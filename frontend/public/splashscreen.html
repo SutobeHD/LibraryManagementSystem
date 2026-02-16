@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RB Editor Pro - Loading</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #020617;
+            /* Dark slate blue */
+            color: #f8fafc;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .container {
+            text-align: center;
+            width: 80%;
+            max-width: 400px;
+        }
+
+        .logo {
+            font-size: 3rem;
+            font-weight: 800;
+            background: linear-gradient(to right, #22d3ee, #3b82f6);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+            letter-spacing: -1px;
+        }
+
+        .subtitle {
+            color: #94a3b8;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 4px;
+            margin-bottom: 3rem;
+        }
+
+        .loader-container {
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 99px;
+            overflow: hidden;
+            margin-bottom: 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .loader-bar {
+            height: 100%;
+            width: 30%;
+            background: linear-gradient(to right, #22d3ee, #3b82f6);
+            border-radius: 99px;
+            animation: move 2s infinite ease-in-out;
+            box-shadow: 0 0 15px rgba(34, 211, 238, 0.5);
+        }
+
+        .status {
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 0.7rem;
+            color: #64748b;
+            height: 1rem;
+        }
+
+        @keyframes move {
+            0% {
+                transform: translateX(-150%);
+            }
+
+            100% {
+                transform: translateX(350%);
+            }
+        }
+
+        .terminal-text {
+            color: #22d3ee;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="logo">RB Editor Pro</div>
+        <div class="subtitle">Desktop Edition</div>
+
+        <div class="loader-container">
+            <div class="loader-bar"></div>
+        </div>
+
+        <div class="status" id="status">Initializing Core Engine...</div>
+    </div>
+
+    <script>
+        const statuses = [
+            "Initializing Core Engine...",
+            "Loading Neural Beat Analyzer...",
+            "Connecting to Audio Backend...",
+            "Scanning Library Database...",
+            "Optimizing Waveform Cache...",
+            "Ready for Action."
+        ];
+
+        let i = 0;
+        const statusEl = document.getElementById('status');
+
+        function updateStatus() {
+            if (i < statuses.length) {
+                statusEl.innerHTML = `<span class="terminal-text">></span> ${statuses[i]}`;
+                i++;
+                setTimeout(updateStatus, 800 + Math.random() * 1000);
+            }
+        }
+
+        updateStatus();
+    </script>
+</body>
+
+</html>

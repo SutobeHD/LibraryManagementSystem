@@ -1,0 +1,26 @@
+# Backend Dockerfile
+FROM python:3.11-slim
+
+# System setup
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy App Code
+COPY app ./app
+
+# Add Docker mode flag
+ENV DOCKER_MODE=true
+
+# Expose
+EXPOSE 8000
+
+# Run
+CMD ["python", "-m", "app.main"]

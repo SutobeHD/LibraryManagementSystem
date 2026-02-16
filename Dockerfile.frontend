@@ -1,0 +1,17 @@
+# Frontend Dockerfile
+FROM node:20-slim
+
+WORKDIR /app
+
+# Dep files
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm install
+
+# Copy source
+COPY frontend .
+
+# Expose
+EXPOSE 5173
+
+# Host 0.0.0.0 is required for Docker
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

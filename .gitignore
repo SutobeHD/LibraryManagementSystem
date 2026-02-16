@@ -1,0 +1,51 @@
+# --- Root & General ---
+.env
+settings.json
+*.log
+*.tmp
+*.db
+*.sqlite
+.DS_Store
+
+# --- Python ---
+**/__pycache__/
+*.py[cod]
+**/venv/
+.pytest_cache/
+rb-backend.spec
+
+# --- Node/JS ---
+**/node_modules/
+**/dist/
+.cache/
+
+# --- Tauri/Rust ---
+src-tauri/target/
+src-tauri/gen/
+src-tauri/cargo_check_output.txt
+
+# --- Data & Media (Recursive - THE IMPORTANT PART) ---
+# Ignore these folders and their contents wherever they are (root, src-tauri, or archive)
+**/backups/
+**/exports/
+**/music/
+**/temp_uploads/
+**/screenshots/
+**/logs/
+**/binaries/
+**/build/
+**/target/
+
+# Specific large files
+**/rekordbox.xml
+*.wav
+*.m4a
+*.mp3
+*.flac
+*.exe
+*.pkg
+*.dmg
+
+# --- Archive ---
+# User requested to keep this local-only.
+archive/

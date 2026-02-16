@@ -1,0 +1,24 @@
+{
+  "name": "rb_editor_pro",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "npm run dev --prefix frontend",
+    "dev:full": "concurrently \"npm run dev --prefix frontend\" \"python -m app.main\"",
+    "build": "npm run build --prefix frontend",
+    "tauri": "tauri",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.0",
+    "concurrently": "^9.2.1"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.10.1"
+  }
+}

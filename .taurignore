@@ -1,0 +1,13 @@
+# Tauri Dev Watcher Exclusions
+# These files/folders are modified by the backend during runtime
+# and should not trigger a full app restart.
+
+rekordbox.xml
+logs/
+exports/
+music/
+backups/
+temp_uploads/
+backend_debug.log
+startup_debug.txt
+*.prj

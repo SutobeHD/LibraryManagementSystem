@@ -1,0 +1,377 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-950 text-slate-200 font-sans antialiased overflow-hidden;
+    /* Subtle background glow */
+    background-image: radial-gradient(circle at 15% 50%, rgba(6, 182, 212, 0.08), transparent 25%),
+      radial-gradient(circle at 85% 30%, rgba(59, 130, 246, 0.08), transparent 25%);
+  }
+}
+
+@layer components {
+
+  /* Rekordbox Beat Marker Triangles */
+  .rb-beat-marker-top {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 8px solid #ff0000;
+    z-index: 20;
+  }
+
+  .rb-beat-marker-bottom {
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-bottom: 8px solid #ff0000;
+    z-index: 20;
+  }
+
+  .rb-bar-label {
+    position: absolute;
+    top: 10px;
+    left: 5px;
+    font-size: 10px;
+    font-weight: bold;
+    color: rgba(255, 255, 255, 0.4);
+    pointer-events: none;
+  }
+
+  /* Premium Glass Panel */
+  .glass-panel {
+    @apply bg-slate-900/40 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl;
+  }
+
+  /* Sidebar Item */
+  .nav-item {
+    @apply flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 cursor-pointer text-slate-400 hover:text-white hover:bg-white/5 border border-transparent;
+  }
+
+  .nav-item.active {
+    @apply bg-cyan-500/10 text-cyan-400 border-cyan-500/20 shadow-lg shadow-cyan-500/20;
+  }
+
+  /* Buttons */
+  .btn-primary {
+    @apply bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-bold px-6 py-2.5 rounded-lg shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/40 transition-all hover:scale-[1.02] active:scale-[0.98] border border-white/10;
+  }
+
+  .btn-ghost {
+    @apply bg-white/5 hover:bg-white/10 text-slate-300 px-4 py-2 rounded-lg transition-all border border-white/5 hover:border-white/10;
+  }
+
+  /* Inputs */
+  .input-glass {
+    @apply bg-black/20 border border-white/10 rounded-lg p-3 text-white focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/50 transition-all placeholder-slate-600;
+  }
+
+  /* Status Colors */
+  .text-neon-blue {
+    @apply text-cyan-400;
+  }
+
+  .text-neon-purple {
+    @apply text-blue-400;
+  }
+
+  .text-neon-pink {
+    @apply text-fuchsia-400;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    @apply w-1.5 h-1.5;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-slate-950;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-800 rounded-full hover:bg-slate-700 transition-colors;
+  }
+}
+
+/* Animations */
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+/* Waveform Beat Grid Lines */
+.ws-beat-line {
+  width: 1px;
+  height: 100%;
+  background-color: rgba(255, 255, 255, 0.3);
+  pointer-events: none;
+  z-index: 10;
+}
+
+.ws-beat-line-downbeat {
+  width: 2px;
+  height: 100%;
+  background-color: rgb(239, 68, 68);
+  pointer-events: none;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
+  z-index: 11;
+}
+
+.ws-beat-line-phrase {
+  width: 2px;
+  height: 100%;
+  background-color: rgb(234, 179, 8);
+  pointer-events: none;
+  box-shadow: 0 0 8px rgba(234, 179, 8, 0.6);
+  z-index: 12;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Rekordbox Edit Mode Styles */
+.rb-edit-container {
+  @apply bg-black min-h-screen flex flex-col text-white select-none;
+  font-family: 'Inter', sans-serif;
+}
+
+.rb-header {
+  @apply bg-[#0a0a0a] border-b border-white/5 px-4 py-1.5 flex items-center justify-between text-[11px] h-10;
+}
+
+.rb-overview-container {
+  @apply h-12 bg-black relative border-b border-white/5 mx-4 mt-2 rounded overflow-hidden;
+}
+
+.rb-detail-container {
+  @apply flex-1 bg-black relative flex flex-col overflow-hidden border-b border-white/5 cursor-crosshair;
+}
+
+.rb-panel-title {
+  @apply text-[9px] font-bold text-slate-500 uppercase tracking-widest px-4 py-2 bg-[#1a1a1a] border-b border-white/5;
+}
+
+.rb-action-panel {
+  @apply bg-[#111] border-t border-white/5 grid grid-cols-2 h-56;
+}
+
+.rb-tool-grid {
+  @apply grid grid-cols-4 gap-2 p-4;
+}
+
+.rb-tool-btn {
+  @apply flex flex-col items-center justify-center gap-1.5 bg-[#1f1f1f] hover:bg-[#2a2a2a] border border-white/5 rounded transition-all py-3 active:scale-95;
+  font-size: 9px;
+  text-transform: uppercase;
+  font-weight: bold;
+  color: #888;
+}
+
+.rb-tool-btn:hover {
+  @apply text-slate-200 border-white/10;
+}
+
+.rb-tool-btn.selected {
+  @apply bg-[#2a2a2a] text-cyan-400 border-cyan-500/30;
+}
+
+.rb-bar-label {
+  @apply absolute top-0 text-[10px] text-slate-500 font-mono pl-1 pointer-events-none;
+}
+
+.rb-metadata-box {
+  @apply flex items-center gap-4 text-[10px] font-mono text-slate-400;
+}
+
+.rb-metadata-value {
+  @apply text-slate-200 font-bold;
+}
+
+.rb-transport-btn {
+  @apply p-1 hover:bg-white/5 rounded transition-all text-slate-500 hover:text-white;
+}
+
+.rb-transport-btn-active {
+  @apply text-orange-500;
+}
+
+.ws-wave-freq canvas {
+  filter: contrast(1.1) saturate(1.4) brightness(1.1);
+}
+
+/* ===== Non-Destructive Editor Styles ===== */
+
+/* Region Block */
+.region-block {
+  @apply absolute rounded-lg overflow-hidden cursor-grab border-2 transition-all duration-150;
+  @apply border-white/10 hover:border-white/30;
+}
+
+.region-block.selected {
+  @apply border-cyan-400 shadow-lg shadow-cyan-400/30 z-20;
+}
+
+.region-block.muted {
+  @apply opacity-40;
+}
+
+/* Palette Container */
+.palette-panel {
+  @apply flex flex-col gap-3 p-3;
+}
+
+.palette-slot {
+  @apply relative aspect-square rounded-lg border-2 transition-all duration-200;
+  @apply bg-slate-900/30 border-dashed border-white/5;
+}
+
+.palette-slot.filled {
+  @apply bg-slate-800/50 border-solid border-white/10 cursor-grab;
+}
+
+.palette-slot.drag-over {
+  @apply border-cyan-400 bg-cyan-400/10 scale-105;
+}
+
+/* Timeline Ruler */
+.timeline-ruler {
+  @apply h-6 bg-black/30 border-b border-white/5;
+}
+
+.timeline-ruler-tick {
+  @apply text-white/30;
+}
+
+/* Playhead */
+.playhead {
+  @apply absolute top-0 bottom-0 w-0.5 bg-cyan-400 z-30 pointer-events-none;
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.5);
+}
+
+.playhead-handle {
+  @apply absolute -top-0 left-1/2 -translate-x-1/2;
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 8px solid #22d3ee;
+}
+
+/* Selection Highlight */
+.selection-highlight {
+  @apply absolute top-0 bottom-0 bg-cyan-400/20 border-l-2 border-r-2 border-cyan-400/50 pointer-events-none;
+}
+
+/* Envelope Overlay */
+.envelope-line {
+  @apply stroke-white/60;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.envelope-node {
+  @apply absolute pointer-events-auto rounded-full border-2 transition-all duration-150;
+  @apply bg-white/80 border-cyan-400 hover:bg-cyan-400;
+}
+
+.envelope-node.active {
+  @apply bg-cyan-400 border-white scale-125;
+}
+
+.envelope-node.gain {
+  @apply bg-yellow-400/80 border-yellow-300 hover:bg-yellow-400;
+}
+
+/* Snap Toggle */
+.snap-toggle {
+  @apply p-2 rounded transition-all;
+}
+
+.snap-toggle.active {
+  @apply bg-cyan-500/20 text-cyan-400;
+}
+
+.snap-toggle.inactive {
+  @apply hover:bg-white/5 text-slate-500;
+}
+
+/* Render Progress Overlay */
+.render-overlay {
+  @apply absolute inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md;
+}
+
+.render-progress-bar {
+  @apply w-full h-2 bg-white/5 rounded-full overflow-hidden;
+}
+
+.render-progress-fill {
+  @apply h-full bg-gradient-to-r from-cyan-500 to-blue-600 transition-all duration-300;
+}
+
+/* Beat Grid Lines */
+.beat-line {
+  @apply absolute top-0 bottom-0 pointer-events-none;
+}
+
+.beat-line.normal {
+  @apply w-px bg-white/10;
+}
+
+.beat-line.downbeat {
+  @apply w-[1.5px] bg-red-500/30;
+}
+
+.beat-line.phrase {
+  @apply w-[2px] bg-yellow-500/40;
+}
+
+/* Toolbar Icons */
+.toolbar-btn {
+  @apply p-2 hover:bg-white/5 rounded text-slate-400 hover:text-white transition-colors;
+}
+
+.toolbar-btn.active {
+  @apply bg-white/10 text-cyan-400;
+}
+
+.toolbar-btn.danger:hover {
+  @apply text-red-400;
+}
+
+.toolbar-divider {
+  @apply w-px h-6 bg-white/10;
+}
