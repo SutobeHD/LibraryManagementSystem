@@ -11,13 +11,13 @@ use tauri::{Emitter, Manager};
 
 #[tauri::command]
 fn close_splashscreen(window: tauri::Window) {
-    // Close splashscreen
+    // Close splashscreen — use .ok() to avoid panic if window doesn't exist
     if let Some(splashscreen) = window.get_webview_window("splashscreen") {
-        splashscreen.close().unwrap();
+        let _ = splashscreen.close();
     }
     // Show main window
     if let Some(main) = window.get_webview_window("main") {
-        main.show().unwrap();
+        let _ = main.show();
     }
 }
 

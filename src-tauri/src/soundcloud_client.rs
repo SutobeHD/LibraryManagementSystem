@@ -22,12 +22,16 @@ use tauri::Emitter;
 type ScError = Box<dyn std::error::Error + Send + Sync>;
 
 // ---------------------------------------------------------------------------
-// Configuration – replace with your real SoundCloud app credentials
+// Configuration
 // ---------------------------------------------------------------------------
-// SoundCloud API Credentials
-// Note: These should be configured in Settings or provided via environment
-const CLIENT_ID: &str = "[[INSERT_SOUNDCLOUD_CLIENT_ID]]";
-const CLIENT_SECRET: &str = "[[INSERT_SOUNDCLOUD_CLIENT_SECRET]]";
+// SECURITY: Credentials loaded from environment variables at runtime.
+// Set SOUNDCLOUD_CLIENT_ID and SOUNDCLOUD_CLIENT_SECRET in your environment.
+fn get_client_id() -> String {
+    std::env::var("SOUNDCLOUD_CLIENT_ID").unwrap_or_else(|_| "[[INSERT_SOUNDCLOUD_CLIENT_ID]]".to_string())
+}
+fn get_client_secret() -> String {
+    std::env::var("SOUNDCLOUD_CLIENT_SECRET").unwrap_or_else(|_| "[[INSERT_SOUNDCLOUD_CLIENT_SECRET]]".to_string())
+}
 const REDIRECT_URI: &str = "http://127.0.0.1:5001/callback";
 const AUTH_URL: &str = "https://secure.soundcloud.com/authorize";
 const TOKEN_URL: &str = "https://secure.soundcloud.com/oauth/token";
@@ -114,11 +118,12 @@ fn generate_code_challenge(verifier: &str) -> String {
 pub fn get_auth_url() -> (String, String) {
     let code_verifier = generate_code_verifier();
     let code_challenge = generate_code_challenge(&code_verifier);
+    let cid = get_client_id();
 
     let mut url = Url::parse(AUTH_URL).expect("Invalid AUTH_URL constant");
     url.query_pairs_mut()
         .append_pair("response_type", "code")
-        .append_pair("client_id", CLIENT_ID)
+        .append_pair("client_id", &cid)
         .append_pair("redirect_uri", REDIRECT_URI)
         .append_pair("code_challenge", &code_challenge)
         .append_pair("code_challenge_method", "S256");
@@ -139,11 +144,13 @@ pub async fn exchange_code_for_token(
     code_verifier: &str,
 ) -> Result<String, ScError> {
     let client = Client::new();
+    let cid = get_client_id();
+    let csec = get_client_secret();
 
     let params = [
         ("grant_type", "authorization_code"),
-        ("client_id", CLIENT_ID),
-        ("client_secret", CLIENT_SECRET),
+        ("client_id", &cid),
+        ("client_secret", &csec),
         ("redirect_uri", REDIRECT_URI),
         ("code", code),
         ("code_verifier", code_verifier),

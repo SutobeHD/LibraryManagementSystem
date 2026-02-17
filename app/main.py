@@ -1,14 +1,16 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import os
+import secrets
 import shutil
 import uvicorn
 import urllib.parse
 import sys, time, threading, signal
+import asyncio
 import subprocess
 import logging
 import traceback
@@ -32,21 +34,99 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = FastAPI(title="Rekordbox Editor Pro")
 
-# --- AUTO-SHUTDOWN MONITOR ---
-last_heartbeat = time.time() + 20 # 20s grace period
+# --- SECURITY: Internal shutdown token (generated per session) ---
+SHUTDOWN_TOKEN = secrets.token_urlsafe(32)
+logger.info(f"Session security token generated.")
 
-def monitor_heartbeat():
-    global last_heartbeat
-    while True:
-        time.sleep(2)
-        if time.time() - last_heartbeat > 6: # 6s timeout (frontend sends every 2s)
-            print("Heartbeat timeout. Shutting down...")
-            os.kill(os.getpid(), signal.SIGTERM)
+# --- SECURITY: Allowed audio directories for streaming/processing ---
+# Users can only stream/process audio from these root directories.
+ALLOWED_AUDIO_ROOTS: list[Path] = []
 
-@app.on_event("startup")
-def start_monitor():
-    threading.Thread(target=monitor_heartbeat, daemon=True).start()
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+def _init_allowed_roots():
+    """Populate allowed audio roots from common music locations and settings."""
+    roots = [
+        Path(os.path.expanduser("~/Music")),
+        Path(EXPORT_DIR).resolve(),
+        Path(MUSIC_DIR).resolve(),
+        Path(TEMP_DIR).resolve(),
+    ]
+    # Add Rekordbox database root if available
+    rb_root = Path(os.environ.get('APPDATA', '')) / "Pioneer" / "rekordbox"
+    if rb_root.exists():
+        roots.append(rb_root.resolve())
+    # Add common drive letters on Windows
+    for drive in ['C:', 'D:', 'E:', 'F:', 'G:', 'H:']:
+        music_path = Path(drive + os.sep) / "Music"
+        if music_path.exists():
+            roots.append(music_path.resolve())
+        dj_path = Path(drive + os.sep) / "DJ Music"
+        if dj_path.exists():
+            roots.append(dj_path.resolve())
+    ALLOWED_AUDIO_ROOTS.extend(roots)
+    logger.info(f"Allowed audio roots: {[str(r) for r in ALLOWED_AUDIO_ROOTS]}")
+
+_init_allowed_roots()
+
+ALLOWED_AUDIO_EXTENSIONS = {'.mp3', '.wav', '.aiff', '.aif', '.flac', '.m4a', '.ogg', '.wma', '.alac'}
+
+def validate_audio_path(path_str: str) -> Path:
+    """
+    Security: Validates that a file path is a real audio file within allowed directories.
+    Prevents path traversal and arbitrary file read attacks.
+    """
+    try:
+        file_path = Path(path_str).resolve()
+    except (ValueError, OSError):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+    
+    # Check extension
+    if file_path.suffix.lower() not in ALLOWED_AUDIO_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="File type not allowed")
+    
+    # Check file exists
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Check that the file is within an allowed directory
+    is_allowed = any(
+        str(file_path).startswith(str(root))
+        for root in ALLOWED_AUDIO_ROOTS
+    )
+    # Also allow paths from the database (track paths stored in library)
+    if not is_allowed:
+        known_paths = {t.get('path', '') for t in db.tracks.values()} if hasattr(db, 'tracks') else set()
+        if str(file_path) not in known_paths and path_str not in known_paths:
+            logger.warning(f"SECURITY: Blocked access to path outside allowed roots: {file_path}")
+            raise HTTPException(status_code=403, detail="Access denied: path outside allowed directories")
+    
+    return file_path
+
+def safe_error_message(e: Exception) -> str:
+    """Sanitize error messages to avoid leaking internal paths or system info."""
+    msg = str(e)
+    # Strip absolute path prefixes from error messages
+    for sensitive in [APP_DIR, str(Path.home()), os.environ.get('APPDATA', '')]:
+        if sensitive:
+            msg = msg.replace(sensitive, '[...]')
+    return msg
+
+# --- SECURITY: CORS locked to localhost only ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:1420",
+        "http://127.0.0.1:1420",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "tauri://localhost",
+        "https://tauri.localhost",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
 
 app.mount("/exports", StaticFiles(directory=EXPORT_DIR), name="exports")
 
@@ -212,32 +292,28 @@ async def startup_check():
 from fastapi import Request
 
 @app.get("/api/stream")
-async def stream_audio(path: str, request: Request):
-    """Streams audio file from absolute path with RANGE SUPPORT"""
+async def stream_audio(path: str):
+    """Streams audio file from absolute path — SECURITY: validates path against allowed roots."""
     logger.info(f"Stream request for: {path}")
-    # logger.info(f"Headers: {dict(request.headers)}")
     
-    file_path = Path(path)
-    if not file_path.exists() or not file_path.is_file():
-        logger.warning(f"File not found for streaming: {path}")
-        raise HTTPException(status_code=404, detail="File not found")
+    # SECURITY: Validate path is within allowed audio directories
+    file_path = validate_audio_path(path)
     
-    # Basic security check - ensure it looks like an audio file
-    ext = file_path.suffix.lower()
     mime_types = {
         '.mp3': 'audio/mpeg',
         '.wav': 'audio/wav',
         '.aiff': 'audio/aiff',
+        '.aif': 'audio/aiff',
         '.flac': 'audio/flac',
-        '.m4a': 'audio/mp4'
+        '.m4a': 'audio/mp4',
+        '.ogg': 'audio/ogg',
     }
-    if ext not in mime_types:
-        logger.warning(f"Invalid file type for streaming: {ext}")
-        raise HTTPException(status_code=400, detail="Invalid file type")
+    ext = file_path.suffix.lower()
+    media_type = mime_types.get(ext, 'application/octet-stream')
 
     return FileResponse(
         file_path, 
-        media_type=mime_types[ext],
+        media_type=media_type,
         filename=file_path.name,
         content_disposition_type="inline"
     )
@@ -249,10 +325,11 @@ async def clean_xml(
     label_folder: str = Form("_AUTO_LABELS")
 ):
     try:
-        # User requested NO auto-optimization. Just save as main XML.
-        # But we should keep the uploaded filename or standardize?
-        # Let's save to rekordbox.xml in root so it persists.
-
+        # SECURITY: Validate file extension
+        if not file.filename or not file.filename.lower().endswith('.xml'):
+            raise HTTPException(400, "Only XML files are accepted")
+        
+        # SECURITY: Fixed target path — no user-controlled filename
         target_path = Path("rekordbox.xml")
         with open(target_path, "wb") as f:
              shutil.copyfileobj(file.file, f)
@@ -266,9 +343,11 @@ async def clean_xml(
             "tracks": len(db.tracks),
             "playlists": len(db.playlists)
         } 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"XML Error: {e}")
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, safe_error_message(e))
 
 @app.get("/api/genres")
 def get_genres(): return db.get_all_genres()
@@ -290,18 +369,19 @@ def get_low_quality_tracks():
         from .services import SettingsManager
         settings = SettingsManager.load()
         threshold = int(settings.get("insights_bitrate_threshold", 320))
-    except: pass
+    except Exception as e:
+        logger.warning(f"Could not load bitrate threshold from settings: {e}")
 
     tracks = []
     source = db.tracks.values()
     
     for t in source:
         try:
-            # Check Bitrate (Live DB uses 'Bitrate' standardized, previous XML might use 'BitRate')
             br = t.get("Bitrate", t.get("BitRate", 0))
             if int(br) < threshold and int(br) > 0: 
                tracks.append(t)
-        except: pass
+        except (ValueError, TypeError) as e:
+            logger.debug(f"Skipping track with invalid bitrate: {t.get('Name', '?')}: {e}")
         
     return tracks
 
@@ -322,7 +402,8 @@ def get_lost_tracks():
         from .services import SettingsManager
         settings = SettingsManager.load()
         threshold = int(settings.get("insights_playcount_threshold", 0))
-    except: pass
+    except Exception as e:
+        logger.warning(f"Could not load playcount threshold from settings: {e}")
     
     tracks = []
     for t in db.tracks.values():
@@ -330,7 +411,8 @@ def get_lost_tracks():
             pc = int(t.get("PlayCount", 0))
             if pc <= threshold:
                 tracks.append(t)
-        except: pass
+        except (ValueError, TypeError) as e:
+            logger.debug(f"Skipping track with invalid playcount: {t.get('Name', '?')}: {e}")
     return tracks
 
 @app.get("/api/labels")
@@ -388,7 +470,7 @@ async def analyze_track(tid: str):
     
     path = track.get("path")
     if not path or not os.path.exists(path):
-        raise HTTPException(404, f"Audio file not found")
+        raise HTTPException(404, "Audio file not found")
     
     try:
         # Perform analysis
@@ -407,16 +489,16 @@ async def analyze_track(tid: str):
                 "name": "DROP",
                 "type": 0,
                 "start": result["dropTime"],
-                "num": -1, # Not a hot cue
+                "num": -1,
                 "red": 255, "green": 0, "blue": 0
             })
             track["positionMarks"] = marks
         
-        db.save_xml() # Save to XML so it's permanent
+        db.save_xml()
         return result
     except Exception as e:
         logger.error(f"Analysis error: {e}")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, safe_error_message(e))
 
 @app.post("/api/track/cues/save")
 def save_cues(r: CueReq): return {"status": "success" if db.save_track_cues(r.track_id, r.cues) else "error"}
@@ -443,12 +525,7 @@ def batch_up(r: BatchReq): return {"status": "success" if db.update_tracks_metad
 def system_heartbeat():
     global last_heartbeat
     last_heartbeat = time.time()
-    return {"status": "alive"}
-
-@app.post("/api/system/shutdown")
-def system_shutdown():
-    os.kill(os.getpid(), signal.SIGTERM)
-    return {"status": "shutdown"}
+    return {"status": "alive", "token": SHUTDOWN_TOKEN}
 
 @app.post("/api/track/delete")
 def del_trk(r: DeleteTrackReq): return {"status": "success" if db.delete_track(r.track_id) else "error"}
@@ -507,7 +584,11 @@ def reorder_pl_track(r: PlReorderReq):
             return {"status": "success"}
         else:
             raise HTTPException(500, "Failed to reorder")
-    except Exception as e: raise HTTPException(500, str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Reorder error: {e}")
+        raise HTTPException(500, safe_error_message(e))
 
 # --- RESTORED ENDPOINTS ---
 
@@ -567,10 +648,10 @@ async def batch_comment(r: BatchCommentReq):
 
     except subprocess.CalledProcessError as e:
         logger.error(f"Batch worker failed: {e.output}")
-        raise HTTPException(500, f"Worker failed: {e.output}")
+        raise HTTPException(500, "Batch processing failed. Check logs for details.")
     except Exception as e:
         logger.error(f"Batch comment error: {e}")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, safe_error_message(e))
 
 @app.post("/api/library/clean-titles")
 def clean_titles(r: CleanTitlesReq):
@@ -658,10 +739,8 @@ def load_lib():
             "tracks": len(db.tracks)
         }
     except Exception as e:
-        logger.error(f"Failed to load library: {e}")
-        with open("last_error.txt", "w") as f:
-            f.write(traceback.format_exc())
-        return {"status": "error", "message": str(e), "traceback": traceback.format_exc()}
+        logger.error(f"Failed to load library: {e}\n{traceback.format_exc()}")
+        return {"status": "error", "message": safe_error_message(e)}
 
 @app.post("/api/library/unload")
 def unload_lib():
@@ -697,8 +776,7 @@ async def get_artwork(path: str):
 
     file_path = Path(p_path)
     if not file_path.exists() or not file_path.is_file():
-        # logger.error(f"Artwork NOT found: {file_path}")
-        raise HTTPException(404, f"Artwork file not found: {p_path}")
+        raise HTTPException(404, "Artwork file not found")
         
     return FileResponse(file_path)
 
@@ -804,7 +882,9 @@ def load_project_endpoint(name: str):
         data = ProjectManager.load_project(name)
         return data
     except FileNotFoundError: raise HTTPException(404, "Project not found")
-    except Exception as e: raise HTTPException(500, str(e))
+    except Exception as e:
+        logger.error(f"Project load error: {e}")
+        raise HTTPException(500, safe_error_message(e))
 
 @app.post("/api/artist/soundcloud")
 
@@ -819,33 +899,41 @@ class SliceReq(BaseModel):
     end: float
 
 @app.post("/api/audio/slice")
-def slice_endpoint(r: SliceReq):
+async def slice_endpoint(r: SliceReq):
     try:
-        # Use absolute path if needed, or ensure services handles it
-        path = AudioEngine.slice_audio(r.source_path, r.start, r.end)
+        # SECURITY: Validate source path
+        validate_audio_path(r.source_path)
+        path = await asyncio.to_thread(AudioEngine.slice_audio, r.source_path, r.start, r.end)
         filename = os.path.basename(path)
         return {"filename": filename, "url": f"/exports/{filename}"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Slice endpoint error: {e}")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, safe_error_message(e))
 
 @app.post("/api/audio/render")
 async def render(r: ExportRequest):
     try:
-        # Ensure output name ends with .wav or .mp3
-        if not r.output_name.endswith(('.wav', '.mp3')):
-            r.output_name += ".wav"
+        # SECURITY: Validate source path
+        validate_audio_path(r.source_path)
+        # SECURITY: Sanitize output name
+        safe_name = Path(r.output_name).name  # Strip any path components
+        if not safe_name.endswith(('.wav', '.mp3')):
+            safe_name += ".wav"
             
-        tid = AudioEngine.render_segment(r.source_path, r.cuts, r.output_name, r.fade_in, r.fade_out)
+        tid = await asyncio.to_thread(AudioEngine.render_segment, r.source_path, r.cuts, safe_name, r.fade_in, r.fade_out)
         return {
             "status": "success", 
             "track_id": tid,
-            "filename": r.output_name,
-            "download_url": f"/exports/{r.output_name}"
+            "filename": safe_name,
+            "download_url": f"/exports/{safe_name}"
         }
+    except HTTPException:
+        raise
     except Exception as e: 
         logger.error(f"Render failed: {e}")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, safe_error_message(e))
 
 @app.post("/api/audio/import")
 async def import_audio(files: List[UploadFile] = File(...)):
@@ -853,16 +941,22 @@ async def import_audio(files: List[UploadFile] = File(...)):
     results = []
     for file in files:
         try:
-            # 1. Save to MUSIC_DIR
-            dest = MUSIC_DIR / file.filename
-            # Avoid overwriting if possible or handle conflict
+            # SECURITY: Validate file extension
+            if not file.filename or Path(file.filename).suffix.lower() not in ALLOWED_AUDIO_EXTENSIONS:
+                results.append({"filename": file.filename or "unknown", "status": "error", "message": "File type not allowed"})
+                continue
+            
+            # SECURITY: Use only the basename to prevent path traversal
+            safe_filename = Path(file.filename).name
+            dest = MUSIC_DIR / safe_filename
             if dest.exists():
-                dest = MUSIC_DIR / f"{file.filename.split('.')[0]}_{int(os.path.getmtime(dest))}.{file.filename.split('.')[-1]}"
+                stem = safe_filename.rsplit('.', 1)[0]
+                ext = safe_filename.rsplit('.', 1)[-1]
+                dest = MUSIC_DIR / f"{stem}_{int(time.time())}.{ext}"
             
             with open(dest, "wb") as f:
                 shutil.copyfileobj(file.file, f)
             
-            # 2. Process (Analyze + Add to DB)
             tid, analysis = ImportManager.process_import(dest)
             results.append({
                 "filename": file.filename, 
@@ -873,7 +967,7 @@ async def import_audio(files: List[UploadFile] = File(...)):
             })
         except Exception as e:
             logger.error(f"Import failed for {file.filename}: {e}")
-            results.append({"filename": file.filename, "status": "error", "message": str(e)})
+            results.append({"filename": file.filename, "status": "error", "message": safe_error_message(e)})
     return results
 
 @app.get("/api/settings")
@@ -891,56 +985,55 @@ def save_s(s: SetReq):
 
 
 
-# --- HEARTBEAT MONITOR ---
-last_heartbeat = time.time()
-HEARTBEAT_TIMEOUT = 30.0
+# --- GRACEFUL SHUTDOWN ---
+_shutdown_event = threading.Event()
 
-def monitor_heartbeat():
-    global last_heartbeat
-    logger.info("Heartbeat monitor started.")
-    while True:
-        time.sleep(1)
-        if time.time() - last_heartbeat > HEARTBEAT_TIMEOUT:
-            logger.warning(f"Heartbeat lost (Last: {last_heartbeat}, Now: {time.time()}). Shutting down...")
-            os.kill(os.getpid(), signal.SIGTERM)
-            break
+def _graceful_shutdown():
+    """Performs cleanup before shutting down the backend."""
+    logger.info("Graceful shutdown initiated...")
+    _shutdown_event.set()
+    # Give time for pending requests to complete
+    time.sleep(0.5)
+    logger.info("Shutdown complete.")
+    os._exit(0)
 
 @app.on_event("startup")
 async def startup_event():
-    # Heartbeat monitor disabled - not needed for desktop app
-    # Backend lifecycle is managed by Tauri (sidecar in prod, Ctrl+C in dev)
-    # global last_heartbeat
-    # last_heartbeat = time.time() + 60  # Large grace for dev mode (Rust compile is slow)
-    # t = threading.Thread(target=monitor_heartbeat, daemon=True)
-    # t.start()
-    pass
+    logger.info(f"Backend started. Binding to 127.0.0.1:8000 only.")
+    # Auto-load library
+    try:
+        db.load_library()
+    except Exception as e:
+        logger.error(f"Failed to auto-load library on startup: {e}")
 
 @app.post("/api/system/heartbeat")
 def heartbeat():
     global last_heartbeat
     last_heartbeat = time.time()
-    return {"status": "alive"}
+    return {"status": "alive", "token": SHUTDOWN_TOKEN}
 
 @app.post("/api/system/shutdown")
-async def shutdown():
-    import os, signal, threading
-    def kill():
-        os.kill(os.getpid(), signal.SIGTERM)
-    threading.Timer(1.0, kill).start()
+async def shutdown(token: str = ""):
+    """SECURITY: Requires session token to trigger shutdown."""
+    if token != SHUTDOWN_TOKEN:
+        logger.warning(f"SECURITY: Unauthorized shutdown attempt!")
+        raise HTTPException(status_code=403, detail="Invalid shutdown token")
+    threading.Thread(target=_graceful_shutdown, daemon=True).start()
     return {"message": "Shutting down..."}
 
 @app.post("/api/system/restart")
-async def restart():
-    import os, sys, threading
+async def restart(token: str = ""):
+    """SECURITY: Requires session token to trigger restart."""
+    if token != SHUTDOWN_TOKEN:
+        raise HTTPException(status_code=403, detail="Invalid restart token")
     def restart_proc():
         logger.info("Restarting backend...")
-        # Check if running as script or frozen
+        time.sleep(0.5)
         if getattr(sys, 'frozen', False):
             os.execv(sys.executable, sys.argv)
         else:
-            # Re-execute the current script
             os.execv(sys.executable, [sys.executable] + sys.argv)
-    threading.Timer(1.0, restart_proc).start()
+    threading.Thread(target=restart_proc, daemon=True).start()
     return {"message": "Restarting backend..."}
 
 @app.post("/api/system/cleanup")

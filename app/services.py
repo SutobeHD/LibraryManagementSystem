@@ -148,8 +148,8 @@ class AudioEngine:
         if not AudioEngine.check_ffmpeg():
              raise RuntimeError("FFmpeg not installed or not found in system PATH. Please install FFmpeg.")
         if not os.path.exists(source_path): raise FileNotFoundError(f"File not found: {source_path}")
+        temp_files = []
         try:
-            temp_files = []
             for i, cut in enumerate(cuts):
                 start, end = cut['start'], cut['end']
                 duration = end - start
@@ -195,41 +195,22 @@ class AudioEngine:
             if not temp_files:
                 raise ValueError("No valid segments to render")
 
-            if not temp_files:
-                raise ValueError("No valid segments to render")
-
             # Final output file path
             final_path = EXPORT_DIR / output_filename
 
             # Use Python's wave module to concatenate the standardized WAV files
-            # This avoids FFmpeg concat demuxer issues entirely
-            try:
-                with wave.open(str(final_path), 'wb') as outfile:
-                    # Set parameters based on the first file (they are all standardized)
-                    with wave.open(str(temp_files[0]), 'rb') as infile:
-                        outfile.setparams(infile.getparams())
-                    
-                    # Append data from all files
-                    for tf in temp_files:
-                        with wave.open(str(tf), 'rb') as infile:
-                            outfile.writeframes(infile.readframes(infile.getnframes()))
+            with wave.open(str(final_path), 'wb') as outfile:
+                with wave.open(str(temp_files[0]), 'rb') as infile:
+                    outfile.setparams(infile.getparams())
                 
-                logger.info(f"Successfully exported track to {final_path} using python wave module")
+                for tf in temp_files:
+                    with wave.open(str(tf), 'rb') as infile:
+                        outfile.writeframes(infile.readframes(infile.getnframes()))
+            
+            logger.info(f"Successfully exported track to {final_path} using python wave module")
 
-            except Exception as e:
-                logger.error(f"Python wave concat error: {e}")
-                # Fallback or cleanup?
-                raise RuntimeError(f"Wave concatenation failed: {e}")
-
-            # Cleanup temp files
-            for tf in temp_files: 
-                try: os.remove(tf)
-                except: pass
-
-            gc.collect()
             # Generate Track Metadata for DB
             new_tid = f"R_{int(time.time())}"
-            # Use original track's BPM/Key if possible
             orig_track = None
             for t in db.tracks.values():
                 if t.get('path') == source_path:
@@ -244,7 +225,7 @@ class AudioEngine:
                 "Genre": orig_track.get('Genre', '') if orig_track else "",
                 "Kind": "WAV File",
                 "Size": str(final_path.stat().st_size),
-                "TotalTime": str(int(duration)), # This is just the last segment's duration in current loop, should be total
+                "TotalTime": str(int(duration)),
                 "DateAdded": datetime.datetime.now().strftime("%Y-%m-%d"),
                 "Bitrate": "2304",
                 "SampleRate": "48000",
@@ -262,6 +243,14 @@ class AudioEngine:
         except Exception as e: 
             logger.error(f"Render failed: {e}")
             raise RuntimeError(f"Render failed: {e}")
+        finally:
+            # STABILITY: Always clean up temp files, even on error
+            for tf in temp_files:
+                try:
+                    if os.path.exists(str(tf)):
+                        os.remove(str(tf))
+                except OSError as cleanup_err:
+                    logger.warning(f"Could not remove temp file {tf}: {cleanup_err}")
 
     @staticmethod
     def slice_audio(source_path: str, start: float, end: float):

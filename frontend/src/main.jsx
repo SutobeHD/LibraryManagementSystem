@@ -1,22 +1,23 @@
-import React, { useState, Component, useEffect } from 'react'
+import React, { useState, Component, useEffect, useCallback, Suspense, lazy } from 'react'
 import ReactDOM from 'react-dom/client'
-import { Music, Scissors, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, Database, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive } from 'lucide-react'
+import { Music, Scissors, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, Database, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2 } from 'lucide-react'
 import './index.css'
 import { ToastProvider } from './components/ToastContext'
 import { Toaster } from 'react-hot-toast'
 
-// Import Views
-import WaveformEditor from './components/WaveformEditor'
-import ToolsView from './components/ToolsView'
-import SettingsView from './components/SettingsView'
-import RankingView from './components/RankingView'
-import XmlCleanView from './components/XmlCleanView'
-import MetadataView from './components/MetadataView'
-import ImportView from './components/ImportView'
-import InsightsView from './components/InsightsView'
-import UsbView from './components/UsbView'
-import BackupManager from './components/BackupManager'
-import api from './api/api'
+// SPEED: Lazy-load heavy views — only the active view is loaded into the bundle
+const WaveformEditor = lazy(() => import('./components/WaveformEditor'));
+const ToolsView = lazy(() => import('./components/ToolsView'));
+const SettingsView = lazy(() => import('./components/SettingsView'));
+const RankingView = lazy(() => import('./components/RankingView'));
+const XmlCleanView = lazy(() => import('./components/XmlCleanView'));
+const MetadataView = lazy(() => import('./components/MetadataView'));
+const ImportView = lazy(() => import('./components/ImportView'));
+const InsightsView = lazy(() => import('./components/InsightsView'));
+const UsbView = lazy(() => import('./components/UsbView'));
+const BackupManager = lazy(() => import('./components/BackupManager'));
+
+import api, { setSessionToken, getSessionToken } from './api/api'
 
 // Error Boundary Configuration
 class ErrorBoundary extends Component {
@@ -53,7 +54,10 @@ const Sidebar = ({ activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnlo
 
   const handleExit = async () => {
     if (confirm("Exit Application?")) {
-      try { await api.post('/api/system/shutdown'); }
+      try {
+        const token = getSessionToken();
+        await api.post('/api/system/shutdown', null, { params: { token } });
+      }
       catch (e) { }
       window.close();
       document.body.innerHTML = "<div style='color:white;display:flex;justify-content:center;height:100vh;align-items:center;background:#0f172a;font-family:sans-serif'>Application Closed</div>";
@@ -141,7 +145,7 @@ const Sidebar = ({ activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnlo
       </div>
 
       {/* Backup Manager Modal */}
-      {showBackups && <BackupManager onClose={() => setShowBackups(false)} />}
+      {showBackups && <Suspense fallback={<div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center"><Loader2 className="animate-spin text-cyan-400" size={32} /></div>}><BackupManager onClose={() => setShowBackups(false)} /></Suspense>}
     </>
   )
 }
@@ -201,15 +205,25 @@ const SelectionView = ({ onSelect }) => (
 
 import Player from './components/Player'
 
+// SPEED: Suspense loading fallback for lazy-loaded views
+const ViewLoader = () => (
+  <div className="flex items-center justify-center h-full">
+    <div className="flex flex-col items-center gap-3">
+      <Loader2 className="animate-spin text-cyan-400" size={32} />
+      <span className="text-xs text-slate-500 uppercase tracking-widest font-bold">Loading View</span>
+    </div>
+  </div>
+);
+
 const App = () => {
   const [appMode, setAppMode] = useState('choice')
   const [activeTab, setActiveTab] = useState('library')
   const [activeTrack, setActiveTrack] = useState(null)
-  const [playerTrack, setPlayerTrack] = useState(null) // Track for bottom player
+  const [playerTrack, setPlayerTrack] = useState(null)
   const [libraryStatus, setLibraryStatus] = useState({ loaded: false, mode: 'live', tracks: 0, playlists: 0 })
   const [isInitialLoading, setIsInitialLoading] = useState(false)
 
-  const checkLibraryStatus = async () => {
+  const checkLibraryStatus = useCallback(async () => {
     try {
       const res = await api.get('/api/library/status');
       setLibraryStatus(res.data);
@@ -219,9 +233,9 @@ const App = () => {
     } catch (e) {
       console.error("Failed to check library status", e);
     }
-  };
+  }, []);
 
-  const handleModeSelect = async (mode) => {
+  const handleModeSelect = useCallback(async (mode) => {
     setAppMode(mode);
     setIsInitialLoading(true);
     try {
@@ -230,9 +244,9 @@ const App = () => {
     } catch (e) {
       console.error("Mode select failed", e);
     }
-  };
+  }, []);
 
-  const handleLoadLibrary = async () => {
+  const handleLoadLibrary = useCallback(async () => {
     try {
       const res = await api.post('/api/library/load');
       if (res.data.status === 'success') {
@@ -243,21 +257,29 @@ const App = () => {
     } catch (e) {
       alert("Error loading library");
     }
-  };
+  }, [checkLibraryStatus]);
 
-  const handleUnloadLibrary = async () => {
+  const handleUnloadLibrary = useCallback(async () => {
     if (!confirm("Are you sure you want to unload the library?")) return;
     try {
       await api.post('/api/library/unload');
       setAppMode('choice');
       setLibraryStatus({ loaded: false, mode: 'live', tracks: 0, playlists: 0 });
     } catch (e) { console.error(e); }
-  };
+  }, []);
 
   useEffect(() => {
-    const hbInterval = setInterval(() => {
-      fetch('http://localhost:8000/api/system/heartbeat', { method: 'POST' }).catch(() => { });
-    }, 2000);
+    // SPEED: Heartbeat at 5s instead of 2s — sufficient for keepalive
+    const hbInterval = setInterval(async () => {
+      try {
+        const res = await fetch('http://localhost:8000/api/system/heartbeat', { method: 'POST' });
+        const data = await res.json();
+        // SECURITY: Capture session token from heartbeat response
+        if (data.token) {
+          setSessionToken(data.token);
+        }
+      } catch (e) { /* backend offline */ }
+    }, 5000);
 
     const checkInterval = setInterval(() => {
       if (appMode !== 'choice' && !libraryStatus.loaded) {
@@ -280,11 +302,11 @@ const App = () => {
       clearInterval(hbInterval);
       clearInterval(checkInterval);
     };
-  }, [libraryStatus.loaded, appMode]);
+  }, [libraryStatus.loaded, appMode, checkLibraryStatus, handleModeSelect]);
 
-  const handleTrackSelect = (track) => { setActiveTrack(track); }
-  const handleTrackEdit = (track) => { setActiveTrack(track); setActiveTab('editor'); }
-  const handlePlayTrack = (track) => { setPlayerTrack(track); }
+  const handleTrackSelect = useCallback((track) => { setActiveTrack(track); }, []);
+  const handleTrackEdit = useCallback((track) => { setActiveTrack(track); setActiveTab('editor'); }, []);
+  const handlePlayTrack = useCallback((track) => { setPlayerTrack(track); }, []);
 
   return (
     <div className="flex h-screen w-screen bg-slate-950 text-slate-200 overflow-hidden font-sans selection:bg-cyan-500/30">
@@ -334,45 +356,58 @@ const App = () => {
 
       <main className="flex-1 h-full overflow-hidden relative z-10 p-4 bg-slate-950/50">
         <div className="h-full w-full rounded-2xl overflow-hidden glass-panel relative shadow-2xl shadow-black/50 pb-20">
-          <ErrorBoundary key="content-boundary">
+          <Suspense fallback={<ViewLoader />}>
+            {/* STABILITY: Each view wrapped in its own ErrorBoundary */}
             <div className={activeTab === 'library' ? 'h-full' : 'hidden'}>
-              <MetadataView onSelectTrack={handleTrackSelect} onEditTrack={handleTrackEdit} onPlayTrack={handlePlayTrack} libraryStatus={libraryStatus} />
+              <ErrorBoundary key="eb-library">
+                <MetadataView onSelectTrack={handleTrackSelect} onEditTrack={handleTrackEdit} onPlayTrack={handlePlayTrack} libraryStatus={libraryStatus} />
+              </ErrorBoundary>
             </div>
 
             <div className={activeTab === 'xml' ? 'h-full' : 'hidden'}>
-              <XmlCleanView libraryStatus={libraryStatus} />
+              <ErrorBoundary key="eb-xml">
+                <XmlCleanView libraryStatus={libraryStatus} />
+              </ErrorBoundary>
             </div>
 
             <div className={activeTab === 'import' ? 'h-full' : 'hidden'}>
-              <ImportView onSelectTrack={handleTrackEdit} onImportComplete={checkLibraryStatus} onPlayTrack={handlePlayTrack} />
+              <ErrorBoundary key="eb-import">
+                <ImportView onSelectTrack={handleTrackEdit} onImportComplete={checkLibraryStatus} onPlayTrack={handlePlayTrack} />
+              </ErrorBoundary>
             </div>
 
             <div className={activeTab === 'ranking' ? 'h-full' : 'hidden'}>
-              <RankingView libraryStatus={libraryStatus} onSelectTrack={handleTrackSelect} onEditTrack={handleTrackEdit} />
+              <ErrorBoundary key="eb-ranking">
+                <RankingView libraryStatus={libraryStatus} onSelectTrack={handleTrackSelect} onEditTrack={handleTrackEdit} />
+              </ErrorBoundary>
             </div>
 
             <div className={activeTab === 'editor' ? 'h-full' : 'hidden'}>
-              <div className="flex-1 flex flex-col h-full bg-slate-900/40">
-                {activeTrack ? <WaveformEditor track={activeTrack} /> : (
-                  <div className="flex h-full flex-col items-center justify-center text-slate-500 animate-fade-in">
-                    <div className="w-20 h-20 bg-slate-900 rounded-full flex items-center justify-center mb-6 border border-white/5">
-                      <Scissors size={40} className="text-slate-600" />
+              <ErrorBoundary key="eb-editor">
+                <div className="flex-1 flex flex-col h-full bg-slate-900/40">
+                  {activeTrack ? <WaveformEditor track={activeTrack} /> : (
+                    <div className="flex h-full flex-col items-center justify-center text-slate-500 animate-fade-in">
+                      <div className="w-20 h-20 bg-slate-900 rounded-full flex items-center justify-center mb-6 border border-white/5">
+                        <Scissors size={40} className="text-slate-600" />
+                      </div>
+                      <h3 className="text-xl font-medium text-slate-400">No track selected</h3>
+                      <p className="text-sm mt-2 text-slate-600">Select a track from Library or Playlists to start editing.</p>
                     </div>
-                    <h3 className="text-xl font-medium text-slate-400">No track selected</h3>
-                    <p className="text-sm mt-2 text-slate-600">Select a track from Library or Playlists to start editing.</p>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
+              </ErrorBoundary>
             </div>
 
             <div className={activeTab === 'insights' ? 'h-full' : 'hidden'}>
-              <InsightsView onSelectTrack={handleTrackSelect} onEditTrack={handleTrackEdit} libraryStatus={libraryStatus} />
+              <ErrorBoundary key="eb-insights">
+                <InsightsView onSelectTrack={handleTrackSelect} onEditTrack={handleTrackEdit} libraryStatus={libraryStatus} />
+              </ErrorBoundary>
             </div>
 
-            {activeTab === 'usb' && <UsbView />}
-            {activeTab === 'tools' && <ToolsView />}
-            {activeTab === 'settings' && <SettingsView />}
-          </ErrorBoundary>
+            {activeTab === 'usb' && <ErrorBoundary key="eb-usb"><UsbView /></ErrorBoundary>}
+            {activeTab === 'tools' && <ErrorBoundary key="eb-tools"><ToolsView /></ErrorBoundary>}
+            {activeTab === 'settings' && <ErrorBoundary key="eb-settings"><SettingsView /></ErrorBoundary>}
+          </Suspense>
         </div>
       </main>
 
