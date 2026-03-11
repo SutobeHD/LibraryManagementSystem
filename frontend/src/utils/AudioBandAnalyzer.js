@@ -5,18 +5,17 @@
  * - Low: < 400 Hz  (Bass / Kick / Punch)
  * - Mid: 400 Hz - 2000 Hz  (Vocals / Instruments)
  * - High: > 2000 Hz (Cymbals / Hi-Hats / Air)
- * 
- * Uses OfflineAudioContext for fast rendering.
- * Also provides peak generation for waveform visualization.
+ *
+ * Also generates multi-resolution (LOD) peak arrays for zoom-adaptive rendering.
  */
 class AudioBandAnalyzer {
     /**
      * Splits audio buffer into 3 bands.
-     * @param {AudioBuffer} audioBuffer 
+     * @param {AudioBuffer} audioBuffer
      * @returns {Promise<{low: AudioBuffer, mid: AudioBuffer, high: AudioBuffer}>}
      */
     static async splitBands(audioBuffer) {
-        if (!audioBuffer) throw new Error("No buffer provided");
+        if (!audioBuffer) throw new Error('No buffer provided');
 
         const lowConfig = [{ type: 'lowpass', freq: 400 }];
         const midConfig = [
@@ -28,7 +27,7 @@ class AudioBandAnalyzer {
         const [low, mid, high] = await Promise.all([
             this.renderFilteredBuffer(audioBuffer, lowConfig),
             this.renderFilteredBuffer(audioBuffer, midConfig),
-            this.renderFilteredBuffer(audioBuffer, highConfig)
+            this.renderFilteredBuffer(audioBuffer, highConfig),
         ]);
 
         return { low, mid, high };
@@ -55,7 +54,7 @@ class AudioBandAnalyzer {
     /**
      * Generate peak data from an AudioBuffer for waveform visualization.
      * Returns an array of { min, max } values, one per pixel column.
-     * 
+     *
      * @param {AudioBuffer} buffer - Audio buffer to analyze
      * @param {number} samplesPerPixel - How many samples each pixel column represents
      * @returns {Array<{min: number, max: number}>}
@@ -63,7 +62,7 @@ class AudioBandAnalyzer {
     static generatePeaks(buffer, samplesPerPixel) {
         if (!buffer) return [];
 
-        // Merge channels to mono for peak calculation
+        // Merge channels to mono
         const length = buffer.length;
         const numChannels = buffer.numberOfChannels;
         const data = new Float32Array(length);
@@ -98,21 +97,18 @@ class AudioBandAnalyzer {
 
     /**
      * Generate 3-band peak data for RGB waveform rendering.
-     * Pre-computes peaks for each frequency band at the given resolution.
-     * 
-     * @param {AudioBuffer} audioBuffer - Source audio buffer
-     * @param {number} samplesPerPixel - Samples per display pixel
-     * @param {Function} [onProgress] - Progress callback (0-1)
+     *
+     * @param {AudioBuffer} audioBuffer
+     * @param {number} samplesPerPixel
+     * @param {Function} [onProgress]
      * @returns {Promise<{low: Array, mid: Array, high: Array}>}
      */
     static async generateBandPeaks(audioBuffer, samplesPerPixel, onProgress = null) {
         if (onProgress) onProgress(0);
 
-        // Split into bands
         const { low, mid, high } = await this.splitBands(audioBuffer);
         if (onProgress) onProgress(0.5);
 
-        // Generate peaks for each band
         const lowPeaks = this.generatePeaks(low, samplesPerPixel);
         const midPeaks = this.generatePeaks(mid, samplesPerPixel);
         const highPeaks = this.generatePeaks(high, samplesPerPixel);
@@ -123,8 +119,74 @@ class AudioBandAnalyzer {
     }
 
     /**
+     * Generate multi-resolution (LOD) peak data for all 3 bands + mono fallback.
+     * Produces r1 (full), r2 (half), r4 (quarter) resolution arrays.
+     * This enables instant zoom-level switching with no recalculation in the render loop.
+     *
+     * @param {AudioBuffer} audioBuffer
+     * @param {number} baseSamplesPerPixel - Base resolution (for r1)
+     * @param {Function} [onProgress]
+     * @returns {Promise<{low, mid, high, mono, lod: {r1, r2, r4}}>}
+     */
+    static async generateMultiResolutionPeaks(audioBuffer, baseSamplesPerPixel, onProgress = null) {
+        if (onProgress) onProgress(0);
+
+        const { low, mid, high } = await this.splitBands(audioBuffer);
+        if (onProgress) onProgress(0.4);
+
+        // Full resolution
+        const lowR1 = this.generatePeaks(low, baseSamplesPerPixel);
+        const midR1 = this.generatePeaks(mid, baseSamplesPerPixel);
+        const highR1 = this.generatePeaks(high, baseSamplesPerPixel);
+        const monoR1 = this.generatePeaks(audioBuffer, baseSamplesPerPixel);
+        if (onProgress) onProgress(0.65);
+
+        // Half resolution (2× decimated)
+        const lowR2 = this._decimatePeaks(lowR1, 2);
+        const midR2 = this._decimatePeaks(midR1, 2);
+        const highR2 = this._decimatePeaks(highR1, 2);
+        if (onProgress) onProgress(0.8);
+
+        // Quarter resolution (4× decimated)
+        const lowR4 = this._decimatePeaks(lowR1, 4);
+        const midR4 = this._decimatePeaks(midR1, 4);
+        const highR4 = this._decimatePeaks(highR1, 4);
+        if (onProgress) onProgress(1.0);
+
+        return {
+            low: lowR1,
+            mid: midR1,
+            high: highR1,
+            mono: monoR1,
+            lod: {
+                r1: { low: lowR1, mid: midR1, high: highR1 },
+                r2: { low: lowR2, mid: midR2, high: highR2 },
+                r4: { low: lowR4, mid: midR4, high: highR4 },
+            },
+        };
+    }
+
+    /**
+     * Decimate peaks by combining every N entries into one.
+     * Takes absolute max/min over group — preserves true peak.
+     */
+    static _decimatePeaks(peaks, factor) {
+        if (!peaks || peaks.length === 0) return [];
+        const out = [];
+        for (let i = 0; i < peaks.length; i += factor) {
+            let min = 0, max = 0;
+            for (let j = i; j < Math.min(i + factor, peaks.length); j++) {
+                if (peaks[j].min < min) min = peaks[j].min;
+                if (peaks[j].max > max) max = peaks[j].max;
+            }
+            out.push({ min, max });
+        }
+        return out;
+    }
+
+    /**
      * Converts AudioBuffer to WAV Blob
-     * @param {AudioBuffer} buffer 
+     * @param {AudioBuffer} buffer
      * @returns {Blob}
      */
     static bufferToWav(buffer) {
@@ -186,7 +248,7 @@ class AudioBandAnalyzer {
             }
         }
 
-        return new Blob([arrayBuffer], { type: "audio/wav" });
+        return new Blob([arrayBuffer], { type: 'audio/wav' });
     }
 }
 

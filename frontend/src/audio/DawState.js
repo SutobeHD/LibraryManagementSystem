@@ -68,6 +68,12 @@ export function createInitialState(overrides = {}) {
         loopStart: 0,
         loopEnd: 0,
 
+        // Dead Reckoning — interpolate playhead between IPC sync frames
+        deadReckoning: {
+            lastSyncWallClock: 0,   // performance.now() at last Tauri sync
+            lastSyncAudioTime: 0,   // audio time (seconds) at last sync
+        },
+
         // View state
         zoom: 100,         // Pixels per second
         scrollX: 0,        // Horizontal scroll offset in pixels
@@ -531,6 +537,10 @@ export function dawReducer(state, action) {
 
         case 'SET_PLAYING':
             return { ...state, isPlaying: action.payload };
+
+        // ── Dead Reckoning ───────────────────
+        case 'SET_DEAD_RECKONING_SYNC':
+            return { ...state, deadReckoning: { ...state.deadReckoning, ...action.payload } };
 
         case 'TOGGLE_LOOP':
             return { ...state, loopEnabled: !state.loopEnabled };

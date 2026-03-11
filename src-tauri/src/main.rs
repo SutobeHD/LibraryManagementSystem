@@ -1,13 +1,16 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
 mod soundcloud_client;
+mod audio;
 
 // use tauri_plugin_shell::ShellExt;
 // use tauri_plugin_shell::process::CommandEvent;
 use serde::Deserialize;
 use soundcloud_client::Track;
 use tauri::{Emitter, Manager};
+use audio::commands::{load_audio, get_waveform, AudioCommandState};
+use audio::engine::AudioController;
+use std::sync::Mutex;
 
 #[tauri::command]
 fn close_splashscreen(window: tauri::Window) {
@@ -126,7 +129,14 @@ fn main() {
     
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![close_splashscreen, login_to_soundcloud, export_to_soundcloud])
+        .manage(AudioCommandState(Mutex::new(AudioController::Default())))
+        .invoke_handler(tauri::generate_handler![
+            close_splashscreen, 
+            login_to_soundcloud, 
+            export_to_soundcloud,
+            load_audio,
+            get_waveform
+        ])
         .setup(|app| {
             #[cfg(not(debug_assertions))]
             {

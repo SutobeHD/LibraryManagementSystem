@@ -22,5 +22,17 @@ url = "2"
 open = "5"
 dotenvy = "0.15"
 
+# --- Native Audio Engine ---
+cpal = "0.15"
+memmap2 = "0.9"
+rustfft = "6.1"
+rubato = "0.14"
+ringbuf = "0.3"
+crossbeam-channel = "0.5"
+
+[dependencies.symphonia]
+version = "0.5"
+features = ["mp3", "flac", "wav", "isomp4", "alac"]
+
 [features]
 custom-protocol = ["tauri/custom-protocol"]

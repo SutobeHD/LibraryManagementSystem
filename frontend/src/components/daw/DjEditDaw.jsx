@@ -35,6 +35,7 @@ import DawToolbar from './DawToolbar';
 import DawTimeline from './DawTimeline';
 import DawControlStrip from './DawControlStrip';
 import DawBrowser from './DawBrowser';
+import WaveformOverview from './WaveformOverview';
 
 // ─── EXTENDED REDUCER ──────────────────────────────────────────────────────────
 
@@ -165,25 +166,25 @@ const DjEditDaw = ({ track: initialTrack }) => {
         loadTrack();
     }, [activeTrack]);
 
-    // ── PLAYHEAD ANIMATION ──
+    // ── PLAYHEAD ANIMATION + DEAD RECKONING SYNC ──
     useEffect(() => {
         let lastSyncTime = 0;
         const updatePlayhead = (timestamp) => {
             if (state.isPlaying) {
-                // Req 14 (React Re-Renders): Throttle global React state updates to ~15fps (every 66ms)
-                // This prevents massive component-tree re-renders for the entire DAW.
-                // The Timeline Canvas (DawTimeline) pulls the realtime value itself at 60fps.
+                // Throttle React state updates to ~15fps (66ms) — Canvas reads at 60fps directly
                 if (timestamp - lastSyncTime > 66) {
                     const currentTime = DawEngine.getCurrentTime();
                     dispatch({ type: 'SET_PLAYHEAD', payload: currentTime });
 
-                    // Auto-scroll: keep playhead visible (at ~70% of viewport)
-                    const playheadPx = currentTime * state.zoom;
-                    const viewportRight = state.scrollX + window.innerWidth * 0.7;
-                    if (playheadPx > viewportRight) {
-                        const newScrollX = playheadPx - window.innerWidth * 0.3;
-                        dispatch({ type: 'SET_SCROLL_X', payload: Math.max(0, newScrollX) });
-                    }
+                    // Dead Reckoning sync: store wall-clock + audio time so Timeline can interpolate
+                    dispatch({
+                        type: 'SET_DEAD_RECKONING_SYNC',
+                        payload: {
+                            lastSyncWallClock: performance.now(),
+                            lastSyncAudioTime: currentTime,
+                        },
+                    });
+
                     lastSyncTime = timestamp;
                 }
             }
@@ -194,7 +195,7 @@ const DjEditDaw = ({ track: initialTrack }) => {
         return () => {
             if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
         };
-    }, [state.isPlaying, state.zoom, state.scrollX]);
+    }, [state.isPlaying]);
 
     // ─── FILE OPERATIONS ───
 
@@ -339,6 +340,12 @@ const DjEditDaw = ({ track: initialTrack }) => {
 
     // ── TRANSPORT CONTROLS ──
     const handlePlay = useCallback(async () => {
+        // EC6: race-condition guard — block play if buffer not yet decoded
+        if (!state.sourceBuffer) {
+            toast.error('Track still loading — please wait...', { id: 'play-guard', duration: 2000 });
+            return;
+        }
+
         await DawEngine.resumeContext();
         dispatch({ type: 'SET_PLAYING', payload: true });
 
@@ -500,23 +507,52 @@ const DjEditDaw = ({ track: initialTrack }) => {
     }, [state]);
 
     const handleOpenProject = useCallback((filepath) => {
-        // Trigger project open
         handleOpen();
     }, [handleOpen]);
 
-    // ── KEYBOARD SHORTCUTS ──
+    // ── KEYBOARD SHORTCUTS (EC8: capture all DAW-relevant keys) ──
     useEffect(() => {
         const handleKeyDown = (e) => {
-            // Ignore shortcuts if typing in an input
             if (e.target.closest('input, select, textarea')) return;
-
-            console.log('Shortcuts: Key:', e.key, 'Ctrl:', e.ctrlKey);
 
             // Space — Play/Pause
             if (e.code === 'Space') {
                 e.preventDefault();
                 if (state.isPlaying) handleStop();
                 else handlePlay();
+                return;
+            }
+
+            // Home — Jump to start
+            if (e.key === 'Home') {
+                e.preventDefault();
+                dispatch({ type: 'SET_PLAYHEAD', payload: 0 });
+                dispatch({ type: 'SET_SCROLL_X', payload: 0 });
+                return;
+            }
+
+            // End — Jump to end
+            if (e.key === 'End') {
+                e.preventDefault();
+                dispatch({ type: 'SET_PLAYHEAD', payload: state.totalDuration });
+                return;
+            }
+
+            // ArrowLeft — Fine scrub backward (-1 beat)
+            if (e.key === 'ArrowLeft' && !e.ctrlKey) {
+                e.preventDefault();
+                const beatSec = state.bpm > 0 ? 60 / state.bpm : 0.5;
+                const delta = e.shiftKey ? beatSec * 4 : beatSec; // Shift = 1 bar
+                dispatch({ type: 'SET_PLAYHEAD', payload: Math.max(0, state.playhead - delta) });
+                return;
+            }
+
+            // ArrowRight — Fine scrub forward (+1 beat)
+            if (e.key === 'ArrowRight' && !e.ctrlKey) {
+                e.preventDefault();
+                const beatSec = state.bpm > 0 ? 60 / state.bpm : 0.5;
+                const delta = e.shiftKey ? beatSec * 4 : beatSec;
+                dispatch({ type: 'SET_PLAYHEAD', payload: Math.min(state.totalDuration, state.playhead + delta) });
                 return;
             }
 
@@ -596,9 +632,7 @@ const DjEditDaw = ({ track: initialTrack }) => {
             const num = parseInt(e.key);
             if (num >= 1 && num <= 8 && !e.ctrlKey && !e.altKey) {
                 const cue = state.hotCues[num - 1];
-                if (cue) {
-                    handleJumpTo(cue.time);
-                }
+                if (cue) handleJumpTo(cue.time);
                 return;
             }
         };
@@ -615,8 +649,8 @@ const DjEditDaw = ({ track: initialTrack }) => {
             window.removeEventListener('keydown', handleKeyDown);
             window.removeEventListener('keyup', handleKeyUp);
         };
-    }, [state.isPlaying, state.hotCues, handlePlay, handleStop, handleSplit, handleRippleDelete, handleSave, handleOpen, handleJumpTo]);
-
+    }, [state.isPlaying, state.hotCues, state.bpm, state.playhead, state.totalDuration,
+        handlePlay, handleStop, handleSplit, handleRippleDelete, handleSave, handleOpen, handleJumpTo, dispatch]);
 
 
     // ── RENDER ──
@@ -635,8 +669,11 @@ const DjEditDaw = ({ track: initialTrack }) => {
                     onAutoCue={handleAutoCue}
                 />
 
-                {/* Middle: Timeline Area */}
+                {/* Middle: Overview + Timeline Area */}
                 <div className="flex-1 flex flex-col overflow-hidden relative">
+                    {/* Waveform Overview Mini-Map (always shown, placeholder when no track) */}
+                    <WaveformOverview state={state} dispatch={dispatch} />
+
                     {activeTrack ? (
                         <div className="flex-1 relative">
                             <DawTimeline

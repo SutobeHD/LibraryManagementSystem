@@ -40,11 +40,6 @@ const DawControlStrip = React.memo(({
     const canUndo = undoStack.length > 0;
     const canRedo = redoStack.length > 0;
 
-    console.log('ControlStrip Render:', {
-        selectedCount: selectedRegionIds?.size,
-        hasSelection,
-        clipboardLen: clipboard?.length
-    });
 
     // ── FORMAT ──
     const formatTime = useCallback((seconds) => {
