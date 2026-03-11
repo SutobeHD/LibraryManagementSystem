@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 from typing import List, Dict, Optional
 from difflib import SequenceMatcher
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +156,7 @@ class SoundCloudPlaylistAPI:
         }
 
     @staticmethod
+    @lru_cache(maxsize=32)
     def get_playlists(auth_token: str) -> List[Dict]:
         """
         Fetch ALL playlists for the authenticated user.
@@ -211,6 +213,7 @@ class SoundCloudPlaylistAPI:
         return playlists
 
     @staticmethod
+    @lru_cache(maxsize=32)
     def get_likes(auth_token: str, max_tracks: int = 500) -> Dict:
         """
         Fetch user's liked tracks as a virtual playlist.
@@ -265,6 +268,7 @@ class SoundCloudPlaylistAPI:
         }
 
     @staticmethod
+    @lru_cache(maxsize=128)
     def get_full_playlist_tracks(playlist_id: int, auth_token: str) -> List[Dict]:
         """
         Fetch ALL tracks for a specific playlist (not just the 20-track preview).

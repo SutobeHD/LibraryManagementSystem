@@ -70,7 +70,7 @@ const Player = ({ track, onClose, onMaximize }) => {
             <div className="flex items-center gap-4 w-1/4 min-w-[200px]">
                 <div className="w-14 h-14 bg-slate-800 rounded-full shadow-lg overflow-hidden shrink-0 border border-white/5 relative group">
                     {track.Artwork ? (
-                        <img src={`${api.defaults.baseURL}/api/artwork?path=${encodeURIComponent(track.Artwork)}`} className="w-full h-full object-cover" />
+                        <img src={`${api.defaults.baseURL}/api/artwork?path=${encodeURIComponent(track.Artwork)}`} className="w-full h-full object-cover" loading="lazy" />
                     ) : (
                         <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-cyan-900 to-blue-900">
                             <span className="text-xs font-bold text-white/50">RB</span>

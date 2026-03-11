@@ -177,6 +177,27 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
     const overviewWs = useRef(null);
     const isMountedRef = useRef(true);
     const originalBufferRef = useRef(null); // Cache original audio for non-destructive preview
+    const [isVisible, setIsVisible] = useState(false);
+
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                if (entry.isIntersecting) {
+                    setIsVisible(true);
+                    observer.disconnect(); // Execute once
+                }
+            },
+            { threshold: 0.1 }
+        );
+
+        if (waveformRef.current) {
+            observer.observe(waveformRef.current);
+        } else if (overviewRef.current) {
+            observer.observe(overviewRef.current);
+        }
+
+        return () => observer.disconnect();
+    }, []);
 
     useEffect(() => {
         isMountedRef.current = true;
@@ -727,6 +748,7 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
     useEffect(() => {
         if (!wavesurfer.current || !overviewWs.current) return;
         if (!fullTrack?.path && !blobUrl) return;
+        if (!isVisible) return;
         if (streaming) {
             setLoading(false);
             setBufferReady(false);

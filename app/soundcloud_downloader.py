@@ -4,9 +4,12 @@ import logging
 import threading
 import time
 import re
+import atexit
+import tempfile
+import shutil
 from pathlib import Path
 from typing import Dict, Optional, Callable
-from .config import MUSIC_DIR, TEMP_DIR
+from .config import MUSIC_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +17,17 @@ class SoundCloudDownloader:
     def __init__(self):
         self.tasks: Dict[str, Dict] = {}
         self._lock = threading.Lock()
+        self._running_processes = set()
+        atexit.register(self.cleanup_processes)
+
+    def cleanup_processes(self):
+        """Req 9: Kill zombie processes on application exit."""
+        for p in list(self._running_processes):
+            try:
+                if p.poll() is None:
+                    p.terminate()
+            except Exception as e:
+                logger.error(f"[SC] Failed to terminate zombie process: {e}")
 
     def _parse_progress(self, line: str, task_id: str):
         """
@@ -52,55 +66,67 @@ class SoundCloudDownloader:
 
         def _run():
             try:
-                cmd = ["scdl", "-l", url, "--path", str(download_dir), "--addtimestamp"]
-                
-                # Priority: Original File
-                # Note: scdl defaults to high quality if available, but --only-original forces it
-                # We want to TRY original, but fallback if not available.
-                # scdl doesn't have a perfect "prefer" but --opus helps for Go+
-                cmd.append("--opus")
-                
-                if auth_token:
-                    # Some versions of scdl use credentials file, others take --auth-token
-                    # Based on research, passing it via environment or arg is safest.
-                    os.environ["SCDL_AUTH_TOKEN"] = auth_token
-                    # Some versions might need: cmd.extend(["--auth-token", auth_token])
-                
-                logger.info(f"Running scdl command: {' '.join(cmd)}")
-                
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True
-                )
+                # Req 10: Insecure Temporary Files -> use short-lived secure temp directory
+                with tempfile.TemporaryDirectory(prefix="scdl_tmp_") as safe_temp_dir:
+                    cmd = ["scdl", "-l", url, "--path", safe_temp_dir, "--addtimestamp"]
+                    
+                    # Priority: Original File
+                    cmd.append("--opus")
+                    
+                    if auth_token:
+                        os.environ["SCDL_AUTH_TOKEN"] = auth_token
+                    
+                    logger.info(f"Running scdl command: {' '.join(cmd)} in {safe_temp_dir}")
+                    
+                    process = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1,
+                        universal_newlines=True
+                    )
+                    
+                    # Req 9: Track process to avoid zombies
+                    self._running_processes.add(process)
 
-                if process.stdout:
-                    for line in process.stdout:
-                        logger.debug(f"scdl: {line.strip()}")
-                        self._parse_progress(line, task_id)
-                
-                process.wait()
-                
-                if process.returncode == 0:
-                    with self._lock:
-                        if task_id in self.tasks:
-                            self.tasks[task_id]['status'] = "Completed"
-                            self.tasks[task_id]['progress'] = 100
-                    logger.info(f"SoundCloud download completed: {url}")
-                    if callback:
-                        callback(task_id, True)
-                else:
-                    error_msg = f"scdl failed with return code {process.returncode}"
-                    with self._lock:
-                        if task_id in self.tasks:
-                            self.tasks[task_id]['status'] = "Failed"
-                            self.tasks[task_id]['error'] = error_msg
-                    logger.error(error_msg)
-                    if callback:
-                        callback(task_id, False)
+                    try:
+                        if process.stdout:
+                            for line in process.stdout:
+                                logger.debug(f"scdl: {line.strip()}")
+                                self._parse_progress(line, task_id)
+                        
+                        process.wait()
+                    finally:
+                        if process in self._running_processes:
+                            self._running_processes.remove(process)
+                        if process.poll() is None:
+                            logger.warning(f"[SC] Thread exited early, killing leftover process {process.pid}")
+                            process.terminate()
+                    
+                    if process.returncode == 0:
+                        # Move successfully completed files to the final destination
+                        for f in Path(safe_temp_dir).glob("*"):
+                            if f.is_file():
+                                target = download_dir / f.name
+                                shutil.copy(f, target)
+                                
+                        with self._lock:
+                            if task_id in self.tasks:
+                                self.tasks[task_id]['status'] = "Completed"
+                                self.tasks[task_id]['progress'] = 100
+                        logger.info(f"SoundCloud download completed: {url}")
+                        if callback:
+                            callback(task_id, True)
+                    else:
+                        error_msg = f"scdl failed with return code {process.returncode}"
+                        with self._lock:
+                            if task_id in self.tasks:
+                                self.tasks[task_id]['status'] = "Failed"
+                                self.tasks[task_id]['error'] = error_msg
+                        logger.error(error_msg)
+                        if callback:
+                            callback(task_id, False)
 
             except Exception as e:
                 with self._lock:

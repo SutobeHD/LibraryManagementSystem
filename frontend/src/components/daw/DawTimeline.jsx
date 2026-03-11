@@ -15,6 +15,7 @@
 import React, { useRef, useEffect, useCallback, useMemo } from 'react';
 import AudioBandAnalyzer from '../../utils/AudioBandAnalyzer';
 import { snapToGrid } from '../../audio/DawState';
+import * as DawEngine from '../../audio/DawEngine';
 
 // ─── COLORS ────────────────────────────────────────────────────────────────────
 
@@ -105,8 +106,16 @@ const DawTimeline = React.memo(({
     useEffect(() => {
         const ds = drawState.current;
         ds.zoom = state.zoom;
-        ds.scrollX = state.scrollX;
-        ds.playhead = state.playhead;
+        
+        // Req 14: To achieve 60-144FPS without React tearing, allow DawEngine to drive playhead and auto-scrolling
+        // autonomously during playback. Only accept React state overrides when paused or heavily desynced.
+        if (!state.isPlaying || Math.abs(ds.scrollX - state.scrollX) > window.innerWidth * 0.5) {
+            ds.scrollX = state.scrollX;
+        }
+        if (!state.isPlaying) {
+            ds.playhead = state.playhead;
+        }
+        
         ds.isPlaying = state.isPlaying;
         ds.regions = state.regions;
         ds.selectedIds = state.selectedRegionIds;
@@ -169,6 +178,18 @@ const DawTimeline = React.memo(({
 
         const renderFrame = (timestamp) => {
             const ds = drawState.current;
+
+            // Engine loop runs perfectly isolated from React DOM renders
+            if (ds.isPlaying) {
+                ds.playhead = DawEngine.getCurrentTime();
+
+                // High-framerate CSS-independent auto-scrolling
+                const playheadPx = ds.playhead * ds.zoom;
+                const limitRight = ds.scrollX + ds.width * 0.7;
+                if (playheadPx > limitRight) {
+                    ds.scrollX = Math.max(0, playheadPx - ds.width * 0.3);
+                }
+            }
 
             // LOD: Measure frame time
             if (ds.lastFrameTime > 0) {

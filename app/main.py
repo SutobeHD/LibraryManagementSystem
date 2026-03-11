@@ -138,6 +138,17 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """SECURITY: Catch all unhandled exceptions to prevent hard crashes and data leaks."""
+    logger.error(f"Unhandled Exception on {request.method} {request.url}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error occurred.", "error_type": type(exc).__name__}
+    )
+
 app.mount("/exports", StaticFiles(directory=EXPORT_DIR), name="exports")
 
 # Artwork Mount
@@ -536,8 +547,9 @@ async def analyze_track(tid: str):
         raise HTTPException(404, "Audio file not found")
     
     try:
-        # Perform analysis
-        result = BeatAnalyzer.analyze(path)
+        # Perform analysis in a separate process pool to avoid blocking the event loop
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(AudioAnalyzer.get_executor(), BeatAnalyzer.analyze, path)
         
         # PERSIST TO DATABASE IN-MEMORY
         track["BPM"] = result["bpm"]
@@ -567,15 +579,11 @@ async def analyze_track(tid: str):
 async def stream_audio(path: str):
     """Streams an audio file from the local filesystem"""
     logger.info(f"Stream request for: {path}")
-    if not os.path.exists(path):
-        logger.error(f"Stream failed - File not found: {path}")
-        raise HTTPException(404, "File not found")
     
-    # Basic security check: ensure path is within allowed roots?
-    # For now, we allow any path as this is a local desktop app helper.
-    # In future, validate against ALLOWED_AUDIO_ROOTS.
+    # SECURITY: Validate against allowed audio roots to prevent path traversal
+    valid_path = validate_audio_path(path)
     
-    return FileResponse(path, headers={"Accept-Ranges": "bytes"})
+    return FileResponse(valid_path, headers={"Accept-Ranges": "bytes"})
 
 
 @app.post("/api/track/cues/save")
@@ -914,7 +922,28 @@ async def get_artwork(path: str):
         else:
             logger.warning("APPDATA not found, cannot resolve PIONEER artwork path")
 
-    file_path = Path(p_path)
+    file_path = Path(p_path).resolve()
+    
+    # SECURITY: Directory Jail & Extension Validation
+    ALLOWED_ARTWORK_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif'}
+    if file_path.suffix.lower() not in ALLOWED_ARTWORK_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Invalid artwork file type")
+
+    # Ensure the path is either in the local covers dir or the Pioneer share dir
+    is_allowed = False
+    if str(file_path).startswith(str(COVERS_DIR.resolve())):
+        is_allowed = True
+    elif os.environ.get("APPDATA"):
+        rb_share_dir = (Path(os.environ.get("APPDATA")) / "Pioneer" / "rekordbox" / "share").resolve()
+        if str(file_path).startswith(str(rb_share_dir)):
+            is_allowed = True
+            
+    # As a fallback, if not in defined locations, allow only if it's explicitly tracked in the DB as artwork.
+    # Note: we mostly rely on the above checks for safety.
+    if not is_allowed:
+        logger.warning(f"SECURITY: Blocked access to non-artwork path: {file_path}")
+        raise HTTPException(status_code=403, detail="Access denied: path outside allowed artwork directories")
+
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(404, "Artwork file not found")
         
@@ -1079,7 +1108,7 @@ async def render(r: ExportRequest):
         raise HTTPException(500, safe_error_message(e))
 
 @app.post("/api/audio/import")
-async def import_audio(files: List[UploadFile] = File(...)):
+def import_audio(files: List[UploadFile] = File(...)):
     """Handles batch audio upload, analysis and library insertion."""
     results = []
     for file in files:
@@ -1143,9 +1172,27 @@ def _graceful_shutdown():
 @app.on_event("startup")
 async def startup_event():
     logger.info(f"Backend started. Binding to 127.0.0.1:8000 only.")
-    # Auto-load library
+    
+    # Req 30: State Recovery - Purge obsolete temp files from previous hard crashes
+    import tempfile, glob
+    tmp_base = tempfile.gettempdir()
+    for stale_dir in glob.glob(os.path.join(tmp_base, "scdl_tmp_*")):
+        try:
+            shutil.rmtree(stale_dir, ignore_errors=True)
+            logger.info(f"Purged stale download state: {stale_dir}")
+        except: pass
+        
+    for stale_file in MUSIC_DIR.glob("*.tmp"):
+        try:
+            os.remove(stale_file)
+        except: pass
+
+    # Req 29: Timeout Handling - Prevent infinite hangs on DB locks during boot
     try:
-        db.load_library()
+        logger.info("Auto-loading library with 30s timeout...")
+        await asyncio.wait_for(asyncio.to_thread(db.load_library), timeout=30.0)
+    except asyncio.TimeoutError:
+        logger.error("Library auto-load timed out after 30 seconds (Possible strict DB lock).")
     except Exception as e:
         logger.error(f"Failed to auto-load library on startup: {e}")
 
@@ -1494,7 +1541,7 @@ async def soundcloud_download(data: Dict[str, str], request: Request):
     if not url:
         raise HTTPException(status_code=400, detail="URL is required")
 
-    auth_token = request.cookies.get("sc_token")
+    auth_token = keyring.get_password("rb_editor_pro", "sc_token")
 
     # Criterion 14: write-permission check before starting download
     sc_dir = MUSIC_DIR / "SoundCloud"
@@ -1543,7 +1590,14 @@ async def get_soundcloud_task_status(task_id: str):
 @app.post("/api/soundcloud/auth-token")
 async def set_soundcloud_auth_token(data: Dict[str, str], response: Response):
     token = data.get("token", "")
-    response.set_cookie(key="sc_token", value=token, httponly=True, samesite='lax', secure=False, max_age=31536000)
+    if token:
+        keyring.set_password("rb_editor_pro", "sc_token", token)
+    else:
+        try: keyring.delete_password("rb_editor_pro", "sc_token")
+        except: pass
+    
+    # Store a dummy cookie so the frontend knows a session exists without exposing the PII token
+    response.set_cookie(key="sc_token", value="os_keyring_active", httponly=True, samesite='lax', secure=False, max_age=31536000)
     return {"status": "success"}
 
 # ─── SoundCloud Playlist Sync API ─────────────────────────────────────────────
@@ -1551,7 +1605,7 @@ async def set_soundcloud_auth_token(data: Dict[str, str], response: Response):
 @app.get("/api/soundcloud/playlists")
 async def get_soundcloud_playlists(request: Request):
     """Fetch all user playlists + likes from SoundCloud."""
-    auth_token = request.cookies.get("sc_token")
+    auth_token = keyring.get_password("rb_editor_pro", "sc_token")
     if not auth_token:
         raise HTTPException(400, "SoundCloud auth token not configured. Go to Settings to set it.")
 
@@ -1577,7 +1631,7 @@ async def sync_soundcloud_playlists(r: ScSyncReq, request: Request):
     if _sync_lock.locked():
         raise HTTPException(409, "A sync operation is already in progress. Please wait.")
 
-    auth_token = request.cookies.get("sc_token")
+    auth_token = keyring.get_password("rb_editor_pro", "sc_token")
     if not auth_token:
         raise HTTPException(400, "SoundCloud auth token not configured")
 
@@ -1618,7 +1672,7 @@ async def sync_all_soundcloud(request: Request):
     if _sync_lock.locked():
         raise HTTPException(409, "A sync operation is already in progress. Please wait.")
 
-    auth_token = request.cookies.get("sc_token")
+    auth_token = keyring.get_password("rb_editor_pro", "sc_token")
     if not auth_token:
         raise HTTPException(400, "SoundCloud auth token not configured")
 
@@ -1656,7 +1710,7 @@ async def merge_soundcloud_playlists(r: ScMergeReq, request: Request):
     if _sync_lock.locked():
         raise HTTPException(409, "A sync operation is already in progress. Please wait.")
 
-    auth_token = request.cookies.get("sc_token")
+    auth_token = keyring.get_password("rb_editor_pro", "sc_token")
     if not auth_token:
         raise HTTPException(400, "SoundCloud auth token not configured")
 

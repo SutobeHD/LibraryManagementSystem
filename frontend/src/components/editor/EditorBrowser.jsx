@@ -90,7 +90,7 @@ const EditorBrowser = ({ onLoadTrack, onClose }) => {
                             {/* Artwork / Icon */}
                             <div className="w-10 h-10 rounded bg-slate-800 flex items-center justify-center flex-shrink-0 overflow-hidden relative">
                                 {track.Artwork ? (
-                                    <img src={`/api/artwork/${track.Artwork}`} alt="" className="w-full h-full object-cover" />
+                                    <img src={`/api/artwork/${track.Artwork}`} alt="" className="w-full h-full object-cover" loading="lazy" />
                                 ) : (
                                     <Disc size={16} className="text-slate-600" />
                                 )}

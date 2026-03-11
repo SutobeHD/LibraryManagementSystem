@@ -62,6 +62,14 @@ const DjEditDaw = ({ track: initialTrack }) => {
         if (initialTrack) setActiveTrack(initialTrack);
     }, [initialTrack]);
 
+    // ── LIFECYCLE CLEANUP ──
+    useEffect(() => {
+        return () => {
+            console.log('[DjEditDaw] Unmounting, disposing DawEngine...');
+            DawEngine.dispose();
+        };
+    }, []);
+
     // ── LOAD TRACK ──
     useEffect(() => {
         if (!activeTrack) return;
@@ -159,17 +167,24 @@ const DjEditDaw = ({ track: initialTrack }) => {
 
     // ── PLAYHEAD ANIMATION ──
     useEffect(() => {
-        const updatePlayhead = () => {
+        let lastSyncTime = 0;
+        const updatePlayhead = (timestamp) => {
             if (state.isPlaying) {
-                const currentTime = DawEngine.getCurrentTime();
-                dispatch({ type: 'SET_PLAYHEAD', payload: currentTime });
+                // Req 14 (React Re-Renders): Throttle global React state updates to ~15fps (every 66ms)
+                // This prevents massive component-tree re-renders for the entire DAW.
+                // The Timeline Canvas (DawTimeline) pulls the realtime value itself at 60fps.
+                if (timestamp - lastSyncTime > 66) {
+                    const currentTime = DawEngine.getCurrentTime();
+                    dispatch({ type: 'SET_PLAYHEAD', payload: currentTime });
 
-                // Auto-scroll: keep playhead visible (at ~70% of viewport)
-                const playheadPx = currentTime * state.zoom;
-                const viewportRight = state.scrollX + window.innerWidth * 0.7;
-                if (playheadPx > viewportRight) {
-                    const newScrollX = playheadPx - window.innerWidth * 0.3;
-                    dispatch({ type: 'SET_SCROLL_X', payload: Math.max(0, newScrollX) });
+                    // Auto-scroll: keep playhead visible (at ~70% of viewport)
+                    const playheadPx = currentTime * state.zoom;
+                    const viewportRight = state.scrollX + window.innerWidth * 0.7;
+                    if (playheadPx > viewportRight) {
+                        const newScrollX = playheadPx - window.innerWidth * 0.3;
+                        dispatch({ type: 'SET_SCROLL_X', payload: Math.max(0, newScrollX) });
+                    }
+                    lastSyncTime = timestamp;
                 }
             }
             animFrameRef.current = requestAnimationFrame(updatePlayhead);

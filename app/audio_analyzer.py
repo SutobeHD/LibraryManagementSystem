@@ -77,11 +77,12 @@ class AudioAnalyzer:
             }
 
         try:
-            # 1. Load Audio
-            # Accuracy: Load full track, native sample rate
-            # Speed: Load first 60 seconds, resample to 22050Hz for speed
-            sr = 22050 if mode == "speed" else 44100
-            duration = 60.0 if mode == "speed" else None
+            # Req 28: Extreme File Sizes / OOM Protection
+            # If file is > 200MB (likely a 1-2 hour mix), force duration cap
+            file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+            if file_size_mb > 200 and duration is None:
+                logger.warning(f"File {file_path} is {file_size_mb:.1f}MB. Capping analysis to first 10 mins to prevent OOM.")
+                duration = 600.0
             
             y, sr = librosa.load(file_path, sr=sr, duration=duration, mono=True)
 
@@ -129,5 +130,13 @@ class AudioAnalyzer:
                 "duration_analyzed": duration or librosa.get_duration(y=y, sr=sr)
             }
         except Exception as e:
-            logger.error(f"Error in _run_analysis for {file_path}: {e}")
-            raise e
+            logger.error(f"Corrupt or unreadable audio file '{file_path}': {e}")
+            # Req 23: Gracefully fail and return fallback to avoid halting large batch analysis
+            return {
+                "bpm": 128.0,
+                "key": "Unknown",
+                "beatgrid": [],
+                "mode": mode,
+                "error": f"Analysis failed: {str(e)}",
+                "corrupt": True
+            }

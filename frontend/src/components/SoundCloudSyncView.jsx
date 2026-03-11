@@ -37,7 +37,7 @@ const PlaylistCard = ({ playlist, selected, onToggle, onSync, syncing }) => {
                     {/* Artwork */}
                     <div className="relative w-20 h-20 rounded-xl overflow-hidden bg-white/5 shrink-0 group">
                         {artworkUrl ? (
-                            <img src={artworkUrl} alt="" className="w-full h-full object-cover" />
+                            <img src={artworkUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
                         ) : (
                             <div className="w-full h-full flex items-center justify-center">
                                 {isLikes ? <Heart size={28} className="text-red-400" /> : <ListMusic size={28} className="text-orange-400/40" />}

@@ -202,6 +202,7 @@ class LiveRekordboxDB:
             
             # 2. Load Playlists
             self._load_playlists()
+            self._load_playlist_tracks()
 
             # 3. Load Cues (Hot Cues & Memory Cues)
             self._load_cues()
@@ -379,6 +380,26 @@ class LiveRekordboxDB:
         
         # Ensure playlists are sorted by Seq for baseline
         self.playlists.sort(key=lambda x: x.get("Seq", 0))
+
+    def _load_playlist_tracks(self):
+        """Req 12: Batch-load all playlist contents to eliminate N+1 queries during frontend navigation."""
+        logger.info("Caching all playlist tracks...")
+        try:
+            self.playlists_tracks.clear()
+            # djmdSongPlaylist links PlaylistID to ContentID
+            query = "SELECT PlaylistID, ContentID FROM djmdSongPlaylist ORDER BY TrackNo"
+            
+            cur = self.db.execute(query)
+            count = 0
+            for row in cur:
+                pid = str(row[0])
+                cid = str(row[1])
+                self.playlists_tracks[pid].append(cid)
+                count += 1
+                
+            logger.info(f"Loaded {count} playlist track mappings instantly.")
+        except Exception as e:
+            logger.error(f"Failed to batch-load playlist tracks: {e}")
 
     def _finalize_ui_metadata(self):
         artist_counts = defaultdict(int)
@@ -563,15 +584,10 @@ class LiveRekordboxDB:
                 # 2. Fetch tracks for ALL nodes in the set
                 all_tracks = {} # Use dict to deduplicate by ID
                 for nid in all_node_ids:
-                    try:
-                        p_items = self.db.get_playlist_contents(nid)
-                        if p_items:
-                            for item in p_items:
-                                tid = str(item.id)
-                                if tid in self.tracks:
-                                    all_tracks[tid] = self.tracks[tid]
-                    except Exception as e:
-                        logger.warning(f"Failed to fetch tracks for node {nid}: {e}")
+                    cids = self.playlists_tracks.get(nid, [])
+                    for cid in cids:
+                        if cid in self.tracks:
+                            all_tracks[cid] = self.tracks[cid]
                 
                 logger.info(f"Total tracks collected from folder {pid}: {len(all_tracks)}")
                 return list(all_tracks.values())
@@ -583,19 +599,14 @@ class LiveRekordboxDB:
                 return self._get_smart_playlist_tracks(xml_rules)
 
             # 4. Regular Playlist
-            items = self.db.get_playlist_contents(str(pid))
-            
-            if not items: 
+            cids = self.playlists_tracks.get(str(pid), [])
+            if not cids:
                 return []
 
-            # Preserve order from items (Sorted by Rekordbox)
-            result = []
-            for item in items:
-                tid = str(item.id)
-                if tid in self.tracks:
-                    result.append(self.tracks[tid])
+            # Preserve order from items
+            result = [self.tracks[cid] for cid in cids if cid in self.tracks]
             
-            logger.info(f"Found {len(result)} tracks for playlist {pid}")
+            logger.info(f"Found {len(result)} tracks for playlist {pid} from cache")
             return result
         except Exception as e:
              logger.error(f"Failed to get tracks for playlist {pid}: {e}")

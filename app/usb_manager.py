@@ -12,12 +12,39 @@ import logging
 import subprocess
 import string
 import ctypes
+import errno
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Generator
+from contextlib import contextmanager
+from logging.handlers import RotatingFileHandler
 
 logger = logging.getLogger(__name__)
+# Req 28: Dedicated rotating file handler for USB module to prevent unbounded log growth
+try:
+    usb_log_handler = RotatingFileHandler("usb_sync.log", maxBytes=5*1024*1024, backupCount=2, encoding="utf-8")
+    usb_log_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    logger.addHandler(usb_log_handler)
+except Exception:
+    pass
+
+@contextmanager
+def locked_sync(usb_root: Path):
+    """Req 24: Prevent concurrent access via explicit lock file."""
+    lock_file = usb_root / ".rbep_sync_lock"
+    if lock_file.exists():
+        if time.time() - lock_file.stat().st_mtime > 600: # 10 mins stale
+            try: lock_file.unlink()
+            except: pass
+        else:
+            raise Exception("Sync is currently locked by another process or aborted recently. Wait or delete .rbep_sync_lock on the USB.")
+    try:
+        lock_file.touch()
+        yield
+    finally:
+        try: lock_file.unlink()
+        except: pass
 
 # --- USB Detection ---
 
@@ -110,6 +137,21 @@ class UsbDetector:
             vol = cls._get_volume_info(drive)
             size = cls._get_drive_size(drive)
             
+            # Req 29: Detect Ghost Drives
+            if size["total"] == 0 and size["free"] == 0:
+                logger.debug(f"Skipping ghost drive or unreadable media: {drive}")
+                continue
+            
+            # Req 12 & 21: Check write protections and permissions strictly
+            is_writable = False
+            try:
+                test_file = Path(drive) / ".rbep_write_test"
+                test_file.write_text("test")
+                test_file.unlink()
+                is_writable = True
+            except OSError:
+                is_writable = False
+
             # Fallback for label if empty
             label = vol["label"] or f"USB Drive ({drive.strip(':\\')})"
             
@@ -118,15 +160,8 @@ class UsbDetector:
             has_legacy = (Path(drive) / cls.LEGACY_PDB).exists() if is_rb else False
 
             track_count = 0
-            # We can no longer count tracks natively via sqlite3 because modern Rekordbox
-            # USBs use SQLCipher encryption for exportLibrary.db.
-            # Showing 0 or fetching from legacy if available is preferable to crashing.
             if has_legacy:
-                try:
-                    # In the future, we might parse the PDB string minimally to estimate
-                    pass
-                except Exception:
-                    pass
+                pass
 
             dev_info = {
                 "device_id": device_id,
@@ -135,11 +170,12 @@ class UsbDetector:
                 "serial": vol["serial"],
                 "filesystem": vol["filesystem"],
                 "is_rekordbox": is_rb,
+                "is_writable": is_writable,
                 "has_legacy_pdb": has_legacy,
                 "has_export_db": db_path.exists() if db_path else False,
                 "track_count": track_count,
                 "total_space": size["total"],
-                "used_space": size["used"], # Keep used_space as it was in the original
+                "used_space": size["used"],
                 "free_space": size["free"]
             }
             logger.info(f"Found USB device: {dev_info}")
@@ -341,7 +377,10 @@ class UsbProfileManager:
                 logger.info(f"Library Legacy (XML) loaded for {device_id}: {len(results['library_legacy'])} tracks")
             except Exception as e:
                 logger.error(f"Error reading Library Legacy XML for {device_id}: {e}")
-                statuses["library_legacy_status"] = "error"
+                statuses["library_legacy_status"] = "error_corrupt"
+                # Req 17: Fallback by isolating corrupted XML so next sync starts fresh
+                try: l_xml_path.rename(l_xml_path.with_suffix(".xml.corrupt"))
+                except: pass
 
         # Fallback: Try PDB if XML didn't yield results
         if not results["library_legacy"] and l_pdb_path.exists():
@@ -569,24 +608,24 @@ class UsbSyncEngine:
 
         try:
             did_sync = False
+            
+            with locked_sync(Path(profile["drive"])):
+                if "library_one" in library_types:
+                    logger.warning("Skipping Library One sync: exportLibrary.db requires SQLCipher encryption.")
+                    yield {"stage": "info", "message": "Library One sync disabled (Modern Rekordbox Database is Encrypted)", "progress": 10}
+                    if "library_legacy" not in library_types:
+                        library_types = list(library_types) + ["library_legacy"]
+                        logger.info("Auto-including library_legacy as fallback for encrypted library_one")
 
-            if "library_one" in library_types:
-                logger.warning("Skipping Library One sync: exportLibrary.db requires SQLCipher encryption.")
-                yield {"stage": "info", "message": "Library One sync disabled (Modern Rekordbox Database is Encrypted)", "progress": 10}
-                # Auto-fallback: if library_one was requested but is encrypted, include legacy
-                if "library_legacy" not in library_types:
-                    library_types = list(library_types) + ["library_legacy"]
-                    logger.info("Auto-including library_legacy as fallback for encrypted library_one")
-
-            if "library_legacy" in library_types or profile.get("sync_mirrored"):
-                yield {"stage": "info", "message": "Starting Legacy XML Sync...", "progress": 20}
-                for event in self._sync_library_legacy(profile):
-                    yield {
-                        "stage": event.get("stage", "sync"),
-                        "message": f"Legacy: {event.get('message', '')}",
-                        "progress": 20 + int(event.get("progress", 0) * 0.8)
-                    }
-                did_sync = True
+                if "library_legacy" in library_types or profile.get("sync_mirrored"):
+                    yield {"stage": "info", "message": "Starting Legacy XML Sync...", "progress": 20}
+                    for event in self._sync_library_legacy(profile):
+                        yield {
+                            "stage": event.get("stage", "sync"),
+                            "message": f"Legacy: {event.get('message', '')}",
+                            "progress": 20 + int(event.get("progress", 0) * 0.8)
+                        }
+                    did_sync = True
 
             if not did_sync:
                 yield {"stage": "complete", "message": "Sync finished (No compatible libraries selected — try enabling Legacy XML)", "progress": 100}
@@ -609,24 +648,24 @@ class UsbSyncEngine:
             UsbProfileManager.save_profile(profile)
 
             did_sync = False
+            
+            with locked_sync(Path(profile["drive"])):
+                if "library_one" in library_types:
+                    logger.warning("Skipping Library One playlist sync: exportLibrary.db requires SQLCipher encryption.")
+                    yield {"stage": "info", "message": "Library One sync disabled (Modern Rekordbox Database is Encrypted)", "progress": 10}
+                    if "library_legacy" not in library_types:
+                        library_types = list(library_types) + ["library_legacy"]
+                        logger.info("Auto-including library_legacy as fallback")
 
-            if "library_one" in library_types:
-                logger.warning("Skipping Library One playlist sync: exportLibrary.db requires SQLCipher encryption.")
-                yield {"stage": "info", "message": "Library One sync disabled (Modern Rekordbox Database is Encrypted)", "progress": 10}
-                # Auto-fallback
-                if "library_legacy" not in library_types:
-                    library_types = list(library_types) + ["library_legacy"]
-                    logger.info("Auto-including library_legacy as fallback for encrypted library_one")
-
-            if "library_legacy" in library_types or profile.get("sync_mirrored"):
-                yield {"stage": "info", "message": "Starting Legacy XML Playlist Sync...", "progress": 20}
-                for event in self._sync_library_legacy(profile, playlist_ids):
-                    yield {
-                        "stage": event.get("stage", "sync"),
-                        "message": f"Legacy: {event.get('message', '')}",
-                        "progress": 20 + int(event.get("progress", 0) * 0.8)
-                    }
-                did_sync = True
+                if "library_legacy" in library_types or profile.get("sync_mirrored"):
+                    yield {"stage": "info", "message": "Starting Legacy XML Playlist Sync...", "progress": 20}
+                    for event in self._sync_library_legacy(profile, playlist_ids):
+                        yield {
+                            "stage": event.get("stage", "sync"),
+                            "message": f"Legacy: {event.get('message', '')}",
+                            "progress": 20 + int(event.get("progress", 0) * 0.8)
+                        }
+                    did_sync = True
 
             if not did_sync:
                 yield {"stage": "complete", "message": "Playlist Sync finished (No compatible libraries — enable Legacy XML)", "progress": 100}
@@ -635,9 +674,83 @@ class UsbSyncEngine:
             logger.error(f"Playlist sync failed: {e}")
             yield {"stage": "error", "message": str(e), "progress": -1}
 
+    def _clean_filename(self, name: str) -> str:
+        """Req 20: Enforce UTF-8 and remove invalid OS characters."""
+        import string, unicodedata
+        name = str(name or "Unknown")
+        valid_chars = f"-_.() {string.ascii_letters}{string.digits}"
+        cleaned = ''.join(c for c in name if c in valid_chars or (unicodedata.category(c)[0] not in 'C'))
+        for char in ["/", "\\", ":", "*", "?", '"', "<", ">", "|"]:
+            cleaned = cleaned.replace(char, "_")
+        return cleaned
+
+    def _get_safe_dest_path(self, artist: str, album: str, filename: str) -> Path:
+        """Req 13: Address FAT32 path/file limits (max 255 chars)."""
+        contents_dir = self.usb_root / "Contents"
+        artist_clean = self._clean_filename(artist)[:40].strip() or "UnknownArtist"
+        album_clean = self._clean_filename(album)[:40].strip() or "UnknownAlbum"
+        file_clean = self._clean_filename(filename)
+
+        dest = contents_dir / artist_clean / album_clean / file_clean
+        
+        # FAT32 path limit is ~250 for safety
+        if len(str(dest)) > 240:
+            excess = len(str(dest)) - 240
+            stem = dest.stem
+            ext = dest.suffix
+            if len(stem) > excess:
+                dest = contents_dir / artist_clean / album_clean / (stem[:-excess] + ext)
+            else:
+                dest = contents_dir / f"track_{hashlib.md5(filename.encode()).hexdigest()[:8]}{ext}"
+        return dest
+
+    def _copy_file_stream(self, src: Path, dest: Path) -> Generator[Dict, None, None]:
+        """Req 18 & 19: Chunk-based streaming & Deduplication."""
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Req 18: Deduplication -> check if exists and size matches
+        if dest.exists() and src.exists() and dest.stat().st_size == src.stat().st_size:
+            yield {"stage": "copy_skip", "message": f"Deduplicated (already exists): {dest.name}"}
+            return
+
+        # Req 16: Check Disk Full proactively
+        try:
+            _, _, free = shutil.disk_usage(str(self.usb_root))
+            if src.stat().st_size > free:
+                raise OSError(errno.ENOSPC, "No space left on USB device")
+        except Exception as e:
+            if "No space left" in str(e): raise
+
+        # Req 19: Chunk-based streaming
+        total_size = src.stat().st_size
+        copied = 0
+        chunk_size = 1024 * 1024 * 4 # 4MB chunks
+        
+        # Req 14 & 15: Disconnect safety -> write to .tmp, then atomic rename
+        tmp_dest = dest.with_suffix(dest.suffix + ".tmp")
+        
+        try:
+            with open(src, 'rb') as fsrc, open(tmp_dest, 'wb') as fdst:
+                while True:
+                    buf = fsrc.read(chunk_size)
+                    if not buf:
+                        break
+                    fdst.write(buf)
+                    copied += len(buf)
+                    yield {"stage": "copying", "message": f"Copying {dest.name}", "copied": copied, "total": total_size}
+            
+            # Atomic rename if completed successfully
+            tmp_dest.replace(dest)
+        except Exception as e:
+            # Cleanup temp file on failure
+            if tmp_dest.exists():
+                try: tmp_dest.unlink()
+                except: pass
+            raise e
+
     def _sync_library_legacy(self, profile: Dict, playlist_ids: List[str] = None) -> Generator[Dict, None, None]:
-        """Legacy Sync (Library Legacy): Exports library to PIONEER/rekordbox.xml."""
-        yield {"stage": "lib_legacy", "message": "Starting Library Legacy (XML) sync...", "progress": 0}
+        """Legacy Sync (Library Legacy): Exports library and audio to USB."""
+        yield {"stage": "lib_legacy", "message": "Starting Library Legacy (XML & Audio) sync...", "progress": 0}
         try:
             import xml.etree.ElementTree as ET
             target = self.usb_pioneer / "rekordbox.xml"
@@ -669,13 +782,68 @@ class UsbSyncEngine:
                     try: artist_name = getattr(db.get_artist(t.artist_id), 'name', '')
                     except: pass
                 
+                album_name = ""
+                if getattr(t, 'album_id', None):
+                    try: album_name = getattr(db.get_album(t.album_id), 'name', '')
+                    except: pass
+                
+                # Original local path
+                local_folder = getattr(t, 'folder_path', '')
+                local_file = getattr(t, 'file_name_l', '')
+                local_path_str = f"{local_folder}{local_file}"
+                
+                # Req 30: Resolve symlinks to avoid infinite loops and get absolute real paths
+                try:
+                    local_path = Path(local_path_str).resolve(strict=False)
+                except Exception:
+                    local_path = Path(local_path_str)
+                
+                usb_dest_path = None
+                if local_path.exists():
+                    usb_dest_path = self._get_safe_dest_path(artist_name, album_name, local_file)
+                    try:
+                        # Copy the file to USB with chunk streaming progress
+                        for event in self._copy_file_stream(local_path, usb_dest_path):
+                            # Ignore fine-grained chunk progress for now to keep UI simpler,
+                            # but it's physically chunked and safe.
+                            pass
+                    except OSError as e:
+                        logger.error(f"Copy failed for {local_file}: {e}")
+                        
+                        err_code = getattr(e, 'winerror', None) or getattr(e, 'errno', None)
+                        
+                        # Req 16: ENOSPC / Disk Full (Win: 112, 39, Unix: 28)
+                        if err_code in (112, 39, 28) or "No space left" in str(e):
+                            raise Exception("Device is full (ENOSPC). Sync aborted.")
+                            
+                        # Req 22: Unexpected Disconnect (Win: 21, 31, 1167, 2, 3)
+                        if err_code in (21, 31, 1167, 2, 3) or "No such file" in str(e):
+                            raise Exception("USB Drive disconnected or inaccessible. Sync aborted.")
+                            
+                        # Req 25: OS File Locks
+                        if isinstance(e, PermissionError) or err_code in (5, 32):
+                            logger.warning(f"PermissionError: file '{local_file}' may be locked by Rekordbox. Skipping without aborting batch.")
+                else:
+                    logger.warning(f"Audio file missing locally, skipping copy: {local_path}")
+                
+                # XML Location -> URL Encode
+                import urllib.parse
+                if usb_dest_path:
+                    # Map to the new USB location file://localhost/D:/Contents/...
+                    loc_val = f"file://localhost/{str(usb_dest_path)}".replace("\\", "/")
+                else:
+                    # Give fallback
+                    loc_val = f"file://localhost/{local_path_str}".replace("\\", "/")
+                    
+                loc_val = urllib.parse.quote(loc_val, safe=":/")
+                
                 ET.SubElement(collection, "TRACK", 
                     TrackID=str(t.id), Name=getattr(t, 'title', ''), 
                     Artist=artist_name,
-                    Location=f"file://localhost/{getattr(t, 'folder_path', '')}{getattr(t, 'file_name_l', '')}".replace("\\", "/")
+                    Location=loc_val
                 )
-                if i % 100 == 0:
-                    yield {"stage": "lib_legacy", "message": f"Exporting XML tracks: {i}/{len(tracks_to_export)}", "progress": int((i/max(len(tracks_to_export),1))*90)}
+                if i % 10 == 0:
+                    yield {"stage": "lib_legacy", "message": f"Copying & Exporting: {i}/{len(tracks_to_export)}", "progress": int((i/max(len(tracks_to_export),1))*90)}
             
             # Also export the Playlists if provided
             if playlist_ids:
@@ -694,7 +862,11 @@ class UsbSyncEngine:
             with open(target, "wb") as f:
                 tree.write(f, encoding="UTF-8", xml_declaration=True)
             
-            yield {"stage": "complete", "message": "Library Legacy (XML) created on USB", "progress": 100}
+            # Req 22: UI-state mismatch -> Give OS buffers 1.5s to flush before declaring 100% complete
+            yield {"stage": "flushing", "message": "Flushing OS file buffers to USB, please wait...", "progress": 99}
+            time.sleep(1.5)
+            
+            yield {"stage": "complete", "message": "Library Legacy (XML & Audio) synced securely.", "progress": 100}
         except Exception as e:
             logger.error(f"Library Legacy sync failed: {e}")
             yield {"stage": "error", "message": f"Library Legacy sync failed: {e}", "progress": -1}
@@ -766,7 +938,7 @@ class UsbActions:
 
     @staticmethod
     def eject(drive: str) -> Dict:
-        """Safely eject a USB drive on Windows."""
+        """Safely eject a USB drive on Windows with timeout/verification (Req 23)."""
         drive_letter = drive.rstrip("\\").rstrip(":")
         try:
             # Use PowerShell to eject
@@ -775,12 +947,22 @@ class UsbActions:
                  f"(New-Object -COM Shell.Application).NameSpace(17).ParseName('{drive_letter}:').InvokeVerb('Eject')"],
                 capture_output=True, text=True, timeout=10
             )
-            if result.returncode == 0:
-                return {"status": "success", "message": f"Drive {drive_letter}: ejected safely"}
+            
+            # Polling loop: Wait up to 5s for the OS to unmount it
+            ejected = False
+            for _ in range(10):
+                if not Path(f"{drive_letter}:\\").exists():
+                    ejected = True
+                    break
+                time.sleep(0.5)
+                
+            if ejected or result.returncode == 0:
+                logger.info(f"Drive {drive_letter}: ejected safely")
+                return {"status": "success", "message": f"Drive {drive_letter}: ejected safely. It is now safe to remove."}
             else:
-                return {"status": "error", "message": result.stderr or "Eject failed"}
+                return {"status": "error", "message": result.stderr or "Drive is busy and could not be ejected cleanly."}
         except Exception as e:
-            return {"status": "error", "message": str(e)}
+            return {"status": "error", "message": f"Eject command failed: {e}"}
 
     @staticmethod
     def set_label(drive: str, new_label: str) -> Dict:

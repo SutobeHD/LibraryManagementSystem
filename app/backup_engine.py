@@ -47,8 +47,13 @@ class BackupEngine:
     def _read_table(self, db_path: Path, table: str) -> Dict[str, Dict]:
         """Read all rows from a table into a dict keyed by ID."""
         rows = {}
+        # Req 3: SQL Injection Prevention -> Whitelist table names
+        if table not in TRACKED_TABLES:
+            logger.warning(f"Blocked attempt to read untracked/invalid table: {table}")
+            return rows
+            
         try:
-            conn = sqlite3.connect(str(db_path))
+            conn = sqlite3.connect(str(db_path), timeout=30.0)
             conn.row_factory = sqlite3.Row
             # Check if table exists
             cur = conn.execute(
@@ -221,9 +226,16 @@ class BackupEngine:
         self.snapshot(f"Auto-backup before restore to {commit_hash}")
 
         try:
-            conn = sqlite3.connect(str(self.db_path))
+            conn = sqlite3.connect(str(self.db_path), timeout=30.0)
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute("PRAGMA busy_timeout=30000;")
 
             for table, rows in snapshot.items():
+                # Req 3: SQL Injection Prevention -> Whitelist table names before any CREATE/DELETE/INSERT
+                if table not in TRACKED_TABLES:
+                    logger.warning(f"Blocked attempt to restore untracked/invalid table: {table}")
+                    continue
+
                 # Check if table exists
                 cur = conn.execute(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)

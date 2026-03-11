@@ -58,6 +58,23 @@ async function ensureContext() {
     return ctx;
 }
 
+/**
+ * Dispose of the AudioContext and clear resources.
+ * Important for preventing memory leaks in SPAs.
+ */
+export async function dispose() {
+    stopPlayback();
+    if (audioContext) {
+        if (audioContext.state !== 'closed') {
+            await audioContext.close();
+        }
+        audioContext = null;
+        isResumed = false;
+        console.log('[DawEngine] AudioContext closed and disposed');
+    }
+    clearCache();
+}
+
 // ─── AUDIO LOADING ─────────────────────────────────────────────────────────────
 
 /**
@@ -407,4 +424,5 @@ export default {
     isPlaying,
     renderTimeline,
     audioBufferToWav,
+    dispose,
 };

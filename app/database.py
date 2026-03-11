@@ -8,6 +8,7 @@ import shutil
 from urllib.parse import unquote
 from pathlib import Path
 from collections import defaultdict
+from functools import lru_cache
 from .config import REKORDBOX_ROOT, DB_FILENAME, BACKUP_DIR
 from .live_database import LiveRekordboxDB
 
@@ -191,6 +192,7 @@ class RekordboxXMLDB:
                 })
         self.genres = [{"id": f"gen_{i}", "name": name, "track_count": count} for i, (name, count) in enumerate(sorted(genre_counts.items()))]
 
+    @lru_cache(maxsize=1)
     def get_all_labels(self):
         label_counts = defaultdict(int)
         for t in self.tracks.values():
@@ -200,6 +202,7 @@ class RekordboxXMLDB:
                 label_counts[normalized] += 1
         return [{"id": f"lbl_{i}", "name": name, "track_count": count} for i, (name, count) in enumerate(sorted(label_counts.items()))]
 
+    @lru_cache(maxsize=1)
     def get_all_albums(self):
         album_counts = defaultdict(int)
         for t in self.tracks.values():
@@ -279,6 +282,8 @@ class RekordboxXMLDB:
         track_data["id"] = tid
         self.tracks[tid] = track_data
         self.save_xml()
+        self.get_all_labels.cache_clear()
+        self.get_all_albums.cache_clear()
         logger.info(f"Added track {tid} to XML library.")
         return tid
 
@@ -290,6 +295,8 @@ class RekordboxXMLDB:
             # Ideally yes, but XML structure might be loose.
             # For now, just remove from collection.
             self.save_xml()
+            self.get_all_labels.cache_clear()
+            self.get_all_albums.cache_clear()
             logger.info(f"Deleted track {tid} from XML library.")
             return True
         return False

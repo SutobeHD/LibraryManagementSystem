@@ -437,6 +437,12 @@ const App = () => {
     </div>
   )
 }
+// Global handler for Unhandled Promise Rejections
+window.addEventListener('unhandledrejection', event => {
+  console.error('Unhandled Promise Rejection:', event.reason);
+  // Prevent default to avoid crashing the UI thread abruptly
+  event.preventDefault();
+});
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
