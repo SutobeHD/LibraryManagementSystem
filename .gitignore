@@ -6,6 +6,13 @@ settings.json
 *.db
 *.sqlite
 .DS_Store
+*.txt
+*.json
+!package.json
+!package-lock.json
+!tauri.conf.json
+!**/*.json.example
+!**/*.json.schema
 
 # --- Python ---
 **/__pycache__/
@@ -49,3 +56,21 @@ src-tauri/cargo_check_output.txt
 # --- Archive ---
 # User requested to keep this local-only.
 archive/
+tests/
+debug_*.py
+inspect_*.py
+check_*.py
+verify_*.py
+test_*.py
+list_*.py
+query_*.py
+find_*.py
+fix_*.py
+*.bak
+test_*.xml
+diag_*.py
+brute_force_*.py
+snippet_*.py
+*_snippet.py
+usb_profiles.json
+*.json.bak
