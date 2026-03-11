@@ -20,6 +20,7 @@ base64 = "0.22"
 rand = "0.9"
 url = "2"
 open = "5"
+dotenvy = "0.15"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

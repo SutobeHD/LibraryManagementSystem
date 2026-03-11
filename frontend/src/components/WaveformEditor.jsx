@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState, useMemo, useCallback, forwardRef, u
 import AudioBandAnalyzer from '../utils/AudioBandAnalyzer';
 import api from '../api/api';
 import { useToast } from './ToastContext';
+import EditorBrowser from './editor/EditorBrowser';
 import {
     Play, Pause, SkipBack, SkipForward, Scissors, Plus, Trash2, Download,
     ZoomIn, ZoomOut, Lock, Unlock, Repeat, ChevronLeft, ChevronRight,
@@ -194,7 +195,7 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
 
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false);
     const [bpm, setBpm] = useState(track?.BPM || 128);
     const [beatGrid, setBeatGrid] = useState([]);
     const [zoom, setZoom] = useState(200);
@@ -434,6 +435,14 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
     const [selectedProject, setSelectedProject] = useState("");
     const [isRendering, setIsRendering] = useState(false);
     const [renderProgress, setRenderProgress] = useState(0);
+    const [showBrowser, setShowBrowser] = useState(false);
+
+    // Auto-open browser if no track is loaded
+    useEffect(() => {
+        if (!fullTrack && !loading && !track) {
+            setShowBrowser(true);
+        }
+    }, [fullTrack, loading, track]);
 
     // Refs for loop state (accessible in audioprocess callback)
     const loopInRef = useRef(loopIn);
@@ -453,14 +462,17 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
 
     useEffect(() => {
         if (track?.id && !track?.path) {
+            setLoading(true);
             api.get(`/api/track/${track.id}`).then(res => {
                 setFullTrack(res.data);
                 if (res.data.BPM) setBpm(parseFloat(res.data.BPM));
                 if (res.data.beatGrid) setBeatGrid(res.data.beatGrid);
                 if (res.data.dropTime) setDropTime(parseFloat(res.data.dropTime));
-            });
+                setLoading(false);
+            }).catch(() => setLoading(false));
         } else {
             setFullTrack(track);
+            setLoading(false);
         }
     }, [track, track?.id]);
 
@@ -470,6 +482,33 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
         playPause: () => wavesurfer.current?.playPause(),
         stop: () => wavesurfer.current?.stop()
     }));
+
+    const loadTrack = useCallback((t) => {
+        if (!t) return;
+        const trackData = { ...t };
+        // Polyfill path if missing (e.g. from raw DB scan)
+        if (!trackData.path) {
+            if (trackData.Path) trackData.path = trackData.Path;
+            else if (trackData.FolderPath && trackData.FileNameL) {
+                // Construct path (simple concatenation, handles most cases)
+                const folder = trackData.FolderPath.replace(/^localhost\//, '');
+                trackData.path = `${folder}/${trackData.FileNameL}`.replace(/\\/g, '/');
+            }
+        }
+        setFullTrack(trackData);
+
+        // Reset state
+        if (wavesurfer.current) {
+            wavesurfer.current.stop();
+            wavesurfer.current.setTime(0);
+        }
+        setLoopIn(null);
+        setLoopOut(null);
+        setIsLooping(false);
+        setCuts([]);
+        setHotCues([]);
+        setBeatGrid([]);
+    }, []);
 
     // Hotkeys
     const skip = (amount) => {
@@ -1364,6 +1403,12 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                     </div>
                 </div>
                 <div className="flex items-center gap-4">
+                    <button
+                        onClick={() => setShowBrowser(!showBrowser)}
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-[10px] font-bold transition-all ${showBrowser ? 'bg-cyan-500/20 border-cyan-500/30 text-cyan-400' : 'bg-[#1a1a1a] border-white/5 text-slate-500'}`}
+                    >
+                        <ListPlus size={14} /> BROWSER
+                    </button>
                     <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
                         <ScanLine size={12} />
                         <span>GRID LOCK: ON</span>
@@ -1371,8 +1416,15 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                 </div>
             </div>
 
+
+            {showBrowser && (
+                <div className="absolute left-0 top-[88px] bottom-0 z-[60] shadow-2xl flex animate-slide-in-left">
+                    <EditorBrowser onLoadTrack={loadTrack} onClose={() => setShowBrowser(false)} />
+                </div>
+            )}
+
             {/* Sub-Header / Project Bar */}
-            <div className="h-10 bg-[#111] border-b border-white/5 px-4 flex items-center justify-between">
+            <div className="h-10 bg-[#111] border-b border-white/5 px-4 flex items-center justify-between flex-shrink-0">
                 <div className="flex items-center gap-4">
                     <select
                         value={selectedProject}

@@ -4,7 +4,11 @@ import api from '../api/api';
 
 const Player = ({ track, onClose, onMaximize }) => {
     const [playing, setPlaying] = useState(false);
-    const [volume, setVolume] = useState(1.0);
+    const [volume, setVolumeState] = useState(() => {
+        const saved = localStorage.getItem('rb_volume');
+        return saved !== null ? parseFloat(saved) : 1.0;
+    });
+    const setVolume = (v) => { setVolumeState(v); localStorage.setItem('rb_volume', String(v)); };
     const [progress, setProgress] = useState(0);
     const [duration, setDuration] = useState(0);
     const audioRef = useRef(null);

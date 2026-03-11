@@ -1,193 +1,246 @@
-import React, { useState, useEffect } from 'react';
-import { Database, Download, RotateCw, Archive, Clock, AlertTriangle, X, Check, Save } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+    Database, Download, RotateCw, Clock, AlertTriangle, X, Check, Save,
+    GitCommit, ChevronRight, ChevronDown, Archive, Trash2, Loader2, Plus, History
+} from 'lucide-react';
 import api from '../api/api';
+import toast from 'react-hot-toast';
 
+const formatSize = (bytes) => {
+    if (!bytes) return '0 B';
+    const k = 1024;
+    const s = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${(bytes / Math.pow(k, i)).toFixed(1)} ${s[i]}`;
+};
+
+const formatDate = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return d.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+
+const timeSince = (iso) => {
+    if (!iso) return '';
+    const diff = Date.now() - new Date(iso).getTime();
+    if (diff < 60000) return 'Just now';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    return `${Math.floor(diff / 86400000)}d ago`;
+};
 
 const BackupManager = ({ onClose }) => {
     const [backups, setBackups] = useState([]);
     const [loading, setLoading] = useState(true);
     const [creating, setCreating] = useState(false);
     const [restoring, setRestoring] = useState(null);
-    const [error, setError] = useState(null);
+    const [expandedCommit, setExpandedCommit] = useState(null);
+    const [commitDiff, setCommitDiff] = useState(null);
 
-    useEffect(() => {
-        loadBackups();
-    }, []);
-
-    const loadBackups = async () => {
+    const loadBackups = useCallback(async () => {
         setLoading(true);
         try {
             const res = await api.get('/api/library/backups');
-            setBackups(res.data);
-            setError(null);
+            setBackups(res.data || []);
         } catch (e) {
-            setError("Failed to load backups");
-            console.error(e);
-        } finally {
-            setLoading(false);
+            toast.error('Failed to load backups');
         }
-    };
+        setLoading(false);
+    }, []);
 
-    const handleCreateBackup = async () => {
+    useEffect(() => { loadBackups(); }, [loadBackups]);
+
+    const createBackup = async () => {
         setCreating(true);
         try {
-            const res = await api.post('/api/library/sync'); // Reused endpoint for manual backup
-            if (res.data.status === 'success') {
-                await loadBackups();
+            const res = await api.post('/api/library/backup');
+            if (res.data.status === 'unchanged') {
+                toast('No changes to backup', { icon: '📋' });
+            } else if (res.data.status === 'success' || !res.data.status) {
+                toast.success(`Backup created: ${res.data.hash || 'OK'}`);
             } else {
-                setError("Failed to create backup: " + res.data.message);
+                toast.error(res.data.message || 'Backup failed');
             }
+            loadBackups();
         } catch (e) {
-            setError("Failed to create backup");
-        } finally {
-            setCreating(false);
+            toast.error('Backup failed');
         }
+        setCreating(false);
     };
 
-    const handleRestore = async (filename) => {
-        if (!confirm(`WARNING: Restore backup '${filename}'?\n\n- Current library will be overwritten.\n- A safety backup of the CURRENT state will be created first.\n- The application will need to restart.`)) {
+    const restoreBackup = async (backup) => {
+        const confirmMsg = backup.is_legacy
+            ? `Restore legacy backup "${backup.filename}"? Current state will be backed up automatically.`
+            : `Restore to commit ${backup.hash}? Current state will be backed up automatically.`;
+
+        if (!confirm(confirmMsg)) return;
+
+        setRestoring(backup.hash);
+        try {
+            const payload = backup.is_legacy
+                ? { filename: backup.filename }
+                : { filename: '', commit_hash: backup.hash };
+
+            const res = await api.post('/api/library/restore', payload);
+            if (res.data.status === 'success') {
+                toast.success(res.data.message || 'Restored successfully');
+                loadBackups();
+            } else {
+                toast.error(res.data.message || 'Restore failed');
+            }
+        } catch (e) {
+            toast.error('Restore failed');
+        }
+        setRestoring(null);
+    };
+
+    const viewDiff = async (hash) => {
+        if (expandedCommit === hash) {
+            setExpandedCommit(null);
+            setCommitDiff(null);
             return;
         }
-
-        setRestoring(filename);
+        setExpandedCommit(hash);
         try {
-            const res = await api.post('/api/library/restore', { filename });
-            if (res.data.status === 'success') {
-                alert("Restore Successful!\n\nThe application will now restart to load the restored database.");
-                // Trigger generic shutdown/restart or just close
-                window.close();
-            } else {
-                alert("Restore Failed: " + res.data.message);
-            }
-        } catch (e) {
-            alert("Restore Failed: Connection Error");
-        } finally {
-            setRestoring(null);
+            const res = await api.get(`/api/library/backup/${hash}/diff`);
+            setCommitDiff(res.data);
+        } catch {
+            setCommitDiff(null);
         }
-    };
-
-    const formatSize = (bytes) => {
-        if (bytes === 0) return '0 B';
-        const k = 1024;
-        const sizes = ['B', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     };
 
     return (
-        <div className="fixed inset-0 z-[200] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-8 animate-fade-in">
-            <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden">
-
+        <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+            <div className="w-full max-w-2xl max-h-[85vh] bg-slate-950 rounded-3xl border border-white/10 shadow-2xl flex flex-col overflow-hidden">
                 {/* Header */}
-                <div className="p-6 border-b border-white/5 flex items-center justify-between bg-slate-900/50">
+                <div className="p-6 pb-4 border-b border-white/5 flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-400">
-                            <Database size={20} />
+                        <div className="p-2.5 bg-emerald-500/20 rounded-xl border border-emerald-500/30">
+                            <History size={22} className="text-emerald-400" />
                         </div>
                         <div>
-                            <h2 className="text-xl font-bold text-white">Backup Manager</h2>
-                            <p className="text-sm text-slate-400">Secure, Restore, and Manage your Library Snapshots</p>
+                            <h2 className="text-xl font-black italic uppercase tracking-tight">Backup Timeline</h2>
+                            <p className="text-slate-500 text-xs mt-0.5">{backups.length} backups · Incremental engine</p>
                         </div>
                     </div>
-                    <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full text-slate-400 hover:text-white transition-colors">
-                        <X size={20} />
-                    </button>
-                </div>
-
-                {/* Toolbar */}
-                <div className="p-4 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
-                    <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-medium">
-                            <Archive size={12} />
-                            <span>Auto-Archival Active</span>
-                        </div>
+                    <div className="flex items-center gap-2">
+                        <button onClick={createBackup} disabled={creating}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-lg text-xs font-bold border border-emerald-500/30 transition-all disabled:opacity-50"
+                        >
+                            {creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                            New Backup
+                        </button>
+                        <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-lg transition-colors">
+                            <X size={18} className="text-slate-400" />
+                        </button>
                     </div>
-                    <button
-                        onClick={handleCreateBackup}
-                        disabled={creating}
-                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition-all shadow-lg shadow-emerald-900/20 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        {creating ? <RotateCw size={16} className="animate-spin" /> : <Save size={16} />}
-                        <span>{creating ? 'Creating Snapshot...' : 'Create New Backup'}</span>
-                    </button>
                 </div>
 
-                {/* List */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-2">
-                    {error && (
-                        <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 flex items-center gap-2 mb-4">
-                            <AlertTriangle size={16} />
-                            {error}
-                        </div>
-                    )}
-
+                {/* Timeline */}
+                <div className="flex-1 overflow-y-auto p-4">
                     {loading ? (
-                        <div className="flex flex-col items-center justify-center h-64 text-slate-500">
-                            <RotateCw size={32} className="animate-spin mb-4 opacity-50" />
-                            <p>Scanning backups...</p>
+                        <div className="flex items-center justify-center h-32">
+                            <Loader2 size={24} className="animate-spin text-emerald-400" />
                         </div>
                     ) : backups.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-64 text-slate-500">
-                            <Database size={48} className="mb-4 opacity-20" />
-                            <p>No backups found.</p>
+                        <div className="flex flex-col items-center justify-center h-32 text-center">
+                            <Archive size={32} className="text-slate-700 mb-3" />
+                            <p className="text-slate-500 text-sm">No backups yet</p>
+                            <p className="text-slate-600 text-xs">Click "New Backup" to create your first snapshot</p>
                         </div>
                     ) : (
-                        <table className="w-full text-left border-collapse">
-                            <thead className="text-xs font-semibold text-slate-500 uppercase tracking-wider sticky top-0 bg-slate-900 z-10">
-                                <tr>
-                                    <th className="pb-3 pl-4">Type</th>
-                                    <th className="pb-3">Filename</th>
-                                    <th className="pb-3">Date Created</th>
-                                    <th className="pb-3">Size</th>
-                                    <th className="pb-3 pr-4 text-right">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-800/50">
-                                {backups.map((backup) => (
-                                    <tr key={backup.filename} className="group hover:bg-white/[0.02] transition-colors">
-                                        <td className="py-3 pl-4 align-middle">
-                                            <span className={`inline-flex items-center px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide
-                        ${backup.type === 'Session' ? 'bg-slate-700 text-slate-300' :
-                                                    backup.type === 'Archive' ? 'bg-purple-900/30 text-purple-400 border border-purple-500/20' :
-                                                        backup.type === 'Pre-Restore' ? 'bg-amber-900/20 text-amber-400 border border-amber-500/20' :
-                                                            'bg-slate-800 text-slate-400'}`}>
-                                                {backup.type === 'Archive' && <Archive size={10} className="mr-1" />}
-                                                {backup.type}
-                                            </span>
-                                        </td>
-                                        <td className="py-3 font-mono text-sm text-slate-300 group-hover:text-white transition-colors">
-                                            {backup.filename}
-                                        </td>
-                                        <td className="py-3 text-sm text-slate-400">
-                                            <div className="flex items-center gap-1.5">
-                                                <Clock size={12} className="opacity-50" />
-                                                {backup.date}
-                                            </div>
-                                        </td>
-                                        <td className="py-3 text-sm text-slate-500 font-mono">
-                                            {formatSize(backup.size)}
-                                        </td>
-                                        <td className="py-3 pr-4 text-right">
-                                            <button
-                                                onClick={() => handleRestore(backup.filename)}
-                                                disabled={restoring}
-                                                className="px-3 py-1.5 rounded hover:bg-cyan-500/10 text-cyan-400 hover:text-cyan-300 border border-transparent hover:border-cyan-500/30 transition-all text-xs font-medium inline-flex items-center gap-1.5 disabled:opacity-30"
-                                            >
-                                                {restoring === backup.filename ? <RotateCw size={12} className="animate-spin" /> : <RotateCw size={12} />}
-                                                <span>Restore</span>
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    )}
-                </div>
+                        <div className="relative">
+                            {/* Timeline Line */}
+                            <div className="absolute left-4 top-0 bottom-0 w-px bg-white/5" />
 
-                {/* Footer */}
-                <div className="p-4 border-t border-white/5 bg-slate-900/50 text-xs text-slate-500 flex justify-between">
-                    <p>Session backups are auto-pruned (keep last 3). Archives are permanent.</p>
-                    <p>Total Backups: {backups.length}</p>
+                            {backups.map((backup, i) => {
+                                const isLegacy = backup.is_legacy;
+                                const isExpanded = expandedCommit === backup.hash;
+                                const stats = backup.stats || {};
+                                const hasChanges = stats.modified || stats.added || stats.deleted;
+
+                                return (
+                                    <div key={backup.hash || i} className="relative pl-10 mb-1">
+                                        {/* Timeline Dot */}
+                                        <div className={`absolute left-[11px] top-4 w-2.5 h-2.5 rounded-full border-2 z-10 ${isLegacy
+                                                ? 'bg-amber-500 border-amber-500/50'
+                                                : i === 0
+                                                    ? 'bg-emerald-400 border-emerald-400/50'
+                                                    : 'bg-slate-700 border-slate-600'
+                                            }`} />
+
+                                        <div className={`p-3 rounded-xl border transition-all hover:bg-white/[0.02] ${isExpanded ? 'bg-white/[0.03] border-white/10' : 'border-transparent'
+                                            }`}>
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2">
+                                                        {isLegacy ? (
+                                                            <span className="text-[9px] font-bold px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded">LEGACY</span>
+                                                        ) : (
+                                                            <code className="text-[10px] font-mono text-slate-500 bg-white/5 px-1.5 py-0.5 rounded">{backup.hash}</code>
+                                                        )}
+                                                        <span className="text-xs text-slate-300 truncate">{backup.message}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-3 mt-1 text-[10px] text-slate-600">
+                                                        <span className="flex items-center gap-1"><Clock size={9} /> {formatDate(backup.timestamp)}</span>
+                                                        <span>{timeSince(backup.timestamp)}</span>
+                                                        {backup.size && <span>{formatSize(backup.size)}</span>}
+                                                        {hasChanges && !isLegacy && (
+                                                            <span className="text-slate-500">
+                                                                {stats.added > 0 && <span className="text-emerald-400">+{stats.added}</span>}
+                                                                {stats.modified > 0 && <span className="text-amber-400 ml-1">~{stats.modified}</span>}
+                                                                {stats.deleted > 0 && <span className="text-red-400 ml-1">-{stats.deleted}</span>}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-1">
+                                                    {!isLegacy && (
+                                                        <button onClick={() => viewDiff(backup.hash)}
+                                                            className="p-1.5 hover:bg-white/5 rounded-lg transition-colors text-slate-500 hover:text-slate-300"
+                                                            title="View changes"
+                                                        >
+                                                            <ChevronRight size={14} className={`transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        onClick={() => restoreBackup(backup)}
+                                                        disabled={restoring === backup.hash}
+                                                        className="p-1.5 hover:bg-emerald-500/10 rounded-lg transition-colors text-slate-500 hover:text-emerald-400"
+                                                        title="Restore this backup"
+                                                    >
+                                                        {restoring === backup.hash
+                                                            ? <Loader2 size={14} className="animate-spin" />
+                                                            : <RotateCw size={14} />}
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {/* Expanded Diff View */}
+                                            {isExpanded && commitDiff && (
+                                                <div className="mt-3 p-3 bg-white/[0.02] rounded-xl border border-white/5 text-[11px]">
+                                                    {Object.entries(commitDiff.tables || {}).map(([table, info]) => (
+                                                        <div key={table} className="mb-2 last:mb-0">
+                                                            <div className="font-bold text-slate-400 mb-1 flex items-center gap-2">
+                                                                <Database size={10} />
+                                                                {table}
+                                                                <span className="text-emerald-400">+{info.added}</span>
+                                                                <span className="text-amber-400">~{info.modified}</span>
+                                                                <span className="text-red-400">-{info.deleted}</span>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                    {Object.keys(commitDiff.tables || {}).length === 0 && (
+                                                        <div className="text-slate-600 text-center py-2">No detailed diff available</div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

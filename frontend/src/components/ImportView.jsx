@@ -104,9 +104,9 @@ const ImportView = ({ onSelectTrack, onImportComplete }) => {
                     onDragOver={onDragOver}
                     onDragLeave={onDragLeave}
                     onDrop={onDrop}
-                    className={`h-64 rounded-3xl border-2 border-dashed flex flex-col items-center justify-center transition-all duration-300 ${isDragging
-                        ? 'border-cyan-500 bg-cyan-500/10 scale-[0.99] shadow-inner'
-                        : 'border-white/10 bg-white/5'
+                    className={`h-48 rounded-xl border-2 border-dashed flex flex-col items-center justify-center transition-all duration-300 ${isDragging
+                        ? 'border-cyan-500 bg-cyan-500/5'
+                        : 'border-white/10 hover:border-white/20 hover:bg-white/5'
                         }`}
                 >
                     <div className="w-20 h-20 rounded-full bg-slate-900 border border-white/5 flex items-center justify-center mb-4 shadow-2xl">
@@ -132,22 +132,22 @@ const ImportView = ({ onSelectTrack, onImportComplete }) => {
 
                 {/* File List */}
                 {files.length > 0 && (
-                    <div className="flex-1 flex flex-col overflow-hidden bg-white/5 rounded-3xl border border-white/5 shadow-2xl">
-                        <div className="p-4 border-b border-white/5 bg-black/20 flex justify-between items-center">
+                    <div className="flex-1 flex flex-col overflow-hidden">
+                        <div className="pb-4 flex justify-between items-center border-b border-white/5">
                             <span className="text-sm font-bold text-slate-400">{files.length} Files Ready</span>
                             {!importing && (
                                 <button
                                     onClick={startImport}
-                                    className="px-6 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-full text-sm font-bold shadow-lg shadow-cyan-900/20 transition-all active:scale-95 flex items-center gap-2"
+                                    className="px-6 py-2 bg-slate-100 hover:bg-white text-black rounded-lg text-sm font-bold shadow-lg shadow-white/10 transition-all active:scale-95 flex items-center gap-2"
                                 >
                                     <Play size={14} fill="currentColor" />
                                     Process & Analyze
                                 </button>
                             )}
                         </div>
-                        <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                        <div className="flex-1 overflow-y-auto pt-2 custom-scrollbar">
                             {files.map((f) => (
-                                <div key={f.id} className="bg-slate-900/50 p-4 rounded-2xl border border-white/5 flex items-center gap-4 group transition-all hover:bg-slate-900 shadow-lg">
+                                <div key={f.id} className="p-3 border-b border-white/5 flex items-center gap-4 group hover:bg-white/5 transition-colors rounded-lg">
                                     <div className="w-10 h-10 bg-slate-800 rounded-xl flex items-center justify-center shrink-0">
                                         <FileAudio size={20} className="text-cyan-500" />
                                     </div>

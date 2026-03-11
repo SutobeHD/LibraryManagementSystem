@@ -93,15 +93,18 @@ class RekordboxXMLDB:
         
         position_marks = []
         for mark in node.findall("POSITION_MARK"):
-            position_marks.append({
-                "name": mark.get("Name", ""),
-                "type": int(mark.get("Type", 0)),
-                "start": float(mark.get("Start", 0)),
-                "num": int(mark.get("Num", -1)),
-                "red": int(mark.get("Red", 0)),
-                "green": int(mark.get("Green", 0)),
-                "blue": int(mark.get("Blue", 0))
-            })
+            m_data = {
+                "Name": mark.get("Name", ""),
+                "Type": mark.get("Type", "0"),
+                "Start": float(mark.get("Start", 0)),
+                "Num": int(mark.get("Num", -1)),
+                "Red": int(mark.get("Red") or 0),
+                "Green": int(mark.get("Green") or 0),
+                "Blue": int(mark.get("Blue") or 0)
+            }
+            if mark.get("End"):
+                m_data["End"] = float(mark.get("End"))
+            position_marks.append(m_data)
         self.tracks[tid]["positionMarks"] = position_marks
 
     def _decode_path(self, location: str) -> str:
@@ -321,13 +324,15 @@ class RekordboxXMLDB:
                     tempo.set("Metro", beat.get("metro", "4/4"))
                 for mark in track.get("positionMarks", []):
                     pm = ET.SubElement(t_node, "POSITION_MARK")
-                    pm.set("Name", mark.get("name") or "")
-                    pm.set("Type", str(mark.get("type", 0)))
-                    pm.set("Start", str(mark.get("start", 0)))
-                    pm.set("Num", str(mark.get("num", -1)))
-                    pm.set("Red", str(mark.get("red", 0)))
-                    pm.set("Green", str(mark.get("green", 0)))
-                    pm.set("Blue", str(mark.get("blue", 0)))
+                    pm.set("Name", str(mark.get("Name") or ""))
+                    pm.set("Type", str(mark.get("Type", "0")))
+                    pm.set("Start", str(mark.get("Start", 0)))
+                    pm.set("Num", str(mark.get("Num", -1)))
+                    pm.set("Red", str(mark.get("Red", 0)))
+                    pm.set("Green", str(mark.get("Green", 0)))
+                    pm.set("Blue", str(mark.get("Blue", 0)))
+                    if mark.get("End"):
+                        pm.set("End", str(mark["End"]))
             playlists_root = ET.SubElement(root, "PLAYLISTS")
             def build_xml_node(parent_node, pid):
                 children = [p for p in self.playlists if p['ParentID'] == pid]
@@ -495,9 +500,9 @@ class RekordboxDB:
             return self.active_db.rename_playlist(pid, name)
         return False
 
-    def move_playlist(self, pid, new_parent_id, position=None):
+    def move_playlist(self, pid, new_parent_id, target_id=None, position=None):
         if hasattr(self.active_db, "move_playlist"):
-            return self.active_db.move_playlist(pid, new_parent_id, position)
+            return self.active_db.move_playlist(pid, new_parent_id, target_id, position)
         return False
 
     def delete_playlist(self, pid):

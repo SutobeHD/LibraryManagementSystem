@@ -6,7 +6,8 @@ import PlaylistBrowser from './PlaylistBrowser';
 import { Search, User, ArrowLeft, Tag, Disc, GitMerge, Music, List, RotateCw } from 'lucide-react';
 
 const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }) => {
-  const [activeTab, setActiveTab] = useState('tracks'); // 'tracks', 'playlists', 'artists', 'labels', 'albums'
+  // Default to 'playlists' — removed separate 'tracks' tab since Collection is now inside PlaylistBrowser
+  const [activeTab, setActiveTab] = useState('playlists');
   const [items, setItems] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
   const [tracks, setTracks] = useState([]);
@@ -17,18 +18,16 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
 
   const loadItems = () => {
     if (!libraryStatus?.loaded) return;
-    if (activeTab === 'playlists') return;
+    if (activeTab === 'playlists') return; // PlaylistBrowser handles its own loading
 
     setIsLoading(true);
     let endpoint = '';
-    if (activeTab === 'tracks') endpoint = '/api/library/tracks';
-    else if (activeTab === 'artists') endpoint = '/api/artists';
+    if (activeTab === 'artists') endpoint = '/api/artists';
     else if (activeTab === 'labels') endpoint = '/api/labels';
     else if (activeTab === 'albums') endpoint = '/api/albums';
 
     if (endpoint) {
       api.get(endpoint).then(res => {
-        console.log(`[MetadataView] Loaded ${activeTab}:`, res.data.length, "items");
         if (activeTab === 'tracks') setTracks(res.data);
         else setItems(res.data);
       }).catch(e => {
@@ -41,12 +40,7 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
   };
 
   useEffect(() => {
-    setItems([]); // Clear previous items to avoid confusion
-    if (activeTab === 'tracks') {
-      // Don't clear tracks immediately to prevent flash if we can avoid it, 
-      // but user reported stale data. Let's clear it if we are entering tracks mode from elsewhere
-      // Actually, improved loadItems logic handles it.
-    }
+    setItems([]);
     loadItems();
     setSelectedItem(null);
     setSearchTerm("");
@@ -89,8 +83,51 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
     }
   };
 
+  // When in playlists tab, render PlaylistBrowser full-height without extra chrome
+  if (activeTab === 'playlists' && !selectedItem) {
+    return (
+      <div className="h-full flex flex-col">
+        {/* Minimal tab bar */}
+        <div className="flex justify-between items-center px-4 py-3 border-b border-white/5 bg-slate-950/30 backdrop-blur-md shrink-0">
+          <div className="flex items-center gap-6">
+            <h1 className="text-xl font-bold text-white flex items-center gap-2">
+              <Music size={20} className="text-cyan-400" />
+              Library
+            </h1>
+            <div className="flex bg-black/40 p-0.5 rounded-lg border border-white/5">
+              {[
+                { id: 'playlists', icon: List, label: 'Playlists' },
+                { id: 'artists', icon: User, label: 'Artists' },
+                { id: 'labels', icon: Tag, label: 'Labels' },
+                { id: 'albums', icon: Disc, label: 'Albums' }
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 ${activeTab === tab.id ? 'bg-cyan-500 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                >
+                  <tab.icon size={11} />
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        {/* PlaylistBrowser fills the remaining space */}
+        <div className="flex-1 overflow-hidden">
+          <PlaylistBrowser
+            onSelectTrack={onSelectTrack}
+            onEditTrack={onEditTrack}
+            onPlayTrack={onPlayTrack}
+            libraryStatus={libraryStatus}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="h-full flex flex-col bg-slate-950/20 p-4">
+    <div className="h-full flex flex-col p-4">
       {/* Tab Switcher & Header */}
       <div className="flex justify-between items-center mb-6">
         {selectedItem ? (
@@ -119,11 +156,10 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
             </h1>
             <div className="flex bg-black/40 p-1 rounded-xl border border-white/5">
               {[
-                { id: 'tracks', icon: Music },
-                { id: 'playlists', icon: List },
-                { id: 'artists', icon: User },
-                { id: 'labels', icon: Tag },
-                { id: 'albums', icon: Disc }
+                { id: 'playlists', icon: List, label: 'Playlists' },
+                { id: 'artists', icon: User, label: 'Artists' },
+                { id: 'labels', icon: Tag, label: 'Labels' },
+                { id: 'albums', icon: Disc, label: 'Albums' }
               ].map(tab => (
                 <button
                   key={tab.id}
@@ -131,7 +167,7 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
                   className={`px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-2 ${activeTab === tab.id ? 'bg-cyan-500 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
                 >
                   <tab.icon size={12} />
-                  {tab.id}
+                  {tab.label}
                 </button>
               ))}
             </div>
@@ -160,19 +196,15 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 overflow-hidden bg-slate-900/40 rounded-xl shadow-inner border border-white/5 relative">
-        {activeTab === 'playlists' ? (
-          <div className="absolute inset-0 overflow-hidden">
-            <PlaylistBrowser onSelectTrack={onSelectTrack} onEditTrack={onEditTrack} onPlayTrack={onPlayTrack} />
-          </div>
-        ) : selectedItem || activeTab === 'tracks' ? (
+      <div className="flex-1 overflow-hidden relative">
+        {selectedItem ? (
           <div className="absolute inset-0 overflow-y-auto pb-4 p-2">
             <TrackTable
               tracks={filteredTracks}
               onSelectTrack={onSelectTrack}
               onEditTrack={onEditTrack}
               onPlay={onPlayTrack}
-              playlistId={activeTab === 'tracks' ? 'ALL_TRACKS' : `${activeTab.toUpperCase()}_${selectedItem.id}`}
+              playlistId={`${activeTab.toUpperCase()}_${selectedItem.id}`}
             />
           </div>
         ) : (
@@ -218,4 +250,3 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
 }
 
 export default MetadataView;
-

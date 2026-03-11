@@ -50,32 +50,38 @@
     pointer-events: none;
   }
 
-  /* Premium Glass Panel */
+  /* Premium Glass Panel - Simplified for Flat Look */
   .glass-panel {
-    @apply bg-slate-900/40 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl;
+    @apply bg-slate-900/40 backdrop-blur-md rounded-2xl;
+    /* Removed border and shadow for cleaner look */
   }
 
-  /* Sidebar Item */
+  /* Sidebar Item - Minimalist */
   .nav-item {
-    @apply flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 cursor-pointer text-slate-400 hover:text-white hover:bg-white/5 border border-transparent;
+    @apply flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 cursor-pointer text-slate-400 hover:text-white hover:bg-white/5;
+    /* Removed border */
   }
 
   .nav-item.active {
-    @apply bg-cyan-500/10 text-cyan-400 border-cyan-500/20 shadow-lg shadow-cyan-500/20;
+    @apply text-cyan-400 bg-cyan-500/10;
+    /* Removed heavy border and shadow */
   }
 
-  /* Buttons */
+  /* Buttons - Flatter */
   .btn-primary {
-    @apply bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-bold px-6 py-2.5 rounded-lg shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/40 transition-all hover:scale-[1.02] active:scale-[0.98] border border-white/10;
+    @apply bg-cyan-600 hover:bg-cyan-500 text-white font-bold px-6 py-2.5 rounded-lg transition-all active:scale-[0.98];
+    /* Removed gradients and heavy shadows */
   }
 
   .btn-ghost {
-    @apply bg-white/5 hover:bg-white/10 text-slate-300 px-4 py-2 rounded-lg transition-all border border-white/5 hover:border-white/10;
+    @apply hover:bg-white/5 text-slate-300 px-4 py-2 rounded-lg transition-all;
+    /* Removed borders */
   }
 
-  /* Inputs */
+  /* Inputs - Clean */
   .input-glass {
-    @apply bg-black/20 border border-white/10 rounded-lg p-3 text-white focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/50 transition-all placeholder-slate-600;
+    @apply bg-slate-900/50 rounded-lg p-3 text-white focus:outline-none focus:ring-1 focus:ring-cyan-500/50 transition-all placeholder-slate-600;
+    /* Removed borders */
   }
 
   /* Status Colors */
@@ -91,13 +97,13 @@
     @apply text-fuchsia-400;
   }
 
-  /* Scrollbar */
+  /* Scrollbar - Thinner */
   ::-webkit-scrollbar {
-    @apply w-1.5 h-1.5;
+    @apply w-1;
   }
 
   ::-webkit-scrollbar-track {
-    @apply bg-slate-950;
+    @apply bg-transparent;
   }
 
   ::-webkit-scrollbar-thumb {

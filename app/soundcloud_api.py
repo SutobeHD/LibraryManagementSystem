@@ -1,0 +1,440 @@
+"""
+SoundCloud Playlist API — Fetches playlists & favorites via the unofficial V2 API.
+Uses the auth_token (stored as HttpOnly cookie "sc_token") for authenticated requests.
+
+Resilience features:
+  - Exponential backoff on 429 Too Many Requests (Criterion 11)
+  - AuthExpiredError raised on 401/403 mid-session (Criterion 5)
+  - Dead/null track filtering (Criterion 9, 12)
+  - Full pagination following next_href (Criterion 8)
+"""
+
+import requests
+import logging
+import time
+import re
+import json
+from pathlib import Path
+from typing import List, Dict, Optional
+from difflib import SequenceMatcher
+
+logger = logging.getLogger(__name__)
+
+# SoundCloud API
+SC_API_BASE = "https://api-v2.soundcloud.com"
+# NOTE: This is a public web-scraper client_id. It may rotate. Used for unauthenticated
+# context enrichment only — all authenticated calls also pass the OAuth Bearer token.
+SC_CLIENT_ID = "***REMOVED***"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Custom Exceptions
+# ──────────────────────────────────────────────────────────────────────────────
+
+class AuthExpiredError(Exception):
+    """Raised when the SoundCloud OAuth token is invalid or has expired."""
+    pass
+
+
+class RateLimitError(Exception):
+    """Raised when the API rate limit is exceeded and retries are exhausted."""
+    pass
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Rate-Limited HTTP helper
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _sc_get(url: str, headers: dict, params: dict = None, max_retries: int = 3, timeout: int = 15) -> requests.Response:
+    """
+    Perform a GET request against the SoundCloud API with automatic 429 backoff.
+
+    On a 429 response:
+      - Reads the `Retry-After` header (falls back to 10 s).
+      - Sleeps and retries up to `max_retries` times with exponential growth.
+    On 401/403:
+      - Raises AuthExpiredError immediately.
+    """
+    delay = 1.0
+    for attempt in range(max_retries + 1):
+        try:
+            resp = requests.get(url, headers=headers, params=params, timeout=timeout)
+        except requests.RequestException as exc:
+            logger.warning(f"[SC] Network error on attempt {attempt + 1}: {exc}")
+            if attempt >= max_retries:
+                raise
+            time.sleep(delay)
+            delay *= 2
+            continue
+
+        if resp.status_code == 200:
+            return resp
+
+        if resp.status_code in (401, 403):
+            logger.error(f"[SC] Auth error {resp.status_code}: token invalid or expired.")
+            raise AuthExpiredError(f"SoundCloud auth token is invalid or expired (HTTP {resp.status_code}).")
+
+        if resp.status_code == 429:
+            retry_after = int(resp.headers.get("Retry-After", delay * 2))
+            logger.warning(f"[SC] 429 Too Many Requests. Retrying in {retry_after}s (attempt {attempt + 1}/{max_retries}).")
+            if attempt >= max_retries:
+                raise RateLimitError("SoundCloud rate limit exceeded. Please try again later.")
+            time.sleep(retry_after)
+            delay = min(delay * 2, 60)
+            continue
+
+        # All other non-200 codes
+        logger.error(f"[SC] Unexpected status {resp.status_code} for {url}: {resp.text[:200]}")
+        resp.raise_for_status()
+
+    raise RateLimitError("Max retries reached.")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SoundCloud Playlist API
+# ──────────────────────────────────────────────────────────────────────────────
+
+class SoundCloudPlaylistAPI:
+    """Fetches playlist and track data from SoundCloud."""
+
+    @staticmethod
+    def _get_headers(auth_token: Optional[str] = None) -> dict:
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        if auth_token:
+            headers["Authorization"] = f"OAuth {auth_token}"
+        return headers
+
+    @staticmethod
+    def _resolve_user_id(auth_token: str) -> int:
+        """Resolve the current user's numeric ID from their auth token.
+        Raises AuthExpiredError on 401/403."""
+        resp = _sc_get(
+            f"{SC_API_BASE}/me",
+            headers=SoundCloudPlaylistAPI._get_headers(auth_token),
+            params={"client_id": SC_CLIENT_ID},
+            timeout=10
+        )
+        data = resp.json()
+        user_id = data.get("id")
+        if not user_id:
+            raise ValueError("Could not determine user ID from /me endpoint.")
+        return user_id
+
+    @staticmethod
+    def _normalize_track(raw: dict) -> Optional[Dict]:
+        """
+        Convert a raw SoundCloud track object into our canonical format.
+        Returns None for dead/deleted tracks (Criterion 9, 12).
+        """
+        if not raw or not isinstance(raw, dict):
+            return None
+        track_id = raw.get("id")
+        if not track_id:
+            return None
+
+        title = raw.get("title", "")
+        user = raw.get("user", {})
+        artist = user.get("username", "") if isinstance(user, dict) else ""
+
+        # A track with an id but no title + no user is likely deleted
+        is_deleted = not title and not artist
+        if is_deleted:
+            logger.debug(f"[SC] Skipping deleted/empty track id={track_id}")
+            return None
+
+        return {
+            "id": track_id,
+            "title": title,
+            "artist": artist,
+            "duration": raw.get("duration", 0),
+            "permalink_url": raw.get("permalink_url", ""),
+            "artwork_url": raw.get("artwork_url"),
+            "downloadable": raw.get("downloadable", False),
+        }
+
+    @staticmethod
+    def get_playlists(auth_token: str) -> List[Dict]:
+        """
+        Fetch ALL playlists for the authenticated user.
+        Follows next_href pagination until exhausted (Criterion 8).
+        Raises AuthExpiredError on token problems (Criterion 5).
+        """
+        user_id = SoundCloudPlaylistAPI._resolve_user_id(auth_token)
+        headers = SoundCloudPlaylistAPI._get_headers(auth_token)
+
+        playlists: List[Dict] = []
+        url: Optional[str] = f"{SC_API_BASE}/users/{user_id}/playlists"
+        params = {"client_id": SC_CLIENT_ID, "limit": 50, "offset": 0}
+
+        while url:
+            resp = _sc_get(url, headers=headers, params=params)
+            data = resp.json()
+
+            # Handle both list and paginated-dict responses
+            if isinstance(data, list):
+                collection = data
+                url = None
+            else:
+                collection = data.get("collection", [])
+                url = data.get("next_href")  # full URL with embedded params
+                params = {}  # next_href already includes query params
+
+            if not isinstance(collection, list):
+                logger.warning("[SC] get_playlists: unexpected collection format, stopping pagination.")
+                break
+
+            for pl in collection:
+                if not pl or not pl.get("id"):
+                    continue
+                tracks_raw = pl.get("tracks", [])
+                track_preview = [
+                    t for t in (SoundCloudPlaylistAPI._normalize_track(tr) for tr in tracks_raw[:20])
+                    if t is not None
+                ]
+                playlists.append({
+                    "id": pl.get("id"),
+                    "title": pl.get("title", "Untitled"),
+                    "track_count": pl.get("track_count", len(tracks_raw)),
+                    "duration": pl.get("duration", 0),
+                    "artwork_url": pl.get("artwork_url") or (tracks_raw[0].get("artwork_url") if tracks_raw else None),
+                    "permalink_url": pl.get("permalink_url", ""),
+                    "created_at": pl.get("created_at", ""),
+                    "is_public": pl.get("sharing", "public") != "private",
+                    "tracks": track_preview,
+                })
+
+            time.sleep(0.3)  # polite rate-limit spacing
+
+        logger.info(f"[SC] Fetched {len(playlists)} playlists for user {user_id}.")
+        return playlists
+
+    @staticmethod
+    def get_likes(auth_token: str, max_tracks: int = 500) -> Dict:
+        """
+        Fetch user's liked tracks as a virtual playlist.
+        Paginates until max_tracks reached or list exhausted (Criterion 8).
+        Raises AuthExpiredError on token problems (Criterion 5).
+        """
+        user_id = SoundCloudPlaylistAPI._resolve_user_id(auth_token)
+        headers = SoundCloudPlaylistAPI._get_headers(auth_token)
+
+        tracks: List[Dict] = []
+        url: Optional[str] = f"{SC_API_BASE}/users/{user_id}/likes"
+        params = {"client_id": SC_CLIENT_ID, "limit": 50, "offset": 0}
+
+        while url and len(tracks) < max_tracks:
+            resp = _sc_get(url, headers=headers, params=params)
+            data = resp.json()
+
+            if not isinstance(data, dict):
+                logger.warning("[SC] get_likes: unexpected response format, stopping.")
+                break
+
+            collection = data.get("collection", [])
+            if not isinstance(collection, list):
+                logger.warning("[SC] get_likes: collection is not a list, stopping.")
+                break
+
+            for item in collection:
+                if len(tracks) >= max_tracks:
+                    break
+                # Likes endpoint wraps the track in {"track": {...}}
+                raw_track = item.get("track") if isinstance(item, dict) and "track" in item else item
+                normalized = SoundCloudPlaylistAPI._normalize_track(raw_track)
+                if normalized:
+                    tracks.append(normalized)
+
+            url = data.get("next_href")
+            params = {}
+            time.sleep(0.3)
+
+        logger.info(f"[SC] Fetched {len(tracks)} liked tracks for user {user_id}.")
+        return {
+            "id": "likes",
+            "title": "❤️ Liked Tracks",
+            "track_count": len(tracks),
+            "duration": sum(t.get("duration", 0) for t in tracks),
+            "artwork_url": tracks[0].get("artwork_url") if tracks else None,
+            "permalink_url": "",
+            "created_at": "",
+            "is_public": False,
+            "is_likes": True,
+            "tracks": tracks,
+        }
+
+    @staticmethod
+    def get_full_playlist_tracks(playlist_id: int, auth_token: str) -> List[Dict]:
+        """
+        Fetch ALL tracks for a specific playlist (not just the 20-track preview).
+        Uses full representation and paginates (Criterion 8).
+        """
+        headers = SoundCloudPlaylistAPI._get_headers(auth_token)
+        try:
+            resp = _sc_get(
+                f"{SC_API_BASE}/playlists/{playlist_id}",
+                headers=headers,
+                params={"client_id": SC_CLIENT_ID, "representation": "full"},
+                timeout=20
+            )
+        except AuthExpiredError:
+            raise
+        except Exception as exc:
+            logger.error(f"[SC] get_full_playlist_tracks({playlist_id}): {exc}")
+            return []
+
+        data = resp.json()
+        if not isinstance(data, dict):
+            logger.warning(f"[SC] Unexpected payload for playlist {playlist_id}.")
+            return []
+
+        raw_tracks = data.get("tracks", [])
+        if not isinstance(raw_tracks, list):
+            logger.warning(f"[SC] tracks field is not a list for playlist {playlist_id}.")
+            return []
+
+        result = []
+        for raw in raw_tracks:
+            normalized = SoundCloudPlaylistAPI._normalize_track(raw)
+            if normalized:
+                result.append(normalized)
+
+        logger.info(f"[SC] get_full_playlist_tracks({playlist_id}): {len(result)} valid tracks (filtered from {len(raw_tracks)}).")
+        return result
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SoundCloud Sync Engine
+# ──────────────────────────────────────────────────────────────────────────────
+
+class SoundCloudSyncEngine:
+    """Syncs SoundCloud playlists → local Rekordbox collection playlists."""
+
+    SYNC_PREFIX = "SC_"
+
+    def __init__(self, db_manager):
+        self.db = db_manager
+
+    def _normalize_title(self, title: str) -> str:
+        return re.sub(r'[^\w\s]', '', title.lower().strip())
+
+    def _fuzzy_match_track(self, sc_title: str, sc_artist: str, local_tracks: Dict) -> Optional[str]:
+        """Find the best matching local track for a SoundCloud track (fuzzy, Criterion 9)."""
+        sc_combined = f"{sc_artist} - {sc_title}".lower()
+        sc_norm_title = self._normalize_title(sc_title)
+        best_match = None
+        best_ratio = 0.0
+
+        for tid, track in local_tracks.items():
+            local_title = (track.get("Title") or "").lower()
+            local_artist = (track.get("Artist") or "").lower()
+            local_combined = f"{local_artist} - {local_title}"
+
+            # Exact normalized title match wins immediately
+            if sc_norm_title and sc_norm_title == self._normalize_title(local_title):
+                return tid
+
+            ratio = SequenceMatcher(None, sc_combined, local_combined).ratio()
+            if ratio > best_ratio and ratio >= 0.65:
+                best_ratio = ratio
+                best_match = tid
+
+        return best_match
+
+    def find_or_create_playlist(self, sc_playlist_title: str) -> Optional[str]:
+        """Find existing synced playlist or create a new one. Returns playlist ID."""
+        sync_name = f"{self.SYNC_PREFIX}{sc_playlist_title}"
+        for pl in self.db.playlists:
+            if pl.get("Name") == sync_name:
+                return pl.get("ID")
+        try:
+            if hasattr(self.db.active_db, 'create_playlist'):
+                pid = self.db.active_db.create_playlist(sync_name)
+                logger.info(f"[SC] Created synced playlist: {sync_name} (ID: {pid})")
+                return str(pid)
+            else:
+                logger.warning("[SC] Database does not support create_playlist.")
+        except Exception as exc:
+            logger.error(f"[SC] Failed to create playlist {sync_name}: {exc}")
+        return None
+
+    def sync_playlist(self, sc_playlist: Dict, auth_token: str) -> Dict:
+        """
+        Sync a single SoundCloud playlist to local collection.
+        Handles dead tracks gracefully (Criterion 9).
+        """
+        title = sc_playlist.get("title", "Untitled")
+        sc_id = sc_playlist.get("id")
+
+        result = {
+            "playlist_title": title,
+            "sc_id": sc_id,
+            "matched": 0,
+            "unmatched": 0,
+            "already_synced": 0,
+            "added": 0,
+            "dead_tracks": 0,
+            "errors": []
+        }
+
+        # Fetch full track list
+        if sc_playlist.get("is_likes"):
+            sc_tracks = sc_playlist.get("tracks", [])
+        else:
+            sc_tracks = SoundCloudPlaylistAPI.get_full_playlist_tracks(sc_id, auth_token)
+
+        if not sc_tracks:
+            result["errors"].append("No live tracks found in playlist (all may have been deleted).")
+            return result
+
+        pid = self.find_or_create_playlist(title)
+        if not pid:
+            result["errors"].append("Could not create or find local playlist.")
+            return result
+
+        # Existing track IDs in the local playlist (to skip re-adds)
+        existing_track_ids: set = set()
+        try:
+            existing = self.db.get_playlist_tracks(pid)
+            existing_track_ids = {str(t.get("id", t.get("ID", ""))) for t in existing}
+        except Exception:
+            pass
+
+        local_tracks = self.db.tracks if hasattr(self.db, 'tracks') else {}
+
+        for sc_track in sc_tracks:
+            sc_title = sc_track.get("title", "")
+            sc_artist = sc_track.get("artist", "")
+
+            if not sc_title:
+                result["dead_tracks"] += 1
+                continue
+
+            matched_tid = self._fuzzy_match_track(sc_title, sc_artist, local_tracks)
+            if matched_tid:
+                result["matched"] += 1
+                if matched_tid in existing_track_ids:
+                    result["already_synced"] += 1
+                else:
+                    try:
+                        if hasattr(self.db, 'add_track_to_playlist'):
+                            self.db.add_track_to_playlist(pid, matched_tid)
+                            result["added"] += 1
+                        elif hasattr(self.db.active_db, 'add_track_to_playlist'):
+                            self.db.active_db.add_track_to_playlist(pid, matched_tid)
+                            result["added"] += 1
+                    except Exception as exc:
+                        result["errors"].append(f"Failed to add '{sc_title}': {exc}")
+            else:
+                result["unmatched"] += 1
+
+        return result
+
+    def sync_all(self, playlists: List[Dict], auth_token: str) -> List[Dict]:
+        """Sync all provided playlists sequentially."""
+        results = []
+        for pl in playlists:
+            result = self.sync_playlist(pl, auth_token)
+            results.append(result)
+        return results

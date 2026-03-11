@@ -19,6 +19,8 @@ const TimelineCanvas = ({
     onRegionMove,
     onRegionResize,
     onRegionSplit,
+    onVolumeChange,
+    onGridAdjust,
     onSelectionChange,
     onPlayheadChange,
     onZoomChange,
@@ -32,7 +34,9 @@ const TimelineCanvas = ({
 
     const [viewportWidth, setViewportWidth] = useState(0);
     const [isSelecting, setIsSelecting] = useState(false);
-    const [selectionStart, setSelectionStart] = useState(null);
+    const [selectionStart, setSelectionStart] = useState(0);
+    const [isDraggingGrid, setIsDraggingGrid] = useState(false);
+    const [gridDragStart, setGridDragStart] = useState(0);
 
     const {
         regions,
@@ -44,7 +48,8 @@ const TimelineCanvas = ({
         selection,
         snapEnabled,
         snapDivision,
-        gridOffset
+        gridOffset,
+        phrases
     } = state;
 
     // Calculate timeline dimensions
@@ -85,43 +90,76 @@ const TimelineCanvas = ({
         ctx.clearRect(0, 0, timelineWidth, containerHeight);
 
         // Calculate beats
-        const beatDuration = 60 / bpm;
-        const numBeats = Math.ceil(totalDuration / beatDuration);
+        const useManualGrid = beatGrid && beatGrid.length > 0;
 
-        for (let i = 0; i < numBeats; i++) {
-            const time = gridOffset + (i * beatDuration);
-            const x = time * zoom;
+        if (useManualGrid) {
+            // DYNAMIC GRID: Render based on detected beats
+            beatGrid.forEach((beat, i) => {
+                const x = beat.time * zoom;
+                if (x < 0 || x > timelineWidth) return;
 
-            if (x < 0 || x > timelineWidth) continue;
+                const isDownbeat = beat.beat === 1;
+                const isPhrase = i % 16 === 0;
 
-            const isDownbeat = i % 4 === 0;
-            const isPhrase = i % 16 === 0;
+                if (isPhrase) {
+                    ctx.strokeStyle = 'rgba(234, 179, 8, 0.5)';
+                    ctx.lineWidth = 2;
+                } else if (isDownbeat) {
+                    ctx.strokeStyle = 'rgba(239, 68, 68, 0.4)';
+                    ctx.lineWidth = 1.5;
+                } else {
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+                    ctx.lineWidth = 1;
+                }
 
-            // Line style based on beat type
-            if (isPhrase) {
-                ctx.strokeStyle = 'rgba(234, 179, 8, 0.4)';
-                ctx.lineWidth = 2;
-            } else if (isDownbeat) {
-                ctx.strokeStyle = 'rgba(239, 68, 68, 0.3)';
-                ctx.lineWidth = 1.5;
-            } else {
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-                ctx.lineWidth = 1;
-            }
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, containerHeight);
+                ctx.stroke();
 
-            ctx.beginPath();
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, containerHeight);
-            ctx.stroke();
+                if (isDownbeat) {
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+                    ctx.font = '10px Inter, sans-serif';
+                    ctx.fillText(`${Math.floor(i / 4) + 1}`, x + 3, 12);
+                }
+            });
+        } else {
+            // STATIC GRID: Original mathematical loop
+            const beatDuration = 60 / bpm;
+            const numBeats = Math.ceil(totalDuration / beatDuration);
 
-            // Bar number on downbeats
-            if (isDownbeat) {
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
-                ctx.font = '10px Inter, sans-serif';
-                ctx.fillText(`${Math.floor(i / 4) + 1}`, x + 3, 12);
+            for (let i = 0; i < numBeats; i++) {
+                const time = gridOffset + (i * beatDuration);
+                const x = time * zoom;
+                if (x < 0 || x > timelineWidth) continue;
+
+                const isDownbeat = i % 4 === 0;
+                const isPhrase = i % 16 === 0;
+
+                if (isPhrase) {
+                    ctx.strokeStyle = 'rgba(234, 179, 8, 0.4)';
+                    ctx.lineWidth = 2;
+                } else if (isDownbeat) {
+                    ctx.strokeStyle = 'rgba(239, 68, 68, 0.3)';
+                    ctx.lineWidth = 1.5;
+                } else {
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+                    ctx.lineWidth = 1;
+                }
+
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, containerHeight);
+                ctx.stroke();
+
+                if (isDownbeat) {
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+                    ctx.font = '10px Inter, sans-serif';
+                    ctx.fillText(`${Math.floor(i / 4) + 1}`, x + 3, 12);
+                }
             }
         }
-    }, [zoom, bpm, gridOffset, totalDuration, timelineWidth, containerHeight]);
+    }, [zoom, bpm, gridOffset, totalDuration, timelineWidth, containerHeight, beatGrid]);
 
     // Draw time ruler
     useEffect(() => {
@@ -209,14 +247,28 @@ const TimelineCanvas = ({
         if (e.shiftKey) {
             setIsSelecting(true);
             setSelectionStart(time);
+        } else if (state.editMode === 'grid') {
+            setIsDraggingGrid(true);
+            setGridDragStart(time);
         } else {
             // Click to set playhead
             const snappedTime = snapEnabled ? snapTime(time) : time;
             onPlayheadChange?.(snappedTime);
         }
-    }, [zoom, snapEnabled, snapTime, onPlayheadChange]);
+    }, [zoom, snapEnabled, snapTime, onPlayheadChange, state.editMode]);
 
     const handleMouseMove = useCallback((e) => {
+        if (isDraggingGrid) {
+            const rect = containerRef.current.getBoundingClientRect();
+            const scrollLeft = containerRef.current.scrollLeft;
+            const x = e.clientX - rect.left + scrollLeft;
+            const time = x / zoom;
+            const delta = time - gridDragStart;
+            onGridAdjust?.(delta);
+            setGridDragStart(time);
+            return;
+        }
+
         if (!isSelecting || selectionStart === null) return;
 
         const rect = containerRef.current.getBoundingClientRect();
@@ -225,18 +277,67 @@ const TimelineCanvas = ({
         const time = x / zoom;
 
         onSelectionChange?.(selectionStart, time);
-    }, [isSelecting, selectionStart, zoom, onSelectionChange]);
+    }, [isSelecting, selectionStart, zoom, onSelectionChange, isDraggingGrid, gridDragStart, onGridAdjust]);
 
     const handleMouseUp = useCallback(() => {
         setIsSelecting(false);
+        setIsDraggingGrid(false);
     }, []);
+
+    // Drop handler for palette items
+    const handleDragOver = useCallback((e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+    }, []);
+
+    const handleDrop = useCallback((e) => {
+        e.preventDefault();
+        const regionAndSource = e.dataTransfer.getData('application/region');
+        if (!regionAndSource) return;
+
+        try {
+            const regionData = JSON.parse(regionAndSource);
+
+            // Calculate drop time
+            const rect = containerRef.current.getBoundingClientRect();
+            const scrollLeft = containerRef.current.scrollLeft;
+            const x = e.clientX - rect.left + scrollLeft;
+            const time = x / zoom;
+
+            // Snap if enabled
+            const snappedTime = snapEnabled ? snapTime(time) : time;
+
+            onRegionDrop?.(regionData, snappedTime);
+        } catch (err) {
+            console.error("Drop failed", err);
+        }
+    }, [zoom, snapEnabled, snapTime, onRegionDrop]);
 
     // Wheel for zoom
     const handleWheel = useCallback((e) => {
         if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
-            const delta = e.deltaY > 0 ? -10 : 10;
-            onZoomChange?.(Math.max(10, Math.min(500, zoom + delta)));
+
+            const rect = containerRef.current.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const scrollLeft = containerRef.current.scrollLeft;
+            const mouseTime = (mouseX + scrollLeft) / zoom;
+
+            // Geometric zoom for smoother experience
+            const factor = e.deltaY > 0 ? 0.85 : 1.17;
+            const newZoom = Math.max(10, Math.min(2000, zoom * factor));
+
+            // Calculate new scroll position to keep mouseTime at the same mouseX
+            const newScrollLeft = (mouseTime * newZoom) - mouseX;
+
+            onZoomChange?.(newZoom);
+
+            // Directly adjust scroll to keep it smooth
+            requestAnimationFrame(() => {
+                if (containerRef.current) {
+                    containerRef.current.scrollLeft = newScrollLeft;
+                }
+            });
         }
     }, [zoom, onZoomChange]);
 
@@ -261,6 +362,8 @@ const TimelineCanvas = ({
                 onMouseUp={handleMouseUp}
                 onMouseLeave={handleMouseUp}
                 onWheel={handleWheel}
+                onDragOver={handleDragOver}
+                onDrop={handleDrop}
             >
                 <div
                     className="relative h-full"
@@ -303,6 +406,53 @@ const TimelineCanvas = ({
                         ))}
                     </div>
 
+                    {/* Markers (Cues, Loops) */}
+                    {state.markers?.map((marker, idx) => {
+                        const x = marker.Start * zoom;
+                        if (x < 0 || x > timelineWidth) return null;
+
+                        const isLoop = String(marker.Type) === "4";
+                        const isHotCue = marker.Num >= 0 && marker.Num <= 7;
+
+                        if (isLoop && marker.End) {
+                            const width = (marker.End - marker.Start) * zoom;
+                            return (
+                                <div
+                                    key={`loop-${idx}`}
+                                    className="absolute top-0 bottom-0 bg-green-500/20 border-l-2 border-r-2 border-green-400 overflow-hidden pointer-events-none"
+                                    style={{ left: `${x}px`, width: `${width}px` }}
+                                >
+                                    <div className="absolute top-0 left-0 p-1 text-[8px] font-bold text-green-400 bg-black/60">LOOP</div>
+                                </div>
+                            );
+                        }
+
+                        // Standard Cue or Hot Cue
+                        const color = isHotCue ? "#f59e0b" : "#ef4444";
+                        const label = isHotCue ? `H${String.fromCharCode(65 + marker.Num)}` : "M";
+
+                        return (
+                            <div
+                                key={`marker-${idx}`}
+                                className="absolute top-0 bottom-0 pointer-events-none"
+                                style={{ left: `${x}px`, width: '1px' }}
+                            >
+                                <div
+                                    className="absolute top-0 left-[-6px] w-0 h-0"
+                                    style={{
+                                        borderLeft: '6px solid transparent',
+                                        borderRight: '6px solid transparent',
+                                        borderTop: `8px solid ${color}`
+                                    }}
+                                />
+                                <div className="absolute h-full w-px" style={{ backgroundColor: color, opacity: 0.3 }} />
+                                <div className="absolute top-8 left-1 px-1 bg-black/80 text-[8px] font-bold rounded" style={{ color: color }}>
+                                    {label}
+                                </div>
+                            </div>
+                        );
+                    })}
+
                     {/* Playhead */}
                     <div
                         ref={playheadRef}
@@ -321,6 +471,30 @@ const TimelineCanvas = ({
                                 borderTop: '8px solid #22d3ee'
                             }}
                         />
+                    </div>
+
+                    {/* Phrase Tracks (Bottom) */}
+                    <div className="absolute bottom-0 left-0 right-0 h-6 bg-black/40 border-t border-white/5 z-40">
+                        {phrases?.map((phrase, idx) => {
+                            const x = phrase.start * zoom;
+                            const w = (phrase.end - phrase.start) * zoom;
+                            return (
+                                <div
+                                    key={`phrase-${idx}`}
+                                    className="absolute top-0 h-full border-r border-white/10 flex items-center px-1 group"
+                                    style={{
+                                        left: `${x}px`,
+                                        width: `${w}px`,
+                                        backgroundColor: `${phrase.color || '#3b82f6'}10`
+                                    }}
+                                    title={`${phrase.name} (${phrase.start.toFixed(2)}s - ${phrase.end.toFixed(2)}s)`}
+                                >
+                                    <span className="text-[9px] font-bold text-white/30 group-hover:text-white/60 truncate uppercase tracking-tighter">
+                                        {phrase.name}
+                                    </span>
+                                </div>
+                            );
+                        })}
                     </div>
                 </div>
             </div>

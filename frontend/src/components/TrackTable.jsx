@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Music, Star, X, Check, ChevronDown, ChevronUp, Image as ImageIcon, Scissors, Trash2, Play } from 'lucide-react';
+import { Music, Star, X, Check, ChevronDown, ChevronUp, ChevronRight, Image as ImageIcon, Scissors, Trash2, Play, Plus, ListMusic } from 'lucide-react';
 import api from '../api/api';
 
 const DEFAULT_COLUMNS = [
@@ -50,7 +50,7 @@ const getKeyColor = (key) => {
     return CAMELOT_COLORS[cleanKey] || '#888';
 };
 
-const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder, onRemove, onDelete, playlistId, customColumns, variant = 'default' }) => {
+const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder, onRemove, onDelete, onAddToPlaylist, availablePlaylists = [], playlistId, customColumns, variant = 'default', onSortedTracksChange }) => {
     const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
     const [visibleColumns, setVisibleColumns] = useState(() => {
         const saved = localStorage.getItem('track_table_columns');
@@ -92,6 +92,12 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
             return 0;
         });
     }, [tracks, sortConfig]);
+
+    useEffect(() => {
+        if (onSortedTracksChange) {
+            onSortedTracksChange(sortedTracks);
+        }
+    }, [sortedTracks, onSortedTracksChange]);
 
     const toggleColumn = (colId) => {
         setVisibleColumns(prev => {
@@ -318,44 +324,115 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
 
             {/* Context Menu */}
             {contextMenu && (
-                <div
-                    className="fixed z-[100] bg-slate-950/90 border border-white/10 rounded-xl shadow-2xl min-w-[180px] animate-fade-in backdrop-blur-xl overflow-hidden"
-                    style={{ top: contextMenu.y, left: contextMenu.x }}
-                    onClick={(e) => e.stopPropagation()}
-                >
-                    <div className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-white/5 truncate max-w-[200px]">
-                        {contextMenu.track.Title}
-                    </div>
-                    <button
-                        onClick={() => { onEditTrack && onEditTrack(contextMenu.track); setContextMenu(null); }}
-                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-cyan-500/10 text-xs text-slate-200 hover:text-cyan-400 transition-colors text-left"
-                    >
-                        <Scissors size={14} /> Open in Waveform Editor
-                    </button>
-                    <button
-                        onClick={() => { openSoundCloud(contextMenu.track); setContextMenu(null); }}
-                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[#ff5500]/10 text-xs text-slate-200 hover:text-[#ff5500] transition-colors text-left"
-                    >
-                        <div className="w-3.5 h-3.5 bg-current mask-soundcloud" style={{ maskImage: 'url(https://a-v2.sndcdn.com/assets/images/sc-icons/ios-a62dfc8f.svg)', WebkitMaskImage: 'url(https://a-v2.sndcdn.com/assets/images/sc-icons/ios-a62dfc8f.svg)' }}></div>
-                        Open in SoundCloud
-                    </button>
-                    {onDelete && (
-                        <button
-                            onClick={() => {
-                                if (window.confirm(`Are you sure you want to PERMANENTLY delete "${contextMenu.track.Title}" from the library?`)) {
-                                    onDelete(contextMenu.track.id || contextMenu.track.ID);
-                                }
-                                setContextMenu(null);
-                            }}
-                            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-red-500/10 text-xs text-slate-200 hover:text-red-400 transition-colors text-left border-t border-white/5"
-                        >
-                            <Trash2 size={14} /> Delete from Collection
-                        </button>
-                    )}
-                </div>
+                <TrackContextMenuPopup
+                    contextMenu={contextMenu}
+                    onEditTrack={onEditTrack}
+                    openSoundCloud={openSoundCloud}
+                    onRemove={onRemove}
+                    onDelete={onDelete}
+                    onAddToPlaylist={onAddToPlaylist}
+                    availablePlaylists={availablePlaylists}
+                    setContextMenu={setContextMenu}
+                />
             )
             }
         </div >
+    );
+};
+
+const TrackContextMenuPopup = ({ contextMenu, onEditTrack, openSoundCloud, onRemove, onDelete, onAddToPlaylist, availablePlaylists, setContextMenu }) => {
+    const [showAddSubmenu, setShowAddSubmenu] = useState(false);
+
+    return (
+        <div
+            className="fixed z-[100] bg-slate-950/90 border border-white/10 rounded-xl shadow-2xl min-w-[200px] animate-fade-in backdrop-blur-xl overflow-visible"
+            style={{ top: contextMenu.y, left: contextMenu.x }}
+            onClick={(e) => e.stopPropagation()}
+        >
+            <div className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-white/5 truncate max-w-[220px]">
+                {contextMenu.track.Title}
+            </div>
+            <button
+                onClick={() => { onEditTrack && onEditTrack(contextMenu.track); setContextMenu(null); }}
+                className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-cyan-500/10 text-xs text-slate-200 hover:text-cyan-400 transition-colors text-left"
+            >
+                <Scissors size={14} /> Open in Waveform Editor
+            </button>
+            <button
+                onClick={() => { openSoundCloud(contextMenu.track); setContextMenu(null); }}
+                className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[#ff5500]/10 text-xs text-slate-200 hover:text-[#ff5500] transition-colors text-left"
+            >
+                <div className="w-3.5 h-3.5 bg-current mask-soundcloud" style={{ maskImage: 'url(https://a-v2.sndcdn.com/assets/images/sc-icons/ios-a62dfc8f.svg)', WebkitMaskImage: 'url(https://a-v2.sndcdn.com/assets/images/sc-icons/ios-a62dfc8f.svg)' }}></div>
+                Open in SoundCloud
+            </button>
+
+            {/* Add to Playlist */}
+            {onAddToPlaylist && availablePlaylists.length > 0 && (
+                <>
+                    <div className="h-px bg-white/5" />
+                    <div className="relative"
+                        onMouseEnter={() => setShowAddSubmenu(true)}
+                        onMouseLeave={() => setShowAddSubmenu(false)}
+                    >
+                        <button className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-green-500/10 text-xs text-slate-200 hover:text-green-400 transition-colors text-left">
+                            <Plus size={14} className="text-green-400" /> Add to Playlist
+                            <ChevronRight size={12} className="ml-auto text-slate-600" />
+                        </button>
+                        {showAddSubmenu && (
+                            <div className="absolute left-full top-0 ml-1 bg-slate-950/95 border border-white/10 rounded-xl shadow-2xl py-1 min-w-[180px] max-h-[300px] overflow-y-auto backdrop-blur-xl z-[110]">
+                                {availablePlaylists.map(pl => (
+                                    <button
+                                        key={pl.ID}
+                                        onClick={() => {
+                                            onAddToPlaylist(pl.ID, contextMenu.track.id || contextMenu.track.ID);
+                                            setContextMenu(null);
+                                        }}
+                                        className="w-full flex items-center gap-2 px-4 py-1.5 hover:bg-white/5 text-xs text-slate-300 transition-colors truncate"
+                                    >
+                                        <ListMusic size={12} className="text-cyan-500/50 shrink-0" />
+                                        <span className="truncate">{pl.Name}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </>
+            )}
+
+            {/* Remove from Playlist */}
+            {onRemove && (
+                <>
+                    <div className="h-px bg-white/5" />
+                    <button
+                        onClick={() => {
+                            onRemove(contextMenu.track.id || contextMenu.track.ID);
+                            setContextMenu(null);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-orange-500/10 text-xs text-slate-200 hover:text-orange-400 transition-colors text-left"
+                    >
+                        <X size={14} /> Remove from Playlist
+                    </button>
+                </>
+            )}
+
+            {/* Delete from Collection */}
+            {onDelete && (
+                <>
+                    <div className="h-px bg-white/5" />
+                    <button
+                        onClick={() => {
+                            if (window.confirm(`Are you sure you want to PERMANENTLY delete "${contextMenu.track.Title}" from the library?`)) {
+                                onDelete(contextMenu.track.id || contextMenu.track.ID);
+                            }
+                            setContextMenu(null);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-red-500/10 text-xs text-slate-200 hover:text-red-400 transition-colors text-left"
+                    >
+                        <Trash2 size={14} /> Delete from Collection
+                    </button>
+                </>
+            )}
+        </div>
     );
 };
 

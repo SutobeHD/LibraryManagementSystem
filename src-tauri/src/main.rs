@@ -3,8 +3,8 @@
 
 mod soundcloud_client;
 
-use tauri_plugin_shell::ShellExt;
-use tauri_plugin_shell::process::CommandEvent;
+// use tauri_plugin_shell::ShellExt;
+// use tauri_plugin_shell::process::CommandEvent;
 use serde::Deserialize;
 use soundcloud_client::Track;
 use tauri::{Emitter, Manager};
@@ -19,6 +19,39 @@ fn close_splashscreen(window: tauri::Window) {
     if let Some(main) = window.get_webview_window("main") {
         let _ = main.show();
     }
+}
+
+#[tauri::command]
+async fn login_to_soundcloud(app: tauri::AppHandle) -> Result<String, String> {
+    // Step 1: Generate auth URL with PKCE
+    let (auth_url, code_verifier) = soundcloud_client::get_auth_url()
+        .map_err(|e| format!("Configuration error: {}", e))?;
+    println!("[SoundCloud] Opening browser for login...");
+    
+    // Emit event: auth started
+    let _ = app.emit("sc-login-progress", serde_json::json!({ "stage": "auth", "message": "Opening browser for login..." }));
+    
+    if let Err(e) = open::that(&auth_url) {
+        return Err(format!("Could not open browser: {}", e));
+    }
+
+    // Step 2: Wait for OAuth callback
+    let _ = app.emit("sc-login-progress", serde_json::json!({ "stage": "auth", "message": "Waiting for authorization..." }));
+    let code = tokio::task::spawn_blocking(soundcloud_client::wait_for_callback)
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+        .map_err(|e| format!("Callback error: {}", e))?;
+
+    // Step 3: Exchange code for access token
+    let _ = app.emit("sc-login-progress", serde_json::json!({ "stage": "auth", "message": "Exchanging code for token..." }));
+    let token = soundcloud_client::exchange_code_for_token(&code, &code_verifier)
+        .await
+        .map_err(|e| format!("Token exchange failed: {}", e))?;
+    
+    println!("[SoundCloud] ✓ Authorization successful.");
+    let _ = app.emit("sc-login-progress", serde_json::json!({ "stage": "done", "message": "Authorization successful." }));
+    
+    Ok(token)
 }
 
 #[derive(Deserialize)]
@@ -40,7 +73,8 @@ async fn export_to_soundcloud(app: tauri::AppHandle, playlist_name: String, trac
         .collect();
 
     // Step 1: Generate auth URL with PKCE
-    let (auth_url, code_verifier) = soundcloud_client::get_auth_url();
+    let (auth_url, code_verifier) = soundcloud_client::get_auth_url()
+        .map_err(|e| format!("Configuration error: {}", e))?;
     println!("[SoundCloud] Opening browser for login...");
     
     // Emit event: auth started
@@ -84,9 +118,15 @@ async fn export_to_soundcloud(app: tauri::AppHandle, playlist_name: String, trac
 }
 
 fn main() {
+    // Robust .env loading: search in current and parent dirs
+    match dotenvy::dotenv() {
+        Ok(path) => println!("[RB Editor] Found .env at: {:?}", path),
+        Err(_) => println!("[RB Editor] No .env file found. Using system environment variables."),
+    }
+    
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![close_splashscreen, export_to_soundcloud])
+        .invoke_handler(tauri::generate_handler![close_splashscreen, login_to_soundcloud, export_to_soundcloud])
         .setup(|app| {
             #[cfg(not(debug_assertions))]
             {

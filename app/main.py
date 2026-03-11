@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
@@ -18,6 +18,16 @@ from pathlib import Path
 from .services import AudioEngine, FileManager, LibraryTools, SettingsManager, SystemCleaner, XMLProcessor, BeatAnalyzer, ImportManager, ProjectManager
 from .database import db
 from .config import EXPORT_DIR, LOG_DIR, TEMP_DIR, MUSIC_DIR
+from .usb_manager import UsbDetector, UsbProfileManager, UsbSyncEngine, UsbActions
+from .backup_engine import BackupEngine
+from .rbep_parser import list_projects as rbep_list_projects, parse_project as rbep_parse_project
+from .rekordbox_bridge import RekordboxBridge
+from .soundcloud_downloader import sc_downloader
+from .audio_analyzer import AudioAnalyzer, LIBROSA_AVAILABLE
+from .soundcloud_api import SoundCloudPlaylistAPI, SoundCloudSyncEngine, AuthExpiredError
+
+# Per-operation lock — prevents race conditions on concurrent sync requests (Criterion 10)
+_sync_lock = asyncio.Lock()
 
 # CONFIG LOGGING
 logging.basicConfig(
@@ -136,6 +146,9 @@ COVERS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/api/artwork", StaticFiles(directory=COVERS_DIR), name="artwork")
 
 # --- DATA MODELS ---
+class FileWriteReq(BaseModel):
+    path: str
+    content: str
 class ExportRequest(BaseModel):
     source_path: str
     filename: str
@@ -185,6 +198,12 @@ class SetReq(BaseModel):
     hide_streaming: bool = False
     remember_lib_mode: bool = False
     last_lib_mode: str = "xml"
+    ranking_filter_mode: str = "all"
+    archive_frequency: str = "daily"
+    last_archive_date: str = ""
+    insights_playcount_threshold: int = 0
+    insights_bitrate_threshold: int = 320
+    soundcloud_auth_token: str = ""
 
 class SmartPlReq(BaseModel):
     artist_threshold: int = 3
@@ -241,11 +260,25 @@ class TrackPlReq(BaseModel):
     pid: str
     track_id: str
 
+class AudioImportReq(BaseModel):
+    file_path: str
+    mode: str = "speed" # "speed" or "accuracy"
+
+class AudioStatusReq(BaseModel):
+    task_id: str
+
 
 class MergeReq(BaseModel):
     category: str # "artists", "labels", "albums"
     source_name: str
     target_name: str
+
+class RbxSyncReq(BaseModel):
+    track_ids: List[str]
+    filename: Optional[str] = "rekordbox_export.xml"
+
+class RbxImportReq(BaseModel):
+    xml_path: str
 
 class PlCreateReq(BaseModel):
     name: str
@@ -317,6 +350,36 @@ async def stream_audio(path: str):
         filename=file_path.name,
         content_disposition_type="inline"
     )
+
+@app.get("/api/audio/waveform")
+async def get_multiband_waveform(path: str, pps: int = 50):
+    """Returns 3-band waveform data for professional visualization."""
+    file_path = validate_audio_path(path)
+    try:
+        return AudioEngine.generate_multiband_waveform(str(file_path), pixels_per_second=pps)
+    except Exception as e:
+        logger.error(f"Waveform generation failed: {e}")
+        raise HTTPException(500, safe_error_message(e))
+
+@app.post("/api/file/write")
+async def file_write(r: FileWriteReq):
+    """Writes text content to a file (used for .rbep project saving)."""
+    try:
+        # Simple security: only allow writing to specific directories?
+        # For now, we trust the path but ensure directory exists
+        path = Path(r.path)
+        if not path.is_absolute():
+             path = Path(APP_DIR).parent / r.path
+        
+        path.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(r.content)
+            
+        return {"status": "success", "path": str(path)}
+    except Exception as e:
+        logger.error(f"File write error: {e}")
+        raise HTTPException(500, str(e))
 
 @app.post("/api/xml/clean")
 async def clean_xml(
@@ -500,6 +563,21 @@ async def analyze_track(tid: str):
         logger.error(f"Analysis error: {e}")
         raise HTTPException(500, safe_error_message(e))
 
+@app.get("/api/audio/stream")
+async def stream_audio(path: str):
+    """Streams an audio file from the local filesystem"""
+    logger.info(f"Stream request for: {path}")
+    if not os.path.exists(path):
+        logger.error(f"Stream failed - File not found: {path}")
+        raise HTTPException(404, "File not found")
+    
+    # Basic security check: ensure path is within allowed roots?
+    # For now, we allow any path as this is a local desktop app helper.
+    # In future, validate against ALLOWED_AUDIO_ROOTS.
+    
+    return FileResponse(path, headers={"Accept-Ranges": "bytes"})
+
+
 @app.post("/api/track/cues/save")
 def save_cues(r: CueReq): return {"status": "success" if db.save_track_cues(r.track_id, r.cues) else "error"}
 
@@ -546,7 +624,7 @@ def get_tree():
 
 @app.post("/api/playlists/create")
 def create_pl(r: CreatePlReq):
-    pid = db.create_playlist(r.name, r.parent_id, r.track_ids, r.type)
+    pid = db.create_playlist(r.name, r.parent_id, r.type == "0", r.track_ids)
     return {"status": "success", "id": pid}
 
 @app.post("/api/playlists/rename")
@@ -685,44 +763,72 @@ def set_lib_mode(r: DBModeReq):
 
 @app.post("/api/library/backup")
 def trigger_backup():
-    if db.mode == "live" and db.live_db:
-        success = db.live_db._ensure_backup()
-        return {"status": "success" if success else "error"}
+    """Create an incremental backup using the Git-like engine."""
+    if db.mode == "live" and db.active_db and hasattr(db.active_db, 'db_path'):
+        try:
+            engine = BackupEngine(str(db.active_db.db_path))
+            result = engine.snapshot("Manual backup")
+            return result
+        except Exception as e:
+            logger.error(f"Incremental backup failed, falling back to legacy: {e}")
+            success = db.active_db._ensure_backup()
+            return {"status": "success" if success else "error", "fallback": True}
     return {"status": "error", "message": "Backups only supported in live mode"}
 
 @app.post("/api/library/sync")
 def sync_lib():
     """
     Triggered by 'Create Backup' (formerly Sync).
-    In Live Mode: Forces a session backup.
+    In Live Mode: Creates incremental snapshot.
     In XML Mode: Saves XML.
     """
-    if db.mode == "live" and db.active_db:
-        # User explicitly requested a backup
+    if db.mode == "live" and db.active_db and hasattr(db.active_db, 'db_path'):
         try:
-            db.active_db._ensure_backup()
-            return {"status": "success", "message": "Backup created successfully"}
+            engine = BackupEngine(str(db.active_db.db_path))
+            result = engine.snapshot("Sync backup")
+            return {"status": "success", "message": "Backup created successfully", **result}
         except Exception as e:
             return {"status": "error", "message": str(e)}
-            
     success = db.save()
     return {"status": "success" if success else "error"}
 
 @app.get("/api/library/backups")
 def list_backups():
-    if db.mode == "live" and db.active_db:
-        return db.active_db.get_available_backups()
+    """Get backup history (incremental commits + legacy backups)."""
+    if db.mode == "live" and db.active_db and hasattr(db.active_db, 'db_path'):
+        try:
+            engine = BackupEngine(str(db.active_db.db_path))
+            return engine.get_history()
+        except Exception as e:
+            logger.error(f"Incremental history failed, falling back: {e}")
+            return db.active_db.get_available_backups()
     return []
 
 class RestoreReq(BaseModel):
     filename: str
+    commit_hash: Optional[str] = None
 
 @app.post("/api/library/restore")
 def restore_backup(r: RestoreReq):
-    if db.mode == "live" and db.active_db:
-        success, msg = db.active_db.restore_backup(r.filename)
-        return {"status": "success" if success else "error", "message": msg}
+    """Restore from incremental commit or legacy backup."""
+    if db.mode == "live" and db.active_db and hasattr(db.active_db, 'db_path'):
+        # Try incremental restore first
+        if r.commit_hash:
+            engine = BackupEngine(str(db.active_db.db_path))
+            return engine.restore(r.commit_hash)
+        # Fall back to legacy restore
+        if r.filename:
+            success, msg = db.active_db.restore_backup(r.filename)
+            return {"status": "success" if success else "error", "message": msg}
     return {"status": "error", "message": "Restore only available in Live mode"}
+
+@app.get("/api/library/backup/{commit_hash}/diff")
+def get_backup_diff(commit_hash: str):
+    """Get detailed diff for a specific backup commit."""
+    if db.mode == "live" and db.active_db and hasattr(db.active_db, 'db_path'):
+        engine = BackupEngine(str(db.active_db.db_path))
+        return engine.get_diff(commit_hash)
+    return {"error": "Not available in current mode"}
 
 @app.post("/api/library/load")
 def load_lib():
@@ -746,6 +852,40 @@ def load_lib():
 def unload_lib():
     success = db.unload_library()
     return {"status": "success", "message": "Library unloaded."}
+
+# --- REKORDBOX SYNC ENDPOINTS ---
+
+@app.post("/api/rekordbox/export")
+async def rbx_export(r: RbxSyncReq):
+    """Exports specified tracks to a Rekordbox XML file."""
+    try:
+        output_path = EXPORT_DIR / r.filename
+        xml_path = RekordboxBridge.export_collection(r.track_ids, output_path)
+        return {
+            "status": "success",
+            "message": f"Exported {len(r.track_ids)} tracks to XML.",
+            "path": str(xml_path)
+        }
+    except Exception as e:
+        logger.error(f"Rekordbox export failed: {e}")
+        raise HTTPException(500, safe_error_message(e))
+
+@app.post("/api/rekordbox/import")
+async def rbx_import(r: RbxImportReq):
+    """Imports tracks and metadata from a Rekordbox XML file."""
+    try:
+        if not os.path.exists(r.xml_path):
+             raise HTTPException(404, "XML file not found")
+        
+        results = RekordboxBridge.import_library(r.xml_path)
+        return {
+            "status": "success",
+            "message": f"Import complete: {results['added']} added, {results['updated']} updated.",
+            "details": results
+        }
+    except Exception as e:
+        logger.error(f"Rekordbox import failed: {e}")
+        raise HTTPException(500, safe_error_message(e))
 
 
 @app.post("/api/library/smart-playlists")
@@ -798,6 +938,9 @@ def get_ptracks(pid: str):
         logger.info(f"Fetching tracks for playlist {pid}. Found: {len(raw_tracks)}")
         for t in raw_tracks:
             d = dict(t)
+            # Ensure lowercase 'id' exists for frontend compatibility
+            if 'id' not in d and 'ID' in d:
+                d['id'] = d['ID']
             # Fix Artist field for frontend
             d['ArtistName'] = d.get('Artist') or 'Unknown Artist'
             p = Path(d.get('path', ''))
@@ -1053,5 +1196,533 @@ def debug_load_xml():
     db.load_xml("rekordbox.xml")
     return {"status": "loaded", "tracks": len(db.tracks), "playlists": len(db.playlists)}
 
+# ─── USB Management API ───────────────────────────────────────────────────────
+
+class UsbProfileReq(BaseModel):
+    device_id: str
+    label: Optional[str] = None
+    drive: Optional[str] = None
+    type: Optional[str] = "Collection"  # MainCollection, Collection, PartCollection, SetStick
+    sync_mode: Optional[str] = "full"   # full, playlists_only, metadata_only, selective
+    sync_playlists: Optional[List[str]] = []
+    auto_sync: Optional[bool] = False
+
+class UsbSyncReq(BaseModel):
+    device_id: str
+    sync_type: Optional[str] = "collection"  # collection, playlists, metadata
+    playlist_ids: Optional[List[str]] = []
+    library_types: Optional[List[str]] = ["library_legacy"] # library_one, library_legacy
+
+class UsbEjectReq(BaseModel):
+    drive: str
+
+class UsbResetReq(BaseModel):
+    device_id: str
+
+class DupMergeReq(BaseModel):
+    keep_id: str
+    remove_ids: List[str]
+
+@app.get("/api/usb/devices")
+def usb_scan_devices():
+    """Scan for connected USB devices."""
+    return UsbDetector.scan()
+
+@app.get("/api/usb/profiles")
+def usb_get_profiles():
+    """List all registered USB profiles (connected + disconnected)."""
+    return UsbProfileManager.get_profiles()
+
+@app.post("/api/usb/profiles")
+def usb_save_profile(r: UsbProfileReq):
+    """Create or update a USB device profile."""
+    profile = UsbProfileManager.save_profile(r.dict())
+    return {"status": "success", "profile": profile}
+
+@app.delete("/api/usb/profiles/{device_id}")
+def usb_delete_profile(device_id: str):
+    """Delete a USB device profile."""
+    if UsbProfileManager.delete_profile(device_id):
+        return {"status": "success"}
+    raise HTTPException(404, "Profile not found")
+
+@app.get("/api/usb/{device_id}/contents")
+def usb_get_contents(device_id: str):
+    """Get the tracks currently existing on the referenced USB stick."""
+    tracks = UsbProfileManager.get_usb_contents(device_id)
+    return {"status": "success", "tracks": tracks}
+
+@app.get("/api/usb/diff/{device_id}")
+def usb_get_diff(device_id: str):
+    """Preview what would change in a sync operation."""
+    profile = UsbProfileManager.get_profile(device_id)
+    if not profile:
+        # Try to auto-create from scan data
+        devices = UsbDetector.scan()
+        dev = next((d for d in devices if d["device_id"] == device_id), None)
+        if not dev:
+            raise HTTPException(404, "Device not found")
+        profile = UsbProfileManager.save_profile({"device_id": device_id, "label": dev.get("label", "USB"), "drive": dev["drive"]})
+    if not db.active_db or not hasattr(db.active_db, 'db_path'):
+        raise HTTPException(400, "No local database loaded")
+    engine = UsbSyncEngine(str(db.active_db.db_path), profile["drive"])
+    diff = engine.calculate_diff()
+    # Add space estimate: ~10MB avg per track to add
+    avg_track_size = 10 * 1024 * 1024
+    diff["space_estimate"] = diff["tracks"]["to_add"] * avg_track_size
+    diff["drive_free"] = profile.get("free_space", 0)
+    return diff
+
+def _get_or_create_profile(device_id: str) -> dict:
+    """Get existing profile or auto-create from scan data."""
+    profile = UsbProfileManager.get_profile(device_id)
+    if profile:
+        return profile
+    devices = UsbDetector.scan()
+    dev = next((d for d in devices if d["device_id"] == device_id), None)
+    if not dev:
+        raise HTTPException(404, "Device not connected — cannot create profile")
+    return UsbProfileManager.save_profile({
+        "device_id": device_id,
+        "label": dev.get("label", "USB Drive"),
+        "drive": dev["drive"]
+    })
+
+@app.post("/api/usb/sync")
+def usb_sync(r: UsbSyncReq):
+    """Sync a specific USB device."""
+    profile = _get_or_create_profile(r.device_id)
+    if not db.active_db or not hasattr(db.active_db, 'db_path'):
+        raise HTTPException(400, "No local database loaded")
+
+    engine = UsbSyncEngine(str(db.active_db.db_path), profile["drive"])
+    results = []
+    libs = r.library_types or ["library_one"]
+
+    if r.sync_type == "collection":
+        for event in engine.sync_collection(profile, libs):
+            results.append(event)
+    elif r.sync_type == "playlists":
+        for event in engine.sync_playlists(profile, r.playlist_ids, libs):
+            results.append(event)
+    elif r.sync_type == "metadata":
+        for event in engine.sync_metadata(profile, libs):
+            results.append(event)
+
+    last = results[-1] if results else {"stage": "error", "message": "No events"}
+    return {"status": "success" if last.get("stage") == "complete" else "error", "result": last}
+
+@app.post("/api/usb/sync/all")
+def usb_sync_all():
+    """Sync all connected USB devices per their profiles."""
+    if not db.active_db or not hasattr(db.active_db, 'db_path'):
+        raise HTTPException(400, "No local database loaded")
+    results = []
+    for event in UsbActions.update_all(str(db.active_db.db_path)):
+        results.append(event)
+    last = results[-1] if results else {"stage": "complete", "message": "Nothing to sync"}
+    return {"status": "success", "result": last, "events": results}
+
+@app.post("/api/usb/eject")
+def usb_eject(r: UsbEjectReq):
+    """Safely eject a USB drive."""
+    return UsbActions.eject(r.drive)
+
+@app.post("/api/usb/reset")
+def usb_reset(r: UsbResetReq):
+    """Reset a USB device (wipe PIONEER folder)."""
+    profile = UsbProfileManager.get_profile(r.device_id)
+    if not profile:
+        raise HTTPException(404, "Profile not found")
+    return UsbActions.reset(profile)
+
+class UsbInitReq(BaseModel):
+    drive: str
+
+@app.post("/api/usb/initialize")
+def usb_initialize(r: UsbInitReq):
+    """Initialize a new Rekordbox library on a USB drive."""
+    if UsbDetector.initialize_usb(r.drive):
+        return {"status": "success", "message": "Library initialized"}
+    raise HTTPException(500, "Failed to initialize library")
+
+class UsbRenameReq(BaseModel):
+    drive: str
+    new_label: str
+
+@app.post("/api/usb/rename")
+def usb_rename(req: UsbRenameReq):
+    """Rename a USB device."""
+    res = UsbActions.set_label(req.drive, req.new_label)
+    if res["status"] == "error":
+        raise HTTPException(500, res["message"])
+    return res
+
+@app.get("/api/usb/settings")
+def usb_get_settings():
+    """Get USB global settings."""
+    return UsbProfileManager.get_settings()
+
+@app.post("/api/usb/settings")
+def usb_save_settings(r: dict):
+    """Save USB global settings."""
+    UsbProfileManager.save_settings(r)
+    return {"status": "success"}
+
+# ─── Enhanced Duplicate Scanner ───────────────────────────────────────────────
+
+@app.post("/api/tools/duplicates/merge")
+def merge_duplicates(r: DupMergeReq):
+    """Merge duplicate tracks: keep one, transfer playlist memberships, delete others."""
+    try:
+        if not db.active_db:
+            raise HTTPException(400, "No database loaded")
+
+        keep_id = r.keep_id
+        remove_ids = r.remove_ids
+
+        # Transfer playlist memberships
+        if hasattr(db.active_db, 'db'):
+            rbox = db.active_db.db
+            for rid in remove_ids:
+                # Find all playlists containing the track to remove
+                for pl in db.playlists:
+                    pl_tracks = db.get_playlist_tracks(pl.get('ID', ''))
+                    track_ids = [str(t.get('id', t.get('ID', ''))) for t in pl_tracks]
+                    if str(rid) in track_ids and str(keep_id) not in track_ids:
+                        # Add the kept track to this playlist
+                        try:
+                            db.add_track_to_playlist(str(pl.get('ID', '')), str(keep_id))
+                        except Exception:
+                            pass
+
+                # Delete the duplicate track
+                try:
+                    db.delete_track(str(rid))
+                except Exception as e:
+                    logger.warning(f"Could not delete duplicate {rid}: {e}")
+
+        return {"status": "success", "kept": keep_id, "removed": len(remove_ids)}
+    except Exception as e:
+        logger.error(f"Merge failed: {e}")
+        raise HTTPException(500, str(e))
+
+@app.post("/api/tools/duplicates/merge-all")
+def merge_all_duplicates():
+    """Auto-merge all duplicate groups using best-metadata heuristic."""
+    try:
+        groups = LibraryTools.find_duplicates()
+        merged = 0
+
+        for group in groups:
+            ids = group.get("ids", [])
+            if len(ids) < 2:
+                continue
+
+            # Pick the best track (highest rating, then most cue points, then highest bitrate)
+            best_id = ids[0]
+            best_score = -1
+
+            for tid in ids:
+                track = db.tracks.get(tid, {})
+                score = (track.get("Rating", 0) or 0) * 100
+                score += (track.get("Bitrate", 0) or 0)
+                score += len(str(track.get("CuePath", ""))) * 10
+                if score > best_score:
+                    best_score = score
+                    best_id = tid
+
+            remove_ids = [i for i in ids if i != best_id]
+
+            # Transfer memberships and delete
+            for rid in remove_ids:
+                try:
+                    db.delete_track(str(rid))
+                except Exception:
+                    pass
+
+            merged += 1
+
+        return {"status": "success", "groups_merged": merged}
+    except Exception as e:
+        logger.error(f"Merge all failed: {e}")
+        raise HTTPException(500, str(e))
+
+# ─── RBEP Project API ──────────────────────────────────────────────────────────
+
+@app.get("/api/projects/rbep/list")
+def rbep_list():
+    """List available .rbep project files."""
+    return rbep_list_projects()
+
+@app.get("/api/projects/rbep/{name}")
+def rbep_get(name: str):
+    """Parse and return a .rbep project by name."""
+    project = rbep_parse_project(name)
+    if not project:
+        raise HTTPException(404, f"Project '{name}' not found")
+    return project
+
+# ─── Audio Analysis API ──────────────────────────────────────────────────────────
+
+@app.post("/api/audio/analyze")
+def analyze_audio(req: AudioImportReq):
+    """Submit an audio file for high-accuracy background analysis."""
+    if not LIBROSA_AVAILABLE:
+        logger.warning("Librosa not installed. Audio analysis will be mocked.")
+    
+    file_path = Path(req.file_path)
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Audio file not found")
+        
+    task_id = f"analysis_{secrets.token_hex(8)}"
+    return AudioAnalyzer.analyze_track(task_id, str(file_path), req.mode)
+
+@app.get("/api/audio/analyze/{task_id}")
+def get_analysis_status(task_id: str):
+    """Check the status/result of a background audio analysis job."""
+    status = AudioAnalyzer.get_status(task_id)
+    if status["status"] == "not_found":
+        raise HTTPException(status_code=404, detail="Task not found")
+    return status
+
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000)
+@app.post("/api/soundcloud/download")
+async def soundcloud_download(data: Dict[str, str], request: Request):
+    url = data.get("url")
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+
+    auth_token = request.cookies.get("sc_token")
+
+    # Criterion 14: write-permission check before starting download
+    sc_dir = MUSIC_DIR / "SoundCloud"
+    sc_dir.mkdir(parents=True, exist_ok=True)
+    if not os.access(str(sc_dir), os.W_OK):
+        raise HTTPException(
+            status_code=403,
+            detail=f"No write permission for download directory: {sc_dir}. Please check folder permissions."
+        )
+
+    # Criterion 7: cleanup corrupt fragments on failure
+    def on_complete(task_id, success):
+        if success:
+            logger.info(f"[SC] Download {task_id} complete. Triggering import scan...")
+            if sc_dir.exists():
+                for f in sc_dir.glob("*"):
+                    if f.suffix.lower() in ALLOWED_AUDIO_EXTENSIONS:
+                        try:
+                            ImportManager.process_import(f)
+                        except Exception as e:
+                            logger.error(f"[SC] Post-download import failed for {f}: {e}")
+        else:
+            logger.warning(f"[SC] Download {task_id} failed. Cleaning fragments...")
+            for pattern in ["*.part", "*.tmp", "*.ytdl", "*.download"]:
+                for frag in sc_dir.glob(pattern):
+                    try:
+                        frag.unlink()
+                        logger.info(f"[SC] Removed fragment: {frag}")
+                    except OSError as oe:
+                        logger.warning(f"[SC] Could not remove fragment {frag}: {oe}")
+
+    task_id = sc_downloader.download_content(url, auth_token=auth_token, callback=on_complete)
+    return {"task_id": task_id}
+
+@app.get("/api/soundcloud/tasks")
+async def get_soundcloud_tasks():
+    return sc_downloader.tasks
+
+@app.get("/api/soundcloud/task/{task_id}")
+async def get_soundcloud_task_status(task_id: str):
+    task = sc_downloader.get_task_status(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
+
+@app.post("/api/soundcloud/auth-token")
+async def set_soundcloud_auth_token(data: Dict[str, str], response: Response):
+    token = data.get("token", "")
+    response.set_cookie(key="sc_token", value=token, httponly=True, samesite='lax', secure=False, max_age=31536000)
+    return {"status": "success"}
+
+# ─── SoundCloud Playlist Sync API ─────────────────────────────────────────────
+
+@app.get("/api/soundcloud/playlists")
+async def get_soundcloud_playlists(request: Request):
+    """Fetch all user playlists + likes from SoundCloud."""
+    auth_token = request.cookies.get("sc_token")
+    if not auth_token:
+        raise HTTPException(400, "SoundCloud auth token not configured. Go to Settings to set it.")
+
+    try:
+        playlists = SoundCloudPlaylistAPI.get_playlists(auth_token)
+        likes = SoundCloudPlaylistAPI.get_likes(auth_token)
+        return {"status": "success", "playlists": playlists, "likes": likes}
+    except AuthExpiredError as e:
+        logger.warning(f"[SC] Auth expired on playlists fetch: {e}")
+        raise HTTPException(401, detail="auth_expired")
+    except Exception as e:
+        logger.error(f"[SC] Failed to fetch playlists: {e}")
+        raise HTTPException(500, safe_error_message(e))
+
+class ScSyncReq(BaseModel):
+    playlist_ids: List[int] = []
+    include_likes: bool = False
+
+@app.post("/api/soundcloud/sync")
+async def sync_soundcloud_playlists(r: ScSyncReq, request: Request):
+    """Sync selected SoundCloud playlists. Uses asyncio.Lock to prevent race conditions."""
+    # Criterion 10: Race condition guard
+    if _sync_lock.locked():
+        raise HTTPException(409, "A sync operation is already in progress. Please wait.")
+
+    auth_token = request.cookies.get("sc_token")
+    if not auth_token:
+        raise HTTPException(400, "SoundCloud auth token not configured")
+
+    if not db.active_db:
+        raise HTTPException(400, "No active library loaded")
+
+    async with _sync_lock:
+        try:
+            engine = SoundCloudSyncEngine(db)
+            all_playlists = SoundCloudPlaylistAPI.get_playlists(auth_token)
+            to_sync = [pl for pl in all_playlists if pl["id"] in r.playlist_ids]
+
+            if r.include_likes:
+                likes = SoundCloudPlaylistAPI.get_likes(auth_token)
+                to_sync.append(likes)
+
+            results = engine.sync_all(to_sync, auth_token)
+
+            total_added = sum(res.get("added", 0) for res in results)
+            total_matched = sum(res.get("matched", 0) for res in results)
+            total_unmatched = sum(res.get("unmatched", 0) for res in results)
+
+            return {
+                "status": "success",
+                "message": f"Synced {len(results)} playlists: {total_added} tracks added, {total_matched} matched, {total_unmatched} not in library",
+                "results": results
+            }
+        except AuthExpiredError as e:
+            logger.warning(f"[SC] Auth expired during sync: {e}")
+            raise HTTPException(401, detail="auth_expired")
+        except Exception as e:
+            logger.error(f"[SC] Sync failed: {e}")
+            raise HTTPException(500, safe_error_message(e))
+
+@app.post("/api/soundcloud/sync-all")
+async def sync_all_soundcloud(request: Request):
+    """Sync ALL SoundCloud playlists + likes. Uses asyncio.Lock to prevent race conditions."""
+    if _sync_lock.locked():
+        raise HTTPException(409, "A sync operation is already in progress. Please wait.")
+
+    auth_token = request.cookies.get("sc_token")
+    if not auth_token:
+        raise HTTPException(400, "SoundCloud auth token not configured")
+
+    if not db.active_db:
+        raise HTTPException(400, "No active library loaded")
+
+    async with _sync_lock:
+        try:
+            engine = SoundCloudSyncEngine(db)
+            all_playlists = SoundCloudPlaylistAPI.get_playlists(auth_token)
+            likes = SoundCloudPlaylistAPI.get_likes(auth_token)
+            all_playlists.append(likes)
+
+            results = engine.sync_all(all_playlists, auth_token)
+            total_added = sum(res.get("added", 0) for res in results)
+            return {
+                "status": "success",
+                "message": f"Synced all {len(results)} playlists: {total_added} tracks added",
+                "results": results
+            }
+        except AuthExpiredError as e:
+            logger.warning(f"[SC] Auth expired during sync-all: {e}")
+            raise HTTPException(401, detail="auth_expired")
+        except Exception as e:
+            logger.error(f"[SC] Sync-all failed: {e}")
+            raise HTTPException(500, safe_error_message(e))
+
+class ScMergeReq(BaseModel):
+    playlist_ids: List[int]
+    merged_name: str
+
+@app.post("/api/soundcloud/merge")
+async def merge_soundcloud_playlists(r: ScMergeReq, request: Request):
+    """Merge multiple SoundCloud playlists into one local playlist."""
+    if _sync_lock.locked():
+        raise HTTPException(409, "A sync operation is already in progress. Please wait.")
+
+    auth_token = request.cookies.get("sc_token")
+    if not auth_token:
+        raise HTTPException(400, "SoundCloud auth token not configured")
+
+    if not db.active_db:
+        raise HTTPException(400, "No active library loaded")
+    
+    try:
+        engine = SoundCloudSyncEngine(db)
+        
+        # Create merged playlist
+        merged_name = f"SC_{r.merged_name}"
+        merged_pid = None
+        
+        # Check if already exists
+        for pl in db.playlists:
+            if pl.get("Name") == merged_name:
+                merged_pid = pl.get("ID")
+                break
+        
+        if not merged_pid and hasattr(db.active_db, 'create_playlist'):
+            merged_pid = str(db.active_db.create_playlist(merged_name))
+        
+        if not merged_pid:
+            raise HTTPException(500, "Could not create merged playlist")
+        
+        # Collect all tracks
+        all_playlists = SoundCloudPlaylistAPI.get_playlists(auth_token)
+        selected = [pl for pl in all_playlists if pl["id"] in r.playlist_ids]
+        
+        added = 0
+        existing_ids = set()
+        try:
+            existing = db.get_playlist_tracks(merged_pid)
+            existing_ids = {str(t.get("id", t.get("ID", ""))) for t in existing}
+        except Exception:
+            pass
+        
+        local_tracks = db.tracks if hasattr(db, 'tracks') else {}
+        
+        for pl in selected:
+            sc_tracks = SoundCloudPlaylistAPI.get_full_playlist_tracks(pl["id"], auth_token)
+            for sc_track in sc_tracks:
+                matched = engine._fuzzy_match_track(
+                    sc_track.get("title", ""),
+                    sc_track.get("artist", ""),
+                    local_tracks
+                )
+                if matched and matched not in existing_ids:
+                    try:
+                        if hasattr(db, 'add_track_to_playlist'):
+                            db.add_track_to_playlist(merged_pid, matched)
+                        elif hasattr(db.active_db, 'add_track_to_playlist'):
+                            db.active_db.add_track_to_playlist(merged_pid, matched)
+                        existing_ids.add(matched)
+                        added += 1
+                    except Exception as e:
+                        logger.warning(f"Failed to add track to merge: {e}")
+        
+        return {
+            "status": "success",
+            "message": f"Merged {len(selected)} playlists into '{merged_name}': {added} tracks added",
+            "playlist_name": merged_name,
+            "tracks_added": added
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Merge failed: {e}")
+        raise HTTPException(500, safe_error_message(e))

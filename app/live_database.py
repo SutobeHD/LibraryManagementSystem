@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 import re
 import threading
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from collections import defaultdict
 import rbox
@@ -201,8 +202,11 @@ class LiveRekordboxDB:
             
             # 2. Load Playlists
             self._load_playlists()
+
+            # 3. Load Cues (Hot Cues & Memory Cues)
+            self._load_cues()
             
-            # 3. Finalize metadata for UI
+            # 4. Finalize metadata for UI
             self._finalize_ui_metadata()
             
             self.loaded = True
@@ -238,25 +242,30 @@ class LiveRekordboxDB:
         logger.info(f"Metadata maps cached. Artists: {len(self.artist_map)}, Genres: {len(self.genre_map)}")
 
     def _load_mytags(self):
-        self.tag_id_to_name = {}
-        self.track_to_tags = defaultdict(list)
-        try:
-            raw_tags = self.db.get_my_tags()
-            for t in raw_tags:
-                tid = str(t.id) if hasattr(t, 'id') else None
-                name = getattr(t, 'name', 'Unknown')
-                if tid: self.tag_id_to_name[tid] = name
-            
-            mappings = self.db.get_song_tag_lists()
-            for m in mappings:
-                cid = str(m.content_id) if hasattr(m, 'content_id') else None
-                tid = str(m.mytag_id) if hasattr(m, 'mytag_id') else None
-                if cid and tid and tid in self.tag_id_to_name:
-                    self.track_to_tags[cid].append(self.tag_id_to_name[tid])
-            
-            logger.info(f"MyTags loaded. Definitions: {len(self.tag_id_to_name)}, Mappings: {len(self.track_to_tags)}")
-        except Exception as e:
-            logger.error(f"Failed to load MyTags: {e}")
+            self.tag_id_to_name = {}
+            self.track_to_tags = defaultdict(list)
+            self.track_to_tag_ids = defaultdict(list)
+            try:
+                raw_tags = self.db.get_my_tags()
+                for t in raw_tags:
+                    tid = str(t.id) if hasattr(t, 'id') else None
+                    name = getattr(t, 'name', 'Unknown')
+                    if not tid: continue
+                    self.tag_id_to_name[tid] = name
+                    
+                    # Fetch contents for this specific tag
+                    try:
+                        tag_contents = self.db.get_my_tag_contents(tid)
+                        for content in tag_contents:
+                            cid = str(content.id)
+                            self.track_to_tags[cid].append(name)
+                            self.track_to_tag_ids[cid].append(tid)
+                    except Exception as tag_err:
+                        logger.warning(f"Failed to fetch contents for tag {name} ({tid}): {tag_err}")
+                
+                logger.info(f"MyTags loaded. Definitions: {len(self.tag_id_to_name)}, Mappings (tracks): {len(self.track_to_tag_ids)}")
+            except Exception as e:
+                logger.error(f"Failed to load MyTags: {e}")
 
     def _load_tracks(self):
         self.tracks = {}
@@ -284,6 +293,7 @@ class LiveRekordboxDB:
                 "Key": key,
                 "Genre": genre,
                 "Label": label,
+                "TagIDs": self.track_to_tag_ids.get(tid, []), # NEU: For smart filtering
                 "TotalTime": float(getattr(item, 'length', 0) or 0),
                 "Artwork": getattr(item, 'image_path', getattr(item, 'image_file_path', '')),
                 "Bitrate": int(getattr(item, 'bit_rate', 0) or 0),
@@ -298,13 +308,57 @@ class LiveRekordboxDB:
                 "ISRC": getattr(item, 'isrc', "")
             }
 
+    def _load_cues(self):
+        """Loads Hot Cues and Memory Cues (djmdSongCue) for all tracks."""
+        logger.info("Loading Cues (Hot Cues & Memory Points)...")
+        try:
+            # Check if get_cues is available (safe attribute check)
+            if not hasattr(self.db, 'get_cues'):
+                logger.warning("rbox.MasterDb does not support get_cues. Skipping cue load.")
+                return
+
+            all_cues = self.db.get_cues()
+            count = 0
+            
+            # Pre-load all content IDs for fast lookup
+            tracks_by_id = self.tracks
+            
+            for cue in all_cues:
+                if not hasattr(cue, 'content_id'): continue
+                cid = str(cue.content_id)
+                
+                if cid in tracks_by_id:
+                    track = tracks_by_id[cid]
+                    if "Cues" not in track:
+                        track["Cues"] = []
+                    
+                    # Convert cue object to dict safely
+                    cue_data = {
+                        "ID": str(cue.id) if hasattr(cue, 'id') else "",
+                        "Type": int(getattr(cue, 'type', 0) or 0), 
+                        "InMsec": int(getattr(cue, 'in_msec', 0) or 0),
+                        "Num": int(getattr(cue, 'hot_cue', 0) or 0), # Hot Cue Number (0 if memory cue)
+                        "Comment": getattr(cue, 'commnt', "")
+                    }
+                    track["Cues"].append(cue_data)
+                    count += 1
+            
+            logger.info(f"Loaded {count} cues across library.")
+        except Exception as e:
+            logger.error(f"Failed to load cues: {e}")
+
     def _load_playlists(self):
         self.playlists = []
         raw_playlists = self.db.get_playlists()
+        
+        # Rbox Attribute values:  0 = normal playlist, 1 = folder, 4 = intelligent playlist
+        # Frontend Type values:   "0" = folder, "1" = normal playlist, "4" = intelligent playlist
+        # We must remap 0↔1 to match what PlaylistNode expects.
+        ATTR_TO_TYPE = {0: "1", 1: "0", 4: "4"}
+        
         for pl in raw_playlists:
-            # attribute 0 = folder, 1 = playlist entry node, 2 = playlist? 
-            # Actually, standard RB schema is: attribute 0: folder, 1: playlist.
-            pl_type = "0" if getattr(pl, 'attribute', 1) == 0 else "1"
+            attr = getattr(pl, 'attribute', 0)
+            pl_type = ATTR_TO_TYPE.get(attr, "1")  # default to playlist
             my_id = str(pl.id)
             
             # Update status for frontend feedback
@@ -318,9 +372,13 @@ class LiveRekordboxDB:
                 "Name": pl.name,
                 "ParentID": parent_id,
                 "Type": pl_type,
-                "Seq": pl.seq
+                "Seq": pl.seq,
+                "smart_list": getattr(pl, 'smart_list', None) if pl_type == "4" else None
             }
             self.playlists.append(node_data)
+        
+        # Ensure playlists are sorted by Seq for baseline
+        self.playlists.sort(key=lambda x: x.get("Seq", 0))
 
     def _finalize_ui_metadata(self):
         artist_counts = defaultdict(int)
@@ -438,28 +496,34 @@ class LiveRekordboxDB:
         if not self.playlists: return []
         
         # 1. Map all nodes
-        node_map = {r['ID']: {**r, 'children': []} for r in self.playlists}
+        node_map = {r['ID']: {**r, 'Children': []} for r in self.playlists}
         tree = []
         
         # 2. Build Tree
         for r in self.playlists:
             pid = r['ParentID']
             if pid in node_map:
-                node_map[pid]['children'].append(node_map[r['ID']])
+                node_map[pid]['Children'].append(node_map[r['ID']])
             elif str(pid).upper() == "ROOT":
                 tree.append(node_map[r['ID']])
         
-        # 3. Log initial tree state
+        # 3. Sort nodes by Seq
+        for node in node_map.values():
+            if node['Children']:
+                node['Children'].sort(key=lambda x: x.get('Seq', 0))
+        tree.sort(key=lambda x: x.get('Seq', 0))
+
+        # 4. Log initial tree state
         logger.info(f"Tree built. Root nodes: {len(tree)}")
         if len(tree) == 1:
             root = tree[0]
-            logger.info(f"Single root detected: Name='{root['Name']}', Type='{root.get('Type')}', Children={len(root['children'])}")
+            logger.info(f"Single root detected: Name='{root['Name']}', Type='{root.get('Type')}', Children={len(root['Children'])}")
             
             # Smart Unwrap: Hoist children if root is a generic container
             if root['Name'].lower() in ['root', 'library', 'collection', 'playlists']:
-                 if root['children']:
+                 if root['Children']:
                      logger.info(f"Hoisting children of generic root: {root['Name']}")
-                     return root['children']
+                     return root['Children']
         
         return tree
 
@@ -512,12 +576,19 @@ class LiveRekordboxDB:
                 logger.info(f"Total tracks collected from folder {pid}: {len(all_tracks)}")
                 return list(all_tracks.values())
 
-            # Regular Playlist
+            # 3. Intelligent Playlist (Type 4)
+            if str(node.get("Type")) == "4":
+                xml_rules = node.get("smart_list")
+                logger.info(f"Generating dynamic content for Intelligent Playlist: {node['Name']}")
+                return self._get_smart_playlist_tracks(xml_rules)
+
+            # 4. Regular Playlist
             items = self.db.get_playlist_contents(str(pid))
             
             if not items: 
                 return []
 
+            # Preserve order from items (Sorted by Rekordbox)
             result = []
             for item in items:
                 tid = str(item.id)
@@ -529,6 +600,129 @@ class LiveRekordboxDB:
         except Exception as e:
              logger.error(f"Failed to get tracks for playlist {pid}: {e}")
              return []
+
+    def _get_smart_playlist_tracks(self, xml_rules):
+        """Filters the entire library based on Intelligent Playlist rules."""
+        if not xml_rules:
+            logger.warning("_get_smart_playlist_tracks: No xml_rules provided")
+            return []
+        
+        rules = self._parse_smart_rules(xml_rules)
+        if not rules:
+            logger.warning("_get_smart_playlist_tracks: Failed to parse rules")
+            return []
+        
+        logger.debug(f"Filtering with rules: {rules}")
+        filtered = []
+        for tid, track in self.tracks.items():
+            if self._apply_smart_rules(track, rules):
+                filtered.append(track)
+        
+        logger.debug(f"Dynamic filter complete. Found {len(filtered)} matches.")
+        return filtered
+
+    def _parse_smart_rules(self, xml_str):
+        try:
+            root = ET.fromstring(xml_str)
+            logical_op = int(root.get("LogicalOperator", "1")) # 1=AND, 0=OR
+            conditions = []
+            for cond in root.findall("CONDITION"):
+                # Rekordbox uses PropertyName, not RuleId in some versions/XML formats
+                rule_id = cond.get("PropertyName") or cond.get("RuleId")
+                conditions.append({
+                    "RuleId": rule_id,
+                    "Operator": int(cond.get("Operator", "1")),
+                    "ValueLeft": cond.get("ValueLeft"),
+                    "ValueRight": cond.get("ValueRight")
+                })
+            res = {"op": logical_op, "conditions": conditions}
+            # logger.info(f"Parsed smart rules: {res}")
+            return res
+        except Exception as e:
+            logger.error(f"Error parsing smart list XML: {e}")
+            return None
+
+    def _apply_smart_rules(self, track, rules):
+        logical_op = rules["op"]
+        conditions = rules["conditions"]
+        
+        if not conditions: return True
+        
+        # logger.debug(f"Applying rules to track: {track.get('Title')}")
+        
+        # AND (LogicalOperator=1)
+        if logical_op == 1:
+            for cond in conditions:
+                if not self._check_condition(track, cond):
+                    return False
+            return True
+        # OR (LogicalOperator=0)
+        else:
+            for cond in conditions:
+                if self._check_condition(track, cond):
+                    return True
+            return False
+
+    def _check_condition(self, track, cond):
+        rule_id = cond["RuleId"]
+        op = cond["Operator"]
+        val_l = cond["ValueLeft"]
+        val_r = cond["ValueRight"]
+        
+        field_map = {
+            "artist": "Artist",
+            "title": "Title",
+            "album": "Album",
+            "genre": "Genre",
+            "label": "Label",
+            "bpm": "BPM",
+            "rating": "Rating",
+            "comment": "Comment",
+            "key": "Key",
+            "myTag": "TagIDs"
+        }
+        
+        field = field_map.get(rule_id)
+        if not field: return False
+        
+        target = track.get(field)
+        if target is None: return False
+        
+        res = False
+        # MyTag Matching (Operator 8 = Matches ID)
+        if rule_id == "myTag":
+            if op == 8: return val_l in target # target is TagIDs list
+            if op == 9: return val_l not in target # Does not match Tag ID? (Assumption)
+            return False
+
+        # String Matching
+        if isinstance(target, str):
+            t_low = target.lower()
+            v_low = val_l.lower() if val_l else ""
+            if op == 1: res = v_low in t_low # Contains
+            elif op == 2: res = v_low not in t_low # Does not contain
+            elif op == 3: res = t_low == v_low # Is
+            elif op == 4: res = t_low != v_low # Is not
+            
+        # Numeric Matching
+        elif isinstance(target, (int, float)):
+            try:
+                l_num = float(val_l) if val_l else 0
+                r_num = float(val_r) if val_r else 0
+                
+                compare_val = target
+                if rule_id == "BPM":
+                    compare_val = target * 100 # Rekordbox stores BPM*100 in rules
+                
+                if op == 1 or op == 3: res = abs(compare_val - l_num) < 0.1
+                elif op == 4: res = abs(compare_val - l_num) >= 0.1
+                elif op == 5: res = l_num <= compare_val <= r_num # Between
+                elif op == 6: res = compare_val > l_num
+                elif op == 7: res = compare_val < l_num
+            except: res = False
+            
+        # if res: logger.info(f"Rule MATCH: {rule_id} {op} {val_l} matches {target}")
+        return res
 
     def get_track_details(self, tid):
         return self.tracks.get(tid)
@@ -685,19 +879,55 @@ class LiveRekordboxDB:
             logger.error(f"Failed to rename playlist {pid}: {e}")
             return False
 
-    def move_playlist(self, pid, new_parent_id, position=None):
+    def move_playlist(self, pid, new_parent_id, target_id=None, position=None):
         try:
-
-            # rbox.move_playlist(id, parent_id, position)
-            # parent_id "ROOT" usually maps to a specific value or None in rbox
-            target_parent = None if str(new_parent_id).upper() == "ROOT" else str(new_parent_id)
-            self.db.move_playlist(str(pid), target_parent, position)
-            # Update cache
+            # 1. Determine actual parent and target sequence
+            sibling = None
+            actual_parent = None
+            target_seq = 0
+            
+            if position == "inside" and target_id:
+                actual_parent = None if str(target_id).upper() == "ROOT" else str(target_id)
+                # Max seq + 1 for new parent
+                siblings = [p for p in self.playlists if p['ParentID'] == (target_id or "ROOT")]
+                target_seq = max([p.get('Seq', 0) for p in siblings], default=-1) + 1
+            elif target_id and position in ("before", "after"):
+                sibling = next((p for p in self.playlists if p['ID'] == str(target_id)), None)
+                if sibling:
+                    sp = sibling.get('ParentID', 'ROOT')
+                    actual_parent = None if str(sp).upper() == "ROOT" else str(sp)
+                    target_seq = sibling.get('Seq', 0)
+                    if position == "after": target_seq += 1
+                else:
+                    actual_parent = None if str(new_parent_id).upper() == "ROOT" else str(new_parent_id)
+                    target_seq = 0
+            else:
+                actual_parent = None if str(new_parent_id).upper() == "ROOT" else str(new_parent_id)
+                target_seq = 0
+            
+            logger.info(f"Moving playlist {pid} to parent_id={actual_parent}, seq={target_seq}")
+            
+            # 2. Call DB (rbox should handle the shift if seq is provided)
+            # If rbox move_playlist(pid, seq=target_seq, parent_id=actual_parent) works as expected:
+            self.db.move_playlist(str(pid), seq=target_seq, parent_id=actual_parent)
+            
+            # 3. Update Cache & Re-sort siblings locally to reflect the move
+            resolved_parent = str(actual_parent) if actual_parent else "ROOT"
+            
             for p in self.playlists:
                 if p['ID'] == str(pid):
-                    p['ParentID'] = new_parent_id if target_parent else "ROOT"
-                    if position is not None: p['Seq'] = position
+                    p['ParentID'] = resolved_parent
+                    p['Seq'] = target_seq
                     break
+            
+            # Simple local re-sequencing for siblings to keep cache in sync
+            parent_siblings = [p for p in self.playlists if p['ParentID'] == resolved_parent]
+            parent_siblings.sort(key=lambda x: (x.get('Seq', 0), 0 if x['ID'] == str(pid) else 1))
+            
+            for i, p in enumerate(parent_siblings):
+                p['Seq'] = i
+                
+            self.playlists.sort(key=lambda x: x.get('Seq', 0))
             return True
         except Exception as e:
             logger.error(f"Failed to move playlist {pid}: {e}")

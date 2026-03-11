@@ -17,7 +17,8 @@ const RegionBlock = ({
     onFadeChange,
     onGainChange,
     isSelected = false,
-    snapToGrid = (t) => t
+    snapToGrid = (t) => t,
+    pixelsPerSecond = 50
 }) => {
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
@@ -25,6 +26,28 @@ const RegionBlock = ({
     const dragStartX = useRef(0);
     const dragStartTime = useRef(0);
     const resizeMode = useRef(null); // 'left', 'right', null
+
+    const [multibandData, setMultibandData] = React.useState(null);
+    const [isProcessing, setIsProcessing] = React.useState(false);
+
+    // Fetch multi-band waveform data
+    useEffect(() => {
+        if (!region.sourcePath) return;
+
+        const fetchWaveform = async () => {
+            setIsProcessing(true);
+            try {
+                const response = await fetch(`/api/audio/waveform?path=${encodeURIComponent(region.sourcePath)}&pps=${pixelsPerSecond}`);
+                const data = await response.json();
+                setMultibandData(data);
+            } catch (err) {
+                console.error("Failed to fetch multiband waveform:", err);
+            }
+            setIsProcessing(false);
+        };
+
+        fetchWaveform();
+    }, [region.sourcePath, pixelsPerSecond]);
 
     // Calculate pixel dimensions
     const width = region.duration * zoom;
@@ -45,10 +68,38 @@ const RegionBlock = ({
         canvas.style.height = `${containerHeight}px`;
         ctx.scale(dpr, dpr);
 
-        // Clear canvas
-        ctx.clearRect(0, 0, width, containerHeight);
+        // Clear canvas and draw background
+        ctx.fillStyle = '#050505';
+        ctx.fillRect(0, 0, width, containerHeight);
 
-        // Draw waveform
+        // Check compatibility
+        const hasBuffer = !!region.sourceBuffer;
+        if (!hasBuffer) {
+            // Render basic placeholder if buffer is missing (shouldn't happen in live mode)
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, width, containerHeight);
+            ctx.fillStyle = '#333';
+            ctx.fillText("No Audio Buffer", 10, 20);
+            return;
+        }
+
+        const hasMultiband = multibandData &&
+            multibandData.low &&
+            multibandData.low.length > 0;
+
+        if (hasMultiband) {
+            drawMultibandWaveform(ctx, width, containerHeight, region, multibandData);
+        } else {
+            drawStandardWaveform(ctx, width, containerHeight, region);
+        }
+
+        // Draw envelope line
+        drawEnvelope(ctx, width, containerHeight, region);
+
+    }, [region, width, containerHeight, zoom, multibandData]);
+
+    // Standard single-band waveform
+    function drawStandardWaveform(ctx, width, containerHeight, region) {
         const buffer = region.sourceBuffer;
         const channelData = buffer.getChannelData(0);
         const sampleRate = buffer.sampleRate;
@@ -57,7 +108,6 @@ const RegionBlock = ({
         const endSample = Math.floor(region.sourceEnd * sampleRate);
         const samplesPerPixel = (endSample - startSample) / width;
 
-        // Gradient for waveform
         const gradient = ctx.createLinearGradient(0, 0, 0, containerHeight);
         gradient.addColorStop(0, region.color || '#3b82f6');
         gradient.addColorStop(0.5, adjustColor(region.color || '#3b82f6', -30));
@@ -71,7 +121,6 @@ const RegionBlock = ({
         const maxAmplitude = (containerHeight / 2) * 0.85;
 
         ctx.beginPath();
-
         for (let x = 0; x < width; x++) {
             const sampleStart = startSample + Math.floor(x * samplesPerPixel);
             const sampleEnd = Math.min(sampleStart + Math.floor(samplesPerPixel), channelData.length);
@@ -83,58 +132,77 @@ const RegionBlock = ({
                 if (sample > max) max = sample;
             }
 
-            // Apply envelope
-            const envelopeGain = calculateEnvelopeGain(
-                x / width * region.duration,
-                region.duration,
-                region.fadeInDuration,
-                region.fadeOutDuration,
-                region.gain
-            );
-
-            const scaledMin = min * envelopeGain;
-            const scaledMax = max * envelopeGain;
-
-            const yTop = centerY - scaledMax * maxAmplitude;
-            const yBottom = centerY - scaledMin * maxAmplitude;
-
-            if (x === 0) {
-                ctx.moveTo(x, yTop);
-            }
-            ctx.lineTo(x, yTop);
+            const envelopeGain = calculateEnvelopeGain(x / width * region.duration, region.duration, region.fadeInDuration, region.fadeOutDuration, region.gain);
+            const yTop = centerY - max * envelopeGain * maxAmplitude;
+            if (x === 0) ctx.moveTo(x, yTop); else ctx.lineTo(x, yTop);
         }
 
-        // Draw bottom half (mirror)
         for (let x = width - 1; x >= 0; x--) {
             const sampleStart = startSample + Math.floor(x * samplesPerPixel);
             const sampleEnd = Math.min(sampleStart + Math.floor(samplesPerPixel), channelData.length);
-
             let min = 0;
             for (let i = sampleStart; i < sampleEnd; i++) {
                 const sample = channelData[i] || 0;
                 if (sample < min) min = sample;
             }
-
-            const envelopeGain = calculateEnvelopeGain(
-                x / width * region.duration,
-                region.duration,
-                region.fadeInDuration,
-                region.fadeOutDuration,
-                region.gain
-            );
-
+            const envelopeGain = calculateEnvelopeGain(x / width * region.duration, region.duration, region.fadeInDuration, region.fadeOutDuration, region.gain);
             const yBottom = centerY - min * envelopeGain * maxAmplitude;
             ctx.lineTo(x, yBottom);
         }
-
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
+    }
 
-        // Draw envelope line
-        drawEnvelope(ctx, width, containerHeight, region);
+    // Professional 3-band RGB waveform
+    function drawMultibandWaveform(ctx, width, containerHeight, region, data) {
+        const centerY = containerHeight / 2;
+        const maxAmplitude = (containerHeight / 2) * 0.9;
 
-    }, [region, width, containerHeight, zoom]);
+        const { low, mid, high } = data;
+        const totalPoints = low.length;
+
+        // Calculate offset into the full data based on region's start within the source
+        // backend pps = 50 (assumed or passed)
+        const pps = pixelsPerSecond || 50;
+        const startIdx = Math.floor(region.sourceStart * pps);
+        const endIdx = Math.floor(region.sourceEnd * pps);
+        const pointsInRegion = endIdx - startIdx;
+
+        const step = pointsInRegion / width;
+
+        for (let x = 0; x < width; x++) {
+            const dataIdx = startIdx + Math.floor(x * step);
+            if (dataIdx >= totalPoints) break;
+
+            const l = low[dataIdx] || 0;
+            const m = mid[dataIdx] || 0;
+            const h = high[dataIdx] || 0;
+
+            const envelopeGain = calculateEnvelopeGain(x / width * region.duration, region.duration, region.fadeInDuration, region.fadeOutDuration, region.gain);
+
+            // RGB Mix: Red (Low), Yellow/Green (Mid), Cyan/Blue (High)
+            // Composite amplitude
+            const totalAmp = (l + m + h) * envelopeGain * maxAmplitude;
+
+            // Pro Color logic - Rekordbox-style (Red-Low, Amber-Mid, Blue-High)
+            const r = Math.min(255, Math.floor(l * 255 + m * 180));
+            const g = Math.min(255, Math.floor(m * 220 + h * 50));
+            const b = Math.min(255, Math.floor(h * 255 + m * 40));
+
+            ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+
+            // Draw a vertical slice
+            const yStart = centerY - totalAmp / 2;
+            ctx.fillRect(x, yStart, 1, Math.max(1, totalAmp));
+
+            // Add a subtle additive overlay to make high energy transients 'pop'
+            if (h > 0.6 || l > 0.8) {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+                ctx.fillRect(x, yStart, 1, Math.max(1, totalAmp));
+            }
+        }
+    }
 
     // Calculate envelope gain at a position
     function calculateEnvelopeGain(position, duration, fadeIn, fadeOut, gain) {
@@ -204,7 +272,8 @@ const RegionBlock = ({
 
     // Mouse handlers for drag/resize
     const handleMouseDown = useCallback((e) => {
-        e.stopPropagation();
+        // Remove stopPropagation to allow playhead placement on regions
+        // e.stopPropagation(); 
         onSelect?.(region.id);
 
         const rect = containerRef.current.getBoundingClientRect();

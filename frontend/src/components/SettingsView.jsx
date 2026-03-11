@@ -268,6 +268,62 @@ const SettingsView = () => {
                         </div>
                     </div>
 
+                    {/* Rekordbox Synchronization */}
+                    <div className="bg-cyan-400/5 rounded-2xl p-6 border border-cyan-400/20 space-y-4">
+                        <div className="flex justify-between items-start">
+                            <div>
+                                <h2 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-1 flex items-center gap-2">
+                                    <RefreshCw size={16} /> Rekordbox Bridge (XML)
+                                </h2>
+                                <p className="text-xs text-slate-500">Bi-directional metadata and beatgrid synchronization.</p>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4 pt-2">
+                            <button
+                                onClick={async () => {
+                                    if (!confirm("Export entire local collection to Rekordbox XML?")) return;
+                                    setStatus("Exporting XML...");
+                                    try {
+                                        // Get all track IDs
+                                        const tracks = await api.get('/api/library/tracks');
+                                        const ids = tracks.data.map(t => t.id || t.TrackID);
+                                        const res = await api.post('/api/rekordbox/export', { track_ids: ids });
+                                        setStatus(`Export successful: ${res.data.path}`);
+                                    } catch (e) { setStatus("Export failed"); }
+                                    setTimeout(() => setStatus(""), 5000);
+                                }}
+                                className="flex items-center justify-center gap-3 p-4 rounded-xl bg-slate-900/50 border border-white/10 hover:border-cyan-500/50 hover:bg-cyan-500/5 transition-all group"
+                            >
+                                <FileOutput className="text-slate-500 group-hover:text-cyan-400 transition-colors" size={20} />
+                                <div className="text-left">
+                                    <div className="text-sm font-bold">Push to Rekordbox</div>
+                                    <div className="text-[10px] text-slate-500">Generate Bridge XML</div>
+                                </div>
+                            </button>
+
+                            <button
+                                onClick={async () => {
+                                    const path = prompt("Enter path to Rekordbox exported XML file:");
+                                    if (!path) return;
+                                    setStatus("Importing XML...");
+                                    try {
+                                        const res = await api.post('/api/rekordbox/import', { xml_path: path });
+                                        setStatus(res.data.message);
+                                    } catch (e) { setStatus("Import failed"); }
+                                    setTimeout(() => setStatus(""), 5000);
+                                }}
+                                className="flex items-center justify-center gap-3 p-4 rounded-xl bg-slate-900/50 border border-white/10 hover:border-cyan-500/50 hover:bg-cyan-500/5 transition-all group"
+                            >
+                                <RefreshCw className="text-slate-500 group-hover:text-cyan-400 transition-colors" size={20} />
+                                <div className="text-left">
+                                    <div className="text-sm font-bold">Pull from Rekordbox</div>
+                                    <div className="text-[10px] text-slate-500">Import Changes & Grids</div>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
+
                     {/* Waveform Visualization */}
                     <div className="bg-slate-950/50 rounded-2xl p-6 border border-white/5 space-y-4">
                         <h2 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4 flex items-center gap-2">

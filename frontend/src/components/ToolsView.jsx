@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api/api';
-import { Download, RefreshCw, Scissors, Copy, Wand2, Search, Check, X, Merge, Sparkles } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { Download, RefreshCw, Scissors, Copy, Wand2, Search, Check, X, Merge, Sparkles, Loader2 } from 'lucide-react';
 
 const ToolsView = () => {
     const [activeTab, setActiveTab] = useState('duplicates');
@@ -8,6 +9,7 @@ const ToolsView = () => {
     const [selectedDuplicate, setSelectedDuplicate] = useState(null);
     const [compareTracks, setCompareTracks] = useState([]);
     const [scanning, setScanning] = useState(false);
+    const [merging, setMerging] = useState(false);
 
     // Rename State
     const [pattern, setPattern] = useState("%artist% - %title%");
@@ -40,23 +42,51 @@ const ToolsView = () => {
 
     const handleKeep = async (keepTrack) => {
         if (!selectedDuplicate) return;
-        const tracksToDelete = selectedDuplicate.ids.filter(id => String(id) !== String(keepTrack.ID));
+        const keepId = String(keepTrack.ID || keepTrack.id);
+        const removeIds = selectedDuplicate.ids.filter(id => String(id) !== keepId).map(String);
 
-        if (tracksToDelete.length === 0) return;
+        if (removeIds.length === 0) return;
+        if (!window.confirm(`Keep "${keepTrack.Title}" and merge ${removeIds.length} duplicate(s)? Playlist memberships will be transferred.`)) return;
 
-        if (!window.confirm(`Are you sure you want to keep "${keepTrack.Title}" and delete the other ${tracksToDelete.length} duplicate(s)? This cannot be undone.`)) return;
-
+        setMerging(true);
         try {
-            await Promise.all(tracksToDelete.map(id => api.post('/api/track/delete', { track_id: String(id) })));
-
-            const newDuplicates = duplicates.filter(d => d !== selectedDuplicate);
-            setDuplicates(newDuplicates);
+            await api.post('/api/tools/duplicates/merge', { keep_id: keepId, remove_ids: removeIds });
+            toast.success(`Merged: kept "${keepTrack.Title}", removed ${removeIds.length} duplicates`);
+            setDuplicates(prev => prev.filter(d => d !== selectedDuplicate));
             setSelectedDuplicate(null);
             setCompareTracks([]);
         } catch (e) {
-            console.error("Failed to resolve duplicates", e);
-            alert("Failed to delete tracks. Check console.");
+            console.error('Merge failed:', e);
+            toast.error('Merge failed');
         }
+        setMerging(false);
+    };
+
+    const handleSmartMerge = async (group) => {
+        if (!group) return;
+        // Pick the best track automatically (highest rating, bitrate)
+        let bestTrack = compareTracks[0];
+        let bestScore = -1;
+        for (const t of compareTracks) {
+            const score = ((t.Rating || 0) * 100) + (t.BitRate || t.Bitrate || 0);
+            if (score > bestScore) { bestScore = score; bestTrack = t; }
+        }
+        if (bestTrack) await handleKeep(bestTrack);
+    };
+
+    const handleMergeAll = async () => {
+        if (!window.confirm(`Auto-merge all ${duplicates.length} duplicate groups? This keeps the highest-quality version and transfers playlist memberships.`)) return;
+        setMerging(true);
+        try {
+            const res = await api.post('/api/tools/duplicates/merge-all');
+            toast.success(`Merged ${res.data.groups_merged} duplicate groups`);
+            setDuplicates([]);
+            setSelectedDuplicate(null);
+            setCompareTracks([]);
+        } catch (e) {
+            toast.error('Merge all failed');
+        }
+        setMerging(false);
     };
 
     const findDuplicates = async () => {
@@ -141,9 +171,21 @@ const ToolsView = () => {
                     {/* DUPLICATES TAB */}
                     {activeTab === 'duplicates' && (
                         <div className="glass-panel p-6 rounded-2xl flex flex-col h-full animate-fade-in">
-                            <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-cyan-400">
-                                <Copy size={20} /> Duplicate Manager
-                            </h2>
+                            <div className="flex items-center justify-between mb-4">
+                                <h2 className="text-xl font-bold flex items-center gap-2 text-cyan-400">
+                                    <Copy size={20} /> Duplicate Manager
+                                </h2>
+                                {duplicates.length > 0 && (
+                                    <button
+                                        onClick={handleMergeAll}
+                                        disabled={merging}
+                                        className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-xl text-xs font-bold border border-emerald-500/30 transition-all disabled:opacity-50"
+                                    >
+                                        {merging ? <RefreshCw size={14} className="animate-spin" /> : <Merge size={14} />}
+                                        Merge All ({duplicates.length} groups)
+                                    </button>
+                                )}
+                            </div>
 
                             <div className="flex-1 flex gap-6 overflow-hidden">
                                 {/* List */}
@@ -165,7 +207,7 @@ const ToolsView = () => {
                                                         <div className="flex justify-between items-start mb-1">
                                                             <div className="font-bold text-slate-200 truncate pr-2">{d.Title}</div>
                                                             <span className="text-[10px] bg-red-500/20 text-red-300 px-1.5 py-0.5 rounded flex-shrink-0">
-                                                                {d.Count}
+                                                                {d.count || d.Count || '?'}x
                                                             </span>
                                                         </div>
                                                         <div className="text-xs text-slate-500">{d.Artist}</div>
@@ -190,21 +232,31 @@ const ToolsView = () => {
                                         <div className="flex-1 flex flex-col p-4 animate-fade-in">
                                             <div className="flex justify-between items-center mb-4">
                                                 <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2"><Merge size={18} /> Compare & Merge</h3>
-                                                <span className="text-xs text-slate-500">Select one to keep</span>
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        onClick={() => handleSmartMerge(selectedDuplicate)}
+                                                        disabled={merging}
+                                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-lg text-xs font-bold border border-emerald-500/30 transition-all disabled:opacity-50"
+                                                    >
+                                                        <Sparkles size={12} /> Smart Merge
+                                                    </button>
+                                                    <span className="text-xs text-slate-500">or select one to keep →</span>
+                                                </div>
                                             </div>
                                             <div className="flex-1 flex gap-4 overflow-x-auto pb-2">
                                                 {compareTracks.map(t => (
-                                                    <div key={t.id} className="min-w-[240px] flex-1 bg-black/60 p-4 rounded-xl border border-white/10 flex flex-col relative group hover:border-white/20 transition-colors">
-                                                        <div className="text-xs text-cyan-500 font-mono mb-2 truncate">{t.id}</div>
+                                                    <div key={t.id || t.ID} className="min-w-[240px] flex-1 bg-black/60 p-4 rounded-xl border border-white/10 flex flex-col relative group hover:border-white/20 transition-colors">
+                                                        <div className="text-xs text-cyan-500 font-mono mb-2 truncate">{t.id || t.ID}</div>
                                                         <div className="font-bold text-lg leading-tight mb-1">{t.Title}</div>
                                                         <div className="text-sm text-slate-400 mb-4">{t.Artist}</div>
 
                                                         <div className="space-y-2 text-xs text-slate-500 mb-6">
-                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>BPM</span> <span className="text-slate-300">{t.BPM?.toFixed(2)}</span></div>
-                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>Key</span> <span className="text-slate-300">{t.Key}</span></div>
-                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>Size</span> <span className="text-slate-300">{(t.Size / 1024 / 1024).toFixed(1)} MB</span></div>
-                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>Bitrate</span> <span className="text-slate-300">{t.BitRate}</span></div>
-                                                            <div className="truncate mt-2 opacity-50" title={t.path}>{t.path}</div>
+                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>BPM</span> <span className="text-slate-300">{t.BPM?.toFixed?.(2) || t.BPM || '—'}</span></div>
+                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>Key</span> <span className="text-slate-300">{t.Key || '—'}</span></div>
+                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>Rating</span> <span className="text-slate-300">{'★'.repeat(t.Rating || 0)}{'☆'.repeat(5 - (t.Rating || 0))}</span></div>
+                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>Size</span> <span className="text-slate-300">{t.Size ? (t.Size / 1024 / 1024).toFixed(1) + ' MB' : '—'}</span></div>
+                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>Bitrate</span> <span className="text-slate-300">{t.BitRate || t.Bitrate || '—'}</span></div>
+                                                            <div className="truncate mt-2 opacity-50" title={t.path || t.FolderPath}>{t.path || t.FolderPath || '—'}</div>
                                                         </div>
 
                                                         <div className="mt-auto">

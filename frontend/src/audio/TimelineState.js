@@ -23,9 +23,13 @@ export function createTimelineState(options = {}) {
         // Regions (the clips on the timeline)
         regions: [],                  // AudioRegion[]
 
-        // Beat grid
+        // Markers (Cues, Loops, Fades)
+        markers: options.markers || [], // Marker[]
+
+        // Beat grid & Phrases (Analysis)
         bpm: options.bpm || 120,
         beatGrid: options.beatGrid || [],
+        phrases: options.phrases || [],
         gridOffset: 0,                // Offset in seconds for grid alignment
 
         // Playback
@@ -52,7 +56,7 @@ export function createTimelineState(options = {}) {
         historyIndex: -1,
 
         // UI state
-        editMode: 'select',           // 'select', 'cut', 'draw'
+        editMode: options.editMode || 'select', // 'select', 'cut', 'draw', 'grid'
         isRendering: false,
         renderProgress: 0
     };
@@ -88,13 +92,37 @@ export function getSnapUnit(bpm, division) {
 export function snapToGrid(state, time) {
     if (!state.snapEnabled) return time;
 
-    const snapUnit = getSnapUnit(state.bpm, state.snapDivision);
-    const offset = state.gridOffset;
+    // Support for Dynamic/Variable Grid
+    if (state.beatGrid && state.beatGrid.length > 0) {
+        // Find the nearest beat in the processed grid
+        let closestBeat = state.beatGrid[0];
+        let minDist = Math.abs(time - closestBeat.time);
 
-    // Adjust for grid offset, snap, then add offset back
-    const adjustedTime = time - offset;
+        for (let i = 1; i < state.beatGrid.length; i++) {
+            const dist = Math.abs(time - state.beatGrid[i].time);
+            if (dist < minDist) {
+                minDist = dist;
+                closestBeat = state.beatGrid[i];
+            } else if (state.beatGrid[i].time > time + 1.0) {
+                break; // Optimized exit
+            }
+        }
+
+        const beatDuration = 60 / closestBeat.bpm;
+        const division = state.snapDivision || '1/4';
+        const snapUnit = getSnapUnit(closestBeat.bpm, division);
+
+        // Offset relative to the closest beat
+        const offset = time - closestBeat.time;
+        const snappedOffset = Math.round(offset / snapUnit) * snapUnit;
+        return Math.max(0, closestBeat.time + snappedOffset);
+    }
+
+    // Fallback for static grid
+    const snapUnit = getSnapUnit(state.bpm, state.snapDivision);
+    const adjustedTime = time - state.gridOffset;
     const snappedTime = Math.round(adjustedTime / snapUnit) * snapUnit;
-    return Math.max(0, snappedTime + offset);
+    return Math.max(0, snappedTime + state.gridOffset);
 }
 
 /**
@@ -164,9 +192,27 @@ export function removeRegion(state, regionId) {
 export function updateRegion(state, regionId, updates) {
     return {
         ...state,
-        regions: state.regions.map(r =>
-            r.id === regionId ? { ...r, ...updates } : r
-        )
+        regions: state.regions.map(r => {
+            if (r.id !== regionId) return r;
+
+            // Merge updates to get potential new state
+            // valid properties: sourceStart, sourceEnd, timelineStart
+            const next = { ...r, ...updates };
+
+            // Recalculate dependent properties if inputs changed
+            // This is necessary because we removed getters in AudioRegion.js to avoid spread-flattening
+            if ('sourceStart' in updates || 'sourceEnd' in updates) {
+                next.duration = next.sourceEnd - next.sourceStart;
+            }
+
+            // Recalculate timelineEnd if duration or timelineStart changed
+            // Note: duration might have changed above
+            if ('timelineStart' in updates || 'sourceStart' in updates || 'sourceEnd' in updates) {
+                next.timelineEnd = next.timelineStart + next.duration;
+            }
+
+            return next;
+        })
     };
 }
 
@@ -314,6 +360,64 @@ export function setZoom(state, zoom) {
 }
 
 /**
+ * Shift the entire beat grid by an offset
+ * 
+ * @param {TimelineState} state 
+ * @param {number} offsetSeconds 
+ * @returns {TimelineState}
+ */
+export function shiftGrid(state, offsetSeconds) {
+    if (!state.beatGrid || state.beatGrid.length === 0) {
+        return {
+            ...state,
+            gridOffset: state.gridOffset + offsetSeconds
+        };
+    }
+
+    return {
+        ...state,
+        beatGrid: state.beatGrid.map(beat => ({
+            ...beat,
+            time: Math.max(0, beat.time + offsetSeconds)
+        })),
+        gridOffset: state.gridOffset + offsetSeconds
+    };
+}
+
+/**
+ * Adjust BPM (stretch/contract grid)
+ * 
+ * @param {TimelineState} state 
+ * @param {number} newBpm 
+ * @returns {TimelineState}
+ */
+export function adjustBPM(state, newBpm) {
+    if (newBpm <= 0) return state;
+
+    // If we have a beat grid, we need to recalculate times
+    // This assumes a constant BPM for now for simplicity in manual editing
+    if (state.beatGrid && state.beatGrid.length > 0) {
+        const firstBeatTime = state.beatGrid[0].time;
+        const beatDuration = 60 / newBpm;
+
+        return {
+            ...state,
+            bpm: newBpm,
+            beatGrid: state.beatGrid.map((beat, i) => ({
+                ...beat,
+                bpm: newBpm,
+                time: firstBeatTime + (i * beatDuration)
+            }))
+        };
+    }
+
+    return {
+        ...state,
+        bpm: newBpm
+    };
+}
+
+/**
  * Push to history for undo
  * 
  * @param {TimelineState} state 
@@ -321,12 +425,24 @@ export function setZoom(state, zoom) {
  * @returns {TimelineState}
  */
 export function pushHistory(state, action) {
-    const newHistory = state.history.slice(0, state.historyIndex + 1);
+    const MAX_HISTORY = 50;
+    let newHistory = state.history.slice(0, state.historyIndex + 1);
+
+    // Create snapshot of regions
+    // We utilize shallow copy to preserve AudioBuffer references (which are not serializable)
+    // while ensuring the array structure is independent.
+    const regionsSnapshot = state.regions.map(r => ({ ...r }));
+
     newHistory.push({
         ...action,
         timestamp: Date.now(),
-        regions: JSON.parse(JSON.stringify(state.regions)) // Deep copy
+        regions: regionsSnapshot
     });
+
+    // Limit history size
+    if (newHistory.length > MAX_HISTORY) {
+        newHistory = newHistory.slice(newHistory.length - MAX_HISTORY);
+    }
 
     return {
         ...state,

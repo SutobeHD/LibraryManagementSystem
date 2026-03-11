@@ -1,12 +1,14 @@
 import React, { useState, Component, useEffect, useCallback, Suspense, lazy } from 'react'
+import { invoke } from '@tauri-apps/api/core'; // Tauri Invoke
 import ReactDOM from 'react-dom/client'
-import { Music, Scissors, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, Database, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2 } from 'lucide-react'
+import { Music, Cloud, Download, Scissors, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, Database, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2, Sparkles } from 'lucide-react'
 import './index.css'
 import { ToastProvider } from './components/ToastContext'
 import { Toaster } from 'react-hot-toast'
 
 // SPEED: Lazy-load heavy views — only the active view is loaded into the bundle
-const WaveformEditor = lazy(() => import('./components/WaveformEditor'));
+// const WaveformEditor = lazy(() => import('./components/WaveformEditor')); // Replaced by DjEditDaw
+const DjEditDaw = lazy(() => import('./components/daw/DjEditDaw'));
 const ToolsView = lazy(() => import('./components/ToolsView'));
 const SettingsView = lazy(() => import('./components/SettingsView'));
 const RankingView = lazy(() => import('./components/RankingView'));
@@ -16,6 +18,9 @@ const ImportView = lazy(() => import('./components/ImportView'));
 const InsightsView = lazy(() => import('./components/InsightsView'));
 const UsbView = lazy(() => import('./components/UsbView'));
 const BackupManager = lazy(() => import('./components/BackupManager'));
+const DesignView = lazy(() => import('./components/DesignView'));
+const SoundCloudView = lazy(() => import('./components/SoundCloudView'));
+const SoundCloudSyncView = lazy(() => import('./components/SoundCloudSyncView'));
 
 import api, { setSessionToken, getSessionToken } from './api/api'
 
@@ -66,18 +71,18 @@ const Sidebar = ({ activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnlo
 
   return (
     <>
-      <div className="w-72 h-screen flex flex-col border-r border-white/5 bg-slate-950/80 backdrop-blur-xl relative z-20 shrink-0 shadow-2xl">
+      <div className="w-64 h-screen flex flex-col relative z-20 shrink-0">
         {/* Logo Area */}
         <div className="p-8 pb-6">
           <div className="flex items-center gap-3 mb-1">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
               <Zap size={20} className="text-white fill-white" />
             </div>
-            <div className="text-xl font-bold tracking-tight text-white font-sans">
-              RB EDITOR
+            <div className="text-lg font-bold tracking-tight text-white font-sans">
+              MUSIC LIBRARY
             </div>
           </div>
-          <div className="text-[10px] font-bold text-cyan-500 tracking-[0.2em] pl-11 uppercase opacity-90">Professional</div>
+          <div className="text-[10px] font-bold text-cyan-500 tracking-[0.2em] pl-11 uppercase opacity-90">MANAGER</div>
 
           {/* Library Status Indicator */}
           <div className="mt-6 px-4">
@@ -117,6 +122,7 @@ const Sidebar = ({ activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnlo
           <NavBtn icon={<Upload size={18} />} label="Audio Import" active={activeTab === 'import'} onClick={() => setActiveTab('import')} />
           <NavBtn icon={<Music size={18} />} label="Library" active={activeTab === 'library'} onClick={() => setActiveTab('library')} />
           <NavBtn icon={<Zap size={18} />} label="Ranking Mode" active={activeTab === 'ranking'} onClick={() => setActiveTab('ranking')} />
+          <NavBtn icon={<Sparkles size={18} className="text-cyan-400" />} label="Design Lab" active={activeTab === 'design'} onClick={() => setActiveTab('design')} />
           <NavBtn icon={<Scissors size={18} />} label="Waveform Editor" active={activeTab === 'editor'} onClick={() => setActiveTab('editor')} />
           <NavBtn icon={<HardDrive size={18} />} label="USB" active={activeTab === 'usb'} onClick={() => setActiveTab('usb')} />
           <NavBtn icon={<Wrench size={18} />} label="Utilities" active={activeTab === 'tools'} onClick={() => setActiveTab('tools')} />
@@ -124,22 +130,24 @@ const Sidebar = ({ activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnlo
             <NavBtn icon={<FileCode size={18} />} label="XML Automator" active={activeTab === 'xml'} onClick={() => setActiveTab('xml')} />
           )}
           <div className="pt-4 mt-4 border-t border-white/5">
+            <NavBtn icon={<Cloud size={18} className="text-orange-500" />} label="SC Download" active={activeTab === 'soundcloud'} onClick={() => setActiveTab('soundcloud')} />
+            <NavBtn icon={<ArrowRightLeft size={18} className="text-orange-400" />} label="SC Playlist Manager" active={activeTab === 'sc-sync'} onClick={() => setActiveTab('sc-sync')} />
             <NavBtn icon={<Activity size={18} />} label="Insights" active={activeTab === 'insights'} onClick={() => setActiveTab('insights')} />
           </div>
         </nav>
 
         {/* Footer Settings */}
-        <div className="p-4 mt-auto border-t border-white/5 bg-black/10">
+        <div className="p-4 mt-auto">
           {libraryStatus?.loaded && libraryStatus?.mode === 'live' && (
-            <div onClick={() => setShowBackups(true)} className="nav-item text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/10 border border-transparent hover:border-emerald-900/30 group mb-2 cursor-pointer transition-all">
-              <Database size={18} className="group-hover:text-emerald-300" />
-              <span className="font-bold text-sm">Backup Manager</span>
+            <div onClick={() => setShowBackups(true)} className="nav-item group mb-1">
+              <Database size={18} className="text-emerald-500 group-hover:text-emerald-400" />
+              <span className="font-medium text-sm text-emerald-500 group-hover:text-emerald-400">Backups</span>
             </div>
           )}
           <NavBtn icon={<Settings size={18} />} label="Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
-          <div onClick={handleExit} className="nav-item text-red-400 hover:text-red-300 hover:bg-red-900/10 mt-2 border border-transparent hover:border-red-900/30 group">
-            <AlertTriangle size={18} className="group-hover:text-red-300" />
-            <span className="font-medium text-sm">Exit Application</span>
+          <div onClick={handleExit} className="nav-item group mt-1">
+            <AlertTriangle size={18} className="text-rose-500 group-hover:text-rose-400" />
+            <span className="font-medium text-sm text-rose-500 group-hover:text-rose-400">Exit</span>
           </div>
         </div>
       </div>
@@ -154,7 +162,6 @@ const NavBtn = ({ icon, label, active, onClick }) => (
   <div onClick={onClick} className={`nav-item ${active ? 'active' : ''}`}>
     {icon}
     <span className="font-medium text-sm">{label}</span>
-    {active && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_10px_#22d3ee]"></div>}
   </div>
 )
 
@@ -287,6 +294,11 @@ const App = () => {
       }
     }, 1000);
 
+    // RESTORED: Splash Screen Close Logic
+    setTimeout(() => {
+      invoke('close_splashscreen').catch(console.error);
+    }, 2000); // Minimum 2s splash screen visibility
+
     // Auto-load remembered mode
     const autoInit = async () => {
       try {
@@ -321,7 +333,7 @@ const App = () => {
               <Zap size={32} className="text-white fill-white" />
             </div>
             <h1 className="text-3xl font-bold text-white mb-2 tracking-tight italic uppercase">Loading Library</h1>
-            <p className="text-cyan-500 font-bold text-[10px] tracking-[0.3em] uppercase mb-12">Professional Edition</p>
+            <p className="text-cyan-500 font-bold text-[10px] tracking-[0.3em] uppercase mb-12">Music Library Manager</p>
             <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden mb-4 border border-white/5 shadow-inner">
               <div
                 className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-500 ease-out"
@@ -354,8 +366,8 @@ const App = () => {
         onUnloadLibrary={handleUnloadLibrary}
       />
 
-      <main className="flex-1 h-full overflow-hidden relative z-10 p-4 bg-slate-950/50">
-        <div className="h-full w-full rounded-2xl overflow-hidden glass-panel relative shadow-2xl shadow-black/50 pb-20">
+      <main className="flex-1 h-full overflow-hidden relative z-10 bg-slate-950/50">
+        <div className="h-full w-full relative pb-20">
           <Suspense fallback={<ViewLoader />}>
             {/* STABILITY: Each view wrapped in its own ErrorBoundary */}
             <div className={activeTab === 'library' ? 'h-full' : 'hidden'}>
@@ -384,17 +396,7 @@ const App = () => {
 
             <div className={activeTab === 'editor' ? 'h-full' : 'hidden'}>
               <ErrorBoundary key="eb-editor">
-                <div className="flex-1 flex flex-col h-full bg-slate-900/40">
-                  {activeTrack ? <WaveformEditor track={activeTrack} /> : (
-                    <div className="flex h-full flex-col items-center justify-center text-slate-500 animate-fade-in">
-                      <div className="w-20 h-20 bg-slate-900 rounded-full flex items-center justify-center mb-6 border border-white/5">
-                        <Scissors size={40} className="text-slate-600" />
-                      </div>
-                      <h3 className="text-xl font-medium text-slate-400">No track selected</h3>
-                      <p className="text-sm mt-2 text-slate-600">Select a track from Library or Playlists to start editing.</p>
-                    </div>
-                  )}
-                </div>
+                <DjEditDaw track={activeTrack} />
               </ErrorBoundary>
             </div>
 
@@ -404,18 +406,34 @@ const App = () => {
               </ErrorBoundary>
             </div>
 
+            <div className={activeTab === 'soundcloud' ? 'h-full' : 'hidden'}>
+              <ErrorBoundary key="eb-soundcloud">
+                <SoundCloudView />
+              </ErrorBoundary>
+            </div>
+
+            <div className={activeTab === 'sc-sync' ? 'h-full' : 'hidden'}>
+              <ErrorBoundary key="eb-sc-sync">
+                <SoundCloudSyncView />
+              </ErrorBoundary>
+            </div>
+
             {activeTab === 'usb' && <ErrorBoundary key="eb-usb"><UsbView /></ErrorBoundary>}
+            {activeTab === 'design' && <ErrorBoundary key="eb-design"><DesignView /></ErrorBoundary>}
             {activeTab === 'tools' && <ErrorBoundary key="eb-tools"><ToolsView /></ErrorBoundary>}
             {activeTab === 'settings' && <ErrorBoundary key="eb-settings"><SettingsView /></ErrorBoundary>}
           </Suspense>
         </div>
       </main>
 
-      <Player
-        track={playerTrack}
-        onClose={() => setPlayerTrack(null)}
-        onMaximize={() => { setActiveTrack(playerTrack); setActiveTab('editor'); }}
-      />
+      {/* Hide Player in Editor and Ranking modes */}
+      {!['editor', 'ranking'].includes(activeTab) && (
+        <Player
+          track={playerTrack}
+          onClose={() => setPlayerTrack(null)}
+          onMaximize={() => { setActiveTrack(playerTrack); setActiveTab('editor'); }}
+        />
+      )}
     </div>
   )
 }

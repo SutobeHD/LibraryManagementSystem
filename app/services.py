@@ -230,6 +230,7 @@ class AudioEngine:
                 "Bitrate": "2304",
                 "SampleRate": "48000",
                 "path": str(final_path),
+                "BPM": orig_track.get('BPM', orig_track.get('AverageBpm', '0')) if orig_track else "0",
             }
             
             # Recalculate total time from segments
@@ -284,6 +285,72 @@ class AudioEngine:
         except Exception as e:
             logger.error(f"Slice error: {e}")
             raise e
+
+    @staticmethod
+    def generate_multiband_waveform(path: str, pixels_per_second: int = 50):
+        """Generates 3-band waveform data for professional visualization."""
+        import librosa
+        import numpy as np
+        from scipy.signal import butter, lfilter
+
+        logger.info(f"Generating multiband waveform for {path} at {pixels_per_second} pps")
+        
+        # 1. Load audio (Mono, downsampled for speed)
+        y, sr = librosa.load(path, sr=22050, mono=True)
+        duration = librosa.get_duration(y=y, sr=sr)
+        points = int(duration * pixels_per_second)
+        
+        # 2. Filter Design
+        def butter_lowpass(cut, fs, order=3):
+            nyq = 0.5 * fs
+            c = cut / nyq
+            return butter(order, c, btype='low')
+
+        def butter_bandpass(lowcut, highcut, fs, order=3):
+            nyq = 0.5 * fs
+            return butter(order, [lowcut/nyq, highcut/nyq], btype='band')
+
+        def butter_highpass(cut, fs, order=3):
+            nyq = 0.5 * fs
+            return butter(order, cut/nyq, btype='high')
+
+        # 3. Apply Filters (Low: <250Hz, Mid: 250-2500Hz, High: >2500Hz)
+        b_l, a_l = butter_lowpass(250, sr)
+        b_m, a_m = butter_bandpass(250, 2500, sr)
+        b_h, a_h = butter_highpass(2500, sr)
+
+        y_l = lfilter(b_l, a_l, y)
+        y_m = lfilter(b_m, a_m, y)
+        y_h = lfilter(b_h, a_h, y)
+
+        # 4. Extract Envelope (RMS)
+        hop = max(1, len(y) // points)
+        
+        def get_envelopes(data):
+            # Pad to match points exactly
+            env = librosa.feature.rms(y=data, frame_length=hop*2, hop_length=hop)[0]
+            if len(env) > points: env = env[:points]
+            elif len(env) < points: env = np.pad(env, (0, points - len(env)))
+            return env
+
+        low_env = get_envelopes(y_l)
+        mid_env = get_envelopes(y_m)
+        high_env = get_envelopes(y_h)
+
+        # 5. Normalize (Global)
+        glob_max = max(np.max(low_env), np.max(mid_env), np.max(high_env))
+        if glob_max > 0:
+            low_env = (low_env / glob_max).round(4)
+            mid_env = (mid_env / glob_max).round(4)
+            high_env = (high_env / glob_max).round(4)
+
+        return {
+            "low": low_env.tolist(),
+            "mid": mid_env.tolist(),
+            "high": high_env.tolist(),
+            "duration": duration,
+            "points": points
+        }
 
 class FileManager:
     @staticmethod
@@ -436,7 +503,8 @@ class SettingsManager:
         "insights_bitrate_threshold": 320,
         "hide_streaming": False,
         "remember_lib_mode": False,
-        "last_lib_mode": "xml"
+        "last_lib_mode": "xml",
+        "soundcloud_auth_token": ""
     }
     @classmethod
     def load(cls):
@@ -512,94 +580,316 @@ class BeatAnalyzer:
             logger.info(f"Audio loaded. Duration: {duration:.2f}s, SR: {sr}")
             
             # 2. Detect BPM (Full track for robustness)
-            logger.info("Detecting global BPM...")
+            logger.info("Detecting BPM (Dynamic Mode - Enhanced for Techno/Schranz)...")
             onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-            tempo, beats = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
-            bpm = float(tempo)
-            logger.info(f"Detected BPM: {bpm:.2f}")
+            
+            # Use a time-varying tempo estimate for dynamic grids
+            # We calculate local BPM for every 8-second window
+            hop_length = 512
+            win_length_sec = 8.0
+            win_length_frames = int(win_length_sec * sr / hop_length)
+            
+            # Enhanced BPM Detection: Check multiple candidates
+            # Prioritize 130-160 range for Schranz/Techno
+            candidates = [None, 140, 150, 160] 
+            best_bpm = 0
+            best_beats = []
+            max_score = -1
+
+            for start_bpm in candidates:
+                if start_bpm:
+                    tempo, beats = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr, start_bpm=start_bpm)
+                else:
+                    tempo, beats = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
+                
+                tempo = float(tempo) # Ensure float works for single-element arrays too
+                
+                # Calculate consistency score (regularity of intervals)
+                if len(beats) > 2:
+                    intervals = np.diff(beats)
+                    score = 1.0 / (np.std(intervals) + 1e-6) # Higher is more stable
+                    
+                    # Penalize < 100 BPM to avoid half-time errors in this genre
+                    if tempo < 100.0: score *= 0.5 
+                    if 130.0 <= tempo <= 160.0: score *= 1.2 # Bonus for target genre
+
+                    if score > max_score:
+                        max_score = score
+                        best_bpm = float(tempo)
+                        best_beats = beats
+            
+            bpm_global = float(best_bpm)
+            beats = best_beats
+            logger.info(f"Selected BPM: {bpm_global} (Score: {max_score:.2f})")
+            
+            # --- DYNAMIC GRID LOGIC ---
+            # We track "anchors" where the BPM or phase shifts significantly
+            # For Rekordbox XML, we'll provide TEMPO tags at intervals or shifts
+            tg_vbr = librosa.beat.tempo(onset_envelope=onset_env, sr=sr, aggregate=None)
+            bpm_vbr = gaussian_filter1d(tg_vbr, sigma=win_length_frames/2)
             
             # 3. ADVANCED DROP DETECTION
-            # Search window: 10s to 90s (most drops happen in this range)
-            # Favor the highest energy transition after a buildup.
-            logger.info("Searching for musical 'drop' (Spectral Novelty)...")
-            limit_sr_start = int(sr * 10) # Skip first 10s (usually silence/simple beat)
-            limit_sr_end = min(len(y), int(sr * 90)) # Up to 90s
+            # ... (Existing spectral novelty logic) ...
+            limit_sr_start = int(sr * 10)
+            limit_sr_end = min(len(y), int(sr * 90))
+            y_analysis = y[limit_sr_start:limit_sr_end] if limit_sr_end > limit_sr_start else y
+            offset_frames = int(limit_sr_start / hop_length) if limit_sr_end > limit_sr_start else 0
             
-            if limit_sr_end <= limit_sr_start:
-                # Track too short, analyze full length instead
-                y_analysis = y
-                offset_frames = 0
-            else:
-                y_analysis = y[limit_sr_start:limit_sr_end]
-                offset_frames = int(limit_sr_start / 512) # Based on hop_length=512
-            
-            # Calculate spectral novelty (sudden changes in frequency content)
+            # Calculate spectral novelty
             S = np.abs(librosa.stft(y_analysis))
             spectral_novelty = librosa.onset.onset_strength(S=librosa.amplitude_to_db(S, ref=np.max), sr=sr)
-            
-            # Smooth the novelty curve to find broad structural changes
-            # Large window (2.5 seconds) to identify structural parts rather than hits
-            hop_length = 512
-            window_size_sec = 2.5
-            window_size_frames = int((window_size_sec * sr) / hop_length)
-            smoothed_novelty = gaussian_filter1d(spectral_novelty, sigma=window_size_frames/4)
-            
-            # Find the point of maximum GRADIENT (start of the drop/buildup)
+            smoothed_novelty = gaussian_filter1d(spectral_novelty, sigma=int(2.5 * sr / hop_length)/4)
             novelty_diff = np.diff(smoothed_novelty)
-            
-            # Give a slight weight to transitions further into the track to avoid picking up the first kick
             weights = np.linspace(1.0, 1.2, len(novelty_diff))
             weighted_diff = novelty_diff * weights
             
             drop_frame = np.argmax(weighted_diff) + offset_frames
             drop_time = librosa.frames_to_time(drop_frame, sr=sr, hop_length=hop_length)
             
-            logger.info(f"Probable Drop/Big Transition detected at: {drop_time:.4f}s")
-            
             # 4. ALIGN DOWNBEAT TO DROP
-            # We find the nearest beat to this drop and treat it as the "Anchor" (Beat 1)
             beat_times = librosa.frames_to_time(beats, sr=sr)
-            # Find the beat closest to the detected drop
-            anchor_idx = np.argmin(np.abs(beat_times - drop_time))
-            anchor_time = beat_times[anchor_idx]
+            if len(beat_times) > 0:
+                anchor_idx = np.argmin(np.abs(beat_times - drop_time))
+                anchor_time = beat_times[anchor_idx]
+            else:
+                anchor_time = 0.0
             
-            logger.info(f"Aligning grid anchor to drop-adjacent beat at: {anchor_time:.4f}s")
+            # 5. GENERATE DYNAMIC GRID
+            # If BPM variation is low (< 0.5 BPM), use static grid for stability
+            bpm_std = np.std(bpm_vbr)
+
+            # SMART INTEGER SNAPPING (Techno/Schranz Optimization)
+            # If BPM is within typical genre range and close to integer, snap it and force static grid
+            # Widened tolerance to 0.35 to catch ~1.25 drift common in high BPM analysis
+            if 125.0 <= bpm_global <= 165.0 and abs(bpm_global - round(bpm_global)) < 0.35:
+                snapped = float(round(bpm_global))
+                logger.info(f"Smart Snapping: Adjusting BPM {bpm_global:.2f} -> {snapped:.2f} (StdDev: {bpm_std:.4f})")
+                bpm_global = snapped
+                bpm_std = 0.0 # Force static grid alignment
+
+            logger.info(f"BPM Stability (StdDev): {bpm_std:.4f}")
             
-            # 5. GENERATE GRID (Backwards and Forwards from Anchor)
-            beat_duration = 60.0 / bpm
-            grid = []
-            
-            # Start from anchor and go backwards to find the "start" of the track grid
-            start_time = anchor_time
-            while start_time > 0:
-                start_time -= beat_duration
-            start_time += beat_duration # Correction to stay > 0
-            
-            current_time = start_time
-            while current_time < duration:
-                # We want the anchor_time to be mapped to a 'Beat 1' (Downbeat)
-                # Calculate beat number relative to anchor
-                beats_from_anchor = round((current_time - anchor_time) / beat_duration)
-                beat_num = (beats_from_anchor % 4) + 1
-                
-                grid.append({
-                    "time": round(float(current_time), 4),
-                    "bpm": bpm,
-                    "beat": int(beat_num),
+            grid_anchors = []
+            if bpm_std < 0.5:
+                # STATIC GRID
+                logger.info("Using static grid (stable tempo).")
+                grid_anchors.append({
+                    "time": 0.0, # Start from 0 with initial offset handled by beat index
+                    "bpm": round(bpm_global, 3),
+                    "beat": 1,
                     "metro": "4/4"
                 })
-                current_time += beat_duration
+                # Alignment: Adjust first anchor time so that anchor_time lands on a proper beat
+                beat_duration = 60.0 / bpm_global
+                start_offset = anchor_time % beat_duration
+                grid_anchors[0]["time"] = round(start_offset, 4)
+            else:
+                # DYNAMIC GRID
+                logger.info("Using dynamic grid (variable tempo detected).")
+                # Add TEMPO markers every 10 seconds to follow drift
+                for t_sec in range(0, int(duration), 10):
+                    frame_idx = int(t_sec * sr / hop_length)
+                    if frame_idx < len(bpm_vbr):
+                        local_bpm = bpm_vbr[frame_idx]
+                        grid_anchors.append({
+                            "time": float(t_sec),
+                            "bpm": round(local_bpm, 3),
+                            "beat": 1, # Simplified for XML exchange
+                            "metro": "4/4"
+                        })
             
-            logger.info(f"Analysis complete for {path}: {len(grid)} beats aligned to drop.")
+            # For internal app representation, we still need a beat-by-beat list for the waveform
+            # (Generated from the anchors)
+            full_beat_list = []
+            curr_anch_idx = 0
+            curr_time = grid_anchors[0]["time"]
+            while curr_time < duration:
+                # Check for next anchor
+                if curr_anch_idx + 1 < len(grid_anchors):
+                    if curr_time >= grid_anchors[curr_anch_idx + 1]["time"]:
+                        curr_anch_idx += 1
+                
+                anchor = grid_anchors[curr_anch_idx]
+                beat_dur = 60.0 / anchor["bpm"]
+                
+                full_beat_list.append({
+                    "time": round(curr_time, 4),
+                    "bpm": anchor["bpm"],
+                    "beat": (len(full_beat_list) % 4) + 1,
+                    "metro": "4/4"
+                })
+                curr_time += beat_dur
+
+            # 6. KEY DETECTION (NEW)
+            logger.info("Detecting musical key...")
+            key_info = BeatAnalyzer.detect_key(y, sr)
+            logger.info(f"Key detected: {key_info['key']} ({key_info['camelot']})")
+
+            # 7. PHRASE DETECTION (NEW)
+            logger.info("Detecting phrases...")
+            phrases = BeatAnalyzer.detect_phrases(y, sr, bpm_global, duration)
+            logger.info(f"Detected {len(phrases)} phrases.")
+
+            # 8. LOUDNESS ANALYSIS (NEW)
+            logger.info("Analyzing loudness...")
+            lufs = BeatAnalyzer.calculate_lufs(y, sr)
+            logger.info(f"Integrated Loudness: {lufs} LUFS")
+
             return {
-                "bpm": round(bpm, 2),
-                "beats": grid,
+                "bpm": round(bpm_global, 2),
+                "key": key_info["key"],
+                "camelot": key_info["camelot"],
+                "phrases": phrases,
+                "lufs": lufs,
+                "peak": round(float(np.max(np.abs(y))), 4),
+                "beats": full_beat_list,
+                "tempoAnchors": grid_anchors, # For Rekordbox XML <TEMPO> bits
                 "totalTime": duration,
                 "dropTime": round(float(drop_time), 4)
             }
         except Exception as e:
             logger.error(f"Professional analysis failed for {path}: {str(e)}", exc_info=True)
             raise RuntimeError(f"Audio analysis failed: {str(e)}")
+
+    @staticmethod
+    def detect_key(y, sr):
+        """Detects the musical key and maps it to Camelot notation."""
+        import librosa
+        import numpy as np
+
+        # 1. Compute Chroma Features (CQT-based for better pitch resolution)
+        # Weighting: Intro (first 30s) and Outro (last 30s) get 2x weight to find "root" key
+        duration = librosa.get_duration(y=y, sr=sr)
+        intro_samples = int(min(duration, 30) * sr)
+        outro_samples = int(min(duration, 30) * sr)
+        
+        y_intro = y[:intro_samples]
+        y_outro = y[-outro_samples:] if duration > 30 else y
+        y_main = y[intro_samples:-outro_samples] if duration > 60 else y
+        
+        chroma_intro = librosa.feature.chroma_cqt(y=y_intro, sr=sr)
+        chroma_outro = librosa.feature.chroma_cqt(y=y_outro, sr=sr)
+        chroma_main = librosa.feature.chroma_cqt(y=y_main, sr=sr)
+        
+        # Weighted mean
+        chroma_mean = (np.mean(chroma_intro, axis=1) * 2.0 + 
+                       np.mean(chroma_outro, axis=1) * 2.0 + 
+                       np.mean(chroma_main, axis=1)) / 5.0
+
+        # 2. Key Profiles (Krumhansl-Schmuckler)
+        major_profile = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
+        minor_profile = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
+
+        # 3. Correlate with shifted versions of profiles
+        major_correlations = []
+        minor_correlations = []
+        for i in range(12):
+            shifted_major = np.roll(major_profile, i)
+            shifted_minor = np.roll(minor_profile, i)
+            major_correlations.append(np.corrcoef(chroma_mean, shifted_major)[0, 1])
+            minor_correlations.append(np.corrcoef(chroma_mean, shifted_minor)[0, 1])
+
+        # 4. Find Best Match
+        major_best_key = np.argmax(major_correlations)
+        major_best_score = major_correlations[major_best_key]
+        minor_best_key = np.argmax(minor_correlations)
+        minor_best_score = minor_correlations[minor_best_key]
+
+        if major_best_score > minor_best_score:
+            key_index = major_best_key
+            is_major = True
+        else:
+            key_index = minor_best_key
+            is_major = False
+
+        # 5. Mapping
+        musical_keys = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+        camelot_major = ['8B', '3B', '10B', '5B', '12B', '7B', '2B', '9B', '4B', '11B', '6B', '1B']
+        camelot_minor = ['5A', '12A', '7A', '2A', '9A', '4A', '11A', '6A', '1A', '8A', '3A', '10A']
+
+        key_name = musical_keys[key_index] + (" Major" if is_major else " Minor")
+        camelot = camelot_major[key_index] if is_major else camelot_minor[key_index]
+
+        return {
+            "key": key_name,
+            "camelot": camelot
+        }
+
+    @staticmethod
+    def detect_phrases(y, sr, bpm, duration):
+        """Detects track structure using professional segmentation."""
+        import librosa
+        import numpy as np
+        
+        try:
+            # 1. Feature extraction for structure
+            # MFCC + Chroma capture both timbre and harmony
+            hop_length = 2048
+            mfcc = librosa.feature.mfcc(y=y, sr=sr, hop_length=hop_length)
+            
+            # 2. Agglomerative clustering for boundaries
+            # Aim for 8-bar or 16-bar phrases (roughly)
+            # n_segments = int(duration / 30) # Too coarse?
+            # Let's try to find natural break points
+            n_segments = min(12, max(4, int(duration / 20)))
+            
+            # Use recurrence matrix for better structural awareness
+            # (Simplified for now to ensure stability)
+            boundaries = librosa.segment.agglomerative(mfcc, n_segments)
+            boundary_times = librosa.frames_to_time(boundaries, sr=sr, hop_length=hop_length)
+            boundary_times = np.sort(np.unique(np.concatenate(([0], boundary_times, [duration]))))
+
+            phrases = []
+            for i in range(len(boundary_times) - 1):
+                start = boundary_times[i]
+                end = boundary_times[i+1]
+                
+                # Heuristic Labeling
+                rel_pos = start / duration
+                if i == 0: label = "INTRO"
+                elif i == len(boundary_times) - 2: label = "OUTRO"
+                else:
+                    # Calculate segment energy to find "The Drop"
+                    seg_start_idx = int(start * sr)
+                    seg_end_idx = int(end * sr)
+                    energy = np.mean(librosa.feature.rms(y=y[seg_start_idx:seg_end_idx])[0]) if seg_end_idx > seg_start_idx else 0
+                    
+                    if energy > 0.15 and 0.2 < rel_pos < 0.8:
+                        label = f"DROP {i}"
+                    else:
+                        label = f"PHRASE {i}"
+
+                phrases.append({
+                    "name": label,
+                    "start": round(float(start), 3),
+                    "end": round(float(end), 3),
+                    "color": "#3b82f6" # Default blue
+                })
+            
+            return phrases
+        except Exception as e:
+            logger.warning(f"Phrase detection failed: {e}")
+            return []
+
+    @staticmethod
+    def calculate_lufs(y, sr):
+        """Calculates Integrated Loudness (LUFS) approximation."""
+        import numpy as np
+        try:
+            # 1. Square the signal
+            squared = y**2
+            
+            # 2. Mean (Integrated)
+            mean_sq = np.mean(squared)
+            
+            # 3. Convert to dB (FS)
+            # -0.691 is the standard compensation for LUFS vs RMS
+            lufs = 10 * np.log10(mean_sq + 1e-12) + 0.691
+            
+            return round(float(lufs), 2)
+        except Exception as e:
+            logger.warning(f"Loudness calculation failed: {e}")
+            return -100.0
 
 class ImportManager:
     @staticmethod
@@ -657,6 +947,11 @@ class ImportManager:
                 "Artist": "New Import",
                 "Album": "Imported",
                 "BPM": analysis["bpm"],
+                "Key": analysis["key"],
+                "Camelot": analysis["camelot"],
+                "phrases": analysis.get("phrases", []),
+                "Loudness": analysis.get("lufs", 0),
+                "Peak": analysis.get("peak", 0),
                 "path": str(file_path.absolute()),
                 "TotalTime": analysis["totalTime"],
                 "beatGrid": analysis["beats"],
@@ -690,6 +985,15 @@ class ImportManager:
                 if not any(str(t.get('ID') or t.get('id')) == str(tid) for t in current_tracks):
                      if db.add_track_to_playlist(pid, tid):
                          logger.info(f"Added track {tid} to 'Import' playlist ({pid})")
+                         
+                         # AUTO-EXPORT: Trigger Bridge XML generation so Rekordbox sees it
+                         try:
+                             from .rekordbox_bridge import RekordboxBridge
+                             export_path = Path(REKORDBOX_ROOT).parent / "exports" / "rekordbox_export.xml"
+                             RekordboxBridge.export_xml([str(tid)], export_path)
+                             logger.info(f"Auto-export triggered for track {tid} to {export_path}")
+                         except Exception as exp_err:
+                             logger.warning(f"Auto-export failed: {exp_err}")
                 else:
                      logger.info(f"Track {tid} already in 'Import' playlist.")
 

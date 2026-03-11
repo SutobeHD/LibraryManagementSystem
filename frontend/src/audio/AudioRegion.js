@@ -38,6 +38,8 @@ export function createRegion({
     name = null,
     color = null
 }) {
+    const duration = sourceEnd - sourceStart;
+
     return {
         id: id || generateRegionId(),
         name: name || `Region ${regionIdCounter}`,
@@ -51,15 +53,9 @@ export function createRegion({
         // Timeline position
         timelineStart,
 
-        // Computed duration
-        get duration() {
-            return this.sourceEnd - this.sourceStart;
-        },
-
-        // Timeline end position
-        get timelineEnd() {
-            return this.timelineStart + this.duration;
-        },
+        // Computed properties (calculated upfront to avoid spread-flattening issues)
+        duration,
+        timelineEnd: timelineStart + duration,
 
         // Envelope settings
         fadeInDuration: 0,      // seconds
@@ -83,11 +79,13 @@ export function createRegion({
  * @returns {AudioRegion}
  */
 export function cloneRegion(region, newTimelineStart = null) {
+    const start = newTimelineStart !== null ? newTimelineStart : region.timelineStart;
     return {
         ...region,
         id: generateRegionId(),
         name: `${region.name} (Copy)`,
-        timelineStart: newTimelineStart !== null ? newTimelineStart : region.timelineStart,
+        timelineStart: start,
+        timelineEnd: start + region.duration,
         isSelected: false
     };
 }
@@ -112,22 +110,28 @@ export function splitRegion(region, splitTime) {
     const sourceSplitPoint = region.sourceStart + relativeOffset;
 
     // Create left region (inherits fade-in)
+    const leftDuration = sourceSplitPoint - region.sourceStart;
     const leftRegion = {
         ...region,
         id: generateRegionId(),
         name: `${region.name} (L)`,
         sourceEnd: sourceSplitPoint,
+        duration: leftDuration,
+        timelineEnd: region.timelineStart + leftDuration,
         fadeOutDuration: 0,  // Reset fade-out on left
         isSelected: false
     };
 
     // Create right region (inherits fade-out)
+    const rightDuration = region.sourceEnd - sourceSplitPoint;
     const rightRegion = {
         ...region,
         id: generateRegionId(),
         name: `${region.name} (R)`,
         sourceStart: sourceSplitPoint,
         timelineStart: splitTime,
+        duration: rightDuration,
+        timelineEnd: splitTime + rightDuration,
         fadeInDuration: 0,  // Reset fade-in on right
         isSelected: false
     };
@@ -145,15 +149,23 @@ export function splitRegion(region, splitTime) {
  */
 export function trimRegion(region, newSourceStart = null, newSourceEnd = null) {
     const trimmedRegion = { ...region };
+    let changed = false;
 
     if (newSourceStart !== null && newSourceStart >= region.sourceStart) {
         const trimAmount = newSourceStart - region.sourceStart;
         trimmedRegion.sourceStart = newSourceStart;
         trimmedRegion.timelineStart = region.timelineStart + trimAmount;
+        changed = true;
     }
 
     if (newSourceEnd !== null && newSourceEnd <= region.sourceEnd) {
         trimmedRegion.sourceEnd = newSourceEnd;
+        changed = true;
+    }
+
+    if (changed) {
+        trimmedRegion.duration = trimmedRegion.sourceEnd - trimmedRegion.sourceStart;
+        trimmedRegion.timelineEnd = trimmedRegion.timelineStart + trimmedRegion.duration;
     }
 
     return trimmedRegion;
@@ -167,9 +179,11 @@ export function trimRegion(region, newSourceStart = null, newSourceEnd = null) {
  * @returns {AudioRegion}
  */
 export function moveRegion(region, newTimelineStart) {
+    const start = Math.max(0, newTimelineStart);
     return {
         ...region,
-        timelineStart: Math.max(0, newTimelineStart)
+        timelineStart: start,
+        timelineEnd: start + region.duration
     };
 }
 

@@ -14,18 +14,21 @@ const TAG_CATEGORIES = {
 
 const PlaylistNode = ({ node, level = 0, onSelect }) => {
     const [isOpen, setIsOpen] = useState(false);
-    const hasChildren = node.children && node.children.length > 0;
+    // Backend returns 'Children' (uppercase)
+    const children = node.Children || [];
+    const hasChildren = children.length > 0;
+
     return (
         <div>
             <div onClick={() => hasChildren ? setIsOpen(!isOpen) : onSelect(node)} className="flex items-center gap-2 py-2 pr-2 cursor-pointer hover:bg-white/5 text-slate-400 hover:text-white select-none transition-colors rounded-r-xl mr-2" style={{ paddingLeft: `${level * 16 + 12}px` }}>
                 {hasChildren ? (isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : <span className="w-3.5"></span>}
-                {node.Type === "1" ?
+                {node.Type === "0" ?
                     <Folder size={16} className="text-amber-500 shrink-0" /> :
                     <ListMusic size={16} className="text-cyan-400 shrink-0" />
                 }
                 <span className="truncate text-sm">{node.Name}</span>
             </div>
-            {isOpen && hasChildren && <div className="border-l border-white/5 ml-4">{node.children.map(c => <PlaylistNode key={c.ID} node={c} level={level} onSelect={onSelect} />)}</div>}
+            {isOpen && hasChildren && <div className="border-l border-white/5 ml-4">{children.map(c => <PlaylistNode key={c.ID} node={c} level={level} onSelect={onSelect} />)}</div>}
         </div>
     );
 };
@@ -70,7 +73,11 @@ const RankingView = ({ libraryStatus, appMode }) => {
     const [colorId, setColorId] = useState(0);
     const [comment, setComment] = useState("");
     const [genre, setGenre] = useState("");
-    const [volume, setVolume] = useState(1);
+    const [volume, setVolumeState] = useState(() => {
+        const saved = localStorage.getItem('rb_volume');
+        return saved !== null ? parseFloat(saved) : 1;
+    });
+    const setVolume = (v) => { setVolumeState(v); localStorage.setItem('rb_volume', String(v)); };
 
     useHotkeys('space', (e) => {
         if (currentTrack) {

@@ -1,6 +1,6 @@
-# RB Editor Pro
+# Music Library Manager
 
-Rekordbox Editor Pro is a high-performance desktop application designed for advanced DJ library management and audio processing. It integrates directly with Rekordbox (Live Mode) or uses XML snapshots to provide tools for cleaning metadata, matching tracks via SoundCloud, and high-fidelity audio editing.
+Music Library Manager is a high-performance desktop application designed for advanced DJ library management and audio processing. It integrates directly with Rekordbox (Live Mode) or uses XML snapshots to provide tools for cleaning metadata, matching tracks via SoundCloud, and high-fidelity audio editing.
 
 ## 🚀 Key Features
 

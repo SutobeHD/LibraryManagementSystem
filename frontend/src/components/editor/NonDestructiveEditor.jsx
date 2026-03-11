@@ -32,6 +32,8 @@ import {
     setPlayhead,
     toggleSnap,
     setSnapDivision,
+    shiftGrid,
+    adjustBPM,
     setZoom,
     pushHistory,
     undo,
@@ -51,7 +53,11 @@ const NonDestructiveEditor = ({
     sourcePath,
     track,
     bpm = 128,
+    camelot = '',
+    loudness = 0,
+    peak = 0,
     beatGrid = [],
+    phrases = [],
     onRenderComplete,
     className = ''
 }) => {
@@ -62,7 +68,7 @@ const NonDestructiveEditor = ({
     const pauseTimeRef = useRef(0);
 
     const [state, setState] = useState(() =>
-        createTimelineState({ bpm, beatGrid, zoom: 50 })
+        createTimelineState({ bpm, beatGrid, phrases, zoom: 50 })
     );
     const [isLoading, setIsLoading] = useState(true);
     const [isPlaying, setIsPlaying] = useState(false);
@@ -254,6 +260,7 @@ const NonDestructiveEditor = ({
             trackId: track?.id,
             bpm: state.bpm,
             beatGrid: state.beatGrid,
+            markers: state.markers,
             zoom: state.zoom,
             snapEnabled: state.snapEnabled,
             snapDivision: state.snapDivision,
@@ -276,8 +283,8 @@ const NonDestructiveEditor = ({
 
     const handleLoadClick = useCallback(async () => {
         try {
-            const res = await api.get('/api/projects');
-            setProjectList(res.data);
+            const res = await api.get('/api/projects/rbep/list');
+            setProjectList(res.data || []);
             setShowLoadModal(true);
         } catch (e) { alert("Failed to list projects"); }
     }, []);
@@ -286,15 +293,22 @@ const NonDestructiveEditor = ({
         try {
             setIsLoading(true);
             setShowLoadModal(false);
-            const res = await api.get(`/api/projects/${prjName}`);
+            const res = await api.get(`/api/projects/rbep/${encodeURIComponent(prjName)}`);
             const data = res.data;
 
-            // 1. Check/Load Audio Source
+            if (!data.tracks || data.tracks.length === 0) {
+                alert('Project has no tracks');
+                setIsLoading(false);
+                return;
+            }
+
+            const firstTrack = data.tracks[0];
+            const trackPath = firstTrack.filepath;
+
+            // 1. Load audio source from the track's filepath
             let buffer = sourceBufferRef.current;
-            if (data.sourcePath !== sourcePath) {
-                // Determine URL for sourcePath
-                // Assuming standard stream URL format
-                const url = `/api/stream?path=${encodeURIComponent(data.sourcePath)}`;
+            if (trackPath && trackPath !== sourcePath) {
+                const url = `/api/stream?path=${encodeURIComponent(trackPath)}`;
                 const ctx = audioContextRef.current || new (window.AudioContext || window.webkitAudioContext)();
                 if (!audioContextRef.current) audioContextRef.current = ctx;
 
@@ -304,29 +318,53 @@ const NonDestructiveEditor = ({
                 sourceBufferRef.current = buffer;
             }
 
-            // 2. Hydrate Regions with Buffer
-            const hydratedRegions = data.regions.map(r => ({
-                ...r,
-                sourceBuffer: buffer,
-                sourcePath: data.sourcePath
+            // 2. Convert RBEP edit data into timeline regions
+            const regions = [];
+            const edit = firstTrack.edit;
+            if (edit && edit.volume && edit.volume.length > 0) {
+                edit.volume.forEach((vol, i) => {
+                    regions.push(createRegion({
+                        sourceBuffer: buffer,
+                        sourcePath: trackPath,
+                        sourceStart: vol.start,
+                        sourceEnd: vol.end,
+                        timelineStart: vol.start,
+                        name: `Volume ${i + 1}`,
+                        color: vol.vol < 1.0 ? '#f59e0b' : '#06b6d4',
+                        gain: vol.vol
+                    }));
+                });
+            } else if (firstTrack.position) {
+                // Create a single region from position data
+                const pos = firstTrack.position;
+                regions.push(createRegion({
+                    sourceBuffer: buffer,
+                    sourcePath: trackPath,
+                    sourceStart: pos.songStart || pos.start || 0,
+                    sourceEnd: pos.songEnd || pos.end || (buffer?.duration || 0),
+                    timelineStart: 0,
+                    name: firstTrack.title || data.name,
+                    color: '#06b6d4'
+                }));
+            }
+
+            // 3. Extract beat grid from RBEP
+            const rbepBeatGrid = (firstTrack.beatGrid || []).map(b => ({
+                index: b.index,
+                bpm: b.bpm,
+                position: b.position / 1000  // Convert ms to seconds
             }));
 
-            const hydratedPalette = (data.paletteSlots || []).map(s => s ? ({
-                ...s,
-                sourceBuffer: buffer,
-                sourcePath: data.sourcePath
-            }) : null);
-
-            // 3. Set State
+            // 4. Set state with loaded project data
             setState(prev => ({
                 ...prev,
-                regions: hydratedRegions,
-                paletteSlots: hydratedPalette,
-                bpm: data.bpm,
-                beatGrid: data.beatGrid || [],
-                zoom: data.zoom || 50,
-                snapEnabled: data.snapEnabled,
-                snapDivision: data.snapDivision || '1/4',
+                regions: regions.length > 0 ? regions : prev.regions,
+                markers: data.markers || firstTrack.positionMarks || [],
+                bpm: firstTrack.bpm || (edit?.bpm?.[0]?.bpm) || prev.bpm,
+                beatGrid: rbepBeatGrid.length > 0 ? rbepBeatGrid : prev.beatGrid,
+                zoom: 50,
+                snapEnabled: true,
+                snapDivision: '1/4',
                 playhead: 0,
                 history: [],
                 historyIndex: -1
@@ -356,6 +394,27 @@ const NonDestructiveEditor = ({
         setState(prev => setPaletteSlot(prev, slotIndex, region));
     }, [sourcePath]);
 
+    // Handle drop onto timeline from palette
+    const handleTimelineDrop = useCallback((regionData, time) => {
+        if (!sourceBufferRef.current) return;
+
+        // Create new region from the dropped data + current source buffer
+        const newRegion = createRegion({
+            sourceBuffer: sourceBufferRef.current,
+            sourcePath: sourcePath,
+            sourceStart: regionData.sourceStart,
+            sourceEnd: regionData.sourceEnd,
+            timelineStart: time,
+            name: regionData.name,
+            color: regionData.color
+        });
+
+        setState(prev => {
+            const newState = pushHistory(prev, { type: 'add', regionId: newRegion.id });
+            return addRegion(newState, newRegion);
+        });
+    }, [sourcePath]);
+
     const handlePaletteDragStart = useCallback((slotIndex, region) => {
         // Could track which slot is being dragged
     }, []);
@@ -366,11 +425,11 @@ const NonDestructiveEditor = ({
 
     // Zoom handlers
     const handleZoomIn = useCallback(() => {
-        setState(prev => setZoom(prev, prev.zoom + 20));
+        setState(prev => setZoom(prev, Math.min(2000, prev.zoom * 1.5)));
     }, []);
 
     const handleZoomOut = useCallback(() => {
-        setState(prev => setZoom(prev, prev.zoom - 20));
+        setState(prev => setZoom(prev, Math.max(10, prev.zoom / 1.5)));
     }, []);
 
     const handleZoomChange = useCallback((newZoom) => {
@@ -387,11 +446,125 @@ const NonDestructiveEditor = ({
         setState(prev => setSelection(prev, start, end));
     }, []);
 
+    // Marker operations
+    const addMarker = useCallback((type, num = -1) => {
+        const time = state.playhead;
+        const newMarker = {
+            Name: type === 4 ? "LOOP" : (num >= 0 ? `HOT CUE ${String.fromCharCode(65 + num)}` : "MEMORY CUE"),
+            Type: type,
+            Start: time,
+            Num: num,
+            Red: type === 4 ? 0 : 239,
+            Green: type === 4 ? 255 : 68,
+            Blue: type === 4 ? 0 : 68
+        };
+
+        if (type === 4 && state.selection) {
+            newMarker.Start = state.selection.start;
+            newMarker.End = state.selection.end;
+        }
+
+        setState(prev => ({
+            ...prev,
+            markers: [...(prev.markers || []), newMarker]
+        }));
+    }, [state.playhead, state.selection]);
+
+    const handleNormalize = useCallback(() => {
+        // Placeholder for normalization logic
+        console.log("Normalize clicked!");
+        // This would typically involve analyzing the audio buffer and applying gain
+        // to reach a target loudness/peak level.
+        // For now, it's just a console log.
+    }, []);
+
+    const handleGridAdjust = useCallback((delta) => {
+        setState(prev => shiftGrid(prev, delta));
+    }, []);
+
+    const toggleGridMode = useCallback(() => {
+        const newMode = state.editMode === 'grid' ? 'select' : 'grid';
+        setState(prev => ({ ...prev, editMode: newMode }));
+    }, [state.editMode]);
+
+    const handleSaveGrid = useCallback(async () => {
+        if (!track?.id) return;
+        try {
+            const response = await fetch('/api/track/grid/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    track_id: track.id,
+                    beat_grid: state.beatGrid
+                })
+            });
+            if (response.ok) {
+                console.log("Grid saved successfully");
+            }
+        } catch (err) {
+            console.error("Failed to save grid:", err);
+        }
+    }, [track?.id, state.beatGrid]);
+
+    // Keyboard shortcuts
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.target.tagName === 'INPUT') return;
+
+            switch (e.key.toLowerCase()) {
+                case 'm': addMarker(0, -1); break; // Memory Cue
+                case 'l': addMarker(4, -1); break; // Loop
+                case '1': addMarker(0, 0); break;  // Hot Cue A
+                case '2': addMarker(0, 1); break;  // Hot Cue B
+                case '3': addMarker(0, 2); break;
+                case '4': addMarker(0, 3); break;
+                case '5': addMarker(0, 4); break;
+                case '6': addMarker(0, 5); break;
+                case '7': addMarker(0, 6); break;
+                case '8': addMarker(0, 7); break;
+                case 'f': addMarker(1, -1); break; // Fade In
+                case 'o': addMarker(2, -1); break; // Fade Out
+                case 's': handleSplit(); break;
+                case 'c': handleCopy(); break;
+                case 'delete': handleDelete(); break;
+                case 'q': handleToggleSnap(); break;
+                case 'g': toggleGridMode(); break; // Toggle Grid Edit Mode
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [addMarker, handleSplit, handleCopy, handleDelete, handleToggleSnap, toggleGridMode]);
+
     // Playhead change
     const handlePlayheadChange = useCallback((time) => {
         pauseTimeRef.current = time;
-        setState(prev => setPlayhead(prev, time));
-    }, []);
+        setState(prev => ({ ...prev, playhead: time }));
+
+        // Seamless-seek if playing
+        if (isPlaying && playerRef.current && audioContextRef.current && sourceBufferRef.current) {
+            try {
+                // Prevent onended from stopping playback during seek
+                playerRef.current.onended = null;
+                playerRef.current.stop();
+            } catch (e) { /* Ignore if already stopped */ }
+
+            const ctx = audioContextRef.current;
+            const source = ctx.createBufferSource();
+            source.buffer = sourceBufferRef.current;
+            source.connect(ctx.destination);
+
+            source.start(0, time);
+            startTimeRef.current = ctx.currentTime - time;
+            playerRef.current = source;
+
+            // Restore onended
+            source.onended = () => {
+                setIsPlaying(false);
+                setState(prev => ({ ...prev, isPlaying: false }));
+            };
+        }
+    }, [isPlaying]);
 
     // Render / Export
     const handleRender = useCallback(async () => {
@@ -545,6 +718,41 @@ const NonDestructiveEditor = ({
 
     return (
         <div className={`flex flex-col h-full bg-[#0a0a0a] text-white ${className}`}>
+            {/* Project Browser Modal */}
+            {showLoadModal && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+                    <div className="w-96 max-h-[70vh] bg-[#111] rounded-2xl border border-white/10 shadow-2xl flex flex-col">
+                        <div className="flex items-center justify-between p-4 border-b border-white/5">
+                            <h3 className="text-lg font-bold flex items-center gap-2">
+                                <FolderOpen size={18} className="text-cyan-400" />
+                                Open RBEP Project
+                            </h3>
+                            <button onClick={() => setShowLoadModal(false)} className="p-1 hover:bg-white/10 rounded text-slate-400">
+                                <X size={16} />
+                            </button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-2">
+                            {projectList.length === 0 ? (
+                                <p className="text-slate-500 text-sm text-center py-8">No .rbep projects found</p>
+                            ) : projectList.map(prj => (
+                                <button
+                                    key={prj.name}
+                                    onClick={() => loadProject(prj.name)}
+                                    className="w-full text-left p-3 rounded-xl hover:bg-white/5 border border-transparent hover:border-cyan-500/20 transition-all group"
+                                >
+                                    <div className="font-bold text-sm text-white group-hover:text-cyan-400 transition-colors">{prj.name}</div>
+                                    <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-3">
+                                        <span>{(prj.size / 1024).toFixed(1)} KB</span>
+                                        <span>·</span>
+                                        <span>{new Date(prj.modified * 1000).toLocaleDateString()}</span>
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Render overlay */}
             {isRendering && (
                 <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md">
@@ -574,10 +782,32 @@ const NonDestructiveEditor = ({
                         </span>
                     </div>
 
-                    {/* BPM */}
-                    <div className="text-xs bg-black/30 px-2 py-1 rounded border border-white/5">
-                        <span className="text-slate-500">BPM</span>
-                        <span className="ml-2 text-cyan-400 font-mono">{state.bpm.toFixed(1)}</span>
+                    {/* BPM & Key */}
+                    <div className="flex gap-1">
+                        <div className="text-xs bg-black/30 px-2 py-1 rounded border border-white/5">
+                            <span className="text-slate-500">BPM</span>
+                            <span className="ml-2 text-cyan-400 font-mono">{state.bpm.toFixed(1)}</span>
+                        </div>
+                        {camelot && (
+                            <div className="text-xs bg-black/30 px-2 py-1 rounded border border-white/5">
+                                <span className="text-slate-500">KEY</span>
+                                <span className="ml-2 text-purple-400 font-mono">{camelot}</span>
+                            </div>
+                        )}
+                        {loudness !== 0 && (
+                            <div className="text-xs bg-black/30 px-2 py-1 rounded border border-white/5 flex items-center gap-2 group cursor-help" title={`Peak: ${(20 * Math.log10(peak || 1e-6)).toFixed(1)} dBFS`}>
+                                <span className="text-slate-500">LUFS</span>
+                                <span className={`font-mono ${loudness > -9 ? 'text-red-400' : 'text-emerald-400'}`}>
+                                    {loudness.toFixed(1)}
+                                </span>
+                                <button
+                                    onClick={handleNormalize}
+                                    className="ml-1 opacity-0 group-hover:opacity-100 text-[10px] bg-white/10 hover:bg-white/20 px-1 rounded transition-all"
+                                >
+                                    NORM
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -675,6 +905,26 @@ const NonDestructiveEditor = ({
                             </select>
                         )}
 
+                        {/* Grid Mode Toggle */}
+                        <div className="flex bg-black/20 p-0.5 rounded border border-white/5">
+                            <button
+                                onClick={toggleGridMode}
+                                className={`p-1.5 rounded transition-all ${state.editMode === 'grid' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:text-white'}`}
+                                title="Grid Editing Mode"
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+                                </svg>
+                            </button>
+                            {state.editMode === 'grid' && (
+                                <button
+                                    onClick={handleSaveGrid}
+                                    className="px-2 text-[10px] font-bold text-cyan-400 hover:text-white transition-colors"
+                                >
+                                    SAVE
+                                </button>
+                            )}
+                        </div>
                         <div className="flex-1" />
 
                         {/* Zoom */}
@@ -732,9 +982,11 @@ const NonDestructiveEditor = ({
                             onRegionMove={handleRegionMove}
                             onRegionResize={handleRegionResize}
                             onRegionSplit={handleSplit}
+                            onGridAdjust={handleGridAdjust}
                             onSelectionChange={handleSelectionChange}
                             onPlayheadChange={handlePlayheadChange}
                             onZoomChange={handleZoomChange}
+                            onRegionDrop={handleTimelineDrop}
                         />
                     </div>
                 </div>

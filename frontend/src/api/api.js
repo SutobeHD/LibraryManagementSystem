@@ -10,6 +10,7 @@ const API_BASE_URL = isTauri
 const api = axios.create({
     baseURL: API_BASE_URL,
     timeout: 30000, // 30s default timeout for stability
+    withCredentials: true, // Send HttpOnly cookies
 });
 
 // --- SECURITY: Session token management ---

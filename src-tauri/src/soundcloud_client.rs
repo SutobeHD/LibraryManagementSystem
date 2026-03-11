@@ -115,10 +115,19 @@ fn generate_code_challenge(verifier: &str) -> String {
 /// # Returns
 /// A tuple `(authorization_url, code_verifier)`.
 /// The caller must store `code_verifier` and pass it to `exchange_code_for_token` later.
-pub fn get_auth_url() -> (String, String) {
+pub fn get_auth_url() -> Result<(String, String), String> {
+    let cid = get_client_id();
+    
+    // SECURITY: Prevent authorization flow if credentials are not configured
+    if cid == "[[INSERT_SOUNDCLOUD_CLIENT_ID]]" || cid.is_empty() {
+        return Err("SoundCloud Client ID is missing. Please set SOUNDCLOUD_CLIENT_ID in your .env file.".to_string());
+    }
+    
+    println!("[SoundCloud] Using Client ID: {}...", &cid[..4]);
+
     let code_verifier = generate_code_verifier();
     let code_challenge = generate_code_challenge(&code_verifier);
-    let cid = get_client_id();
+    let state = generate_code_verifier()[..16].to_string(); // Random state string
 
     let mut url = Url::parse(AUTH_URL).expect("Invalid AUTH_URL constant");
     url.query_pairs_mut()
@@ -126,9 +135,13 @@ pub fn get_auth_url() -> (String, String) {
         .append_pair("client_id", &cid)
         .append_pair("redirect_uri", REDIRECT_URI)
         .append_pair("code_challenge", &code_challenge)
-        .append_pair("code_challenge_method", "S256");
+        .append_pair("code_challenge_method", "S256")
+        .append_pair("state", &state);
 
-    (url.to_string(), code_verifier)
+    let final_url = url.to_string();
+    println!("[SoundCloud] Auth URL generated (state: {})", state);
+    
+    Ok((final_url, code_verifier))
 }
 
 /// Exchanges an authorization code for an access token using the PKCE code verifier.
@@ -422,7 +435,13 @@ pub async fn handle_export_click() {
     let playlist_name = "My Rekordbox Export";
 
     // Step 1 + 2: Generate auth URL and open in browser
-    let (auth_url, code_verifier) = get_auth_url();
+    let (auth_url, code_verifier) = match get_auth_url() {
+        Ok(vals) => vals,
+        Err(e) => {
+            eprintln!("[SoundCloud] Configuration error: {}", e);
+            return;
+        }
+    };
     println!("[SoundCloud] Opening browser for login...");
     if let Err(e) = open::that(&auth_url) {
         eprintln!("[SoundCloud] Could not open browser: {}", e);

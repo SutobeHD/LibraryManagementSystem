@@ -1,6 +1,6 @@
 {
     "$schema": "https://schema.tauri.app/config/2",
-    "productName": "RB Editor Pro",
+    "productName": "Music Library Manager",
     "version": "0.1.0",
     "identifier": "com.rbeditor.pro",
     "build": {
@@ -14,10 +14,22 @@
         "windows": [
             {
                 "label": "main",
-                "title": "Rekordbox Editor Pro",
+                "title": "Music Library Manager",
                 "width": 1400,
                 "height": 900,
                 "resizable": true,
+                "visible": false
+            },
+            {
+                "label": "splashscreen",
+                "title": "Loading...",
+                "url": "splashscreen.html",
+                "width": 450,
+                "height": 300,
+                "decorations": false,
+                "resizable": false,
+                "center": true,
+                "transparent": true,
                 "visible": true
             }
         ]
