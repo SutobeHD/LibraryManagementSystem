@@ -58,7 +58,7 @@ impl AudioEngine {
             .format(&hint, mss, &fmt_opts, &meta_opts)
             .map_err(|e| format!("Failed to probe format: {}", e))?;
 
-        let mut format = probed.format;
+        let format = probed.format;
 
         // 5. Find the first audio track
         let track = format
@@ -80,7 +80,7 @@ impl AudioEngine {
 }
 
 use crate::audio::playback::PlaybackEngine;
-use ringbuf::{HeapRb, SharedRb, producer::Producer};
+use ringbuf::HeapRb;
 use std::thread;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -90,7 +90,7 @@ pub struct AudioController {
 }
 
 impl AudioController {
-    pub fn Default() -> Self {
+    pub fn default() -> Self {
         Self {
             playback: PlaybackEngine::new(),
             stop_signal: Arc::new(AtomicBool::new(false)),
@@ -124,7 +124,7 @@ impl AudioController {
 
         // Spawn decoder thread (Req 8)
         thread::spawn(move || {
-            use symphonia::core::audio::{AudioBufferRef, Signal, SampleBuffer};
+            use symphonia::core::audio::SampleBuffer;
             // Default 2 channels, f32
             let mut sample_buf: Option<SampleBuffer<f32>> = None;
             

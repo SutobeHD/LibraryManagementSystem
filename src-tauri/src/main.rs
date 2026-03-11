@@ -8,7 +8,7 @@ mod audio;
 use serde::Deserialize;
 use soundcloud_client::Track;
 use tauri::{Emitter, Manager};
-use audio::commands::{load_audio, get_waveform, AudioCommandState};
+use audio::commands::{load_audio, get_3band_waveform, start_project_export, AudioCommandState};
 use audio::engine::AudioController;
 use std::sync::Mutex;
 
@@ -129,13 +129,14 @@ fn main() {
     
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .manage(AudioCommandState(Mutex::new(AudioController::Default())))
+        .manage(AudioCommandState(Mutex::new(AudioController::default())))
         .invoke_handler(tauri::generate_handler![
             close_splashscreen, 
             login_to_soundcloud, 
             export_to_soundcloud,
             load_audio,
-            get_waveform
+            get_3band_waveform,
+            start_project_export
         ])
         .setup(|app| {
             #[cfg(not(debug_assertions))]

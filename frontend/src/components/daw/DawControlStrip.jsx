@@ -6,7 +6,7 @@
  * Merges functionality from DawTransport + DawToolbar edit tools + PerformancePanel
  */
 
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
     Play, Pause, Square, SkipBack, Repeat,
     Scissors, Trash2, Undo2, Redo2,
@@ -14,7 +14,8 @@ import {
     ArrowDownToLine, ArrowUpFromLine, X, Plus,
     Activity, BarChart3, Waves,
     Copy, Clipboard, Files,
-    ChevronsLeft, ChevronsRight, Minus
+    ChevronsLeft, ChevronsRight, Minus,
+    Download, Crosshair
 } from 'lucide-react';
 import { getPositionInfo, HOT_CUE_COLORS, snapToGrid } from '../../audio/DawState';
 
@@ -26,6 +27,7 @@ const DawControlStrip = React.memo(({
     onSplit,
     onRippleDelete,
     onJumpTo,
+    onExport,
 }) => {
     const {
         isPlaying, playhead, bpm, totalDuration, zoom,
@@ -40,6 +42,17 @@ const DawControlStrip = React.memo(({
     const canUndo = undoStack.length > 0;
     const canRedo = redoStack.length > 0;
 
+    // ── TIME MODE TOGGLE (Elapsed ↔ Remaining) ──
+    const [timeMode, setTimeMode] = useState('elapsed'); // 'elapsed' | 'remaining'
+    const toggleTimeMode = useCallback(() => setTimeMode(m => m === 'elapsed' ? 'remaining' : 'elapsed'), []);
+
+    // ── ADAPTIVE ZOOM-TO-PLAYHEAD ──
+    const handleZoomToPlayhead = useCallback(() => {
+        const containerWidth = window.innerWidth * 0.6; // rough estimate of timeline width
+        const newScrollX = Math.max(0, state.playhead * state.zoom - containerWidth * 0.5);
+        dispatch({ type: 'SET_SCROLL_X', payload: newScrollX });
+    }, [state.playhead, state.zoom, dispatch]);
+
 
     // ── FORMAT ──
     const formatTime = useCallback((seconds) => {
@@ -48,6 +61,13 @@ const DawControlStrip = React.memo(({
         const s = seconds % 60;
         return `${m.toString().padStart(2, '0')}:${s.toFixed(1).padStart(4, '0')}`;
     }, []);
+
+    const formatRemaining = useCallback((seconds) => {
+        const rem = Math.max(0, (totalDuration || 0) - seconds);
+        const m = Math.floor(rem / 60);
+        const s = rem % 60;
+        return `-${m.toString().padStart(2, '0')}:${s.toFixed(1).padStart(4, '0')}`;
+    }, [totalDuration]);
 
     const posInfo = useMemo(() => getPositionInfo(playhead, bpm), [playhead, bpm]);
 
@@ -177,12 +197,16 @@ const DawControlStrip = React.memo(({
 
             {/* ── TIME ── */}
             <div className="flex items-center gap-3 px-3 border-r border-white/5">
-                <div className="flex flex-col items-center min-w-[80px]">
-                    <span className="text-sm font-mono font-bold text-white tracking-tight leading-none">
-                        {formatTime(playhead)}
+                <div
+                    className="flex flex-col items-center min-w-[80px] cursor-pointer select-none group"
+                    onClick={toggleTimeMode}
+                    title="Click to toggle Elapsed / Remaining"
+                >
+                    <span className={`text-sm font-mono font-bold tracking-tight leading-none transition-colors ${timeMode === 'remaining' ? 'text-cyan-300' : 'text-white'}`}>
+                        {timeMode === 'remaining' ? formatRemaining(playhead) : formatTime(playhead)}
                     </span>
-                    <span className="text-[8px] text-slate-500 font-mono uppercase tracking-wider">
-                        Bar {posInfo.bar} · Beat {posInfo.beat}
+                    <span className="text-[8px] text-slate-500 font-mono uppercase tracking-wider group-hover:text-slate-400 transition-colors">
+                        {timeMode === 'remaining' ? 'Remaining' : `Bar ${posInfo.bar} · Beat ${posInfo.beat}`}
                     </span>
                 </div>
                 <div className="flex flex-col items-center">
@@ -298,7 +322,7 @@ const DawControlStrip = React.memo(({
             </div>
 
             {/* ── LOOP CONTROLS ── */}
-            <div className="flex items-center gap-0.5 px-2">
+            <div className="flex items-center gap-0.5 px-2 border-r border-white/5">
                 <TBtn onClick={handleLoopIn} title="Loop In">
                     <ArrowDownToLine size={13} />
                 </TBtn>
@@ -309,6 +333,26 @@ const DawControlStrip = React.memo(({
                     <TBtn onClick={() => dispatch({ type: 'REMOVE_LOOP', payload: activeLoopIndex })} danger title="Delete Loop">
                         <X size={13} />
                     </TBtn>
+                )}
+            </div>
+
+            {/* ── RIGHT ACTIONS ── */}
+            <div className="ml-auto flex items-center gap-0.5 px-3">
+                {/* Adaptive Zoom-to-Playhead */}
+                <TBtn onClick={handleZoomToPlayhead} title="Center view on playhead">
+                    <Crosshair size={13} />
+                </TBtn>
+                {/* Export */}
+                {onExport && (
+                    <button
+                        onClick={onExport}
+                        title="Export Project"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold text-white transition-all hover:opacity-90 ml-1"
+                        style={{ background: 'linear-gradient(135deg,rgba(99,102,241,0.8),rgba(139,92,246,0.6))', border: '1px solid rgba(99,102,241,0.4)' }}
+                    >
+                        <Download size={10} />
+                        Export
+                    </button>
                 )}
             </div>
         </div>

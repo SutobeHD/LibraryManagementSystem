@@ -36,6 +36,7 @@ import DawTimeline from './DawTimeline';
 import DawControlStrip from './DawControlStrip';
 import DawBrowser from './DawBrowser';
 import WaveformOverview from './WaveformOverview';
+import ExportModal from './ExportModal';
 
 // ─── EXTENDED REDUCER ──────────────────────────────────────────────────────────
 
@@ -52,8 +53,11 @@ function extendedReducer(state, action) {
 const DjEditDaw = ({ track: initialTrack }) => {
     console.log('[DjEditDaw] Mounting with track:', initialTrack);
     const [state, dispatch] = useReducer(extendedReducer, null, () => createInitialState());
-    const [activeTrack, setActiveTrack] = React.useState(initialTrack);
-    const [isLibraryCollapsed, setIsLibraryCollapsed] = React.useState(false);
+    const [showExport, setShowExport] = useState(false);
+    const [activeTrack, setActiveTrack] = useState(initialTrack);
+    const [isLoading, setIsLoading] = useState(false);
+    const [loadProgress, setLoadProgress] = useState(0);
+    const [isLibraryCollapsed, setIsLibraryCollapsed] = useState(false);
     const fileInputRef = useRef(null);
     const animFrameRef = useRef(null);
     const hasInitialized = useRef(false);
@@ -714,6 +718,7 @@ const DjEditDaw = ({ track: initialTrack }) => {
                     onSplit={handleSplit}
                     onRippleDelete={handleRippleDelete}
                     onJumpTo={handleJumpTo}
+                    onExport={() => setShowExport(true)}
                 />
 
                 {/* Bottom: Library Browser (Collapsible/Resizable) */}
@@ -730,6 +735,14 @@ const DjEditDaw = ({ track: initialTrack }) => {
                         />
                     </div>
                 </div>
+
+                {/* Export Modal */}
+                {showExport && (
+                    <ExportModal
+                        state={state}
+                        onClose={() => setShowExport(false)}
+                    />
+                )}
 
                 {/* Hidden File Input for Open Dialog */}
                 <input

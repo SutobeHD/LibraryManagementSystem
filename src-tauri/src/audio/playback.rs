@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Stream, StreamConfig, OutputCallbackInfo, StreamError};
-use ringbuf::{HeapRb, SharedRb, consumer::Consumer};
+use cpal::{Stream, OutputCallbackInfo, StreamError};
+use ringbuf::{SharedRb, consumer::Consumer};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct PlaybackEngine {

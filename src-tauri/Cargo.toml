@@ -30,6 +30,10 @@ rubato = "0.14"
 ringbuf = "0.3"
 crossbeam-channel = "0.5"
 
+# --- Export & Metadata ---
+hound = "3.5"
+lofty = "0.21"
+
 [dependencies.symphonia]
 version = "0.5"
 features = ["mp3", "flac", "wav", "isomp4", "alac"]
