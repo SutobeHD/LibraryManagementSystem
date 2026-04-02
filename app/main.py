@@ -56,7 +56,7 @@ from .rbep_parser import list_projects as rbep_list_projects, parse_project as r
 from .rekordbox_bridge import RekordboxBridge
 from .soundcloud_downloader import sc_downloader
 from .audio_analyzer import AudioAnalyzer, LIBROSA_AVAILABLE
-from .soundcloud_api import SoundCloudPlaylistAPI, SoundCloudSyncEngine, AuthExpiredError
+from .soundcloud_api import SoundCloudPlaylistAPI, SoundCloudSyncEngine, AuthExpiredError, RateLimitError
 
 # Per-operation lock — prevents race conditions on concurrent sync requests (Criterion 10)
 _sync_lock = asyncio.Lock()
@@ -1705,21 +1705,53 @@ if __name__ == "__main__":
 
 @app.get("/api/soundcloud/playlists")
 async def get_soundcloud_playlists(request: Request):
-    """Fetch all user playlists + likes from SoundCloud."""
+    """
+    Fetch all user playlists + likes from SoundCloud.
+
+    EC1: Returns empty lists on 0 playlists — never 404.
+    EC2: Clears the lru_cache before fetching so a fresh token always hits the SC API.
+    EC3: RateLimitError from _sc_get is surfaced as 429.
+    """
     auth_token = keyring.get_password("rb_editor_pro", "sc_token")
     if not auth_token:
-        raise HTTPException(400, "SoundCloud auth token not configured. Go to Settings to set it.")
+        # Return 401 (not 400) so the frontend's fetchPlaylists() catch block
+        # recognises it as an auth failure and shows the login screen (not a toast error).
+        logger.warning("[SC] /api/soundcloud/playlists: no auth token in keyring — returning 401.")
+        raise HTTPException(401, detail="auth_expired")
+
+    # EC2: Invalidate lru_cache so a freshly-rotated token always fetches live data.
+    SoundCloudPlaylistAPI.get_playlists.cache_clear()
+    SoundCloudPlaylistAPI.get_likes.cache_clear()
+
+    logger.info("[SC] Fetching playlists from SoundCloud (token present).")
 
     try:
-        playlists = SoundCloudPlaylistAPI.get_playlists(auth_token)
-        likes = SoundCloudPlaylistAPI.get_likes(auth_token)
+        # Run the blocking requests-based calls on a thread so we don't stall the
+        # async event loop (FastAPI / uvicorn are async; requests.get is synchronous).
+        import functools
+        playlists = await asyncio.to_thread(
+            functools.partial(SoundCloudPlaylistAPI.get_playlists, auth_token)
+        )
+        likes = await asyncio.to_thread(
+            functools.partial(SoundCloudPlaylistAPI.get_likes, auth_token)
+        )
+
+        logger.info(f"[SC] Playlists fetched: {len(playlists)} playlists, {likes.get('track_count', 0)} liked tracks.")
         return {"status": "success", "playlists": playlists, "likes": likes}
+
     except AuthExpiredError as e:
         logger.warning(f"[SC] Auth expired on playlists fetch: {e}")
         raise HTTPException(401, detail="auth_expired")
+
+    except RateLimitError as e:
+        # EC3: Surface 429 so the frontend can display a meaningful message.
+        logger.warning(f"[SC] Rate limited on playlists fetch: {e}")
+        raise HTTPException(429, detail="SoundCloud rate limit hit. Please wait and try again.")
+
     except Exception as e:
-        logger.error(f"[SC] Failed to fetch playlists: {e}")
+        logger.error(f"[SC] Failed to fetch playlists: {e}", exc_info=True)
         raise HTTPException(500, safe_error_message(e))
+
 
 class ScSyncReq(BaseModel):
     playlist_ids: List[int] = []

@@ -165,19 +165,33 @@ const SoundCloudSyncView = () => {
         setLoading(true);
         try {
             const res = await api.get('/api/soundcloud/playlists');
-            // Criterion 12: Null-payload guard
+
+            // DoD proof: log the raw payload in DevTools so we can confirm mapping works.
+            console.log('[SC] fetchPlaylists raw response:', res.data);
+
+            // EC4: Null-payload guard — SC may return null for artwork_url etc.
             const pls = Array.isArray(res.data?.playlists) ? res.data.playlists : [];
-            const lks = res.data?.likes || null;
+            const lks = res.data?.likes ?? null;
+
+            console.log(`[SC] Loaded ${pls.length} playlists, likes: ${lks?.track_count ?? 0} tracks`);
+
             setPlaylists(pls);
             setLikes(lks);
             setAuthRequired(false);
         } catch (e) {
-            const status = e.response?.status;
-            const detail = e.response?.data?.detail || e.message || 'Unknown error';
+            const status   = e.response?.status;
+            const detail   = e.response?.data?.detail || e.message || 'Unknown error';
 
-            // Criterion 5: Token expiry during session
-            if (status === 401 || detail === 'auth_expired' || detail?.toLowerCase().includes('auth token')) {
+            console.error('[SC] fetchPlaylists error:', status, detail);
+
+            // EC2: Token expiry — backend returns 401 with detail="auth_expired"
+            if (status === 401 || detail === 'auth_expired' || detail?.toLowerCase().includes('auth')) {
                 showLoginScreen();
+
+            // EC3: Rate limited — show a friendly message, don't clear auth state
+            } else if (status === 429) {
+                toast.error('SoundCloud Rate Limit erreicht. Bitte kurz warten und nochmal versuchen.');
+
             } else {
                 toast.error('Fehler beim Laden der Playlisten: ' + detail);
             }

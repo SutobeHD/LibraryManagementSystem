@@ -26,6 +26,11 @@ logger = logging.getLogger(__name__)
 # for development. Never commit real client IDs to version control.
 SC_CLIENT_ID = os.environ.get("SOUNDCLOUD_CLIENT_ID", "***REMOVED***")
 
+# SoundCloud API base URL.
+# V2 API (api-v2.soundcloud.com) returns richer metadata and supports pagination.
+# All endpoints use:  Authorization: OAuth <access_token>  +  ?client_id=<SC_CLIENT_ID>
+SC_API_BASE = "https://api-v2.soundcloud.com"
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Custom Exceptions
 # ──────────────────────────────────────────────────────────────────────────────
