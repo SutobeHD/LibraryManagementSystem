@@ -18,7 +18,7 @@
  * └──────────────────────────────────────────────────┘
  */
 
-import React, { useReducer, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
+import React, { useState, useReducer, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import toast from 'react-hot-toast';
 import { Music } from 'lucide-react';
 
