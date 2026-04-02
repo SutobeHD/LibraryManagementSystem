@@ -136,6 +136,24 @@ api.interceptors.response.use(
             }
         }
 
+        // EC4/EC10: Pydantic validation error — FastAPI returns 422 with field-level detail.
+        // Log the structured errors so they're visible in the browser DevTools console.
+        if (status === 422) {
+            const errs = error.response.data?.errors ?? [];
+            console.error(
+                `[API] Validation error on ${originalRequest?.url}:`,
+                errs.length ? errs.map(e => `${e.field.join('.')} → ${e.message}`).join(', ') : error.response.data
+            );
+        }
+
+        // EC10: 400 Bad Request — log the backend-provided reason so it's immediately visible.
+        if (status === 400) {
+            console.error(
+                `[API] 400 Bad Request on ${originalRequest?.url}:`,
+                error.response.data?.detail ?? error.response.data
+            );
+        }
+
         // EC4: SoundCloud API rate limit surfaced from backend as 429
         if (status === 429) {
             console.warn('[API] Rate limited (429). Retry after cooldown.');

@@ -171,6 +171,30 @@ app.add_middleware(
 )
 
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """
+    EC4/EC10: Surface Pydantic 422 validation errors with field-level detail.
+    FastAPI normally returns 422 for these, but they were previously swallowed by the
+    global Exception handler into a generic 500.  This handler logs the exact field
+    errors so payload mismatches are immediately visible in the backend logs,
+    and returns them to the client in a structured way.
+    """
+    errors = exc.errors()
+    logger.warning(
+        f"[VALIDATION] {request.method} {request.url.path} — "
+        f"{len(errors)} validation error(s): "
+        + "; ".join(f"{e['loc']} → {e['msg']}" for e in errors)
+    )
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": "Request validation failed",
+            "errors": [{"field": list(e["loc"]), "message": e["msg"], "type": e["type"]} for e in errors],
+        },
+    )
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -1633,10 +1657,23 @@ async def set_soundcloud_auth_token(data: Dict[str, str], response: Response):
     """
     token = data.get("token", "").strip()
 
-    # EC13: Basic token format validation — SC OAuth tokens are 40–80 char alphanumeric
-    if token and not (10 <= len(token) <= 512 and token.isascii()):
-        logger.warning("[SC] Rejected suspicious auth token (format mismatch).")
-        raise HTTPException(status_code=400, detail="Invalid token format")
+    # EC13: Token format validation.
+    # SoundCloud OAuth 2.1 issues JWT access tokens that are typically 400–900+ chars.
+    # Upper bound is 2048 to safely accept any standard JWT while blocking clearly
+    # malformed payloads (e.g. accidental HTML page bodies > 2 KB).
+    if token:
+        token_len = len(token)
+        is_ascii  = token.isascii()
+        if not (10 <= token_len <= 2048 and is_ascii):
+            # EC10: Log the exact rejection reason so future failures are debuggable.
+            reason = (
+                f"length={token_len} (must be 10–2048)"
+                if not (10 <= token_len <= 2048)
+                else "contains non-ASCII characters"
+            )
+            logger.warning(f"[SC] /api/soundcloud/auth-token rejected: {reason}")
+            raise HTTPException(status_code=400, detail=f"Invalid token format: {reason}")
+
 
     if token:
         keyring.set_password("rb_editor_pro", "sc_token", token)
