@@ -130,7 +130,7 @@ def get_sc_client_id() -> str:
 # SoundCloud API base URL.
 # V2 API (api-v2.soundcloud.com) returns richer metadata and supports pagination.
 # All endpoints use:  Authorization: OAuth <access_token>  +  ?client_id=<SC_CLIENT_ID>
-SC_API_BASE = "https://api-v2.soundcloud.com"
+SC_API_BASE = "https://api.soundcloud.com"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Custom Exceptions
@@ -385,18 +385,23 @@ class SoundCloudPlaylistAPI:
         headers = SoundCloudPlaylistAPI._get_headers(auth_token)
 
         tracks: List[Dict] = []
-        url: Optional[str] = f"{SC_API_BASE}/users/{user_id}/track_likes"
+        url: Optional[str] = f"{SC_API_BASE}/users/{user_id}/favorites"
         params = {"client_id": get_sc_client_id(), "limit": 50, "offset": 0}
 
         while url and len(tracks) < max_tracks:
             resp = _sc_get(url, headers=headers, params=params)
             data = resp.json()
 
-            if not isinstance(data, dict):
+            if isinstance(data, list):
+                collection = data
+                url = None
+            elif isinstance(data, dict):
+                collection = data.get("collection", [])
+                url = data.get("next_href")
+            else:
                 logger.warning("[SC] get_likes: unexpected response format, stopping.")
                 break
 
-            collection = data.get("collection", [])
             if not isinstance(collection, list):
                 logger.warning("[SC] get_likes: collection is not a list, stopping.")
                 break
@@ -404,13 +409,14 @@ class SoundCloudPlaylistAPI:
             for item in collection:
                 if len(tracks) >= max_tracks:
                     break
-                # Likes endpoint wraps the track in {"track": {...}}
+                # Likes endpoint wraps the track in {"track": {...}} or is direct track
                 raw_track = item.get("track") if isinstance(item, dict) and "track" in item else item
                 normalized = SoundCloudPlaylistAPI._normalize_track(raw_track)
                 if normalized:
                     tracks.append(normalized)
 
-            url = data.get("next_href")
+            if isinstance(data, list):
+                break
             params = {}
             time.sleep(0.3)
 
