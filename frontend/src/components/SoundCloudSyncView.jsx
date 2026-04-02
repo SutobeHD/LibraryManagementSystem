@@ -139,6 +139,7 @@ const PlaylistCard = ({ playlist, selected, onToggle, onSync, syncing }) => {
 const SoundCloudSyncView = () => {
     const [playlists, setPlaylists] = useState([]);
     const [likes, setLikes] = useState(null);
+    const [scUser, setScUser] = useState(null);        // { username, full_name, avatar_url, ... }
     const [loading, setLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
     const [selectedIds, setSelectedIds] = useState(new Set());
@@ -156,6 +157,7 @@ const SoundCloudSyncView = () => {
     const showLoginScreen = () => {
         setPlaylists([]);
         setLikes(null);
+        setScUser(null);
         setAuthRequired(true);
     };
 
@@ -174,16 +176,18 @@ const SoundCloudSyncView = () => {
             // DoD proof: log the raw payload in DevTools so we can confirm mapping works.
             console.log('[SC] fetchPlaylists raw response:', res.data);
 
-            // EC4/EC1: Null-payload guard. SC API can return empty collections `[]` 
-            // instead of failing. We must map safely.
+            // EC4/EC1: Null-payload guard. SC API can return empty collections `[]`
             const pls = Array.isArray(res.data?.playlists) ? res.data.playlists : [];
             const lks = res.data?.likes ?? null;
+            const usr = res.data?.user ?? null;  // ← NEW: account profile
 
             console.log(`[SC] Loaded ${pls.length} playlists, likes: ${lks?.track_count ?? 0} tracks`);
-            console.log('Mapped Playlists for UI:', pls); // Required DoD Proof
+            console.log('Mapped Playlists for UI:', pls);        // Required DoD Proof
+            console.log('[SC] Logged in as:', usr?.username);    // Account proof
 
             setPlaylists(pls);
             setLikes(lks);
+            setScUser(usr);
             setAuthRequired(false);
 
         } catch (e) {
@@ -377,7 +381,49 @@ const SoundCloudSyncView = () => {
                             </p>
                         </div>
                     </div>
-                    <div className="flex items-center gap-2">
+
+                    {/* RIGHT SIDE: Account card + action buttons */}
+                    <div className="flex items-center gap-3">
+
+                        {/* ── Account Pill ── */}
+                        {loading && !scUser ? (
+                            // Skeleton shimmer while loading
+                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 animate-pulse">
+                                <div className="w-7 h-7 rounded-full bg-white/10" />
+                                <div className="w-24 h-3 rounded bg-white/10" />
+                            </div>
+                        ) : scUser ? (
+                            // Loaded: display avatar + username
+                            <a
+                                href={scUser.permalink_url || 'https://soundcloud.com'}
+                                target="_blank" rel="noreferrer"
+                                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 transition-all group"
+                                title={`Eingeloggt als: ${scUser.username}`}
+                            >
+                                {/* EC1: null avatar_url → initials fallback */}
+                                {scUser.avatar_url ? (
+                                    <img
+                                        src={scUser.avatar_url.replace('-large', '-t50x50')}
+                                        alt={scUser.username}
+                                        className="w-7 h-7 rounded-full object-cover ring-1 ring-orange-500/30"
+                                        onError={(e) => { e.target.style.display = 'none'; }}
+                                    />
+                                ) : (
+                                    <div className="w-7 h-7 rounded-full bg-orange-500/30 flex items-center justify-center text-[10px] font-black text-orange-300">
+                                        {(scUser.username || '?')[0].toUpperCase()}
+                                    </div>
+                                )}
+                                <div className="flex flex-col">
+                                    <span className="text-[11px] font-bold text-orange-300 leading-tight group-hover:text-orange-200">
+                                        {scUser.username}
+                                    </span>
+                                    <span className="text-[9px] text-slate-500 leading-tight">
+                                        {scUser.followers_count?.toLocaleString() ?? 0} Followers
+                                    </span>
+                                </div>
+                            </a>
+                        ) : null}
+
                         <button
                             onClick={handleSyncAll}
                             disabled={syncing || allPlaylists.length === 0}

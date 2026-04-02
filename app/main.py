@@ -1706,21 +1706,22 @@ if __name__ == "__main__":
 @app.get("/api/soundcloud/playlists")
 async def get_soundcloud_playlists(request: Request):
     """
-    Fetch all user playlists + likes from SoundCloud.
+    Fetch user playlists + likes + profile from SoundCloud in parallel.
 
     EC1: Returns empty lists on 0 playlists — never 404.
     EC2: Clears the lru_cache before fetching so a fresh token always hits the SC API.
     EC3: RateLimitError from _sc_get is surfaced as 429.
+    ROOT CAUSE FIX: SoundCloud 404s on /me and /users/{id}/playlists (bad client_id
+    or invalid token) now raise AuthExpiredError instead of leaking the raw
+    "404 Client Error: Not Found" string to the frontend toast.
     """
     auth_token = keyring.get_password("rb_editor_pro", "sc_token")
-    
+
     # DOD Verification Print
     safe_token = f"{auth_token[:10]}..." if auth_token else "NONE"
     print(f"DEBUG: Playlist Route aufgerufen mit Token: {safe_token}")
-    
+
     if not auth_token:
-        # Return 401 (not 400) so the frontend's fetchPlaylists() catch block
-        # recognises it as an auth failure and shows the login screen (not a toast error).
         logger.warning("[SC] /api/soundcloud/playlists: no auth token in keyring — returning 401.")
         raise HTTPException(401, detail="auth_expired")
 
@@ -1728,33 +1729,66 @@ async def get_soundcloud_playlists(request: Request):
     SoundCloudPlaylistAPI.get_playlists.cache_clear()
     SoundCloudPlaylistAPI.get_likes.cache_clear()
 
-    logger.info("[SC] Fetching playlists from SoundCloud (token present).")
+    logger.info("[SC] Fetching playlists + user profile from SoundCloud (parallel).")
 
+    import functools
     try:
-        # Run the blocking requests-based calls on a thread so we don't stall the
-        # async event loop (FastAPI / uvicorn are async; requests.get is synchronous).
-        import functools
-        playlists = await asyncio.to_thread(
-            functools.partial(SoundCloudPlaylistAPI.get_playlists, auth_token)
-        )
-        likes = await asyncio.to_thread(
-            functools.partial(SoundCloudPlaylistAPI.get_likes, auth_token)
+        # asyncio.gather: runs profile + playlists + likes concurrently on the thread pool.
+        # This is faster and prevents slow SC servers from stalling the event loop.
+        profile, playlists, likes = await asyncio.gather(
+            asyncio.to_thread(SoundCloudPlaylistAPI.get_user_profile, auth_token),
+            asyncio.to_thread(functools.partial(SoundCloudPlaylistAPI.get_playlists, auth_token)),
+            asyncio.to_thread(functools.partial(SoundCloudPlaylistAPI.get_likes, auth_token)),
         )
 
-        logger.info(f"[SC] Playlists fetched: {len(playlists)} playlists, {likes.get('track_count', 0)} liked tracks.")
-        return {"status": "success", "playlists": playlists, "likes": likes}
+        logger.info(
+            f"[SC] Fetched: user={profile.get('username')}, "
+            f"{len(playlists)} playlists, {likes.get('track_count', 0)} liked tracks."
+        )
+        return {
+            "status": "success",
+            "user": profile,          # ← NEW: username, avatar_url, etc.
+            "playlists": playlists,
+            "likes": likes,
+        }
 
     except AuthExpiredError as e:
-        logger.warning(f"[SC] Auth expired on playlists fetch: {e}")
+        logger.warning(f"[SC] Auth expired / invalid token on playlists fetch: {e}")
         raise HTTPException(401, detail="auth_expired")
 
     except RateLimitError as e:
-        # EC3: Surface 429 so the frontend can display a meaningful message.
         logger.warning(f"[SC] Rate limited on playlists fetch: {e}")
         raise HTTPException(429, detail="SoundCloud rate limit hit. Please wait and try again.")
 
     except Exception as e:
         logger.error(f"[SC] Failed to fetch playlists: {e}", exc_info=True)
+        raise HTTPException(500, safe_error_message(e))
+
+
+@app.get("/api/soundcloud/me")
+async def get_soundcloud_me(request: Request):
+    """
+    Standalone User Profile endpoint.
+    Returns the SC account info (username, avatar) independently of playlists.
+    Useful for the account card/header component without re-fetching all playlists.
+    """
+    auth_token = keyring.get_password("rb_editor_pro", "sc_token")
+    if not auth_token:
+        raise HTTPException(401, detail="auth_expired")
+
+    try:
+        import functools
+        profile = await asyncio.to_thread(
+            functools.partial(SoundCloudPlaylistAPI.get_user_profile, auth_token)
+        )
+        return {"status": "success", "user": profile}
+
+    except AuthExpiredError as e:
+        logger.warning(f"[SC] Auth expired on /me fetch: {e}")
+        raise HTTPException(401, detail="auth_expired")
+
+    except Exception as e:
+        logger.error(f"[SC] Failed to fetch user profile: {e}", exc_info=True)
         raise HTTPException(500, safe_error_message(e))
 
 

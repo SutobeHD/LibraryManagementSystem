@@ -56,8 +56,12 @@ def _sc_get(url: str, headers: dict, params: dict = None, max_retries: int = 3, 
     On a 429 response:
       - Reads the `Retry-After` header (falls back to 10 s).
       - Sleeps and retries up to `max_retries` times with exponential growth.
-    On 401/403:
+    On 401/403/404:
       - Raises AuthExpiredError immediately.
+      - NOTE: SoundCloud returns 404 on /me and /users/{id}/playlists when the
+        client_id is invalid or the token doesn't match the account. This is an
+        auth failure — not a missing-resource error. Treating it as such prevents
+        the cryptic '404 Client Error: Not Found' message in the frontend toast.
     """
     delay = 1.0
     for attempt in range(max_retries + 1):
@@ -83,6 +87,19 @@ def _sc_get(url: str, headers: dict, params: dict = None, max_retries: int = 3, 
         if resp.status_code in (401, 403):
             logger.error(f"[SC] Auth error {resp.status_code}: token invalid or expired.")
             raise AuthExpiredError(f"SoundCloud auth token is invalid or expired (HTTP {resp.status_code}).")
+
+        # ROOT CAUSE FIX: SoundCloud returns 404 when client_id is wrong or the token
+        # doesn't belong to a valid account. This is functionally an auth error —
+        # treat it identically to 401/403 so the frontend shows the login screen
+        # instead of the cryptic 'Fehler: 404 Client Error: Not Found' toast.
+        if resp.status_code == 404:
+            logger.error(
+                f"[SC] 404 Not Found from SoundCloud for {url}. "
+                "This typically means the client_id or OAuth token is invalid/expired."
+            )
+            raise AuthExpiredError(
+                f"SoundCloud returned 404 for {url}. Token or client_id may be invalid."
+            )
 
         if resp.status_code == 429:
             retry_after = int(resp.headers.get("Retry-After", delay * 2))
@@ -120,7 +137,7 @@ class SoundCloudPlaylistAPI:
     @staticmethod
     def _resolve_user_id(auth_token: str) -> int:
         """Resolve the current user's numeric ID from their auth token.
-        Raises AuthExpiredError on 401/403."""
+        Raises AuthExpiredError on 401/403/404."""
         resp = _sc_get(
             f"{SC_API_BASE}/me",
             headers=SoundCloudPlaylistAPI._get_headers(auth_token),
@@ -132,6 +149,34 @@ class SoundCloudPlaylistAPI:
         if not user_id:
             raise ValueError("Could not determine user ID from /me endpoint.")
         return user_id
+
+    @staticmethod
+    def get_user_profile(auth_token: str) -> Dict:
+        """
+        Fetch the authenticated user's public profile from SoundCloud.
+        Returns a dict with: id, username, full_name, avatar_url, permalink_url,
+        followers_count, track_count.
+
+        EC1: If avatar_url is null/missing, the key is still present (value=None).
+             The frontend must render a fallback (initials/icon) in that case.
+        EC2: Raises AuthExpiredError on 401/403/404 from the SC API.
+        """
+        resp = _sc_get(
+            f"{SC_API_BASE}/me",
+            headers=SoundCloudPlaylistAPI._get_headers(auth_token),
+            params={"client_id": SC_CLIENT_ID},
+            timeout=10
+        )
+        data = resp.json()
+        return {
+            "id":              data.get("id"),
+            "username":        data.get("username") or data.get("permalink") or "Unknown",
+            "full_name":       data.get("full_name") or "",
+            "avatar_url":      data.get("avatar_url"),   # may be None — frontend handles fallback
+            "permalink_url":   data.get("permalink_url") or "",
+            "followers_count": data.get("followers_count", 0),
+            "track_count":     data.get("track_count", 0),
+        }
 
     @staticmethod
     def _normalize_track(raw: dict) -> Optional[Dict]:
