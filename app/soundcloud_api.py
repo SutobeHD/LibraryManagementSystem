@@ -242,7 +242,7 @@ class SoundCloudPlaylistAPI:
         resp = _sc_get(
             f"{SC_API_BASE}/me",
             headers=SoundCloudPlaylistAPI._get_headers(auth_token),
-            params={"client_id": get_sc_client_id()},
+            params={} if auth_token else {"client_id": get_sc_client_id()},
             timeout=10
         )
         data = resp.json()
@@ -265,7 +265,7 @@ class SoundCloudPlaylistAPI:
         resp = _sc_get(
             f"{SC_API_BASE}/me",
             headers=SoundCloudPlaylistAPI._get_headers(auth_token),
-            params={"client_id": get_sc_client_id()},
+            params={} if auth_token else {"client_id": get_sc_client_id()},
             timeout=10
         )
         data = resp.json()
@@ -324,7 +324,9 @@ class SoundCloudPlaylistAPI:
 
         playlists: List[Dict] = []
         url: Optional[str] = f"{SC_API_BASE}/users/{user_id}/playlists"
-        params = {"client_id": get_sc_client_id(), "limit": 50, "offset": 0}
+        params = {"limit": 50, "offset": 0}
+        if not auth_token:
+            params["client_id"] = get_sc_client_id()
 
         logger.info(f"[SC] Starting playlist fetch for user_id: {user_id}")
 
@@ -386,7 +388,9 @@ class SoundCloudPlaylistAPI:
 
         tracks: List[Dict] = []
         url: Optional[str] = f"{SC_API_BASE}/users/{user_id}/favorites"
-        params = {"client_id": get_sc_client_id(), "limit": 50, "offset": 0}
+        params = {"limit": 50, "offset": 0}
+        if not auth_token:
+            params["client_id"] = get_sc_client_id()
 
         while url and len(tracks) < max_tracks:
             resp = _sc_get(url, headers=headers, params=params)
@@ -443,10 +447,13 @@ class SoundCloudPlaylistAPI:
         """
         headers = SoundCloudPlaylistAPI._get_headers(auth_token)
         try:
+            params = {"representation": "full"}
+            if not auth_token:
+                params["client_id"] = get_sc_client_id()
             resp = _sc_get(
                 f"{SC_API_BASE}/playlists/{playlist_id}",
                 headers=headers,
-                params={"client_id": get_sc_client_id(), "representation": "full"},
+                params=params,
                 timeout=20
             )
         except AuthExpiredError:
