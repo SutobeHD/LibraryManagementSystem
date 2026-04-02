@@ -15,6 +15,38 @@ import subprocess
 import logging
 import traceback
 from pathlib import Path
+
+# EC9: Load .env file so SOUNDCLOUD_CLIENT_ID etc. are available as env-vars.
+# python-dotenv is a soft dependency; if missing we fall back to os.environ silently.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env", override=False)
+except ImportError:
+    pass  # dotenv not installed — rely on shell environment variables
+
+# EC7/EC13: keyring provides OS-level credential storage for the SC OAuth token.
+# This avoids storing the secret in plaintext in settings.json or cookies.
+try:
+    import keyring
+except ImportError:
+    # Fallback shim so the rest of main.py doesn't crash on import if keyring
+    # is not yet installed.  On first run the user will get a clear 503 error
+    # instead of a silent startup crash.
+    class _KeyringShim:
+        """No-op shim when the `keyring` package is unavailable."""
+        _store: dict = {}
+        def get_password(self, service, username):
+            return self._store.get(f"{service}:{username}")
+        def set_password(self, service, username, value):
+            self._store[f"{service}:{username}"] = value
+        def delete_password(self, service, username):
+            self._store.pop(f"{service}:{username}", None)
+    keyring = _KeyringShim()
+    logging.getLogger("APP_MAIN").warning(
+        "[WARN] `keyring` package not installed. SC tokens will be stored in-memory only "
+        "and lost on restart. Run: pip install keyring"
+    )
+
 from .services import AudioEngine, FileManager, LibraryTools, SettingsManager, SystemCleaner, XMLProcessor, BeatAnalyzer, ImportManager, ProjectManager
 from .database import db
 from .config import EXPORT_DIR, LOG_DIR, TEMP_DIR, MUSIC_DIR
@@ -1059,11 +1091,9 @@ def load_project_endpoint(name: str):
         raise HTTPException(500, safe_error_message(e))
 
 @app.post("/api/artist/soundcloud")
-
-@app.post("/api/artist/soundcloud")
-def set_sc(r: ScReq): 
+def set_sc(r: ScReq):
     # storage.set_artist_link(r.artist_name, r.link)
-    return {"status":"saved"}
+    return {"status": "saved"}
 
 class SliceReq(BaseModel):
     source_path: str
@@ -1533,8 +1563,10 @@ def get_analysis_status(task_id: str):
         raise HTTPException(status_code=404, detail="Task not found")
     return status
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+# ─── SoundCloud Download API ──────────────────────────────────────────────────
+# NOTE: These endpoints use `keyring` for secure token storage (EC7/EC13).
+# The routes must be defined BEFORE the __main__ guard so FastAPI registers them.
+
 @app.post("/api/soundcloud/download")
 async def soundcloud_download(data: Dict[str, str], request: Request):
     url = data.get("url")
@@ -1576,29 +1608,61 @@ async def soundcloud_download(data: Dict[str, str], request: Request):
     task_id = sc_downloader.download_content(url, auth_token=auth_token, callback=on_complete)
     return {"task_id": task_id}
 
+
 @app.get("/api/soundcloud/tasks")
 async def get_soundcloud_tasks():
+    """Poll active download tasks. Returns empty dict when no tasks are running."""
     return sc_downloader.tasks
+
 
 @app.get("/api/soundcloud/task/{task_id}")
 async def get_soundcloud_task_status(task_id: str):
+    """Get status for a specific download task."""
     task = sc_downloader.get_task_status(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
 
+
 @app.post("/api/soundcloud/auth-token")
 async def set_soundcloud_auth_token(data: Dict[str, str], response: Response):
-    token = data.get("token", "")
+    """
+    EC7/EC13: Persist the SC OAuth token in the OS keyring (not in cookies or JSON).
+    Sets a lightweight HttpOnly sentinel cookie so frontend can detect auth state
+    without ever seeing the raw token.
+    """
+    token = data.get("token", "").strip()
+
+    # EC13: Basic token format validation — SC OAuth tokens are 40–80 char alphanumeric
+    if token and not (10 <= len(token) <= 512 and token.isascii()):
+        logger.warning("[SC] Rejected suspicious auth token (format mismatch).")
+        raise HTTPException(status_code=400, detail="Invalid token format")
+
     if token:
         keyring.set_password("rb_editor_pro", "sc_token", token)
+        logger.info("[SC] Auth token stored in OS keyring.")
     else:
-        try: keyring.delete_password("rb_editor_pro", "sc_token")
-        except: pass
-    
-    # Store a dummy cookie so the frontend knows a session exists without exposing the PII token
-    response.set_cookie(key="sc_token", value="os_keyring_active", httponly=True, samesite='lax', secure=False, max_age=31536000)
+        # Empty token → clear credentials (logout)
+        try:
+            keyring.delete_password("rb_editor_pro", "sc_token")
+        except Exception:
+            pass
+        logger.info("[SC] Auth token cleared from keyring (logout).")
+
+    # Sentinel cookie — value is never the real token (EC13)
+    response.set_cookie(
+        key="sc_token",
+        value="os_keyring_active" if token else "",
+        httponly=True,
+        samesite="lax",
+        secure=False,   # set to True when served over HTTPS
+        max_age=31536000 if token else 0
+    )
     return {"status": "success"}
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="127.0.0.1", port=8000)
 
 # ─── SoundCloud Playlist Sync API ─────────────────────────────────────────────
 

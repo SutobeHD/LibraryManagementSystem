@@ -9,6 +9,7 @@ Resilience features:
   - Full pagination following next_href (Criterion 8)
 """
 
+import os
 import requests
 import logging
 import time
@@ -21,11 +22,9 @@ from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
-# SoundCloud API
-SC_API_BASE = "https://api-v2.soundcloud.com"
-# NOTE: This is a public web-scraper client_id. It may rotate. Used for unauthenticated
-# context enrichment only — all authenticated calls also pass the OAuth Bearer token.
-SC_CLIENT_ID = "***REMOVED***"
+# EC9: Prefer the env-var set from .env; hardcoded string is a last-resort fallback
+# for development. Never commit real client IDs to version control.
+SC_CLIENT_ID = os.environ.get("SOUNDCLOUD_CLIENT_ID", "***REMOVED***")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Custom Exceptions
@@ -68,6 +67,12 @@ def _sc_get(url: str, headers: dict, params: dict = None, max_retries: int = 3, 
             continue
 
         if resp.status_code == 200:
+            # EC10: Catch malformed/non-JSON responses from SoundCloud
+            try:
+                resp.json()  # Validate JSON parsability before returning
+            except ValueError as json_err:
+                logger.error(f"[SC] Malformed JSON from {url}: {json_err}")
+                raise ValueError(f"SoundCloud returned non-JSON (status 200). Possible maintenance page. Raw: {resp.text[:120]}")
             return resp
 
         if resp.status_code in (401, 403):

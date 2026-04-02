@@ -13,22 +13,31 @@ const SoundCloudView = () => {
     const [isLoggingIn, setIsLoggingIn] = useState(false);
     const [loginMessage, setLoginMessage] = useState('');
 
+    // EC11: Ref-based guard prevents multiple simultaneous login requests
+    // even if the user spam-clicks the button before state re-renders.
+    const loginInFlightRef = React.useRef(false);
+
     useEffect(() => {
         // Load existing token
         api.get('/api/settings').then(res => {
             if (res.data.soundcloud_auth_token) {
                 setToken(res.data.soundcloud_auth_token);
             }
-        });
+        }).catch(() => { /* settings may not be loaded yet — ignore */ });
 
-        // Poll for tasks
+        // EC12: Poll for tasks; .catch() ensures a failed request never freezes the spinner.
         const interval = setInterval(() => {
-            api.get('/api/soundcloud/tasks').then(res => {
-                setTasks(res.data);
-                // Check if any task just finished to reset downloading state
-                const active = Object.values(res.data).some(t => t.status === 'Downloading' || t.status === 'Starting');
-                if (!active) setIsDownloading(false);
-            });
+            api.get('/api/soundcloud/tasks')
+                .then(res => {
+                    setTasks(res.data ?? {});
+                    const active = Object.values(res.data ?? {}).some(
+                        t => t.status === 'Downloading' || t.status === 'Starting'
+                    );
+                    if (!active) setIsDownloading(false);
+                })
+                .catch(() => {
+                    // Silently ignore polling errors — avoids frozen spinner (EC12)
+                });
         }, 3000);
 
         // Listen to native auth events
@@ -37,9 +46,17 @@ const SoundCloudView = () => {
             setLoginMessage(data.message);
         });
 
+        // EC7: React to the global 'sc:auth-expired' event from the Axios interceptor
+        const onAuthExpired = () => {
+            setToken('');
+            setLoginMessage('');
+        };
+        window.addEventListener('sc:auth-expired', onAuthExpired);
+
         return () => {
             clearInterval(interval);
             unlisten.then(f => f());
+            window.removeEventListener('sc:auth-expired', onAuthExpired);
         };
     }, []);
 
@@ -60,6 +77,11 @@ const SoundCloudView = () => {
     };
 
     const handleLogin = async () => {
+        // EC11: Block concurrent login calls — ref check is synchronous,
+        // unlike setState which batches and may fire twice.
+        if (loginInFlightRef.current) return;
+        loginInFlightRef.current = true;
+
         setIsLoggingIn(true);
         setLoginMessage('Initializing secure login...');
         try {
@@ -70,10 +92,17 @@ const SoundCloudView = () => {
             setToken(newToken);
             toast.success('SoundCloud Login erfolgreich!');
         } catch (e) {
-            toast.error(`Login fehlgeschlagen: ${e}`);
+            const errStr = String(e);
+            // Distinguish Tauri unavailability from real auth errors
+            if (errStr.includes('invoke') || errStr.includes('TAURI') || errStr.includes('undefined')) {
+                toast.error('Login ist nur in der Desktop-App verfügbar.');
+            } else {
+                toast.error(`Login fehlgeschlagen: ${errStr}`);
+            }
         } finally {
             setIsLoggingIn(false);
             setLoginMessage('');
+            loginInFlightRef.current = false;
         }
     };
 

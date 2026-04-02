@@ -1,49 +1,171 @@
 import axios from 'axios';
 
-// Detect if we are running in Tauri
+// ─── EC2: Runtime detection of Tauri context ───────────────────────────────────
+// Tauri injects window.__TAURI_INTERNALS__ before the page loads.
+// In browser-preview/dev-server mode we use an empty baseURL and rely on Vite's proxy.
 const isTauri = !!(window.__TAURI_INTERNALS__ || window.__TAURI_METADATA__ || window.__TAURI__);
 
+// EC1/EC2: No trailing slash on baseURL; all route paths start with '/'
 const API_BASE_URL = isTauri
-    ? 'http://127.0.0.1:8000'
-    : ''; // Use proxy (empty string) in browser-preview mode
+    ? (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000')
+    : ''; // empty string → browser uses Vite proxy (see vite.config.js)
 
+// ─── Axios Instance ────────────────────────────────────────────────────────────
 const api = axios.create({
     baseURL: API_BASE_URL,
-    timeout: 30000, // 30s default timeout for stability
-    withCredentials: true, // Send HttpOnly cookies
+    timeout: 10_000,          // EC8: 10 s hard timeout on every request
+    withCredentials: true,    // Send HttpOnly cookies (sc_token sentinel)
 });
 
-// --- SECURITY: Session token management ---
-// The backend generates a unique token per session, returned via the heartbeat endpoint.
-// This token is required for sensitive operations (shutdown, restart).
+// ─── SECURITY: Session token management (for backend shutdown/restart) ─────────
 let _sessionToken = '';
+export function setSessionToken(token) { _sessionToken = token; }
+export function getSessionToken()      { return _sessionToken; }
 
-export function setSessionToken(token) {
-    _sessionToken = token;
+// ─── EC15: Token-refresh state ────────────────────────────────────────────────
+// Prevents an infinite refresh loop if the refresh request itself fails.
+// Pattern: queue all 401-waiting requests, drain them after one refresh.
+let _isRefreshing        = false;           // true while a refresh is in flight
+let _refreshSubscribers  = [];             // resolve/reject callbacks queued during refresh
+let _refreshFailCount    = 0;              // consecutive refresh failures
+const MAX_REFRESH_FAILS  = 2;             // stop trying after this many failures
+
+/** Add a callback that will be called once the token has been refreshed. */
+function _subscribeRefresh(callback) {
+    _refreshSubscribers.push(callback);
 }
 
-export function getSessionToken() {
-    return _sessionToken;
+/** Drain the subscriber queue after a successful (or failed) refresh. */
+function _drainRefreshQueue(newToken, error) {
+    _refreshSubscribers.forEach(cb => cb(newToken, error));
+    _refreshSubscribers = [];
 }
 
-// --- STABILITY: AbortController factory ---
-// Create cancellable requests to prevent memory leaks on component unmount.
+/** Attempt to silently re-authenticate using a stored SC token.
+ *  Returns the new token string, or throws on failure. */
+async function _refreshScToken() {
+    // EC15: Only one refresh in flight at a time.
+    if (_isRefreshing) {
+        // Return a promise that resolves when the in-flight refresh finishes.
+        return new Promise((resolve, reject) => {
+            _subscribeRefresh((token, err) => {
+                if (err) reject(err);
+                else resolve(token);
+            });
+        });
+    }
+
+    _isRefreshing = true;
+    try {
+        // The backend /api/soundcloud/auth-token endpoint validates and stores
+        // the new token.  In Tauri the token comes from the native keystore;
+        // in browser mode we can't silently refresh — throw immediately.
+        if (!isTauri) throw new Error('Silent token refresh unavailable in browser mode.');
+
+        // Dynamically import to avoid crashing in browser-preview mode.
+        const { invoke } = await import('@tauri-apps/api/core');
+        const newToken = await invoke('login_to_soundcloud');
+
+        await api.post('/api/soundcloud/auth-token', { token: newToken });
+        _refreshFailCount = 0;
+        _isRefreshing = false;
+        _drainRefreshQueue(newToken, null);
+        return newToken;
+    } catch (err) {
+        _refreshFailCount++;
+        _isRefreshing = false;
+        _drainRefreshQueue(null, err);
+        throw err;
+    }
+}
+
+// ─── REQUEST INTERCEPTOR ──────────────────────────────────────────────────────
+api.interceptors.request.use(
+    (config) => {
+        // Attach shutdown session token when present (for /api/system/* calls)
+        if (_sessionToken) {
+            config.headers['X-Session-Token'] = _sessionToken;
+        }
+        return config;
+    },
+    (error) => Promise.reject(error)
+);
+
+// ─── RESPONSE INTERCEPTOR ─────────────────────────────────────────────────────
+api.interceptors.response.use(
+    // ── Happy path ──────────────────────────────────────────────────────────
+    (response) => response,
+
+    // ── Error path ──────────────────────────────────────────────────────────
+    async (error) => {
+        const originalRequest = error.config;
+
+        // EC6: Network abort / no response at all
+        if (!error.response) {
+            const isCancelled = axios.isCancel(error);
+            if (!isCancelled) {
+                console.error('[API] Network error / unreachable backend:', error.message);
+            }
+            return Promise.reject(error);
+        }
+
+        const { status } = error.response;
+
+        // EC7/EC15: 401 Unauthorized → attempt silent token refresh once.
+        if (status === 401 && !originalRequest._retried) {
+            // EC15: Bail out if we've already failed MAX_REFRESH_FAILS times —
+            // this breaks the infinite refresh loop.
+            if (_refreshFailCount >= MAX_REFRESH_FAILS) {
+                console.error('[API] Refresh loop threshold reached. Clearing SC session.');
+                _refreshFailCount = 0;
+                // Emit a custom DOM event so the UI can show the login screen.
+                window.dispatchEvent(new CustomEvent('sc:auth-expired'));
+                return Promise.reject(error);
+            }
+
+            originalRequest._retried = true; // guard: retry this request only once
+
+            try {
+                await _refreshScToken();
+                // Re-send the original request now that the token is fresh.
+                return api(originalRequest);
+            } catch (refreshErr) {
+                // Refresh failed → propagate the original 401
+                window.dispatchEvent(new CustomEvent('sc:auth-expired'));
+                return Promise.reject(error);
+            }
+        }
+
+        // EC4: SoundCloud API rate limit surfaced from backend as 429
+        if (status === 429) {
+            console.warn('[API] Rate limited (429). Retry after cooldown.');
+        }
+
+        // EC5: SoundCloud is down (502/503 from our backend proxying a 500 SC error)
+        if (status >= 500) {
+            console.error(`[API] Server error ${status}:`, error.response.data?.detail);
+        }
+
+        return Promise.reject(error);
+    }
+);
+
+// ─── AbortController helpers ──────────────────────────────────────────────────
+
+/** Create a manually-cancellable token (use in useEffect cleanup). */
 export function createCancelToken() {
     const controller = new AbortController();
-    return {
-        signal: controller.signal,
-        cancel: () => controller.abort(),
-    };
+    return { signal: controller.signal, cancel: () => controller.abort() };
 }
 
-// Helper to make a cancellable GET request
+/** Cancellable GET — returns {promise, cancel}. */
 export function cancellableGet(url, config = {}) {
     const controller = new AbortController();
     const promise = api.get(url, { ...config, signal: controller.signal });
     return { promise, cancel: () => controller.abort() };
 }
 
-// Helper to make a cancellable POST request
+/** Cancellable POST — returns {promise, cancel}. */
 export function cancellablePost(url, data, config = {}) {
     const controller = new AbortController();
     const promise = api.post(url, data, { ...config, signal: controller.signal });
