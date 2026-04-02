@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
     Cloud, RefreshCw, ListMusic, Music, Heart, Check, X, Loader2,
     ArrowUpDown, Download, Merge, CheckSquare, Square, ChevronDown,
-    ChevronRight, Globe, Lock, Clock, AlertTriangle, Zap, Search, LogIn
+    ChevronRight, Globe, Lock, Clock, AlertTriangle, Zap, Search, LogIn, FolderOpen
 } from 'lucide-react';
 import api from '../api/api';
 import toast from 'react-hot-toast';
@@ -146,6 +146,7 @@ const SoundCloudSyncView = () => {
     const [isLoggingIn, setIsLoggingIn] = useState(false);
     const [loginMessage, setLoginMessage] = useState('');
     const [authRequired, setAuthRequired] = useState(false); // true → show login screen
+    const [scSettings, setScSettings] = useState({ sc_sync_folder_id: null, available_folders: [] });
 
     // Criterion 10: isBusy ref prevents double-execution on rapid clicks
     const isBusy = React.useRef(false);
@@ -213,6 +214,8 @@ const SoundCloudSyncView = () => {
 
     useEffect(() => {
         fetchPlaylists();
+        // Load SC settings (folder picker)
+        api.get('/api/soundcloud/settings').then(r => setScSettings(r.data)).catch(() => {});
 
         // Listen to native auth events from Tauri
         const unlisten = listen('sc-login-progress', (event) => {
@@ -460,6 +463,31 @@ const SoundCloudSyncView = () => {
                             onChange={(e) => setFilter(e.target.value)}
                             className="w-full pl-9 pr-3 py-2 bg-white/5 border border-white/10 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-orange-500/30"
                         />
+                    </div>
+
+                    {/* Folder Picker — where synced playlists land */}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                        <FolderOpen size={12} className="text-slate-500" />
+                        <select
+                            value={scSettings.sc_sync_folder_id ?? ''}
+                            onChange={async (e) => {
+                                const val = e.target.value || null;
+                                try {
+                                    await api.put('/api/soundcloud/settings', { sc_sync_folder_id: val });
+                                    setScSettings(prev => ({ ...prev, sc_sync_folder_id: val }));
+                                    toast.success('Zielordner gespeichert');
+                                } catch {
+                                    toast.error('Konnte Einstellung nicht speichern');
+                                }
+                            }}
+                            className="text-[10px] bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-slate-300 focus:outline-none focus:border-orange-500/30 max-w-[160px] truncate"
+                            title="Zielordner für synchronisierte Playlisten"
+                        >
+                            <option value="">📁 Root (kein Ordner)</option>
+                            {(scSettings.available_folders || []).map(f => (
+                                <option key={f.id} value={f.id}>{f.name}</option>
+                            ))}
+                        </select>
                     </div>
 
                     {/* Selection controls */}

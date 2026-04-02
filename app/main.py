@@ -1701,6 +1701,34 @@ async def set_soundcloud_auth_token(data: Dict[str, str], response: Response):
 
 # ─── SoundCloud Playlist Sync API ─────────────────────────────────────────────
 
+class ScSettingsReq(BaseModel):
+    sc_sync_folder_id: Optional[str] = None  # Rekordbox playlist ID or None for ROOT
+
+@app.get("/api/soundcloud/settings")
+async def get_sc_settings():
+    """Return SC-specific settings (sync target folder)."""
+    s = SettingsManager.load()
+    # Also expose all available local folders for the UI picker
+    folders = [
+        {"id": pl["ID"], "name": pl["Name"]}
+        for pl in (db.playlists or [])
+        if str(pl.get("Type")) == "0"  # Type 0 = folder
+    ]
+    return {
+        "sc_sync_folder_id": s.get("sc_sync_folder_id"),
+        "available_folders": folders,
+    }
+
+@app.put("/api/soundcloud/settings")
+async def update_sc_settings(r: ScSettingsReq):
+    """Persist SC sync target folder to settings.json."""
+    s = SettingsManager.load()
+    s["sc_sync_folder_id"] = r.sc_sync_folder_id  # None → ROOT, str → specific folder
+    SettingsManager.save(s)
+    logger.info(f"[SC] sc_sync_folder_id updated to: {r.sc_sync_folder_id!r}")
+    return {"status": "ok", "sc_sync_folder_id": r.sc_sync_folder_id}
+
+
 @app.get("/api/soundcloud/playlists")
 async def get_soundcloud_playlists(request: Request):
     """

@@ -504,7 +504,8 @@ class SettingsManager:
         "hide_streaming": False,
         "remember_lib_mode": False,
         "last_lib_mode": "xml",
-        "soundcloud_auth_token": ""
+        "soundcloud_auth_token": "",
+        "sc_sync_folder_id": None    # local Rekordbox playlist ID to create SC playlists inside
     }
     @classmethod
     def load(cls):

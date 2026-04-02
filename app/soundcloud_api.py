@@ -522,15 +522,22 @@ class SoundCloudSyncEngine:
         return best_match
 
     def find_or_create_playlist(self, sc_playlist_title: str) -> Optional[str]:
-        """Find existing synced playlist or create a new one. Returns playlist ID string."""
+        """Find existing synced playlist or create a new one. Returns playlist ID string.
+        Respects the 'sc_sync_folder_id' setting: if set, creates the playlist inside
+        that local Rekordbox folder instead of ROOT.
+        """
+        from .services import SettingsManager
         sync_name = f"{self.SYNC_PREFIX}{sc_playlist_title}"
         for pl in self.db.playlists:
             if pl.get("Name") == sync_name:
                 return str(pl.get("ID"))
         try:
             if hasattr(self.db, 'create_playlist'):
+                # Determine target parent folder from settings
+                target_folder_id = SettingsManager.load().get("sc_sync_folder_id") or "ROOT"
+                logger.info(f"[SC] Creating playlist '{sync_name}' in folder id={target_folder_id}")
                 # db.create_playlist() returns a node_data dict: {"ID": str, "Name": str, ...}
-                node_data = self.db.create_playlist(sync_name)
+                node_data = self.db.create_playlist(sync_name, parent_id=target_folder_id)
                 if isinstance(node_data, dict):
                     pid = str(node_data["ID"])
                 else:
