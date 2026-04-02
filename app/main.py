@@ -1698,8 +1698,6 @@ async def set_soundcloud_auth_token(data: Dict[str, str], response: Response):
     return {"status": "success"}
 
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
 
 # ─── SoundCloud Playlist Sync API ─────────────────────────────────────────────
 
@@ -1959,3 +1957,6 @@ async def merge_soundcloud_playlists(r: ScMergeReq, request: Request):
     except Exception as e:
         logger.error(f"Merge failed: {e}")
         raise HTTPException(500, safe_error_message(e))
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="127.0.0.1", port=8000)
