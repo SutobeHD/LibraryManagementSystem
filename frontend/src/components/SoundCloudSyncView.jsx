@@ -166,18 +166,26 @@ const SoundCloudSyncView = () => {
         try {
             const res = await api.get('/api/soundcloud/playlists');
 
+            // EC: Unexpected backend error response format { status: "error", message: "..." }
+            if (res.data?.status === 'error' || res.data?.message) {
+                throw new Error(res.data.message || 'Backend returned an error format');
+            }
+
             // DoD proof: log the raw payload in DevTools so we can confirm mapping works.
             console.log('[SC] fetchPlaylists raw response:', res.data);
 
-            // EC4: Null-payload guard — SC may return null for artwork_url etc.
+            // EC4/EC1: Null-payload guard. SC API can return empty collections `[]` 
+            // instead of failing. We must map safely.
             const pls = Array.isArray(res.data?.playlists) ? res.data.playlists : [];
             const lks = res.data?.likes ?? null;
 
             console.log(`[SC] Loaded ${pls.length} playlists, likes: ${lks?.track_count ?? 0} tracks`);
+            console.log('Mapped Playlists for UI:', pls); // Required DoD Proof
 
             setPlaylists(pls);
             setLikes(lks);
             setAuthRequired(false);
+
         } catch (e) {
             const status   = e.response?.status;
             const detail   = e.response?.data?.detail || e.message || 'Unknown error';
@@ -472,7 +480,7 @@ const SoundCloudSyncView = () => {
                         <Loader2 size={32} className="animate-spin text-orange-400 mb-4" />
                         <span className="text-slate-500 text-sm">Lade SoundCloud Playlisten...</span>
                     </div>
-                ) : authRequired || allPlaylists.length === 0 ? (
+                ) : authRequired ? (
                     <div className="flex flex-col items-center justify-center h-full text-center">
                         <Cloud size={48} className="text-slate-700 mb-4" />
                         <h2 className="text-xl font-bold text-slate-400 mb-2">Login Required</h2>
