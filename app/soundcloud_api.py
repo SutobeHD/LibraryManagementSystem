@@ -91,8 +91,9 @@ def get_sc_client_id() -> str:
         for url in script_urls:
             try:
                 js_resp = requests.get(url, headers=stealth_headers, timeout=5.0)
+                logger.debug(f"[SC Scraper] Scanning script: {url} (Status: {js_resp.status_code})")
             except Exception as e_script:
-                logger.debug(f"[SC Scraper] Skipped script {url} due to network error: {e_script}")
+                logger.warning(f"[SC Scraper] Skipped script {url} due to network error: {e_script}")
                 continue
 
             if js_resp.status_code == 200:
@@ -103,6 +104,8 @@ def get_sc_client_id() -> str:
                     _DYNAMIC_CLIENT_ID_EXPIRES = now + 3600  # cache 1 hour
                     logger.info(f"[SC Scraper] SUCCESS! Fetched dynamic client_id: {_DYNAMIC_CLIENT_ID}")
                     return _DYNAMIC_CLIENT_ID
+                else:
+                    logger.debug(f"[SC Scraper] No client_id found in script: {url}")
 
         logger.warning("[SC Scraper] Regex found no client_id in any JS bundles.")
 
@@ -116,7 +119,7 @@ def get_sc_client_id() -> str:
     # HARD FALLBACK: If Cloudflare blocked us or the regex broke, rotate known stable IDs
     import random
     fallback = random.choice(FALLBACK_CLIENT_IDS)
-    logger.warning(f"[SC Scraper] Failed to parse HTML, using Fallback ID: {fallback}")
+    logger.warning(f"[SC Scraper] Scrape failed or blocked, using Fallback ID: {fallback}")
     
     # Cache fallback shortly (5 mins) so we can retry the scraper later if it was a temporary ban
     _DYNAMIC_CLIENT_ID = fallback
@@ -164,7 +167,9 @@ def _sc_get(url: str, headers: dict, params: dict = None, max_retries: int = 3, 
     delay = 1.0
     for attempt in range(max_retries + 1):
         try:
+            logger.debug(f"[SC] GET Request to {url} (params: {params})")
             resp = requests.get(url, headers=headers, params=params, timeout=timeout)
+            logger.info(f"[SC] Response {resp.status_code} from {url}")
         except requests.RequestException as exc:
             logger.warning(f"[SC] Network error on attempt {attempt + 1}: {exc}")
             if attempt >= max_retries:
@@ -176,24 +181,22 @@ def _sc_get(url: str, headers: dict, params: dict = None, max_retries: int = 3, 
         if resp.status_code == 200:
             # EC10: Catch malformed/non-JSON responses from SoundCloud
             try:
-                resp.json()  # Validate JSON parsability before returning
+                resp_json = resp.json()  # Validate JSON parsability before returning
+                # logger.debug(f"[SC] JSON Response snippet: {str(resp_json)[:200]}...")
+                return resp
             except ValueError as json_err:
-                logger.error(f"[SC] Malformed JSON from {url}: {json_err}")
-                raise ValueError(f"SoundCloud returned non-JSON (status 200). Possible maintenance page. Raw: {resp.text[:120]}")
-            return resp
+                logger.error(f"[SC] Malformed JSON from {url}: {json_err}. Raw body snippet: {resp.text[:200]}")
+                raise ValueError(f"SoundCloud returned non-JSON (status 200). Raw: {resp.text[:120]}")
 
         if resp.status_code in (401, 403):
-            logger.error(f"[SC] Auth error {resp.status_code}: token invalid or expired.")
+            logger.error(f"[SC] Auth error {resp.status_code}: token invalid or expired. Body: {resp.text[:200]}")
             raise AuthExpiredError(f"SoundCloud auth token is invalid or expired (HTTP {resp.status_code}).")
 
-        # ROOT CAUSE FIX: SoundCloud returns 404 when client_id is wrong or the token
-        # doesn't belong to a valid account. This is functionally an auth error —
-        # treat it identically to 401/403 so the frontend shows the login screen
-        # instead of the cryptic 'Fehler: 404 Client Error: Not Found' toast.
+        # ROOT CAUSE FIX: SoundCloud returns 404 when client_id is wrong...
         if resp.status_code == 404:
             logger.error(
                 f"[SC] 404 Not Found from SoundCloud for {url}. "
-                "This typically means the client_id or OAuth token is invalid/expired."
+                f"Body: {resp.text[:200]}"
             )
             raise AuthExpiredError(
                 f"SoundCloud returned 404 for {url}. Token or client_id may be invalid."
@@ -323,7 +326,10 @@ class SoundCloudPlaylistAPI:
         url: Optional[str] = f"{SC_API_BASE}/users/{user_id}/playlists"
         params = {"client_id": get_sc_client_id(), "limit": 50, "offset": 0}
 
+        logger.info(f"[SC] Starting playlist fetch for user_id: {user_id}")
+
         while url:
+            logger.debug(f"[SC] Fetching page: {url} (params: {params})")
             resp = _sc_get(url, headers=headers, params=params)
             data = resp.json()
 
@@ -331,13 +337,15 @@ class SoundCloudPlaylistAPI:
             if isinstance(data, list):
                 collection = data
                 url = None
+                logger.info(f"[SC] Fetched {len(collection)} playlists (single page).")
             else:
                 collection = data.get("collection", [])
                 url = data.get("next_href")  # full URL with embedded params
                 params = {}  # next_href already includes query params
+                logger.info(f"[SC] Fetched {len(collection)} playlists from current page. Next page: {url}")
 
             if not isinstance(collection, list):
-                logger.warning("[SC] get_playlists: unexpected collection format, stopping pagination.")
+                logger.warning(f"[SC] get_playlists: unexpected collection format (type: {type(collection)}), stopping pagination.")
                 break
 
             for pl in collection:

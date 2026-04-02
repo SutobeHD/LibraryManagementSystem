@@ -174,16 +174,18 @@ const SoundCloudSyncView = () => {
             }
 
             // DoD proof: log the raw payload in DevTools so we can confirm mapping works.
-            console.log('[SC] fetchPlaylists raw response:', res.data);
+            console.log('[SC] fetchPlaylists API Response Success:', res.data);
 
-            // EC4/EC1: Null-payload guard. SC API can return empty collections `[]`
             const pls = Array.isArray(res.data?.playlists) ? res.data.playlists : [];
             const lks = res.data?.likes ?? null;
-            const usr = res.data?.user ?? null;  // ← NEW: account profile
+            const usr = res.data?.user ?? null;  // ← account profile
 
-            console.log(`[SC] Loaded ${pls.length} playlists, likes: ${lks?.track_count ?? 0} tracks`);
-            console.log('Mapped Playlists for UI:', pls);        // Required DoD Proof
-            console.log('[SC] Logged in as:', usr?.username);    // Account proof
+            if (pls.length === 0) {
+                console.warn('[SC] API returned SUCCESS but playlists array is EMPTY.');
+            }
+
+            console.log(`[SC] Summary: ${pls.length} playlists, likes: ${lks?.track_count ?? 0} tracks, user: ${usr?.username}`);
+            console.log('[SC] Mapped Playlists for UI:', pls);
 
             setPlaylists(pls);
             setLikes(lks);

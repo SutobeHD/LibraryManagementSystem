@@ -1732,22 +1732,29 @@ async def get_soundcloud_playlists(request: Request):
     logger.info("[SC] Fetching playlists + user profile from SoundCloud (parallel).")
 
     import functools
+    import time as pytime
+    start_time = pytime.time()
+    
     try:
         # asyncio.gather: runs profile + playlists + likes concurrently on the thread pool.
         # This is faster and prevents slow SC servers from stalling the event loop.
+        logger.info(f"[SC] Starting parallel fetch for user profile, playlists, and likes...")
+        
         profile, playlists, likes = await asyncio.gather(
             asyncio.to_thread(SoundCloudPlaylistAPI.get_user_profile, auth_token),
             asyncio.to_thread(functools.partial(SoundCloudPlaylistAPI.get_playlists, auth_token)),
             asyncio.to_thread(functools.partial(SoundCloudPlaylistAPI.get_likes, auth_token)),
         )
 
+        duration = pytime.time() - start_time
         logger.info(
-            f"[SC] Fetched: user={profile.get('username')}, "
-            f"{len(playlists)} playlists, {likes.get('track_count', 0)} liked tracks."
+            f"[SC] Parallel fetch completed in {duration:.2f}s. "
+            f"Results: user='{profile.get('username')}', "
+            f"playlists={len(playlists)}, likes={likes.get('track_count', 0)} tracks."
         )
         return {
             "status": "success",
-            "user": profile,          # ← NEW: username, avatar_url, etc.
+            "user": profile,
             "playlists": playlists,
             "likes": likes,
         }
