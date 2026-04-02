@@ -33,10 +33,18 @@ logger = logging.getLogger(__name__)
 _DYNAMIC_CLIENT_ID: Optional[str] = None
 _DYNAMIC_CLIENT_ID_EXPIRES: float = 0.0
 
+# Known, stable client IDs from open source projects if the scraper is blocked by Cloudflare (403)
+FALLBACK_CLIENT_IDS = [
+    "***REMOVED***",  # Standard web player
+    "***REMOVED***",  # Backup ID 1
+    "***REMOVED***",  # Backup ID 2
+]
+
 def get_sc_client_id() -> str:
     """
     Dynamically scrape a valid SoundCloud client_id from their desktop website.
     Caches the ID in memory for 1 hour to prevent rate limits.
+    If blocked by Cloudflare anti-bot (e.g., 403), uses a robust fallback chain.
     """
     global _DYNAMIC_CLIENT_ID, _DYNAMIC_CLIENT_ID_EXPIRES
     now = time.time()
@@ -49,11 +57,23 @@ def get_sc_client_id() -> str:
     if env_id:
         return env_id
 
+    # STEALTH HEADERS: Mimic a standard desktop Chrome browser to bypass simple bot checks
+    stealth_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9,de;q=0.8",
+        "DNT": "1",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1"
+    }
+
     try:
-        logger.info("[SC] Fetching dynamic client_id from soundcloud.com...")
-        # Mobile/desktop site might differ, forcing desktop user agent
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        resp = requests.get("https://soundcloud.com", headers=headers, timeout=10)
+        logger.info("[SC Scraper] Attempting to scrape dynamic client_id from soundcloud.com...")
+        
+        # Fast timeout (5s) to avoid stalling the backend if SC is hanging or proxying via Cloudflare challenge
+        resp = requests.get("https://soundcloud.com", headers=stealth_headers, timeout=5.0)
+        
+        logger.info(f"[SC Scraper] Main page status: {resp.status_code}, HTML length: {len(resp.text)} bytes")
         resp.raise_for_status()
 
         # Find script tags: <script crossorigin src="https://a-v2.sndcdn.com/assets/49-8c9df1fb.js">
@@ -62,27 +82,45 @@ def get_sc_client_id() -> str:
             # Fallback regex if SC changes their markup
             script_urls = re.findall(r'src="([^"]+?sndcdn\.com/assets/[^"]+?\.js)"', resp.text)
 
-        # Iterate scripts looking for client_id:"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        logger.info(f"[SC Scraper] Found {len(script_urls)} .js bundle links to scan.")
+
+        # ROBUST REGEX: allows spaces between client_id, colon, and quotes, matches single or double quotes
+        regex_pattern = r'client_id\s*:\s*["\']([a-zA-Z0-9]{32})["\']'
+
+        # Iterate scripts looking for the 32-character client_id
         for url in script_urls:
-            js_resp = requests.get(url, headers=headers, timeout=10)
+            try:
+                js_resp = requests.get(url, headers=stealth_headers, timeout=5.0)
+            except Exception as e_script:
+                logger.debug(f"[SC Scraper] Skipped script {url} due to network error: {e_script}")
+                continue
+
             if js_resp.status_code == 200:
-                match = re.search(r'client_id:"([a-zA-Z0-9]{32})"', js_resp.text)
+                match = re.search(regex_pattern, js_resp.text)
                 if match:
                     new_id = match.group(1)
                     _DYNAMIC_CLIENT_ID = new_id
                     _DYNAMIC_CLIENT_ID_EXPIRES = now + 3600  # cache 1 hour
-                    logger.info(f"[SC] Fetched dynamic client_id: {_DYNAMIC_CLIENT_ID}")
+                    logger.info(f"[SC Scraper] SUCCESS! Fetched dynamic client_id: {_DYNAMIC_CLIENT_ID}")
                     return _DYNAMIC_CLIENT_ID
 
-    except Exception as e:
-        logger.error(f"[SC] Dynamic client_id fetch failed: {e}")
+        logger.warning("[SC Scraper] Regex found no client_id in any JS bundles.")
 
-    # Ultimate Fallback (might be expired, but better than crashing)
-    logger.warning("[SC] Scraper failed, falling back to default client_id.")
-    fallback = "***REMOVED***"
-    # Cache fallback shortly so we can retry the scraper if it was a temporary network issue
+    except requests.exceptions.HTTPError as he:
+        logger.error(f"[SC Scraper] Blocked by SC (Status {he.response.status_code}). Likely Cloudflare Challenge.")
+    except requests.exceptions.Timeout:
+        logger.error("[SC Scraper] Timeout after 5 seconds while reaching soundcloud.com")
+    except Exception as e:
+        logger.error(f"[SC Scraper] Unexpected error: {e}")
+
+    # HARD FALLBACK: If Cloudflare blocked us or the regex broke, rotate known stable IDs
+    import random
+    fallback = random.choice(FALLBACK_CLIENT_IDS)
+    logger.warning(f"[SC Scraper] Failed to parse HTML, using Fallback ID: {fallback}")
+    
+    # Cache fallback shortly (5 mins) so we can retry the scraper later if it was a temporary ban
     _DYNAMIC_CLIENT_ID = fallback
-    _DYNAMIC_CLIENT_ID_EXPIRES = now + 60
+    _DYNAMIC_CLIENT_ID_EXPIRES = now + 300
     return fallback
 
 
