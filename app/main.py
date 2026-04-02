@@ -1880,10 +1880,16 @@ async def sync_all_soundcloud(request: Request):
 class ScMergeReq(BaseModel):
     playlist_ids: List[int]
     merged_name: str
+    delete_originals: bool = False  # Originals deleted ONLY after full verification
 
 @app.post("/api/soundcloud/merge")
 async def merge_soundcloud_playlists(r: ScMergeReq, request: Request):
-    """Merge multiple SoundCloud playlists into one local playlist."""
+    """
+    Merge multiple SoundCloud playlists into one local playlist.
+
+    Safety: if delete_originals=True, originals are only deleted AFTER
+    we confirm all matched tracks exist in the merged playlist (zero-loss).
+    """
     if _sync_lock.locked():
         raise HTTPException(409, "A sync operation is already in progress. Please wait.")
 
@@ -1893,69 +1899,117 @@ async def merge_soundcloud_playlists(r: ScMergeReq, request: Request):
 
     if not db.active_db:
         raise HTTPException(400, "No active library loaded")
-    
+
     try:
         engine = SoundCloudSyncEngine(db)
-        
-        # Create merged playlist
+
+        # ── 1. Resolve or create merged target playlist ────────────────────────
         merged_name = f"SC_{r.merged_name}"
         merged_pid = None
-        
-        # Check if already exists
         for pl in db.playlists:
             if pl.get("Name") == merged_name:
-                merged_pid = pl.get("ID")
+                merged_pid = str(pl.get("ID"))
                 break
-        
-        if not merged_pid and hasattr(db.active_db, 'create_playlist'):
-            merged_pid = str(db.active_db.create_playlist(merged_name))
-        
+
+        if not merged_pid:
+            if hasattr(db, 'create_playlist'):
+                node = db.create_playlist(merged_name)
+                merged_pid = str(node["ID"]) if isinstance(node, dict) else str(node)
+            else:
+                raise HTTPException(500, "Database does not support create_playlist")
+
         if not merged_pid:
             raise HTTPException(500, "Could not create merged playlist")
-        
-        # Collect all tracks
-        all_playlists = SoundCloudPlaylistAPI.get_playlists(auth_token)
-        selected = [pl for pl in all_playlists if pl["id"] in r.playlist_ids]
-        
-        added = 0
-        existing_ids = set()
+
+        logger.info(f"[SC] Merging into '{merged_name}' (pid={merged_pid}), delete_originals={r.delete_originals}")
+
+        # ── 2. Cache existing tracks in merged playlist ────────────────────────
+        existing_ids: set = set()
         try:
             existing = db.get_playlist_tracks(merged_pid)
-            existing_ids = {str(t.get("id", t.get("ID", ""))) for t in existing}
+            existing_ids = {str(t.get("ID", t.get("id", ""))) for t in existing}
         except Exception:
             pass
-        
+
         local_tracks = db.tracks if hasattr(db, 'tracks') else {}
-        
-        for pl in selected:
+        all_playlists = SoundCloudPlaylistAPI.get_playlists(auth_token)
+        selected_pls = [pl for pl in all_playlists if pl["id"] in r.playlist_ids]
+
+        source_track_sets: dict = {}  # sc_playlist_id → set of local track IDs matched
+        added = 0
+
+        # ── 3. Match & add tracks ──────────────────────────────────────────────
+        for pl in selected_pls:
             sc_tracks = SoundCloudPlaylistAPI.get_full_playlist_tracks(pl["id"], auth_token)
+            matched_for_pl: set = set()
             for sc_track in sc_tracks:
                 matched = engine._fuzzy_match_track(
                     sc_track.get("title", ""),
                     sc_track.get("artist", ""),
                     local_tracks
                 )
-                if matched and matched not in existing_ids:
-                    try:
-                        if hasattr(db, 'add_track_to_playlist'):
-                            db.add_track_to_playlist(merged_pid, matched)
-                        elif hasattr(db.active_db, 'add_track_to_playlist'):
-                            db.active_db.add_track_to_playlist(merged_pid, matched)
-                        existing_ids.add(matched)
-                        added += 1
-                    except Exception as e:
-                        logger.warning(f"Failed to add track to merge: {e}")
-        
+                if matched:
+                    matched_for_pl.add(matched)
+                    if matched not in existing_ids:
+                        if db.add_track_to_playlist(merged_pid, matched):
+                            existing_ids.add(matched)
+                            added += 1
+                        else:
+                            logger.warning(f"[SC] add_track_to_playlist failed: tid={matched}")
+            source_track_sets[pl["id"]] = matched_for_pl
+
+        # ── 4. Verified deletion ───────────────────────────────────────────────
+        deleted_playlists: list = []
+        skipped_deletion_reason = None
+
+        if r.delete_originals:
+            try:
+                merged_tracks_after = db.get_playlist_tracks(merged_pid)
+                merged_ids_after = {str(t.get("ID", t.get("id", ""))) for t in merged_tracks_after}
+            except Exception as ve:
+                skipped_deletion_reason = f"Re-read of merged playlist failed: {ve}"
+                merged_ids_after = set()
+
+            all_ok = True
+            for pl in selected_pls:
+                required = source_track_sets.get(pl["id"], set())
+                missing = required - merged_ids_after
+                if missing:
+                    all_ok = False
+                    skipped_deletion_reason = (
+                        f"Verification FAILED for '{pl['title']}': "
+                        f"{len(missing)} track(s) absent from merged playlist — originals kept."
+                    )
+                    logger.error(f"[SC] {skipped_deletion_reason}")
+                    break
+
+            if all_ok:
+                for pl in selected_pls:
+                    sc_pl_name = f"SC_{pl['title']}"
+                    local_pl = next((p for p in db.playlists if p.get("Name") == sc_pl_name), None)
+                    if local_pl:
+                        if db.delete_playlist(str(local_pl["ID"])):
+                            deleted_playlists.append(sc_pl_name)
+                            logger.info(f"[SC] Deleted original: {sc_pl_name}")
+                        else:
+                            logger.warning(f"[SC] Could not delete: {sc_pl_name}")
+
         return {
             "status": "success",
-            "message": f"Merged {len(selected)} playlists into '{merged_name}': {added} tracks added",
+            "message": (
+                f"Merged {len(selected_pls)} playlist(s) into '{merged_name}': {added} tracks added"
+                + (f". Deleted: {deleted_playlists}" if deleted_playlists else "")
+                + (f". ⚠️ {skipped_deletion_reason}" if skipped_deletion_reason else "")
+            ),
             "playlist_name": merged_name,
-            "tracks_added": added
+            "tracks_added": added,
+            "deleted_playlists": deleted_playlists,
+            "skipped_deletion_reason": skipped_deletion_reason,
         }
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Merge failed: {e}")
+        logger.error(f"[SC] Merge failed: {e}", exc_info=True)
         raise HTTPException(500, safe_error_message(e))
 
 if __name__ == "__main__":

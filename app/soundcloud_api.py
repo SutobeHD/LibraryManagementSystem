@@ -354,8 +354,9 @@ class SoundCloudPlaylistAPI:
                 if not pl or not pl.get("id"):
                     continue
                 tracks_raw = pl.get("tracks", [])
+                # No hard limit — frontend handles scrolling
                 track_preview = [
-                    t for t in (SoundCloudPlaylistAPI._normalize_track(tr) for tr in tracks_raw[:20])
+                    t for t in (SoundCloudPlaylistAPI._normalize_track(tr) for tr in tracks_raw)
                     if t is not None
                 ]
                 playlists.append({
@@ -521,16 +522,21 @@ class SoundCloudSyncEngine:
         return best_match
 
     def find_or_create_playlist(self, sc_playlist_title: str) -> Optional[str]:
-        """Find existing synced playlist or create a new one. Returns playlist ID."""
+        """Find existing synced playlist or create a new one. Returns playlist ID string."""
         sync_name = f"{self.SYNC_PREFIX}{sc_playlist_title}"
         for pl in self.db.playlists:
             if pl.get("Name") == sync_name:
-                return pl.get("ID")
+                return str(pl.get("ID"))
         try:
-            if hasattr(self.db.active_db, 'create_playlist'):
-                pid = self.db.active_db.create_playlist(sync_name)
+            if hasattr(self.db, 'create_playlist'):
+                # db.create_playlist() returns a node_data dict: {"ID": str, "Name": str, ...}
+                node_data = self.db.create_playlist(sync_name)
+                if isinstance(node_data, dict):
+                    pid = str(node_data["ID"])
+                else:
+                    pid = str(node_data)
                 logger.info(f"[SC] Created synced playlist: {sync_name} (ID: {pid})")
-                return str(pid)
+                return pid
             else:
                 logger.warning("[SC] Database does not support create_playlist.")
         except Exception as exc:

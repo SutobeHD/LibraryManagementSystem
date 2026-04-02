@@ -108,12 +108,12 @@ const PlaylistCard = ({ playlist, selected, onToggle, onSync, syncing }) => {
 
             {/* Expanded track list */}
             {expanded && (
-                <div className="border-t border-white/5 px-4 py-3 max-h-48 overflow-y-auto">
+                <div className="border-t border-white/5 px-4 py-3 max-h-80 overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent relative">
                     {(playlist.tracks || []).length === 0 ? (
                         <p className="text-[10px] text-slate-600 text-center py-4">No track preview available</p>
                     ) : (
                         <div className="space-y-1">
-                            {playlist.tracks.slice(0, 30).map((track, i) => (
+                            {playlist.tracks.map((track, i) => (
                                 <div key={track?.id || i} className="flex items-center gap-2 py-1 group">
                                     <span className="text-[9px] text-slate-600 w-5 text-right tabular-nums">{i + 1}</span>
                                     <div className="flex-1 min-w-0">
@@ -123,11 +123,6 @@ const PlaylistCard = ({ playlist, selected, onToggle, onSync, syncing }) => {
                                     <span className="text-[9px] text-slate-600 tabular-nums">{formatDuration(track?.duration || 0)}</span>
                                 </div>
                             ))}
-                            {playlist.tracks.length > 30 && (
-                                <div className="text-[10px] text-slate-600 text-center pt-2">
-                                    + {playlist.tracks.length - 30} more tracks
-                                </div>
-                            )}
                         </div>
                     )}
                 </div>
@@ -147,6 +142,7 @@ const SoundCloudSyncView = () => {
     const [filter, setFilter] = useState('');
     const [mergeMode, setMergeMode] = useState(false);
     const [mergeName, setMergeName] = useState('');
+    const [deleteOriginals, setDeleteOriginals] = useState(false);
     const [isLoggingIn, setIsLoggingIn] = useState(false);
     const [loginMessage, setLoginMessage] = useState('');
     const [authRequired, setAuthRequired] = useState(false); // true → show login screen
@@ -341,10 +337,18 @@ const SoundCloudSyncView = () => {
         setSyncing(true);
         try {
             const ids = [...selectedIds].filter(id => id !== 'likes');
-            const res = await api.post('/api/soundcloud/merge', { playlist_ids: ids, merged_name: mergeName });
+            const res = await api.post('/api/soundcloud/merge', {
+                playlist_ids: ids,
+                merged_name: mergeName,
+                delete_originals: deleteOriginals,
+            });
             toast.success(res.data.message || 'Playlisten zusammengeführt!');
+            if (res.data.skipped_deletion_reason) {
+                toast.error(res.data.skipped_deletion_reason, { duration: 8000 });
+            }
             setMergeMode(false);
             setMergeName('');
+            setDeleteOriginals(false);
             setSelectedIds(new Set());
         } catch (e) {
             const status = e.response?.status;
@@ -500,23 +504,42 @@ const SoundCloudSyncView = () => {
 
                 {/* Merge panel */}
                 {mergeMode && selectedIds.size >= 2 && (
-                    <div className="mt-3 p-3 bg-purple-500/10 border border-purple-500/20 rounded-xl flex items-center gap-3">
-                        <Merge size={16} className="text-purple-400 shrink-0" />
-                        <input
-                            type="text"
-                            placeholder="Name der zusammengeführten Playlist..."
-                            value={mergeName}
-                            onChange={(e) => setMergeName(e.target.value)}
-                            className="flex-1 px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-purple-500/30"
-                        />
-                        <button
-                            onClick={handleMerge}
-                            disabled={syncing || !mergeName.trim()}
-                            className="flex items-center gap-1.5 px-4 py-1.5 bg-purple-500 hover:bg-purple-400 text-white rounded-lg text-xs font-bold transition-all disabled:opacity-30"
-                        >
-                            {syncing ? <Loader2 size={12} className="animate-spin" /> : <Merge size={12} />}
-                            Zusammenführen
-                        </button>
+                    <div className="mt-3 p-3 bg-purple-500/10 border border-purple-500/20 rounded-xl flex flex-col gap-3">
+                        <div className="flex items-center gap-3">
+                            <Merge size={16} className="text-purple-400 shrink-0" />
+                            <input
+                                type="text"
+                                placeholder="Name der zusammengeführten Playlist..."
+                                value={mergeName}
+                                onChange={(e) => setMergeName(e.target.value)}
+                                className="flex-1 px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-purple-500/30"
+                            />
+                            <button
+                                onClick={handleMerge}
+                                disabled={syncing || !mergeName.trim()}
+                                className="flex items-center gap-1.5 px-4 py-1.5 bg-purple-500 hover:bg-purple-400 text-white rounded-lg text-xs font-bold transition-all disabled:opacity-30"
+                            >
+                                {syncing ? <Loader2 size={12} className="animate-spin" /> : <Merge size={12} />}
+                                Zusammenführen
+                            </button>
+                        </div>
+                        {/* Delete originals toggle */}
+                        <label className="flex items-center gap-2 cursor-pointer select-none group w-fit">
+                            <input
+                                type="checkbox"
+                                checked={deleteOriginals}
+                                onChange={(e) => setDeleteOriginals(e.target.checked)}
+                                className="w-3.5 h-3.5 accent-purple-500"
+                            />
+                            <span className="text-[10px] text-slate-400 group-hover:text-slate-200 transition-colors">
+                                Ursprungsplaylisten nach erfolgreichem Merge löschen
+                            </span>
+                        </label>
+                        {deleteOriginals && (
+                            <p className="text-[9px] text-amber-500/80 leading-relaxed pl-5">
+                                ⚠️ Löschen erfolgt nur, wenn <strong>alle</strong> gematchten Tracks sicher in der neuen Playlist vorhanden sind.
+                            </p>
+                        )}
                     </div>
                 )}
             </div>
