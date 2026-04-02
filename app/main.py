@@ -1713,6 +1713,11 @@ async def get_soundcloud_playlists(request: Request):
     EC3: RateLimitError from _sc_get is surfaced as 429.
     """
     auth_token = keyring.get_password("rb_editor_pro", "sc_token")
+    
+    # DOD Verification Print
+    safe_token = f"{auth_token[:10]}..." if auth_token else "NONE"
+    print(f"DEBUG: Playlist Route aufgerufen mit Token: {safe_token}")
+    
     if not auth_token:
         # Return 401 (not 400) so the frontend's fetchPlaylists() catch block
         # recognises it as an auth failure and shows the login screen (not a toast error).
