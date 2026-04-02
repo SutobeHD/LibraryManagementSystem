@@ -24,7 +24,67 @@ logger = logging.getLogger(__name__)
 
 # EC9: Prefer the env-var set from .env; hardcoded string is a last-resort fallback
 # for development. Never commit real client IDs to version control.
-SC_CLIENT_ID = os.environ.get("SOUNDCLOUD_CLIENT_ID", "***REMOVED***")
+# SC_CLIENT_ID = os.environ.get("SOUNDCLOUD_CLIENT_ID", "***REMOVED***")
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Dynamic Client ID Scraper
+# ──────────────────────────────────────────────────────────────────────────────
+
+_DYNAMIC_CLIENT_ID: Optional[str] = None
+_DYNAMIC_CLIENT_ID_EXPIRES: float = 0.0
+
+def get_sc_client_id() -> str:
+    """
+    Dynamically scrape a valid SoundCloud client_id from their desktop website.
+    Caches the ID in memory for 1 hour to prevent rate limits.
+    """
+    global _DYNAMIC_CLIENT_ID, _DYNAMIC_CLIENT_ID_EXPIRES
+    now = time.time()
+
+    # Pre-checks: use cached ID or ENV var if valid
+    if _DYNAMIC_CLIENT_ID and now < _DYNAMIC_CLIENT_ID_EXPIRES:
+        return _DYNAMIC_CLIENT_ID
+
+    env_id = os.environ.get("SOUNDCLOUD_CLIENT_ID")
+    if env_id:
+        return env_id
+
+    try:
+        logger.info("[SC] Fetching dynamic client_id from soundcloud.com...")
+        # Mobile/desktop site might differ, forcing desktop user agent
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        resp = requests.get("https://soundcloud.com", headers=headers, timeout=10)
+        resp.raise_for_status()
+
+        # Find script tags: <script crossorigin src="https://a-v2.sndcdn.com/assets/49-8c9df1fb.js">
+        script_urls = re.findall(r'<script crossorigin src="([^"]+)"></script>', resp.text)
+        if not script_urls:
+            # Fallback regex if SC changes their markup
+            script_urls = re.findall(r'src="([^"]+?sndcdn\.com/assets/[^"]+?\.js)"', resp.text)
+
+        # Iterate scripts looking for client_id:"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        for url in script_urls:
+            js_resp = requests.get(url, headers=headers, timeout=10)
+            if js_resp.status_code == 200:
+                match = re.search(r'client_id:"([a-zA-Z0-9]{32})"', js_resp.text)
+                if match:
+                    new_id = match.group(1)
+                    _DYNAMIC_CLIENT_ID = new_id
+                    _DYNAMIC_CLIENT_ID_EXPIRES = now + 3600  # cache 1 hour
+                    logger.info(f"[SC] Fetched dynamic client_id: {_DYNAMIC_CLIENT_ID}")
+                    return _DYNAMIC_CLIENT_ID
+
+    except Exception as e:
+        logger.error(f"[SC] Dynamic client_id fetch failed: {e}")
+
+    # Ultimate Fallback (might be expired, but better than crashing)
+    logger.warning("[SC] Scraper failed, falling back to default client_id.")
+    fallback = "***REMOVED***"
+    # Cache fallback shortly so we can retry the scraper if it was a temporary network issue
+    _DYNAMIC_CLIENT_ID = fallback
+    _DYNAMIC_CLIENT_ID_EXPIRES = now + 60
+    return fallback
+
 
 # SoundCloud API base URL.
 # V2 API (api-v2.soundcloud.com) returns richer metadata and supports pagination.
@@ -141,7 +201,7 @@ class SoundCloudPlaylistAPI:
         resp = _sc_get(
             f"{SC_API_BASE}/me",
             headers=SoundCloudPlaylistAPI._get_headers(auth_token),
-            params={"client_id": SC_CLIENT_ID},
+            params={"client_id": get_sc_client_id()},
             timeout=10
         )
         data = resp.json()
@@ -164,7 +224,7 @@ class SoundCloudPlaylistAPI:
         resp = _sc_get(
             f"{SC_API_BASE}/me",
             headers=SoundCloudPlaylistAPI._get_headers(auth_token),
-            params={"client_id": SC_CLIENT_ID},
+            params={"client_id": get_sc_client_id()},
             timeout=10
         )
         data = resp.json()
@@ -223,7 +283,7 @@ class SoundCloudPlaylistAPI:
 
         playlists: List[Dict] = []
         url: Optional[str] = f"{SC_API_BASE}/users/{user_id}/playlists"
-        params = {"client_id": SC_CLIENT_ID, "limit": 50, "offset": 0}
+        params = {"client_id": get_sc_client_id(), "limit": 50, "offset": 0}
 
         while url:
             resp = _sc_get(url, headers=headers, params=params)
@@ -279,8 +339,8 @@ class SoundCloudPlaylistAPI:
         headers = SoundCloudPlaylistAPI._get_headers(auth_token)
 
         tracks: List[Dict] = []
-        url: Optional[str] = f"{SC_API_BASE}/users/{user_id}/likes"
-        params = {"client_id": SC_CLIENT_ID, "limit": 50, "offset": 0}
+        url: Optional[str] = f"{SC_API_BASE}/users/{user_id}/track_likes"
+        params = {"client_id": get_sc_client_id(), "limit": 50, "offset": 0}
 
         while url and len(tracks) < max_tracks:
             resp = _sc_get(url, headers=headers, params=params)
@@ -334,7 +394,7 @@ class SoundCloudPlaylistAPI:
             resp = _sc_get(
                 f"{SC_API_BASE}/playlists/{playlist_id}",
                 headers=headers,
-                params={"client_id": SC_CLIENT_ID, "representation": "full"},
+                params={"client_id": get_sc_client_id(), "representation": "full"},
                 timeout=20
             )
         except AuthExpiredError:
