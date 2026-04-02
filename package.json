@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "dev": "npm run dev --prefix frontend",
-    "dev:full": "concurrently \"npm run dev --prefix frontend\" \"python -m app.main\"",
+    "cleanup": "powershell -Command \"try { Get-NetTCPConnection -LocalPort 8000,5173 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } } catch {}\"",
+    "dev:full": "npm run cleanup && concurrently \"npm run dev --prefix frontend\" \"python -m app.main\"",
     "build": "npm run build --prefix frontend",
     "tauri": "tauri",
     "test": "echo \"Error: no test specified\" && exit 1"
