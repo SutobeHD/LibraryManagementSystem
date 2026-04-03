@@ -1871,6 +1871,55 @@ async def sync_soundcloud_playlists(r: ScSyncReq, request: Request):
             logger.error(f"[SC] Sync failed: {e}")
             raise HTTPException(500, safe_error_message(e))
 
+class ScPreviewReq(BaseModel):
+    playlist_id: int
+    is_likes: bool = False
+
+@app.post("/api/soundcloud/preview-matches")
+async def preview_soundcloud_matches(r: ScPreviewReq, request: Request):
+    """
+    Dry-run: returns per-track fuzzy match details for a given SC playlist.
+    Does NOT write anything to the database.
+    Used by the Inspector Panel in the frontend.
+    """
+    auth_token = keyring.get_password("rb_editor_pro", "sc_token")
+    if not auth_token:
+        raise HTTPException(401, detail="auth_expired")
+    if not db.active_db:
+        raise HTTPException(400, "No active library loaded")
+
+    try:
+        engine = SoundCloudSyncEngine(db)
+
+        if r.is_likes:
+            playlist_data = SoundCloudPlaylistAPI.get_likes(auth_token)
+        else:
+            all_pls = SoundCloudPlaylistAPI.get_playlists(auth_token)
+            playlist_data = next((pl for pl in all_pls if pl["id"] == r.playlist_id), None)
+            if not playlist_data:
+                raise HTTPException(404, f"Playlist {r.playlist_id} not found")
+
+        matches = await asyncio.to_thread(engine.preview_matches, playlist_data, auth_token)
+        matched   = sum(1 for m in matches if m["status"] == "matched")
+        unmatched = sum(1 for m in matches if m["status"] == "unmatched")
+        dead      = sum(1 for m in matches if m["status"] == "dead")
+
+        return {
+            "playlist_title": playlist_data.get("title", ""),
+            "total": len(matches),
+            "matched": matched,
+            "unmatched": unmatched,
+            "dead": dead,
+            "matches": matches,
+        }
+    except HTTPException:
+        raise
+    except AuthExpiredError:
+        raise HTTPException(401, detail="auth_expired")
+    except Exception as e:
+        logger.error(f"[SC] preview-matches failed: {e}", exc_info=True)
+        raise HTTPException(500, safe_error_message(e))
+
 @app.post("/api/soundcloud/sync-all")
 async def sync_all_soundcloud(request: Request):
     """Sync ALL SoundCloud playlists + likes. Uses asyncio.Lock to prevent race conditions."""

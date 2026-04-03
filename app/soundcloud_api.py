@@ -499,7 +499,12 @@ class SoundCloudSyncEngine:
         return re.sub(r'[^\w\s]', '', title.lower().strip())
 
     def _fuzzy_match_track(self, sc_title: str, sc_artist: str, local_tracks: Dict) -> Optional[str]:
-        """Find the best matching local track for a SoundCloud track (fuzzy, Criterion 9)."""
+        """Find the best matching local track. Returns the local track ID or None."""
+        tid, _ = self._fuzzy_match_with_score(sc_title, sc_artist, local_tracks)
+        return tid
+
+    def _fuzzy_match_with_score(self, sc_title: str, sc_artist: str, local_tracks: Dict):
+        """Find the best match and return (local_track_id, score). Score 0..1."""
         sc_combined = f"{sc_artist} - {sc_title}".lower()
         sc_norm_title = self._normalize_title(sc_title)
         best_match = None
@@ -512,14 +517,14 @@ class SoundCloudSyncEngine:
 
             # Exact normalized title match wins immediately
             if sc_norm_title and sc_norm_title == self._normalize_title(local_title):
-                return tid
+                return tid, 1.0
 
             ratio = SequenceMatcher(None, sc_combined, local_combined).ratio()
             if ratio > best_ratio and ratio >= 0.65:
                 best_ratio = ratio
                 best_match = tid
 
-        return best_match
+        return best_match, round(best_ratio, 3)
 
     def find_or_create_playlist(self, sc_playlist_title: str) -> Optional[str]:
         """Find existing synced playlist or create a new one. Returns playlist ID string.
@@ -629,3 +634,55 @@ class SoundCloudSyncEngine:
             result = self.sync_playlist(pl, auth_token)
             results.append(result)
         return results
+
+    def preview_matches(self, sc_playlist: Dict, auth_token: str) -> List[Dict]:
+        """
+        Dry-run: return per-track match details WITHOUT writing to the DB.
+        Used by the Inspector Panel endpoint.
+        Returns list of dicts:
+          { sc_title, sc_artist, sc_url, local_id, local_title, local_artist, score, status }
+          status: 'matched' | 'unmatched' | 'dead'
+        """
+        sc_id = sc_playlist.get("id")
+        if sc_playlist.get("is_likes"):
+            sc_tracks = sc_playlist.get("tracks", [])
+        else:
+            sc_tracks = SoundCloudPlaylistAPI.get_full_playlist_tracks(sc_id, auth_token)
+
+        local_tracks = self.db.tracks if hasattr(self.db, 'tracks') else {}
+        preview = []
+
+        for sc_track in sc_tracks:
+            sc_title = sc_track.get("title", "")
+            sc_artist = sc_track.get("artist", "")
+
+            if not sc_title:
+                preview.append({"sc_title": "", "sc_artist": sc_artist,
+                                 "sc_url": sc_track.get("permalink_url", ""),
+                                 "local_id": None, "local_title": None, "local_artist": None,
+                                 "score": 0.0, "status": "dead"})
+                continue
+
+            tid, score = self._fuzzy_match_with_score(sc_title, sc_artist, local_tracks)
+            if tid:
+                local = local_tracks[tid]
+                preview.append({
+                    "sc_title": sc_title,
+                    "sc_artist": sc_artist,
+                    "sc_url": sc_track.get("permalink_url", ""),
+                    "local_id": tid,
+                    "local_title": local.get("Title", ""),
+                    "local_artist": local.get("Artist", ""),
+                    "score": score,
+                    "status": "matched",
+                })
+            else:
+                preview.append({
+                    "sc_title": sc_title,
+                    "sc_artist": sc_artist,
+                    "sc_url": sc_track.get("permalink_url", ""),
+                    "local_id": None, "local_title": None, "local_artist": None,
+                    "score": 0.0, "status": "unmatched",
+                })
+
+        return preview

@@ -8,6 +8,7 @@ import api from '../api/api';
 import toast from 'react-hot-toast';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import MatchInspectorModal from './MatchInspectorModal';
 
 const formatDuration = (ms) => {
     if (!ms) return '0:00';
@@ -24,7 +25,7 @@ const formatTotalDuration = (ms) => {
     return `${mins} min`;
 };
 
-const PlaylistCard = ({ playlist, selected, onToggle, onSync, syncing }) => {
+const PlaylistCard = ({ playlist, selected, onToggle, onSync, onInspect, syncing }) => {
     const [expanded, setExpanded] = useState(false);
     const isLikes = playlist.is_likes;
     const artworkUrl = playlist.artwork_url?.replace('-large', '-t300x300') || null;
@@ -95,6 +96,14 @@ const PlaylistCard = ({ playlist, selected, onToggle, onSync, syncing }) => {
                             </button>
 
                             <button
+                                onClick={() => onInspect(playlist)}
+                                className="flex items-center gap-1 px-2 py-1.5 text-slate-500 hover:text-amber-400 text-[10px] transition-colors"
+                                title="Match Inspector"
+                            >
+                                <Search size={10} /> Inspect
+                            </button>
+
+                            <button
                                 onClick={() => setExpanded(!expanded)}
                                 className="flex items-center gap-1 px-2 py-1.5 text-slate-500 hover:text-slate-300 text-[10px] transition-colors"
                             >
@@ -146,6 +155,7 @@ const SoundCloudSyncView = () => {
     const [isLoggingIn, setIsLoggingIn] = useState(false);
     const [loginMessage, setLoginMessage] = useState('');
     const [authRequired, setAuthRequired] = useState(false); // true → show login screen
+    const [inspectorPlaylist, setInspectorPlaylist] = useState(null);
     const [scSettings, setScSettings] = useState({ sc_sync_folder_id: null, available_folders: [] });
 
     // Criterion 10: isBusy ref prevents double-execution on rapid clicks
@@ -639,6 +649,7 @@ const SoundCloudSyncView = () => {
                                     selected={selectedIds.has(pl.id)}
                                     onToggle={toggleSelect}
                                     onSync={handleSync}
+                                    onInspect={setInspectorPlaylist}
                                     syncing={syncing}
                                 />
                             ))}
@@ -653,6 +664,15 @@ const SoundCloudSyncView = () => {
                     </>
                 )}
             </div>
+
+            {/* Match Inspector Modal — portal over full viewport */}
+            {inspectorPlaylist && (
+                <MatchInspectorModal
+                    playlist={inspectorPlaylist}
+                    onClose={() => setInspectorPlaylist(null)}
+                    onSync={handleSync}
+                />
+            )}
         </div>
     );
 };
