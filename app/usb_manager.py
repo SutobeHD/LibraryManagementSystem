@@ -118,20 +118,14 @@ class UsbDetector:
         """Scan all removable drives and return Rekordbox USB info."""
         devices = []
         for drive in cls._get_removable_drives():
-            is_rb = cls.is_rekordbox_usb(drive)
-            # Skip system drive (C:) and fixed drives that don't have Rekordbox data
-            # unless they are potential USB sticks (we exclude C: to be safe)
             drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive)
-            if drive_type == 3:
-                if drive.upper().startswith("C:"):
-                    continue
-                if not is_rb:
-                    # If it's fixed and not RB, we only show it if it's not the system drive
-                    # and potentially we could check for other markers, but for now we keep it visible
-                    # so the user can initialize it.
-                    pass
-
             is_rb = cls.is_rekordbox_usb(drive)
+
+            # Fixed drives (type 3): only include if they actually have Rekordbox data.
+            # This prevents internal HDDs/SSDs from cluttering the device list.
+            if drive_type == 3 and not is_rb:
+                logger.debug(f"Skipping fixed drive without Rekordbox structure: {drive}")
+                continue
             logger.info(f"Scanning drive {drive}: type={drive_type}, is_rb={is_rb}")
 
             vol = cls._get_volume_info(drive)
@@ -434,7 +428,8 @@ class UsbSyncEngine:
     def __init__(self, local_db_path: str, usb_drive: str):
         self.local_path = Path(local_db_path)
         self.usb_drive = usb_drive
-        self.usb_pioneer = Path(usb_drive) / "PIONEER"
+        self.usb_root = Path(usb_drive)  # drive root, e.g. Path("E:\\")
+        self.usb_pioneer = self.usb_root / "PIONEER"
         self.usb_rb = self.usb_pioneer / "rekordbox"
         self.usb_db_path = self.usb_rb / "exportLibrary.db"
         self.usb_anlz = self.usb_pioneer / "USBANLZ"
@@ -686,7 +681,8 @@ class UsbSyncEngine:
 
     def _get_safe_dest_path(self, artist: str, album: str, filename: str) -> Path:
         """Req 13: Address FAT32 path/file limits (max 255 chars)."""
-        contents_dir = self.usb_root / "Contents"
+        # Pioneer CDJs expect audio in PIONEER/Contents/ (not drive root/Contents/)
+        contents_dir = self.usb_pioneer / "Contents"
         artist_clean = self._clean_filename(artist)[:40].strip() or "UnknownArtist"
         album_clean = self._clean_filename(album)[:40].strip() or "UnknownAlbum"
         file_clean = self._clean_filename(filename)
@@ -713,7 +709,7 @@ class UsbSyncEngine:
             yield {"stage": "copy_skip", "message": f"Deduplicated (already exists): {dest.name}"}
             return
 
-        # Req 16: Check Disk Full proactively
+        # Req 16: Check Disk Full proactively (use drive root for disk_usage)
         try:
             _, _, free = shutil.disk_usage(str(self.usb_root))
             if src.stat().st_size > free:
@@ -787,10 +783,14 @@ class UsbSyncEngine:
                     try: album_name = getattr(db.get_album(t.album_id), 'name', '')
                     except: pass
                 
-                # Original local path
-                local_folder = getattr(t, 'folder_path', '')
-                local_file = getattr(t, 'file_name_l', '')
-                local_path_str = f"{local_folder}{local_file}"
+                # Original local path — folder_path may or may not end with separator
+                local_folder = getattr(t, 'folder_path', '') or ''
+                local_file = getattr(t, 'file_name_l', '') or ''
+                # Ensure exactly one path separator between folder and filename
+                if local_folder and local_file and not local_folder.endswith(('/', '\\')):
+                    local_path_str = f"{local_folder}/{local_file}"
+                else:
+                    local_path_str = f"{local_folder}{local_file}"
                 
                 # Req 30: Resolve symlinks to avoid infinite loops and get absolute real paths
                 try:
@@ -837,10 +837,16 @@ class UsbSyncEngine:
                     
                 loc_val = urllib.parse.quote(loc_val, safe=":/")
                 
-                ET.SubElement(collection, "TRACK", 
-                    TrackID=str(t.id), Name=getattr(t, 'title', ''), 
+                ET.SubElement(collection, "TRACK",
+                    TrackID=str(t.id),
+                    Name=getattr(t, 'title', '') or '',
                     Artist=artist_name,
-                    Location=loc_val
+                    Album=album_name,
+                    TotalTime=str(int(getattr(t, 'length', 0) or 0)),
+                    AverageBpm=f"{float(getattr(t, 'bpm', 0) or 0):.2f}",
+                    Tonality=str(getattr(t, 'key_id', '') or ''),
+                    Rating=str(getattr(t, 'rating', 0) or 0),
+                    Location=loc_val,
                 )
                 if i % 10 == 0:
                     yield {"stage": "lib_legacy", "message": f"Copying & Exporting: {i}/{len(tracks_to_export)}", "progress": int((i/max(len(tracks_to_export),1))*90)}
@@ -922,19 +928,6 @@ class UsbSyncEngine:
 
 class UsbActions:
     """High-level USB operations."""
-
-    @staticmethod
-    def set_label(drive: str, new_label: str) -> Dict:
-        """Sets the volume label for a drive."""
-        try:
-            import ctypes
-            drive_root = f"{drive.rstrip(os.sep)}{os.sep}" # Ensure X:\ format
-            if not ctypes.windll.kernel32.SetVolumeLabelW(drive_root, new_label):
-                error = ctypes.GetLastError()
-                return {"status": "error", "message": f"Failed to rename (Error {error})"}
-            return {"status": "success", "message": f"Renamed to {new_label}"}
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
 
     @staticmethod
     def eject(drive: str) -> Dict:
