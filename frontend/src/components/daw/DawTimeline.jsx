@@ -137,11 +137,11 @@ const DawTimeline = React.memo(({
         d.activeLoopIndex = state.activeLoopIndex;
         d.snapEnabled  = state.snapEnabled;
         d.slipMode     = state.slipMode || false;
-        d.waveformStyle = state.waveformStyle || 'liquid';
+        d.waveformStyle = state.waveformStyle || '3band';
         d.selectionRange = state.selectionRange;
 
         // Detect waveform data change → force rebuild
-        const newKey = `${state.totalDuration?.toFixed(2)}-${state.zoom?.toFixed(0)}-${d.lodLevel}-${!!state.bandPeaks}-${!!state.fallbackPeaks}`;
+        const newKey = `${state.totalDuration?.toFixed(2)}-${state.zoom?.toFixed(0)}-${d.lodLevel}-${!!state.bandPeaks}-${!!state.fallbackPeaks}-${state.waveformStyle}`;
         if (newKey !== waveformKey.current) {
             d.needsWaveformRebuild = true;
             waveformKey.current = newKey;
@@ -438,7 +438,10 @@ function buildWaveformBitmap(d) {
         const rEndPx   = Math.min(width, regionEnd            * zoom - scrollX);
         if (rEndPx <= rStartPx) continue;
 
-        if (hasBand && activePeaks) {
+        // Mono mode: always use fallback mono peaks
+        if (waveformStyle === 'mono' && hasMono) {
+            drawSmoothBandPath(ctx, fallbackPeaks, 'fallback', region, rStartPx, rEndPx, scrollX, zoom, totalDuration, centerY, maxAmp, lodLevel, width, height);
+        } else if (hasBand && activePeaks) {
             const isBass = waveformStyle === 'bass';
             const bands = isBass
                 ? [{ p: activePeaks.low, bk: 'low' }]

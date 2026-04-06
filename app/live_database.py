@@ -3,6 +3,7 @@ import shutil
 import logging
 import time
 from datetime import datetime
+import sqlite3
 import re
 import threading
 import xml.etree.ElementTree as ET
@@ -207,7 +208,10 @@ class LiveRekordboxDB:
             # 3. Load Cues (Hot Cues & Memory Cues)
             self._load_cues()
             
-            # 4. Finalize metadata for UI
+            # 4. Load Beatgrids (from ANLZ DAT files)
+            self._load_beatgrids_from_anlz()
+            
+            # 5. Finalize metadata for UI
             self._finalize_ui_metadata()
             
             self.loaded = True
@@ -348,6 +352,43 @@ class LiveRekordboxDB:
         except Exception as e:
             logger.error(f"Failed to load cues: {e}")
 
+    def _load_beatgrids_from_anlz(self):
+        """Loads high-precision beatgrid (PQTZ) from local Rekordbox ANLZ binary files."""
+        logger.info("Loading Beatgrids from ANLZ binary (PQTZ)...")
+        try:
+            count = 0
+            # To avoid excessive file access, we only do this for the collections
+            for tid_str, track in self.tracks.items():
+                try:
+                    paths = self.db.get_content_anlz_paths(tid_str)
+                    if not paths: 
+                        continue
+                    
+                    dat_path = paths.get('DAT')
+                    if dat_path and os.path.exists(str(dat_path)):
+                        anlz = rbox.Anlz(str(dat_path))
+                        # rbox.Anlz dynamically parses chunks like PQTZ
+                        pqtz = getattr(anlz, 'pqtz', None)
+                        if pqtz and pqtz.entries:
+                            track["beatGrid"] = []
+                            for entry in pqtz.entries:
+                                track["beatGrid"].append({
+                                    "time": float(entry.time) / 1000.0,
+                                    "bpm": float(entry.bpm) / 100.0,
+                                    "beat": 1
+                                })
+                            count += 1
+                        else:
+                            # logger.warning(f"No pqtz in ANLZ for {tid_str}")
+                            pass
+                except Exception as e:
+                    logger.warning(f"Failed to parse ANLZ for track {tid_str}: {e}")
+                    continue
+            
+            logger.info(f"Successfully linked {count} tracks with ANLZ beatgrids.")
+        except Exception as e:
+            logger.error(f"Critical failure in ANLZ loader: {e}")
+
     def _load_playlists(self):
         self.playlists = []
         raw_playlists = self.db.get_playlists()
@@ -382,24 +423,28 @@ class LiveRekordboxDB:
         self.playlists.sort(key=lambda x: x.get("Seq", 0))
 
     def _load_playlist_tracks(self):
-        """Req 12: Batch-load all playlist contents to eliminate N+1 queries during frontend navigation."""
-        logger.info("Caching all playlist tracks...")
+        """Batch-load all playlist contents using rbox's native methods."""
+        logger.info("Caching all playlist tracks via rbox...")
         try:
             self.playlists_tracks.clear()
-            # djmdSongPlaylist links PlaylistID to ContentID
-            query = "SELECT PlaylistID, ContentID FROM djmdSongPlaylist ORDER BY TrackNo"
-            
-            cur = self.db.execute(query)
+            playlists = self.db.get_playlists()
             count = 0
-            for row in cur:
-                pid = str(row[0])
-                cid = str(row[1])
-                self.playlists_tracks[pid].append(cid)
-                count += 1
+            for pl in playlists:
+                pid = str(pl.id)
+                # Correct method is db.get_playlist_songs(playlist_id)
+                try:
+                    songs = self.db.get_playlist_songs(pl.id)
+                    for s in songs:
+                        # s is usually djmdSongPlaylist entry, which has content_id
+                        if hasattr(s, 'content_id'):
+                            self.playlists_tracks[pid].append(str(s.content_id))
+                            count += 1
+                except:
+                    continue
                 
-            logger.info(f"Loaded {count} playlist track mappings instantly.")
+            logger.info(f"Loaded {count} playlist track mappings via rbox.")
         except Exception as e:
-            logger.error(f"Failed to batch-load playlist tracks: {e}")
+            logger.error(f"Failed to load playlist tracks via rbox: {e}")
 
     def _finalize_ui_metadata(self):
         artist_counts = defaultdict(int)

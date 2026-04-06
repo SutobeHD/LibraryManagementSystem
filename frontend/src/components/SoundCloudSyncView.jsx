@@ -25,6 +25,57 @@ const formatTotalDuration = (ms) => {
     return `${mins} min`;
 };
 
+const DownloadQueueWidget = () => {
+    const [tasks, setTasks] = useState({});
+
+    useEffect(() => {
+        const fetchTasks = async () => {
+            try {
+                const res = await api.get('/api/soundcloud/tasks');
+                setTasks(res.data);
+            } catch (e) {
+                // Ignore errors
+            }
+        };
+        fetchTasks();
+        const interval = setInterval(fetchTasks, 2000);
+        return () => clearInterval(interval);
+    }, []);
+
+    const activeTasks = Object.values(tasks);
+    if (activeTasks.length === 0) return null;
+
+    return (
+        <div className="fixed bottom-4 right-4 w-72 bg-slate-900 border border-white/10 rounded-2xl shadow-2xl p-4 z-40 overflow-hidden">
+            <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-2">
+                <Download size={12} className="text-orange-400" /> Downloads
+            </h3>
+            <div className="space-y-3 max-h-48 overflow-y-auto pr-1">
+                {activeTasks.map(t => (
+                    <div key={t.id || t.sc_title} className="text-xs">
+                        <div className="flex justify-between items-center mb-1">
+                            <span className="text-slate-300 truncate font-semibold w-40" title={t.sc_title || t.url}>
+                                {t.sc_title || t.url?.split('/').pop()}
+                            </span>
+                            <span className="text-[9px] text-slate-500 uppercase">{t.status}</span>
+                        </div>
+                        {t.status === 'Error' || t.status === 'Failed' ? (
+                            <div className="text-[10px] text-red-400 mt-1">{t.error}</div>
+                        ) : (
+                            <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+                                <div
+                                    className={`h-full ${t.status === 'Completed' ? 'bg-emerald-500' : 'bg-orange-500'}`}
+                                    style={{ width: `${t.progress || 0}%` }}
+                                />
+                            </div>
+                        )}
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
 const PlaylistCard = ({ playlist, selected, onToggle, onSync, onInspect, syncing }) => {
     const [expanded, setExpanded] = useState(false);
     const isLikes = playlist.is_likes;
@@ -673,6 +724,9 @@ const SoundCloudSyncView = () => {
                     onSync={handleSync}
                 />
             )}
+
+            {/* Downloader Queue Floating Widget */}
+            <DownloadQueueWidget />
         </div>
     );
 };

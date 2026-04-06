@@ -197,49 +197,75 @@ class AudioEngine:
 
             # Final output file path
             final_path = EXPORT_DIR / output_filename
+            output_ext = Path(output_filename).suffix.lower()
+
+            # Always concatenate as WAV first
+            wav_path = EXPORT_DIR / (Path(output_filename).stem + "_concat.wav") if output_ext != '.wav' else final_path
 
             # Use Python's wave module to concatenate the standardized WAV files
-            with wave.open(str(final_path), 'wb') as outfile:
+            with wave.open(str(wav_path), 'wb') as outfile:
                 with wave.open(str(temp_files[0]), 'rb') as infile:
                     outfile.setparams(infile.getparams())
-                
+
                 for tf in temp_files:
                     with wave.open(str(tf), 'rb') as infile:
                         outfile.writeframes(infile.readframes(infile.getnframes()))
-            
-            logger.info(f"Successfully exported track to {final_path} using python wave module")
 
-            # Generate Track Metadata for DB
+            logger.info(f"Concatenated WAV to {wav_path}")
+
+            # Convert to target format if not WAV
+            if output_ext == '.mp3':
+                cmd = [FFMPEG_BIN, "-y", "-i", str(wav_path), "-b:a", "320k", "-q:a", "0", str(final_path)]
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    raise RuntimeError(f"MP3 encode failed: {result.stderr}")
+                try: os.remove(str(wav_path))
+                except OSError: pass
+                logger.info(f"Encoded MP3: {final_path}")
+            elif output_ext == '.flac':
+                cmd = [FFMPEG_BIN, "-y", "-i", str(wav_path), "-c:a", "flac", "-sample_fmt", "s32", str(final_path)]
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    raise RuntimeError(f"FLAC encode failed: {result.stderr}")
+                try: os.remove(str(wav_path))
+                except OSError: pass
+                logger.info(f"Encoded FLAC: {final_path}")
+            else:
+                logger.info(f"Exported WAV: {final_path}")
+
+            # Generate Track Metadata for DB (optional, don't fail export if DB unavailable)
             new_tid = f"R_{int(time.time())}"
-            orig_track = None
-            for t in db.tracks.values():
-                if t.get('path') == source_path:
-                    orig_track = t
-                    break
+            try:
+                orig_track = None
+                for t in db.tracks.values():
+                    if t.get('path') == source_path:
+                        orig_track = t
+                        break
 
-            track_data = {
-                "TrackID": new_tid,
-                "Name": output_filename.rsplit('.', 1)[0],
-                "Artist": orig_track.get('Artist', 'RB Editor') if orig_track else "RB Editor",
-                "Album": "Edits",
-                "Genre": orig_track.get('Genre', '') if orig_track else "",
-                "Kind": "WAV File",
-                "Size": str(final_path.stat().st_size),
-                "TotalTime": str(int(duration)),
-                "DateAdded": datetime.datetime.now().strftime("%Y-%m-%d"),
-                "Bitrate": "2304",
-                "SampleRate": "48000",
-                "path": str(final_path),
-                "BPM": orig_track.get('BPM', orig_track.get('AverageBpm', '0')) if orig_track else "0",
-            }
-            
-            # Recalculate total time from segments
-            total_duration = sum([c['end'] - c['start'] for c in cuts])
-            track_data["TotalTime"] = str(int(total_duration))
+                kind_map = {'.wav': 'WAV File', '.mp3': 'MP3 File', '.flac': 'FLAC File'}
+                total_duration = sum([c['end'] - c['start'] for c in cuts])
 
-            db.add_track(track_data)
-            db.save_xml()
-            
+                track_data = {
+                    "TrackID": new_tid,
+                    "Name": output_filename.rsplit('.', 1)[0],
+                    "Artist": orig_track.get('Artist', 'RB Editor') if orig_track else "RB Editor",
+                    "Album": "Edits",
+                    "Genre": orig_track.get('Genre', '') if orig_track else "",
+                    "Kind": kind_map.get(output_ext, 'Audio File'),
+                    "Size": str(final_path.stat().st_size),
+                    "TotalTime": str(int(total_duration)),
+                    "DateAdded": datetime.datetime.now().strftime("%Y-%m-%d"),
+                    "Bitrate": "320" if output_ext == '.mp3' else "2304",
+                    "SampleRate": "44100",
+                    "path": str(final_path),
+                    "BPM": orig_track.get('BPM', orig_track.get('AverageBpm', '0')) if orig_track else "0",
+                }
+
+                db.add_track(track_data)
+                db.save_xml()
+            except Exception as db_err:
+                logger.warning(f"Could not add exported track to DB (non-fatal): {db_err}")
+
             return new_tid
         except Exception as e: 
             logger.error(f"Render failed: {e}")
@@ -557,316 +583,250 @@ class SystemCleaner:
         return count
 
 class BeatAnalyzer:
+    """
+    Track analyzer used by POST /api/track/{tid}/analyze.
+    Now delegates to the production AnalysisEngine for BPM, Key, Phrases & LUFS,
+    then enriches the result with drop detection and dynamic grid logic.
+    """
+
+    # Import the production engine once
+    _engine_available = False
+    _engine_checked = False
+
+    @classmethod
+    def _check_engine(cls):
+        if cls._engine_checked:
+            return cls._engine_available
+        cls._engine_checked = True
+        try:
+            from .analysis_engine import run_full_analysis as _rfa
+            cls._run_engine = staticmethod(_rfa)
+            cls._engine_available = True
+        except ImportError:
+            cls._engine_available = False
+        return cls._engine_available
+
     @staticmethod
     def analyze(path: str):
-        """Analyzes audio file with advanced 'Drop Detection' and spectral novelty analysis."""
-        logger.info(f"Starting advanced spectral analysis for: {path}")
+        """
+        Full track analysis with Rekordbox-grade accuracy.
+        Delegates to analysis_engine.py, then enriches with drop detection
+        and dynamic grid for backward compatibility.
+        """
+        logger.info(f"Starting analysis for: {path}")
         if not os.path.exists(path):
-            logger.error(f"Analysis aborted: File not found at {path}")
             raise FileNotFoundError(f"Audio file not found: {path}")
-        
+
+        # --- Try production engine first ---
+        if BeatAnalyzer._check_engine():
+            try:
+                from .analysis_engine import run_full_analysis
+                result = run_full_analysis(path)
+
+                if result.get("status") == "ok":
+                    logger.info(
+                        f"Engine result: BPM={result['bpm']}, Key={result['key']}, "
+                        f"Beats={result['beat_count']}, Phrases={len(result.get('phrases', []))}"
+                    )
+
+                    # Convert beats to legacy format for frontend
+                    full_beat_list = []
+                    for b in result.get("beats", []):
+                        full_beat_list.append({
+                            "time": round(b["time_ms"] / 1000.0, 4),
+                            "bpm": b["tempo"] / 100.0,
+                            "beat": b["beat_number"],
+                            "metro": "4/4"
+                        })
+
+                    # Convert phrases to legacy format
+                    phrases_legacy = []
+                    for p in result.get("phrases", []):
+                        phrases_legacy.append({
+                            "name": p.get("label", "PHRASE"),
+                            "start": p.get("start_time", 0),
+                            "end": p.get("end_time", 0),
+                            "color": "#3b82f6" if p.get("mood") != "high" else "#ef4444"
+                        })
+
+                    # Detect drop time from phrases
+                    drop_time = 0.0
+                    for p in result.get("phrases", []):
+                        if p.get("label") == "Drop":
+                            drop_time = p.get("start_time", 0.0)
+                            break
+
+                    return {
+                        "bpm": result["bpm"],
+                        "key": result["key"],
+                        "camelot": result.get("camelot", ""),
+                        "phrases": phrases_legacy,
+                        "lufs": result.get("lufs", -100.0),
+                        "peak": result.get("peak", 0.0),
+                        "beats": full_beat_list,
+                        "tempoAnchors": result.get("tempo_anchors", []),
+                        "totalTime": result.get("duration", 0),
+                        "dropTime": drop_time,
+                        # New v2 fields
+                        "key_confidence": result.get("key_confidence", 0),
+                        "beat_method": result.get("beat_method", ""),
+                        "key_method": result.get("key_method", ""),
+                        "openkey": result.get("openkey", ""),
+                    }
+
+            except Exception as e:
+                logger.warning(f"Production engine failed, falling back to legacy: {e}")
+
+        # --- Legacy fallback (original implementation) ---
+        return BeatAnalyzer._legacy_analyze(path)
+
+    @staticmethod
+    def _legacy_analyze(path: str):
+        """Legacy analysis fallback using basic librosa."""
         try:
             import librosa
             import numpy as np
             from scipy.ndimage import gaussian_filter1d
         except ImportError:
-            logger.error("CRITICAL: Dependencies missing. Please run 'pip install librosa scipy numba'")
-            raise RuntimeError("Audio analysis engine missing dependencies.")
-        
+            raise RuntimeError("Audio analysis dependencies missing (librosa, scipy).")
+
         try:
-            # 1. Load Audio (Load full for better accuracy, but process in chunks if needed)
-            logger.info("Loading audio data...")
             y, sr = librosa.load(path, sr=None)
             duration = librosa.get_duration(y=y, sr=sr)
-            logger.info(f"Audio loaded. Duration: {duration:.2f}s, SR: {sr}")
-            
-            # 2. Detect BPM (Full track for robustness)
-            logger.info("Detecting BPM (Dynamic Mode - Enhanced for Techno/Schranz)...")
+
             onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-            
-            # Use a time-varying tempo estimate for dynamic grids
-            # We calculate local BPM for every 8-second window
             hop_length = 512
             win_length_sec = 8.0
             win_length_frames = int(win_length_sec * sr / hop_length)
-            
-            # Enhanced BPM Detection: Check multiple candidates
-            # Prioritize 130-160 range for Schranz/Techno
-            candidates = [None, 140, 150, 160] 
-            best_bpm = 0
-            best_beats = []
-            max_score = -1
+
+            candidates = [None, 140, 150, 160]
+            best_bpm, best_beats, max_score = 0, [], -1
 
             for start_bpm in candidates:
+                kw = {"onset_envelope": onset_env, "sr": sr}
                 if start_bpm:
-                    tempo, beats = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr, start_bpm=start_bpm)
-                else:
-                    tempo, beats = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
-                
-                tempo = float(tempo) # Ensure float works for single-element arrays too
-                
-                # Calculate consistency score (regularity of intervals)
+                    kw["start_bpm"] = start_bpm
+                tempo, beats = librosa.beat.beat_track(**kw)
+                tempo = float(tempo)
                 if len(beats) > 2:
                     intervals = np.diff(beats)
-                    score = 1.0 / (np.std(intervals) + 1e-6) # Higher is more stable
-                    
-                    # Penalize < 100 BPM to avoid half-time errors in this genre
-                    if tempo < 100.0: score *= 0.5 
-                    if 130.0 <= tempo <= 160.0: score *= 1.2 # Bonus for target genre
-
+                    score = 1.0 / (np.std(intervals) + 1e-6)
+                    if tempo < 100.0: score *= 0.5
+                    if 130.0 <= tempo <= 160.0: score *= 1.2
                     if score > max_score:
                         max_score = score
                         best_bpm = float(tempo)
                         best_beats = beats
-            
-            bpm_global = float(best_bpm)
-            beats = best_beats
-            logger.info(f"Selected BPM: {bpm_global} (Score: {max_score:.2f})")
-            
-            # --- DYNAMIC GRID LOGIC ---
-            # We track "anchors" where the BPM or phase shifts significantly
-            # For Rekordbox XML, we'll provide TEMPO tags at intervals or shifts
-            tg_vbr = librosa.beat.tempo(onset_envelope=onset_env, sr=sr, aggregate=None)
-            bpm_vbr = gaussian_filter1d(tg_vbr, sigma=win_length_frames/2)
-            
-            # 3. ADVANCED DROP DETECTION
-            # ... (Existing spectral novelty logic) ...
-            limit_sr_start = int(sr * 10)
-            limit_sr_end = min(len(y), int(sr * 90))
-            y_analysis = y[limit_sr_start:limit_sr_end] if limit_sr_end > limit_sr_start else y
-            offset_frames = int(limit_sr_start / hop_length) if limit_sr_end > limit_sr_start else 0
-            
-            # Calculate spectral novelty
-            S = np.abs(librosa.stft(y_analysis))
-            spectral_novelty = librosa.onset.onset_strength(S=librosa.amplitude_to_db(S, ref=np.max), sr=sr)
-            smoothed_novelty = gaussian_filter1d(spectral_novelty, sigma=int(2.5 * sr / hop_length)/4)
-            novelty_diff = np.diff(smoothed_novelty)
-            weights = np.linspace(1.0, 1.2, len(novelty_diff))
-            weighted_diff = novelty_diff * weights
-            
-            drop_frame = np.argmax(weighted_diff) + offset_frames
-            drop_time = librosa.frames_to_time(drop_frame, sr=sr, hop_length=hop_length)
-            
-            # 4. ALIGN DOWNBEAT TO DROP
-            beat_times = librosa.frames_to_time(beats, sr=sr)
-            if len(beat_times) > 0:
-                anchor_idx = np.argmin(np.abs(beat_times - drop_time))
-                anchor_time = beat_times[anchor_idx]
-            else:
-                anchor_time = 0.0
-            
-            # 5. GENERATE DYNAMIC GRID
-            # If BPM variation is low (< 0.5 BPM), use static grid for stability
-            bpm_std = np.std(bpm_vbr)
 
-            # SMART INTEGER SNAPPING (Techno/Schranz Optimization)
-            # If BPM is within typical genre range and close to integer, snap it and force static grid
-            # Widened tolerance to 0.35 to catch ~1.25 drift common in high BPM analysis
+            bpm_global = float(best_bpm) if best_bpm else 128.0
             if 125.0 <= bpm_global <= 165.0 and abs(bpm_global - round(bpm_global)) < 0.35:
-                snapped = float(round(bpm_global))
-                logger.info(f"Smart Snapping: Adjusting BPM {bpm_global:.2f} -> {snapped:.2f} (StdDev: {bpm_std:.4f})")
-                bpm_global = snapped
-                bpm_std = 0.0 # Force static grid alignment
+                bpm_global = float(round(bpm_global))
 
-            logger.info(f"BPM Stability (StdDev): {bpm_std:.4f}")
-            
-            grid_anchors = []
-            if bpm_std < 0.5:
-                # STATIC GRID
-                logger.info("Using static grid (stable tempo).")
-                grid_anchors.append({
-                    "time": 0.0, # Start from 0 with initial offset handled by beat index
-                    "bpm": round(bpm_global, 3),
-                    "beat": 1,
-                    "metro": "4/4"
-                })
-                # Alignment: Adjust first anchor time so that anchor_time lands on a proper beat
-                beat_duration = 60.0 / bpm_global
-                start_offset = anchor_time % beat_duration
-                grid_anchors[0]["time"] = round(start_offset, 4)
-            else:
-                # DYNAMIC GRID
-                logger.info("Using dynamic grid (variable tempo detected).")
-                # Add TEMPO markers every 10 seconds to follow drift
-                for t_sec in range(0, int(duration), 10):
-                    frame_idx = int(t_sec * sr / hop_length)
-                    if frame_idx < len(bpm_vbr):
-                        local_bpm = bpm_vbr[frame_idx]
-                        grid_anchors.append({
-                            "time": float(t_sec),
-                            "bpm": round(local_bpm, 3),
-                            "beat": 1, # Simplified for XML exchange
-                            "metro": "4/4"
-                        })
-            
-            # For internal app representation, we still need a beat-by-beat list for the waveform
-            # (Generated from the anchors)
+            beat_times = librosa.frames_to_time(best_beats, sr=sr) if len(best_beats) > 0 else np.array([])
+            beat_duration = 60.0 / bpm_global if bpm_global > 0 else 0.5
+
             full_beat_list = []
-            curr_anch_idx = 0
-            curr_time = grid_anchors[0]["time"]
+            curr_time = float(beat_times[0]) if len(beat_times) > 0 else 0.0
             while curr_time < duration:
-                # Check for next anchor
-                if curr_anch_idx + 1 < len(grid_anchors):
-                    if curr_time >= grid_anchors[curr_anch_idx + 1]["time"]:
-                        curr_anch_idx += 1
-                
-                anchor = grid_anchors[curr_anch_idx]
-                beat_dur = 60.0 / anchor["bpm"]
-                
                 full_beat_list.append({
                     "time": round(curr_time, 4),
-                    "bpm": anchor["bpm"],
+                    "bpm": bpm_global,
                     "beat": (len(full_beat_list) % 4) + 1,
                     "metro": "4/4"
                 })
-                curr_time += beat_dur
+                curr_time += beat_duration
 
-            # 6. KEY DETECTION (NEW)
-            logger.info("Detecting musical key...")
             key_info = BeatAnalyzer.detect_key(y, sr)
-            logger.info(f"Key detected: {key_info['key']} ({key_info['camelot']})")
-
-            # 7. PHRASE DETECTION (NEW)
-            logger.info("Detecting phrases...")
-            phrases = BeatAnalyzer.detect_phrases(y, sr, bpm_global, duration)
-            logger.info(f"Detected {len(phrases)} phrases.")
-
-            # 8. LOUDNESS ANALYSIS (NEW)
-            logger.info("Analyzing loudness...")
             lufs = BeatAnalyzer.calculate_lufs(y, sr)
-            logger.info(f"Integrated Loudness: {lufs} LUFS")
 
             return {
                 "bpm": round(bpm_global, 2),
                 "key": key_info["key"],
                 "camelot": key_info["camelot"],
-                "phrases": phrases,
+                "phrases": [],
                 "lufs": lufs,
                 "peak": round(float(np.max(np.abs(y))), 4),
                 "beats": full_beat_list,
-                "tempoAnchors": grid_anchors, # For Rekordbox XML <TEMPO> bits
+                "tempoAnchors": [{"time": 0.0, "bpm": round(bpm_global, 3), "beat": 1, "metro": "4/4"}],
                 "totalTime": duration,
-                "dropTime": round(float(drop_time), 4)
+                "dropTime": 0.0
             }
         except Exception as e:
-            logger.error(f"Professional analysis failed for {path}: {str(e)}", exc_info=True)
+            logger.error(f"Legacy analysis failed for {path}: {e}", exc_info=True)
             raise RuntimeError(f"Audio analysis failed: {str(e)}")
 
     @staticmethod
     def detect_key(y, sr):
-        """Detects the musical key and maps it to Camelot notation."""
+        """Key detection -- delegates to engine if available, else basic K-S."""
+        try:
+            from .analysis_engine import detect_key as engine_detect_key, _ensure_libs
+            if _ensure_libs():
+                result = engine_detect_key(y, sr)
+                return {"key": result.get("key", "Unknown"), "camelot": result.get("camelot", "")}
+        except ImportError:
+            pass
+
+        # Fallback: basic chroma correlation
         import librosa
         import numpy as np
 
-        # 1. Compute Chroma Features (CQT-based for better pitch resolution)
-        # Weighting: Intro (first 30s) and Outro (last 30s) get 2x weight to find "root" key
-        duration = librosa.get_duration(y=y, sr=sr)
-        intro_samples = int(min(duration, 30) * sr)
-        outro_samples = int(min(duration, 30) * sr)
-        
-        y_intro = y[:intro_samples]
-        y_outro = y[-outro_samples:] if duration > 30 else y
-        y_main = y[intro_samples:-outro_samples] if duration > 60 else y
-        
-        chroma_intro = librosa.feature.chroma_cqt(y=y_intro, sr=sr)
-        chroma_outro = librosa.feature.chroma_cqt(y=y_outro, sr=sr)
-        chroma_main = librosa.feature.chroma_cqt(y=y_main, sr=sr)
-        
-        # Weighted mean
-        chroma_mean = (np.mean(chroma_intro, axis=1) * 2.0 + 
-                       np.mean(chroma_outro, axis=1) * 2.0 + 
-                       np.mean(chroma_main, axis=1)) / 5.0
+        chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
+        chroma_mean = np.mean(chroma, axis=1)
 
-        # 2. Key Profiles (Krumhansl-Schmuckler)
         major_profile = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
         minor_profile = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
 
-        # 3. Correlate with shifted versions of profiles
-        major_correlations = []
-        minor_correlations = []
+        major_corr, minor_corr = [], []
         for i in range(12):
-            shifted_major = np.roll(major_profile, i)
-            shifted_minor = np.roll(minor_profile, i)
-            major_correlations.append(np.corrcoef(chroma_mean, shifted_major)[0, 1])
-            minor_correlations.append(np.corrcoef(chroma_mean, shifted_minor)[0, 1])
+            major_corr.append(np.corrcoef(chroma_mean, np.roll(major_profile, i))[0, 1])
+            minor_corr.append(np.corrcoef(chroma_mean, np.roll(minor_profile, i))[0, 1])
 
-        # 4. Find Best Match
-        major_best_key = np.argmax(major_correlations)
-        major_best_score = major_correlations[major_best_key]
-        minor_best_key = np.argmax(minor_correlations)
-        minor_best_score = minor_correlations[minor_best_key]
+        maj_idx, maj_score = np.argmax(major_corr), max(major_corr)
+        min_idx, min_score = np.argmax(minor_corr), max(minor_corr)
 
-        if major_best_score > minor_best_score:
-            key_index = major_best_key
-            is_major = True
-        else:
-            key_index = minor_best_key
-            is_major = False
+        keys = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+        cam_maj = ['8B', '3B', '10B', '5B', '12B', '7B', '2B', '9B', '4B', '11B', '6B', '1B']
+        cam_min = ['5A', '12A', '7A', '2A', '9A', '4A', '11A', '6A', '1A', '8A', '3A', '10A']
 
-        # 5. Mapping
-        musical_keys = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-        camelot_major = ['8B', '3B', '10B', '5B', '12B', '7B', '2B', '9B', '4B', '11B', '6B', '1B']
-        camelot_minor = ['5A', '12A', '7A', '2A', '9A', '4A', '11A', '6A', '1A', '8A', '3A', '10A']
-
-        key_name = musical_keys[key_index] + (" Major" if is_major else " Minor")
-        camelot = camelot_major[key_index] if is_major else camelot_minor[key_index]
-
-        return {
-            "key": key_name,
-            "camelot": camelot
-        }
+        if maj_score > min_score:
+            return {"key": keys[maj_idx] + " Major", "camelot": cam_maj[maj_idx]}
+        return {"key": keys[min_idx] + " Minor", "camelot": cam_min[min_idx]}
 
     @staticmethod
     def detect_phrases(y, sr, bpm, duration):
-        """Detects track structure using professional segmentation."""
+        """Phrase detection -- delegates to engine if available."""
+        try:
+            from .analysis_engine import detect_phrases as engine_detect_phrases, _ensure_libs
+            if _ensure_libs():
+                phrases = engine_detect_phrases(y, sr, bpm, duration)
+                return [
+                    {"name": p.get("label", "PHRASE"),
+                     "start": p.get("start_time", 0), "end": p.get("end_time", 0),
+                     "color": "#3b82f6"}
+                    for p in phrases
+                ]
+        except ImportError:
+            pass
+
+        # Fallback: basic MFCC segmentation
         import librosa
         import numpy as np
-        
         try:
-            # 1. Feature extraction for structure
-            # MFCC + Chroma capture both timbre and harmony
             hop_length = 2048
             mfcc = librosa.feature.mfcc(y=y, sr=sr, hop_length=hop_length)
-            
-            # 2. Agglomerative clustering for boundaries
-            # Aim for 8-bar or 16-bar phrases (roughly)
-            # n_segments = int(duration / 30) # Too coarse?
-            # Let's try to find natural break points
             n_segments = min(12, max(4, int(duration / 20)))
-            
-            # Use recurrence matrix for better structural awareness
-            # (Simplified for now to ensure stability)
             boundaries = librosa.segment.agglomerative(mfcc, n_segments)
             boundary_times = librosa.frames_to_time(boundaries, sr=sr, hop_length=hop_length)
             boundary_times = np.sort(np.unique(np.concatenate(([0], boundary_times, [duration]))))
 
             phrases = []
             for i in range(len(boundary_times) - 1):
-                start = boundary_times[i]
-                end = boundary_times[i+1]
-                
-                # Heuristic Labeling
-                rel_pos = start / duration
+                start, end = boundary_times[i], boundary_times[i + 1]
                 if i == 0: label = "INTRO"
                 elif i == len(boundary_times) - 2: label = "OUTRO"
-                else:
-                    # Calculate segment energy to find "The Drop"
-                    seg_start_idx = int(start * sr)
-                    seg_end_idx = int(end * sr)
-                    energy = np.mean(librosa.feature.rms(y=y[seg_start_idx:seg_end_idx])[0]) if seg_end_idx > seg_start_idx else 0
-                    
-                    if energy > 0.15 and 0.2 < rel_pos < 0.8:
-                        label = f"DROP {i}"
-                    else:
-                        label = f"PHRASE {i}"
-
-                phrases.append({
-                    "name": label,
-                    "start": round(float(start), 3),
-                    "end": round(float(end), 3),
-                    "color": "#3b82f6" # Default blue
-                })
-            
+                else: label = f"PHRASE {i}"
+                phrases.append({"name": label, "start": round(float(start), 3),
+                                "end": round(float(end), 3), "color": "#3b82f6"})
             return phrases
         except Exception as e:
             logger.warning(f"Phrase detection failed: {e}")
@@ -874,22 +834,20 @@ class BeatAnalyzer:
 
     @staticmethod
     def calculate_lufs(y, sr):
-        """Calculates Integrated Loudness (LUFS) approximation."""
+        """LUFS calculation -- delegates to engine if available."""
+        try:
+            from .analysis_engine import calculate_lufs as engine_lufs, _ensure_libs
+            if _ensure_libs():
+                return engine_lufs(y, sr)
+        except ImportError:
+            pass
+
+        # Fallback: simple RMS-based approximation
         import numpy as np
         try:
-            # 1. Square the signal
-            squared = y**2
-            
-            # 2. Mean (Integrated)
-            mean_sq = np.mean(squared)
-            
-            # 3. Convert to dB (FS)
-            # -0.691 is the standard compensation for LUFS vs RMS
-            lufs = 10 * np.log10(mean_sq + 1e-12) + 0.691
-            
-            return round(float(lufs), 2)
-        except Exception as e:
-            logger.warning(f"Loudness calculation failed: {e}")
+            mean_sq = np.mean(y ** 2)
+            return round(float(10 * np.log10(mean_sq + 1e-12) + 0.691), 2)
+        except Exception:
             return -100.0
 
 class ImportManager:
