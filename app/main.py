@@ -1398,7 +1398,7 @@ def usb_sync(r: UsbSyncReq):
 
     engine = UsbSyncEngine(str(db.active_db.db_path), profile["drive"])
     results = []
-    libs = r.library_types or ["library_one"]
+    libs = r.library_types or ["library_legacy"]
 
     if r.sync_type == "collection":
         for event in engine.sync_collection(profile, libs):
