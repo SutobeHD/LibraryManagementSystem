@@ -1145,7 +1145,7 @@ async def render(r: ExportRequest):
         validate_audio_path(r.source_path)
         # SECURITY: Sanitize output name
         safe_name = Path(r.output_name).name  # Strip any path components
-        if not safe_name.endswith(('.wav', '.mp3')):
+        if not safe_name.endswith(('.wav', '.mp3', '.flac')):
             safe_name += ".wav"
             
         tid = await asyncio.to_thread(AudioEngine.render_segment, r.source_path, r.cuts, safe_name, r.fade_in, r.fade_out)
@@ -1594,6 +1594,7 @@ def get_analysis_status(task_id: str):
 @app.post("/api/soundcloud/download")
 async def soundcloud_download(data: Dict[str, str], request: Request):
     url = data.get("url")
+    title = data.get("title")
     if not url:
         raise HTTPException(status_code=400, detail="URL is required")
 
@@ -1609,17 +1610,16 @@ async def soundcloud_download(data: Dict[str, str], request: Request):
         )
 
     # Criterion 7: cleanup corrupt fragments on failure
-    def on_complete(task_id, success):
-        if success:
-            logger.info(f"[SC] Download {task_id} complete. Triggering import scan...")
-            if sc_dir.exists():
-                for f in sc_dir.glob("*"):
-                    if f.suffix.lower() in ALLOWED_AUDIO_EXTENSIONS:
-                        try:
-                            ImportManager.process_import(f)
-                        except Exception as e:
-                            logger.error(f"[SC] Post-download import failed for {f}: {e}")
-        else:
+    def on_complete(task_id, success, downloaded_files=None):
+        if success and downloaded_files:
+            logger.info(f"[SC] Download {task_id} complete. Triggering import scan on {len(downloaded_files)} files...")
+            for f in downloaded_files:
+                if f.suffix.lower() in ALLOWED_AUDIO_EXTENSIONS:
+                    try:
+                        ImportManager.process_import(f)
+                    except Exception as e:
+                        logger.error(f"[SC] Post-download import failed for {f}: {e}")
+        elif not success:
             logger.warning(f"[SC] Download {task_id} failed. Cleaning fragments...")
             for pattern in ["*.part", "*.tmp", "*.ytdl", "*.download"]:
                 for frag in sc_dir.glob(pattern):
@@ -1629,7 +1629,7 @@ async def soundcloud_download(data: Dict[str, str], request: Request):
                     except OSError as oe:
                         logger.warning(f"[SC] Could not remove fragment {frag}: {oe}")
 
-    task_id = sc_downloader.download_content(url, auth_token=auth_token, callback=on_complete)
+    task_id = sc_downloader.download_content(url, auth_token=auth_token, callback=on_complete, sc_title=title)
     return {"task_id": task_id}
 
 

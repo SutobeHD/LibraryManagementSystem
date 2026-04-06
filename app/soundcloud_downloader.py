@@ -44,7 +44,7 @@ class SoundCloudDownloader:
                     if "Downloading" in line:
                         self.tasks[task_id]['status'] = "Downloading"
 
-    def download_content(self, url: str, auth_token: Optional[str] = None, callback: Optional[Callable] = None):
+    def download_content(self, url: str, auth_token: Optional[str] = None, callback: Optional[Callable] = None, sc_title: Optional[str] = None):
         """
         Downloads a track or playlist from SoundCloud.
         """
@@ -58,6 +58,7 @@ class SoundCloudDownloader:
             self.tasks[task_id] = {
                 "id": task_id,
                 "url": url,
+                "sc_title": sc_title,
                 "status": "Starting",
                 "progress": 0,
                 "startTime": time.time(),
@@ -105,11 +106,13 @@ class SoundCloudDownloader:
                             process.terminate()
                     
                     if process.returncode == 0:
+                        downloaded_files = []
                         # Move successfully completed files to the final destination
                         for f in Path(safe_temp_dir).glob("*"):
                             if f.is_file():
                                 target = download_dir / f.name
                                 shutil.copy(f, target)
+                                downloaded_files.append(target)
                                 
                         with self._lock:
                             if task_id in self.tasks:
@@ -117,7 +120,7 @@ class SoundCloudDownloader:
                                 self.tasks[task_id]['progress'] = 100
                         logger.info(f"SoundCloud download completed: {url}")
                         if callback:
-                            callback(task_id, True)
+                            callback(task_id, True, downloaded_files)
                     else:
                         error_msg = f"scdl failed with return code {process.returncode}"
                         with self._lock:
@@ -126,7 +129,7 @@ class SoundCloudDownloader:
                                 self.tasks[task_id]['error'] = error_msg
                         logger.error(error_msg)
                         if callback:
-                            callback(task_id, False)
+                            callback(task_id, False, [])
 
             except Exception as e:
                 with self._lock:
@@ -135,7 +138,7 @@ class SoundCloudDownloader:
                         self.tasks[task_id]['error'] = str(e)
                 logger.error(f"Download thread error: {e}")
                 if callback:
-                    callback(task_id, False)
+                    callback(task_id, False, [])
 
         thread = threading.Thread(target=_run, daemon=True)
         thread.start()

@@ -163,7 +163,7 @@ const DawControlStrip = React.memo(({
     }, [dispatch]);
 
     const handleWaveformCycle = useCallback(() => {
-        const styles = ['detail', 'liquid', 'bass'];
+        const styles = ['3band', 'mono', 'bass'];
         const nextIdx = (styles.indexOf(waveformStyle) + 1) % styles.length;
         dispatch({ type: 'SET_WAVEFORM_STYLE', payload: styles[nextIdx] });
     }, [waveformStyle, dispatch]);
@@ -295,10 +295,10 @@ const DawControlStrip = React.memo(({
                 <div className="w-px h-4 bg-white/10 mx-0.5" />
                 <TBtn
                     onClick={handleWaveformCycle}
-                    title={`Waveform Style: ${waveformStyle === 'liquid' ? 'Smooth' : waveformStyle === 'bass' ? 'Bass Only' : 'Bars'}`}
-                    active={waveformStyle !== 'detail'}
+                    title={`Waveform: ${waveformStyle === '3band' ? '3-Band (Rekordbox)' : waveformStyle === 'bass' ? 'Bass Only' : 'Mono'}`}
+                    active={waveformStyle !== '3band'}
                 >
-                    {waveformStyle === 'liquid' ? <Activity size={13} /> : waveformStyle === 'bass' ? <Waves size={13} /> : <BarChart3 size={13} />}
+                    {waveformStyle === '3band' ? <BarChart3 size={13} /> : waveformStyle === 'bass' ? <Waves size={13} /> : <Activity size={13} />}
                 </TBtn>
             </div>
 

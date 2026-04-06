@@ -80,7 +80,7 @@ export function createInitialState(overrides = {}) {
         snapEnabled: true,
         snapDivision: '1/4',  // '1/4' | '1/8' | '1/16' | '1/32'
         slipMode: false,      // When true, snap is temporarily disabled
-        waveformStyle: 'detail', // 'detail' | 'liquid'
+        waveformStyle: '3band', // '3band' (Rekordbox CDJ) | 'mono' | 'bass'
 
         // History (undo/redo)
         undoStack: [],     // Array of { regions, hotCues, memoryCues, loops, label }

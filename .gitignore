@@ -53,7 +53,19 @@ src-tauri/cargo_check_output.txt
 *.pkg
 *.dmg
 
-# --- Archive ---
+# --- Binary / DAT artifacts ---
+*.DAT
+*.dat
+anlz_test_modified.*
+
+# --- Temp / scratch directories ---
+tmp/
+temp/
+
+# --- Claude worktrees (git-managed, not submodules) ---
+.claude/worktrees/
+
+# --- Archive & local-only scripts ---
 # User requested to keep this local-only.
 archive/
 tests/
@@ -74,3 +86,10 @@ snippet_*.py
 *_snippet.py
 usb_profiles.json
 *.json.bak
+
+# --- Loose debug/research dumps (local only) ---
+calibrate_*.py
+mass_verify*.py
+final_*.py
+rb_comparison.py
+benchmark_results.txt

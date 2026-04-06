@@ -29,6 +29,7 @@ import RbepSerializer from '../../audio/RbepSerializer';
 const DawScrollbar = lazy(() => import('./DawScrollbar'));
 import { parseRbep, serializeRbep, buildTempoMap, loadRbepFile, saveRbepFile } from '../../audio/RbepSerializer';
 import AudioBandAnalyzer from '../../utils/AudioBandAnalyzer';
+import api from '../../api/api';
 
 // UI imports
 import DawToolbar from './DawToolbar';
@@ -138,10 +139,10 @@ const DjEditDaw = ({ track: initialTrack }) => {
                 };
                 dispatch({ type: 'SET_REGIONS', payload: [initialRegion] });
 
-                // Generate band peaks for waveform visualization
+                // Generate waveform peaks for visualization
                 toast.loading('Analyzing waveform...', { id: 'daw-load' });
 
-                // Always generate simple mono fallback peaks first (fast, guaranteed to work)
+                // 1. Always generate mono fallback peaks first (instant, guaranteed)
                 const samplesPerPixel = Math.ceil(audioBuffer.length / 4000);
                 try {
                     const fallback = AudioBandAnalyzer.generatePeaks(audioBuffer, samplesPerPixel);
@@ -150,12 +151,31 @@ const DjEditDaw = ({ track: initialTrack }) => {
                     console.warn('[DjEditDaw] Fallback peaks failed:', err);
                 }
 
-                // Then try RGB band splitting (may fail on some audio)
+                // 2. Try backend 3-band waveform (Butterworth, Rekordbox-quality)
+                let usedBackendWaveform = false;
                 try {
-                    const bandPeaks = await AudioBandAnalyzer.generateBandPeaks(audioBuffer, samplesPerPixel);
-                    dispatch({ type: 'SET_BAND_PEAKS', payload: bandPeaks });
+                    const pps = Math.max(30, Math.ceil(4000 / audioBuffer.duration));
+                    const resp = await api.get('/api/audio/waveform', {
+                        params: { path: filepath, pps },
+                        timeout: 15000,
+                    });
+                    if (resp.data?.low?.length > 0) {
+                        const bandPeaks = convertBackendWaveform(resp.data);
+                        dispatch({ type: 'SET_BAND_PEAKS', payload: bandPeaks });
+                        usedBackendWaveform = true;
+                    }
                 } catch (err) {
-                    console.warn('[DjEditDaw] Band peaks failed, using fallback:', err);
+                    console.warn('[DjEditDaw] Backend waveform unavailable, falling back to client-side:', err.message);
+                }
+
+                // 3. Fallback: client-side band splitting (BiquadFilter, less accurate)
+                if (!usedBackendWaveform) {
+                    try {
+                        const bandPeaks = await AudioBandAnalyzer.generateBandPeaks(audioBuffer, samplesPerPixel);
+                        dispatch({ type: 'SET_BAND_PEAKS', payload: bandPeaks });
+                    } catch (err) {
+                        console.warn('[DjEditDaw] Band peaks failed, using mono fallback:', err);
+                    }
                 }
 
                 toast.success('Track loaded', { id: 'daw-load' });
@@ -391,42 +411,13 @@ const DjEditDaw = ({ track: initialTrack }) => {
         setActiveTrack(track);
     }, []);
 
-    const handleExport = useCallback(async () => {
-        try {
-            if (!state.sourceBuffer || state.regions.length === 0) {
-                toast.error('Nothing to export');
-                return;
-            }
-
-            toast.loading('Rendering audio...', { id: 'daw-export' });
-
-            const rendered = await DawEngine.renderTimeline(
-                state.regions,
-                state.sourceBuffer,
-                state.sourceBuffer.sampleRate,
-                (progress) => {
-                    if (progress >= 1) toast.loading('Encoding WAV...', { id: 'daw-export' });
-                }
-            );
-
-            const wavBlob = DawEngine.audioBufferToWav(rendered);
-
-            // Trigger download
-            const url = URL.createObjectURL(wavBlob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${state.project.name || 'Export'}.wav`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-
-            toast.success('Exported!', { id: 'daw-export' });
-        } catch (err) {
-            console.error('[DjEditDaw] Export failed:', err);
-            toast.error(`Export failed: ${err.message}`, { id: 'daw-export' });
+    const handleExport = useCallback(() => {
+        if (!state.sourceBuffer || state.regions.length === 0) {
+            toast.error('Nothing to export');
+            return;
         }
-    }, [state.sourceBuffer, state.regions, state.project.name]);
+        setShowExport(true);
+    }, [state.sourceBuffer, state.regions]);
 
 
     // ── EDITING ACTIONS ──
@@ -768,6 +759,22 @@ const DjEditDaw = ({ track: initialTrack }) => {
 };
 
 // ─── HELPERS ───────────────────────────────────────────────────────────────────
+
+/**
+ * Convert backend waveform data ({low, mid, high} float arrays 0-1)
+ * into the {min, max} peak format that DawTimeline expects.
+ * Backend Butterworth 4th-order filters produce higher quality than client-side BiquadFilter.
+ */
+function convertBackendWaveform(data) {
+    const toPeaks = (arr) =>
+        arr.map(v => ({ min: -Math.abs(v), max: Math.abs(v) }));
+
+    return {
+        low:  toPeaks(data.low),
+        mid:  toPeaks(data.mid),
+        high: toPeaks(data.high),
+    };
+}
 
 function buildProjectFromState(state) {
     const cuePoints = stateToCuePoints(state.hotCues, state.memoryCues, state.loops);

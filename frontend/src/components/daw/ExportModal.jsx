@@ -6,15 +6,14 @@
  * - Output path selection via Tauri file dialog
  * - Format selector (WAV / MP3 320kbps / FLAC)
  * - Normalization toggle
- * - Progress bar wired to Tauri event 'export-progress'
- * - Success/error states
- * - Graceful fallback to browser-side WAV download when Tauri unavailable
+ * - Browser-side WAV export + backend rendering for MP3/FLAC
+ * - Progress bar with success/error states
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { X, FolderOpen, Music, CheckCircle2, AlertCircle, Download, Loader2 } from 'lucide-react';
 import * as DawEngine from '../../audio/DawEngine';
-import AudioBandAnalyzer from '../../utils/AudioBandAnalyzer';
+import api from '../../api/api';
 
 // ─── TAURI DYNAMIC IMPORTS (graceful fallback if not in Tauri context) ──────────
 
@@ -24,15 +23,6 @@ async function tauriInvoke(cmd, args) {
         return await invoke(cmd, args);
     } catch {
         return null; // fallback to web mode
-    }
-}
-
-async function tauriListen(event, cb) {
-    try {
-        const { listen } = await import('@tauri-apps/api/event');
-        return await listen(event, cb);
-    } catch {
-        return () => {}; // noop unlisten
     }
 }
 
@@ -53,42 +43,20 @@ const ExportModal = React.memo(({ state, onClose }) => {
     const [phase,       setPhase]       = useState('idle'); // idle | exporting | done | error
     const [progress,    setProgress]    = useState(0);
     const [errorMsg,    setErrorMsg]    = useState('');
-    const unlistenRef   = useRef(null);
 
-    // Subscribe to Tauri export events
-    useEffect(() => {
-        let aliveProgress = true;
-        let aliveComplete = true;
-        let aliveError    = true;
-
-        (async () => {
-            unlistenRef.current = [
-                await tauriListen('export-progress', (ev) => {
-                    if (aliveProgress) setProgress(Math.round((ev.payload ?? 0) * 100));
-                }),
-                await tauriListen('export-complete', () => {
-                    if (aliveComplete) { setPhase('done'); setProgress(100); }
-                }),
-                await tauriListen('export-error', (ev) => {
-                    if (aliveError) { setPhase('error'); setErrorMsg(ev.payload ?? 'Unknown error'); }
-                }),
-            ];
-        })();
-
-        return () => {
-            aliveProgress = false; aliveComplete = false; aliveError = false;
-            unlistenRef.current?.forEach(u => u && u());
-        };
-    }, []);
+    // Resolve track metadata from correct state paths
+    const trackTitle  = state.trackMeta?.title  || state.project?.name || 'Untitled';
+    const trackArtist = state.trackMeta?.artist || 'Unknown';
+    const trackKey    = state.trackMeta?.key    || '';
 
     // ── Browse for output folder ──
     const handleBrowse = useCallback(async () => {
         const dir = await tauriInvoke('open_file_dialog', { directory: true, title: 'Select export folder' });
         if (dir) {
-            const safeName = (state.trackTitle || 'export').replace(/[<>:"/\\|?*]/g, '_');
+            const safeName = (trackTitle || 'export').replace(/[<>:"/\\|?*]/g, '_');
             setOutputPath(`${dir}/${safeName}.${format}`);
         }
-    }, [state.trackTitle, format]);
+    }, [trackTitle, format]);
 
     // Update extension in path when format changes
     useEffect(() => {
@@ -102,57 +70,79 @@ const ExportModal = React.memo(({ state, onClose }) => {
         setProgress(0);
         setErrorMsg('');
 
-        const trackMeta = {
-            title:    state.trackTitle   || 'Untitled',
-            artist:   state.trackArtist  || 'Unknown',
-            bpm:      state.bpm,
-            key:      state.trackKey     || '',
-        };
-
-        // Try Tauri first
-        const tauriResult = await tauriInvoke('export_project', {
-            path:      outputPath || undefined,
-            format,
-            normalize,
-            regions:   state.regions,
-            trackMeta,
-        });
-
-        if (tauriResult !== null) {
-            // Tauri command returned — wait for event to set done
-            return;
-        }
-
-        // ── Fallback: browser-side WAV download ──
         try {
             if (!state.sourceBuffer || !state.regions?.length) {
                 throw new Error('No audio data to export');
             }
 
-            setProgress(10);
-            const rendered = await DawEngine.renderTimeline(
-                state.regions,
-                state.sourceBuffer,
-                state.sourceBuffer.sampleRate,
-                (p) => setProgress(Math.round(10 + p * 88))
-            );
+            const safeName = (trackTitle).replace(/[<>:"/\\|?*]/g, '_');
 
-            setProgress(98);
-            const wav  = DawEngine.audioBufferToWav(rendered);
-            const url  = URL.createObjectURL(wav);
-            const link = document.createElement('a');
-            link.href     = url;
-            link.download = `${trackMeta.title}.wav`;
-            link.click();
-            setTimeout(() => URL.revokeObjectURL(url), 5000);
+            // ── WAV: browser-side rendering (fast, no backend needed) ──
+            if (format === 'wav') {
+                setProgress(10);
+                const rendered = await DawEngine.renderTimeline(
+                    state.regions,
+                    state.sourceBuffer,
+                    state.sourceBuffer.sampleRate,
+                    (p) => setProgress(Math.round(10 + p * 85))
+                );
+
+                setProgress(96);
+                const wav = DawEngine.audioBufferToWav(rendered);
+                triggerDownload(wav, `${safeName}.wav`);
+                setProgress(100);
+                setPhase('done');
+                return;
+            }
+
+            // ── MP3 / FLAC: backend rendering via /api/audio/render ──
+            const sourcePath = state.trackMeta?.filepath;
+            if (!sourcePath) {
+                throw new Error('Source file path not available — cannot render MP3/FLAC');
+            }
+
+            setProgress(10);
+
+            // Build cuts array from regions
+            const cuts = state.regions.map(r => ({
+                start: r.sourceStart,
+                end: r.sourceEnd ?? (r.sourceStart + r.duration),
+            }));
+
+            const outputName = `${safeName}.${format}`;
+            const payload = {
+                source_path: sourcePath,
+                filename: sourcePath,
+                cuts,
+                output_name: outputName,
+                fade_in: false,
+                fade_out: false,
+            };
+
+            setProgress(30);
+            const resp = await api.post('/api/audio/render', payload, { timeout: 120000 });
+            setProgress(80);
+
+            if (resp.data?.download_url || resp.data?.filename) {
+                // Download rendered file from backend
+                const downloadUrl = resp.data.download_url || `/exports/${resp.data.filename}`;
+                const dlResp = await fetch(downloadUrl);
+                if (!dlResp.ok) throw new Error(`Download failed: ${dlResp.status}`);
+                const blob = await dlResp.blob();
+                triggerDownload(blob, outputName);
+            } else {
+                throw new Error(resp.data?.error || 'Backend render returned no output');
+            }
 
             setProgress(100);
             setPhase('done');
+
         } catch (err) {
+            console.error('[ExportModal] Export failed:', err);
             setPhase('error');
             setErrorMsg(err.message || String(err));
         }
-    }, [outputPath, format, normalize, state]);
+    }, [outputPath, format, normalize, state, trackTitle]);
 
     // ── Formatted duration ──
     const durStr = (() => {
@@ -161,6 +151,18 @@ const ExportModal = React.memo(({ state, onClose }) => {
         const s = Math.floor(d % 60);
         return `${m}:${s.toString().padStart(2, '0')}`;
     })();
+
+    // ── Download helper ──
+    function triggerDownload(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+    }
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.72)' }}>
@@ -187,8 +189,8 @@ const ExportModal = React.memo(({ state, onClose }) => {
                         <Music size={14} className="text-indigo-400" />
                     </div>
                     <div className="min-w-0 flex-1">
-                        <div className="text-xs font-semibold text-white truncate">{state.trackTitle || 'Untitled'}</div>
-                        <div className="text-[10px] text-slate-500 truncate">{state.trackArtist || 'Unknown Artist'}</div>
+                        <div className="text-xs font-semibold text-white truncate">{trackTitle}</div>
+                        <div className="text-[10px] text-slate-500 truncate">{trackArtist}</div>
                     </div>
                     <div className="text-right flex-shrink-0">
                         <div className="text-[10px] font-mono text-slate-400">{durStr}</div>
