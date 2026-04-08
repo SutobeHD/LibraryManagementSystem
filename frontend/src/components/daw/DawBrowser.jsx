@@ -32,14 +32,16 @@ const DawBrowser = React.memo(({ onLoadTrack, onOpenProject, isCollapsed, onTogg
         fetchTracks();
     }, []);
 
-    // Load recent projects
+    // Load saved .rbep projects from backend
     useEffect(() => {
         const fetchProjects = async () => {
             try {
-                const res = await api.get('/api/projects/recent');
-                setProjects(res.data?.projects || []);
-            } catch {
-                // Projects endpoint may not exist yet
+                // /api/projects/rbep/list returns array of { name, filepath, modified }
+                const res = await api.get('/api/projects/rbep/list');
+                const raw = Array.isArray(res.data) ? res.data : (res.data?.projects || []);
+                setProjects(raw);
+            } catch (err) {
+                console.warn('[DawBrowser] Failed to load projects:', err);
                 setProjects([]);
             }
         };

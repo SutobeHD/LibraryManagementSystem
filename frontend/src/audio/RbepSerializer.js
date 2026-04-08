@@ -473,16 +473,23 @@ export async function loadRbepFile(filepath) {
 export async function saveRbepFile(project, filepath) {
     const xmlString = serializeRbep(project);
 
-    try {
-        const { invoke } = await import('@tauri-apps/api/core');
-        await invoke('plugin:fs|write_text_file', { path: filepath, contents: xmlString });
-    } catch {
-        // Fallback: POST to backend
-        await fetch('http://localhost:8000/api/file/write', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: filepath, content: xmlString }),
-        });
+    // Try Tauri native file write first (desktop context)
+    if (window.__TAURI__) {
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            await invoke('plugin:fs|write_text_file', { path: filepath, contents: xmlString });
+            return;
+        } catch (e) {
+            console.warn('[RbepSerializer] Tauri fs write failed, falling back to backend:', e);
+        }
+    }
+
+    // Fallback: POST to backend via api instance (includes session token + proper headers)
+    // Lazy-import api to avoid circular deps at module level
+    const { default: api } = await import('../api/api.js');
+    const res = await api.post('/api/file/write', { path: filepath, content: xmlString });
+    if (res.data?.status !== 'success') {
+        throw new Error(res.data?.message || 'Backend file write returned no success status');
     }
 }
 

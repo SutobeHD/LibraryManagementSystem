@@ -163,20 +163,22 @@ const WaveformOverview = React.memo(({ state, dispatch }) => {
         e.preventDefault();
         isDragging.current = true;
 
-        // Calculate which "part" of the viewport window was clicked
         const clickTime = timeFromX(e.clientX);
-        const viewCenterSec = (scrollX + (canvasRef.current?.getBoundingClientRect().width / 2) / zoom * zoom) / zoom;
-        dragStartOffsetX.current = clickTime; // store click time
+        dragStartOffsetX.current = clickTime;
 
+        // Scroll viewport AND move playhead so the middle timeline stays in sync
+        dispatch({ type: 'SET_PLAYHEAD', payload: clickTime });
         scrollToTime(clickTime);
-    }, [timeFromX, scrollToTime, scrollX, zoom]);
+    }, [timeFromX, scrollToTime, dispatch]);
 
     const handleMouseMove = useCallback((e) => {
         if (!isDragging.current) return;
         e.preventDefault();
         const clickTime = timeFromX(e.clientX);
+        // Keep playhead and scroll in sync while dragging
+        dispatch({ type: 'SET_PLAYHEAD', payload: clickTime });
         scrollToTime(clickTime);
-    }, [timeFromX, scrollToTime]);
+    }, [timeFromX, scrollToTime, dispatch]);
 
     const handleMouseUp = useCallback(() => {
         isDragging.current = false;

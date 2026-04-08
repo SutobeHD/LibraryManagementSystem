@@ -78,6 +78,8 @@ const ExportModal = React.memo(({ state, onClose }) => {
             const safeName = (trackTitle).replace(/[<>:"/\\|?*]/g, '_');
 
             // ── WAV: browser-side rendering (fast, no backend needed) ──
+            // File is saved to the browser's Downloads folder (standard browser behaviour).
+            // In Tauri desktop mode the Tauri file-dialog is used to choose the exact path.
             if (format === 'wav') {
                 setProgress(10);
                 const rendered = await DawEngine.renderTimeline(
@@ -92,6 +94,8 @@ const ExportModal = React.memo(({ state, onClose }) => {
                 triggerDownload(wav, `${safeName}.wav`);
                 setProgress(100);
                 setPhase('done');
+                // Note: WAV goes to browser Downloads folder — not to the selected outputPath.
+                // outputPath is used for filename only when no Tauri context is available.
                 return;
             }
 
