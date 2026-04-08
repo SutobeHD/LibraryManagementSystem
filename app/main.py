@@ -381,11 +381,9 @@ class ProjectReq(BaseModel):
 class DBModeReq(BaseModel):
     mode: str # "xml" or "live"
 
-@app.on_event("startup")
-async def startup_check():
-    # Auto-load library on startup
-    logger.info(f"Auto-loading library in {db.mode} mode...")
-    db.load_library()
+# NOTE: Library auto-load is handled by startup_event() near the bottom of this file.
+# A second @app.on_event("startup") here was causing the DB to load twice (~90s startup).
+# Removed — do not add another startup handler here.
 
 # --- ENDPOINTS ---
 
@@ -681,7 +679,12 @@ def move_t(r: MoveReq):
 def ren_t(r: RenameReq): return {"success": [], "errors": ["Not supported in XML-only mode yet"]}
 
 @app.get("/api/playlists/tree")
-def get_tree(): 
+def get_tree():
+    if not db.active_db:
+        # Backend is still loading (ANLZ scan in progress) — return empty tree,
+        # frontend will retry on next interaction rather than showing a crash.
+        logger.warning("get_tree: DB not yet loaded, returning empty tree")
+        return []
     tree = db.get_playlist_tree()
     logger.info(f"Fetched playlist tree. Root nodes: {len(tree)}")
     return tree
@@ -1366,7 +1369,7 @@ def usb_get_diff(device_id: str):
         profile = UsbProfileManager.save_profile({"device_id": device_id, "label": dev.get("label", "USB"), "drive": dev["drive"]})
     if not db.active_db or not hasattr(db.active_db, 'db_path'):
         raise HTTPException(400, "No local database loaded")
-    engine = UsbSyncEngine(str(db.active_db.db_path), profile["drive"])
+    engine = UsbSyncEngine(str(db.active_db.db_path), profile["drive"], profile.get("filesystem", ""))
     diff = engine.calculate_diff()
     # Add space estimate: ~10MB avg per track to add
     avg_track_size = 10 * 1024 * 1024
@@ -1396,7 +1399,7 @@ def usb_sync(r: UsbSyncReq):
     if not db.active_db or not hasattr(db.active_db, 'db_path'):
         raise HTTPException(400, "No local database loaded")
 
-    engine = UsbSyncEngine(str(db.active_db.db_path), profile["drive"])
+    engine = UsbSyncEngine(str(db.active_db.db_path), profile["drive"], profile.get("filesystem", ""))
     results = []
     libs = r.library_types or ["library_legacy"]
 

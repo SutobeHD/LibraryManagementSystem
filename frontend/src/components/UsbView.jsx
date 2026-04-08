@@ -275,7 +275,7 @@ const UsbView = () => {
     useEffect(() => {
         if (selectedDeviceId) {
             loadUsbContents(selectedDeviceId);
-            setActiveLibrary('library_one'); // Reset view on switch
+            setActiveLibrary('library_legacy'); // Default to legacy (library_one is SQLCipher-encrypted)
         }
     }, [selectedDeviceId, loadUsbContents]);
 
@@ -865,9 +865,9 @@ const UsbView = () => {
                                                     </div>
                                                     <input
                                                         type="checkbox"
-                                                        checked={(sel.library_types || ["library_one"]).includes("library_one")}
+                                                        checked={(sel.library_types || ["library_legacy"]).includes("library_one")}
                                                         onChange={(e) => {
-                                                            const current = sel.library_types || ["library_one"];
+                                                            const current = sel.library_types || ["library_legacy"];
                                                             const next = e.target.checked
                                                                 ? [...new Set([...current, "library_one"])]
                                                                 : current.filter(t => t !== "library_one");
@@ -883,9 +883,9 @@ const UsbView = () => {
                                                     </div>
                                                     <input
                                                         type="checkbox"
-                                                        checked={(sel.library_types || ["library_one"]).includes("library_legacy")}
+                                                        checked={(sel.library_types || ["library_legacy"]).includes("library_legacy")}
                                                         onChange={(e) => {
-                                                            const current = sel.library_types || ["library_one"];
+                                                            const current = sel.library_types || ["library_legacy"];
                                                             const next = e.target.checked
                                                                 ? [...new Set([...current, "library_legacy"])]
                                                                 : current.filter(t => t !== "library_legacy");
