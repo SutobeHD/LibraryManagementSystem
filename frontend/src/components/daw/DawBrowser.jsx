@@ -17,19 +17,31 @@ const DawBrowser = React.memo(({ onLoadTrack, onOpenProject, isCollapsed, onTogg
     const [activeSection, setActiveSection] = useState('library'); // 'library' | 'projects' | 'palette'
     const [isLoading, setIsLoading] = useState(false);
 
-    // Load library tracks
+    // Load library tracks — retries once after 3s if backend not ready on mount
     useEffect(() => {
-        const fetchTracks = async () => {
-            setIsLoading(true);
+        let retryTimer = null;
+        const fetchTracks = async (isRetry = false) => {
+            if (!isRetry) setIsLoading(true);
             try {
-                const res = await api.get('/api/library/tracks', { params: { limit: 100 } });
-                setTracks(res.data?.tracks || []);
+                const res = await api.get('/api/library/tracks', { params: { limit: 200 } });
+                // Endpoint may return plain array or { tracks: [...] } — handle both
+                const tracks = Array.isArray(res.data) ? res.data : (res.data?.tracks || []);
+                setTracks(tracks);
+                if (tracks.length === 0 && !isRetry) {
+                    // Library might still be loading — retry in 3s
+                    retryTimer = setTimeout(() => fetchTracks(true), 3000);
+                }
             } catch (err) {
                 console.warn('[DawBrowser] Failed to load tracks:', err);
+                if (!isRetry) {
+                    // Backend may not be ready yet — retry once after 3s
+                    retryTimer = setTimeout(() => fetchTracks(true), 3000);
+                }
             }
-            setIsLoading(false);
+            if (!isRetry) setIsLoading(false);
         };
         fetchTracks();
+        return () => { if (retryTimer) clearTimeout(retryTimer); };
     }, []);
 
     // Load saved .rbep projects from backend
