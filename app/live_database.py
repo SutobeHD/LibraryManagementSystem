@@ -409,13 +409,26 @@ class LiveRekordboxDB:
             parent_id = str(pl.parent_id) if pl.parent_id else "ROOT"
             if parent_id.lower() == "root": parent_id = "ROOT"
             
+            # pyrekordbox may expose smart playlist XML as 'SmartList', 'smart_list', or
+            # via a raw attribute — try all known names so intelligent playlists aren't empty.
+            smart_list_xml = None
+            if pl_type == "4":
+                for attr_name in ('SmartList', 'smart_list', 'smartList', 'criteria'):
+                    val = getattr(pl, attr_name, None)
+                    if val:
+                        smart_list_xml = val
+                        break
+                if smart_list_xml is None:
+                    logger.debug(f"Intelligent playlist '{pl.name}' has no smart_list XML. "
+                                 f"Available attrs: {[a for a in dir(pl) if not a.startswith('_')]}")
+
             node_data = {
                 "ID": my_id,
                 "Name": pl.name,
                 "ParentID": parent_id,
                 "Type": pl_type,
                 "Seq": pl.seq,
-                "smart_list": getattr(pl, 'smart_list', None) if pl_type == "4" else None
+                "smart_list": smart_list_xml
             }
             self.playlists.append(node_data)
         
