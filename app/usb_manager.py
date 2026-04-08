@@ -425,7 +425,7 @@ class UsbSyncEngine:
     between the local Rekordbox master.db (via pyrekordbox) and USB exportLibrary.db.
     """
 
-    def __init__(self, local_db_path: str, usb_drive: str):
+    def __init__(self, local_db_path: str, usb_drive: str, filesystem: str = ""):
         self.local_path = Path(local_db_path)
         self.usb_drive = usb_drive
         self.usb_root = Path(usb_drive)  # drive root, e.g. Path("E:\\")
@@ -433,6 +433,25 @@ class UsbSyncEngine:
         self.usb_rb = self.usb_pioneer / "rekordbox"
         self.usb_db_path = self.usb_rb / "exportLibrary.db"
         self.usb_anlz = self.usb_pioneer / "USBANLZ"
+
+        # Filesystem-aware path limit:
+        # FAT32  → 260 chars total (Windows MAX_PATH), 240 conservative limit
+        # exFAT  → 255 chars per filename component, no strict total limit
+        # NTFS   → 255 chars per component, 32767 total (practically 260 without \\?\ prefix)
+        # For Pioneer CDJ hardware compatibility: FAT32/exFAT recommended.
+        # NTFS USB drives work for PC-to-PC sync but not all CDJ models.
+        fs_upper = (filesystem or "").upper()
+        if "NTFS" in fs_upper:
+            self.path_limit = 255   # per-component limit; no strict total needed
+            self.filesystem = "NTFS"
+        elif "EXFAT" in fs_upper or "EX_FAT" in fs_upper:
+            self.path_limit = 255
+            self.filesystem = "exFAT"
+        else:
+            # FAT32 or unknown → conservative Windows MAX_PATH limit
+            self.path_limit = 240
+            self.filesystem = "FAT32"
+        logger.info(f"UsbSyncEngine: drive={usb_drive} filesystem={self.filesystem} path_limit={self.path_limit}")
 
     def _ensure_usb_structure(self):
         """Create PIONEER directory structure on USB if missing, and ensure DB integrity."""
@@ -680,24 +699,36 @@ class UsbSyncEngine:
         return cleaned
 
     def _get_safe_dest_path(self, artist: str, album: str, filename: str) -> Path:
-        """Req 13: Address FAT32 path/file limits (max 255 chars)."""
-        # Pioneer CDJs expect audio in PIONEER/Contents/ (not drive root/Contents/)
+        """
+        Build a safe destination path for a track on the USB drive.
+
+        Path limits per filesystem (self.filesystem / self.path_limit):
+          FAT32  → 240 chars total (conservative Windows MAX_PATH)
+          exFAT  → 255 chars per component (no strict total limit)
+          NTFS   → 255 chars per component (no strict total limit on modern Windows)
+
+        Pioneer CDJs expect audio files under PIONEER/Contents/<Artist>/<Album>/<file>.
+        """
         contents_dir = self.usb_pioneer / "Contents"
         artist_clean = self._clean_filename(artist)[:40].strip() or "UnknownArtist"
         album_clean = self._clean_filename(album)[:40].strip() or "UnknownAlbum"
         file_clean = self._clean_filename(filename)
 
         dest = contents_dir / artist_clean / album_clean / file_clean
-        
-        # FAT32 path limit is ~250 for safety
-        if len(str(dest)) > 240:
-            excess = len(str(dest)) - 240
+
+        # Only truncate total path length for FAT32 where MAX_PATH is a hard limit.
+        # On NTFS/exFAT the per-component limit (255) is already enforced by _clean_filename.
+        if self.filesystem == "FAT32" and len(str(dest)) > self.path_limit:
+            excess = len(str(dest)) - self.path_limit
             stem = dest.stem
             ext = dest.suffix
             if len(stem) > excess:
                 dest = contents_dir / artist_clean / album_clean / (stem[:-excess] + ext)
             else:
+                # Path too deep — flatten to contents root with hash-based name
                 dest = contents_dir / f"track_{hashlib.md5(filename.encode()).hexdigest()[:8]}{ext}"
+            logger.debug(f"FAT32 path truncated to {len(str(dest))} chars: {dest.name}")
+
         return dest
 
     def _copy_file_stream(self, src: Path, dest: Path) -> Generator[Dict, None, None]:
