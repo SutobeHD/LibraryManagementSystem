@@ -40,11 +40,14 @@ const SoundCloudView = () => {
                 });
         }, 3000);
 
-        // Listen to native auth events
-        const unlisten = listen('sc-login-progress', (event) => {
-            const data = event.payload;
-            setLoginMessage(data.message);
-        });
+        // Listen to native auth events (only available in Tauri desktop context)
+        let unlisten = null;
+        if (window.__TAURI__) {
+            unlisten = listen('sc-login-progress', (event) => {
+                const data = event.payload;
+                setLoginMessage(data.message);
+            });
+        }
 
         // EC7: React to the global 'sc:auth-expired' event from the Axios interceptor
         const onAuthExpired = () => {
@@ -55,7 +58,7 @@ const SoundCloudView = () => {
 
         return () => {
             clearInterval(interval);
-            unlisten.then(f => f());
+            if (unlisten) unlisten.then(f => f());
             window.removeEventListener('sc:auth-expired', onAuthExpired);
         };
     }, []);

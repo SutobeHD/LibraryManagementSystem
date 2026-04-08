@@ -278,12 +278,15 @@ const SoundCloudSyncView = () => {
         // Load SC settings (folder picker)
         api.get('/api/soundcloud/settings').then(r => setScSettings(r.data)).catch(() => {});
 
-        // Listen to native auth events from Tauri
-        const unlisten = listen('sc-login-progress', (event) => {
-            setLoginMessage(event.payload?.message || '');
-        });
+        // Listen to native auth events from Tauri (only in desktop context)
+        let unlistenPromise = null;
+        if (window.__TAURI__) {
+            unlistenPromise = listen('sc-login-progress', (event) => {
+                setLoginMessage(event.payload?.message || '');
+            });
+        }
 
-        return () => { unlisten.then(f => f()); };
+        return () => { if (unlistenPromise) unlistenPromise.then(f => f()); };
     }, [fetchPlaylists]);
 
     const handleLogin = async () => {

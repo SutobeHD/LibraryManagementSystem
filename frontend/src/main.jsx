@@ -294,10 +294,12 @@ const App = () => {
       }
     }, 1000);
 
-    // RESTORED: Splash Screen Close Logic
-    setTimeout(() => {
-      invoke('close_splashscreen').catch(console.error);
-    }, 2000); // Minimum 2s splash screen visibility
+    // Close Tauri splashscreen (only in desktop context — no-op in browser)
+    if (window.__TAURI__) {
+      setTimeout(() => {
+        invoke('close_splashscreen').catch(console.error);
+      }, 2000);
+    }
 
     // Auto-load remembered mode
     const autoInit = async () => {
