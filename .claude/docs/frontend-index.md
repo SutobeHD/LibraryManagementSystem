@@ -66,7 +66,7 @@ All DAW state is managed in this directory. Do NOT duplicate in component-local 
 | `components/SettingsView.jsx` | App settings: Rekordbox paths, preferences | `GET /api/settings`, `POST /api/settings` |
 | `components/ToolsView.jsx` | Batch tools: clean titles, find duplicates, batch comments, rename | `GET /api/tools/duplicates`, `POST /api/tools/batch-comment`, `POST /api/library/clean-titles` |
 | `components/DesignView.jsx` | UI theme/palette preview and customization |  |
-| `components/WaveformEditor.jsx` | **Legacy** waveform editor — superseded by `DjEditDaw.jsx`, do not extend |  |
+| `components/WaveformEditor.jsx` | Full waveform editor (WaveSurfer.js). Used in RankingView (`simpleMode`) and standalone. Exposes ref API: `stop()`, `setTime(t)`, `getCurrentTime()`, `playPause()`. Fires `onPlayPause(bool)` on play/pause/finish events | — |
 
 ---
 
@@ -77,6 +77,7 @@ All DAW state is managed in this directory. Do NOT duplicate in component-local 
 | `components/ToastContext.jsx` | **Toast notification provider** — wrap app with this, then `useToast()` → `toast.success()`, `toast.error()`, `toast.info()`. Never use `alert()` | Import `useToast` in any component needing notifications |
 | `components/BatchEditBar.jsx` | Batch editing toolbar: operates on a set of selected track IDs | Rendered by LibraryView when tracks are selected |
 | `components/RenameModal.jsx` | Rename dialog modal | Props: `isOpen: bool`, `onConfirm(newName)`, `onCancel()`, `currentName: string` |
+| `components/shared/WaveformMiniCanvas.jsx` | **Reusable canvas waveform renderer** — CDJ-style 3-band colors (Low=Red, Mid=Green, High=Blue via screen blend), falls back to mono. Props: `peaks`, `bandPeaks`, `totalDuration`, `playhead`, `viewportStart/End`, `height`. DPR-aware, ResizeObserver-reactive. Used by WaveformOverview | Any component needing compact waveform display |
 
 ---
 
@@ -92,7 +93,7 @@ Main 4-panel DAW editor. `DjEditDaw` is the root; all others are children.
 | `daw/DawBrowser.jsx` | Left-panel track library sidebar for loading tracks into DAW | Calls `GET /api/library/tracks`; emits selected track to parent |
 | `daw/DawControlStrip.jsx` | Playback transport, BPM display, snap-to-grid toggle, key display | Props: `bpm`, `key`, `snapEnabled`, playback state |
 | `daw/DawScrollbar.jsx` | Custom horizontal scrollbar for timeline navigation | Props: `scrollPos`, `viewportWidth`, `totalWidth`, `onChange` |
-| `daw/WaveformOverview.jsx` | Mini-map waveform for quick navigation; shows viewport indicator rectangle | Props: `waveformData`, `viewportStart`, `viewportEnd` |
+| `daw/WaveformOverview.jsx` | Mini-map waveform — delegates canvas drawing to `WaveformMiniCanvas`. Click/drag dispatches `SET_SCROLL_X` + `SET_PLAYHEAD` | Props: `state`, `dispatch` |
 | `daw/ExportModal.jsx` | Export dialog: region range, format, fade settings | Props: `isOpen`, `onExport(params)`, `onCancel` |
 
 ---
