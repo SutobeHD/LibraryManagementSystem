@@ -177,7 +177,13 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
     const overviewWs = useRef(null);
     const isMountedRef = useRef(true);
     const originalBufferRef = useRef(null); // Cache original audio for non-destructive preview
+    const onPlayPauseRef = useRef(onPlayPause); // Ref to avoid stale closure in wavesurfer event handlers
+    const isPlayingExternalRef = useRef(isPlayingExternal);
     const [isVisible, setIsVisible] = useState(false);
+
+    // Keep refs in sync with latest props
+    useEffect(() => { onPlayPauseRef.current = onPlayPause; }, [onPlayPause]);
+    useEffect(() => { isPlayingExternalRef.current = isPlayingExternal; }, [isPlayingExternal]);
 
     useEffect(() => {
         const observer = new IntersectionObserver(
@@ -645,8 +651,8 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                 if (!isMountedRef.current) return;
                 setDuration(wavesurfer.current.getDuration());
                 setLoading(false);
-                // Check if we should auto-play
-                if (isPlayingExternal) {
+                // Check if we should auto-play (use ref to get current value, not stale closure)
+                if (isPlayingExternalRef.current) {
                     wavesurfer.current.play().catch(e => console.warn("Autoplay blocked:", e));
                 }
                 // Capture Original Buffer
@@ -700,6 +706,23 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
             wavesurfer.current.on('error', (e) => {
                 console.error("WaveSurfer Error:", e);
                 toast.error("Audio Error: " + (e.message || e));
+            });
+
+            // Notify parent of play/pause/finish state changes (needed by RankingView)
+            wavesurfer.current.on('play', () => {
+                if (!isMountedRef.current) return;
+                setInternalPlaying(true);
+                onPlayPauseRef.current?.(true);
+            });
+            wavesurfer.current.on('pause', () => {
+                if (!isMountedRef.current) return;
+                setInternalPlaying(false);
+                onPlayPauseRef.current?.(false);
+            });
+            wavesurfer.current.on('finish', () => {
+                if (!isMountedRef.current) return;
+                setInternalPlaying(false);
+                onPlayPauseRef.current?.(false);
             });
 
             // Sync Overview Clicks
