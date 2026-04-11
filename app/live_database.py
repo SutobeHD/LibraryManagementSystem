@@ -934,6 +934,23 @@ class LiveRekordboxDB:
             logger.error(f"Failed to update track metadata {tid}: {e}")
             raise e
 
+    def get_analysis_writer(self):
+        """
+        Returns an AnalysisDBWriter instance bound to this database.
+        Used for analyzing tracks and writing results back to master.db + ANLZ files.
+        """
+        from .analysis_db_writer import AnalysisDBWriter
+        if not hasattr(self, '_analysis_writer') or self._analysis_writer is None:
+            self._analysis_writer = AnalysisDBWriter(self)
+        return self._analysis_writer
+
+    def get_unanalyzed_track_ids(self) -> list:
+        """Returns list of track IDs that have BPM=0 or no beatgrid."""
+        return [
+            tid for tid, t in self.tracks.items()
+            if not t.get("BPM") or t["BPM"] <= 0
+        ]
+
     def rename_playlist(self, pid, new_name):
         try:
 

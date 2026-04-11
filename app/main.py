@@ -334,6 +334,13 @@ class AudioImportReq(BaseModel):
 class AudioStatusReq(BaseModel):
     task_id: str
 
+class AnalyzeFullReq(BaseModel):
+    force: bool = False   # Re-analyze even if already analyzed
+
+class AnalyzeBatchReq(BaseModel):
+    track_ids: Optional[List[str]] = None  # None = auto-detect unanalyzed
+    force: bool = False
+
 
 class MergeReq(BaseModel):
     category: str # "artists", "labels", "albums"
@@ -1589,6 +1596,117 @@ def get_analysis_status(task_id: str):
     if status["status"] == "not_found":
         raise HTTPException(status_code=404, detail="Task not found")
     return status
+
+# ─── Track Analysis + DB Write API ───────────────────────────────────────────
+# These endpoints run our own analysis engine and write results directly
+# into the Rekordbox live database (master.db + ANLZ binary files),
+# replacing the need for Rekordbox's built-in analysis.
+
+@app.post("/api/track/{tid}/analyze-full")
+async def analyze_track_full(tid: str, req: AnalyzeFullReq = AnalyzeFullReq()):
+    """
+    Analyze a track with our engine and write BPM, key, waveforms, beatgrid
+    directly into the Rekordbox live database + ANLZ files.
+
+    Requires live DB mode. Rekordbox must NOT be running.
+    """
+    if not hasattr(db, 'get_analysis_writer'):
+        raise HTTPException(400, "Analysis-to-DB requires live database mode. Switch to live mode first.")
+
+    if _is_rekordbox_running():
+        raise HTTPException(409, "Rekordbox is running. Close it before writing analysis data.")
+
+    try:
+        writer = db.get_analysis_writer()
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, writer.analyze_and_save, tid, req.force)
+
+        if result.get("status") == "error":
+            raise HTTPException(500, result.get("error", "Analysis failed"))
+
+        return {"status": "ok", "data": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"analyze-full failed for {tid}: {e}", exc_info=True)
+        raise HTTPException(500, safe_error_message(e))
+
+
+@app.post("/api/library/analyze-batch")
+async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
+    """
+    Batch-analyze tracks and write results to Rekordbox DB + ANLZ.
+    If track_ids is None, automatically finds all unanalyzed tracks.
+
+    Returns a streaming response with progress updates (NDJSON).
+    """
+    if not hasattr(db, 'get_analysis_writer'):
+        raise HTTPException(400, "Analysis-to-DB requires live database mode.")
+
+    if _is_rekordbox_running():
+        raise HTTPException(409, "Rekordbox is running. Close it before writing analysis data.")
+
+    writer = db.get_analysis_writer()
+
+    track_ids = req.track_ids
+    if not track_ids:
+        track_ids = db.get_unanalyzed_track_ids()
+
+    if not track_ids:
+        return {"status": "ok", "data": {"message": "No tracks to analyze", "total": 0}}
+
+    import json
+
+    async def stream_progress():
+        loop = asyncio.get_running_loop()
+        for progress in writer.analyze_batch(track_ids, force=req.force):
+            yield json.dumps(progress) + "\n"
+            await asyncio.sleep(0)  # Yield control to event loop
+
+    return StreamingResponse(
+        stream_progress(),
+        media_type="application/x-ndjson",
+        headers={"X-Total-Tracks": str(len(track_ids))},
+    )
+
+
+@app.get("/api/library/analyze-status")
+def get_analyze_capabilities():
+    """Report which analysis backends are available and how many tracks need analysis."""
+    try:
+        from .audio_analyzer import AudioAnalyzer
+        caps = AudioAnalyzer.capabilities()
+    except Exception:
+        caps = {"core": False, "madmom": False, "essentia": False}
+
+    unanalyzed_count = 0
+    total_count = 0
+    if hasattr(db, 'tracks'):
+        total_count = len(db.tracks)
+        unanalyzed_count = len([
+            t for t in db.tracks.values()
+            if not t.get("BPM") or t["BPM"] <= 0
+        ])
+
+    return {
+        "status": "ok",
+        "data": {
+            **caps,
+            "total_tracks": total_count,
+            "unanalyzed_tracks": unanalyzed_count,
+            "analyzed_tracks": total_count - unanalyzed_count,
+        }
+    }
+
+
+def _is_rekordbox_running() -> bool:
+    """Check if Rekordbox is currently running."""
+    try:
+        import rbox
+        return rbox.is_rekordbox_running()
+    except Exception:
+        return False
+
 
 # ─── SoundCloud Download API ──────────────────────────────────────────────────
 # NOTE: These endpoints use `keyring` for secure token storage (EC7/EC13).

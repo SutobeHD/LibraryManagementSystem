@@ -1,7 +1,7 @@
 # app/ INDEX — Python Backend
 
 > Module and endpoint map for the FastAPI backend. Update when adding/removing endpoints or modules.
-> Last updated: 2026-04-06
+> Last updated: 2026-04-11
 
 ---
 
@@ -57,6 +57,9 @@ FastAPI app (~1700 lines). Security: CORS locked to localhost, session token aut
 | POST | `/api/audio/render` | Render audio with FFmpeg (format conversion, export) |
 | POST | `/api/audio/import` | Import a local audio file into the library |
 | POST | `/api/track/{tid}/analyze` | Full analysis pipeline on single track |
+| POST | `/api/track/{tid}/analyze-full` | **[NEW]** Analyze + write ANLZ files + update master.db in one call. Body: `{ force: bool }`. Requires live DB mode, Rekordbox must be closed |
+| POST | `/api/library/analyze-batch` | **[NEW]** Batch analyze multiple tracks; NDJSON streaming progress. Body: `{ track_ids: [int], force: bool }` |
+| GET | `/api/library/analyze-status` | **[NEW]** Report analysis engine capabilities + count of unanalyzed tracks |
 
 ### Project (DAW / RBEP) Endpoints
 | Method | Path | Description |
@@ -225,6 +228,8 @@ Direct SQLite access (live mode). Thread-safe via locks. Auto-backup on write.
 |--------|-------------|
 | `get_tracks()` | Query `master.db` directly |
 | `update_track(id, fields)` | Write to SQLite (**requires Rekordbox to be closed**) |
+| `get_analysis_writer()` | Lazy-create and return `AnalysisDBWriter` instance bound to this DB |
+| `get_unanalyzed_track_ids()` | Return list of track IDs with BPM=0 (not yet analyzed) |
 
 ---
 
@@ -237,8 +242,44 @@ Async DSP pipeline using `ProcessPoolExecutor`. All class methods (no instance n
 | `AnalysisEngine.submit(task_id, file_path)` | `{ task_id, status: "pending" }` | Queue a track for analysis in background pool |
 | `AnalysisEngine.get_status(task_id)` | `{ status, bpm, key, confidence, beatgrid }` | Poll task result. status: `pending|done|error` |
 | `AnalysisEngine.analyze_sync(file_path)` | `{ bpm, key, confidence, beatgrid, anlz }` | Synchronous analysis (blocks; use for scripting only) |
+| `run_full_analysis(file_path)` | full result dict | Top-level free function — single call returns everything needed for ANLZ writing |
 
-Algorithms: Krumhansl-Schmuckler key detection, multi-resolution BPM estimation, Rekordbox ANLZ structure generation for beatgrid export.
+Algorithms: madmom RNN beat tracking (librosa fallback), essentia KeyExtractor (K-S/Temperley ensemble fallback), 3-band Butterworth crossover (200Hz/2500Hz) for waveform generation.
+
+Waveform outputs: PWAV (400 mono preview), PWV2 (100 tiny), PWV3 (detail@150fps), PWV4 (1200×6 color preview), PWV5 (color detail u16), PWV6 (1200×[lo,mi,hi] 3-band preview), PWV7 (N×[lo,mi,hi] 3-band detail@150fps).
+
+---
+
+## ANLZ Writer (`app/anlz_writer.py`)
+
+Writes Rekordbox-compatible binary ANLZ files (.DAT, .EXT, .2EX). All output is validated by rbox.
+
+| Function | Description |
+|----------|-------------|
+| `write_anlz_files(anlz_dir, track_path, analysis_result)` | Main entry point — writes all 3 files from `run_full_analysis()` output. Returns `{"dat": path, "ext": path, "2ex": path}` |
+| `build_dat(track_path, beats, pvbr, pwav, pwv2)` | Build .DAT bytes: PPTH + PVBR + PQTZ + PWAV + PWV2 + PCOB×2 |
+| `build_ext(track_path, beats, pwv3, pwv5, pwv4)` | Build .EXT bytes: PPTH + PWV3 + PCOB×2 + PCO2×2 + PWV5 + PWV4 |
+| `build_2ex(track_path, pwv7, pwv6)` | Build .2EX bytes: PPTH + PWV7 + PWV6 + PWVC |
+
+**Tag formats** (all big-endian, rbox-validated):
+- PQTZ entries: `[beat_number(u16), tempo×100(u16), time_ms(u32)]`
+- PCOB: 24-byte header with `0xFFFFFFFF` sentinel
+- PCO2: `list_type` is u32 (not u16)
+- PWV5: header field +20 must be `0x00960305`
+- PWV6: hdr_len=20, `entry_size(u32)=3` before `entry_count`
+- PWV7: hdr_len=24, `entry_size(u32)=3`, data is `[lo, mid, hi]` per entry
+
+---
+
+## Analysis-to-DB Orchestrator (`app/analysis_db_writer.py`) — `AnalysisDBWriter`
+
+Ties analysis → ANLZ files → master.db in a single pipeline. **Requires live DB mode and Rekordbox closed.**
+
+| Method | Description |
+|--------|-------------|
+| `analyze_and_save(track_id, force=False)` | Full pipeline for single track: analyze → write ANLZ → update BPM/key/analysed in master.db |
+| `analyze_batch(track_ids, force=False)` | Generator — yields `{track_id, status, progress, bpm, key, error}` dicts as each track completes |
+| `get_unanalyzed_tracks()` | Returns list of track dicts with `bpm=0` or missing ANLZ files |
 
 ---
 
