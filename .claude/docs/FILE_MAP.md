@@ -1,7 +1,7 @@
 # FILE_MAP.md — RB Editor Pro
 
 > **Read this first.** One-line-per-file map of the entire codebase. Use this to find the right file for any task without searching blindly.
-> Last updated: 2026-04-06
+> Last updated: 2026-04-11
 
 ---
 
@@ -26,8 +26,10 @@
 | `app/config.py` | Path constants: `REKORDBOX_ROOT`, `DB_FILENAME`, `FFMPEG_BIN`, `BACKUP_DIR`, `EXPORT_DIR`, `LOG_DIR`, `TEMP_DIR`, `MUSIC_DIR`, `DB_KEY` |
 | `app/services.py` | 11 business logic classes: `XMLProcessor`, `SystemGuard`, `AudioEngine` (FFmpeg), `FileManager`, `LibraryTools`, `SettingsManager`, `MetadataManager`, `SystemCleaner`, `BeatAnalyzer`, `ImportManager`, `ProjectManager` |
 | `app/database.py` | `RekordboxXMLDB` — parses Rekordbox XML into in-memory cache; `RekordboxDB` — live SQLite access via rbox. Methods: `load_xml`, `get_tracks`, `get_playlists`, `get_track_details`, `save_xml`, `add_track`, `delete_track`, `save_track_cues`, `save_track_beatgrid` |
-| `app/live_database.py` | `LiveRekordboxDB` — thread-safe direct access to Rekordbox `master.db` via rbox library with automatic backup management |
-| `app/analysis_engine.py` | `AnalysisEngine` (class methods: `submit`, `get_status`, `analyze_sync`) — production DSP: Krumhansl-Schmuckler key detection, BPM estimation, Rekordbox ANLZ structure generation. ProcessPoolExecutor-based async pipeline |
+| `app/live_database.py` | `LiveRekordboxDB` — thread-safe direct access to Rekordbox `master.db` via rbox library with automatic backup management. Added: `get_analysis_writer()`, `get_unanalyzed_track_ids()` |
+| `app/analysis_engine.py` | `AnalysisEngine` (class methods: `submit`, `get_status`, `analyze_sync`) + free `run_full_analysis(path)` — production DSP: madmom RNN beat tracking, essentia key detection, full ANLZ waveform generation (PWAV/PWV2/PWV3/PWV4/PWV5/PWV6/PWV7). ProcessPoolExecutor-based async pipeline |
+| `app/analysis_db_writer.py` | `AnalysisDBWriter` — orchestrates: analyze track → write ANLZ files → update master.db. Methods: `analyze_and_save(track_id, force?)`, `analyze_batch(track_ids)` (progress generator), `get_unanalyzed_tracks()` |
+| `app/anlz_writer.py` | Binary ANLZ file writer producing Rekordbox-compatible `.DAT`, `.EXT`, `.2EX` files. Public API: `build_dat()`, `build_ext()`, `build_2ex()`, `write_anlz_files(anlz_dir, track_path, analysis_result)`. All tags rbox-validated |
 | `app/audio_analyzer.py` | Background analysis worker pool; wraps `AnalysisEngine` for HTTP task tracking with `task_id` polling |
 | `app/soundcloud_api.py` | `SoundCloudPlaylistAPI` — SC unofficial v2 API with dynamic client_id scraping, exponential backoff, pagination. `SoundCloudSyncEngine` — fuzzy title/artist matching to local library. `AuthExpiredError`, `RateLimitError` |
 | `app/soundcloud_downloader.py` | Background yt-dlp-based SC track downloader with process lifecycle management and zombie cleanup |

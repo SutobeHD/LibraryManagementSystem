@@ -12,7 +12,7 @@ Upgrade highlights (v2.0):
   - essentia KeyExtractor (with improved Krumhansl-Schmuckler fallback)
   - PWV4 Color Preview Waveform (1200 entries, 6 bytes/entry)
   - PSSI Song Structure / Phrase detection (energy-based, bar-aligned)
-  - HD Waveforms: PWV6/PWV7 for CDJ-3000 .2EX files
+  - 3-Band Waveforms: PWV6/PWV7 for CDJ-3000 .2EX files (3 bytes/entry: [low, mid, high])
   - PVBR VBR index generation
   - Corrected crossover frequencies (200 Hz / 2500 Hz)
   - Integrated Loudness (LUFS) measurement
@@ -581,8 +581,8 @@ def generate_waveform_data(
     - PWV3: Monochrome detail (150/sec)
     - PWV4: Color preview (1200 entries, 6 bytes/entry)  [NEW]
     - PWV5: Color detail (150/sec, 2 bytes/entry with RGB + height)
-    - PWV6: HD preview (3 bytes/entry)  [NEW - CDJ-3000]
-    - PWV7: HD detail (6 bytes/entry, 150/sec)  [NEW - CDJ-3000]
+    - PWV6: 3-band preview (3 bytes/entry: [lo,mi,hi])  [CDJ-3000]
+    - PWV7: 3-band detail (3 bytes/entry: [lo,mi,hi], 150/sec)  [CDJ-3000]
     - 3-Band float arrays for our frontend rendering
     """
     duration = len(y) / sr
@@ -691,27 +691,24 @@ def generate_waveform_data(
            (b_vals.astype(np.uint16) << 7)  | \
            (h_vals.astype(np.uint16) << 2)
 
-    # -- PWV6: HD Preview (3 bytes/entry, ~1200 entries) [NEW - CDJ-3000] --
+    # -- PWV6: 3-Band Preview (3 bytes/entry, ~1200 entries) [CDJ-3000 .2EX]
+    # rbox reads as [low, mid, high] — byte order must match
     pwv6_entries = 1200
-    pwv6_r = quantize_log(_resample_array(rms_high, pwv6_entries), 255)
-    pwv6_g = quantize_log(_resample_array(rms_mid, pwv6_entries), 255)
-    pwv6_b = quantize_log(_resample_array(rms_low, pwv6_entries), 255)
+    pwv6_lo = quantize_log(_resample_array(rms_low, pwv6_entries), 255)
+    pwv6_mi = quantize_log(_resample_array(rms_mid, pwv6_entries), 255)
+    pwv6_hi = quantize_log(_resample_array(rms_high, pwv6_entries), 255)
     pwv6 = []
     for i in range(pwv6_entries):
-        pwv6.append([int(pwv6_r[i]), int(pwv6_g[i]), int(pwv6_b[i])])
+        pwv6.append([int(pwv6_lo[i]), int(pwv6_mi[i]), int(pwv6_hi[i])])
 
-    # -- PWV7: HD Detail (6 bytes/entry, 150/sec) [NEW - CDJ-3000] --------
-    hd_r = quantize_log(rms_high, 255)
-    hd_g = quantize_log(rms_mid, 255)
-    hd_b = quantize_log(rms_low, 255)
-    hd_height = quantize_log(rms_full, 255)
+    # -- PWV7: 3-Band Detail (3 bytes/entry, 150/sec) [CDJ-3000 .2EX] -----
+    # rbox reads as Waveform3BandDetail: [low, mid, high] per entry
+    hd_lo = quantize_log(rms_low, 255)
+    hd_mi = quantize_log(rms_mid, 255)
+    hd_hi = quantize_log(rms_high, 255)
     pwv7 = []
     for i in range(min_len):
-        pwv7.append([
-            int(hd_r[i]), int(hd_g[i]), int(hd_b[i]),
-            int(hd_height[i]),
-            int(hd_g[i] // 2), int(hd_b[i] // 2)
-        ])
+        pwv7.append([int(hd_lo[i]), int(hd_mi[i]), int(hd_hi[i])])
 
     # -- 3-Band float arrays (for our frontend Canvas/WebGL) --------------
     max_low = float(np.max(rms_low)) if np.max(rms_low) > 0 else 1.0
@@ -725,8 +722,8 @@ def generate_waveform_data(
         "pwv3": pwv3.tolist(),           # N bytes -- monochrome detail
         "pwv4": pwv4,                    # 1200 x 6 bytes -- color preview [NEW]
         "pwv5": pwv5.tolist(),           # N x uint16 -- color detail
-        "pwv6": pwv6,                    # 1200 x 3 bytes -- HD preview [NEW]
-        "pwv7": pwv7,                    # N x 6 bytes -- HD detail [NEW]
+        "pwv6": pwv6,                    # 1200 x [lo,mi,hi] -- 3-band preview
+        "pwv7": pwv7,                    # N x [lo,mi,hi] -- 3-band detail
         # Frontend float arrays
         "rgb_low": (rms_low / max_low).tolist(),
         "rgb_mid": (rms_mid / max_mid).tolist(),
