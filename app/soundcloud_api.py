@@ -301,6 +301,9 @@ class SoundCloudPlaylistAPI:
             logger.debug(f"[SC] Skipping deleted/empty track id={track_id}")
             return None
 
+        # download_url is present in the API response when downloadable=True.
+        # It points to the official /tracks/{id}/download endpoint.
+        # We include it here so callers don't need a second API round-trip.
         return {
             "id": track_id,
             "title": title,
@@ -309,7 +312,50 @@ class SoundCloudPlaylistAPI:
             "permalink_url": raw.get("permalink_url", ""),
             "artwork_url": raw.get("artwork_url"),
             "downloadable": raw.get("downloadable", False),
+            "download_url": raw.get("download_url"),  # None when not downloadable
         }
+
+    @staticmethod
+    def resolve_track_from_url(permalink_url: str, auth_token: Optional[str] = None) -> Optional[Dict]:
+        """
+        Resolve a SoundCloud permalink URL to a normalized track dict.
+
+        Uses the /resolve endpoint to look up any SC URL (track, playlist, user).
+        Returns a normalized track dict (same shape as _normalize_track) when the
+        URL resolves to a track, or None on failure / if it resolves to a non-track.
+
+        This is used by the download endpoint when the caller provides only a URL
+        (rather than pre-resolved track metadata), so the backend can check
+        'downloadable' before making any download attempt.
+        """
+        headers = SoundCloudPlaylistAPI._get_headers(auth_token)
+        params: dict = {"url": permalink_url}
+        if not auth_token:
+            params["client_id"] = get_sc_client_id()
+
+        logger.info("[SC] Resolving URL: %s", permalink_url)
+        try:
+            resp = _sc_get(
+                f"{SC_API_BASE}/resolve",
+                headers=headers,
+                params=params,
+                timeout=10,
+            )
+            data = resp.json()
+
+            # /resolve returns the resource directly; check it's a track
+            kind = data.get("kind", "")
+            if kind != "track":
+                logger.warning("[SC] resolve_track_from_url: kind=%s (not a track) for %s", kind, permalink_url)
+                return None
+
+            return SoundCloudPlaylistAPI._normalize_track(data)
+
+        except AuthExpiredError:
+            raise
+        except Exception as exc:
+            logger.error("[SC] resolve_track_from_url failed for %s: %s", permalink_url, exc)
+            return None
 
     @staticmethod
     @lru_cache(maxsize=32)

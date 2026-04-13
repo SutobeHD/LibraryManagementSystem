@@ -31,8 +31,9 @@
 | `app/analysis_db_writer.py` | `AnalysisDBWriter` — orchestrates: analyze track → write ANLZ files → update master.db. Methods: `analyze_and_save(track_id, force?)`, `analyze_batch(track_ids)` (progress generator), `get_unanalyzed_tracks()` |
 | `app/anlz_writer.py` | Binary ANLZ file writer producing Rekordbox-compatible `.DAT`, `.EXT`, `.2EX` files. Public API: `build_dat()`, `build_ext()`, `build_2ex()`, `write_anlz_files(anlz_dir, track_path, analysis_result)`. All tags rbox-validated |
 | `app/audio_analyzer.py` | Background analysis worker pool; wraps `AnalysisEngine` for HTTP task tracking with `task_id` polling |
-| `app/soundcloud_api.py` | `SoundCloudPlaylistAPI` — SC unofficial v2 API with dynamic client_id scraping, exponential backoff, pagination. `SoundCloudSyncEngine` — fuzzy title/artist matching to local library. `AuthExpiredError`, `RateLimitError` |
-| `app/soundcloud_downloader.py` | Background yt-dlp-based SC track downloader with process lifecycle management and zombie cleanup |
+| `app/soundcloud_api.py` | `SoundCloudPlaylistAPI` — SC unofficial v2 API with dynamic client_id scraping, exponential backoff, pagination. Added: `resolve_track_from_url()`, `download_url` in normalized track. `SoundCloudSyncEngine` — fuzzy title/artist matching. `AuthExpiredError`, `RateLimitError` |
+| `app/soundcloud_downloader.py` | Legal HTTP-based SC downloader (official API only, `downloadable=true` gate). Dedup-aware (registry + SHA-256). Auto-organizes files: `SoundCloud/{Artist}/{Title}.ext`. Post-download: analysis + auto-playlist sort. |
+| `app/download_registry.py` | SQLite download registry: dedup by sc_track_id (O(1)) + SHA-256 content hash. Analysis history log. Multi-device via device_id UUID. `init_registry()`, `is_already_downloaded()`, `find_by_hash()`, `register_download()`, `update_analysis()`, `get_history()`, `get_stats()` |
 | `app/usb_manager.py` | `UsbDetector` (scan, initialize_usb), `UsbProfileManager` (CRUD for sync profiles), `UsbSyncEngine` (calculate_diff, sync_collection, sync_playlists — lock-file concurrency, incremental diff) |
 | `app/backup_engine.py` | Git-like incremental backup: compressed JSON changesets, HEAD tracking, commit timeline, restore |
 | `app/rekordbox_export.py` | Converts `AnalysisEngine` results → Rekordbox XML `TRACK` elements with `TEMPO` nodes and `POSITION_MARK` cues |

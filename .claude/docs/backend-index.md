@@ -124,9 +124,13 @@ FastAPI app (~1700 lines). Security: CORS locked to localhost, session token aut
 | POST | `/api/soundcloud/sync` | Run SC playlist sync (match + mark) |
 | POST | `/api/soundcloud/sync-all` | Sync all SC playlists at once |
 | POST | `/api/soundcloud/merge` | Merge SC playlist into local playlist |
-| POST | `/api/soundcloud/download` | Download a specific SC track via yt-dlp |
+| POST | `/api/soundcloud/download` | **[UPDATED]** Start legal download: body `ScDownloadRequest`. Accepts URL or pre-resolved track data. Rejects if `downloadable=false`. Uses official SC API only. Returns `{task_id}`. |
 | GET | `/api/soundcloud/tasks` | List all active download tasks |
 | GET | `/api/soundcloud/task/{task_id}` | Poll status of a download task |
+| GET | `/api/soundcloud/history` | **[NEW]** Paginated analysis history log. Params: `limit`, `offset`, `status`, `device_id`, `search`, `this_device_only` |
+| GET | `/api/soundcloud/history/stats` | **[NEW]** Aggregate stats: total/analyzed/failed counts, device count, date range |
+| GET | `/api/soundcloud/check/{sc_track_id}` | **[NEW]** O(1) dedup check — returns `{already_downloaded: bool}` |
+| DELETE | `/api/soundcloud/history/{sc_track_id}` | **[NEW]** Remove registry entry (to allow re-download). Does NOT delete the file. |
 | POST | `/api/artist/soundcloud` | Associate artist with SC profile |
 
 ### USB Sync Endpoints
@@ -294,9 +298,48 @@ Ties analysis → ANLZ files → master.db in a single pipeline. **Requires live
 
 ---
 
+## Download Registry (`app/download_registry.py`)
+
+SQLite-based deduplication + analysis history log. DB at `{MUSIC_DIR}/download_registry.db`.
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `init_registry()` | None | Create schema (call once on startup) |
+| `is_already_downloaded(sc_track_id)` | bool | O(1) dedup check by SC track ID |
+| `find_by_hash(sha256)` | `dict \| None` | Content-based dedup by SHA-256 |
+| `register_download(**kwargs)` | bool | UPSERT download record (idempotent) |
+| `update_analysis(**kwargs)` | bool | Store BPM/key results, mark 'analyzed' |
+| `mark_failed(sc_track_id, error)` | None | Mark as permanently failed |
+| `delete_entry(sc_track_id)` | bool | Remove entry (allows re-download) |
+| `get_history(**filters)` | `[dict]` | Paginated history, newest-first |
+| `get_stats()` | dict | Aggregate counts + date range |
+| `get_current_device_id()` | str | Stable UUID for this machine |
+| `compute_sha256(path)` | `str \| None` | Stream-hash a file for content dedup |
+
+Device ID: stored as `{MUSIC_DIR}/.rb_device_id`. Not hardware-tied.
+
+---
+
 ## SoundCloud Downloader (`app/soundcloud_downloader.py`)
 
-yt-dlp based downloader running as subprocess. Manages process lifecycle, zombie cleanup, task state. Each download has a `task_id` for polling via `GET /api/soundcloud/task/{task_id}`.
+Legal, dedup-aware HTTP-based downloader. Uses official SC API only (`GET /tracks/{id}/download`).
+No third-party tools (scdl, yt-dlp). Rejects tracks where `downloadable=false`.
+
+**Download flow:**
+1. Legal gate: reject if `downloadable=False`
+2. Dedup gate: reject if `is_already_downloaded(sc_track_id)` → True
+3. Register as 'downloading' in registry (blocks parallel duplicates)
+4. Resolve official download URL via `/tracks/{id}/download` + OAuth
+5. Stream to temp file → move to `SoundCloud/{Artist}/{Title}.ext`
+6. SHA-256 hash → content dedup check
+7. Register as 'downloaded'
+8. Background thread: analyze (BPM/key) → import → auto-sort into SC playlist
+
+| Method | Description |
+|--------|-------------|
+| `download_track(**kwargs)` | Start download; returns task_id immediately |
+| `get_task_status(task_id)` | Returns task dict or None |
+| `cleanup_processes()` | atexit hook (no-op; no subprocesses) |
 
 ---
 
