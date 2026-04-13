@@ -57,6 +57,7 @@ from .rekordbox_bridge import RekordboxBridge
 from .soundcloud_downloader import sc_downloader
 from .audio_analyzer import AudioAnalyzer, LIBROSA_AVAILABLE
 from .soundcloud_api import SoundCloudPlaylistAPI, SoundCloudSyncEngine, AuthExpiredError, RateLimitError
+from . import download_registry
 
 # Per-operation lock — prevents race conditions on concurrent sync requests (Criterion 10)
 _sync_lock = asyncio.Lock()
@@ -1237,19 +1238,27 @@ def _graceful_shutdown():
 async def startup_event():
     logger.info(f"Backend started. Binding to 127.0.0.1:8000 only.")
     
-    # Req 30: State Recovery - Purge obsolete temp files from previous hard crashes
+    # Initialize download registry (creates SQLite DB if not exists)
+    try:
+        download_registry.init_registry()
+    except Exception as _e:
+        logger.error("[startup] download_registry.init_registry() failed: %s", _e)
+
+    # State Recovery: purge orphaned temp files from previous hard crashes
     import tempfile, glob
     tmp_base = tempfile.gettempdir()
-    for stale_dir in glob.glob(os.path.join(tmp_base, "scdl_tmp_*")):
+    for stale_file in glob.glob(os.path.join(tmp_base, "rbpro_sc_*")):
         try:
-            shutil.rmtree(stale_dir, ignore_errors=True)
-            logger.info(f"Purged stale download state: {stale_dir}")
-        except: pass
-        
+            os.remove(stale_file)
+            logger.info("Purged stale download temp: %s", stale_file)
+        except OSError:
+            pass
+
     for stale_file in MUSIC_DIR.glob("*.tmp"):
         try:
             os.remove(stale_file)
-        except: pass
+        except OSError:
+            pass
 
     # Req 29: Timeout Handling - Prevent infinite hangs on DB locks during boot
     try:
@@ -1710,53 +1719,110 @@ def _is_rekordbox_running() -> bool:
 
 # ─── SoundCloud Download API ──────────────────────────────────────────────────
 # NOTE: These endpoints use `keyring` for secure token storage (EC7/EC13).
-# The routes must be defined BEFORE the __main__ guard so FastAPI registers them.
+
+class ScDownloadRequest(BaseModel):
+    """
+    Body for POST /api/soundcloud/download.
+
+    Two usage modes:
+      A) Pre-resolved (preferred — from SoundCloudSyncView where full track data is available):
+           sc_track_id + title + artist + downloadable + (optional) sc_playlist_title
+      B) URL-only (from SoundCloudView URL input box):
+           url — backend resolves track metadata via /resolve API before downloading.
+
+    Legal gate: downloads are ONLY started if downloadable=True.
+    The backend ALWAYS re-validates the downloadable flag server-side; the frontend
+    value is trusted only as a hint (re-checked via registry or API resolve).
+    """
+    url: Optional[str] = None               # SC permalink URL (mode B)
+    sc_track_id: Optional[str] = None       # SoundCloud track ID (mode A)
+    title: Optional[str] = None
+    artist: Optional[str] = None
+    duration_ms: int = 0
+    downloadable: bool = False              # must be True or download is rejected
+    sc_playlist_title: Optional[str] = None # for auto-playlist sort
+
 
 @app.post("/api/soundcloud/download")
-async def soundcloud_download(data: Dict[str, str], request: Request):
-    url = data.get("url")
-    title = data.get("title")
-    if not url:
-        raise HTTPException(status_code=400, detail="URL is required")
+async def soundcloud_download(data: ScDownloadRequest, request: Request):
+    """
+    Start a legal SoundCloud track download.
 
+    Legal compliance:
+      - Rejects any track where downloadable=False.
+      - Uses the official SC API download endpoint only.
+      - No third-party ripping tools are involved.
+
+    Deduplication:
+      - Checks the registry by sc_track_id before starting.
+      - SHA-256 content check happens after download completes.
+
+    Returns: { task_id: str }
+    """
     auth_token = keyring.get_password("rb_editor_pro", "sc_token")
 
-    # Criterion 14: write-permission check before starting download
+    # Write-permission guard
     sc_dir = MUSIC_DIR / "SoundCloud"
     sc_dir.mkdir(parents=True, exist_ok=True)
     if not os.access(str(sc_dir), os.W_OK):
         raise HTTPException(
             status_code=403,
-            detail=f"No write permission for download directory: {sc_dir}. Please check folder permissions."
+            detail=f"No write permission for download directory: {sc_dir}."
         )
 
-    # Criterion 7: cleanup corrupt fragments on failure
-    def on_complete(task_id, success, downloaded_files=None):
-        if success and downloaded_files:
-            logger.info(f"[SC] Download {task_id} complete. Triggering import scan on {len(downloaded_files)} files...")
-            for f in downloaded_files:
-                if f.suffix.lower() in ALLOWED_AUDIO_EXTENSIONS:
-                    try:
-                        ImportManager.process_import(f)
-                    except Exception as e:
-                        logger.error(f"[SC] Post-download import failed for {f}: {e}")
-        elif not success:
-            logger.warning(f"[SC] Download {task_id} failed. Cleaning fragments...")
-            for pattern in ["*.part", "*.tmp", "*.ytdl", "*.download"]:
-                for frag in sc_dir.glob(pattern):
-                    try:
-                        frag.unlink()
-                        logger.info(f"[SC] Removed fragment: {frag}")
-                    except OSError as oe:
-                        logger.warning(f"[SC] Could not remove fragment {frag}: {oe}")
+    sc_track_id = data.sc_track_id
+    title = data.title or ""
+    artist = data.artist or ""
+    downloadable = data.downloadable
+    permalink_url = data.url or ""
 
-    task_id = sc_downloader.download_content(url, auth_token=auth_token, callback=on_complete, sc_title=title)
-    return {"task_id": task_id}
+    # Mode B: URL-only — resolve track metadata from SC API
+    if not sc_track_id:
+        if not permalink_url:
+            raise HTTPException(status_code=400, detail="Either 'url' or 'sc_track_id' is required.")
+        logger.info("[SC-DL API] Resolving URL: %s", permalink_url)
+        try:
+            track_meta = SoundCloudPlaylistAPI.resolve_track_from_url(permalink_url, auth_token)
+        except AuthExpiredError:
+            raise HTTPException(status_code=401, detail="SoundCloud auth token expired.")
+        except Exception as exc:
+            logger.error("[SC-DL API] resolve_track_from_url failed: %s", exc)
+            raise HTTPException(status_code=502, detail=f"Could not resolve SC URL: {exc}")
+
+        if not track_meta:
+            raise HTTPException(
+                status_code=400,
+                detail="URL does not point to a valid SoundCloud track."
+            )
+        sc_track_id = str(track_meta["id"])
+        title = title or track_meta.get("title", "")
+        artist = artist or track_meta.get("artist", "")
+        downloadable = track_meta.get("downloadable", False)
+        permalink_url = track_meta.get("permalink_url", permalink_url)
+        data = ScDownloadRequest(
+            url=permalink_url, sc_track_id=sc_track_id,
+            title=title, artist=artist,
+            duration_ms=track_meta.get("duration", 0),
+            downloadable=downloadable,
+            sc_playlist_title=data.sc_playlist_title,
+        )
+
+    task_id = sc_downloader.download_track(
+        sc_track_id=sc_track_id,
+        sc_permalink_url=permalink_url,
+        title=title,
+        artist=artist,
+        duration_ms=data.duration_ms,
+        downloadable=downloadable,
+        auth_token=auth_token,
+        sc_playlist_title=data.sc_playlist_title,
+    )
+    return {"status": "ok", "data": {"task_id": task_id}}
 
 
 @app.get("/api/soundcloud/tasks")
 async def get_soundcloud_tasks():
-    """Poll active download tasks. Returns empty dict when no tasks are running."""
+    """Poll all active download tasks."""
     return sc_downloader.tasks
 
 
@@ -1767,6 +1833,75 @@ async def get_soundcloud_task_status(task_id: str):
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
+
+
+# ─── Download History & Deduplication API ────────────────────────────────────
+
+@app.get("/api/soundcloud/history")
+async def get_download_history(
+    limit: int = 100,
+    offset: int = 0,
+    status: Optional[str] = None,
+    device_id: Optional[str] = None,
+    search: Optional[str] = None,
+    this_device_only: bool = False,
+):
+    """
+    Paginated analysis history log for all downloaded tracks.
+
+    Query params:
+      limit           — page size (max 500)
+      offset          — pagination offset
+      status          — filter by status: 'analyzed'|'downloaded'|'failed'|...
+      device_id       — filter to a specific device UUID
+      search          — substring search in title/artist
+      this_device_only— shorthand: filter to current device ID
+    """
+    limit = min(limit, 500)
+    effective_device_id = download_registry.get_current_device_id() if this_device_only else device_id
+    try:
+        rows = download_registry.get_history(
+            limit=limit, offset=offset,
+            status=status, device_id=effective_device_id, search=search,
+        )
+        return {"status": "ok", "data": rows}
+    except Exception as exc:
+        logger.error("[SC History] get_history failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to load history.")
+
+
+@app.get("/api/soundcloud/history/stats")
+async def get_download_stats():
+    """Aggregate statistics: total downloads, analyzed, failed, device count, date range."""
+    try:
+        stats = download_registry.get_stats()
+        stats["device_id"] = download_registry.get_current_device_id()
+        return {"status": "ok", "data": stats}
+    except Exception as exc:
+        logger.error("[SC History] get_stats failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to load stats.")
+
+
+@app.get("/api/soundcloud/check/{sc_track_id}")
+async def check_already_downloaded(sc_track_id: str):
+    """
+    Fast O(1) deduplication check. Returns whether a track is already in the registry.
+    Use before showing a download button in the UI to indicate 'already downloaded' state.
+    """
+    already = download_registry.is_already_downloaded(sc_track_id)
+    return {"status": "ok", "data": {"sc_track_id": sc_track_id, "already_downloaded": already}}
+
+
+@app.delete("/api/soundcloud/history/{sc_track_id}")
+async def delete_history_entry(sc_track_id: str):
+    """
+    Remove a registry entry to allow re-download (e.g. for failed entries).
+    Does NOT delete the file from disk.
+    """
+    ok = download_registry.delete_entry(sc_track_id)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to delete registry entry.")
+    return {"status": "ok", "data": {"deleted": sc_track_id}}
 
 
 @app.post("/api/soundcloud/auth-token")
