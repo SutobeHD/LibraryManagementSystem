@@ -62,6 +62,10 @@ const DjEditDaw = ({ track: initialTrack }) => {
     const fileInputRef = useRef(null);
     const animFrameRef = useRef(null);
     const hasInitialized = useRef(false);
+    // Set to true when handleFileSelect has loaded a .rbep project — tells the
+    // activeTrack loadTrack useEffect to skip re-initializing the regions/audio,
+    // so it doesn't overwrite the 9 parsed regions with a single default region.
+    const skipNextAutoLoad = useRef(false);
 
     // Configurable keyboard shortcuts — loaded from /api/settings on mount.
     // Stored in a ref (not state) so the keydown handler closure always reads
@@ -91,6 +95,16 @@ const DjEditDaw = ({ track: initialTrack }) => {
     // ── LOAD TRACK ──
     useEffect(() => {
         if (!activeTrack) return;
+
+        // Skip auto-load if the track was just hydrated from a .rbep project file.
+        // handleFileSelect has already loaded the audio, parsed 9 edit regions, and
+        // dispatched HYDRATE — running loadTrack() here would overwrite those regions
+        // with a single default full-track region, making the export equal the original.
+        if (skipNextAutoLoad.current) {
+            skipNextAutoLoad.current = false;
+            console.log('[DjEditDaw] Skipping auto-load — regions already hydrated from .rbep');
+            return;
+        }
 
         const loadTrack = async () => {
             try {
@@ -328,6 +342,10 @@ const DjEditDaw = ({ track: initialTrack }) => {
                 await DawEngine.resumeContext();
 
                 dispatch({ type: 'HYDRATE', payload: newState });
+                // Prevent the activeTrack useEffect from re-initializing audio + regions.
+                // Without this flag, the useEffect would replace the 9 parsed regions
+                // with a single default region spanning the full source (= original song).
+                skipNextAutoLoad.current = true;
                 setActiveTrack(newState.trackMeta);
                 toast.success(`Opened: ${projectName}`, { id: 'daw-open' });
 
