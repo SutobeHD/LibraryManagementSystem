@@ -788,18 +788,38 @@ class UsbSyncEngine:
             # Simple XML generation
             root = ET.Element("DJ_PLAYLISTS", Version="1.0.0")
             
-            # Filter tracks if playlist_ids provided
+            # Filter tracks if playlist_ids provided.
+            #
+            # Historical bug: rbox.MasterDb has NO get_playlist() method (it's
+            # get_playlist_by_id) and NO get_playlist_content() method (it's
+            # get_playlist_contents — plural). Both raised AttributeError and were
+            # swallowed by `except: pass`, leaving target_track_ids empty. The
+            # subsequent filter then fell through to "copy all tracks", which in
+            # practice silently skipped everything (SoundCloud streams, unresolved
+            # paths) and reported success with zero files copied.
             target_track_ids = set()
             if playlist_ids:
                 for pl_id in playlist_ids:
                     try:
-                        pl = db.get_playlist(int(pl_id))
-                        if pl:
-                            for t_id in db.get_playlist_content(pl.id):
-                                target_track_ids.add(str(t_id))
-                    except: pass
-            
+                        # get_playlist_contents accepts a string ID and yields
+                        # DjmdContent objects — extract .id from each.
+                        contents = db.get_playlist_contents(str(pl_id))
+                        count = 0
+                        for content in contents:
+                            target_track_ids.add(str(content.id))
+                            count += 1
+                        logger.info(f"Playlist {pl_id}: resolved {count} tracks for USB sync")
+                    except Exception as e:
+                        logger.warning(f"Failed to resolve playlist {pl_id}: {type(e).__name__}: {e}")
+
+                # If the user asked for specific playlists but none resolved,
+                # abort instead of silently copying the entire library.
+                if not target_track_ids:
+                    yield {"stage": "error", "message": "No tracks found in selected playlists (check playlist IDs)", "progress": -1}
+                    return
+
             tracks_to_export = [t for t in db.get_contents() if not target_track_ids or str(t.id) in target_track_ids]
+            logger.info(f"USB sync: {len(tracks_to_export)} tracks to process (filter={'playlists' if target_track_ids else 'full library'})")
             
             collection = ET.SubElement(root, "COLLECTION", Entries=str(len(tracks_to_export)))
             
@@ -882,18 +902,19 @@ class UsbSyncEngine:
                 if i % 10 == 0:
                     yield {"stage": "lib_legacy", "message": f"Copying & Exporting: {i}/{len(tracks_to_export)}", "progress": int((i/max(len(tracks_to_export),1))*90)}
             
-            # Also export the Playlists if provided
+            # Also export the Playlists if provided.
+            # Same rbox method-name fix as above (get_playlist_by_id + get_playlist_contents).
             if playlist_ids:
                 node_pl = ET.SubElement(root, "PLAYLISTS")
-                # Simplified recursive playlist export
                 for pl_id in playlist_ids:
                     try:
-                        pl = db.get_playlist(int(pl_id))
+                        pl = db.get_playlist_by_id(str(pl_id))
                         if pl:
-                            pl_elem = ET.SubElement(node_pl, "NODE", Name=getattr(pl, 'name', ''), Type="1")
-                            for t_id in db.get_playlist_content(pl.id):
-                                ET.SubElement(pl_elem, "TRACK", Key=str(t_id))
-                    except: pass
+                            pl_elem = ET.SubElement(node_pl, "NODE", Name=getattr(pl, 'name', '') or '', Type="1")
+                            for content in db.get_playlist_contents(str(pl_id)):
+                                ET.SubElement(pl_elem, "TRACK", Key=str(content.id))
+                    except Exception as e:
+                        logger.warning(f"Failed to export playlist {pl_id} to XML: {type(e).__name__}: {e}")
 
             tree = ET.ElementTree(root)
             with open(target, "wb") as f:
