@@ -823,32 +823,46 @@ class UsbSyncEngine:
             
             collection = ET.SubElement(root, "COLLECTION", Entries=str(len(tracks_to_export)))
             
+            skipped_streaming = 0
+            skipped_missing = 0
+            copied_ok = 0
+
             for i, t in enumerate(tracks_to_export):
                 artist_name = ""
                 if getattr(t, 'artist_id', None):
                     try: artist_name = getattr(db.get_artist(t.artist_id), 'name', '')
                     except: pass
-                
+
                 album_name = ""
                 if getattr(t, 'album_id', None):
                     try: album_name = getattr(db.get_album(t.album_id), 'name', '')
                     except: pass
-                
-                # Original local path — folder_path may or may not end with separator
-                local_folder = getattr(t, 'folder_path', '') or ''
-                local_file = getattr(t, 'file_name_l', '') or ''
-                # Ensure exactly one path separator between folder and filename
-                if local_folder and local_file and not local_folder.endswith(('/', '\\')):
-                    local_path_str = f"{local_folder}/{local_file}"
-                else:
-                    local_path_str = f"{local_folder}{local_file}"
-                
+
+                # rbox's DjmdContent.folder_path is actually the FULL FILE PATH
+                # (not a folder), e.g. '<user_dir>/Music/.../MTHN - Beginning.m4a'.
+                # The old code did `folder_path + '/' + file_name_l` which doubled
+                # the filename ('/MTHN - Beginning.m4a/MTHN - Beginning.m4a') and
+                # silently failed for every single track — reporting "sync complete"
+                # with zero files copied. See debug survey: 3322/3322 local tracks
+                # have folder_path as a full file path, 0 have it as a real folder.
+                local_path_str = getattr(t, 'folder_path', '') or ''
+                local_file = getattr(t, 'file_name_l', '') or os.path.basename(local_path_str)
+
+                # Skip streaming-service pseudo-tracks (SoundCloud, Spotify, etc.)
+                # — they store a URI scheme in folder_path instead of a real path.
+                if ':' in local_path_str[:12] and not local_path_str[1:3] == ':\\' and not local_path_str[1:3] == ':/':
+                    # Matches soundcloud:tracks:123, spotify:track:abc, etc.
+                    # but NOT Windows drive letters like "C:/" or "C:\"
+                    if local_path_str.split(':', 1)[0].lower() in ('soundcloud', 'spotify', 'tidal', 'beatport', 'http', 'https'):
+                        skipped_streaming += 1
+                        continue
+
                 # Req 30: Resolve symlinks to avoid infinite loops and get absolute real paths
                 try:
                     local_path = Path(local_path_str).resolve(strict=False)
                 except Exception:
                     local_path = Path(local_path_str)
-                
+
                 usb_dest_path = None
                 if local_path.exists():
                     usb_dest_path = self._get_safe_dest_path(artist_name, album_name, local_file)
@@ -858,6 +872,7 @@ class UsbSyncEngine:
                             # Ignore fine-grained chunk progress for now to keep UI simpler,
                             # but it's physically chunked and safe.
                             pass
+                        copied_ok += 1
                     except OSError as e:
                         logger.error(f"Copy failed for {local_file}: {e}")
                         
@@ -875,6 +890,7 @@ class UsbSyncEngine:
                         if isinstance(e, PermissionError) or err_code in (5, 32):
                             logger.warning(f"PermissionError: file '{local_file}' may be locked by Rekordbox. Skipping without aborting batch.")
                 else:
+                    skipped_missing += 1
                     logger.warning(f"Audio file missing locally, skipping copy: {local_path}")
                 
                 # XML Location -> URL Encode
@@ -923,8 +939,17 @@ class UsbSyncEngine:
             # Req 22: UI-state mismatch -> Give OS buffers 1.5s to flush before declaring 100% complete
             yield {"stage": "flushing", "message": "Flushing OS file buffers to USB, please wait...", "progress": 99}
             time.sleep(1.5)
-            
-            yield {"stage": "complete", "message": "Library Legacy (XML & Audio) synced securely.", "progress": 100}
+
+            summary = f"{copied_ok} copied, {skipped_missing} missing locally, {skipped_streaming} streaming (skipped)"
+            logger.info(f"Legacy sync finished: {summary}")
+            yield {
+                "stage": "complete",
+                "message": f"Synced: {summary}",
+                "progress": 100,
+                "copied": copied_ok,
+                "skipped_missing": skipped_missing,
+                "skipped_streaming": skipped_streaming,
+            }
         except Exception as e:
             logger.error(f"Library Legacy sync failed: {e}")
             yield {"stage": "error", "message": f"Library Legacy sync failed: {e}", "progress": -1}
