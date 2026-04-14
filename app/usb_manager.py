@@ -428,6 +428,11 @@ class UsbSyncEngine:
     def __init__(self, local_db_path: str, usb_drive: str, filesystem: str = ""):
         self.local_path = Path(local_db_path)
         self.usb_drive = usb_drive
+        # Normalize bare drive letters ("E:") to drive root ("E:\") so that
+        # Path("E:") / "PIONEER" doesn't produce relative "E:PIONEER" instead
+        # of the expected absolute "E:\PIONEER".
+        if len(usb_drive) == 2 and usb_drive[1] == ':':
+            usb_drive = usb_drive + '\\'
         self.usb_root = Path(usb_drive)  # drive root, e.g. Path("E:\\")
         self.usb_pioneer = self.usb_root / "PIONEER"
         self.usb_rb = self.usb_pioneer / "rekordbox"
@@ -775,6 +780,20 @@ class UsbSyncEngine:
                 except: pass
             raise e
 
+    @staticmethod
+    def _xml_safe(value: str) -> str:
+        """Strip characters illegal in XML 1.0 attribute values.
+
+        XML 1.0 only allows: #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD]
+        Track names from Rekordbox can contain ASCII control characters (e.g.
+        \\x13 = DC3) which cause xml.etree.ElementTree to write values that it
+        then refuses to parse — producing a RecordBox XML that Rekordbox itself
+        cannot read.
+        """
+        import re
+        # Remove everything below 0x20 except tab (0x09), LF (0x0A), CR (0x0D)
+        return re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', str(value or ''))
+
     def _sync_library_legacy(self, profile: Dict, playlist_ids: List[str] = None) -> Generator[Dict, None, None]:
         """Legacy Sync (Library Legacy): Exports library and audio to USB."""
         yield {"stage": "lib_legacy", "message": "Starting Library Legacy (XML & Audio) sync...", "progress": 0}
@@ -905,22 +924,29 @@ class UsbSyncEngine:
                 # XML Location -> URL Encode
                 import urllib.parse
                 if usb_dest_path:
-                    # Map to the new USB location file://localhost/D:/Contents/...
-                    loc_val = f"file://localhost/{str(usb_dest_path)}".replace("\\", "/")
+                    # Build absolute path string: Path("E:\\PIONEER\\...") → "E:/PIONEER/..."
+                    # Use resolve() to guarantee an absolute path (drive letter + backslash root)
+                    # before stringifying, so "E:PIONEER" never appears in the URL.
+                    abs_dest = usb_dest_path.resolve()
+                    loc_val = f"file://localhost/{str(abs_dest)}".replace("\\", "/")
                 else:
-                    # Give fallback
                     loc_val = f"file://localhost/{local_path_str}".replace("\\", "/")
-                    
-                loc_val = urllib.parse.quote(loc_val, safe=":/")
-                
+
+                # Percent-encode everything except already-safe URL chars.
+                # safe=":/." keeps drive letters, slashes, and dots unencoded.
+                loc_val = urllib.parse.quote(loc_val, safe=":/./-_~")
+
+                # _xml_safe strips ASCII control characters (e.g. \x13 DC3) that
+                # some Rekordbox track names contain — they make ElementTree write
+                # invalid XML that nothing (including Rekordbox) can re-parse.
                 ET.SubElement(collection, "TRACK",
                     TrackID=str(t.id),
-                    Name=getattr(t, 'title', '') or '',
-                    Artist=artist_name,
-                    Album=album_name,
+                    Name=self._xml_safe(getattr(t, 'title', '') or ''),
+                    Artist=self._xml_safe(artist_name),
+                    Album=self._xml_safe(album_name),
                     TotalTime=str(int(getattr(t, 'length', 0) or 0)),
                     AverageBpm=f"{float(getattr(t, 'bpm', 0) or 0):.2f}",
-                    Tonality=str(getattr(t, 'key_id', '') or ''),
+                    Tonality=self._xml_safe(getattr(t, 'key_id', '') or ''),
                     Rating=str(getattr(t, 'rating', 0) or 0),
                     Location=loc_val,
                 )
@@ -935,11 +961,22 @@ class UsbSyncEngine:
                     try:
                         pl = db.get_playlist_by_id(str(pl_id))
                         if pl:
-                            pl_elem = ET.SubElement(node_pl, "NODE", Name=getattr(pl, 'name', '') or '', Type="1")
+                            pl_elem = ET.SubElement(node_pl, "NODE",
+                                Name=self._xml_safe(getattr(pl, 'name', '') or ''), Type="1")
                             for content in db.get_playlist_contents(str(pl_id)):
                                 ET.SubElement(pl_elem, "TRACK", Key=str(content.id))
                     except Exception as e:
                         logger.warning(f"Failed to export playlist {pl_id} to XML: {type(e).__name__}: {e}")
+
+            # Remove stale .corrupt leftover from a previous failed sync before
+            # writing the new file — otherwise the reader sees the old bad file.
+            corrupt_path = target.with_suffix(".xml.corrupt")
+            if corrupt_path.exists():
+                try:
+                    corrupt_path.unlink()
+                    logger.info(f"Removed stale corrupt XML: {corrupt_path}")
+                except Exception as e:
+                    logger.warning(f"Could not remove corrupt XML: {e}")
 
             tree = ET.ElementTree(root)
             with open(target, "wb") as f:
