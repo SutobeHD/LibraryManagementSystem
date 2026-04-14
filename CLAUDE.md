@@ -7,11 +7,11 @@
 ## MANDATORY WORKFLOW — Follow This Every Session
 
 ### Start of Every Task
-1. **Read `.claude/docs/FILE_MAP.md` first** — identifies the exact files to edit without blind search
-2. Read the relevant index file in `.claude/docs/` for the area you're working in
+1. **Read `docs/FILE_MAP.md` first** — identifies the exact files to edit without blind search
+2. Read the relevant index file in `docs/` for the area you're working in
 
 ### After Every Edit Session (NON-OPTIONAL)
-1. **Update docs** — update `FILE_MAP.md` and the relevant `.claude/docs/` index file to reflect any added/removed/renamed files or changed APIs
+1. **Update docs** — update `FILE_MAP.md` and the relevant `docs/` index file to reflect any added/removed/renamed files or changed APIs
 2. **Git commit** — create a descriptive commit after every completed task. Format: `type(scope): description`. Never leave work uncommitted.
 
 ```bash
@@ -140,8 +140,8 @@ Rules:
 
 ### 4. Token Efficiency (Keep Context Lean)
 
-- **Read `.claude/docs/FILE_MAP.md` first** — single file that maps the entire codebase; never search blindly
-- **Then read the relevant index** (`.claude/docs/frontend-index.md`, `backend-index.md`, `rust-index.md`) for the area you're changing
+- **Read `docs/FILE_MAP.md` first** — single file that maps the entire codebase; never search blindly
+- **Then read the relevant index** (`docs/frontend-index.md`, `backend-index.md`, `rust-index.md`) for the area you're changing
 - **Targeted edits** over full rewrites — use Edit tool, not rewrite entire files
 - **Don't re-read files** already read in the same conversation
 - **One concern per PR/commit** — don't bundle unrelated changes
@@ -181,15 +181,15 @@ Rules:
 
 ### 7. Update Docs After Every Change (MANDATORY)
 
-All index files live in `.claude/docs/`. After **any** code change, update the relevant files — this is not optional:
+All index files live in `docs/`. After **any** code change, update the relevant files — this is not optional:
 
 | Changed area | Update these files |
 |---|---|
-| Any file added/renamed/deleted | `.claude/docs/FILE_MAP.md` |
-| React components | `.claude/docs/frontend-index.md` + `FILE_MAP.md` |
-| FastAPI routes or Python modules | `.claude/docs/backend-index.md` + `FILE_MAP.md` |
-| Rust commands, modules, events | `.claude/docs/rust-index.md` + `FILE_MAP.md` |
-| System data flows or architecture | `.claude/docs/architecture.md` |
+| Any file added/renamed/deleted | `docs/FILE_MAP.md` |
+| React components | `docs/frontend-index.md` + `FILE_MAP.md` |
+| FastAPI routes or Python modules | `docs/backend-index.md` + `FILE_MAP.md` |
+| Rust commands, modules, events | `docs/rust-index.md` + `FILE_MAP.md` |
+| System data flows or architecture | `docs/architecture.md` |
 
 Then commit: `git commit -m "type(scope): description"`
 
@@ -265,7 +265,7 @@ Key ports: Frontend `5173`, Backend `8000`, Tauri dev uses Vite proxy.
 | Rust audio engine        | `src-tauri/src/audio/`                 |
 | Tauri commands           | `src-tauri/src/audio/commands.rs`      |
 | OAuth/SoundCloud (Rust)  | `src-tauri/src/soundcloud_client.rs`   |
-| Architecture overview    | `.claude/docs/architecture.md`         |
-| Frontend component index | `.claude/docs/frontend-index.md`       |
-| Backend module index     | `.claude/docs/backend-index.md`        |
-| Rust command index       | `.claude/docs/rust-index.md`           |
+| Architecture overview    | `docs/architecture.md`         |
+| Frontend component index | `docs/frontend-index.md`       |
+| Backend module index     | `docs/backend-index.md`        |
+| Rust command index       | `docs/rust-index.md`           |

@@ -181,11 +181,11 @@
 
 | File | Purpose |
 |------|---------|
-| `.claude/docs/FILE_MAP.md` | **This file** — master project navigation map |
-| `.claude/docs/architecture.md` | System architecture, data flows, security model, performance characteristics |
-| `.claude/docs/frontend-index.md` | React component index: props, key functions, Tauri IPC calls |
-| `.claude/docs/backend-index.md` | FastAPI routes, Python class/method index, response envelopes |
-| `.claude/docs/rust-index.md` | Tauri commands, Rust module index, event system, crate list |
+| `docs/FILE_MAP.md` | **This file** — master project navigation map |
+| `docs/architecture.md` | System architecture, data flows, security model, performance characteristics |
+| `docs/frontend-index.md` | React component index: props, key functions, Tauri IPC calls |
+| `docs/backend-index.md` | FastAPI routes, Python class/method index, response envelopes |
+| `docs/rust-index.md` | Tauri commands, Rust module index, event system, crate list |
 | `.claude/agents/director.md` | Orchestrator agent — routes tasks to specialist agents |
 | `.claude/agents/frontend-agent.md` | React/TS specialist |
 | `.claude/agents/backend-agent.md` | Python/FastAPI specialist |

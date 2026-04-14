@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — RB Editor Pro
 
-> Quick-reference architecture map. Read `.claude/docs/FILE_MAP.md` first for file-level navigation, then this file for data flows and system design.
+> Quick-reference architecture map. Read `docs/FILE_MAP.md` first for file-level navigation, then this file for data flows and system design.
 > Last updated: 2026-04-06
 
 ---
