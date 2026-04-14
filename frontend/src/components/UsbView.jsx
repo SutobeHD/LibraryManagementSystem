@@ -332,12 +332,17 @@ const UsbView = () => {
         setSyncing(sel.device_id);
         setSyncProgress({ stage: 'starting', message: 'Preparing...', progress: 0 });
         try {
+            // USB sync is a long-running blocking call (file copy loop can take
+            // several minutes for large playlists). The default 10s Axios timeout
+            // would abort the HTTP request while the backend is still copying,
+            // causing the UI to show "Sync failed" even though the sync itself
+            // completes successfully on the server. Disable the timeout here.
             const res = await api.post('/api/usb/sync', {
                 device_id: sel.device_id,
                 sync_type: syncType,
                 playlist_ids: playlistIds,
                 library_types: sel.library_types || ["library_legacy"]
-            });
+            }, { timeout: 0 });
             const result = res.data.result;
             setSyncProgress({ ...result, progress: 100 });
             if (res.data.status === 'success') {

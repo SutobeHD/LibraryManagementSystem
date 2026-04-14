@@ -828,15 +828,24 @@ class UsbSyncEngine:
             copied_ok = 0
 
             for i, t in enumerate(tracks_to_export):
+                # rbox API uses *_by_id suffix for single-entity lookups.
+                # Previous code called db.get_artist / db.get_album which don't
+                # exist — they raised AttributeError that got silently swallowed
+                # by `except: pass`, producing empty artist/album folder names
+                # on USB ("UnknownArtist/UnknownAlbum" for every track).
                 artist_name = ""
                 if getattr(t, 'artist_id', None):
-                    try: artist_name = getattr(db.get_artist(t.artist_id), 'name', '')
-                    except: pass
+                    try:
+                        artist_name = getattr(db.get_artist_by_id(str(t.artist_id)), 'name', '') or ''
+                    except Exception as e:
+                        logger.debug(f"artist lookup failed for id={t.artist_id}: {e}")
 
                 album_name = ""
                 if getattr(t, 'album_id', None):
-                    try: album_name = getattr(db.get_album(t.album_id), 'name', '')
-                    except: pass
+                    try:
+                        album_name = getattr(db.get_album_by_id(str(t.album_id)), 'name', '') or ''
+                    except Exception as e:
+                        logger.debug(f"album lookup failed for id={t.album_id}: {e}")
 
                 # rbox's DjmdContent.folder_path is actually the FULL FILE PATH
                 # (not a folder), e.g. '<user_dir>/Music/.../MTHN - Beginning.m4a'.
