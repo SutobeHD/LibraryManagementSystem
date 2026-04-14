@@ -738,59 +738,81 @@ class LiveRekordboxDB:
         val_l = cond["ValueLeft"]
         val_r = cond["ValueRight"]
         
+        # Map Rekordbox smart-playlist PropertyName → track dict field.
+        # "grouping" = ColorID (Rekordbox color tag, stored as integer 0-8).
+        # "duration" = TotalTime in seconds (rbox `length` column).
+        # "bpm"      = BPM decimal (already ÷100 in track cache); rules store BPM×100.
         field_map = {
-            "artist": "Artist",
-            "title": "Title",
-            "album": "Album",
-            "genre": "Genre",
-            "label": "Label",
-            "bpm": "BPM",
-            "rating": "Rating",
-            "comment": "Comment",
-            "key": "Key",
-            "myTag": "TagIDs"
+            "artist":    "Artist",
+            "title":     "Title",
+            "album":     "Album",
+            "genre":     "Genre",
+            "label":     "Label",
+            "bpm":       "BPM",
+            "rating":    "Rating",
+            "comment":   "Comment",
+            "key":       "Key",
+            "myTag":     "TagIDs",
+            "grouping":  "ColorID",   # Rekordbox color label, used as grouping
+            "duration":  "TotalTime", # Track length in seconds
         }
-        
+
         field = field_map.get(rule_id)
-        if not field: return False
-        
-        target = track.get(field)
-        if target is None: return False
-        
-        res = False
-        # MyTag Matching (Operator 8 = Matches ID)
-        if rule_id == "myTag":
-            if op == 8: return val_l in target # target is TagIDs list
-            if op == 9: return val_l not in target # Does not match Tag ID? (Assumption)
+        if not field:
+            logger.debug("_check_condition: unknown rule_id=%r — skipped", rule_id)
             return False
 
-        # String Matching
+        target = track.get(field)
+        if target is None: return False
+
+        res = False
+        # MyTag Matching (Operator 8 = Tag ID is in list, Operator 9 = not in list)
+        # IMPORTANT: rbox stores IDs as unsigned 32-bit integers ("3979022742"),
+        # but the SmartList XML uses signed 32-bit ("-315944554") for large IDs.
+        # Both forms represent the same bit pattern — normalize ValueLeft to unsigned.
+        if rule_id == "myTag":
+            try:
+                n = int(val_l)
+                norm = str(n & 0xFFFFFFFF) if n < 0 else val_l
+            except (ValueError, TypeError):
+                norm = val_l
+            if op == 8: return norm in target  # target is list of unsigned tag ID strings
+            if op == 9: return norm not in target
+            return False
+
+        # String Matching (artist, title, album, genre, label, comment, key)
+        # op=8/9 are used when Rekordbox shows a dropdown (e.g. genre picked from list)
+        # rather than a free-text box — semantics are "Is" / "Is not".
         if isinstance(target, str):
             t_low = target.lower()
             v_low = val_l.lower() if val_l else ""
-            if op == 1: res = v_low in t_low # Contains
-            elif op == 2: res = v_low not in t_low # Does not contain
-            elif op == 3: res = t_low == v_low # Is
-            elif op == 4: res = t_low != v_low # Is not
-            
-        # Numeric Matching
+            if op == 1:            res = v_low in t_low        # Contains
+            elif op == 2:          res = v_low not in t_low    # Does not contain
+            elif op in (3, 8):     res = t_low == v_low        # Is / Dropdown-Is
+            elif op in (4, 9):     res = t_low != v_low        # Is not / Dropdown-Is not
+
+        # Numeric Matching (bpm, rating, grouping/ColorID, duration)
         elif isinstance(target, (int, float)):
             try:
-                l_num = float(val_l) if val_l else 0
-                r_num = float(val_r) if val_r else 0
-                
-                compare_val = target
-                if rule_id == "BPM":
-                    compare_val = target * 100 # Rekordbox stores BPM*100 in rules
-                
-                if op == 1 or op == 3: res = abs(compare_val - l_num) < 0.1
-                elif op == 4: res = abs(compare_val - l_num) >= 0.1
-                elif op == 5: res = l_num <= compare_val <= r_num # Between
-                elif op == 6: res = compare_val > l_num
-                elif op == 7: res = compare_val < l_num
-            except: res = False
-            
-        # if res: logger.info(f"Rule MATCH: {rule_id} {op} {val_l} matches {target}")
+                l_num = float(val_l) if val_l else 0.0
+                r_num = float(val_r) if val_r else 0.0
+
+                compare_val = float(target)
+                # BPM: track cache stores decimal BPM (e.g. 132.0).
+                # Rekordbox smart-playlist rules store BPM×100 (e.g. 13200).
+                # Rule PropertyName is lowercase "bpm" — fix: match lowercase.
+                if rule_id == "bpm":
+                    compare_val = compare_val * 100.0
+
+                if op == 1 or op == 3:   res = abs(compare_val - l_num) < 0.5  # Equals (wider tolerance for BPM×100)
+                elif op == 4:            res = abs(compare_val - l_num) >= 0.5  # Not equals
+                elif op == 5:            res = l_num <= compare_val <= r_num    # Between
+                elif op == 6:            res = compare_val > l_num              # Greater than
+                elif op == 7:            res = compare_val < l_num              # Less than
+            except Exception as exc:
+                logger.debug("_check_condition numeric error: %s", exc)
+                res = False
+
         return res
 
     def get_track_details(self, tid):
