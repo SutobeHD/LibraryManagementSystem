@@ -968,6 +968,46 @@ def gen_smart(r: SmartPlReq):
     status = LibraryTools.generate_smart_playlists(r.artist_threshold, r.label_threshold)
     return {"status": "success" if status else "error"}
 
+
+@app.post("/api/library/scan-folder")
+async def scan_folder(data: Dict[str, str]):
+    """
+    Trigger an import scan of a specific directory.
+    Walks the folder recursively and imports any audio files not yet in the library.
+    Long-running — runs in a background thread via BackgroundTasks.
+    """
+    path_str = data.get("path", "").strip()
+    if not path_str:
+        raise HTTPException(status_code=400, detail="'path' is required.")
+
+    scan_path = Path(path_str)
+    if not scan_path.exists() or not scan_path.is_dir():
+        raise HTTPException(status_code=404, detail=f"Directory not found: {path_str}")
+
+    AUDIO_EXTENSIONS = {".mp3", ".wav", ".flac", ".aiff", ".aif", ".ogg", ".opus", ".m4a", ".aac"}
+
+    def _scan():
+        imported = 0
+        skipped = 0
+        for audio_file in scan_path.rglob("*"):
+            if audio_file.suffix.lower() not in AUDIO_EXTENSIONS:
+                continue
+            try:
+                result = ImportManager.process_import(audio_file)
+                if result:
+                    imported += 1
+                else:
+                    skipped += 1
+            except Exception as exc:
+                logger.warning("[Scan] Skipped %s: %s", audio_file.name, exc)
+                skipped += 1
+        logger.info("[Scan] Folder scan complete: path=%s imported=%d skipped=%d", path_str, imported, skipped)
+
+    import threading
+    thread = threading.Thread(target=_scan, daemon=True, name=f"scan-{scan_path.name}")
+    thread.start()
+    return {"status": "ok", "data": {"message": f"Scanning {path_str} in background…"}}
+
 @app.get("/api/artwork")
 async def get_artwork(path: str):
     """

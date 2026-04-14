@@ -49,6 +49,7 @@ All commands registered via `tauri::Builder::default().invoke_handler(tauri::gen
 | `load_audio` | `path: String, state: State<AudioCommandState>, app: AppHandle` | `Result<AudioInfo, String>` | Load audio file via memory map, validate path + extension, initialize playback engine |
 | `get_3band_waveform` | `path: String, state: State<AudioCommandState>` | `Result<WaveformData, String>` | Compute FFT → 3-band frequency arrays for waveform display |
 | `start_project_export` | `params: ExportParams, state: State<AudioCommandState>, app: AppHandle` | `Result<(), String>` | Start async export; emits `export_progress` events as it runs |
+| `list_audio_devices` | _(none)_ | `Result<Vec<String>, String>` | Enumerate CPAL output devices; first entry is always `"System Default"`. Uses `spawn_blocking` to avoid blocking async runtime |
 
 `WaveformData` shape:
 ```rust
@@ -119,7 +120,7 @@ Implements OAuth 2.1 + PKCE:
 | `serde` / `serde_json` | — | Serialization for IPC types and payloads |
 | `reqwest` | — | HTTP client for OAuth token exchange |
 | `open` | — | Open URLs in system browser |
-| `log` | — | Logging facade (impl via tauri's built-in logger) |
+| `log` | 0.4 | Logging facade (impl via tauri's built-in logger). `log::info!`, `log::warn!`, etc. |
 
 ---
 

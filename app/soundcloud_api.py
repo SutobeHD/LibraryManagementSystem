@@ -150,6 +150,22 @@ class RateLimitError(Exception):
 # Rate-Limited HTTP helper
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _get_proxy() -> Optional[dict]:
+    """
+    Read the HTTP proxy URL from app settings (persisted in settings.json).
+    Returns a requests-compatible proxies dict, or None if no proxy is configured.
+    Used by all SoundCloud API calls so corporate firewall users can route traffic.
+    """
+    try:
+        from .services import SettingsManager
+        proxy_url = (SettingsManager.load() or {}).get("http_proxy", "").strip()
+        if proxy_url:
+            return {"http": proxy_url, "https": proxy_url}
+    except Exception as exc:
+        logger.debug("[SC] _get_proxy: could not read settings: %s", exc)
+    return None
+
+
 def _sc_get(url: str, headers: dict, params: dict = None, max_retries: int = 3, timeout: int = 15) -> requests.Response:
     """
     Perform a GET request against the SoundCloud API with automatic 429 backoff.
@@ -168,7 +184,7 @@ def _sc_get(url: str, headers: dict, params: dict = None, max_retries: int = 3, 
     for attempt in range(max_retries + 1):
         try:
             logger.debug(f"[SC] GET Request to {url} (params: {params})")
-            resp = requests.get(url, headers=headers, params=params, timeout=timeout)
+            resp = requests.get(url, headers=headers, params=params, timeout=timeout, proxies=_get_proxy())
             logger.info(f"[SC] Response {resp.status_code} from {url}")
         except requests.RequestException as exc:
             logger.warning(f"[SC] Network error on attempt {attempt + 1}: {exc}")

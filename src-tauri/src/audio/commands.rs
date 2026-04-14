@@ -52,6 +52,36 @@ pub async fn get_3band_waveform(path: String) -> Result<serde_json::Value, Strin
     }).await.map_err(|e| e.to_string())?
 }
 
+/// List all available audio output device names on this machine.
+///
+/// Uses CPAL's default host to enumerate output devices. Returns a list of
+/// human-readable device names the user can choose from in Settings.
+/// The first entry is always "System Default" (empty string mapped to CPAL's default).
+///
+/// # Errors
+/// Returns `Err(String)` if the CPAL host fails to enumerate devices.
+#[command]
+pub async fn list_audio_devices() -> Result<Vec<String>, String> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    tokio::task::spawn_blocking(|| {
+        let host = cpal::default_host();
+        let devices = host
+            .output_devices()
+            .map_err(|e| format!("Failed to enumerate audio output devices: {}", e))?;
+        let mut names = vec!["System Default".to_string()];
+        for device in devices {
+            match device.name() {
+                Ok(name) => names.push(name),
+                Err(e) => log::warn!("Skipping device with unreadable name: {}", e),
+            }
+        }
+        log::info!("[Audio] Enumerated {} output devices", names.len());
+        Ok(names)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 use crate::audio::export::{ProjectState, render_project};
 
 #[command]
