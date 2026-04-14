@@ -90,7 +90,7 @@
 | `frontend/src/components/InsightsView.jsx` | Library analytics: low quality, no artwork, lost tracks, bitrate stats |
 | `frontend/src/components/RankingView.jsx` | Track ranking/sorting by quality metrics |
 | `frontend/src/components/ImportView.jsx` | Import wizard: add tracks from file or API |
-| `frontend/src/components/SettingsView.jsx` | App settings: paths, preferences, calls `GET/POST /api/settings` |
+| `frontend/src/components/SettingsView.jsx` | **Tabbed** preferences panel (8 tabs): Library, Backup, Export, Audio (CPAL device), Analysis quality, Appearance (band colors + locale), Shortcuts (key capture), Network (proxy). Calls `GET/POST /api/settings`. |
 | `frontend/src/components/ToolsView.jsx` | Batch operations: rename, clean titles, find duplicates, batch comments |
 | `frontend/src/components/DesignView.jsx` | UI theme/design preview and customization |
 | `frontend/src/components/WaveformEditor.jsx` | Legacy waveform editor (superseded by `DjEditDaw`) |
@@ -149,7 +149,7 @@
 | `src-tauri/src/audio/engine.rs` | `AudioEngine`/`AudioController` — Symphonia codec decoding, memory-mapped file loading (memmap2, zero-copy), decoder abstraction for MP3/FLAC/WAV/ALAC/ISOMP4 |
 | `src-tauri/src/audio/playback.rs` | `PlaybackEngine` — CPAL device-agnostic audio output, ringbuf lock-free sample queue, stream init + error recovery |
 | `src-tauri/src/audio/analysis.rs` | `compute_waveform` (RustFFT), `estimate_bpm`, `detect_key` (chromatic) — 3-band freq split: low 20–300Hz, mid 300Hz–4kHz, high 4kHz–20kHz |
-| `src-tauri/src/audio/commands.rs` | Tauri IPC handlers: `load_audio`, `get_3band_waveform`, `start_project_export` — all return `Result<T, String>`. `AudioCommandState` shared state |
+| `src-tauri/src/audio/commands.rs` | Tauri IPC handlers: `load_audio`, `get_3band_waveform`, `start_project_export`, `list_audio_devices` (CPAL output device enumeration) — all return `Result<T, String>`. `AudioCommandState` shared state |
 | `src-tauri/src/audio/export.rs` | `render_project` — offline audio synthesis. Structs: `AudioRegion`, `ProjectState`, `Fade` |
 | `src-tauri/src/audio/metadata.rs` | Tag read/write via lofty: ID3 (MP3), FLAC tags, ALAC metadata |
 | `src-tauri/build.rs` | Tauri build script (required, do not modify) |

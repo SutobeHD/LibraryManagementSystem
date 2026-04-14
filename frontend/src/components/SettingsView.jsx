@@ -1,478 +1,819 @@
-import React, { useState, useEffect } from 'react';
+/**
+ * SettingsView — Tabbed preferences panel.
+ *
+ * Tabs:
+ *   Library   — DB mode, scan folders, library filter
+ *   Backup    — retention, auto-backup interval, archive frequency
+ *   Export    — format, bitrate, sample rate
+ *   Audio     — output device selection (via Tauri CPAL enumeration)
+ *   Analysis  — quality preset (Fast / Standard / Thorough)
+ *   Appearance— waveform band colors, language/locale
+ *   Shortcuts — configurable DAW keyboard shortcuts
+ *   Network   — HTTP proxy for SoundCloud API calls
+ *
+ * All settings are persisted via POST /api/settings (arbitrary JSON).
+ * The backend's SettingsManager handles load/save transparently.
+ */
+
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api/api';
-import { Settings, Database, HardDrive, RefreshCw, Save, Trash2, Shield, User, Globe, Moon, Bell, Info, CheckCircle, AlertCircle, FileOutput, Power, Folder, Check } from 'lucide-react';
+import toast from 'react-hot-toast';
+import {
+    Settings, Database, HardDrive, RefreshCw, Save, Trash2, Shield,
+    User, Globe, Moon, Bell, Info, CheckCircle, AlertCircle, FileOutput,
+    Power, Folder, Check, Plus, X, Speaker, Sliders, Keyboard,
+    Wifi, Palette, Music, FolderOpen, ChevronRight
+} from 'lucide-react';
 
+// ── Default settings ──────────────────────────────────────────────────────────
+// Merged with whatever the backend returns; unrecognised keys are preserved.
+const DEFAULTS = {
+    // Library
+    backup_retention_days: 7,
+    auto_backup: true,
+    archive_frequency: 'daily',
+    auto_backup_interval_min: 30,   // 0 = session-only
+    remember_lib_mode: false,
+    hide_streaming: false,
+    scan_folders: [],               // extra watched folders
+
+    // Export
+    export_format: 'xml',
+    export_bitrate: '320',
+    export_sample_rate: '44100',
+
+    // Audio
+    audio_output_device: '',        // '' = system default
+
+    // Analysis
+    analysis_quality: 'standard',  // 'fast' | 'standard' | 'thorough'
+    ranking_filter_mode: 'all',
+    insights_bitrate_threshold: 320,
+    insights_playcount_threshold: 0,
+    artist_view_threshold: 0,
+
+    // Appearance
+    waveform_visual_mode: 'blue',
+    waveform_color_low: '#ef4444',
+    waveform_color_mid: '#22c55e',
+    waveform_color_high: '#3b82f6',
+    locale: 'de',                  // 'de' | 'en'
+
+    // Shortcuts (action → key-combo string)
+    shortcuts: {
+        play_pause:  'Space',
+        jump_start:  'Home',
+        jump_end:    'End',
+        scrub_back:  'ArrowLeft',
+        scrub_fwd:   'ArrowRight',
+        split:       'Ctrl+E',
+        delete:      'Delete',
+        undo:        'Ctrl+Z',
+        redo:        'Ctrl+Shift+Z',
+        copy:        'Ctrl+C',
+        paste:       'Ctrl+V',
+        duplicate:   'Ctrl+D',
+        save:        'Ctrl+S',
+        open:        'Ctrl+O',
+    },
+
+    // Network
+    http_proxy: '',
+    sc_sync_folder_id: '',
+};
+
+const SHORTCUT_LABELS = {
+    play_pause:  'Play / Pause',
+    jump_start:  'Jump to Start',
+    jump_end:    'Jump to End',
+    scrub_back:  'Scrub Back (1 Beat)',
+    scrub_fwd:   'Scrub Forward (1 Beat)',
+    split:       'Split Region',
+    delete:      'Ripple Delete',
+    undo:        'Undo',
+    redo:        'Redo',
+    copy:        'Copy Selection',
+    paste:       'Paste / Insert',
+    duplicate:   'Duplicate',
+    save:        'Save Project',
+    open:        'Open Project',
+};
+
+const TABS = [
+    { id: 'library',    label: 'Library',    icon: Database },
+    { id: 'backup',     label: 'Backup',     icon: HardDrive },
+    { id: 'export',     label: 'Export',     icon: FileOutput },
+    { id: 'audio',      label: 'Audio',      icon: Music },
+    { id: 'analysis',   label: 'Analysis',   icon: Sliders },
+    { id: 'appearance', label: 'Appearance', icon: Palette },
+    { id: 'shortcuts',  label: 'Shortcuts',  icon: Keyboard },
+    { id: 'network',    label: 'Network',    icon: Wifi },
+];
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Render a toggle switch */
+const Toggle = ({ checked, onChange, label, sub }) => (
+    <div className="flex items-center justify-between">
+        <div>
+            <p className="text-sm font-semibold text-white">{label}</p>
+            {sub && <p className="text-xs text-slate-500 mt-0.5">{sub}</p>}
+        </div>
+        <button
+            role="switch"
+            aria-checked={checked}
+            onClick={() => onChange(!checked)}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${checked ? 'bg-cyan-600' : 'bg-slate-700'}`}
+        >
+            <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-6' : 'translate-x-1'}`} />
+        </button>
+    </div>
+);
+
+/** Section wrapper */
+const Section = ({ title, icon: Icon, children }) => (
+    <div className="bg-slate-950/50 rounded-2xl p-6 border border-white/5 space-y-5">
+        <h2 className="text-xs font-bold text-cyan-400 uppercase tracking-widest flex items-center gap-2">
+            {Icon && <Icon size={14} />}{title}
+        </h2>
+        {children}
+    </div>
+);
+
+/** Label + select/input row */
+const Field = ({ label, children }) => (
+    <div>
+        <label className="text-xs text-slate-400 mb-2 block font-bold uppercase tracking-wide">{label}</label>
+        {children}
+    </div>
+);
+
+// ── Keyboard capture ──────────────────────────────────────────────────────────
+const KeyCapture = ({ binding, onCapture }) => {
+    const [capturing, setCapturing] = useState(false);
+    const ref = useRef(null);
+
+    const start = () => {
+        setCapturing(true);
+        setTimeout(() => ref.current?.focus(), 50);
+    };
+
+    const handleKey = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        // Ignore modifier-only presses
+        if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
+
+        // Escape cancels capture
+        if (e.key === 'Escape') { setCapturing(false); return; }
+
+        let combo = '';
+        if (e.ctrlKey)  combo += 'Ctrl+';
+        if (e.shiftKey) combo += 'Shift+';
+        if (e.altKey)   combo += 'Alt+';
+
+        if (e.code === 'Space')        combo += 'Space';
+        else if (e.key.length === 1)   combo += e.key.toUpperCase();
+        else                           combo += e.key;
+
+        onCapture(combo);
+        setCapturing(false);
+    };
+
+    return (
+        <div className="flex items-center gap-2">
+            <button
+                ref={ref}
+                onKeyDown={capturing ? handleKey : undefined}
+                onBlur={() => setCapturing(false)}
+                onClick={start}
+                className={`
+                    px-3 py-1.5 rounded-lg text-xs font-mono border transition-all min-w-[120px] text-center
+                    ${capturing
+                        ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300 animate-pulse'
+                        : 'bg-slate-800 border-white/10 text-slate-300 hover:border-cyan-500/50 hover:text-white'}
+                `}
+            >
+                {capturing ? 'Press a key…' : (binding || '—')}
+            </button>
+            {!capturing && (
+                <button onClick={start} title="Edit shortcut" className="text-slate-500 hover:text-cyan-400 transition-colors">
+                    <ChevronRight size={12} />
+                </button>
+            )}
+        </div>
+    );
+};
+
+// ── Main component ────────────────────────────────────────────────────────────
 const SettingsView = () => {
-    const [settings, setSettings] = useState({
-        backup_retention_days: 7,
-        export_format: "xml",
-        auto_backup: true,
-        waveform_visual_mode: "blue"
-    });
-    const [status, setStatus] = useState("");
-
-    useEffect(() => {
-        loadSettings();
-    }, []);
-
+    const [settings, setSettings] = useState(DEFAULTS);
+    const [activeTab, setActiveTab] = useState('library');
+    const [saving, setSaving] = useState(false);
     const [libStatus, setLibStatus] = useState({ mode: 'xml', loaded: false });
+    const [audioDevices, setAudioDevices] = useState(['System Default']);
+    const [scanFolderInput, setScanFolderInput] = useState('');
 
+    // ── Load settings + library status on mount ───────────────────────────────
     useEffect(() => {
-        loadSettings();
-        loadLibStatus();
+        api.get('/api/settings')
+            .then(res => setSettings({ ...DEFAULTS, ...res.data, shortcuts: { ...DEFAULTS.shortcuts, ...(res.data.shortcuts || {}) } }))
+            .catch(() => {});
+        api.get('/api/library/status')
+            .then(res => setLibStatus(res.data))
+            .catch(() => {});
+
+        // Enumerate CPAL audio devices (Tauri desktop only)
+        if (window.__TAURI__) {
+            import('@tauri-apps/api/core').then(({ invoke }) => {
+                invoke('list_audio_devices')
+                    .then(devices => setAudioDevices(devices))
+                    .catch(e => console.warn('[Settings] list_audio_devices failed:', e));
+            });
+        }
     }, []);
 
-    const loadLibStatus = async () => {
+    const set = useCallback((key, value) => {
+        setSettings(prev => ({ ...prev, [key]: value }));
+    }, []);
+
+    const setShortcut = useCallback((action, combo) => {
+        setSettings(prev => ({
+            ...prev,
+            shortcuts: { ...(prev.shortcuts || {}), [action]: combo },
+        }));
+    }, []);
+
+    // ── Persist ────────────────────────────────────────────────────────────────
+    const saveSettings = async () => {
+        setSaving(true);
         try {
-            const res = await api.get('/api/library/status');
-            setLibStatus(res.data);
-        } catch (e) {
-            console.error("Failed to load library status", e);
+            await api.post('/api/settings', settings);
+            toast.success('Settings saved');
+        } catch {
+            toast.error('Failed to save settings');
+        } finally {
+            setSaving(false);
         }
     };
 
-    const handleSwitchMode = async (mode) => {
+    // ── Library helpers ────────────────────────────────────────────────────────
+    const switchMode = async (mode) => {
         try {
             const res = await api.post('/api/library/mode', { mode });
-            if (res.data.status === "success") {
-                setLibStatus({ ...libStatus, mode: res.data.mode });
-                setStatus(`Switched to ${res.data.mode.toUpperCase()} mode`);
-                setTimeout(() => setStatus(""), 3000);
+            if (res.data.status === 'success') {
+                setLibStatus(prev => ({ ...prev, mode: res.data.mode }));
+                toast.success(`Switched to ${res.data.mode.toUpperCase()} mode`);
             }
-        } catch (e) {
-            alert("Failed to switch mode");
+        } catch {
+            toast.error('Failed to switch library mode');
         }
     };
 
     const triggerBackup = async () => {
         try {
-            setStatus("Creating Backup...");
             const res = await api.post('/api/library/backup');
-            if (res.data.status === "success") {
-                setStatus("Backup Created Successfully!");
-            } else {
-                setStatus("Backup Failed: " + (res.data.message || "Unknown error"));
-            }
-            setTimeout(() => setStatus(""), 3000);
-        } catch (e) {
-            setStatus("Backup Error");
+            if (res.data.status === 'success') toast.success('Backup created');
+            else toast.error('Backup failed: ' + (res.data.message || 'Unknown error'));
+        } catch {
+            toast.error('Backup error');
         }
     };
 
-    const loadSettings = async () => {
+    const addScanFolder = async () => {
+        const folder = scanFolderInput.trim();
+        if (!folder) return;
+        const existing = settings.scan_folders || [];
+        if (existing.includes(folder)) { toast.error('Folder already in list'); return; }
+        const updated = [...existing, folder];
+        set('scan_folders', updated);
+        setScanFolderInput('');
+        // Trigger immediate scan
         try {
-            const res = await api.get('/api/settings');
-            setSettings(res.data);
-        } catch (e) {
-            console.error("Failed to load settings", e);
+            await api.post('/api/library/scan-folder', { path: folder });
+            toast.success(`Scanning: ${folder}`);
+        } catch {
+            toast('Folder added — will scan on next startup', { icon: 'ℹ️' });
         }
     };
 
-    const saveSettings = async () => {
-        setStatus("Saving...");
-        try {
-            await api.post('/api/settings', settings);
-            setStatus("Settings Saved Successfully!");
-            setTimeout(() => setStatus(""), 3000);
-        } catch (e) {
-            setStatus("Error saving settings");
-        }
+    const removeScanFolder = (path) => {
+        set('scan_folders', (settings.scan_folders || []).filter(f => f !== path));
     };
 
-    const handleSelectDB = async () => {
-        try {
-            const res = await api.post('/api/system/select_db');
-            if (res.data.path) {
-                setSettings({ ...settings, master_db_path: res.data.path.replace(/\\/g, "/") });
-            }
-        } catch (e) { alert("Dialog failed. Please paste path manually."); }
-    }
+    // ── Tab content renderers ──────────────────────────────────────────────────
 
-    const cleanupBackups = async () => {
-        if (!confirm("Delete old backups?")) return;
-        try {
-            const res = await api.post('/api/system/cleanup');
-            alert(res.data.message || "Cleanup Complete");
-        } catch (e) { alert("Cleanup failed"); }
-    };
-
-    const handleRestartBackend = async () => {
-        if (!confirm("Restart Backend Server? The UI may lose connection briefly.")) return;
-        try {
-            await api.post('/api/system/restart');
-            setStatus("Backend Restarting...");
-            setTimeout(() => setStatus(""), 5000);
-        } catch (e) {
-            alert("Failed to trigger restart");
-        }
-    };
-
-    const handleSync = async () => {
-        if (!confirm("Confirm and Sync all pending changes to the Rekordbox Database? This will create an automatic backup first.")) return;
-        setStatus("Syncing...");
-        try {
-            const res = await api.post('/api/library/sync');
-            if (res.data.status === "success") {
-                setStatus("Changes Synced Successfully!");
-            } else {
-                setStatus("Sync Failed: " + (res.data.message || "Unknown error"));
-            }
-            setTimeout(() => setStatus(""), 3000);
-        } catch (e) {
-            setStatus("Sync Error");
-        }
-    };
-
-    return (
-        <div className="h-full w-full flex flex-col items-center bg-transparent text-white relative overflow-y-auto p-4 md:p-8">
-            {/* Background Decoration */}
-            <div className="absolute top-[-20%] right-[-10%] w-[600px] h-[600px] bg-cyan-500/10 rounded-full blur-[120px] pointer-events-none"></div>
-
-            <div className="w-full max-w-4xl glass-panel p-6 md:p-10 rounded-3xl relative z-10 animate-slide-up shadow-2xl my-auto">
-                <div className="flex items-center gap-6 mb-10 border-b border-white/10 pb-8">
-                    <div className="p-4 bg-cyan-500/20 rounded-2xl shadow-lg shadow-cyan-500/10">
-                        <Settings size={40} className="text-cyan-400" />
-                    </div>
-                    <div>
-                        <h1 className="text-4xl font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">Preferences</h1>
-                        <p className="text-slate-400 mt-1">Configure your Rekordbox integration parameters</p>
-                    </div>
+    const renderLibrary = () => (
+        <div className="space-y-6">
+            <Section title="Connection Mode" icon={Database}>
+                <div className="grid grid-cols-2 gap-4">
+                    {['xml', 'live'].map(mode => (
+                        <button
+                            key={mode}
+                            onClick={() => switchMode(mode)}
+                            className={`flex flex-col items-center p-5 rounded-2xl border transition-all ${
+                                libStatus.mode === mode
+                                    ? 'bg-cyan-500/20 border-cyan-500 shadow-lg shadow-cyan-500/10'
+                                    : 'bg-slate-950/50 border-white/5 hover:border-white/20'}`}
+                        >
+                            <Database size={28} className={libStatus.mode === mode ? 'text-cyan-400 mb-2' : 'text-slate-500 mb-2'} />
+                            <span className={`font-bold text-sm ${libStatus.mode === mode ? 'text-white' : 'text-slate-400'}`}>
+                                {mode === 'xml' ? 'XML Snapshot' : 'Live Database'}
+                            </span>
+                            <p className="text-[10px] text-slate-500 mt-1 text-center">
+                                {mode === 'xml' ? 'Static Rekordbox export' : 'Direct access (master.db)'}
+                            </p>
+                        </button>
+                    ))}
                 </div>
-
-                <div className="space-y-10">
-                    {/* Database Mode Selection */}
-                    <div>
-                        <h2 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                            <Database size={16} /> Library Connection Mode
-                        </h2>
-                        <div className="grid grid-cols-2 gap-4">
-                            <button
-                                onClick={() => handleSwitchMode('xml')}
-                                className={`flex flex-col items-center p-6 rounded-2xl border transition-all ${libStatus.mode === 'xml' ? 'bg-cyan-500/20 border-cyan-500 shadow-lg shadow-cyan-500/10' : 'bg-slate-950/50 border-white/5 hover:border-white/20'}`}
-                            >
-                                <FileOutput size={32} className={libStatus.mode === 'xml' ? 'text-cyan-400 mb-3' : 'text-slate-500 mb-3'} />
-                                <span className={`font-bold ${libStatus.mode === 'xml' ? 'text-white' : 'text-slate-400'}`}>XML Snapshot</span>
-                                <p className="text-[10px] text-slate-500 mt-1 text-center">Static export from Rekordbox</p>
-                            </button>
-                            <button
-                                onClick={() => handleSwitchMode('live')}
-                                className={`flex flex-col items-center p-6 rounded-2xl border transition-all ${libStatus.mode === 'live' ? 'bg-cyan-500/20 border-cyan-500 shadow-lg shadow-cyan-500/10' : 'bg-slate-950/50 border-white/5 hover:border-white/20'}`}
-                            >
-                                <Database size={32} className={libStatus.mode === 'live' ? 'text-cyan-400 mb-3' : 'text-slate-500 mb-3'} />
-                                <span className={`font-bold ${libStatus.mode === 'live' ? 'text-white' : 'text-slate-400'}`}>Live Database</span>
-                                <p className="text-[10px] text-slate-500 mt-1 text-center">Direct access (Master.db)</p>
-                            </button>
-                        </div>
-                        <div className="mt-4 flex items-center gap-3">
-                            <label className="flex items-center gap-3 cursor-pointer group">
-                                <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${settings.remember_lib_mode ? 'bg-cyan-500 border-cyan-500' : 'bg-transparent border-slate-600 group-hover:border-cyan-500'}`}>
-                                    {settings.remember_lib_mode && <Check size={12} className="text-white" />}
-                                </div>
-                                <input
-                                    type="checkbox"
-                                    checked={settings.remember_lib_mode}
-                                    onChange={e => setSettings({ ...settings, remember_lib_mode: e.target.checked })}
-                                    className="hidden"
-                                />
-                                <span className="text-sm text-slate-300 group-hover:text-white transition-colors font-medium">Remember my selection</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    {/* DB Info & Backup */}
-                    {libStatus.mode === 'live' && (
-                        <div className="bg-cyan-500/5 border border-cyan-500/20 rounded-2xl p-6 animate-pulse-subtle">
-                            <div className="flex justify-between items-center gap-4">
-                                <div>
-                                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                                        <HardDrive size={16} className="text-cyan-400" /> Live Database Active
-                                    </h3>
-                                    <p className="text-xs text-slate-400 mt-1 font-mono">{libStatus.path}</p>
-                                </div>
-                                <div className="flex gap-2">
-                                    <button onClick={triggerBackup} className="btn-ghost py-2 px-4 flex items-center gap-2 rounded-xl text-xs border-cyan-500/20 hover:bg-cyan-500/10">
-                                        <Save size={14} /> Manual Backup
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Backup & Export */}
-                    <div className="grid grid-cols-2 gap-8">
-                        <div>
-                            <h2 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                                <HardDrive size={16} /> Backup Strategy
-                            </h2>
-                            <div className="bg-slate-950/50 rounded-2xl p-6 border border-white/5 space-y-4 h-full">
-                                <div>
-                                    <label className="text-xs text-slate-400 mb-2 block font-bold uppercase">Retention (Days)</label>
-                                    <input
-                                        type="number"
-                                        value={settings.backup_retention_days}
-                                        onChange={e => setSettings({ ...settings, backup_retention_days: parseInt(e.target.value) })}
-                                        className="input-glass w-full"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="text-xs text-slate-400 mb-2 block font-bold uppercase">Archival Frequency</label>
-                                    <select
-                                        value={settings.archive_frequency || 'daily'}
-                                        onChange={e => setSettings({ ...settings, archive_frequency: e.target.value })}
-                                        className="input-glass w-full"
-                                    >
-                                        <option value="off">Off (Session Only)</option>
-                                        <option value="daily">Daily Archive</option>
-                                        <option value="weekly">Weekly Archive</option>
-                                        <option value="monthly">Monthly Archive</option>
-                                    </select>
-                                </div>
-                                <div className="pt-2">
-                                    <label className="flex items-center gap-3 cursor-pointer group">
-                                        <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${settings.auto_backup ? 'bg-cyan-500 border-cyan-500' : 'bg-transparent border-slate-600 group-hover:border-cyan-500'}`}>
-                                            {settings.auto_backup && <Save size={12} className="text-white" />}
-                                        </div>
-                                        <input
-                                            type="checkbox"
-                                            checked={settings.auto_backup}
-                                            onChange={e => setSettings({ ...settings, auto_backup: e.target.checked })}
-                                            className="hidden"
-                                        />
-                                        <span className="text-sm text-slate-300 group-hover:text-white transition-colors">Auto-backup on launch</span>
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div>
-                            <h2 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                                <FileOutput size={16} /> Export Options
-                            </h2>
-                            <div className="bg-slate-950/50 rounded-2xl p-6 border border-white/5 space-y-4 h-full flex flex-col justify-between">
-                                <div>
-                                    <label className="text-xs text-slate-400 mb-2 block font-bold uppercase">Default Format</label>
-                                    <select
-                                        value={settings.export_format}
-                                        onChange={e => setSettings({ ...settings, export_format: e.target.value })}
-                                        className="input-glass w-full appearance-none bg-slate-900 cursor-pointer"
-                                    >
-                                        <option value="xml">Rekordbox XML</option>
-                                        <option value="m3u">M3U Playlist</option>
-                                        <option value="csv">CSV Data</option>
-                                    </select>
-                                </div>
-                                <button onClick={cleanupBackups} className="w-full btn-ghost text-red-400 hover:text-red-300 hover:bg-red-500/10 flex items-center justify-center gap-2 border-red-500/20 hover:border-red-500/40 transition-all">
-                                    <Trash2 size={16} /> Clean Old Backups
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Rekordbox Synchronization */}
-                    <div className="bg-cyan-400/5 rounded-2xl p-6 border border-cyan-400/20 space-y-4">
-                        <div className="flex justify-between items-start">
-                            <div>
-                                <h2 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-1 flex items-center gap-2">
-                                    <RefreshCw size={16} /> Rekordbox Bridge (XML)
-                                </h2>
-                                <p className="text-xs text-slate-500">Bi-directional metadata and beatgrid synchronization.</p>
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4 pt-2">
-                            <button
-                                onClick={async () => {
-                                    if (!confirm("Export entire local collection to Rekordbox XML?")) return;
-                                    setStatus("Exporting XML...");
-                                    try {
-                                        // Get all track IDs
-                                        const tracks = await api.get('/api/library/tracks');
-                                        const ids = tracks.data.map(t => t.id || t.TrackID);
-                                        const res = await api.post('/api/rekordbox/export', { track_ids: ids });
-                                        setStatus(`Export successful: ${res.data.path}`);
-                                    } catch (e) { setStatus("Export failed"); }
-                                    setTimeout(() => setStatus(""), 5000);
-                                }}
-                                className="flex items-center justify-center gap-3 p-4 rounded-xl bg-slate-900/50 border border-white/10 hover:border-cyan-500/50 hover:bg-cyan-500/5 transition-all group"
-                            >
-                                <FileOutput className="text-slate-500 group-hover:text-cyan-400 transition-colors" size={20} />
-                                <div className="text-left">
-                                    <div className="text-sm font-bold">Push to Rekordbox</div>
-                                    <div className="text-[10px] text-slate-500">Generate Bridge XML</div>
-                                </div>
-                            </button>
-
-                            <button
-                                onClick={async () => {
-                                    const path = prompt("Enter path to Rekordbox exported XML file:");
-                                    if (!path) return;
-                                    setStatus("Importing XML...");
-                                    try {
-                                        const res = await api.post('/api/rekordbox/import', { xml_path: path });
-                                        setStatus(res.data.message);
-                                    } catch (e) { setStatus("Import failed"); }
-                                    setTimeout(() => setStatus(""), 5000);
-                                }}
-                                className="flex items-center justify-center gap-3 p-4 rounded-xl bg-slate-900/50 border border-white/10 hover:border-cyan-500/50 hover:bg-cyan-500/5 transition-all group"
-                            >
-                                <RefreshCw className="text-slate-500 group-hover:text-cyan-400 transition-colors" size={20} />
-                                <div className="text-left">
-                                    <div className="text-sm font-bold">Pull from Rekordbox</div>
-                                    <div className="text-[10px] text-slate-500">Import Changes & Grids</div>
-                                </div>
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Waveform Visualization */}
-                    <div className="bg-slate-950/50 rounded-2xl p-6 border border-white/5 space-y-4">
-                        <h2 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                            Activity Waveform Style
-                        </h2>
-                        <div className="grid grid-cols-2 gap-8">
-                            <div>
-                                <label className="text-xs text-slate-400 mb-2 block font-bold uppercase">Color Profile</label>
-                                <select
-                                    value={settings.waveform_visual_mode || 'blue'}
-                                    onChange={e => setSettings({ ...settings, waveform_visual_mode: e.target.value })}
-                                    className="input-glass w-full"
-                                >
-                                    <option value="blue">Standard Blue</option>
-                                    <option value="rgb">RGB Intensity (Red-Green-Blue)</option>
-                                    <option value="3band">High Contrast (3-Band Style)</option>
-                                </select>
-                            </div>
-                            <div className="flex items-center">
-                                <span className="text-xs text-slate-500 italic leading-relaxed">
-                                    Changes the color palette of waveforms across the application.
-                                    <br />("RGB" uses Red for lows/bottom, Blue for highs/top.)
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="bg-slate-950/50 rounded-2xl p-6 border border-white/5 space-y-4">
-                        <h2 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                            <Shield size={16} /> Library Filtering
-                        </h2>
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <h3 className="text-sm font-bold text-white">Hide Streaming Content</h3>
-                                <p className="text-xs text-slate-500 mt-1">Filter out tracks from SoundCloud, Spotify, Tidal, and Beatport.</p>
-                            </div>
-                            <label className="relative inline-flex items-center cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    className="sr-only peer"
-                                    checked={settings.hide_streaming}
-                                    onChange={e => setSettings({ ...settings, hide_streaming: e.target.checked })}
-                                />
-                                <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600 peer-checked:after:bg-white"></div>
-                            </label>
-                        </div>
-                    </div>
-
-                    {/* Ranking Mode Settings */}
-                    <div className="bg-slate-950/50 rounded-2xl p-6 border border-white/5 space-y-4">
-                        <h2 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                            <Power size={16} /> Power Ranking Mode
-                        </h2>
-                        <div className="grid grid-cols-2 gap-8">
-                            <div>
-                                <label className="text-xs text-slate-400 mb-2 block font-bold uppercase">Filter Mode</label>
-                                <select
-                                    value={settings.ranking_filter_mode || 'all'}
-                                    onChange={e => setSettings({ ...settings, ranking_filter_mode: e.target.value })}
-                                    className="input-glass w-full"
-                                >
-                                    <option value="all">Show All Tracks</option>
-                                    <option value="unrated">Unrated Only (0 Stars)</option>
-                                    <option value="untagged">Untagged Only (No Comments)</option>
-                                </select>
-                            </div>
-                            <div className="flex items-center">
-                                <span className="text-xs text-slate-500 italic leading-relaxed">This determines which tracks appear in your queue when you select a source in Ranking Mode.</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Insights Settings */}
-                    <div className="bg-slate-950/50 rounded-2xl p-6 border border-white/5 space-y-4">
-                        <h2 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                            <Folder size={16} /> Library Insights
-                        </h2>
-                        <div className="grid grid-cols-2 gap-8">
-                            <div>
-                                <label className="text-xs text-slate-400 mb-2 block font-bold uppercase">Low Quality Threshold (kbps)</label>
-                                <input
-                                    type="number"
-                                    min="0"
-                                    max="320"
-                                    value={settings.insights_bitrate_threshold || 320}
-                                    onChange={e => setSettings({ ...settings, insights_bitrate_threshold: parseInt(e.target.value) || 0 })}
-                                    className="input-glass w-full"
-                                />
-                            </div>
-                            <div>
-                                <label className="text-xs text-slate-400 mb-2 block font-bold uppercase">Lost Track Threshold (Plays)</label>
-                                <input
-                                    type="number"
-                                    min="0"
-                                    value={settings.insights_playcount_threshold || 0}
-                                    onChange={e => setSettings({ ...settings, insights_playcount_threshold: parseInt(e.target.value) || 0 })}
-                                    className="input-glass w-full"
-                                />
-                            </div>
-                        </div>
-                        <div className="text-xs text-slate-500 italic">
-                            Adjusts the criteria for the "Low Quality" and "Lost Tracks" insights views.
-                        </div>
-                    </div>
-
-                    {/* Artist View Threshold */}
-                    <div className="bg-slate-950/50 rounded-2xl p-6 border border-white/5 space-y-4">
-                        <h2 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                            <User size={16} /> Artist View
-                        </h2>
-                        <div>
-                            <label className="text-xs text-slate-400 mb-2 block font-bold uppercase">Min Tracks Threshold</label>
-                            <div className="flex gap-4 items-center">
-                                <input
-                                    type="number"
-                                    min="0"
-                                    value={settings.artist_view_threshold || 0}
-                                    onChange={e => setSettings({ ...settings, artist_view_threshold: parseInt(e.target.value) || 0 })}
-                                    className="input-glass w-32"
-                                />
-                                <span className="text-xs text-slate-500">Only show artists with this many tracks or more.</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* System Controls */}
-                <div className="mt-8 pt-8 border-t border-white/5">
-                    <h2 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                        <RefreshCw size={16} /> System Operations
-                    </h2>
-                    <div className="flex gap-4">
-                        <button onClick={handleRestartBackend} className="btn-ghost text-amber-400 border-amber-500/20 hover:bg-amber-500/10 flex items-center gap-2 px-4 py-2 rounded-lg transition-all">
-                            <RefreshCw size={16} /> Restart Backend Service
+                <Toggle
+                    checked={settings.remember_lib_mode}
+                    onChange={v => set('remember_lib_mode', v)}
+                    label="Remember mode selection"
+                />
+                {libStatus.mode === 'live' && (
+                    <div className="flex items-center justify-between p-3 bg-cyan-500/5 border border-cyan-500/20 rounded-xl">
+                        <p className="text-xs text-slate-400 font-mono truncate">{libStatus.path}</p>
+                        <button onClick={triggerBackup} className="ml-3 flex-shrink-0 text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1.5 border border-cyan-500/20 rounded-lg px-3 py-1.5 hover:bg-cyan-500/10 transition-all">
+                            <Save size={12} /> Backup
                         </button>
                     </div>
+                )}
+            </Section>
+
+            <Section title="Scan Folders" icon={FolderOpen}>
+                <p className="text-xs text-slate-500">Additional folders monitored for new audio files. Tracks are auto-imported on detection.</p>
+                <div className="flex gap-2">
+                    <input
+                        value={scanFolderInput}
+                        onChange={e => setScanFolderInput(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && addScanFolder()}
+                        placeholder="C:\Music\My Tracks"
+                        className="input-glass flex-1 text-sm"
+                    />
+                    <button onClick={addScanFolder} className="px-3 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 rounded-xl text-cyan-400 transition-all">
+                        <Plus size={16} />
+                    </button>
+                </div>
+                {(settings.scan_folders || []).length > 0 && (
+                    <div className="space-y-2 mt-1">
+                        {(settings.scan_folders || []).map(f => (
+                            <div key={f} className="flex items-center justify-between p-2.5 bg-slate-900/60 rounded-xl border border-white/5">
+                                <span className="text-xs text-slate-300 font-mono truncate">{f}</span>
+                                <button onClick={() => removeScanFolder(f)} className="ml-2 flex-shrink-0 text-slate-500 hover:text-red-400 transition-colors">
+                                    <X size={14} />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </Section>
+
+            <Section title="Library Filter" icon={Shield}>
+                <Toggle
+                    checked={settings.hide_streaming}
+                    onChange={v => set('hide_streaming', v)}
+                    label="Hide Streaming Content"
+                    sub="Filter SoundCloud, Spotify, Tidal, Beatport tracks from library view"
+                />
+            </Section>
+        </div>
+    );
+
+    const renderBackup = () => (
+        <div className="space-y-6">
+            <Section title="Retention" icon={HardDrive}>
+                <Field label="Keep backups for (days)">
+                    <input
+                        type="number" min="1" max="365"
+                        value={settings.backup_retention_days}
+                        onChange={e => set('backup_retention_days', parseInt(e.target.value) || 7)}
+                        className="input-glass w-32"
+                    />
+                </Field>
+                <Field label="Archive frequency">
+                    <select value={settings.archive_frequency || 'daily'} onChange={e => set('archive_frequency', e.target.value)} className="input-glass w-full">
+                        <option value="off">Off (session snapshots only)</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                    </select>
+                </Field>
+            </Section>
+
+            <Section title="Auto-Backup" icon={Save}>
+                <Toggle
+                    checked={settings.auto_backup}
+                    onChange={v => set('auto_backup', v)}
+                    label="Auto-backup on launch"
+                    sub="Creates a snapshot every time the app starts"
+                />
+                <Field label="Background interval">
+                    <div className="flex items-center gap-3">
+                        <select
+                            value={settings.auto_backup_interval_min}
+                            onChange={e => set('auto_backup_interval_min', parseInt(e.target.value))}
+                            className="input-glass w-48"
+                        >
+                            <option value={0}>Off (manual only)</option>
+                            <option value={15}>Every 15 minutes</option>
+                            <option value={30}>Every 30 minutes</option>
+                            <option value={60}>Every hour</option>
+                            <option value={120}>Every 2 hours</option>
+                        </select>
+                        <span className="text-xs text-slate-500">while the app is open</span>
+                    </div>
+                </Field>
+                <button
+                    onClick={triggerBackup}
+                    className="text-xs border border-white/10 hover:border-cyan-500/40 bg-slate-900/50 hover:bg-cyan-500/5 text-slate-300 hover:text-white rounded-xl px-4 py-2.5 flex items-center gap-2 transition-all"
+                >
+                    <Save size={14} /> Create Backup Now
+                </button>
+            </Section>
+
+            <Section title="Cleanup" icon={Trash2}>
+                <p className="text-xs text-slate-500">Removes backup snapshots older than the retention window.</p>
+                <button
+                    onClick={async () => {
+                        try {
+                            const res = await api.post('/api/system/cleanup');
+                            toast.success(res.data.message || 'Old backups removed');
+                        } catch { toast.error('Cleanup failed'); }
+                    }}
+                    className="text-xs border border-red-500/20 hover:border-red-500/40 bg-red-500/5 hover:bg-red-500/10 text-red-400 rounded-xl px-4 py-2.5 flex items-center gap-2 transition-all"
+                >
+                    <Trash2 size={14} /> Clean Old Backups
+                </button>
+            </Section>
+        </div>
+    );
+
+    const renderExport = () => (
+        <div className="space-y-6">
+            <Section title="Format Defaults" icon={FileOutput}>
+                <Field label="Default export format">
+                    <select value={settings.export_format} onChange={e => set('export_format', e.target.value)} className="input-glass w-full">
+                        <option value="xml">Rekordbox XML</option>
+                        <option value="m3u">M3U Playlist</option>
+                        <option value="csv">CSV Spreadsheet</option>
+                    </select>
+                </Field>
+                <div className="grid grid-cols-2 gap-4">
+                    <Field label="Audio export bitrate">
+                        <select value={settings.export_bitrate || '320'} onChange={e => set('export_bitrate', e.target.value)} className="input-glass w-full">
+                            <option value="128">128 kbps (MP3)</option>
+                            <option value="192">192 kbps (MP3)</option>
+                            <option value="256">256 kbps (AAC)</option>
+                            <option value="320">320 kbps (MP3 – max)</option>
+                            <option value="lossless">Lossless (WAV/FLAC)</option>
+                        </select>
+                    </Field>
+                    <Field label="Sample rate">
+                        <select value={settings.export_sample_rate || '44100'} onChange={e => set('export_sample_rate', e.target.value)} className="input-glass w-full">
+                            <option value="44100">44.1 kHz (CD quality)</option>
+                            <option value="48000">48 kHz (broadcast)</option>
+                            <option value="96000">96 kHz (studio)</option>
+                        </select>
+                    </Field>
+                </div>
+            </Section>
+
+            <Section title="Rekordbox Bridge" icon={RefreshCw}>
+                <p className="text-xs text-slate-500">Bi-directional sync with the Rekordbox XML library.</p>
+                <div className="grid grid-cols-2 gap-3">
+                    <button
+                        onClick={async () => {
+                            try {
+                                const tracks = await api.get('/api/library/tracks');
+                                const ids = tracks.data.map(t => t.id || t.TrackID);
+                                const res = await api.post('/api/rekordbox/export', { track_ids: ids });
+                                toast.success(`Exported: ${res.data.path}`);
+                            } catch { toast.error('Export failed'); }
+                        }}
+                        className="flex items-center justify-center gap-2 p-4 rounded-xl bg-slate-900/50 border border-white/10 hover:border-cyan-500/50 hover:bg-cyan-500/5 transition-all text-sm"
+                    >
+                        <FileOutput size={16} className="text-cyan-400" /> Push to Rekordbox
+                    </button>
+                    <button
+                        onClick={async () => {
+                            const path = prompt('Rekordbox XML export path:');
+                            if (!path) return;
+                            try {
+                                const res = await api.post('/api/rekordbox/import', { xml_path: path });
+                                toast.success(res.data.message || 'Import complete');
+                            } catch { toast.error('Import failed'); }
+                        }}
+                        className="flex items-center justify-center gap-2 p-4 rounded-xl bg-slate-900/50 border border-white/10 hover:border-cyan-500/50 hover:bg-cyan-500/5 transition-all text-sm"
+                    >
+                        <RefreshCw size={16} className="text-cyan-400" /> Pull from Rekordbox
+                    </button>
+                </div>
+            </Section>
+        </div>
+    );
+
+    const renderAudio = () => (
+        <div className="space-y-6">
+            <Section title="Output Device" icon={Music}>
+                <p className="text-xs text-slate-500">
+                    Select which audio output device the DAW playback engine uses.
+                    Takes effect the next time a track is loaded.
+                    {!window.__TAURI__ && <span className="block mt-1 text-amber-400">⚠ Device enumeration requires the desktop app (Tauri).</span>}
+                </p>
+                <Field label="Audio output">
+                    <select
+                        value={settings.audio_output_device || ''}
+                        onChange={e => set('audio_output_device', e.target.value)}
+                        className="input-glass w-full"
+                    >
+                        {audioDevices.map(d => (
+                            <option key={d} value={d === 'System Default' ? '' : d}>{d}</option>
+                        ))}
+                    </select>
+                </Field>
+                {audioDevices.length === 1 && window.__TAURI__ && (
+                    <p className="text-xs text-slate-500 italic">Only the system default was found. Check that your audio drivers are installed.</p>
+                )}
+            </Section>
+        </div>
+    );
+
+    const renderAnalysis = () => (
+        <div className="space-y-6">
+            <Section title="Analysis Quality" icon={Sliders}>
+                <p className="text-xs text-slate-500">Controls the accuracy vs. speed trade-off for BPM and key detection.</p>
+                <div className="grid grid-cols-3 gap-3">
+                    {[
+                        { id: 'fast',      label: 'Fast',      sub: 'librosa — ~2s/track' },
+                        { id: 'standard',  label: 'Standard',  sub: 'madmom RNN — ~8s/track' },
+                        { id: 'thorough',  label: 'Thorough',  sub: 'Ensemble — ~20s/track' },
+                    ].map(q => (
+                        <button
+                            key={q.id}
+                            onClick={() => set('analysis_quality', q.id)}
+                            className={`flex flex-col items-center p-4 rounded-2xl border transition-all ${
+                                settings.analysis_quality === q.id
+                                    ? 'bg-cyan-500/20 border-cyan-500'
+                                    : 'bg-slate-950/50 border-white/5 hover:border-white/20'}`}
+                        >
+                            <span className={`font-bold text-sm ${settings.analysis_quality === q.id ? 'text-white' : 'text-slate-400'}`}>{q.label}</span>
+                            <span className="text-[10px] text-slate-500 mt-1 text-center">{q.sub}</span>
+                        </button>
+                    ))}
+                </div>
+            </Section>
+
+            <Section title="Ranking Mode" icon={Power}>
+                <Field label="Default queue filter">
+                    <select value={settings.ranking_filter_mode || 'all'} onChange={e => set('ranking_filter_mode', e.target.value)} className="input-glass w-full">
+                        <option value="all">All Tracks</option>
+                        <option value="unrated">Unrated Only (0 Stars)</option>
+                        <option value="untagged">Untagged Only (No Comments)</option>
+                    </select>
+                </Field>
+            </Section>
+
+            <Section title="Library Insights" icon={Info}>
+                <div className="grid grid-cols-2 gap-4">
+                    <Field label="Low quality threshold (kbps)">
+                        <input type="number" min="0" max="320"
+                            value={settings.insights_bitrate_threshold || 320}
+                            onChange={e => set('insights_bitrate_threshold', parseInt(e.target.value) || 0)}
+                            className="input-glass w-full" />
+                    </Field>
+                    <Field label="Lost track play threshold">
+                        <input type="number" min="0"
+                            value={settings.insights_playcount_threshold || 0}
+                            onChange={e => set('insights_playcount_threshold', parseInt(e.target.value) || 0)}
+                            className="input-glass w-full" />
+                    </Field>
+                </div>
+            </Section>
+
+            <Section title="Artist View" icon={User}>
+                <Field label="Min tracks to show artist">
+                    <input type="number" min="0"
+                        value={settings.artist_view_threshold || 0}
+                        onChange={e => set('artist_view_threshold', parseInt(e.target.value) || 0)}
+                        className="input-glass w-32" />
+                </Field>
+            </Section>
+        </div>
+    );
+
+    const renderAppearance = () => (
+        <div className="space-y-6">
+            <Section title="Waveform Colors" icon={Palette}>
+                <p className="text-xs text-slate-500">
+                    Custom colors for the 3-band waveform display (Low / Mid / High frequency bands).
+                    Changes the palette across the DAW editor and overview.
+                </p>
+                <Field label="Color mode">
+                    <select value={settings.waveform_visual_mode || 'custom'} onChange={e => set('waveform_visual_mode', e.target.value)} className="input-glass w-full">
+                        <option value="blue">Standard Blue (monochrome)</option>
+                        <option value="rgb">RGB Intensity (preset)</option>
+                        <option value="3band">High Contrast 3-Band (preset)</option>
+                        <option value="custom">Custom Colors (below)</option>
+                    </select>
+                </Field>
+                <div className="grid grid-cols-3 gap-4">
+                    {[
+                        { key: 'waveform_color_low',  label: 'Low (Bass)', defaultColor: '#ef4444' },
+                        { key: 'waveform_color_mid',  label: 'Mid',        defaultColor: '#22c55e' },
+                        { key: 'waveform_color_high', label: 'High (Air)', defaultColor: '#3b82f6' },
+                    ].map(({ key, label, defaultColor }) => (
+                        <div key={key} className="flex flex-col items-center gap-2">
+                            <label className="text-xs text-slate-400 font-bold uppercase">{label}</label>
+                            <div className="relative">
+                                <input
+                                    type="color"
+                                    value={settings[key] || defaultColor}
+                                    onChange={e => set(key, e.target.value)}
+                                    className="w-14 h-14 rounded-xl border-0 cursor-pointer bg-transparent p-0.5"
+                                    style={{ outline: `2px solid ${settings[key] || defaultColor}40` }}
+                                />
+                            </div>
+                            <span className="text-[10px] text-slate-500 font-mono">{settings[key] || defaultColor}</span>
+                        </div>
+                    ))}
+                </div>
+                <div className="flex items-center gap-3 h-6 rounded-lg overflow-hidden border border-white/10">
+                    <div className="flex-1 h-full" style={{ background: settings.waveform_color_low  || '#ef4444' }} />
+                    <div className="flex-1 h-full" style={{ background: settings.waveform_color_mid  || '#22c55e' }} />
+                    <div className="flex-1 h-full" style={{ background: settings.waveform_color_high || '#3b82f6' }} />
+                </div>
+            </Section>
+
+            <Section title="Language" icon={Globe}>
+                <div className="grid grid-cols-2 gap-3">
+                    {[
+                        { id: 'de', label: 'Deutsch', flag: '🇩🇪' },
+                        { id: 'en', label: 'English',  flag: '🇬🇧' },
+                    ].map(lang => (
+                        <button
+                            key={lang.id}
+                            onClick={() => set('locale', lang.id)}
+                            className={`flex items-center gap-3 p-4 rounded-2xl border transition-all ${
+                                (settings.locale || 'de') === lang.id
+                                    ? 'bg-cyan-500/20 border-cyan-500'
+                                    : 'bg-slate-950/50 border-white/5 hover:border-white/20'}`}
+                        >
+                            <span className="text-2xl">{lang.flag}</span>
+                            <span className={`font-bold text-sm ${(settings.locale || 'de') === lang.id ? 'text-white' : 'text-slate-400'}`}>{lang.label}</span>
+                        </button>
+                    ))}
+                </div>
+                <p className="text-xs text-slate-500 italic">Full i18n support is being rolled out progressively.</p>
+            </Section>
+        </div>
+    );
+
+    const renderShortcuts = () => (
+        <div className="space-y-6">
+            <Section title="DAW Keyboard Shortcuts" icon={Keyboard}>
+                <p className="text-xs text-slate-500">
+                    Click any shortcut to capture a new key binding. Changes apply immediately in the DAW editor after saving.
+                    Press <kbd className="px-1.5 py-0.5 bg-slate-800 rounded text-[10px] font-mono border border-white/10">Esc</kbd> to cancel capture.
+                </p>
+                <div className="space-y-1.5">
+                    {Object.entries(SHORTCUT_LABELS).map(([action, label]) => (
+                        <div key={action} className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-800/50 transition-colors">
+                            <span className="text-sm text-slate-300">{label}</span>
+                            <KeyCapture
+                                binding={settings.shortcuts?.[action] || DEFAULTS.shortcuts[action]}
+                                onCapture={combo => setShortcut(action, combo)}
+                            />
+                        </div>
+                    ))}
+                </div>
+                <button
+                    onClick={() => setSettings(prev => ({ ...prev, shortcuts: { ...DEFAULTS.shortcuts } }))}
+                    className="text-xs text-slate-500 hover:text-white border border-white/10 hover:border-white/20 rounded-lg px-3 py-2 transition-all"
+                >
+                    Reset to defaults
+                </button>
+            </Section>
+        </div>
+    );
+
+    const renderNetwork = () => (
+        <div className="space-y-6">
+            <Section title="HTTP Proxy" icon={Wifi}>
+                <p className="text-xs text-slate-500">
+                    For users behind corporate firewalls. Applied to all SoundCloud API calls.
+                    Format: <code className="text-cyan-400 text-[11px]">http://user:pass@proxy.example.com:8080</code>
+                </p>
+                <Field label="Proxy URL (leave empty to disable)">
+                    <input
+                        type="text"
+                        value={settings.http_proxy || ''}
+                        onChange={e => set('http_proxy', e.target.value)}
+                        placeholder="http://proxy.company.com:8080"
+                        className="input-glass w-full font-mono text-sm"
+                    />
+                </Field>
+            </Section>
+
+            <Section title="SoundCloud Sync" icon={Globe}>
+                <Field label="Target folder ID for synced playlists">
+                    <input
+                        type="text"
+                        value={settings.sc_sync_folder_id || ''}
+                        onChange={e => set('sc_sync_folder_id', e.target.value)}
+                        placeholder="ROOT (or Rekordbox folder ID)"
+                        className="input-glass w-full"
+                    />
+                </Field>
+                <p className="text-xs text-slate-500">Leave empty to create SC_ playlists at the root level.</p>
+            </Section>
+
+            <Section title="System" icon={Power}>
+                <button
+                    onClick={async () => {
+                        try {
+                            await api.post('/api/system/restart');
+                            toast.success('Backend restarting…');
+                        } catch { toast.error('Restart failed'); }
+                    }}
+                    className="text-xs border border-amber-500/20 hover:border-amber-500/40 bg-amber-500/5 hover:bg-amber-500/10 text-amber-400 rounded-xl px-4 py-2.5 flex items-center gap-2 transition-all"
+                >
+                    <RefreshCw size={14} /> Restart Backend Service
+                </button>
+            </Section>
+        </div>
+    );
+
+    const TAB_CONTENT = {
+        library:    renderLibrary,
+        backup:     renderBackup,
+        export:     renderExport,
+        audio:      renderAudio,
+        analysis:   renderAnalysis,
+        appearance: renderAppearance,
+        shortcuts:  renderShortcuts,
+        network:    renderNetwork,
+    };
+
+    // ── Render ─────────────────────────────────────────────────────────────────
+    return (
+        <div className="h-full w-full flex flex-col items-center bg-transparent text-white overflow-y-auto p-4 md:p-8 relative">
+            <div className="absolute top-[-20%] right-[-10%] w-[600px] h-[600px] bg-cyan-500/10 rounded-full blur-[120px] pointer-events-none" />
+
+            <div className="w-full max-w-4xl relative z-10 animate-slide-up my-auto">
+                {/* Header */}
+                <div className="glass-panel px-8 py-6 rounded-3xl shadow-2xl mb-4">
+                    <div className="flex items-center gap-5">
+                        <div className="p-3.5 bg-cyan-500/20 rounded-2xl shadow-lg shadow-cyan-500/10">
+                            <Settings size={36} className="text-cyan-400" />
+                        </div>
+                        <div>
+                            <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">Preferences</h1>
+                            <p className="text-slate-400 mt-0.5 text-sm">RB Editor Pro — Configure all application settings</p>
+                        </div>
+                    </div>
                 </div>
 
-                <div className="mt-10 pt-8 border-t border-white/10 flex justify-between items-center">
-                    <div className={`text-sm font-bold flex items-center gap-2 ${status.includes("Error") ? "text-red-400" : "text-green-400"}`}>
-                        {status && (status.includes("Error") ? <AlertCircle size={16} /> : <CheckCircle size={16} />)}
-                        {status}
-                    </div>
-                    <button onClick={saveSettings} className="btn-primary flex items-center gap-3 px-10 py-4 rounded-xl text-lg shadow-xl shadow-cyan-500/20">
-                        <Save size={20} /> Save Changes
+                {/* Tab strip */}
+                <div className="glass-panel rounded-2xl p-1.5 mb-4 flex gap-1 flex-wrap">
+                    {TABS.map(tab => {
+                        const Icon = tab.icon;
+                        return (
+                            <button
+                                key={tab.id}
+                                onClick={() => setActiveTab(tab.id)}
+                                className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wide transition-all ${
+                                    activeTab === tab.id
+                                        ? 'bg-cyan-500/20 text-cyan-300 shadow-md'
+                                        : 'text-slate-400 hover:text-white hover:bg-white/5'
+                                }`}
+                            >
+                                <Icon size={13} />{tab.label}
+                            </button>
+                        );
+                    })}
+                </div>
+
+                {/* Tab content */}
+                <div className="glass-panel rounded-3xl p-6 shadow-2xl">
+                    {TAB_CONTENT[activeTab]?.()}
+                </div>
+
+                {/* Footer */}
+                <div className="mt-4 flex justify-end">
+                    <button
+                        onClick={saveSettings}
+                        disabled={saving}
+                        className="btn-primary flex items-center gap-3 px-8 py-3 rounded-xl text-sm shadow-xl shadow-cyan-500/20 disabled:opacity-50"
+                    >
+                        {saving ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}
+                        {saving ? 'Saving…' : 'Save Changes'}
                     </button>
                 </div>
             </div>
         </div>
     );
 };
+
 export default SettingsView;

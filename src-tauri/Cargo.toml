@@ -21,6 +21,7 @@ rand = "0.9"
 url = "2"
 open = "5"
 dotenvy = "0.15"
+log = "0.4"
 
 # --- Native Audio Engine ---
 cpal = "0.15"

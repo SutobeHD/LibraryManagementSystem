@@ -84,6 +84,7 @@ FastAPI app (~1700 lines). Security: CORS locked to localhost, session token aut
 | POST | `/api/library/restore` | Restore library to a specific backup commit |
 | POST | `/api/library/sync` | Sync current XML with live DB state |
 | POST | `/api/library/smart-playlists` | Generate smart playlists from rules |
+| POST | `/api/library/scan-folder` | **[NEW]** Background scan of a directory; auto-imports audio files not yet in library. Body: `{ path: str }` |
 | POST | `/api/library/clean-titles` | Clean track title strings (remove tags, fix encoding) |
 | POST | `/api/debug/load_xml` | Debug endpoint: reload XML from disk |
 

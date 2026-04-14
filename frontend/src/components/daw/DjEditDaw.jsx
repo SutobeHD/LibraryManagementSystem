@@ -63,6 +63,18 @@ const DjEditDaw = ({ track: initialTrack }) => {
     const animFrameRef = useRef(null);
     const hasInitialized = useRef(false);
 
+    // Configurable keyboard shortcuts — loaded from /api/settings on mount.
+    // Stored in a ref (not state) so the keydown handler closure always reads
+    // the latest value without needing to be re-registered on every settings change.
+    const shortcutsRef = useRef({
+        play_pause: 'Space',   jump_start: 'Home',      jump_end: 'End',
+        scrub_back: 'ArrowLeft', scrub_fwd: 'ArrowRight',
+        split: 'Ctrl+E',       delete: 'Delete',
+        undo: 'Ctrl+Z',        redo: 'Ctrl+Shift+Z',
+        copy: 'Ctrl+C',        paste: 'Ctrl+V',
+        duplicate: 'Ctrl+D',   save: 'Ctrl+S',          open: 'Ctrl+O',
+    });
+
     // Sync prop changes to internal state
     useEffect(() => {
         if (initialTrack) setActiveTrack(initialTrack);
@@ -505,45 +517,76 @@ const DjEditDaw = ({ track: initialTrack }) => {
         handleOpen();
     }, [handleOpen]);
 
-    // ── KEYBOARD SHORTCUTS (EC8: capture all DAW-relevant keys) ──
+    // ── Load configurable shortcuts from settings on mount ───────────────────
     useEffect(() => {
+        api.get('/api/settings')
+            .then(res => {
+                const saved = res.data?.shortcuts;
+                if (saved && typeof saved === 'object') {
+                    shortcutsRef.current = { ...shortcutsRef.current, ...saved };
+                }
+            })
+            .catch(() => {}); // non-fatal — defaults remain in ref
+    }, []);
+
+    // ── KEYBOARD SHORTCUTS (EC8: capture all DAW-relevant keys) ──
+    // Uses shortcutsRef for configurable bindings; ref lookup is always current
+    // even though this effect only re-registers when action handlers change.
+    useEffect(() => {
+        /**
+         * Returns true if a KeyboardEvent matches a combo string.
+         * Combo format: ['Ctrl+']['Shift+']['Alt+']key
+         * key is matched against both e.code (e.g. 'Space') and e.key (e.g. 'ArrowLeft').
+         */
+        const matches = (e, combo) => {
+            if (!combo) return false;
+            const parts   = combo.split('+');
+            const key     = parts[parts.length - 1];
+            const ctrl    = parts.includes('Ctrl');
+            const shift   = parts.includes('Shift');
+            const alt     = parts.includes('Alt');
+            if (e.ctrlKey !== ctrl || e.shiftKey !== shift || e.altKey !== alt) return false;
+            return e.code === key || e.key === key;
+        };
+
+        const sc = () => shortcutsRef.current; // alias for brevity
+
         const handleKeyDown = (e) => {
             if (e.target.closest('input, select, textarea')) return;
 
-            // Space — Play/Pause
-            if (e.code === 'Space') {
+            // Play / Pause
+            if (matches(e, sc().play_pause)) {
                 e.preventDefault();
-                if (state.isPlaying) handleStop();
-                else handlePlay();
+                if (state.isPlaying) handleStop(); else handlePlay();
                 return;
             }
 
-            // Home — Jump to start
-            if (e.key === 'Home') {
+            // Jump to Start
+            if (matches(e, sc().jump_start)) {
                 e.preventDefault();
                 dispatch({ type: 'SET_PLAYHEAD', payload: 0 });
                 dispatch({ type: 'SET_SCROLL_X', payload: 0 });
                 return;
             }
 
-            // End — Jump to end
-            if (e.key === 'End') {
+            // Jump to End
+            if (matches(e, sc().jump_end)) {
                 e.preventDefault();
                 dispatch({ type: 'SET_PLAYHEAD', payload: state.totalDuration });
                 return;
             }
 
-            // ArrowLeft — Fine scrub backward (-1 beat)
-            if (e.key === 'ArrowLeft' && !e.ctrlKey) {
+            // Scrub Back (1 beat; Shift = 1 bar)
+            if (matches(e, sc().scrub_back) && !e.ctrlKey) {
                 e.preventDefault();
                 const beatSec = state.bpm > 0 ? 60 / state.bpm : 0.5;
-                const delta = e.shiftKey ? beatSec * 4 : beatSec; // Shift = 1 bar
+                const delta = e.shiftKey ? beatSec * 4 : beatSec;
                 dispatch({ type: 'SET_PLAYHEAD', payload: Math.max(0, state.playhead - delta) });
                 return;
             }
 
-            // ArrowRight — Fine scrub forward (+1 beat)
-            if (e.key === 'ArrowRight' && !e.ctrlKey) {
+            // Scrub Forward (1 beat; Shift = 1 bar)
+            if (matches(e, sc().scrub_fwd) && !e.ctrlKey) {
                 e.preventDefault();
                 const beatSec = state.bpm > 0 ? 60 / state.bpm : 0.5;
                 const delta = e.shiftKey ? beatSec * 4 : beatSec;
@@ -551,71 +594,45 @@ const DjEditDaw = ({ track: initialTrack }) => {
                 return;
             }
 
-            // Ctrl+E — Split
-            if (e.ctrlKey && e.key.toLowerCase() === 'e') {
-                e.preventDefault();
-                handleSplit();
-                return;
-            }
+            // Split region
+            if (matches(e, sc().split)) { e.preventDefault(); handleSplit(); return; }
 
-            // Delete — Ripple Delete
-            if (e.key === 'Delete') {
-                e.preventDefault();
-                handleRippleDelete();
-                return;
-            }
+            // Ripple Delete
+            if (matches(e, sc().delete)) { e.preventDefault(); handleRippleDelete(); return; }
 
-            // Ctrl+Z — Undo
-            if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'z') {
-                e.preventDefault();
-                dispatch({ type: 'UNDO' });
-                return;
-            }
+            // Undo (must check redo first — redo has Shift modifier)
+            if (matches(e, sc().redo))  { e.preventDefault(); dispatch({ type: 'REDO' }); return; }
+            if (matches(e, sc().undo))  { e.preventDefault(); dispatch({ type: 'UNDO' }); return; }
 
-            // Ctrl+Shift+Z — Redo
-            if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'z') {
-                e.preventDefault();
-                dispatch({ type: 'REDO' });
-                return;
-            }
-
-            // Ctrl+C — Copy
-            if (e.ctrlKey && e.key.toLowerCase() === 'c') {
+            // Copy
+            if (matches(e, sc().copy)) {
                 e.preventDefault();
                 dispatch({ type: 'COPY_SELECTION' });
                 toast.success('Copied to clipboard');
                 return;
             }
 
-            // Ctrl+V — Paste (Insert)
-            if (e.ctrlKey && e.key.toLowerCase() === 'v') {
+            // Paste
+            if (matches(e, sc().paste)) {
                 e.preventDefault();
                 dispatch({ type: 'PASTE_INSERT' });
                 toast.success('Pasted insert');
                 return;
             }
 
-            // Ctrl+D — Duplicate
-            if (e.ctrlKey && e.key.toLowerCase() === 'd') {
+            // Duplicate
+            if (matches(e, sc().duplicate)) {
                 e.preventDefault();
                 dispatch({ type: 'DUPLICATE_SELECTION' });
                 toast.success('Duplicated selection');
                 return;
             }
 
-            // Ctrl+S — Save
-            if (e.ctrlKey && e.key.toLowerCase() === 's') {
-                e.preventDefault();
-                handleSave();
-                return;
-            }
+            // Save
+            if (matches(e, sc().save)) { e.preventDefault(); handleSave(); return; }
 
-            // Ctrl+O — Open
-            if (e.ctrlKey && e.key.toLowerCase() === 'o') {
-                e.preventDefault();
-                handleOpen();
-                return;
-            }
+            // Open
+            if (matches(e, sc().open)) { e.preventDefault(); handleOpen(); return; }
 
             // Shift (held) — Slip mode
             if (e.key === 'Shift') {
@@ -623,7 +640,7 @@ const DjEditDaw = ({ track: initialTrack }) => {
                 return;
             }
 
-            // 1-8 — Hot cues
+            // 1–8 — Hot cue jump
             const num = parseInt(e.key);
             if (num >= 1 && num <= 8 && !e.ctrlKey && !e.altKey) {
                 const cue = state.hotCues[num - 1];

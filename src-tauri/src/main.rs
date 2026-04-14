@@ -8,7 +8,7 @@ mod audio;
 use serde::Deserialize;
 use soundcloud_client::Track;
 use tauri::{Emitter, Manager};
-use audio::commands::{load_audio, get_3band_waveform, start_project_export, AudioCommandState};
+use audio::commands::{load_audio, get_3band_waveform, start_project_export, list_audio_devices, AudioCommandState};
 use audio::engine::AudioController;
 use std::sync::Mutex;
 
@@ -136,6 +136,7 @@ fn main() {
             export_to_soundcloud,
             load_audio,
             get_3band_waveform,
+            list_audio_devices,
             start_project_export
         ])
         .setup(|app| {
