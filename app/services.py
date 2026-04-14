@@ -1,5 +1,6 @@
 import shutil
 import wave
+import struct
 import psutil
 import datetime
 import subprocess
@@ -18,6 +19,21 @@ from .database import db
 import mutagen
 from mutagen.id3 import ID3, APIC
 from mutagen.flac import FLAC, Picture
+try:
+    import soundfile as sf
+    _HAS_SOUNDFILE = True
+except ImportError:
+    _HAS_SOUNDFILE = False
+    logger_import = logging.getLogger(__name__)
+    logger_import.warning("soundfile not available — FLAC export disabled")
+
+try:
+    import lameenc
+    _HAS_LAMEENC = True
+except ImportError:
+    _HAS_LAMEENC = False
+    logger_import = logging.getLogger(__name__)
+    logger_import.warning("lameenc not available — MP3 export disabled")
 
 logger = logging.getLogger(__name__)
 
@@ -215,21 +231,36 @@ class AudioEngine:
 
             # Convert to target format if not WAV
             if output_ext == '.mp3':
-                cmd = [FFMPEG_BIN, "-y", "-i", str(wav_path), "-b:a", "320k", "-q:a", "0", str(final_path)]
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                if result.returncode != 0:
-                    raise RuntimeError(f"MP3 encode failed: {result.stderr}")
+                if not _HAS_LAMEENC:
+                    raise RuntimeError("MP3 export requires lameenc: pip install lameenc")
+                # Read concatenated WAV as raw PCM samples, encode with lameenc (LAME)
+                with wave.open(str(wav_path), 'rb') as wf:
+                    channels = wf.getnchannels()
+                    sample_rate = wf.getframerate()
+                    n_frames = wf.getnframes()
+                    raw_pcm = wf.readframes(n_frames)
+                # lameenc expects int16 interleaved samples
+                encoder = lameenc.Encoder()
+                encoder.set_bit_rate(320)
+                encoder.set_in_sample_rate(sample_rate)
+                encoder.set_channels(channels)
+                encoder.set_quality(2)  # 2 = near-best, 7 = fastest
+                mp3_data = encoder.encode(raw_pcm)
+                mp3_data += encoder.flush()
+                with open(str(final_path), 'wb') as f:
+                    f.write(mp3_data)
                 try: os.remove(str(wav_path))
                 except OSError: pass
-                logger.info(f"Encoded MP3: {final_path}")
+                logger.info(f"Encoded MP3 via lameenc: {final_path} ({len(mp3_data)//1024} KB)")
             elif output_ext == '.flac':
-                cmd = [FFMPEG_BIN, "-y", "-i", str(wav_path), "-c:a", "flac", "-sample_fmt", "s32", str(final_path)]
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                if result.returncode != 0:
-                    raise RuntimeError(f"FLAC encode failed: {result.stderr}")
+                if not _HAS_SOUNDFILE:
+                    raise RuntimeError("FLAC export requires soundfile: pip install soundfile")
+                # Read WAV via soundfile and re-encode as FLAC (lossless)
+                data, sample_rate = sf.read(str(wav_path), dtype='int16')
+                sf.write(str(final_path), data, sample_rate, subtype='PCM_16', format='FLAC')
                 try: os.remove(str(wav_path))
                 except OSError: pass
-                logger.info(f"Encoded FLAC: {final_path}")
+                logger.info(f"Encoded FLAC via soundfile: {final_path}")
             else:
                 logger.info(f"Exported WAV: {final_path}")
 

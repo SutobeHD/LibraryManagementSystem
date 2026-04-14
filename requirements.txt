@@ -10,3 +10,5 @@ scipy==1.11.4
 numba==0.58.1
 keyring>=24.0.0
 python-dotenv>=1.0.0
+soundfile>=0.12.1
+lameenc>=1.7.0
