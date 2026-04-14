@@ -63,7 +63,7 @@ All DAW state is managed in this directory. Do NOT duplicate in component-local 
 | `components/InsightsView.jsx` | Library analytics: low quality tracks, missing artwork, lost files, bitrate stats | `GET /api/insights/low_quality`, `GET /api/insights/no_artwork`, `GET /api/insights/lost` |
 | `components/RankingView.jsx` | Track ranking by quality metrics (bitrate, artwork, analysis status) | `GET /api/library/tracks` |
 | `components/ImportView.jsx` | Import wizard: add tracks from filesystem or URL | `POST /api/audio/import` |
-| `components/SettingsView.jsx` | App settings: Rekordbox paths, preferences | `GET /api/settings`, `POST /api/settings` |
+| `components/SettingsView.jsx` | **8-tab preferences panel**: Library (watched folders + scan), Backup (auto-interval), Export (bitrate/sample-rate defaults), Audio (CPAL output device via `list_audio_devices` Tauri cmd), Analysis (quality preset), Appearance (waveform band colors + locale), Shortcuts (14 configurable hotkeys via `KeyCapture` component), Network (HTTP proxy). Inner helper components: `Toggle`, `Section`, `Field`, `KeyCapture` | `GET /api/settings`, `POST /api/settings`, `POST /api/library/scan-folder`, `invoke('list_audio_devices')` |
 | `components/ToolsView.jsx` | Batch tools: clean titles, find duplicates, batch comments, rename | `GET /api/tools/duplicates`, `POST /api/tools/batch-comment`, `POST /api/library/clean-titles` |
 | `components/DesignView.jsx` | UI theme/palette preview and customization |  |
 | `components/WaveformEditor.jsx` | Full waveform editor (WaveSurfer.js). Used in RankingView (`simpleMode`) and standalone. Exposes ref API: `stop()`, `setTime(t)`, `getCurrentTime()`, `playPause()`. Fires `onPlayPause(bool)` on play/pause/finish events | — |
@@ -87,7 +87,7 @@ Main 4-panel DAW editor. `DjEditDaw` is the root; all others are children.
 
 | File | Purpose | Key Props / State |
 |------|---------|------------------|
-| `daw/DjEditDaw.jsx` | **Root DAW container** — orchestrates all 4 panels, owns top-level DAW state via `dawReducer` | Loads `.rbep` project; distributes state to children |
+| `daw/DjEditDaw.jsx` | **Root DAW container** — orchestrates all 4 panels, owns top-level DAW state via `dawReducer`. Configurable hotkeys via `shortcutsRef` (loads `settings.shortcuts` from API on mount); `matches(e, combo)` helper resolves `'Ctrl+Shift+Z'`-style strings | Loads `.rbep` project; distributes state to children |
 | `daw/DawToolbar.jsx` | Toolbar: save/open/export/edit-mode toggle buttons | Callbacks: `onSave`, `onOpen`, `onExport`, `onModeChange` |
 | `daw/DawTimeline.jsx` | Waveform canvas + interactive cue/beatgrid editing (click to place cues, drag to reposition) | Props: `waveformData`, `cuePoints`, `zoom`, `playhead` |
 | `daw/DawBrowser.jsx` | Left-panel track library sidebar for loading tracks into DAW | Calls `GET /api/library/tracks`; emits selected track to parent |
