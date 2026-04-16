@@ -143,7 +143,7 @@ FastAPI app (~1700 lines). Security: CORS locked to localhost, session token aut
 | DELETE | `/api/usb/profiles/{device_id}` | Delete a sync profile |
 | GET | `/api/usb/{device_id}/contents` | List tracks/playlists on USB device |
 | GET | `/api/usb/diff/{device_id}` | Calculate diff: what would change in a sync |
-| POST | `/api/usb/sync` | Run USB sync for specific playlists |
+| POST | `/api/usb/sync` | Run USB sync for specific playlists (long-running, no timeout — can take minutes for large libraries) |
 | POST | `/api/usb/sync/all` | Sync entire local library to USB |
 | POST | `/api/usb/eject` | Eject a USB device |
 | POST | `/api/usb/reset` | Reset USB library to factory state |
@@ -350,9 +350,13 @@ No third-party tools (scdl, yt-dlp). Rejects tracks where `downloadable=false`.
 |-------|------------|---------|
 | `UsbDetector` | `scan() → [Device]`, `is_rekordbox_usb(drive)`, `initialize_usb(drive)` | Detect and validate Rekordbox USB drives, initialize new drives |
 | `UsbProfileManager` | `get_profiles()`, `get_profile(id)`, `save_profile(p)`, `delete_profile(id)`, `get_settings()`, `save_settings(s)`, `get_usb_contents(id)` | Persistent sync profile CRUD (which playlists → which drive) |
-| `UsbSyncEngine` | `calculate_diff(playlist_ids?) → Diff`, `sync_collection(profile)`, `sync_playlists(profile, ids)` | Incremental sync with lock-file concurrency, diff calculation, generator-based progress streaming |
+| `UsbSyncEngine` | `calculate_diff()`, `sync_collection(profile)`, `sync_playlists(profile, ids)`, `sync_metadata(profile)`, `_sync_library_legacy(profile, ids)` | Incremental sync with lock-file concurrency, diff calculation, XML export w/ control-char sanitization |
 
-`UsbSyncEngine` uses a file lock to prevent concurrent syncs. Both `sync_collection` and `sync_playlists` are generators: yield `{ type, message, progress }` dicts as work progresses.
+**`UsbSyncEngine` notes**:
+- Drive letter normalization: bare `"E:"` → `"E:\\"` to ensure absolute paths in file URLs
+- XML safety: `_xml_safe()` strips ASCII control chars (0x00-0x1F except tab/LF/CR) from Rekordbox metadata before writing — prevents ElementTree from writing unparseable XML
+- Uses file lock (`.rbep_sync_lock`) to prevent concurrent syncs
+- All sync methods are generators: yield `{ stage, message, progress }` events; `stage="complete"` or `stage="error"` on finish
 
 ---
 

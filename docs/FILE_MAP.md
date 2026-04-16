@@ -34,7 +34,7 @@
 | `app/soundcloud_api.py` | `SoundCloudPlaylistAPI` — SC unofficial v2 API with dynamic client_id scraping, exponential backoff, pagination. Added: `resolve_track_from_url()`, `download_url` in normalized track. `SoundCloudSyncEngine` — fuzzy title/artist matching. `AuthExpiredError`, `RateLimitError` |
 | `app/soundcloud_downloader.py` | Legal HTTP-based SC downloader (official API only, `downloadable=true` gate). Dedup-aware (registry + SHA-256). Auto-organizes files: `SoundCloud/{Artist}/{Title}.ext`. Post-download: analysis + auto-playlist sort. |
 | `app/download_registry.py` | SQLite download registry: dedup by sc_track_id (O(1)) + SHA-256 content hash. Analysis history log. Multi-device via device_id UUID. `init_registry()`, `is_already_downloaded()`, `find_by_hash()`, `register_download()`, `update_analysis()`, `get_history()`, `get_stats()` |
-| `app/usb_manager.py` | `UsbDetector` (scan, initialize_usb), `UsbProfileManager` (CRUD for sync profiles), `UsbSyncEngine` (calculate_diff, sync_collection, sync_playlists — lock-file concurrency, incremental diff) |
+| `app/usb_manager.py` | `UsbDetector` (scan, initialize_usb), `UsbProfileManager` (CRUD for sync profiles), `UsbSyncEngine` (sync_collection, sync_playlists, sync_metadata — lock-file concurrency, XML export w/ control-char sanitization `_xml_safe()`, drive-letter path normalization) |
 | `app/backup_engine.py` | Git-like incremental backup: compressed JSON changesets, HEAD tracking, commit timeline, restore |
 | `app/rekordbox_export.py` | Converts `AnalysisEngine` results → Rekordbox XML `TRACK` elements with `TEMPO` nodes and `POSITION_MARK` cues |
 | `app/rekordbox_bridge.py` | High-level: export selected tracks → Rekordbox XML; import from XML exports |
@@ -53,7 +53,7 @@
 | File | Purpose |
 |------|---------|
 | `frontend/src/main.jsx` | App root: lazy-loaded tab views, session token init, global error boundary, tab router |
-| `frontend/src/api/api.js` | **Central Axios instance** — always use this. Handles session tokens, 401 refresh queue, 429 exponential backoff, HttpOnly cookie support, 10s timeout, Tauri context detection |
+| `frontend/src/api/api.js` | **Central Axios instance** — always use this. Handles session tokens, 401 refresh queue, 429 exponential backoff, HttpOnly cookie support, 10s default timeout (disabled for long-running calls like `/api/usb/sync` via `{ timeout: 0 }`), Tauri context detection |
 | `frontend/src/index.css` | Global styles (Tailwind base + custom) |
 
 ### Audio Engine
@@ -84,7 +84,7 @@
 | `frontend/src/components/SoundCloudView.jsx` | SC track search and preview interface |
 | `frontend/src/components/SoundCloudSyncView.jsx` | SC sync: match SC tracks to library, trigger download, preview matches |
 | `frontend/src/components/SoundCloudProgressModal.jsx` | Download progress overlay with per-track status |
-| `frontend/src/components/UsbView.jsx` | USB device manager: detect drives, sync profiles, trigger `POST /api/usb/sync` |
+| `frontend/src/components/UsbView.jsx` | USB device manager: detect drives, sync profiles, trigger `POST /api/usb/sync` (no timeout for long-running syncs), progress streaming |
 | `frontend/src/components/BackupManager.jsx` | Library backup/restore: timeline view, create snapshots, `POST /api/library/backup` |
 | `frontend/src/components/XmlCleanView.jsx` | Rekordbox XML cleanup/validation tool, calls `POST /api/xml/clean` |
 | `frontend/src/components/InsightsView.jsx` | Library analytics: low quality, no artwork, lost tracks, bitrate stats |
