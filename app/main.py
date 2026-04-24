@@ -1770,28 +1770,36 @@ class ScDownloadRequest(BaseModel):
       B) URL-only (from SoundCloudView URL input box):
            url — backend resolves track metadata via /resolve API before downloading.
 
-    Legal gate: downloads are ONLY started if downloadable=True.
-    The backend ALWAYS re-validates the downloadable flag server-side; the frontend
-    value is trusted only as a hint (re-checked via registry or API resolve).
+    `downloadable` is a hint, not a hard gate: when True the downloader prefers
+    the official /tracks/{id}/download endpoint (original upload). When False,
+    it falls back to the same signed transcodings the SC web player plays for
+    the authenticated user. Legal boundaries are enforced inside the downloader
+    (see app/soundcloud_downloader.py module docstring): snipped previews,
+    401/403 responses, and unavailable tracks are skipped there.
     """
     url: Optional[str] = None               # SC permalink URL (mode B)
     sc_track_id: Optional[str] = None       # SoundCloud track ID (mode A)
     title: Optional[str] = None
     artist: Optional[str] = None
     duration_ms: int = 0
-    downloadable: bool = False              # must be True or download is rejected
+    downloadable: bool = False              # hint for path selection; see class docstring
     sc_playlist_title: Optional[str] = None # for auto-playlist sort
 
 
 @app.post("/api/soundcloud/download")
 async def soundcloud_download(data: ScDownloadRequest, request: Request):
     """
-    Start a legal SoundCloud track download.
+    Start a SoundCloud track download.
 
-    Legal compliance:
-      - Rejects any track where downloadable=False.
-      - Uses the official SC API download endpoint only.
-      - No third-party ripping tools are involved.
+    Acquisition order (chosen by the downloader, not by this endpoint):
+      1. Official /tracks/{id}/download — when creator enabled it.
+      2. v2 media.transcodings[] stream — same as the SC web player.
+
+    Legal boundaries (enforced in app/soundcloud_downloader.py):
+      - Snipped (30s-preview) transcodings are skipped.
+      - 401/403 from transcoding-signing is respected (no retry-with-other-path).
+      - Go+ (hq) quality is only used when SC itself exposes it for the
+        authenticated account — no paywall circumvention.
 
     Deduplication:
       - Checks the registry by sc_track_id before starting.
