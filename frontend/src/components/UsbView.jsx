@@ -348,6 +348,10 @@ const UsbView = () => {
             if (res.data.status === 'success') {
                 toast.success(result.message || 'Sync complete!');
                 scanDevices();
+                // Reload the USB Library Contents viewer — without this the box
+                // below keeps showing the pre-sync state ("No tracks found")
+                // even after a successful sync wrote the new XML.
+                loadUsbContents(sel.device_id);
             } else {
                 toast.error(result.message || 'Sync failed');
             }
