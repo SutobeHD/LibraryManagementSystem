@@ -323,24 +323,42 @@ Device ID: stored as `{MUSIC_DIR}/.rb_device_id`. Not hardware-tied.
 
 ## SoundCloud Downloader (`app/soundcloud_downloader.py`)
 
-Legal, dedup-aware HTTP-based downloader. Uses official SC API only (`GET /tracks/{id}/download`).
-No third-party tools (scdl, yt-dlp). Rejects tracks where `downloadable=false`.
+Dedup-aware downloader with two-stage acquisition — same legal surface as the
+SC web player itself.
+
+**Acquisition order:**
+1. **Official `/tracks/{id}/download`** (preferred) — used when `downloadable=True`,
+   returns the creator's original upload.
+2. **Fallback: v2 `media.transcodings[]`** — signed CDN stream same as web-player:
+   - `progressive` → direct HTTP stream (MP3)
+   - `hls` → ffmpeg `-c copy` mux to `.m4a` (no re-encode)
+
+**Legal boundaries** (enforced in `_resolve_stream_via_transcodings`):
+- Skip `snipped: true` transcodings (= 30s paywall previews)
+- Skip on 401/403 from transcoding-signing (no access)
+- Skip when `transcodings[]` empty (private/removed)
+- Only use `hq` (Go+) when SC itself returns it — never probe for paid quality
+- HLS mux uses `-c copy` (repack only, no re-encode, no DRM touched)
 
 **Download flow:**
-1. Legal gate: reject if `downloadable=False`
-2. Dedup gate: reject if `is_already_downloaded(sc_track_id)` → True
-3. Register as 'downloading' in registry (blocks parallel duplicates)
-4. Resolve official download URL via `/tracks/{id}/download` + OAuth
-5. Stream to temp file → move to `SoundCloud/{Artist}/{Title}.ext`
+1. Dedup gate: reject if `is_already_downloaded(sc_track_id)` → True
+2. Register as 'downloading' in registry (blocks parallel duplicates)
+3. Resolve source URL (official → transcodings fallback)
+4. Download by protocol (progressive=`_stream_file_to_temp`, hls=`_download_hls_to_temp`)
+5. Move to `SoundCloud/{Artist}/{Title}.ext`
 6. SHA-256 hash → content dedup check
 7. Register as 'downloaded'
 8. Background thread: analyze (BPM/key) → import → auto-sort into SC playlist
 
-| Method | Description |
-|--------|-------------|
+| Method / Function | Description |
+|-------------------|-------------|
 | `download_track(**kwargs)` | Start download; returns task_id immediately |
 | `get_task_status(task_id)` | Returns task dict or None |
-| `cleanup_processes()` | atexit hook (no-op; no subprocesses) |
+| `cleanup_processes()` | atexit hook (no-op; no subprocesses held) |
+| `_resolve_official_download_url(id, token)` | v1 `/tracks/{id}/download` resolver |
+| `_resolve_stream_via_transcodings(id, token)` | v2 transcodings[] resolver with legal gates |
+| `_stream_file_to_temp(url, token)` | Progressive HTTP download to temp |
+| `_download_hls_to_temp(m3u8, token, mime)` | HLS segment download + ffmpeg `-c copy` mux |
 
 ---
 
@@ -355,6 +373,8 @@ No third-party tools (scdl, yt-dlp). Rejects tracks where `downloadable=false`.
 **`UsbSyncEngine` notes**:
 - Drive letter normalization: bare `"E:"` → `"E:\\"` to ensure absolute paths in file URLs
 - XML safety: `_xml_safe()` strips ASCII control chars (0x00-0x1F except tab/LF/CR) from Rekordbox metadata before writing — prevents ElementTree from writing unparseable XML
+- Filename safety: `_clean_filename()` strips trailing dots/spaces and rejects Windows reserved names (CON/PRN/AUX/NUL/COM1-9/LPT1-9). Without this, Windows silently drops trailing dots at mkdir time and later writes to the requested path fail with ENOENT.
+- Copy-error classification: only real disconnects — `winerror` in `(21, 31, 1167, 3)` OR `self.usb_root.exists()` returning False — abort the batch. Plain ENOENT on a single bad path is logged and skipped so one bad track doesn't kill a 3000-track sync.
 - Uses file lock (`.rbep_sync_lock`) to prevent concurrent syncs
 - All sync methods are generators: yield `{ stage, message, progress }` events; `stage="complete"` or `stage="error"` on finish
 
