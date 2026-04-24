@@ -694,14 +694,30 @@ class UsbSyncEngine:
             yield {"stage": "error", "message": str(e), "progress": -1}
 
     def _clean_filename(self, name: str) -> str:
-        """Req 20: Enforce UTF-8 and remove invalid OS characters."""
+        """Req 20: Enforce UTF-8 and remove invalid OS characters.
+
+        Windows silently strips trailing dots and spaces when creating directories
+        or files. That means mkdir("foo ..") actually creates "foo", and any
+        subsequent write to "foo ..\\file" fails with ENOENT. We must strip them
+        here so the path we *request* matches the path Windows actually creates.
+        Same for leading dots/spaces (hidden / trim artifacts) and reserved names.
+        """
         import string, unicodedata
         name = str(name or "Unknown")
         valid_chars = f"-_.() {string.ascii_letters}{string.digits}"
         cleaned = ''.join(c for c in name if c in valid_chars or (unicodedata.category(c)[0] not in 'C'))
         for char in ["/", "\\", ":", "*", "?", '"', "<", ">", "|"]:
             cleaned = cleaned.replace(char, "_")
-        return cleaned
+        # Strip leading/trailing dots and whitespace — Windows silently drops
+        # them and that mismatches the path we later try to write to.
+        cleaned = cleaned.strip(" .")
+        # Avoid Windows reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+        reserved = {"CON", "PRN", "AUX", "NUL",
+                    *(f"COM{i}" for i in range(1, 10)),
+                    *(f"LPT{i}" for i in range(1, 10))}
+        if cleaned.upper() in reserved:
+            cleaned = f"_{cleaned}"
+        return cleaned or "Unknown"
 
     def _get_safe_dest_path(self, artist: str, album: str, filename: str) -> Path:
         """
@@ -903,20 +919,37 @@ class UsbSyncEngine:
                         copied_ok += 1
                     except OSError as e:
                         logger.error(f"Copy failed for {local_file}: {e}")
-                        
+
                         err_code = getattr(e, 'winerror', None) or getattr(e, 'errno', None)
-                        
+
                         # Req 16: ENOSPC / Disk Full (Win: 112, 39, Unix: 28)
                         if err_code in (112, 39, 28) or "No space left" in str(e):
                             raise Exception("Device is full (ENOSPC). Sync aborted.")
-                            
-                        # Req 22: Unexpected Disconnect (Win: 21, 31, 1167, 2, 3)
-                        if err_code in (21, 31, 1167, 2, 3) or "No such file" in str(e):
+
+                        # Req 22: Disconnect detection — ENOENT (errno 2) alone is
+                        # ambiguous: it fires for illegal filenames (Windows strips
+                        # trailing dots/spaces), missing sources, etc. A real USB
+                        # disconnect means the drive ROOT no longer exists. Probe
+                        # that before aborting the entire batch over one bad file.
+                        disconnect_codes = (21, 31, 1167, 3)  # Win: dev not ready / disk removed / not accessible
+                        drive_gone = False
+                        try:
+                            drive_gone = not self.usb_root.exists()
+                        except Exception:
+                            drive_gone = True
+                        if err_code in disconnect_codes or drive_gone:
                             raise Exception("USB Drive disconnected or inaccessible. Sync aborted.")
-                            
+
                         # Req 25: OS File Locks
                         if isinstance(e, PermissionError) or err_code in (5, 32):
                             logger.warning(f"PermissionError: file '{local_file}' may be locked by Rekordbox. Skipping without aborting batch.")
+                            continue
+
+                        # ENOENT / ENOTDIR / invalid-name paths — skip the bad
+                        # track, keep syncing the rest. Previous behavior treated
+                        # ENOENT as disconnect and killed the whole batch.
+                        logger.warning(f"Skipping '{local_file}' after OSError (err={err_code}): {e}")
+                        continue
                 else:
                     skipped_missing += 1
                     logger.warning(f"Audio file missing locally, skipping copy: {local_path}")
