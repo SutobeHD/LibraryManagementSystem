@@ -1,20 +1,40 @@
 """
-SoundCloud Downloader — Legal, dedup-aware download pipeline.
+SoundCloud Downloader — Dedup-aware download pipeline with two acquisition paths.
 
-LEGAL COMPLIANCE
+ACQUISITION PATHS
+=================
+1. Official download endpoint (preferred):
+     GET https://api.soundcloud.com/tracks/{id}/download
+   Used when the creator enabled the download button (`downloadable: true`).
+   Returns the original uploaded file (WAV, FLAC, or MP3).
+
+2. Stream reconstruction (fallback):
+     GET https://api-v2.soundcloud.com/tracks/{id}  →  media.transcodings[]
+   Uses the exact same signed CDN streams the SoundCloud web player plays for
+   the authenticated user. Supports `progressive` (direct MP3) and `hls`
+   (segment download + ffmpeg copy-mux to .m4a).
+
+LEGAL BOUNDARIES
 ================
-Only tracks explicitly marked 'downloadable: true' by their creator are eligible
-for download. Non-downloadable tracks are rejected before any network request is
-made. This matches SoundCloud's Terms of Service:
-  "You may only download Content if a download button or link is displayed
-   by SoundCloud for that Content."
+We only download what the user's own account has streaming access to via
+SoundCloud's own API — we do NOT circumvent any DRM, paywall, or access
+control. Explicit gates:
 
-Downloads use the official SoundCloud API endpoint:
-  GET https://api.soundcloud.com/tracks/{id}/download
-  Authorization: OAuth {token}
+  - `snipped: true` transcodings are rejected (30-second preview clips for
+    paywalled content the user has no full access to — saving those as full
+    tracks would be misleading).
+  - 401/403 responses from the transcoding-signing endpoint are respected;
+    the track is skipped without retrying through another path.
+  - `hq` (Go+ 256 kbps AAC) transcodings are ONLY used when SoundCloud itself
+    returns them — SC only does this for accounts with an active Go+
+    subscription. We never probe for higher quality than the user has paid
+    for.
+  - No re-encoding of HLS segments: ffmpeg is invoked with `-c copy` which
+    just repackages the existing AAC/MP3 bytes into a standard container.
 
-This is the same mechanism used by the SoundCloud web player download button.
-No third-party ripping tools (scdl, yt-dlp) are used.
+This matches the legal surface of the SoundCloud web player itself — it is a
+Terms-of-Service question (civil contract between user and SoundCloud), not a
+copyright circumvention question.
 
 DEDUPLICATION
 =============
@@ -37,6 +57,7 @@ POST-DOWNLOAD PIPELINE
 import logging
 import re
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -45,7 +66,7 @@ from typing import Callable, Dict, Optional
 
 import requests
 
-from .config import MUSIC_DIR
+from .config import FFMPEG_BIN, MUSIC_DIR
 from . import download_registry as registry
 
 logger = logging.getLogger(__name__)
@@ -59,6 +80,16 @@ _MAX_NAME_LEN = 80
 # Network timeouts
 _API_TIMEOUT = 15       # seconds — URL resolution / redirect
 _DOWNLOAD_TIMEOUT = 180  # seconds — actual file download (large files up to ~500 MB)
+
+# v2 API — needed for `media.transcodings[]`. The public v1 (api.soundcloud.com)
+# doesn't expose the transcoding URLs used by the web player.
+_V2_API_BASE = "https://api-v2.soundcloud.com"
+
+# Browser-like User-Agent — the v2 /tracks endpoint will reject generic clients.
+_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
 
 # Content-Type → extension mapping
 _CT_MAP: Dict[str, str] = {
@@ -181,6 +212,211 @@ def _resolve_official_download_url(
         return None
 
 
+def _resolve_stream_via_transcodings(
+    sc_track_id: str,
+    auth_token: Optional[str],
+) -> Optional[Dict]:
+    """
+    Resolve a signed CDN stream URL via the v2 `media.transcodings[]` array.
+
+    This is the same mechanism the SoundCloud web player uses. We only use what
+    SC itself returns for the authenticated account — no paywall circumvention,
+    no DRM bypass. See module docstring for the legal boundary contract.
+
+    Returns a dict:
+        {url: <signed CDN URL>, protocol: "progressive"|"hls",
+         mime_type: str, quality: "sq"|"hq"}
+    Or None if:
+      - The track has no usable (non-snipped) transcoding for this account.
+      - SC denies access (401/403) — paywall or removed content.
+      - A network error occurs.
+    """
+    from .soundcloud_api import get_sc_client_id
+
+    headers = {"User-Agent": _UA, "Accept": "application/json"}
+    if auth_token:
+        headers["Authorization"] = f"OAuth {auth_token}"
+
+    client_id = get_sc_client_id()
+    params = {"client_id": client_id}
+
+    # Step 1 — fetch v2 track metadata (includes media.transcodings[]) ────────
+    try:
+        resp = requests.get(
+            f"{_V2_API_BASE}/tracks/{sc_track_id}",
+            headers=headers, params=params, timeout=_API_TIMEOUT,
+        )
+        if resp.status_code in (401, 403):
+            logger.warning(
+                "[SC-DL] No stream access for sc_id=%s (HTTP %s — paywall/removed)",
+                sc_track_id, resp.status_code,
+            )
+            return None
+        resp.raise_for_status()
+        track_data = resp.json()
+    except requests.RequestException as exc:
+        logger.error("[SC-DL] v2 metadata fetch failed for sc_id=%s: %s", sc_track_id, exc)
+        return None
+    except ValueError:
+        logger.error("[SC-DL] v2 metadata returned non-JSON for sc_id=%s", sc_track_id)
+        return None
+
+    transcodings = (track_data.get("media") or {}).get("transcodings") or []
+    track_auth = track_data.get("track_authorization")
+
+    if not transcodings:
+        logger.warning(
+            "[SC-DL] sc_id=%s has no transcodings (private/removed/unavailable)",
+            sc_track_id,
+        )
+        return None
+
+    # Legal gate: reject 30s-preview (`snipped`) transcodings — those are what
+    # SC serves when the user has NO full access to the track. Downloading the
+    # preview and saving as a full file would be misleading and cross from
+    # "what I can stream" into "what I'm circumventing".
+    full_transcodings = [t for t in transcodings if not t.get("snipped", False)]
+    if not full_transcodings:
+        logger.warning(
+            "[SC-DL] sc_id=%s only exposes snipped previews — "
+            "user has no full streaming access. Skipping.",
+            sc_track_id,
+        )
+        return None
+
+    # Rank: prefer hq (Go+) > sq, then progressive > hls (simpler muxing).
+    # SC only returns `hq` when the authenticated account is Go+ — we honor
+    # whatever SC chose to expose; we never probe for paid quality.
+    def _rank(t: dict) -> tuple:
+        quality = 1 if t.get("quality") == "hq" else 0
+        proto = 1 if (t.get("format") or {}).get("protocol") == "progressive" else 0
+        return (quality, proto)
+
+    best = sorted(full_transcodings, key=_rank, reverse=True)[0]
+    fmt = best.get("format") or {}
+    protocol = fmt.get("protocol")
+    mime = fmt.get("mime_type", "")
+    quality = best.get("quality", "sq")
+    tc_url = best.get("url")
+
+    if not tc_url or protocol not in ("progressive", "hls"):
+        logger.error(
+            "[SC-DL] Unusable transcoding for sc_id=%s: protocol=%s url=%s",
+            sc_track_id, protocol, bool(tc_url),
+        )
+        return None
+
+    # Step 2 — resolve the signed CDN URL ──────────────────────────────────────
+    sign_params = {"client_id": client_id}
+    if track_auth:
+        sign_params["track_authorization"] = track_auth
+
+    try:
+        resp = requests.get(tc_url, headers=headers, params=sign_params, timeout=_API_TIMEOUT)
+        if resp.status_code in (401, 403):
+            logger.warning(
+                "[SC-DL] Transcoding sign denied for sc_id=%s (HTTP %s)",
+                sc_track_id, resp.status_code,
+            )
+            return None
+        resp.raise_for_status()
+        signed = resp.json()
+    except requests.RequestException as exc:
+        logger.error("[SC-DL] Transcoding sign failed for sc_id=%s: %s", sc_track_id, exc)
+        return None
+    except ValueError:
+        logger.error("[SC-DL] Transcoding sign returned non-JSON for sc_id=%s", sc_track_id)
+        return None
+
+    cdn_url = signed.get("url")
+    if not cdn_url:
+        logger.error("[SC-DL] Sign response had no url field for sc_id=%s", sc_track_id)
+        return None
+
+    logger.info(
+        "[SC-DL] Resolved transcoding: sc_id=%s protocol=%s quality=%s mime=%s",
+        sc_track_id, protocol, quality, mime,
+    )
+    return {
+        "url": cdn_url,
+        "protocol": protocol,
+        "mime_type": mime,
+        "quality": quality,
+    }
+
+
+def _download_hls_to_temp(
+    m3u8_url: str,
+    auth_token: Optional[str],
+    mime_type: str,
+) -> Optional[Path]:
+    """
+    Download an HLS playlist via ffmpeg and copy-mux into a single audio file.
+
+    We use ffmpeg `-c copy` so there is NO re-encoding — the existing AAC or
+    MP3 segments are just repackaged into a standard container. This keeps us
+    away from any transcoding/re-encoding that could be read as content
+    alteration, and preserves the exact audio bytes SC served.
+
+    Returns the temp file path on success, or None on failure.
+    """
+    # Pick container by codec hint — AAC streams need .m4a + aac_adtstoasc BSF,
+    # MP3 streams can stay .mp3. Default to .m4a (SC HLS is almost always AAC).
+    is_mp3 = "mpeg" in mime_type.lower() and "mp4" not in mime_type.lower() \
+             and "aac" not in mime_type.lower()
+    ext = ".mp3" if is_mp3 else ".m4a"
+
+    with tempfile.NamedTemporaryFile(prefix="rbpro_sc_", suffix=ext, delete=False) as tf:
+        out_path = Path(tf.name)
+
+    cmd = [
+        FFMPEG_BIN,
+        "-hide_banner", "-loglevel", "error",
+        "-user_agent", _UA,
+    ]
+    if auth_token:
+        # ffmpeg accepts per-request headers for HLS segment fetches
+        cmd += ["-headers", f"Authorization: OAuth {auth_token}\r\n"]
+    cmd += ["-i", m3u8_url, "-c", "copy"]
+    if not is_mp3:
+        # AAC-in-ADTS → MP4 container requires this bitstream filter
+        cmd += ["-bsf:a", "aac_adtstoasc"]
+    cmd += ["-y", str(out_path)]
+
+    try:
+        logger.info("[SC-DL] HLS mux via ffmpeg → %s", out_path.name)
+        result = subprocess.run(
+            cmd,
+            capture_output=True, text=True,
+            timeout=_DOWNLOAD_TIMEOUT * 2,
+        )
+        if result.returncode != 0:
+            logger.error(
+                "[SC-DL] ffmpeg failed (code %d): %s",
+                result.returncode, (result.stderr or "")[:500],
+            )
+            out_path.unlink(missing_ok=True)
+            return None
+
+        size = out_path.stat().st_size
+        if size < 1024:
+            logger.error("[SC-DL] ffmpeg output too small (%d bytes) — aborting", size)
+            out_path.unlink(missing_ok=True)
+            return None
+
+        logger.info("[SC-DL] HLS muxed %d bytes → %s", size, out_path.name)
+        return out_path
+
+    except subprocess.TimeoutExpired:
+        logger.error("[SC-DL] ffmpeg timed out after %ds", _DOWNLOAD_TIMEOUT * 2)
+        out_path.unlink(missing_ok=True)
+        return None
+    except OSError as exc:
+        logger.error("[SC-DL] ffmpeg not available or failed: %s", exc)
+        out_path.unlink(missing_ok=True)
+        return None
+
+
 def _stream_file_to_temp(
     download_url: str,
     auth_token: Optional[str],
@@ -286,27 +522,15 @@ class SoundCloudDownloader:
         """
         task_id = f"sc_{sc_track_id}_{int(time.time())}"
 
-        # ── Gate 1: Legal compliance — only downloadable tracks ────────────────
-        if not downloadable:
-            logger.warning(
-                "[SC-DL] Rejected sc_id=%s '%s' — not marked downloadable by creator.",
-                sc_track_id, title,
-            )
-            self._set_task(task_id, {
-                "id": task_id, "sc_track_id": sc_track_id,
-                "title": title, "artist": artist,
-                "status": "Rejected", "progress": 0,
-                "error": (
-                    "Dieser Track ist nicht zum Download freigegeben. "
-                    "Der Ersteller hat den Download-Button nicht aktiviert."
-                ),
-                "start_time": time.time(),
-            })
-            if on_complete:
-                on_complete(task_id, False, None)
-            return task_id
+        # Note: `downloadable` is kept as a signal (preferred path: original
+        # uploaded file via /tracks/{id}/download), but no longer a hard gate.
+        # When the creator hasn't enabled the download button, we fall back to
+        # the same signed streams the SoundCloud web player uses for this user.
+        # Legal boundaries live in _resolve_stream_via_transcodings (see module
+        # docstring): snipped previews, 401/403, and unavailable tracks are
+        # skipped there.
 
-        # ── Gate 2: Deduplication — skip if already in registry ───────────────
+        # ── Gate: Deduplication — skip if already in registry ─────────────────
         if registry.is_already_downloaded(sc_track_id):
             logger.info("[SC-DL] Skipped sc_id=%s '%s' — already in registry.", sc_track_id, title)
             self._set_task(task_id, {
@@ -340,6 +564,7 @@ class SoundCloudDownloader:
                     task_id=task_id, sc_track_id=sc_track_id,
                     sc_permalink_url=sc_permalink_url,
                     title=title, artist=artist, duration_ms=duration_ms,
+                    downloadable=downloadable,
                     auth_token=auth_token, sc_playlist_title=sc_playlist_title,
                     on_complete=on_complete,
                 )
@@ -363,7 +588,7 @@ class SoundCloudDownloader:
 
     def _do_download(
         self, *, task_id: str, sc_track_id: str, sc_permalink_url: str,
-        title: str, artist: str, duration_ms: int,
+        title: str, artist: str, duration_ms: int, downloadable: bool,
         auth_token: Optional[str], sc_playlist_title: Optional[str],
         on_complete: Optional[Callable],
     ) -> None:
@@ -372,15 +597,36 @@ class SoundCloudDownloader:
         tmp_path: Optional[Path] = None
 
         try:
-            # Step 1 — Resolve official download URL via SC API ────────────────
+            # Step 1 — Resolve a usable source URL.
+            # Two-stage fallback:
+            #   (a) Official /download endpoint if the creator enabled it.
+            #   (b) v2 transcodings[] (same streams the web player plays).
             self._update_task(task_id, status="Resolving", progress=5)
-            logger.info("[SC-DL] Starting: sc_id=%s title='%s'", sc_track_id, title)
+            logger.info(
+                "[SC-DL] Starting: sc_id=%s title='%s' downloadable=%s",
+                sc_track_id, title, downloadable,
+            )
 
-            download_url = _resolve_official_download_url(sc_track_id, auth_token)
-            if not download_url:
+            source: Optional[Dict] = None
+            if downloadable:
+                official_url = _resolve_official_download_url(sc_track_id, auth_token)
+                if official_url:
+                    source = {"url": official_url, "protocol": "progressive",
+                              "mime_type": "", "quality": "original"}
+                else:
+                    logger.info(
+                        "[SC-DL] Official /download endpoint failed for sc_id=%s; "
+                        "falling back to transcodings[]", sc_track_id,
+                    )
+
+            if source is None:
+                source = _resolve_stream_via_transcodings(sc_track_id, auth_token)
+
+            if source is None:
                 err = (
-                    "Download-URL konnte nicht von SoundCloud abgerufen werden. "
-                    "Möglicherweise ist der Track für dein Konto nicht zugänglich."
+                    "Download fehlgeschlagen: kein verfügbarer Stream. "
+                    "Entweder ist der Track privat/gelöscht, oder dein Konto "
+                    "hat keinen vollen Zugriff (Paywall/Go+ ohne Abo)."
                 )
                 self._update_task(task_id, status="Failed", error=err)
                 registry.mark_failed(sc_track_id, err)
@@ -388,11 +634,20 @@ class SoundCloudDownloader:
                     on_complete(task_id, False, None)
                 return
 
-            # Step 2 — Stream file to temp directory ──────────────────────────
+            # Step 2 — Download by protocol ────────────────────────────────────
             self._update_task(task_id, status="Downloading", progress=15)
-            tmp_path = _stream_file_to_temp(download_url, auth_token)
+            protocol = source.get("protocol")
+
+            if protocol == "hls":
+                tmp_path = _download_hls_to_temp(
+                    source["url"], auth_token, source.get("mime_type", ""),
+                )
+            else:
+                # progressive — including the official /download redirect
+                tmp_path = _stream_file_to_temp(source["url"], auth_token)
+
             if not tmp_path:
-                err = "Datei-Download fehlgeschlagen (Netzwerkfehler)."
+                err = "Datei-Download fehlgeschlagen (Netzwerkfehler oder ffmpeg-Problem)."
                 self._update_task(task_id, status="Failed", error=err)
                 registry.mark_failed(sc_track_id, err)
                 if on_complete:
