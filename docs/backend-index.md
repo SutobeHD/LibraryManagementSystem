@@ -1,7 +1,7 @@
 # app/ INDEX — Python Backend
 
 > Module and endpoint map for the FastAPI backend. Update when adding/removing endpoints or modules.
-> Last updated: 2026-04-11
+> Last updated: 2026-04-30
 
 ---
 
@@ -235,6 +235,25 @@ Direct SQLite access (live mode). Thread-safe via locks. Auto-backup on write.
 | `update_track(id, fields)` | Write to SQLite (**requires Rekordbox to be closed**) |
 | `get_analysis_writer()` | Lazy-create and return `AnalysisDBWriter` instance bound to this DB |
 | `get_unanalyzed_track_ids()` | Return list of track IDs with BPM=0 (not yet analyzed) |
+| `_load_beatgrids_from_anlz()` | Loads PQTZ beatgrids via `SafeAnlzParser` (subprocess-isolated) so rbox panics on malformed `.DAT` files cannot crash the backend |
+
+### `app/anlz_safe.py` — `SafeAnlzParser`
+Process-isolated wrapper around `rbox.Anlz` PQTZ parsing. Defends against
+known panics in `rbox` 0.1.5 (`masterdb/database.rs:1162` `unwrap()` on
+`None`) that abort the whole Python process on malformed ANLZ files.
+
+| Layer | Purpose |
+|-------|---------|
+| `_validate_anlz_header(path)` | Fast pre-check: file size ≥ 28 bytes + `PMAI` magic. Rejects truncated / non-ANLZ files before they reach rbox. |
+| `ProcessPoolExecutor(max_workers=1)` | Runs `rbox.Anlz()` in a subprocess. A panic kills only the worker; parent respawns it (`BrokenExecutor` handler). |
+| `_bad_ids` cache | Once a track id panics / times out / fails header check, skip it for the rest of the session — don't re-trigger the same panic on every reload. |
+| `PER_CALL_TIMEOUT_S = 5.0` | Hung worker is killed and respawned on timeout. |
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `parse_pqtz(track_id, dat_path)` | `list[dict] \| None` | Safe PQTZ extract; `None` on any failure |
+| `stats` | `dict` | `{bad_ids, panics, worker_alive}` for diagnostics |
+| `shutdown()` | None | Tear down the worker (idempotent) |
 
 ---
 
