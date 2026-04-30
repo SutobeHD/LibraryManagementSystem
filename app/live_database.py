@@ -11,6 +11,7 @@ from pathlib import Path
 from collections import defaultdict
 import rbox
 from .config import BACKUP_DIR
+from .anlz_safe import SafeAnlzParser
 
 logger = logging.getLogger(__name__)
 
@@ -353,41 +354,58 @@ class LiveRekordboxDB:
             logger.error(f"Failed to load cues: {e}")
 
     def _load_beatgrids_from_anlz(self):
-        """Loads high-precision beatgrid (PQTZ) from local Rekordbox ANLZ binary files."""
+        """Loads high-precision beatgrid (PQTZ) from local Rekordbox ANLZ binary files.
+
+        Uses `SafeAnlzParser` to isolate `rbox.Anlz` calls in a subprocess
+        worker. This is required because rbox 0.1.5 has a known panic in
+        `rbox/src/masterdb/database.rs:1162` (`unwrap()` on `None`) that
+        triggers `abort()` on malformed ANLZ files and would otherwise
+        kill the entire FastAPI backend (Windows exit 0xC0000409).
+        """
         logger.info("Loading Beatgrids from ANLZ binary (PQTZ)...")
+        parser = SafeAnlzParser()
         try:
             count = 0
-            # To avoid excessive file access, we only do this for the collections
+            scanned = 0
             for tid_str, track in self.tracks.items():
                 try:
                     paths = self.db.get_content_anlz_paths(tid_str)
-                    if not paths: 
-                        continue
-                    
-                    dat_path = paths.get('DAT')
-                    if dat_path and os.path.exists(str(dat_path)):
-                        anlz = rbox.Anlz(str(dat_path))
-                        # rbox.Anlz dynamically parses chunks like PQTZ
-                        pqtz = getattr(anlz, 'pqtz', None)
-                        if pqtz and pqtz.entries:
-                            track["beatGrid"] = []
-                            for entry in pqtz.entries:
-                                track["beatGrid"].append({
-                                    "time": float(entry.time) / 1000.0,
-                                    "bpm": float(entry.bpm) / 100.0,
-                                    "beat": 1
-                                })
-                            count += 1
-                        else:
-                            # logger.warning(f"No pqtz in ANLZ for {tid_str}")
-                            pass
                 except Exception as e:
-                    logger.warning(f"Failed to parse ANLZ for track {tid_str}: {e}")
+                    # rbox raises e.g. "Failed to get AnalysisDataPath" for
+                    # tracks without analysis. Log at debug to avoid noise
+                    # — these are expected for un-analyzed tracks.
+                    logger.debug(
+                        "get_content_anlz_paths failed for %s: %s",
+                        tid_str, e,
+                    )
                     continue
-            
-            logger.info(f"Successfully linked {count} tracks with ANLZ beatgrids.")
+
+                if not paths:
+                    continue
+                dat_path = paths.get('DAT')
+                if not dat_path:
+                    continue
+                dat_path = str(dat_path)
+                if not os.path.exists(dat_path):
+                    continue
+
+                scanned += 1
+                entries = parser.parse_pqtz(tid_str, dat_path)
+                if entries:
+                    track["beatGrid"] = entries
+                    count += 1
+
+            logger.info(
+                "ANLZ beatgrids: scanned=%d linked=%d skipped=%d (panics=%d)",
+                scanned,
+                count,
+                parser.stats["bad_ids"],
+                parser.stats["panics"],
+            )
         except Exception as e:
-            logger.error(f"Critical failure in ANLZ loader: {e}")
+            logger.error("Critical failure in ANLZ loader: %s", e)
+        finally:
+            parser.shutdown()
 
     def _load_playlists(self):
         self.playlists = []
