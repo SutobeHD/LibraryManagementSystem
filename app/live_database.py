@@ -183,45 +183,78 @@ class LiveRekordboxDB:
                 logger.error(f"Failed to create archival backup: {e}")
 
     def load(self):
-        """Loads the library from the live master.db."""
+        """Loads the library from the live master.db.
+
+        Beatgrid loading is dispatched to a background thread because
+        it goes through subprocess-isolated rbox calls (see
+        `app.anlz_safe`) and a buggy DB row could otherwise stall the
+        library load. Tracks become visible in the UI immediately;
+        beatgrids fill in as soon as the worker finishes (typically
+        within a few seconds of the load returning).
+        """
         try:
             # Always backup before opening
             self._ensure_backup()
-            
+
             logger.info("Opening Live Database...")
             # Trigger connection on main thread
             _ = self.db
             logger.info(f"Successfully opened live database at {self.db_path}")
-            
+
             # Pre-load metadata maps for performance
             self._load_metadata_maps()
-            
+
             # Load MyTags
             self._load_mytags()
-            
+
             # 1. Load Tracks (Content)
             self._load_tracks()
-            
+
             # 2. Load Playlists
             self._load_playlists()
             self._load_playlist_tracks()
 
             # 3. Load Cues (Hot Cues & Memory Cues)
             self._load_cues()
-            
-            # 4. Load Beatgrids (from ANLZ DAT files)
-            self._load_beatgrids_from_anlz()
-            
-            # 5. Finalize metadata for UI
+
+            # 4. Finalize metadata for UI (ID/path normalization, etc.)
             self._finalize_ui_metadata()
-            
+
             self.loaded = True
             self.loading_status = "Idle"
-            logger.info(f"LIVE LOAD COMPLETE: {len(self.tracks)} tracks, {len(self.playlists)} playlists")
+            logger.info(
+                f"LIVE LOAD COMPLETE: {len(self.tracks)} tracks, "
+                f"{len(self.playlists)} playlists"
+            )
+
+            # 5. Beatgrids — kick off in background so a slow / panicking
+            # rbox call cannot delay or break the foreground init path.
+            self._start_beatgrid_background_load()
+
             return True
         except Exception as e:
             logger.error(f"Failed to load live database: {e}", exc_info=True)
             return False
+
+    def _start_beatgrid_background_load(self) -> None:
+        """Spawn a daemon thread to populate ANLZ beatgrids out of band."""
+        if getattr(self, "_beatgrid_thread", None) and self._beatgrid_thread.is_alive():
+            logger.debug("Beatgrid loader already running; skipping new spawn")
+            return
+
+        def _runner() -> None:
+            try:
+                self._load_beatgrids_from_anlz()
+            except Exception as e:  # noqa: BLE001
+                logger.error("Background beatgrid loader crashed: %s", e, exc_info=True)
+
+        self._beatgrid_thread = threading.Thread(
+            target=_runner,
+            name="anlz-beatgrid-loader",
+            daemon=True,
+        )
+        self._beatgrid_thread.start()
+        logger.info("ANLZ beatgrid loader running in background")
 
     def _load_metadata_maps(self):
         """Creates ID -> Name maps for joined tables."""
@@ -354,58 +387,55 @@ class LiveRekordboxDB:
             logger.error(f"Failed to load cues: {e}")
 
     def _load_beatgrids_from_anlz(self):
-        """Loads high-precision beatgrid (PQTZ) from local Rekordbox ANLZ binary files.
+        """Loads high-precision beatgrid (PQTZ) from local Rekordbox ANLZ files.
 
-        Uses `SafeAnlzParser` to isolate `rbox.Anlz` calls in a subprocess
-        worker. This is required because rbox 0.1.5 has a known panic in
-        `rbox/src/masterdb/database.rs:1162` (`unwrap()` on `None`) that
-        triggers `abort()` on malformed ANLZ files and would otherwise
-        kill the entire FastAPI backend (Windows exit 0xC0000409).
+        Runs the entire iteration in a subprocess worker via
+        `SafeAnlzParser.load_all_beatgrids` so panics in `rbox`
+        (`masterdb/database.rs:1162` unwrap on None) only kill the
+        worker and not the FastAPI backend. Bisects on panic to
+        identify the offending track id and blacklist it.
+
+        Designed to run on a background thread (see
+        `_start_beatgrid_background_load`); writes only to existing
+        `self.tracks[tid]` dict entries (single-key add), which is safe
+        under the GIL even with concurrent readers.
         """
-        logger.info("Loading Beatgrids from ANLZ binary (PQTZ)...")
+        track_ids = list(self.tracks.keys())
+        if not track_ids:
+            logger.info("Beatgrid loader: no tracks to scan")
+            return
+
+        logger.info(
+            "Beatgrid loader: scanning %d tracks (subprocess-isolated)...",
+            len(track_ids),
+        )
         parser = SafeAnlzParser()
+        start = time.monotonic()
         try:
-            count = 0
-            scanned = 0
-            for tid_str, track in self.tracks.items():
-                try:
-                    paths = self.db.get_content_anlz_paths(tid_str)
-                except Exception as e:
-                    # rbox raises e.g. "Failed to get AnalysisDataPath" for
-                    # tracks without analysis. Log at debug to avoid noise
-                    # — these are expected for un-analyzed tracks.
-                    logger.debug(
-                        "get_content_anlz_paths failed for %s: %s",
-                        tid_str, e,
-                    )
-                    continue
-
-                if not paths:
-                    continue
-                dat_path = paths.get('DAT')
-                if not dat_path:
-                    continue
-                dat_path = str(dat_path)
-                if not os.path.exists(dat_path):
-                    continue
-
-                scanned += 1
-                entries = parser.parse_pqtz(tid_str, dat_path)
-                if entries:
-                    track["beatGrid"] = entries
-                    count += 1
-
-            logger.info(
-                "ANLZ beatgrids: scanned=%d linked=%d skipped=%d (panics=%d)",
-                scanned,
-                count,
-                parser.stats["bad_ids"],
-                parser.stats["panics"],
-            )
-        except Exception as e:
-            logger.error("Critical failure in ANLZ loader: %s", e)
+            beatgrids = parser.load_all_beatgrids(str(self.db_path), track_ids)
+        except Exception as e:  # noqa: BLE001
+            logger.error("ANLZ batch loader failed: %s", e, exc_info=True)
+            beatgrids = {}
         finally:
             parser.shutdown()
+
+        applied = 0
+        for tid, entries in beatgrids.items():
+            track = self.tracks.get(tid)
+            if track is not None and entries:
+                track["beatGrid"] = entries
+                applied += 1
+
+        elapsed = time.monotonic() - start
+        logger.info(
+            "Beatgrid loader done in %.2fs: scanned=%d linked=%d "
+            "skipped=%d panics=%d",
+            elapsed,
+            len(track_ids),
+            applied,
+            parser.stats["bad_ids"],
+            parser.stats["panics"],
+        )
 
     def _load_playlists(self):
         self.playlists = []
