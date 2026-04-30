@@ -235,25 +235,40 @@ Direct SQLite access (live mode). Thread-safe via locks. Auto-backup on write.
 | `update_track(id, fields)` | Write to SQLite (**requires Rekordbox to be closed**) |
 | `get_analysis_writer()` | Lazy-create and return `AnalysisDBWriter` instance bound to this DB |
 | `get_unanalyzed_track_ids()` | Return list of track IDs with BPM=0 (not yet analyzed) |
-| `_load_beatgrids_from_anlz()` | Loads PQTZ beatgrids via `SafeAnlzParser` (subprocess-isolated) so rbox panics on malformed `.DAT` files cannot crash the backend |
+| `_load_beatgrids_from_anlz()` | Batch-loads PQTZ beatgrids via `SafeAnlzParser.load_all_beatgrids` (subprocess-isolated, bisecting). Runs on a daemon thread spawned by `_start_beatgrid_background_load` after `loaded=True` so a slow / panicking rbox call cannot block library init |
+| `_start_beatgrid_background_load()` | Spawns the `anlz-beatgrid-loader` daemon thread that runs `_load_beatgrids_from_anlz` out of band |
 
 ### `app/anlz_safe.py` — `SafeAnlzParser`
-Process-isolated wrapper around `rbox.Anlz` PQTZ parsing. Defends against
-known panics in `rbox` 0.1.5 (`masterdb/database.rs:1162` `unwrap()` on
-`None`) that abort the whole Python process on malformed ANLZ files.
+Process-isolated wrapper around `rbox.MasterDb` + `rbox.Anlz`. Defends
+against known panics in `rbox` 0.1.5 (`masterdb/database.rs:1162`
+`unwrap()` on `None`) that abort the whole Python process on malformed
+ANLZ rows. The panic site is in `MasterDb` itself, so even a plain
+`get_content_anlz_paths(tid)` call can crash the backend — the
+subprocess therefore handles **the entire iteration**, not just
+`rbox.Anlz()`.
 
 | Layer | Purpose |
 |-------|---------|
-| `_validate_anlz_header(path)` | Fast pre-check: file size ≥ 28 bytes + `PMAI` magic. Rejects truncated / non-ANLZ files before they reach rbox. |
-| `ProcessPoolExecutor(max_workers=1)` | Runs `rbox.Anlz()` in a subprocess. A panic kills only the worker; parent respawns it (`BrokenExecutor` handler). |
-| `_bad_ids` cache | Once a track id panics / times out / fails header check, skip it for the rest of the session — don't re-trigger the same panic on every reload. |
-| `PER_CALL_TIMEOUT_S = 5.0` | Hung worker is killed and respawned on timeout. |
+| `_validate_anlz_header(path)` | Fast pre-check: file size ≥ 28 bytes + `PMAI` magic. Rejects truncated / non-ANLZ files before rbox sees them. |
+| `ProcessPoolExecutor(max_workers=1)` | All rbox calls run in a subprocess. A panic kills only the worker; parent respawns it (`BrokenExecutor` handler). |
+| Batch + bisect | `load_all_beatgrids` chunks tracks (default 500/chunk). On worker crash the chunk is bisected to identify and blacklist the offending track id (~log₂N restarts). |
+| `_bad_ids` cache | Track ids that panic / time out / fail header check are skipped for the rest of the session. |
+| `PER_CHUNK_TIMEOUT_S = 60.0` | Hung worker is killed and respawned; that chunk is dropped (no bisect — bisecting a hang would just hang again). |
+| `MAX_PANICS_PER_RUN = 32` | Hard ceiling on subprocess restarts to protect against pathological DBs where every other row panics. |
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `parse_pqtz(track_id, dat_path)` | `list[dict] \| None` | Safe PQTZ extract; `None` on any failure |
-| `stats` | `dict` | `{bad_ids, panics, worker_alive}` for diagnostics |
-| `shutdown()` | None | Tear down the worker (idempotent) |
+| `load_all_beatgrids(db_path, track_ids, chunk_size=500)` | `dict[str, list[dict]]` | Batch-load PQTZ for every requested track id. Worker opens its own MasterDb. Used by `LiveRekordboxDB._load_beatgrids_from_anlz`. |
+| `parse_pqtz(track_id, dat_path)` | `list[dict] \| None` | Single-file PQTZ extract for ad-hoc lookups; `None` on any failure. |
+| `stats` | `dict` | `{bad_ids, panics, worker_alive}` for diagnostics. |
+| `shutdown()` | None | Tear down the worker (idempotent). |
+
+**Load flow**: `LiveRekordboxDB.load()` finishes synchronous init
+(metadata, tracks, playlists, cues), marks `loaded=True`, and **then**
+spawns a daemon thread (`_start_beatgrid_background_load`) that calls
+`_load_beatgrids_from_anlz` → `SafeAnlzParser.load_all_beatgrids`. The
+UI sees tracks immediately; beatgrids fill in within seconds without
+ever blocking the load path.
 
 ---
 
