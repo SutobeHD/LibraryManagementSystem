@@ -349,6 +349,8 @@ const SpaceBar = ({ total, free, estimatedUsage }) => {
     const estimatePct = (estimatedUsage / total) * 100;
     const afterFree = free - estimatedUsage;
 
+    const usedColor = usedPct > 95 ? 'var(--bad)' : usedPct > 80 ? 'var(--amber)' : '#2DD4BF';
+
     return (
         <div className="space-y-2">
             <div className="flex items-center justify-between text-[10px]">
@@ -357,10 +359,10 @@ const SpaceBar = ({ total, free, estimatedUsage }) => {
                     {formatBytes(afterFree > 0 ? afterFree : 0)} free after sync
                 </span>
             </div>
-            <div className="w-full h-2 bg-mx-input rounded-full overflow-hidden flex border border-line-subtle">
+            <div className="w-full h-2.5 bg-mx-input rounded-full overflow-hidden flex border border-line-subtle">
                 <div
                     className="h-full transition-all"
-                    style={{ width: `${usedPct}%`, background: 'var(--ink-muted)' }}
+                    style={{ width: `${usedPct}%`, background: usedColor }}
                     title={`Used: ${formatBytes(used)}`}
                 />
                 {estimatedUsage > 0 && (
@@ -376,7 +378,7 @@ const SpaceBar = ({ total, free, estimatedUsage }) => {
             </div>
             <div className="flex items-center gap-3 text-[10px] text-ink-muted">
                 <span className="flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--ink-muted)' }} /> Used {formatBytes(used)}
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: usedColor }} /> Used {formatBytes(used)}
                 </span>
                 {estimatedUsage > 0 && (
                     <span className="flex items-center gap-1">
@@ -424,6 +426,8 @@ const UsbView = () => {
         setLoadingContents(false);
     }, []);
 
+    const [hiddenCount, setHiddenCount] = useState(0);
+
     const scanDevices = useCallback(async () => {
         setScanning(true);
         try {
@@ -431,10 +435,17 @@ const UsbView = () => {
                 api.get('/api/usb/devices'),
                 api.get('/api/usb/profiles'),
             ]);
-            setDevices(devRes.data);
+            const allDrives = devRes.data;
+            const filtered = allDrives.filter(d =>
+                d.is_removable !== false &&
+                d.drive_type !== 'fixed' &&
+                !['C:\\', 'C:/', 'C:'].includes(d.drive)
+            );
+            setHiddenCount(allDrives.length - filtered.length);
+            setDevices(filtered);
             setProfiles(profRes.data);
-            if (!selectedDeviceId && devRes.data.length > 0) {
-                setSelectedDeviceId(devRes.data[0].device_id);
+            if (!selectedDeviceId && filtered.length > 0) {
+                setSelectedDeviceId(filtered[0].device_id);
             }
         } catch (e) {
             console.error('Scan failed', e);
@@ -663,7 +674,10 @@ const UsbView = () => {
                         <div className="flex flex-col items-center justify-center h-48 text-center px-4">
                             <Usb size={32} className="text-ink-placeholder mb-3" />
                             <p className="text-[12px] text-ink-muted">No USB devices detected</p>
-                            <p className="text-[10px] text-ink-placeholder mt-1">Insert a drive and click Scan</p>
+                            <p className="text-[10px] text-ink-placeholder mt-1">Insert a USB stick and click Scan</p>
+                            {hiddenCount > 0 && (
+                                <p className="text-[10px] text-ink-placeholder mt-2">{hiddenCount} system drive(s) hidden</p>
+                            )}
                         </div>
                     )}
                     {scanning && allDevices.length === 0 && (
@@ -707,7 +721,7 @@ const UsbView = () => {
                                     </div>
                                     {/* Compat status badge */}
                                     {worst === 'partial' && (
-                                        <X size={12} className="text-bad shrink-0" title="Won't work on Pioneer CDJs" />
+                                        <AlertTriangle size={12} className="text-orange-500 shrink-0" title="Wrong format for CDJs — consider reformatting" />
                                     )}
                                     {worst === 'warn' && (
                                         <AlertTriangle size={12} className="text-amber2 shrink-0" title="Limited CDJ support" />
@@ -751,16 +765,17 @@ const UsbView = () => {
                                             <Edit2 size={13} />
                                         </button>
                                     </h2>
-                                    <p className="text-tiny text-ink-muted font-mono mt-1">
-                                        {sel.drive} · {normalizeFs(sel.filesystem)} · {formatBytes(sel.total_space)} total · {formatBytes(sel.free_space)} free
+                                    <p className="text-[13px] text-ink-secondary font-mono mt-1">
+                                        {sel.drive} · <span className="text-teal-400">{normalizeFs(sel.filesystem)}</span> · {formatBytes(sel.total_space)} total · {formatBytes(sel.free_space)} free
                                     </p>
                                 </div>
                                 <button
-                                    onClick={() => deleteProfile(sel.device_id)}
-                                    className="p-2 hover:bg-bad/10 text-ink-muted hover:text-bad rounded-mx-sm transition-all"
-                                    title="Delete profile"
+                                    onClick={ejectDrive}
+                                    disabled={!isConnected(sel)}
+                                    className="p-2 hover:bg-amber2/10 text-ink-muted hover:text-amber2 rounded-mx-sm transition-all disabled:opacity-30"
+                                    title="Safely eject drive"
                                 >
-                                    <Trash2 size={14} />
+                                    <Power size={16} />
                                 </button>
                             </div>
 
@@ -799,9 +814,43 @@ const UsbView = () => {
                                         </div>
                                     )}
 
-                                    {/* Device type */}
+                                    {/* Main Sync Source */}
                                     <div className="mx-card p-4">
-                                        <div className="mx-caption mb-3">Device Type</div>
+                                        <div className="mx-caption mb-3">Main Sync Source</div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <button
+                                                onClick={() => saveProfile({ sync_direction: 'pc_main' })}
+                                                className={`flex items-center gap-2.5 p-3 rounded-mx-sm border transition-all ${
+                                                    (sel.sync_direction || 'pc_main') === 'pc_main'
+                                                        ? 'bg-amber2/10 border-amber2/50 text-amber2'
+                                                        : 'bg-mx-input border-line-subtle text-ink-secondary hover:bg-mx-hover'
+                                                }`}
+                                            >
+                                                <Database size={15} />
+                                                <div className="text-[12px] font-medium">PC is Main</div>
+                                            </button>
+                                            <button
+                                                onClick={() => saveProfile({ sync_direction: 'usb_main' })}
+                                                className={`flex items-center gap-2.5 p-3 rounded-mx-sm border transition-all ${
+                                                    sel.sync_direction === 'usb_main'
+                                                        ? 'bg-amber2/10 border-amber2/50 text-amber2'
+                                                        : 'bg-mx-input border-line-subtle text-ink-secondary hover:bg-mx-hover'
+                                                }`}
+                                            >
+                                                <Usb size={15} />
+                                                <div className="text-[12px] font-medium">USB is Main</div>
+                                            </button>
+                                        </div>
+                                        <p className="text-[10px] text-ink-muted mt-2">
+                                            {(sel.sync_direction || 'pc_main') === 'pc_main'
+                                                ? 'PC library is the source of truth — USB receives updates.'
+                                                : 'USB library is the source of truth — PC receives updates.'}
+                                        </p>
+                                    </div>
+
+                                    {/* Target Ecosystem */}
+                                    <div className="mx-card p-4">
+                                        <div className="mx-caption mb-3">Target Ecosystem</div>
                                         <div className="grid grid-cols-2 gap-2">
                                             {USB_TYPES.map(type => {
                                                 const Icon = type.icon;
@@ -825,6 +874,28 @@ const UsbView = () => {
                                                     </button>
                                                 );
                                             })}
+                                        </div>
+                                    </div>
+
+                                    {/* Playlist selection — ABOVE contents */}
+                                    <div className="mx-card p-4">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <span className="mx-caption">Select Playlists</span>
+                                            <span className="text-[10px] font-mono text-amber2">
+                                                {(sel.sync_playlists || []).length} selected
+                                            </span>
+                                        </div>
+                                        <div className="max-h-64 overflow-y-auto pr-1 -mx-1">
+                                            {playlistTree.length > 0 ? playlistTree.map(node => (
+                                                <PlaylistTreeNode
+                                                    key={node.ID}
+                                                    node={node}
+                                                    selectedIds={sel.sync_playlists || []}
+                                                    onToggle={togglePlaylist}
+                                                />
+                                            )) : (
+                                                <p className="text-ink-placeholder text-tiny text-center py-4">No playlists loaded</p>
+                                            )}
                                         </div>
                                     </div>
 
@@ -893,13 +964,6 @@ const UsbView = () => {
                                                     ? <><Loader2 size={14} className="animate-spin" /> Syncing…</>
                                                     : <><Download size={14} /> Sync {SYNC_TYPES.find(s => s.id === selectedSyncType)?.label}</>}
                                             </button>
-                                            <button
-                                                onClick={ejectDrive}
-                                                disabled={!isConnected(sel)}
-                                                className="btn-secondary flex items-center gap-2 disabled:opacity-30"
-                                            >
-                                                <Power size={14} /> Eject
-                                            </button>
                                         </div>
 
                                         {syncing === sel.device_id && syncProgress && (
@@ -913,6 +977,10 @@ const UsbView = () => {
                                                         className="h-full bg-amber2 rounded-full transition-all duration-500"
                                                         style={{ width: `${Math.max(0, syncProgress.progress)}%` }}
                                                     />
+                                                </div>
+                                                <div className="flex items-center gap-1.5 text-[10px] text-ink-muted font-mono">
+                                                    <Clock size={10} />
+                                                    <span>Estimated time: calculating…</span>
                                                 </div>
                                             </div>
                                         )}
@@ -929,29 +997,6 @@ const UsbView = () => {
                                         />
                                     )}
 
-                                    {/* Playlist selection */}
-                                    {selectedSyncType === 'playlists' && (
-                                        <div className="mx-card p-4">
-                                            <div className="flex items-center justify-between mb-3">
-                                                <span className="mx-caption">Select Playlists</span>
-                                                <span className="text-[10px] font-mono text-amber2">
-                                                    {(sel.sync_playlists || []).length} selected
-                                                </span>
-                                            </div>
-                                            <div className="max-h-64 overflow-y-auto pr-1 -mx-1">
-                                                {playlistTree.length > 0 ? playlistTree.map(node => (
-                                                    <PlaylistTreeNode
-                                                        key={node.ID}
-                                                        node={node}
-                                                        selectedIds={sel.sync_playlists || []}
-                                                        onToggle={togglePlaylist}
-                                                    />
-                                                )) : (
-                                                    <p className="text-ink-placeholder text-tiny text-center py-4">No playlists loaded</p>
-                                                )}
-                                            </div>
-                                        </div>
-                                    )}
 
                                     {/* Settings */}
                                     <div className="mx-card p-4">
@@ -1009,13 +1054,27 @@ const UsbView = () => {
                                     {/* Danger zone */}
                                     <div className="mx-card p-4" style={{ borderColor: 'rgba(232, 92, 74, 0.20)' }}>
                                         <div className="mx-caption mb-3" style={{ color: 'var(--bad)' }}>Danger Zone</div>
-                                        <button
-                                            onClick={resetUsb}
-                                            disabled={!isConnected(sel)}
-                                            className="flex items-center gap-2 px-3 py-2 bg-bad/10 hover:bg-bad/20 text-bad rounded-mx-sm text-tiny font-semibold border border-bad/30 transition-all disabled:opacity-30"
-                                        >
-                                            <Trash2 size={12} /> Reset USB
-                                        </button>
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <button
+                                                onClick={handleRename}
+                                                className="flex items-center gap-2 px-3 py-2 bg-mx-input hover:bg-mx-hover text-ink-secondary rounded-mx-sm text-tiny font-semibold border border-line-subtle transition-all"
+                                            >
+                                                <Edit2 size={12} /> Rename Drive
+                                            </button>
+                                            <button
+                                                onClick={() => deleteProfile(sel.device_id)}
+                                                className="flex items-center gap-2 px-3 py-2 bg-bad/10 hover:bg-bad/20 text-bad rounded-mx-sm text-tiny font-semibold border border-bad/30 transition-all"
+                                            >
+                                                <Trash2 size={12} /> Delete Profile
+                                            </button>
+                                            <button
+                                                onClick={resetUsb}
+                                                disabled={!isConnected(sel)}
+                                                className="flex items-center gap-2 px-3 py-2 bg-bad/10 hover:bg-bad/20 text-bad rounded-mx-sm text-tiny font-semibold border border-bad/30 transition-all disabled:opacity-30"
+                                            >
+                                                <Trash2 size={12} /> Reset USB
+                                            </button>
+                                        </div>
                                     </div>
 
                                     {/* Library contents */}
