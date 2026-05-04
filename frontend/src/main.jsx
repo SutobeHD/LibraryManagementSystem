@@ -1,7 +1,7 @@
 import React, { useState, Component, useEffect, useCallback, Suspense, lazy } from 'react'
 import { invoke } from '@tauri-apps/api/core'; // Tauri Invoke
 import ReactDOM from 'react-dom/client'
-import { Music, Cloud, Download, Scissors, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, Database, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2, Sparkles } from 'lucide-react'
+import { Music, Cloud, Download, Scissors, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, Database, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2, Sparkles, Copy, Layers } from 'lucide-react'
 import './index.css'
 import { ToastProvider } from './components/ToastContext'
 import { Toaster } from 'react-hot-toast'
@@ -21,6 +21,8 @@ const BackupManager = lazy(() => import('./components/BackupManager'));
 const DesignView = lazy(() => import('./components/DesignView'));
 const SoundCloudView = lazy(() => import('./components/SoundCloudView'));
 const SoundCloudSyncView = lazy(() => import('./components/SoundCloudSyncView'));
+const PhraseGeneratorView = lazy(() => import('./components/PhraseGeneratorView'));
+const DuplicateView = lazy(() => import('./components/DuplicateView'));
 
 import api, { setSessionToken, getSessionToken } from './api/api'
 
@@ -154,6 +156,8 @@ const Sidebar = ({ activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnlo
           <NavGroup label="Editor">
             <NavBtn icon={<Scissors size={14} />} label="Waveform Editor" active={activeTab === 'editor'} onClick={() => setActiveTab('editor')} />
             <NavBtn icon={<Wrench size={14} />} label="Utilities" active={activeTab === 'tools'} onClick={() => setActiveTab('tools')} />
+            <NavBtn icon={<Layers size={14} />} label="Phrase Cues" active={activeTab === 'phrase'} onClick={() => setActiveTab('phrase')} />
+            <NavBtn icon={<Copy size={14} />} label="Duplicate Finder" active={activeTab === 'duplicates'} onClick={() => setActiveTab('duplicates')} />
             {libraryStatus?.mode === 'xml' && (
               <NavBtn icon={<FileCode size={14} />} label="XML Automator" active={activeTab === 'xml'} onClick={() => setActiveTab('xml')} />
             )}
@@ -507,6 +511,8 @@ const App = () => {
             {activeTab === 'design' && <ErrorBoundary key="eb-design"><DesignView /></ErrorBoundary>}
             {activeTab === 'tools' && <ErrorBoundary key="eb-tools"><ToolsView /></ErrorBoundary>}
             {activeTab === 'settings' && <ErrorBoundary key="eb-settings"><SettingsView /></ErrorBoundary>}
+            {activeTab === 'phrase' && <ErrorBoundary key="eb-phrase"><PhraseGeneratorView /></ErrorBoundary>}
+            {activeTab === 'duplicates' && <ErrorBoundary key="eb-duplicates"><DuplicateView /></ErrorBoundary>}
           </Suspense>
         </div>
       </main>
