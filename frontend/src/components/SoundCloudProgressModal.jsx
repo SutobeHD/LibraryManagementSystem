@@ -54,7 +54,7 @@ export default function SoundCloudProgressModal({ isOpen, onClose }) {
 
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-slate-800 rounded-2xl shadow-2xl border border-white/10 max-w-lg w-full p-6">
+            <div className="bg-mx-card rounded-2xl shadow-2xl border border-white/10 max-w-lg w-full p-6">
                 {/* Header */}
                 <div className="flex items-center justify-between mb-6">
                     <h2 className="text-2xl font-bold text-white flex items-center gap-3">
@@ -65,25 +65,25 @@ export default function SoundCloudProgressModal({ isOpen, onClose }) {
 
                 {/* Stage */}
                 <div className="mb-4">
-                    <div className="text-lg font-semibold text-cyan-400 mb-2">{getStageTitle()}</div>
-                    <div className="text-sm text-slate-400">{progress.message}</div>
+                    <div className="text-lg font-semibold text-amber2 mb-2">{getStageTitle()}</div>
+                    <div className="text-sm text-ink-secondary">{progress.message}</div>
                 </div>
 
                 {/* Progress Bar (only for searching stage) */}
                 {progress.stage === 'searching' && progress.total > 0 && (
                     <div className="mb-4">
-                        <div className="flex justify-between text-xs text-slate-400 mb-2">
+                        <div className="flex justify-between text-xs text-ink-secondary mb-2">
                             <span>Track {progress.current} of {progress.total}</span>
                             <span>{getProgressPercentage()}%</span>
                         </div>
-                        <div className="h-3 bg-slate-700 rounded-full overflow-hidden">
+                        <div className="h-3 bg-mx-hover rounded-full overflow-hidden">
                             <div
                                 className="h-full bg-gradient-to-r from-orange-600 to-orange-400 transition-all duration-300 ease-out"
                                 style={{ width: `${getProgressPercentage()}%` }}
                             ></div>
                         </div>
                         {progress.trackName && (
-                            <div className="mt-2 text-xs text-slate-500 truncate">
+                            <div className="mt-2 text-xs text-ink-muted truncate">
                                 {progress.trackName}
                             </div>
                         )}
@@ -93,13 +93,13 @@ export default function SoundCloudProgressModal({ isOpen, onClose }) {
                 {/* Spinner for non-searching stages */}
                 {progress.stage !== 'searching' && (
                     <div className="flex justify-center py-4">
-                        <div className="w-12 h-12 border-4 border-slate-700 border-t-orange-500 rounded-full animate-spin"></div>
+                        <div className="w-12 h-12 border-4 border-line-default border-t-orange-500 rounded-full animate-spin"></div>
                     </div>
                 )}
 
                 {/* Info */}
-                <div className="mt-6 p-3 bg-slate-900/50 rounded-lg border border-white/5">
-                    <p className="text-xs text-slate-400 text-center">
+                <div className="mt-6 p-3 bg-mx-shell/50 rounded-lg border border-white/5">
+                    <p className="text-xs text-ink-secondary text-center">
                         Please keep this window open. This process may take several minutes for large playlists.
                     </p>
                 </div>

@@ -36,31 +36,31 @@ const LibraryView = ({ onSelectTrack }) => {
 
     return (
         <div className="flex h-full flex-col">
-            <div className="p-4 border-b border-white/5 bg-slate-950/30 backdrop-blur-md flex items-center justify-between">
+            <div className="p-4 border-b border-white/5 bg-mx-deepest/30 backdrop-blur-md flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                    <div className="p-2 bg-gradient-to-br from-cyan-500/20 to-blue-500/20 rounded-lg border border-cyan-500/30">
-                        <Database size={20} className="text-cyan-400" />
+                    <div className="p-2 bg-gradient-to-br from-amber2/20 to-amber2-press/20 rounded-lg border border-amber2/30">
+                        <Database size={20} className="text-amber2" />
                     </div>
                     <div>
                         <h1 className="text-xl font-bold text-white tracking-tight">Library Tracks</h1>
-                        <p className="text-xs text-slate-500 font-mono uppercase tracking-widest">{filteredTracks.length} / {tracks.length} TRACKS</p>
+                        <p className="text-xs text-ink-muted font-mono uppercase tracking-widest">{filteredTracks.length} / {tracks.length} TRACKS</p>
                     </div>
                 </div>
 
                 <div className="flex items-center gap-3">
                     <div className="relative group">
-                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-cyan-400 transition-colors" />
+                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted group-focus-within:text-amber2 transition-colors" />
                         <input
                             type="text"
                             placeholder="Search library..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            className="bg-slate-900/50 border border-white/5 rounded-full py-1.5 pl-9 pr-4 text-sm text-slate-300 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/50 w-64 transition-all"
+                            className="bg-mx-shell/50 border border-white/5 rounded-full py-1.5 pl-9 pr-4 text-sm text-ink-primary focus:outline-none focus:border-amber2/50 focus:ring-1 focus:ring-amber2/50 w-64 transition-all"
                         />
                     </div>
                     <button
                         onClick={loadTracks}
-                        className="p-2 hover:bg-white/5 rounded-lg text-slate-400 hover:text-cyan-400 transition-colors"
+                        className="p-2 hover:bg-white/5 rounded-lg text-ink-secondary hover:text-amber2 transition-colors"
                         title="Refresh Library"
                     >
                         <RotateCw size={18} className={loading ? 'animate-spin' : ''} />
@@ -71,8 +71,8 @@ const LibraryView = ({ onSelectTrack }) => {
             {loading && tracks.length === 0 ? (
                 <div className="flex-1 flex items-center justify-center">
                     <div className="flex flex-col items-center gap-4 animate-pulse">
-                        <div className="w-12 h-12 rounded-full border-4 border-cyan-500/30 border-t-cyan-500 animate-spin"></div>
-                        <span className="text-slate-500 font-medium">Loading library...</span>
+                        <div className="w-12 h-12 rounded-full border-4 border-amber2/30 border-t-amber2 animate-spin"></div>
+                        <span className="text-ink-muted font-medium">Loading library...</span>
                     </div>
                 </div>
             ) : (

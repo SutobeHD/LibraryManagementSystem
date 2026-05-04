@@ -117,13 +117,13 @@ const Toggle = ({ checked, onChange, label, sub }) => (
     <div className="flex items-center justify-between">
         <div>
             <p className="text-sm font-semibold text-white">{label}</p>
-            {sub && <p className="text-xs text-slate-500 mt-0.5">{sub}</p>}
+            {sub && <p className="text-xs text-ink-muted mt-0.5">{sub}</p>}
         </div>
         <button
             role="switch"
             aria-checked={checked}
             onClick={() => onChange(!checked)}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${checked ? 'bg-cyan-600' : 'bg-slate-700'}`}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${checked ? 'bg-amber2' : 'bg-mx-hover'}`}
         >
             <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-6' : 'translate-x-1'}`} />
         </button>
@@ -132,8 +132,8 @@ const Toggle = ({ checked, onChange, label, sub }) => (
 
 /** Section wrapper */
 const Section = ({ title, icon: Icon, children }) => (
-    <div className="bg-slate-950/50 rounded-2xl p-6 border border-white/5 space-y-5">
-        <h2 className="text-xs font-bold text-cyan-400 uppercase tracking-widest flex items-center gap-2">
+    <div className="bg-mx-deepest/50 rounded-2xl p-6 border border-white/5 space-y-5">
+        <h2 className="text-xs font-bold text-amber2 uppercase tracking-widest flex items-center gap-2">
             {Icon && <Icon size={14} />}{title}
         </h2>
         {children}
@@ -143,7 +143,7 @@ const Section = ({ title, icon: Icon, children }) => (
 /** Label + select/input row */
 const Field = ({ label, children }) => (
     <div>
-        <label className="text-xs text-slate-400 mb-2 block font-bold uppercase tracking-wide">{label}</label>
+        <label className="text-xs text-ink-secondary mb-2 block font-bold uppercase tracking-wide">{label}</label>
         {children}
     </div>
 );
@@ -191,14 +191,14 @@ const KeyCapture = ({ binding, onCapture }) => {
                 className={`
                     px-3 py-1.5 rounded-lg text-xs font-mono border transition-all min-w-[120px] text-center
                     ${capturing
-                        ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300 animate-pulse'
-                        : 'bg-slate-800 border-white/10 text-slate-300 hover:border-cyan-500/50 hover:text-white'}
+                        ? 'bg-amber2/20 border-amber2 text-amber2-hover animate-pulse'
+                        : 'bg-mx-card border-white/10 text-ink-primary hover:border-amber2/50 hover:text-white'}
                 `}
             >
                 {capturing ? 'Press a key…' : (binding || '—')}
             </button>
             {!capturing && (
-                <button onClick={start} title="Edit shortcut" className="text-slate-500 hover:text-cyan-400 transition-colors">
+                <button onClick={start} title="Edit shortcut" className="text-ink-muted hover:text-amber2 transition-colors">
                     <ChevronRight size={12} />
                 </button>
             )}
@@ -314,14 +314,14 @@ const SettingsView = () => {
                             onClick={() => switchMode(mode)}
                             className={`flex flex-col items-center p-5 rounded-2xl border transition-all ${
                                 libStatus.mode === mode
-                                    ? 'bg-cyan-500/20 border-cyan-500 shadow-lg shadow-cyan-500/10'
-                                    : 'bg-slate-950/50 border-white/5 hover:border-white/20'}`}
+                                    ? 'bg-amber2/20 border-amber2 shadow-lg shadow-amber2/10'
+                                    : 'bg-mx-deepest/50 border-white/5 hover:border-white/20'}`}
                         >
-                            <Database size={28} className={libStatus.mode === mode ? 'text-cyan-400 mb-2' : 'text-slate-500 mb-2'} />
-                            <span className={`font-bold text-sm ${libStatus.mode === mode ? 'text-white' : 'text-slate-400'}`}>
+                            <Database size={28} className={libStatus.mode === mode ? 'text-amber2 mb-2' : 'text-ink-muted mb-2'} />
+                            <span className={`font-bold text-sm ${libStatus.mode === mode ? 'text-white' : 'text-ink-secondary'}`}>
                                 {mode === 'xml' ? 'XML Snapshot' : 'Live Database'}
                             </span>
-                            <p className="text-[10px] text-slate-500 mt-1 text-center">
+                            <p className="text-[10px] text-ink-muted mt-1 text-center">
                                 {mode === 'xml' ? 'Static Rekordbox export' : 'Direct access (master.db)'}
                             </p>
                         </button>
@@ -333,9 +333,9 @@ const SettingsView = () => {
                     label="Remember mode selection"
                 />
                 {libStatus.mode === 'live' && (
-                    <div className="flex items-center justify-between p-3 bg-cyan-500/5 border border-cyan-500/20 rounded-xl">
-                        <p className="text-xs text-slate-400 font-mono truncate">{libStatus.path}</p>
-                        <button onClick={triggerBackup} className="ml-3 flex-shrink-0 text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1.5 border border-cyan-500/20 rounded-lg px-3 py-1.5 hover:bg-cyan-500/10 transition-all">
+                    <div className="flex items-center justify-between p-3 bg-amber2/5 border border-amber2/20 rounded-xl">
+                        <p className="text-xs text-ink-secondary font-mono truncate">{libStatus.path}</p>
+                        <button onClick={triggerBackup} className="ml-3 flex-shrink-0 text-xs text-amber2 hover:text-amber2-hover flex items-center gap-1.5 border border-amber2/20 rounded-lg px-3 py-1.5 hover:bg-amber2/10 transition-all">
                             <Save size={12} /> Backup
                         </button>
                     </div>
@@ -343,7 +343,7 @@ const SettingsView = () => {
             </Section>
 
             <Section title="Scan Folders" icon={FolderOpen}>
-                <p className="text-xs text-slate-500">Additional folders monitored for new audio files. Tracks are auto-imported on detection.</p>
+                <p className="text-xs text-ink-muted">Additional folders monitored for new audio files. Tracks are auto-imported on detection.</p>
                 <div className="flex gap-2">
                     <input
                         value={scanFolderInput}
@@ -352,16 +352,16 @@ const SettingsView = () => {
                         placeholder="C:\Music\My Tracks"
                         className="input-glass flex-1 text-sm"
                     />
-                    <button onClick={addScanFolder} className="px-3 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 rounded-xl text-cyan-400 transition-all">
+                    <button onClick={addScanFolder} className="px-3 py-2 bg-amber2/20 hover:bg-amber2/30 border border-amber2/30 rounded-xl text-amber2 transition-all">
                         <Plus size={16} />
                     </button>
                 </div>
                 {(settings.scan_folders || []).length > 0 && (
                     <div className="space-y-2 mt-1">
                         {(settings.scan_folders || []).map(f => (
-                            <div key={f} className="flex items-center justify-between p-2.5 bg-slate-900/60 rounded-xl border border-white/5">
-                                <span className="text-xs text-slate-300 font-mono truncate">{f}</span>
-                                <button onClick={() => removeScanFolder(f)} className="ml-2 flex-shrink-0 text-slate-500 hover:text-red-400 transition-colors">
+                            <div key={f} className="flex items-center justify-between p-2.5 bg-mx-shell/60 rounded-xl border border-white/5">
+                                <span className="text-xs text-ink-primary font-mono truncate">{f}</span>
+                                <button onClick={() => removeScanFolder(f)} className="ml-2 flex-shrink-0 text-ink-muted hover:text-red-400 transition-colors">
                                     <X size={14} />
                                 </button>
                             </div>
@@ -422,19 +422,19 @@ const SettingsView = () => {
                             <option value={60}>Every hour</option>
                             <option value={120}>Every 2 hours</option>
                         </select>
-                        <span className="text-xs text-slate-500">while the app is open</span>
+                        <span className="text-xs text-ink-muted">while the app is open</span>
                     </div>
                 </Field>
                 <button
                     onClick={triggerBackup}
-                    className="text-xs border border-white/10 hover:border-cyan-500/40 bg-slate-900/50 hover:bg-cyan-500/5 text-slate-300 hover:text-white rounded-xl px-4 py-2.5 flex items-center gap-2 transition-all"
+                    className="text-xs border border-white/10 hover:border-amber2/40 bg-mx-shell/50 hover:bg-amber2/5 text-ink-primary hover:text-white rounded-xl px-4 py-2.5 flex items-center gap-2 transition-all"
                 >
                     <Save size={14} /> Create Backup Now
                 </button>
             </Section>
 
             <Section title="Cleanup" icon={Trash2}>
-                <p className="text-xs text-slate-500">Removes backup snapshots older than the retention window.</p>
+                <p className="text-xs text-ink-muted">Removes backup snapshots older than the retention window.</p>
                 <button
                     onClick={async () => {
                         try {
@@ -481,7 +481,7 @@ const SettingsView = () => {
             </Section>
 
             <Section title="Rekordbox Bridge" icon={RefreshCw}>
-                <p className="text-xs text-slate-500">Bi-directional sync with the Rekordbox XML library.</p>
+                <p className="text-xs text-ink-muted">Bi-directional sync with the Rekordbox XML library.</p>
                 <div className="grid grid-cols-2 gap-3">
                     <button
                         onClick={async () => {
@@ -492,9 +492,9 @@ const SettingsView = () => {
                                 toast.success(`Exported: ${res.data.path}`);
                             } catch { toast.error('Export failed'); }
                         }}
-                        className="flex items-center justify-center gap-2 p-4 rounded-xl bg-slate-900/50 border border-white/10 hover:border-cyan-500/50 hover:bg-cyan-500/5 transition-all text-sm"
+                        className="flex items-center justify-center gap-2 p-4 rounded-xl bg-mx-shell/50 border border-white/10 hover:border-amber2/50 hover:bg-amber2/5 transition-all text-sm"
                     >
-                        <FileOutput size={16} className="text-cyan-400" /> Push to Rekordbox
+                        <FileOutput size={16} className="text-amber2" /> Push to Rekordbox
                     </button>
                     <button
                         onClick={async () => {
@@ -505,9 +505,9 @@ const SettingsView = () => {
                                 toast.success(res.data.message || 'Import complete');
                             } catch { toast.error('Import failed'); }
                         }}
-                        className="flex items-center justify-center gap-2 p-4 rounded-xl bg-slate-900/50 border border-white/10 hover:border-cyan-500/50 hover:bg-cyan-500/5 transition-all text-sm"
+                        className="flex items-center justify-center gap-2 p-4 rounded-xl bg-mx-shell/50 border border-white/10 hover:border-amber2/50 hover:bg-amber2/5 transition-all text-sm"
                     >
-                        <RefreshCw size={16} className="text-cyan-400" /> Pull from Rekordbox
+                        <RefreshCw size={16} className="text-amber2" /> Pull from Rekordbox
                     </button>
                 </div>
             </Section>
@@ -517,7 +517,7 @@ const SettingsView = () => {
     const renderAudio = () => (
         <div className="space-y-6">
             <Section title="Output Device" icon={Music}>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-ink-muted">
                     Select which audio output device the DAW playback engine uses.
                     Takes effect the next time a track is loaded.
                     {!window.__TAURI__ && <span className="block mt-1 text-amber-400">⚠ Device enumeration requires the desktop app (Tauri).</span>}
@@ -534,7 +534,7 @@ const SettingsView = () => {
                     </select>
                 </Field>
                 {audioDevices.length === 1 && window.__TAURI__ && (
-                    <p className="text-xs text-slate-500 italic">Only the system default was found. Check that your audio drivers are installed.</p>
+                    <p className="text-xs text-ink-muted italic">Only the system default was found. Check that your audio drivers are installed.</p>
                 )}
             </Section>
         </div>
@@ -543,7 +543,7 @@ const SettingsView = () => {
     const renderAnalysis = () => (
         <div className="space-y-6">
             <Section title="Analysis Quality" icon={Sliders}>
-                <p className="text-xs text-slate-500">Controls the accuracy vs. speed trade-off for BPM and key detection.</p>
+                <p className="text-xs text-ink-muted">Controls the accuracy vs. speed trade-off for BPM and key detection.</p>
                 <div className="grid grid-cols-3 gap-3">
                     {[
                         { id: 'fast',      label: 'Fast',      sub: 'librosa — ~2s/track' },
@@ -555,11 +555,11 @@ const SettingsView = () => {
                             onClick={() => set('analysis_quality', q.id)}
                             className={`flex flex-col items-center p-4 rounded-2xl border transition-all ${
                                 settings.analysis_quality === q.id
-                                    ? 'bg-cyan-500/20 border-cyan-500'
-                                    : 'bg-slate-950/50 border-white/5 hover:border-white/20'}`}
+                                    ? 'bg-amber2/20 border-amber2'
+                                    : 'bg-mx-deepest/50 border-white/5 hover:border-white/20'}`}
                         >
-                            <span className={`font-bold text-sm ${settings.analysis_quality === q.id ? 'text-white' : 'text-slate-400'}`}>{q.label}</span>
-                            <span className="text-[10px] text-slate-500 mt-1 text-center">{q.sub}</span>
+                            <span className={`font-bold text-sm ${settings.analysis_quality === q.id ? 'text-white' : 'text-ink-secondary'}`}>{q.label}</span>
+                            <span className="text-[10px] text-ink-muted mt-1 text-center">{q.sub}</span>
                         </button>
                     ))}
                 </div>
@@ -606,7 +606,7 @@ const SettingsView = () => {
     const renderAppearance = () => (
         <div className="space-y-6">
             <Section title="Waveform Colors" icon={Palette}>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-ink-muted">
                     Custom colors for the 3-band waveform display (Low / Mid / High frequency bands).
                     Changes the palette across the DAW editor and overview.
                 </p>
@@ -625,7 +625,7 @@ const SettingsView = () => {
                         { key: 'waveform_color_high', label: 'High (Air)', defaultColor: '#3b82f6' },
                     ].map(({ key, label, defaultColor }) => (
                         <div key={key} className="flex flex-col items-center gap-2">
-                            <label className="text-xs text-slate-400 font-bold uppercase">{label}</label>
+                            <label className="text-xs text-ink-secondary font-bold uppercase">{label}</label>
                             <div className="relative">
                                 <input
                                     type="color"
@@ -635,7 +635,7 @@ const SettingsView = () => {
                                     style={{ outline: `2px solid ${settings[key] || defaultColor}40` }}
                                 />
                             </div>
-                            <span className="text-[10px] text-slate-500 font-mono">{settings[key] || defaultColor}</span>
+                            <span className="text-[10px] text-ink-muted font-mono">{settings[key] || defaultColor}</span>
                         </div>
                     ))}
                 </div>
@@ -657,15 +657,15 @@ const SettingsView = () => {
                             onClick={() => set('locale', lang.id)}
                             className={`flex items-center gap-3 p-4 rounded-2xl border transition-all ${
                                 (settings.locale || 'de') === lang.id
-                                    ? 'bg-cyan-500/20 border-cyan-500'
-                                    : 'bg-slate-950/50 border-white/5 hover:border-white/20'}`}
+                                    ? 'bg-amber2/20 border-amber2'
+                                    : 'bg-mx-deepest/50 border-white/5 hover:border-white/20'}`}
                         >
                             <span className="text-2xl">{lang.flag}</span>
-                            <span className={`font-bold text-sm ${(settings.locale || 'de') === lang.id ? 'text-white' : 'text-slate-400'}`}>{lang.label}</span>
+                            <span className={`font-bold text-sm ${(settings.locale || 'de') === lang.id ? 'text-white' : 'text-ink-secondary'}`}>{lang.label}</span>
                         </button>
                     ))}
                 </div>
-                <p className="text-xs text-slate-500 italic">Full i18n support is being rolled out progressively.</p>
+                <p className="text-xs text-ink-muted italic">Full i18n support is being rolled out progressively.</p>
             </Section>
         </div>
     );
@@ -673,14 +673,14 @@ const SettingsView = () => {
     const renderShortcuts = () => (
         <div className="space-y-6">
             <Section title="DAW Keyboard Shortcuts" icon={Keyboard}>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-ink-muted">
                     Click any shortcut to capture a new key binding. Changes apply immediately in the DAW editor after saving.
-                    Press <kbd className="px-1.5 py-0.5 bg-slate-800 rounded text-[10px] font-mono border border-white/10">Esc</kbd> to cancel capture.
+                    Press <kbd className="px-1.5 py-0.5 bg-mx-card rounded text-[10px] font-mono border border-white/10">Esc</kbd> to cancel capture.
                 </p>
                 <div className="space-y-1.5">
                     {Object.entries(SHORTCUT_LABELS).map(([action, label]) => (
-                        <div key={action} className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-800/50 transition-colors">
-                            <span className="text-sm text-slate-300">{label}</span>
+                        <div key={action} className="flex items-center justify-between p-2.5 rounded-xl hover:bg-mx-card/50 transition-colors">
+                            <span className="text-sm text-ink-primary">{label}</span>
                             <KeyCapture
                                 binding={settings.shortcuts?.[action] || DEFAULTS.shortcuts[action]}
                                 onCapture={combo => setShortcut(action, combo)}
@@ -690,7 +690,7 @@ const SettingsView = () => {
                 </div>
                 <button
                     onClick={() => setSettings(prev => ({ ...prev, shortcuts: { ...DEFAULTS.shortcuts } }))}
-                    className="text-xs text-slate-500 hover:text-white border border-white/10 hover:border-white/20 rounded-lg px-3 py-2 transition-all"
+                    className="text-xs text-ink-muted hover:text-white border border-white/10 hover:border-white/20 rounded-lg px-3 py-2 transition-all"
                 >
                     Reset to defaults
                 </button>
@@ -701,9 +701,9 @@ const SettingsView = () => {
     const renderNetwork = () => (
         <div className="space-y-6">
             <Section title="HTTP Proxy" icon={Wifi}>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-ink-muted">
                     For users behind corporate firewalls. Applied to all SoundCloud API calls.
-                    Format: <code className="text-cyan-400 text-[11px]">http://user:pass@proxy.example.com:8080</code>
+                    Format: <code className="text-amber2 text-[11px]">http://user:pass@proxy.example.com:8080</code>
                 </p>
                 <Field label="Proxy URL (leave empty to disable)">
                     <input
@@ -726,7 +726,7 @@ const SettingsView = () => {
                         className="input-glass w-full"
                     />
                 </Field>
-                <p className="text-xs text-slate-500">Leave empty to create SC_ playlists at the root level.</p>
+                <p className="text-xs text-ink-muted">Leave empty to create SC_ playlists at the root level.</p>
             </Section>
 
             <Section title="System" icon={Power}>
@@ -759,18 +759,18 @@ const SettingsView = () => {
     // ── Render ─────────────────────────────────────────────────────────────────
     return (
         <div className="h-full w-full flex flex-col items-center bg-transparent text-white overflow-y-auto p-4 md:p-8 relative">
-            <div className="absolute top-[-20%] right-[-10%] w-[600px] h-[600px] bg-cyan-500/10 rounded-full blur-[120px] pointer-events-none" />
+            <div className="absolute top-[-20%] right-[-10%] w-[600px] h-[600px] bg-amber2/10 rounded-full blur-[120px] pointer-events-none" />
 
             <div className="w-full max-w-4xl relative z-10 animate-slide-up my-auto">
                 {/* Header */}
                 <div className="glass-panel px-8 py-6 rounded-3xl shadow-2xl mb-4">
                     <div className="flex items-center gap-5">
-                        <div className="p-3.5 bg-cyan-500/20 rounded-2xl shadow-lg shadow-cyan-500/10">
-                            <Settings size={36} className="text-cyan-400" />
+                        <div className="p-3.5 bg-amber2/20 rounded-2xl shadow-lg shadow-amber2/10">
+                            <Settings size={36} className="text-amber2" />
                         </div>
                         <div>
                             <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">Preferences</h1>
-                            <p className="text-slate-400 mt-0.5 text-sm">RB Editor Pro — Configure all application settings</p>
+                            <p className="text-ink-secondary mt-0.5 text-sm">RB Editor Pro — Configure all application settings</p>
                         </div>
                     </div>
                 </div>
@@ -785,8 +785,8 @@ const SettingsView = () => {
                                 onClick={() => setActiveTab(tab.id)}
                                 className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wide transition-all ${
                                     activeTab === tab.id
-                                        ? 'bg-cyan-500/20 text-cyan-300 shadow-md'
-                                        : 'text-slate-400 hover:text-white hover:bg-white/5'
+                                        ? 'bg-amber2/20 text-amber2-hover shadow-md'
+                                        : 'text-ink-secondary hover:text-white hover:bg-white/5'
                                 }`}
                             >
                                 <Icon size={13} />{tab.label}
@@ -805,7 +805,7 @@ const SettingsView = () => {
                     <button
                         onClick={saveSettings}
                         disabled={saving}
-                        className="btn-primary flex items-center gap-3 px-8 py-3 rounded-xl text-sm shadow-xl shadow-cyan-500/20 disabled:opacity-50"
+                        className="btn-primary flex items-center gap-3 px-8 py-3 rounded-xl text-sm shadow-xl shadow-amber2/20 disabled:opacity-50"
                     >
                         {saving ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}
                         {saving ? 'Saving…' : 'Save Changes'}

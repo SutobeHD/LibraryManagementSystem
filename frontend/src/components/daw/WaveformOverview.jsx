@@ -101,7 +101,7 @@ const WaveformOverview = React.memo(({ state, dispatch }) => {
                 className="w-full shrink-0 flex items-center justify-center"
                 style={{ height: OVERVIEW_HEIGHT, background: '#080b14', borderBottom: '1px solid rgba(255,255,255,0.05)' }}
             >
-                <span className="text-[9px] text-slate-600 uppercase tracking-widest font-bold">Overview — No Track Loaded</span>
+                <span className="text-[9px] text-ink-placeholder uppercase tracking-widest font-bold">Overview — No Track Loaded</span>
             </div>
         );
     }
@@ -124,7 +124,7 @@ const WaveformOverview = React.memo(({ state, dispatch }) => {
                 className="absolute inset-0"
             />
             {/* Label */}
-            <div className="absolute left-2 top-0.5 text-[8px] text-slate-600 font-bold uppercase tracking-widest pointer-events-none select-none z-10">
+            <div className="absolute left-2 top-0.5 text-[8px] text-ink-placeholder font-bold uppercase tracking-widest pointer-events-none select-none z-10">
                 OVERVIEW
             </div>
         </div>

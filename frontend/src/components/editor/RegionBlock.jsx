@@ -326,7 +326,7 @@ const RegionBlock = ({
                 absolute top-0 h-full rounded-lg overflow-hidden cursor-grab
                 border-2 transition-all duration-150
                 ${isSelected
-                    ? 'border-cyan-400 shadow-lg shadow-cyan-400/30 z-20'
+                    ? 'border-amber2 shadow-lg shadow-amber2/30 z-20'
                     : 'border-white/10 hover:border-white/30 z-10'
                 }
                 ${region.isMuted ? 'opacity-40' : 'opacity-100'}

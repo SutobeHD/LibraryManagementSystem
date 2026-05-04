@@ -686,7 +686,7 @@ const DjEditDaw = ({ track: initialTrack }) => {
     // ── RENDER ──
     try {
         return (
-            <div className="flex flex-col h-full bg-slate-950 text-white overflow-hidden">
+            <div className="flex flex-col h-full bg-mx-deepest text-white overflow-hidden">
                 {/* Top Bar: Project Header */}
                 <DawToolbar
                     state={state}
@@ -719,14 +719,14 @@ const DjEditDaw = ({ track: initialTrack }) => {
                         </div>
                     ) : (
                         /* Empty State */
-                        <div className="flex-1 flex flex-col items-center justify-center bg-slate-950/50">
+                        <div className="flex-1 flex flex-col items-center justify-center bg-mx-deepest/50">
                             <Music size={48} className="text-slate-800 mb-4" />
-                            <h2 className="text-lg font-semibold text-slate-500">No Project Loaded</h2>
-                            <p className="text-sm text-slate-600 mt-2 mb-6">Select a track from the library below to start editing</p>
+                            <h2 className="text-lg font-semibold text-ink-muted">No Project Loaded</h2>
+                            <p className="text-sm text-ink-placeholder mt-2 mb-6">Select a track from the library below to start editing</p>
                             <div className="flex gap-3">
                                 <button
                                     onClick={handleOpen}
-                                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm text-white transition-colors border border-white/5"
+                                    className="px-4 py-2 bg-mx-card hover:bg-mx-hover rounded-lg text-sm text-white transition-colors border border-white/5"
                                 >
                                     Open Project
                                 </button>
@@ -783,7 +783,7 @@ const DjEditDaw = ({ track: initialTrack }) => {
     } catch (err) {
         console.error('[DjEditDaw] Render Error:', err);
         return (
-            <div className="flex items-center justify-center h-full text-red-500 bg-slate-950">
+            <div className="flex items-center justify-center h-full text-red-500 bg-mx-deepest">
                 <div className="text-center">
                     <h3 className="font-bold text-xl">DAW Render Error</h3>
                     <pre className="text-xs mt-2 text-left bg-black/50 p-4 rounded">{err.message}</pre>

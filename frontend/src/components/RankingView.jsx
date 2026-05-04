@@ -20,11 +20,11 @@ const PlaylistNode = ({ node, level = 0, onSelect }) => {
 
     return (
         <div>
-            <div onClick={() => hasChildren ? setIsOpen(!isOpen) : onSelect(node)} className="flex items-center gap-2 py-2 pr-2 cursor-pointer hover:bg-white/5 text-slate-400 hover:text-white select-none transition-colors rounded-r-xl mr-2" style={{ paddingLeft: `${level * 16 + 12}px` }}>
+            <div onClick={() => hasChildren ? setIsOpen(!isOpen) : onSelect(node)} className="flex items-center gap-2 py-2 pr-2 cursor-pointer hover:bg-white/5 text-ink-secondary hover:text-white select-none transition-colors rounded-r-xl mr-2" style={{ paddingLeft: `${level * 16 + 12}px` }}>
                 {hasChildren ? (isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : <span className="w-3.5"></span>}
                 {node.Type === "0" ?
                     <Folder size={16} className="text-amber-500 shrink-0" /> :
-                    <ListMusic size={16} className="text-cyan-400 shrink-0" />
+                    <ListMusic size={16} className="text-amber2 shrink-0" />
                 }
                 <span className="truncate text-sm">{node.Name}</span>
             </div>
@@ -208,15 +208,15 @@ const RankingView = ({ libraryStatus, appMode }) => {
     if (!selectedPlaylist) {
         return (
             <div className="flex h-full relative">
-                <div className="w-80 bg-slate-900/50 border-r border-white/5 flex flex-col backdrop-blur-md">
+                <div className="w-80 bg-mx-shell/50 border-r border-white/5 flex flex-col backdrop-blur-md">
                     <div className="p-4 border-b border-white/5">
-                        <h2 className="text-slate-500 font-bold uppercase text-[10px] mb-4 tracking-widest">Select Source</h2>
+                        <h2 className="text-ink-muted font-bold uppercase text-[10px] mb-4 tracking-widest">Select Source</h2>
                         <div className="flex bg-black/40 p-1 rounded-lg border border-white/5 mb-4">
                             {['playlist', 'artist', 'label', 'album'].map(mode => (
                                 <button
                                     key={mode}
                                     onClick={() => setSourceMode(mode)}
-                                    className={`flex-1 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all ${sourceMode === mode ? 'bg-cyan-500 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                                    className={`flex-1 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all ${sourceMode === mode ? 'bg-amber2 text-white shadow-lg' : 'text-ink-muted hover:text-ink-primary'}`}
                                 >
                                     {mode.charAt(0).toUpperCase() + mode.slice(1)}
                                 </button>
@@ -224,7 +224,7 @@ const RankingView = ({ libraryStatus, appMode }) => {
                         </div>
                         {sourceMode !== 'playlist' && (
                             <div className="relative group">
-                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" />
                                 <input
                                     className="input-glass w-full pl-9 py-1.5 text-xs"
                                     placeholder={`Filter ${sourceMode}s...`}
@@ -245,22 +245,22 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                     onClick={() => handleSelectSource(item)}
                                     className="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 cursor-pointer group transition-all border border-transparent hover:border-white/5"
                                 >
-                                    <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-slate-500 group-hover:text-cyan-400 group-hover:bg-cyan-500/10 transition-colors">
+                                    <div className="w-8 h-8 rounded-full bg-mx-card flex items-center justify-center text-ink-muted group-hover:text-amber2 group-hover:bg-amber2/10 transition-colors">
                                         {sourceMode === 'artist' ? <User size={14} /> : sourceMode === 'label' ? <Tag size={14} /> : <Disc size={14} />}
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <div className="text-sm font-medium text-slate-300 group-hover:text-white truncate">{item.name}</div>
-                                        <div className="text-[10px] text-slate-600 group-hover:text-slate-500">{item.track_count} tracks</div>
+                                        <div className="text-sm font-medium text-ink-primary group-hover:text-white truncate">{item.name}</div>
+                                        <div className="text-[10px] text-ink-placeholder group-hover:text-ink-muted">{item.track_count} tracks</div>
                                     </div>
-                                    <ChevronRight size={14} className="text-slate-600 group-hover:text-cyan-500 opacity-0 group-hover:opacity-100 transition-all" />
+                                    <ChevronRight size={14} className="text-ink-placeholder group-hover:text-amber2 opacity-0 group-hover:opacity-100 transition-all" />
                                 </div>
                             ))
                         )}
                     </div>
                 </div>
-                <div className="flex-1 flex items-center justify-center text-slate-500 flex-col bg-transparent">
+                <div className="flex-1 flex items-center justify-center text-ink-muted flex-col bg-transparent">
                     <Zap size={80} className="mb-6 opacity-10" />
-                    <p className="text-xl font-light text-slate-400">Select a source to start power ranking</p>
+                    <p className="text-xl font-light text-ink-secondary">Select a source to start power ranking</p>
                 </div>
             </div>
         );
@@ -268,15 +268,15 @@ const RankingView = ({ libraryStatus, appMode }) => {
 
     return (
         <div className="h-full flex flex-col bg-transparent overflow-hidden relative">
-            <div className="absolute top-0 w-full h-1 bg-slate-800">
-                <div className="h-full bg-cyan-500 transition-all duration-300 shadow-[0_0_10px_#06b6d4]" style={{ width: `${((currentIndex + 1) / queue.length) * 100}%` }}></div>
+            <div className="absolute top-0 w-full h-1 bg-mx-card">
+                <div className="h-full bg-amber2 transition-all duration-300 shadow-[0_0_10px_#06b6d4]" style={{ width: `${((currentIndex + 1) / queue.length) * 100}%` }}></div>
             </div>
 
-            <div className="bg-slate-900/80 p-4 border-b border-white/5 flex justify-between items-center shrink-0 z-10 backdrop-blur-md">
+            <div className="bg-mx-shell/80 p-4 border-b border-white/5 flex justify-between items-center shrink-0 z-10 backdrop-blur-md">
                 <h2 className="text-xl font-bold flex items-center gap-2 text-white"><Zap className="text-yellow-400" size={20} /> {selectedPlaylist.Name}</h2>
                 <div className="flex items-center gap-4">
-                    <div className="text-slate-400 text-sm font-mono bg-black/20 px-3 py-1 rounded-full border border-white/5">Track {currentIndex + 1} / {queue.length}</div>
-                    <button onClick={() => setSelectedPlaylist(null)} className="text-xs text-cyan-400 hover:text-white uppercase font-bold tracking-widest hover:underline border border-cyan-500/30 px-3 py-1 rounded-full hover:bg-cyan-500/10 transition-colors">Exit Full Screen</button>
+                    <div className="text-ink-secondary text-sm font-mono bg-black/20 px-3 py-1 rounded-full border border-white/5">Track {currentIndex + 1} / {queue.length}</div>
+                    <button onClick={() => setSelectedPlaylist(null)} className="text-xs text-amber2 hover:text-white uppercase font-bold tracking-widest hover:underline border border-amber2/30 px-3 py-1 rounded-full hover:bg-amber2/10 transition-colors">Exit Full Screen</button>
                 </div>
             </div>
 
@@ -289,13 +289,13 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                 <h1 className="text-4xl md:text-5xl font-bold text-white mb-2 drop-shadow-md leading-tight tracking-tight truncate" title={currentTrack.Title}>
                                     {currentTrack.Title}
                                 </h1>
-                                <p className="text-2xl md:text-3xl text-cyan-400 font-light truncate" title={currentTrack.Artist}>
+                                <p className="text-2xl md:text-3xl text-amber2 font-light truncate" title={currentTrack.Artist}>
                                     {currentTrack.Artist || "Unknown Artist"}
                                 </p>
                             </div>
                             <div className="text-right shrink-0">
-                                <div className="text-6xl font-mono text-slate-700 font-bold tracking-tighter opacity-50">
-                                    {Math.round(currentTrack.BPM)} <span className="text-xl text-slate-600">BPM</span>
+                                <div className="text-6xl font-mono text-ink-placeholder font-bold tracking-tighter opacity-50">
+                                    {Math.round(currentTrack.BPM)} <span className="text-xl text-ink-placeholder">BPM</span>
                                 </div>
                             </div>
                         </div>
@@ -317,9 +317,9 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                     <button onClick={() => {
                                         const prev = currentIndex - 1;
                                         if (prev >= 0) { setIsPlaying(true); setCurrentIndex(prev); loadTrack(queue[prev]); }
-                                    }} className="text-slate-400 hover:text-white p-2 transition-colors"><SkipBack size={24} /></button>
+                                    }} className="text-ink-secondary hover:text-white p-2 transition-colors"><SkipBack size={24} /></button>
 
-                                    <button onClick={() => setIsPlaying(!isPlaying)} className="bg-white text-black rounded-full p-4 hover:bg-cyan-400 hover:scale-110 transition-all shadow-lg shadow-white/10">
+                                    <button onClick={() => setIsPlaying(!isPlaying)} className="bg-white text-black rounded-full p-4 hover:bg-amber2 hover:scale-110 transition-all shadow-lg shadow-white/10">
                                         {isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="ml-1" />}
                                     </button>
 
@@ -328,11 +328,11 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                         if (wavesurferRef.current) {
                                             wavesurferRef.current.setTime(wavesurferRef.current.getCurrentTime() + 10);
                                         }
-                                    }} className="text-slate-400 hover:text-white p-2 transition-colors"><SkipForward size={24} /></button>
+                                    }} className="text-ink-secondary hover:text-white p-2 transition-colors"><SkipForward size={24} /></button>
 
                                     <div className="w-[1px] h-8 bg-white/10 mx-2"></div>
                                     <div className="flex items-center gap-2 group/vol">
-                                        <Volume2 size={20} className="text-slate-400 group-hover/vol:text-white transition-colors" />
+                                        <Volume2 size={20} className="text-ink-secondary group-hover/vol:text-white transition-colors" />
                                         <input
                                             type="range" min="0" max="1" step="0.01"
                                             value={volume}
@@ -349,7 +349,7 @@ const RankingView = ({ libraryStatus, appMode }) => {
                             <div className="space-y-8">
                                 <div className="bg-black/10 p-6 rounded-2xl border border-white/5">
                                     <div className="flex justify-between items-center mb-4">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Rate Track</label>
+                                        <label className="text-[10px] font-bold text-ink-muted uppercase tracking-widest">Rate Track</label>
                                         <button onClick={handleServiceMark} className="px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-full uppercase tracking-wider transition-colors shadow-lg shadow-purple-500/20">
                                             Mark as Service
                                         </button>
@@ -357,14 +357,14 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                     <div className="flex gap-2 justify-between">
                                         {[1, 2, 3, 4, 5].map(star => (
                                             <button key={star} onClick={() => setRating(star)} className="transition-transform hover:scale-110 focus:outline-none">
-                                                <Star size={36} className={`filter drop-shadow-md transition-colors duration-200 ${rating >= star ? "text-amber-400 fill-amber-400" : "text-slate-700 hover:text-slate-500"}`} />
+                                                <Star size={36} className={`filter drop-shadow-md transition-colors duration-200 ${rating >= star ? "text-amber-400 fill-amber-400" : "text-ink-placeholder hover:text-ink-muted"}`} />
                                             </button>
                                         ))}
                                     </div>
                                 </div>
 
                                 <div className="bg-black/10 p-6 rounded-2xl border border-white/5">
-                                    <label className="text-[10px] font-bold text-slate-500 uppercase mb-4 block tracking-widest">Color Code</label>
+                                    <label className="text-[10px] font-bold text-ink-muted uppercase mb-4 block tracking-widest">Color Code</label>
                                     <div className="flex gap-3 flex-wrap justify-center">
                                         {COLORS.slice(1).map(c => (
                                             <button
@@ -375,7 +375,7 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                                 title={c.name}
                                             />
                                         ))}
-                                        <button onClick={() => setColorId(0)} className="text-[10px] text-slate-500 underline self-center ml-2 hover:text-white uppercase tracking-widest">Clear</button>
+                                        <button onClick={() => setColorId(0)} className="text-[10px] text-ink-muted underline self-center ml-2 hover:text-white uppercase tracking-widest">Clear</button>
                                     </div>
                                 </div>
                             </div>
@@ -383,7 +383,7 @@ const RankingView = ({ libraryStatus, appMode }) => {
                             {/* Right Column: Metadata */}
                             <div className="space-y-6">
                                 <div>
-                                    <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 flex items-center gap-2 tracking-widest"><Disc size={12} /> Genre</label>
+                                    <label className="text-[10px] font-bold text-ink-muted uppercase mb-2 flex items-center gap-2 tracking-widest"><Disc size={12} /> Genre</label>
                                     <input
                                         list="genres"
                                         value={genre}
@@ -397,7 +397,7 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                 </div>
                                 <div>
                                     <div>
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 flex items-center justify-between tracking-widest">
+                                        <label className="text-[10px] font-bold text-ink-muted uppercase mb-2 flex items-center justify-between tracking-widest">
                                             <div className="flex items-center gap-2"><Tag size={12} /> Tags & Comments</div>
                                         </label>
 
@@ -405,7 +405,7 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                         <div className="space-y-4 mb-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                                             {Object.entries(TAG_CATEGORIES).map(([category, tags]) => (
                                                 <div key={category}>
-                                                    <div className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em] mb-2 px-1">{category}</div>
+                                                    <div className="text-[9px] font-black text-ink-placeholder uppercase tracking-[0.2em] mb-2 px-1">{category}</div>
                                                     <div className="flex flex-wrap gap-1.5">
                                                         {tags.map(tag => {
                                                             const isActive = comment.includes(tag);
@@ -420,8 +420,8 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                                                         }
                                                                     }}
                                                                     className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all ${isActive
-                                                                        ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.2)]'
-                                                                        : 'bg-black/20 border-white/5 text-slate-500 hover:border-white/20 hover:text-slate-300'
+                                                                        ? 'bg-amber2/20 border-amber2 text-amber2 shadow-[0_0_10px_rgba(6,182,212,0.2)]'
+                                                                        : 'bg-black/20 border-white/5 text-ink-muted hover:border-white/20 hover:text-ink-primary'
                                                                         }`}
                                                                 >
                                                                     {tag}
@@ -449,7 +449,7 @@ const RankingView = ({ libraryStatus, appMode }) => {
                         <div className="mt-8 flex justify-center items-center pb-8">
                             <button
                                 onClick={saveAndNext}
-                                className="group relative px-16 py-6 bg-cyan-500 hover:bg-cyan-400 rounded-2xl font-black text-2xl uppercase tracking-widest text-black shadow-[0_0_40px_rgba(6,182,212,0.4)] hover:shadow-[0_0_60px_rgba(6,182,212,0.6)] transform transition-all hover:-translate-y-1 hover:scale-105 active:scale-95 flex items-center gap-4"
+                                className="group relative px-16 py-6 bg-amber2 hover:bg-amber2 rounded-2xl font-black text-2xl uppercase tracking-widest text-black shadow-[0_0_40px_rgba(6,182,212,0.4)] hover:shadow-[0_0_60px_rgba(6,182,212,0.6)] transform transition-all hover:-translate-y-1 hover:scale-105 active:scale-95 flex items-center gap-4"
                             >
                                 <span className="relative z-10">Save & Next</span>
                                 <ArrowRight size={32} className="relative z-10 group-hover:translate-x-2 transition-transform" />
@@ -463,7 +463,7 @@ const RankingView = ({ libraryStatus, appMode }) => {
                     {queue.length > 0 && currentIndex < queue.length ? (
                         // Loading State
                         <div className="flex flex-col items-center">
-                            <div className="w-16 h-16 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mb-6"></div>
+                            <div className="w-16 h-16 border-4 border-amber2 border-t-transparent rounded-full animate-spin mb-6"></div>
                             <h2 className="text-2xl font-bold mb-2">Loading Track...</h2>
                         </div>
                     ) : (
@@ -473,7 +473,7 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                 <Zap size={48} className="text-green-500" fill="currentColor" />
                             </div>
                             <h2 className="text-4xl font-bold mb-2">Queue Completed!</h2>
-                            <p className="text-slate-400">All tracks have been processed.</p>
+                            <p className="text-ink-secondary">All tracks have been processed.</p>
                         </div>
                     )}
                 </div>

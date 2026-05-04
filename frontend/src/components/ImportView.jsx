@@ -88,14 +88,14 @@ const ImportView = ({ onSelectTrack, onImportComplete }) => {
     };
 
     return (
-        <div className="flex flex-col h-full bg-slate-950/50 animate-in fade-in duration-500">
+        <div className="flex flex-col h-full bg-mx-deepest/50 animate-in fade-in duration-500">
             {/* Header */}
             <div className="p-8 border-b border-white/5">
                 <h1 className="text-3xl font-bold text-white mb-2 flex items-center gap-3">
-                    <Upload className="text-cyan-500" />
-                    Audio Import <span className="text-xs bg-cyan-500/10 text-cyan-400 px-2 py-0.5 rounded border border-cyan-500/20 ml-2">PRO</span>
+                    <Upload className="text-amber2" />
+                    Audio Import <span className="text-xs bg-amber2/10 text-amber2 px-2 py-0.5 rounded border border-amber2/20 ml-2">PRO</span>
                 </h1>
-                <p className="text-slate-400">Drag & Drop audio files to analyze and add them to your Rekordbox collection.</p>
+                <p className="text-ink-secondary">Drag & Drop audio files to analyze and add them to your Rekordbox collection.</p>
             </div>
 
             <div className="flex-1 overflow-hidden flex flex-col p-8 gap-8">
@@ -105,15 +105,15 @@ const ImportView = ({ onSelectTrack, onImportComplete }) => {
                     onDragLeave={onDragLeave}
                     onDrop={onDrop}
                     className={`h-48 rounded-xl border-2 border-dashed flex flex-col items-center justify-center transition-all duration-300 ${isDragging
-                        ? 'border-cyan-500 bg-cyan-500/5'
+                        ? 'border-amber2 bg-amber2/5'
                         : 'border-white/10 hover:border-white/20 hover:bg-white/5'
                         }`}
                 >
-                    <div className="w-20 h-20 rounded-full bg-slate-900 border border-white/5 flex items-center justify-center mb-4 shadow-2xl">
-                        <Upload size={32} className={isDragging ? 'text-cyan-400 scale-110 transition-transform' : 'text-slate-500'} />
+                    <div className="w-20 h-20 rounded-full bg-mx-shell border border-white/5 flex items-center justify-center mb-4 shadow-2xl">
+                        <Upload size={32} className={isDragging ? 'text-amber2 scale-110 transition-transform' : 'text-ink-muted'} />
                     </div>
-                    <p className="text-xl font-medium text-slate-300">Drop files here</p>
-                    <p className="text-sm text-slate-500 mt-2">Support for WAV, MP3, AIFF, FLAC</p>
+                    <p className="text-xl font-medium text-ink-primary">Drop files here</p>
+                    <p className="text-sm text-ink-muted mt-2">Support for WAV, MP3, AIFF, FLAC</p>
                     <input
                         type="file"
                         multiple
@@ -124,7 +124,7 @@ const ImportView = ({ onSelectTrack, onImportComplete }) => {
                     />
                     <label
                         htmlFor="fileInput"
-                        className="mt-6 px-6 py-2 bg-slate-800 hover:bg-slate-700 rounded-full text-sm font-bold border border-white/5 transition-colors cursor-pointer"
+                        className="mt-6 px-6 py-2 bg-mx-card hover:bg-mx-hover rounded-full text-sm font-bold border border-white/5 transition-colors cursor-pointer"
                     >
                         Browse Files
                     </label>
@@ -134,7 +134,7 @@ const ImportView = ({ onSelectTrack, onImportComplete }) => {
                 {files.length > 0 && (
                     <div className="flex-1 flex flex-col overflow-hidden">
                         <div className="pb-4 flex justify-between items-center border-b border-white/5">
-                            <span className="text-sm font-bold text-slate-400">{files.length} Files Ready</span>
+                            <span className="text-sm font-bold text-ink-secondary">{files.length} Files Ready</span>
                             {!importing && (
                                 <button
                                     onClick={startImport}
@@ -148,12 +148,12 @@ const ImportView = ({ onSelectTrack, onImportComplete }) => {
                         <div className="flex-1 overflow-y-auto pt-2 custom-scrollbar">
                             {files.map((f) => (
                                 <div key={f.id} className="p-3 border-b border-white/5 flex items-center gap-4 group hover:bg-white/5 transition-colors rounded-lg">
-                                    <div className="w-10 h-10 bg-slate-800 rounded-xl flex items-center justify-center shrink-0">
-                                        <FileAudio size={20} className="text-cyan-500" />
+                                    <div className="w-10 h-10 bg-mx-card rounded-xl flex items-center justify-center shrink-0">
+                                        <FileAudio size={20} className="text-amber2" />
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <p className="text-sm font-bold text-slate-200 truncate">{f.file.name}</p>
-                                        <p className="text-[10px] text-slate-500 font-mono mt-0.5">{(f.file.size / (1024 * 1024)).toFixed(2)} MB</p>
+                                        <p className="text-sm font-bold text-ink-primary truncate">{f.file.name}</p>
+                                        <p className="text-[10px] text-ink-muted font-mono mt-0.5">{(f.file.size / (1024 * 1024)).toFixed(2)} MB</p>
                                     </div>
 
                                     {/* Status Indicator */}
@@ -161,9 +161,9 @@ const ImportView = ({ onSelectTrack, onImportComplete }) => {
                                         {f.status === 'uploading' && (
                                             <div className="flex flex-col items-end gap-1">
                                                 <div className="w-32 h-1 bg-white/5 rounded-full overflow-hidden">
-                                                    <div className="h-full bg-cyan-500 transition-all duration-300" style={{ width: `${f.progress}%` }} />
+                                                    <div className="h-full bg-amber2 transition-all duration-300" style={{ width: `${f.progress}%` }} />
                                                 </div>
-                                                <span className="text-[10px] items-center gap-1 font-bold text-cyan-500 flex uppercase tracking-tighter">
+                                                <span className="text-[10px] items-center gap-1 font-bold text-amber2 flex uppercase tracking-tighter">
                                                     <Loader2 size={10} className="animate-spin" /> Analyzing
                                                 </span>
                                             </div>
@@ -172,7 +172,7 @@ const ImportView = ({ onSelectTrack, onImportComplete }) => {
                                             <div className="flex items-center gap-3">
                                                 <div className="flex flex-col items-end">
                                                     <span className="text-[10px] font-bold text-green-500 uppercase tracking-tighter">Ready for Edit</span>
-                                                    {f.bpm && <span className="text-[10px] font-mono text-cyan-400 font-bold">{f.bpm.toFixed(1)} BPM</span>}
+                                                    {f.bpm && <span className="text-[10px] font-mono text-amber2 font-bold">{f.bpm.toFixed(1)} BPM</span>}
                                                 </div>
                                                 <CheckCircle2 size={18} className="text-green-500" />
                                                 <button
@@ -192,7 +192,7 @@ const ImportView = ({ onSelectTrack, onImportComplete }) => {
                                         {f.status === 'pending' && !importing && (
                                             <button
                                                 onClick={() => removeFile(f.id)}
-                                                className="p-2 text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                className="p-2 text-ink-placeholder hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
                                             >
                                                 <Trash2 size={16} />
                                             </button>

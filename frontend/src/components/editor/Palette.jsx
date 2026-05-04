@@ -91,10 +91,10 @@ const PaletteSlot = ({
             className={`
                 relative aspect-square rounded-lg border-2 transition-all duration-200
                 ${region
-                    ? 'bg-slate-800/50 border-white/10 cursor-grab'
-                    : 'bg-slate-900/30 border-dashed border-white/5'
+                    ? 'bg-mx-card/50 border-white/10 cursor-grab'
+                    : 'bg-mx-shell/30 border-dashed border-white/5'
                 }
-                ${isDragOver ? 'border-cyan-400 bg-cyan-400/10 scale-105' : ''}
+                ${isDragOver ? 'border-amber2 bg-amber2/10 scale-105' : ''}
                 hover:border-white/20
             `}
             onDragOver={handleDragOver}
@@ -153,7 +153,7 @@ const Palette = ({
     return (
         <div className={`flex flex-col gap-3 p-3 ${className}`}>
             {/* Header */}
-            <div className="flex items-center gap-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+            <div className="flex items-center gap-2 text-[10px] font-bold text-ink-muted uppercase tracking-widest">
                 <Clipboard size={12} />
                 <span>Palette</span>
             </div>
@@ -173,7 +173,7 @@ const Palette = ({
             </div>
 
             {/* Usage hint */}
-            <div className="text-[9px] text-slate-600 text-center">
+            <div className="text-[9px] text-ink-placeholder text-center">
                 Drag clips here to store
             </div>
         </div>
