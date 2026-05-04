@@ -22,7 +22,7 @@
 
 | File | Purpose |
 |------|---------|
-| `app/main.py` | **All 80+ API routes** — see backend-index.md for full route list. Also contains `validate_audio_path()`, request models, startup event, CORS config, global error handlers |
+| `app/main.py` | **All 90+ API routes** — see backend-index.md for full route list. Also contains `validate_audio_path()`, request models, startup event, CORS config, global error handlers. New routes: `GET/POST /api/usb/playcount/*`, `POST /api/phrase/generate`, `POST /api/phrase/commit`, `POST /api/duplicates/scan`, `GET /api/duplicates/results`, `POST /api/duplicates/merge` |
 | `app/config.py` | Path constants: `REKORDBOX_ROOT`, `DB_FILENAME`, `FFMPEG_BIN`, `BACKUP_DIR`, `EXPORT_DIR`, `LOG_DIR`, `TEMP_DIR`, `MUSIC_DIR`, `DB_KEY` |
 | `app/services.py` | 11 business logic classes: `XMLProcessor`, `SystemGuard`, `AudioEngine` (FFmpeg), `FileManager`, `LibraryTools`, `SettingsManager`, `MetadataManager`, `SystemCleaner`, `BeatAnalyzer`, `ImportManager`, `ProjectManager` |
 | `app/database.py` | `RekordboxXMLDB` — parses Rekordbox XML into in-memory cache; `RekordboxDB` — live SQLite access via rbox. Methods: `load_xml`, `get_tracks`, `get_playlists`, `get_track_details`, `save_xml`, `add_track`, `delete_track`, `save_track_cues`, `save_track_beatgrid` |
@@ -43,6 +43,8 @@
 | `app/xml_generator.py` | `RekordboxXML` — generates valid `DJ_PLAYLISTS` XML from Python track data with dynamic/static beatgrids and cue points |
 | `app/sidecar.py` | `SidecarStorage` — persists artist metadata (SoundCloud links, custom fields) in `app_data.json` sidecar file |
 | `app/batch_worker.py` | CLI tool for batch track metadata updates (comments/tags) using rbox `MasterDb` — find/replace/append/set operations |
+| `app/playcount_sync.py` | **NEW** USB Play-Count Sync engine: `load_usb_sync_meta`, `save_usb_sync_meta`, `diff_playcounts` (three-way diff), `resolve_playcounts` (commits to PC DB + USB XML), `read_usb_xml_playcounts`. API: `GET /api/usb/playcount/diff`, `POST /api/usb/playcount/resolve` |
+| `app/phrase_generator.py` | **NEW** Phrase & Auto-Cue Generator: `extract_beats_from_db`, `detect_first_downbeat` (librosa energy), `generate_phrase_cues` (phrase/bar markers), `commit_cues_to_db` (hot cues A–H via rbox). API: `POST /api/phrase/generate`, `POST /api/phrase/commit` |
 | `app/__init__.py` | Package init (empty) |
 
 ---
@@ -95,6 +97,8 @@
 | `frontend/src/components/ToolsView.jsx` | Batch operations: rename, clean titles, find duplicates, batch comments |
 | `frontend/src/components/DesignView.jsx` | UI theme/design preview and customization |
 | `frontend/src/components/WaveformEditor.jsx` | Legacy waveform editor (superseded by `DjEditDaw`) |
+| `frontend/src/components/PhraseGeneratorView.jsx` | **NEW** Phrase & Auto-Cue Generator: track selector, phrase length picker (8/16/32), generate preview list (amber phrase / grey bar markers), two-step Generate → Commit flow |
+| `frontend/src/components/DuplicateView.jsx` | **NEW** Acoustic Duplicate Finder: scan library, group by fingerprint similarity, left group list + right card detail panel, master selection, merge play counts, POST /api/duplicates/merge |
 
 ### Shared UI Components
 
@@ -146,13 +150,14 @@
 |------|---------|
 | `src-tauri/src/main.rs` | App init, splashscreen, Tauri commands: `close_splashscreen`, `login_to_soundcloud` (PKCE OAuth), `export_to_soundcloud`. Registers `AudioCommandState` |
 | `src-tauri/src/soundcloud_client.rs` | SC OAuth 2.1 + PKCE: `get_auth_url()`, `wait_for_callback()` (one-shot HTTP server), `exchange_code_for_token()`. Also contains `Track` struct |
-| `src-tauri/src/audio/mod.rs` | Audio module re-exports: engine, playback, analysis, commands, export, metadata |
+| `src-tauri/src/audio/mod.rs` | Audio module re-exports: engine, playback, analysis, commands, export, metadata, fingerprint |
 | `src-tauri/src/audio/engine.rs` | `AudioEngine`/`AudioController` — Symphonia codec decoding, memory-mapped file loading (memmap2, zero-copy), decoder abstraction for MP3/FLAC/WAV/ALAC/ISOMP4 |
 | `src-tauri/src/audio/playback.rs` | `PlaybackEngine` — CPAL device-agnostic audio output, ringbuf lock-free sample queue, stream init + error recovery |
 | `src-tauri/src/audio/analysis.rs` | `compute_waveform` (RustFFT), `estimate_bpm`, `detect_key` (chromatic) — 3-band freq split: low 20–300Hz, mid 300Hz–4kHz, high 4kHz–20kHz |
 | `src-tauri/src/audio/commands.rs` | Tauri IPC handlers: `load_audio`, `get_3band_waveform`, `start_project_export`, `list_audio_devices` (CPAL output device enumeration) — all return `Result<T, String>`. `AudioCommandState` shared state |
 | `src-tauri/src/audio/export.rs` | `render_project` — offline audio synthesis. Structs: `AudioRegion`, `ProjectState`, `Fade` |
 | `src-tauri/src/audio/metadata.rs` | Tag read/write via lofty: ID3 (MP3), FLAC tags, ALAC metadata |
+| `src-tauri/src/audio/fingerprint.rs` | **NEW** Acoustic fingerprinting: decode via Symphonia → 11025 Hz mono → 32-band Mel spectrogram → Chromaprint-style u32 hash words. `hamming_similarity()`. Tauri commands: `fingerprint_track(path)`, `fingerprint_batch(paths, window)` (emits `fingerprint_progress` events) |
 | `src-tauri/build.rs` | Tauri build script (required, do not modify) |
 | `src-tauri/Cargo.toml` | Rust deps: tauri 2.2, cpal, symphonia, rustfft, rubato, ringbuf, memmap2, hound, lofty, sha2, reqwest, tokio, serde |
 | `src-tauri/tauri.conf.json` | Tauri config: window title, size, splashscreen, bundle identifier |
