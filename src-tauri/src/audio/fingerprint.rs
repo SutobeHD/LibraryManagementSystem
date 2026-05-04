@@ -20,6 +20,7 @@
 use std::collections::HashMap;
 use log::{debug, error, info, warn};
 use serde::Serialize;
+use tauri::Emitter;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::formats::FormatOptions;
@@ -187,7 +188,7 @@ fn resample_mono(input: &[f32], src_sr: usize, dst_sr: usize) -> Vec<f32> {
 /// using cosine correlation (Goertzel-style) for the N_MELS centre frequencies.
 /// This is not a full FFT Mel spectrogram but sufficient for fingerprint hashing.
 fn mel_frame_energies(frame: &[f32]) -> [f32; N_MELS] {
-    let n = frame.len();
+    let _n = frame.len();
     let mut energies = [0.0f32; N_MELS];
 
     // Mel scale: linearly spaced in Mel domain from 80–4000 Hz
