@@ -460,3 +460,54 @@ Git-like incremental backup (~95% smaller than full copies via compressed JSON d
 | `ANALYSIS_PENDING` | Task still running |
 | `ANALYSIS_FAILED` | Analysis task failed |
 | `USB_LOCKED` | Another sync is in progress |
+
+
+---
+
+## USB Play-Count Sync (`app/playcount_sync.py`)
+
+New module for three-way play-count diffing between PC and USB.
+
+| Function | Signature | Notes |
+|----------|-----------|-------|
+| `load_usb_sync_meta` | `(usb_root: str) -> dict` | Reads `PIONEER/RB_EDITOR_SYNC.json` |
+| `save_usb_sync_meta` | `(usb_root: str, meta: dict) -> None` | Atomic write via .tmp |
+| `diff_playcounts` | `(pc_tracks, usb_tracks, last_sync_ts) -> dict` | Returns `{auto, conflicts}` |
+| `resolve_playcounts` | `(resolutions, pc_db_path, usb_xml_path) -> dict` | Commits to DB + XML |
+| `read_usb_xml_playcounts` | `(usb_xml_path: str) -> list[dict]` | Parses Rekordbox XML |
+
+**API endpoints added to `app/main.py`**:
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/usb/playcount/diff` | Diff PC vs USB play counts |
+| POST | `/api/usb/playcount/resolve` | Commit resolved play counts |
+
+---
+
+## Phrase & Auto-Cue Generator (`app/phrase_generator.py`)
+
+| Function | Signature | Notes |
+|----------|-----------|-------|
+| `extract_beats_from_db` | `(track_id: int, db_path: str) -> list[float]` | Reads rbox beatgrid |
+| `detect_first_downbeat` | `(audio_path: str, beats: list[float]) -> float` | librosa energy analysis |
+| `generate_phrase_cues` | `(beats, phrase_length=16) -> list[dict]` | phrase_start / bar_start cues |
+| `commit_cues_to_db` | `(track_id, cues, db_path) -> None` | Writes hot cues A–H via rbox |
+
+**API endpoints added to `app/main.py`**:
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/phrase/generate` | Generate phrase cues from beat grid |
+| POST | `/api/phrase/commit` | Write hot cues to Rekordbox DB |
+
+---
+
+## Acoustic Duplicate Finder (in `app/main.py`)
+
+Background job system with Python fallback fingerprinting (librosa PCM / MD5).
+
+**API endpoints added to `app/main.py`**:
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/duplicates/scan` | Start background fingerprint scan, returns `job_id` |
+| GET | `/api/duplicates/results` | Poll scan status/results |
+| POST | `/api/duplicates/merge` | Merge duplicate tracks in library |

@@ -169,3 +169,45 @@ log('info', 'Component mounted', { trackCount: tracks.length });
 log('warn', 'Waveform cache miss', { trackId });
 log('error', 'API call failed', { endpoint, status, error: err.message });
 ```
+
+
+---
+
+## New Views (2026-05-04)
+
+### `PhraseGeneratorView.jsx`
+Route: `phrase` tab in Editor group.
+
+| Element | Description |
+|---------|-------------|
+| Track selector | Searchable inline picker (loads `/api/library/tracks`) |
+| Phrase length | 8/16/32 bars radio cards |
+| Generate button | POST `/api/phrase/generate` → preview list |
+| CueRow | Shows position_ms, label, type (amber=phrase / grey=bar) |
+| Commit button | POST `/api/phrase/commit` → success state |
+
+State: `selectedTrack`, `phraseLength`, `cues`, `generating`, `committing`, `committed`, `genError`, `genWarning`.
+
+### `DuplicateView.jsx`
+Route: `duplicates` tab in Editor group.
+
+| Element | Description |
+|---------|-------------|
+| Scan Library | POST `/api/duplicates/scan` → poll `job_id` via GET `/api/duplicates/results` |
+| Group list (left) | Similarity badge + rep track title |
+| GroupDetail (right) | Horizontal `TrackCard` cards per track |
+| TrackCard | format, bitrate, size_mb, play_count; radio button = master |
+| Auto button | Selects highest-bitrate track as master |
+| Merge button | POST `/api/duplicates/merge` |
+
+State: `scanning`, `scanProgress`, `groups`, `selectedGroupIdx`, `scanError`. Poll via `setInterval` ref.
+
+### `UsbView.jsx` (modified)
+Added `PlayCountSync` collapsible section rendered for connected rekordbox devices.
+
+| Element | Description |
+|---------|-------------|
+| Analyse Counts | GET `/api/usb/playcount/diff` |
+| Conflict table | Per-track strategy dropdown (take_max/take_pc/take_usb/sum) |
+| Set All to MAX | Sets all strategies to take_max |
+| Write Sync | Triple-confirm → POST `/api/usb/playcount/resolve` |

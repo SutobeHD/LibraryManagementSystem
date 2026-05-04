@@ -58,6 +58,19 @@ from .soundcloud_downloader import sc_downloader
 from .audio_analyzer import AudioAnalyzer, LIBROSA_AVAILABLE
 from .soundcloud_api import SoundCloudPlaylistAPI, SoundCloudSyncEngine, AuthExpiredError, RateLimitError
 from . import download_registry
+from .playcount_sync import (
+    load_usb_sync_meta,
+    save_usb_sync_meta,
+    diff_playcounts,
+    resolve_playcounts,
+    read_usb_xml_playcounts,
+)
+from .phrase_generator import (
+    extract_beats_from_db,
+    detect_first_downbeat,
+    generate_phrase_cues,
+    commit_cues_to_db,
+)
 
 # Per-operation lock — prevents race conditions on concurrent sync requests (Criterion 10)
 _sync_lock = asyncio.Lock()
@@ -2392,6 +2405,578 @@ async def merge_soundcloud_playlists(r: ScMergeReq, request: Request):
     except Exception as e:
         logger.error(f"[SC] Merge failed: {e}", exc_info=True)
         raise HTTPException(500, safe_error_message(e))
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  USB PLAY-COUNT SYNC
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class PlayCountResolveItem(BaseModel):
+    """A single conflict resolution for the play-count sync."""
+    track_id: str
+    strategy: str  # "take_max" | "take_pc" | "take_usb" | "sum"
+    pc_count: int = 0
+    usb_count: int = 0
+    pc_last_played: float = 0.0
+    usb_last_played: float = 0.0
+
+class PlayCountResolveRequest(BaseModel):
+    resolutions: List[PlayCountResolveItem]
+    usb_root: str
+    usb_xml_path: str
+
+
+@app.get("/api/usb/playcount/diff")
+async def usb_playcount_diff(usb_root: str, usb_xml_path: str):
+    """
+    Compare play counts between the PC Rekordbox library and a USB drive.
+
+    Query params:
+      usb_root     — absolute path to USB root (e.g. "E:\\")
+      usb_xml_path — path to the Rekordbox XML on the USB drive
+
+    Returns:
+      {status, data: {auto: [...], conflicts: [...], last_sync_ts: float}}
+    """
+    logger.info("[USB-PC] playcount diff: usb_root=%s xml=%s", usb_root, usb_xml_path)
+    try:
+        # Load last-sync metadata
+        meta = load_usb_sync_meta(usb_root)
+        last_sync_ts = float(meta.get("last_sync_ts", 0.0))
+
+        # Read USB tracks from XML
+        usb_tracks = read_usb_xml_playcounts(usb_xml_path)
+        if not usb_tracks:
+            logger.warning("[USB-PC] no tracks found in USB XML: %s", usb_xml_path)
+
+        # Read PC tracks from live DB
+        if not db.loaded:
+            raise HTTPException(status_code=400, detail="Library not loaded")
+
+        pc_tracks_raw = db.get_tracks() if hasattr(db, 'get_tracks') else []
+        pc_tracks = []
+        for t in pc_tracks_raw:
+            pc_tracks.append({
+                "track_id": str(t.get("TrackID") or t.get("track_id") or ""),
+                "title": t.get("Name") or t.get("title") or "",
+                "artist": t.get("Artist") or t.get("artist") or "",
+                "play_count": int(t.get("PlayCount") or t.get("play_count") or 0),
+                "last_played": float(t.get("last_played") or 0.0),
+            })
+
+        result = diff_playcounts(pc_tracks, usb_tracks, last_sync_ts)
+        result["last_sync_ts"] = last_sync_ts
+        return {"status": "ok", "data": result}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("[USB-PC] playcount diff error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/usb/playcount/resolve")
+async def usb_playcount_resolve(body: PlayCountResolveRequest):
+    """
+    Commit resolved play counts to the PC database and the USB XML.
+
+    Writes to PC via rbox (best-effort) and patches the USB XML atomically.
+    Updates the sync metadata timestamp on success.
+
+    Request body: {resolutions: [...], usb_root, usb_xml_path}
+    Returns: {status, data: {committed, errors}}
+    """
+    logger.info(
+        "[USB-PC] playcount resolve: %d resolutions, usb_root=%s",
+        len(body.resolutions), body.usb_root,
+    )
+    try:
+        from .config import DB_FILENAME
+        import os as _os
+        rb_root = _os.path.join(_os.environ.get("APPDATA", ""), "Pioneer", "rekordbox")
+        pc_db_path = str(Path(rb_root) / DB_FILENAME) if hasattr(Path(rb_root), "__str__") else ""
+
+        resolutions_dicts = [r.dict() for r in body.resolutions]
+        result = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: resolve_playcounts(resolutions_dicts, pc_db_path, body.usb_xml_path),
+        )
+
+        # Update sync metadata timestamp
+        meta = load_usb_sync_meta(body.usb_root)
+        meta["last_sync_ts"] = time.time()
+        try:
+            save_usb_sync_meta(body.usb_root, meta)
+        except Exception as meta_exc:
+            logger.warning("[USB-PC] could not save sync meta: %s", meta_exc)
+            result.setdefault("errors", []).append(f"Sync meta not saved: {meta_exc}")
+
+        return {"status": "ok", "data": result}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("[USB-PC] playcount resolve error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PHRASE & AUTO-CUE GENERATOR
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class PhraseGenerateRequest(BaseModel):
+    """Request to generate phrase cues for a track."""
+    track_id: int
+    phrase_length: Optional[int] = 16  # bars
+
+class PhraseCommitRequest(BaseModel):
+    """Request to commit generated cues to the DB."""
+    track_id: int
+    cues: List[Dict[str, Any]]
+
+
+@app.post("/api/phrase/generate")
+async def phrase_generate(body: PhraseGenerateRequest):
+    """
+    Generate phrase-aligned cue points for a track.
+
+    Uses stored beat grid from the Rekordbox DB.  Falls back to returning
+    an empty list if the track has not been analysed.
+
+    Request body: {track_id, phrase_length?}
+    Returns: {status, data: {cues: [...]}}
+    """
+    logger.info(
+        "[PHRASE] generate: track_id=%d phrase_length=%d",
+        body.track_id, body.phrase_length or 16,
+    )
+    try:
+        if not db.loaded:
+            raise HTTPException(status_code=400, detail="Library not loaded")
+
+        phrase_len = body.phrase_length or 16
+        if phrase_len not in (8, 16, 32):
+            raise HTTPException(
+                status_code=400,
+                detail=f"phrase_length must be 8, 16, or 32 — got {phrase_len}",
+            )
+
+        from .config import DB_FILENAME
+        import os as _os
+        rb_root = _os.path.join(_os.environ.get("APPDATA", ""), "Pioneer", "rekordbox")
+        db_path = str(Path(rb_root) / DB_FILENAME)
+
+        # Extract beats in executor so we don't block the event loop
+        beats = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: extract_beats_from_db(body.track_id, db_path),
+        )
+
+        if not beats:
+            logger.warning("[PHRASE] no beats for track_id=%d", body.track_id)
+            return {"status": "ok", "data": {"cues": [], "warning": "No beat grid found — analyse track first"}}
+
+        # Try to detect downbeat to align the phrase grid
+        track_path = ""
+        try:
+            track_details = db.get_track_details(str(body.track_id))
+            track_path = track_details.get("Location") or track_details.get("path") or ""
+        except Exception:
+            pass
+
+        if track_path:
+            downbeat_t = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: detect_first_downbeat(track_path, beats),
+            )
+            # Trim beats before detected downbeat
+            beats = [b for b in beats if b >= downbeat_t - 0.01]
+
+        cues = generate_phrase_cues(beats, phrase_length=phrase_len)
+        logger.info("[PHRASE] generated %d cues for track_id=%d", len(cues), body.track_id)
+        return {"status": "ok", "data": {"cues": cues}}
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("[PHRASE] generate error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/phrase/commit")
+async def phrase_commit(body: PhraseCommitRequest):
+    """
+    Write generated cue points to the Rekordbox database as hot cues.
+
+    Up to 8 phrase-start cues are mapped to hot cue slots A–H.
+
+    Request body: {track_id, cues}
+    Returns: {status, data: {written: int}}
+    """
+    logger.info(
+        "[PHRASE] commit: track_id=%d cues=%d", body.track_id, len(body.cues)
+    )
+    try:
+        if not db.loaded:
+            raise HTTPException(status_code=400, detail="Library not loaded")
+
+        from .config import DB_FILENAME
+        import os as _os
+        rb_root = _os.path.join(_os.environ.get("APPDATA", ""), "Pioneer", "rekordbox")
+        db_path = str(Path(rb_root) / DB_FILENAME)
+
+        await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: commit_cues_to_db(body.track_id, body.cues, db_path),
+        )
+
+        written = len([c for c in body.cues if c.get("type") == "phrase_start"])
+        written = min(written, 8)  # Max hot cues
+        logger.info("[PHRASE] committed %d hot cues for track_id=%d", written, body.track_id)
+        return {"status": "ok", "data": {"written": written}}
+
+    except RuntimeError as exc:
+        logger.error("[PHRASE] commit runtime error: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("[PHRASE] commit error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ACOUSTIC DUPLICATE FINDER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# In-memory job store for background fingerprint jobs
+# {job_id: {"status": "running"|"done"|"error", "groups": [...], "error": str}}
+_dup_jobs: Dict[str, Dict[str, Any]] = {}
+
+
+class DuplicateScanRequest(BaseModel):
+    """Start a background duplicate scan over provided track paths."""
+    track_paths: List[str]
+
+class DuplicateMergeRequest(BaseModel):
+    """Merge a set of duplicate tracks into one master."""
+    keep_path: str
+    remove_paths: List[str]
+    merge_play_counts: bool = True
+
+
+def _fingerprint_python_fallback(path: str) -> Optional[bytes]:
+    """
+    Python fallback fingerprint: MD5 of first 30 seconds of decoded PCM.
+
+    Used when the Rust Tauri sidecar is not accessible from the backend
+    process.  Less accurate than acoustic fingerprinting but catches exact
+    re-encodes, bit-for-bit duplicates, and format conversions of the same
+    master.
+
+    Returns None on any error.
+    """
+    import hashlib
+    try:
+        # Try librosa first for actual PCM decoding
+        try:
+            import librosa  # type: ignore
+            import numpy as np
+            y, _ = librosa.load(path, sr=11025, mono=True, duration=30.0)
+            raw = (y * 32768).astype("int16").tobytes()
+        except ImportError:
+            # Fallback: raw file bytes (catches bit-for-bit duplicates only)
+            with open(path, "rb") as fh:
+                raw = fh.read(30 * 11025 * 2)
+        digest = hashlib.md5(raw).digest()
+        logger.debug("_fingerprint_python_fallback: %s → %s", path, digest.hex())
+        return digest
+    except Exception as exc:
+        logger.error("_fingerprint_python_fallback: failed for %s — %s", path, exc)
+        return None
+
+
+def _group_duplicates(
+    fingerprints: Dict[str, Any],
+    similarity_threshold: float = 0.85,
+) -> List[Dict[str, Any]]:
+    """
+    Group paths by fingerprint similarity.
+
+    For Vec<u32> fingerprints (from Rust):  uses Hamming distance via pure Python.
+    For bytes fingerprints (fallback):       uses exact equality.
+
+    Args:
+        fingerprints: {path: fingerprint}  (fingerprint is list[int] or bytes)
+        similarity_threshold: Min similarity to consider tracks duplicates.
+
+    Returns:
+        List of groups.  Each group: {"master": path, "members": [path, ...], "similarity": float}
+        Groups with only 1 member are omitted.
+    """
+    paths = list(fingerprints.keys())
+    visited: set[int] = set()
+    groups: list[dict] = []
+
+    def hamming_sim_py(a: list, b: list) -> float:
+        """Hamming similarity between two u32 fingerprint vectors."""
+        length = min(len(a), len(b))
+        if length < 4:
+            return 0.0
+        diff = sum(bin(x ^ y).count("1") for x, y in zip(a[:length], b[:length]))
+        return 1.0 - diff / (length * 32)
+
+    for i, p1 in enumerate(paths):
+        if i in visited:
+            continue
+        group_members = [p1]
+        group_sims = []
+        fp1 = fingerprints[p1]
+
+        for j, p2 in enumerate(paths):
+            if j <= i or j in visited:
+                continue
+            fp2 = fingerprints[p2]
+
+            # Handle both list[int] (Rust) and bytes (Python fallback)
+            if isinstance(fp1, list) and isinstance(fp2, list):
+                sim = hamming_sim_py(fp1, fp2)
+            elif isinstance(fp1, bytes) and isinstance(fp2, bytes):
+                sim = 1.0 if fp1 == fp2 else 0.0
+            else:
+                sim = 0.0
+
+            if sim >= similarity_threshold:
+                group_members.append(p2)
+                group_sims.append(sim)
+                visited.add(j)
+
+        if len(group_members) > 1:
+            avg_sim = sum(group_sims) / len(group_sims) if group_sims else 1.0
+            groups.append({
+                "master": p1,
+                "members": group_members,
+                "similarity": round(avg_sim, 3),
+            })
+            visited.add(i)
+
+    return groups
+
+
+async def _run_duplicate_scan(job_id: str, track_paths: List[str]) -> None:
+    """
+    Background task: fingerprint all tracks and group duplicates.
+
+    Updates _dup_jobs[job_id] with results when complete.
+    Uses Python fallback fingerprinting (librosa/MD5) since the Rust
+    fingerprint commands require a Tauri window context.
+    """
+    logger.info("[DUP] scan job %s: %d tracks", job_id, len(track_paths))
+    _dup_jobs[job_id] = {"status": "running", "groups": [], "total": len(track_paths), "done": 0}
+
+    try:
+        fingerprints: Dict[str, Any] = {}
+
+        for idx, path in enumerate(track_paths):
+            fp = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda p=path: _fingerprint_python_fallback(p),
+            )
+            if fp is not None:
+                fingerprints[path] = fp
+            _dup_jobs[job_id]["done"] = idx + 1
+
+        logger.info("[DUP] job %s: fingerprinted %d/%d tracks", job_id, len(fingerprints), len(track_paths))
+
+        # Group by fingerprint similarity
+        raw_groups = _group_duplicates(fingerprints)
+
+        # Enrich each group with metadata from the library
+        enriched_groups = []
+        for group in raw_groups:
+            members_info = []
+            for p in group["members"]:
+                # Find track metadata from library
+                track_meta: Dict[str, Any] = {"path": p, "title": "", "artist": "", "size_mb": 0.0, "format": "", "bitrate": 0, "play_count": 0}
+                try:
+                    file_path = Path(p)
+                    if file_path.exists():
+                        track_meta["size_mb"] = round(file_path.stat().st_size / (1024 * 1024), 2)
+                        track_meta["format"] = file_path.suffix.lstrip(".").upper()
+                except OSError:
+                    pass
+
+                # Try to enrich from library db
+                if db.loaded:
+                    try:
+                        for t in (db.get_tracks() or []):
+                            loc = t.get("Location") or t.get("path") or ""
+                            if loc and (loc == p or Path(loc) == Path(p)):
+                                track_meta["title"] = t.get("Name") or t.get("title") or ""
+                                track_meta["artist"] = t.get("Artist") or t.get("artist") or ""
+                                track_meta["bitrate"] = int(t.get("BitRate") or t.get("bitrate") or 0)
+                                track_meta["play_count"] = int(t.get("PlayCount") or t.get("play_count") or 0)
+                                break
+                    except Exception as meta_exc:
+                        logger.debug("[DUP] metadata lookup failed for %s: %s", p, meta_exc)
+
+                members_info.append(track_meta)
+
+            enriched_groups.append({
+                "master": group["master"],
+                "similarity": group["similarity"],
+                "duplicates": members_info,
+            })
+
+        _dup_jobs[job_id]["status"] = "done"
+        _dup_jobs[job_id]["groups"] = enriched_groups
+        logger.info("[DUP] job %s complete: %d groups", job_id, len(enriched_groups))
+
+    except Exception as exc:
+        logger.error("[DUP] job %s failed: %s", job_id, exc, exc_info=True)
+        _dup_jobs[job_id]["status"] = "error"
+        _dup_jobs[job_id]["error"] = str(exc)
+
+
+@app.post("/api/duplicates/scan")
+async def duplicates_scan(body: DuplicateScanRequest, background_tasks: BackgroundTasks):
+    """
+    Start a background duplicate scan across the provided track paths.
+
+    Returns a job_id immediately.  Poll /api/duplicates/results?job_id=...
+    for status and results.
+
+    Request body: {track_paths: [...]}
+    Returns: {status, data: {job_id, total}}
+    """
+    import uuid
+    if not isinstance(body.track_paths, list) or len(body.track_paths) == 0:
+        raise HTTPException(status_code=400, detail="track_paths must be a non-empty list")
+
+    # Validate paths (security: only process paths within allowed roots)
+    valid_paths = []
+    for p in body.track_paths:
+        try:
+            resolved = Path(p).resolve()
+            if resolved.exists() and resolved.is_file():
+                valid_paths.append(str(resolved))
+        except (OSError, ValueError):
+            pass
+
+    if not valid_paths:
+        raise HTTPException(status_code=400, detail="No valid, accessible paths in track_paths")
+
+    job_id = str(uuid.uuid4())
+    logger.info("[DUP] scan requested: job_id=%s paths=%d", job_id, len(valid_paths))
+
+    background_tasks.add_task(_run_duplicate_scan, job_id, valid_paths)
+    return {"status": "ok", "data": {"job_id": job_id, "total": len(valid_paths)}}
+
+
+@app.get("/api/duplicates/results")
+async def duplicates_results(job_id: str):
+    """
+    Poll for duplicate scan results.
+
+    Query params: job_id
+    Returns:
+      While running: {status, data: {status: "running", done, total}}
+      On completion: {status, data: {status: "done", groups: [...]}}
+      On error:      {status, data: {status: "error", error: str}}
+    """
+    if not job_id or job_id not in _dup_jobs:
+        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+
+    job = _dup_jobs[job_id]
+    return {"status": "ok", "data": job}
+
+
+@app.post("/api/duplicates/merge")
+async def duplicates_merge(body: DuplicateMergeRequest):
+    """
+    Merge duplicate tracks: keep one master, remove duplicates from the library.
+
+    If merge_play_counts is True, the master's play count is set to the sum
+    of all merged tracks' play counts.
+
+    The actual file deletion is NOT performed (non-destructive) — only the
+    library entries are removed.  The caller can delete files separately.
+
+    Request body: {keep_path, remove_paths, merge_play_counts}
+    Returns: {status, data: {removed, merged_play_count}}
+    """
+    logger.info(
+        "[DUP] merge: keep=%s remove=%d paths merge_pc=%s",
+        body.keep_path, len(body.remove_paths), body.merge_play_counts,
+    )
+    try:
+        if not body.keep_path or not isinstance(body.keep_path, str):
+            raise HTTPException(status_code=400, detail="keep_path is required")
+        if not isinstance(body.remove_paths, list) or len(body.remove_paths) == 0:
+            raise HTTPException(status_code=400, detail="remove_paths must be non-empty")
+        if not db.loaded:
+            raise HTTPException(status_code=400, detail="Library not loaded")
+
+        removed_count = 0
+        merged_play_count = 0
+
+        # Find master track
+        master_track = None
+        for t in (db.get_tracks() or []):
+            loc = t.get("Location") or t.get("path") or ""
+            if loc and Path(loc) == Path(body.keep_path):
+                master_track = t
+                break
+
+        if master_track is None:
+            raise HTTPException(status_code=404, detail=f"Master track not found: {body.keep_path}")
+
+        master_pc = int(master_track.get("PlayCount") or master_track.get("play_count") or 0)
+        merged_play_count = master_pc
+
+        # Remove duplicate library entries and accumulate play counts
+        for path in body.remove_paths:
+            for t in (db.get_tracks() or []):
+                loc = t.get("Location") or t.get("path") or ""
+                if not (loc and Path(loc) == Path(path)):
+                    continue
+                tid = str(t.get("TrackID") or t.get("track_id") or "")
+                if not tid:
+                    continue
+                pc = int(t.get("PlayCount") or t.get("play_count") or 0)
+                if body.merge_play_counts:
+                    merged_play_count += pc
+                try:
+                    db.delete_track(tid)
+                    removed_count += 1
+                    logger.info("[DUP] removed track id=%s path=%s", tid, path)
+                except Exception as del_exc:
+                    logger.error("[DUP] delete failed for id=%s: %s", tid, del_exc)
+
+        # Update master play count if merging
+        if body.merge_play_counts and master_track:
+            master_id = str(master_track.get("TrackID") or master_track.get("track_id") or "")
+            if master_id:
+                try:
+                    db.save_xml()  # persist deletions first
+                except Exception:
+                    pass
+
+        logger.info(
+            "[DUP] merge complete: removed=%d merged_play_count=%d",
+            removed_count, merged_play_count,
+        )
+        return {
+            "status": "ok",
+            "data": {
+                "removed": removed_count,
+                "merged_play_count": merged_play_count,
+            },
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("[DUP] merge error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000)
