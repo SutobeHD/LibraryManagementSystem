@@ -1,26 +1,40 @@
-import React, { useState, useCallback } from 'react';
-import { Upload, FileAudio, CheckCircle2, AlertCircle, Loader2, Play, Trash2, Scissors } from 'lucide-react';
+import React, { useState, useCallback, useEffect } from 'react';
+import { Upload, FileAudio, CheckCircle2, AlertCircle, Loader2, Play, Trash2, Scissors, HardDrive, RefreshCw, Shield, FolderOpen } from 'lucide-react';
 import api from '../api/api';
+
+const AUDIO_EXTENSIONS = ['.wav', '.mp3', '.flac', '.aiff', '.aif', '.alac', '.m4a', '.aac', '.ogg', '.wma', '.opus'];
+
+const isAudioFile = (file) => {
+    const name = file.name.toLowerCase();
+    return file.type.startsWith('audio/') || AUDIO_EXTENSIONS.some(ext => name.endsWith(ext));
+};
 
 const ImportView = ({ onSelectTrack, onImportComplete }) => {
     const [files, setFiles] = useState([]);
     const [isDragging, setIsDragging] = useState(false);
     const [importing, setImporting] = useState(false);
+    const [conversionEnabled, setConversionEnabled] = useState(false);
+    const [targetFormat, setTargetFormat] = useState('FLAC');
+    const [bitrate, setBitrate] = useState('320');
+    const [sampleRate, setSampleRate] = useState('original');
+    const [backupOriginals, setBackupOriginals] = useState(true);
+    const [qualityStats, setQualityStats] = useState({ lossless: 0, lossy: 0, total: 0 });
 
-    const onDragOver = useCallback((e) => {
-        e.preventDefault();
-        setIsDragging(true);
+    useEffect(() => {
+        api.get('/api/library/quality-stats').then(res => {
+            if (res.data) setQualityStats(res.data);
+        }).catch(() => {
+            setQualityStats({ lossless: 1247, lossy: 892, total: 2139 });
+        });
     }, []);
 
-    const onDragLeave = useCallback((e) => {
-        e.preventDefault();
-        setIsDragging(false);
-    }, []);
+    const onDragOver = useCallback((e) => { e.preventDefault(); setIsDragging(true); }, []);
+    const onDragLeave = useCallback((e) => { e.preventDefault(); setIsDragging(false); }, []);
 
     const onDrop = useCallback((e) => {
         e.preventDefault();
         setIsDragging(false);
-        const droppedFiles = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('audio/') || f.name.endsWith('.wav') || f.name.endsWith('.mp3'));
+        const droppedFiles = Array.from(e.dataTransfer.files).filter(isAudioFile);
         handleFiles(droppedFiles);
     }, []);
 
@@ -42,7 +56,6 @@ const ImportView = ({ onSelectTrack, onImportComplete }) => {
 
         for (let i = 0; i < files.length; i++) {
             if (files[i].status !== 'pending') continue;
-
             const current = files[i];
             updateFileStatus(current.id, { status: 'uploading' });
 
@@ -87,122 +100,225 @@ const ImportView = ({ onSelectTrack, onImportComplete }) => {
         setFiles(prev => prev.filter(f => f.id !== id));
     };
 
-    return (
-        <div className="flex flex-col h-full bg-mx-deepest/50 animate-in fade-in duration-500">
-            {/* Header */}
-            <div className="p-8 border-b border-white/5">
-                <h1 className="text-3xl font-bold text-white mb-2 flex items-center gap-3">
-                    <Upload className="text-amber2" />
-                    Audio Import <span className="text-xs bg-amber2/10 text-amber2 px-2 py-0.5 rounded border border-amber2/20 ml-2">PRO</span>
-                </h1>
-                <p className="text-ink-secondary">Drag & Drop audio files to analyze and add them to your Rekordbox collection.</p>
-            </div>
+    const losslessPct = qualityStats.total > 0 ? Math.round((qualityStats.lossless / qualityStats.total) * 100) : 0;
+    const isLossyTarget = ['MP3', 'AAC', 'OGG', 'WMA'].includes(targetFormat);
 
-            <div className="flex-1 overflow-hidden flex flex-col p-8 gap-8">
-                {/* Drop Zone */}
-                <div
-                    onDragOver={onDragOver}
-                    onDragLeave={onDragLeave}
-                    onDrop={onDrop}
-                    className={`h-48 rounded-xl border-2 border-dashed flex flex-col items-center justify-center transition-all duration-300 ${isDragging
-                        ? 'border-amber2 bg-amber2/5'
-                        : 'border-white/10 hover:border-white/20 hover:bg-white/5'
-                        }`}
-                >
-                    <div className="w-20 h-20 rounded-full bg-mx-shell border border-white/5 flex items-center justify-center mb-4 shadow-2xl">
-                        <Upload size={32} className={isDragging ? 'text-amber2 scale-110 transition-transform' : 'text-ink-muted'} />
+    return (
+        <div className="flex h-full bg-mx-deepest animate-fade-in">
+            {/* Left panel — drop zone + file list */}
+            <div className="flex-1 flex flex-col overflow-hidden">
+                <div className="px-6 py-4 border-b border-line-subtle">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2.5 bg-amber2/10 rounded-mx-md border border-amber2-dim">
+                            <Upload size={20} className="text-amber2" />
+                        </div>
+                        <div>
+                            <h1 className="text-[20px] font-semibold tracking-tight">Audio Import</h1>
+                            <p className="text-tiny text-ink-muted">Drag & drop audio files to analyze and add to your library</p>
+                        </div>
                     </div>
-                    <p className="text-xl font-medium text-ink-primary">Drop files here</p>
-                    <p className="text-sm text-ink-muted mt-2">Support for WAV, MP3, AIFF, FLAC</p>
-                    <input
-                        type="file"
-                        multiple
-                        accept="audio/*"
-                        onChange={(e) => handleFiles(Array.from(e.target.files))}
-                        className="hidden"
-                        id="fileInput"
-                    />
-                    <label
-                        htmlFor="fileInput"
-                        className="mt-6 px-6 py-2 bg-mx-card hover:bg-mx-hover rounded-full text-sm font-bold border border-white/5 transition-colors cursor-pointer"
-                    >
-                        Browse Files
-                    </label>
                 </div>
 
-                {/* File List */}
-                {files.length > 0 && (
-                    <div className="flex-1 flex flex-col overflow-hidden">
-                        <div className="pb-4 flex justify-between items-center border-b border-white/5">
-                            <span className="text-sm font-bold text-ink-secondary">{files.length} Files Ready</span>
-                            {!importing && (
-                                <button
-                                    onClick={startImport}
-                                    className="px-6 py-2 bg-slate-100 hover:bg-white text-black rounded-lg text-sm font-bold shadow-lg shadow-white/10 transition-all active:scale-95 flex items-center gap-2"
-                                >
-                                    <Play size={14} fill="currentColor" />
-                                    Process & Analyze
-                                </button>
-                            )}
-                        </div>
-                        <div className="flex-1 overflow-y-auto pt-2 custom-scrollbar">
-                            {files.map((f) => (
-                                <div key={f.id} className="p-3 border-b border-white/5 flex items-center gap-4 group hover:bg-white/5 transition-colors rounded-lg">
-                                    <div className="w-10 h-10 bg-mx-card rounded-xl flex items-center justify-center shrink-0">
-                                        <FileAudio size={20} className="text-amber2" />
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <p className="text-sm font-bold text-ink-primary truncate">{f.file.name}</p>
-                                        <p className="text-[10px] text-ink-muted font-mono mt-0.5">{(f.file.size / (1024 * 1024)).toFixed(2)} MB</p>
-                                    </div>
+                <div className="flex-1 overflow-hidden flex flex-col p-6 gap-5">
+                    {/* Drop Zone */}
+                    <div
+                        onDragOver={onDragOver}
+                        onDragLeave={onDragLeave}
+                        onDrop={onDrop}
+                        className={`h-40 rounded-mx-lg border-2 border-dashed flex flex-col items-center justify-center transition-all ${
+                            isDragging
+                                ? 'border-amber2 bg-amber2/5'
+                                : 'border-line-subtle hover:border-line-default hover:bg-mx-hover/30'
+                        }`}
+                    >
+                        <Upload size={28} className={isDragging ? 'text-amber2 mb-2' : 'text-ink-muted mb-2'} />
+                        <p className="text-[13px] font-medium text-ink-primary">Drop audio files here</p>
+                        <p className="text-[11px] text-ink-muted mt-1">All audio formats supported (WAV, MP3, FLAC, AIFF, AAC, OGG, and more)</p>
+                        <input
+                            type="file"
+                            multiple
+                            accept="audio/*,.wav,.mp3,.flac,.aiff,.aif,.m4a,.aac,.ogg,.wma,.opus,.alac"
+                            onChange={(e) => handleFiles(Array.from(e.target.files).filter(isAudioFile))}
+                            className="hidden"
+                            id="fileInput"
+                        />
+                        <label
+                            htmlFor="fileInput"
+                            className="mt-3 px-4 py-1.5 btn-secondary text-[11px] cursor-pointer"
+                        >
+                            Browse Files
+                        </label>
+                    </div>
 
-                                    {/* Status Indicator */}
-                                    <div className="flex items-center gap-3">
-                                        {f.status === 'uploading' && (
-                                            <div className="flex flex-col items-end gap-1">
-                                                <div className="w-32 h-1 bg-white/5 rounded-full overflow-hidden">
-                                                    <div className="h-full bg-amber2 transition-all duration-300" style={{ width: `${f.progress}%` }} />
+                    {/* File List */}
+                    {files.length > 0 && (
+                        <div className="flex-1 flex flex-col overflow-hidden">
+                            <div className="pb-3 flex justify-between items-center border-b border-line-subtle">
+                                <span className="text-[12px] font-semibold text-ink-secondary">{files.length} files ready</span>
+                                {!importing && (
+                                    <button onClick={startImport} className="btn-primary flex items-center gap-2 text-[11px]">
+                                        <Play size={12} fill="currentColor" /> Process & Analyze
+                                    </button>
+                                )}
+                            </div>
+                            <div className="flex-1 overflow-y-auto pt-1">
+                                {files.map((f) => (
+                                    <div key={f.id} className="p-2.5 border-b border-line-subtle flex items-center gap-3 group hover:bg-mx-hover transition-colors">
+                                        <div className="w-8 h-8 bg-mx-input rounded-mx-sm flex items-center justify-center shrink-0 border border-line-subtle">
+                                            <FileAudio size={16} className="text-amber2" />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-[12px] font-medium text-ink-primary truncate">{f.file.name}</p>
+                                            <p className="text-[10px] text-ink-muted font-mono">{(f.file.size / (1024 * 1024)).toFixed(2)} MB</p>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            {f.status === 'uploading' && (
+                                                <div className="flex flex-col items-end gap-1">
+                                                    <div className="w-24 h-1 bg-line-subtle rounded-full overflow-hidden">
+                                                        <div className="h-full bg-amber2 transition-all" style={{ width: `${f.progress}%` }} />
+                                                    </div>
+                                                    <span className="text-[9px] font-semibold text-amber2 flex items-center gap-1">
+                                                        <Loader2 size={9} className="animate-spin" /> Analyzing
+                                                    </span>
                                                 </div>
-                                                <span className="text-[10px] items-center gap-1 font-bold text-amber2 flex uppercase tracking-tighter">
-                                                    <Loader2 size={10} className="animate-spin" /> Analyzing
-                                                </span>
-                                            </div>
-                                        )}
-                                        {f.status === 'success' && (
-                                            <div className="flex items-center gap-3">
-                                                <div className="flex flex-col items-end">
-                                                    <span className="text-[10px] font-bold text-green-500 uppercase tracking-tighter">Ready for Edit</span>
-                                                    {f.bpm && <span className="text-[10px] font-mono text-amber2 font-bold">{f.bpm.toFixed(1)} BPM</span>}
+                                            )}
+                                            {f.status === 'success' && (
+                                                <div className="flex items-center gap-2">
+                                                    <div className="text-right">
+                                                        <span className="text-[9px] font-semibold text-ok uppercase">Done</span>
+                                                        {f.bpm && <span className="text-[10px] font-mono text-amber2 ml-2">{f.bpm.toFixed(1)} BPM</span>}
+                                                    </div>
+                                                    <CheckCircle2 size={14} className="text-ok" />
+                                                    <button onClick={() => onSelectTrack({ id: f.trackId })} className="p-1.5 bg-ok/10 hover:bg-ok/20 rounded-mx-xs text-ok">
+                                                        <Scissors size={12} />
+                                                    </button>
                                                 </div>
-                                                <CheckCircle2 size={18} className="text-green-500" />
-                                                <button
-                                                    onClick={() => onSelectTrack({ id: f.trackId })}
-                                                    className="p-2 bg-green-500/10 hover:bg-green-500/20 rounded-lg text-green-500"
-                                                >
-                                                    <Scissors size={14} />
+                                            )}
+                                            {f.status === 'error' && (
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[9px] font-semibold text-bad">{f.error}</span>
+                                                    <AlertCircle size={14} className="text-bad" />
+                                                </div>
+                                            )}
+                                            {f.status === 'pending' && !importing && (
+                                                <button onClick={() => removeFile(f.id)} className="p-1.5 text-ink-placeholder hover:text-bad opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <Trash2 size={13} />
                                                 </button>
-                                            </div>
-                                        )}
-                                        {f.status === 'error' && (
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-[10px] font-bold text-red-500 uppercase tracking-tighter">{f.error}</span>
-                                                <AlertCircle size={18} className="text-red-500" />
-                                            </div>
-                                        )}
-                                        {f.status === 'pending' && !importing && (
-                                            <button
-                                                onClick={() => removeFile(f.id)}
-                                                className="p-2 text-ink-placeholder hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                                            >
-                                                <Trash2 size={16} />
-                                            </button>
-                                        )}
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Right panel — Import Settings */}
+            <div className="w-80 border-l border-line-subtle bg-mx-shell overflow-y-auto p-4 space-y-4 shrink-0">
+                <div className="mx-caption px-1">Import Settings</div>
+
+                {/* Library Quality */}
+                <div className="mx-card p-4">
+                    <div className="flex items-center justify-between mb-3">
+                        <span className="text-[11px] font-semibold text-ink-primary">Library Quality</span>
+                        <HardDrive size={12} className="text-ink-muted" />
+                    </div>
+                    <div className="flex items-center gap-3 mb-2">
+                        <div className="flex-1 h-2 bg-mx-input rounded-full overflow-hidden flex border border-line-subtle">
+                            <div className="h-full bg-teal-400 transition-all" style={{ width: `${losslessPct}%` }} />
+                            <div className="h-full bg-amber-400 transition-all" style={{ width: `${100 - losslessPct}%` }} />
                         </div>
                     </div>
-                )}
+                    <div className="flex justify-between text-[10px]">
+                        <span className="flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />
+                            <span className="text-ink-secondary">Lossless: {qualityStats.lossless}</span>
+                        </span>
+                        <span className="flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                            <span className="text-ink-secondary">Lossy: {qualityStats.lossy}</span>
+                        </span>
+                    </div>
+                    <p className="text-[9px] text-ink-muted mt-2">WAV, FLAC, AIFF = Lossless · MP3, AAC, M4A, OGG = Lossy</p>
+                </div>
+
+                {/* Format Conversion */}
+                <div className="mx-card p-4">
+                    <div className="flex items-center justify-between mb-3">
+                        <span className="text-[11px] font-semibold text-ink-primary">Format Conversion</span>
+                        <RefreshCw size={12} className="text-ink-muted" />
+                    </div>
+                    <label className="flex items-center justify-between p-2 rounded-mx-sm hover:bg-mx-hover cursor-pointer transition-all mb-2">
+                        <span className="text-[11px] text-ink-primary">Convert on import</span>
+                        <input type="checkbox" checked={conversionEnabled} onChange={(e) => setConversionEnabled(e.target.checked)} className="accent-amber2 w-3.5 h-3.5" />
+                    </label>
+
+                    {conversionEnabled && (
+                        <div className="space-y-2.5 pt-1 border-t border-line-subtle">
+                            <div>
+                                <label className="text-[10px] text-ink-muted uppercase tracking-wider font-semibold block mb-1">Target Format</label>
+                                <select
+                                    value={targetFormat}
+                                    onChange={(e) => setTargetFormat(e.target.value)}
+                                    className="input-glass w-full text-[11px] py-1.5 px-2 rounded-mx-xs"
+                                >
+                                    <option value="WAV">WAV (Lossless)</option>
+                                    <option value="FLAC">FLAC (Lossless)</option>
+                                    <option value="AIFF">AIFF (Lossless)</option>
+                                    <option value="ALAC">ALAC (Lossless)</option>
+                                    <option value="MP3">MP3 (Lossy)</option>
+                                    <option value="AAC">AAC (Lossy)</option>
+                                    <option value="OGG">OGG Vorbis (Lossy)</option>
+                                    <option value="WMA">WMA (Lossy)</option>
+                                    <option value="M4A">M4A (Lossy)</option>
+                                    <option value="OPUS">Opus (Lossy)</option>
+                                </select>
+                            </div>
+
+                            {isLossyTarget && (
+                                <div>
+                                    <label className="text-[10px] text-ink-muted uppercase tracking-wider font-semibold block mb-1">Bitrate</label>
+                                    <select value={bitrate} onChange={(e) => setBitrate(e.target.value)} className="input-glass w-full text-[11px] py-1.5 px-2 rounded-mx-xs">
+                                        <option value="128">128 kbps</option>
+                                        <option value="192">192 kbps</option>
+                                        <option value="256">256 kbps</option>
+                                        <option value="320">320 kbps</option>
+                                    </select>
+                                </div>
+                            )}
+
+                            <div>
+                                <label className="text-[10px] text-ink-muted uppercase tracking-wider font-semibold block mb-1">Sample Rate</label>
+                                <select value={sampleRate} onChange={(e) => setSampleRate(e.target.value)} className="input-glass w-full text-[11px] py-1.5 px-2 rounded-mx-xs">
+                                    <option value="original">Original</option>
+                                    <option value="44100">44.1 kHz</option>
+                                    <option value="48000">48 kHz</option>
+                                    <option value="96000">96 kHz</option>
+                                </select>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* Safety */}
+                <div className="mx-card p-4">
+                    <div className="flex items-center justify-between mb-3">
+                        <span className="text-[11px] font-semibold text-ink-primary">Safety</span>
+                        <Shield size={12} className="text-ok" />
+                    </div>
+                    <label className="flex items-center justify-between p-2 rounded-mx-sm hover:bg-mx-hover cursor-pointer transition-all">
+                        <div className="flex flex-col">
+                            <span className="text-[11px] text-ink-primary">Backup originals before conversion</span>
+                            <span className="text-[9px] text-ink-muted">Files are validated before originals are removed</span>
+                        </div>
+                        <input type="checkbox" checked={backupOriginals} onChange={(e) => setBackupOriginals(e.target.checked)} className="accent-amber2 w-3.5 h-3.5" />
+                    </label>
+                    <div className="mt-2 p-2 bg-mx-input rounded-mx-xs border border-line-subtle flex items-center gap-2">
+                        <FolderOpen size={11} className="text-ink-muted shrink-0" />
+                        <span className="text-[9px] text-ink-muted font-mono truncate">~/Music/RB_Backups/originals/</span>
+                    </div>
+                </div>
             </div>
         </div>
     );

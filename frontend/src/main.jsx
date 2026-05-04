@@ -23,6 +23,8 @@ const SoundCloudView = lazy(() => import('./components/SoundCloudView'));
 const SoundCloudSyncView = lazy(() => import('./components/SoundCloudSyncView'));
 const PhraseGeneratorView = lazy(() => import('./components/PhraseGeneratorView'));
 const DuplicateView = lazy(() => import('./components/DuplicateView'));
+const UtilitiesView = lazy(() => import('./components/UtilitiesView'));
+const MetadataSyncView = lazy(() => import('./components/MetadataSyncView'));
 
 import api, { setSessionToken, getSessionToken } from './api/api'
 
@@ -155,9 +157,6 @@ const Sidebar = ({ activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnlo
 
           <NavGroup label="Editor">
             <NavBtn icon={<Scissors size={14} />} label="Waveform Editor" active={activeTab === 'editor'} onClick={() => setActiveTab('editor')} />
-            <NavBtn icon={<Wrench size={14} />} label="Utilities" active={activeTab === 'tools'} onClick={() => setActiveTab('tools')} />
-            <NavBtn icon={<Layers size={14} />} label="Phrase Cues" active={activeTab === 'phrase'} onClick={() => setActiveTab('phrase')} />
-            <NavBtn icon={<Copy size={14} />} label="Duplicate Finder" active={activeTab === 'duplicates'} onClick={() => setActiveTab('duplicates')} />
             {libraryStatus?.mode === 'xml' && (
               <NavBtn icon={<FileCode size={14} />} label="XML Automator" active={activeTab === 'xml'} onClick={() => setActiveTab('xml')} />
             )}
@@ -166,7 +165,12 @@ const Sidebar = ({ activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnlo
           <NavGroup label="Sync">
             <NavBtn icon={<HardDrive size={14} />} label="USB Export" active={activeTab === 'usb'} onClick={() => setActiveTab('usb')} />
             <NavBtn icon={<Cloud size={14} />} label="SoundCloud" active={activeTab === 'soundcloud'} onClick={() => setActiveTab('soundcloud')} />
-            <NavBtn icon={<ArrowRightLeft size={14} />} label="SC Playlists" active={activeTab === 'sc-sync'} onClick={() => setActiveTab('sc-sync')} />
+            <NavBtn icon={<Download size={14} />} label="SCloudLibrary" active={activeTab === 'sc-sync'} onClick={() => setActiveTab('sc-sync')} />
+            <NavBtn icon={<ArrowRightLeft size={14} />} label="Metadata Sync" active={activeTab === 'metadata-sync'} onClick={() => setActiveTab('metadata-sync')} />
+          </NavGroup>
+
+          <NavGroup label="Utilities">
+            <NavBtn icon={<Wrench size={14} />} label="Utilities" active={activeTab === 'utilities'} onClick={() => setActiveTab('utilities')} />
           </NavGroup>
 
           <NavGroup label="Lab">
@@ -224,8 +228,8 @@ const NavBtn = ({ icon, label, active, onClick }) => (
 const SelectionView = ({ onSelect }) => (
   <div className="fixed inset-0 z-[110] bg-mx-deepest flex flex-col items-center justify-center p-8 animate-fade-in">
     <div
-      className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] rounded-full blur-[120px] pointer-events-none"
-      style={{ background: 'rgba(232, 164, 42, 0.05)' }}
+      className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] rounded-full blur-[150px] pointer-events-none"
+      style={{ background: 'rgba(45, 212, 191, 0.03)' }}
     ></div>
 
     <div className="relative z-10 flex flex-col items-center max-w-4xl w-full">
@@ -403,8 +407,8 @@ const App = () => {
       {isInitialLoading && (
         <div className="fixed inset-0 z-[120] bg-mx-deepest flex flex-col items-center justify-center p-8 animate-fade-in font-sans">
           <div
-            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 rounded-full blur-[100px] animate-pulse"
-            style={{ background: 'rgba(232, 164, 42, 0.10)' }}
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 rounded-full blur-[120px]"
+            style={{ background: 'rgba(45, 212, 191, 0.04)' }}
           ></div>
           <div className="relative z-10 flex flex-col items-center max-w-md w-full">
             {/* Bar-graph logo, animated */}
@@ -509,10 +513,9 @@ const App = () => {
 
             {activeTab === 'usb' && <ErrorBoundary key="eb-usb"><UsbView /></ErrorBoundary>}
             {activeTab === 'design' && <ErrorBoundary key="eb-design"><DesignView /></ErrorBoundary>}
-            {activeTab === 'tools' && <ErrorBoundary key="eb-tools"><ToolsView /></ErrorBoundary>}
+            {activeTab === 'utilities' && <ErrorBoundary key="eb-utilities"><UtilitiesView /></ErrorBoundary>}
+            {activeTab === 'metadata-sync' && <ErrorBoundary key="eb-metadata-sync"><MetadataSyncView /></ErrorBoundary>}
             {activeTab === 'settings' && <ErrorBoundary key="eb-settings"><SettingsView /></ErrorBoundary>}
-            {activeTab === 'phrase' && <ErrorBoundary key="eb-phrase"><PhraseGeneratorView /></ErrorBoundary>}
-            {activeTab === 'duplicates' && <ErrorBoundary key="eb-duplicates"><DuplicateView /></ErrorBoundary>}
           </Suspense>
         </div>
       </main>
