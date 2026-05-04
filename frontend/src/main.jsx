@@ -71,139 +71,209 @@ const Sidebar = ({ activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnlo
 
   return (
     <>
-      <div className="w-64 h-screen flex flex-col relative z-20 shrink-0">
-        {/* Logo Area */}
-        <div className="p-8 pb-6">
-          <div className="flex items-center gap-3 mb-1">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
-              <Zap size={20} className="text-white fill-white" />
-            </div>
-            <div className="text-lg font-bold tracking-tight text-white font-sans">
-              MUSIC LIBRARY
-            </div>
+      {/* Sidebar — Melodex design system: 220px, near-black, amber active border-left */}
+      <div
+        className="h-screen flex flex-col relative z-20 shrink-0 bg-mx-shell border-r border-line-subtle"
+        style={{ width: 220 }}
+      >
+        {/* Logo: 5 amber bars (audio meter) + wordmark */}
+        <div className="px-4 py-3 border-b border-line-subtle flex items-center gap-2">
+          <div className="flex items-end gap-[2px]">
+            {[14, 18, 22, 16, 10].map((h, i) => (
+              <div
+                key={i}
+                className="bg-amber2 rounded-[1.5px]"
+                style={{ width: 3, height: h }}
+              />
+            ))}
           </div>
-          <div className="text-[10px] font-bold text-cyan-500 tracking-[0.2em] pl-11 uppercase opacity-90">MANAGER</div>
+          <span className="text-[15px] font-bold tracking-tight text-ink-primary">RB Editor</span>
+        </div>
 
-          {/* Library Status Indicator */}
-          <div className="mt-6 px-4">
-            <div className={`p-3 rounded-lg border flex items-center justify-between ${libraryStatus?.loaded ? 'bg-emerald-900/20 border-emerald-500/30' : 'bg-rose-900/10 border-rose-500/20'}`}>
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${libraryStatus?.loaded ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]' : 'bg-rose-400 shadow-[0_0_8px_#fb7185]'}`}></div>
-                <div className="flex flex-col">
-                  <span className={`text-[10px] font-bold uppercase ${libraryStatus?.loaded ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    {libraryStatus?.loaded ? 'Library Active' : 'No Library'}
+        {/* Library Status Indicator */}
+        <div className="px-3 pt-3">
+          <div
+            className={`px-3 py-2 rounded-mx-sm border flex items-center justify-between ${
+              libraryStatus?.loaded
+                ? 'bg-ok/5 border-ok/30'
+                : 'bg-bad/5 border-bad/25'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <div
+                className={`w-1.5 h-1.5 rounded-full ${
+                  libraryStatus?.loaded
+                    ? 'bg-ok shadow-[0_0_6px_#3DD68C]'
+                    : 'bg-bad shadow-[0_0_6px_#E85C4A]'
+                }`}
+              ></div>
+              <div className="flex flex-col leading-tight">
+                <span
+                  className={`text-[10px] font-semibold uppercase tracking-wider ${
+                    libraryStatus?.loaded ? 'text-ok' : 'text-bad'
+                  }`}
+                >
+                  {libraryStatus?.loaded ? 'Active' : 'No Library'}
+                </span>
+                {libraryStatus?.loaded && (
+                  <span className="text-[10px] font-mono text-ink-muted mt-0.5">
+                    {libraryStatus.tracks?.toLocaleString?.() ?? libraryStatus.tracks} tracks
                   </span>
-                  {libraryStatus?.loaded && <span className="text-[9px] text-slate-500">{libraryStatus.tracks} Tracks</span>}
-                </div>
+                )}
               </div>
-              {!libraryStatus?.loaded ? (
-                <button
-                  onClick={onLoadLibrary}
-                  className="p-1.5 bg-rose-500 hover:bg-rose-400 text-white rounded transition-colors"
-                  title="Load Default Library"
-                >
-                  <Zap size={12} />
-                </button>
-              ) : (
-                <button
-                  onClick={onUnloadLibrary}
-                  className="p-1.5 bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 rounded transition-colors border border-white/5"
-                  title="Unload Library"
-                >
-                  <X size={12} />
-                </button>
-              )}
             </div>
+            {!libraryStatus?.loaded ? (
+              <button
+                onClick={onLoadLibrary}
+                className="p-1.5 bg-amber2 hover:bg-amber2-hover text-mx-deepest rounded-mx-sm transition-colors"
+                title="Load default library"
+              >
+                <Zap size={11} />
+              </button>
+            ) : (
+              <button
+                onClick={onUnloadLibrary}
+                className="p-1.5 bg-mx-card hover:bg-bad/15 text-ink-muted hover:text-bad rounded-mx-sm transition-colors border border-line-subtle"
+                title="Unload library"
+              >
+                <X size={11} />
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 px-4 space-y-1 mt-6 overflow-y-auto">
-          <NavBtn icon={<Upload size={18} />} label="Audio Import" active={activeTab === 'import'} onClick={() => setActiveTab('import')} />
-          <NavBtn icon={<Music size={18} />} label="Library" active={activeTab === 'library'} onClick={() => setActiveTab('library')} />
-          <NavBtn icon={<Zap size={18} />} label="Ranking Mode" active={activeTab === 'ranking'} onClick={() => setActiveTab('ranking')} />
-          <NavBtn icon={<Sparkles size={18} className="text-cyan-400" />} label="Design Lab" active={activeTab === 'design'} onClick={() => setActiveTab('design')} />
-          <NavBtn icon={<Scissors size={18} />} label="Waveform Editor" active={activeTab === 'editor'} onClick={() => setActiveTab('editor')} />
-          <NavBtn icon={<HardDrive size={18} />} label="USB" active={activeTab === 'usb'} onClick={() => setActiveTab('usb')} />
-          <NavBtn icon={<Wrench size={18} />} label="Utilities" active={activeTab === 'tools'} onClick={() => setActiveTab('tools')} />
-          {libraryStatus?.mode === 'xml' && (
-            <NavBtn icon={<FileCode size={18} />} label="XML Automator" active={activeTab === 'xml'} onClick={() => setActiveTab('xml')} />
-          )}
-          <div className="pt-4 mt-4 border-t border-white/5">
-            <NavBtn icon={<Cloud size={18} className="text-orange-500" />} label="SC Download" active={activeTab === 'soundcloud'} onClick={() => setActiveTab('soundcloud')} />
-            <NavBtn icon={<ArrowRightLeft size={18} className="text-orange-400" />} label="SC Playlist Manager" active={activeTab === 'sc-sync'} onClick={() => setActiveTab('sc-sync')} />
-            <NavBtn icon={<Activity size={18} />} label="Insights" active={activeTab === 'insights'} onClick={() => setActiveTab('insights')} />
-          </div>
+        {/* Navigation — grouped, scrollable */}
+        <nav className="flex-1 mt-3 overflow-y-auto pb-2">
+          <NavGroup label="Library">
+            <NavBtn icon={<Music size={14} />} label="Library" active={activeTab === 'library'} onClick={() => setActiveTab('library')} />
+            <NavBtn icon={<Upload size={14} />} label="Audio Import" active={activeTab === 'import'} onClick={() => setActiveTab('import')} />
+            <NavBtn icon={<Zap size={14} />} label="Ranking Mode" active={activeTab === 'ranking'} onClick={() => setActiveTab('ranking')} />
+            <NavBtn icon={<Activity size={14} />} label="Insights" active={activeTab === 'insights'} onClick={() => setActiveTab('insights')} />
+          </NavGroup>
+
+          <NavGroup label="Editor">
+            <NavBtn icon={<Scissors size={14} />} label="Waveform Editor" active={activeTab === 'editor'} onClick={() => setActiveTab('editor')} />
+            <NavBtn icon={<Wrench size={14} />} label="Utilities" active={activeTab === 'tools'} onClick={() => setActiveTab('tools')} />
+            {libraryStatus?.mode === 'xml' && (
+              <NavBtn icon={<FileCode size={14} />} label="XML Automator" active={activeTab === 'xml'} onClick={() => setActiveTab('xml')} />
+            )}
+          </NavGroup>
+
+          <NavGroup label="Sync">
+            <NavBtn icon={<HardDrive size={14} />} label="USB Export" active={activeTab === 'usb'} onClick={() => setActiveTab('usb')} />
+            <NavBtn icon={<Cloud size={14} />} label="SoundCloud" active={activeTab === 'soundcloud'} onClick={() => setActiveTab('soundcloud')} />
+            <NavBtn icon={<ArrowRightLeft size={14} />} label="SC Playlists" active={activeTab === 'sc-sync'} onClick={() => setActiveTab('sc-sync')} />
+          </NavGroup>
+
+          <NavGroup label="Lab">
+            <NavBtn icon={<Sparkles size={14} />} label="Design Lab" active={activeTab === 'design'} onClick={() => setActiveTab('design')} />
+          </NavGroup>
         </nav>
 
-        {/* Footer Settings */}
-        <div className="p-4 mt-auto">
+        {/* Footer */}
+        <div className="border-t border-line-subtle py-2">
           {libraryStatus?.loaded && libraryStatus?.mode === 'live' && (
-            <div onClick={() => setShowBackups(true)} className="nav-item group mb-1">
-              <Database size={18} className="text-emerald-500 group-hover:text-emerald-400" />
-              <span className="font-medium text-sm text-emerald-500 group-hover:text-emerald-400">Backups</span>
+            <div onClick={() => setShowBackups(true)} className="nav-item">
+              <Database size={14} />
+              <span>Backups</span>
             </div>
           )}
-          <NavBtn icon={<Settings size={18} />} label="Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
-          <div onClick={handleExit} className="nav-item group mt-1">
-            <AlertTriangle size={18} className="text-rose-500 group-hover:text-rose-400" />
-            <span className="font-medium text-sm text-rose-500 group-hover:text-rose-400">Exit</span>
+          <NavBtn icon={<Settings size={14} />} label="Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
+          <div onClick={handleExit} className="nav-item" style={{ color: 'var(--bad)' }}>
+            <AlertTriangle size={14} />
+            <span>Exit</span>
           </div>
         </div>
       </div>
 
       {/* Backup Manager Modal */}
-      {showBackups && <Suspense fallback={<div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center"><Loader2 className="animate-spin text-cyan-400" size={32} /></div>}><BackupManager onClose={() => setShowBackups(false)} /></Suspense>}
+      {showBackups && (
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center">
+              <Loader2 className="animate-spin text-amber2" size={32} />
+            </div>
+          }
+        >
+          <BackupManager onClose={() => setShowBackups(false)} />
+        </Suspense>
+      )}
     </>
   )
 }
 
+/** Group label for sidebar sections — matches Melodex `.t-caption` style. */
+const NavGroup = ({ label, children }) => (
+  <div className="pt-3">
+    <div className="mx-caption px-4 pb-1.5">{label}</div>
+    {children}
+  </div>
+)
+
 const NavBtn = ({ icon, label, active, onClick }) => (
   <div onClick={onClick} className={`nav-item ${active ? 'active' : ''}`}>
     {icon}
-    <span className="font-medium text-sm">{label}</span>
+    <span>{label}</span>
   </div>
 )
 
 const SelectionView = ({ onSelect }) => (
-  <div className="fixed inset-0 z-[110] bg-slate-950 flex flex-col items-center justify-center p-8 animate-fade-in">
-    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-cyan-600/5 rounded-full blur-[120px] pointer-events-none"></div>
+  <div className="fixed inset-0 z-[110] bg-mx-deepest flex flex-col items-center justify-center p-8 animate-fade-in">
+    <div
+      className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] rounded-full blur-[120px] pointer-events-none"
+      style={{ background: 'rgba(232, 164, 42, 0.05)' }}
+    ></div>
 
     <div className="relative z-10 flex flex-col items-center max-w-4xl w-full">
-      <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-2xl shadow-cyan-500/20 mb-12 animate-float">
-        <Zap size={40} className="text-white fill-white" />
+      {/* Bar-graph logo, large */}
+      <div className="flex items-end gap-1 mb-10">
+        {[28, 36, 44, 32, 20].map((h, i) => (
+          <div key={i} className="bg-amber2 rounded-[2px]" style={{ width: 6, height: h }} />
+        ))}
       </div>
 
-      <h1 className="text-5xl font-black text-white mb-4 tracking-tighter uppercase italic">Select Mode</h1>
-      <p className="text-slate-400 text-lg mb-16 text-center max-w-md">Choose your library source to continue.</p>
+      <h1 className="text-3xl font-bold text-ink-primary mb-3 tracking-tight">Select Mode</h1>
+      <p className="text-ink-secondary text-sm mb-12 text-center max-w-md">
+        Choose your library source to continue.
+      </p>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-3xl">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-3xl">
         <button
           onClick={() => onSelect('live')}
-          className="group relative p-8 glass-panel rounded-3xl border border-white/5 hover:border-cyan-500/50 transition-all hover:scale-[1.02] text-left overflow-hidden shadow-2xl shadow-black/50"
+          className="group relative p-7 mx-card rounded-mx-lg hover:border-amber2 transition-all text-left overflow-hidden shadow-mx-md"
         >
-          <div className="absolute top-0 right-0 p-6 opacity-10 group-hover:opacity-30 transition-opacity">
-            <Zap size={120} className="text-cyan-400" />
+          <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-15 transition-opacity">
+            <Zap size={120} className="text-amber2" />
           </div>
-          <div className="w-12 h-12 rounded-xl bg-cyan-500/20 flex items-center justify-center mb-6 text-cyan-400">
-            <Zap size={24} />
+          <div
+            className="w-10 h-10 rounded-mx-md flex items-center justify-center mb-5"
+            style={{ background: 'var(--amber-bg)', color: 'var(--amber)' }}
+          >
+            <Zap size={20} />
           </div>
-          <h3 className="text-2xl font-bold text-white mb-2 italic uppercase">Rekordbox Live</h3>
-          <p className="text-slate-400 text-sm leading-relaxed">Direct integration with your master.db. Fast, live edits and backups.</p>
+          <h3 className="text-lg font-semibold text-ink-primary mb-1.5">Rekordbox Live</h3>
+          <p className="text-ink-secondary text-tiny leading-relaxed">
+            Direct integration with your <span className="font-mono">master.db</span>. Fast, live edits and backups.
+          </p>
         </button>
 
         <button
           onClick={() => onSelect('xml')}
-          className="group relative p-8 glass-panel rounded-3xl border border-white/5 hover:border-amber-500/50 transition-all hover:scale-[1.02] text-left overflow-hidden shadow-2xl shadow-black/50"
+          className="group relative p-7 mx-card rounded-mx-lg hover:border-amber2 transition-all text-left overflow-hidden shadow-mx-md"
         >
-          <div className="absolute top-0 right-0 p-6 opacity-10 group-hover:opacity-30 transition-opacity">
-            <FileCode size={120} className="text-amber-400" />
+          <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-15 transition-opacity">
+            <FileCode size={120} className="text-info" />
           </div>
-          <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center mb-6 text-amber-400">
-            <FileCode size={24} />
+          <div
+            className="w-10 h-10 rounded-mx-md flex items-center justify-center mb-5"
+            style={{ background: 'rgba(74, 158, 232, 0.08)', color: 'var(--info)' }}
+          >
+            <FileCode size={20} />
           </div>
-          <h3 className="text-2xl font-bold text-white mb-2 italic uppercase">XML Snapshot</h3>
-          <p className="text-slate-400 text-sm leading-relaxed">Standard XML-based workflow. Best for analyzing and cleaning exports.</p>
+          <h3 className="text-lg font-semibold text-ink-primary mb-1.5">XML Snapshot</h3>
+          <p className="text-ink-secondary text-tiny leading-relaxed">
+            Standard XML-based workflow. Best for analyzing and cleaning exports.
+          </p>
         </button>
       </div>
     </div>
@@ -216,8 +286,8 @@ import Player from './components/Player'
 const ViewLoader = () => (
   <div className="flex items-center justify-center h-full">
     <div className="flex flex-col items-center gap-3">
-      <Loader2 className="animate-spin text-cyan-400" size={32} />
-      <span className="text-xs text-slate-500 uppercase tracking-widest font-bold">Loading View</span>
+      <Loader2 className="animate-spin text-amber2" size={28} />
+      <span className="mx-caption">Loading View</span>
     </div>
   </div>
 );
@@ -323,35 +393,48 @@ const App = () => {
   const handlePlayTrack = useCallback((track) => { setPlayerTrack(track); }, []);
 
   return (
-    <div className="flex h-screen w-screen bg-slate-950 text-slate-200 overflow-hidden font-sans selection:bg-cyan-500/30">
+    <div className="flex h-screen w-screen bg-mx-deepest text-ink-primary overflow-hidden font-sans">
       {appMode === 'choice' && <SelectionView onSelect={handleModeSelect} />}
 
       {isInitialLoading && (
-        <div className="fixed inset-0 z-[120] bg-slate-950 flex flex-col items-center justify-center p-8 animate-fade-in font-sans">
-          {/* Loading UI omitted for brevity, same as before */}
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-cyan-600/10 rounded-full blur-[100px] animate-pulse"></div>
+        <div className="fixed inset-0 z-[120] bg-mx-deepest flex flex-col items-center justify-center p-8 animate-fade-in font-sans">
+          <div
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 rounded-full blur-[100px] animate-pulse"
+            style={{ background: 'rgba(232, 164, 42, 0.10)' }}
+          ></div>
           <div className="relative z-10 flex flex-col items-center max-w-md w-full">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-2xl shadow-cyan-500/20 mb-8 animate-bounce">
-              <Zap size={32} className="text-white fill-white" />
+            {/* Bar-graph logo, animated */}
+            <div className="flex items-end gap-1 mb-8">
+              {[20, 28, 36, 24, 16].map((h, i) => (
+                <div
+                  key={i}
+                  className="bg-amber2 rounded-[2px] origin-bottom"
+                  style={{
+                    width: 5,
+                    height: h,
+                    animation: `barBounce 0.9s ${i * 0.12}s ease-in-out infinite alternate`,
+                  }}
+                />
+              ))}
             </div>
-            <h1 className="text-3xl font-bold text-white mb-2 tracking-tight italic uppercase">Loading Library</h1>
-            <p className="text-cyan-500 font-bold text-[10px] tracking-[0.3em] uppercase mb-12">Music Library Manager</p>
-            <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden mb-4 border border-white/5 shadow-inner">
+            <h1 className="text-2xl font-semibold text-ink-primary mb-2 tracking-tight">Loading Library</h1>
+            <p className="mx-caption mb-10" style={{ color: 'var(--amber)' }}>RB Editor Pro</p>
+            <div className="w-full h-1 bg-line-subtle rounded-full overflow-hidden mb-3">
               <div
-                className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-500 ease-out"
+                className="h-full bg-amber2 transition-all duration-500 ease-out"
                 style={{ width: libraryStatus.loaded ? '100%' : (libraryStatus.tracks > 0 ? '75%' : '20%') }}
               ></div>
             </div>
-            <div className="flex justify-between w-full px-1 mb-8">
-              <span className="text-[10px] font-bold text-slate-500 uppercase">Status</span>
-              <span className="text-[10px] font-bold text-cyan-400 uppercase">
-                {libraryStatus.loaded ? 'Success' : `Initializing ${appMode.toUpperCase()}...`}
+            <div className="flex justify-between w-full px-0.5 mb-8">
+              <span className="mx-caption">Status</span>
+              <span className="mx-caption" style={{ color: 'var(--amber)' }}>
+                {libraryStatus.loaded ? 'Success' : `Initializing ${appMode.toUpperCase()}…`}
               </span>
             </div>
             {!libraryStatus.loaded && (
               <button
                 onClick={() => setIsInitialLoading(false)}
-                className="mt-12 text-[10px] text-slate-600 hover:text-slate-400 underline transition-colors uppercase tracking-widest font-bold"
+                className="mt-8 text-[10px] text-ink-muted hover:text-ink-secondary underline transition-colors uppercase tracking-widest font-semibold"
               >
                 Manual Bypass
               </button>
@@ -368,7 +451,7 @@ const App = () => {
         onUnloadLibrary={handleUnloadLibrary}
       />
 
-      <main className="flex-1 h-full overflow-hidden relative z-10 bg-slate-950/50">
+      <main className="flex-1 h-full overflow-hidden relative z-10 bg-mx-deepest">
         <div className="h-full w-full relative pb-20">
           <Suspense fallback={<ViewLoader />}>
             {/* STABILITY: Each view wrapped in its own ErrorBoundary */}
@@ -455,11 +538,13 @@ root.render(
       toastOptions={{
         duration: 3000,
         style: {
-          background: '#1e293b',
-          color: '#fff',
-          border: '1px solid rgba(255,255,255,0.1)',
-          backdropFilter: 'blur(10px)',
-          maxWidth: '500px'
+          background: '#1A1E27',
+          color: '#F0F2F7',
+          border: '1px solid #2A2F3E',
+          fontFamily: '"DM Sans", system-ui, sans-serif',
+          fontSize: 13,
+          maxWidth: '500px',
+          borderRadius: 6,
         },
         success: { duration: 3000 },
         error: { duration: 4000 }
