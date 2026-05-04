@@ -184,3 +184,30 @@ cd src-tauri && cargo clippy -- -D warnings
 # Tests
 cd src-tauri && cargo test
 ```
+
+
+---
+
+## Audio Fingerprinting (`src-tauri/src/audio/fingerprint.rs`) — NEW 2026-05-04
+
+Chromaprint-style acoustic fingerprinting for duplicate detection.
+
+### Algorithm
+1. Decode audio via Symphonia → mono f32 samples
+2. Resample to 11025 Hz (nearest-neighbour)
+3. Sliding 128 ms frames (50% overlap) → 32-band Mel spectrogram via Goertzel
+4. Temporal gradient of band energy differences → 1 bit per band per frame → u32 word
+5. Hamming distance comparison → similarity 0.0–1.0
+
+### Public Functions
+| Function | Signature | Notes |
+|----------|-----------|-------|
+| `hamming_similarity` | `(a: &[u32], b: &[u32]) -> Option<f32>` | Returns None if < 4 words |
+
+### Tauri Commands
+| Command | Signature | Events |
+|---------|-----------|--------|
+| `fingerprint_track` | `(path: String) -> Result<Vec<u32>, String>` | none |
+| `fingerprint_batch` | `(paths: Vec<String>, window: Window) -> Result<HashMap<String, Vec<u32>>, String>` | emits `fingerprint_progress: {done, total, current_path}` |
+
+Registered in `src-tauri/src/main.rs` invoke handler.

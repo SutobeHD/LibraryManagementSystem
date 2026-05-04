@@ -9,6 +9,7 @@ use serde::Deserialize;
 use soundcloud_client::Track;
 use tauri::{Emitter, Manager};
 use audio::commands::{load_audio, get_3band_waveform, start_project_export, list_audio_devices, AudioCommandState};
+use audio::fingerprint::{fingerprint_track, fingerprint_batch};
 use audio::engine::AudioController;
 use std::sync::Mutex;
 
@@ -137,7 +138,9 @@ fn main() {
             load_audio,
             get_3band_waveform,
             list_audio_devices,
-            start_project_export
+            start_project_export,
+            fingerprint_track,
+            fingerprint_batch
         ])
         .setup(|app| {
             #[cfg(not(debug_assertions))]
