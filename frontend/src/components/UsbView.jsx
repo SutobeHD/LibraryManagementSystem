@@ -20,11 +20,11 @@ const UsbLibraryTree = ({ item, level = 0 }) => {
                     style={{ paddingLeft: `${level * 12 + 8}px` }}
                 >
                     <div className="w-4 h-4 flex items-center justify-center">
-                        {isExpanded ? <ChevronDown size={14} className="text-slate-500" /> : <ChevronRight size={14} className="text-slate-500" />}
+                        {isExpanded ? <ChevronDown size={14} className="text-ink-muted" /> : <ChevronRight size={14} className="text-ink-muted" />}
                     </div>
-                    <Folder size={16} className={isExpanded ? "text-cyan-400" : "text-slate-400"} />
-                    <span className={`text-xs ${isExpanded ? 'text-slate-200 font-bold' : 'text-slate-400'}`}>{item.name}</span>
-                    <span className="text-[10px] text-slate-600 opacity-0 group-hover:opacity-100 ml-auto mr-2">
+                    <Folder size={16} className={isExpanded ? "text-amber2" : "text-ink-secondary"} />
+                    <span className={`text-xs ${isExpanded ? 'text-ink-primary font-bold' : 'text-ink-secondary'}`}>{item.name}</span>
+                    <span className="text-[10px] text-ink-placeholder opacity-0 group-hover:opacity-100 ml-auto mr-2">
                         {item.children.length} items
                     </span>
                 </div>
@@ -45,10 +45,10 @@ const UsbLibraryTree = ({ item, level = 0 }) => {
             style={{ paddingLeft: `${level * 12 + 28}px` }}
         >
             <div className="flex-1 min-w-0">
-                <div className="text-xs font-bold text-slate-300 truncate">{item.Title}</div>
-                <div className="text-[9px] text-slate-500 truncate">{item.ArtistName || 'Unknown Artist'}</div>
+                <div className="text-xs font-bold text-ink-primary truncate">{item.Title}</div>
+                <div className="text-[9px] text-ink-muted truncate">{item.ArtistName || 'Unknown Artist'}</div>
             </div>
-            <div className="text-[9px] text-slate-600 font-mono tabular-nums opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="text-[9px] text-ink-placeholder font-mono tabular-nums opacity-0 group-hover:opacity-100 transition-opacity">
                 {item.BPM ? (item.BPM / 100).toFixed(2) : '-.--'}
             </div>
         </div>
@@ -114,7 +114,7 @@ const PlaylistTreeNode = ({ node, depth = 0, selectedIds, onToggle }) => {
         return (
             <div>
                 <div
-                    className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs hover:bg-white/5 transition-all text-left text-slate-300 group"
+                    className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs hover:bg-white/5 transition-all text-left text-ink-primary group"
                     style={{ paddingLeft: `${depth * 16 + 12}px` }}
                 >
                     {/* Toggle Open/Close */}
@@ -135,7 +135,7 @@ const PlaylistTreeNode = ({ node, depth = 0, selectedIds, onToggle }) => {
                     </button>
 
                     <span className="font-medium cursor-pointer" onClick={() => setOpen(!open)}>{node.Name}</span>
-                    <span className="text-slate-600 text-[9px] ml-auto">{children.filter(c => c.Type !== "0").length}</span>
+                    <span className="text-ink-placeholder text-[9px] ml-auto">{children.filter(c => c.Type !== "0").length}</span>
                 </div>
                 {open && children.map(child => (
                     <PlaylistTreeNode key={child.ID} node={child} depth={depth + 1} selectedIds={selectedIds} onToggle={onToggle} />
@@ -148,7 +148,7 @@ const PlaylistTreeNode = ({ node, depth = 0, selectedIds, onToggle }) => {
     return (
         <button
             onClick={() => onToggle(node)}
-            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs transition-all text-left ${isSelected ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 'hover:bg-white/5 text-slate-400 border border-transparent'}`}
+            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs transition-all text-left ${isSelected ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 'hover:bg-white/5 text-ink-secondary border border-transparent'}`}
             style={{ paddingLeft: `${depth * 16 + 12}px` }}
         >
             <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${isSelected ? 'bg-purple-500 border-purple-500' : 'border-white/20'}`}>
@@ -171,21 +171,21 @@ const SpaceBar = ({ total, free, estimatedUsage }) => {
 
     return (
         <div className="space-y-2">
-            <div className="flex items-center justify-between text-[10px] text-slate-400">
+            <div className="flex items-center justify-between text-[10px] text-ink-secondary">
                 <span>Storage Usage</span>
                 <span>{formatBytes(afterFree > 0 ? afterFree : 0)} free after sync</span>
             </div>
             <div className="w-full h-3 bg-white/5 rounded-full overflow-hidden flex">
                 <div className="h-full bg-slate-500/60 transition-all" style={{ width: `${usedPct}%` }} title={`Used: ${formatBytes(used)}`} />
                 {estimatedUsage > 0 && (
-                    <div className={`h-full transition-all ${afterFree < 0 ? 'bg-red-500/80' : 'bg-cyan-500/50'}`}
+                    <div className={`h-full transition-all ${afterFree < 0 ? 'bg-red-500/80' : 'bg-amber2/50'}`}
                         style={{ width: `${Math.min(estimatePct, 100 - usedPct)}%` }}
                         title={`Sync will use: ~${formatBytes(estimatedUsage)}`} />
                 )}
             </div>
-            <div className="flex items-center gap-4 text-[9px] text-slate-500">
+            <div className="flex items-center gap-4 text-[9px] text-ink-muted">
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-500/60" /> Used ({formatBytes(used)})</span>
-                {estimatedUsage > 0 && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-cyan-500/50" /> Sync (~{formatBytes(estimatedUsage)})</span>}
+                {estimatedUsage > 0 && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber2/50" /> Sync (~{formatBytes(estimatedUsage)})</span>}
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-white/5" /> Free ({formatBytes(free)})</span>
             </div>
         </div>
@@ -487,14 +487,14 @@ const UsbView = () => {
                         </div>
                         <div>
                             <h1 className="text-2xl font-black italic tracking-tighter uppercase">USB Device Manager</h1>
-                            <p className="text-slate-500 text-sm">{devices.length} connected · {profiles.length} registered</p>
+                            <p className="text-ink-muted text-sm">{devices.length} connected · {profiles.length} registered</p>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
                         <button
                             onClick={syncAll}
                             disabled={!!syncing || profiles.filter(p => isConnected(p)).length === 0}
-                            className="flex items-center gap-2 px-4 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 rounded-xl text-sm font-bold border border-cyan-500/30 transition-all disabled:opacity-30"
+                            className="flex items-center gap-2 px-4 py-2 bg-amber2/20 hover:bg-amber2/30 text-amber2 rounded-xl text-sm font-bold border border-amber2/30 transition-all disabled:opacity-30"
                         >
                             <ArrowUpDown size={16} /> Update All
                         </button>
@@ -515,9 +515,9 @@ const UsbView = () => {
                 <div className="w-72 border-r border-white/5 overflow-y-auto p-3 space-y-1.5">
                     {allDevices.length === 0 && !scanning && (
                         <div className="flex flex-col items-center justify-center h-full text-center p-6">
-                            <Usb size={40} className="text-slate-600 mb-4" />
-                            <p className="text-slate-500 text-sm">No USB devices detected</p>
-                            <p className="text-slate-600 text-xs mt-1">Insert a USB drive and click Scan</p>
+                            <Usb size={40} className="text-ink-placeholder mb-4" />
+                            <p className="text-ink-muted text-sm">No USB devices detected</p>
+                            <p className="text-ink-placeholder text-xs mt-1">Insert a USB drive and click Scan</p>
                         </div>
                     )}
                     {scanning && allDevices.length === 0 && (
@@ -545,18 +545,18 @@ const UsbView = () => {
                                     <Icon size={18} className={`text-${type.color}-400`} />
                                     <div className="flex-1 min-w-0">
                                         <div className="font-bold text-sm truncate">{device.label || 'USB Drive'}</div>
-                                        <div className="text-[10px] text-slate-500 flex items-center gap-2">
+                                        <div className="text-[10px] text-ink-muted flex items-center gap-2">
                                             <span>{device.drive}</span>
                                             <span>·</span>
                                             <span>{device.track_count || 0} tracks</span>
                                         </div>
                                     </div>
                                     {syncing === device.device_id && (
-                                        <Loader2 size={14} className="animate-spin text-cyan-400" />
+                                        <Loader2 size={14} className="animate-spin text-amber2" />
                                     )}
                                 </div>
                                 {device.last_sync && (
-                                    <div className="mt-1.5 ml-5 text-[9px] text-slate-600 flex items-center gap-1">
+                                    <div className="mt-1.5 ml-5 text-[9px] text-ink-placeholder flex items-center gap-1">
                                         <Clock size={8} /> Last: {formatDate(device.last_sync)}
                                     </div>
                                 )}
@@ -569,20 +569,20 @@ const UsbView = () => {
                 <div className="flex-1 overflow-y-auto p-6">
                     {!sel ? (
                         <div className="flex flex-col items-center justify-center h-full text-center">
-                            <HardDrive size={48} className="text-slate-700 mb-4" />
-                            <p className="text-slate-500">Select a device from the sidebar</p>
+                            <HardDrive size={48} className="text-ink-placeholder mb-4" />
+                            <p className="text-ink-muted">Select a device from the sidebar</p>
                         </div>
                     ) : (
                         <div className="space-y-6 max-w-3xl">
                             {/* Device Header */}
                             <div className="flex items-center justify-between px-1 mb-4">
                                 <h2 className="text-xl font-bold flex items-center gap-3">
-                                    <Usb className="text-cyan-400" />
+                                    <Usb className="text-amber2" />
                                     USB Devices
                                 </h2>
                                 <button
                                     onClick={() => scanDevices()}
-                                    className="p-2 hover:bg-white/5 rounded-full text-slate-500 hover:text-cyan-400 transition-all active:rotate-180 duration-500"
+                                    className="p-2 hover:bg-white/5 rounded-full text-ink-muted hover:text-amber2 transition-all active:rotate-180 duration-500"
                                     title="Scan for devices"
                                 >
                                     <RefreshCw size={18} />
@@ -593,17 +593,17 @@ const UsbView = () => {
                                     <h2 className="text-xl font-black italic uppercase tracking-tight flex items-center gap-3">
                                         <div className={`w-3 h-3 rounded-full ${isConnected(sel) ? 'bg-emerald-400' : 'bg-red-400'}`} />
                                         {sel.label || 'USB Drive'}
-                                        <button onClick={handleRename} className="p-1 hover:bg-white/10 rounded-lg text-slate-500 hover:text-white transition-colors">
+                                        <button onClick={handleRename} className="p-1 hover:bg-white/10 rounded-lg text-ink-muted hover:text-white transition-colors">
                                             <Edit2 size={16} />
                                         </button>
                                     </h2>
-                                    <p className="text-slate-500 text-sm mt-1">
+                                    <p className="text-ink-muted text-sm mt-1">
                                         {sel.drive} · {sel.filesystem || 'Unknown FS'} · {formatBytes(sel.total_space)} total · {formatBytes(sel.free_space)} free
                                     </p>
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <button onClick={() => deleteProfile(sel.device_id)}
-                                        className="p-2 hover:bg-red-500/10 text-slate-600 hover:text-red-400 rounded-lg transition-all"
+                                        className="p-2 hover:bg-red-500/10 text-ink-placeholder hover:text-red-400 rounded-lg transition-all"
                                         title="Delete profile"
                                     >
                                         <Trash2 size={16} />
@@ -674,7 +674,7 @@ const UsbView = () => {
 
                                     {/* Type Selector */}
                                     <div className="glass-panel rounded-2xl p-4 border border-white/5">
-                                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">Device Type</div>
+                                        <div className="text-[10px] font-bold text-ink-muted uppercase tracking-widest mb-3">Device Type</div>
                                         <div className="grid grid-cols-2 gap-2">
                                             {USB_TYPES.map(type => {
                                                 const Icon = type.icon;
@@ -685,13 +685,13 @@ const UsbView = () => {
                                                         onClick={() => saveProfile({ type: type.id })}
                                                         className={`flex items-center gap-3 p-3 rounded-xl border transition-all text-left ${active
                                                             ? `bg-${type.color}-500/10 border-${type.color}-500/30 text-${type.color}-400`
-                                                            : 'bg-white/[0.02] border-white/5 text-slate-400 hover:bg-white/5'
+                                                            : 'bg-white/[0.02] border-white/5 text-ink-secondary hover:bg-white/5'
                                                             }`}
                                                     >
                                                         <Icon size={18} />
                                                         <div>
                                                             <div className="text-xs font-bold">{type.label}</div>
-                                                            <div className="text-[9px] text-slate-500">{type.desc}</div>
+                                                            <div className="text-[9px] text-ink-muted">{type.desc}</div>
                                                         </div>
                                                         {active && <Check size={14} className="ml-auto" />}
                                                     </button>
@@ -702,7 +702,7 @@ const UsbView = () => {
 
                                     {/* Sync Controls */}
                                     <div className="glass-panel rounded-2xl p-4 border border-white/5">
-                                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">Sync Controls</div>
+                                        <div className="text-[10px] font-bold text-ink-muted uppercase tracking-widest mb-3">Sync Controls</div>
 
                                         {/* Sync Type Selector */}
                                         <div className="grid grid-cols-3 gap-2 mb-4">
@@ -715,7 +715,7 @@ const UsbView = () => {
                                                         onClick={() => setSelectedSyncType(st.id)}
                                                         className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border transition-all text-center ${active
                                                             ? `bg-${st.color}-500/15 border-${st.color}-500/30 text-${st.color}-400 ring-1 ring-${st.color}-500/20`
-                                                            : 'bg-white/[0.02] border-white/5 text-slate-500 hover:bg-white/5'
+                                                            : 'bg-white/[0.02] border-white/5 text-ink-muted hover:bg-white/5'
                                                             }`}
                                                     >
                                                         <Icon size={18} />
@@ -730,22 +730,22 @@ const UsbView = () => {
                                             <button onClick={loadDiff}
                                                 className="w-full mb-3 flex items-center justify-between px-4 py-2.5 bg-white/[0.03] hover:bg-white/5 rounded-xl border border-white/5 text-xs transition-all"
                                             >
-                                                <span className="text-slate-400">Preview Changes</span>
-                                                <ChevronRight size={14} className="text-slate-600" />
+                                                <span className="text-ink-secondary">Preview Changes</span>
+                                                <ChevronRight size={14} className="text-ink-placeholder" />
                                             </button>
                                         )}
 
                                         {diff && (
                                             <div className="mb-4 p-3 bg-white/[0.02] rounded-xl border border-white/5 text-xs space-y-1.5">
-                                                <div className="flex justify-between"><span className="text-slate-400">Tracks to add</span><span className="text-emerald-400 font-bold">+{diff.tracks?.to_add || 0}</span></div>
-                                                <div className="flex justify-between"><span className="text-slate-400">Tracks to update</span><span className="text-amber-400 font-bold">~{diff.tracks?.to_update || 0}</span></div>
-                                                <div className="flex justify-between"><span className="text-slate-400">Tracks to remove</span><span className="text-red-400 font-bold">-{diff.tracks?.to_remove || 0}</span></div>
-                                                <div className="flex justify-between"><span className="text-slate-400">Unchanged</span><span className="text-slate-500">{diff.tracks?.unchanged || 0}</span></div>
-                                                <div className="border-t border-white/5 pt-1.5 flex justify-between"><span className="text-slate-400">Playlists to add</span><span className="text-emerald-400 font-bold">+{diff.playlists?.to_add || 0}</span></div>
+                                                <div className="flex justify-between"><span className="text-ink-secondary">Tracks to add</span><span className="text-emerald-400 font-bold">+{diff.tracks?.to_add || 0}</span></div>
+                                                <div className="flex justify-between"><span className="text-ink-secondary">Tracks to update</span><span className="text-amber-400 font-bold">~{diff.tracks?.to_update || 0}</span></div>
+                                                <div className="flex justify-between"><span className="text-ink-secondary">Tracks to remove</span><span className="text-red-400 font-bold">-{diff.tracks?.to_remove || 0}</span></div>
+                                                <div className="flex justify-between"><span className="text-ink-secondary">Unchanged</span><span className="text-ink-muted">{diff.tracks?.unchanged || 0}</span></div>
+                                                <div className="border-t border-white/5 pt-1.5 flex justify-between"><span className="text-ink-secondary">Playlists to add</span><span className="text-emerald-400 font-bold">+{diff.playlists?.to_add || 0}</span></div>
                                                 {diff.space_estimate > 0 && (
                                                     <div className="border-t border-white/5 pt-1.5 flex justify-between">
-                                                        <span className="text-slate-400">Est. space needed</span>
-                                                        <span className={`font-bold ${diff.space_estimate > (sel.free_space || 0) ? 'text-red-400' : 'text-cyan-400'}`}>
+                                                        <span className="text-ink-secondary">Est. space needed</span>
+                                                        <span className={`font-bold ${diff.space_estimate > (sel.free_space || 0) ? 'text-red-400' : 'text-amber2'}`}>
                                                             ~{formatBytes(diff.space_estimate)}
                                                         </span>
                                                     </div>
@@ -758,7 +758,7 @@ const UsbView = () => {
                                             <button
                                                 onClick={runSync}
                                                 disabled={!!syncing || !isConnected(sel)}
-                                                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-cyan-500/20 to-blue-500/20 hover:from-cyan-500/30 hover:to-blue-500/30 text-cyan-400 rounded-xl text-sm font-bold border border-cyan-500/30 transition-all disabled:opacity-30"
+                                                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-amber2/20 to-amber2-press/20 hover:from-amber2/30 hover:to-amber2-press/30 text-amber2 rounded-xl text-sm font-bold border border-amber2/30 transition-all disabled:opacity-30"
                                             >
                                                 {syncing === sel.device_id ? (
                                                     <><Loader2 size={16} className="animate-spin" /> Syncing...</>
@@ -779,12 +779,12 @@ const UsbView = () => {
                                         {syncing === sel.device_id && syncProgress && (
                                             <div className="mt-4 space-y-2">
                                                 <div className="flex items-center justify-between text-xs">
-                                                    <span className="text-slate-400">{syncProgress.message}</span>
-                                                    <span className="text-cyan-400 font-bold">{Math.max(0, syncProgress.progress)}%</span>
+                                                    <span className="text-ink-secondary">{syncProgress.message}</span>
+                                                    <span className="text-amber2 font-bold">{Math.max(0, syncProgress.progress)}%</span>
                                                 </div>
                                                 <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
                                                     <div
-                                                        className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full transition-all duration-500"
+                                                        className="h-full bg-gradient-to-r from-amber2 to-amber2-press rounded-full transition-all duration-500"
                                                         style={{ width: `${Math.max(0, syncProgress.progress)}%` }}
                                                     />
                                                 </div>
@@ -796,7 +796,7 @@ const UsbView = () => {
                                     {selectedSyncType === 'playlists' && (
                                         <div className="glass-panel rounded-2xl p-4 border border-white/5">
                                             <div className="flex items-center justify-between mb-3">
-                                                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Select Playlists</div>
+                                                <div className="text-[10px] font-bold text-ink-muted uppercase tracking-widest">Select Playlists</div>
                                                 <span className="text-[10px] text-purple-400 font-bold">{(sel.sync_playlists || []).length} selected</span>
                                             </div>
                                             <div className="max-h-64 overflow-y-auto space-y-0.5 pr-1">
@@ -808,7 +808,7 @@ const UsbView = () => {
                                                         onToggle={togglePlaylist}
                                                     />
                                                 )) : (
-                                                    <p className="text-slate-600 text-xs text-center py-4">No playlists loaded</p>
+                                                    <p className="text-ink-placeholder text-xs text-center py-4">No playlists loaded</p>
                                                 )}
                                             </div>
                                         </div>
@@ -816,47 +816,47 @@ const UsbView = () => {
 
                                     {/* Settings */}
                                     <div className="glass-panel rounded-2xl p-4 border border-white/5">
-                                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">Device Settings</div>
+                                        <div className="text-[10px] font-bold text-ink-muted uppercase tracking-widest mb-3">Device Settings</div>
                                         <div className="space-y-2">
                                             <label className="flex items-center justify-between p-2 rounded-lg hover:bg-white/[0.02] cursor-pointer transition-all">
-                                                <span className="text-sm text-slate-300">Auto-sync on startup</span>
+                                                <span className="text-sm text-ink-primary">Auto-sync on startup</span>
                                                 <input
                                                     type="checkbox"
                                                     checked={sel.auto_sync || false}
                                                     onChange={(e) => saveProfile({ auto_sync: e.target.checked })}
-                                                    className="accent-cyan-500 w-4 h-4"
+                                                    className="accent-amber2 w-4 h-4"
                                                 />
                                             </label>
 
                                             <div className="pt-2 border-t border-white/5 mt-2">
-                                                <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2">Sync Settings</div>
+                                                <div className="text-[9px] font-bold text-ink-muted uppercase tracking-widest mb-2">Sync Settings</div>
 
                                                 <label className="flex items-center justify-between p-2 rounded-lg hover:bg-white/[0.02] cursor-pointer transition-all">
                                                     <div className="flex flex-col">
-                                                        <span className="text-xs text-slate-300">Mirrored Sync</span>
-                                                        <span className="text-[9px] text-slate-500 italic">Keep both libraries identical</span>
+                                                        <span className="text-xs text-ink-primary">Mirrored Sync</span>
+                                                        <span className="text-[9px] text-ink-muted italic">Keep both libraries identical</span>
                                                     </div>
                                                     <input
                                                         type="checkbox"
                                                         checked={sel.sync_mirrored || false}
                                                         onChange={(e) => saveProfile({ sync_mirrored: e.target.checked })}
-                                                        className="accent-cyan-500 w-4 h-4"
+                                                        className="accent-amber2 w-4 h-4"
                                                     />
                                                 </label>
 
                                                 {sel.sync_mirrored && (
                                                     <div className="p-2 space-y-2 bg-white/[0.02] rounded-lg mt-1">
-                                                        <div className="text-[9px] text-slate-500 uppercase font-bold tracking-tighter">Primary Library (Master)</div>
+                                                        <div className="text-[9px] text-ink-muted uppercase font-bold tracking-tighter">Primary Library (Master)</div>
                                                         <div className="flex gap-2">
                                                             <button
                                                                 onClick={() => saveProfile({ sync_primary: 'library_one' })}
-                                                                className={`flex-1 py-1 text-[10px] rounded border transition-all ${sel.sync_primary !== 'library_legacy' ? 'bg-cyan-500/10 border-cyan-500/50 text-cyan-400' : 'border-white/10 text-slate-500'}`}
+                                                                className={`flex-1 py-1 text-[10px] rounded border transition-all ${sel.sync_primary !== 'library_legacy' ? 'bg-amber2/10 border-amber2/50 text-amber2' : 'border-white/10 text-ink-muted'}`}
                                                             >
                                                                 Newer
                                                             </button>
                                                             <button
                                                                 onClick={() => saveProfile({ sync_primary: 'library_legacy' })}
-                                                                className={`flex-1 py-1 text-[10px] rounded border transition-all ${sel.sync_primary === 'library_legacy' ? 'bg-purple-500/10 border-purple-500/50 text-purple-400' : 'border-white/10 text-slate-500'}`}
+                                                                className={`flex-1 py-1 text-[10px] rounded border transition-all ${sel.sync_primary === 'library_legacy' ? 'bg-purple-500/10 border-purple-500/50 text-purple-400' : 'border-white/10 text-ink-muted'}`}
                                                             >
                                                                 Legacy
                                                             </button>
@@ -866,11 +866,11 @@ const UsbView = () => {
                                             </div>
 
                                             <div className="pt-2 border-t border-white/5 mt-2">
-                                                <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2">Target Libraries</div>
+                                                <div className="text-[9px] font-bold text-ink-muted uppercase tracking-widest mb-2">Target Libraries</div>
                                                 <label className="flex items-center justify-between p-2 rounded-lg hover:bg-white/[0.02] cursor-pointer transition-all">
                                                     <div className="flex flex-col">
-                                                        <span className="text-xs text-slate-300">Library One</span>
-                                                        <span className="text-[9px] text-slate-500 italic">Newer (CDJ-3000/rx3)</span>
+                                                        <span className="text-xs text-ink-primary">Library One</span>
+                                                        <span className="text-[9px] text-ink-muted italic">Newer (CDJ-3000/rx3)</span>
                                                     </div>
                                                     <input
                                                         type="checkbox"
@@ -882,13 +882,13 @@ const UsbView = () => {
                                                                 : current.filter(t => t !== "library_one");
                                                             saveProfile({ library_types: next });
                                                         }}
-                                                        className="accent-cyan-500 w-4 h-4"
+                                                        className="accent-amber2 w-4 h-4"
                                                     />
                                                 </label>
                                                 <label className="flex items-center justify-between p-2 rounded-lg hover:bg-white/[0.02] cursor-pointer transition-all">
                                                     <div className="flex flex-col">
-                                                        <span className="text-xs text-slate-300">Library Legacy</span>
-                                                        <span className="text-[9px] text-slate-500 italic">Legacy (CDJ-2000/Nexus)</span>
+                                                        <span className="text-xs text-ink-primary">Library Legacy</span>
+                                                        <span className="text-[9px] text-ink-muted italic">Legacy (CDJ-2000/Nexus)</span>
                                                     </div>
                                                     <input
                                                         type="checkbox"
@@ -924,20 +924,20 @@ const UsbView = () => {
                                     {/* USB Library View (Inline) */}
                                     <div className="glass-panel rounded-2xl overflow-hidden border border-white/5 flex flex-col bg-white/[0.01]">
                                         <div className="flex items-center justify-between p-4 border-b border-white/5 bg-white/[0.02]">
-                                            <h3 className="text-[10px] font-black uppercase tracking-widest flex items-center gap-2 text-slate-400">
-                                                <Database size={12} className="text-cyan-400" />
+                                            <h3 className="text-[10px] font-black uppercase tracking-widest flex items-center gap-2 text-ink-secondary">
+                                                <Database size={12} className="text-amber2" />
                                                 USB Library Contents
                                             </h3>
                                             <div className="flex gap-1 bg-black/40 p-1 rounded-lg border border-white/5">
                                                 <button
                                                     onClick={() => setActiveLibrary('library_one')}
-                                                    className={`px-2 py-1 text-[9px] font-bold rounded-md transition-all ${activeLibrary === 'library_one' ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/20' : 'text-slate-500 hover:text-white'}`}
+                                                    className={`px-2 py-1 text-[9px] font-bold rounded-md transition-all ${activeLibrary === 'library_one' ? 'bg-amber2 text-white shadow-lg shadow-amber2/20' : 'text-ink-muted hover:text-white'}`}
                                                 >
                                                     Library One
                                                 </button>
                                                 <button
                                                     onClick={() => setActiveLibrary('library_legacy')}
-                                                    className={`px-2 py-1 text-[9px] font-bold rounded-md transition-all ${activeLibrary === 'library_legacy' ? 'bg-purple-500 text-white shadow-lg shadow-purple-500/20' : 'text-slate-500 hover:text-white'}`}
+                                                    className={`px-2 py-1 text-[9px] font-bold rounded-md transition-all ${activeLibrary === 'library_legacy' ? 'bg-purple-500 text-white shadow-lg shadow-purple-500/20' : 'text-ink-muted hover:text-white'}`}
                                                 >
                                                     Library Legacy
                                                 </button>
@@ -946,12 +946,12 @@ const UsbView = () => {
 
                                         <div className="max-h-[500px] overflow-y-auto">
                                             {loadingContents ? (
-                                                <div className="p-12 flex flex-col items-center justify-center gap-3 text-slate-500 italic text-xs">
-                                                    <Loader2 size={24} className="animate-spin text-cyan-500" />
+                                                <div className="p-12 flex flex-col items-center justify-center gap-3 text-ink-muted italic text-xs">
+                                                    <Loader2 size={24} className="animate-spin text-amber2" />
                                                     Reading USB Database...
                                                 </div>
                                             ) : (usbTracks[activeLibrary] || []).length === 0 ? (
-                                                <div className="p-12 flex flex-col items-center justify-center gap-3 text-slate-600 text-center">
+                                                <div className="p-12 flex flex-col items-center justify-center gap-3 text-ink-placeholder text-center">
                                                     <Music size={32} strokeWidth={1} />
                                                     <p className="text-xs uppercase tracking-tighter font-bold">No tracks found in {activeLibrary === 'library_one' ? 'Newer' : 'Legacy'} format</p>
                                                     <p className="text-[10px] opacity-50">Run sync to populate this library</p>
@@ -970,7 +970,7 @@ const UsbView = () => {
 
                             {/* Stats Footer */}
                             {sel.is_rekordbox && (
-                                <div className="flex items-center gap-4 text-[10px] text-slate-600 px-1">
+                                <div className="flex items-center gap-4 text-[10px] text-ink-placeholder px-1">
                                     <span>RB USB: {sel.has_export_db ? '✓ exportLibrary.db' : '✗ No DB'}</span>
                                     <span>·</span>
                                     <span>Legacy PDB: {sel.has_legacy_pdb ? '✓' : '✗'}</span>

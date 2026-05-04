@@ -43,10 +43,10 @@ const DawToolbar = React.memo(({ state, dispatch, onSave, onOpen, onExport, onSp
     }, [handleNameBlur, state.project.name]);
 
     return (
-        <div className="h-11 bg-slate-900/60 border-b border-white/5 flex items-center px-4 gap-3 shrink-0 backdrop-blur-xl">
+        <div className="h-11 bg-mx-shell/60 border-b border-white/5 flex items-center px-4 gap-3 shrink-0 backdrop-blur-xl">
             {/* Project info */}
             <div className="flex items-center gap-2 min-w-0 mr-4">
-                <FileAudio size={14} className="text-cyan-400 shrink-0" />
+                <FileAudio size={14} className="text-amber2 shrink-0" />
                 {isEditingName ? (
                     <input
                         type="text"
@@ -55,11 +55,11 @@ const DawToolbar = React.memo(({ state, dispatch, onSave, onOpen, onExport, onSp
                         onBlur={handleNameBlur}
                         onKeyDown={handleNameKeyDown}
                         autoFocus
-                        className="bg-slate-800 text-sm font-semibold text-white px-1 py-0.5 rounded border border-cyan-500/50 focus:outline-none min-w-[200px]"
+                        className="bg-mx-card text-sm font-semibold text-white px-1 py-0.5 rounded border border-amber2/50 focus:outline-none min-w-[200px]"
                     />
                 ) : (
                     <span
-                        className="text-sm font-semibold text-white truncate max-w-[300px] cursor-text hover:text-cyan-100 transition-colors"
+                        className="text-sm font-semibold text-white truncate max-w-[300px] cursor-text hover:text-amber2-hover transition-colors"
                         onDoubleClick={handleNameDoubleClick}
                         title="Double-click to rename"
                     >
@@ -74,12 +74,12 @@ const DawToolbar = React.memo(({ state, dispatch, onSave, onOpen, onExport, onSp
             {/* Global Info */}
             <div className="flex items-center gap-4 mr-6">
                 <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">BPM</span>
-                    <span className="text-xs text-cyan-400 font-mono font-bold leading-none">{bpm?.toFixed(1) || '---'}</span>
+                    <span className="text-[10px] text-ink-muted uppercase tracking-widest font-bold">BPM</span>
+                    <span className="text-xs text-amber2 font-mono font-bold leading-none">{bpm?.toFixed(1) || '---'}</span>
                 </div>
                 <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Quantize</span>
-                    <span className={`text-xs font-bold leading-none ${snapEnabled ? 'text-cyan-400' : 'text-slate-600'}`}>
+                    <span className="text-[10px] text-ink-muted uppercase tracking-widest font-bold">Quantize</span>
+                    <span className={`text-xs font-bold leading-none ${snapEnabled ? 'text-amber2' : 'text-ink-placeholder'}`}>
                         {snapEnabled ? 'ON' : 'OFF'}
                     </span>
                 </div>
@@ -115,11 +115,11 @@ const DawToolbar = React.memo(({ state, dispatch, onSave, onOpen, onExport, onSp
             {state.trackMeta.title && (
                 <div className="flex items-center gap-2 text-right min-w-0">
                     <div className="truncate">
-                        <span className="text-xs text-slate-400 truncate">
+                        <span className="text-xs text-ink-secondary truncate">
                             {state.trackMeta.artist}
                         </span>
-                        <span className="text-xs text-slate-600 mx-1">—</span>
-                        <span className="text-xs text-slate-300 font-medium truncate">
+                        <span className="text-xs text-ink-placeholder mx-1">—</span>
+                        <span className="text-xs text-ink-primary font-medium truncate">
                             {state.trackMeta.title}
                         </span>
                     </div>
@@ -134,12 +134,12 @@ const ToolBtn = React.memo(({ icon, label, onClick, disabled, accent, danger }) 
         onClick={onClick}
         disabled={disabled}
         className={`p-2 rounded-lg transition-all text-xs ${disabled
-            ? 'text-slate-600 cursor-not-allowed opacity-50'
+            ? 'text-ink-placeholder cursor-not-allowed opacity-50'
             : danger
-                ? 'text-slate-400 hover:text-red-400 hover:bg-red-500/10'
+                ? 'text-ink-secondary hover:text-red-400 hover:bg-red-500/10'
                 : accent
-                    ? 'text-cyan-400 hover:bg-cyan-500/15'
-                    : 'text-slate-400 hover:text-white hover:bg-white/5'
+                    ? 'text-amber2 hover:bg-amber2/15'
+                    : 'text-ink-secondary hover:text-white hover:bg-white/5'
             }`}
         title={label}
     >

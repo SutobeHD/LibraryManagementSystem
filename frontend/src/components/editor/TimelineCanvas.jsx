@@ -381,7 +381,7 @@ const TimelineCanvas = ({
                     {/* Selection Highlight */}
                     {selection && (
                         <div
-                            className="absolute top-0 bottom-0 bg-cyan-400/20 border-l-2 border-r-2 border-cyan-400/50 pointer-events-none"
+                            className="absolute top-0 bottom-0 bg-amber2/20 border-l-2 border-r-2 border-amber2/50 pointer-events-none"
                             style={{
                                 left: `${selection.start * zoom}px`,
                                 width: `${(selection.end - selection.start) * zoom}px`
@@ -456,7 +456,7 @@ const TimelineCanvas = ({
                     {/* Playhead */}
                     <div
                         ref={playheadRef}
-                        className="absolute top-0 bottom-0 w-0.5 bg-cyan-400 z-30 pointer-events-none"
+                        className="absolute top-0 bottom-0 w-0.5 bg-amber2 z-30 pointer-events-none"
                         style={{
                             left: `${playhead * zoom}px`,
                             boxShadow: '0 0 10px rgba(34, 211, 238, 0.5)'

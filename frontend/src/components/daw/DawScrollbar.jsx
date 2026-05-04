@@ -47,7 +47,7 @@ const DawScrollbar = React.memo(({ state, dispatch }) => {
         <div
             ref={containerRef}
             onScroll={handleScroll}
-            className="w-full h-4 bg-slate-900 border-t border-white/5 overflow-x-auto overflow-y-hidden custom-scrollbar"
+            className="w-full h-4 bg-mx-shell border-t border-white/5 overflow-x-auto overflow-y-hidden custom-scrollbar"
             style={{
                 scrollbarWidth: 'auto',
                 scrollbarColor: '#475569 #0f172a'

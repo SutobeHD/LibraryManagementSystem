@@ -88,10 +88,10 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
     return (
       <div className="h-full flex flex-col">
         {/* Minimal tab bar */}
-        <div className="flex justify-between items-center px-4 py-3 border-b border-white/5 bg-slate-950/30 backdrop-blur-md shrink-0">
+        <div className="flex justify-between items-center px-4 py-3 border-b border-white/5 bg-mx-deepest/30 backdrop-blur-md shrink-0">
           <div className="flex items-center gap-6">
             <h1 className="text-xl font-bold text-white flex items-center gap-2">
-              <Music size={20} className="text-cyan-400" />
+              <Music size={20} className="text-amber2" />
               Library
             </h1>
             <div className="flex bg-black/40 p-0.5 rounded-lg border border-white/5">
@@ -104,7 +104,7 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 ${activeTab === tab.id ? 'bg-cyan-500 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                  className={`px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 ${activeTab === tab.id ? 'bg-amber2 text-white shadow-lg' : 'text-ink-muted hover:text-ink-primary'}`}
                 >
                   <tab.icon size={11} />
                   {tab.label}
@@ -134,24 +134,24 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
           <div className="flex items-center gap-4">
             <button
               onClick={() => setSelectedItem(null)}
-              className="p-2 hover:bg-white/10 rounded-full transition-colors text-slate-400 hover:text-white"
+              className="p-2 hover:bg-white/10 rounded-full transition-colors text-ink-secondary hover:text-white"
             >
               <ArrowLeft size={24} />
             </button>
             <div>
               <h1 className="text-4xl font-bold text-white flex items-center gap-3">
-                {activeTab === 'artists' ? <User size={32} className="text-cyan-400" /> :
+                {activeTab === 'artists' ? <User size={32} className="text-amber2" /> :
                   activeTab === 'labels' ? <Tag size={32} className="text-purple-400" /> :
                     <Disc size={32} className="text-amber-400" />}
                 {selectedItem.name}
               </h1>
-              <p className="text-slate-400 text-sm mt-1">{filteredTracks.length} / {selectedItem.track_count || tracks.length} Tracks</p>
+              <p className="text-ink-secondary text-sm mt-1">{filteredTracks.length} / {selectedItem.track_count || tracks.length} Tracks</p>
             </div>
           </div>
         ) : (
           <div className="flex items-center gap-8">
             <h1 className="text-4xl font-bold text-white flex items-center gap-3">
-              <Music size={32} className="text-cyan-400" />
+              <Music size={32} className="text-amber2" />
               Library
             </h1>
             <div className="flex bg-black/40 p-1 rounded-xl border border-white/5">
@@ -164,7 +164,7 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-2 ${activeTab === tab.id ? 'bg-cyan-500 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                  className={`px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-2 ${activeTab === tab.id ? 'bg-amber2 text-white shadow-lg' : 'text-ink-muted hover:text-ink-primary'}`}
                 >
                   <tab.icon size={12} />
                   {tab.label}
@@ -178,13 +178,13 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
           <button
             onClick={loadItems}
             disabled={isLoading}
-            className={`p-2 rounded-full transition-all border border-white/5 hover:bg-white/10 text-slate-400 hover:text-cyan-400 ${isLoading ? 'animate-spin opacity-50' : ''}`}
+            className={`p-2 rounded-full transition-all border border-white/5 hover:bg-white/10 text-ink-secondary hover:text-amber2 ${isLoading ? 'animate-spin opacity-50' : ''}`}
             title="Refresh View"
           >
             <RotateCw size={16} />
           </button>
           <div className="relative group w-64">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-cyan-400 transition-colors" />
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted group-focus-within:text-amber2 transition-colors" />
             <input
               className="input-glass w-full pl-10 bg-black/20 text-sm rounded-full py-2"
               placeholder={selectedItem ? "Search tracks..." : `Search ${activeTab}...`}
@@ -213,17 +213,17 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
               <div
                 key={a.id}
                 onClick={() => handleSelect(a)}
-                className="bg-slate-800/40 hover:bg-cyan-500/10 border border-white/5 hover:border-cyan-500/50 p-6 rounded-xl cursor-pointer transition-all group flex flex-col items-center justify-center text-center gap-2 relative"
+                className="bg-mx-card/40 hover:bg-amber2/10 border border-white/5 hover:border-amber2/50 p-6 rounded-xl cursor-pointer transition-all group flex flex-col items-center justify-center text-center gap-2 relative"
               >
                 <button
                   onClick={(e) => { e.stopPropagation(); handleMerge(a.name); }}
-                  className="absolute top-2 right-2 p-2 rounded-lg bg-black/40 text-slate-500 hover:text-cyan-400 opacity-0 group-hover:opacity-100 transition-all border border-white/5"
+                  className="absolute top-2 right-2 p-2 rounded-lg bg-black/40 text-ink-muted hover:text-amber2 opacity-0 group-hover:opacity-100 transition-all border border-white/5"
                   title="Merge/Rename"
                 >
                   <GitMerge size={14} />
                 </button>
 
-                <div className="w-16 h-16 rounded-full bg-slate-900 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform shadow-lg overflow-hidden relative border border-white/5">
+                <div className="w-16 h-16 rounded-full bg-mx-shell flex items-center justify-center mb-2 group-hover:scale-110 transition-transform shadow-lg overflow-hidden relative border border-white/5">
                   {a.Artwork ? (
                     <img
                       src={`${api.defaults.baseURL || ''}/api/artwork?path=${encodeURIComponent(a.Artwork)}`}
@@ -233,13 +233,13 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
                       onError={(e) => e.target.style.display = 'none'}
                     />
                   ) : (
-                    activeTab === 'artists' ? <User size={32} className="text-slate-500" /> :
-                      activeTab === 'labels' ? <Tag size={32} className="text-slate-500" /> :
-                        <Disc size={32} className="text-slate-500" />
+                    activeTab === 'artists' ? <User size={32} className="text-ink-muted" /> :
+                      activeTab === 'labels' ? <Tag size={32} className="text-ink-muted" /> :
+                        <Disc size={32} className="text-ink-muted" />
                   )}
                 </div>
-                <div className="font-bold text-slate-200 group-hover:text-white truncate w-full">{a.name}</div>
-                <div className="text-xs text-slate-500 font-mono bg-black/20 px-2 py-1 rounded-full">{a.track_count} Tracks</div>
+                <div className="font-bold text-ink-primary group-hover:text-white truncate w-full">{a.name}</div>
+                <div className="text-xs text-ink-muted font-mono bg-black/20 px-2 py-1 rounded-full">{a.track_count} Tracks</div>
               </div>
             ))}
           </div>

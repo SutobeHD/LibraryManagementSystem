@@ -193,7 +193,7 @@ const WaveformMiniCanvas = React.memo(({
                 className={`w-full flex items-center justify-center ${className}`}
                 style={{ height, background: COLORS.bg, ...style }}
             >
-                <span className="text-[8px] text-slate-700 uppercase tracking-widest font-bold select-none">
+                <span className="text-[8px] text-ink-placeholder uppercase tracking-widest font-bold select-none">
                     No Waveform
                 </span>
             </div>

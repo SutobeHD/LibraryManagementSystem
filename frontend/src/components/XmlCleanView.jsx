@@ -44,10 +44,10 @@ const XmlCleanView = () => {
         <div className="p-12 h-full flex flex-col items-center justify-center bg-transparent text-white overflow-y-auto">
             <div className="text-center mb-10">
                 <h1 className="text-5xl font-bold mb-4 flex items-center justify-center gap-4 drop-shadow-lg">
-                    <Server size={48} className="text-cyan-400" />
-                    <span className="bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">Library Manager</span>
+                    <Server size={48} className="text-amber2" />
+                    <span className="bg-gradient-to-r from-amber2 to-amber2-press bg-clip-text text-transparent">Library Manager</span>
                 </h1>
-                <p className="text-slate-400 text-lg max-w-xl mx-auto leading-relaxed">
+                <p className="text-ink-secondary text-lg max-w-xl mx-auto leading-relaxed">
                     Import your <code>rekordbox.xml</code> to load your library.<br />
                     We will scan for tracks, playlists, and metadata.
                 </p>
@@ -57,7 +57,7 @@ const XmlCleanView = () => {
                 <div className="w-full max-w-2xl flex flex-col gap-6">
                     <div
                         className={`w-full h-64 border-2 border-dashed rounded-3xl flex flex-col items-center justify-center transition-all duration-300 cursor-pointer shadow-xl backdrop-blur-sm 
-                            ${dragActive ? 'border-cyan-500 bg-cyan-500/10 scale-105' : 'border-slate-700 bg-slate-900/50 hover:border-cyan-500/50 hover:bg-slate-800/80'}`}
+                            ${dragActive ? 'border-amber2 bg-amber2/10 scale-105' : 'border-line-default bg-mx-shell/50 hover:border-amber2/50 hover:bg-mx-card/80'}`}
                         onDragEnter={handleDrag} onDragLeave={handleDrag} onDragOver={handleDrag} onDrop={handleDrop}
                         onClick={() => !scanning && document.getElementById('fileUpload').click()}
                     >
@@ -69,10 +69,10 @@ const XmlCleanView = () => {
                                     <FileCode size={32} className="text-blue-400" />
                                 </div>
                                 <p className="font-bold text-xl text-white mb-1">{file.name}</p>
-                                <p className="text-sm font-mono text-cyan-400">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                                <p className="text-sm font-mono text-amber2">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
                             </div>
                         ) : (
-                            <div className="text-center text-slate-500">
+                            <div className="text-center text-ink-muted">
                                 <Upload size={48} className="mx-auto mb-4 opacity-50" />
                                 <p className="text-lg font-medium mb-1">Drop rekordbox.xml here</p>
                                 <p className="text-sm opacity-60">or click to browse</p>
@@ -85,7 +85,7 @@ const XmlCleanView = () => {
                             onClick={startScan}
                             disabled={scanning}
                             className={`w-full h-16 rounded-xl font-bold text-lg shadow-lg flex items-center justify-center gap-3 transition-all
-                                ${scanning ? 'bg-slate-800 text-slate-400 cursor-wait' : 'btn-primary hover:scale-[1.02] active:scale-[0.98]'}`}
+                                ${scanning ? 'bg-mx-card text-ink-secondary cursor-wait' : 'btn-primary hover:scale-[1.02] active:scale-[0.98]'}`}
                         >
                             {scanning ? (
                                 <>
@@ -109,7 +109,7 @@ const XmlCleanView = () => {
                                         setScanResult({ tracks: 0, playlists: 0 });
                                     }
                                 }}
-                                className="w-full h-12 rounded-xl font-bold text-xs uppercase tracking-widest border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10 transition-all flex items-center justify-center gap-2"
+                                className="w-full h-12 rounded-xl font-bold text-xs uppercase tracking-widest border border-amber2/30 text-amber2 hover:bg-amber2/10 transition-all flex items-center justify-center gap-2"
                             >
                                 <Zap size={14} /> Create New Empty Library
                             </button>
@@ -122,20 +122,20 @@ const XmlCleanView = () => {
                         <CheckCircle size={40} className="text-green-400" />
                     </div>
                     <h2 className="text-3xl font-bold mb-2 text-white">Library Loaded</h2>
-                    <p className="text-slate-400 mb-8">Your music is ready to explore.</p>
+                    <p className="text-ink-secondary mb-8">Your music is ready to explore.</p>
 
                     <div className="grid grid-cols-2 gap-4 mb-8">
-                        <div className="bg-slate-950/50 rounded-xl p-4 border border-white/5">
-                            <div className="text-slate-400 text-xs uppercase font-bold tracking-widest mb-1">Tracks</div>
-                            <div className="text-2xl font-mono text-cyan-400">{scanResult.tracks || 0}</div>
+                        <div className="bg-mx-deepest/50 rounded-xl p-4 border border-white/5">
+                            <div className="text-ink-secondary text-xs uppercase font-bold tracking-widest mb-1">Tracks</div>
+                            <div className="text-2xl font-mono text-amber2">{scanResult.tracks || 0}</div>
                         </div>
-                        <div className="bg-slate-950/50 rounded-xl p-4 border border-white/5">
-                            <div className="text-slate-400 text-xs uppercase font-bold tracking-widest mb-1">Playlists</div>
+                        <div className="bg-mx-deepest/50 rounded-xl p-4 border border-white/5">
+                            <div className="text-ink-secondary text-xs uppercase font-bold tracking-widest mb-1">Playlists</div>
                             <div className="text-2xl font-mono text-purple-400">{scanResult.playlists || 0}</div>
                         </div>
                     </div>
 
-                    <button onClick={() => { setFile(null); setScanResult(null); }} className="text-sm text-slate-500 hover:text-white underline decoration-slate-700 hover:decoration-white transition-all">
+                    <button onClick={() => { setFile(null); setScanResult(null); }} className="text-sm text-ink-muted hover:text-white underline decoration-slate-700 hover:decoration-white transition-all">
                         Load a different file
                     </button>
                 </div>

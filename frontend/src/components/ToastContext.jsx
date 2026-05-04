@@ -37,7 +37,7 @@ export const ToastProvider = ({ children }) => {
                             pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl backdrop-blur-md border animate-slide-in-right
                             ${toast.type === 'success' ? 'bg-green-500/10 border-green-500/20 text-green-400' : ''}
                             ${toast.type === 'error' ? 'bg-red-500/10 border-red-500/20 text-red-400' : ''}
-                            ${toast.type === 'info' ? 'bg-slate-800/80 border-white/10 text-slate-200' : ''}
+                            ${toast.type === 'info' ? 'bg-mx-card/80 border-white/10 text-ink-primary' : ''}
                         `}
                     >
                         {toast.type === 'success' && <CheckCircle size={18} />}

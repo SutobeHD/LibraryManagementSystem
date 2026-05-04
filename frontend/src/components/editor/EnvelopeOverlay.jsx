@@ -119,8 +119,8 @@ const EnvelopeOverlay = ({
                     w-4 h-4 rounded-full border-2 
                     transition-all duration-150
                     ${activeNode === 'fadeIn'
-                        ? 'bg-cyan-400 border-white scale-125'
-                        : 'bg-white/80 border-cyan-400 hover:bg-cyan-400'
+                        ? 'bg-amber2 border-white scale-125'
+                        : 'bg-white/80 border-amber2 hover:bg-amber2'
                     }
                 `}
                 style={{
@@ -159,8 +159,8 @@ const EnvelopeOverlay = ({
                     w-4 h-4 rounded-full border-2 
                     transition-all duration-150
                     ${activeNode === 'fadeOut'
-                        ? 'bg-cyan-400 border-white scale-125'
-                        : 'bg-white/80 border-cyan-400 hover:bg-cyan-400'
+                        ? 'bg-amber2 border-white scale-125'
+                        : 'bg-white/80 border-amber2 hover:bg-amber2'
                     }
                 `}
                 style={{

@@ -57,8 +57,8 @@ const PlaylistNode = ({ node, level = 0, onSelect, onContextMenu, onMoveNode, is
         <div>
             <div
                 className={`flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-all duration-150 group relative
-                    ${isSelected ? 'bg-cyan-500/15 text-white' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}
-                    ${dragOver === "center" ? 'ring-1 ring-cyan-400 bg-cyan-500/10' : ''}
+                    ${isSelected ? 'bg-amber2/15 text-white' : 'text-ink-secondary hover:text-ink-primary hover:bg-white/5'}
+                    ${dragOver === "center" ? 'ring-1 ring-amber2 bg-amber2/10' : ''}
                 `}
                 style={{ paddingLeft: `${12 + level * 16}px` }}
                 onClick={() => {
@@ -72,11 +72,11 @@ const PlaylistNode = ({ node, level = 0, onSelect, onContextMenu, onMoveNode, is
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
             >
-                {dragOver === "top" && <div className="absolute top-0 left-0 right-0 h-0.5 bg-cyan-400 z-10" />}
-                {dragOver === "bottom" && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-cyan-400 z-10" />}
+                {dragOver === "top" && <div className="absolute top-0 left-0 right-0 h-0.5 bg-amber2 z-10" />}
+                {dragOver === "bottom" && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber2 z-10" />}
 
                 {isEditMode && !isIntelligent && (
-                    <GripVertical size={12} className="text-slate-600 shrink-0 cursor-grab" />
+                    <GripVertical size={12} className="text-ink-placeholder shrink-0 cursor-grab" />
                 )}
 
                 {isFolder ? (
@@ -90,7 +90,7 @@ const PlaylistNode = ({ node, level = 0, onSelect, onContextMenu, onMoveNode, is
                     </>
                 ) : (
                     <>
-                        <ListMusic size={14} className="text-cyan-400/60 shrink-0" />
+                        <ListMusic size={14} className="text-amber2/60 shrink-0" />
                     </>
                 )}
 
@@ -107,7 +107,7 @@ const PlaylistNode = ({ node, level = 0, onSelect, onContextMenu, onMoveNode, is
                         onClick={(e) => { e.stopPropagation(); onRename(node); }}
                         className="opacity-0 group-hover:opacity-100 p-1 hover:bg-white/10 rounded transition-all shrink-0"
                     >
-                        <Edit2 size={11} className="text-slate-500" />
+                        <Edit2 size={11} className="text-ink-muted" />
                     </button>
                 )}
             </div>
@@ -450,14 +450,14 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
 
     if (!loading && tree.length === 0 && !dbLoaded) {
         return (
-            <div className="flex h-full flex-col items-center justify-center text-slate-500 bg-slate-950/50">
-                <Database size={64} className="mb-6 opacity-30 text-cyan-400" />
+            <div className="flex h-full flex-col items-center justify-center text-ink-muted bg-mx-deepest/50">
+                <Database size={64} className="mb-6 opacity-30 text-amber2" />
                 <h2 className="text-2xl font-bold text-white mb-2">Library Empty</h2>
                 <div className="flex flex-col items-center">
                     <p className="max-w-md text-center mb-8">No playlists found. Please try refreshing or check your database connection.</p>
                     <button
                         onClick={loadTree}
-                        className="px-6 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-full font-bold text-white transition-all shadow-lg shadow-cyan-500/20"
+                        className="px-6 py-2 bg-amber2 hover:bg-amber2 rounded-full font-bold text-white transition-all shadow-lg shadow-amber2/20"
                     >
                         <RotateCw size={16} className="mr-2 inline" />
                         Refresh Library
@@ -484,25 +484,25 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
             />
             {/* SIDEBAR */}
             <div
-                className="border-r border-white/5 overflow-y-auto bg-slate-950/30 backdrop-blur-md flex flex-col shrink-0 relative"
+                className="border-r border-white/5 overflow-y-auto bg-mx-deepest/30 backdrop-blur-md flex flex-col shrink-0 relative"
                 style={{ width: '280px' }}
             >
                 {/* Sidebar Header */}
-                <div className="sticky top-0 bg-slate-950/90 z-10 border-b border-white/5 backdrop-blur-xl shrink-0">
+                <div className="sticky top-0 bg-mx-deepest/90 z-10 border-b border-white/5 backdrop-blur-xl shrink-0">
                     <div className="flex justify-between items-center px-3 py-3">
-                        <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Library</h3>
+                        <h3 className="text-[10px] font-bold text-ink-muted uppercase tracking-widest">Library</h3>
                         <div className="flex gap-0.5">
                             <button
                                 onClick={toggleEditMode}
-                                className={`p-1.5 rounded transition-all ${isEditMode ? 'bg-amber-500/20 text-amber-400' : 'hover:bg-white/5 text-slate-500'}`}
+                                className={`p-1.5 rounded transition-all ${isEditMode ? 'bg-amber-500/20 text-amber-400' : 'hover:bg-white/5 text-ink-muted'}`}
                                 title={isEditMode ? "Exit Edit Mode" : "Enter Edit Mode"}
                             >
                                 <Edit2 size={12} />
                             </button>
-                            <button onClick={loadTree} className="p-1.5 hover:bg-white/5 rounded text-slate-500" title="Refresh">
+                            <button onClick={loadTree} className="p-1.5 hover:bg-white/5 rounded text-ink-muted" title="Refresh">
                                 <RotateCw size={12} className={loading ? 'animate-spin' : ''} />
                             </button>
-                            <button onClick={handleCreatePlaylist} className="p-1.5 hover:bg-white/5 rounded text-cyan-500" title="New Playlist">
+                            <button onClick={handleCreatePlaylist} className="p-1.5 hover:bg-white/5 rounded text-amber2" title="New Playlist">
                                 <Plus size={12} />
                             </button>
                             <button onClick={handleCreateFolder} className="p-1.5 hover:bg-white/5 rounded text-amber-500" title="New Folder">
@@ -515,21 +515,21 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                 {/* Collection Node */}
                 <div
                     className={`flex items-center gap-2.5 px-3 py-2.5 cursor-pointer transition-all border-b border-white/5
-                        ${showCollection ? 'bg-cyan-500/10 text-white' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}
+                        ${showCollection ? 'bg-amber2/10 text-white' : 'text-ink-secondary hover:text-ink-primary hover:bg-white/5'}`}
                     onClick={handleSelectCollection}
                 >
-                    <div className={`p-1.5 rounded-lg ${showCollection ? 'bg-cyan-500/20' : 'bg-white/5'}`}>
-                        <Database size={14} className="text-cyan-400" />
+                    <div className={`p-1.5 rounded-lg ${showCollection ? 'bg-amber2/20' : 'bg-white/5'}`}>
+                        <Database size={14} className="text-amber2" />
                     </div>
                     <div className="flex-1 min-w-0">
                         <div className="text-[13px] font-semibold truncate">Collection</div>
-                        <div className="text-[10px] text-slate-500 font-mono">{allTracks.length} tracks</div>
+                        <div className="text-[10px] text-ink-muted font-mono">{allTracks.length} tracks</div>
                     </div>
                 </div>
 
                 {/* Playlist Tree */}
                 <div className="px-1 pt-2 pb-1">
-                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-widest px-2 mb-1">Playlists</div>
+                    <div className="text-[9px] font-bold text-ink-placeholder uppercase tracking-widest px-2 mb-1">Playlists</div>
                 </div>
                 <div
                     className="flex-1 overflow-y-auto pb-4"
@@ -561,13 +561,13 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                 {/* Playlist Context Menu */}
                 {contextMenu && (
                     <div
-                        className="fixed z-[100] bg-slate-900/95 border border-white/10 rounded-xl shadow-2xl py-1.5 min-w-[180px] animate-fade-in backdrop-blur-xl"
+                        className="fixed z-[100] bg-mx-shell/95 border border-white/10 rounded-xl shadow-2xl py-1.5 min-w-[180px] animate-fade-in backdrop-blur-xl"
                         style={{ top: contextMenu.y, left: contextMenu.x }}
                     >
                         {contextMenu.node.Type !== "4" && (
                             <>
-                                <button onClick={() => handleRename(contextMenu.node)} className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-slate-300">
-                                    <Edit2 size={14} className="text-slate-500" /> Rename
+                                <button onClick={() => handleRename(contextMenu.node)} className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-ink-primary">
+                                    <Edit2 size={14} className="text-ink-muted" /> Rename
                                 </button>
                                 <button onClick={() => handleDelete(contextMenu.node)} className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-red-400">
                                     <Trash2 size={14} /> Delete
@@ -578,7 +578,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                         <button onClick={handleCreateFolder} className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-amber-500">
                             <FolderPlus size={14} /> New Folder
                         </button>
-                        <button onClick={handleCreatePlaylist} className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-cyan-400">
+                        <button onClick={handleCreatePlaylist} className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-amber2">
                             <Plus size={14} /> New Playlist
                         </button>
                     </div>
@@ -591,19 +591,19 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                 {(selectedPlaylist || showCollection) ? (
                     <div className="flex-1 overflow-y-auto flex flex-col">
                         {/* Header */}
-                        <div className="p-5 border-b border-white/5 bg-slate-900/40 backdrop-blur-xl flex justify-between items-end shrink-0">
+                        <div className="p-5 border-b border-white/5 bg-mx-shell/40 backdrop-blur-xl flex justify-between items-end shrink-0">
                             <div className="flex items-center gap-4">
-                                <div className={`p-2.5 rounded-xl ${showCollection ? 'bg-cyan-500/15' : isIntelligentSelected ? 'bg-purple-500/15' : 'bg-slate-800'}`}>
-                                    {showCollection ? <Database size={24} className="text-cyan-400" /> :
+                                <div className={`p-2.5 rounded-xl ${showCollection ? 'bg-amber2/15' : isIntelligentSelected ? 'bg-purple-500/15' : 'bg-mx-card'}`}>
+                                    {showCollection ? <Database size={24} className="text-amber2" /> :
                                         isIntelligentSelected ? <Sparkles size={24} className="text-purple-400" /> :
-                                            <ListMusic size={24} className="text-cyan-400" />}
+                                            <ListMusic size={24} className="text-amber2" />}
                                 </div>
                                 <div>
                                     <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
                                         {currentViewTitle}
                                         {isIntelligentSelected && <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Intelligent</span>}
                                     </h1>
-                                    <p className="text-slate-500 font-mono text-xs mt-0.5">
+                                    <p className="text-ink-muted font-mono text-xs mt-0.5">
                                         {currentViewTracks.length}{currentViewTracks.length !== currentViewCount ? ` / ${currentViewCount}` : ''} TRACKS
                                     </p>
                                 </div>
@@ -617,7 +617,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                                         placeholder="Search..."
                                         value={showCollection ? collectionSearch : playlistSearch}
                                         onChange={(e) => showCollection ? setCollectionSearch(e.target.value) : setPlaylistSearch(e.target.value)}
-                                        className="bg-slate-900/60 border border-white/5 rounded-lg py-1.5 pl-3 pr-3 text-xs text-slate-300 focus:outline-none focus:border-cyan-500/50 w-48 transition-all"
+                                        className="bg-mx-shell/60 border border-white/5 rounded-lg py-1.5 pl-3 pr-3 text-xs text-ink-primary focus:outline-none focus:border-amber2/50 w-48 transition-all"
                                     />
                                 </div>
                                 {selectedPlaylist && !isIntelligentSelected && (
@@ -633,7 +633,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                                         <button
                                             onClick={handleCleanTitles}
                                             disabled={isProcessing || !tracks.length}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold transition-all border border-white/5 disabled:opacity-30"
+                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-mx-card hover:bg-mx-hover rounded-lg text-xs font-bold transition-all border border-white/5 disabled:opacity-30"
                                         >
                                             <Edit2 size={12} className="text-orange-400" />
                                             Clean
@@ -646,8 +646,8 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                         {/* Track Table */}
                         {loading ? (
                             <div className="flex-1 flex items-center justify-center">
-                                <div className="text-cyan-400 animate-pulse flex flex-col items-center">
-                                    <div className="w-10 h-10 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin mb-4"></div>
+                                <div className="text-amber2 animate-pulse flex flex-col items-center">
+                                    <div className="w-10 h-10 border-4 border-amber2 border-t-transparent rounded-full animate-spin mb-4"></div>
                                     <span className="text-sm font-medium">Loading tracks...</span>
                                 </div>
                             </div>
@@ -678,9 +678,9 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                         )}
                     </div>
                 ) : (
-                    <div className="flex-1 flex flex-col items-center justify-center text-slate-500">
+                    <div className="flex-1 flex flex-col items-center justify-center text-ink-muted">
                         <ListMusic size={64} className="mb-6 opacity-20" />
-                        <p className="text-xl font-light text-slate-500">Select a playlist to view tracks</p>
+                        <p className="text-xl font-light text-ink-muted">Select a playlist to view tracks</p>
                     </div>
                 )}
             </div>

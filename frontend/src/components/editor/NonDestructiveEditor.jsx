@@ -710,8 +710,8 @@ const NonDestructiveEditor = ({
     if (isLoading) {
         return (
             <div className={`flex items-center justify-center h-full bg-black ${className}`}>
-                <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
-                <span className="ml-3 text-slate-400">Loading audio...</span>
+                <Loader2 className="w-8 h-8 text-amber2 animate-spin" />
+                <span className="ml-3 text-ink-secondary">Loading audio...</span>
             </div>
         );
     }
@@ -724,24 +724,24 @@ const NonDestructiveEditor = ({
                     <div className="w-96 max-h-[70vh] bg-[#111] rounded-2xl border border-white/10 shadow-2xl flex flex-col">
                         <div className="flex items-center justify-between p-4 border-b border-white/5">
                             <h3 className="text-lg font-bold flex items-center gap-2">
-                                <FolderOpen size={18} className="text-cyan-400" />
+                                <FolderOpen size={18} className="text-amber2" />
                                 Open RBEP Project
                             </h3>
-                            <button onClick={() => setShowLoadModal(false)} className="p-1 hover:bg-white/10 rounded text-slate-400">
+                            <button onClick={() => setShowLoadModal(false)} className="p-1 hover:bg-white/10 rounded text-ink-secondary">
                                 <X size={16} />
                             </button>
                         </div>
                         <div className="flex-1 overflow-y-auto p-2">
                             {projectList.length === 0 ? (
-                                <p className="text-slate-500 text-sm text-center py-8">No .rbep projects found</p>
+                                <p className="text-ink-muted text-sm text-center py-8">No .rbep projects found</p>
                             ) : projectList.map(prj => (
                                 <button
                                     key={prj.name}
                                     onClick={() => loadProject(prj.name)}
-                                    className="w-full text-left p-3 rounded-xl hover:bg-white/5 border border-transparent hover:border-cyan-500/20 transition-all group"
+                                    className="w-full text-left p-3 rounded-xl hover:bg-white/5 border border-transparent hover:border-amber2/20 transition-all group"
                                 >
-                                    <div className="font-bold text-sm text-white group-hover:text-cyan-400 transition-colors">{prj.name}</div>
-                                    <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-3">
+                                    <div className="font-bold text-sm text-white group-hover:text-amber2 transition-colors">{prj.name}</div>
+                                    <div className="text-[10px] text-ink-muted mt-0.5 flex items-center gap-3">
                                         <span>{(prj.size / 1024).toFixed(1)} KB</span>
                                         <span>·</span>
                                         <span>{new Date(prj.modified * 1000).toLocaleDateString()}</span>
@@ -756,17 +756,17 @@ const NonDestructiveEditor = ({
             {/* Render overlay */}
             {isRendering && (
                 <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md">
-                    <div className="w-80 p-8 rounded-2xl bg-slate-900/80 border border-cyan-500/20 flex flex-col items-center">
-                        <Loader2 size={48} className="text-cyan-400 animate-spin mb-6" />
+                    <div className="w-80 p-8 rounded-2xl bg-mx-shell/80 border border-amber2/20 flex flex-col items-center">
+                        <Loader2 size={48} className="text-amber2 animate-spin mb-6" />
                         <h3 className="text-xl font-bold mb-2">Rendering Audio</h3>
-                        <p className="text-slate-400 text-sm mb-6">Applying edits and effects...</p>
+                        <p className="text-ink-secondary text-sm mb-6">Applying edits and effects...</p>
                         <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden mb-2">
                             <div
-                                className="h-full bg-gradient-to-r from-cyan-500 to-blue-600 transition-all duration-300"
+                                className="h-full bg-gradient-to-r from-amber2 to-amber2-press transition-all duration-300"
                                 style={{ width: `${renderProgress}%` }}
                             />
                         </div>
-                        <div className="text-xs font-mono text-cyan-500">{renderProgress}% COMPLETE</div>
+                        <div className="text-xs font-mono text-amber2">{renderProgress}% COMPLETE</div>
                     </div>
                 </div>
             )}
@@ -776,7 +776,7 @@ const NonDestructiveEditor = ({
                 <div className="flex items-center gap-4">
                     {/* Track info */}
                     <div className="flex items-center gap-2">
-                        <Music size={14} className="text-cyan-400" />
+                        <Music size={14} className="text-amber2" />
                         <span className="text-sm font-bold text-white truncate max-w-[200px]">
                             {track?.Title || 'Untitled'}
                         </span>
@@ -785,18 +785,18 @@ const NonDestructiveEditor = ({
                     {/* BPM & Key */}
                     <div className="flex gap-1">
                         <div className="text-xs bg-black/30 px-2 py-1 rounded border border-white/5">
-                            <span className="text-slate-500">BPM</span>
-                            <span className="ml-2 text-cyan-400 font-mono">{state.bpm.toFixed(1)}</span>
+                            <span className="text-ink-muted">BPM</span>
+                            <span className="ml-2 text-amber2 font-mono">{state.bpm.toFixed(1)}</span>
                         </div>
                         {camelot && (
                             <div className="text-xs bg-black/30 px-2 py-1 rounded border border-white/5">
-                                <span className="text-slate-500">KEY</span>
+                                <span className="text-ink-muted">KEY</span>
                                 <span className="ml-2 text-purple-400 font-mono">{camelot}</span>
                             </div>
                         )}
                         {loudness !== 0 && (
                             <div className="text-xs bg-black/30 px-2 py-1 rounded border border-white/5 flex items-center gap-2 group cursor-help" title={`Peak: ${(20 * Math.log10(peak || 1e-6)).toFixed(1)} dBFS`}>
-                                <span className="text-slate-500">LUFS</span>
+                                <span className="text-ink-muted">LUFS</span>
                                 <span className={`font-mono ${loudness > -9 ? 'text-red-400' : 'text-emerald-400'}`}>
                                     {loudness.toFixed(1)}
                                 </span>
@@ -813,10 +813,10 @@ const NonDestructiveEditor = ({
 
                 {/* Project Controls */}
                 <div className="flex items-center gap-1 mr-4 border-r border-white/10 pr-4">
-                    <button onClick={handleSaveProject} className="p-2 hover:bg-white/5 rounded text-slate-400 hover:text-green-400" title="Save Project">
+                    <button onClick={handleSaveProject} className="p-2 hover:bg-white/5 rounded text-ink-secondary hover:text-green-400" title="Save Project">
                         <Save size={16} />
                     </button>
-                    <button onClick={handleLoadClick} className="p-2 hover:bg-white/5 rounded text-slate-400 hover:text-cyan-400" title="Open Project">
+                    <button onClick={handleLoadClick} className="p-2 hover:bg-white/5 rounded text-ink-secondary hover:text-amber2" title="Open Project">
                         <FolderOpen size={16} />
                     </button>
                 </div>
@@ -837,13 +837,13 @@ const NonDestructiveEditor = ({
                         <div className="flex items-center gap-1 mr-4">
                             <button
                                 onClick={handleStop}
-                                className="p-2 hover:bg-white/5 rounded text-slate-400 hover:text-white"
+                                className="p-2 hover:bg-white/5 rounded text-ink-secondary hover:text-white"
                             >
                                 <SkipBack size={16} />
                             </button>
                             <button
                                 onClick={isPlaying ? handlePause : handlePlay}
-                                className="p-2 hover:bg-white/5 rounded text-slate-400 hover:text-white"
+                                className="p-2 hover:bg-white/5 rounded text-ink-secondary hover:text-white"
                             >
                                 {isPlaying ? <Pause size={16} /> : <Play size={16} />}
                             </button>
@@ -854,21 +854,21 @@ const NonDestructiveEditor = ({
                         {/* Edit tools */}
                         <button
                             onClick={handleSplit}
-                            className="p-2 hover:bg-white/5 rounded text-slate-400 hover:text-white"
+                            className="p-2 hover:bg-white/5 rounded text-ink-secondary hover:text-white"
                             title="Split at playhead (S)"
                         >
                             <Scissors size={16} />
                         </button>
                         <button
                             onClick={handleCopy}
-                            className="p-2 hover:bg-white/5 rounded text-slate-400 hover:text-white"
+                            className="p-2 hover:bg-white/5 rounded text-ink-secondary hover:text-white"
                             title="Copy to palette (C)"
                         >
                             <Copy size={16} />
                         </button>
                         <button
                             onClick={handleDelete}
-                            className="p-2 hover:bg-white/5 rounded text-slate-400 hover:text-red-400"
+                            className="p-2 hover:bg-white/5 rounded text-ink-secondary hover:text-red-400"
                             title="Delete selected (Del)"
                         >
                             <Trash2 size={16} />
@@ -880,8 +880,8 @@ const NonDestructiveEditor = ({
                         <button
                             onClick={handleToggleSnap}
                             className={`p-2 rounded transition-all ${state.snapEnabled
-                                ? 'bg-cyan-500/20 text-cyan-400'
-                                : 'hover:bg-white/5 text-slate-500'
+                                ? 'bg-amber2/20 text-amber2'
+                                : 'hover:bg-white/5 text-ink-muted'
                                 }`}
                             title="Snap to grid (Q)"
                         >
@@ -895,7 +895,7 @@ const NonDestructiveEditor = ({
                                 onChange={(e) => setState(prev =>
                                     setSnapDivision(prev, e.target.value)
                                 )}
-                                className="bg-black/30 text-xs text-slate-300 border border-white/10 rounded px-2 py-1"
+                                className="bg-black/30 text-xs text-ink-primary border border-white/10 rounded px-2 py-1"
                             >
                                 <option value="1/1">1 Bar</option>
                                 <option value="1/2">1/2</option>
@@ -909,7 +909,7 @@ const NonDestructiveEditor = ({
                         <div className="flex bg-black/20 p-0.5 rounded border border-white/5">
                             <button
                                 onClick={toggleGridMode}
-                                className={`p-1.5 rounded transition-all ${state.editMode === 'grid' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:text-white'}`}
+                                className={`p-1.5 rounded transition-all ${state.editMode === 'grid' ? 'bg-amber2/20 text-amber2' : 'text-ink-secondary hover:text-white'}`}
                                 title="Grid Editing Mode"
                             >
                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -919,7 +919,7 @@ const NonDestructiveEditor = ({
                             {state.editMode === 'grid' && (
                                 <button
                                     onClick={handleSaveGrid}
-                                    className="px-2 text-[10px] font-bold text-cyan-400 hover:text-white transition-colors"
+                                    className="px-2 text-[10px] font-bold text-amber2 hover:text-white transition-colors"
                                 >
                                     SAVE
                                 </button>
@@ -930,16 +930,16 @@ const NonDestructiveEditor = ({
                         {/* Zoom */}
                         <button
                             onClick={handleZoomOut}
-                            className="p-2 hover:bg-white/5 rounded text-slate-400 hover:text-white"
+                            className="p-2 hover:bg-white/5 rounded text-ink-secondary hover:text-white"
                         >
                             <ZoomOut size={16} />
                         </button>
-                        <div className="text-xs text-slate-500 w-12 text-center">
+                        <div className="text-xs text-ink-muted w-12 text-center">
                             {state.zoom}x
                         </div>
                         <button
                             onClick={handleZoomIn}
-                            className="p-2 hover:bg-white/5 rounded text-slate-400 hover:text-white"
+                            className="p-2 hover:bg-white/5 rounded text-ink-secondary hover:text-white"
                         >
                             <ZoomIn size={16} />
                         </button>
@@ -950,14 +950,14 @@ const NonDestructiveEditor = ({
                         <button
                             onClick={handleUndo}
                             disabled={state.historyIndex < 0}
-                            className="p-2 hover:bg-white/5 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                            className="p-2 hover:bg-white/5 rounded text-ink-secondary hover:text-white disabled:opacity-30"
                         >
                             <Undo2 size={16} />
                         </button>
                         <button
                             onClick={handleRedo}
                             disabled={state.historyIndex >= state.history.length - 1}
-                            className="p-2 hover:bg-white/5 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                            className="p-2 hover:bg-white/5 rounded text-ink-secondary hover:text-white disabled:opacity-30"
                         >
                             <Redo2 size={16} />
                         </button>
@@ -967,7 +967,7 @@ const NonDestructiveEditor = ({
                         {/* Render */}
                         <button
                             onClick={handleRender}
-                            className="flex items-center gap-2 px-4 py-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 rounded-lg text-sm font-bold hover:from-cyan-500 hover:to-blue-500 transition-all"
+                            className="flex items-center gap-2 px-4 py-1.5 bg-gradient-to-r from-amber2 to-amber2-press rounded-lg text-sm font-bold hover:from-amber2 hover:to-amber2-press transition-all"
                         >
                             <Download size={14} />
                             Render

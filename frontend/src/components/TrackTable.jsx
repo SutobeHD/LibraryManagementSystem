@@ -130,9 +130,9 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
     };
 
     return (
-        <div className={`h-full overflow-auto scrollbar-thin relative ${variant === 'default' ? 'bg-slate-900/40 rounded-xl shadow-inner border border-white/5 mx-2 mb-2 pb-20' : ''}`}>
+        <div className={`h-full overflow-auto relative ${variant === 'default' ? 'bg-mx-shell border border-line-subtle rounded-mx-md mx-2 mb-2 pb-20' : ''}`}>
             <table className="w-full text-left border-collapse min-w-[800px] table-fixed">
-                <thead className="sticky top-0 bg-slate-800/90 backdrop-blur-md z-10 border-b border-white/10 select-none">
+                <thead className="sticky top-0 z-10 select-none" style={{ background: 'var(--mx-shell)', borderBottom: '1px solid var(--line-subtle)' }}>
                     <tr onContextMenu={(e) => {
                         e.preventDefault();
                         setHeaderMenu({ x: e.clientX, y: e.clientY });
@@ -145,7 +145,7 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
                                     key={col.id}
                                     style={{ width: col.width, textAlign: col.align || 'left' }}
                                     onClick={() => col.sortable && handleSort(col.id)}
-                                    className={`p-2 text-[9px] font-bold text-slate-500 uppercase tracking-wider ${col.sortable ? 'cursor-pointer hover:text-cyan-400 transition-colors' : ''}`}
+                                    className={`p-2 text-[10px] font-semibold text-ink-muted uppercase tracking-wider ${col.sortable ? 'cursor-pointer hover:text-amber2 transition-colors' : ''}`}
                                 >
                                     <div className="flex items-center gap-1 justify-between">
                                         <span className={col.align === 'center' ? 'mx-auto' : (col.align === 'right' ? 'ml-auto' : '')}>{col.label}</span>
@@ -157,7 +157,7 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
                             );
                         })}
                         {customColumns && customColumns.map(col => (
-                            <th key={col.id} style={{ width: col.width }} className="p-2 text-[9px] font-bold text-slate-500 uppercase tracking-wider text-center">{col.label}</th>
+                            <th key={col.id} style={{ width: col.width }} className="p-2 text-[10px] font-semibold text-ink-muted uppercase tracking-wider text-center">{col.label}</th>
                         ))}
                     </tr>
                 </thead>
@@ -172,7 +172,8 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
                                 setContextMenu({ x: e.clientX, y: e.clientY, track: t });
                                 setHeaderMenu(null);
                             }}
-                            className="group hover:bg-white/5 border-b border-white/5 transition-colors cursor-pointer text-[11px]"
+                            className="group transition-colors cursor-pointer text-[12px] hover:bg-mx-hover"
+                            style={{ borderBottom: '1px solid var(--line-subtle)' }}
                             draggable={!!onReorder}
                             onDragStart={(e) => {
                                 if (onReorder) {
@@ -192,11 +193,11 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
                             }}
                         >
                             {visibleColumns.includes('index') && (
-                                <td className="p-1 font-mono text-slate-600 text-right pr-2">{index + 1}</td>
+                                <td className="p-1 font-mono text-ink-muted text-right pr-2 text-[11px]">{index + 1}</td>
                             )}
                             {visibleColumns.includes('preview') && (
                                 <td
-                                    className="p-1 text-center opacity-50 hover:opacity-100 cursor-pointer hover:text-cyan-400"
+                                    className="p-1 text-center opacity-50 hover:opacity-100 cursor-pointer hover:text-amber2"
                                     onClick={(e) => { e.stopPropagation(); onPlay && onPlay(t); }}
                                 >
                                     <Play size={12} className="mx-auto fill-current" />
@@ -205,7 +206,7 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
                             {visibleColumns.includes('artwork') && (
                                 <td className="p-1 px-2 text-center w-[48px]">
                                     {t.Artwork ? (
-                                        <div className="w-10 h-10 rounded-full overflow-hidden mx-auto bg-slate-900 border border-white/10 relative group-hover:scale-105 transition-transform shadow-sm">
+                                        <div className="w-9 h-9 rounded-mx-sm overflow-hidden mx-auto bg-mx-card border border-line-subtle relative group-hover:scale-105 transition-transform">
                                             <img
                                                 src={`${api.defaults.baseURL || ''}/api/artwork?path=${encodeURIComponent(t.Artwork)}`}
                                                 alt={t.Title}
@@ -221,23 +222,23 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
                                             />
                                         </div>
                                     ) : (
-                                        <div className="w-10 h-10 bg-slate-800/50 rounded-full flex items-center justify-center mx-auto text-xs text-slate-700">
-                                            <ImageIcon size={16} />
+                                        <div className="w-9 h-9 bg-mx-card rounded-mx-sm border border-line-subtle flex items-center justify-center mx-auto text-ink-placeholder">
+                                            <ImageIcon size={14} />
                                         </div>
                                     )}
                                 </td>
                             )}
                             {visibleColumns.includes('Title') && (
-                                <td className="p-1 px-2 font-semibold text-slate-300 group-hover:text-cyan-400 transition-colors truncate" title={t.Title}>{t.Title}</td>
+                                <td className="p-1 px-2 font-medium text-ink-primary group-hover:text-amber2 transition-colors truncate" title={t.Title}>{t.Title}</td>
                             )}
                             {visibleColumns.includes('Artist') && (
-                                <td className="p-1 text-slate-400 truncate" title={t.Artist}>{t.Artist}</td>
+                                <td className="p-1 text-ink-secondary truncate" title={t.Artist}>{t.Artist}</td>
                             )}
                             {visibleColumns.includes('Album') && (
-                                <td className="p-1 text-slate-500 truncate" title={t.Album}>{t.Album || '-'}</td>
+                                <td className="p-1 text-ink-muted truncate" title={t.Album}>{t.Album || '-'}</td>
                             )}
                             {visibleColumns.includes('BPM') && (
-                                <td className="p-1 text-slate-300 text-center font-mono">{t.BPM ? parseFloat(t.BPM).toFixed(2) : '-'}</td>
+                                <td className="p-1 text-amber2 text-center font-mono">{t.BPM ? parseFloat(t.BPM).toFixed(2) : '-'}</td>
                             )}
                             {visibleColumns.includes('Key') && (
                                 <td className="p-1 text-center font-mono font-bold">
@@ -257,7 +258,7 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
                                 <td className="p-1 text-center">
                                     <div className="flex justify-center gap-0.5 opacity-40 group-hover:opacity-100">
                                         {[1, 2, 3, 4, 5].map(star => (
-                                            <Star key={star} size={8} fill={star <= (t.Rating || 0) ? "white" : "none"} className={star <= (t.Rating || 0) ? "text-white" : "text-slate-600"} />
+                                            <Star key={star} size={9} fill={star <= (t.Rating || 0) ? "currentColor" : "none"} className={star <= (t.Rating || 0) ? "text-amber2" : "text-ink-placeholder"} />
                                         ))}
                                     </div>
                                 </td>
@@ -268,15 +269,15 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
                                 { id: 'Composer', value: t.Composer },
                                 { id: 'Remixer', value: t.Remixer }
                             ].map(field => visibleColumns.includes(field.id) && (
-                                <td key={field.id} className={`p-1 truncate ${field.id === 'Bitrate' || field.id === 'PlayCount' ? 'text-center font-mono' : 'text-slate-500'}`} title={field.value}>
+                                <td key={field.id} className={`p-1 truncate ${field.id === 'Bitrate' || field.id === 'PlayCount' ? 'text-center font-mono text-ink-secondary' : 'text-ink-muted'}`} title={field.value}>
                                     {field.value || '-'}
                                 </td>
                             ))}
                             {visibleColumns.includes('TotalTime') && (
-                                <td className="p-1 text-slate-500 text-center font-mono">{formatTime(t.TotalTime)}</td>
+                                <td className="p-1 text-ink-secondary text-center font-mono">{formatTime(t.TotalTime)}</td>
                             )}
                             {visibleColumns.includes('DateAdded') && (
-                                <td className="p-1 text-slate-600 text-right pr-2 text-[9px]">{t.DateAdded || '-'}</td>
+                                <td className="p-1 text-ink-muted text-right pr-2 text-[10px] font-mono">{t.DateAdded || '-'}</td>
                             )}
                             {customColumns && customColumns.map(col => (
                                 <td key={col.id} className="p-1">{col.render ? col.render(t) : '-'}</td>
@@ -286,7 +287,7 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
                                     {onRemove && (
                                         <button
                                             onClick={(e) => { e.stopPropagation(); onRemove(t.id); }}
-                                            className="p-1 px-2 hover:bg-red-500/10 rounded-md text-red-400/60 hover:text-red-400 transition-all font-bold opacity-0 group-hover:opacity-100"
+                                            className="p-1 px-2 hover:bg-bad/10 rounded-mx-sm text-bad/60 hover:text-bad transition-all opacity-0 group-hover:opacity-100"
                                         >
                                             <X size={12} />
                                         </button>
@@ -301,21 +302,21 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
             {/* Column Menu */}
             {headerMenu && (
                 <div
-                    className="fixed z-[100] bg-slate-900 border border-white/10 rounded-lg shadow-2xl py-2 min-w-[160px] animate-fade-in backdrop-blur-xl"
+                    className="fixed z-[100] bg-mx-panel border border-line-default rounded-mx-md shadow-mx-lg py-1.5 min-w-[160px] animate-fade-in"
                     style={{ top: headerMenu.y, left: headerMenu.x }}
                     onClick={(e) => e.stopPropagation()}
                 >
-                    <div className="px-3 py-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-white/5 mb-1">Toggle Columns</div>
+                    <div className="mx-caption px-3 py-1.5 border-b border-line-subtle mb-1">Toggle Columns</div>
                     {DEFAULT_COLUMNS.map(col => {
                         if (col.fixed) return null;
                         return (
                             <button
                                 key={col.id}
                                 onClick={() => toggleColumn(col.id)}
-                                className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-white/5 text-xs text-slate-300 transition-colors"
+                                className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-mx-hover text-[12px] text-ink-secondary hover:text-ink-primary transition-colors"
                             >
                                 <span>{col.label}</span>
-                                {visibleColumns.includes(col.id) && <Check size={12} className="text-cyan-400" />}
+                                {visibleColumns.includes(col.id) && <Check size={12} className="text-amber2" />}
                             </button>
                         );
                     })}
@@ -345,22 +346,22 @@ const TrackContextMenuPopup = ({ contextMenu, onEditTrack, openSoundCloud, onRem
 
     return (
         <div
-            className="fixed z-[100] bg-slate-950/90 border border-white/10 rounded-xl shadow-2xl min-w-[200px] animate-fade-in backdrop-blur-xl overflow-visible"
+            className="fixed z-[100] bg-mx-panel border border-line-default rounded-mx-md shadow-mx-lg min-w-[200px] animate-fade-in overflow-visible"
             style={{ top: contextMenu.y, left: contextMenu.x }}
             onClick={(e) => e.stopPropagation()}
         >
-            <div className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-white/5 truncate max-w-[220px]">
+            <div className="mx-caption px-3 py-2 border-b border-line-subtle truncate max-w-[220px]">
                 {contextMenu.track.Title}
             </div>
             <button
                 onClick={() => { onEditTrack && onEditTrack(contextMenu.track); setContextMenu(null); }}
-                className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-cyan-500/10 text-xs text-slate-200 hover:text-cyan-400 transition-colors text-left"
+                className="w-full flex items-center gap-3 px-4 py-2 hover:bg-mx-hover text-[12px] text-ink-secondary hover:text-amber2 transition-colors text-left"
             >
                 <Scissors size={14} /> Open in Waveform Editor
             </button>
             <button
                 onClick={() => { openSoundCloud(contextMenu.track); setContextMenu(null); }}
-                className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[#ff5500]/10 text-xs text-slate-200 hover:text-[#ff5500] transition-colors text-left"
+                className="w-full flex items-center gap-3 px-4 py-2 hover:bg-[#ff5500]/10 text-[12px] text-ink-secondary hover:text-[#ff5500] transition-colors text-left"
             >
                 <div className="w-3.5 h-3.5 bg-current mask-soundcloud" style={{ maskImage: 'url(https://a-v2.sndcdn.com/assets/images/sc-icons/ios-a62dfc8f.svg)', WebkitMaskImage: 'url(https://a-v2.sndcdn.com/assets/images/sc-icons/ios-a62dfc8f.svg)' }}></div>
                 Open in SoundCloud
@@ -369,17 +370,17 @@ const TrackContextMenuPopup = ({ contextMenu, onEditTrack, openSoundCloud, onRem
             {/* Add to Playlist */}
             {onAddToPlaylist && availablePlaylists.length > 0 && (
                 <>
-                    <div className="h-px bg-white/5" />
+                    <div className="h-px bg-line-subtle" />
                     <div className="relative"
                         onMouseEnter={() => setShowAddSubmenu(true)}
                         onMouseLeave={() => setShowAddSubmenu(false)}
                     >
-                        <button className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-green-500/10 text-xs text-slate-200 hover:text-green-400 transition-colors text-left">
-                            <Plus size={14} className="text-green-400" /> Add to Playlist
-                            <ChevronRight size={12} className="ml-auto text-slate-600" />
+                        <button className="w-full flex items-center gap-3 px-4 py-2 hover:bg-mx-hover text-[12px] text-ink-secondary hover:text-ok transition-colors text-left">
+                            <Plus size={14} className="text-ok" /> Add to Playlist
+                            <ChevronRight size={12} className="ml-auto text-ink-muted" />
                         </button>
                         {showAddSubmenu && (
-                            <div className="absolute left-full top-0 ml-1 bg-slate-950/95 border border-white/10 rounded-xl shadow-2xl py-1 min-w-[180px] max-h-[300px] overflow-y-auto backdrop-blur-xl z-[110]">
+                            <div className="absolute left-full top-0 ml-1 bg-mx-panel border border-line-default rounded-mx-md shadow-mx-lg py-1 min-w-[180px] max-h-[300px] overflow-y-auto z-[110]">
                                 {availablePlaylists.map(pl => (
                                     <button
                                         key={pl.ID}
@@ -387,9 +388,9 @@ const TrackContextMenuPopup = ({ contextMenu, onEditTrack, openSoundCloud, onRem
                                             onAddToPlaylist(pl.ID, contextMenu.track.id || contextMenu.track.ID);
                                             setContextMenu(null);
                                         }}
-                                        className="w-full flex items-center gap-2 px-4 py-1.5 hover:bg-white/5 text-xs text-slate-300 transition-colors truncate"
+                                        className="w-full flex items-center gap-2 px-4 py-1.5 hover:bg-mx-hover text-[12px] text-ink-secondary hover:text-ink-primary transition-colors truncate"
                                     >
-                                        <ListMusic size={12} className="text-cyan-500/50 shrink-0" />
+                                        <ListMusic size={12} className="text-amber2/60 shrink-0" />
                                         <span className="truncate">{pl.Name}</span>
                                     </button>
                                 ))}
@@ -402,13 +403,13 @@ const TrackContextMenuPopup = ({ contextMenu, onEditTrack, openSoundCloud, onRem
             {/* Remove from Playlist */}
             {onRemove && (
                 <>
-                    <div className="h-px bg-white/5" />
+                    <div className="h-px bg-line-subtle" />
                     <button
                         onClick={() => {
                             onRemove(contextMenu.track.id || contextMenu.track.ID);
                             setContextMenu(null);
                         }}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-orange-500/10 text-xs text-slate-200 hover:text-orange-400 transition-colors text-left"
+                        className="w-full flex items-center gap-3 px-4 py-2 hover:bg-amber2/10 text-[12px] text-ink-secondary hover:text-amber2 transition-colors text-left"
                     >
                         <X size={14} /> Remove from Playlist
                     </button>
@@ -418,7 +419,7 @@ const TrackContextMenuPopup = ({ contextMenu, onEditTrack, openSoundCloud, onRem
             {/* Delete from Collection */}
             {onDelete && (
                 <>
-                    <div className="h-px bg-white/5" />
+                    <div className="h-px bg-line-subtle" />
                     <button
                         onClick={() => {
                             if (window.confirm(`Are you sure you want to PERMANENTLY delete "${contextMenu.track.Title}" from the library?`)) {
@@ -426,7 +427,7 @@ const TrackContextMenuPopup = ({ contextMenu, onEditTrack, openSoundCloud, onRem
                             }
                             setContextMenu(null);
                         }}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-red-500/10 text-xs text-slate-200 hover:text-red-400 transition-colors text-left"
+                        className="w-full flex items-center gap-3 px-4 py-2 hover:bg-bad/10 text-[12px] text-ink-secondary hover:text-bad transition-colors text-left"
                     >
                         <Trash2 size={14} /> Delete from Collection
                     </button>

@@ -111,7 +111,7 @@ const BackupManager = ({ onClose }) => {
 
     return (
         <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
-            <div className="w-full max-w-2xl max-h-[85vh] bg-slate-950 rounded-3xl border border-white/10 shadow-2xl flex flex-col overflow-hidden">
+            <div className="w-full max-w-2xl max-h-[85vh] bg-mx-deepest rounded-3xl border border-white/10 shadow-2xl flex flex-col overflow-hidden">
                 {/* Header */}
                 <div className="p-6 pb-4 border-b border-white/5 flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -120,7 +120,7 @@ const BackupManager = ({ onClose }) => {
                         </div>
                         <div>
                             <h2 className="text-xl font-black italic uppercase tracking-tight">Backup Timeline</h2>
-                            <p className="text-slate-500 text-xs mt-0.5">{backups.length} backups · Incremental engine</p>
+                            <p className="text-ink-muted text-xs mt-0.5">{backups.length} backups · Incremental engine</p>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -131,7 +131,7 @@ const BackupManager = ({ onClose }) => {
                             New Backup
                         </button>
                         <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-lg transition-colors">
-                            <X size={18} className="text-slate-400" />
+                            <X size={18} className="text-ink-secondary" />
                         </button>
                     </div>
                 </div>
@@ -144,9 +144,9 @@ const BackupManager = ({ onClose }) => {
                         </div>
                     ) : backups.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-32 text-center">
-                            <Archive size={32} className="text-slate-700 mb-3" />
-                            <p className="text-slate-500 text-sm">No backups yet</p>
-                            <p className="text-slate-600 text-xs">Click "New Backup" to create your first snapshot</p>
+                            <Archive size={32} className="text-ink-placeholder mb-3" />
+                            <p className="text-ink-muted text-sm">No backups yet</p>
+                            <p className="text-ink-placeholder text-xs">Click "New Backup" to create your first snapshot</p>
                         </div>
                     ) : (
                         <div className="relative">
@@ -166,7 +166,7 @@ const BackupManager = ({ onClose }) => {
                                                 ? 'bg-amber-500 border-amber-500/50'
                                                 : i === 0
                                                     ? 'bg-emerald-400 border-emerald-400/50'
-                                                    : 'bg-slate-700 border-slate-600'
+                                                    : 'bg-mx-hover border-slate-600'
                                             }`} />
 
                                         <div className={`p-3 rounded-xl border transition-all hover:bg-white/[0.02] ${isExpanded ? 'bg-white/[0.03] border-white/10' : 'border-transparent'
@@ -177,16 +177,16 @@ const BackupManager = ({ onClose }) => {
                                                         {isLegacy ? (
                                                             <span className="text-[9px] font-bold px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded">LEGACY</span>
                                                         ) : (
-                                                            <code className="text-[10px] font-mono text-slate-500 bg-white/5 px-1.5 py-0.5 rounded">{backup.hash}</code>
+                                                            <code className="text-[10px] font-mono text-ink-muted bg-white/5 px-1.5 py-0.5 rounded">{backup.hash}</code>
                                                         )}
-                                                        <span className="text-xs text-slate-300 truncate">{backup.message}</span>
+                                                        <span className="text-xs text-ink-primary truncate">{backup.message}</span>
                                                     </div>
-                                                    <div className="flex items-center gap-3 mt-1 text-[10px] text-slate-600">
+                                                    <div className="flex items-center gap-3 mt-1 text-[10px] text-ink-placeholder">
                                                         <span className="flex items-center gap-1"><Clock size={9} /> {formatDate(backup.timestamp)}</span>
                                                         <span>{timeSince(backup.timestamp)}</span>
                                                         {backup.size && <span>{formatSize(backup.size)}</span>}
                                                         {hasChanges && !isLegacy && (
-                                                            <span className="text-slate-500">
+                                                            <span className="text-ink-muted">
                                                                 {stats.added > 0 && <span className="text-emerald-400">+{stats.added}</span>}
                                                                 {stats.modified > 0 && <span className="text-amber-400 ml-1">~{stats.modified}</span>}
                                                                 {stats.deleted > 0 && <span className="text-red-400 ml-1">-{stats.deleted}</span>}
@@ -197,7 +197,7 @@ const BackupManager = ({ onClose }) => {
                                                 <div className="flex items-center gap-1">
                                                     {!isLegacy && (
                                                         <button onClick={() => viewDiff(backup.hash)}
-                                                            className="p-1.5 hover:bg-white/5 rounded-lg transition-colors text-slate-500 hover:text-slate-300"
+                                                            className="p-1.5 hover:bg-white/5 rounded-lg transition-colors text-ink-muted hover:text-ink-primary"
                                                             title="View changes"
                                                         >
                                                             <ChevronRight size={14} className={`transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
@@ -206,7 +206,7 @@ const BackupManager = ({ onClose }) => {
                                                     <button
                                                         onClick={() => restoreBackup(backup)}
                                                         disabled={restoring === backup.hash}
-                                                        className="p-1.5 hover:bg-emerald-500/10 rounded-lg transition-colors text-slate-500 hover:text-emerald-400"
+                                                        className="p-1.5 hover:bg-emerald-500/10 rounded-lg transition-colors text-ink-muted hover:text-emerald-400"
                                                         title="Restore this backup"
                                                     >
                                                         {restoring === backup.hash
@@ -221,7 +221,7 @@ const BackupManager = ({ onClose }) => {
                                                 <div className="mt-3 p-3 bg-white/[0.02] rounded-xl border border-white/5 text-[11px]">
                                                     {Object.entries(commitDiff.tables || {}).map(([table, info]) => (
                                                         <div key={table} className="mb-2 last:mb-0">
-                                                            <div className="font-bold text-slate-400 mb-1 flex items-center gap-2">
+                                                            <div className="font-bold text-ink-secondary mb-1 flex items-center gap-2">
                                                                 <Database size={10} />
                                                                 {table}
                                                                 <span className="text-emerald-400">+{info.added}</span>
@@ -231,7 +231,7 @@ const BackupManager = ({ onClose }) => {
                                                         </div>
                                                     ))}
                                                     {Object.keys(commitDiff.tables || {}).length === 0 && (
-                                                        <div className="text-slate-600 text-center py-2">No detailed diff available</div>
+                                                        <div className="text-ink-placeholder text-center py-2">No detailed diff available</div>
                                                     )}
                                                 </div>
                                             )}

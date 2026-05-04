@@ -1372,7 +1372,7 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
         }
     }, [isPlayingExternal]);
 
-    if (loading && !fullTrack) return <div className="flex h-full items-center justify-center text-slate-500 bg-black">Loading...</div>;
+    if (loading && !fullTrack) return <div className="flex h-full items-center justify-center text-ink-muted bg-black">Loading...</div>;
 
     if (simpleMode) {
         return (
@@ -1400,7 +1400,7 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
 
                     {analyzing && (
                         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                            <span className="text-xs font-bold text-cyan-400 animate-pulse">ANALYZING 3-BAND...</span>
+                            <span className="text-xs font-bold text-amber2 animate-pulse">ANALYZING 3-BAND...</span>
                         </div>
                     )}
                 </div>
@@ -1422,18 +1422,18 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
         <div className="rb-edit-container relative">
             {isRendering && (
                 <div className="absolute inset-0 z-[100] flex flex-col items-center justify-center bg-black/90 backdrop-blur-md animate-fade-in">
-                    <div className="w-80 p-8 glass-panel border border-cyan-500/20 rounded-2xl flex flex-col items-center">
-                        <Loader2 size={48} className="text-cyan-400 animate-spin mb-6" />
+                    <div className="w-80 p-8 glass-panel border border-amber2/20 rounded-2xl flex flex-col items-center">
+                        <Loader2 size={48} className="text-amber2 animate-spin mb-6" />
                         <h3 className="text-xl font-bold text-white mb-2">Rendering Audio</h3>
-                        <p className="text-slate-400 text-sm mb-6">Processing insertion and effects...</p>
+                        <p className="text-ink-secondary text-sm mb-6">Processing insertion and effects...</p>
 
                         <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden mb-2">
                             <div
-                                className="h-full bg-gradient-to-r from-cyan-500 to-blue-600 transition-all duration-300"
+                                className="h-full bg-gradient-to-r from-amber2 to-amber2-press transition-all duration-300"
                                 style={{ width: `${renderProgress}%` }}
                             />
                         </div>
-                        <div className="text-[10px] font-mono text-cyan-500 tracking-widest">{renderProgress}% COMPLETE</div>
+                        <div className="text-[10px] font-mono text-amber2 tracking-widest">{renderProgress}% COMPLETE</div>
                     </div>
                 </div>
             )}
@@ -1441,20 +1441,20 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
             <div className="rb-header">
                 <div className="flex items-center gap-6">
                     <div className="flex items-center gap-3">
-                        <span className="text-slate-500 font-bold tracking-tight">RB EDITOR PRO</span>
+                        <span className="text-ink-muted font-bold tracking-tight">RB EDITOR PRO</span>
                     </div>
-                    <div className="bg-[#1a1a1a] h-6 px-4 flex items-center rounded border border-white/5 font-bold text-cyan-400 text-[10px]">
+                    <div className="bg-[#1a1a1a] h-6 px-4 flex items-center rounded border border-white/5 font-bold text-amber2 text-[10px]">
                         EDIT MODE
                     </div>
                 </div>
                 <div className="flex items-center gap-4">
                     <button
                         onClick={() => setShowBrowser(!showBrowser)}
-                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-[10px] font-bold transition-all ${showBrowser ? 'bg-cyan-500/20 border-cyan-500/30 text-cyan-400' : 'bg-[#1a1a1a] border-white/5 text-slate-500'}`}
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-[10px] font-bold transition-all ${showBrowser ? 'bg-amber2/20 border-amber2/30 text-amber2' : 'bg-[#1a1a1a] border-white/5 text-ink-muted'}`}
                     >
                         <ListPlus size={14} /> BROWSER
                     </button>
-                    <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
+                    <div className="flex items-center gap-2 text-[10px] text-ink-muted font-mono">
                         <ScanLine size={12} />
                         <span>GRID LOCK: ON</span>
                     </div>
@@ -1474,7 +1474,7 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                     <select
                         value={selectedProject}
                         onChange={(e) => setSelectedProject(e.target.value)}
-                        className="bg-[#050505] text-slate-300 font-bold outline-none text-xs border border-white/5 rounded px-2 py-1 max-w-[150px]"
+                        className="bg-[#050505] text-ink-primary font-bold outline-none text-xs border border-white/5 rounded px-2 py-1 max-w-[150px]"
                     >
                         <option value="">New Project</option>
                         {projectList.map(p => <option key={p.path} value={p.path}>{p.name}.prj</option>)}
@@ -1502,20 +1502,20 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                     </div>
 
                     <div onClick={handleToggleVisualMode} className={`flex items-center h-8 px-3 rounded border border-white/5 gap-2 cursor-pointer transition-all ${visualMode !== 'blue' ? 'bg-indigo-500/20 border-indigo-500/30' : 'bg-black'}`}>
-                        <Layers size={12} className={visualMode !== 'blue' ? 'text-indigo-400' : 'text-slate-500'} />
-                        <span className={`text-[10px] uppercase font-bold ${visualMode !== 'blue' ? 'text-indigo-400' : 'text-slate-500'}`}>{visualMode}</span>
+                        <Layers size={12} className={visualMode !== 'blue' ? 'text-indigo-400' : 'text-ink-muted'} />
+                        <span className={`text-[10px] uppercase font-bold ${visualMode !== 'blue' ? 'text-indigo-400' : 'text-ink-muted'}`}>{visualMode}</span>
                     </div>
 
-                    <div onClick={() => setIsQuantized(!isQuantized)} className={`flex items-center h-8 px-3 rounded border border-white/5 gap-2 cursor-pointer transition-all ${isQuantized ? 'bg-cyan-500/10 border-cyan-500/30' : 'bg-black'}`}>
-                        <RotateCcw size={12} className={isQuantized ? 'text-cyan-400' : 'text-orange-500'} />
-                        <span className={`text-[10px] uppercase font-bold ${isQuantized ? 'text-cyan-400' : 'text-slate-500'}`}>Q : {isQuantized ? 'ON' : 'AUTO'}</span>
+                    <div onClick={() => setIsQuantized(!isQuantized)} className={`flex items-center h-8 px-3 rounded border border-white/5 gap-2 cursor-pointer transition-all ${isQuantized ? 'bg-amber2/10 border-amber2/30' : 'bg-black'}`}>
+                        <RotateCcw size={12} className={isQuantized ? 'text-amber2' : 'text-orange-500'} />
+                        <span className={`text-[10px] uppercase font-bold ${isQuantized ? 'text-amber2' : 'text-ink-muted'}`}>Q : {isQuantized ? 'ON' : 'AUTO'}</span>
                     </div>
 
                     <div className="flex items-center gap-1 bg-[#050505] px-2 py-1 rounded border border-white/5">
-                        <span className="text-[9px] text-slate-500 font-bold mr-2">GRID</span>
-                        <button onClick={() => handleGridShift(-0.01)} className="p-1 hover:bg-white/5 rounded text-slate-400 hover:text-white" title="-10ms"><ChevronLeft size={12} /></button>
-                        <button onClick={() => handleSaveGrid()} className="p-1 hover:bg-white/5 rounded text-cyan-500 hover:text-cyan-400" title="Save Grid"><Save size={12} /></button>
-                        <button onClick={() => handleGridShift(0.01)} className="p-1 hover:bg-white/5 rounded text-slate-400 hover:text-white" title="+10ms"><ChevronRight size={12} /></button>
+                        <span className="text-[9px] text-ink-muted font-bold mr-2">GRID</span>
+                        <button onClick={() => handleGridShift(-0.01)} className="p-1 hover:bg-white/5 rounded text-ink-secondary hover:text-white" title="-10ms"><ChevronLeft size={12} /></button>
+                        <button onClick={() => handleSaveGrid()} className="p-1 hover:bg-white/5 rounded text-amber2 hover:text-amber2" title="Save Grid"><Save size={12} /></button>
+                        <button onClick={() => handleGridShift(0.01)} className="p-1 hover:bg-white/5 rounded text-ink-secondary hover:text-white" title="+10ms"><ChevronRight size={12} /></button>
                     </div>
 
                     <button
@@ -1532,16 +1532,16 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
             {/* Metadata Bar */}
             <div className="h-12 flex items-center justify-between px-6 bg-black border-b border-white/5">
                 <div className="flex items-center gap-4">
-                    <div className="rb-metadata-value !text-cyan-400 bg-cyan-950/20 px-2 rounded border border-cyan-500/20 uppercase">
+                    <div className="rb-metadata-value !text-amber2 bg-amber2/20 px-2 rounded border border-amber2/20 uppercase">
                         {visualMode} MODE
                     </div>
                     <div className="flex items-center gap-4">
-                        <div className="w-8 h-8 bg-cyan-700/20 flex items-center justify-center rounded border border-cyan-500/20">
-                            <Disc size={20} className="text-cyan-400" />
+                        <div className="w-8 h-8 bg-amber2/20 flex items-center justify-center rounded border border-amber2/20">
+                            <Disc size={20} className="text-amber2" />
                         </div>
                         <div>
                             <div className="text-sm font-bold truncate max-w-[200px]">{fullTrack?.Title || 'No Track'}</div>
-                            <div className="text-[10px] text-slate-500 truncate">{fullTrack?.Artist || 'Unknown Artist'}</div>
+                            <div className="text-[10px] text-ink-muted truncate">{fullTrack?.Artist || 'Unknown Artist'}</div>
                         </div>
                     </div>
                 </div>
@@ -1561,13 +1561,13 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                 <div className="rb-detail-container relative">
                     {streaming ? (
                         <div className="absolute inset-0 z-[60] flex flex-col items-center justify-center bg-black/40 backdrop-blur-sm">
-                            <div className="bg-slate-900/80 p-8 rounded-2xl border border-white/10 flex flex-col items-center gap-4 shadow-2xl">
+                            <div className="bg-mx-shell/80 p-8 rounded-2xl border border-white/10 flex flex-col items-center gap-4 shadow-2xl">
                                 <div className="w-16 h-16 bg-amber-500/20 rounded-full flex items-center justify-center border border-amber-500/30">
                                     <Music size={32} className="text-amber-500" />
                                 </div>
                                 <div className="text-center">
                                     <h3 className="text-lg font-bold text-white mb-1 tracking-tight">Stream Not Supported</h3>
-                                    <p className="text-sm text-slate-400 max-w-[240px] leading-relaxed">
+                                    <p className="text-sm text-ink-secondary max-w-[240px] leading-relaxed">
                                         Cloud and subscription tracks (SoundCloud, Spotify, etc.) cannot be analyzed or edited directly.
                                     </p>
                                 </div>
@@ -1581,9 +1581,9 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                     ) : (
                         loading && (
                             <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/60 backdrop-blur-md">
-                                <Loader2 className="w-12 h-12 text-cyan-500 animate-spin mb-4" />
-                                <div className="text-cyan-500 font-bold uppercase tracking-widest text-xs animate-pulse">Loading Audio...</div>
-                                <div className="text-[10px] text-slate-500 mt-2">Decoding high-fidelity waveform buffer</div>
+                                <Loader2 className="w-12 h-12 text-amber2 animate-spin mb-4" />
+                                <div className="text-amber2 font-bold uppercase tracking-widest text-xs animate-pulse">Loading Audio...</div>
+                                <div className="text-[10px] text-ink-muted mt-2">Decoding high-fidelity waveform buffer</div>
                             </div>
                         )
                     )}
@@ -1614,14 +1614,14 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
 
                     {/* Cuts Summary */}
                     {cuts.length > 0 && (
-                        <div className="absolute top-2 right-2 bg-black/80 backdrop-blur-md border border-white/10 rounded-lg p-2 text-[10px] font-mono text-slate-400 max-w-[200px]">
+                        <div className="absolute top-2 right-2 bg-black/80 backdrop-blur-md border border-white/10 rounded-lg p-2 text-[10px] font-mono text-ink-secondary max-w-[200px]">
                             <div className="text-amber-400 font-bold mb-1 flex items-center gap-1"><Scissors size={10} /> {cuts.length} Edit(s)</div>
                             {cuts.slice(0, 3).map(c => (
                                 <div key={c.id} className={`truncate ${c.type === 'delete' ? 'text-red-400' : 'text-green-400'}`}>
                                     {c.type === 'delete' ? `DEL: ${c.start.toFixed(1)}s - ${c.end.toFixed(1)}s` : `INS: @${(c.insertAt || 0).toFixed(1)}s`}
                                 </div>
                             ))}
-                            {cuts.length > 3 && <div className="text-slate-600">+{cuts.length - 3} more</div>}
+                            {cuts.length > 3 && <div className="text-ink-placeholder">+{cuts.length - 3} more</div>}
                         </div>
                     )}
                 </div>
@@ -1638,13 +1638,13 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                             <Infinity size={12} className="text-amber-500" /> Loops
                         </div>
                         <div className="flex gap-2">
-                            <button onClick={handleSetLoopIn} className="flex-1 h-12 bg-slate-800/40 hover:bg-slate-700/40 border border-amber-500/30 text-amber-500 font-bold rounded flex items-center justify-center gap-2 text-xs">
+                            <button onClick={handleSetLoopIn} className="flex-1 h-12 bg-mx-card/40 hover:bg-mx-hover/40 border border-amber-500/30 text-amber-500 font-bold rounded flex items-center justify-center gap-2 text-xs">
                                 LOOP IN
                             </button>
-                            <button onClick={handleSetLoopOut} className="flex-1 h-12 bg-slate-800/40 hover:bg-slate-700/40 border border-amber-500/30 text-amber-500 font-bold rounded flex items-center justify-center gap-2 text-xs">
+                            <button onClick={handleSetLoopOut} className="flex-1 h-12 bg-mx-card/40 hover:bg-mx-hover/40 border border-amber-500/30 text-amber-500 font-bold rounded flex items-center justify-center gap-2 text-xs">
                                 LOOP OUT
                             </button>
-                            <button onClick={() => { setLoopIn(null); setLoopOut(null); setIsLooping(false); }} className="w-12 h-12 bg-slate-800/20 border border-white/5 text-slate-500 rounded flex items-center justify-center">
+                            <button onClick={() => { setLoopIn(null); setLoopOut(null); setIsLooping(false); }} className="w-12 h-12 bg-mx-card/20 border border-white/5 text-ink-muted rounded flex items-center justify-center">
                                 <X size={14} />
                             </button>
                         </div>
@@ -1657,7 +1657,7 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                                 <button
                                     key={b}
                                     onClick={() => setSelectedBeats(b)}
-                                    className={`h-9 text-[11px] font-bold border rounded transition-all ${selectedBeats === b ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400' : 'bg-[#1a1a1a] border-white/5 text-slate-500'}`}
+                                    className={`h-9 text-[11px] font-bold border rounded transition-all ${selectedBeats === b ? 'bg-amber2/20 border-amber2 text-amber2' : 'bg-[#1a1a1a] border-white/5 text-ink-muted'}`}
                                 >
                                     {b} BEAT
                                 </button>
@@ -1682,7 +1682,7 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                                         onClick={() => handleSetHotCue(num)}
                                         className={`h-16 rounded border-2 flex flex-col items-center justify-center font-bold transition-all relative group ${cue
                                             ? 'text-white border-white/20'
-                                            : 'bg-slate-800/30 border-white/5 text-slate-600'
+                                            : 'bg-mx-card/30 border-white/5 text-ink-placeholder'
                                             }`}
                                         style={cue ? { backgroundColor: HOT_CUE_COLORS[num - 1] } : {}}
                                     >
@@ -1697,14 +1697,14 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                                 );
                             })}
                         </div>
-                        <button onClick={handleSaveCues} className="mt-2 h-7 bg-cyan-900/20 border border-cyan-500/30 text-cyan-400 text-[10px] font-bold rounded flex items-center justify-center gap-2">
+                        <button onClick={handleSaveCues} className="mt-2 h-7 bg-amber2/20 border border-amber2/30 text-amber2 text-[10px] font-bold rounded flex items-center justify-center gap-2">
                             <Save size={12} /> SAVE TO XML
                         </button>
                     </div>
 
                     {/* Edit Actions Bottom */}
                     <div className="flex-1 p-2 flex flex-col justify-end">
-                        <div className="rb-panel-title !bg-transparent !p-0 mb-3 text-slate-400 uppercase tracking-tighter">Edit Tools</div>
+                        <div className="rb-panel-title !bg-transparent !p-0 mb-3 text-ink-secondary uppercase tracking-tighter">Edit Tools</div>
                         <div className="grid grid-cols-4 gap-2">
                             <button onClick={handleCopy} className="rb-tool-btn !py-2"><Clipboard size={14} />COPY</button>
                             <button onClick={handlePaste} className="rb-tool-btn !py-2"><Clipboard size={14} />PASTE</button>
@@ -1712,7 +1712,7 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                             <button onClick={handleDelete} className="rb-tool-btn !py-2"><Trash2 size={14} />DELETE</button>
                             <button onClick={() => setCuts([])} className="rb-tool-btn !py-2 text-orange-400"><Scissors size={14} />CLEAR</button>
                             <button onClick={handleUndo} disabled={historyIdx < 0} className="rb-tool-btn !py-2 disabled:opacity-20"><RotateCcw size={14} />UNDO</button>
-                            <button onClick={() => handleRender(cuts)} className="rb-tool-btn !py-2 text-cyan-400 border-cyan-500/10 col-span-2"><Download size={14} />EXPORT</button>
+                            <button onClick={() => handleRender(cuts)} className="rb-tool-btn !py-2 text-amber2 border-amber2/10 col-span-2"><Download size={14} />EXPORT</button>
                         </div>
                     </div>
                 </div>

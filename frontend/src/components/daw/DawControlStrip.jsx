@@ -171,7 +171,7 @@ const DawControlStrip = React.memo(({
 
 
     return (
-        <div className="bg-slate-900/80 border-t border-white/5 flex items-center shrink-0 backdrop-blur-xl overflow-hidden">
+        <div className="bg-mx-shell/80 border-t border-white/5 flex items-center shrink-0 backdrop-blur-xl overflow-hidden">
             {/* ── TRANSPORT ── */}
             <div className="flex items-center gap-0.5 px-3 py-1.5 border-r border-white/5">
                 <TBtn onClick={handleGoToStart} title="Go to Start">
@@ -180,7 +180,7 @@ const DawControlStrip = React.memo(({
                 <button
                     onClick={isPlaying ? onStop : onPlay}
                     className={`p-2 rounded-lg transition-all ${isPlaying
-                        ? 'bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30'
+                        ? 'bg-amber2/20 text-amber2 hover:bg-amber2/30'
                         : 'bg-white/5 text-white hover:bg-white/10'
                         }`}
                     title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
@@ -202,22 +202,22 @@ const DawControlStrip = React.memo(({
                     onClick={toggleTimeMode}
                     title="Click to toggle Elapsed / Remaining"
                 >
-                    <span className={`text-sm font-mono font-bold tracking-tight leading-none transition-colors ${timeMode === 'remaining' ? 'text-cyan-300' : 'text-white'}`}>
+                    <span className={`text-sm font-mono font-bold tracking-tight leading-none transition-colors ${timeMode === 'remaining' ? 'text-amber2-hover' : 'text-white'}`}>
                         {timeMode === 'remaining' ? formatRemaining(playhead) : formatTime(playhead)}
                     </span>
-                    <span className="text-[8px] text-slate-500 font-mono uppercase tracking-wider group-hover:text-slate-400 transition-colors">
+                    <span className="text-[8px] text-ink-muted font-mono uppercase tracking-wider group-hover:text-ink-secondary transition-colors">
                         {timeMode === 'remaining' ? 'Remaining' : `Bar ${posInfo.bar} · Beat ${posInfo.beat}`}
                     </span>
                 </div>
                 <div className="flex flex-col items-center">
                     <div className="flex items-center gap-1">
-                        <button onClick={() => handleAdjustBpm(-0.1)} className="text-[10px] text-slate-600 hover:text-white"><Minus size={10} /></button>
-                        <span className="text-xs font-mono font-bold text-cyan-400 leading-none">
+                        <button onClick={() => handleAdjustBpm(-0.1)} className="text-[10px] text-ink-placeholder hover:text-white"><Minus size={10} /></button>
+                        <span className="text-xs font-mono font-bold text-amber2 leading-none">
                             {bpm?.toFixed(1) || '---'}
                         </span>
-                        <button onClick={() => handleAdjustBpm(0.1)} className="text-[10px] text-slate-600 hover:text-white"><Plus size={10} /></button>
+                        <button onClick={() => handleAdjustBpm(0.1)} className="text-[10px] text-ink-placeholder hover:text-white"><Plus size={10} /></button>
                     </div>
-                    <span className="text-[8px] text-slate-500 uppercase tracking-wider">BPM</span>
+                    <span className="text-[8px] text-ink-muted uppercase tracking-wider">BPM</span>
                 </div>
             </div>
 
@@ -226,7 +226,7 @@ const DawControlStrip = React.memo(({
                 <TBtn onClick={() => handleShiftGrid(-0.01)} title="Shift Grid Left">
                     <ChevronsLeft size={14} />
                 </TBtn>
-                <span className="text-[8px] text-slate-500 font-bold uppercase w-8 text-center leading-tight">Grid<br />Shift</span>
+                <span className="text-[8px] text-ink-muted font-bold uppercase w-8 text-center leading-tight">Grid<br />Shift</span>
                 <TBtn onClick={() => handleShiftGrid(0.01)} title="Shift Grid Right">
                     <ChevronsRight size={14} />
                 </TBtn>
@@ -264,8 +264,8 @@ const DawControlStrip = React.memo(({
                 <button
                     onClick={handleSnapToggle}
                     className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all ${snapEnabled
-                        ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
-                        : 'bg-white/5 text-slate-500 border border-white/5'
+                        ? 'bg-amber2/15 text-amber2 border border-amber2/30'
+                        : 'bg-white/5 text-ink-muted border border-white/5'
                         }`}
                     title="Toggle Snap"
                 >
@@ -275,7 +275,7 @@ const DawControlStrip = React.memo(({
                 <select
                     value={snapDivision}
                     onChange={handleDivisionChange}
-                    className="bg-slate-800 border border-white/10 text-[10px] text-slate-300 rounded px-1.5 py-1 appearance-none cursor-pointer focus:outline-none"
+                    className="bg-mx-card border border-white/10 text-[10px] text-ink-primary rounded px-1.5 py-1 appearance-none cursor-pointer focus:outline-none"
                 >
                     <option value="1/1">Bar</option>
                     <option value="1/2">1/2</option>
@@ -284,13 +284,13 @@ const DawControlStrip = React.memo(({
                     <option value="1/16">1/16</option>
                 </select>
                 <div className="w-px h-4 bg-white/10 mx-0.5" />
-                <Grid3X3 size={12} className="text-slate-500" />
+                <Grid3X3 size={12} className="text-ink-muted" />
                 <input
                     type="range" min="10" max="2000" value={zoom}
                     onChange={handleZoomChange}
-                    className="w-16 h-1 bg-slate-700 rounded-full appearance-none cursor-pointer accent-cyan-500"
+                    className="w-16 h-1 bg-mx-hover rounded-full appearance-none cursor-pointer accent-amber2"
                 />
-                <span className="text-[9px] text-slate-500 font-mono w-6">{Math.round(zoom)}</span>
+                <span className="text-[9px] text-ink-muted font-mono w-6">{Math.round(zoom)}</span>
 
                 <div className="w-px h-4 bg-white/10 mx-0.5" />
                 <TBtn
@@ -311,7 +311,7 @@ const DawControlStrip = React.memo(({
                         onContextMenu={(e) => { e.preventDefault(); if (cue) handleDeleteHotCue(i, e); }}
                         className={`relative w-7 h-7 rounded text-[10px] font-bold transition-all ${cue
                             ? 'text-slate-900 shadow-sm hover:brightness-110'
-                            : 'bg-slate-800/60 text-slate-600 hover:bg-slate-700/60 border border-white/5'
+                            : 'bg-mx-card/60 text-ink-placeholder hover:bg-mx-hover/60 border border-white/5'
                             }`}
                         style={cue ? { backgroundColor: `rgb(${cue.red},${cue.green},${cue.blue})` } : undefined}
                         title={cue ? `${cue.name} — ${formatTime(cue.time)} (Right-click to delete)` : `Set Hot Cue ${String.fromCharCode(65 + i)}`}
@@ -365,12 +365,12 @@ const TBtn = React.memo(({ onClick, children, disabled, active, danger, title })
         onClick={onClick}
         disabled={disabled}
         className={`p-1.5 rounded-lg transition-colors text-xs ${disabled
-            ? 'text-slate-700 cursor-not-allowed opacity-50'
+            ? 'text-ink-placeholder cursor-not-allowed opacity-50'
             : active
                 ? 'text-amber-400 bg-amber-500/10'
                 : danger
-                    ? 'text-slate-400 hover:text-red-400 hover:bg-red-500/10'
-                    : 'text-slate-400 hover:text-white hover:bg-white/5'
+                    ? 'text-ink-secondary hover:text-red-400 hover:bg-red-500/10'
+                    : 'text-ink-secondary hover:text-white hover:bg-white/5'
             }`}
         title={title}
     >

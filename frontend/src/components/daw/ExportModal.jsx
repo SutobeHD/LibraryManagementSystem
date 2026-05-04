@@ -182,7 +182,7 @@ const ExportModal = React.memo(({ state, onClose }) => {
                         </div>
                         <span className="text-sm font-semibold text-white tracking-tight">Export Project</span>
                     </div>
-                    <button onClick={onClose} className="w-6 h-6 flex items-center justify-center rounded text-slate-500 hover:text-white hover:bg-white/8 transition-colors">
+                    <button onClick={onClose} className="w-6 h-6 flex items-center justify-center rounded text-ink-muted hover:text-white hover:bg-white/8 transition-colors">
                         <X size={14} />
                     </button>
                 </div>
@@ -194,30 +194,30 @@ const ExportModal = React.memo(({ state, onClose }) => {
                     </div>
                     <div className="min-w-0 flex-1">
                         <div className="text-xs font-semibold text-white truncate">{trackTitle}</div>
-                        <div className="text-[10px] text-slate-500 truncate">{trackArtist}</div>
+                        <div className="text-[10px] text-ink-muted truncate">{trackArtist}</div>
                     </div>
                     <div className="text-right flex-shrink-0">
-                        <div className="text-[10px] font-mono text-slate-400">{durStr}</div>
-                        <div className="text-[10px] text-slate-600">{state.bpm ? `${Math.round(state.bpm)} BPM` : '— BPM'}</div>
+                        <div className="text-[10px] font-mono text-ink-secondary">{durStr}</div>
+                        <div className="text-[10px] text-ink-placeholder">{state.bpm ? `${Math.round(state.bpm)} BPM` : '— BPM'}</div>
                     </div>
                 </div>
 
                 <div className="px-5 mt-4 space-y-4">
                     {/* Output Path */}
                     <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">Output Path</label>
+                        <label className="text-[10px] font-bold text-ink-muted uppercase tracking-widest mb-1.5 block">Output Path</label>
                         <div className="flex gap-2">
                             <input
                                 type="text"
                                 value={outputPath}
                                 onChange={e => setOutputPath(e.target.value)}
                                 placeholder="Click 📁 to select folder..."
-                                className="flex-1 px-3 py-2 rounded-lg text-xs text-slate-300 placeholder-slate-600 outline-none"
+                                className="flex-1 px-3 py-2 rounded-lg text-xs text-ink-primary placeholder-slate-600 outline-none"
                                 style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
                             />
                             <button
                                 onClick={handleBrowse}
-                                className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-white transition-colors flex-shrink-0"
+                                className="w-8 h-8 flex items-center justify-center rounded-lg text-ink-secondary hover:text-white transition-colors flex-shrink-0"
                                 style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)' }}
                                 title="Browse…"
                             >
@@ -228,13 +228,13 @@ const ExportModal = React.memo(({ state, onClose }) => {
 
                     {/* Format */}
                     <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">Format</label>
+                        <label className="text-[10px] font-bold text-ink-muted uppercase tracking-widest mb-1.5 block">Format</label>
                         <div className="grid grid-cols-3 gap-2">
                             {FORMATS.map(f => (
                                 <button
                                     key={f.id}
                                     onClick={() => setFormat(f.id)}
-                                    className={`px-3 py-2.5 rounded-lg text-left transition-all ${format === f.id ? 'text-white' : 'text-slate-500 hover:text-slate-300'}`}
+                                    className={`px-3 py-2.5 rounded-lg text-left transition-all ${format === f.id ? 'text-white' : 'text-ink-muted hover:text-ink-primary'}`}
                                     style={{
                                         background: format === f.id ? 'linear-gradient(135deg,rgba(99,102,241,0.30),rgba(139,92,246,0.18))' : 'rgba(255,255,255,0.04)',
                                         border: format === f.id ? '1px solid rgba(99,102,241,0.5)' : '1px solid rgba(255,255,255,0.07)',
@@ -256,7 +256,7 @@ const ExportModal = React.memo(({ state, onClose }) => {
                         >
                             <div className="w-4 h-4 rounded-full bg-white shadow-md transition-all" />
                         </div>
-                        <span className="text-xs text-slate-400 group-hover:text-slate-300 transition-colors select-none">
+                        <span className="text-xs text-ink-secondary group-hover:text-ink-primary transition-colors select-none">
                             Apply Normalization
                         </span>
                     </label>
@@ -278,10 +278,10 @@ const ExportModal = React.memo(({ state, onClose }) => {
                         ) : (
                             <div>
                                 <div className="flex items-center justify-between mb-1.5">
-                                    <span className="text-[10px] text-slate-500 flex items-center gap-1">
+                                    <span className="text-[10px] text-ink-muted flex items-center gap-1">
                                         <Loader2 size={10} className="animate-spin" /> Rendering…
                                     </span>
-                                    <span className="text-[10px] font-mono text-slate-400">{progress}%</span>
+                                    <span className="text-[10px] font-mono text-ink-secondary">{progress}%</span>
                                 </div>
                                 <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
                                     <div
@@ -298,7 +298,7 @@ const ExportModal = React.memo(({ state, onClose }) => {
                 <div className="flex gap-2 px-5 py-4 mt-3">
                     <button
                         onClick={onClose}
-                        className="flex-1 py-2 rounded-lg text-xs text-slate-400 hover:text-white transition-colors"
+                        className="flex-1 py-2 rounded-lg text-xs text-ink-secondary hover:text-white transition-colors"
                         style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
                     >
                         {phase === 'done' ? 'Close' : 'Cancel'}

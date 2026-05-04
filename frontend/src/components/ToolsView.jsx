@@ -140,26 +140,26 @@ const ToolsView = () => {
                     </div>
                     <div>
                         <h1 className="text-3xl font-bold">Library Tools</h1>
-                        <p className="text-slate-400">Advanced utilities to keep your library clean</p>
+                        <p className="text-ink-secondary">Advanced utilities to keep your library clean</p>
                     </div>
                 </div>
 
                 <div className="flex gap-6 border-b border-white/10">
                     <button
                         onClick={() => setActiveTab('duplicates')}
-                        className={`pb-4 px-2 font-bold text-sm tracking-widest uppercase transition-all border-b-2 ${activeTab === 'duplicates' ? 'border-cyan-400 text-cyan-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
+                        className={`pb-4 px-2 font-bold text-sm tracking-widest uppercase transition-all border-b-2 ${activeTab === 'duplicates' ? 'border-amber2 text-amber2' : 'border-transparent text-ink-muted hover:text-ink-primary'}`}
                     >
                         Duplicate Manager
                     </button>
                     <button
                         onClick={() => setActiveTab('rename')}
-                        className={`pb-4 px-2 font-bold text-sm tracking-widest uppercase transition-all border-b-2 ${activeTab === 'rename' ? 'border-fuchsia-400 text-fuchsia-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
+                        className={`pb-4 px-2 font-bold text-sm tracking-widest uppercase transition-all border-b-2 ${activeTab === 'rename' ? 'border-fuchsia-400 text-fuchsia-400' : 'border-transparent text-ink-muted hover:text-ink-primary'}`}
                     >
                         Smart Rename
                     </button>
                     <button
                         onClick={() => setActiveTab('comments')}
-                        className={`pb-4 px-2 font-bold text-sm tracking-widest uppercase transition-all border-b-2 ${activeTab === 'comments' ? 'border-amber-400 text-amber-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
+                        className={`pb-4 px-2 font-bold text-sm tracking-widest uppercase transition-all border-b-2 ${activeTab === 'comments' ? 'border-amber-400 text-amber-400' : 'border-transparent text-ink-muted hover:text-ink-primary'}`}
                     >
                         Mass Comment Editor
                     </button>
@@ -172,7 +172,7 @@ const ToolsView = () => {
                     {activeTab === 'duplicates' && (
                         <div className="glass-panel p-6 rounded-2xl flex flex-col h-full animate-fade-in">
                             <div className="flex items-center justify-between mb-4">
-                                <h2 className="text-xl font-bold flex items-center gap-2 text-cyan-400">
+                                <h2 className="text-xl font-bold flex items-center gap-2 text-amber2">
                                     <Copy size={20} /> Duplicate Manager
                                 </h2>
                                 {duplicates.length > 0 && (
@@ -192,7 +192,7 @@ const ToolsView = () => {
                                 <div className="w-1/3 flex flex-col">
                                     <div className="flex-1 bg-black/20 rounded-xl mb-4 overflow-y-auto border border-white/5 p-2 scrollbar-hide">
                                         {!Array.isArray(duplicates) || duplicates.length === 0 ? (
-                                            <div className="h-full flex flex-col items-center justify-center text-slate-500">
+                                            <div className="h-full flex flex-col items-center justify-center text-ink-muted">
                                                 <Search size={48} className="mb-4 opacity-20" />
                                                 <p>No duplicates found yet</p>
                                             </div>
@@ -202,15 +202,15 @@ const ToolsView = () => {
                                                     <div
                                                         key={i}
                                                         onClick={() => handleSelectDuplicate(d)}
-                                                        className={`p-3 rounded-lg border cursor-pointer transition-colors ${selectedDuplicate === d ? 'bg-cyan-900/20 border-cyan-500/50' : 'bg-white/5 border-white/5 hover:bg-white/10'}`}
+                                                        className={`p-3 rounded-lg border cursor-pointer transition-colors ${selectedDuplicate === d ? 'bg-amber2/20 border-amber2/50' : 'bg-white/5 border-white/5 hover:bg-white/10'}`}
                                                     >
                                                         <div className="flex justify-between items-start mb-1">
-                                                            <div className="font-bold text-slate-200 truncate pr-2">{d.Title}</div>
+                                                            <div className="font-bold text-ink-primary truncate pr-2">{d.Title}</div>
                                                             <span className="text-[10px] bg-red-500/20 text-red-300 px-1.5 py-0.5 rounded flex-shrink-0">
                                                                 {d.count || d.Count || '?'}x
                                                             </span>
                                                         </div>
-                                                        <div className="text-xs text-slate-500">{d.Artist}</div>
+                                                        <div className="text-xs text-ink-muted">{d.Artist}</div>
                                                     </div>
                                                 ))}
                                             </div>
@@ -231,7 +231,7 @@ const ToolsView = () => {
                                     {selectedDuplicate && compareTracks.length > 0 ? (
                                         <div className="flex-1 flex flex-col p-4 animate-fade-in">
                                             <div className="flex justify-between items-center mb-4">
-                                                <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2"><Merge size={18} /> Compare & Merge</h3>
+                                                <h3 className="text-lg font-bold text-ink-primary flex items-center gap-2"><Merge size={18} /> Compare & Merge</h3>
                                                 <div className="flex items-center gap-2">
                                                     <button
                                                         onClick={() => handleSmartMerge(selectedDuplicate)}
@@ -240,22 +240,22 @@ const ToolsView = () => {
                                                     >
                                                         <Sparkles size={12} /> Smart Merge
                                                     </button>
-                                                    <span className="text-xs text-slate-500">or select one to keep →</span>
+                                                    <span className="text-xs text-ink-muted">or select one to keep →</span>
                                                 </div>
                                             </div>
                                             <div className="flex-1 flex gap-4 overflow-x-auto pb-2">
                                                 {compareTracks.map(t => (
                                                     <div key={t.id || t.ID} className="min-w-[240px] flex-1 bg-black/60 p-4 rounded-xl border border-white/10 flex flex-col relative group hover:border-white/20 transition-colors">
-                                                        <div className="text-xs text-cyan-500 font-mono mb-2 truncate">{t.id || t.ID}</div>
+                                                        <div className="text-xs text-amber2 font-mono mb-2 truncate">{t.id || t.ID}</div>
                                                         <div className="font-bold text-lg leading-tight mb-1">{t.Title}</div>
-                                                        <div className="text-sm text-slate-400 mb-4">{t.Artist}</div>
+                                                        <div className="text-sm text-ink-secondary mb-4">{t.Artist}</div>
 
-                                                        <div className="space-y-2 text-xs text-slate-500 mb-6">
-                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>BPM</span> <span className="text-slate-300">{t.BPM?.toFixed?.(2) || t.BPM || '—'}</span></div>
-                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>Key</span> <span className="text-slate-300">{t.Key || '—'}</span></div>
-                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>Rating</span> <span className="text-slate-300">{'★'.repeat(t.Rating || 0)}{'☆'.repeat(5 - (t.Rating || 0))}</span></div>
-                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>Size</span> <span className="text-slate-300">{t.Size ? (t.Size / 1024 / 1024).toFixed(1) + ' MB' : '—'}</span></div>
-                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>Bitrate</span> <span className="text-slate-300">{t.BitRate || t.Bitrate || '—'}</span></div>
+                                                        <div className="space-y-2 text-xs text-ink-muted mb-6">
+                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>BPM</span> <span className="text-ink-primary">{t.BPM?.toFixed?.(2) || t.BPM || '—'}</span></div>
+                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>Key</span> <span className="text-ink-primary">{t.Key || '—'}</span></div>
+                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>Rating</span> <span className="text-ink-primary">{'★'.repeat(t.Rating || 0)}{'☆'.repeat(5 - (t.Rating || 0))}</span></div>
+                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>Size</span> <span className="text-ink-primary">{t.Size ? (t.Size / 1024 / 1024).toFixed(1) + ' MB' : '—'}</span></div>
+                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>Bitrate</span> <span className="text-ink-primary">{t.BitRate || t.Bitrate || '—'}</span></div>
                                                             <div className="truncate mt-2 opacity-50" title={t.path || t.FolderPath}>{t.path || t.FolderPath || '—'}</div>
                                                         </div>
 
@@ -272,9 +272,9 @@ const ToolsView = () => {
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500">
+                                        <div className="absolute inset-0 flex flex-col items-center justify-center text-ink-muted">
                                             <Merge size={64} className="mb-6 opacity-20" />
-                                            <h3 className="text-xl font-bold text-slate-300 mb-2">Select a Duplicate Group</h3>
+                                            <h3 className="text-xl font-bold text-ink-primary mb-2">Select a Duplicate Group</h3>
                                             <p className="max-w-md text-center text-sm px-8">Select a group from the list to compare tracks side-by-side and merge metadata.</p>
                                         </div>
                                     )}
@@ -291,17 +291,17 @@ const ToolsView = () => {
                             </h2>
 
                             <div className="mb-6">
-                                <label className="text-[10px] text-slate-500 uppercase font-bold mb-2 block tracking-widest leading-none">Pattern</label>
+                                <label className="text-[10px] text-ink-muted uppercase font-bold mb-2 block tracking-widest leading-none">Pattern</label>
                                 <input
                                     value={pattern}
                                     onChange={e => setPattern(e.target.value)}
                                     className="input-glass w-full font-mono text-fuchsia-400"
                                 />
-                                <p className="text-xs text-slate-500 mt-2">Available: %artist%, %title%, %bpm%, %key%</p>
+                                <p className="text-xs text-ink-muted mt-2">Available: %artist%, %title%, %bpm%, %key%</p>
                             </div>
 
                             <div className="flex-1 bg-black/20 rounded-xl mb-4 overflow-hidden border border-white/5 relative">
-                                <div className="absolute inset-0 flex items-center justify-center text-slate-600 font-bold text-lg opacity-20 rotate-[-12deg]">
+                                <div className="absolute inset-0 flex items-center justify-center text-ink-placeholder font-bold text-lg opacity-20 rotate-[-12deg]">
                                     PREVIEW MODE
                                 </div>
                             </div>
@@ -322,11 +322,11 @@ const ToolsView = () => {
                             <div className="space-y-6 max-w-2xl">
                                 {/* Scope */}
                                 <div>
-                                    <label className="text-[10px] text-slate-500 uppercase font-bold mb-2 block tracking-widest">Target Scope</label>
+                                    <label className="text-[10px] text-ink-muted uppercase font-bold mb-2 block tracking-widest">Target Scope</label>
                                     <select
                                         value={commentData.scope}
                                         onChange={e => setCommentData({ ...commentData, scope: e.target.value })}
-                                        className="input-glass w-full text-slate-300"
+                                        className="input-glass w-full text-ink-primary"
                                     >
                                         <option value="LIB">Full Library (All Tracks)</option>
                                         {flatPlaylists.map(pl => (
@@ -339,13 +339,13 @@ const ToolsView = () => {
 
                                 {/* Action */}
                                 <div>
-                                    <label className="text-[10px] text-slate-500 uppercase font-bold mb-2 block tracking-widest">Action</label>
+                                    <label className="text-[10px] text-ink-muted uppercase font-bold mb-2 block tracking-widest">Action</label>
                                     <div className="flex gap-4">
                                         {['remove', 'replace', 'append', 'set'].map(act => (
                                             <button
                                                 key={act}
                                                 onClick={() => setCommentData({ ...commentData, action: act })}
-                                                className={`flex-1 py-2 rounded-lg border text-sm capitalize ${commentData.action === act ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-black/20 border-white/5 text-slate-500 hover:bg-white/5'}`}
+                                                className={`flex-1 py-2 rounded-lg border text-sm capitalize ${commentData.action === act ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-black/20 border-white/5 text-ink-muted hover:bg-white/5'}`}
                                             >
                                                 {act}
                                             </button>
@@ -357,7 +357,7 @@ const ToolsView = () => {
                                 <div className="grid grid-cols-2 gap-4">
                                     {(commentData.action === 'remove' || commentData.action === 'replace') && (
                                         <div className={`${commentData.action === 'remove' ? 'col-span-2' : ''}`}>
-                                            <label className="text-[10px] text-slate-500 uppercase font-bold mb-2 block tracking-widest">Find Text</label>
+                                            <label className="text-[10px] text-ink-muted uppercase font-bold mb-2 block tracking-widest">Find Text</label>
                                             <input
                                                 value={commentData.find}
                                                 onChange={e => setCommentData({ ...commentData, find: e.target.value })}
@@ -368,7 +368,7 @@ const ToolsView = () => {
                                     )}
                                     {commentData.action !== 'remove' && (
                                         <div className={`${commentData.action === 'set' || commentData.action === 'append' ? 'col-span-2' : ''}`}>
-                                            <label className="text-[10px] text-slate-500 uppercase font-bold mb-2 block tracking-widest">
+                                            <label className="text-[10px] text-ink-muted uppercase font-bold mb-2 block tracking-widest">
                                                 {commentData.action === 'replace' ? 'Replace With' : 'Content'}
                                             </label>
                                             <input
