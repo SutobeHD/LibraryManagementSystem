@@ -85,7 +85,7 @@
 | `frontend/src/components/SoundCloudView.jsx` | SC track search and preview interface |
 | `frontend/src/components/SoundCloudSyncView.jsx` | SC sync: match SC tracks to library, trigger download, preview matches |
 | `frontend/src/components/SoundCloudProgressModal.jsx` | Download progress overlay with per-track status |
-| `frontend/src/components/UsbView.jsx` | USB device manager: detect drives, sync profiles, trigger `POST /api/usb/sync` (no timeout for long-running syncs), progress streaming |
+| `frontend/src/components/UsbView.jsx` | USB device manager — Melodex-styled, accepts ALL filesystem types (FAT32/exFAT/NTFS/HFS+/APFS/ext*/ReFS/BTRFS). Top-level `CompatibilityPanel` shows per-target status (PC + CDJ-3000/2000NXS2/2000NXS/older) with green ✓ / yellow ⚠ / red ✗ based on `FS_COMPAT` matrix. Device list shows compat badge on each item. `normalizeFs()` maps raw OS strings → matrix keys. Calls `POST /api/usb/sync` (no timeout), progress streaming. Sub-components: `Toggle`, `PillBtn`, `PillTab`, `Row`, `SpaceBar`, `PlaylistTreeNode`, `UsbLibraryTree` |
 | `frontend/src/components/BackupManager.jsx` | Library backup/restore: timeline view, create snapshots, `POST /api/library/backup` |
 | `frontend/src/components/XmlCleanView.jsx` | Rekordbox XML cleanup/validation tool, calls `POST /api/xml/clean` |
 | `frontend/src/components/InsightsView.jsx` | Library analytics: low quality, no artwork, lost tracks, bitrate stats |
