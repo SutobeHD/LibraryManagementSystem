@@ -53,9 +53,9 @@
 
 | File | Purpose |
 |------|---------|
-| `frontend/src/main.jsx` | App root: lazy-loaded tab views, session token init, global error boundary, tab router |
+| `frontend/src/main.jsx` | App root: lazy-loaded tab views, session token init, global error boundary, tab router. **Sidebar** redesigned to Melodex spec — 220px width, bar-graph logo, grouped nav (`NavGroup`: Library / Editor / Sync / Lab), amber active border-left, library status chip with ok/bad colors. SelectionView + loading screen also recolored to amber |
 | `frontend/src/api/api.js` | **Central Axios instance** — always use this. Handles session tokens, 401 refresh queue, 429 exponential backoff, HttpOnly cookie support, 10s default timeout (disabled for long-running calls like `/api/usb/sync` via `{ timeout: 0 }`), Tauri context detection |
-| `frontend/src/index.css` | Global styles (Tailwind base + custom) |
+| `frontend/src/index.css` | Global styles — Melodex CSS vars (`--mx-*`, `--ink-*`, `--amber*`), DM Sans + JetBrains Mono via Google Fonts, primitives (`.nav-item`, `.btn-primary`, `.btn-ghost`, `.btn-secondary`, `.input-glass`, `.glass-panel`, `.mx-card`, `.mx-panel`, `.mx-caption`, `.mx-mono`, `.mx-chip`), DAW/region/playhead styles recolored to amber, monochrome scrollbars |
 
 ### Audio Engine
 
@@ -135,7 +135,7 @@
 |------|---------|
 | `frontend/package.json` | Frontend deps: React 18, Vite 7.x, Tauri API v2, axios, WaveSurfer.js, Tailwind, Lucide icons |
 | `frontend/vite.config.js` | Vite: React plugin, `/api` proxy → localhost:8000, Tauri integration |
-| `frontend/tailwind.config.js` | Tailwind: glassmorphism design system, custom slate tones |
+| `frontend/tailwind.config.js` | Tailwind: **Melodex design system** — amber #E8A42A accent, DM Sans + JetBrains Mono, `mx-*` (surfaces), `ink-*` (text), `line-*` (borders), `amber2.*` palette. Legacy `djdark`/`neon.*` aliases preserved |
 | `frontend/postcss.config.js` | PostCSS: Tailwind + Autoprefixer |
 
 ---
