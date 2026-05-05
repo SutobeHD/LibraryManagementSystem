@@ -151,14 +151,14 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
+          # Use only libayatana-appindicator3-dev (modern, replaces libappindicator3-dev which conflicts)
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
+            libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf \
             libssl-dev \
             libgtk-3-dev \
-            libayatana-appindicator3-dev \
             build-essential \
             curl \
             wget \
@@ -186,6 +186,28 @@ jobs:
         shell: bash
         run: ls -la src-tauri/binaries/
 
+      - name: Generate macOS icon (icon.icns) if missing
+        if: matrix.platform == 'macos-latest'
+        working-directory: src-tauri/icons
+        run: |
+          if [ ! -f icon.icns ]; then
+            echo "Generating icon.icns from icon.png..."
+            mkdir -p icon.iconset
+            sips -z 16 16     icon.png --out icon.iconset/icon_16x16.png
+            sips -z 32 32     icon.png --out icon.iconset/icon_16x16@2x.png
+            sips -z 32 32     icon.png --out icon.iconset/icon_32x32.png
+            sips -z 64 64     icon.png --out icon.iconset/icon_32x32@2x.png
+            sips -z 128 128   icon.png --out icon.iconset/icon_128x128.png
+            sips -z 256 256   icon.png --out icon.iconset/icon_128x128@2x.png
+            sips -z 256 256   icon.png --out icon.iconset/icon_256x256.png
+            sips -z 512 512   icon.png --out icon.iconset/icon_256x256@2x.png
+            sips -z 512 512   icon.png --out icon.iconset/icon_512x512.png
+            sips -z 1024 1024 icon.png --out icon.iconset/icon_512x512@2x.png
+            iconutil -c icns icon.iconset
+            rm -rf icon.iconset
+            echo "Generated icon.icns ($(ls -la icon.icns))"
+          fi
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -212,21 +234,27 @@ jobs:
             - **Linux**: `chmod +x *.AppImage && ./Music\ Library\ Manager.AppImage`
 
             See [SECURITY.md](https://github.com/SutobeHD/LibaryMangementSystem/blob/main/docs/SECURITY.md) for verification details.
-          releaseDraft: false
+          releaseDraft: true
           prerelease: ${{ contains(github.ref_name, 'Alpha') || contains(github.ref_name, 'Beta') || contains(github.ref_name, 'rc') }}
           args: ${{ matrix.args }}
 
   # ============================================================
-  # STAGE 3 — Generate SHA256SUMS for verification
+  # STAGE 3 — Publish draft release after all builds succeed
   # ============================================================
-  checksums:
+  publish:
     needs: build-tauri
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Download all release assets
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p release-assets
-          # Wait for release to be created by tauri-action, then attach checksums later
-          # Note: Checksums require a 2nd workflow run after release is published.
-          # For Schicht B, switch to Sigstore Cosign signatures (more secure than SHA256).
-          echo "Checksums will be added in Schicht B (Sigstore Cosign)."
+          # Wait briefly for all draft uploads to settle
+          sleep 10
+          # Find the draft release matching this tag and publish it
+          gh release edit "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --draft=false
+
