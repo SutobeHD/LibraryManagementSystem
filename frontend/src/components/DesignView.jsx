@@ -25,6 +25,11 @@ const BACKGROUNDS = [
     { id: 'sunburst', name: 'Sunburst Grid', desc: 'Radial ray bursts on tiled grid' },
     { id: 'tribal', name: 'Tribal Zigzag', desc: 'Aztec/Maya stepped bands' },
     { id: 'notes', name: 'Note Glyphs', desc: 'Eighth-notes scattered on staff lines' },
+    { id: 'boldstripes', name: 'Bold Stripes', desc: 'Thick vertical bars, mono' },
+    { id: 'thickdiag', name: 'Thick Diagonals', desc: 'Heavy 45° lines, mono' },
+    { id: 'arcs', name: 'Concentric Arcs', desc: 'Bold quarter arcs, vinyl reduction' },
+    { id: 'chevron', name: 'Chevron', desc: 'Heavy V-shapes stacked' },
+    { id: 'heavygrid', name: 'Heavy Grid', desc: 'Bold square grid, mono' },
 ];
 
 const DesignView = () => {
@@ -439,6 +444,26 @@ const BackgroundPreview = ({ id, onApply, isActive }) => {
         tribal: {
             backgroundColor: '#0a1628',
             backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='80' height='40' viewBox='0 0 80 40'><g fill='none' stroke-width='1'><polyline points='0,10 10,4 20,10 30,4 40,10 50,4 60,10 70,4 80,10' stroke='%2345d4bf' stroke-opacity='0.4'/><polyline points='0,20 10,14 20,20 30,14 40,20 50,14 60,20 70,14 80,20' stroke='%23f59e0b' stroke-opacity='0.35'/><polyline points='0,30 10,24 20,30 30,24 40,30 50,24 60,30 70,24 80,30' stroke='%2345d4bf' stroke-opacity='0.4'/></g></svg>")`,
+        },
+        boldstripes: {
+            backgroundColor: '#0a1628',
+            backgroundImage: `repeating-linear-gradient(90deg, transparent 0 56px, rgba(255,255,255,0.09) 56px 60px)`,
+        },
+        thickdiag: {
+            backgroundColor: '#0a1628',
+            backgroundImage: `repeating-linear-gradient(45deg, transparent 0 32px, rgba(255,255,255,0.08) 32px 36px)`,
+        },
+        arcs: {
+            backgroundColor: '#0a1628',
+            backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'><g fill='none' stroke='%23ffffff' stroke-opacity='0.1' stroke-width='3'><circle cx='0' cy='160' r='40'/><circle cx='0' cy='160' r='80'/><circle cx='0' cy='160' r='120'/><circle cx='160' cy='0' r='40'/><circle cx='160' cy='0' r='80'/><circle cx='160' cy='0' r='120'/></g></svg>")`,
+        },
+        chevron: {
+            backgroundColor: '#0a1628',
+            backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='80' height='40' viewBox='0 0 80 40'><polyline points='0,30 40,10 80,30' fill='none' stroke='%23ffffff' stroke-opacity='0.1' stroke-width='3'/></svg>")`,
+        },
+        heavygrid: {
+            backgroundColor: '#0a1628',
+            backgroundImage: `repeating-linear-gradient(0deg, transparent 0 76px, rgba(255,255,255,0.09) 76px 80px), repeating-linear-gradient(90deg, transparent 0 76px, rgba(255,255,255,0.09) 76px 80px)`,
         },
         notes: {
             backgroundColor: '#0a1628',
