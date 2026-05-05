@@ -43,11 +43,13 @@ async function createFolderIfNotExists(path) {
     if (!isTauri) return;
     try {
         const { mkdir } = await import('@tauri-apps/plugin-fs');
-        const dir = path.includes('\\') ? path.substring(0, path.lastIndexOf('\\')) : path.substring(0, path.lastIndexOf('/'));
-        if (dir && dir.length > 3) { // Skip drive letter on Windows
-            await mkdir(dir, { recursive: true });
-            console.log('[ExportModal] Created folder:', dir);
-        }
+        // Extract directory from full path (works with both / and \)
+        const lastSlash = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
+        if (lastSlash <= 0) return; // No directory to create
+        const dir = path.substring(0, lastSlash);
+        console.log('[ExportModal] Creating folder:', dir);
+        await mkdir(dir, { recursive: true });
+        console.log('[ExportModal] Folder created successfully');
     } catch (err) {
         console.warn('[ExportModal] mkdir failed:', err.message);
         // Don't throw — the write might still succeed if folder exists
@@ -57,14 +59,16 @@ async function createFolderIfNotExists(path) {
 async function writeBinaryFile(path, uint8) {
     if (!isTauri) return false;
     try {
-        const { writeFile } = await import('@tauri-apps/plugin-fs');
+        const { writeBinaryFile: writeBin } = await import('@tauri-apps/plugin-fs');
         console.log('[ExportModal] Writing to:', path);
-        await writeFile(path, uint8);
+        console.log('[ExportModal] File size:', uint8.length, 'bytes');
+        // Use writeBinaryFile for binary data
+        await writeBin(path, uint8);
         console.log('[ExportModal] Write successful');
         return true;
     } catch (err) {
         const msg = err.message || String(err);
-        console.error('[ExportModal] Tauri fs writeFile failed:', msg);
+        console.error('[ExportModal] Tauri fs writeBinaryFile failed:', msg);
         throw new Error(`File write failed: ${msg}`);
     }
 }
