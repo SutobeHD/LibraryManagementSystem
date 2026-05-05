@@ -291,24 +291,38 @@ const DjEditDaw = ({ track: initialTrack }) => {
                 // Hydrate state
                 const newState = createInitialState();
 
-                // Set Header info (Project Name, BPM, Quantize)
-                // Note: file.name gives us the filename, but not full path. 
-                // We'll use file.name as project name if header name is missing.
-                const projectName = project.header?.name || file.name.replace('.rbep', '') || 'Untitled Project';
+                // BUGFIX: The .rbep edit timeline can be LONGER (or shorter) than the source audio
+                // because edit projects rearrange/repeat sections. Compute timeline duration from
+                // the maximum region timelineEnd — falling back to source audio duration only if
+                // no regions exist. Without this, totalDuration was being set to the source song
+                // length (e.g. 6:49 for VELVET SHUFFLE) instead of the edit length (e.g. 8:01),
+                // causing the timeline UI, playhead, and export to be clipped to the wrong length.
+                const editTimelineEnd = (trackData.regions && trackData.regions.length > 0)
+                    ? trackData.regions.reduce((max, r) => Math.max(max, r.timelineEnd || 0), 0)
+                    : audioBuffer.duration;
+
+                // BUGFIX: parseRbep returns project.info (not project.header), so the previous
+                // `project.header?.bpm` always returned undefined and BPM defaulted to 128.
+                // The actual track BPM is parsed from <edit><bpm><section bpm="..."/> into
+                // trackData.bpm (defaults to 128 in RbepSerializer if absent).
+                const projectName = project.info?.name || file.name.replace('.rbep', '') || 'Untitled Project';
+                const projectBpm = parseFloat(trackData.bpm || 128);
                 newState.project = {
                     name: projectName,
                     filepath: null, // We don't know the full path from browser input
                     dirty: false,
-                    bpm: parseFloat(project.header?.bpm || 128),
-                    quantize: project.header?.quantize === 'ON'
+                    bpm: projectBpm,
+                    quantize: project.info?.quantize === 'ON'
                 };
 
-                // Set Track info
+                // Set Track info — keep `duration` as source-audio length (used for waveform
+                // mapping), but the timeline-level totalDuration is the edit length.
                 newState.trackMeta = {
                     ...trackData.song,
                     duration: audioBuffer.duration
                 };
-                newState.totalDuration = audioBuffer.duration;
+                newState.totalDuration = editTimelineEnd;
+                newState.bpm = projectBpm;
                 newState.sourceBuffer = audioBuffer;
 
                 // Generate waveform peaks
@@ -326,11 +340,19 @@ const DjEditDaw = ({ track: initialTrack }) => {
                 }
 
 
-                // Set Tempo Map
-                newState.tempoMap = project.tempoMap || buildTempoMap(newState.project.bpm, 0, newState.totalDuration * 1000);
+                // BUGFIX: Prefer the project's <mastergrid> as the timeline tempo map (it
+                // reflects the edited timeline's beat positions, e.g. 1284 beats / 481.5s for
+                // VELVET SHUFFLE). Fall back to the per-track <songgrid>/orggrid, then to a
+                // synthesized constant-BPM map sized to the edit length.
+                newState.tempoMap = (project.mastergrid?.beats?.length > 0
+                    ? project.mastergrid.beats
+                    : (trackData.songTempoMap?.length > 0
+                        ? trackData.songTempoMap
+                        : buildTempoMap(newState.project.bpm, 0, newState.totalDuration * 1000)));
 
-                // Set Cues/Loops
-                const { hotCues, memoryCues, loops } = cuePointsToState(trackData.positionMarks);
+                // BUGFIX: parseRbep stores cue points in `cuePoints` (not `positionMarks`).
+                // Using the wrong property name silently dropped all hot/memory cues + loops.
+                const { hotCues, memoryCues, loops } = cuePointsToState(trackData.cuePoints || []);
                 newState.hotCues = hotCues;
                 newState.memoryCues = memoryCues;
                 newState.loops = loops;

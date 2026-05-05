@@ -39,7 +39,7 @@
 | `app/backup_engine.py` | Git-like incremental backup: compressed JSON changesets, HEAD tracking, commit timeline, restore |
 | `app/rekordbox_export.py` | Converts `AnalysisEngine` results → Rekordbox XML `TRACK` elements with `TEMPO` nodes and `POSITION_MARK` cues |
 | `app/rekordbox_bridge.py` | High-level: export selected tracks → Rekordbox XML; import from XML exports |
-| `app/rbep_parser.py` | Parses `.rbep` (Rekordbox Editor Project) XML: volume envelopes, BPM maps, hot cues, memory cues, beat grids |
+| `app/rbep_parser.py` | Parses `.rbep` (Rekordbox Editor Project) XML. Real-format aware: `<filepath>` directly under `<song>`, `<edit>` directly under `<track>`, `<position>/<data>/<section>` collected as a list (not a single object). Exposes `positions[]` and `editEndBeats` for timeline duration. Volume envelopes, BPM maps, hot cues, memory cues, beat grids |
 | `app/xml_generator.py` | `RekordboxXML` — generates valid `DJ_PLAYLISTS` XML from Python track data with dynamic/static beatgrids and cue points |
 | `app/sidecar.py` | `SidecarStorage` — persists artist metadata (SoundCloud links, custom fields) in `app_data.json` sidecar file |
 | `app/batch_worker.py` | CLI tool for batch track metadata updates (comments/tags) using rbox `MasterDb` — find/replace/append/set operations |

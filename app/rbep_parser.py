@@ -69,29 +69,64 @@ class RbepProject:
             "beatGrid": [],
         }
 
-        # Parse filepath from data element
-        data_el = song_el.find("data")
-        if data_el is not None:
-            fp_el = data_el.find("filepath")
-            if fp_el is not None and fp_el.text:
-                track["filepath"] = fp_el.text.strip()
+        # Parse filepath — in real Rekordbox .rbep files, <filepath> sits directly
+        # under <song> (no intermediate <data> wrapper). Fall back to the legacy
+        # nested layout for backwards compatibility with older fixture files.
+        fp_el = song_el.find("filepath")
+        if fp_el is None:
+            data_el = song_el.find("data")
+            if data_el is not None:
+                fp_el = data_el.find("filepath")
+        if fp_el is not None and fp_el.text:
+            track["filepath"] = fp_el.text.strip()
 
-        # Parse position (song start/end markers)
-        pos_el = song_el.find("position")
-        if pos_el is not None:
-            section = pos_el.find("section") or pos_el.find("data/section")
-            if section is not None:
-                track["position"] = {
-                    "start": float(section.get("start", 0)),
-                    "end": float(section.get("end", 0)),
-                    "songStart": float(section.get("songstart", 0)),
-                    "songEnd": float(section.get("songend", 0)),
-                }
-
-        # Parse edit data
-        edit_el = song_el.find("edit") or track_el.find("edit")
+        # Parse edit data — <edit> is a direct child of <track> in real .rbep files.
+        # The legacy/test layout placed it under <song>; check both for compatibility.
+        edit_el = track_el.find("edit") or song_el.find("edit")
         if edit_el is not None:
             track["edit"] = self._parse_edit(edit_el)
+
+        # Parse position sections — under <edit><position><data><section .../> in real
+        # .rbep files. These describe the edited timeline (start/end in beats vs.
+        # songstart/songend in source-song beats). Collect ALL sections, not just one.
+        position_sections: list[dict] = []
+        if edit_el is not None:
+            pos_el = edit_el.find("position")
+            if pos_el is not None:
+                data_el = pos_el.find("data")
+                if data_el is not None:
+                    for sec in data_el.findall("section"):
+                        try:
+                            position_sections.append({
+                                "start": float(sec.get("start", 0) or 0),
+                                "end": float(sec.get("end", 0) or 0),
+                                "songStart": float(sec.get("songstart", 0) or 0),
+                                "songEnd": float(sec.get("songend", 0) or 0),
+                            })
+                        except (TypeError, ValueError) as exc:
+                            logger.warning(
+                                "rbep: bad position section attrs %r: %s",
+                                sec.attrib, exc,
+                            )
+        # Legacy fallback: <position> directly under <song> with a single <section>
+        if not position_sections:
+            legacy_pos = song_el.find("position")
+            if legacy_pos is not None:
+                section = legacy_pos.find("section") or legacy_pos.find("data/section")
+                if section is not None:
+                    try:
+                        position_sections.append({
+                            "start": float(section.get("start", 0) or 0),
+                            "end": float(section.get("end", 0) or 0),
+                            "songStart": float(section.get("songstart", 0) or 0),
+                            "songEnd": float(section.get("songend", 0) or 0),
+                        })
+                    except (TypeError, ValueError) as exc:
+                        logger.warning("rbep: bad legacy position section: %s", exc)
+        track["positions"] = position_sections
+        # Convenience: total edited timeline end (in beats — convert to seconds via songgrid BPM)
+        if position_sections:
+            track["editEndBeats"] = max(s["end"] for s in position_sections)
 
         # Parse beat grid
         songgrid_el = track_el.find("songgrid")
