@@ -1,6 +1,6 @@
 [package]
 name = "library-management-system"
-version = "0.1.0"
+version = "0.1.1"
 description = "Rekordbox Editor Pro Desktop"
 edition = "2021"
 
