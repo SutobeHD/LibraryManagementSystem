@@ -1,7 +1,7 @@
 # FILE_MAP.md — RB Editor Pro
 
 > **Read this first.** One-line-per-file map of the entire codebase. Use this to find the right file for any task without searching blindly.
-> Last updated: 2026-04-30
+> Last updated: 2026-05-05
 
 ---
 
@@ -55,7 +55,7 @@
 
 | File | Purpose |
 |------|---------|
-| `frontend/src/main.jsx` | App root: lazy-loaded tab views, session token init, global error boundary, tab router. **Sidebar** — 220px, groups: Library / Editor / Sync / Utilities / Lab. Footer: Backups + Settings + Exit. No glow effects on loading/selection screens. Lazy imports for UtilitiesView, MetadataSyncView |
+| `frontend/src/main.jsx` | App root: lazy-loaded tab views, session token init, global error boundary, tab router. **Sidebar** — 220px, groups: Library / Editor / Sync / Utilities / Lab. Footer: Backups + Settings + Exit. No glow effects on loading/selection screens. Lazy imports for UtilitiesView |
 | `frontend/src/api/api.js` | **Central Axios instance** — always use this. Handles session tokens, 401 refresh queue, 429 exponential backoff, HttpOnly cookie support, 10s default timeout (disabled for long-running calls like `/api/usb/sync` via `{ timeout: 0 }`), Tauri context detection |
 | `frontend/src/index.css` | Global styles — Melodex CSS vars (`--mx-*`, `--ink-*`, `--amber*`), DM Sans + JetBrains Mono via Google Fonts, primitives (`.nav-item`, `.btn-primary`, `.btn-ghost`, `.btn-secondary`, `.input-glass`, `.glass-panel`, `.mx-card`, `.mx-panel`, `.mx-caption`, `.mx-mono`, `.mx-chip`), DAW/region/playhead styles recolored to amber, monochrome scrollbars |
 
@@ -87,7 +87,7 @@
 | `frontend/src/components/SoundCloudView.jsx` | SC track search and preview interface |
 | `frontend/src/components/SoundCloudSyncView.jsx` | SC sync: match SC tracks to library, trigger download, preview matches |
 | `frontend/src/components/SoundCloudProgressModal.jsx` | Download progress overlay with per-track status |
-| `frontend/src/components/UsbView.jsx` | USB device manager — filters USB sticks only (no system/fixed drives). Main Sync Source toggle (PC/USB), Target Ecosystem card, dynamic storage bar colors, Eject in header, Playlists above Contents. Compat matrix: orange AlertTriangle for wrong-format, red X for incompat. ETA placeholder. Sub-components: `Toggle`, `PillBtn`, `PillTab`, `Row`, `SpaceBar`, `PlaylistTreeNode`, `UsbLibraryTree`, `PlayCountSync` |
+| `frontend/src/components/UsbView.jsx` | USB device manager — filters USB sticks only (no system/fixed drives). Main Sync Source toggle (PC/USB), Target Ecosystem card, dynamic storage bar colors, Eject in header, Playlists above Contents. Compat matrix: orange AlertTriangle for wrong-format, red X for incompat. ETA placeholder. Includes inline collapsible MetadataSyncPanel (smart/manual sync modes, category checkboxes). Sub-components: `Toggle`, `PillBtn`, `PillTab`, `Row`, `SpaceBar`, `PlaylistTreeNode`, `UsbLibraryTree`, `PlayCountSync`, `MetadataSyncPanel` |
 | `frontend/src/components/BackupManager.jsx` | Library backup/restore: timeline view, create snapshots, `POST /api/library/backup` |
 | `frontend/src/components/XmlCleanView.jsx` | Rekordbox XML cleanup/validation tool, calls `POST /api/xml/clean` |
 | `frontend/src/components/InsightsView.jsx` | Library analytics: low quality, no artwork, lost tracks, bitrate stats |
@@ -97,7 +97,6 @@
 | `frontend/src/components/ToolsView.jsx` | Batch operations: rename, clean titles, find duplicates, batch comments |
 | `frontend/src/components/DesignView.jsx` | Design Lab: 10 feature mockup pages (Stems, Smart Playlist, Batch Tag, Set Planner, Streaming Hub, DVS, Collab, Harmonic Mixing, Routing Matrix, Macros) + 5 selectable background themes (Vinyl/Grid/Bokeh/Waveform/Mesh) stored in localStorage |
 | `frontend/src/components/UtilitiesView.jsx` | Utilities hub grid dashboard: Phrase Cues, Duplicate Finder, XML Cleaner, Mass Format Converter (placeholder). Sub-views open inline with back button |
-| `frontend/src/components/MetadataSyncView.jsx` | Metadata Sync: smart/manual mode selector, main source toggle (PC/USB), metadata category checkboxes (play counts, ratings, tags, color, cues, beatgrids) |
 | `frontend/src/components/WaveformEditor.jsx` | Legacy waveform editor (superseded by `DjEditDaw`) |
 | `frontend/src/components/PhraseGeneratorView.jsx` | **NEW** Phrase & Auto-Cue Generator: track selector, phrase length picker (8/16/32), generate preview list (amber phrase / grey bar markers), two-step Generate → Commit flow |
 | `frontend/src/components/DuplicateView.jsx` | **NEW** Acoustic Duplicate Finder: scan library, group by fingerprint similarity, left group list + right card detail panel, master selection, merge play counts, POST /api/duplicates/merge |

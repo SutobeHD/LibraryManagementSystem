@@ -24,7 +24,6 @@ const SoundCloudSyncView = lazy(() => import('./components/SoundCloudSyncView'))
 const PhraseGeneratorView = lazy(() => import('./components/PhraseGeneratorView'));
 const DuplicateView = lazy(() => import('./components/DuplicateView'));
 const UtilitiesView = lazy(() => import('./components/UtilitiesView'));
-const MetadataSyncView = lazy(() => import('./components/MetadataSyncView'));
 
 import api, { setSessionToken, getSessionToken } from './api/api'
 
@@ -166,7 +165,6 @@ const Sidebar = ({ activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnlo
             <NavBtn icon={<HardDrive size={14} />} label="USB Export" active={activeTab === 'usb'} onClick={() => setActiveTab('usb')} />
             <NavBtn icon={<Cloud size={14} />} label="SoundCloud" active={activeTab === 'soundcloud'} onClick={() => setActiveTab('soundcloud')} />
             <NavBtn icon={<Download size={14} />} label="SCloudLibrary" active={activeTab === 'sc-sync'} onClick={() => setActiveTab('sc-sync')} />
-            <NavBtn icon={<ArrowRightLeft size={14} />} label="Metadata Sync" active={activeTab === 'metadata-sync'} onClick={() => setActiveTab('metadata-sync')} />
           </NavGroup>
 
           <NavGroup label="Utilities">
@@ -514,7 +512,6 @@ const App = () => {
             {activeTab === 'usb' && <ErrorBoundary key="eb-usb"><UsbView /></ErrorBoundary>}
             {activeTab === 'design' && <ErrorBoundary key="eb-design"><DesignView /></ErrorBoundary>}
             {activeTab === 'utilities' && <ErrorBoundary key="eb-utilities"><UtilitiesView /></ErrorBoundary>}
-            {activeTab === 'metadata-sync' && <ErrorBoundary key="eb-metadata-sync"><MetadataSyncView /></ErrorBoundary>}
             {activeTab === 'settings' && <ErrorBoundary key="eb-settings"><SettingsView /></ErrorBoundary>}
           </Suspense>
         </div>
