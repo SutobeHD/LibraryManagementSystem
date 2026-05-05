@@ -1,33 +1,52 @@
-# 📥 DOWNLOAD EVALUATION
+# 📥 SOUNDCLOUD INTEGRATION
 
-This physical document evaluates the current implementation of SoundCloud downloading capabilities in the "RB Editor Pro" (SoundCloud Manager) app, assessing both technical stability and legal aspects (Terms of Service).
+Evaluation and documentation of SoundCloud download and sync capabilities in RB Editor Pro.
 
-## 1. Technical Evaluation
+## 1. Current Implementation
 
-### Current Implementation
-- The downloading logic is encapsulated in `app/soundcloud_downloader.py`.
-- It relies on calling a third-party command-line utility named `scdl` via Python's `subprocess.Popen`.
-- Commands look like: `scdl -l <url> --path <dir> --opus` (to attempt fetching Go+ high-quality Opus streams if authenticated).
-- Authentication tokens (`SCDL_AUTH_TOKEN`) are passed to fetch user-specific/premium content.
+### Overview
+- **OAuth 2.1 + PKCE** — Official authentication via Tauri OAuth handler in `src-tauri/src/soundcloud_client.rs`
+- **Track Matching** — Fuzzy title/artist matching with ISRC fallback in `app/soundcloud_api.py`
+- **Download** — Two-stage acquisition in `app/soundcloud_downloader.py`:
+  1. Official `/tracks/{id}/download` endpoint when `downloadable=true`
+  2. Fallback to v2 media transcodings (same streams the web player uses)
+- **Legal Gates:**
+  - Skip preview-only tracks (duration < 15s)
+  - Honor 401/403 responses (user/DRM restrictions)
+  - Respect uploader's `downloadable` flag
+- **Dedup** — Registry via SHA-256 content hash in `app/download_registry.py`
+- **Analysis** — Auto-analyze via madmom RNN beats + essentia key detection
 
-### Technical Risks
-- **Dependency coupling:** Relying on `scdl` means the app is fragile against upstream changes. If SoundCloud changes its DOM or API logic, `scdl` breaks, and this app's download feature breaks until `scdl` is updated.
-- **Undocumented V2 API:** The rest of the metadata fetching (in `app/soundcloud_api.py`) relies on `api-v2.soundcloud.com` and a scraped `client_id` (currently `***REMOVED***`). This is an unofficial, internal API used by SoundCloud's web client. It is frequently subject to rate-limiting (429 errors), authentication blocks (401/403), and unpredictable structural changes.
-- **Error Handling:** The current subprocess polling regex (`[####################] 100%`) is extremely fragile. It relies on the stdout formatting of `scdl` staying exactly the same. Any CLI output change will break the progress bar in the UI.
+### Technical Details
+- Rate limiting: Exponential backoff with jitter for 429/503 responses
+- Network errors: Graceful retry logic with user feedback
+- File organization: Auto-organize into artist/track structure
+- Metadata: Post-download tag write via lofty (MP3/FLAC/ALAC support)
 
-## 2. Legal Evaluation (SoundCloud Terms of Service)
+## 2. Sync Features
 
-### Terms of Service Violations
-Using `scdl` to rip audio directly violates SoundCloud's API Terms of Use and general User Terms of Service multiple times:
-1. **No Downloads without explicit permission:** SoundCloud ToS explicitly states that users may only download content if the uploader has enabled a specific "Download" button. Ripping streaming endpoints (HLS/Progressive streams) via tools like `scdl` is strictly prohibited.
-2. **Reverse Engineering the API:** Using the internal `api-v2.soundcloud.com` and extracting a hardcoded Client ID essentially bypasses SoundCloud's official developer API, which is a violation of their developer ToS.
-3. **DRM / Go+ Circumvention:** Attempting to fetch premium Go+ `.opus` files offline outside of the official, encrypted offline storage provided by official SoundCloud apps violates copyright and anti-circumvention provisions (like the DMCA). 
+### What's Supported
+- **Playlist Sync** — SoundCloud → Rekordbox with fuzzy track matching
+- **Metadata Sync** — Pull track metadata (BPM, key, artist) from SoundCloud  
+- **Play Count Sync** — Bi-directional sync of play counts between PC and USB
+- **Analysis Integration** — Tracks auto-analyzed upon download with beatgrid/key data written to Rekordbox DB
 
-### Potential Consequences
-- **Account Bans:** The user's provided OAuth token (`auth_token`) can be traced. Heavy scraping or downloading can trigger automated abuse flags, leading to the termination of the user's SoundCloud account.
-- **IP Blocking:** Server/Local IP bans based on aggressive scraping.
+## 3. Limitations & Edge Cases
 
-## 3. Recommendations
-To ensure a stable and legally sound application:
-- **Deprecate Unofficial Downloads:** Switch completely to **Sync & Stream** logic rather than local MP3 extraction. If local files are needed for DJ sets, tracks should only be downloaded if the artist provided an official download link.
-- **Robust Error Handling:** For any web-scraping/v2 API requests kept for sync purposes, implement exponential backoff and handle 401/403/429 gracefully, informing the user that tokens might have expired or rate limits were triggered.
+### Known Limitations
+- **Rate Limiting:** SoundCloud V2 API heavily rate-limits. 429 responses are retried with backoff.
+- **Authentication:** OAuth tokens can expire. Re-authentication required when 401/403 received.
+- **Preview vs Downloadable:** Some tracks are preview-only (no official download link). These are skipped in batch operations.
+- **Regional Restrictions:** Some content is geo-blocked; download will fail with 403.
+
+## 4. File Organization
+
+Downloaded tracks are organized into:
+```
+Music/
+  SoundCloud Downloads/
+    [Artist Name]/
+      [Track Title].mp3
+```
+
+Registry prevents re-downloading via SHA-256 content hash matching.

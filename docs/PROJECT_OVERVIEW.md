@@ -1,4 +1,6 @@
-# 🏗 PROJECT OVERVIEW: SoundCloud Manager (RB Editor Pro)
+# 🏗 PROJECT OVERVIEW: RB Editor Pro
+
+A high-performance desktop application for professional DJ library management, built with Tauri, React, and Python FastAPI.
 
 This document provides a comprehensive overview of the current architecture, tech stack, and state management of the application.
 
