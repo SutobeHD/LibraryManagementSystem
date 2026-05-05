@@ -30,6 +30,11 @@ const BACKGROUNDS = [
     { id: 'arcs', name: 'Concentric Arcs', desc: 'Bold quarter arcs, vinyl reduction' },
     { id: 'chevron', name: 'Chevron', desc: 'Heavy V-shapes stacked' },
     { id: 'heavygrid', name: 'Heavy Grid', desc: 'Bold square grid, mono' },
+    { id: 'wavecue', name: 'Wave + Cues', desc: 'Bold sine + vertical cue markers' },
+    { id: 'pulsecue', name: 'Pulse + Cues', desc: 'Square wave with amber dot cues' },
+    { id: 'waveseg', name: 'Segmented Wave', desc: 'Sine broken by vertical bars' },
+    { id: 'doublewave', name: 'Dual Wave Cues', desc: 'Two phase-shifted waves + dots' },
+    { id: 'stepwave', name: 'Stepped Wave', desc: 'Stair wave with cue verticals' },
 ];
 
 const DesignView = () => {
@@ -464,6 +469,26 @@ const BackgroundPreview = ({ id, onApply, isActive }) => {
         heavygrid: {
             backgroundColor: '#0a1628',
             backgroundImage: `repeating-linear-gradient(0deg, transparent 0 76px, rgba(255,255,255,0.09) 76px 80px), repeating-linear-gradient(90deg, transparent 0 76px, rgba(255,255,255,0.09) 76px 80px)`,
+        },
+        wavecue: {
+            backgroundColor: '#0a1628',
+            backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='80' viewBox='0 0 160 80'><path d='M0 40 Q 40 12 80 40 T 160 40' fill='none' stroke='%23ffffff' stroke-opacity='0.18' stroke-width='2.5'/><line x1='40' y1='8' x2='40' y2='72' stroke='%23ffffff' stroke-opacity='0.12' stroke-width='2'/><circle cx='40' cy='12' r='3' fill='%23f59e0b' fill-opacity='0.7'/><line x1='120' y1='8' x2='120' y2='72' stroke='%23ffffff' stroke-opacity='0.12' stroke-width='2'/><circle cx='120' cy='68' r='3' fill='%23f59e0b' fill-opacity='0.7'/></svg>")`,
+        },
+        pulsecue: {
+            backgroundColor: '#0a1628',
+            backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='80' viewBox='0 0 160 80'><path d='M0 50 H40 V30 H80 V50 H120 V30 H160' fill='none' stroke='%23ffffff' stroke-opacity='0.2' stroke-width='2.5'/><line x1='40' y1='10' x2='40' y2='70' stroke='%23ffffff' stroke-opacity='0.1' stroke-width='2'/><circle cx='40' cy='40' r='3.5' fill='%23f59e0b' fill-opacity='0.7'/><line x1='120' y1='10' x2='120' y2='70' stroke='%23ffffff' stroke-opacity='0.1' stroke-width='2'/><circle cx='120' cy='40' r='3.5' fill='%23f59e0b' fill-opacity='0.7'/></svg>")`,
+        },
+        waveseg: {
+            backgroundColor: '#0a1628',
+            backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='80' viewBox='0 0 200 80'><path d='M0 40 Q 25 20 50 40' fill='none' stroke='%23ffffff' stroke-opacity='0.18' stroke-width='2.5'/><path d='M70 40 Q 95 60 120 40 T 170 40' fill='none' stroke='%23ffffff' stroke-opacity='0.18' stroke-width='2.5'/><line x1='60' y1='12' x2='60' y2='68' stroke='%23f59e0b' stroke-opacity='0.55' stroke-width='2'/><line x1='180' y1='12' x2='180' y2='68' stroke='%23ffffff' stroke-opacity='0.15' stroke-width='2'/></svg>")`,
+        },
+        doublewave: {
+            backgroundColor: '#0a1628',
+            backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='80' viewBox='0 0 160 80'><path d='M0 32 Q 40 8 80 32 T 160 32' fill='none' stroke='%23ffffff' stroke-opacity='0.18' stroke-width='2.5'/><path d='M0 56 Q 40 80 80 56 T 160 56' fill='none' stroke='%23ffffff' stroke-opacity='0.1' stroke-width='2.5'/><circle cx='40' cy='8' r='3' fill='%23f59e0b' fill-opacity='0.7'/><circle cx='120' cy='80' r='3' fill='%23f59e0b' fill-opacity='0.5'/></svg>")`,
+        },
+        stepwave: {
+            backgroundColor: '#0a1628',
+            backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='80' viewBox='0 0 160 80'><path d='M0 56 H20 V44 H40 V32 H60 V20 H80 V32 H100 V44 H120 V56 H160' fill='none' stroke='%23ffffff' stroke-opacity='0.2' stroke-width='2.5'/><line x1='80' y1='6' x2='80' y2='74' stroke='%23ffffff' stroke-opacity='0.1' stroke-width='2'/><circle cx='80' cy='20' r='3.5' fill='%23f59e0b' fill-opacity='0.75'/></svg>")`,
         },
         notes: {
             backgroundColor: '#0a1628',
