@@ -113,20 +113,60 @@ class UsbDetector:
         """Check if a drive has a PIONEER/rekordbox structure."""
         return (Path(drive) / cls.PIONEER_MARKER).is_dir()
 
+    @staticmethod
+    def _get_bus_types() -> Dict[str, str]:
+        """Fetch Windows bus types (USB, NVMe, SATA) for each drive letter."""
+        import subprocess, json
+        try:
+            CREATE_NO_WINDOW = 0x08000000
+            ps_cmd = 'Get-Disk | Select-Object Number, BusType | ConvertTo-Json -Compress'
+            output = subprocess.check_output(['powershell', '-NoProfile', '-Command', ps_cmd], text=True, creationflags=CREATE_NO_WINDOW)
+            disks = json.loads(output)
+            if isinstance(disks, dict): disks = [disks]
+            
+            ps_part = 'Get-Partition | Select-Object DiskNumber, DriveLetter | ConvertTo-Json -Compress'
+            out_part = subprocess.check_output(['powershell', '-NoProfile', '-Command', ps_part], text=True, creationflags=CREATE_NO_WINDOW)
+            parts = json.loads(out_part)
+            if isinstance(parts, dict): parts = [parts]
+            
+            bus_map = {}
+            disk_bus = {d['Number']: d['BusType'] for d in disks}
+            for p in parts:
+                dl = p.get('DriveLetter')
+                if dl and str(dl).strip():
+                    letter = f"{dl}:\\"
+                    bus_map[letter] = disk_bus.get(p['DiskNumber'])
+            return bus_map
+        except Exception as e:
+            logger.error(f"Failed to get bus types: {e}")
+            return {}
+
     @classmethod
     def scan(cls) -> List[Dict]:
         """Scan all removable drives and return Rekordbox USB info."""
         devices = []
+        bus_types = cls._get_bus_types()
+        
         for drive in cls._get_removable_drives():
             drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive)
             is_rb = cls.is_rekordbox_usb(drive)
+            bus_type = bus_types.get(drive, "Unknown")
 
-            # Fixed drives (type 3): only include if they actually have Rekordbox data.
-            # This prevents internal HDDs/SSDs from cluttering the device list.
-            if drive_type == 3 and not is_rb:
-                logger.debug(f"Skipping fixed drive without Rekordbox structure: {drive}")
+            # Strict filtering: if it's a fixed drive (type 3), it MUST be on a USB bus.
+            # This prevents internal NVMe/SATA hard drives from being recognized as USB sticks,
+            # even if they happen to contain a PIONEER directory.
+            is_usb_bus = bus_type == "USB"
+            
+            if drive_type == 3 and not is_usb_bus:
+                logger.debug(f"Skipping fixed internal drive {drive} (BusType: {bus_type})")
                 continue
-            logger.info(f"Scanning drive {drive}: type={drive_type}, is_rb={is_rb}")
+
+            # Fixed drives (type 3) that ARE USB: only include if they actually have Rekordbox data.
+            if drive_type == 3 and not is_rb:
+                logger.debug(f"Skipping fixed USB drive without Rekordbox structure: {drive}")
+                continue
+                
+            logger.info(f"Scanning drive {drive}: type={drive_type}, bus={bus_type}, is_rb={is_rb}")
 
             vol = cls._get_volume_info(drive)
             size = cls._get_drive_size(drive)
