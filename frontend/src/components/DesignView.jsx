@@ -20,6 +20,11 @@ const BACKGROUNDS = [
     { id: 'cuemarks', name: 'Cue Markers', desc: 'Thin verticals with amber dot accents' },
     { id: 'spectrum', name: 'Spectrum Bars', desc: 'Staggered vertical lines, EQ feel' },
     { id: 'crosshatch', name: 'Diagonal Hatch', desc: 'Crossing diagonals, high contrast' },
+    { id: 'circuit', name: 'Circuit Traces', desc: 'PCB lines + knob nodes, navy/teal/amber' },
+    { id: 'constellation', name: 'Constellations', desc: 'Stars connected by thin lines' },
+    { id: 'sunburst', name: 'Sunburst Grid', desc: 'Radial ray bursts on tiled grid' },
+    { id: 'tribal', name: 'Tribal Zigzag', desc: 'Aztec/Maya stepped bands' },
+    { id: 'notes', name: 'Note Glyphs', desc: 'Eighth-notes scattered on staff lines' },
 ];
 
 const DesignView = () => {
@@ -418,6 +423,26 @@ const BackgroundPreview = ({ id, onApply, isActive }) => {
         crosshatch: {
             backgroundColor: '#0a0a0a',
             backgroundImage: `repeating-linear-gradient(45deg, transparent 0 11px, rgba(255,255,255,0.06) 11px 12px), repeating-linear-gradient(-45deg, transparent 0 11px, rgba(245,158,11,0.08) 11px 12px)`,
+        },
+        circuit: {
+            backgroundColor: '#0a1628',
+            backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'><g fill='none' stroke-width='1'><path d='M0 30 H40 V60 H80 V20 H120' stroke='%2345d4bf' stroke-opacity='0.35'/><path d='M0 90 H30 V70 H70 V100 H120' stroke='%2345d4bf' stroke-opacity='0.25'/><path d='M20 0 V20 H60 V50' stroke='%23f59e0b' stroke-opacity='0.3'/><path d='M100 0 V40 H80' stroke='%23f59e0b' stroke-opacity='0.25'/><circle cx='40' cy='30' r='3' stroke='%2345d4bf' stroke-opacity='0.6'/><circle cx='40' cy='30' r='1' fill='%23f59e0b' fill-opacity='0.7'/><circle cx='80' cy='60' r='3' stroke='%2345d4bf' stroke-opacity='0.6'/><circle cx='80' cy='60' r='1' fill='%23f59e0b' fill-opacity='0.7'/><circle cx='30' cy='90' r='2.5' stroke='%23f59e0b' stroke-opacity='0.5'/><rect x='58' y='48' width='4' height='4' fill='%2345d4bf' fill-opacity='0.5'/></g></svg>")`,
+        },
+        constellation: {
+            backgroundColor: '#0a1628',
+            backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'><g fill='none' stroke='%2345d4bf' stroke-opacity='0.25' stroke-width='0.6'><line x1='30' y1='40' x2='70' y2='60'/><line x1='70' y1='60' x2='110' y2='30'/><line x1='110' y1='30' x2='140' y2='70'/><line x1='140' y1='70' x2='170' y2='50'/><line x1='40' y1='130' x2='80' y2='150'/><line x1='80' y1='150' x2='130' y2='140'/><line x1='130' y1='140' x2='160' y2='170'/><line x1='70' y1='60' x2='80' y2='150'/></g><g fill='%23ffffff' fill-opacity='0.55'><circle cx='30' cy='40' r='1.2'/><circle cx='110' cy='30' r='1.2'/><circle cx='140' cy='70' r='1.2'/><circle cx='170' cy='50' r='1'/><circle cx='40' cy='130' r='1'/><circle cx='130' cy='140' r='1.2'/><circle cx='160' cy='170' r='1'/></g><g fill='%23f59e0b' fill-opacity='0.7'><circle cx='70' cy='60' r='1.4'/><circle cx='80' cy='150' r='1.4'/></g></svg>")`,
+        },
+        sunburst: {
+            backgroundColor: '#0a1628',
+            backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140' viewBox='0 0 140 140'><g fill='none' stroke-width='0.8' transform='translate(70 70)'><line x1='0' y1='-30' x2='0' y2='-50' stroke='%23f59e0b' stroke-opacity='0.55'/><line x1='0' y1='30' x2='0' y2='50' stroke='%23f59e0b' stroke-opacity='0.55'/><line x1='-30' y1='0' x2='-50' y2='0' stroke='%23f59e0b' stroke-opacity='0.55'/><line x1='30' y1='0' x2='50' y2='0' stroke='%23f59e0b' stroke-opacity='0.55'/><line x1='-21' y1='-21' x2='-35' y2='-35' stroke='%2345d4bf' stroke-opacity='0.4'/><line x1='21' y1='-21' x2='35' y2='-35' stroke='%2345d4bf' stroke-opacity='0.4'/><line x1='-21' y1='21' x2='-35' y2='35' stroke='%2345d4bf' stroke-opacity='0.4'/><line x1='21' y1='21' x2='35' y2='35' stroke='%2345d4bf' stroke-opacity='0.4'/><circle cx='0' cy='0' r='6' stroke='%23f59e0b' stroke-opacity='0.6'/><circle cx='0' cy='0' r='2' fill='%23f59e0b' fill-opacity='0.5'/></g></svg>")`,
+        },
+        tribal: {
+            backgroundColor: '#0a1628',
+            backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='80' height='40' viewBox='0 0 80 40'><g fill='none' stroke-width='1'><polyline points='0,10 10,4 20,10 30,4 40,10 50,4 60,10 70,4 80,10' stroke='%2345d4bf' stroke-opacity='0.4'/><polyline points='0,20 10,14 20,20 30,14 40,20 50,14 60,20 70,14 80,20' stroke='%23f59e0b' stroke-opacity='0.35'/><polyline points='0,30 10,24 20,30 30,24 40,30 50,24 60,30 70,24 80,30' stroke='%2345d4bf' stroke-opacity='0.4'/></g></svg>")`,
+        },
+        notes: {
+            backgroundColor: '#0a1628',
+            backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='80' viewBox='0 0 160 80'><g stroke='%2345d4bf' stroke-opacity='0.18' stroke-width='0.6'><line x1='0' y1='20' x2='160' y2='20'/><line x1='0' y1='30' x2='160' y2='30'/><line x1='0' y1='40' x2='160' y2='40'/><line x1='0' y1='50' x2='160' y2='50'/><line x1='0' y1='60' x2='160' y2='60'/></g><g fill='%23f59e0b' fill-opacity='0.55'><ellipse cx='25' cy='50' rx='3' ry='2.2' transform='rotate(-20 25 50)'/><rect x='27.5' y='32' width='0.8' height='18' fill='%23f59e0b' fill-opacity='0.55'/><path d='M28 32 Q34 36 32 44' fill='none' stroke='%23f59e0b' stroke-opacity='0.55' stroke-width='0.8'/></g><g fill='%2345d4bf' fill-opacity='0.5'><ellipse cx='90' cy='40' rx='3' ry='2.2' transform='rotate(-20 90 40)'/><rect x='92.5' y='22' width='0.8' height='18' fill='%2345d4bf' fill-opacity='0.5'/><path d='M93 22 Q99 26 97 34' fill='none' stroke='%2345d4bf' stroke-opacity='0.5' stroke-width='0.8'/></g><g fill='%23f59e0b' fill-opacity='0.4'><ellipse cx='130' cy='55' rx='3' ry='2.2' transform='rotate(-20 130 55)'/><rect x='132.5' y='37' width='0.8' height='18' fill='%23f59e0b' fill-opacity='0.4'/></g></svg>")`,
         },
     };
 
