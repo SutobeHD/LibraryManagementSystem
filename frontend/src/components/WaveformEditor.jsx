@@ -237,26 +237,18 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
     const [loopIn, setLoopIn] = useState(null);
     const [loopOut, setLoopOut] = useState(null);
     const [isLooping, setIsLooping] = useState(false);
-    const [visualMode, setVisualMode] = useState('rgb'); // 'blue', 'rgb', '3band' — default RGB (ranking-style)
+    const [visualMode, setVisualMode] = useState('blue'); // 'blue', 'rgb', '3band'
     const [multibandBuffers, setMultibandBuffers] = useState(null);
     const [analyzing, setAnalyzing] = useState(false);
     const [bufferReady, setBufferReady] = useState(false);
 
-    // Refs for multi-band layers (main waveform)
+    // Refs for multi-band layers
     const waveLowRef = useRef(null);
     const waveMidRef = useRef(null);
     const waveHighRef = useRef(null);
     const wsLow = useRef(null);
     const wsMid = useRef(null);
     const wsHigh = useRef(null);
-
-    // Refs for multi-band layers (overview mini-map)
-    const overviewLowRef = useRef(null);
-    const overviewMidRef = useRef(null);
-    const overviewHighRef = useRef(null);
-    const ovLow = useRef(null);
-    const ovMid = useRef(null);
-    const ovHigh = useRef(null);
 
     // Fetch Global Settings on mount
     useEffect(() => {
@@ -305,13 +297,10 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
             wsLow.current?.destroy(); wsLow.current = null;
             wsMid.current?.destroy(); wsMid.current = null;
             wsHigh.current?.destroy(); wsHigh.current = null;
-            ovLow.current?.destroy(); ovLow.current = null;
-            ovMid.current?.destroy(); ovMid.current = null;
-            ovHigh.current?.destroy(); ovHigh.current = null;
         };
 
         const initLayers = async () => {
-            // If Blue Mode, cleanup slaves and restore Main + Overview defaults
+            // If Blue Mode, cleanup slaves and restore Main
             if (visualMode === 'blue') {
                 cleanupSlaves();
                 wavesurfer.current.setOptions({
@@ -319,9 +308,6 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                     progressColor: 'rgba(59, 130, 246, 0.8)',
                     cursorColor: 'rgba(255, 255, 255, 0.5)'
                 });
-                if (overviewWs.current && !overviewWs.current.isDestroyed) {
-                    overviewWs.current.setOptions({ waveColor: '#444', progressColor: '#ff9800' });
-                }
                 return;
             }
 
@@ -346,14 +332,6 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                 cursorColor: 'rgba(255, 255, 255, 0.5)',
             });
 
-            // Hide Overview Waveform (keep interaction + regions/timeline plugins)
-            if (overviewWs.current && !overviewWs.current.isDestroyed) {
-                overviewWs.current.setOptions({
-                    waveColor: 'transparent',
-                    progressColor: 'transparent',
-                });
-            }
-
             const WaveSurfer = (await import('wavesurfer.js')).default;
 
             const options = {
@@ -373,28 +351,12 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
             wsMid.current = WaveSurfer.create({ ...options, container: waveMidRef.current, waveColor: colMid, progressColor: colMid });
             wsHigh.current = WaveSurfer.create({ ...options, container: waveHighRef.current, waveColor: colHigh, progressColor: colHigh });
 
-            // Overview slaves: full-track view (fillParent), no interaction, height matches overview row
-            const ovOptions = {
-                height: 48,
-                cursorColor: 'transparent',
-                interact: false,
-                hideScrollbar: true,
-                fillParent: true,
-                normalize: true,
-                barWidth: undefined,
-            };
-            if (overviewLowRef.current && overviewMidRef.current && overviewHighRef.current) {
-                ovLow.current = WaveSurfer.create({ ...ovOptions, container: overviewLowRef.current, waveColor: colLow, progressColor: colLow });
-                ovMid.current = WaveSurfer.create({ ...ovOptions, container: overviewMidRef.current, waveColor: colMid, progressColor: colMid });
-                ovHigh.current = WaveSurfer.create({ ...ovOptions, container: overviewHighRef.current, waveColor: colHigh, progressColor: colHigh });
-            }
-
             // Load Blobs
-            const loadBlob = (ws, blob, applyZoom = true) => {
+            const loadBlob = (ws, blob) => {
                 // Apply Zoom/Time once ready
                 ws.once('ready', () => {
                     if (ws && !ws.isDestroyed) {
-                        if (applyZoom) ws.zoom(zoom);
+                        ws.zoom(zoom);
                         ws.setTime(wavesurfer.current.getCurrentTime());
                     }
                 });
@@ -404,11 +366,6 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
             if (wsLow.current) loadBlob(wsLow.current, multibandBuffers.low);
             if (wsMid.current) loadBlob(wsMid.current, multibandBuffers.mid);
             if (wsHigh.current) loadBlob(wsHigh.current, multibandBuffers.high);
-
-            // Overview slaves: no zoom (fillParent shows full track)
-            if (ovLow.current) loadBlob(ovLow.current, multibandBuffers.low, false);
-            if (ovMid.current) loadBlob(ovMid.current, multibandBuffers.mid, false);
-            if (ovHigh.current) loadBlob(ovHigh.current, multibandBuffers.high, false);
 
             // Initial Sync (Might be too early, but good backup)
             const t = wavesurfer.current.getCurrentTime();
@@ -447,7 +404,7 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
 
                     const scroll = scrollEl.scrollLeft;
 
-                    // Sync Main Slaves (time + scroll)
+                    // Sync Slaves
                     [wsLow, wsMid, wsHigh].forEach(ws => {
                         if (ws.current && !ws.current.isDestroyed) {
                             // Sync Time
@@ -459,15 +416,6 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                             const childScroll = childWrapper?.parentElement;
                             if (childScroll) {
                                 childScroll.scrollLeft = scroll;
-                            }
-                        }
-                    });
-
-                    // Sync Overview Slaves (time only — fillParent, no scroll)
-                    [ovLow, ovMid, ovHigh].forEach(ws => {
-                        if (ws.current && !ws.current.isDestroyed) {
-                            if (Math.abs(ws.current.getCurrentTime() - time) > 0.05) {
-                                ws.current.setTime(time);
                             }
                         }
                     });
@@ -1429,17 +1377,9 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
     if (simpleMode) {
         return (
             <div className="flex flex-col h-full w-full bg-[#030303] overflow-hidden relative group rounded-xl">
-                {/* Top Section: Overview — 3-band stacked layers (matches main waveform style) */}
-                <div className="h-12 w-full border-b border-white/10 relative bg-black/60 shrink-0 mb-2 overflow-hidden">
-                    {(visualMode === 'rgb' || visualMode === '3band') && (
-                        <>
-                            <div ref={overviewHighRef} className={`absolute inset-0 z-30 pointer-events-none ${visualMode === 'rgb' ? 'mix-blend-screen' : ''}`} />
-                            <div ref={overviewMidRef} className={`absolute inset-0 z-20 pointer-events-none ${visualMode === 'rgb' ? 'mix-blend-screen' : ''}`} />
-                            <div ref={overviewLowRef} className={`absolute inset-0 z-10 pointer-events-none ${visualMode === 'rgb' ? 'mix-blend-screen' : ''}`} />
-                        </>
-                    )}
-                    {/* Master overview: kept on top for click/regions/timeline interaction (waveform itself transparent in 3-band modes) */}
-                    <div ref={overviewRef} className="absolute inset-0 z-40 rb-overview-container !h-full !bg-transparent" />
+                {/* Top Section: Overview with more room */}
+                <div className="h-12 w-full border-b border-white/10 relative bg-black/60 shrink-0 mb-2">
+                    <div ref={overviewRef} className="rb-overview-container !h-full !bg-transparent" />
                 </div>
 
                 {/* Main Section: Waveform with distinct 3-band coloring (Native Gradients) */}
@@ -1614,17 +1554,8 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
 
             {/* Waveform Section */}
             <div className="flex-1 flex flex-col bg-black">
-                {/* Overview — 3-band stacked layers (matches main waveform) */}
-                <div className="rb-overview-container relative overflow-hidden">
-                    {(visualMode === 'rgb' || visualMode === '3band') && (
-                        <>
-                            <div ref={overviewHighRef} className={`absolute inset-0 z-30 pointer-events-none ${visualMode === 'rgb' ? 'mix-blend-screen' : ''}`} />
-                            <div ref={overviewMidRef} className={`absolute inset-0 z-20 pointer-events-none ${visualMode === 'rgb' ? 'mix-blend-screen' : ''}`} />
-                            <div ref={overviewLowRef} className={`absolute inset-0 z-10 pointer-events-none ${visualMode === 'rgb' ? 'mix-blend-screen' : ''}`} />
-                        </>
-                    )}
-                    <div ref={overviewRef} className="absolute inset-0 z-40" />
-                </div>
+                {/* Overview */}
+                <div ref={overviewRef} className="rb-overview-container" />
 
                 {/* Detail View */}
                 <div className="rb-detail-container relative">
