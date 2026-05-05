@@ -245,8 +245,7 @@ const SelectionView = ({ onSelect }) => (
   <div className="fixed inset-0 z-[110] bg-mx-deepest flex flex-col items-center justify-center p-8 animate-fade-in">
     <DotGridBackdrop />
 
-    {/* Single horizontal hairline through the middle for visual anchor */}
-    <div className="absolute left-0 right-0 top-1/2 h-px bg-line-subtle pointer-events-none" />
+
 
     <div className="relative z-10 flex flex-col items-center max-w-4xl w-full">
       {/* Bar-graph logo, large */}
@@ -423,7 +422,7 @@ const App = () => {
       {isInitialLoading && (
         <div className="fixed inset-0 z-[120] bg-mx-deepest flex flex-col items-center justify-center p-8 animate-fade-in font-sans">
           <DotGridBackdrop />
-          <div className="absolute left-0 right-0 top-1/2 h-px bg-line-subtle pointer-events-none" />
+
           <div className="relative z-10 flex flex-col items-center max-w-md w-full">
             {/* Bar-graph logo, animated */}
             <div className="flex items-end gap-1 mb-8">
