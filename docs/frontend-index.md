@@ -66,7 +66,7 @@ All DAW state is managed in this directory. Do NOT duplicate in component-local 
 | `components/SettingsView.jsx` | **8-tab preferences panel**: Library (watched folders + scan), Backup (auto-interval), Export (bitrate/sample-rate defaults), Audio (CPAL output device via `list_audio_devices` Tauri cmd), Analysis (quality preset), Appearance (waveform band colors + locale), Shortcuts (14 configurable hotkeys via `KeyCapture` component), Network (HTTP proxy). Inner helper components: `Toggle`, `Section`, `Field`, `KeyCapture` | `GET /api/settings`, `POST /api/settings`, `POST /api/library/scan-folder`, `invoke('list_audio_devices')` |
 | `components/ToolsView.jsx` | Batch tools: clean titles, find duplicates, batch comments, rename | `GET /api/tools/duplicates`, `POST /api/tools/batch-comment`, `POST /api/library/clean-titles` |
 | `components/DesignView.jsx` | UI theme/palette preview and customization |  |
-| `components/WaveformEditor.jsx` | Full waveform editor (WaveSurfer.js). Used in RankingView (`simpleMode`) and standalone. Exposes ref API: `stop()`, `setTime(t)`, `getCurrentTime()`, `playPause()`. Fires `onPlayPause(bool)` on play/pause/finish events | — |
+| `components/WaveformEditor.jsx` | Full waveform editor (WaveSurfer.js). Used in RankingView (`simpleMode`) and standalone. 3-band RGB rendering default (3 stacked WaveSurfer layers + `mix-blend-screen`) for both main waveform AND overview minimap. `visualMode` toggles `blue`/`rgb`/`3band`. Exposes ref API: `stop()`, `setTime(t)`, `getCurrentTime()`, `playPause()`. Fires `onPlayPause(bool)` on play/pause/finish events | — |
 
 ---
 
