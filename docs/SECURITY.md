@@ -93,13 +93,13 @@ cd src-tauri && cargo audit && cd ..
 
 ## Known Accepted Risks
 
-### Vite 7.3.1 — 3 high dev-server CVEs (GHSA-4w7w-66w2-5vf9, GHSA-v2wj-q39q-566r, GHSA-p9ff-h696-f583)
-- **Scope**: Vite dev server only (path traversal, fs.deny bypass, WebSocket file read)
-- **Production impact**: ZERO — Vite is build-time only, dev server not used in production builds
-- **Exploitable**: Only if attacker can reach `localhost:5173` (would need local network access during active dev session)
-- **Mitigation**: Vite dev server bound to `localhost` only by default — not exposed to LAN
-- **Status**: Watching for Vite 7.3.2+ patch release (Vite 8.x still in beta as of May 2026)
-- **Action**: Update immediately when 7.3.2 lands
+### picomatch <=2.3.1 || 4.0.0–4.0.3 — high ReDoS (GHSA-3v7f-55p6-f55p, GHSA-c2c7-rcm5-vvqj)
+- **Scope**: Build-time glob matching (transient via vite, tailwindcss, tinyglobby)
+- **Production impact**: ZERO — only used during `vite build` / `tailwind compile`
+- **Exploitable**: Only with attacker-controlled glob patterns in tailwind/vite config (would require separate compromise to inject)
+- **Mitigation**: Build runs in isolated environment; config files are git-tracked and reviewed
+- **Status**: No upstream patch released yet (May 2026). Latest picomatch=4.0.3 still vulnerable.
+- **Action**: Watching upstream for 4.0.4+ release. Dependabot will auto-PR when available.
 
 ## Reporting Security Issues
 

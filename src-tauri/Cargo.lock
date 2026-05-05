@@ -1998,6 +1998,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "library-management-system"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "cpal",
+ "crossbeam-channel",
+ "dotenvy",
+ "hound",
+ "lofty",
+ "log",
+ "memmap2",
+ "open",
+ "rand 0.9.4",
+ "reqwest 0.12.28",
+ "ringbuf",
+ "rubato",
+ "rustfft",
+ "serde",
+ "serde_json",
+ "sha2",
+ "symphonia",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-fs",
+ "tauri-plugin-shell",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "libredox"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3215,37 +3246,6 @@ name = "raw-window-handle"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20675572f6f24e9e76ef639bc5552774ed45f1c30e2951e1e99c59888861c539"
-
-[[package]]
-name = "rb-editor-pro"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "cpal",
- "crossbeam-channel",
- "dotenvy",
- "hound",
- "lofty",
- "log",
- "memmap2",
- "open",
- "rand 0.9.4",
- "reqwest 0.12.28",
- "ringbuf",
- "rubato",
- "rustfft",
- "serde",
- "serde_json",
- "sha2",
- "symphonia",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-fs",
- "tauri-plugin-shell",
- "tokio",
- "url",
-]
 
 [[package]]
 name = "realfft"
