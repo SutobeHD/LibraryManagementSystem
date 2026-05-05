@@ -300,36 +300,99 @@ export function isPlaying() {
 /**
  * Render the timeline to an AudioBuffer using OfflineAudioContext.
  * Used for WAV/MP3 export.
- * 
- * @param {Array} regions - Regions to render
+ *
+ * Critical fixes for Rekordbox-accurate export:
+ * 1. **playbackRate**: When source duration ≠ timeline duration, the source is
+ *    pitch-shifted/stretched so the audio fits exactly into the timeline slot.
+ *    Rekordbox edit projects routinely have BPM-aligned cuts where source beats
+ *    map to timeline beats with different tempos.
+ * 2. **Volume envelopes**: If `volumeEnvelope` is provided (from .rbep <volume>),
+ *    a per-region GainNode applies the volume value over its time range.
+ * 3. **Tight scheduling**: Each region gets its own GainNode so volumes don't bleed.
+ *
+ * @param {Array} regions - Regions to render: { timelineStart, duration|timelineEnd, sourceStart, sourceEnd|sourceDuration, gain? }
  * @param {AudioBuffer} sourceBuffer - Source audio buffer
  * @param {number} sampleRate - Output sample rate (default: 44100)
  * @param {Function} [onProgress] - Progress callback (0-1)
+ * @param {Array} [volumeEnvelope] - Optional volume sections: { startSec, endSec, vol }
  * @returns {Promise<AudioBuffer>}
  */
-export async function renderTimeline(regions, sourceBuffer, sampleRate = 44100, onProgress = null) {
+export async function renderTimeline(regions, sourceBuffer, sampleRate = 44100, onProgress = null, volumeEnvelope = null) {
     if (!regions || regions.length === 0 || !sourceBuffer) {
         throw new Error('No regions or source buffer to render');
     }
 
-    // Calculate total duration
+    // Sort regions by timeline position
     const sorted = [...regions].sort((a, b) => a.timelineStart - b.timelineStart);
-    const totalDuration = Math.max(...sorted.map(r => r.timelineStart + r.duration));
+
+    // Calculate total duration from MAX of (timelineStart + timelineDuration)
+    const totalDuration = Math.max(...sorted.map(r => {
+        const dur = r.duration || ((r.timelineEnd || 0) - r.timelineStart);
+        return r.timelineStart + Math.max(0, dur);
+    }));
+
+    if (totalDuration <= 0) {
+        throw new Error(`Invalid timeline duration: ${totalDuration}`);
+    }
+
     const totalSamples = Math.ceil(totalDuration * sampleRate);
     const numChannels = sourceBuffer.numberOfChannels;
 
     const offlineCtx = new OfflineAudioContext(numChannels, totalSamples, sampleRate);
 
-    // Schedule all regions
+    // Master output gain (for volume envelopes spanning the whole timeline)
+    const masterGain = offlineCtx.createGain();
+    masterGain.gain.value = 1.0;
+    masterGain.connect(offlineCtx.destination);
+
+    // Apply volume envelope if provided
+    if (volumeEnvelope && Array.isArray(volumeEnvelope) && volumeEnvelope.length > 0) {
+        for (const env of volumeEnvelope) {
+            const t = Math.max(0, env.startSec || 0);
+            const v = Math.max(0, Math.min(2, env.vol ?? 1.0));
+            try {
+                masterGain.gain.setValueAtTime(v, t);
+            } catch (e) {
+                console.warn('[renderTimeline] Volume envelope point failed:', e);
+            }
+        }
+    }
+
+    // Schedule each region with proper rate-stretching and gain
     for (const region of sorted) {
+        const timelineDur = region.duration || ((region.timelineEnd || 0) - region.timelineStart);
+        const sourceDur = region.sourceDuration || ((region.sourceEnd || 0) - (region.sourceStart || 0));
+
+        if (timelineDur <= 0 || sourceDur <= 0) {
+            console.warn('[renderTimeline] Skipping invalid region:', region);
+            continue;
+        }
+
         const source = offlineCtx.createBufferSource();
         source.buffer = sourceBuffer;
-        source.connect(offlineCtx.destination);
 
-        const bufferOffset = region.sourceStart;
-        const playDuration = region.sourceDuration || (region.sourceEnd - region.sourceStart);
+        // Per-region gain (so each region can have its own volume)
+        const regionGain = offlineCtx.createGain();
+        regionGain.gain.value = region.gain ?? 1.0;
 
-        source.start(region.timelineStart, bufferOffset, playDuration);
+        // CRITICAL: rate-stretch the source so its audio fills the timeline slot exactly.
+        // This matches Rekordbox behavior — when an edit cut has different source/timeline
+        // BPMs, the source is pitch-shifted to align beats. Without this, exports have
+        // gaps or overlaps and fail to match what Rekordbox plays back.
+        const playbackRate = sourceDur / timelineDur;
+        if (Number.isFinite(playbackRate) && playbackRate > 0) {
+            source.playbackRate.value = playbackRate;
+        }
+
+        source.connect(regionGain);
+        regionGain.connect(masterGain);
+
+        // start(when, offset, duration) — duration is in SOURCE time, not timeline time
+        try {
+            source.start(region.timelineStart, region.sourceStart, sourceDur);
+        } catch (e) {
+            console.error('[renderTimeline] start() failed for region:', region, e);
+        }
     }
 
     if (onProgress) onProgress(0.1);

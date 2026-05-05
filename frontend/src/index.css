@@ -255,6 +255,17 @@
   }
   ::-webkit-scrollbar-thumb:hover { background: var(--line-default); }
   * { scrollbar-width: thin; scrollbar-color: var(--line-subtle) transparent; }
+
+  /* DAW scrollbar — amber thumb, slightly more visible (no color flash on drag) */
+  .daw-scrollbar::-webkit-scrollbar { height: 10px; }
+  .daw-scrollbar::-webkit-scrollbar-track { background: transparent; }
+  .daw-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(232, 164, 42, 0.45);
+    border-radius: 4px;
+    transition: background 0.15s;
+  }
+  .daw-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(232, 164, 42, 0.7); }
+  .daw-scrollbar::-webkit-scrollbar-thumb:active { background: rgba(232, 164, 42, 0.85); }
 }
 
 /* Animations */
