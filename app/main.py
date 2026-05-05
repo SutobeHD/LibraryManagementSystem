@@ -1381,6 +1381,17 @@ class UsbProfileReq(BaseModel):
     sync_playlists: Optional[List[str]] = []
     auto_sync: Optional[bool] = False
 
+    # Per-profile audio export settings (used during sync if conversion is needed)
+    audio_format: Optional[str] = "original"   # 'original' | 'mp3' | 'flac' | 'wav' | 'aac'
+    audio_bitrate: Optional[str] = "320"       # for lossy formats: '128', '192', '256', '320'
+    audio_sample_rate: Optional[str] = "44100" # '44100' | '48000' | '96000'
+
+    # Library type / sync direction (already used elsewhere — declared here so frontend can update)
+    sync_direction: Optional[str] = "pc_main"  # 'pc_main' | 'usb_main'
+    sync_mirrored:  Optional[bool] = False
+    sync_primary:   Optional[str] = None
+    library_types:  Optional[List[str]] = None
+
 class UsbSyncReq(BaseModel):
     device_id: str
     sync_type: Optional[str] = "collection"  # collection, playlists, metadata
