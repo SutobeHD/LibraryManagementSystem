@@ -3,8 +3,8 @@
 mod soundcloud_client;
 mod audio;
 
-// use tauri_plugin_shell::ShellExt;
-// use tauri_plugin_shell::process::CommandEvent;
+use tauri_plugin_shell::ShellExt;
+use tauri_plugin_shell::process::CommandEvent;
 use serde::Deserialize;
 use soundcloud_client::Track;
 use tauri::{Emitter, Manager};
@@ -157,19 +157,24 @@ fn main() {
 
                 tauri::async_runtime::spawn(async move {
                     // Keep the child alive in this scope
-                    let _child = child; 
-                    while let Some(event) = rx.recv().await {
-                        match event {
-                            CommandEvent::Stdout(line) => {
-                                println!("backend: {}", String::from_utf8_lossy(&line).trim());
+                    let _child = child;
+                    loop {
+                        match rx.recv().await {
+                            Some(event) => {
+                                match event {
+                                    CommandEvent::Stdout(line) => {
+                                        println!("backend: {}", String::from_utf8_lossy(&line).trim());
+                                    }
+                                    CommandEvent::Stderr(line) => {
+                                        eprintln!("backend-error: {}", String::from_utf8_lossy(&line).trim());
+                                    }
+                                    CommandEvent::Error(err) => {
+                                        eprintln!("backend-critical: {}", err);
+                                    }
+                                    _ => {}
+                                }
                             }
-                            CommandEvent::Stderr(line) => {
-                                eprintln!("backend-error: {}", String::from_utf8_lossy(&line).trim());
-                            }
-                            CommandEvent::Error(err) => {
-                                eprintln!("backend-critical: {}", err);
-                            }
-                            _ => {}
+                            None => break,
                         }
                     }
                 });
