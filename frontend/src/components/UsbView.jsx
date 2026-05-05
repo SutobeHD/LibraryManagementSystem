@@ -139,12 +139,6 @@ const USB_TYPES = [
     { id: 'SetStick',       label: 'Set Stick',        desc: 'Playlists only (<500 tracks)', icon: PlayCircle },
 ];
 
-const SYNC_TYPES = [
-    { id: 'collection', label: 'Collection', icon: Database },
-    { id: 'playlists',  label: 'Playlists',  icon: ListMusic },
-    { id: 'metadata',   label: 'Metadata',   icon: ArrowUpDown },
-];
-
 // ────────────────────────────────────────────────────────────────────
 //  COMPATIBILITY PANEL
 // ────────────────────────────────────────────────────────────────────
@@ -406,7 +400,9 @@ const UsbView = () => {
     const [syncProgress, setSyncProgress] = useState(null);
     const [diff, setDiff] = useState(null);
     const [playlistTree, setPlaylistTree] = useState([]);
-    const [selectedSyncType, setSelectedSyncType] = useState('collection');
+    // sync_type wird jetzt aus USB-Typ + Kontext abgeleitet — kein separater State mehr.
+    // Mapping: SetStick → 'playlists', alles andere → 'collection'.
+    // Rationale: Doppelte Auswahl (Target Ecosystem + Sync-Type) verwirrt — Target legt Inhalt fest.
 
     // Contents viewer
     const [activeLibrary, setActiveLibrary] = useState('library_legacy');
@@ -520,9 +516,12 @@ const UsbView = () => {
 
     const runSync = async () => {
         if (!sel) return;
-        const playlistIds = selectedSyncType === 'playlists' ? (sel.sync_playlists || []) : [];
-        if (selectedSyncType === 'playlists' && playlistIds.length === 0) {
-            toast.error('Select at least one playlist to sync');
+        // Sync-Inhalt aus USB-Typ ableiten — keine doppelte Auswahl
+        const isPlaylistOnly = sel.type === 'SetStick';
+        const sync_type      = isPlaylistOnly ? 'playlists' : 'collection';
+        const playlistIds    = isPlaylistOnly ? (sel.sync_playlists || []) : [];
+        if (isPlaylistOnly && playlistIds.length === 0) {
+            toast.error('Select at least one playlist for the Set Stick');
             return;
         }
         setSyncing(sel.device_id);
@@ -530,7 +529,7 @@ const UsbView = () => {
         try {
             const res = await api.post('/api/usb/sync', {
                 device_id: sel.device_id,
-                sync_type: selectedSyncType,
+                sync_type,
                 playlist_ids: playlistIds,
                 library_types: sel.library_types || ['library_legacy'],
             }, { timeout: 0 });
@@ -899,28 +898,15 @@ const UsbView = () => {
                                         </div>
                                     </div>
 
-                                    {/* Sync controls */}
+                                    {/* Sync controls — vereinfacht: Inhalt ergibt sich aus Target Ecosystem */}
                                     <div className="mx-card p-4">
-                                        <div className="mx-caption mb-3">Sync</div>
-                                        <div className="grid grid-cols-3 gap-2 mb-3">
-                                            {SYNC_TYPES.map(st => {
-                                                const Icon = st.icon;
-                                                const active = selectedSyncType === st.id;
-                                                return (
-                                                    <button
-                                                        key={st.id}
-                                                        onClick={() => setSelectedSyncType(st.id)}
-                                                        className={`flex flex-col items-center gap-1.5 py-2.5 px-2 rounded-mx-sm border transition-all ${
-                                                            active
-                                                                ? 'bg-amber2/10 border-amber2/50 text-amber2'
-                                                                : 'bg-mx-input border-line-subtle text-ink-muted hover:bg-mx-hover'
-                                                        }`}
-                                                    >
-                                                        <Icon size={15} />
-                                                        <span className="text-[10px] font-semibold uppercase tracking-wider">{st.label}</span>
-                                                    </button>
-                                                );
-                                            })}
+                                        <div className="flex items-center justify-between mb-3">
+                                            <span className="mx-caption">Sync</span>
+                                            <span className="text-[10px] text-ink-muted">
+                                                {sel.type === 'SetStick'
+                                                    ? `${(sel.sync_playlists || []).length} playlists selected`
+                                                    : `Full ${USB_TYPES.find(t => t.id === sel.type)?.label || 'collection'}`}
+                                            </span>
                                         </div>
 
                                         {isConnected(sel) && (
@@ -954,17 +940,15 @@ const UsbView = () => {
                                             </div>
                                         )}
 
-                                        <div className="flex gap-2">
-                                            <button
-                                                onClick={runSync}
-                                                disabled={!!syncing || !isConnected(sel)}
-                                                className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed"
-                                            >
-                                                {syncing === sel.device_id
-                                                    ? <><Loader2 size={14} className="animate-spin" /> Syncing…</>
-                                                    : <><Download size={14} /> Sync {SYNC_TYPES.find(s => s.id === selectedSyncType)?.label}</>}
-                                            </button>
-                                        </div>
+                                        <button
+                                            onClick={runSync}
+                                            disabled={!!syncing || !isConnected(sel)}
+                                            className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed"
+                                        >
+                                            {syncing === sel.device_id
+                                                ? <><Loader2 size={14} className="animate-spin" /> Syncing…</>
+                                                : <><Download size={14} /> Sync Now</>}
+                                        </button>
 
                                         {syncing === sel.device_id && syncProgress && (
                                             <div className="mt-3 space-y-1.5">

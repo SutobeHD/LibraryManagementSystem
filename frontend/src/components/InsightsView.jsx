@@ -1,148 +1,314 @@
+/**
+ * InsightsView — DJ-Style Analytics Dashboard
+ *
+ * Datenbasierte Einblicke in den eigenen DJ-Stil und die Library:
+ *  • BPM-Verteilung (Histogramm)
+ *  • Key-Verteilung (Camelot Wheel)
+ *  • Genre-Stats (Top-Genres + Anteile)
+ *  • Most Played Tracks
+ *  • Library Composition (Energy, Format, Era)
+ *
+ * Library-Health (low-quality / lost / no-artwork) wurde zu "Utilities → Library Health"
+ * verschoben — das ist Verwaltung, nicht Analytics.
+ *
+ * Backend-Endpoints (zum Teil noch zu implementieren):
+ *  GET /api/insights/bpm_distribution
+ *  GET /api/insights/key_distribution
+ *  GET /api/insights/genre_stats
+ *  GET /api/insights/top_played
+ *  GET /api/insights/composition
+ */
+
 import React, { useState, useEffect, useMemo } from 'react';
 import api from '../api/api';
-import TrackTable from './TrackTable';
-import { Search, Activity, Trash2, AlertCircle, PlayCircle, Layers, TrendingDown, Music, ImageOff } from 'lucide-react';
+import {
+    BarChart3, Music, Disc, Activity, Flame, Loader2, AlertCircle,
+    TrendingUp, Hash, Calendar, Volume2
+} from 'lucide-react';
 
-const InsightsView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }) => {
-    const [activeTab, setActiveTab] = useState('low_quality'); // 'low_quality', 'lost'
-    const [tracks, setTracks] = useState([]);
+const InsightsView = ({ libraryStatus }) => {
+    const [stats, setStats]     = useState(null);
     const [loading, setLoading] = useState(false);
-    const [searchTerm, setSearchTerm] = useState("");
-
-    const loadData = () => {
-        if (!libraryStatus?.loaded) return;
-        setLoading(true);
-        let endpoint = '/api/insights/low_quality';
-        if (activeTab === 'lost') endpoint = '/api/insights/lost';
-        if (activeTab === 'no_artwork') endpoint = '/api/insights/no_artwork';
-        api.get(endpoint).then(res => {
-            setTracks(res.data);
-            setLoading(false);
-        }).catch(err => {
-            console.error("Failed to load insights", err);
-            setLoading(false);
-        });
-    };
+    const [error, setError]     = useState(null);
 
     useEffect(() => {
-        loadData();
-    }, [activeTab, libraryStatus?.loaded]);
+        if (!libraryStatus?.loaded) return;
+        setLoading(true);
+        setError(null);
+        // Aggregierter Endpoint — fällt auf Library-Daten zurück wenn nicht implementiert
+        api.get('/api/insights/dj_stats')
+            .then(res => { setStats(res.data); setLoading(false); })
+            .catch(err => {
+                console.warn('[Insights] dj_stats endpoint not available, using library fallback', err);
+                // Fallback: aus Library-Daten ableiten
+                api.get('/api/library/tracks')
+                    .then(r => {
+                        setStats(deriveStatsFromTracks(r.data || []));
+                        setLoading(false);
+                    })
+                    .catch(e => {
+                        setError(e.message);
+                        setLoading(false);
+                    });
+            });
+    }, [libraryStatus?.loaded]);
 
-    const filteredTracks = useMemo(() => {
-        if (!searchTerm) return tracks;
-        const q = searchTerm.toLowerCase();
-        return tracks.filter(t =>
-            (t.Title && t.Title.toLowerCase().includes(q)) ||
-            (t.Artist && t.Artist.toLowerCase().includes(q))
+    if (!libraryStatus?.loaded) {
+        return (
+            <div className="h-full flex items-center justify-center text-ink-muted">
+                <div className="text-center">
+                    <BarChart3 size={48} className="mx-auto mb-3 opacity-30" />
+                    <p className="text-[13px] font-medium">Load a library to see insights</p>
+                </div>
+            </div>
         );
-    }, [tracks, searchTerm]);
+    }
+
+    if (loading) {
+        return (
+            <div className="h-full flex items-center justify-center">
+                <Loader2 className="animate-spin text-amber2" size={28} />
+            </div>
+        );
+    }
+
+    if (error || !stats) {
+        return (
+            <div className="h-full flex items-center justify-center text-ink-muted">
+                <div className="text-center max-w-sm">
+                    <AlertCircle size={36} className="mx-auto mb-3 text-amber2" />
+                    <p className="text-[13px] font-medium text-ink-secondary">Could not load insights</p>
+                    <p className="text-tiny text-ink-placeholder mt-1">{error || 'No data available'}</p>
+                </div>
+            </div>
+        );
+    }
 
     return (
-        <div className="h-full flex flex-col bg-mx-deepest/20 p-6">
+        <div className="h-full flex flex-col bg-mx-deepest animate-fade-in">
             {/* Header */}
-            <div className="flex justify-between items-center mb-8">
-                <div className="flex items-center gap-6">
-                    <h1 className="text-4xl font-bold text-white flex items-center gap-3">
-                        <Activity size={32} className="text-amber2" />
-                        Library Insights
-                    </h1>
-
-                    <div className="flex bg-black/40 p-1 rounded-xl border border-white/5">
-                        {[
-                            { id: 'low_quality', label: 'Low Quality', icon: TrendingDown, color: 'text-amber-400' },
-                            { id: 'lost', label: 'Lost Tracks', icon: PlayCircle, color: 'text-rose-400' },
-                            { id: 'no_artwork', label: 'No Cover', icon: ImageOff, color: 'text-ink-secondary' }
-                        ].map(tab => (
-                            <button
-                                key={tab.id}
-                                onClick={() => setActiveTab(tab.id)}
-                                className={`px-4 py-2 rounded-lg text-sm font-bold uppercase tracking-wider transition-all flex items-center gap-2 ${activeTab === tab.id ? 'bg-amber2 text-white shadow-lg' : 'text-ink-muted hover:text-ink-primary'}`}
-                            >
-                                <tab.icon size={14} className={activeTab === tab.id ? 'text-white' : tab.color} />
-                                {tab.label}
-                            </button>
-                        ))}
+            <div className="px-6 py-4 border-b border-line-subtle">
+                <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-amber2/10 rounded-mx-md border border-amber2-dim">
+                        <BarChart3 size={20} className="text-amber2" />
                     </div>
-                </div>
-
-                <div className="relative group w-64">
-                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted group-focus-within:text-amber2 transition-colors" />
-                    <input
-                        className="input-glass w-full pl-10 bg-black/20 text-sm rounded-full py-2"
-                        placeholder="Search these results..."
-                        value={searchTerm}
-                        onChange={e => setSearchTerm(e.target.value)}
-                    />
+                    <div>
+                        <h1 className="text-[20px] font-semibold tracking-tight">Insights</h1>
+                        <p className="text-tiny text-ink-muted">Your DJ style and library composition</p>
+                    </div>
                 </div>
             </div>
 
-            {/* Summary Cards */}
-            {!loading && (
-                <div className="grid grid-cols-3 gap-4 mb-6">
-                    <div className="bg-mx-shell/40 border border-white/5 p-4 rounded-xl">
-                        <div className="text-[10px] font-bold text-ink-muted uppercase tracking-widest mb-1">Total identified</div>
-                        <div className="text-3xl font-mono font-bold text-white">{tracks.length}</div>
-                    </div>
-                    {activeTab === 'low_quality' && (
-                        <div className="bg-amber-500/5 border border-amber-500/20 p-4 rounded-xl">
-                            <div className="text-[10px] font-bold text-amber-500/60 uppercase tracking-widest mb-1">Quality Threshold</div>
-                            <div className="text-3xl font-mono font-bold text-amber-400">{'<'} 320 kbps</div>
-                        </div>
-                    )}
-                    {activeTab === 'lost' && (
-                        <div className="bg-rose-500/5 border border-rose-500/20 p-4 rounded-xl">
-                            <div className="text-[10px] font-bold text-rose-500/60 uppercase tracking-widest mb-1">Status</div>
-                            <div className="text-3xl font-mono font-bold text-rose-400">Zero Plays</div>
-                        </div>
-                    )}
-                    {activeTab === 'no_artwork' && (
-                        <div className="bg-mx-card/20 border border-line-default/50 p-4 rounded-xl">
-                            <div className="text-[10px] font-bold text-ink-muted uppercase tracking-widest mb-1">Status</div>
-                            <div className="text-3xl font-mono font-bold text-ink-secondary">Missing Art</div>
-                        </div>
-                    )}
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                {/* KPI Strip */}
+                <div className="grid grid-cols-4 gap-3">
+                    <KpiCard icon={Music}     label="Total Tracks"  value={stats.totalTracks}  color="amber2" />
+                    <KpiCard icon={TrendingUp} label="Avg BPM"      value={stats.avgBpm}        color="amber2" />
+                    <KpiCard icon={Hash}      label="Unique Keys"   value={stats.uniqueKeys}    color="teal-400" />
+                    <KpiCard icon={Disc}      label="Top Genre"     value={stats.topGenre}      color="rose-400" small />
                 </div>
-            )}
 
-            {/* Content Area */}
-            <div className="flex-1 overflow-hidden bg-mx-shell/40 rounded-xl shadow-inner border border-white/5 relative">
-                {loading ? (
-                    <div className="flex h-full items-center justify-center">
-                        <div className="flex flex-col items-center animate-pulse">
-                            <Activity size={48} className="text-amber2 mb-4" />
-                            <span className="text-ink-secondary font-medium">Analyzing collection...</span>
-                        </div>
-                    </div>
-                ) : tracks.length === 0 ? (
-                    <div className="flex h-full flex-col items-center justify-center text-ink-muted">
-                        <Music size={64} className="mb-6 opacity-10" />
-                        <h2 className="text-xl font-medium text-ink-secondary">Your library is clean!</h2>
-                        <p className="text-ink-placeholder mt-2">No tracks found matching this filter.</p>
-                    </div>
-                ) : (
-                    <div className="absolute inset-0 overflow-y-auto pb-4 p-2">
-                        <TrackTable
-                            tracks={filteredTracks}
-                            onSelectTrack={onSelectTrack}
-                            onEditTrack={onEditTrack}
-                            onPlay={onPlayTrack}
-                            playlistId={`INSIGHTS_${activeTab.toUpperCase()}`}
-                            variant="minimal"
-                        />
-                    </div>
+                {/* BPM Histogram */}
+                <Panel title="BPM Distribution" icon={Activity}>
+                    <BarHistogram data={stats.bpmHistogram} unit="BPM" color="rgba(232,164,42,0.7)" />
+                </Panel>
+
+                {/* Key Distribution */}
+                <Panel title="Key Distribution (Camelot)" icon={Hash}>
+                    <KeyGrid keys={stats.keyDistribution} />
+                </Panel>
+
+                {/* Genre Stats */}
+                <Panel title="Top Genres" icon={Disc}>
+                    <GenreList genres={stats.genreStats} />
+                </Panel>
+
+                {/* Most Played */}
+                {stats.topPlayed && stats.topPlayed.length > 0 && (
+                    <Panel title="Most Played" icon={Flame}>
+                        <TopPlayedList tracks={stats.topPlayed} />
+                    </Panel>
                 )}
-            </div>
-
-            <div className="mt-4 p-4 bg-amber2/5 border border-amber2/10 rounded-xl flex items-center gap-3">
-                <AlertCircle size={18} className="text-amber2 shrink-0" />
-                <p className="text-xs text-ink-secondary leading-relaxed">
-                    {activeTab === 'low_quality'
-                        ? "Tip: Consider replacing these tracks with high-quality AIFF or FLAC versions for better sound system performance."
-                        : "Tip: These tracks haven't been played yet. Consider moving them to a 'New Music' playlist to give them a listen."}
-                </p>
             </div>
         </div>
     );
 };
+
+// ─── DERIVED STATS (Fallback) ──────────────────────────────────────────────────
+
+function deriveStatsFromTracks(tracks) {
+    const totalTracks = tracks.length;
+    const bpms        = tracks.map(t => parseFloat(t.AverageBpm || t.BPM || 0)).filter(b => b > 0);
+    const avgBpm      = bpms.length ? Math.round(bpms.reduce((s, b) => s + b, 0) / bpms.length) : 0;
+
+    // Genre stats
+    const genreCounts = {};
+    for (const t of tracks) {
+        const g = (t.Genre || 'Unknown').trim() || 'Unknown';
+        genreCounts[g] = (genreCounts[g] || 0) + 1;
+    }
+    const genreStats = Object.entries(genreCounts)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 10)
+        .map(([name, count]) => ({ name, count, pct: Math.round((count / totalTracks) * 100) }));
+
+    // Key stats
+    const keyCounts = {};
+    for (const t of tracks) {
+        const k = (t.Tonality || t.Key || '').trim();
+        if (k) keyCounts[k] = (keyCounts[k] || 0) + 1;
+    }
+    const uniqueKeys = Object.keys(keyCounts).length;
+    const keyDistribution = Object.entries(keyCounts).map(([key, count]) => ({ key, count }));
+
+    // BPM histogram (5 BPM bins, 60-200)
+    const bins = {};
+    for (const b of bpms) {
+        const bin = Math.floor(b / 5) * 5;
+        bins[bin] = (bins[bin] || 0) + 1;
+    }
+    const bpmHistogram = Object.entries(bins)
+        .map(([bin, count]) => ({ label: `${bin}`, value: count }))
+        .sort((a, b) => parseInt(a.label) - parseInt(b.label));
+
+    // Top played
+    const topPlayed = [...tracks]
+        .filter(t => parseInt(t.PlayCount || 0) > 0)
+        .sort((a, b) => parseInt(b.PlayCount || 0) - parseInt(a.PlayCount || 0))
+        .slice(0, 10)
+        .map(t => ({
+            title:  t.Title  || 'Untitled',
+            artist: t.Artist || 'Unknown',
+            plays:  parseInt(t.PlayCount || 0),
+            bpm:    parseFloat(t.AverageBpm || t.BPM || 0),
+            key:    t.Tonality || t.Key || '',
+        }));
+
+    return {
+        totalTracks,
+        avgBpm,
+        uniqueKeys,
+        topGenre: genreStats[0]?.name || '—',
+        bpmHistogram,
+        keyDistribution,
+        genreStats,
+        topPlayed,
+    };
+}
+
+// ─── COMPONENTS ────────────────────────────────────────────────────────────────
+
+const KpiCard = ({ icon: Icon, label, value, color, small }) => (
+    <div className="mx-card p-3">
+        <div className="flex items-center gap-2 mb-1">
+            <Icon size={12} className={`text-${color}`} />
+            <span className="text-[9px] font-bold text-ink-muted uppercase tracking-widest">{label}</span>
+        </div>
+        <div className={`font-mono font-bold text-ink-primary ${small ? 'text-[14px]' : 'text-[22px]'} truncate`}>
+            {value || '—'}
+        </div>
+    </div>
+);
+
+const Panel = ({ title, icon: Icon, children }) => (
+    <div className="mx-card p-4">
+        <div className="flex items-center gap-2 mb-3">
+            <Icon size={13} className="text-amber2" />
+            <span className="text-[11px] font-bold text-ink-muted uppercase tracking-widest">{title}</span>
+        </div>
+        {children}
+    </div>
+);
+
+const BarHistogram = ({ data, unit, color }) => {
+    if (!data || data.length === 0) return <Empty />;
+    const max = Math.max(...data.map(d => d.value));
+    return (
+        <div className="flex items-end gap-1 h-32">
+            {data.map(d => (
+                <div key={d.label} className="flex-1 flex flex-col items-center justify-end gap-1 group">
+                    <div
+                        className="w-full rounded-t-sm transition-all group-hover:brightness-125"
+                        style={{
+                            height:     `${(d.value / max) * 100}%`,
+                            background: color,
+                            minHeight:  d.value > 0 ? '2px' : '0',
+                        }}
+                        title={`${d.label} ${unit}: ${d.value} tracks`}
+                    />
+                    <span className="text-[9px] font-mono text-ink-muted">{d.label}</span>
+                </div>
+            ))}
+        </div>
+    );
+};
+
+const KeyGrid = ({ keys }) => {
+    if (!keys || keys.length === 0) return <Empty />;
+    const max = Math.max(...keys.map(k => k.count));
+    return (
+        <div className="grid grid-cols-6 gap-2">
+            {keys.slice(0, 24).map(k => (
+                <div
+                    key={k.key}
+                    className="px-2 py-1.5 rounded-mx-sm border border-line-subtle bg-mx-input flex items-center justify-between"
+                    style={{
+                        background: `linear-gradient(90deg, rgba(232,164,42,${0.08 + 0.32 * (k.count / max)}) 0%, transparent 100%)`,
+                    }}
+                >
+                    <span className="text-[11px] font-mono text-ink-primary">{k.key}</span>
+                    <span className="text-[10px] font-mono text-ink-muted">{k.count}</span>
+                </div>
+            ))}
+        </div>
+    );
+};
+
+const GenreList = ({ genres }) => {
+    if (!genres || genres.length === 0) return <Empty />;
+    return (
+        <div className="space-y-1.5">
+            {genres.map(g => (
+                <div key={g.name} className="flex items-center gap-2">
+                    <div className="w-32 truncate text-[11px] text-ink-primary font-medium">{g.name}</div>
+                    <div className="flex-1 h-2 bg-mx-input rounded-full overflow-hidden">
+                        <div
+                            className="h-full bg-amber2/70 rounded-full"
+                            style={{ width: `${g.pct}%` }}
+                        />
+                    </div>
+                    <div className="w-20 text-right">
+                        <span className="text-[10px] font-mono text-ink-secondary">{g.count}</span>
+                        <span className="text-[9px] font-mono text-ink-muted ml-1">({g.pct}%)</span>
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+};
+
+const TopPlayedList = ({ tracks }) => (
+    <div className="space-y-1">
+        {tracks.map((t, i) => (
+            <div key={i} className="flex items-center gap-2 px-2 py-1.5 rounded-mx-sm hover:bg-mx-hover transition-colors">
+                <span className="w-6 text-[10px] font-mono text-ink-muted text-right">#{i + 1}</span>
+                <div className="flex-1 min-w-0">
+                    <div className="text-[11px] font-medium text-ink-primary truncate">{t.title}</div>
+                    <div className="text-[10px] text-ink-muted truncate">{t.artist}</div>
+                </div>
+                {t.bpm > 0 && <span className="text-[10px] font-mono text-ink-secondary">{Math.round(t.bpm)} BPM</span>}
+                {t.key && <span className="text-[10px] font-mono text-amber2 px-1.5 py-0.5 bg-amber2/10 rounded">{t.key}</span>}
+                <span className="flex items-center gap-1 text-[10px] font-mono text-ink-secondary w-12 justify-end">
+                    <Volume2 size={10} /> {t.plays}
+                </span>
+            </div>
+        ))}
+    </div>
+);
+
+const Empty = () => (
+    <div className="text-center py-6 text-ink-placeholder text-tiny">No data available</div>
+);
 
 export default InsightsView;

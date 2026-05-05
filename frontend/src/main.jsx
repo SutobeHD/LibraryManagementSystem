@@ -15,7 +15,6 @@ const RankingView = lazy(() => import('./components/RankingView'));
 const XmlCleanView = lazy(() => import('./components/XmlCleanView'));
 const MetadataView = lazy(() => import('./components/MetadataView'));
 const ImportView = lazy(() => import('./components/ImportView'));
-const InsightsView = lazy(() => import('./components/InsightsView'));
 const UsbView = lazy(() => import('./components/UsbView'));
 const BackupManager = lazy(() => import('./components/BackupManager'));
 const DesignView = lazy(() => import('./components/DesignView'));
@@ -24,6 +23,7 @@ const SoundCloudSyncView = lazy(() => import('./components/SoundCloudSyncView'))
 const PhraseGeneratorView = lazy(() => import('./components/PhraseGeneratorView'));
 const DuplicateView = lazy(() => import('./components/DuplicateView'));
 const UtilitiesView = lazy(() => import('./components/UtilitiesView'));
+const InsightsView  = lazy(() => import('./components/InsightsView'));
 
 import api, { setSessionToken, getSessionToken } from './api/api'
 
@@ -151,7 +151,7 @@ const Sidebar = ({ activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnlo
             <NavBtn icon={<Music size={14} />} label="Library" active={activeTab === 'library'} onClick={() => setActiveTab('library')} />
             <NavBtn icon={<Upload size={14} />} label="Audio Import" active={activeTab === 'import'} onClick={() => setActiveTab('import')} />
             <NavBtn icon={<Zap size={14} />} label="Ranking Mode" active={activeTab === 'ranking'} onClick={() => setActiveTab('ranking')} />
-            <NavBtn icon={<Activity size={14} />} label="Insights" active={activeTab === 'insights'} onClick={() => setActiveTab('insights')} />
+            <NavBtn icon={<BarChart3 size={14} />} label="Insights" active={activeTab === 'insights'} onClick={() => setActiveTab('insights')} />
           </NavGroup>
 
           <NavGroup label="Editor">
@@ -509,7 +509,7 @@ const App = () => {
 
             <div className={activeTab === 'insights' ? 'h-full' : 'hidden'}>
               <ErrorBoundary key="eb-insights">
-                <InsightsView onSelectTrack={handleTrackSelect} onEditTrack={handleTrackEdit} libraryStatus={libraryStatus} />
+                <InsightsView libraryStatus={libraryStatus} />
               </ErrorBoundary>
             </div>
 
@@ -527,7 +527,16 @@ const App = () => {
 
             {activeTab === 'usb' && <ErrorBoundary key="eb-usb"><UsbView /></ErrorBoundary>}
             {activeTab === 'design' && <ErrorBoundary key="eb-design"><DesignView /></ErrorBoundary>}
-            {activeTab === 'utilities' && <ErrorBoundary key="eb-utilities"><UtilitiesView /></ErrorBoundary>}
+            {activeTab === 'utilities' && (
+              <ErrorBoundary key="eb-utilities">
+                <UtilitiesView
+                  onSelectTrack={handleTrackSelect}
+                  onEditTrack={handleTrackEdit}
+                  onPlayTrack={(track) => setPlayerTrack(track)}
+                  libraryStatus={libraryStatus}
+                />
+              </ErrorBoundary>
+            )}
             {activeTab === 'settings' && <ErrorBoundary key="eb-settings"><SettingsView /></ErrorBoundary>}
           </Suspense>
         </div>
