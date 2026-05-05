@@ -1,59 +1,63 @@
-
-import React, { useRef, useEffect, useCallback } from 'react';
-import { useMemo } from 'react';
-
 /**
  * DawScrollbar — Horizontal scrollbar synchronized with the timeline
+ *
+ * Critical: avoids the feedback loop where programmatically setting
+ * `scrollLeft` triggers an `onScroll` event that re-dispatches SET_SCROLL_X.
+ * We use a `programmaticScroll` ref to suppress events fired by our own writes.
  */
+
+import React, { useRef, useEffect, useCallback, useMemo } from 'react';
+
 const DawScrollbar = React.memo(({ state, dispatch }) => {
     const { totalDuration, zoom, scrollX } = state;
     const containerRef = useRef(null);
-    const thumbRef = useRef(null);
+    const programmaticScroll = useRef(false);
+    const rafRef = useRef(null);
 
-    // Calculate total width of timeline in pixels
-    const totalWidth = useMemo(() => totalDuration * zoom, [totalDuration, zoom]);
+    // Total content width in pixels (timeline pixels match scrollbar pixels 1:1)
+    const totalWidth = useMemo(
+        () => Math.max(10, (totalDuration || 0) * (zoom || 100) + 200),
+        [totalDuration, zoom]
+    );
 
-    // Calculate viewport width (approximation, as actual width is in canvas)
-    // We can assume viewport is container width.
-    // If totalWidth < viewport, no scrollbar needed?
-    // But we need to allow scrolling negative margin?
-    // Let's rely on container width.
+    // ── Sync state.scrollX → DOM scrollLeft (without triggering onScroll loop) ──
+    useEffect(() => {
+        const el = containerRef.current;
+        if (!el) return;
+        const target = Math.max(0, Math.round(scrollX || 0));
+        if (Math.abs(el.scrollLeft - target) < 1) return; // already in sync
+        programmaticScroll.current = true;
+        el.scrollLeft = target;
+        // Release the flag on the next frame, after the scroll event has fired
+        requestAnimationFrame(() => { programmaticScroll.current = false; });
+    }, [scrollX]);
 
-    const containerWidth = containerRef.current?.clientWidth || 1000;
-    // This is tricky because containerRef is null on first render.
-    // We can use 100% width.
-
-    // Instead of custom thumb, let's use native scrollbar behavior with a dummy spacer?
-    // Or a custom UI range slider?
-    // Native scrollbar is easiest for user interaction (drag, click track).
-
-    const viewportWidth = window.innerWidth; // Rough estimate or pass from parent?
-    // Using a spacer div width = totalDuration * zoom + padding
-
+    // ── User scroll → dispatch (debounced via rAF for smooth UI) ──
     const handleScroll = useCallback((e) => {
-        const newScrollX = e.target.scrollLeft - 20; // Adjust for margin?
-        // Actually, scrollX in state corresponds to pixels.
-        // If we set scrollLeft, we dispatch SET_SCROLL_X.
-        dispatch({ type: 'SET_SCROLL_X', payload: e.target.scrollLeft });
+        if (programmaticScroll.current) return; // ignore our own writes
+        const newScrollX = e.target.scrollLeft;
+        if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        rafRef.current = requestAnimationFrame(() => {
+            dispatch({ type: 'SET_SCROLL_X', payload: newScrollX });
+        });
     }, [dispatch]);
 
-    useEffect(() => {
-        if (containerRef.current) {
-            containerRef.current.scrollLeft = Math.max(0, scrollX);
-        }
-    }, [scrollX]);
+    // Cleanup pending rAF on unmount
+    useEffect(() => () => {
+        if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    }, []);
 
     return (
         <div
             ref={containerRef}
             onScroll={handleScroll}
-            className="w-full h-4 bg-mx-shell border-t border-white/5 overflow-x-auto overflow-y-hidden custom-scrollbar"
+            className="w-full h-3 bg-mx-deepest border-t border-line-subtle overflow-x-auto overflow-y-hidden daw-scrollbar"
             style={{
-                scrollbarWidth: 'auto',
-                scrollbarColor: '#475569 #0f172a'
+                scrollbarWidth: 'thin',
+                scrollbarColor: 'var(--amber) transparent',
             }}
         >
-            <div style={{ width: Math.max(10, totalWidth + 400), height: '1px' }} />
+            <div style={{ width: totalWidth, height: '1px' }} />
         </div>
     );
 });

@@ -360,6 +360,21 @@ const DjEditDaw = ({ track: initialTrack }) => {
                 // Set regions
                 newState.regions = trackData.regions || [];
 
+                // Convert .rbep volume sections (beat-indexed) to seconds for export
+                // The parser stores volume as { startBeat, endBeat, vol } — we need seconds
+                if (trackData.volume && trackData.volume.length > 0) {
+                    const timelineTempoMap = newState.tempoMap;
+                    newState.volumeData = trackData.volume.map(v => ({
+                        startSec: timelineTempoMap.length > 0
+                            ? (timelineTempoMap[Math.min(Math.floor(v.startBeat), timelineTempoMap.length - 1)]?.positionMs || 0) / 1000
+                            : v.startBeat * (60 / newState.bpm),
+                        endSec: timelineTempoMap.length > 0
+                            ? (timelineTempoMap[Math.min(Math.floor(v.endBeat), timelineTempoMap.length - 1)]?.positionMs || 0) / 1000
+                            : v.endBeat * (60 / newState.bpm),
+                        vol: v.vol,
+                    }));
+                }
+
                 // Resume context and play (optional)
                 await DawEngine.resumeContext();
 

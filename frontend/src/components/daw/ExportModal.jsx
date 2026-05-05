@@ -148,7 +148,8 @@ const ExportModal = React.memo(({ state, onClose }) => {
                     state.regions,
                     state.sourceBuffer,
                     state.sourceBuffer.sampleRate,
-                    (p) => setProgress(Math.round(10 + p * 75))
+                    (p) => setProgress(Math.round(10 + p * 75)),
+                    state.volumeData || null  // Apply .rbep volume envelopes for Rekordbox-accurate output
                 );
 
                 setProgress(88);
