@@ -39,15 +39,33 @@ async function pickDirectory(initial) {
     }
 }
 
+async function createFolderIfNotExists(path) {
+    if (!isTauri) return;
+    try {
+        const { mkdir } = await import('@tauri-apps/plugin-fs');
+        const dir = path.includes('\\') ? path.substring(0, path.lastIndexOf('\\')) : path.substring(0, path.lastIndexOf('/'));
+        if (dir && dir.length > 3) { // Skip drive letter on Windows
+            await mkdir(dir, { recursive: true });
+            console.log('[ExportModal] Created folder:', dir);
+        }
+    } catch (err) {
+        console.warn('[ExportModal] mkdir failed:', err.message);
+        // Don't throw — the write might still succeed if folder exists
+    }
+}
+
 async function writeBinaryFile(path, uint8) {
     if (!isTauri) return false;
     try {
         const { writeFile } = await import('@tauri-apps/plugin-fs');
+        console.log('[ExportModal] Writing to:', path);
         await writeFile(path, uint8);
+        console.log('[ExportModal] Write successful');
         return true;
     } catch (err) {
-        console.warn('[ExportModal] Tauri fs writeFile failed:', err);
-        return false;
+        const msg = err.message || String(err);
+        console.error('[ExportModal] Tauri fs writeFile failed:', msg);
+        throw new Error(`File write failed: ${msg}`);
     }
 }
 
@@ -134,8 +152,8 @@ const ExportModal = React.memo(({ state, onClose }) => {
                 const u8  = new Uint8Array(wav);
 
                 if (isTauri && outputDir) {
-                    const ok = await writeBinaryFile(fullPath, u8);
-                    if (!ok) throw new Error(`Could not write to ${fullPath}. Check folder permissions.`);
+                    await createFolderIfNotExists(fullPath);
+                    await writeBinaryFile(fullPath, u8);
                     setSavedPath(fullPath);
                 } else {
                     // Browser fallback: trigger download
@@ -197,8 +215,8 @@ const ExportModal = React.memo(({ state, onClose }) => {
             const u8   = new Uint8Array(buf);
 
             if (isTauri && outputDir) {
-                const ok = await writeBinaryFile(fullPath, u8);
-                if (!ok) throw new Error(`Could not write to ${fullPath}.`);
+                await createFolderIfNotExists(fullPath);
+                await writeBinaryFile(fullPath, u8);
                 setSavedPath(fullPath);
             } else {
                 triggerDownload(blob, outName);

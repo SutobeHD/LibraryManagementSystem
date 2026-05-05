@@ -55,7 +55,7 @@
 
 | File | Purpose |
 |------|---------|
-| `frontend/src/main.jsx` | App root: lazy-loaded tab views, session token init, global error boundary, tab router. **Sidebar** — 220px, groups: Library / Editor / Sync / Utilities / Lab. Footer: Backups + Settings + Exit. No glow effects on loading/selection screens. Lazy imports for UtilitiesView |
+| `frontend/src/main.jsx` | App root: lazy-loaded tab views, session token init, global error boundary, tab router. **Sidebar** — 220px, groups: Library / Editor / Sync / Utilities / Lab. Footer: Backups + Settings + Exit. DotGridBackdrop component for selection/loading screens (24px radial dots, amber2, no gradient blur). Lazy imports for UtilitiesView |
 | `frontend/src/api/api.js` | **Central Axios instance** — always use this. Handles session tokens, 401 refresh queue, 429 exponential backoff, HttpOnly cookie support, 10s default timeout (disabled for long-running calls like `/api/usb/sync` via `{ timeout: 0 }`), Tauri context detection |
 | `frontend/src/index.css` | Global styles — Melodex CSS vars (`--mx-*`, `--ink-*`, `--amber*`), DM Sans + JetBrains Mono via Google Fonts, primitives (`.nav-item`, `.btn-primary`, `.btn-ghost`, `.btn-secondary`, `.input-glass`, `.glass-panel`, `.mx-card`, `.mx-panel`, `.mx-caption`, `.mx-mono`, `.mx-chip`), DAW/region/playhead styles recolored to amber, monochrome scrollbars |
 
@@ -120,7 +120,7 @@
 | `frontend/src/components/daw/DawControlStrip.jsx` | Control strip: track info, BPM display, playback transport, snap-to-grid toggle |
 | `frontend/src/components/daw/DawScrollbar.jsx` | Custom horizontal scrollbar for timeline navigation |
 | `frontend/src/components/daw/WaveformOverview.jsx` | Mini-map waveform overview for quick timeline navigation |
-| `frontend/src/components/daw/ExportModal.jsx` | Export dialog: region range, fade settings, format options |
+| `frontend/src/components/daw/ExportModal.jsx` | **Export dialog** with folder picker, format options (WAV/MP3/FLAC), normalization. Helpers: `pickDirectory()` (tauri-plugin-dialog), `createFolderIfNotExists()` (tauri-plugin-fs mkdir), `writeBinaryFile()` (tauri-plugin-fs writeFile with error propagation). WAV: DawEngine.renderTimeline → audioBufferToWav → fs write. MP3/FLAC: POST /api/audio/render → download → fs write. Browser fallback: download via blob. Reads default_export_dir from /api/settings |
 
 ### Non-Destructive Editor (`editor/`)
 
@@ -160,9 +160,9 @@
 | `src-tauri/src/audio/metadata.rs` | Tag read/write via lofty: ID3 (MP3), FLAC tags, ALAC metadata |
 | `src-tauri/src/audio/fingerprint.rs` | **NEW** Acoustic fingerprinting: decode via Symphonia → 11025 Hz mono → 32-band Mel spectrogram → Chromaprint-style u32 hash words. `hamming_similarity()`. Tauri commands: `fingerprint_track(path)`, `fingerprint_batch(paths, window)` (emits `fingerprint_progress` events) |
 | `src-tauri/build.rs` | Tauri build script (required, do not modify) |
-| `src-tauri/Cargo.toml` | Rust deps: tauri 2.2, tauri-plugin-shell, tauri-plugin-dialog (folder picker), tauri-plugin-fs (binary writes), cpal, symphonia, rustfft, rubato, ringbuf, memmap2, hound, lofty, sha2, reqwest, tokio, serde |
+| `src-tauri/Cargo.toml` | Rust deps: tauri 2.2, tauri-plugin-shell, tauri-plugin-dialog (folder picker via `open { directory: true }`), tauri-plugin-fs (binary writes via `writeFile` + folder creation via `mkdir`), cpal, symphonia, rustfft, rubato, ringbuf, memmap2, hound, lofty, sha2, reqwest, tokio, serde |
 | `src-tauri/tauri.conf.json` | Tauri config: window title, size, splashscreen, bundle identifier |
-| `src-tauri/capabilities/main.json` | Permissions: `core:default`, `shell:*`, `dialog:default/allow-open/allow-save`, `fs:default/allow-write-text-file/allow-read-text-file` |
+| `src-tauri/capabilities/main.json` | Permissions: `core:default`, `shell:allow-spawn/allow-execute`, `dialog:default/allow-open/allow-save`, `fs:default/allow-write-file/allow-read-file/allow-mkdir` (binary writes + folder creation) |
 
 ---
 
