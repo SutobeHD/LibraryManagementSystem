@@ -90,7 +90,7 @@ const Sidebar = ({ activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnlo
               />
             ))}
           </div>
-          <span className="text-[15px] font-bold tracking-tight text-ink-primary">RB Editor</span>
+          <span className="text-[15px] font-bold tracking-tight text-ink-primary">Library Manager</span>
         </div>
 
         {/* Library Status Indicator */}
@@ -439,7 +439,7 @@ const App = () => {
               ))}
             </div>
             <h1 className="text-2xl font-semibold text-ink-primary mb-2 tracking-tight">Loading Library</h1>
-            <p className="mx-caption mb-10" style={{ color: 'var(--amber)' }}>RB Editor Pro</p>
+            <p className="mx-caption mb-10" style={{ color: 'var(--amber)' }}>LibraryManagementSystem</p>
             <div className="w-full h-1 bg-line-subtle rounded-full overflow-hidden mb-3">
               <div
                 className="h-full bg-amber2 transition-all duration-500 ease-out"

@@ -1,4 +1,4 @@
-# FILE_MAP.md — RB Editor Pro
+# FILE_MAP.md — LibraryManagementSystem
 
 > **Read this first.** One-line-per-file map of the entire codebase. Use this to find the right file for any task without searching blindly.
 > Last updated: 2026-05-05

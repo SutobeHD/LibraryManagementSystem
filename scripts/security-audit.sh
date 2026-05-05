@@ -7,7 +7,7 @@
 
 set -e
 
-echo "==> Security Audit (RB Editor Pro)"
+echo "==> Security Audit (LibraryManagementSystem)"
 echo "==> Date: $(date)"
 echo ""
 

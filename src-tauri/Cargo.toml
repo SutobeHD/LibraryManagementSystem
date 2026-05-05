@@ -1,5 +1,5 @@
 [package]
-name = "rb-editor-pro"
+name = "library-management-system"
 version = "0.1.0"
 description = "Rekordbox Editor Pro Desktop"
 edition = "2021"

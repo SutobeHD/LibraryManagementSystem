@@ -1,6 +1,6 @@
 # 📥 SOUNDCLOUD INTEGRATION
 
-Evaluation and documentation of SoundCloud download and sync capabilities in RB Editor Pro.
+Evaluation and documentation of SoundCloud download and sync capabilities in LibraryManagementSystem.
 
 ## 1. Current Implementation
 

@@ -124,8 +124,8 @@ async fn export_to_soundcloud(app: tauri::AppHandle, playlist_name: String, trac
 fn main() {
     // Robust .env loading: search in current and parent dirs
     match dotenvy::dotenv() {
-        Ok(path) => println!("[RB Editor] Found .env at: {:?}", path),
-        Err(_) => println!("[RB Editor] No .env file found. Using system environment variables."),
+        Ok(path) => println!("[LibraryManagementSystem] Found .env at: {:?}", path),
+        Err(_) => println!("[LibraryManagementSystem] No .env file found. Using system environment variables."),
     }
     
     tauri::Builder::default()

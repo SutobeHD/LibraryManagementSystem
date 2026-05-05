@@ -1,5 +1,5 @@
 """
-RB Editor Pro -- ANLZ Binary File Writer
+LibraryManagementSystem -- ANLZ Binary File Writer
 ==========================================
 Writes Rekordbox-compatible ANLZ binary files (.DAT, .EXT, .2EX)
 so our analysis results can be injected directly into a Rekordbox library

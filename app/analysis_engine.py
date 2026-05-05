@@ -1,5 +1,5 @@
 """
-RB Editor Pro -- High-Accuracy Analysis Engine (v2.0)
+LibraryManagementSystem -- High-Accuracy Analysis Engine (v2.0)
 ======================================================
 Production-grade DSP pipeline that produces Rekordbox-compatible analysis data.
 Matches or exceeds Rekordbox analysis quality for BPM, Key, Waveforms & Phrases.

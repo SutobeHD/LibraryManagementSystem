@@ -5,7 +5,7 @@
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "==> Security Audit (RB Editor Pro)" -ForegroundColor Cyan
+Write-Host "==> Security Audit (LibraryManagementSystem)" -ForegroundColor Cyan
 Write-Host "==> Date: $(Get-Date)" -ForegroundColor Cyan
 Write-Host ""
 

@@ -1,5 +1,5 @@
 """
-RB Editor Pro -- Analysis-to-Database Writer
+LibraryManagementSystem -- Analysis-to-Database Writer
 =============================================
 Orchestrates writing analysis results into the Rekordbox live database:
   1. Runs AnalysisEngine on a track

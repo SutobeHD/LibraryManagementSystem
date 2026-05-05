@@ -1,4 +1,4 @@
-# RB Editor Pro
+# LibraryManagementSystem
 
 Desktop companion for DJs. Bridges SoundCloud playlists with local Rekordbox-compatible library. Local-first, no shared backend.
 

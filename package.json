@@ -1,7 +1,7 @@
 {
   "name": "music-library-manager",
   "version": "1.0.0",
-  "description": "RB Editor Pro — Rekordbox library editor with native audio engine",
+  "description": "LibraryManagementSystem — Rekordbox library editor with native audio engine",
   "main": "index.js",
   "scripts": {
     "dev": "npm run dev --prefix frontend",

@@ -36,7 +36,7 @@ def analysis_to_xml_track(track_id: str, analysis_result: Dict[str, Any], metada
     track.set("DateAdded", time.strftime("%Y-%m-%d"))
     track.set("BitRate", "320") # Assumption or pass actual
     track.set("SampleRate", str(analysis_result.get("sample_rate", 44100)))
-    track.set("Comments", "Analyzed by RB Editor Pro")
+    track.set("Comments", "Analyzed by LibraryManagementSystem")
     track.set("PlayCount", "0")
     track.set("Rating", "0")
     track.set("Location", f"file://localhost/{analysis_result.get('file', '').replace(os.sep, '/')}")
