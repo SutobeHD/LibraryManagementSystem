@@ -20,10 +20,24 @@ import api from '../../api/api';
 
 // ─── TAURI HELPERS (graceful fallback for browser/dev) ──────────────────────────
 
-const isTauri = typeof window !== 'undefined' && Boolean(window.__TAURI__);
+/**
+ * Tauri 2 detection — `window.__TAURI__` is Tauri 1.x only.
+ * Tauri 2 sets `__TAURI_INTERNALS__`. We check both for safety.
+ * Best practice: try to load the plugin and fall back if it errors.
+ */
+const isTauri = typeof window !== 'undefined' && (
+    Boolean(window.__TAURI_INTERNALS__) ||
+    Boolean(window.__TAURI__) ||
+    Boolean(window.isTauri)
+);
+
+console.log('[ExportModal] Tauri detection:', {
+    isTauri,
+    __TAURI_INTERNALS__: !!window.__TAURI_INTERNALS__,
+    __TAURI__: !!window.__TAURI__,
+});
 
 async function pickDirectory(initial) {
-    if (!isTauri) return null;
     try {
         const { open } = await import('@tauri-apps/plugin-dialog');
         const picked = await open({
@@ -40,35 +54,46 @@ async function pickDirectory(initial) {
 }
 
 async function createFolderIfNotExists(path) {
-    if (!isTauri) return;
     try {
         const { mkdir } = await import('@tauri-apps/plugin-fs');
-        // Extract directory from full path (works with both / and \)
         const lastSlash = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
-        if (lastSlash <= 0) return; // No directory to create
+        if (lastSlash <= 0) return;
         const dir = path.substring(0, lastSlash);
         console.log('[ExportModal] Creating folder:', dir);
         await mkdir(dir, { recursive: true });
-        console.log('[ExportModal] Folder created successfully');
+        console.log('[ExportModal] Folder ready');
     } catch (err) {
-        console.warn('[ExportModal] mkdir failed:', err.message);
-        // Don't throw — the write might still succeed if folder exists
+        // mkdir may fail because folder already exists — that's fine
+        console.log('[ExportModal] mkdir result:', err.message);
     }
 }
 
+/**
+ * Write binary file via Tauri 2 plugin-fs.
+ * Tauri 2 API: writeFile(path, Uint8Array) — replaces Tauri 1's writeBinaryFile.
+ * Returns the result; throws on actual failure (not "missing plugin").
+ */
 async function writeBinaryFile(path, uint8) {
-    if (!isTauri) return false;
     try {
-        const { writeBinaryFile: writeBin } = await import('@tauri-apps/plugin-fs');
-        console.log('[ExportModal] Writing to:', path);
-        console.log('[ExportModal] File size:', uint8.length, 'bytes');
-        // Use writeBinaryFile for binary data
-        await writeBin(path, uint8);
+        const fs = await import('@tauri-apps/plugin-fs');
+        console.log('[ExportModal] Writing', uint8.length, 'bytes to:', path);
+
+        // Tauri 2 unified API
+        if (typeof fs.writeFile === 'function') {
+            await fs.writeFile(path, uint8);
+        }
+        // Tauri 1 fallback (just in case)
+        else if (typeof fs.writeBinaryFile === 'function') {
+            await fs.writeBinaryFile(path, uint8);
+        } else {
+            throw new Error('No fs write function found in plugin-fs');
+        }
+
         console.log('[ExportModal] Write successful');
         return true;
     } catch (err) {
         const msg = err.message || String(err);
-        console.error('[ExportModal] Tauri fs writeBinaryFile failed:', msg);
+        console.error('[ExportModal] Tauri fs write failed:', msg);
         throw new Error(`File write failed: ${msg}`);
     }
 }
@@ -156,12 +181,26 @@ const ExportModal = React.memo(({ state, onClose }) => {
                 const wav = DawEngine.audioBufferToWav(rendered, normalize);
                 const u8  = new Uint8Array(wav);
 
-                if (isTauri && outputDir) {
-                    await createFolderIfNotExists(fullPath);
-                    await writeBinaryFile(fullPath, u8);
-                    setSavedPath(fullPath);
+                if (outputDir) {
+                    // Try Tauri write — falls back to download only if Tauri unavailable
+                    try {
+                        await createFolderIfNotExists(fullPath);
+                        await writeBinaryFile(fullPath, u8);
+                        setSavedPath(fullPath);
+                    } catch (writeErr) {
+                        console.error('[ExportModal] Tauri write failed, falling back to download:', writeErr);
+                        if (!isTauri) {
+                            // Genuine browser context — fall back to download
+                            const blob = new Blob([u8], { type: 'audio/wav' });
+                            triggerDownload(blob, outName);
+                            setSavedPath(`Downloads / ${outName}`);
+                        } else {
+                            // Tauri context but write failed — surface the error
+                            throw writeErr;
+                        }
+                    }
                 } else {
-                    // Browser fallback: trigger download
+                    // No folder selected — browser-style download
                     const blob = new Blob([u8], { type: 'audio/wav' });
                     triggerDownload(blob, outName);
                     setSavedPath(`Downloads / ${outName}`);
@@ -219,10 +258,20 @@ const ExportModal = React.memo(({ state, onClose }) => {
             const buf  = await blob.arrayBuffer();
             const u8   = new Uint8Array(buf);
 
-            if (isTauri && outputDir) {
-                await createFolderIfNotExists(fullPath);
-                await writeBinaryFile(fullPath, u8);
-                setSavedPath(fullPath);
+            if (outputDir) {
+                try {
+                    await createFolderIfNotExists(fullPath);
+                    await writeBinaryFile(fullPath, u8);
+                    setSavedPath(fullPath);
+                } catch (writeErr) {
+                    console.error('[ExportModal] Tauri write failed, falling back to download:', writeErr);
+                    if (!isTauri) {
+                        triggerDownload(blob, outName);
+                        setSavedPath(`Downloads / ${outName}`);
+                    } else {
+                        throw writeErr;
+                    }
+                }
             } else {
                 triggerDownload(blob, outName);
                 setSavedPath(`Downloads / ${outName}`);
