@@ -1,0 +1,13 @@
+{
+  "_comment": "Lockfile-Lint config — Schicht A Hardening. Verifies all package URLs in lockfile come from npm registry only (no git, no local, no malicious mirrors).",
+  "path": "frontend/package-lock.json",
+  "type": "npm",
+  "validate-https": true,
+  "allowed-hosts": [
+    "npm"
+  ],
+  "validate-package-names": true,
+  "validate-checksum": true,
+  "validate-integrity": true,
+  "empty-hostname": false
+}
