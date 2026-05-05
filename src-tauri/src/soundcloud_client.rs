@@ -24,15 +24,35 @@ type ScError = Box<dyn std::error::Error + Send + Sync>;
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
-// SECURITY: Credentials loaded from environment variables at runtime.
-// Set SOUNDCLOUD_CLIENT_ID and SOUNDCLOUD_CLIENT_SECRET in your environment.
-fn get_client_id() -> String {
-    std::env::var("SOUNDCLOUD_CLIENT_ID").unwrap_or_else(|_| "[[INSERT_SOUNDCLOUD_CLIENT_ID]]".to_string())
+// SECURITY: Credentials are loaded from the user's environment at runtime.
+// They never live in source code. Each user/tester registers their own
+// SoundCloud app and provides their own values via .env (see .env.example).
+//
+// On a fresh checkout with no .env, the helpers below return Err and the
+// auth flow refuses to start — we never silently fall back to a baked-in
+// credential.
+fn get_client_id() -> Result<String, String> {
+    std::env::var("SOUNDCLOUD_CLIENT_ID").map_err(|_| {
+        "SOUNDCLOUD_CLIENT_ID is not set. Copy .env.example to .env and \
+         fill in your own SoundCloud app credentials."
+            .to_string()
+    })
 }
-fn get_client_secret() -> String {
-    std::env::var("SOUNDCLOUD_CLIENT_SECRET").unwrap_or_else(|_| "[[INSERT_SOUNDCLOUD_CLIENT_SECRET]]".to_string())
+
+fn get_client_secret() -> Result<String, String> {
+    std::env::var("SOUNDCLOUD_CLIENT_SECRET").map_err(|_| {
+        "SOUNDCLOUD_CLIENT_SECRET is not set. Copy .env.example to .env and \
+         fill in your own SoundCloud app credentials."
+            .to_string()
+    })
 }
-const REDIRECT_URI: &str = "http://127.0.0.1:5001/callback";
+
+// Localhost callback port. Override with SOUNDCLOUD_REDIRECT_URI if you
+// registered a different redirect on your SoundCloud app.
+fn get_redirect_uri() -> String {
+    std::env::var("SOUNDCLOUD_REDIRECT_URI")
+        .unwrap_or_else(|_| "http://127.0.0.1:5001/callback".to_string())
+}
 const AUTH_URL: &str = "https://secure.soundcloud.com/authorize";
 const TOKEN_URL: &str = "https://secure.soundcloud.com/oauth/token";
 const API_BASE: &str = "https://api.soundcloud.com";
@@ -116,15 +136,16 @@ fn generate_code_challenge(verifier: &str) -> String {
 /// A tuple `(authorization_url, code_verifier)`.
 /// The caller must store `code_verifier` and pass it to `exchange_code_for_token` later.
 pub fn get_auth_url() -> Result<(String, String), String> {
-    let cid = get_client_id();
-    
-    // SECURITY: Prevent authorization flow if credentials are not configured
-    if cid == "[[INSERT_SOUNDCLOUD_CLIENT_ID]]" || cid.is_empty() {
-        return Err("SoundCloud Client ID is missing. Please set SOUNDCLOUD_CLIENT_ID in your .env file.".to_string());
+    let cid = get_client_id()?;
+    if cid.is_empty() {
+        return Err(
+            "SOUNDCLOUD_CLIENT_ID is empty. Copy .env.example to .env and \
+             register your own SoundCloud app at https://soundcloud.com/you/apps."
+                .to_string(),
+        );
     }
-    
-    println!("[SoundCloud] Using Client ID: {}...", &cid[..4]);
 
+    let redirect_uri = get_redirect_uri();
     let code_verifier = generate_code_verifier();
     let code_challenge = generate_code_challenge(&code_verifier);
     let state = generate_code_verifier()[..16].to_string(); // Random state string
@@ -133,7 +154,7 @@ pub fn get_auth_url() -> Result<(String, String), String> {
     url.query_pairs_mut()
         .append_pair("response_type", "code")
         .append_pair("client_id", &cid)
-        .append_pair("redirect_uri", REDIRECT_URI)
+        .append_pair("redirect_uri", &redirect_uri)
         .append_pair("code_challenge", &code_challenge)
         .append_pair("code_challenge_method", "S256")
         .append_pair("state", &state);
@@ -157,14 +178,15 @@ pub async fn exchange_code_for_token(
     code_verifier: &str,
 ) -> Result<String, ScError> {
     let client = Client::new();
-    let cid = get_client_id();
-    let csec = get_client_secret();
+    let cid = get_client_id().map_err(|e| -> ScError { e.into() })?;
+    let csec = get_client_secret().map_err(|e| -> ScError { e.into() })?;
+    let redirect_uri = get_redirect_uri();
 
     let params = [
         ("grant_type", "authorization_code"),
         ("client_id", &cid),
         ("client_secret", &csec),
-        ("redirect_uri", REDIRECT_URI),
+        ("redirect_uri", &redirect_uri),
         ("code", code),
         ("code_verifier", code_verifier),
     ];
@@ -319,10 +341,6 @@ pub async fn search_and_create_playlist(
         },
     };
 
-    // Debug: print the JSON we're about to send
-    let json_debug = serde_json::to_string_pretty(&body).unwrap_or_else(|_| "Failed to serialize".to_string());
-    println!("[SoundCloud] Sending JSON payload:\n{}", json_debug);
-
     let client = Client::builder()
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         .build()?;
@@ -356,8 +374,17 @@ pub async fn search_and_create_playlist(
 /// Starts a temporary HTTP server on 127.0.0.1:5001, waits for the OAuth
 /// callback, extracts the `code` query parameter, and returns it.
 pub fn wait_for_callback() -> Result<String, ScError> {
-    let listener = TcpListener::bind("127.0.0.1:5001")?;
-    println!("[SoundCloud] Waiting for OAuth callback on http://127.0.0.1:5001/callback ...");
+    // Bind to the same port the redirect URI advertises. We parse it from the
+    // env-driven URL so a custom SOUNDCLOUD_REDIRECT_URI keeps server + URL
+    // in sync.
+    let redirect = get_redirect_uri();
+    let port = Url::parse(&redirect)
+        .ok()
+        .and_then(|u| u.port())
+        .unwrap_or(5001);
+    let bind_addr = format!("127.0.0.1:{}", port);
+    let listener = TcpListener::bind(&bind_addr)?;
+    println!("[SoundCloud] Waiting for OAuth callback on {}...", redirect);
 
     // Accept only the first connection
     let (mut stream, _) = listener.accept()?;
@@ -378,20 +405,38 @@ pub fn wait_for_callback() -> Result<String, ScError> {
         })
         .ok_or_else(|| -> ScError { "No 'code' parameter found in the callback URL".into() })?;
 
-    // Send a friendly response to the browser
-    let response_body = r#"
-<!DOCTYPE html>
-<html>
-<head><title>RB Editor Pro</title></head>
-<body style="font-family:sans-serif;text-align:center;padding:60px;background:#0a0e17;color:#fff">
-  <h1 style="color:#3b82f6">✓ Authorisation Successful</h1>
-  <p>You can close this tab and return to RB Editor Pro.</p>
+    // Friendly callback page. We send Content-Length in BYTES (not chars) and
+    // declare charset=utf-8 so the checkmark glyph renders correctly across
+    // browsers — without the charset declaration, the browser falls back to
+    // its locale encoding (often Windows-1252 / ISO-8859-1) and the multibyte
+    // UTF-8 sequence gets mangled (e.g. "✓" → "âœ"").
+    let response_body = r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Crate Sync</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+           text-align: center; padding: 80px 20px; background: #0a0e17; color: #fff;
+           margin: 0; min-height: 100vh; box-sizing: border-box; }
+    .card { max-width: 460px; margin: 0 auto; padding: 48px 32px; border-radius: 16px;
+            background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); }
+    h1 { color: #f59e0b; margin: 0 0 16px 0; font-size: 28px; font-weight: 600; }
+    p { color: #94a3b8; line-height: 1.6; margin: 0; }
+    .check { font-size: 48px; margin-bottom: 24px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="check">✓</div>
+    <h1>Authorisation Successful</h1>
+    <p>You can close this tab and return to the app.</p>
+  </div>
 </body>
-</html>
-"#;
+</html>"#;
     let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        response_body.len(),
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        response_body.as_bytes().len(),
         response_body
     );
     stream.write_all(response.as_bytes())?;
@@ -400,86 +445,3 @@ pub fn wait_for_callback() -> Result<String, ScError> {
     Ok(code)
 }
 
-// ---------------------------------------------------------------------------
-// Example integration function
-// ---------------------------------------------------------------------------
-
-/// Example function showing how to call this module from your UI code
-/// when the user clicks the "Export to SoundCloud" button.
-///
-/// This performs the full flow:
-/// 1. Generate the auth URL (with PKCE).
-/// 2. Open the user's browser for SoundCloud login.
-/// 3. Wait for the callback on the local server.
-/// 4. Exchange the code for an access token.
-/// 5. Search for each track and create a playlist.
-pub async fn handle_export_click() {
-    // -- Example tracks (in your real code these come from the Rekordbox XML) --
-    let tracks = vec![
-        Track {
-            artist: "Fred again..".to_string(),
-            title: "Delilah (pull me out of this)".to_string(),
-            duration_ms: 240000,
-        },
-        Track {
-            artist: "Bicep".to_string(),
-            title: "Glue".to_string(),
-            duration_ms: 269000,
-        },
-        Track {
-            artist: "Peggy Gou".to_string(),
-            title: "Starry Night".to_string(),
-            duration_ms: 360000,
-        },
-    ];
-    let playlist_name = "My Rekordbox Export";
-
-    // Step 1 + 2: Generate auth URL and open in browser
-    let (auth_url, code_verifier) = match get_auth_url() {
-        Ok(vals) => vals,
-        Err(e) => {
-            eprintln!("[SoundCloud] Configuration error: {}", e);
-            return;
-        }
-    };
-    println!("[SoundCloud] Opening browser for login...");
-    if let Err(e) = open::that(&auth_url) {
-        eprintln!("[SoundCloud] Could not open browser: {}", e);
-        println!("[SoundCloud] Please open this URL manually:\n{}", auth_url);
-    }
-
-    // Step 3: Wait for the OAuth callback (blocking, runs on a threadpool)
-    let code = match tokio::task::spawn_blocking(wait_for_callback).await {
-        Ok(Ok(code)) => code,
-        Ok(Err(e)) => {
-            eprintln!("[SoundCloud] Callback error: {}", e);
-            return;
-        }
-        Err(e) => {
-            eprintln!("[SoundCloud] Task join error: {}", e);
-            return;
-        }
-    };
-
-    // Step 4: Exchange the code for an access token
-    let token = match exchange_code_for_token(&code, &code_verifier).await {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("[SoundCloud] Token exchange failed: {}", e);
-            return;
-        }
-    };
-    println!("[SoundCloud] ✓ Access token received.");
-
-    // Step 5: Search tracks and create the playlist
-    // Step 5: Search tracks and create the playlist
-    match search_and_create_playlist(&token, playlist_name, tracks, None).await {
-        Ok(result) => {
-             println!("[SoundCloud] ✓ Export complete! ({} succeeded, {} failed)", result.success_count, result.failed_tracks.len());
-             if !result.failed_tracks.is_empty() {
-                 println!("[SoundCloud] Failed tracks: {:?}", result.failed_tracks);
-             }
-        },
-        Err(e) => eprintln!("[SoundCloud] Playlist creation failed: {}", e),
-    }
-}

@@ -22,9 +22,10 @@ from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
-# EC9: Prefer the env-var set from .env; hardcoded string is a last-resort fallback
-# for development. Never commit real client IDs to version control.
-# SC_CLIENT_ID = os.environ.get("SOUNDCLOUD_CLIENT_ID", "***REMOVED***")
+# SECURITY: Client ID is read from the SOUNDCLOUD_CLIENT_ID env var (set in .env).
+# We never ship hardcoded credentials in the source — see .env.example for setup.
+# If the env var is missing, the scraper below tries to extract a public web-
+# player ID from soundcloud.com at runtime (cached in memory only).
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Dynamic Client ID Scraper
@@ -33,29 +34,29 @@ logger = logging.getLogger(__name__)
 _DYNAMIC_CLIENT_ID: Optional[str] = None
 _DYNAMIC_CLIENT_ID_EXPIRES: float = 0.0
 
-# Known, stable client IDs from open source projects if the scraper is blocked by Cloudflare (403)
-FALLBACK_CLIENT_IDS = [
-    "***REMOVED***",  # Standard web player
-    "***REMOVED***",  # Backup ID 1
-    "***REMOVED***",  # Backup ID 2
-]
 
 def get_sc_client_id() -> str:
     """
-    Dynamically scrape a valid SoundCloud client_id from their desktop website.
-    Caches the ID in memory for 1 hour to prevent rate limits.
-    If blocked by Cloudflare anti-bot (e.g., 403), uses a robust fallback chain.
+    Resolve a valid SoundCloud client_id. Resolution order:
+      1. SOUNDCLOUD_CLIENT_ID environment variable (preferred — set in .env).
+      2. In-memory cache from a previous successful scrape (1-hour TTL).
+      3. Live scrape of soundcloud.com to extract the public web-player ID.
+
+    Raises RuntimeError if all three fail — we never silently fall back to a
+    hardcoded ID, because that would (a) leak a fingerprint to SoundCloud and
+    (b) couple this codebase to a single shared client_id that could be
+    revoked at any time.
     """
     global _DYNAMIC_CLIENT_ID, _DYNAMIC_CLIENT_ID_EXPIRES
     now = time.time()
 
-    # Pre-checks: use cached ID or ENV var if valid
-    if _DYNAMIC_CLIENT_ID and now < _DYNAMIC_CLIENT_ID_EXPIRES:
-        return _DYNAMIC_CLIENT_ID
-
     env_id = os.environ.get("SOUNDCLOUD_CLIENT_ID")
     if env_id:
         return env_id
+
+    # Pre-checks: use cached ID if still valid
+    if _DYNAMIC_CLIENT_ID and now < _DYNAMIC_CLIENT_ID_EXPIRES:
+        return _DYNAMIC_CLIENT_ID
 
     # STEALTH HEADERS: Mimic a standard desktop Chrome browser to bypass simple bot checks
     stealth_headers = {
@@ -116,15 +117,14 @@ def get_sc_client_id() -> str:
     except Exception as e:
         logger.error(f"[SC Scraper] Unexpected error: {e}")
 
-    # HARD FALLBACK: If Cloudflare blocked us or the regex broke, rotate known stable IDs
-    import random
-    fallback = random.choice(FALLBACK_CLIENT_IDS)
-    logger.warning(f"[SC Scraper] Scrape failed or blocked, using Fallback ID: {fallback}")
-    
-    # Cache fallback shortly (5 mins) so we can retry the scraper later if it was a temporary ban
-    _DYNAMIC_CLIENT_ID = fallback
-    _DYNAMIC_CLIENT_ID_EXPIRES = now + 300
-    return fallback
+    # No hardcoded fallback by design — see module docstring. The user must
+    # either provide their own SOUNDCLOUD_CLIENT_ID in .env, or accept that
+    # SC public endpoints are unreachable when the scrape fails.
+    raise RuntimeError(
+        "Could not resolve a SoundCloud client_id. "
+        "Set SOUNDCLOUD_CLIENT_ID in your .env file (see .env.example), "
+        "or check your network connection to soundcloud.com."
+    )
 
 
 # SoundCloud API base URL.
