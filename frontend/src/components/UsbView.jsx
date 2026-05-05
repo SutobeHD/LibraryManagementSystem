@@ -710,12 +710,12 @@ const UsbView = () => {
                                         <div className="text-[13px] font-medium text-ink-primary truncate">
                                             {device.label || 'USB Drive'}
                                         </div>
-                                        <div className="text-[10px] text-ink-muted font-mono flex items-center gap-1.5">
-                                            <span>{device.drive}</span>
-                                            <span>·</span>
-                                            <span>{fsKey}</span>
-                                            <span>·</span>
-                                            <span>{device.track_count || 0} tr</span>
+                                        <div className="text-[11px] font-mono flex items-center gap-1.5 mt-0.5">
+                                            <span className="text-ink-primary font-semibold">{device.drive}</span>
+                                            <span className="text-ink-placeholder">·</span>
+                                            <span className="text-amber2">{fsKey}</span>
+                                            <span className="text-ink-placeholder">·</span>
+                                            <span className="text-ink-secondary">{device.track_count || 0} tracks</span>
                                         </div>
                                     </div>
                                     {/* Compat status badge */}
