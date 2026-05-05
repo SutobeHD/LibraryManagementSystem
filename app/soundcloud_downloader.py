@@ -111,10 +111,22 @@ _CT_MAP: Dict[str, str] = {
 
 # ── Filename helpers ───────────────────────────────────────────────────────────
 
+# M6: Windows reserved device names. Even with a safe extension, naming a
+# file CON.mp3 / NUL.txt etc. fails or opens the device handle. Match the
+# stem (before optional dot+ext) case-insensitively.
+_WIN_RESERVED_RE = re.compile(
+    r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)", re.IGNORECASE,
+)
+
+
 def _sanitize_name(name: str) -> str:
     """
     Convert an artist/title string to a safe filesystem component.
     Strips Windows/Unix path-illegal characters, collapses whitespace, limits length.
+
+    M6: also prefixes Windows-reserved device names (CON, PRN, AUX, NUL,
+    COM1–9, LPT1–9) with an underscore so the resulting path can never
+    resolve to a device handle.
     """
     if not name or not name.strip():
         return "Unknown"
@@ -123,6 +135,8 @@ def _sanitize_name(name: str) -> str:
     safe = re.sub(r'\s+', " ", safe).strip(" ._")
     if len(safe) > _MAX_NAME_LEN:
         safe = safe[:_MAX_NAME_LEN].rstrip(" ._")
+    if _WIN_RESERVED_RE.match(safe):
+        safe = "_" + safe
     return safe or "Unknown"
 
 
@@ -142,6 +156,25 @@ def _build_save_path(artist: str, title: str, ext: str) -> Path:
     while candidate.exists():
         candidate = artist_dir / f"{stem} ({counter}){ext}"
         counter += 1
+
+    # L1: Windows MAX_PATH = 260 (without the \\?\ prefix). We aim for ≤250 to
+    # leave headroom for the ".part" temp-file suffix used during download.
+    # If the candidate is too long, truncate the stem and retry collision-handling.
+    MAX_TOTAL = 250
+    if len(str(candidate)) > MAX_TOTAL:
+        overflow = len(str(candidate)) - MAX_TOTAL
+        # Reserve room for ext + " (NN)" collision suffix.
+        new_stem_len = max(8, len(stem) - overflow - 8)
+        truncated_stem = stem[:new_stem_len].rstrip(" ._") or "track"
+        logger.warning(
+            "[SC-DL] Path > %d chars, truncating stem %r -> %r",
+            MAX_TOTAL, stem, truncated_stem,
+        )
+        candidate = artist_dir / f"{truncated_stem}{ext}"
+        counter = 1
+        while candidate.exists():
+            candidate = artist_dir / f"{truncated_stem} ({counter}){ext}"
+            counter += 1
     return candidate
 
 
@@ -188,17 +221,21 @@ def _resolve_official_download_url(
     logger.info("[SC-DL] Resolving official download URL: sc_id=%s", sc_track_id)
 
     try:
-        resp = requests.get(
+        # H8: ``stream=True`` opens an unbuffered connection — without an
+        # explicit close the underlying urllib3 connection leaks back into
+        # the pool with un-drained body bytes. ``with`` guarantees release
+        # via ``resp.close()`` on every exit path.
+        with requests.get(
             url,
             headers=headers,
             params=params,
             allow_redirects=True,   # follow the 302 chain to the CDN
             timeout=_API_TIMEOUT,
             stream=True,            # avoid buffering the body here
-        )
-        resp.raise_for_status()
-        logger.info("[SC-DL] Resolved to: %s", resp.url[:120])
-        return resp.url
+        ) as resp:
+            resp.raise_for_status()
+            logger.info("[SC-DL] Resolved to: %s", resp.url[:120])
+            return resp.url
 
     except requests.HTTPError as exc:
         code = exc.response.status_code if exc.response is not None else "?"
@@ -237,7 +274,11 @@ def _resolve_stream_via_transcodings(
     if auth_token:
         headers["Authorization"] = f"OAuth {auth_token}"
 
-    client_id = get_sc_client_id()
+    try:
+        client_id = get_sc_client_id()
+    except RuntimeError as exc:
+        logger.error("[SC-DL] No client_id available for sc_id=%s: %s", sc_track_id, exc)
+        return None
     params = {"client_id": client_id}
 
     # Step 1 — fetch v2 track metadata (includes media.transcodings[]) ────────
