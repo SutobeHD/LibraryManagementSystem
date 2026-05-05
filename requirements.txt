@@ -16,11 +16,11 @@ uvicorn==0.27.0
 python-multipart==0.0.9
 
 # --- HTTP & System ---
-requests==2.31.0
+requests==2.33.1
 psutil==5.9.8
 
 # --- Database ---
-sqlalchemy==2.0.25
+sqlalchemy==2.0.49
 
 # --- Audio Analysis (heavy stack — required for beatgrid/key detection) ---
 librosa==0.10.1
