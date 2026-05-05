@@ -547,11 +547,12 @@ class LibraryTools:
 class SettingsManager:
     CONFIG = Path("settings.json")
     DEFAULT = {
-        "backup_retention_days": 30, 
-        "default_export_format": "wav", 
-        "theme": "dark", 
-        "auto_snap": True, 
-        "db_path": "", 
+        "backup_retention_days": 30,
+        "default_export_format": "wav",
+        "default_export_dir": "",  # If empty, falls back to EXPORT_DIR (./exports). User can pick any folder.
+        "theme": "dark",
+        "auto_snap": True,
+        "db_path": "",
         "artist_view_threshold": 0,
         "ranking_filter_mode": "all", # all, unrated, untagged
         "archive_frequency": "daily", # off, daily, weekly, monthly

@@ -282,11 +282,14 @@ const RankingView = ({ libraryStatus, appMode }) => {
 
             {currentTrack ? (
                 <div className="flex-1 overflow-y-auto p-4 flex flex-col items-center relative custom-scrollbar">
-                    <div className="w-full max-w-[1400px] glass-panel rounded-3xl p-8 shadow-2xl relative z-10 animate-slide-up bg-black/40 backdrop-blur-xl border border-white/10 mb-20">
+                    {/* Cleaned-up wrapper: no triple-stacked glass card. Content sits flat on
+                        the shell, separated only by the existing background and a single
+                        bottom hairline. */}
+                    <div className="w-full max-w-[1400px] relative z-10 animate-slide-up px-2 md:px-6 py-6 mb-20">
                         {/* Header */}
-                        <div className="flex justify-between items-start mb-8 border-b border-white/5 pb-6 gap-8">
+                        <div className="flex justify-between items-start mb-6 pb-5 border-b border-line-subtle gap-8">
                             <div className="flex-1 min-w-0">
-                                <h1 className="text-4xl md:text-5xl font-bold text-white mb-2 drop-shadow-md leading-tight tracking-tight truncate" title={currentTrack.Title}>
+                                <h1 className="text-4xl md:text-5xl font-bold text-ink-primary mb-2 leading-tight tracking-tight truncate" title={currentTrack.Title}>
                                     {currentTrack.Title}
                                 </h1>
                                 <p className="text-2xl md:text-3xl text-amber2 font-light truncate" title={currentTrack.Artist}>
@@ -294,14 +297,14 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                 </p>
                             </div>
                             <div className="text-right shrink-0">
-                                <div className="text-6xl font-mono text-ink-placeholder font-bold tracking-tighter opacity-50">
+                                <div className="text-6xl font-mono text-ink-muted font-bold tracking-tighter">
                                     {Math.round(currentTrack.BPM)} <span className="text-xl text-ink-placeholder">BPM</span>
                                 </div>
                             </div>
                         </div>
 
-                        {/* Waveform */}
-                        <div className="h-64 bg-black/60 rounded-2xl mb-12 border border-white/10 overflow-hidden shrink-0 shadow-[inset_0_0_20px_rgba(0,0,0,0.8)] relative ring-1 ring-white/5 group">
+                        {/* Waveform — own clean container, no overlapping controls */}
+                        <div className="h-56 mb-3 rounded-mx-md overflow-hidden border border-line-subtle bg-mx-deepest/60 shrink-0">
                             <WaveformEditor
                                 ref={wavesurferRef}
                                 track={currentTrack}
@@ -310,72 +313,86 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                 onPlayPause={setIsPlaying}
                                 volume={volume}
                             />
+                        </div>
 
-                            {/* Central Controls Overlay - Only Transport */}
-                            <div className="absolute inset-x-0 bottom-6 flex justify-center z-[60] pointer-events-none">
-                                <div className="pointer-events-auto flex items-center gap-6 bg-black/80 backdrop-blur-xl px-8 py-3 rounded-full border border-white/10 shadow-2xl transform transition-all hover:scale-105">
-                                    <button onClick={() => {
+                        {/* Transport — separate row, flat against the shell */}
+                        <div className="flex items-center justify-between gap-4 mb-10 px-1">
+                            <div className="flex items-center gap-4">
+                                <button
+                                    onClick={() => {
                                         const prev = currentIndex - 1;
                                         if (prev >= 0) { setIsPlaying(true); setCurrentIndex(prev); loadTrack(queue[prev]); }
-                                    }} className="text-ink-secondary hover:text-white p-2 transition-colors"><SkipBack size={24} /></button>
+                                    }}
+                                    className="text-ink-muted hover:text-ink-primary p-2 transition-colors"
+                                    title="Previous track"
+                                >
+                                    <SkipBack size={22} />
+                                </button>
 
-                                    <button onClick={() => setIsPlaying(!isPlaying)} className="bg-white text-black rounded-full p-4 hover:bg-amber2 hover:scale-110 transition-all shadow-lg shadow-white/10">
-                                        {isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="ml-1" />}
-                                    </button>
+                                <button
+                                    onClick={() => setIsPlaying(!isPlaying)}
+                                    className="bg-amber2 text-mx-deepest rounded-full p-3.5 hover:bg-amber2-hover transition-colors"
+                                    title={isPlaying ? 'Pause' : 'Play'}
+                                >
+                                    {isPlaying ? <Pause size={22} fill="currentColor" /> : <Play size={22} fill="currentColor" className="ml-0.5" />}
+                                </button>
 
-                                    {/* Small skip forward for previewing, NOT saving */}
-                                    <button onClick={() => {
+                                <button
+                                    onClick={() => {
                                         if (wavesurferRef.current) {
                                             wavesurferRef.current.setTime(wavesurferRef.current.getCurrentTime() + 10);
                                         }
-                                    }} className="text-ink-secondary hover:text-white p-2 transition-colors"><SkipForward size={24} /></button>
+                                    }}
+                                    className="text-ink-muted hover:text-ink-primary p-2 transition-colors"
+                                    title="Skip forward 10s"
+                                >
+                                    <SkipForward size={22} />
+                                </button>
+                            </div>
 
-                                    <div className="w-[1px] h-8 bg-white/10 mx-2"></div>
-                                    <div className="flex items-center gap-2 group/vol">
-                                        <Volume2 size={20} className="text-ink-secondary group-hover/vol:text-white transition-colors" />
-                                        <input
-                                            type="range" min="0" max="1" step="0.01"
-                                            value={volume}
-                                            onChange={e => setVolume(parseFloat(e.target.value))}
-                                            className="w-24 h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white transition-all"
-                                        />
-                                    </div>
-                                </div>
+                            <div className="flex items-center gap-2 group/vol">
+                                <Volume2 size={16} className="text-ink-muted group-hover/vol:text-ink-secondary transition-colors" />
+                                <input
+                                    type="range" min="0" max="1" step="0.01"
+                                    value={volume}
+                                    onChange={e => setVolume(parseFloat(e.target.value))}
+                                    className="w-32 h-1 bg-mx-input rounded-full appearance-none cursor-pointer accent-amber2 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-amber2 transition-all"
+                                />
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-12">
-                            {/* Left Column: Rating & Color */}
-                            <div className="space-y-8">
-                                <div className="bg-black/10 p-6 rounded-2xl border border-white/5">
+                        <div className="grid grid-cols-2 gap-10">
+                            {/* Left Column: Rating & Color — flat, hairline-separated rows */}
+                            <div className="space-y-6">
+                                <div className="py-4 border-b border-line-subtle">
                                     <div className="flex justify-between items-center mb-4">
-                                        <label className="text-[10px] font-bold text-ink-muted uppercase tracking-widest">Rate Track</label>
-                                        <button onClick={handleServiceMark} className="px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-full uppercase tracking-wider transition-colors shadow-lg shadow-purple-500/20">
+                                        <label className="mx-caption">Rate Track</label>
+                                        <button onClick={handleServiceMark} className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-mx-sm bg-mx-input border border-line-subtle text-ink-secondary hover:text-amber2 hover:border-amber2/40 hover:bg-amber2/5 transition-colors">
                                             Mark as Service
                                         </button>
                                     </div>
                                     <div className="flex gap-2 justify-between">
                                         {[1, 2, 3, 4, 5].map(star => (
                                             <button key={star} onClick={() => setRating(star)} className="transition-transform hover:scale-110 focus:outline-none">
-                                                <Star size={36} className={`filter drop-shadow-md transition-colors duration-200 ${rating >= star ? "text-amber-400 fill-amber-400" : "text-ink-placeholder hover:text-ink-muted"}`} />
+                                                <Star size={32} className={`transition-colors duration-200 ${rating >= star ? "text-amber2 fill-amber2" : "text-ink-placeholder hover:text-ink-muted"}`} />
                                             </button>
                                         ))}
                                     </div>
                                 </div>
 
-                                <div className="bg-black/10 p-6 rounded-2xl border border-white/5">
-                                    <label className="text-[10px] font-bold text-ink-muted uppercase mb-4 block tracking-widest">Color Code</label>
-                                    <div className="flex gap-3 flex-wrap justify-center">
+                                <div className="py-4">
+                                    <label className="mx-caption mb-4 block">Color Code</label>
+                                    <div className="flex gap-3 flex-wrap items-center">
                                         {COLORS.slice(1).map(c => (
                                             <button
                                                 key={c.id}
                                                 onClick={() => setColorId(c.id)}
-                                                className={`w-8 h-8 rounded-full border-2 transition-all hover:scale-125 shadow-md ${colorId === c.id ? 'border-white scale-125 ring-2 ring-white/20' : 'border-transparent opacity-80 hover:opacity-100'}`}
+                                                className={`w-7 h-7 rounded-full border-2 transition-all hover:scale-110 ${colorId === c.id ? 'border-ink-primary scale-110 ring-1 ring-amber2/40' : 'border-transparent opacity-75 hover:opacity-100'}`}
                                                 style={{ backgroundColor: c.hex }}
                                                 title={c.name}
                                             />
                                         ))}
-                                        <button onClick={() => setColorId(0)} className="text-[10px] text-ink-muted underline self-center ml-2 hover:text-white uppercase tracking-widest">Clear</button>
+                                        <button onClick={() => setColorId(0)} className="text-[10px] text-ink-muted hover:text-ink-secondary self-center ml-2 uppercase tracking-widest">Clear</button>
                                     </div>
                                 </div>
                             </div>

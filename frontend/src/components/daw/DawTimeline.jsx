@@ -140,8 +140,9 @@ const DawTimeline = React.memo(({
         d.waveformStyle = state.waveformStyle || '3band';
         d.selectionRange = state.selectionRange;
 
-        // Detect waveform data change → force rebuild
-        const newKey = `${state.totalDuration?.toFixed(2)}-${state.zoom?.toFixed(0)}-${d.lodLevel}-${!!state.bandPeaks}-${!!state.fallbackPeaks}-${state.waveformStyle}`;
+        // Detect waveform data change → force rebuild. scrollX is included so manual
+        // scroll/zoom triggers a rebuild (the bitmap covers only the visible window).
+        const newKey = `${state.totalDuration?.toFixed(2)}-${state.zoom?.toFixed(0)}-${Math.round(d.scrollX)}-${d.lodLevel}-${!!state.bandPeaks}-${!!state.fallbackPeaks}-${state.waveformStyle}`;
         if (newKey !== waveformKey.current) {
             d.needsWaveformRebuild = true;
             waveformKey.current = newKey;
@@ -204,7 +205,15 @@ const DawTimeline = React.memo(({
                 d.playhead = DawEngine.getCurrentTime();
                 const phPx = d.playhead * d.zoom;
                 const limitR = d.scrollX + d.width * 0.7;
-                if (phPx > limitR) d.scrollX = Math.max(0, phPx - d.width * 0.3);
+                if (phPx > limitR) {
+                    d.scrollX = Math.max(0, phPx - d.width * 0.3);
+                    // BUGFIX: The waveform bitmap is rendered for the visible window only,
+                    // anchored to the scrollX at build time. When auto-follow advances scrollX
+                    // during playback, the bitmap goes stale → the playhead scrolls but the
+                    // peaks under it stay frozen. Force a rebuild so the waveform tracks the
+                    // playhead.
+                    d.needsWaveformRebuild = true;
+                }
             }
 
             // LOD hysteresis (EC25)
