@@ -98,8 +98,9 @@ temp/
 scratch/
 work/
 
-# --- Claude Development (local worktrees, not to be committed) ---
-.claude/worktrees/
+# --- Claude Development (local-only configuration, not to be committed) ---
+.claude/
+CLAUDE.md
 
 # --- Local-Only Archives & Development ---
 # User data and experimental code — not part of the public repo
