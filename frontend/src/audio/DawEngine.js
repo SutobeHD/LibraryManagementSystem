@@ -342,13 +342,13 @@ export async function renderTimeline(regions, sourceBuffer, sampleRate = 44100, 
 }
 
 /**
- * Convert an AudioBuffer to a WAV Blob.
- * Clean implementation without the legacy bugs.
- * 
+ * Convert an AudioBuffer to a 16-bit PCM WAV ArrayBuffer.
+ *
  * @param {AudioBuffer} buffer
- * @returns {Blob}
+ * @param {boolean} [normalize=false] — peak-normalize to ~ -0.17 dBFS before quantization
+ * @returns {ArrayBuffer} Raw WAV bytes (wrap in Blob for download or Uint8Array for fs write)
  */
-export function audioBufferToWav(buffer) {
+export function audioBufferToWav(buffer, normalize = false) {
     const numChannels = buffer.numberOfChannels;
     const sampleRate = buffer.sampleRate;
     const format = 1; // PCM
@@ -399,10 +399,23 @@ export function audioBufferToWav(buffer) {
         channels.push(buffer.getChannelData(ch));
     }
 
+    // Optional normalization: scale all samples so the peak hits ~ -0.17 dBFS (0.98).
+    let scale = 1.0;
+    if (normalize) {
+        let peak = 0;
+        for (const ch of channels) {
+            for (let i = 0; i < ch.length; i++) {
+                const a = Math.abs(ch[i]);
+                if (a > peak) peak = a;
+            }
+        }
+        if (peak > 0) scale = 0.98 / peak;
+    }
+
     // Write interleaved samples
     for (let i = 0; i < buffer.length; i++) {
         for (let ch = 0; ch < numChannels; ch++) {
-            let sample = channels[ch][i];
+            let sample = channels[ch][i] * scale;
             sample = Math.max(-1, Math.min(1, sample));
             sample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
             view.setInt16(offset, sample, true);
@@ -410,7 +423,7 @@ export function audioBufferToWav(buffer) {
         }
     }
 
-    return new Blob([arrayBuffer], { type: 'audio/wav' });
+    return arrayBuffer;
 }
 
 export default {

@@ -271,6 +271,7 @@ class GridReq(BaseModel):
 class SetReq(BaseModel):
     backup_retention_days: int
     default_export_format: str
+    default_export_dir: str = ""  # User-selectable default folder for audio exports; empty = backend EXPORT_DIR
     theme: str
     auto_snap: bool
     db_path: str = ""

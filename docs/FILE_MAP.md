@@ -160,9 +160,9 @@
 | `src-tauri/src/audio/metadata.rs` | Tag read/write via lofty: ID3 (MP3), FLAC tags, ALAC metadata |
 | `src-tauri/src/audio/fingerprint.rs` | **NEW** Acoustic fingerprinting: decode via Symphonia → 11025 Hz mono → 32-band Mel spectrogram → Chromaprint-style u32 hash words. `hamming_similarity()`. Tauri commands: `fingerprint_track(path)`, `fingerprint_batch(paths, window)` (emits `fingerprint_progress` events) |
 | `src-tauri/build.rs` | Tauri build script (required, do not modify) |
-| `src-tauri/Cargo.toml` | Rust deps: tauri 2.2, cpal, symphonia, rustfft, rubato, ringbuf, memmap2, hound, lofty, sha2, reqwest, tokio, serde |
+| `src-tauri/Cargo.toml` | Rust deps: tauri 2.2, tauri-plugin-shell, tauri-plugin-dialog (folder picker), tauri-plugin-fs (binary writes), cpal, symphonia, rustfft, rubato, ringbuf, memmap2, hound, lofty, sha2, reqwest, tokio, serde |
 | `src-tauri/tauri.conf.json` | Tauri config: window title, size, splashscreen, bundle identifier |
-| `src-tauri/capabilities/main.json` | Minimal permissions: `core:default`, `shell:allow-open` (for OAuth browser) |
+| `src-tauri/capabilities/main.json` | Permissions: `core:default`, `shell:*`, `dialog:default/allow-open/allow-save`, `fs:default/allow-write-text-file/allow-read-text-file` |
 
 ---
 

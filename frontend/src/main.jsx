@@ -223,12 +223,30 @@ const NavBtn = ({ icon, label, active, onClick }) => (
   </div>
 )
 
+// Subtle dot-grid backdrop — sharp, low-contrast, no blur. Sits behind the
+// content so the screen feels like an extension of the app shell rather than
+// a soft hero gradient.
+const DotGridBackdrop = () => (
+  <div
+    className="absolute inset-0 pointer-events-none"
+    style={{
+      backgroundImage:
+        'radial-gradient(circle at 1px 1px, rgba(232,164,42,0.07) 1px, transparent 1.5px)',
+      backgroundSize: '24px 24px',
+      maskImage:
+        'radial-gradient(ellipse at center, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.55) 55%, transparent 90%)',
+      WebkitMaskImage:
+        'radial-gradient(ellipse at center, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.55) 55%, transparent 90%)',
+    }}
+  />
+);
+
 const SelectionView = ({ onSelect }) => (
   <div className="fixed inset-0 z-[110] bg-mx-deepest flex flex-col items-center justify-center p-8 animate-fade-in">
-    <div
-      className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] rounded-full blur-[150px] pointer-events-none"
-      style={{ background: 'rgba(45, 212, 191, 0.03)' }}
-    ></div>
+    <DotGridBackdrop />
+
+    {/* Single horizontal hairline through the middle for visual anchor */}
+    <div className="absolute left-0 right-0 top-1/2 h-px bg-line-subtle pointer-events-none" />
 
     <div className="relative z-10 flex flex-col items-center max-w-4xl w-full">
       {/* Bar-graph logo, large */}
@@ -268,11 +286,11 @@ const SelectionView = ({ onSelect }) => (
           className="group relative p-7 mx-card rounded-mx-lg hover:border-amber2 transition-all text-left overflow-hidden shadow-mx-md"
         >
           <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-15 transition-opacity">
-            <FileCode size={120} className="text-info" />
+            <FileCode size={120} className="text-amber2" />
           </div>
           <div
             className="w-10 h-10 rounded-mx-md flex items-center justify-center mb-5"
-            style={{ background: 'rgba(74, 158, 232, 0.08)', color: 'var(--info)' }}
+            style={{ background: 'var(--amber-bg)', color: 'var(--amber)' }}
           >
             <FileCode size={20} />
           </div>
@@ -404,10 +422,8 @@ const App = () => {
 
       {isInitialLoading && (
         <div className="fixed inset-0 z-[120] bg-mx-deepest flex flex-col items-center justify-center p-8 animate-fade-in font-sans">
-          <div
-            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 rounded-full blur-[120px]"
-            style={{ background: 'rgba(45, 212, 191, 0.04)' }}
-          ></div>
+          <DotGridBackdrop />
+          <div className="absolute left-0 right-0 top-1/2 h-px bg-line-subtle pointer-events-none" />
           <div className="relative z-10 flex flex-col items-center max-w-md w-full">
             {/* Bar-graph logo, animated */}
             <div className="flex items-end gap-1 mb-8">

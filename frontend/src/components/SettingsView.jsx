@@ -41,6 +41,7 @@ const DEFAULTS = {
     export_format: 'xml',
     export_bitrate: '320',
     export_sample_rate: '44100',
+    default_export_dir: '',           // Default output folder for audio exports (DAW). Empty = backend ./exports.
 
     // Audio
     audio_output_device: '',        // '' = system default
@@ -452,6 +453,48 @@ const SettingsView = () => {
 
     const renderExport = () => (
         <div className="space-y-6">
+            <Section title="Default Output Folder" icon={FolderOpen}>
+                <p className="text-xs text-ink-muted">
+                    Audio exports from the Waveform Editor go here unless you pick a different folder per export.
+                    Empty = use the app's built-in <span className="font-mono">./exports</span> directory.
+                </p>
+                <Field label="Default export folder">
+                    <div className="flex gap-2">
+                        <input
+                            type="text"
+                            value={settings.default_export_dir || ''}
+                            onChange={e => set('default_export_dir', e.target.value)}
+                            placeholder="e.g. <user_dir>\Music\Exports"
+                            className="input-glass flex-1"
+                        />
+                        <button
+                            type="button"
+                            onClick={async () => {
+                                try {
+                                    const { open } = await import('@tauri-apps/plugin-dialog');
+                                    const picked = await open({
+                                        directory: true,
+                                        multiple: false,
+                                        title: 'Choose default export folder',
+                                        defaultPath: settings.default_export_dir || undefined,
+                                    });
+                                    if (typeof picked === 'string' && picked.length) {
+                                        set('default_export_dir', picked);
+                                    }
+                                } catch (err) {
+                                    console.error('[Settings] folder picker failed', err);
+                                    toast.error('Folder picker unavailable in browser mode — type the path manually.');
+                                }
+                            }}
+                            className="px-3 py-2 rounded-lg text-xs bg-mx-shell/50 border border-white/10 hover:border-amber2/50 hover:bg-amber2/5 transition-all flex items-center gap-1.5"
+                            title="Browse…"
+                        >
+                            <FolderOpen size={13} /> Browse
+                        </button>
+                    </div>
+                </Field>
+            </Section>
+
             <Section title="Format Defaults" icon={FileOutput}>
                 <Field label="Default export format">
                     <select value={settings.export_format} onChange={e => set('export_format', e.target.value)} className="input-glass w-full">
