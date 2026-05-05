@@ -58,7 +58,12 @@ npm run tauri dev
 
 ## 📂 Project Structure
 
-A detailed overview of the files and functions can be found in [PROJECT_WIKI.md](./PROJECT_WIKI.md).
+A detailed overview of the project structure, architecture, and development guidelines can be found in the `docs/` directory:
+- **[FILE_MAP.md](./docs/FILE_MAP.md)** — Master project navigation map
+- **[architecture.md](./docs/architecture.md)** — System architecture & data flows
+- **[frontend-index.md](./docs/frontend-index.md)** — React components & APIs
+- **[backend-index.md](./docs/backend-index.md)** — FastAPI routes & services
+- **[rust-index.md](./docs/rust-index.md)** — Tauri commands & Rust modules
 
 ## 🔒 Security & Stability
 

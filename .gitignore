@@ -1,25 +1,39 @@
 # --- Root & General ---
 .env
+.env.local
+.env.*.local
 settings.json
 *.log
+*.log.*
 *.tmp
 *.db
 *.sqlite
+*.sqlite3
 .DS_Store
-*.txt
-*.json
-!package.json
-!package-lock.json
-!tauri.conf.json
-!**/*.json.example
-!**/*.json.schema
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
 
 # --- Python ---
 **/__pycache__/
 *.py[cod]
+*.pyc
+*.pyo
 **/venv/
+**/env/
 .pytest_cache/
+.tox/
+*.egg-info/
+dist/
+build/
 rb-backend.spec
+.coverage
+htmlcov/
 
 # --- Node/JS ---
 **/node_modules/
@@ -31,8 +45,8 @@ src-tauri/target/
 src-tauri/gen/
 src-tauri/cargo_check_output.txt
 
-# --- Data & Media (Recursive - THE IMPORTANT PART) ---
-# Ignore these folders and their contents wherever they are (root, src-tauri, or archive)
+# --- Data & Media (Recursive) ---
+# User data and large files (should never be committed)
 **/backups/
 **/exports/
 **/music/
@@ -43,32 +57,58 @@ src-tauri/cargo_check_output.txt
 **/build/
 **/target/
 
-# Specific large files
+# Audio files (large media)
 **/rekordbox.xml
-*.wav
-*.m4a
-*.mp3
-*.flac
-*.exe
-*.pkg
-*.dmg
+**/*.wav
+**/*.m4a
+**/*.mp3
+**/*.flac
+**/*.aac
+**/*.ogg
+**/*.opus
+**/*.wma
 
-# --- Binary / DAT artifacts ---
-*.DAT
-*.dat
-anlz_test_modified.*
+# Build & installer artifacts
+**/*.exe
+**/*.pkg
+**/*.dmg
+**/*.msi
+**/*.nsis
+**/*.zip
+**/*.rar
+**/*.7z
 
-# --- Temp / scratch directories ---
+# Binary / DAT artifacts
+**/*.DAT
+**/*.dat
+**/*.ANLZ
+**/anlz_test_modified.*
+
+# Rekordbox & DJ software
+**/master.db
+**/master.db-*
+**/cache.db
+**/rekordbox_db/
+**/*.rbxml
+
+# --- Temporary & Scratch Directories ---
 tmp/
 temp/
+.tmp/
+scratch/
+work/
 
-# --- Claude worktrees (git-managed, not submodules) ---
+# --- Claude Development (local worktrees, not to be committed) ---
 .claude/worktrees/
 
-# --- Archive & local-only scripts ---
-# User requested to keep this local-only.
+# --- Local-Only Archives & Development ---
+# User data and experimental code — not part of the public repo
 archive/
 tests/
+/research/
+/experimental/
+
+# --- Development Scripts (debug/test/utilities) ---
 debug_*.py
 inspect_*.py
 check_*.py
@@ -78,18 +118,33 @@ list_*.py
 query_*.py
 find_*.py
 fix_*.py
-*.bak
-test_*.xml
-diag_*.py
-brute_force_*.py
-snippet_*.py
-*_snippet.py
-usb_profiles.json
-*.json.bak
-
-# --- Loose debug/research dumps (local only) ---
 calibrate_*.py
 mass_verify*.py
 final_*.py
 rb_comparison.py
 benchmark_results.txt
+brute_force_*.py
+snippet_*.py
+*_snippet.py
+*_test.py
+*_debug.py
+*_local.py
+
+# --- Local Configuration & Backups ---
+usb_profiles.json
+*.bak
+*.bak.*
+*.backup
+test_*.xml
+test_*.json
+*.json.bak
+.credentials
+.secrets
+.keys/
+
+# --- IDE & Editor Artifacts ---
+.vscode/settings.json
+.vscode/launch.json
+.idea/workspace.xml
+.idea/shelf/
+*.orig
