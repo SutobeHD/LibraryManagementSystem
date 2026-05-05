@@ -15,17 +15,17 @@ const MOCKUPS = [
 ];
 
 const BACKGROUNDS = [
-    { id: 'vinyl', name: 'Vinyl Grooves', desc: 'Dark abstract record grooves' },
-    { id: 'grid', name: 'DAW Grid', desc: 'Minimal dark grid pattern' },
-    { id: 'bokeh', name: 'Bokeh Lights', desc: 'Blurred LED mixer lights' },
-    { id: 'waveform', name: 'Audio Waveform', desc: 'Subtle waveform watermark' },
-    { id: 'mesh', name: 'Mesh Gradient', desc: 'Turquoise/dark blue gradient' },
+    { id: 'beatgrid', name: 'Beat Grid', desc: 'Vertical bars, every 4th accented (4/4)' },
+    { id: 'waveline', name: 'Wave Lines', desc: 'Horizontal sine strokes, tileable' },
+    { id: 'cuemarks', name: 'Cue Markers', desc: 'Thin verticals with amber dot accents' },
+    { id: 'spectrum', name: 'Spectrum Bars', desc: 'Staggered vertical lines, EQ feel' },
+    { id: 'crosshatch', name: 'Diagonal Hatch', desc: 'Crossing diagonals, high contrast' },
 ];
 
 const DesignView = () => {
     const [activeSection, setActiveSection] = useState('mockup');
     const [activeMockup, setActiveMockup] = useState('stems');
-    const [activeBackground, setActiveBackground] = useState('mesh');
+    const [activeBackground, setActiveBackground] = useState('beatgrid');
     const [selectedBg, setSelectedBg] = useState(localStorage.getItem('rb_bg_theme') || null);
 
     const applyBackground = (id) => {
@@ -397,12 +397,28 @@ const MacrosMockup = () => (
 
 const BackgroundPreview = ({ id, onApply, isActive }) => {
     const bg = BACKGROUNDS.find(b => b.id === id);
+    // Tileable SVG line patterns. All on #0a0a0a, white/amber strokes for contrast.
     const bgStyles = {
-        vinyl: { background: 'radial-gradient(circle at 50% 50%, #1a1a1a 0%, #0a0a0a 30%, #111 31%, #0a0a0a 60%, #111 61%, #0a0a0a 100%)' },
-        grid: { backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(255,255,255,0.03) 39px, rgba(255,255,255,0.03) 40px), repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(255,255,255,0.03) 39px, rgba(255,255,255,0.03) 40px)', background: '#0a0a0a' },
-        bokeh: { background: 'radial-gradient(ellipse at 20% 50%, rgba(45,212,191,0.08) 0%, transparent 50%), radial-gradient(ellipse at 80% 30%, rgba(245,158,11,0.06) 0%, transparent 40%), radial-gradient(ellipse at 60% 80%, rgba(129,140,248,0.05) 0%, transparent 45%), #0a0a0a' },
-        waveform: { backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'400\' height=\'100\' viewBox=\'0 0 400 100\'%3E%3Cpath d=\'M0,50 C50,20 100,80 150,50 C200,20 250,80 300,50 C350,20 400,80 400,50\' stroke=\'rgba(255,255,255,0.03)\' fill=\'none\' stroke-width=\'1\'/%3E%3C/svg%3E")', backgroundRepeat: 'repeat', backgroundColor: '#0a0a0a' },
-        mesh: { background: 'conic-gradient(from 180deg at 50% 50%, #0a1628 0deg, #0d1f3c 90deg, #091a2a 180deg, #0b1e35 270deg, #0a1628 360deg)' },
+        beatgrid: {
+            backgroundColor: '#0a0a0a',
+            backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='80' viewBox='0 0 160 80'><line x1='0.5' y1='0' x2='0.5' y2='80' stroke='%23f59e0b' stroke-opacity='0.35' stroke-width='1'/><line x1='40.5' y1='10' x2='40.5' y2='70' stroke='%23ffffff' stroke-opacity='0.08' stroke-width='1'/><line x1='80.5' y1='10' x2='80.5' y2='70' stroke='%23ffffff' stroke-opacity='0.08' stroke-width='1'/><line x1='120.5' y1='10' x2='120.5' y2='70' stroke='%23ffffff' stroke-opacity='0.08' stroke-width='1'/></svg>")`,
+        },
+        waveline: {
+            backgroundColor: '#0a0a0a',
+            backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='40' viewBox='0 0 120 40'><path d='M0 20 Q 30 4 60 20 T 120 20' fill='none' stroke='%23ffffff' stroke-opacity='0.1' stroke-width='1'/><path d='M0 20 Q 30 36 60 20 T 120 20' fill='none' stroke='%23ffffff' stroke-opacity='0.04' stroke-width='1'/></svg>")`,
+        },
+        cuemarks: {
+            backgroundColor: '#0a0a0a',
+            backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'><line x1='0.5' y1='0' x2='0.5' y2='100' stroke='%23ffffff' stroke-opacity='0.06' stroke-width='1'/><circle cx='0.5' cy='20' r='1.6' fill='%23f59e0b' fill-opacity='0.55'/><line x1='50.5' y1='0' x2='50.5' y2='100' stroke='%23ffffff' stroke-opacity='0.06' stroke-width='1'/><circle cx='50.5' cy='70' r='1.6' fill='%2345d4bf' fill-opacity='0.45'/></svg>")`,
+        },
+        spectrum: {
+            backgroundColor: '#0a0a0a',
+            backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60'><line x1='6' y1='30' x2='6' y2='54' stroke='%23ffffff' stroke-opacity='0.12' stroke-width='1'/><line x1='14' y1='22' x2='14' y2='54' stroke='%23ffffff' stroke-opacity='0.12' stroke-width='1'/><line x1='22' y1='10' x2='22' y2='54' stroke='%23f59e0b' stroke-opacity='0.25' stroke-width='1'/><line x1='30' y1='18' x2='30' y2='54' stroke='%23ffffff' stroke-opacity='0.12' stroke-width='1'/><line x1='38' y1='28' x2='38' y2='54' stroke='%23ffffff' stroke-opacity='0.12' stroke-width='1'/><line x1='46' y1='14' x2='46' y2='54' stroke='%23ffffff' stroke-opacity='0.12' stroke-width='1'/><line x1='54' y1='34' x2='54' y2='54' stroke='%23ffffff' stroke-opacity='0.12' stroke-width='1'/></svg>")`,
+        },
+        crosshatch: {
+            backgroundColor: '#0a0a0a',
+            backgroundImage: `repeating-linear-gradient(45deg, transparent 0 11px, rgba(255,255,255,0.06) 11px 12px), repeating-linear-gradient(-45deg, transparent 0 11px, rgba(245,158,11,0.08) 11px 12px)`,
+        },
     };
 
     return (

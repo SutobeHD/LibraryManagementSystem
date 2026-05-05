@@ -11,7 +11,7 @@
 |------|---------|
 | `CLAUDE.md` | AI agent coding rules, principles, mandatory post-edit workflow |
 | `package.json` | Root npm scripts: `dev:full` (starts all), `tauri dev`, `tauri build` |
-| `requirements.txt` | Python deps: FastAPI, librosa, scipy, keyring, yt-dlp, python-dotenv |
+| `requirements.txt` | Python deps: FastAPI, uvicorn, psutil, requests, sqlalchemy, librosa, scipy, numba, keyring, python-dotenv, soundfile, lameenc, numpy, rbox, madmom, essentia |
 | `docker-compose.yml` | Docker: backend port 8000 + frontend port 5173 with volume mounts |
 | `README.md` | Project overview, features, tech stack, setup instructions |
 | `PROJECT_WIKI.md` | Extended feature documentation and architectural detail |
@@ -22,7 +22,7 @@
 
 | File | Purpose |
 |------|---------|
-| `app/main.py` | **All 90+ API routes** — see backend-index.md for full route list. Also contains `validate_audio_path()`, request models, startup event, CORS config, global error handlers. New routes: `GET/POST /api/usb/playcount/*`, `POST /api/phrase/generate`, `POST /api/phrase/commit`, `POST /api/duplicates/scan`, `GET /api/duplicates/results`, `POST /api/duplicates/merge` |
+| `app/main.py` | **All 123 API routes** — see backend-index.md for full route list. Also contains `validate_audio_path()` (uses `Path.is_relative_to` against resolved roots — no startswith), request models, startup event, CORS config (explicit method whitelist), global error handlers, `_db_write_lock` (RLock serialising rbox writers), `SHUTDOWN_TOKEN` one-shot via `POST /api/system/init-token` (heartbeat no longer leaks token). New routes: `POST /api/system/init-token`, `GET/POST /api/usb/playcount/*`, `POST /api/phrase/generate`, `POST /api/phrase/commit`, `POST /api/duplicates/scan`, `GET /api/duplicates/results`, `POST /api/duplicates/merge` |
 | `app/config.py` | Path constants: `REKORDBOX_ROOT`, `DB_FILENAME`, `FFMPEG_BIN`, `BACKUP_DIR`, `EXPORT_DIR`, `LOG_DIR`, `TEMP_DIR`, `MUSIC_DIR`, `DB_KEY` |
 | `app/services.py` | 11 business logic classes: `XMLProcessor`, `SystemGuard`, `AudioEngine` (FFmpeg), `FileManager`, `LibraryTools`, `SettingsManager`, `MetadataManager`, `SystemCleaner`, `BeatAnalyzer`, `ImportManager`, `ProjectManager` |
 | `app/database.py` | `RekordboxXMLDB` — parses Rekordbox XML into in-memory cache; `RekordboxDB` — live SQLite access via rbox. Methods: `load_xml`, `get_tracks`, `get_playlists`, `get_track_details`, `save_xml`, `add_track`, `delete_track`, `save_track_cues`, `save_track_beatgrid` |
@@ -95,7 +95,7 @@
 | `frontend/src/components/ImportView.jsx` | Two-panel import: left drop zone + file list, right settings panel (Library Quality Analyzer, Format Conversion with all audio formats, Safe Deletion Protocol with backup toggle) |
 | `frontend/src/components/SettingsView.jsx` | **Tabbed** preferences panel (8 tabs): Library, Backup, Export, Audio (CPAL device), Analysis quality, Appearance (band colors + locale), Shortcuts (key capture), Network (proxy). Calls `GET/POST /api/settings`. |
 | `frontend/src/components/ToolsView.jsx` | Batch operations: rename, clean titles, find duplicates, batch comments |
-| `frontend/src/components/DesignView.jsx` | Design Lab: 10 feature mockup pages (Stems, Smart Playlist, Batch Tag, Set Planner, Streaming Hub, DVS, Collab, Harmonic Mixing, Routing Matrix, Macros) + 5 selectable background themes (Vinyl/Grid/Bokeh/Waveform/Mesh) stored in localStorage |
+| `frontend/src/components/DesignView.jsx` | Design Lab: 10 feature mockup pages (Stems, Smart Playlist, Batch Tag, Set Planner, Streaming Hub, DVS, Collab, Harmonic Mixing, Routing Matrix, Macros) + 5 selectable tileable line-pattern background themes (Beat Grid/Wave Lines/Cue Markers/Spectrum/Crosshatch) stored in localStorage |
 | `frontend/src/components/UtilitiesView.jsx` | Utilities hub grid dashboard: Phrase Cues, Duplicate Finder, XML Cleaner, Mass Format Converter (placeholder). Sub-views open inline with back button |
 | `frontend/src/components/WaveformEditor.jsx` | Legacy waveform editor (superseded by `DjEditDaw`) |
 | `frontend/src/components/PhraseGeneratorView.jsx` | **NEW** Phrase & Auto-Cue Generator: track selector, phrase length picker (8/16/32), generate preview list (amber phrase / grey bar markers), two-step Generate → Commit flow |
@@ -160,9 +160,9 @@
 | `src-tauri/src/audio/metadata.rs` | Tag read/write via lofty: ID3 (MP3), FLAC tags, ALAC metadata |
 | `src-tauri/src/audio/fingerprint.rs` | **NEW** Acoustic fingerprinting: decode via Symphonia → 11025 Hz mono → 32-band Mel spectrogram → Chromaprint-style u32 hash words. `hamming_similarity()`. Tauri commands: `fingerprint_track(path)`, `fingerprint_batch(paths, window)` (emits `fingerprint_progress` events) |
 | `src-tauri/build.rs` | Tauri build script (required, do not modify) |
-| `src-tauri/Cargo.toml` | Rust deps: tauri 2.2, tauri-plugin-shell, tauri-plugin-dialog (folder picker via `open { directory: true }`), tauri-plugin-fs (binary writes via `writeFile` + folder creation via `mkdir`), cpal, symphonia, rustfft, rubato, ringbuf, memmap2, hound, lofty, sha2, reqwest, tokio, serde |
+| `src-tauri/Cargo.toml` | Rust deps: tauri =2.10.2 (pinned), reqwest =0.12.28 (pinned), tauri-plugin-shell, tauri-plugin-dialog (folder picker via `open { directory: true }`), tauri-plugin-fs (binary writes via `writeFile` + folder creation via `mkdir`), cpal, symphonia, rustfft, rubato, ringbuf, memmap2, hound, lofty, sha2, tokio, serde |
 | `src-tauri/tauri.conf.json` | Tauri config: window title, size, splashscreen, bundle identifier |
-| `src-tauri/capabilities/main.json` | Permissions: `core:default`, `shell:allow-spawn/allow-execute`, `dialog:default/allow-open/allow-save`, `fs:default/allow-write-file/allow-read-file/allow-mkdir` (binary writes + folder creation) |
+| `src-tauri/capabilities/main.json` | Permissions: `core:default`, `shell:allow-spawn` (sidecar `rb-backend` only — no `allow-execute` to prevent RCE), `dialog:default/allow-open/allow-save`, `fs:default/allow-write-file/allow-read-file/allow-mkdir` (binary writes + folder creation) |
 
 ---
 
