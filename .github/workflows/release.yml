@@ -147,11 +147,12 @@ jobs:
             src-tauri/target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install Linux build deps (Tauri + WebKit)
+      - name: Install Linux build deps (Tauri + WebKit + Audio)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          # Use only libayatana-appindicator3-dev (modern, replaces libappindicator3-dev which conflicts)
+          # libayatana-appindicator3-dev replaces deprecated libappindicator3-dev
+          # libasound2-dev required by cpal (audio engine, transient via alsa-sys)
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
@@ -159,6 +160,9 @@ jobs:
             patchelf \
             libssl-dev \
             libgtk-3-dev \
+            libasound2-dev \
+            libjack-jackd2-dev \
+            libpulse-dev \
             build-essential \
             curl \
             wget \
