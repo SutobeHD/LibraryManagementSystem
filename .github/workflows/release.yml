@@ -1,0 +1,232 @@
+# --- Multi-Platform Release Workflow ---
+# Trigger: Push of any tag matching `v*` (e.g. v0.0.3Alpha, v1.2.3)
+#
+# Stages:
+#   1. build-backend: PyInstaller compiles RB_Backend for each platform
+#   2. build-tauri:   Tauri bundles the app (uses backend artifact from stage 1)
+#   3. publish:       tauri-action automatically creates a GitHub Release
+#
+# Platforms covered:
+#   - Windows (x64)        → .msi + .exe installer
+#   - macOS (Apple Silicon)→ .dmg (untested by maintainer, builds best-effort)
+#   - Linux (x64)          → .AppImage (universal, runs on Ubuntu + Arch + Fedora)
+#                          → .deb (Debian/Ubuntu)
+#
+# Cost: ~45 minutes CI per release (free tier covers ~40 releases/month)
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:  # manual trigger from Actions tab
+
+# Required permissions for tauri-action to create releases
+permissions:
+  contents: write
+  id-token: write       # OIDC for future Sigstore signing (Schicht B)
+  attestations: write   # SLSA provenance attestation
+
+jobs:
+  # ============================================================
+  # STAGE 1 — Build Python Backend (PyInstaller)
+  # ============================================================
+  build-backend:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'windows-latest'
+            target: 'x86_64-pc-windows-msvc'
+            ext: '.exe'
+          - platform: 'macos-latest'
+            target: 'aarch64-apple-darwin'
+            ext: ''
+          - platform: 'ubuntu-22.04'
+            target: 'x86_64-unknown-linux-gnu'
+            ext: ''
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Linux build deps (audio libs)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libsndfile1-dev \
+            libsndfile1 \
+            ffmpeg \
+            libffi-dev
+
+      - name: Install macOS build deps
+        if: matrix.platform == 'macos-latest'
+        run: |
+          brew install libsndfile ffmpeg
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller==6.11.1
+          pip install -r requirements.txt
+
+      - name: Build backend with PyInstaller
+        run: pyinstaller --clean backend.spec
+
+      - name: Rename binary with platform triple
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          if [ "${{ matrix.ext }}" = ".exe" ]; then
+            mv "dist/RB_Backend.exe" "artifacts/RB_Backend-${{ matrix.target }}.exe"
+          else
+            mv "dist/RB_Backend" "artifacts/RB_Backend-${{ matrix.target }}"
+            chmod +x "artifacts/RB_Backend-${{ matrix.target }}"
+          fi
+          ls -la artifacts/
+
+      - name: Upload backend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-${{ matrix.target }}
+          path: artifacts/RB_Backend-${{ matrix.target }}*
+          retention-days: 7
+
+  # ============================================================
+  # STAGE 2 — Build Tauri App (uses backend artifacts from stage 1)
+  # ============================================================
+  build-tauri:
+    needs: build-backend
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'windows-latest'
+            target: 'x86_64-pc-windows-msvc'
+            args: ''
+          - platform: 'macos-latest'
+            target: 'aarch64-apple-darwin'
+            args: '--target aarch64-apple-darwin'
+          - platform: 'ubuntu-22.04'
+            target: 'x86_64-unknown-linux-gnu'
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            src-tauri/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Linux build deps (Tauri + WebKit)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev
+
+      - name: Install npm dependencies (root)
+        run: npm ci
+
+      - name: Install npm dependencies (frontend)
+        working-directory: frontend
+        run: npm ci
+
+      - name: Download backend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-${{ matrix.target }}
+          path: src-tauri/binaries/
+
+      - name: Make backend executable (Unix)
+        if: matrix.platform != 'windows-latest'
+        run: chmod +x src-tauri/binaries/RB_Backend-*
+
+      - name: List backend binary
+        shell: bash
+        run: ls -la src-tauri/binaries/
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Sigstore signing will be enabled in Schicht B
+          # TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          # TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Release ${{ github.ref_name }}'
+          releaseBody: |
+            ## Music Library Manager — ${{ github.ref_name }}
+
+            Multi-platform automated build via GitHub Actions.
+
+            ### Downloads
+            - **Windows**: `.msi` installer
+            - **macOS**: `.dmg` (Apple Silicon, unsigned — Gatekeeper warning expected)
+            - **Linux**: `.AppImage` (universal, works on Ubuntu + Arch + Fedora) or `.deb` (Debian/Ubuntu)
+
+            ### First-time install
+            - **Windows**: SmartScreen warning is expected (no code-signing cert yet) — click "More info" → "Run anyway"
+            - **macOS**: Gatekeeper will block — right-click → Open → confirm. (Or: `xattr -d com.apple.quarantine /path/to/app`)
+            - **Linux**: `chmod +x *.AppImage && ./Music\ Library\ Manager.AppImage`
+
+            See [SECURITY.md](https://github.com/SutobeHD/LibaryMangementSystem/blob/main/docs/SECURITY.md) for verification details.
+          releaseDraft: false
+          prerelease: ${{ contains(github.ref_name, 'Alpha') || contains(github.ref_name, 'Beta') || contains(github.ref_name, 'rc') }}
+          args: ${{ matrix.args }}
+
+  # ============================================================
+  # STAGE 3 — Generate SHA256SUMS for verification
+  # ============================================================
+  checksums:
+    needs: build-tauri
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all release assets
+        run: |
+          mkdir -p release-assets
+          # Wait for release to be created by tauri-action, then attach checksums later
+          # Note: Checksums require a 2nd workflow run after release is published.
+          # For Schicht B, switch to Sigstore Cosign signatures (more secure than SHA256).
+          echo "Checksums will be added in Schicht B (Sigstore Cosign)."
