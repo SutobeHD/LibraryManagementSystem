@@ -511,7 +511,7 @@ const BackgroundPreview = ({ id, onApply, isActive }) => {
                                 <div key={i} className="bg-amber2/60 rounded-[1.5px]" style={{ width: 3, height: h }} />
                             ))}
                         </div>
-                        <span className="text-[13px] font-semibold text-ink-primary/60">RB Editor Pro</span>
+                        <span className="text-[13px] font-semibold text-ink-primary/60">LibraryManagementSystem</span>
                     </div>
                 </div>
             </div>

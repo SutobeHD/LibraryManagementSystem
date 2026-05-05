@@ -1018,7 +1018,7 @@ const SettingsView = () => {
                         </div>
                         <div>
                             <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">Preferences</h1>
-                            <p className="text-ink-secondary mt-0.5 text-sm">RB Editor Pro — Configure all application settings</p>
+                            <p className="text-ink-secondary mt-0.5 text-sm">LibraryManagementSystem — Configure all application settings</p>
                         </div>
                     </div>
                 </div>

@@ -1,4 +1,4 @@
-# 🏗 PROJECT OVERVIEW: RB Editor Pro
+# 🏗 PROJECT OVERVIEW: LibraryManagementSystem
 
 A high-performance desktop application for professional DJ library management, built with Tauri, React, and Python FastAPI.
 

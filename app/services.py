@@ -279,7 +279,7 @@ class AudioEngine:
                 track_data = {
                     "TrackID": new_tid,
                     "Name": output_filename.rsplit('.', 1)[0],
-                    "Artist": orig_track.get('Artist', 'RB Editor') if orig_track else "RB Editor",
+                    "Artist": orig_track.get('Artist', 'LibraryManagementSystem') if orig_track else "LibraryManagementSystem",
                     "Album": "Edits",
                     "Genre": orig_track.get('Genre', '') if orig_track else "",
                     "Kind": kind_map.get(output_ext, 'Audio File'),

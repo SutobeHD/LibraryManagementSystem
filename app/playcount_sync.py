@@ -28,7 +28,7 @@ _SYNC_META_FILENAME = "PIONEER/RB_EDITOR_SYNC.json"
 
 def load_usb_sync_meta(usb_root: str) -> dict:
     """
-    Load the RB Editor sync metadata from a USB drive.
+    Load the LibraryManagementSystem sync metadata from a USB drive.
 
     The metadata file stores the timestamp of the last successful sync
     and a mapping of track_id → {play_count, last_played} as seen at

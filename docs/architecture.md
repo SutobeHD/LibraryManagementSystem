@@ -1,4 +1,4 @@
-# ARCHITECTURE.md — RB Editor Pro
+# ARCHITECTURE.md — LibraryManagementSystem
 
 > Quick-reference architecture map. Read `docs/FILE_MAP.md` first for file-level navigation, then this file for data flows and system design.
 > Last updated: 2026-04-06

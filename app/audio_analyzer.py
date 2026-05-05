@@ -1,5 +1,5 @@
 """
-RB Editor Pro -- Audio Analyzer (Unified Wrapper)
+LibraryManagementSystem -- Audio Analyzer (Unified Wrapper)
 ===================================================
 Thin wrapper around the production AnalysisEngine.
 Maintains backward compatibility with the existing API endpoints
