@@ -1668,12 +1668,17 @@ class AnalysisEngine:
             cls._executor = None
 
     @classmethod
-    def submit(cls, task_id: str, file_path: str) -> Dict[str, Any]:
-        """Submit an analysis job to the background worker pool."""
+    def submit(cls, task_id: str, file_path: str, quick: bool = False) -> Dict[str, Any]:
+        """
+        Submit an analysis job to the background worker pool.
+
+        quick=True runs only BPM+key (Pass 1) for fast UI response.
+        """
         executor = cls.get_executor()
-        future = executor.submit(run_full_analysis, file_path)
+        target = run_quick_analysis if quick else run_full_analysis
+        future = executor.submit(target, file_path)
         cls._tasks[task_id] = future
-        return {"task_id": task_id, "status": "processing"}
+        return {"task_id": task_id, "status": "processing", "pass": "quick" if quick else "full"}
 
     @classmethod
     def get_status(cls, task_id: str) -> Dict[str, Any]:
@@ -1707,10 +1712,83 @@ class AnalysisEngine:
         }
 
 
+def run_quick_analysis(
+    file_path: str,
+    progress_callback: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Pass-1 analysis: BPM, key, beats only. Fast (~3-8s typical).
+
+    Use when the user needs the track playable immediately and detailed
+    waveform/phrase analysis can run as a background pass.
+
+    Quick results are NOT written to the analysis cache -- the cache is
+    reserved for full-pass results so a later full-pass can hit it.
+    """
+    if not _ensure_libs():
+        return _fallback_result(file_path, "Analysis libraries not available")
+
+    def emit(stage: str, pct: int):
+        if progress_callback:
+            try:
+                progress_callback(stage, pct)
+            except Exception:
+                pass
+
+    try:
+        emit("load", 5)
+        y, sr = librosa.load(file_path, sr=44100, mono=True)
+        duration = len(y) / sr
+        emit("load", 25)
+
+        encoder_delay = get_encoder_delay(file_path)
+        first_signal_t = find_first_signal_onset(y, sr)
+
+        emit("beats", 30)
+        beat_result = detect_beats(y, sr, encoder_delay=encoder_delay,
+                                   first_signal_t=first_signal_t)
+        emit("beats", 70)
+
+        emit("key", 75)
+        key_result = detect_key(y, sr)
+        emit("key", 95)
+
+        emit("done", 100)
+
+        return {
+            "file": file_path,
+            "duration": round(duration, 3),
+            "sample_rate": sr,
+            "bpm": beat_result["bpm"],
+            "bpm_raw": beat_result["bpm_raw"],
+            "beats": beat_result["beats"],
+            "beat_count": beat_result["beat_count"],
+            "downbeat_index": beat_result["downbeat_index"],
+            "beat_method": beat_result.get("method", "unknown"),
+            "grid_confidence": beat_result.get("grid_confidence", 0.0),
+            "key": key_result["key"],
+            "camelot": key_result["camelot"],
+            "openkey": key_result["openkey"],
+            "key_id": key_result.get("key_id", 0),
+            "key_confidence": key_result["confidence"],
+            "key_method": key_result.get("method", "unknown"),
+            "encoder_delay_ms": round(encoder_delay * 1000.0, 2),
+            "first_signal_ms": round(first_signal_t * 1000.0, 2),
+            "pass": "quick",
+            "status": "ok",
+            "error": None,
+        }
+
+    except Exception as e:
+        logger.error(f"Quick analysis failed for '{file_path}': {e}", exc_info=True)
+        return _fallback_result(file_path, str(e))
+
+
 def run_full_analysis(
     file_path: str,
     duration_cap_arg: Optional[float] = None,
     use_cache: bool = True,
+    progress_callback: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Full analysis pipeline. Runs in a worker process.
@@ -1725,7 +1803,16 @@ def run_full_analysis(
     When use_cache is True (default), a successful prior run for the same
     file (matching mtime + size + analyzer version) is returned without
     re-analyzing. Pass use_cache=False to force re-analysis.
+
+    progress_callback(stage_name, percent_int) is invoked at stage boundaries.
     """
+    def emit(stage: str, pct: int):
+        if progress_callback:
+            try:
+                progress_callback(stage, pct)
+            except Exception:
+                pass
+
     # -- Cache lookup (skip if explicitly disabled) -----------------------
     if use_cache and duration_cap_arg is None:
         try:
@@ -1733,6 +1820,7 @@ def run_full_analysis(
             cached = get_default_cache().get(file_path)
             if cached is not None:
                 cached["cache_hit"] = True
+                emit("cache_hit", 100)
                 return cached
         except Exception as e:
             logger.debug(f"Cache lookup failed: {e}")
@@ -1741,6 +1829,7 @@ def run_full_analysis(
         return _fallback_result(file_path, "Analysis libraries not available")
 
     try:
+        emit("load", 5)
         # -- Duration cap (only when explicitly requested) ----------------
         # Rekordbox analyzes the full track regardless of length.
         # Library RAM use scales linearly: ~10 MB/min @ 44.1kHz mono float32.
@@ -1750,6 +1839,7 @@ def run_full_analysis(
         # -- Load Audio (44.1 kHz mono -- Rekordbox standard) -------------
         y, sr = librosa.load(file_path, sr=44100, mono=True, duration=duration_cap)
         duration = len(y) / sr
+        emit("load", 15)
 
         # -- Format-aware parameters --------------------------------------
         encoder_delay = get_encoder_delay(file_path)
@@ -1764,21 +1854,40 @@ def run_full_analysis(
             f"key={'essentia' if _ESSENTIA_AVAILABLE else 'K-S'})"
         )
 
-        # -- Run Analysis Components (all independent) --------------------
-        key_result = detect_key(y, sr)
+        # -- Run Analysis Components --------------------------------------
+        emit("beats", 20)
         beat_result = detect_beats(y, sr, encoder_delay=encoder_delay, first_signal_t=first_signal_t)
+        emit("beats", 45)
+
+        emit("key", 50)
+        key_result = detect_key(y, sr)
+        emit("key", 60)
+
+        emit("waveform", 65)
         waveform_result = generate_waveform_data(y, sr)
+        emit("waveform", 80)
+
+        emit("phrases", 82)
         phrase_result = detect_phrases(y, sr, beat_result["bpm"], duration)
+        emit("phrases", 88)
+
+        emit("tempo_grid", 89)
         tempo_anchors = detect_tempo_changes(y, sr, beat_result["bpm"])
+
+        emit("pvbr", 91)
         pvbr_index = generate_pvbr(duration, file_path)
+
+        emit("lufs", 93)
         lufs = calculate_lufs(y, sr)
 
+        emit("cues", 95)
         # -- Auto-generate Hot + Memory Cues from phrases -----------------
         hot_cues = generate_hot_cues(phrase_result, beat_result["beats"], duration)
         memory_cues = generate_memory_cues(phrase_result, beat_result["beats"])
 
         # Peak level
         peak = round(float(np.max(np.abs(y))), 4)
+        emit("finalize", 98)
 
         result = {
             # -- Metadata --
@@ -1820,6 +1929,7 @@ def run_full_analysis(
             "status": "ok",
             "error": None,
             "cache_hit": False,
+            "pass": "full",
         }
 
         # -- Persist to cache (full-track analyses only) ------------------
@@ -1830,6 +1940,7 @@ def run_full_analysis(
             except Exception as e:
                 logger.debug(f"Cache put failed: {e}")
 
+        emit("done", 100)
         return result
 
     except Exception as e:
