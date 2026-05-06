@@ -495,6 +495,9 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
     const [isRendering, setIsRendering] = useState(false);
     const [renderProgress, setRenderProgress] = useState(0);
     const [showBrowser, setShowBrowser] = useState(false);
+    // Confirm-modal state (replaces native window.confirm)
+    const [confirmModal, setConfirmModal] = useState(null); // { title, message, onConfirm, confirmLabel }
+    const showConfirm = useCallback((opts) => setConfirmModal(opts), []);
 
     // Auto-open browser if no track is loaded
     useEffect(() => {
@@ -1096,6 +1099,7 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
     };
 
     const handleSetHotCue = (num) => {
+        if (!wavesurfer.current) return;
         const time = wavesurfer.current.getCurrentTime();
         const existing = hotCues.find(c => c.HotCueNum === num);
 
@@ -1107,12 +1111,35 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
             Color: HOT_CUE_COLORS[num - 1]
         };
 
-        if (existing) {
-            setHotCues(hotCues.map(c => c.HotCueNum === num ? newCue : c));
+        const apply = () => setHotCues(prev => {
+            const without = prev.filter(c => c.HotCueNum !== num);
+            return [...without, newCue];
+        });
+
+        // Existing cue: ask before overwrite (skip if same time within 100ms = re-click)
+        if (existing && Math.abs(existing.InPoint - time) > 0.1) {
+            showConfirm({
+                title: `Overwrite Hot Cue ${String.fromCharCode(64 + num)}?`,
+                message: `Replace existing cue at ${formatTime(existing.InPoint)} with new position ${formatTime(time)}?`,
+                confirmLabel: 'Overwrite',
+                onConfirm: apply,
+            });
         } else {
-            setHotCues([...hotCues, newCue]);
+            apply();
         }
     };
+
+    const handleJumpHotCue = useCallback((num) => {
+        const cue = hotCues.find(c => c.HotCueNum === num);
+        if (cue && wavesurfer.current) {
+            wavesurfer.current.setTime(cue.InPoint);
+            setCurrentTime(cue.InPoint);
+        }
+    }, [hotCues]);
+
+    const handleDeleteHotCue = useCallback((num) => {
+        setHotCues(prev => prev.filter(c => c.HotCueNum !== num));
+    }, []);
 
     const handleSetLoopIn = () => setLoopIn(wavesurfer.current.getCurrentTime());
     const handleSetLoopOut = () => {
@@ -1291,7 +1318,10 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
     };
 
     const handlePaste = () => {
-        if (!clipboard) return;
+        if (!clipboard) {
+            toast.error("Clipboard empty. Use COPY first.");
+            return;
+        }
         const pSize = clipboard.duration;
         const pAt = currentTime;
 
@@ -1307,17 +1337,19 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
             type: 'insert',
             src: clipboard.source_path,
             insertAt: pAt,
-            gap: pSize // Visual gap size
+            gap: pSize
         };
 
+        // Use functional setState to avoid stale closure
         setCuts(prev => [...prev, newCut]);
+        const newHistory = [...history.slice(0, historyIdx + 1), { type: 'add_cut', data: newCut }];
+        setHistory(newHistory);
+        setHistoryIdx(newHistory.length - 1);
         toast.success(`Segment pasted at ${pAt.toFixed(2)}s.`);
-        // Trigger visual preview
-        updateVisualPreview([...cuts, newCut]);
+        // Preview rebuild handled by debounced effect
     };
 
     const handleInsert = () => {
-        // INSERT inserts a gap (silence) at the current selection
         const regions = wavesurfer.current?.plugins?.find(p => p.getRegions);
         const selection = regions?.getRegions()?.find(r => r.id === 'selection-range');
         if (!selection) {
@@ -1331,7 +1363,7 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
             id: `insert-${Date.now()}`,
             type: 'insert',
             insertAt: currentTime,
-            gap: selection.end - selection.start // This is a gap/silence insert
+            gap: selection.end - selection.start
         };
 
         setCuts(prev => [...prev, newCut]);
@@ -1339,11 +1371,10 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
         setHistory(newHistory);
         setHistoryIdx(newHistory.length - 1);
         toast.info("Insert region marked.");
-        updateVisualPreview([...cuts, newCut]);
+        // Preview handled by debounced effect
     };
 
     const handleDelete = () => {
-        // DELETE marks a section to be removed from the final render
         const regions = wavesurfer.current?.plugins?.find(p => p.getRegions);
         const selection = regions?.getRegions()?.find(r => r.id === 'selection-range');
         if (!selection) {
@@ -1363,7 +1394,7 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
         setHistory(newHistory);
         setHistoryIdx(newHistory.length - 1);
         toast.info("Section marked for deletion.");
-        updateVisualPreview([...cuts, newCut]);
+        // Preview handled by debounced effect
     };
 
     const jumpToCue = (time) => {
@@ -1396,9 +1427,12 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
             keepSegments.push({ start: lastPos, end: duration, src: fullTrack.path });
         }
 
-        if (confirm(`Render track without ${deleteCuts.length} deleted sections?`)) {
-            handleRender(keepSegments, `${fullTrack.Title}_Edited.wav`);
-        }
+        showConfirm({
+            title: 'Apply All Edits?',
+            message: `Render track without ${deleteCuts.length} deleted section${deleteCuts.length === 1 ? '' : 's'}?`,
+            confirmLabel: 'Render',
+            onConfirm: () => handleRender(keepSegments, `${fullTrack.Title}_Edited.wav`),
+        });
     };
 
     const previewGenRef = useRef(0); // Track generation to ignore stale results
@@ -1450,12 +1484,21 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
         }
     }, [blobUrl, fullTrack?.path, duration, toast, trackBlobUrl]);
 
+    // Debounced preview rebuild — runs whenever cuts change (handleInsert/Delete/Paste/Clear/Undo)
+    // 300ms debounce avoids rebuilding on every rapid edit
+    useEffect(() => {
+        if (!bufferReady) return;
+        const t = setTimeout(() => updateVisualPreview(cuts), 300);
+        return () => clearTimeout(t);
+    }, [cuts, bufferReady, updateVisualPreview]);
+
     const handleClear = () => {
         if (cuts.length === 0) return;
-        setCuts([]);
         const newHistory = [...history.slice(0, historyIdx + 1), { type: 'clear_cuts', data: cuts }];
+        setCuts([]);
         setHistory(newHistory);
         setHistoryIdx(newHistory.length - 1);
+        // Preview rebuild via debounced effect
     };
 
     const handleUndo = () => {
@@ -1464,7 +1507,42 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
         if (last.type === 'add_cut') setCuts(prev => prev.filter(c => c.id !== last.data.id));
         if (last.type === 'clear_cuts') setCuts(last.data);
         setHistoryIdx(prev => prev - 1);
+        // Preview rebuild via debounced effect
     };
+
+    const handleRedo = () => {
+        if (historyIdx >= history.length - 1) return;
+        const next = history[historyIdx + 1];
+        if (next.type === 'add_cut') setCuts(prev => [...prev, next.data]);
+        if (next.type === 'clear_cuts') setCuts([]);
+        setHistoryIdx(prev => prev + 1);
+    };
+
+    // Edit hotkeys — only active in full mode (simpleMode is ranking, conflicts with shortcuts)
+    const editHotkeyOpts = { enabled: !simpleMode, preventDefault: true, enableOnFormTags: false };
+    useHotkeys('ctrl+c, meta+c', () => handleCopy(), editHotkeyOpts, [fullTrack?.path]);
+    useHotkeys('ctrl+v, meta+v', () => handlePaste(), editHotkeyOpts, [clipboard, currentTime, history, historyIdx]);
+    useHotkeys('i', () => handleInsert(), editHotkeyOpts, [currentTime, history, historyIdx]);
+    useHotkeys('delete, backspace', () => handleDelete(), editHotkeyOpts, [history, historyIdx]);
+    useHotkeys('ctrl+z, meta+z', () => handleUndo(), editHotkeyOpts, [history, historyIdx]);
+    useHotkeys('ctrl+shift+z, meta+shift+z, ctrl+y, meta+y', () => handleRedo(), editHotkeyOpts, [history, historyIdx]);
+    useHotkeys('ctrl+e, meta+e', () => handleRender(cuts), editHotkeyOpts, [cuts, fullTrack?.path, duration]);
+    useHotkeys('ctrl+s, meta+s', () => handleSaveCues(), editHotkeyOpts, [hotCues, track]);
+    // Zoom shortcuts
+    useHotkeys('ctrl+plus, meta+plus, ctrl+equal, meta+equal', () => setZoom(p => Math.min(ZOOM_MAX, p + ZOOM_STEP)), editHotkeyOpts);
+    useHotkeys('ctrl+minus, meta+minus', () => setZoom(p => Math.max(ZOOM_MIN, p - ZOOM_STEP)), editHotkeyOpts);
+    // Loop in/out
+    useHotkeys('l', () => loopIn === null ? handleSetLoopIn() : handleSetLoopOut(), editHotkeyOpts, [loopIn]);
+    useHotkeys('shift+l', () => { setLoopIn(null); setLoopOut(null); setIsLooping(false); }, editHotkeyOpts);
+    // Hot Cues: 1-8 jump, Shift+1-8 set
+    useHotkeys('1,2,3,4,5,6,7,8', (e, h) => {
+        const num = parseInt(h.keys?.[0] ?? e.key, 10);
+        if (num >= 1 && num <= 8) handleJumpHotCue(num);
+    }, editHotkeyOpts, [handleJumpHotCue]);
+    useHotkeys('shift+1,shift+2,shift+3,shift+4,shift+5,shift+6,shift+7,shift+8', (e, h) => {
+        const num = parseInt((h.keys?.[0] ?? e.key).replace('shift+', ''), 10);
+        if (num >= 1 && num <= 8) handleSetHotCue(num);
+    }, editHotkeyOpts, [hotCues]);
 
     // Sync playback state with external prop (Ranking Mode)
     useEffect(() => {
@@ -1789,9 +1867,15 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                                 return (
                                     <button
                                         key={num}
-                                        onClick={() => handleSetHotCue(num)}
+                                        onClick={() => cue ? handleJumpHotCue(num) : handleSetHotCue(num)}
+                                        onContextMenu={(e) => {
+                                            e.preventDefault();
+                                            if (cue) handleDeleteHotCue(num);
+                                            else handleSetHotCue(num);
+                                        }}
+                                        title={cue ? `Jump to ${formatTime(cue.InPoint)} • Right-click to delete • Shift+${num} to overwrite` : `Set Hot Cue ${String.fromCharCode(64 + num)} (Shift+${num})`}
                                         className={`h-16 rounded border-2 flex flex-col items-center justify-center font-bold transition-all relative group ${cue
-                                            ? 'text-white border-white/20'
+                                            ? 'text-white border-white/20 cursor-pointer'
                                             : 'bg-mx-card/30 border-white/5 text-ink-placeholder'
                                             }`}
                                         style={cue ? { backgroundColor: HOT_CUE_COLORS[num - 1] } : {}}
@@ -1801,6 +1885,9 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                                             <div className="absolute top-1 right-1">
                                                 <Target size={10} className="text-white/50" />
                                             </div>
+                                        )}
+                                        {cue && (
+                                            <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 text-[8px] font-mono opacity-70">{formatTime(cue.InPoint)}</span>
                                         )}
                                         {!cue && <Plus size={12} className="opacity-0 group-hover:opacity-100 transition-opacity" />}
                                     </button>
@@ -1816,17 +1903,43 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                     <div className="flex-1 p-2 flex flex-col justify-end">
                         <div className="rb-panel-title !bg-transparent !p-0 mb-3 text-ink-secondary uppercase tracking-tighter">Edit Tools</div>
                         <div className="grid grid-cols-4 gap-2">
-                            <button onClick={handleCopy} className="rb-tool-btn !py-2"><Clipboard size={14} />COPY</button>
-                            <button onClick={handlePaste} className="rb-tool-btn !py-2"><Clipboard size={14} />PASTE</button>
-                            <button onClick={handleInsert} className="rb-tool-btn !py-2"><ListPlus size={14} />INSERT</button>
-                            <button onClick={handleDelete} className="rb-tool-btn !py-2"><Trash2 size={14} />DELETE</button>
-                            <button onClick={() => setCuts([])} className="rb-tool-btn !py-2 text-orange-400"><Scissors size={14} />CLEAR</button>
-                            <button onClick={handleUndo} disabled={historyIdx < 0} className="rb-tool-btn !py-2 disabled:opacity-20"><RotateCcw size={14} />UNDO</button>
-                            <button onClick={() => handleRender(cuts)} className="rb-tool-btn !py-2 text-amber2 border-amber2/10 col-span-2"><Download size={14} />EXPORT</button>
+                            <button onClick={handleCopy} className="rb-tool-btn !py-2" title="Copy selection (Ctrl+C)"><Clipboard size={14} />COPY</button>
+                            <button onClick={handlePaste} className="rb-tool-btn !py-2" title="Paste at cursor (Ctrl+V)"><Clipboard size={14} />PASTE</button>
+                            <button onClick={handleInsert} className="rb-tool-btn !py-2" title="Insert silence (I)"><ListPlus size={14} />INSERT</button>
+                            <button onClick={handleDelete} className="rb-tool-btn !py-2" title="Delete selection (Del)"><Trash2 size={14} />DELETE</button>
+                            <button onClick={handleClear} className="rb-tool-btn !py-2 text-orange-400" title="Clear all edits"><Scissors size={14} />CLEAR</button>
+                            <button onClick={handleUndo} disabled={historyIdx < 0} className="rb-tool-btn !py-2 disabled:opacity-20" title="Undo (Ctrl+Z)"><RotateCcw size={14} />UNDO</button>
+                            <button onClick={handleRedo} disabled={historyIdx >= history.length - 1} className="rb-tool-btn !py-2 disabled:opacity-20" title="Redo (Ctrl+Shift+Z)"><RotateCw size={14} />REDO</button>
+                            <button onClick={() => handleRender(cuts)} className="rb-tool-btn !py-2 text-amber2 border-amber2/10" title="Export edited audio (Ctrl+E)"><Download size={14} />EXPORT</button>
                         </div>
                     </div>
                 </div>
             </div>
+
+            {/* Confirm Modal (replaces window.confirm) */}
+            {confirmModal && (
+                <div className="absolute inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fade-in" onClick={() => setConfirmModal(null)}>
+                    <div className="w-[420px] glass-panel border border-white/10 rounded-2xl p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                        <h3 className="text-lg font-bold text-white mb-2">{confirmModal.title || 'Confirm'}</h3>
+                        <p className="text-sm text-ink-secondary mb-6 leading-relaxed">{confirmModal.message}</p>
+                        <div className="flex gap-2 justify-end">
+                            <button
+                                onClick={() => setConfirmModal(null)}
+                                className="px-4 py-2 rounded-lg bg-mx-card/40 hover:bg-mx-card/60 border border-white/10 text-sm font-bold text-ink-secondary"
+                            >Cancel</button>
+                            <button
+                                onClick={() => {
+                                    const cb = confirmModal.onConfirm;
+                                    setConfirmModal(null);
+                                    cb?.();
+                                }}
+                                className="px-4 py-2 rounded-lg bg-amber2/20 hover:bg-amber2/30 border border-amber2/40 text-sm font-bold text-amber2"
+                                autoFocus
+                            >{confirmModal.confirmLabel || 'Confirm'}</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 });
