@@ -442,108 +442,137 @@ def _build_pwvc() -> bytes:
     return buf
 
 
-def _build_pssi(phrases: List[Dict[str, Any]], duration_ms: int) -> bytes:
+def _build_pssi(
+    phrases: List[Dict[str, Any]],
+    bpm: float,
+    duration_ms: int,
+) -> bytes:
     """
-    PSSI — Song structure / phrase analysis.
-    Header (32 bytes): tag(4) + hdr_len(4) + total_len(4) + entry_size(4)
-                        + entry_count(2) + mood(2) + reserved(12)
-    Entry (24 bytes): phrase_number(2) + beat(2) + phrase_id(2) + fill(1) + fill_beat(1)
-                      + pad1(2) + pad2(2) + start_beat(4) + end_beat(4) + pad3(4)
-    """
-    entry_count = len(phrases)
-    if entry_count == 0:
-        return b''  # Skip PSSI if no phrases
+    PSSI — Song Structure (Phrase Analysis).
 
+    Header (32 bytes):
+        tag(4)='PSSI' + hdr_len(4)=32 + total_len(4) + entry_size(4)=24
+        + entry_count(2) + mood(2) + bank(2) + end_beat(2) + reserved(8)
+
+    Entry (24 bytes):
+        index(2) + start_beat(2) + phrase_id(2) + reserved(2)
+        + fill(1) + fill_beat(1) + reserved(2)
+        + reserved(2) + reserved(2)
+        + start_beat_u32(4) + end_beat_u32(4) + reserved(4)
+
+    Beat-count anchoring (NOT ms): phrase position = ms * bpm / 60000.
+    """
+    if not phrases or bpm <= 0:
+        return b''
+
+    entry_count = len(phrases)
     entry_size = 24
     hdr_len = 32
     total_len = hdr_len + entry_count * entry_size
 
-    # Determine mood (use most common mood)
+    # Mood = most common across track
     mood_map = {"high": 1, "mid": 2, "low": 3}
-    mood_counts = {}
+    mood_counts: Dict[str, int] = {}
     for p in phrases:
         m = p.get("mood", "mid")
         mood_counts[m] = mood_counts.get(m, 0) + 1
     dominant_mood = max(mood_counts, key=mood_counts.get) if mood_counts else "mid"
     mood_val = mood_map.get(dominant_mood, 2)
 
-    buf = struct.pack('>4sIIIHH',
+    end_beat_total = int(round((duration_ms / 1000.0) * (bpm / 60.0)))
+
+    buf = struct.pack('>4sIII',
         b'PSSI',
         hdr_len,
         total_len,
         entry_size,
+    )
+    buf += struct.pack('>HHHH',
         entry_count,
         mood_val,
+        0,                          # bank (reserved)
+        end_beat_total & 0xFFFF,
     )
-    # 12 bytes reserved in header
-    buf += b'\x00' * 12
+    buf += b'\x00' * 8              # reserved padding (header is 32 bytes)
 
-    # Convert phrases to beat-based positions (approximate)
+    def ms_to_beat(ms: int) -> int:
+        return max(0, int(round((ms / 1000.0) * (bpm / 60.0))))
+
     for i, phrase in enumerate(phrases):
-        start_ms = phrase.get("start_ms", 0)
-        end_ms = phrase.get("end_ms", start_ms + 1000)
-        phrase_id = phrase.get("id", 1)
-        fill_val = phrase.get("fill", 0)
+        start_beat = ms_to_beat(phrase.get("start_ms", 0))
+        end_beat = ms_to_beat(phrase.get("end_ms", phrase.get("start_ms", 0)))
+        phrase_id = int(phrase.get("id", 1))
+        fill_val = int(phrase.get("fill", 0))
 
-        # Convert ms to beat number (approximate: beat = ms * bpm / 60000)
-        # Use 1-based beat count; we'll just use the ms value directly / beat_duration
-        # For simplicity, use position index as phrase number
-        buf += struct.pack('>HHHBBHHiiI',
-            i + 1,          # phrase_number
-            1,              # beat
-            phrase_id,       # phrase_id (1=intro, 2=verse, 5=chorus, etc.)
-            fill_val,       # fill
-            0,              # fill_beat
-            0,              # pad1
-            0,              # pad2
-            start_ms,       # start_beat (ms as signed i32)
-            end_ms,         # end_beat (ms as signed i32)
-            0,              # pad3
+        buf += struct.pack('>HHHH',
+            (i + 1) & 0xFFFF,           # phrase index (1-based)
+            start_beat & 0xFFFF,        # start_beat (u16)
+            phrase_id & 0xFFFF,         # phrase_id
+            0,                          # reserved
         )
+        buf += struct.pack('>BBH',
+            fill_val & 0xFF,            # fill flag
+            0,                          # fill_beat
+            0,                          # reserved
+        )
+        buf += struct.pack('>HH',
+            0,                          # reserved
+            0,                          # reserved
+        )
+        buf += struct.pack('>II',
+            start_beat & 0xFFFFFFFF,    # start_beat (u32, redundant for 32-bit reader)
+            end_beat & 0xFFFFFFFF,      # end_beat (u32)
+        )
+        buf += struct.pack('>I', 0)     # trailing reserved
 
     return buf
 
 
-def _build_pqt2(beats: List[Dict[str, Any]]) -> bytes:
+def _build_pqt2(beats: List[Dict[str, Any]], bpm: float) -> bytes:
     """
-    PQT2 — Extended beat grid (used in .EXT files).
-    This stores the same beat data as PQTZ but with an extended header
-    that includes beat grid anchor points for the extended format.
+    PQT2 — Extended beat grid (used in .EXT for CDJ-3000 / Rekordbox 7+).
 
-    Header is 56 bytes. Entries are 8 bytes (same as PQTZ).
+    Compact 2-byte-per-beat format that CDJ-3000 prefers for fast loading:
+        Header (56 bytes): tag(4) + hdr_len(4) + total_len(4)
+                          + 4 reserved + 4 flags=0x01000002 + 4 reserved
+                          + 2 first_anchor + 2 first_tempo
+                          + 4 first_time_ms + 2 last_anchor + 2 last_tempo
+                          + 4 last_time_ms + 4 entry_count + 12 padding
+        Entry (2 bytes):  beat_number(1) + tempo_offset_signed_byte(1)
+
+    Tempo offset: actual_tempo = base_tempo + (offset * 100). For stable
+    tracks all entries are 0; for variable BPM the offset records local
+    deviation in 0.01 BPM steps (range ±1.27 BPM per beat).
     """
-    entry_count = len(beats)
+    if not beats:
+        return b''
+
+    base_tempo_int = int(round(bpm * 100))    # BPM × 100
+    first_beat_time = beats[0].get('time_ms', 0)
+    last_beat_time = beats[-1].get('time_ms', 0)
+
     hdr_len = 56
-    total_len = hdr_len + entry_count * 8
+    total_len = hdr_len + len(beats) * 2
 
-    # Build extended header with anchor info from first/last beats
-    first_beat_tempo = beats[0].get('tempo', 12800) if beats else 12800
-    first_beat_time = beats[0].get('time_ms', 0) if beats else 0
-    last_beat_tempo = beats[-1].get('tempo', 12800) if beats else 12800
-    last_beat_time = beats[-1].get('time_ms', 0) if beats else 0
-
-    buf = struct.pack('>4sII',
-        b'PQT2',
-        hdr_len,
-        total_len,
-    )
-    # Extended header fields (36 bytes after the standard 12)
+    buf = struct.pack('>4sII', b'PQT2', hdr_len, total_len)
     buf += struct.pack('>I', 0)                 # reserved
-    buf += struct.pack('>I', 0x01000002)        # version/flags (observed value)
+    buf += struct.pack('>I', 0x01000002)        # observed flags
     buf += struct.pack('>I', 0)                 # reserved
-    buf += struct.pack('>HH', 0, first_beat_tempo)  # first beat anchor
-    buf += struct.pack('>I', first_beat_time)   # first beat time
-    buf += struct.pack('>HH', 0, last_beat_tempo)   # last beat anchor
-    buf += struct.pack('>I', last_beat_time)    # last beat time
-    buf += struct.pack('>I', entry_count)       # entry count
-    buf += b'\x00' * (hdr_len - 12 - 36)       # remaining padding
+    buf += struct.pack('>HH', 1, base_tempo_int & 0xFFFF)   # first anchor: beat 1, tempo
+    buf += struct.pack('>I', first_beat_time)
+    buf += struct.pack('>HH', 1, base_tempo_int & 0xFFFF)   # last anchor
+    buf += struct.pack('>I', last_beat_time)
+    buf += struct.pack('>I', len(beats))
+    buf += b'\x00' * 12                         # padding to 56-byte header
 
-    # Beat entries (same format as PQTZ)
     for b in beats:
-        beat_num = b.get('beat_number', 1)
-        tempo = b.get('tempo', 12800)
-        time_ms = b.get('time_ms', 0)
-        buf += struct.pack('>HHI', beat_num, tempo, time_ms)
+        beat_num = (b.get('beat_number', 1) & 0xFF)
+        local_tempo = b.get('tempo', base_tempo_int)
+        offset = local_tempo - base_tempo_int
+        # Saturate to signed byte range -- variable-BPM beyond ±1.27 BPM
+        # per beat is unrealistic (would mean tempo drift > 76 BPM/min).
+        offset = max(-127, min(127, offset))
+        buf += struct.pack('>Bb', beat_num, offset)
 
     return buf
 
@@ -600,9 +629,14 @@ def build_ext(
     duration_ms: int = 0,
     hot_cues: Optional[List[Dict[str, Any]]] = None,
     memory_cues: Optional[List[Dict[str, Any]]] = None,
+    bpm: float = 0.0,
 ) -> bytes:
     """
     Build a complete .EXT ANLZ file.
+
+    Tag order observed in real Rekordbox 7.x .EXT files:
+      PPTH → PWV3 → PCOB(hot) → PCOB(mem) → PCO2(hot) → PCO2(mem)
+      → PQT2 (extended grid, CDJ-3000) → PWV5 → PWV4 → PSSI (phrase struct)
     """
     tags = b''
     tags += _build_ppth(track_path)
@@ -611,14 +645,12 @@ def build_ext(
     tags += _build_pcob(0, memory_cues)
     tags += _build_pco2(1, hot_cues)
     tags += _build_pco2(0, memory_cues)
-    # PQT2 (extended beat grid) uses a compressed 2-byte entry format that
-    # differs from PQTZ. The full beat grid in .DAT (PQTZ) is authoritative;
-    # skipping PQT2 here is safe — Rekordbox falls back to the DAT grid.
+    if beats and bpm > 0:
+        tags += _build_pqt2(beats, bpm)
     tags += _build_pwv5(pwv5)
     tags += _build_pwv4(pwv4)
-    # PSSI (song structure) has a complex encrypted/hashed header that varies
-    # across Rekordbox versions. Skipping for now — Rekordbox will simply show
-    # "not analyzed" for phrase structure, but waveforms + beat grid work fine.
+    if phrases and bpm > 0:
+        tags += _build_pssi(phrases, bpm, duration_ms)
 
     total_len = PMAI_HEADER_LEN + len(tags)
     header = _build_file_header(total_len)
@@ -675,6 +707,7 @@ def write_anlz_files(
     duration_ms = int(analysis_result.get("duration", 0) * 1000)
     hot_cues = analysis_result.get("hot_cues", [])
     memory_cues = analysis_result.get("memory_cues", [])
+    bpm = float(analysis_result.get("bpm", 0.0))
 
     paths = {}
 
@@ -709,6 +742,7 @@ def write_anlz_files(
             duration_ms=duration_ms,
             hot_cues=hot_cues,
             memory_cues=memory_cues,
+            bpm=bpm,
         )
         ext_path = os.path.join(anlz_dir, f"{filename_base}.EXT")
         with open(ext_path, 'wb') as f:
