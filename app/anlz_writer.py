@@ -18,6 +18,9 @@ References:
 import struct
 import logging
 import os
+import glob
+import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -680,11 +683,63 @@ def build_2ex(
 # Public API: write analysis results to ANLZ files
 # ---------------------------------------------------------------------------
 
+_DEFAULT_BACKUP_KEEP = 3
+
+
+def _backup_existing_anlz(anlz_dir: str, basename: str) -> List[str]:
+    """
+    Move existing .DAT/.EXT/.2EX to timestamped .bak files.
+
+    Protects user-edited cues from being silently overwritten by a fresh
+    analysis. Caller can roll back from these backups if needed.
+    Returns list of backup paths created.
+    """
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    created: List[str] = []
+    for ext in ("DAT", "EXT", "2EX"):
+        src = os.path.join(anlz_dir, f"{basename}.{ext}")
+        if not os.path.exists(src):
+            continue
+        dst = src + f".bak-{timestamp}"
+        try:
+            shutil.copy2(src, dst)
+            created.append(dst)
+        except OSError as e:
+            logger.warning(f"Backup failed for {src}: {e}")
+    return created
+
+
+def _prune_anlz_backups(anlz_dir: str, keep: int = _DEFAULT_BACKUP_KEEP) -> int:
+    """
+    Keep only the N most recent backups per ANLZ basename.
+    Returns the number of files removed.
+    """
+    pattern = os.path.join(anlz_dir, "*.bak-*")
+    backups = glob.glob(pattern)
+    by_prefix: Dict[str, List[str]] = {}
+    for path in backups:
+        prefix = path.rsplit(".bak-", 1)[0]
+        by_prefix.setdefault(prefix, []).append(path)
+
+    removed = 0
+    for files in by_prefix.values():
+        # Most recent first (timestamp is sortable lexicographically)
+        files.sort(reverse=True)
+        for stale in files[keep:]:
+            try:
+                os.unlink(stale)
+                removed += 1
+            except OSError:
+                pass
+    return removed
+
+
 def write_anlz_files(
     anlz_dir: str,
     track_path: str,
     analysis_result: Dict[str, Any],
     filename_base: str = "ANLZ0000",
+    backup_existing: bool = True,
 ) -> Dict[str, str]:
     """
     Write all three ANLZ files (.DAT, .EXT, .2EX) from AnalysisEngine output.
@@ -699,6 +754,13 @@ def write_anlz_files(
         Dict with paths of written files: {"dat": path, "ext": path, "2ex": path}
     """
     os.makedirs(anlz_dir, exist_ok=True)
+
+    # Backup existing files before overwrite (safe-by-default)
+    if backup_existing:
+        backups = _backup_existing_anlz(anlz_dir, filename_base)
+        if backups:
+            logger.info(f"Backed up {len(backups)} existing ANLZ file(s) before write")
+        _prune_anlz_backups(anlz_dir)
 
     beats = analysis_result.get("beats", [])
     waveform = analysis_result.get("waveform", {})

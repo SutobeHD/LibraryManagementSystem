@@ -1709,7 +1709,8 @@ class AnalysisEngine:
 
 def run_full_analysis(
     file_path: str,
-    duration_cap_arg: Optional[float] = None
+    duration_cap_arg: Optional[float] = None,
+    use_cache: bool = True,
 ) -> Dict[str, Any]:
     """
     Full analysis pipeline. Runs in a worker process.
@@ -1720,7 +1721,22 @@ def run_full_analysis(
     - phrases (PSSI format)
     - tempo anchors (for dynamic grid / XML <TEMPO> tags)
     - PVBR index, LUFS loudness
+
+    When use_cache is True (default), a successful prior run for the same
+    file (matching mtime + size + analyzer version) is returned without
+    re-analyzing. Pass use_cache=False to force re-analysis.
     """
+    # -- Cache lookup (skip if explicitly disabled) -----------------------
+    if use_cache and duration_cap_arg is None:
+        try:
+            from .analysis_cache import get_default_cache
+            cached = get_default_cache().get(file_path)
+            if cached is not None:
+                cached["cache_hit"] = True
+                return cached
+        except Exception as e:
+            logger.debug(f"Cache lookup failed: {e}")
+
     if not _ensure_libs():
         return _fallback_result(file_path, "Analysis libraries not available")
 
@@ -1764,7 +1780,7 @@ def run_full_analysis(
         # Peak level
         peak = round(float(np.max(np.abs(y))), 4)
 
-        return {
+        result = {
             # -- Metadata --
             "file": file_path,
             "duration": round(duration, 3),
@@ -1803,7 +1819,18 @@ def run_full_analysis(
             # -- Status --
             "status": "ok",
             "error": None,
+            "cache_hit": False,
         }
+
+        # -- Persist to cache (full-track analyses only) ------------------
+        if use_cache and duration_cap_arg is None:
+            try:
+                from .analysis_cache import get_default_cache
+                get_default_cache().put(file_path, result)
+            except Exception as e:
+                logger.debug(f"Cache put failed: {e}")
+
+        return result
 
     except Exception as e:
         logger.error(f"Analysis failed for '{file_path}': {e}", exc_info=True)
