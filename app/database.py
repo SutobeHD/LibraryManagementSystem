@@ -512,9 +512,33 @@ class RekordboxDB:
             success = self.standalone_db.load_xml(str(target))
             self.loaded = success
             return success
-        # mode == "xml"
-        if not path: path = "rekordbox.xml"
-        success = self.xml_db.load_xml(path)
+        # mode == "xml": prefer explicit arg → settings.db_path → cwd default.
+        # Auto-create an empty skeleton if the target file is missing so the
+        # loading screen never hangs on a fresh install (Issue: "stuck on
+        # Initializing XML"). Users can replace the file with a real
+        # Rekordbox export later — load_xml will pick it up on next start.
+        target = None
+        if path:
+            target = Path(path)
+        else:
+            try:
+                from .services import SettingsManager
+                cfg_path = (SettingsManager.load().get("db_path") or "").strip()
+                if cfg_path:
+                    target = Path(cfg_path).expanduser()
+            except Exception:
+                target = None
+        if target is None:
+            target = Path("rekordbox.xml")
+        if not target.exists() or target.stat().st_size == 0:
+            logger.info(f"XML mode: '{target}' missing — creating empty skeleton.")
+            try:
+                self.write_empty_standalone_xml(target)
+            except Exception as exc:
+                logger.error(f"Could not create empty XML at {target}: {exc}")
+                self.loaded = False
+                return False
+        success = self.xml_db.load_xml(str(target))
         self.loaded = success
         return success
 
