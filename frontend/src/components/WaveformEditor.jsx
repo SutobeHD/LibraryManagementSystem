@@ -7,7 +7,8 @@ import {
     Play, Pause, SkipBack, SkipForward, Scissors, Plus, Trash2, Download,
     ZoomIn, ZoomOut, Lock, Unlock, Repeat, ChevronLeft, ChevronRight,
     Grid3X3, Music, Clock, Disc, MousePointer, ScanLine, Sparkles, Loader2,
-    RotateCcw, RotateCw, Copy, Clipboard, ListPlus, Terminal, Save, Infinity, X, Type, Target, Zap, Layers
+    RotateCcw, RotateCw, Copy, Clipboard, ListPlus, Terminal, Save, Infinity, X, Type, Target, Zap, Layers,
+    Volume2, VolumeX, Upload
 } from 'lucide-react';
 import { useHotkeys } from 'react-hotkeys-hook';
 
@@ -215,12 +216,14 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
         return () => { isMountedRef.current = false; };
     }, []);
 
-    // Volume Control
+    // Volume Control — local state, defaults to prop, can be overridden by user
+    const [internalVolume, setInternalVolume] = useState(volume);
+    useEffect(() => { setInternalVolume(volume); }, [volume]);
     useEffect(() => {
         if (wavesurfer.current) {
-            wavesurfer.current.setVolume(volume);
+            wavesurfer.current.setVolume(internalVolume);
         }
-    }, [volume]);
+    }, [internalVolume]);
 
     const [internalPlaying, setInternalPlaying] = useState(false);
     const isPlaying = isPlayingExternal !== undefined ? isPlayingExternal : internalPlaying;
@@ -1274,21 +1277,6 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
         }
     };
 
-    const handleClone = () => {
-        // Find selection region
-        const regions = wavesurfer.current.plugins.find(p => p.getRegions);
-        const selection = regions.getRegions().find(r => r.id === 'selection-range');
-        if (!selection) return;
-
-        const newCut = { start: selection.start, end: selection.end, id: `cut-${Date.now()}` };
-        setCuts(prev => [...prev, newCut]);
-
-        // Add to history
-        const newHistory = [...history.slice(0, historyIdx + 1), { type: 'add_cut', data: newCut }];
-        setHistory(newHistory);
-        setHistoryIdx(newHistory.length - 1);
-    };
-
     const handleCopy = () => {
         if (!wavesurfer.current) {
             toast.error("Waveform not loaded.");
@@ -1636,10 +1624,14 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                     >
                         <ListPlus size={14} /> BROWSER
                     </button>
-                    <div className="flex items-center gap-2 text-[10px] text-ink-muted font-mono">
+                    <button
+                        onClick={() => setIsQuantized(prev => !prev)}
+                        className={`flex items-center gap-2 text-[10px] font-mono transition-colors ${isQuantized ? 'text-amber2' : 'text-ink-muted hover:text-ink-secondary'}`}
+                        title={`Beat snap is ${isQuantized ? 'ON' : 'OFF'} — click to toggle (Q)`}
+                    >
                         <ScanLine size={12} />
-                        <span>GRID LOCK: ON</span>
-                    </div>
+                        <span>GRID LOCK: {isQuantized ? 'ON' : 'OFF'}</span>
+                    </button>
                 </div>
             </div>
 
@@ -1663,24 +1655,62 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                     </select>
                 </div>
                 <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2 mr-2">
-                        {hotCues.sort((a, b) => a.HotCueNum - b.HotCueNum).map(cue => (
-                            <button
-                                key={cue.ID}
-                                onClick={() => jumpToCue(cue.InPoint)}
-                                className="w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold text-white transition-transform hover:scale-110"
-                                style={{ backgroundColor: HOT_CUE_COLORS[cue.HotCueNum - 1] }}
-                            >
-                                {String.fromCharCode(64 + cue.HotCueNum)}
-                            </button>
-                        ))}
+                    {/* Rekordbox-style hot-cue strip: always shows all 8 slots */}
+                    <div className="flex items-center gap-1 mr-2 bg-black/40 px-1.5 py-1 rounded border border-white/5">
+                        {[1, 2, 3, 4, 5, 6, 7, 8].map(num => {
+                            const cue = hotCues.find(c => c.HotCueNum === num);
+                            const letter = String.fromCharCode(64 + num);
+                            const color = HOT_CUE_COLORS[num - 1];
+                            return (
+                                <button
+                                    key={num}
+                                    onClick={() => cue ? jumpToCue(cue.InPoint) : handleSetHotCue(num)}
+                                    onContextMenu={(e) => {
+                                        e.preventDefault();
+                                        if (cue) handleDeleteHotCue(num);
+                                        else handleSetHotCue(num);
+                                    }}
+                                    title={cue
+                                        ? `Hot Cue ${letter} @ ${formatTime(cue.InPoint)} • Click to jump • Right-click to delete • Shift+${num} to overwrite`
+                                        : `Empty slot ${letter} • Click or Shift+${num} to set at current time`}
+                                    className={`relative w-7 h-7 rounded flex flex-col items-center justify-center font-bold text-[10px] transition-all hover:scale-105 ${cue ? 'text-white shadow-md' : 'bg-white/5 text-white/30 border border-white/10 hover:bg-white/10 hover:text-white/60'}`}
+                                    style={cue ? { backgroundColor: color, boxShadow: `0 0 8px ${color}40` } : {}}
+                                >
+                                    <span className="leading-none">{letter}</span>
+                                    {cue && (
+                                        <span className="text-[7px] font-mono opacity-80 leading-none mt-0.5">{Math.floor(cue.InPoint / 60)}:{(Math.floor(cue.InPoint % 60)).toString().padStart(2, '0')}</span>
+                                    )}
+                                </button>
+                            );
+                        })}
                     </div>
 
                     <div className="flex items-center bg-[#050505] px-2 py-1 rounded border border-white/5 gap-2">
-                        <button onClick={() => wavesurfer.current?.stop()} className="rb-transport-btn"><SkipBack size={12} /></button>
-                        <button onClick={() => wavesurfer.current?.playPause()} className="rb-transport-btn">
+                        <button onClick={() => wavesurfer.current?.stop()} className="rb-transport-btn" title="Stop"><SkipBack size={12} /></button>
+                        <button onClick={() => wavesurfer.current?.playPause()} className="rb-transport-btn" title="Play / Pause (Space)">
                             {isPlaying ? <Pause size={14} className="text-orange-500" /> : <Play size={14} />}
                         </button>
+                    </div>
+
+                    {/* Volume Slider */}
+                    <div className="flex items-center bg-[#050505] h-8 px-2 rounded border border-white/5 gap-2" title={`Volume: ${Math.round(internalVolume * 100)}%`}>
+                        <button
+                            onClick={() => setInternalVolume(prev => prev > 0 ? 0 : 0.8)}
+                            className="text-ink-muted hover:text-white transition-colors"
+                            title={internalVolume > 0 ? 'Mute' : 'Unmute'}
+                        >
+                            {internalVolume > 0 ? <Volume2 size={14} /> : <VolumeX size={14} className="text-orange-500" />}
+                        </button>
+                        <input
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.01"
+                            value={internalVolume}
+                            onChange={(e) => setInternalVolume(parseFloat(e.target.value))}
+                            className="w-20 h-1 accent-amber2 cursor-pointer"
+                        />
+                        <span className="text-[9px] font-mono text-ink-muted w-6 text-right">{Math.round(internalVolume * 100)}</span>
                     </div>
 
                     <div onClick={handleToggleVisualMode} className={`flex items-center h-8 px-3 rounded border border-white/5 gap-2 cursor-pointer transition-all ${visualMode !== 'blue' ? 'bg-indigo-500/20 border-indigo-500/30' : 'bg-black'}`}>
@@ -1728,9 +1758,9 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                     </div>
                 </div>
                 <div className="rb-metadata-box">
-                    <span>TIME <span className="rb-metadata-value">{formatTime(currentTime)}</span></span>
-                    <span>KEY <span className="rb-metadata-value">{fullTrack?.Key || '4A'}</span></span>
-                    <span>BPM <span className="rb-metadata-value">{bpm.toFixed(2)}</span></span>
+                    <span>TIME <span className="rb-metadata-value">{fullTrack ? `${formatTime(currentTime)} / ${formatTime(duration)}` : '--:--.--'}</span></span>
+                    <span>KEY <span className="rb-metadata-value">{fullTrack?.Key || '—'}</span></span>
+                    <span>BPM <span className="rb-metadata-value">{fullTrack && bpm ? bpm.toFixed(2) : '—'}</span></span>
                 </div>
             </div>
 
@@ -1800,16 +1830,43 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                         <div className="px-2 py-1 bg-black/60 border border-white/10 rounded text-[9px] font-mono text-ink-muted pointer-events-none">{zoom}px/s</div>
                     </div>
 
-                    {/* Cuts Summary */}
+                    {/* Cuts Summary — interactive: click row to jump, X to delete */}
                     {cuts.length > 0 && (
-                        <div className="absolute top-2 right-2 bg-black/80 backdrop-blur-md border border-white/10 rounded-lg p-2 text-[10px] font-mono text-ink-secondary max-w-[200px]">
-                            <div className="text-amber-400 font-bold mb-1 flex items-center gap-1"><Scissors size={10} /> {cuts.length} Edit(s)</div>
-                            {cuts.slice(0, 3).map(c => (
-                                <div key={c.id} className={`truncate ${c.type === 'delete' ? 'text-red-400' : 'text-green-400'}`}>
-                                    {c.type === 'delete' ? `DEL: ${c.start.toFixed(1)}s - ${c.end.toFixed(1)}s` : `INS: @${(c.insertAt || 0).toFixed(1)}s`}
-                                </div>
-                            ))}
-                            {cuts.length > 3 && <div className="text-ink-placeholder">+{cuts.length - 3} more</div>}
+                        <div className="absolute top-2 right-2 bg-black/85 backdrop-blur-md border border-white/10 rounded-lg p-2 text-[10px] font-mono text-ink-secondary w-[240px] max-h-[60%] overflow-y-auto">
+                            <div className="text-amber-400 font-bold mb-1.5 flex items-center justify-between">
+                                <span className="flex items-center gap-1"><Scissors size={10} /> {cuts.length} Edit{cuts.length === 1 ? '' : 's'}</span>
+                                <button
+                                    onClick={handleClear}
+                                    title="Clear all edits"
+                                    className="text-ink-muted hover:text-red-400 transition-colors px-1"
+                                >Clear</button>
+                            </div>
+                            {cuts.map(c => {
+                                const isDelete = c.type === 'delete';
+                                const jumpTime = isDelete ? c.start : (c.insertAt ?? c.start);
+                                return (
+                                    <div
+                                        key={c.id}
+                                        className="group flex items-center justify-between gap-1 py-0.5 hover:bg-white/5 rounded px-1 cursor-pointer"
+                                        onClick={() => { wavesurfer.current?.setTime(jumpTime); setCurrentTime(jumpTime); }}
+                                        title="Click to jump to this edit"
+                                    >
+                                        <span className={`truncate flex-1 ${isDelete ? 'text-red-400' : 'text-green-400'}`}>
+                                            {isDelete ? `DEL ${c.start.toFixed(1)}–${c.end.toFixed(1)}s` : `INS @${(c.insertAt ?? 0).toFixed(1)}s`}
+                                        </span>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setCuts(prev => prev.filter(x => x.id !== c.id));
+                                            }}
+                                            title="Remove this edit"
+                                            className="opacity-40 group-hover:opacity-100 hover:text-red-400 transition-opacity"
+                                        >
+                                            <X size={11} />
+                                        </button>
+                                    </div>
+                                );
+                            })}
                         </div>
                     )}
                 </div>
@@ -1822,34 +1879,67 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                 <div className="w-1/2 border-r border-white/5 flex flex-col p-2 bg-[#050505]">
                     {/* Loops Top */}
                     <div className="flex-1 border-b border-white/5 p-2 flex flex-col">
-                        <div className="rb-panel-title !bg-transparent !p-0 mb-3 flex items-center gap-2">
-                            <Infinity size={12} className="text-amber-500" /> Loops
+                        <div className="rb-panel-title !bg-transparent !p-0 mb-3 flex items-center justify-between">
+                            <span className="flex items-center gap-2">
+                                <Infinity size={12} className={isLooping ? 'text-green-400 animate-pulse' : 'text-amber-500'} /> Loops
+                            </span>
+                            {loopIn !== null && loopOut !== null && (
+                                <span className="text-[9px] font-mono text-amber-400">
+                                    {formatTime(loopOut - loopIn)} {isLooping ? '• ACTIVE' : '• PAUSED'}
+                                </span>
+                            )}
                         </div>
                         <div className="flex gap-2">
-                            <button onClick={handleSetLoopIn} className="flex-1 h-12 bg-mx-card/40 hover:bg-mx-hover/40 border border-amber-500/30 text-amber-500 font-bold rounded flex items-center justify-center gap-2 text-xs">
-                                LOOP IN
+                            <button
+                                onClick={handleSetLoopIn}
+                                title="Set loop in point at current time (L)"
+                                className={`flex-1 h-12 border font-bold rounded flex flex-col items-center justify-center gap-0.5 text-xs transition-colors ${loopIn !== null ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-mx-card/40 hover:bg-mx-hover/40 border-amber-500/30 text-amber-500'}`}
+                            >
+                                <span>LOOP IN</span>
+                                {loopIn !== null && <span className="text-[9px] font-mono opacity-80">{formatTime(loopIn)}</span>}
                             </button>
-                            <button onClick={handleSetLoopOut} className="flex-1 h-12 bg-mx-card/40 hover:bg-mx-hover/40 border border-amber-500/30 text-amber-500 font-bold rounded flex items-center justify-center gap-2 text-xs">
-                                LOOP OUT
+                            <button
+                                onClick={handleSetLoopOut}
+                                title="Set loop out point at current time (L)"
+                                className={`flex-1 h-12 border font-bold rounded flex flex-col items-center justify-center gap-0.5 text-xs transition-colors ${loopOut !== null ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-mx-card/40 hover:bg-mx-hover/40 border-amber-500/30 text-amber-500'}`}
+                            >
+                                <span>LOOP OUT</span>
+                                {loopOut !== null && <span className="text-[9px] font-mono opacity-80">{formatTime(loopOut)}</span>}
                             </button>
-                            <button onClick={() => { setLoopIn(null); setLoopOut(null); setIsLooping(false); }} className="w-12 h-12 bg-mx-card/20 border border-white/5 text-ink-muted rounded flex items-center justify-center">
+                            <button
+                                onClick={() => { setLoopIn(null); setLoopOut(null); setIsLooping(false); }}
+                                disabled={loopIn === null && loopOut === null}
+                                title="Clear loop (Shift+L)"
+                                className="w-12 h-12 bg-mx-card/20 border border-white/5 text-ink-muted rounded flex items-center justify-center disabled:opacity-30 hover:bg-mx-card/40"
+                            >
                                 <X size={14} />
                             </button>
                         </div>
                     </div>
                     {/* Beat Select Bottom */}
                     <div className="flex-1 p-2 flex flex-col">
-                        <div className="rb-panel-title !bg-transparent !p-0 mb-3">Beat Select</div>
+                        <div className="rb-panel-title !bg-transparent !p-0 mb-3 flex items-center justify-between">
+                            <span>Beat Select</span>
+                            {bpm > 0 && (
+                                <span className="text-[9px] font-mono text-ink-muted">
+                                    {(selectedBeats * 60 / bpm).toFixed(2)}s @ {bpm.toFixed(0)} BPM
+                                </span>
+                            )}
+                        </div>
                         <div className="grid grid-cols-4 gap-1.5 overflow-y-auto">
-                            {[1, 2, 4, 8, 16, 32, 64, 128].map(b => (
-                                <button
-                                    key={b}
-                                    onClick={() => setSelectedBeats(b)}
-                                    className={`h-9 text-[11px] font-bold border rounded transition-all ${selectedBeats === b ? 'bg-amber2/20 border-amber2 text-amber2' : 'bg-[#1a1a1a] border-white/5 text-ink-muted'}`}
-                                >
-                                    {b} BEAT
-                                </button>
-                            ))}
+                            {[1, 2, 4, 8, 16, 32, 64, 128].map(b => {
+                                const seconds = bpm > 0 ? (b * 60 / bpm).toFixed(2) : '—';
+                                return (
+                                    <button
+                                        key={b}
+                                        onClick={() => setSelectedBeats(b)}
+                                        title={`Select ${b} beat${b === 1 ? '' : 's'} (${seconds}s @ ${bpm.toFixed(0)} BPM)`}
+                                        className={`h-9 text-[11px] font-bold border rounded transition-all ${selectedBeats === b ? 'bg-amber2/20 border-amber2 text-amber2' : 'bg-[#1a1a1a] border-white/5 text-ink-muted hover:border-white/15'}`}
+                                    >
+                                        {b} BEAT
+                                    </button>
+                                );
+                            })}
                         </div>
                     </div>
                 </div>
