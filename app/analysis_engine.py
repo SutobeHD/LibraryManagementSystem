@@ -1615,6 +1615,124 @@ def calculate_lufs(y: np.ndarray, sr: int) -> float:
 
 
 # =========================================================================== #
+# 6b. REPLAY GAIN  [NEW]
+# =========================================================================== #
+
+# ReplayGain 2.0 reference target. Most modern services normalize to -14 LUFS
+# (Spotify), -16 (Apple) or -18 (EBU R128 broadcast). -18 is the historic
+# ReplayGain standard and what most DJ software uses for "auto-leveling".
+REPLAY_GAIN_TARGET_LUFS = -18.0
+
+
+def calculate_replay_gain(lufs: float, target: float = REPLAY_GAIN_TARGET_LUFS) -> float:
+    """
+    ReplayGain 2.0 value. Apply this as a gain (in dB) to bring the track
+    to the target loudness. Negative for loud-mastered tracks; positive for
+    quiet recordings.
+    """
+    if lufs is None or lufs <= -100.0:
+        return 0.0
+    return round(target - float(lufs), 2)
+
+
+# =========================================================================== #
+# 6c. MOOD / TEXTURE FEATURES  [NEW]
+# =========================================================================== #
+
+def detect_mood(
+    y: np.ndarray, sr: int, bpm: float, lufs: float,
+) -> Dict[str, Any]:
+    """
+    Heuristic mood/texture classification from spectral features.
+
+    Returns:
+        {
+            "mood":             one of Energetic / Driving / Uplifting /
+                                Mellow / Dark / Balanced
+            "brightness":       spectral centroid normalized 0..1
+            "warmth":           1 - rolloff_norm (low end emphasis)
+            "texture":          ZCR (high = noisy/percussive, low = tonal)
+            "spectral_centroid": raw Hz
+            "spectral_rolloff":  raw Hz at 85% energy
+        }
+    """
+    try:
+        # Spectral centroid: where the "center of mass" of spectrum sits
+        spec_cent = float(np.mean(librosa.feature.spectral_centroid(y=y, sr=sr)))
+        # Rolloff: freq below which 85% of energy is contained
+        spec_roll = float(np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr, roll_percent=0.85)))
+        # Zero crossing rate: textural roughness
+        zcr = float(np.mean(librosa.feature.zero_crossing_rate(y=y)))
+
+        nyquist = sr / 2.0
+        brightness = min(1.0, spec_cent / (nyquist * 0.5))   # 0..1 scale
+        warmth = 1.0 - min(1.0, spec_roll / nyquist)
+
+        # Mood heuristic
+        is_loud = lufs is not None and lufs > -16.0
+        is_fast = bpm > 130.0
+        is_bright = brightness > 0.40
+        is_warm = warmth > 0.55
+
+        if is_fast and is_loud and is_bright:
+            mood = "Energetic"
+        elif is_fast and not is_bright:
+            mood = "Driving"
+        elif is_bright and not is_fast:
+            mood = "Uplifting"
+        elif is_warm and not is_loud:
+            mood = "Mellow"
+        elif not is_bright and is_loud:
+            mood = "Dark"
+        else:
+            mood = "Balanced"
+
+        return {
+            "mood": mood,
+            "brightness": round(brightness, 3),
+            "warmth": round(warmth, 3),
+            "texture": round(zcr, 4),
+            "spectral_centroid": round(spec_cent, 1),
+            "spectral_rolloff": round(spec_roll, 1),
+        }
+    except Exception as e:
+        logger.warning(f"Mood detection failed: {e}")
+        return {"mood": "Unknown", "brightness": 0.0, "warmth": 0.0,
+                "texture": 0.0, "spectral_centroid": 0.0, "spectral_rolloff": 0.0}
+
+
+def hint_genre(bpm: float, brightness: float, texture: float) -> str:
+    """
+    Very rough genre hint from BPM + spectral features.
+
+    NOT a substitute for proper genre classification (which needs ML).
+    Use as a default tag for tracks where ID3 genre is missing.
+    """
+    if bpm <= 0:
+        return "Unknown"
+
+    if 65 <= bpm <= 95:
+        if brightness < 0.3:
+            return "Reggae"
+        if texture > 0.08:
+            return "Hip-Hop"
+        return "Downtempo"
+    if 95 < bpm <= 115:
+        return "Hip-Hop" if texture > 0.07 else "Pop"
+    if 115 < bpm <= 130:
+        return "House" if brightness > 0.35 else "Pop"
+    if 130 < bpm <= 145:
+        return "Techno" if brightness > 0.4 else "Electro"
+    if 145 < bpm <= 165:
+        return "Trance" if brightness > 0.5 else "Hard Dance"
+    if 165 < bpm <= 185:
+        return "Drum & Bass"
+    if 185 < bpm <= 220:
+        return "Hardcore"
+    return "Unknown"
+
+
+# =========================================================================== #
 # 7. DYNAMIC TEMPO GRID  [NEW]
 # =========================================================================== #
 
@@ -1972,6 +2090,11 @@ def run_full_analysis(
             lufs = calculate_lufs(y_native, sr_native)
         else:
             lufs = calculate_lufs(y, sr)
+        replay_gain = calculate_replay_gain(lufs)
+
+        emit("mood", 94)
+        mood_features = detect_mood(y, sr, beat_result["bpm"], lufs)
+        genre_hint = hint_genre(beat_result["bpm"], mood_features["brightness"], mood_features["texture"])
 
         emit("cues", 95)
         # -- Auto-generate Hot + Memory Cues from phrases -----------------
@@ -2019,9 +2142,13 @@ def run_full_analysis(
             "pvbr": pvbr_index,
             # -- Loudness --
             "lufs": lufs,
+            "replay_gain": replay_gain,
             "peak": peak,
             # -- Stereo Image --
             "stereo": stereo_features,
+            # -- Mood / Genre Hints --
+            "mood": mood_features,
+            "genre_hint": genre_hint,
             # -- Status --
             "status": "ok",
             "error": None,
@@ -2059,7 +2186,10 @@ def _fallback_result(file_path: str, error: str) -> Dict[str, Any]:
         "waveform": _empty_waveform(),
         "phrases": [], "hot_cues": [], "memory_cues": [],
         "tempo_anchors": [],
-        "pvbr": [0] * 400, "lufs": -100.0, "peak": 0.0,
+        "pvbr": [0] * 400, "lufs": -100.0, "replay_gain": 0.0, "peak": 0.0,
         "stereo": None,
+        "mood": {"mood": "Unknown", "brightness": 0.0, "warmth": 0.0,
+                 "texture": 0.0, "spectral_centroid": 0.0, "spectral_rolloff": 0.0},
+        "genre_hint": "Unknown",
         "status": "error", "error": error,
     }
