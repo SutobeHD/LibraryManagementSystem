@@ -336,6 +336,57 @@ def test_e2e_cache_hit():
         os.unlink(path)
 
 
+def test_cue_toggles_via_kwargs():
+    """Per-call override disables hot cues + memory cues."""
+    from app.analysis_engine import run_full_analysis
+    y, sr = _synth_track(bpm=130.0, duration_s=8.0)
+    path = _write_wav(y, sr)
+    try:
+        result = run_full_analysis(
+            path, auto_hot_cues=False, auto_memory_cues=False
+        )
+        assert result["hot_cues"] == []
+        assert result["memory_cues"] == []
+    finally:
+        os.unlink(path)
+
+
+def test_cue_toggles_via_settings(monkeypatch):
+    """Setting RB_ANALYSIS_AUTO_HOT_CUES=0 disables hot cues globally."""
+    monkeypatch.setenv("RB_ANALYSIS_AUTO_HOT_CUES", "0")
+    from app import analysis_settings
+    s = analysis_settings.reload_settings()
+    assert s.auto_hot_cues is False
+
+    from app.analysis_engine import run_full_analysis
+    y, sr = _synth_track(bpm=130.0, duration_s=8.0)
+    path = _write_wav(y, sr)
+    try:
+        result = run_full_analysis(path)  # no kwarg -- settings should win
+        assert result["hot_cues"] == []
+        # memory cues stay enabled (different setting)
+        assert isinstance(result["memory_cues"], list)
+    finally:
+        os.unlink(path)
+
+
+def test_cue_toggles_kwarg_overrides_settings(monkeypatch):
+    """Per-call kwarg overrides the global setting."""
+    monkeypatch.setenv("RB_ANALYSIS_AUTO_HOT_CUES", "0")  # disable globally
+    from app import analysis_settings
+    analysis_settings.reload_settings()
+
+    from app.analysis_engine import run_full_analysis
+    y, sr = _synth_track(bpm=130.0, duration_s=8.0)
+    path = _write_wav(y, sr)
+    try:
+        # Override: enable hot cues for this call
+        result = run_full_analysis(path, auto_hot_cues=True)
+        assert len(result["hot_cues"]) > 0
+    finally:
+        os.unlink(path)
+
+
 def test_e2e_anlz_write_roundtrip():
     from app.analysis_engine import run_full_analysis
     from app.anlz_writer import write_anlz_files

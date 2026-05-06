@@ -1860,15 +1860,28 @@ class AnalysisEngine:
             cls._executor = None
 
     @classmethod
-    def submit(cls, task_id: str, file_path: str, quick: bool = False) -> Dict[str, Any]:
+    def submit(
+        cls,
+        task_id: str,
+        file_path: str,
+        quick: bool = False,
+        auto_hot_cues: Optional[bool] = None,
+        auto_memory_cues: Optional[bool] = None,
+    ) -> Dict[str, Any]:
         """
         Submit an analysis job to the background worker pool.
 
         quick=True runs only BPM+key (Pass 1) for fast UI response.
+        auto_hot_cues / auto_memory_cues = None → use settings defaults.
         """
         executor = cls.get_executor()
-        target = run_quick_analysis if quick else run_full_analysis
-        future = executor.submit(target, file_path)
+        if quick:
+            future = executor.submit(run_quick_analysis, file_path)
+        else:
+            future = executor.submit(
+                run_full_analysis, file_path, None, True, None,
+                auto_hot_cues, auto_memory_cues,
+            )
         cls._tasks[task_id] = future
         return {"task_id": task_id, "status": "processing", "pass": "quick" if quick else "full"}
 
@@ -1981,6 +1994,8 @@ def run_full_analysis(
     duration_cap_arg: Optional[float] = None,
     use_cache: bool = True,
     progress_callback: Optional[Any] = None,
+    auto_hot_cues: Optional[bool] = None,
+    auto_memory_cues: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """
     Full analysis pipeline. Runs in a worker process.
@@ -1995,6 +2010,13 @@ def run_full_analysis(
     When use_cache is True (default), a successful prior run for the same
     file (matching mtime + size + analyzer version) is returned without
     re-analyzing. Pass use_cache=False to force re-analysis.
+
+    auto_hot_cues / auto_memory_cues:
+        None  → use settings (default True for both)
+        True  → generate cues from phrases
+        False → leave empty (PCOB tag still written, but with 0 entries —
+                Rekordbox will display no auto-cues; user-edited cues in
+                an existing ANLZ are overwritten — backups are kept)
 
     progress_callback(stage_name, percent_int) is invoked at stage boundaries.
     """
@@ -2116,9 +2138,12 @@ def run_full_analysis(
         genre_hint = hint_genre(beat_result["bpm"], mood_features["brightness"], mood_features["texture"])
 
         emit("cues", 95)
-        # -- Auto-generate Hot + Memory Cues from phrases -----------------
-        hot_cues = generate_hot_cues(phrase_result, beat_result["beats"], duration)
-        memory_cues = generate_memory_cues(phrase_result, beat_result["beats"])
+        # -- Auto-generate Hot + Memory Cues (respecting toggles) ---------
+        s_live = get_settings()
+        do_hot = s_live.auto_hot_cues if auto_hot_cues is None else auto_hot_cues
+        do_mem = s_live.auto_memory_cues if auto_memory_cues is None else auto_memory_cues
+        hot_cues = generate_hot_cues(phrase_result, beat_result["beats"], duration) if do_hot else []
+        memory_cues = generate_memory_cues(phrase_result, beat_result["beats"]) if do_mem else []
 
         # Peak level
         peak = round(float(np.max(np.abs(y))), 4)

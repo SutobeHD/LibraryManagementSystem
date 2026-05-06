@@ -38,6 +38,13 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on", "y", "t")
+
+
 @dataclass(frozen=True)
 class AnalysisSettings:
     # -- BPM detection / output range -------------------------------------
@@ -55,6 +62,14 @@ class AnalysisSettings:
 
     # -- Waveform colors --------------------------------------------------
     color_gamma: float = 0.65          # < 1 brightens mids in PWV4/5/6/7
+
+    # -- Cue generation toggles ------------------------------------------
+    # When False, the corresponding cue list is left empty in the result
+    # AND in the written PCOB tag. Existing user-edited cues in the source
+    # ANLZ are NOT preserved -- the .bak files (kept by anlz_writer) are
+    # the rollback path if you change your mind.
+    auto_hot_cues: bool = True
+    auto_memory_cues: bool = True
 
     # -- Cue limits -------------------------------------------------------
     cue_max_hot: int = 8               # Rekordbox hot cue slots A..H
@@ -86,10 +101,13 @@ class AnalysisSettings:
             env_name = f"RB_ANALYSIS_{f.name.upper()}"
             if env_name not in os.environ:
                 continue
-            if f.type == "float" or f.default.__class__ is float:
-                kwargs[f.name] = _env_float(env_name, getattr(defaults, f.name))
-            elif f.type == "int" or f.default.__class__ is int:
-                kwargs[f.name] = _env_int(env_name, getattr(defaults, f.name))
+            default_val = getattr(defaults, f.name)
+            if isinstance(default_val, bool):
+                kwargs[f.name] = _env_bool(env_name, default_val)
+            elif isinstance(default_val, float):
+                kwargs[f.name] = _env_float(env_name, default_val)
+            elif isinstance(default_val, int):
+                kwargs[f.name] = _env_int(env_name, default_val)
         return dataclass_replace(defaults, **kwargs) if kwargs else defaults
 
 
