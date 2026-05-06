@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Upload, FileAudio, CheckCircle2, AlertCircle, Loader2, Play, Trash2, Scissors, HardDrive, RefreshCw, Shield, FolderOpen } from 'lucide-react';
+import toast from 'react-hot-toast';
 import api from '../api/api';
 
 const AUDIO_EXTENSIONS = ['.wav', '.mp3', '.flac', '.aiff', '.aif', '.alac', '.m4a', '.aac', '.ogg', '.wma', '.opus'];
@@ -7,6 +8,64 @@ const AUDIO_EXTENSIONS = ['.wav', '.mp3', '.flac', '.aiff', '.aif', '.alac', '.m
 const isAudioFile = (file) => {
     const name = file.name.toLowerCase();
     return file.type.startsWith('audio/') || AUDIO_EXTENSIONS.some(ext => name.endsWith(ext));
+};
+
+const hasAudioExtension = (name) => {
+    const lower = (name || '').toLowerCase();
+    return AUDIO_EXTENSIONS.some(ext => lower.endsWith(ext));
+};
+
+/**
+ * Recursively walk a DataTransferItemList, returning every File inside any
+ * dropped folder. Uses the (non-standard but universally implemented)
+ * webkitGetAsEntry API. Falls back gracefully when entries aren't available.
+ */
+const collectFilesFromDataTransfer = async (items) => {
+    if (!items || !items.length) return [];
+
+    const readEntries = (reader) => new Promise((resolve, reject) => {
+        reader.readEntries(resolve, reject);
+    });
+
+    const walk = async (entry) => {
+        if (!entry) return [];
+        if (entry.isFile) {
+            return new Promise((resolve) => {
+                entry.file((file) => resolve([file]), () => resolve([]));
+            });
+        }
+        if (entry.isDirectory) {
+            const reader = entry.createReader();
+            const out = [];
+            // readEntries only returns ~100 at a time; loop until empty.
+            // eslint-disable-next-line no-constant-condition
+            while (true) {
+                let batch = [];
+                try { batch = await readEntries(reader); } catch { break; }
+                if (!batch.length) break;
+                for (const child of batch) {
+                    const inner = await walk(child);
+                    out.push(...inner);
+                }
+            }
+            return out;
+        }
+        return [];
+    };
+
+    const collected = [];
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const entry = typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null;
+        if (entry) {
+            const files = await walk(entry);
+            collected.push(...files);
+        } else if (item.kind === 'file') {
+            const f = item.getAsFile();
+            if (f) collected.push(f);
+        }
+    }
+    return collected;
 };
 
 const ImportView = ({ onSelectTrack, onImportComplete }) => {
@@ -31,12 +90,107 @@ const ImportView = ({ onSelectTrack, onImportComplete }) => {
     const onDragOver = useCallback((e) => { e.preventDefault(); setIsDragging(true); }, []);
     const onDragLeave = useCallback((e) => { e.preventDefault(); setIsDragging(false); }, []);
 
-    const onDrop = useCallback((e) => {
+    /**
+     * Send a list of absolute filesystem paths (files and/or folders) to the
+     * backend for recursive import. Used by the Tauri drag-drop event and the
+     * "Browse Folder" picker.
+     */
+    const importPaths = useCallback(async (paths) => {
+        if (!paths || !paths.length) return;
+        try {
+            const res = await api.post('/api/library/import-paths', { paths });
+            const { queued_dirs = 0, queued_files = 0, message } = res.data || {};
+            if (queued_dirs || queued_files) {
+                toast.success(message || `Importing ${queued_dirs} folder(s), ${queued_files} file(s)`);
+            } else {
+                toast('Nothing to import — paths had no audio files.', { icon: 'ℹ️' });
+            }
+            if (onImportComplete) {
+                // Refresh the library view shortly so newly-analysed tracks appear.
+                setTimeout(() => onImportComplete(), 1500);
+            }
+        } catch (err) {
+            toast.error(err?.response?.data?.detail || 'Import failed');
+        }
+    }, [onImportComplete]);
+
+    const onDrop = useCallback(async (e) => {
         e.preventDefault();
         setIsDragging(false);
-        const droppedFiles = Array.from(e.dataTransfer.files).filter(isAudioFile);
+        const items = e.dataTransfer?.items;
+        // Browser drop with directory entries → recurse via webkitGetAsEntry.
+        const hasDirectoryEntry = items && Array.from(items).some(
+            it => typeof it.webkitGetAsEntry === 'function' && it.webkitGetAsEntry()?.isDirectory
+        );
+        if (hasDirectoryEntry) {
+            try {
+                const all = await collectFilesFromDataTransfer(items);
+                const audio = all.filter(isAudioFile);
+                if (!audio.length) {
+                    toast('No audio files found in dropped folder.', { icon: 'ℹ️' });
+                    return;
+                }
+                handleFiles(audio);
+                toast.success(`Loaded ${audio.length} file(s) from folder(s)`);
+                return;
+            } catch (err) {
+                console.warn('[Import] folder walk failed', err);
+            }
+        }
+        // Plain file drop → existing behaviour.
+        const droppedFiles = Array.from(e.dataTransfer.files || []).filter(isAudioFile);
         handleFiles(droppedFiles);
     }, []);
+
+    // ── Tauri desktop drag-drop ────────────────────────────────────────────────
+    // Browsers cannot expose absolute paths from a native OS drop. Tauri can.
+    // When the user drops folders/files from the file manager, route the
+    // absolute paths through the backend's recursive importer (no upload).
+    useEffect(() => {
+        if (!window.__TAURI__) return;
+        let unlisten = null;
+        let cancelled = false;
+        (async () => {
+            try {
+                const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+                const win = getCurrentWebviewWindow();
+                unlisten = await win.onDragDropEvent((event) => {
+                    const payload = event.payload || {};
+                    const type = payload.type;
+                    if (type === 'enter' || type === 'over') {
+                        setIsDragging(true);
+                    } else if (type === 'leave') {
+                        setIsDragging(false);
+                    } else if (type === 'drop') {
+                        setIsDragging(false);
+                        const paths = Array.isArray(payload.paths) ? payload.paths : [];
+                        if (paths.length) importPaths(paths);
+                    }
+                });
+                if (cancelled && unlisten) unlisten();
+            } catch (err) {
+                console.warn('[Import] Tauri drag-drop unavailable', err);
+            }
+        })();
+        return () => { cancelled = true; if (typeof unlisten === 'function') unlisten(); };
+    }, [importPaths]);
+
+    const browseFolder = useCallback(async () => {
+        try {
+            const { open } = await import('@tauri-apps/plugin-dialog');
+            const picked = await open({
+                directory: true,
+                multiple: true,
+                title: 'Choose folder(s) to import',
+            });
+            if (!picked) return;
+            const paths = Array.isArray(picked) ? picked : [picked];
+            importPaths(paths);
+        } catch (err) {
+            console.error('[Import] folder picker failed', err);
+            toast.error('Folder picker unavailable in browser mode — drop a folder or use Browse Files.');
+        }
+    }, [importPaths]);
 
     const handleFiles = (newFiles) => {
         const fileObjects = newFiles.map(f => ({
@@ -132,8 +286,8 @@ const ImportView = ({ onSelectTrack, onImportComplete }) => {
                         }`}
                     >
                         <Upload size={28} className={isDragging ? 'text-amber2 mb-2' : 'text-ink-muted mb-2'} />
-                        <p className="text-[13px] font-medium text-ink-primary">Drop audio files here</p>
-                        <p className="text-[11px] text-ink-muted mt-1">All audio formats supported (WAV, MP3, FLAC, AIFF, AAC, OGG, and more)</p>
+                        <p className="text-[13px] font-medium text-ink-primary">Drop audio files or whole folders here</p>
+                        <p className="text-[11px] text-ink-muted mt-1">All audio formats supported · Folders are scanned recursively</p>
                         <input
                             type="file"
                             multiple
@@ -142,12 +296,22 @@ const ImportView = ({ onSelectTrack, onImportComplete }) => {
                             className="hidden"
                             id="fileInput"
                         />
-                        <label
-                            htmlFor="fileInput"
-                            className="mt-3 px-4 py-1.5 btn-secondary text-[11px] cursor-pointer"
-                        >
-                            Browse Files
-                        </label>
+                        <div className="mt-3 flex items-center gap-2">
+                            <label
+                                htmlFor="fileInput"
+                                className="px-4 py-1.5 btn-secondary text-[11px] cursor-pointer"
+                            >
+                                Browse Files
+                            </label>
+                            <button
+                                type="button"
+                                onClick={browseFolder}
+                                className="px-4 py-1.5 btn-secondary text-[11px] flex items-center gap-1.5"
+                                title="Pick a folder; all audio files inside are imported recursively"
+                            >
+                                <FolderOpen size={12} /> Browse Folder
+                            </button>
+                        </div>
                     </div>
 
                     {/* File List */}
