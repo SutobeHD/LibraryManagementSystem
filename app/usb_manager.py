@@ -1193,6 +1193,102 @@ class UsbActions:
             return {"status": "error", "message": str(e)}
 
     @staticmethod
+    def format_drive(drive: str, label: str = "CDJ", filesystem: str = "FAT32") -> Dict:
+        """
+        Wipe and re-format a USB drive, then re-create the Pioneer skeleton.
+
+        DESTRUCTIVE — all existing data on the drive is lost. Callers must
+        gate this behind explicit double-confirmation in the UI; this method
+        does not prompt.
+
+        Supported filesystems: FAT32 (CDJ-2000NXS2 + CDJ-3000), exFAT (CDJ-3000
+        only — needed for files >4GB).
+
+        Platform support:
+          * Windows: PowerShell `Format-Volume`
+          * Linux:   `mkfs.vfat` / `mkfs.exfat` (drive must be a block device)
+          * macOS:   `diskutil eraseDisk`
+        """
+        import platform, shlex, subprocess as sp
+
+        fs = (filesystem or "FAT32").upper()
+        if fs not in ("FAT32", "EXFAT"):
+            return {"status": "error", "message": f"Unsupported filesystem: {fs}"}
+
+        # Sanitise label — most filesystems impose limits.
+        safe_label = "".join(c for c in (label or "CDJ") if c.isalnum() or c in " _-")[:11] or "CDJ"
+
+        system = platform.system()
+        try:
+            if system == "Windows":
+                drive_letter = drive.rstrip("\\").rstrip("/").rstrip(":")
+                if not drive_letter:
+                    return {"status": "error", "message": "Invalid drive."}
+                ps_fs = "FAT32" if fs == "FAT32" else "exFAT"
+                # -Confirm:$false suppresses interactive prompt; -Force overrides
+                # the "drive contains data" guard.
+                cmd = (
+                    f"Format-Volume -DriveLetter {drive_letter} -FileSystem {ps_fs} "
+                    f"-NewFileSystemLabel '{safe_label}' -Confirm:$false -Force"
+                )
+                proc = sp.run(
+                    ["powershell", "-NoProfile", "-Command", cmd],
+                    capture_output=True, text=True, timeout=600,
+                )
+                if proc.returncode != 0:
+                    return {"status": "error", "message": (proc.stderr or proc.stdout or "Format failed").strip()}
+
+                # Re-create PIONEER skeleton + DEVICE.PIONEER marker.
+                drive_root = f"{drive_letter}:\\"
+                UsbDetector.initialize_usb(drive_root)
+                return {
+                    "status": "success",
+                    "message": f"Drive {drive_letter}: formatted as {ps_fs} '{safe_label}' and CDJ-prepared.",
+                }
+
+            elif system == "Linux":
+                # On Linux `drive` must be a block device path (e.g. /dev/sdb1).
+                if not drive or not drive.startswith("/dev/"):
+                    return {"status": "error", "message": "Linux: pass a block device path like /dev/sdb1."}
+                tool = "mkfs.vfat" if fs == "FAT32" else "mkfs.exfat"
+                args = (
+                    [tool, "-F", "32", "-n", safe_label, drive]
+                    if fs == "FAT32"
+                    else [tool, "-n", safe_label, drive]
+                )
+                proc = sp.run(args, capture_output=True, text=True, timeout=600)
+                if proc.returncode != 0:
+                    return {"status": "error", "message": (proc.stderr or proc.stdout).strip()}
+                return {
+                    "status": "success",
+                    "message": f"Formatted {drive} as {fs}. Mount it, then run /api/usb/initialize.",
+                }
+
+            elif system == "Darwin":
+                # macOS: drive should be a disk identifier like disk2 or /dev/disk2.
+                ident = drive.replace("/dev/", "")
+                fs_arg = "MS-DOS" if fs == "FAT32" else "ExFAT"
+                proc = sp.run(
+                    ["diskutil", "eraseDisk", fs_arg, safe_label, ident],
+                    capture_output=True, text=True, timeout=600,
+                )
+                if proc.returncode != 0:
+                    return {"status": "error", "message": (proc.stderr or proc.stdout).strip()}
+                return {
+                    "status": "success",
+                    "message": f"Erased {ident} as {fs_arg} '{safe_label}'.",
+                }
+            else:
+                return {"status": "error", "message": f"Unsupported platform: {system}"}
+        except sp.TimeoutExpired:
+            return {"status": "error", "message": "Format command timed out (>10 min). Drive may be unhealthy."}
+        except FileNotFoundError as exc:
+            return {"status": "error", "message": f"Format tool not found: {exc}"}
+        except Exception as exc:
+            logger.error("format_drive failed: %s", exc, exc_info=True)
+            return {"status": "error", "message": str(exc)}
+
+    @staticmethod
     def reset(profile: Dict) -> Dict:
         """Wipe PIONEER folder on USB and rebuild structure."""
         drive = profile.get("drive", "")

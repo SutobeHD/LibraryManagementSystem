@@ -72,6 +72,7 @@ from .phrase_generator import (
     commit_cues_to_db,
 )
 from . import folder_watcher
+from . import audio_tags
 
 # Per-operation lock — prevents race conditions on concurrent sync requests (Criterion 10)
 _sync_lock = asyncio.Lock()
@@ -669,6 +670,67 @@ async def stream_audio(path: str):
     return FileResponse(valid_path, headers={"Accept-Ranges": "bytes"})
 
 
+# ── Pioneer "My Tag" (live mode only) ────────────────────────────────────────
+def _require_live_db():
+    if db.mode != "live" or not db.active_db or not hasattr(db.active_db, "list_mytags"):
+        raise HTTPException(409, "MyTag is only available in Live (master.db) mode.")
+    return db.active_db
+
+
+class MyTagCreateReq(BaseModel):
+    name: str
+
+
+class TrackMyTagsReq(BaseModel):
+    tag_ids: List[str] = []
+
+
+@app.get("/api/mytags")
+def list_mytags():
+    return _require_live_db().list_mytags()
+
+
+@app.post("/api/mytags")
+def create_mytag(r: MyTagCreateReq):
+    name = (r.name or "").strip()
+    if not name:
+        raise HTTPException(400, "Tag name is required.")
+    try:
+        new_id = _require_live_db().create_mytag(name)
+        return {"status": "success", "id": new_id, "name": name}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, f"Could not create MyTag: {exc}")
+
+
+@app.delete("/api/mytags/{tag_id}")
+def delete_mytag(tag_id: str):
+    try:
+        _require_live_db().delete_mytag(tag_id)
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, f"Could not delete MyTag: {exc}")
+
+
+@app.get("/api/track/{tid}/mytags")
+def get_track_mytags(tid: str):
+    return _require_live_db().get_track_mytags(tid)
+
+
+@app.post("/api/track/{tid}/mytags")
+def set_track_mytags(tid: str, r: TrackMyTagsReq):
+    try:
+        result = _require_live_db().set_track_mytags(tid, r.tag_ids)
+        return {"status": "success", **result}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, f"Could not update MyTags: {exc}")
+
+
 @app.post("/api/track/cues/save")
 def save_cues(r: CueReq): return {"status": "success" if db.save_track_cues(r.track_id, r.cues) else "error"}
 
@@ -680,9 +742,31 @@ def update_track(tid: str, r: TrackUpdateReq):
     updates = {k: v for k, v in r.dict().items() if v is not None}
     if not updates: return {"status": "no_change"}
     try:
-        if db.update_tracks_metadata([tid], updates): 
-            return {"status": "success"}
-        raise HTTPException(500, "Update returned False (unknown error)")
+        if not db.update_tracks_metadata([tid], updates):
+            raise HTTPException(500, "Update returned False (unknown error)")
+
+        # Best-effort write-back to the source audio file's tags. Disabled by
+        # toggling settings.write_tags_to_files=False (default true).
+        tag_status = "skipped"
+        try:
+            cfg = SettingsManager.load()
+            if cfg.get("write_tags_to_files", True):
+                track = db.get_track_details(tid) or {}
+                src = track.get("path")
+                if src:
+                    artwork_bytes = None
+                    art_path = track.get("Artwork")
+                    if art_path:
+                        artwork_bytes = audio_tags.load_artwork(art_path)
+                    ok = audio_tags.write_tags(src, updates, artwork=artwork_bytes)
+                    tag_status = "written" if ok else "failed"
+        except Exception as exc:
+            logger.warning(f"Tag write-back skipped for {tid}: {exc}")
+            tag_status = "error"
+
+        return {"status": "success", "file_tags": tag_status}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Update failed for {tid}: {e}")
         raise HTTPException(500, f"Update failed: {str(e)}")
@@ -1733,6 +1817,132 @@ def usb_initialize(r: UsbInitReq):
     if UsbDetector.initialize_usb(r.drive):
         return {"status": "success", "message": "Library initialized"}
     raise HTTPException(500, "Failed to initialize library")
+
+
+# ─── DESTRUCTIVE: USB FORMAT (FAT32 / exFAT) ─────────────────────────────────
+# Two-step protocol so the UI cannot accidentally trigger a format:
+#   1. POST /api/usb/format/preview {drive}  → returns drive info + a one-shot
+#      token (valid 60s, single-use). The caller MUST display the data.
+#   2. POST /api/usb/format/confirm {drive, token, filesystem, label,
+#      typed_confirmation}  → wipes the drive. Server verifies the token AND
+#      that `typed_confirmation` matches the literal string "FORMAT <DRIVE>".
+#
+# Rationale: the protocol-level second factor means a misbehaving frontend
+# (or a stray click) can't issue a destructive call without first reading the
+# preview, and the typed phrase forces an additional human acknowledgement.
+
+_format_tokens: dict[str, dict] = {}  # token → {drive, expires_at, used}
+_format_tokens_lock = threading.Lock()
+_FORMAT_TOKEN_TTL = 60.0
+
+
+def _purge_expired_tokens():
+    now = time.time()
+    with _format_tokens_lock:
+        for tok in [t for t, m in _format_tokens.items() if m.get("expires_at", 0) < now]:
+            _format_tokens.pop(tok, None)
+
+
+class UsbFormatPreviewReq(BaseModel):
+    drive: str
+
+
+@app.post("/api/usb/format/preview")
+def usb_format_preview(r: UsbFormatPreviewReq):
+    """
+    Step 1 of the format protocol. Returns drive metadata the UI must display
+    in its warning dialog, plus a single-use token to pass to /confirm.
+    """
+    _purge_expired_tokens()
+    drive = r.drive.strip()
+    if not drive:
+        raise HTTPException(400, "Drive is required.")
+
+    # Cross-platform existence check — accept "E:" / "E:\\" on Windows and
+    # block-device paths like "/dev/sdb1" on Linux/macOS.
+    drive_path = Path(drive if drive.endswith(("\\", "/")) else drive + ("\\" if ":" in drive else ""))
+    exists = drive_path.exists() or Path(drive).exists()
+    if not exists:
+        raise HTTPException(404, f"Drive not found: {drive}")
+
+    # Pull volume info if we can; non-fatal otherwise.
+    info = {"label": "", "filesystem": "Unknown", "total": 0, "free": 0}
+    try:
+        if hasattr(UsbDetector, "_get_volume_info"):
+            info.update(UsbDetector._get_volume_info(drive))
+        if hasattr(UsbDetector, "_get_drive_size"):
+            info.update(UsbDetector._get_drive_size(drive))
+    except Exception as exc:
+        logger.warning("Drive probe failed for %s: %s", drive, exc)
+
+    token = secrets.token_urlsafe(24)
+    with _format_tokens_lock:
+        _format_tokens[token] = {
+            "drive": drive,
+            "expires_at": time.time() + _FORMAT_TOKEN_TTL,
+            "used": False,
+        }
+
+    # The exact phrase the user must type in the UI to confirm.
+    phrase = f"FORMAT {drive.rstrip(chr(92)).rstrip('/').rstrip(':')}"
+    logger.warning("FORMAT preview issued for drive=%s token=%s…", drive, token[:8])
+    return {
+        "status": "ok",
+        "drive": drive,
+        "label": info.get("label") or "",
+        "filesystem": info.get("filesystem") or "Unknown",
+        "total_bytes": int(info.get("total") or 0),
+        "free_bytes": int(info.get("free") or 0),
+        "confirm_phrase": phrase,
+        "token": token,
+        "ttl_seconds": int(_FORMAT_TOKEN_TTL),
+        "warning": (
+            "DESTRUCTIVE: every file on this drive will be permanently erased. "
+            "After formatting the stick is re-built as a clean Rekordbox / CDJ "
+            "device (PIONEER skeleton + DEVICE.PIONEER marker)."
+        ),
+    }
+
+
+class UsbFormatConfirmReq(BaseModel):
+    drive: str
+    token: str
+    filesystem: str = "FAT32"           # "FAT32" or "exFAT"
+    label: str = "CDJ"
+    typed_confirmation: str = ""        # must match the preview's confirm_phrase
+
+
+@app.post("/api/usb/format/confirm")
+def usb_format_confirm(r: UsbFormatConfirmReq):
+    """Step 2: actually format the drive after both confirmations check out."""
+    _purge_expired_tokens()
+    with _format_tokens_lock:
+        meta = _format_tokens.get(r.token)
+        if not meta:
+            raise HTTPException(403, "Invalid or expired confirmation token. Re-open the format dialog.")
+        if meta.get("used"):
+            raise HTTPException(403, "This token has already been used.")
+        if meta["drive"] != r.drive:
+            raise HTTPException(403, "Token does not match this drive.")
+
+    # Phrase check first — wrong typing should not burn the token, so the user
+    # can correct a typo without re-opening the dialog.
+    expected = f"FORMAT {r.drive.rstrip(chr(92)).rstrip('/').rstrip(':')}"
+    if r.typed_confirmation.strip() != expected:
+        raise HTTPException(400, f"Typed confirmation does not match. Expected: {expected}")
+
+    # Phrase OK — burn the token, then run the destructive op.
+    with _format_tokens_lock:
+        meta = _format_tokens.get(r.token)
+        if not meta or meta.get("used"):
+            raise HTTPException(403, "Token state changed. Re-open the format dialog.")
+        meta["used"] = True
+
+    logger.warning("FORMAT confirmed: drive=%s fs=%s label=%s", r.drive, r.filesystem, r.label)
+    res = UsbActions.format_drive(r.drive, label=r.label, filesystem=r.filesystem)
+    if res.get("status") != "success":
+        raise HTTPException(500, res.get("message") or "Format failed")
+    return res
 
 class UsbRenameReq(BaseModel):
     drive: str
