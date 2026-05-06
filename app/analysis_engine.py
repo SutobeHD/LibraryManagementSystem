@@ -1187,12 +1187,19 @@ def generate_hot_cues(
     return cues
 
 
-def generate_memory_cues(phrases: List[Dict[str, Any]], beats: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def generate_memory_cues(
+    phrases: List[Dict[str, Any]],
+    beats: List[Dict[str, Any]],
+    max_cues: int = 16,
+) -> List[Dict[str, Any]]:
     """
-    Auto-generate Memory Cues at every phrase boundary.
-    Memory cues have no slot limit; useful for navigating long tracks.
+    Auto-generate Memory Cues at SIGNIFICANT phrase boundaries only.
+
+    Filters: Drop / Chorus / Bridge / Outro always kept; consecutive
+    Verse phrases skipped; min spacing of 16 bars between cues for cleaner
+    track navigation in Rekordbox.
     """
-    if not beats:
+    if not beats or not phrases:
         return []
 
     beat_times_ms = sorted(b["time_ms"] for b in beats)
@@ -1207,19 +1214,50 @@ def generate_memory_cues(phrases: List[Dict[str, Any]], beats: List[Dict[str, An
             candidates.append(beat_times_ms[idx])
         return min(candidates, key=lambda x: abs(x - t_ms)) if candidates else t_ms
 
+    # Always-keep labels (DJ-relevant transitions)
+    always_keep = {"Drop", "Chorus", "Bridge", "Outro", "Up", "Down"}
+
+    # Min spacing: 16 bars at 120 BPM = 32 seconds; scale by phrase bar count
+    # We use first phrase's bar duration as proxy
+    first_bars = phrases[0].get("bars", 8) if phrases else 8
+    bar_to_ms = (60.0 / 120.0) * 4 * 1000  # rough fallback
+    if beat_times_ms and len(beat_times_ms) >= 5:
+        # Estimate one-beat-ms from beat spacing → bar = 4 beats
+        deltas = [beat_times_ms[i + 1] - beat_times_ms[i] for i in range(len(beat_times_ms) - 1)]
+        beat_ms = float(np.median(deltas)) if deltas else 500.0
+        bar_to_ms = beat_ms * 4
+    min_spacing_ms = bar_to_ms * 16
+
     cues: List[Dict[str, Any]] = []
+    last_cue_ms = -1e18
     for i, p in enumerate(phrases):
         label = p.get("label", "Verse")
+        start_ms = int(p.get("start_ms", 0))
+
+        keep = False
+        if label in always_keep:
+            keep = True
+        elif start_ms - last_cue_ms >= min_spacing_ms:
+            keep = True
+
+        if not keep:
+            continue
+
         color = _CUE_COLOR_BY_LABEL.get(label, _DEFAULT_CUE_COLOR)
         cues.append({
             "type": "memory_cue",
-            "number": i,
+            "number": len(cues),
             "name": label,
-            "time_ms": snap(int(p.get("start_ms", 0))),
+            "time_ms": snap(start_ms),
             "color_id": color["id"],
             "color_rgb": color["rgb"],
             "loop_len_ms": 0,
         })
+        last_cue_ms = start_ms
+
+        if len(cues) >= max_cues:
+            break
+
     return cues
 
 
