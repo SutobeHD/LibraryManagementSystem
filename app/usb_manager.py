@@ -55,6 +55,27 @@ class UsbDetector:
     RB_DB_PATH = "PIONEER/rekordbox/exportLibrary.db"
     LEGACY_PDB = "PIONEER/rekordbox/export.pdb"
 
+    # 32-byte device-identification blob accepted by CDJ-2000NXS2 / CDJ-3000.
+    # Some firmware revisions check for this file before mounting the stick as
+    # a Rekordbox device. Format is "PIONEER DEVICE" + null padding to 32 bytes.
+    DEVICE_PIONEER_MAGIC = b"PIONEER DEVICE"
+    DEVICE_PIONEER_SIZE = 32
+
+    @classmethod
+    def _write_device_pioneer(cls, pioneer_path: Path) -> None:
+        """Create /PIONEER/DEVICE.PIONEER if missing. Never overwrites."""
+        target = pioneer_path / "DEVICE.PIONEER"
+        if target.exists():
+            return
+        try:
+            blob = cls.DEVICE_PIONEER_MAGIC + b"\x00" * (
+                cls.DEVICE_PIONEER_SIZE - len(cls.DEVICE_PIONEER_MAGIC)
+            )
+            target.write_bytes(blob)
+            logger.info(f"Wrote DEVICE.PIONEER marker at {target}")
+        except Exception as e:
+            logger.warning(f"Failed to write DEVICE.PIONEER at {target}: {e}")
+
     @staticmethod
     def _get_removable_drives() -> List[str]:
         """Get all removable drive letters on Windows."""
@@ -243,6 +264,10 @@ class UsbDetector:
             }
             for name, content in settings_files.items():
                 (pioneer_path / name).write_bytes(content)
+
+            # CDJ device-identification marker (some firmware needs this to mount
+            # the stick as a Rekordbox device).
+            cls._write_device_pioneer(pioneer_path)
 
             logger.info(f"Initialized Rekordbox library at {rb_path}")
             
@@ -503,6 +528,8 @@ class UsbSyncEngine:
         self.usb_rb.mkdir(parents=True, exist_ok=True)
         self.usb_anlz.mkdir(parents=True, exist_ok=True)
         (self.usb_pioneer / "Artwork").mkdir(exist_ok=True)
+        # Ensure CDJ device-identification marker exists on already-prepared sticks.
+        UsbDetector._write_device_pioneer(self.usb_pioneer)
         
         # Self-healing: if the DB exists but is an encrypted master.db clone from the old bug,
         # it will throw an error on `sqlite3.connect`. We must delete it to let the sync engine rebuild it.

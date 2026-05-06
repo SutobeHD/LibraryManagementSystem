@@ -1005,15 +1005,16 @@ async def scan_folder(data: Dict[str, str]):
     if not scan_path.exists() or not scan_path.is_dir():
         raise HTTPException(status_code=404, detail=f"Directory not found: {path_str}")
 
-    AUDIO_EXTENSIONS = {".mp3", ".wav", ".flac", ".aiff", ".aif", ".ogg", ".opus", ".m4a", ".aac"}
-
     def _scan():
         imported = 0
         skipped = 0
         for audio_file in scan_path.rglob("*"):
-            if audio_file.suffix.lower() not in AUDIO_EXTENSIONS:
+            if not audio_file.is_file() or audio_file.suffix.lower() not in folder_watcher.AUDIO_EXTENSIONS:
                 continue
             try:
+                if _is_known_audio_path(audio_file):
+                    skipped += 1
+                    continue
                 result = ImportManager.process_import(audio_file)
                 if result:
                     imported += 1
@@ -1024,10 +1025,83 @@ async def scan_folder(data: Dict[str, str]):
                 skipped += 1
         logger.info("[Scan] Folder scan complete: path=%s imported=%d skipped=%d", path_str, imported, skipped)
 
-    import threading
     thread = threading.Thread(target=_scan, daemon=True, name=f"scan-{scan_path.name}")
     thread.start()
     return {"status": "ok", "data": {"message": f"Scanning {path_str} in background…"}}
+
+
+@app.post("/api/library/import-paths")
+async def import_paths(data: Dict[str, Any]):
+    """
+    Import a mixed list of absolute filesystem paths (files OR directories).
+    Used by drag-drop in the desktop app, where the OS hands us full paths
+    instead of upload-able File blobs. Dedup via _is_known_audio_path.
+    """
+    raw = data.get("paths") or []
+    if not isinstance(raw, list) or not raw:
+        raise HTTPException(status_code=400, detail="'paths' must be a non-empty list")
+
+    targets: list[Path] = []
+    queued_dirs = 0
+    queued_files = 0
+    for entry in raw:
+        if not isinstance(entry, str) or not entry.strip():
+            continue
+        try:
+            p = Path(entry).expanduser()
+        except Exception:
+            continue
+        if not p.exists():
+            continue
+        if p.is_dir():
+            targets.append(p)
+            queued_dirs += 1
+        elif p.is_file() and p.suffix.lower() in folder_watcher.AUDIO_EXTENSIONS:
+            targets.append(p)
+            queued_files += 1
+
+    if not targets:
+        return {"status": "ok", "queued_dirs": 0, "queued_files": 0, "message": "No importable paths."}
+
+    def _run():
+        imported = 0
+        skipped = 0
+        for t in targets:
+            try:
+                if t.is_dir():
+                    for f in t.rglob("*"):
+                        if not f.is_file() or f.suffix.lower() not in folder_watcher.AUDIO_EXTENSIONS:
+                            continue
+                        if _is_known_audio_path(f):
+                            skipped += 1
+                            continue
+                        try:
+                            ImportManager.process_import(f)
+                            imported += 1
+                        except Exception as exc:
+                            logger.warning("[Drop] Import failed for %s: %s", f, exc)
+                            skipped += 1
+                else:
+                    if _is_known_audio_path(t):
+                        skipped += 1
+                        continue
+                    try:
+                        ImportManager.process_import(t)
+                        imported += 1
+                    except Exception as exc:
+                        logger.warning("[Drop] Import failed for %s: %s", t, exc)
+                        skipped += 1
+            except Exception as exc:
+                logger.warning("[Drop] Scan failed for %s: %s", t, exc)
+        logger.info("[Drop] import-paths complete: imported=%d skipped=%d", imported, skipped)
+
+    threading.Thread(target=_run, daemon=True, name="drop-import").start()
+    return {
+        "status": "ok",
+        "queued_dirs": queued_dirs,
+        "queued_files": queued_files,
+        "message": f"Importing in background ({queued_dirs} folder(s), {queued_files} file(s))",
+    }
 
 @app.get("/api/artwork")
 async def get_artwork(path: str):
