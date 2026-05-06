@@ -1,7 +1,7 @@
 import React, { useState, Component, useEffect, useCallback, Suspense, lazy } from 'react'
 import { invoke } from '@tauri-apps/api/core'; // Tauri Invoke
 import ReactDOM from 'react-dom/client'
-import { Music, Cloud, Download, Scissors, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, Database, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2, Sparkles, Copy, Layers } from 'lucide-react'
+import { Music, Cloud, Download, Scissors, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, Database, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2, Sparkles, Copy, Layers, FileSearch, FilePlus, Check, FolderOpen } from 'lucide-react'
 import './index.css'
 import { ToastProvider } from './components/ToastContext'
 import { Toaster } from 'react-hot-toast'
@@ -322,6 +322,206 @@ const SelectionView = ({ onSelect }) => (
   </div>
 );
 
+
+// ─── XML Source Picker ─────────────────────────────────────────────────────
+// Shown when the user picks "XML Snapshot". Lets them choose where the
+// library XML comes from instead of silently dumping a file in the cwd.
+const XmlSourcePicker = ({ onCancel, onLoaded, onPickEmpty }) => {
+  const [candidates, setCandidates] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [scanning, setScanning] = useState(true);
+  const [dragOver, setDragOver] = useState(false);
+  const [error, setError] = useState('');
+
+  // Probe disk for likely Rekordbox XML files on mount.
+  useEffect(() => {
+    api.get('/api/library/xml/candidates')
+      .then(res => setCandidates(res.data?.candidates || []))
+      .catch(() => setCandidates([]))
+      .finally(() => setScanning(false));
+  }, []);
+
+  const loadByPath = async (path) => {
+    setBusy(true); setError('');
+    try {
+      const res = await api.post('/api/library/xml/load', { path });
+      onLoaded(res.data);
+    } catch (e) {
+      setError(e?.response?.data?.detail || `Could not load ${path}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const browseFile = async () => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const picked = await open({
+        multiple: false,
+        title: 'Select your Rekordbox XML export',
+        filters: [{ name: 'Rekordbox XML', extensions: ['xml'] }],
+      });
+      if (typeof picked === 'string' && picked.length) {
+        loadByPath(picked);
+      }
+    } catch {
+      setError('File picker unavailable in browser mode — use drag-and-drop instead.');
+    }
+  };
+
+  // Tauri-aware drag-and-drop — uses native paths when available, falls
+  // back to browser File API otherwise.
+  useEffect(() => {
+    if (!window.__TAURI__) return;
+    let unlisten = null; let cancelled = false;
+    (async () => {
+      try {
+        const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+        const win = getCurrentWebviewWindow();
+        unlisten = await win.onDragDropEvent((event) => {
+          const p = event.payload || {};
+          if (p.type === 'enter' || p.type === 'over') setDragOver(true);
+          else if (p.type === 'leave') setDragOver(false);
+          else if (p.type === 'drop') {
+            setDragOver(false);
+            const xml = (p.paths || []).find(x => x.toLowerCase().endsWith('.xml'));
+            if (xml) loadByPath(xml);
+            else setError('Drop a .xml file please.');
+          }
+        });
+        if (cancelled && unlisten) unlisten();
+      } catch (err) { console.warn('Tauri drag-drop unavailable', err); }
+    })();
+    return () => { cancelled = true; if (typeof unlisten === 'function') unlisten(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const onBrowserDrop = async (e) => {
+    e.preventDefault(); setDragOver(false);
+    const file = Array.from(e.dataTransfer?.files || []).find(f => f.name.toLowerCase().endsWith('.xml'));
+    if (!file) { setError('Drop a .xml file please.'); return; }
+    // Browsers can't expose absolute paths, so we read the content + send it
+    // up. Server-side: create a temp file and load that. Skipped for brevity
+    // — if user is in Tauri this path is dead; if browser, point them at
+    // Browse instead.
+    setError('Browser drag-drop can\'t resolve absolute paths. Use the Browse… button or run the desktop app.');
+  };
+
+  const fmtBytes = (b) => {
+    if (!b) return '0 B';
+    const u = ['B','KB','MB','GB']; let i = 0; let n = b;
+    while (n >= 1024 && i < u.length-1) { n /= 1024; i++; }
+    return `${n.toFixed(n < 10 ? 1 : 0)} ${u[i]}`;
+  };
+  const fmtAge = (ts) => {
+    if (!ts) return '';
+    const d = Math.max(0, (Date.now()/1000) - ts);
+    if (d < 3600) return `${Math.round(d/60)}m ago`;
+    if (d < 86400) return `${Math.round(d/3600)}h ago`;
+    return `${Math.round(d/86400)}d ago`;
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[150] bg-mx-deepest/90 backdrop-blur-sm flex items-center justify-center p-6"
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={onBrowserDrop}
+    >
+      <div className={`w-full max-w-3xl mx-card rounded-mx-lg p-7 shadow-mx-lg border ${dragOver ? 'border-amber2' : 'border-line-subtle'} relative`}>
+        <button
+          onClick={onCancel}
+          className="absolute top-4 right-4 text-ink-muted hover:text-ink-primary"
+          aria-label="Close"
+        >
+          <X size={18} />
+        </button>
+
+        <h2 className="text-xl font-semibold text-ink-primary mb-1">XML Library Source</h2>
+        <p className="text-tiny text-ink-muted mb-6">Pick where the XML library comes from. Drop a file anywhere on this dialog, browse manually, choose an auto-detected one, or start fresh.</p>
+
+        {error && (
+          <div className="mb-4 p-3 rounded-mx-sm bg-bad/10 border border-bad/30 text-bad text-tiny">
+            {error}
+          </div>
+        )}
+
+        {/* Action tiles */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+          <button
+            onClick={browseFile}
+            disabled={busy}
+            className="p-4 rounded-mx-md border border-line-subtle hover:border-amber2 bg-mx-input/40 text-left transition-colors disabled:opacity-30"
+          >
+            <FolderOpen size={18} className="text-amber2 mb-2" />
+            <div className="text-[12px] font-semibold text-ink-primary">Browse for XML…</div>
+            <div className="text-[10px] text-ink-muted mt-0.5">Pick a Rekordbox export from disk.</div>
+          </button>
+          <button
+            onClick={onPickEmpty}
+            disabled={busy}
+            className="p-4 rounded-mx-md border border-line-subtle hover:border-emerald-400/50 bg-mx-input/40 text-left transition-colors disabled:opacity-30"
+          >
+            <FilePlus size={18} className="text-emerald-300 mb-2" />
+            <div className="text-[12px] font-semibold text-ink-primary">Start with empty library</div>
+            <div className="text-[10px] text-ink-muted mt-0.5">Auto-creates <span className="font-mono">rekordbox.xml</span> and you import tracks later.</div>
+          </button>
+        </div>
+
+        {/* Auto-detected list */}
+        <div className="mb-3 flex items-center gap-2">
+          <FileSearch size={14} className="text-amber2" />
+          <span className="mx-caption">Auto-detected on disk</span>
+          {scanning && <Loader2 size={11} className="animate-spin text-ink-muted" />}
+        </div>
+        {!scanning && candidates.length === 0 && (
+          <div className="p-4 rounded-mx-sm border border-dashed border-line-subtle text-tiny text-ink-muted text-center">
+            No Rekordbox XML files found at common locations. Use Browse… or start with an empty library.
+          </div>
+        )}
+        {candidates.length > 0 && (
+          <div className="space-y-1.5">
+            {candidates.map((c) => (
+              <button
+                key={c.path}
+                onClick={() => loadByPath(c.path)}
+                disabled={busy}
+                className="w-full p-3 rounded-mx-sm border border-line-subtle hover:border-amber2 bg-mx-input/40 flex items-center gap-3 text-left transition-colors disabled:opacity-30"
+              >
+                <FileCode size={16} className={c.looks_valid ? 'text-amber2 shrink-0' : 'text-ink-muted shrink-0'} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] font-mono text-ink-primary truncate">{c.path}</div>
+                  <div className="text-[9px] text-ink-muted flex items-center gap-2">
+                    <span>{fmtBytes(c.size_bytes)}</span>
+                    <span>•</span>
+                    <span>{fmtAge(c.modified_ts)}</span>
+                    {c.looks_valid ? (
+                      <span className="text-ok flex items-center gap-1"><Check size={9} /> looks valid</span>
+                    ) : (
+                      <span className="text-bad">unrecognised header</span>
+                    )}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Drop hint */}
+        <div className={`mt-6 py-3 px-4 rounded-mx-sm border-2 border-dashed text-center text-tiny transition-colors ${dragOver ? 'border-amber2 text-amber2 bg-amber2/5' : 'border-line-subtle text-ink-muted'}`}>
+          {dragOver ? 'Release to load this file…' : 'Or drop a .xml file anywhere on this dialog'}
+        </div>
+
+        {busy && (
+          <div className="mt-4 flex items-center justify-center gap-2 text-tiny text-amber2">
+            <Loader2 size={12} className="animate-spin" /> Loading library…
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 import Player from './components/Player'
 
 // SPEED: Suspense loading fallback for lazy-loaded views
@@ -344,6 +544,9 @@ const App = () => {
   // Watchdog: when the load takes too long, surface a recovery UI instead
   // of leaving the user staring at the spinner forever.
   const [loadStuck, setLoadStuck] = useState(false)
+  // XML mode opens an intermediate picker (browse / drop / auto-detect / new)
+  // instead of silently auto-creating a file in the working directory.
+  const [showXmlPicker, setShowXmlPicker] = useState(false)
 
   const checkLibraryStatus = useCallback(async () => {
     try {
@@ -468,7 +671,28 @@ const App = () => {
 
   return (
     <div className="flex h-screen w-screen bg-mx-deepest text-ink-primary overflow-hidden font-sans">
-      {appMode === 'choice' && <SelectionView onSelect={handleModeSelect} />}
+      {appMode === 'choice' && (
+        <SelectionView
+          onSelect={(m) => { if (m === 'xml') setShowXmlPicker(true); else handleModeSelect(m); }}
+        />
+      )}
+
+      {showXmlPicker && (
+        <XmlSourcePicker
+          onCancel={() => setShowXmlPicker(false)}
+          onLoaded={(info) => {
+            setShowXmlPicker(false);
+            setAppMode('xml');
+            setIsInitialLoading(true);
+            setActiveTab('library');
+            checkLibraryStatus();
+          }}
+          onPickEmpty={() => {
+            setShowXmlPicker(false);
+            handleModeSelect('xml'); // existing flow: backend auto-creates empty XML
+          }}
+        />
+      )}
 
       {isInitialLoading && (
         <div className="fixed inset-0 z-[120] bg-mx-deepest flex flex-col items-center justify-center p-8 animate-fade-in font-sans">

@@ -409,7 +409,8 @@ class ProjectReq(BaseModel):
     data: Dict[str, Any]
 
 class DBModeReq(BaseModel):
-    mode: str # "xml" or "live"
+    mode: str # "xml" | "live" | "standalone"
+    xml_path: str = ""  # optional explicit XML file path for mode="xml"
 
 # NOTE: Library auto-load is handled by startup_event() near the bottom of this file.
 # A second @app.on_event("startup") here was causing the DB to load twice (~90s startup).
@@ -934,18 +935,119 @@ def get_lib_status():
 
 @app.post("/api/library/mode")
 def set_lib_mode(r: DBModeReq):
-    logger.info(f"Setting library mode to: {r.mode}")
+    logger.info(f"Setting library mode to: {r.mode} (xml_path='{r.xml_path}')")
     success = db.set_mode(r.mode)
     if success:
-        # Update settings if remember is on
         s = SettingsManager.load()
         if s.get("remember_lib_mode"):
             s["last_lib_mode"] = r.mode
             SettingsManager.save(s)
+        # If the caller pinned a specific XML file, persist it as the active
+        # XML source so future startups load the same file. Empty string
+        # means "let the backend decide" (settings.db_path → cwd default).
+        if r.mode == "xml" and r.xml_path.strip():
+            s["db_path"] = str(Path(r.xml_path).expanduser())
+            SettingsManager.save(s)
 
-        db.load_library() # Reload in new mode (auto-creates XML in standalone)
+        load_arg = r.xml_path.strip() if r.mode == "xml" and r.xml_path.strip() else None
+        db.load_library(load_arg)
         logger.info(f"Library reloaded in {r.mode} mode. Tracks: {len(db.tracks)}")
-    return {"status": "success" if success else "error", "mode": db.mode}
+    return {"status": "success" if success else "error", "mode": db.mode,
+            "path": str(db.xml_path) if db.mode in ("xml", "standalone") else None,
+            "tracks": len(db.tracks) if db.loaded else 0}
+
+
+# ─── XML-Modus: Quellen-Auswahl (Browse / Drop / Auto-Detect / Neu) ─────
+@app.get("/api/library/xml/candidates")
+def xml_candidates():
+    """
+    Probe well-known locations for an existing Rekordbox XML export so the
+    UI can offer one-click load. Lightweight (just stat() on a fixed list).
+    Returns paths in priority order.
+    """
+    home = Path.home()
+    appdata = os.environ.get("APPDATA", "")
+    docs = home / "Documents"
+    candidates = [
+        # Most likely: user did "Export to XML" via Rekordbox menu
+        docs / "rekordbox" / "rekordbox.xml",
+        docs / "rekordbox6" / "rekordbox.xml",
+        # Less common but seen in older installs
+        home / "rekordbox.xml",
+        Path.cwd() / "rekordbox.xml",
+        Path(appdata) / "Pioneer" / "rekordbox" / "rekordbox.xml" if appdata else None,
+    ]
+    # Also add the currently-configured db_path if non-empty.
+    try:
+        cfg_path = (SettingsManager.load().get("db_path") or "").strip()
+        if cfg_path:
+            candidates.insert(0, Path(cfg_path).expanduser())
+    except Exception:
+        pass
+
+    found = []
+    seen = set()
+    for c in candidates:
+        if c is None:
+            continue
+        try:
+            cr = c.expanduser().resolve()
+        except Exception:
+            continue
+        if str(cr) in seen:
+            continue
+        seen.add(str(cr))
+        if cr.exists() and cr.is_file():
+            try:
+                size = cr.stat().st_size
+                mtime = cr.stat().st_mtime
+            except OSError:
+                continue
+            found.append({
+                "path": str(cr),
+                "size_bytes": size,
+                "modified_ts": mtime,
+                "looks_valid": _quick_xml_sniff(cr),
+            })
+    return {"candidates": found}
+
+
+def _quick_xml_sniff(path: Path) -> bool:
+    """Cheap sanity check: file starts with <?xml and contains DJ_PLAYLISTS."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(2048)
+        return head.startswith(b"<?xml") and b"DJ_PLAYLISTS" in head
+    except OSError:
+        return False
+
+
+class XmlLoadReq(BaseModel):
+    path: str
+
+
+@app.post("/api/library/xml/load")
+def xml_load(r: XmlLoadReq):
+    """Activate XML mode pointing at a specific file (browse, drop, auto-detect)."""
+    p = (r.path or "").strip()
+    if not p:
+        raise HTTPException(400, "path is required")
+    target = Path(p).expanduser()
+    if not target.is_file():
+        raise HTTPException(404, f"File not found: {target}")
+
+    # Persist + activate.
+    s = SettingsManager.load()
+    s["db_path"] = str(target)
+    if s.get("remember_lib_mode"):
+        s["last_lib_mode"] = "xml"
+    SettingsManager.save(s)
+
+    db.set_mode("xml")
+    success = db.load_library(str(target))
+    if not success:
+        raise HTTPException(500, "Could not parse the XML file. Is it a valid Rekordbox export?")
+    return {"status": "success", "path": str(target), "tracks": len(db.tracks)}
 
 
 # ─── Standalone Library — self-managed XML, no Rekordbox needed ────────────
