@@ -247,9 +247,24 @@ const SettingsView = () => {
     const [libStatus, setLibStatus] = useState({ mode: 'xml', loaded: false });
     const [audioDevices, setAudioDevices] = useState(['System Default']);
     const [scanFolderInput, setScanFolderInput] = useState('');
+    const [watcherStatus, setWatcherStatus] = useState({ running: false, folders: [], pending_imports: 0 });
     const [usbProfiles, setUsbProfiles] = useState([]);
     const [usbProfilesLoading, setUsbProfilesLoading] = useState(false);
     const [editingProfileId, setEditingProfileId] = useState(null);
+
+    // ── Folder watcher status (live polled while Library tab is open) ────────
+    const refreshWatcherStatus = useCallback(() => {
+        api.get('/api/library/folder-watcher/status')
+            .then(res => setWatcherStatus(res.data || { running: false, folders: [], pending_imports: 0 }))
+            .catch(() => {});
+    }, []);
+
+    useEffect(() => {
+        if (activeTab !== 'library') return;
+        refreshWatcherStatus();
+        const id = setInterval(refreshWatcherStatus, 5000);
+        return () => clearInterval(id);
+    }, [activeTab, refreshWatcherStatus]);
 
     // ── USB profiles loader (lazy on tab activation) ──────────────────────────
     const loadUsbProfiles = useCallback(() => {
@@ -358,21 +373,47 @@ const SettingsView = () => {
         if (!folder) return;
         const existing = settings.scan_folders || [];
         if (existing.includes(folder)) { toast.error('Folder already in list'); return; }
-        const updated = [...existing, folder];
-        set('scan_folders', updated);
-        setScanFolderInput('');
-        // Trigger immediate scan
         try {
-            await api.post('/api/library/scan-folder', { path: folder });
-            toast.success(`Scanning: ${folder}`);
-        } catch {
-            toast('Folder added — will scan on next startup', { icon: 'ℹ️' });
+            const res = await api.post('/api/library/folder-watcher/add', { path: folder });
+            const folders = res.data?.folders || [...existing, folder];
+            set('scan_folders', folders);
+            setScanFolderInput('');
+            toast.success(`Watching: ${folder}`);
+            refreshWatcherStatus();
+        } catch (err) {
+            toast.error(err?.response?.data?.detail || 'Failed to start watcher');
         }
     };
 
-    const removeScanFolder = (path) => {
-        set('scan_folders', (settings.scan_folders || []).filter(f => f !== path));
+    const browseScanFolder = async () => {
+        try {
+            const { open } = await import('@tauri-apps/plugin-dialog');
+            const picked = await open({
+                directory: true,
+                multiple: false,
+                title: 'Choose folder to watch for new tracks',
+            });
+            if (typeof picked === 'string' && picked.length) {
+                setScanFolderInput(picked);
+            }
+        } catch (err) {
+            toast.error('Folder picker unavailable in browser mode — type the path manually.');
+        }
     };
+
+    const removeScanFolder = async (path) => {
+        try {
+            const res = await api.post('/api/library/folder-watcher/remove', { path });
+            const folders = res.data?.folders ?? (settings.scan_folders || []).filter(f => f !== path);
+            set('scan_folders', folders);
+            refreshWatcherStatus();
+        } catch {
+            // Fall back to local-only removal so the user isn't stuck on a stale entry.
+            set('scan_folders', (settings.scan_folders || []).filter(f => f !== path));
+        }
+    };
+
+    const watchedSet = new Set((watcherStatus.folders || []).filter(f => f.alive).map(f => f.path));
 
     // ── Tab content renderers ──────────────────────────────────────────────────
 
@@ -414,8 +455,11 @@ const SettingsView = () => {
                 )}
             </Section>
 
-            <Section title="Scan Folders" icon={FolderOpen}>
-                <p className="text-xs text-ink-muted">Additional folders monitored for new audio files. Tracks are auto-imported on detection.</p>
+            <Section title="Watched Folders" icon={FolderOpen}>
+                <p className="text-xs text-ink-muted">
+                    Folders monitored in the background. New audio files are auto-imported and analysed
+                    as soon as they appear (or on next app start). An initial scan runs when you add a folder.
+                </p>
                 <div className="flex gap-2">
                     <input
                         value={scanFolderInput}
@@ -424,21 +468,45 @@ const SettingsView = () => {
                         placeholder="C:\Music\My Tracks"
                         className="input-glass flex-1 text-sm"
                     />
+                    <button
+                        onClick={browseScanFolder}
+                        title="Browse…"
+                        className="px-3 py-2 rounded-xl text-xs bg-mx-shell/50 border border-white/10 hover:border-amber2/50 hover:bg-amber2/5 transition-all flex items-center gap-1.5"
+                    >
+                        <FolderOpen size={13} /> Browse
+                    </button>
                     <button onClick={addScanFolder} className="px-3 py-2 bg-amber2/20 hover:bg-amber2/30 border border-amber2/30 rounded-xl text-amber2 transition-all">
                         <Plus size={16} />
                     </button>
                 </div>
                 {(settings.scan_folders || []).length > 0 && (
                     <div className="space-y-2 mt-1">
-                        {(settings.scan_folders || []).map(f => (
-                            <div key={f} className="flex items-center justify-between p-2.5 bg-mx-shell/60 rounded-xl border border-white/5">
-                                <span className="text-xs text-ink-primary font-mono truncate">{f}</span>
-                                <button onClick={() => removeScanFolder(f)} className="ml-2 flex-shrink-0 text-ink-muted hover:text-red-400 transition-colors">
-                                    <X size={14} />
-                                </button>
-                            </div>
-                        ))}
+                        {(settings.scan_folders || []).map(f => {
+                            const watching = watchedSet.has(f);
+                            return (
+                                <div key={f} className="flex items-center justify-between p-2.5 bg-mx-shell/60 rounded-xl border border-white/5">
+                                    <div className="min-w-0 flex-1 flex items-center gap-2">
+                                        <span
+                                            className={`shrink-0 w-2 h-2 rounded-full ${watching ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : 'bg-ink-muted'}`}
+                                            title={watching ? 'Watching' : 'Not watching'}
+                                        />
+                                        <span className="text-xs text-ink-primary font-mono truncate">{f}</span>
+                                        <span className={`text-[10px] uppercase tracking-wide ${watching ? 'text-emerald-300' : 'text-ink-muted'}`}>
+                                            {watching ? 'Live' : 'Idle'}
+                                        </span>
+                                    </div>
+                                    <button onClick={() => removeScanFolder(f)} className="ml-2 flex-shrink-0 text-ink-muted hover:text-red-400 transition-colors">
+                                        <X size={14} />
+                                    </button>
+                                </div>
+                            );
+                        })}
                     </div>
+                )}
+                {watcherStatus.pending_imports > 0 && (
+                    <p className="text-[11px] text-amber2 mt-1">
+                        {watcherStatus.pending_imports} file{watcherStatus.pending_imports === 1 ? '' : 's'} queued for import…
+                    </p>
                 )}
             </Section>
 
