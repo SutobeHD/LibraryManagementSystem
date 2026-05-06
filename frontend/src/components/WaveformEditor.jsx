@@ -10,7 +10,12 @@ import {
     RotateCcw, RotateCw, Copy, Clipboard, ListPlus, Terminal, Save, Infinity, X, Type, Target, Zap, Layers
 } from 'lucide-react';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { toast } from 'react-hot-toast';
+
+// Zoom range: minPxPerSec for WaveSurfer
+const ZOOM_MIN = 50;
+const ZOOM_MAX = 800;
+const ZOOM_STEP = 50;
+const ZOOM_DEFAULT = 200;
 
 // --- Utility: Slice Audio Buffer for Instant Preview ---
 // --- Utility: Build Preview Buffer (Async with Splicing) ---
@@ -225,7 +230,7 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
     const [loading, setLoading] = useState(false);
     const [bpm, setBpm] = useState(track?.BPM || 128);
     const [beatGrid, setBeatGrid] = useState([]);
-    const [zoom, setZoom] = useState(200);
+    const [zoom, setZoom] = useState(ZOOM_DEFAULT);
     const [fullTrack, setFullTrack] = useState(track?.path ? track : null);
 
     const [selectedBeats, setSelectedBeats] = useState(1);
@@ -249,6 +254,20 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
     const wsLow = useRef(null);
     const wsMid = useRef(null);
     const wsHigh = useRef(null);
+
+    // Track Blob-URLs for cleanup (memory leak prevention)
+    const blobUrlsRef = useRef([]);
+    const trackBlobUrl = useCallback((url) => {
+        blobUrlsRef.current.push(url);
+        return url;
+    }, []);
+    const revokeAllBlobUrls = useCallback(() => {
+        blobUrlsRef.current.forEach(u => { try { URL.revokeObjectURL(u); } catch (e) { } });
+        blobUrlsRef.current = [];
+    }, []);
+
+    // Revoke all blob URLs on unmount
+    useEffect(() => () => revokeAllBlobUrls(), [revokeAllBlobUrls]);
 
     // Fetch Global Settings on mount
     useEffect(() => {
@@ -360,7 +379,8 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                         ws.setTime(wavesurfer.current.getCurrentTime());
                     }
                 });
-                ws.load(URL.createObjectURL(blob));
+                const url = trackBlobUrl(URL.createObjectURL(blob));
+                ws.load(url);
             };
 
             if (wsLow.current) loadBlob(wsLow.current, multibandBuffers.low);
@@ -380,15 +400,19 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
         initLayers();
 
         // ---------------------------------------------------------
-        // FORCE SYNC LOOP (RAF)
+        // FORCE SYNC LOOP (RAF) — only runs when needed
         // ---------------------------------------------------------
+        // Only run sync loop when in multi-band mode AND playing (saves CPU)
+        if (visualMode === 'blue') return;
+
         let rafId;
+        let lastSyncTime = -1;
+        let lastSyncScroll = -1;
+
         const loop = () => {
             if (wavesurfer.current && !wavesurfer.current.isDestroyed) {
                 const master = wavesurfer.current;
                 const wrapper = master.getWrapper();
-                // WaveSurfer v7 Shadow DOM: .wrapper has overflow:visible
-                // The scrollable element is .scroll = wrapper.parentElement
                 const scrollEl = wrapper?.parentElement;
 
                 if (scrollEl && master.getDuration() > 0) {
@@ -397,28 +421,36 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                     const totalWidth = scrollEl.scrollWidth;
                     const containerWidth = scrollEl.clientWidth;
 
-                    // Smooth centering: keep cursor in the middle of the viewport every frame
-                    const cursorPx = (time / dur) * totalWidth;
-                    const targetScroll = cursorPx - containerWidth / 2;
-                    scrollEl.scrollLeft = Math.max(0, Math.min(targetScroll, totalWidth - containerWidth));
+                    // Smooth centering only during playback (saves DOM writes when paused)
+                    if (master.isPlaying()) {
+                        const cursorPx = (time / dur) * totalWidth;
+                        const targetScroll = cursorPx - containerWidth / 2;
+                        scrollEl.scrollLeft = Math.max(0, Math.min(targetScroll, totalWidth - containerWidth));
+                    }
 
                     const scroll = scrollEl.scrollLeft;
 
-                    // Sync Slaves
-                    [wsLow, wsMid, wsHigh].forEach(ws => {
-                        if (ws.current && !ws.current.isDestroyed) {
-                            // Sync Time
-                            if (Math.abs(ws.current.getCurrentTime() - time) > 0.05) {
-                                ws.current.setTime(time);
+                    // Skip update if nothing changed (cheap noop check)
+                    const timeChanged = Math.abs(time - lastSyncTime) > 0.01;
+                    const scrollChanged = scroll !== lastSyncScroll;
+                    if (timeChanged || scrollChanged) {
+                        lastSyncTime = time;
+                        lastSyncScroll = scroll;
+
+                        // Sync Slaves
+                        [wsLow, wsMid, wsHigh].forEach(ws => {
+                            if (ws.current && !ws.current.isDestroyed) {
+                                if (Math.abs(ws.current.getCurrentTime() - time) > 0.05) {
+                                    ws.current.setTime(time);
+                                }
+                                const childWrapper = ws.current.getWrapper();
+                                const childScroll = childWrapper?.parentElement;
+                                if (childScroll && childScroll.scrollLeft !== scroll) {
+                                    childScroll.scrollLeft = scroll;
+                                }
                             }
-                            // Sync Scroll
-                            const childWrapper = ws.current.getWrapper();
-                            const childScroll = childWrapper?.parentElement;
-                            if (childScroll) {
-                                childScroll.scrollLeft = scroll;
-                            }
-                        }
-                    });
+                        });
+                    }
                 }
             }
             rafId = requestAnimationFrame(loop);
@@ -426,9 +458,9 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
         loop();
 
         return () => {
-            cancelAnimationFrame(rafId);
+            if (rafId) cancelAnimationFrame(rafId);
         };
-    }, [visualMode, multibandBuffers]); // Removed zoom dependency
+    }, [visualMode, multibandBuffers, zoom]); // re-run on zoom to recalc widths
 
     // Sync zoom to slaves when state changes
     useEffect(() => {
@@ -655,9 +687,12 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                 if (isPlayingExternalRef.current) {
                     wavesurfer.current.play().catch(e => console.warn("Autoplay blocked:", e));
                 }
-                // Capture Original Buffer
-                if (!originalBufferRef.current) {
-                    originalBufferRef.current = wavesurfer.current.getDecodedData();
+                // Capture Original Buffer + reset multiband state for new track
+                const buffer = wavesurfer.current.getDecodedData();
+                if (buffer) {
+                    originalBufferRef.current = buffer;
+                    setMultibandBuffers(null);
+                    setBufferReady(true);
                 }
             });
 
@@ -730,17 +765,6 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                 if (wavesurfer.current) wavesurfer.current.seekTo(rel);
             });
 
-            // Capture Buffer on Ready
-            wavesurfer.current.on('ready', () => {
-                const buffer = wavesurfer.current.getDecodedData();
-                if (buffer) {
-                    originalBufferRef.current = buffer;
-                    // Reset multiband buffers to trigger new analysis if needed
-                    setMultibandBuffers(null);
-                    setBufferReady(true);
-                }
-            });
-
             // Trigger initial load if track is already present (optimization for race conditions)
             if (fullTrack?.path || blobUrl) {
                 const loadUrl = blobUrl || `/api/stream?path=${encodeURIComponent(fullTrack.path)}`;
@@ -804,57 +828,118 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
 
     }, [fullTrack?.path, blobUrl, streaming]); // Added streaming dependency
 
-    const gridRegions = useRef([]);
+    const beatCanvasRef = useRef(null);
 
-    // 1. Grid Rendering Effect (Only when beats/zoom changes)
+    // 1. Grid Rendering Effect — Canvas-based (1 element vs 1000+ regions)
     useEffect(() => {
-        if (!wavesurfer.current || !duration || !beats) return;
-        let regions = wavesurfer.current.plugins.find(p => p.addRegion);
-        if (!regions) return;
+        if (!wavesurfer.current || !duration || !beats?.length || !beatCanvasRef.current) return;
 
-        // Clear only old grid regions
-        gridRegions.current.forEach(r => { try { r.remove(); } catch (e) { } });
-        gridRegions.current = [];
+        const canvas = beatCanvasRef.current;
+        const wrapper = wavesurfer.current.getWrapper();
+        const scrollEl = wrapper?.parentElement;
+        if (!scrollEl) return;
 
-        const density = zoom < 2 ? 4 : 1;
-        beats.forEach((b, i) => {
-            if (i % density !== 0 && !b.isDownbeat) return;
+        let rafPending = false;
 
-            const r = regions.addRegion({
-                id: `grid-${i}`,
-                start: b.time,
-                end: b.time,
-                color: b.isDownbeat ? 'rgba(255, 255, 255, 0.25)' : 'rgba(255, 255, 255, 0.05)',
-                drag: false,
-                resize: false,
-                content: b.isDownbeat ? (() => {
-                    const el = document.createElement('div');
-                    el.style.height = '100%';
-                    el.style.width = '100%';
-                    el.style.position = 'relative';
+        const drawGrid = () => {
+            rafPending = false;
+            const ctx = canvas.getContext('2d');
+            const dpr = window.devicePixelRatio || 1;
+            const w = scrollEl.clientWidth;
+            const h = scrollEl.clientHeight;
+            if (!w || !h) return;
 
-                    // Top Red Triangle
-                    const topTri = document.createElement('div');
-                    topTri.className = 'rb-beat-marker-top';
-                    el.appendChild(topTri);
+            canvas.width = w * dpr;
+            canvas.height = h * dpr;
+            canvas.style.width = `${w}px`;
+            canvas.style.height = `${h}px`;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, w, h);
 
-                    // Bottom Red Triangle
-                    const bottomTri = document.createElement('div');
-                    bottomTri.className = 'rb-beat-marker-bottom';
-                    el.appendChild(bottomTri);
+            const pxPerSec = scrollEl.scrollWidth / duration;
+            const scrollLeft = scrollEl.scrollLeft;
+            const startTime = scrollLeft / pxPerSec - 0.5;
+            const endTime = (scrollLeft + w) / pxPerSec + 0.5;
 
-                    // Bar number label
-                    const label = document.createElement('div');
-                    label.className = 'rb-bar-label';
-                    label.textContent = b.barNum;
-                    el.appendChild(label);
+            // Adaptive density: skip non-downbeats at low zoom
+            const pxPerBeat = pxPerSec * (60 / bpm);
+            const showAllBeats = pxPerBeat >= 12;
 
-                    return el;
-                })() : null
-            });
-            gridRegions.current.push(r);
-        });
-    }, [beats, zoom, duration]);
+            for (let i = 0; i < beats.length; i++) {
+                const b = beats[i];
+                if (b.time < startTime || b.time > endTime) continue;
+                if (!showAllBeats && !b.isDownbeat) continue;
+
+                const x = Math.round(b.time * pxPerSec - scrollLeft) + 0.5;
+
+                if (b.isDownbeat) {
+                    // Vertical line
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(x, 0);
+                    ctx.lineTo(x, h);
+                    ctx.stroke();
+
+                    // Top triangle
+                    ctx.fillStyle = 'rgba(255, 60, 60, 0.95)';
+                    ctx.beginPath();
+                    ctx.moveTo(x - 4, 0);
+                    ctx.lineTo(x + 4, 0);
+                    ctx.lineTo(x, 5);
+                    ctx.closePath();
+                    ctx.fill();
+
+                    // Bottom triangle
+                    ctx.beginPath();
+                    ctx.moveTo(x - 4, h);
+                    ctx.lineTo(x + 4, h);
+                    ctx.lineTo(x, h - 5);
+                    ctx.closePath();
+                    ctx.fill();
+
+                    // Bar number
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+                    ctx.font = 'bold 10px ui-monospace, Menlo, monospace';
+                    ctx.fillText(String(b.barNum), x + 4, 12);
+                } else {
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(x, 0);
+                    ctx.lineTo(x, h);
+                    ctx.stroke();
+                }
+            }
+        };
+
+        const scheduleDraw = () => {
+            if (rafPending) return;
+            rafPending = true;
+            requestAnimationFrame(drawGrid);
+        };
+
+        drawGrid();
+        // Schedule extra redraws after WaveSurfer applies zoom (async DOM update)
+        const t1 = setTimeout(scheduleDraw, 50);
+        const t2 = setTimeout(scheduleDraw, 200);
+
+        scrollEl.addEventListener('scroll', scheduleDraw, { passive: true });
+        const ro = new ResizeObserver(scheduleDraw);
+        ro.observe(scrollEl);
+
+        // Listen to WaveSurfer zoom event for accurate redraw timing
+        const zoomHandler = () => scheduleDraw();
+        wavesurfer.current.on('zoom', zoomHandler);
+
+        return () => {
+            clearTimeout(t1);
+            clearTimeout(t2);
+            scrollEl.removeEventListener('scroll', scheduleDraw);
+            ro.disconnect();
+            try { wavesurfer.current?.un('zoom', zoomHandler); } catch (e) { }
+        };
+    }, [beats, zoom, duration, bpm]);
 
     // 2. Interactive Overlay Effect (Cues, Selection, Cuts)
     useEffect(() => {
@@ -1316,35 +1401,54 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
         }
     };
 
-    const updateVisualPreview = async (currentCuts) => {
+    const previewGenRef = useRef(0); // Track generation to ignore stale results
+    const updateVisualPreview = useCallback(async (currentCuts) => {
         if (!wavesurfer.current) return;
 
-        // We use the ref if available
         let sourceBuffer = originalBufferRef.current;
-        // Let's assume we can get it or fallback.
         if (!sourceBuffer) sourceBuffer = wavesurfer.current.getDecodedData();
         if (!sourceBuffer) return;
 
+        // If no cuts, restore original (early return, no rebuild)
+        if (!currentCuts || currentCuts.length === 0) {
+            // Reset to original via reload
+            const origUrl = blobUrl || (fullTrack?.path ? `/api/stream?path=${encodeURIComponent(fullTrack.path)}` : null);
+            if (origUrl) {
+                const time = wavesurfer.current.getCurrentTime();
+                wavesurfer.current.load(origUrl);
+                wavesurfer.current.once('ready', () => {
+                    if (!isMountedRef.current) return;
+                    wavesurfer.current.setTime(time);
+                });
+            }
+            return;
+        }
+
         toast.info("Updating Waveform...");
+        const gen = ++previewGenRef.current;
 
         try {
-            // We need fullTrack.path for referencing the src if 'ORIGINAL'
             const newBuffer = await buildPreviewBuffer(sourceBuffer, currentCuts, duration, fullTrack?.path);
+
+            // Stale check: a newer preview started while we were rebuilding
+            if (gen !== previewGenRef.current || !isMountedRef.current) return;
+
             const newBlob = bufferToWave(newBuffer, newBuffer.length);
-            const newUrl = URL.createObjectURL(newBlob);
+            const newUrl = trackBlobUrl(URL.createObjectURL(newBlob));
 
             const time = wavesurfer.current.getCurrentTime();
             wavesurfer.current.load(newUrl);
-            wavesurfer.current.on('ready', () => {
+            // CRITICAL: 'once' instead of 'on' - 'on' stacks listeners on every preview update
+            wavesurfer.current.once('ready', () => {
+                if (!isMountedRef.current) return;
                 wavesurfer.current.setTime(time);
-                // toast.success("Preview Updated!");
             });
 
         } catch (e) {
             console.error("Preview Gen Failed", e);
             toast.error("Visual Preview Failed");
         }
-    };
+    }, [blobUrl, fullTrack?.path, duration, toast, trackBlobUrl]);
 
     const handleClear = () => {
         if (cuts.length === 0) return;
@@ -1588,10 +1692,15 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                         )
                     )}
 
-                    <div ref={waveformRef} className={`w-full h-full ws-wave-freq relative z-40 
+                    <div ref={waveformRef} className={`w-full h-full ws-wave-freq relative z-40
                         ${visualMode === 'blue' ? 'filter grayscale-[1] sepia-[1] hue-rotate-[190deg] saturate-[3] brightness-[0.8]' : ''}
                         ${streaming ? 'opacity-20 pointer-events-none' : ''}
                     `} />
+
+                    {/* Canvas-based Beat Grid (replaces 1000+ Region DOM nodes) */}
+                    {!streaming && (
+                        <canvas ref={beatCanvasRef} className="absolute top-0 left-0 z-[45] pointer-events-none" />
+                    )}
 
                     {/* Multi-Band Layers (Real Waveforms) */}
                     {!streaming && (visualMode === 'rgb' || visualMode === '3band') && (
@@ -1608,8 +1717,9 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
 
                     {/* Zoom Controls Overlay */}
                     <div className="absolute bottom-4 left-4 flex gap-2 z-50">
-                        <button onClick={() => setZoom(prev => Math.max(1, prev - 1))} className="p-1 bg-black/60 border border-white/10 rounded pointer-events-auto"><ZoomOut size={12} /></button>
-                        <button onClick={() => setZoom(prev => Math.min(10, prev + 1))} className="p-1 bg-black/60 border border-white/10 rounded pointer-events-auto"><ZoomIn size={12} /></button>
+                        <button onClick={() => setZoom(prev => Math.max(ZOOM_MIN, prev - ZOOM_STEP))} className="p-1 bg-black/60 border border-white/10 rounded pointer-events-auto" title="Zoom Out"><ZoomOut size={12} /></button>
+                        <button onClick={() => setZoom(prev => Math.min(ZOOM_MAX, prev + ZOOM_STEP))} className="p-1 bg-black/60 border border-white/10 rounded pointer-events-auto" title="Zoom In"><ZoomIn size={12} /></button>
+                        <div className="px-2 py-1 bg-black/60 border border-white/10 rounded text-[9px] font-mono text-ink-muted pointer-events-none">{zoom}px/s</div>
                     </div>
 
                     {/* Cuts Summary */}
