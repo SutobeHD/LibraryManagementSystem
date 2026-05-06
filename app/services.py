@@ -563,7 +563,8 @@ class SettingsManager:
         "remember_lib_mode": False,
         "last_lib_mode": "xml",
         "soundcloud_auth_token": "",
-        "sc_sync_folder_id": None    # local Rekordbox playlist ID to create SC playlists inside
+        "sc_sync_folder_id": None,   # local Rekordbox playlist ID to create SC playlists inside
+        "scan_folders": []           # absolute paths watched for new audio files (FolderWatcher)
     }
     @classmethod
     def load(cls):

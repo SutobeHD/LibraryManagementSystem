@@ -71,6 +71,7 @@ from .phrase_generator import (
     generate_phrase_cues,
     commit_cues_to_db,
 )
+from . import folder_watcher
 
 # Per-operation lock — prevents race conditions on concurrent sync requests (Criterion 10)
 _sync_lock = asyncio.Lock()
@@ -269,11 +270,16 @@ class GridReq(BaseModel):
     beat_grid: List[dict]
 
 class SetReq(BaseModel):
-    backup_retention_days: int
-    default_export_format: str
+    # Permissive: the frontend stores arbitrary preference keys (shortcuts,
+    # waveform colors, scan_folders, …). Anything declared explicitly is type-
+    # checked; everything else is preserved verbatim via model_extra.
+    model_config = {"extra": "allow"}
+
+    backup_retention_days: int = 7
+    default_export_format: str = "wav"
     default_export_dir: str = ""  # User-selectable default folder for audio exports; empty = backend EXPORT_DIR
-    theme: str
-    auto_snap: bool
+    theme: str = "dark"
+    auto_snap: bool = True
     db_path: str = ""
     artist_view_threshold: int = 0
     waveform_visual_mode: str = "blue"
@@ -286,6 +292,7 @@ class SetReq(BaseModel):
     insights_playcount_threshold: int = 0
     insights_bitrate_threshold: int = 320
     soundcloud_auth_token: str = ""
+    scan_folders: List[str] = []
 
 class SmartPlReq(BaseModel):
     artist_threshold: int = 3
@@ -1262,16 +1269,107 @@ def import_audio(files: List[UploadFile] = File(...)):
     return results
 
 @app.get("/api/settings")
-def get_s(): 
+def get_s():
     s = SettingsManager.load()
     s['active_db_path'] = "XML Mode"
     return s
 
 @app.post("/api/settings")
-def save_s(s: SetReq): 
-    SettingsManager.save(s.dict())
+def save_s(s: SetReq):
+    # Merge declared fields + any extras the frontend passes through.
+    payload = s.model_dump()
+    extras = getattr(s, "model_extra", None) or {}
+    payload.update(extras)
+    SettingsManager.save(payload)
     db.refresh_metadata()
-    return {"status":"saved"}
+
+    # Bring the live folder watcher in sync with the saved scan_folders list
+    # so toggling a folder in the UI takes effect immediately.
+    watcher = folder_watcher.get_watcher()
+    if watcher is not None:
+        try:
+            watcher.reconcile(payload.get("scan_folders") or [])
+        except Exception as exc:
+            logger.warning("FolderWatcher reconcile failed: %s", exc)
+
+    return {"status": "saved"}
+
+
+# --- Folder Watcher ---------------------------------------------------------
+# Live auto-import: configured via settings.scan_folders. These endpoints let
+# the UI inspect / toggle individual folders without a full settings round-trip.
+
+def _track_paths_snapshot() -> set[str]:
+    """Resolved-path set of every track currently in the library."""
+    paths: set[str] = set()
+    for t in getattr(db, "tracks", {}).values():
+        p = t.get("path") if isinstance(t, dict) else None
+        if not p:
+            continue
+        try:
+            paths.add(str(Path(p).resolve()))
+        except Exception:
+            paths.add(p)
+    return paths
+
+
+def _is_known_audio_path(path: Path) -> bool:
+    try:
+        resolved = str(path.resolve())
+    except Exception:
+        resolved = str(path)
+    return resolved in _track_paths_snapshot()
+
+
+@app.get("/api/library/folder-watcher/status")
+def folder_watcher_status():
+    watcher = folder_watcher.get_watcher()
+    if watcher is None:
+        return {"running": False, "folders": [], "pending_imports": 0}
+    return watcher.status()
+
+
+@app.post("/api/library/folder-watcher/add")
+def folder_watcher_add(data: Dict[str, str]):
+    path = (data.get("path") or "").strip()
+    if not path:
+        raise HTTPException(status_code=400, detail="'path' is required.")
+    if not Path(path).is_dir():
+        raise HTTPException(status_code=404, detail=f"Directory not found: {path}")
+
+    cfg = SettingsManager.load()
+    folders = list(cfg.get("scan_folders") or [])
+    norm = str(Path(path).expanduser().resolve())
+    if norm not in folders:
+        folders.append(norm)
+        cfg["scan_folders"] = folders
+        SettingsManager.save(cfg)
+
+    watcher = folder_watcher.get_watcher()
+    if watcher is None:
+        raise HTTPException(status_code=503, detail="Folder watcher not initialised.")
+    ok = watcher.add(norm)
+    return {"status": "ok" if ok else "error", "folders": folders}
+
+
+@app.post("/api/library/folder-watcher/remove")
+def folder_watcher_remove(data: Dict[str, str]):
+    path = (data.get("path") or "").strip()
+    if not path:
+        raise HTTPException(status_code=400, detail="'path' is required.")
+
+    norm = str(Path(path).expanduser().resolve())
+    cfg = SettingsManager.load()
+    folders = [f for f in (cfg.get("scan_folders") or []) if f not in (path, norm)]
+    cfg["scan_folders"] = folders
+    SettingsManager.save(cfg)
+
+    watcher = folder_watcher.get_watcher()
+    if watcher is not None:
+        watcher.remove(norm)
+        # Also try the raw input in case it was stored unnormalised.
+        watcher.remove(path)
+    return {"status": "ok", "folders": folders}
 
 
 
@@ -1283,6 +1381,10 @@ def _graceful_shutdown():
     """Performs cleanup before shutting down the backend."""
     logger.info("Graceful shutdown initiated...")
     _shutdown_event.set()
+    try:
+        folder_watcher.shutdown_watcher()
+    except Exception as exc:
+        logger.warning("FolderWatcher shutdown error: %s", exc)
     # Give time for pending requests to complete
     time.sleep(0.5)
     logger.info("Shutdown complete.")
@@ -1322,6 +1424,33 @@ async def startup_event():
         logger.error("Library auto-load timed out after 30 seconds (Possible strict DB lock).")
     except Exception as e:
         logger.error(f"Failed to auto-load library on startup: {e}")
+
+    # Folder watcher: auto-import audio files dropped into user-configured folders.
+    try:
+        def _import_one(path: Path):
+            return ImportManager.process_import(path)
+
+        watcher = folder_watcher.init_watcher(
+            import_callback=_import_one,
+            is_known_callback=_is_known_audio_path,
+        )
+        cfg = SettingsManager.load()
+        scan_folders = cfg.get("scan_folders") or []
+        if scan_folders:
+            watcher.start(scan_folders)
+            logger.info("FolderWatcher started for %d folder(s).", len(scan_folders))
+        else:
+            logger.info("FolderWatcher initialised — no folders configured.")
+    except Exception as e:
+        logger.error(f"FolderWatcher startup failed: {e}", exc_info=True)
+
+
+@app.on_event("shutdown")
+async def shutdown_watcher_event():
+    try:
+        folder_watcher.shutdown_watcher()
+    except Exception as exc:
+        logger.warning("FolderWatcher shutdown error: %s", exc)
 
 @app.post("/api/system/heartbeat")
 def heartbeat():

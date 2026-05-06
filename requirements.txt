@@ -42,5 +42,8 @@ mutagen==1.47.0
 # --- Loudness (ITU-R BS.1770 / EBU R128) ---
 pyloudnorm==0.1.1
 
+# --- Filesystem watcher (auto-import on folder change) ---
+watchdog==4.0.2
+
 # --- Test Framework ---
 pytest==9.0.3
