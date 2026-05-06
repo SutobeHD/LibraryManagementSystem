@@ -18,7 +18,51 @@ const ZOOM_MAX = 800;
 const ZOOM_STEP = 50;
 const ZOOM_DEFAULT = 200;
 
-// --- Utility: Slice Audio Buffer for Instant Preview ---
+// localStorage auto-save (cuts + cues, keyed by track.id)
+const STORAGE_KEY_PREFIX = 'rb-editor:edits:';
+const STORAGE_VERSION = 1;
+const loadEditsForTrack = (trackId) => {
+    if (!trackId) return null;
+    try {
+        const raw = localStorage.getItem(STORAGE_KEY_PREFIX + trackId);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (parsed.version !== STORAGE_VERSION) return null;
+        return parsed;
+    } catch (e) { return null; }
+};
+const saveEditsForTrack = (trackId, data) => {
+    if (!trackId) return;
+    try {
+        localStorage.setItem(STORAGE_KEY_PREFIX + trackId, JSON.stringify({ version: STORAGE_VERSION, ...data, savedAt: Date.now() }));
+    } catch (e) { /* quota or disabled */ }
+};
+const clearEditsForTrack = (trackId) => {
+    if (!trackId) return;
+    try { localStorage.removeItem(STORAGE_KEY_PREFIX + trackId); } catch (e) { }
+};
+
+// --- Shared decode context (reused, not recreated per insert) ---
+let _sharedDecodeCtx = null;
+const getSharedDecodeContext = () => {
+    if (!_sharedDecodeCtx || _sharedDecodeCtx.state === 'closed') {
+        _sharedDecodeCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return _sharedDecodeCtx;
+};
+
+// Cache decoded insert slices keyed by `${src}:${start}:${end}` to avoid re-fetching
+const insertSliceCache = new Map();
+const SLICE_CACHE_MAX = 32;
+const cacheSlice = (key, buffer) => {
+    if (insertSliceCache.size >= SLICE_CACHE_MAX) {
+        // Drop oldest entry (insertion order)
+        const firstKey = insertSliceCache.keys().next().value;
+        insertSliceCache.delete(firstKey);
+    }
+    insertSliceCache.set(key, buffer);
+};
+
 // --- Utility: Build Preview Buffer (Async with Splicing) ---
 const buildPreviewBuffer = async (originalBuffer, cuts, originalDuration, originalPath) => {
     // 1. Build Base Segments (Handle Deletes)
@@ -28,30 +72,19 @@ const buildPreviewBuffer = async (originalBuffer, cuts, originalDuration, origin
 
     deleteCuts.forEach(cut => {
         if (cut.start > lastPos) {
-            baseSegments.push({
-                src: 'ORIGINAL',
-                start: lastPos,
-                end: cut.start,
-                duration: cut.start - lastPos
-            });
+            baseSegments.push({ src: 'ORIGINAL', start: lastPos, end: cut.start, duration: cut.start - lastPos });
         }
         lastPos = Math.max(lastPos, cut.end);
     });
     if (lastPos < originalDuration) {
-        baseSegments.push({
-            src: 'ORIGINAL',
-            start: lastPos,
-            end: originalDuration,
-            duration: originalDuration - lastPos
-        });
+        baseSegments.push({ src: 'ORIGINAL', start: lastPos, end: originalDuration, duration: originalDuration - lastPos });
     }
 
-    // Step A: Construct Base Buffer
     const baseTotalLen = baseSegments.reduce((sum, s) => sum + s.duration, 0);
     const sampleRate = originalBuffer.sampleRate;
     const channels = originalBuffer.numberOfChannels;
 
-    // Create Base Buffer
+    // Create Base Buffer (use OfflineAudioContext just to get a valid AudioBuffer)
     const baseFrames = Math.max(1, Math.floor(baseTotalLen * sampleRate));
     const baseCtx = new OfflineAudioContext(channels, baseFrames, sampleRate);
     const baseBuf = baseCtx.createBuffer(channels, baseFrames, sampleRate);
@@ -72,32 +105,35 @@ const buildPreviewBuffer = async (originalBuffer, cuts, originalDuration, origin
         ptr += segLen;
     }
 
-    // 2. Inject Inserts
-    // SORT DESCENDING by insertAt to avoid index invalidation during sequential splicing
+    // 2. Inject Inserts (sorted DESC by insertAt to avoid index invalidation)
     const inserts = cuts.filter(c => c.type === 'insert').sort((a, b) => b.insertAt - a.insertAt);
-
     let currentBuf = baseBuf;
 
     for (let ins of inserts) {
-        // Fetch Insert Audio
         let insBuf = null;
         if (ins.src && ins.start !== undefined && ins.end !== undefined) {
-            try {
-                const sliceRes = await api.post('/api/audio/slice', { source_path: ins.src, start: ins.start, end: ins.end });
-                const arrayBuf = await (await fetch(sliceRes.data.url)).arrayBuffer();
-                const audioCtx = new AudioContext();
-                insBuf = await audioCtx.decodeAudioData(arrayBuf);
-                audioCtx.close();
-            } catch (e) { console.error("Slice fetch failed", e); }
+            const cacheKey = `${ins.src}:${ins.start.toFixed(4)}:${ins.end.toFixed(4)}`;
+            if (insertSliceCache.has(cacheKey)) {
+                insBuf = insertSliceCache.get(cacheKey);
+            } else {
+                try {
+                    const sliceRes = await api.post('/api/audio/slice', { source_path: ins.src, start: ins.start, end: ins.end });
+                    const arrayBuf = await (await fetch(sliceRes.data.url)).arrayBuffer();
+                    // Reuse shared decode context (avoids hitting browser's AudioContext limit ~6)
+                    const ctx = getSharedDecodeContext();
+                    insBuf = await ctx.decodeAudioData(arrayBuf);
+                    cacheSlice(cacheKey, insBuf);
+                } catch (e) { console.error("Slice fetch failed", e); }
+            }
         }
 
         if (!insBuf) {
             const gapFrames = Math.floor((ins.gap || 1) * sampleRate);
+            // Use cheap throw-away OfflineAudioContext just to get an AudioBuffer instance
             const ctx = new OfflineAudioContext(channels, gapFrames, sampleRate);
             insBuf = ctx.createBuffer(channels, gapFrames, sampleRate);
         }
 
-        // Splice `insBuf` into `currentBuf` at `ins.insertAt`
         const splitFrame = Math.floor(ins.insertAt * sampleRate);
         const safeSplit = Math.max(0, Math.min(splitFrame, currentBuf.length));
 
@@ -107,7 +143,7 @@ const buildPreviewBuffer = async (originalBuffer, cuts, originalDuration, origin
 
         for (let c = 0; c < channels; c++) {
             const cData = currentBuf.getChannelData(c);
-            const iData = insBuf.getChannelData(c);
+            const iData = insBuf.getChannelData(Math.min(c, insBuf.numberOfChannels - 1));
             const nData = newBuf.getChannelData(c);
 
             nData.set(cData.subarray(0, safeSplit), 0);
@@ -170,12 +206,48 @@ const bufferToWave = (abuffer, len) => {
 };
 
 
+// Error Boundary — prevents WaveSurfer / decode crashes from white-screening the app
+class WaveformErrorBoundary extends React.Component {
+    constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null };
+    }
+    static getDerivedStateFromError(error) {
+        return { hasError: true, error };
+    }
+    componentDidCatch(error, info) {
+        console.error('WaveformEditor crashed:', error, info);
+    }
+    handleRetry = () => {
+        this.setState({ hasError: false, error: null });
+    };
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div className="flex flex-col items-center justify-center h-full p-8 bg-black text-center">
+                    <div className="text-red-400 font-bold text-lg mb-2">Waveform Editor crashed</div>
+                    <div className="text-ink-muted text-sm mb-4 max-w-md font-mono">
+                        {this.state.error?.message || 'Unknown error'}
+                    </div>
+                    <button
+                        onClick={this.handleRetry}
+                        className="px-4 py-2 rounded bg-amber2/20 border border-amber2/40 text-amber2 font-bold hover:bg-amber2/30"
+                    >
+                        Retry
+                    </button>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
+
 const HOT_CUE_COLORS = [
     '#2ecc71', '#e67e22', '#f1c40f', '#3498db',
     '#fd79a8', '#00d2d3', '#a29bfe', '#ff7675',
 ];
 
-const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, isPlayingExternal = null, onPlayPause = null, volume = 1 }, ref) => {
+const WaveformEditorInner = forwardRef(({ track, blobUrl = null, simpleMode = false, isPlayingExternal = null, onPlayPause = null, volume = 1 }, ref) => {
     const toast = useToast();
     const waveformRef = useRef(null);
     const overviewRef = useRef(null);
@@ -502,6 +574,47 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
     const [confirmModal, setConfirmModal] = useState(null); // { title, message, onConfirm, confirmLabel }
     const showConfirm = useCallback((opts) => setConfirmModal(opts), []);
 
+    // Drag-and-drop state
+    const [isDragOver, setIsDragOver] = useState(false);
+    const handleFileDrop = useCallback((file) => {
+        if (!file) return;
+        if (!file.type.startsWith('audio/') && !/\.(wav|mp3|flac|aac|ogg|m4a)$/i.test(file.name)) {
+            toast.error('Unsupported file type — drop an audio file.');
+            return;
+        }
+        const url = trackBlobUrl(URL.createObjectURL(file));
+        const synthetic = {
+            id: `local-${Date.now()}`,
+            Title: file.name.replace(/\.[^/.]+$/, ''),
+            Artist: 'Local file',
+            path: url,
+            BPM: 0,
+        };
+        setFullTrack(synthetic);
+        // Reset everything for new track
+        setLoopIn(null); setLoopOut(null); setIsLooping(false);
+        setCuts([]); setHotCues([]); setBeatGrid([]);
+        setHistory([]); setHistoryIdx(-1);
+        // Force load with the new blob URL
+        if (wavesurfer.current && overviewWs.current) {
+            wavesurfer.current.load(url);
+            overviewWs.current.load(url);
+        }
+        toast.success(`Loaded: ${file.name}`);
+    }, [toast, trackBlobUrl]);
+
+    // History helper — caps at 50 entries to prevent unbounded memory growth
+    const HISTORY_LIMIT = 50;
+    const pushHistory = useCallback((entry) => {
+        setHistory(prev => {
+            const truncated = prev.slice(0, historyIdx + 1);
+            const next = [...truncated, entry];
+            // Drop oldest entries if over limit
+            return next.length > HISTORY_LIMIT ? next.slice(next.length - HISTORY_LIMIT) : next;
+        });
+        setHistoryIdx(prev => Math.min(prev + 1, HISTORY_LIMIT - 1));
+    }, [historyIdx]);
+
     // Auto-open browser if no track is loaded
     useEffect(() => {
         if (!fullTrack && !loading && !track) {
@@ -702,17 +815,26 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                 }
             });
 
+            // Throttled currentTime updates: ref every frame, state every ~100ms.
+            // Avoids 60Hz re-renders of the entire component during playback.
+            let lastStateUpdate = 0;
             wavesurfer.current.on('audioprocess', () => {
                 if (!isMountedRef.current) return;
                 const time = wavesurfer.current.getCurrentTime();
-                setCurrentTime(time);
+
+                // Throttled state update for visible time-display only
+                const now = performance.now();
+                if (now - lastStateUpdate > 100) {
+                    lastStateUpdate = now;
+                    setCurrentTime(time);
+                }
+
                 if (overviewWs.current && overviewWs.current.getDuration() > 0) {
-                    // Sync Overview
                     const dur = wavesurfer.current.getDuration();
                     if (dur > 0) overviewWs.current.seekTo(time / dur);
                 }
 
-                // LOOP PLAYBACK LOGIC
+                // LOOP PLAYBACK LOGIC (every frame for accuracy)
                 if (isLoopingRef.current && loopInRef.current !== null && loopOutRef.current !== null) {
                     if (time >= loopOutRef.current) {
                         wavesurfer.current.setTime(loopInRef.current);
@@ -810,19 +932,26 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
 
         const url = blobUrl || `/api/stream?path=${encodeURIComponent(fullTrack.path)}`;
 
-        // Don't reload if it's the same URL? 
-        // Actually, user might want to reload if they edited it. 
-        // But for now, let's just load.
+        // AbortController: if user switches tracks rapidly, abort the old load
+        const controller = new AbortController();
+        const signal = controller.signal;
 
         setLoading(true);
-        setBufferReady(false); // Reset buffer state
-        setMultibandBuffers(null); // Reset analysis
+        setBufferReady(false);
+        setMultibandBuffers(null);
+        originalBufferRef.current = null; // CRITICAL: reset stale buffer ref
         // Clear Regions/Cues from previous track
         const regions = wavesurfer.current.plugins.find(p => p.getRegions);
         if (regions) regions.clearRegions();
 
-        wavesurfer.current.load(url);
-        overviewWs.current.load(url);
+        // Revoke blob URLs from previous track's preview rebuilds
+        revokeAllBlobUrls();
+
+        // Guard against races: only apply load if not aborted
+        if (!signal.aborted) {
+            wavesurfer.current.load(url);
+            overviewWs.current.load(url);
+        }
 
         // Reset State
         setLoopIn(null);
@@ -830,9 +959,13 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
         setIsLooping(false);
         setCuts([]);
         setHotCues([]);
-        setBeatGrid([]); // Will re-fetch
+        setBeatGrid([]);
+        setHistory([]);
+        setHistoryIdx(-1);
+        setClipboard(null);
 
-    }, [fullTrack?.path, blobUrl, streaming]); // Added streaming dependency
+        return () => controller.abort();
+    }, [fullTrack?.path, blobUrl, streaming, revokeAllBlobUrls]);
 
     const beatCanvasRef = useRef(null);
 
@@ -1328,11 +1461,8 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
             gap: pSize
         };
 
-        // Use functional setState to avoid stale closure
         setCuts(prev => [...prev, newCut]);
-        const newHistory = [...history.slice(0, historyIdx + 1), { type: 'add_cut', data: newCut }];
-        setHistory(newHistory);
-        setHistoryIdx(newHistory.length - 1);
+        pushHistory({ type: 'add_cut', data: newCut });
         toast.success(`Segment pasted at ${pAt.toFixed(2)}s.`);
         // Preview rebuild handled by debounced effect
     };
@@ -1355,9 +1485,7 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
         };
 
         setCuts(prev => [...prev, newCut]);
-        const newHistory = [...history.slice(0, historyIdx + 1), { type: 'add_cut', data: newCut }];
-        setHistory(newHistory);
-        setHistoryIdx(newHistory.length - 1);
+        pushHistory({ type: 'add_cut', data: newCut });
         toast.info("Insert region marked.");
         // Preview handled by debounced effect
     };
@@ -1378,9 +1506,7 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
         };
 
         setCuts(prev => [...prev, newCut]);
-        const newHistory = [...history.slice(0, historyIdx + 1), { type: 'add_cut', data: newCut }];
-        setHistory(newHistory);
-        setHistoryIdx(newHistory.length - 1);
+        pushHistory({ type: 'add_cut', data: newCut });
         toast.info("Section marked for deletion.");
         // Preview handled by debounced effect
     };
@@ -1480,12 +1606,38 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
         return () => clearTimeout(t);
     }, [cuts, bufferReady, updateVisualPreview]);
 
+    // Auto-save edits to localStorage (debounced 500ms)
+    useEffect(() => {
+        if (!fullTrack?.id) return;
+        const t = setTimeout(() => {
+            if (cuts.length === 0 && hotCues.length === 0) {
+                clearEditsForTrack(fullTrack.id);
+            } else {
+                saveEditsForTrack(fullTrack.id, { cuts, hotCues });
+            }
+        }, 500);
+        return () => clearTimeout(t);
+    }, [cuts, hotCues, fullTrack?.id]);
+
+    // Restore edits when track loads
+    useEffect(() => {
+        if (!fullTrack?.id || !bufferReady) return;
+        const saved = loadEditsForTrack(fullTrack.id);
+        if (saved && (saved.cuts?.length || saved.hotCues?.length)) {
+            // Only restore if state is empty (don't clobber active session)
+            if (cuts.length === 0 && hotCues.length === 0) {
+                if (saved.cuts?.length) setCuts(saved.cuts);
+                if (saved.hotCues?.length) setHotCues(saved.hotCues);
+                toast.info(`Restored ${saved.cuts?.length || 0} edits + ${saved.hotCues?.length || 0} cues from auto-save`);
+            }
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [fullTrack?.id, bufferReady]);
+
     const handleClear = () => {
         if (cuts.length === 0) return;
-        const newHistory = [...history.slice(0, historyIdx + 1), { type: 'clear_cuts', data: cuts }];
+        pushHistory({ type: 'clear_cuts', data: cuts });
         setCuts([]);
-        setHistory(newHistory);
-        setHistoryIdx(newHistory.length - 1);
         // Preview rebuild via debounced effect
     };
 
@@ -1770,7 +1922,22 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                 <div ref={overviewRef} className="rb-overview-container" />
 
                 {/* Detail View */}
-                <div className="rb-detail-container relative">
+                <div
+                    className={`rb-detail-container relative transition-all ${isDragOver ? 'ring-2 ring-amber2 ring-inset' : ''}`}
+                    onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragOver(true); }}
+                    onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; }}
+                    onDragLeave={(e) => {
+                        e.preventDefault(); e.stopPropagation();
+                        // Only flip off if we're actually leaving the container (not entering a child)
+                        if (!e.currentTarget.contains(e.relatedTarget)) setIsDragOver(false);
+                    }}
+                    onDrop={(e) => {
+                        e.preventDefault(); e.stopPropagation();
+                        setIsDragOver(false);
+                        const file = e.dataTransfer.files?.[0];
+                        if (file) handleFileDrop(file);
+                    }}
+                >
                     {streaming ? (
                         <div className="absolute inset-0 z-[60] flex flex-col items-center justify-center bg-black/40 backdrop-blur-sm">
                             <div className="bg-mx-shell/80 p-8 rounded-2xl border border-white/10 flex flex-col items-center gap-4 shadow-2xl">
@@ -1829,6 +1996,17 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
                         <button onClick={() => setZoom(prev => Math.min(ZOOM_MAX, prev + ZOOM_STEP))} className="p-1 bg-black/60 border border-white/10 rounded pointer-events-auto" title="Zoom In"><ZoomIn size={12} /></button>
                         <div className="px-2 py-1 bg-black/60 border border-white/10 rounded text-[9px] font-mono text-ink-muted pointer-events-none">{zoom}px/s</div>
                     </div>
+
+                    {/* Drop Zone Overlay — visual feedback while dragging audio file */}
+                    {isDragOver && (
+                        <div className="absolute inset-0 z-[80] flex items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-none">
+                            <div className="flex flex-col items-center gap-3 p-6 border-2 border-dashed border-amber2 rounded-2xl bg-amber2/10">
+                                <Upload size={48} className="text-amber2 animate-bounce" />
+                                <div className="text-amber2 font-bold uppercase tracking-widest text-sm">Drop audio file to load</div>
+                                <div className="text-[10px] text-ink-muted">.wav  .mp3  .flac  .aac  .ogg  .m4a</div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Cuts Summary — interactive: click row to jump, X to delete */}
                     {cuts.length > 0 && (
@@ -2033,5 +2211,13 @@ const WaveformEditor = forwardRef(({ track, blobUrl = null, simpleMode = false, 
         </div>
     );
 });
+
+// Public export wraps the inner component in an ErrorBoundary so a WaveSurfer
+// or decode crash doesn't take the whole app down.
+const WaveformEditor = forwardRef((props, ref) => (
+    <WaveformErrorBoundary>
+        <WaveformEditorInner {...props} ref={ref} />
+    </WaveformErrorBoundary>
+));
 
 export default WaveformEditor;
