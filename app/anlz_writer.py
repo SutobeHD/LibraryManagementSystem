@@ -165,17 +165,67 @@ def _build_pwv2(waveform_data: List[int]) -> bytes:
     return buf
 
 
-def _build_pcob(cue_type: int, cues: Optional[List[Dict]] = None) -> bytes:
+def _build_pcpt_entry(cue: Dict[str, Any]) -> bytes:
+    """
+    PCPT — single cue point entry inside a PCOB list.
+    Layout (56 bytes total):
+        magic(4)='PCPT' + hdr_len(4)=0x1C + total_len(4)=0x38
+        + hot_cue(4) + status(4) + flags(4)=0x00100000
+        + order_first(2) + order_last(2) + type(1) + pad(3)
+        + time_ms(4) + loop_time_ms(4) + 16 bytes padding
+    """
+    hot_cue = cue.get("number", 0)
+    is_hot = cue.get("type", "hot_cue") == "hot_cue"
+    # Rekordbox cue numbering: 0 = memory, 1..8 = hot A..H
+    cue_num = (hot_cue + 1) if is_hot else 0
+
+    is_loop = cue.get("loop_len_ms", 0) > 0
+    cue_type_byte = 2 if is_loop else 1
+    time_ms = int(cue.get("time_ms", 0))
+    loop_end = (time_ms + int(cue.get("loop_len_ms", 0))) if is_loop else 0xFFFFFFFF
+
+    buf = struct.pack('>4sII',
+        b'PCPT',
+        0x1C,           # header_length
+        0x38,           # total_length
+    )
+    buf += struct.pack('>III',
+        cue_num,        # hot_cue (0=memory, 1..8=hot)
+        4 if is_hot else 0,   # status: 4=active hot cue, 0=loaded memory
+        0x00100000,     # observed flags
+    )
+    buf += struct.pack('>HHB3x',
+        0xFFFF,         # order_first
+        0xFFFF,         # order_last
+        cue_type_byte,  # 1=cue, 2=loop
+    )
+    buf += struct.pack('>II',
+        time_ms,
+        loop_end & 0xFFFFFFFF,
+    )
+    buf += b'\x00' * 16  # trailing padding
+    return buf
+
+
+def _build_pcob(cue_type: int, cues: Optional[List[Dict[str, Any]]] = None) -> bytes:
     """
     PCOB — Cue list container.
     cue_type: 0 = memory cues, 1 = hot cues
-    Header (24 bytes): tag(4) + hdr_len(4) + total_len(4) + cue_list_type(4) + count(2) + memory_count(2) + reserved(4)
-
-    For now, we write empty cue lists (preserving existing cues is handled separately).
+    Header (24 bytes): tag(4) + hdr_len(4) + total_len(4) + cue_list_type(4)
+                     + count(2) + memory_count(2) + reserved(4)
     """
-    entry_count = 0
+    cues = cues or []
+    if cue_type == 1:
+        # Hot cue list — only hot_cue entries (Rekordbox: max 8)
+        entries = [c for c in cues if c.get("type", "hot_cue") == "hot_cue"][:8]
+    else:
+        # Memory cue list
+        entries = [c for c in cues if c.get("type", "hot_cue") == "memory_cue"]
+
+    entry_data = b''.join(_build_pcpt_entry(c) for c in entries)
+    entry_count = len(entries)
     hdr_len = 24
-    total_len = hdr_len  # no cue entries for now
+    total_len = hdr_len + len(entry_data)
 
     buf = struct.pack('>4sIIIHHI',
         b'PCOB',
@@ -183,27 +233,73 @@ def _build_pcob(cue_type: int, cues: Optional[List[Dict]] = None) -> bytes:
         total_len,
         cue_type,
         entry_count,
-        0,              # reserved
-        0xFFFFFFFF,     # sentinel (rbox validates u2 == 0xFFFFFFFF)
+        entry_count if cue_type == 0 else 0,   # memory_count only set for memory list
+        0xFFFFFFFF,     # sentinel
     )
+    buf += entry_data
     return buf
 
 
-def _build_pco2(cue_type: int) -> bytes:
+def _build_pcp2_entry(cue: Dict[str, Any]) -> bytes:
     """
-    PCO2 — Extended cue list (used in .EXT).
-    Same header structure as PCOB but for extended cues.
+    PCP2 — extended cue entry (used inside PCO2 in .EXT).
+    Includes RGB color + comment (UTF-16BE NUL-terminated).
     """
+    hot_cue = cue.get("number", 0)
+    is_hot = cue.get("type", "hot_cue") == "hot_cue"
+    cue_num = (hot_cue + 1) if is_hot else 0
+    is_loop = cue.get("loop_len_ms", 0) > 0
+    time_ms = int(cue.get("time_ms", 0))
+    loop_end = (time_ms + int(cue.get("loop_len_ms", 0))) if is_loop else 0xFFFFFFFF
+
+    name = cue.get("name", "") or ""
+    name_bytes = (name + '\0').encode('utf-16-be')
+
+    color_id = int(cue.get("color_id", 0)) & 0xFF
+    rgb = cue.get("color_rgb", (0, 0, 0))
+    r, g, b = (int(x) & 0xFF for x in rgb)
+
+    body = struct.pack('>IIIBBBB',
+        cue_num,            # hot_cue
+        time_ms,
+        loop_end & 0xFFFFFFFF,
+        color_id,           # color id (palette index)
+        r, g, b,            # explicit RGB
+    )
+    body += struct.pack('>II',
+        0,                  # loop numerator
+        0,                  # loop denominator
+    )
+    body += struct.pack('>I', len(name_bytes))
+    body += name_bytes
+
+    hdr_len = 0x10
+    total_len = hdr_len + len(body)
+    return struct.pack('>4sII', b'PCP2', hdr_len, total_len) + body
+
+
+def _build_pco2(cue_type: int, cues: Optional[List[Dict[str, Any]]] = None) -> bytes:
+    """
+    PCO2 — Extended cue list (used in .EXT). Carries color + comment per cue.
+    """
+    cues = cues or []
+    if cue_type == 1:
+        entries = [c for c in cues if c.get("type", "hot_cue") == "hot_cue"][:8]
+    else:
+        entries = [c for c in cues if c.get("type", "hot_cue") == "memory_cue"]
+
+    entry_data = b''.join(_build_pcp2_entry(c) for c in entries)
     hdr_len = 20
-    total_len = hdr_len
+    total_len = hdr_len + len(entry_data)
 
     buf = struct.pack('>4sIIII',
         b'PCO2',
         hdr_len,
         total_len,
-        cue_type,   # u32 list_type
-        0,          # u32 entry count
+        cue_type,
+        len(entries),
     )
+    buf += entry_data
     return buf
 
 
@@ -462,6 +558,8 @@ def build_dat(
     pvbr: List[int],
     pwav: List[int],
     pwv2: List[int],
+    hot_cues: Optional[List[Dict[str, Any]]] = None,
+    memory_cues: Optional[List[Dict[str, Any]]] = None,
 ) -> bytes:
     """
     Build a complete .DAT ANLZ file.
@@ -472,6 +570,8 @@ def build_dat(
         pvbr: VBR index (400 ms offsets)
         pwav: Monochrome preview waveform (400 bytes)
         pwv2: Tiny preview waveform (100 bytes)
+        hot_cues: Optional list of auto-generated hot cues (PCOB type=1)
+        memory_cues: Optional list of auto-generated memory cues (PCOB type=0)
 
     Returns:
         Complete .DAT file as bytes
@@ -482,8 +582,8 @@ def build_dat(
     tags += _build_pqtz(beats)
     tags += _build_pwav(pwav)
     tags += _build_pwv2(pwv2)
-    tags += _build_pcob(1)  # hot cues (empty)
-    tags += _build_pcob(0)  # memory cues (empty)
+    tags += _build_pcob(1, hot_cues)     # hot cues
+    tags += _build_pcob(0, memory_cues)  # memory cues
 
     total_len = PMAI_HEADER_LEN + len(tags)
     header = _build_file_header(total_len)
@@ -498,26 +598,19 @@ def build_ext(
     pwv4: List[List[int]],
     phrases: Optional[List[Dict[str, Any]]] = None,
     duration_ms: int = 0,
+    hot_cues: Optional[List[Dict[str, Any]]] = None,
+    memory_cues: Optional[List[Dict[str, Any]]] = None,
 ) -> bytes:
     """
     Build a complete .EXT ANLZ file.
-
-    Args:
-        track_path: Original audio file path
-        beats: Beat grid entries (used for PQT2)
-        pwv3: Monochrome detail waveform (150/sec)
-        pwv5: Color detail waveform (u16 packed, 150/sec)
-        pwv4: Color preview waveform (1200 × 6 bytes)
-        phrases: PSSI song structure data
-        duration_ms: Track duration in ms (for PSSI)
     """
     tags = b''
     tags += _build_ppth(track_path)
     tags += _build_pwv3(pwv3)
-    tags += _build_pcob(1)
-    tags += _build_pcob(0)
-    tags += _build_pco2(1)
-    tags += _build_pco2(0)
+    tags += _build_pcob(1, hot_cues)
+    tags += _build_pcob(0, memory_cues)
+    tags += _build_pco2(1, hot_cues)
+    tags += _build_pco2(0, memory_cues)
     # PQT2 (extended beat grid) uses a compressed 2-byte entry format that
     # differs from PQTZ. The full beat grid in .DAT (PQTZ) is authoritative;
     # skipping PQT2 here is safe — Rekordbox falls back to the DAT grid.
@@ -580,6 +673,8 @@ def write_anlz_files(
     phrases = analysis_result.get("phrases", [])
     pvbr = analysis_result.get("pvbr", [0] * 400)
     duration_ms = int(analysis_result.get("duration", 0) * 1000)
+    hot_cues = analysis_result.get("hot_cues", [])
+    memory_cues = analysis_result.get("memory_cues", [])
 
     paths = {}
 
@@ -591,6 +686,8 @@ def write_anlz_files(
             pvbr=pvbr,
             pwav=waveform.get("pwav", [0] * 400),
             pwv2=waveform.get("pwv2", [0] * 100),
+            hot_cues=hot_cues,
+            memory_cues=memory_cues,
         )
         dat_path = os.path.join(anlz_dir, f"{filename_base}.DAT")
         with open(dat_path, 'wb') as f:
@@ -610,6 +707,8 @@ def write_anlz_files(
             pwv4=waveform.get("pwv4", []),
             phrases=phrases,
             duration_ms=duration_ms,
+            hot_cues=hot_cues,
+            memory_cues=memory_cues,
         )
         ext_path = os.path.join(anlz_dir, f"{filename_base}.EXT")
         with open(ext_path, 'wb') as f:
