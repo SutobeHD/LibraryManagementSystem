@@ -457,11 +457,11 @@ def _build_pssi(
         tag(4)='PSSI' + hdr_len(4)=32 + total_len(4) + entry_size(4)=24
         + entry_count(2) + mood(2) + bank(2) + end_beat(2) + reserved(8)
 
-    Entry (24 bytes):
-        index(2) + start_beat(2) + phrase_id(2) + reserved(2)
-        + fill(1) + fill_beat(1) + reserved(2)
-        + reserved(2) + reserved(2)
-        + start_beat_u32(4) + end_beat_u32(4) + reserved(4)
+    Entry (24 bytes total):
+        index(2) + start_beat(2) + phrase_id(2) + reserved(2)   = 8
+        + fill(1) + fill_beat(1) + reserved(2)                  = 4
+        + bank(2) + reserved(2)                                 = 4
+        + end_beat(4) + reserved(4)                             = 8
 
     Beat-count anchoring (NOT ms): phrase position = ms * bpm / 60000.
     """
@@ -507,26 +507,26 @@ def _build_pssi(
         phrase_id = int(phrase.get("id", 1))
         fill_val = int(phrase.get("fill", 0))
 
+        # Entry layout: 24 bytes total
         buf += struct.pack('>HHHH',
             (i + 1) & 0xFFFF,           # phrase index (1-based)
             start_beat & 0xFFFF,        # start_beat (u16)
             phrase_id & 0xFFFF,         # phrase_id
             0,                          # reserved
-        )
+        )                                # +8
         buf += struct.pack('>BBH',
             fill_val & 0xFF,            # fill flag
             0,                          # fill_beat
             0,                          # reserved
-        )
+        )                                # +4 (=12)
         buf += struct.pack('>HH',
+            0,                          # bank
             0,                          # reserved
-            0,                          # reserved
-        )
+        )                                # +4 (=16)
         buf += struct.pack('>II',
-            start_beat & 0xFFFFFFFF,    # start_beat (u32, redundant for 32-bit reader)
             end_beat & 0xFFFFFFFF,      # end_beat (u32)
-        )
-        buf += struct.pack('>I', 0)     # trailing reserved
+            0,                          # trailing reserved
+        )                                # +8 (=24)
 
     return buf
 

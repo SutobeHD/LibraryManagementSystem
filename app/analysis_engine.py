@@ -30,6 +30,8 @@ import warnings
 from typing import Dict, Any, List, Optional, Tuple
 from concurrent.futures import ProcessPoolExecutor, Future
 
+from .analysis_settings import get_settings
+
 warnings.filterwarnings('ignore', category=UserWarning)
 warnings.filterwarnings('ignore', category=FutureWarning)
 
@@ -263,9 +265,9 @@ def _correlate_key(chroma_vector: np.ndarray) -> Tuple[str, str, float]:
         kk_minor = float(np.corrcoef(rotated, _MINOR_PROFILE)[0, 1])
         # -- Temperley minor --
         tp_minor = float(np.corrcoef(rotated, _TEMPERLEY_MINOR)[0, 1])
-        # Ensemble average. Mild minor preference (1.10) avoids bias against
-        # pop/rock/jazz/classical major tracks while still leaning electronic-friendly.
-        minor_corr = ((kk_minor + tp_minor) / 2.0) * 1.10
+        # Ensemble average. Mild minor preference (default 1.10) avoids bias
+        # against pop/rock/jazz/classical major tracks. Tunable via settings.
+        minor_corr = ((kk_minor + tp_minor) / 2.0) * _S.minor_bias
 
         if minor_corr > best_corr:
             best_corr = minor_corr
@@ -405,29 +407,30 @@ def detect_key(y: np.ndarray, sr: int) -> Dict[str, str]:
 # 2. BPM & BEAT GRID -- madmom RNN + librosa fallback
 # =========================================================================== #
 
-# BPM detection ranges:
-#   Detection range (60-210) -- what madmom DBN / librosa is allowed to find.
-#     Wide enough to cover Reggae (~75) and Drum&Bass (~174) without folding.
-#   Output range (80-180) -- Pioneer-style sweet spot for displayed BPM.
-#     Anything outside gets octave-corrected to match Rekordbox conventions.
-_MIN_BPM = 60.0
-_MAX_BPM = 210.0
-_OUTPUT_MIN_BPM = 80.0
-_OUTPUT_MAX_BPM = 180.0
+# BPM detection ranges -- pulled from settings (env-overridable):
+#   Detection range -- what madmom DBN / librosa is allowed to find.
+#   Output range -- Pioneer-style sweet spot for displayed BPM.
+_S = get_settings()
+_MIN_BPM = _S.bpm_detect_min
+_MAX_BPM = _S.bpm_detect_max
+_OUTPUT_MIN_BPM = _S.bpm_output_min
+_OUTPUT_MAX_BPM = _S.bpm_output_max
 
 
 def _octave_correct(bpm: float) -> float:
     """
-    Pioneer-style octave correction. Pushes BPM into the 80-180 display range.
-    A track detected at 65 BPM (typically a half-time read of 130) becomes 130;
-    a track detected at 196 BPM (double-time read of 98) stays 196 only if it
-    cannot be halved into the range -- so 220 → 110 but 196 stays 196.
+    Pioneer-style octave correction. Pushes BPM into the configured display
+    range (default 80-180). A track detected at 65 BPM becomes 130; a track
+    at 220 BPM becomes 110.
+
+    Uses live settings so test overrides take effect immediately.
     """
     if bpm <= 0:
         return bpm
-    while bpm < _OUTPUT_MIN_BPM:
+    s = get_settings()
+    while bpm < s.bpm_output_min:
         bpm *= 2.0
-    while bpm > _OUTPUT_MAX_BPM:
+    while bpm > s.bpm_output_max:
         bpm /= 2.0
     return bpm
 
@@ -464,11 +467,11 @@ def _onset_density_disambiguate(
         return bpm
     ratio = onset_rate / expected_beat_rate
 
-    if ratio > 5.5 and bpm * 2.0 < _MAX_BPM:
-        logger.info(f"BPM disambiguate: {bpm:.1f} → {bpm * 2:.1f} (ratio={ratio:.2f}, half-time misread)")
+    if ratio > _S.onset_density_high_ratio and bpm * 2.0 < _MAX_BPM:
+        logger.info(f"BPM disambiguate: {bpm:.1f} -> {bpm * 2:.1f} (ratio={ratio:.2f}, half-time misread)")
         return bpm * 2.0
-    if ratio < 0.4 and bpm / 2.0 > _MIN_BPM:
-        logger.info(f"BPM disambiguate: {bpm:.1f} → {bpm / 2:.1f} (ratio={ratio:.2f}, double-time misread)")
+    if ratio < _S.onset_density_low_ratio and bpm / 2.0 > _MIN_BPM:
+        logger.info(f"BPM disambiguate: {bpm:.1f} -> {bpm / 2:.1f} (ratio={ratio:.2f}, double-time misread)")
         return bpm / 2.0
     return bpm
 
@@ -943,7 +946,7 @@ def generate_waveform_data(
 
     # Gamma curve for color channels (R/G/B): boosts mid-range so bands
     # are more visible vs. Rekordbox's vivid waveforms (was: blocky/dim).
-    COLOR_GAMMA = 0.65
+    COLOR_GAMMA = _S.color_gamma
 
     def brightness_from_ratio(high_arr, total_arr, length):
         """Compute brightness (whiteness) from high-freq to total ratio."""
@@ -1202,14 +1205,20 @@ def detect_phrases(
                 "beat": 1,
             })
 
-        # -- Merge consecutive phrases with same label --------------------
+        # -- Merge consecutive same-label phrases (capped) ----------------
+        # Cap at phrase_merge_max_bars: once a section is "long enough", we
+        # keep further same-label phrases as separate entries. This prevents
+        # a 32-bar Chorus from collapsing into 1 phrase entry, which would
+        # rob the cue generator of mid-section transition points.
+        max_merge = _S.phrase_merge_max_bars
         merged: List[Dict[str, Any]] = []
         for p in phrases:
-            if merged and merged[-1]["label"] == p["label"]:
+            same_label = bool(merged) and merged[-1]["label"] == p["label"]
+            current_bars = merged[-1].get("bars", phrase_bars) if merged else 0
+            if same_label and current_bars < max_merge:
                 merged[-1]["end_ms"] = p["end_ms"]
                 merged[-1]["end_time"] = p["end_time"]
-                merged[-1]["bars"] = merged[-1].get("bars", phrase_bars) + phrase_bars
-                # Average energy
+                merged[-1]["bars"] = current_bars + phrase_bars
                 merged[-1]["energy"] = round((merged[-1]["energy"] + p["energy"]) / 2.0, 3)
             else:
                 merged.append(p)
@@ -1245,8 +1254,10 @@ def generate_hot_cues(
     phrases: List[Dict[str, Any]],
     beats: List[Dict[str, Any]],
     duration: float,
-    max_cues: int = 8,
+    max_cues: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
+    if max_cues is None:
+        max_cues = _S.cue_max_hot
     """
     Auto-generate Hot Cues from phrase boundaries.
 
@@ -1340,8 +1351,10 @@ def generate_hot_cues(
 def generate_memory_cues(
     phrases: List[Dict[str, Any]],
     beats: List[Dict[str, Any]],
-    max_cues: int = 16,
+    max_cues: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
+    if max_cues is None:
+        max_cues = _S.cue_max_memory
     """
     Auto-generate Memory Cues at SIGNIFICANT phrase boundaries only.
 
@@ -1621,10 +1634,10 @@ def calculate_lufs(y: np.ndarray, sr: int) -> float:
 # ReplayGain 2.0 reference target. Most modern services normalize to -14 LUFS
 # (Spotify), -16 (Apple) or -18 (EBU R128 broadcast). -18 is the historic
 # ReplayGain standard and what most DJ software uses for "auto-leveling".
-REPLAY_GAIN_TARGET_LUFS = -18.0
+REPLAY_GAIN_TARGET_LUFS = _S.replay_gain_target_lufs
 
 
-def calculate_replay_gain(lufs: float, target: float = REPLAY_GAIN_TARGET_LUFS) -> float:
+def calculate_replay_gain(lufs: float, target: Optional[float] = None) -> float:
     """
     ReplayGain 2.0 value. Apply this as a gain (in dB) to bring the track
     to the target loudness. Negative for loud-mastered tracks; positive for
@@ -1632,7 +1645,8 @@ def calculate_replay_gain(lufs: float, target: float = REPLAY_GAIN_TARGET_LUFS) 
     """
     if lufs is None or lufs <= -100.0:
         return 0.0
-    return round(target - float(lufs), 2)
+    tgt = REPLAY_GAIN_TARGET_LUFS if target is None else target
+    return round(tgt - float(lufs), 2)
 
 
 # =========================================================================== #
@@ -1738,8 +1752,8 @@ def hint_genre(bpm: float, brightness: float, texture: float) -> str:
 
 def detect_tempo_changes(
     y: np.ndarray, sr: int, global_bpm: float,
-    change_threshold: float = 1.5,
-    min_anchor_spacing_s: float = 8.0,
+    change_threshold: Optional[float] = None,
+    min_anchor_spacing_s: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """
     Tempo-change anchors via change-point detection.
@@ -1751,6 +1765,11 @@ def detect_tempo_changes(
         - min_anchor_spacing_s prevents chatter from oscillating tempo curves
         - matches Rekordbox <TEMPO> XML output style for variable-BPM tracks
     """
+    if change_threshold is None:
+        change_threshold = _S.tempo_change_threshold_bpm
+    if min_anchor_spacing_s is None:
+        min_anchor_spacing_s = _S.tempo_change_min_spacing_s
+
     try:
         from scipy.ndimage import gaussian_filter1d
 
@@ -2034,9 +2053,9 @@ def run_full_analysis(
             sr = sr_native
         duration = len(y) / sr
 
-        # Waveform analysis stays at native SR (capped at 96k -- diminishing
-        # returns above that, and keeps memory predictable for 192k masters).
-        WAVEFORM_SR_CAP = 96000
+        # Waveform analysis stays at native SR (capped at config value --
+        # diminishing returns above 96k, keeps memory predictable on 192k masters).
+        WAVEFORM_SR_CAP = _S.waveform_sr_cap
         if sr_native > WAVEFORM_SR_CAP:
             y_for_waveform = librosa.resample(y_mono, orig_sr=sr_native, target_sr=WAVEFORM_SR_CAP)
             waveform_sr = WAVEFORM_SR_CAP
