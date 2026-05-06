@@ -117,7 +117,10 @@ jobs:
             args: '--target aarch64-apple-darwin'
           - platform: 'ubuntu-22.04'
             target: 'x86_64-unknown-linux-gnu'
-            args: ''
+            # Skip AppImage on Linux — bundling downloads linuxdeploy from GitHub
+            # which frequently hangs in CI. Build only .deb + .rpm (universal-enough)
+            # AppImage can be built locally if needed.
+            args: '--bundles deb,rpm'
 
     runs-on: ${{ matrix.platform }}
     steps:
