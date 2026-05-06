@@ -4,14 +4,20 @@ mod soundcloud_client;
 mod audio;
 
 use tauri_plugin_shell::ShellExt;
-use tauri_plugin_shell::process::CommandEvent;
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use serde::Deserialize;
 use soundcloud_client::Track;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, RunEvent};
 use audio::commands::{load_audio, get_3band_waveform, start_project_export, list_audio_devices, AudioCommandState};
 use audio::fingerprint::{fingerprint_track, fingerprint_batch};
 use audio::engine::AudioController;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+
+/// Shared holder for the Python sidecar's process handle. We stash it here
+/// at spawn-time so the `RunEvent::Exit` handler can kill it when Tauri
+/// shuts down — otherwise (especially on Windows) the FastAPI process
+/// keeps running after the user closes the app window.
+struct BackendChildState(Arc<Mutex<Option<CommandChild>>>);
 
 #[tauri::command]
 fn close_splashscreen(window: tauri::Window) {
@@ -128,14 +134,18 @@ fn main() {
         Err(_) => println!("[LibraryManagementSystem] No .env file found. Using system environment variables."),
     }
     
-    tauri::Builder::default()
+    let backend_child: Arc<Mutex<Option<CommandChild>>> = Arc::new(Mutex::new(None));
+    let backend_child_for_setup = backend_child.clone();
+
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .manage(AudioCommandState(Mutex::new(AudioController::default())))
+        .manage(BackendChildState(backend_child.clone()))
         .invoke_handler(tauri::generate_handler![
-            close_splashscreen, 
-            login_to_soundcloud, 
+            close_splashscreen,
+            login_to_soundcloud,
             export_to_soundcloud,
             load_audio,
             get_3band_waveform,
@@ -144,7 +154,7 @@ fn main() {
             fingerprint_track,
             fingerprint_batch
         ])
-        .setup(|app| {
+        .setup(move |app| {
             #[cfg(not(debug_assertions))]
             {
                 let shell = app.shell();
@@ -155,9 +165,13 @@ fn main() {
                     .spawn()
                     .map_err(|e| format!("failed to spawn sidecar: {}", e))?;
 
+                // Stash the child in shared state so the exit handler can
+                // kill it when the Tauri app shuts down.
+                if let Ok(mut slot) = backend_child_for_setup.lock() {
+                    *slot = Some(child);
+                }
+
                 tauri::async_runtime::spawn(async move {
-                    // Keep the child alive in this scope
-                    let _child = child;
                     loop {
                         match rx.recv().await {
                             Some(event) => {
@@ -179,14 +193,37 @@ fn main() {
                     }
                 });
             }
-            
+
             #[cfg(debug_assertions)]
             {
+                let _ = &backend_child_for_setup; // silence unused-warning in dev builds
                 println!("Debug mode detected: Skipping sidecar spawn. Ensure the backend is running manually on port 8000.");
             }
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    // Tear-down: kill the backend sidecar BEFORE the Tauri process itself
+    // exits. Both `ExitRequested` (close-button / quit menu) and `Exit`
+    // (final teardown) fire — we handle both so the child dies even if the
+    // app is force-quit through the OS.
+    app.run(move |app_handle, event| {
+        match event {
+            RunEvent::ExitRequested { .. } | RunEvent::Exit => {
+                if let Some(state) = app_handle.try_state::<BackendChildState>() {
+                    if let Ok(mut slot) = state.0.lock() {
+                        if let Some(child) = slot.take() {
+                            println!("Shutting down backend sidecar (pid={})...", child.pid());
+                            if let Err(e) = child.kill() {
+                                eprintln!("Failed to kill backend sidecar: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    });
 }
