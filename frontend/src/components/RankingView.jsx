@@ -73,6 +73,11 @@ const RankingView = ({ libraryStatus, appMode }) => {
     const [colorId, setColorId] = useState(0);
     const [comment, setComment] = useState("");
     const [genre, setGenre] = useState("");
+    // MyTag (live mode only — falls silently to no-op in xml mode)
+    const [allMyTags, setAllMyTags] = useState([]);    // [{id, name}]
+    const [trackMyTagIds, setTrackMyTagIds] = useState([]);
+    const [newMyTagName, setNewMyTagName] = useState("");
+    const myTagSupported = appMode === 'live' || libraryStatus?.mode === 'live';
     const [volume, setVolumeState] = useState(() => {
         const saved = localStorage.getItem('rb_volume');
         return saved !== null ? parseFloat(saved) : 1;
@@ -128,6 +133,42 @@ const RankingView = ({ libraryStatus, appMode }) => {
         setComment(track.Comment || "");
         setGenre(track.Genre || "");
         setIsPlaying(true);
+        // Load this track's MyTag assignments (live mode only).
+        if (myTagSupported && track.ID) {
+            api.get(`/api/track/${encodeURIComponent(track.ID)}/mytags`)
+                .then(res => setTrackMyTagIds((res.data || []).map(t => String(t.id))))
+                .catch(() => setTrackMyTagIds([]));
+        } else {
+            setTrackMyTagIds([]);
+        }
+    };
+
+    // Pull the global MyTag list once when entering live mode.
+    useEffect(() => {
+        if (!myTagSupported) { setAllMyTags([]); return; }
+        api.get('/api/mytags')
+            .then(res => setAllMyTags(Array.isArray(res.data) ? res.data : []))
+            .catch(() => setAllMyTags([]));
+    }, [myTagSupported]);
+
+    const toggleMyTag = (tagId) => {
+        const id = String(tagId);
+        setTrackMyTagIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+    };
+
+    const createMyTag = async () => {
+        const name = newMyTagName.trim();
+        if (!name) return;
+        try {
+            const res = await api.post('/api/mytags', { name });
+            const newTag = { id: String(res.data.id), name: res.data.name };
+            setAllMyTags(prev => [...prev, newTag]);
+            setTrackMyTagIds(prev => [...prev, newTag.id]);
+            setNewMyTagName("");
+            toast.success(`MyTag "${name}" created`);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || 'Could not create MyTag');
+        }
     };
 
     const handleServiceMark = () => {
@@ -151,6 +192,16 @@ const RankingView = ({ libraryStatus, appMode }) => {
             console.log("Saving track...", currentTrack);
             if (!currentTrack.ID) console.warn("Track ID is missing!");
             await api.post(`/api/track/${encodeURIComponent(currentTrack.ID)}`, payload);
+            // Persist MyTags too (live mode); failure is non-fatal.
+            if (myTagSupported) {
+                try {
+                    await api.post(`/api/track/${encodeURIComponent(currentTrack.ID)}/mytags`,
+                                   { tag_ids: trackMyTagIds });
+                } catch (tagErr) {
+                    console.warn('MyTag save failed:', tagErr);
+                    toast(tagErr.response?.data?.detail || 'MyTag save failed', { icon: '⚠️' });
+                }
+            }
             toast.success("Saved");
         } catch (e) {
             console.error("Save failed:", e);
@@ -458,6 +509,54 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                         />
                                     </div>
                                 </div>
+
+                                {/* Pioneer "My Tag" — only available in Live (master.db) mode */}
+                                {myTagSupported && (
+                                    <div>
+                                        <label className="text-[10px] font-bold text-ink-muted uppercase mb-2 flex items-center gap-2 tracking-widest">
+                                            <Tag size={12} /> Pioneer My Tag
+                                            <span className="ml-auto text-[9px] text-ink-placeholder normal-case tracking-normal">writes to master.db</span>
+                                        </label>
+                                        <div className="flex flex-wrap gap-1.5 mb-3 max-h-32 overflow-y-auto custom-scrollbar pr-1">
+                                            {allMyTags.length === 0 && (
+                                                <span className="text-[11px] text-ink-placeholder italic">No My Tags defined yet — create one below.</span>
+                                            )}
+                                            {allMyTags.map(t => {
+                                                const active = trackMyTagIds.includes(String(t.id));
+                                                return (
+                                                    <button
+                                                        key={t.id}
+                                                        type="button"
+                                                        onClick={() => toggleMyTag(t.id)}
+                                                        className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all ${active
+                                                            ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
+                                                            : 'bg-black/20 border-white/5 text-ink-muted hover:border-white/20 hover:text-ink-primary'}`}
+                                                    >
+                                                        {t.name}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="text"
+                                                value={newMyTagName}
+                                                onChange={e => setNewMyTagName(e.target.value)}
+                                                onKeyDown={e => e.key === 'Enter' && createMyTag()}
+                                                placeholder="New My Tag name…"
+                                                className="input-glass flex-1 text-xs"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={createMyTag}
+                                                disabled={!newMyTagName.trim()}
+                                                className="px-3 py-1.5 rounded-md text-[10px] font-bold bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 hover:bg-emerald-500/30 disabled:opacity-30"
+                                            >
+                                                + Add
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                         </div>

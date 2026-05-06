@@ -1004,6 +1004,113 @@ class LiveRekordboxDB:
             logger.error(f"Failed to update track metadata {tid}: {e}")
             raise e
 
+    # ── MyTag (Pioneer "My Tag") read/write ────────────────────────────────
+    # rbox's wheel API for MyTag write hasn't been used elsewhere in this
+    # codebase, so version-to-version method names may differ. We probe a
+    # set of plausible names and surface a clear error if none of them work.
+    # Reads use the snapshot loaded by `_load_mytags()` (no extra DB hit).
+
+    def list_mytags(self):
+        """Return all defined MyTag entries as [{id, name}, …]."""
+        return [{"id": tid, "name": name} for tid, name in self.tag_id_to_name.items()]
+
+    def get_track_mytags(self, tid):
+        """Return MyTag IDs assigned to the given track."""
+        tid = str(tid)
+        ids = list(self.track_to_tag_ids.get(tid, []))
+        return [{"id": i, "name": self.tag_id_to_name.get(i, "?")} for i in ids]
+
+    def _try_call(self, names, *args, **kwargs):
+        """Call the first method on self.db that exists. Return (ok, result, last_err)."""
+        last = None
+        for name in names:
+            fn = getattr(self.db, name, None)
+            if callable(fn):
+                try:
+                    return True, fn(*args, **kwargs), None
+                except Exception as exc:
+                    last = exc
+                    logger.warning("rbox.%s(%s) raised: %s", name, args, exc)
+        return False, None, last
+
+    def create_mytag(self, name: str) -> str:
+        """Create a new MyTag definition. Returns the new tag id."""
+        ok, result, err = self._try_call(
+            ["create_my_tag", "add_my_tag", "create_mytag", "add_mytag"],
+            name,
+        )
+        if not ok:
+            raise Exception(f"rbox: no create_my_tag method available ({err})")
+        new_id = str(getattr(result, "id", result))
+        self.tag_id_to_name[new_id] = name
+        return new_id
+
+    def delete_mytag(self, tag_id: str) -> bool:
+        ok, _, err = self._try_call(
+            ["delete_my_tag", "remove_my_tag", "delete_mytag"],
+            str(tag_id),
+        )
+        if not ok:
+            raise Exception(f"rbox: no delete_my_tag method available ({err})")
+        self.tag_id_to_name.pop(str(tag_id), None)
+        for cid, ids in list(self.track_to_tag_ids.items()):
+            self.track_to_tag_ids[cid] = [i for i in ids if i != str(tag_id)]
+        return True
+
+    def set_track_mytags(self, tid: str, tag_ids: list) -> dict:
+        """
+        Replace the set of MyTags on a track. Adds tags missing from the
+        current set and removes tags no longer wanted. Returns a summary.
+        """
+        tid = str(tid)
+        wanted = {str(x) for x in tag_ids}
+        current = {str(x) for x in self.track_to_tag_ids.get(tid, [])}
+
+        added, removed, errors = [], [], []
+
+        for new_id in wanted - current:
+            ok, _, err = self._try_call(
+                ["add_to_my_tag", "add_song_to_my_tag", "create_my_tag_song",
+                 "add_content_to_my_tag", "add_my_tag_song"],
+                str(new_id), tid,
+            )
+            if not ok:
+                # Try (tid, tag) argument order as a fallback.
+                ok, _, err = self._try_call(
+                    ["add_to_my_tag", "add_song_to_my_tag", "create_my_tag_song",
+                     "add_content_to_my_tag", "add_my_tag_song"],
+                    tid, str(new_id),
+                )
+            if ok:
+                added.append(str(new_id))
+            else:
+                errors.append({"tag_id": str(new_id), "error": str(err) or "no method"})
+
+        for old_id in current - wanted:
+            ok, _, err = self._try_call(
+                ["remove_from_my_tag", "delete_my_tag_song", "delete_song_from_my_tag",
+                 "remove_content_from_my_tag", "remove_my_tag_song"],
+                str(old_id), tid,
+            )
+            if not ok:
+                ok, _, err = self._try_call(
+                    ["remove_from_my_tag", "delete_my_tag_song", "delete_song_from_my_tag",
+                     "remove_content_from_my_tag", "remove_my_tag_song"],
+                    tid, str(old_id),
+                )
+            if ok:
+                removed.append(str(old_id))
+            else:
+                errors.append({"tag_id": str(old_id), "error": str(err) or "no method"})
+
+        # Refresh in-memory cache so subsequent reads reflect the change.
+        new_set = (current - {x["tag_id"] for x in errors if x["tag_id"] in current - wanted}) \
+                  | set(added) - set(removed)
+        self.track_to_tag_ids[tid] = list(new_set)
+        self.track_to_tags[tid] = [self.tag_id_to_name.get(i, "?") for i in new_set]
+
+        return {"added": added, "removed": removed, "errors": errors}
+
     def get_analysis_writer(self):
         """
         Returns an AnalysisDBWriter instance bound to this database.
