@@ -917,10 +917,16 @@ def clean_titles(r: CleanTitlesReq):
 
 @app.get("/api/library/status")
 def get_lib_status():
+    if db.mode == "live":
+        path_str = str(db.live_db_path)
+    elif db.mode == "standalone":
+        path_str = str(db.standalone_db.xml_path)
+    else:
+        path_str = str(db.xml_path)
     return {
         "loaded": db.loaded,
         "mode": db.mode,
-        "path": str(db.xml_path) if db.mode == "xml" else str(db.live_db_path),
+        "path": path_str,
         "tracks": len(db.active_db.tracks) if db.active_db else 0,
         "playlists": len(db.active_db.playlists) if db.active_db else 0,
         "loading_current_item": getattr(db.active_db, "loading_status", "Idle") if db.active_db else "Idle"
@@ -936,10 +942,83 @@ def set_lib_mode(r: DBModeReq):
         if s.get("remember_lib_mode"):
             s["last_lib_mode"] = r.mode
             SettingsManager.save(s)
-            
-        db.load_library() # Reload in new mode
+
+        db.load_library() # Reload in new mode (auto-creates XML in standalone)
         logger.info(f"Library reloaded in {r.mode} mode. Tracks: {len(db.tracks)}")
     return {"status": "success" if success else "error", "mode": db.mode}
+
+
+# ─── Standalone Library — self-managed XML, no Rekordbox needed ────────────
+class StandalonePathReq(BaseModel):
+    path: str = ""  # absolute path; empty = use default location
+
+
+@app.get("/api/library/standalone/info")
+def standalone_info():
+    """Resolve current standalone library path + status (no side effects)."""
+    p = db.standalone_path()
+    return {
+        "path": str(p),
+        "default_path": str(db.default_standalone_path()),
+        "exists": p.exists(),
+        "size_bytes": p.stat().st_size if p.exists() else 0,
+        "track_count": len(db.standalone_db.tracks) if db.mode == "standalone" else None,
+        "is_active": db.mode == "standalone",
+    }
+
+
+@app.post("/api/library/standalone/init")
+def standalone_init(r: StandalonePathReq = StandalonePathReq()):
+    """
+    Create (or adopt) a standalone library XML and switch the app into
+    standalone mode. If `path` is empty the default location is used. If a
+    file already exists at the path, it's loaded as-is (not overwritten).
+    """
+    target = Path(r.path).expanduser() if r.path.strip() else db.default_standalone_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    # Persist the choice so future startups land here automatically.
+    s = SettingsManager.load()
+    s["standalone_library_path"] = str(target)
+    if s.get("remember_lib_mode"):
+        s["last_lib_mode"] = "standalone"
+    SettingsManager.save(s)
+
+    # Auto-create the file if missing, then activate the mode.
+    if not target.exists() or target.stat().st_size == 0:
+        db.write_empty_standalone_xml(target)
+
+    db.set_mode("standalone")
+    success = db.load_library()
+    return {
+        "status": "success" if success else "error",
+        "path": str(target),
+        "track_count": len(db.standalone_db.tracks),
+    }
+
+
+@app.post("/api/library/standalone/path")
+def standalone_set_path(r: StandalonePathReq):
+    """
+    Move the standalone library to a new path. The file at the new location
+    is loaded if it exists, otherwise an empty one is created.
+    """
+    if not r.path.strip():
+        raise HTTPException(400, "path is required")
+    target = Path(r.path).expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    s = SettingsManager.load()
+    s["standalone_library_path"] = str(target)
+    SettingsManager.save(s)
+
+    if not target.exists() or target.stat().st_size == 0:
+        db.write_empty_standalone_xml(target)
+
+    if db.mode == "standalone":
+        db.load_library()
+    return {"status": "success", "path": str(target),
+            "track_count": len(db.standalone_db.tracks)}
 
 @app.post("/api/library/backup")
 def trigger_backup():
@@ -1574,9 +1653,22 @@ async def startup_event():
         except OSError:
             pass
 
+    # Restore the remembered library mode (xml / live / standalone) before
+    # auto-loading so a user who runs Rekordbox-free isn't dropped back into
+    # live mode on every restart.
+    try:
+        _cfg = SettingsManager.load()
+        if _cfg.get("remember_lib_mode"):
+            _last = (_cfg.get("last_lib_mode") or "").strip()
+            if _last in db.SUPPORTED_MODES:
+                db.set_mode(_last)
+                logger.info(f"Startup: restored last_lib_mode='{_last}'")
+    except Exception as _e:
+        logger.warning(f"Could not restore last_lib_mode: {_e}")
+
     # Req 29: Timeout Handling - Prevent infinite hangs on DB locks during boot
     try:
-        logger.info("Auto-loading library with 30s timeout...")
+        logger.info(f"Auto-loading library (mode={db.mode}) with 30s timeout...")
         await asyncio.wait_for(asyncio.to_thread(db.load_library), timeout=30.0)
     except asyncio.TimeoutError:
         logger.error("Library auto-load timed out after 30 seconds (Possible strict DB lock).")

@@ -564,7 +564,9 @@ class SettingsManager:
         "last_lib_mode": "xml",
         "soundcloud_auth_token": "",
         "sc_sync_folder_id": None,   # local Rekordbox playlist ID to create SC playlists inside
-        "scan_folders": []           # absolute paths watched for new audio files (FolderWatcher)
+        "scan_folders": [],          # absolute paths watched for new audio files (FolderWatcher)
+        "standalone_library_path": "",  # path to the self-managed XML library (empty = default)
+        "write_tags_to_files": True  # mirror metadata edits into the source audio file's tags
     }
     @classmethod
     def load(cls):

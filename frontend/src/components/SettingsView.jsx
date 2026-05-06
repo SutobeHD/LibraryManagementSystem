@@ -415,28 +415,74 @@ const SettingsView = () => {
 
     const watchedSet = new Set((watcherStatus.folders || []).filter(f => f.alive).map(f => f.path));
 
+    // ── Standalone library (self-managed XML, no Rekordbox needed) ─────────
+    const [standaloneInfo, setStandaloneInfo] = useState({ path: '', default_path: '', exists: false, is_active: false });
+
+    const refreshStandaloneInfo = useCallback(() => {
+        api.get('/api/library/standalone/info')
+            .then(res => setStandaloneInfo(res.data || {}))
+            .catch(() => {});
+    }, []);
+
+    useEffect(() => {
+        if (activeTab === 'library') refreshStandaloneInfo();
+    }, [activeTab, refreshStandaloneInfo, libStatus.mode]);
+
+    const initStandalone = async (customPath = '') => {
+        try {
+            const res = await api.post('/api/library/standalone/init', { path: customPath || '' });
+            toast.success(`Standalone library ready (${res.data.track_count} tracks)`);
+            setLibStatus({ mode: 'standalone', loaded: true, path: res.data.path });
+            refreshStandaloneInfo();
+        } catch (err) {
+            toast.error(err?.response?.data?.detail || 'Could not initialise standalone library');
+        }
+    };
+
+    const browseStandalonePath = async () => {
+        try {
+            const { save } = await import('@tauri-apps/plugin-dialog');
+            const picked = await save({
+                title: 'Choose location for your standalone library XML',
+                defaultPath: standaloneInfo.path || standaloneInfo.default_path,
+                filters: [{ name: 'Rekordbox XML', extensions: ['xml'] }],
+            });
+            if (typeof picked === 'string' && picked.length) {
+                await api.post('/api/library/standalone/path', { path: picked });
+                toast.success('Standalone library path updated');
+                refreshStandaloneInfo();
+            }
+        } catch {
+            toast.error('Picker unavailable — paste the path manually instead.');
+        }
+    };
+
     // ── Tab content renderers ──────────────────────────────────────────────────
+
+    const LIB_MODES = [
+        { id: 'live',       label: 'Live Database', sub: 'Direct master.db (Rekordbox installed)' },
+        { id: 'xml',        label: 'XML Snapshot',  sub: 'Static Rekordbox export' },
+        { id: 'standalone', label: 'Standalone',    sub: 'Own library — no Rekordbox needed' },
+    ];
 
     const renderLibrary = () => (
         <div className="space-y-6">
             <Section title="Connection Mode" icon={Database}>
-                <div className="grid grid-cols-2 gap-4">
-                    {['xml', 'live'].map(mode => (
+                <div className="grid grid-cols-3 gap-3">
+                    {LIB_MODES.map(({ id, label, sub }) => (
                         <button
-                            key={mode}
-                            onClick={() => switchMode(mode)}
-                            className={`flex flex-col items-center p-5 rounded-2xl border transition-all ${
-                                libStatus.mode === mode
+                            key={id}
+                            onClick={() => id === 'standalone' ? initStandalone() : switchMode(id)}
+                            className={`flex flex-col items-center p-4 rounded-2xl border transition-all ${
+                                libStatus.mode === id
                                     ? 'bg-amber2/20 border-amber2 shadow-lg shadow-amber2/10'
                                     : 'bg-mx-deepest/50 border-white/5 hover:border-white/20'}`}
                         >
-                            <Database size={28} className={libStatus.mode === mode ? 'text-amber2 mb-2' : 'text-ink-muted mb-2'} />
-                            <span className={`font-bold text-sm ${libStatus.mode === mode ? 'text-white' : 'text-ink-secondary'}`}>
-                                {mode === 'xml' ? 'XML Snapshot' : 'Live Database'}
+                            <Database size={24} className={libStatus.mode === id ? 'text-amber2 mb-1.5' : 'text-ink-muted mb-1.5'} />
+                            <span className={`font-bold text-[12px] ${libStatus.mode === id ? 'text-white' : 'text-ink-secondary'}`}>
+                                {label}
                             </span>
-                            <p className="text-[10px] text-ink-muted mt-1 text-center">
-                                {mode === 'xml' ? 'Static Rekordbox export' : 'Direct access (master.db)'}
-                            </p>
+                            <p className="text-[10px] text-ink-muted mt-1 text-center">{sub}</p>
                         </button>
                     ))}
                 </div>
@@ -451,6 +497,25 @@ const SettingsView = () => {
                         <button onClick={triggerBackup} className="ml-3 flex-shrink-0 text-xs text-amber2 hover:text-amber2-hover flex items-center gap-1.5 border border-amber2/20 rounded-lg px-3 py-1.5 hover:bg-amber2/10 transition-all">
                             <Save size={12} /> Backup
                         </button>
+                    </div>
+                )}
+                {libStatus.mode === 'standalone' && (
+                    <div className="space-y-2 p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-xl">
+                        <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                                <p className="text-[10px] uppercase tracking-wide text-emerald-300 font-semibold mb-1">Standalone library file</p>
+                                <p className="text-xs text-ink-secondary font-mono truncate">{standaloneInfo.path || libStatus.path}</p>
+                            </div>
+                            <button
+                                onClick={browseStandalonePath}
+                                className="flex-shrink-0 text-xs text-emerald-300 hover:text-emerald-200 flex items-center gap-1.5 border border-emerald-500/30 rounded-lg px-3 py-1.5 hover:bg-emerald-500/10 transition-all"
+                            >
+                                <FolderOpen size={12} /> Change…
+                            </button>
+                        </div>
+                        <p className="text-[10px] text-ink-muted">
+                            Self-managed Rekordbox-XML library. No Rekordbox install needed; imports, USB sync, analysis and CDJ export all work directly off this file.
+                        </p>
                     </div>
                 )}
             </Section>

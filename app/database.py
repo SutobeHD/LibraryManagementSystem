@@ -363,6 +363,14 @@ class RekordboxXMLDB:
             return False
 
 class RekordboxDB:
+    # Three modes:
+    #   live        — read/write Rekordbox's master.db (requires Rekordbox install)
+    #   xml         — read a Rekordbox XML export (snapshot workflow)
+    #   standalone  — self-managed Rekordbox-XML-format library at a user-chosen
+    #                 path. No Rekordbox installation required. Auto-created on
+    #                 first use. This is the "I just want a DJ app" mode.
+    SUPPORTED_MODES = ("live", "xml", "standalone")
+
     def __init__(self):
         # Discover Live DB path
         self.live_db_path = Path(os.path.expandvars(r"%APPDATA%\Pioneer\rekordbox\master.db"))
@@ -371,10 +379,65 @@ class RekordboxDB:
 
         self.mode = "live" if self.live_db_path.exists() else "xml"
         self.xml_db = RekordboxXMLDB()
+        # standalone_db is a *separate* RekordboxXMLDB instance pointing at the
+        # user's own XML file — kept apart from xml_db so switching modes
+        # doesn't accidentally cross-contaminate state.
+        self.standalone_db = RekordboxXMLDB()
         self.live_db = None
         self.loaded = False
-        
+
         logger.info(f"Database initialized (Mode: {self.mode})")
+
+    # ── Standalone helpers ────────────────────────────────────────────────
+    @staticmethod
+    def default_standalone_path() -> Path:
+        """
+        Default location for the self-managed standalone library.
+        ~/Documents/RB-Editor-Pro/library.xml — works on Windows, macOS, Linux.
+        Creates parent dirs but NOT the file.
+        """
+        base = Path.home() / "Documents" / "RB-Editor-Pro"
+        base.mkdir(parents=True, exist_ok=True)
+        return base / "library.xml"
+
+    @classmethod
+    def standalone_path(cls) -> Path:
+        """Resolve the active standalone library path (settings → fallback)."""
+        try:
+            from .services import SettingsManager
+            cfg = SettingsManager.load()
+            p = (cfg.get("standalone_library_path") or "").strip()
+            if p:
+                return Path(p).expanduser()
+        except Exception:
+            pass
+        return cls.default_standalone_path()
+
+    @staticmethod
+    def write_empty_standalone_xml(path: Path) -> None:
+        """Create a minimal valid Rekordbox-format XML file at the given path."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists() and path.stat().st_size > 0:
+            return
+        skeleton = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<DJ_PLAYLISTS Version="1.0.0">\n'
+            '  <PRODUCT Name="RB-Editor-Pro" Version="1.0.0" Company="RB-Editor-Pro"/>\n'
+            '  <COLLECTION Entries="0"/>\n'
+            '  <PLAYLISTS>\n'
+            '    <NODE Type="0" Name="ROOT" Count="0"/>\n'
+            '  </PLAYLISTS>\n'
+            '</DJ_PLAYLISTS>\n'
+        )
+        path.write_text(skeleton, encoding="utf-8")
+        logger.info(f"Created empty standalone library at {path}")
+
+    def ensure_standalone_initialised(self) -> Path:
+        """Ensure the standalone XML exists at the configured path; return it."""
+        p = self.standalone_path()
+        if not p.exists() or p.stat().st_size == 0:
+            self.write_empty_standalone_xml(p)
+        return p
 
     def _get_hide_streaming_setting(self):
         try:
@@ -415,6 +478,8 @@ class RekordboxDB:
 
     @property
     def xml_path(self):
+        if self.mode == "standalone":
+            return self.standalone_db.xml_path
         return self.xml_db.xml_path
 
     @property
@@ -423,10 +488,14 @@ class RekordboxDB:
             if not self.live_db:
                 self.live_db = LiveRekordboxDB(str(self.live_db_path))
             return self.live_db
+        if self.mode == "standalone":
+            return self.standalone_db
         return self.xml_db
 
     def set_mode(self, mode: str):
-        if mode not in ["xml", "live"]: return False
+        if mode not in self.SUPPORTED_MODES:
+            logger.warning(f"set_mode rejected: unknown mode '{mode}'")
+            return False
         self.mode = mode
         logger.info(f"Switched to mode: {self.mode}")
         return True
@@ -436,16 +505,26 @@ class RekordboxDB:
             success = self.active_db.load()
             self.loaded = success
             return success
-        else:
-            if not path: path = "rekordbox.xml"
-            success = self.xml_db.load_xml(path)
+        if self.mode == "standalone":
+            target = Path(path) if path else self.ensure_standalone_initialised()
+            if not target.exists() or target.stat().st_size == 0:
+                self.write_empty_standalone_xml(target)
+            success = self.standalone_db.load_xml(str(target))
             self.loaded = success
             return success
+        # mode == "xml"
+        if not path: path = "rekordbox.xml"
+        success = self.xml_db.load_xml(path)
+        self.loaded = success
+        return success
 
     def unload_library(self):
         self.xml_db.tracks = {}
         self.xml_db.playlists = []
         self.xml_db.loaded = False
+        self.standalone_db.tracks = {}
+        self.standalone_db.playlists = []
+        self.standalone_db.loaded = False
         if self.live_db:
              self.live_db.tracks = {}
              self.live_db.loaded = False
