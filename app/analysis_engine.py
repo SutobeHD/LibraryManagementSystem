@@ -432,6 +432,82 @@ def _octave_correct(bpm: float) -> float:
     return bpm
 
 
+def _onset_density_disambiguate(
+    bpm: float,
+    onset_strength: np.ndarray,
+    sr: int,
+    hop: int,
+) -> float:
+    """
+    Octave disambiguation via onset-density check.
+
+    A 130 BPM track detected as 65 has too few "beats" relative to onset density:
+    typical 4/4 dance music has 2-4 strong onsets per beat (kick + hihat patterns).
+    DnB / minimal genres can have 1-2.
+
+    Heuristic ratio = onsets_per_sec / (bpm/60):
+        ratio > 5.5 → likely half-time misread, double the BPM
+        ratio < 0.4 → likely double-time misread, halve the BPM
+    """
+    if bpm <= 0 or len(onset_strength) == 0:
+        return bpm
+
+    threshold = float(np.percentile(onset_strength, 80))
+    n_strong = int(np.sum(onset_strength > threshold))
+    duration_s = len(onset_strength) * hop / sr
+    if duration_s < 5.0:
+        return bpm
+
+    onset_rate = n_strong / duration_s
+    expected_beat_rate = bpm / 60.0
+    if expected_beat_rate < 0.1:
+        return bpm
+    ratio = onset_rate / expected_beat_rate
+
+    if ratio > 5.5 and bpm * 2.0 < _MAX_BPM:
+        logger.info(f"BPM disambiguate: {bpm:.1f} → {bpm * 2:.1f} (ratio={ratio:.2f}, half-time misread)")
+        return bpm * 2.0
+    if ratio < 0.4 and bpm / 2.0 > _MIN_BPM:
+        logger.info(f"BPM disambiguate: {bpm:.1f} → {bpm / 2:.1f} (ratio={ratio:.2f}, double-time misread)")
+        return bpm / 2.0
+    return bpm
+
+
+def _compute_beat_confidence(
+    beat_times: np.ndarray,
+    onset_strength: np.ndarray,
+    sr: int,
+    hop: int,
+) -> List[float]:
+    """
+    Per-beat confidence in [0, 1] based on local onset strength.
+
+    A confident beat sits on a strong percussive onset. Confidence < 0.3
+    suggests the beat was interpolated from grid extrapolation rather than
+    locked to an audible transient (e.g. silent breakdown sections).
+    """
+    if len(beat_times) == 0 or len(onset_strength) == 0:
+        return []
+
+    max_strength = float(np.max(onset_strength))
+    if max_strength <= 0:
+        return [0.0] * len(beat_times)
+
+    confidences: List[float] = []
+    for t in beat_times:
+        frame = int(round(t * sr / hop))
+        # Look at ±2 frames around beat for max onset (sub-frame jitter tolerant)
+        lo = max(0, frame - 2)
+        hi = min(len(onset_strength), frame + 3)
+        if hi > lo:
+            local_peak = float(np.max(onset_strength[lo:hi]))
+            confidences.append(round(local_peak / max_strength, 3))
+        else:
+            confidences.append(0.0)
+
+    return confidences
+
+
 def detect_beats_madmom(
     y: np.ndarray, sr: int,
     encoder_delay: float = 0.0,
@@ -465,6 +541,11 @@ def detect_beats_madmom(
             median_ibi = float(np.median(ibis))
             bpm_raw = 60.0 / median_ibi if median_ibi > 0 else 128.0
 
+            # Onset-density disambiguation (correct half-/double-time misreads)
+            HOP_OE = 256
+            onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=HOP_OE)
+            bpm_raw = _onset_density_disambiguate(bpm_raw, onset_env, sr, HOP_OE)
+
             # Octave correction
             bpm_raw = _octave_correct(bpm_raw)
 
@@ -475,12 +556,18 @@ def detect_beats_madmom(
             else:
                 bpm = round(bpm_raw, 2)
 
+            # Per-beat confidence on RAW madmom beats (before any shifts)
+            raw_confidences = _compute_beat_confidence(beats_madmom, onset_env, sr, HOP_OE)
+
             # Format-aware encoder-delay compensation (0 for FLAC/WAV, ~22.5ms for MP3)
             beat_times = beats_madmom + encoder_delay
+            n_orig = len(beat_times)
 
             # Skip beats inside leading silence
             if first_signal_t > 0:
-                beat_times = beat_times[beat_times >= first_signal_t - (60.0 / max(bpm, 1.0)) * 0.5]
+                mask = beat_times >= first_signal_t - (60.0 / max(bpm, 1.0)) * 0.5
+                beat_times = beat_times[mask]
+            n_skipped = n_orig - len(beat_times)
 
             # Build PQTZ-format beat grid
             beats = []
@@ -488,10 +575,13 @@ def detect_beats_madmom(
             for i, t in enumerate(beat_times):
                 if t < 0:
                     continue
+                conf_idx = i + n_skipped
+                conf = raw_confidences[conf_idx] if conf_idx < len(raw_confidences) else 0.5
                 beats.append({
                     "beat_number": (i % 4) + 1,
                     "tempo": tempo_int,
-                    "time_ms": int(round(t * 1000))
+                    "time_ms": int(round(t * 1000)),
+                    "confidence": conf,
                 })
 
             # Downbeat detection
@@ -500,12 +590,16 @@ def detect_beats_madmom(
                 for i in range(len(beats)):
                     beats[i]["beat_number"] = ((i - downbeat_idx) % 4) + 1
 
+            kept = [b["confidence"] for b in beats]
+            mean_conf = float(np.mean(kept)) if kept else 0.0
+
             return {
                 "bpm": bpm,
                 "bpm_raw": round(bpm_raw, 4),
                 "beats": beats,
                 "downbeat_index": downbeat_idx,
                 "beat_count": len(beats),
+                "grid_confidence": round(mean_conf, 3),
                 "method": "madmom RNN + DBN"
             }
         finally:
@@ -581,7 +675,10 @@ def detect_beats(
     else:
         bpm_refined = coarse_bpm
 
-    # 5. Octave correction (60-210 BPM range)
+    # 5a. Onset-density disambiguation (correct half/double-time misreads)
+    bpm_refined = _onset_density_disambiguate(bpm_refined, onset_env, sr, HOP)
+
+    # 5b. Octave correction (60-210 BPM range)
     bpm_refined = _octave_correct(bpm_refined)
 
     # 6. Beat tracking with refined BPM as prior
@@ -599,6 +696,10 @@ def detect_beats(
 
     # 8. Convert to times
     beat_times = librosa.frames_to_time(beat_frames, sr=sr, hop_length=HOP)
+
+    # 8b. Per-beat confidence -- compute on RAW beat_times (before shifts)
+    #     so frame indices map cleanly into the onset_env we computed above.
+    raw_confidences = _compute_beat_confidence(beat_times, onset_env, sr, HOP)
 
     # 9. Align to first strong transient in first 2 seconds (after silence)
     align_start = max(0, int(first_signal_t * sr))
@@ -623,23 +724,39 @@ def detect_beats(
     if first_signal_t > 0:
         beat_times = beat_times[beat_times >= first_signal_t - (60.0 / max(bpm, 1.0)) * 0.5]
 
-    # 10. Build PQTZ-format beat grid
+    # 10. Track index alignment after silence skip:
+    #     raw_confidences was computed before silence skip, so we need to
+    #     map kept-beat indices back to their original positions.
+    n_skipped = 0
+    if first_signal_t > 0:
+        # Count how many leading beats were dropped
+        # (beat_times currently is the post-shift array; raw_confidences is
+        # indexed by original frame order)
+        n_skipped = max(0, len(raw_confidences) - len(beat_times))
+
+    # 11. Build PQTZ-format beat grid
     beats = []
     tempo_int = int(round(bpm * 100))
     for i, t in enumerate(beat_times):
         if t < 0:
             continue
+        conf_idx = i + n_skipped
+        conf = raw_confidences[conf_idx] if conf_idx < len(raw_confidences) else 0.5
         beats.append({
             "beat_number": (i % 4) + 1,
             "tempo": tempo_int,
-            "time_ms": int(round(t * 1000))
+            "time_ms": int(round(t * 1000)),
+            "confidence": conf,
         })
 
-    # 11. Downbeat detection
+    # 12. Downbeat detection
     downbeat_idx = _detect_downbeat(y, sr, beat_times)
     if downbeat_idx > 0:
         for i in range(len(beats)):
             beats[i]["beat_number"] = ((i - downbeat_idx) % 4) + 1
+
+    kept_confidences = [b["confidence"] for b in beats]
+    mean_conf = float(np.mean(kept_confidences)) if kept_confidences else 0.0
 
     return {
         "bpm": bpm,
@@ -647,6 +764,7 @@ def detect_beats(
         "beats": beats,
         "downbeat_index": downbeat_idx,
         "beat_count": len(beats),
+        "grid_confidence": round(mean_conf, 3),
         "method": "librosa + parabolic interpolation"
     }
 
@@ -1615,6 +1733,7 @@ def run_full_analysis(
             "beat_count": beat_result["beat_count"],
             "downbeat_index": beat_result["downbeat_index"],
             "beat_method": beat_result.get("method", "unknown"),
+            "grid_confidence": beat_result.get("grid_confidence", 0.0),
             # -- Key --
             "key": key_result["key"],
             "camelot": key_result["camelot"],
@@ -1653,7 +1772,7 @@ def _fallback_result(file_path: str, error: str) -> Dict[str, Any]:
         "encoder_delay_ms": 0.0, "first_signal_ms": 0.0,
         "bpm": 128.0, "bpm_raw": 128.0,
         "beats": [], "beat_count": 0, "downbeat_index": 0,
-        "beat_method": "fallback",
+        "beat_method": "fallback", "grid_confidence": 0.0,
         "key": "Unknown", "camelot": "", "openkey": "",
         "key_id": 0, "key_confidence": 0.0, "key_method": "none",
         "waveform": _empty_waveform(),
