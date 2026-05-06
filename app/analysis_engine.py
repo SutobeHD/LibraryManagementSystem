@@ -473,6 +473,40 @@ def _onset_density_disambiguate(
     return bpm
 
 
+def _multi_band_onset_strength(
+    y: np.ndarray, sr: int, hop: int = 256,
+) -> np.ndarray:
+    """
+    Multi-band onset strength — robust across genres.
+
+    Low band  (20-200Hz):    kick drum, sub-bass     → on-beat hits
+    Mid band  (200-2500Hz):  snare, clap, vocal      → backbeat (2+4)
+    High band (2500Hz-Nyq):  hi-hat, cymbal          → off-beat fills
+
+    Weighted combination: kick contributes most to beat tracking,
+    mid is second-strongest, hi-hat lowest weight (mostly between-beats).
+    Outperforms HPSS-only onset on sparse genres (DnB, Dub, Jazz, Acoustic).
+    """
+    sos_lo = signal.butter(4, 200.0, 'low', fs=sr, output='sos')
+    sos_mi = signal.butter(4, [200.0, 2500.0], 'bp', fs=sr, output='sos')
+    sos_hi = signal.butter(4, 2500.0, 'high', fs=sr, output='sos')
+
+    y_lo = signal.sosfilt(sos_lo, y)
+    y_mi = signal.sosfilt(sos_mi, y)
+    y_hi = signal.sosfilt(sos_hi, y)
+
+    try:
+        o_lo = librosa.onset.onset_strength(y=y_lo, sr=sr, hop_length=hop, aggregate=np.median)
+        o_mi = librosa.onset.onset_strength(y=y_mi, sr=sr, hop_length=hop, aggregate=np.median)
+        o_hi = librosa.onset.onset_strength(y=y_hi, sr=sr, hop_length=hop, aggregate=np.median)
+    except Exception:
+        # Fallback to single-band onset
+        return librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop, aggregate=np.median)
+
+    L = min(len(o_lo), len(o_mi), len(o_hi))
+    return 0.5 * o_lo[:L] + 0.3 * o_mi[:L] + 0.2 * o_hi[:L]
+
+
 def _compute_beat_confidence(
     beat_times: np.ndarray,
     onset_strength: np.ndarray,
@@ -543,7 +577,7 @@ def detect_beats_madmom(
 
             # Onset-density disambiguation (correct half-/double-time misreads)
             HOP_OE = 256
-            onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=HOP_OE)
+            onset_env = _multi_band_onset_strength(y, sr, hop=HOP_OE)
             bpm_raw = _onset_density_disambiguate(bpm_raw, onset_env, sr, HOP_OE)
 
             # Octave correction
@@ -635,13 +669,11 @@ def detect_beats(
     # -- Strategy B: librosa with sub-bin refinement (fallback) --
     HOP = 256
 
-    # 1. Harmonic/Percussive Separation
-    _, y_percussive = librosa.effects.hpss(y, margin=2.0)
+    # 1. Multi-band onset strength (kick/snare/hi-hat weighted combo)
+    onset_env = _multi_band_onset_strength(y, sr, hop=HOP)
 
-    # 2. Onset strength from percussive component
-    onset_env = librosa.onset.onset_strength(
-        y=y_percussive, sr=sr, hop_length=HOP, aggregate=np.median
-    )
+    # 2. Keep percussive component for first-onset alignment (HPSS is targeted use)
+    _, y_percussive = librosa.effects.hpss(y, margin=2.0)
 
     # 3. Coarse tempo estimate (biased towards dance music)
     tempo_estimate = librosa.feature.tempo(
@@ -1532,13 +1564,19 @@ def calculate_lufs(y: np.ndarray, sr: int) -> float:
 # =========================================================================== #
 
 def detect_tempo_changes(
-    y: np.ndarray, sr: int, global_bpm: float
+    y: np.ndarray, sr: int, global_bpm: float,
+    change_threshold: float = 1.5,
+    min_anchor_spacing_s: float = 8.0,
 ) -> List[Dict[str, Any]]:
     """
-    Detect tempo changes throughout the track for dynamic grid support.
-    Returns a list of tempo anchors in Rekordbox XML <TEMPO> format.
+    Tempo-change anchors via change-point detection.
 
-    If tempo is stable (<0.5 BPM variance), returns a single static anchor.
+    Replaces the old "anchor every 10s" approach. Now:
+        - stable tempo (std < 0.5 BPM)              → 1 anchor at t=0
+        - variable tempo                             → anchors only at points
+          where local BPM changes by ≥ change_threshold (default 1.5 BPM)
+        - min_anchor_spacing_s prevents chatter from oscillating tempo curves
+        - matches Rekordbox <TEMPO> XML output style for variable-BPM tracks
     """
     try:
         from scipy.ndimage import gaussian_filter1d
@@ -1560,33 +1598,40 @@ def detect_tempo_changes(
 
         if bpm_std < 0.5:
             # Static grid -- stable tempo
-            beat_duration = 60.0 / global_bpm
             return [{
                 "time": 0.0,
                 "bpm": round(global_bpm, 3),
                 "beat": 1,
                 "metro": "4/4"
             }]
-        else:
-            # Dynamic grid -- add anchors every 10 seconds
-            anchors = []
-            for t_sec in range(0, int(duration), 10):
-                frame_idx = int(t_sec * sr / hop_length)
-                if frame_idx < len(bpm_curve):
-                    local_bpm = float(bpm_curve[frame_idx])
-                    # Octave-correct
-                    while local_bpm < 70:
-                        local_bpm *= 2
-                    while local_bpm > 200:
-                        local_bpm /= 2
-                    anchors.append({
-                        "time": float(t_sec),
-                        "bpm": round(local_bpm, 3),
-                        "beat": 1,
-                        "metro": "4/4"
-                    })
-            return anchors if anchors else [{"time": 0.0, "bpm": round(global_bpm, 3),
-                                              "beat": 1, "metro": "4/4"}]
+
+        # -- Change-point detection --
+        anchors = [{
+            "time": 0.0,
+            "bpm": round(_octave_correct(float(bpm_curve[0])), 3),
+            "beat": 1,
+            "metro": "4/4",
+        }]
+        last_anchor_bpm = float(bpm_curve[0])
+        last_anchor_t = 0.0
+        min_spacing_frames = int(min_anchor_spacing_s * sr / hop_length)
+
+        for i in range(min_spacing_frames, len(bpm_curve)):
+            local_bpm = _octave_correct(float(bpm_curve[i]))
+            t_sec = i * hop_length / sr
+            # Add anchor if BPM diverges enough AND spacing satisfied
+            if (abs(local_bpm - last_anchor_bpm) >= change_threshold and
+                    t_sec - last_anchor_t >= min_anchor_spacing_s):
+                anchors.append({
+                    "time": round(t_sec, 2),
+                    "bpm": round(local_bpm, 3),
+                    "beat": 1,
+                    "metro": "4/4",
+                })
+                last_anchor_bpm = local_bpm
+                last_anchor_t = t_sec
+
+        return anchors
 
     except Exception as e:
         logger.warning(f"Tempo change detection failed: {e}")
