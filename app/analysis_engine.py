@@ -1507,6 +1507,52 @@ def _read_mp3_xing_toc(file_path: str, duration: float) -> Optional[List[int]]:
 
 
 # =========================================================================== #
+# 5b. STEREO FEATURES  [NEW]
+# =========================================================================== #
+
+def compute_stereo_features(y_stereo: np.ndarray, sr: int) -> Optional[Dict[str, Any]]:
+    """
+    Stereo-image metrics. Only meaningful when input has 2 channels.
+
+    width: side-channel energy / mid-channel energy
+        0.0 = mono (perfectly identical L and R)
+        ~0.3 = typical pop production
+        >0.7 = very wide / live recording / classical
+    balance: -1.0 (full left) ... 0.0 (centered) ... +1.0 (full right)
+    phase_correlation: -1 ... +1
+        +1 = L and R highly correlated (good for mono compatibility)
+        ~0 = stereo-mixed (typical for modern productions)
+        <0 = phase-inverted (warning -- mono summing will cancel content)
+    """
+    if y_stereo is None or y_stereo.ndim != 2 or y_stereo.shape[0] != 2:
+        return None
+
+    L, R = y_stereo[0], y_stereo[1]
+
+    M = (L + R) * 0.5     # mid (mono-summed)
+    S = (L - R) * 0.5     # side
+    m_rms = float(np.sqrt(np.mean(M ** 2)))
+    s_rms = float(np.sqrt(np.mean(S ** 2)))
+    width = s_rms / (m_rms + 1e-10)
+
+    L_rms = float(np.sqrt(np.mean(L ** 2)))
+    R_rms = float(np.sqrt(np.mean(R ** 2)))
+    balance = (R_rms - L_rms) / (R_rms + L_rms + 1e-10)
+
+    if np.std(L) > 1e-10 and np.std(R) > 1e-10:
+        phase_corr = float(np.corrcoef(L, R)[0, 1])
+    else:
+        phase_corr = 1.0
+
+    return {
+        "width": round(float(width), 4),
+        "balance": round(float(balance), 4),
+        "phase_correlation": round(phase_corr, 4),
+        "is_mono": abs(width) < 0.01 and abs(phase_corr - 1.0) < 0.01,
+    }
+
+
+# =========================================================================== #
 # 6. LOUDNESS (LUFS) MEASUREMENT  [NEW]
 # =========================================================================== #
 
@@ -1517,6 +1563,9 @@ def calculate_lufs(y: np.ndarray, sr: int) -> float:
     Preferred path: pyloudnorm (proper K-weighting + 400ms block gating
     + -70/-10 LU absolute/relative gates). Matches Rekordbox loudness display.
 
+    Accepts mono (1D) or stereo (2 x N or N x 2) input. BS.1770 channel
+    weighting is applied automatically by pyloudnorm for multi-channel.
+
     Fallback: K-weighted RMS approximation (off by ~1-3 LU on dynamic tracks).
     """
     # -- Preferred: pyloudnorm (proper BS.1770 with block gating) ---------
@@ -1525,6 +1574,9 @@ def calculate_lufs(y: np.ndarray, sr: int) -> float:
             meter = pyloudnorm.Meter(sr)  # block_size=0.4s, overlap default
             # pyloudnorm expects shape (n,) for mono or (n, channels) for multi
             audio = y.astype(np.float64)
+            # Reshape stereo (2, N) → (N, 2) for pyloudnorm channel-major
+            if audio.ndim == 2 and audio.shape[0] == 2 and audio.shape[1] != 2:
+                audio = audio.T
             lufs = float(meter.integrated_loudness(audio))
             # pyloudnorm returns -inf for pure silence; clamp to a sane sentinel
             if not np.isfinite(lufs):
@@ -1532,6 +1584,9 @@ def calculate_lufs(y: np.ndarray, sr: int) -> float:
             return round(lufs, 2)
         except Exception as e:
             logger.warning(f"pyloudnorm LUFS failed, falling back to approximation: {e}")
+        # Mono fallback path expects 1D
+        if y.ndim > 1:
+            y = librosa.to_mono(y)
 
     # -- Fallback: K-weighted RMS approximation ---------------------------
     try:
@@ -1836,9 +1891,41 @@ def run_full_analysis(
         # Caller can pass duration_cap_arg explicitly if memory is tight.
         duration_cap = duration_cap_arg
 
-        # -- Load Audio (44.1 kHz mono -- Rekordbox standard) -------------
-        y, sr = librosa.load(file_path, sr=44100, mono=True, duration=duration_cap)
+        # -- Load Audio at native SR + stereo (preserves Hi-Res detail) ---
+        # Native SR keeps high-frequency content for waveform rendering.
+        # Down-conversion to 44.1k mono happens below for beat/key analyses.
+        y_native, sr_native = librosa.load(
+            file_path, sr=None, mono=False, duration=duration_cap
+        )
+
+        # Track stereo info before mono-down-mix
+        stereo_features = None
+        if y_native.ndim == 2 and y_native.shape[0] == 2:
+            stereo_features = compute_stereo_features(y_native, sr_native)
+            y_mono = librosa.to_mono(y_native)
+        else:
+            # Already mono (1D) or unexpected shape
+            y_mono = y_native if y_native.ndim == 1 else librosa.to_mono(y_native)
+
+        # Down-sample to 44.1k for beat/key/phrase analyses (Rekordbox standard)
+        if sr_native != 44100:
+            y = librosa.resample(y_mono, orig_sr=sr_native, target_sr=44100)
+            sr = 44100
+        else:
+            y = y_mono
+            sr = sr_native
         duration = len(y) / sr
+
+        # Waveform analysis stays at native SR (capped at 96k -- diminishing
+        # returns above that, and keeps memory predictable for 192k masters).
+        WAVEFORM_SR_CAP = 96000
+        if sr_native > WAVEFORM_SR_CAP:
+            y_for_waveform = librosa.resample(y_mono, orig_sr=sr_native, target_sr=WAVEFORM_SR_CAP)
+            waveform_sr = WAVEFORM_SR_CAP
+        else:
+            y_for_waveform = y_mono
+            waveform_sr = sr_native
+
         emit("load", 15)
 
         # -- Format-aware parameters --------------------------------------
@@ -1864,7 +1951,8 @@ def run_full_analysis(
         emit("key", 60)
 
         emit("waveform", 65)
-        waveform_result = generate_waveform_data(y, sr)
+        # Use native (or capped) SR audio so high-frequency band is visible
+        waveform_result = generate_waveform_data(y_for_waveform, waveform_sr)
         emit("waveform", 80)
 
         emit("phrases", 82)
@@ -1878,7 +1966,12 @@ def run_full_analysis(
         pvbr_index = generate_pvbr(duration, file_path)
 
         emit("lufs", 93)
-        lufs = calculate_lufs(y, sr)
+        # Pass stereo audio to LUFS when available -- BS.1770 channel weighting
+        # gives slightly different (more accurate) result for stereo masters.
+        if y_native.ndim == 2:
+            lufs = calculate_lufs(y_native, sr_native)
+        else:
+            lufs = calculate_lufs(y, sr)
 
         emit("cues", 95)
         # -- Auto-generate Hot + Memory Cues from phrases -----------------
@@ -1894,6 +1987,8 @@ def run_full_analysis(
             "file": file_path,
             "duration": round(duration, 3),
             "sample_rate": sr,
+            "sample_rate_native": sr_native,
+            "channels": int(y_native.shape[0]) if y_native.ndim == 2 else 1,
             "encoder_delay_ms": round(encoder_delay * 1000.0, 2),
             "first_signal_ms": round(first_signal_t * 1000.0, 2),
             # -- BPM & Beats (PQTZ) --
@@ -1925,6 +2020,8 @@ def run_full_analysis(
             # -- Loudness --
             "lufs": lufs,
             "peak": peak,
+            # -- Stereo Image --
+            "stereo": stereo_features,
             # -- Status --
             "status": "ok",
             "error": None,
@@ -1952,6 +2049,7 @@ def _fallback_result(file_path: str, error: str) -> Dict[str, Any]:
     """Safe fallback -- never crash the batch pipeline."""
     return {
         "file": file_path, "duration": 0, "sample_rate": 44100,
+        "sample_rate_native": 44100, "channels": 1,
         "encoder_delay_ms": 0.0, "first_signal_ms": 0.0,
         "bpm": 128.0, "bpm_raw": 128.0,
         "beats": [], "beat_count": 0, "downbeat_index": 0,
@@ -1962,5 +2060,6 @@ def _fallback_result(file_path: str, error: str) -> Dict[str, Any]:
         "phrases": [], "hot_cues": [], "memory_cues": [],
         "tempo_anchors": [],
         "pvbr": [0] * 400, "lufs": -100.0, "peak": 0.0,
+        "stereo": None,
         "status": "error", "error": error,
     }
