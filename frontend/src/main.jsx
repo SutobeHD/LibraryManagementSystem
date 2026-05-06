@@ -260,7 +260,7 @@ const SelectionView = ({ onSelect }) => (
         Choose your library source to continue.
       </p>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-3xl">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl">
         <button
           onClick={() => onSelect('live')}
           className="group relative p-7 mx-card rounded-mx-lg hover:border-amber2 transition-all text-left overflow-hidden shadow-mx-md"
@@ -295,7 +295,26 @@ const SelectionView = ({ onSelect }) => (
           </div>
           <h3 className="text-lg font-semibold text-ink-primary mb-1.5">XML Snapshot</h3>
           <p className="text-ink-secondary text-tiny leading-relaxed">
-            Standard XML-based workflow. Best for analyzing and cleaning exports.
+            Existing Rekordbox XML export. Auto-creates an empty one if none is found.
+          </p>
+        </button>
+
+        <button
+          onClick={() => onSelect('standalone')}
+          className="group relative p-7 mx-card rounded-mx-lg hover:border-amber2 transition-all text-left overflow-hidden shadow-mx-md"
+        >
+          <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-15 transition-opacity">
+            <FileCode size={120} className="text-emerald-400" />
+          </div>
+          <div
+            className="w-10 h-10 rounded-mx-md flex items-center justify-center mb-5"
+            style={{ background: 'rgba(16,185,129,0.10)', color: 'rgb(110,231,183)' }}
+          >
+            <FileCode size={20} />
+          </div>
+          <h3 className="text-lg font-semibold text-ink-primary mb-1.5">Standalone</h3>
+          <p className="text-ink-secondary text-tiny leading-relaxed">
+            No Rekordbox needed. Self-managed XML library at <span className="font-mono">~/Documents/RB-Editor-Pro/library.xml</span>.
           </p>
         </button>
       </div>
@@ -322,6 +341,9 @@ const App = () => {
   const [playerTrack, setPlayerTrack] = useState(null)
   const [libraryStatus, setLibraryStatus] = useState({ loaded: false, mode: 'live', tracks: 0, playlists: 0 })
   const [isInitialLoading, setIsInitialLoading] = useState(false)
+  // Watchdog: when the load takes too long, surface a recovery UI instead
+  // of leaving the user staring at the spinner forever.
+  const [loadStuck, setLoadStuck] = useState(false)
 
   const checkLibraryStatus = useCallback(async () => {
     try {
@@ -338,13 +360,42 @@ const App = () => {
   const handleModeSelect = useCallback(async (mode) => {
     setAppMode(mode);
     setIsInitialLoading(true);
+    setLoadStuck(false);
     try {
-      await api.post('/api/library/mode', { mode });
-      setActiveTab(mode === 'xml' ? 'xml' : 'library');
+      // Standalone has its own bootstrap endpoint that also creates the
+      // library file and persists the path; /api/library/mode is fine as a
+      // fallback if the backend isn't on the new build yet.
+      if (mode === 'standalone') {
+        try {
+          await api.post('/api/library/standalone/init', { path: '' });
+        } catch (initErr) {
+          console.warn('standalone/init failed, falling back to /mode', initErr);
+          await api.post('/api/library/mode', { mode });
+        }
+      } else {
+        await api.post('/api/library/mode', { mode });
+      }
+      setActiveTab('library');
+      // Don't wait for the next polling tick — fetch status now.
+      checkLibraryStatus();
     } catch (e) {
       console.error("Mode select failed", e);
+      // Hide the spinner so the user can see something / retry, instead of
+      // staying on the loading screen forever.
+      setIsInitialLoading(false);
     }
-  }, []);
+  }, [checkLibraryStatus]);
+
+  // Watchdog: if the loading screen has been visible for >15s without the
+  // library going to loaded=true, flip loadStuck so the user gets recovery UI.
+  useEffect(() => {
+    if (!isInitialLoading || libraryStatus.loaded) {
+      setLoadStuck(false);
+      return;
+    }
+    const id = setTimeout(() => setLoadStuck(true), 15000);
+    return () => clearTimeout(id);
+  }, [isInitialLoading, libraryStatus.loaded]);
 
   const handleLoadLibrary = useCallback(async () => {
     try {
@@ -448,13 +499,40 @@ const App = () => {
             </div>
             <div className="flex justify-between w-full px-0.5 mb-8">
               <span className="mx-caption">Status</span>
-              <span className="mx-caption" style={{ color: 'var(--amber)' }}>
-                {libraryStatus.loaded ? 'Success' : `Initializing ${appMode.toUpperCase()}…`}
+              <span className="mx-caption" style={{ color: loadStuck ? 'var(--bad)' : 'var(--amber)' }}>
+                {libraryStatus.loaded
+                  ? 'Success'
+                  : loadStuck
+                    ? 'Stuck — backend not responding'
+                    : `Initializing ${appMode.toUpperCase()}…`}
               </span>
             </div>
+
+            {loadStuck && !libraryStatus.loaded && (
+              <div className="mb-6 p-4 bg-bad/10 border border-bad/30 rounded-mx-md text-tiny text-ink-secondary space-y-2 max-w-md text-center">
+                <p className="text-bad font-semibold">Library loading hasn't completed in 15 seconds.</p>
+                <p>This usually means the backend is on an older build that doesn't recognise this mode, or the XML file path is unreachable.</p>
+                <p className="text-ink-muted">Try Standalone mode (creates a fresh library at <span className="font-mono">~/Documents/RB-Editor-Pro/library.xml</span>), restart your backend, or use Manual Bypass to skip into the app and pick a mode in Settings.</p>
+                <div className="flex justify-center gap-2 pt-2">
+                  <button
+                    onClick={() => handleModeSelect('standalone')}
+                    className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-mx-sm bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25 transition-colors"
+                  >
+                    Switch to Standalone
+                  </button>
+                  <button
+                    onClick={() => checkLibraryStatus()}
+                    className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-mx-sm bg-amber2/15 border border-amber2/30 text-amber2 hover:bg-amber2/25 transition-colors"
+                  >
+                    Retry Status
+                  </button>
+                </div>
+              </div>
+            )}
+
             {!libraryStatus.loaded && (
               <button
-                onClick={() => setIsInitialLoading(false)}
+                onClick={() => { setIsInitialLoading(false); setLoadStuck(false); }}
                 className="mt-8 text-[10px] text-ink-muted hover:text-ink-secondary underline transition-colors uppercase tracking-widest font-semibold"
               >
                 Manual Bypass
