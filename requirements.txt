@@ -35,3 +35,9 @@ python-dotenv==1.2.2
 # --- Audio I/O ---
 soundfile==0.13.1
 lameenc==1.8.2
+
+# --- Audio Metadata / Format Detection ---
+mutagen==1.47.0
+
+# --- Loudness (ITU-R BS.1770 / EBU R128) ---
+pyloudnorm==0.1.1
