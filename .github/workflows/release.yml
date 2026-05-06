@@ -240,7 +240,7 @@ jobs:
             - **macOS**: Gatekeeper will block — right-click → Open → confirm. (Or: `xattr -d com.apple.quarantine /path/to/app`)
             - **Linux**: `chmod +x *.AppImage && ./Music\ Library\ Manager.AppImage`
 
-            See [SECURITY.md](https://github.com/SutobeHD/LibaryMangementSystem/blob/main/docs/SECURITY.md) for verification details.
+            See [SECURITY.md](https://github.com/SutobeHD/LibraryManagementSystem/blob/main/docs/SECURITY.md) for verification details.
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, 'Alpha') || contains(github.ref_name, 'Beta') || contains(github.ref_name, 'rc') }}
           args: ${{ matrix.args }}
