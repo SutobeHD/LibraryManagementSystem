@@ -378,51 +378,79 @@ class UsbProfileManager:
         results = {"library_one": [], "library_legacy": []}
         statuses = {"library_one_status": "empty", "library_legacy_status": "empty"}
 
-        # --- Library One (DeviceSQL) ---
+        # --- Library One (modern OneLibrary, SQLCipher-encrypted) ---
+        # Plain sqlite3 cannot open SQLCipher; use rbox.OneLibrary instead.
+        # Reader output also gathers playlist tree so the UI can show what
+        # was actually written (mirrors the legacy XML view).
+        legacy_one_playlists: list = []
         if l1_path.exists():
             try:
-                conn = sqlite3.connect(str(l1_path))
-                conn.row_factory = sqlite3.Row
-                cur = conn.execute("""
-                    SELECT c.ID, c.Title, c.BPM, c.Duration, c.FolderPath, c.FileNameL,
-                           a.Name as ArtistName
-                    FROM djmdContent c
-                    LEFT JOIN djmdArtist a ON c.ArtistID = a.ID
-                    WHERE c.Title IS NOT NULL AND c.Title != ''
-                """)
-                for row in cur:
-                    r = dict(row)
-                    results["library_one"].append(r)
-                conn.close()
+                import rbox as _rbox
+                onedb = _rbox.OneLibrary(str(l1_path))
+                # Build artist + album lookup once so we don't N+1 each track
+                artist_lookup = {a.id: a.name for a in onedb.get_artists() if a.name}
+                album_lookup = {a.id: a.name for a in onedb.get_albums() if a.name}
+                for c in onedb.get_contents():
+                    artist_id = getattr(c, "artist_id", None)
+                    album_id = getattr(c, "album_id", None)
+                    results["library_one"].append({
+                        "ID": str(c.id),
+                        "Title": c.title or "",
+                        "ArtistName": artist_lookup.get(artist_id, "") if artist_id else "",
+                        "Album": album_lookup.get(album_id, "") if album_id else "",
+                        "BPM": int((c.bpmx100 or 0)),  # already × 100
+                        "Duration": int(c.length or 0),
+                        "FolderPath": str(Path(c.path or "").parent).replace("\\", "/"),
+                        "FileNameL": Path(c.path or "").name,
+                        "TotalTime": int(c.length or 0),
+                    })
+                # Walk playlist tree (ordered by parent → seq)
+                pls_by_id = {p.id: p for p in onedb.get_playlists()}
+                children_by_parent = {}
+                for p in pls_by_id.values():
+                    pid = getattr(p, "parent_id", 0) or 0
+                    children_by_parent.setdefault(pid, []).append(p)
+                def _walk_one(parent_id, parent_name):
+                    for child in sorted(children_by_parent.get(parent_id, []),
+                                        key=lambda x: getattr(x, "seq", 0) or 0):
+                        is_folder = getattr(child, "attribute", 0) == 1
+                        track_keys = []
+                        if not is_folder:
+                            try:
+                                contents = onedb.get_playlist_contents(int(child.id))
+                                track_keys = [str(getattr(pc, "content_id", pc)) for pc in contents]
+                            except Exception:
+                                track_keys = []
+                        legacy_one_playlists.append({
+                            "name": child.name or "",
+                            "type": "0" if is_folder else "1",
+                            "parent": parent_name,
+                            "track_keys": track_keys,
+                        })
+                        if is_folder:
+                            _walk_one(child.id, child.name)
+                _walk_one(0, "ROOT")
                 statuses["library_one_status"] = "loaded"
-                logger.info(f"Library One loaded for {device_id}: {len(results['library_one'])} tracks")
-            except sqlite3.DatabaseError as e:
-                logger.warning(f"Library One on {device_id} is encrypted (SQLCipher): {e}")
+                logger.info(
+                    "Library One loaded for %s: %d tracks, %d playlists",
+                    device_id, len(results["library_one"]), len(legacy_one_playlists),
+                )
+            except Exception as e:
+                logger.warning(f"Library One read failed for {device_id} (will fall back to size estimate): {e}")
                 statuses["library_one_status"] = "encrypted"
-                # Try to estimate track count from file size
                 try:
                     file_size = l1_path.stat().st_size
-                    est_tracks = max(0, file_size // 50000)  # rough estimate
+                    est_tracks = max(0, file_size // 50000)
                     results["library_one"].append({
                         "ID": "_status_encrypted",
-                        "Title": f"Library One (Encrypted) — ~{est_tracks} tracks estimated",
-                        "ArtistName": "Rekordbox 7+ uses SQLCipher encryption",
+                        "Title": f"Library One — ~{est_tracks} tracks (couldn't open: {type(e).__name__})",
+                        "ArtistName": "rbox failed to open the DB on this stick",
                         "BPM": 0, "Duration": 0,
                         "FolderPath": str(l1_path), "FileNameL": "",
-                        "_encrypted": True
+                        "_encrypted": True,
                     })
                 except Exception:
-                    results["library_one"].append({
-                        "ID": "_status_encrypted",
-                        "Title": "Library One (Encrypted)",
-                        "ArtistName": "Rekordbox 7+ uses SQLCipher encryption",
-                        "BPM": 0, "Duration": 0,
-                        "FolderPath": str(l1_path), "FileNameL": "",
-                        "_encrypted": True
-                    })
-            except Exception as e:
-                logger.error(f"Error reading Library One for {device_id}: {e}")
-                statuses["library_one_status"] = "error"
+                    pass
 
         # --- Library Legacy: Try XML first, then PDB ---
         legacy_playlists = []  # [{name, type, parent, track_keys: [...]}]
@@ -523,6 +551,7 @@ class UsbProfileManager:
             "library_one_flat": results["library_one"],
             "library_legacy_flat": results["library_legacy"],
             "library_legacy_playlists": legacy_playlists,
+            "library_one_playlists": legacy_one_playlists,
             **statuses
         }
 

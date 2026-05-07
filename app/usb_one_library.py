@@ -578,6 +578,12 @@ class OneLibraryUsbWriter:
     def _write_playlists(self, db, source, content_id_map: Dict[str, str]) -> None:
         """Walks playlist tree, creates folders / playlists, links tracks.
 
+        rbox 0.1.7 caveat: `create_playlist_content(playlist_id, content_id,
+        seq)` rejects str ids with TypeError ("'str' object cannot be
+        interpreted as an integer"). Earlier code stored ids as str and the
+        TypeError got silently swallowed — playlists shipped to USB but were
+        empty on the CDJ. We now pass ints throughout.
+
         System playlists like "Import" are filtered out — see
         usb_manager.EXCLUDED_USB_PLAYLISTS.
         """
@@ -591,10 +597,10 @@ class OneLibraryUsbWriter:
         for p in playlists:
             by_parent.setdefault(p["parent_id"], []).append(p)
 
-        # ID-translation: source-pid → onelibrary-pid
-        id_map: Dict[str, str] = {"ROOT": None}
+        # ID-translation: source-pid → onelibrary-pid (kept as int)
+        id_map: Dict[str, Optional[int]] = {"ROOT": None}
 
-        def _emit(parent_src_id: str, parent_one_id):
+        def _emit(parent_src_id: str, parent_one_id: Optional[int]):
             children = by_parent.get(parent_src_id, [])
             for seq, child in enumerate(children):
                 try:
@@ -604,17 +610,31 @@ class OneLibraryUsbWriter:
                             else db.create_playlist(child["name"], parent_one_id, seq)
                     else:
                         obj = db.create_playlist(child["name"], parent_one_id, seq)
-                    one_id = str(getattr(obj, "id", obj))
+                    one_id = int(getattr(obj, "id", 0)) or None
                     id_map[child["id"]] = one_id
-                    # Link tracks (skip for folders/smart-without-materialised)
-                    if child["type"] in ("1", "4"):
+                    # Link tracks (skip for folders/smart-without-materialised).
+                    # Both ids MUST be int for rbox's create_playlist_content.
+                    if child["type"] in ("1", "4") and one_id is not None:
+                        linked = 0
                         for ti, t_src_id in enumerate(child["track_ids"]):
-                            content_id = content_id_map.get(str(t_src_id))
-                            if content_id:
-                                try:
-                                    db.create_playlist_content(one_id, content_id, ti)
-                                except Exception as e:
-                                    logger.debug(f"playlist_content link failed: {e}")
+                            content_id_str = content_id_map.get(str(t_src_id))
+                            if not content_id_str:
+                                continue
+                            try:
+                                db.create_playlist_content(
+                                    int(one_id), int(content_id_str), ti,
+                                )
+                                linked += 1
+                            except Exception as e:
+                                logger.warning(
+                                    "[OneLibrary] playlist_content link failed "
+                                    "(pl=%s,content=%s): %s",
+                                    one_id, content_id_str, e,
+                                )
+                        logger.info(
+                            "[OneLibrary] playlist '%s' linked %d/%d tracks",
+                            child["name"], linked, len(child["track_ids"]),
+                        )
                     _emit(child["id"], one_id)
                 except Exception as e:
                     logger.warning(f"playlist '{child['name']}' skipped: {e}")
