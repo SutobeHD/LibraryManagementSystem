@@ -574,6 +574,16 @@ class UsbSyncEngine:
         (self.usb_pioneer / "Artwork").mkdir(exist_ok=True)
         # Ensure CDJ device-identification marker exists on already-prepared sticks.
         UsbDetector._write_device_pioneer(self.usb_pioneer)
+
+        # Seed MYSETTING / MYSETTING2 / DJMMYSETTING with pyrekordbox factory
+        # defaults if they're missing. The user can later overwrite these via
+        # the USB Settings tab; this ensures every freshly-synced stick has
+        # valid CDJ-readable settings out of the box.
+        try:
+            from . import usb_mysettings
+            usb_mysettings.write_defaults(self.usb_root)
+        except Exception as exc:
+            logger.warning(f"[mysettings] default seed skipped: {exc}")
         
         # Self-healing: if the DB exists but is an encrypted master.db clone from the old bug,
         # it will throw an error on `sqlite3.connect`. We must delete it to let the sync engine rebuild it.

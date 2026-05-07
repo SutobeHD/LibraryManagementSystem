@@ -2191,6 +2191,57 @@ def usb_initialize(r: UsbInitReq):
     raise HTTPException(500, "Failed to initialize library")
 
 
+# ─── MYSETTING / DJM SETTINGS — CDJ + DJM player customisation ─────────────
+# Bound to a USB profile so the user can configure each stick independently.
+# Schema endpoint feeds the frontend dropdowns; the read/write pair persists
+# the binary MYSETTING.DAT / MYSETTING2.DAT / DJMMYSETTING.DAT files into
+# <USB>/PIONEER/.
+
+class UsbMySettingsReq(BaseModel):
+    device_id: str
+    values: Dict[str, Dict[str, str]]  # {"MYSETTING": {"auto_cue": "off", …}}
+
+
+@app.get("/api/usb/mysettings/schema")
+def usb_mysettings_schema():
+    """Return the editable-field schema (file → fields → enum options).
+    Frontend uses this to render labelled dropdowns without hardcoding."""
+    from . import usb_mysettings
+    return usb_mysettings.get_schema()
+
+
+@app.get("/api/usb/mysettings/{device_id}")
+def usb_mysettings_read(device_id: str):
+    """Read current MYSETTING values from a connected stick. Falls back to
+    pyrekordbox factory defaults for any field whose file is missing."""
+    from . import usb_mysettings
+    profile = UsbProfileManager.get_profile(device_id)
+    if not profile:
+        raise HTTPException(404, "Profile not found")
+    drive = profile.get("drive")
+    if not drive:
+        raise HTTPException(400, "Profile has no drive letter")
+    return {
+        "status": "ok",
+        "device_id": device_id,
+        "values": usb_mysettings.read_settings(Path(drive)),
+    }
+
+
+@app.post("/api/usb/mysettings")
+def usb_mysettings_write(r: UsbMySettingsReq):
+    """Persist user-edited MYSETTING values to <USB>/PIONEER/."""
+    from . import usb_mysettings
+    profile = UsbProfileManager.get_profile(r.device_id)
+    if not profile:
+        raise HTTPException(404, "Profile not found")
+    drive = profile.get("drive")
+    if not drive:
+        raise HTTPException(400, "Profile has no drive letter")
+    written = usb_mysettings.write_settings(Path(drive), r.values)
+    return {"status": "ok", "written": written}
+
+
 # ─── DESTRUCTIVE: USB FORMAT (FAT32 / exFAT) ─────────────────────────────────
 # Two-step protocol so the UI cannot accidentally trigger a format:
 #   1. POST /api/usb/format/preview {drive}  → returns drive info + a one-shot
