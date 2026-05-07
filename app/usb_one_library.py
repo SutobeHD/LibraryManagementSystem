@@ -247,13 +247,23 @@ class OneLibraryUsbWriter:
                 if label_id is not None:
                     slot.label_id = int(label_id)
 
+                # Artwork — extract embedded cover, write small+medium JPEGs
+                # to PIONEER/Artwork/<bucket>/, point the existing image row
+                # (image_id is preserved from the placeholder slot) at the
+                # small variant. Done BEFORE update_content so the FK stays
+                # valid in case the user-data overlay shifts image_id.
+                if src_path and src_path.exists():
+                    try:
+                        self._write_track_artwork(db, slot, src_path)
+                    except Exception as exc:
+                        logger.debug("[OneLibrary] artwork skipped for slot %s: %s", slot.id, exc)
+
                 db.update_content(slot)
                 content_id_map[t["id"]] = str(slot.id)
                 used_slots += 1
 
                 if copy_anlz:
                     self._copy_anlz_for(t, str(slot.id), source)
-                self._copy_artwork(t, str(slot.id))
 
                 if i % 5 == 0 or i == slot_count - 1:
                     yield {
@@ -398,6 +408,39 @@ class OneLibraryUsbWriter:
             return cache[name]
         except Exception:
             return None
+
+    def _write_track_artwork(self, db, slot, audio_path: Path) -> None:
+        """Generate the bucketed artwork pair for one track and update the
+        OneLibrary `image` row to point at the small JPEG.
+
+        Reuses whichever image_id the placeholder slot already references
+        (template-baseline images carry empty paths after anonymisation).
+        """
+        from . import usb_artwork
+
+        image_id = getattr(slot, "image_id", None)
+        if image_id in (None, 0):
+            # No FK — try to create a fresh image row (works on real DBs).
+            try:
+                img = db.create_image(usb_artwork.usb_relative_path(1))  # placeholder path
+                image_id = int(img.id)
+                slot.image_id = image_id
+            except Exception as exc:
+                logger.debug("[OneLibrary] create_image failed: %s", exc)
+                return
+
+        result = usb_artwork.write_artwork_pair(audio_path, int(image_id), self.pioneer)
+        if not result:
+            return  # no embedded art — leave existing image FK in place
+
+        # Point the image record at our small JPEG so CDJ list-view can find it
+        try:
+            img_row = db.get_image_by_id(int(image_id))
+            if img_row is not None:
+                img_row.path = usb_artwork.usb_relative_path(int(image_id))
+                db.update_image(img_row)
+        except Exception as exc:
+            logger.debug("[OneLibrary] update_image path skipped: %s", exc)
 
     def _dest_audio_path(self, track: Dict, src_path: Path) -> Path:
         """Pioneer-canonical layout: <usb>/Contents/<Artist>/<Title>/<filename>.
