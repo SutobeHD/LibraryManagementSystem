@@ -2043,7 +2043,9 @@ class UsbSyncReq(BaseModel):
     device_id: str
     sync_type: Optional[str] = "collection"  # collection, playlists, metadata
     playlist_ids: Optional[List[str]] = []
-    library_types: Optional[List[str]] = ["library_legacy"] # library_one, library_legacy
+    # Default to BOTH formats so Rekordbox auto-detects (exportLibrary.db) AND
+    # older Rekordbox / manual XML import (rekordbox.xml) both work out of the box.
+    library_types: Optional[List[str]] = ["library_one", "library_legacy"]
 
 class UsbEjectReq(BaseModel):
     drive: str
@@ -2133,7 +2135,12 @@ def usb_sync(r: UsbSyncReq):
     db_path = getattr(db.active_db, "db_path", None) or getattr(db.active_db, "xml_path", None)
     engine = UsbSyncEngine(str(db_path), profile["drive"], profile.get("filesystem", ""))
     results = []
-    libs = r.library_types or ["library_legacy"]
+    # Always export both formats so Rekordbox + CDJs auto-detect the stick.
+    # Legacy callers that passed only one type are upgraded silently — the
+    # writers are no-ops when their target file already matches, so this is
+    # additive rather than destructive.
+    libs = sorted(set((r.library_types or []) + ["library_one", "library_legacy"]))
+    logger.info(f"[USB-SYNC] device={r.device_id} type={r.sync_type} libs={libs}")
 
     if r.sync_type == "collection":
         for event in engine.sync_collection(profile, libs):

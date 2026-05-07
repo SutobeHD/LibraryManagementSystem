@@ -721,7 +721,9 @@ const UsbView = () => {
                 device_id: sel.device_id,
                 sync_type,
                 playlist_ids: playlistIds,
-                library_types: sel.library_types || ['library_one', 'library_legacy'],
+                // Always export both formats — Rekordbox auto-detects via
+                // exportLibrary.db, older CDJs / manual import use rekordbox.xml.
+                library_types: ['library_one', 'library_legacy'],
             }, { timeout: 0 });
             const result = res.data.result;
             setSyncProgress({ ...result, progress: 100 });
@@ -1259,29 +1261,11 @@ const UsbView = () => {
 
                                         <div className="border-t border-line-subtle mt-3 pt-3">
                                             <div className="mx-caption mb-2">Target Libraries</div>
-                                            <Toggle
-                                                label="Library One"
-                                                sub="exportLibrary.db — needed for Rekordbox 6/7 auto-detect on USB insert"
-                                                checked={(sel.library_types || ['library_one', 'library_legacy']).includes('library_one')}
-                                                onChange={(v) => {
-                                                    const cur = sel.library_types || ['library_one', 'library_legacy'];
-                                                    saveProfile({ library_types: v ? [...new Set([...cur, 'library_one'])] : cur.filter(t => t !== 'library_one') });
-                                                }}
-                                            />
-                                            <Toggle
-                                                label="Library Legacy"
-                                                sub="rekordbox.xml — manual import only (Preferences → Advanced → Database)"
-                                                checked={(sel.library_types || ['library_one', 'library_legacy']).includes('library_legacy')}
-                                                onChange={(v) => {
-                                                    const cur = sel.library_types || ['library_one', 'library_legacy'];
-                                                    saveProfile({ library_types: v ? [...new Set([...cur, 'library_legacy'])] : cur.filter(t => t !== 'library_legacy') });
-                                                }}
-                                            />
-                                            {!(sel.library_types || ['library_one', 'library_legacy']).includes('library_one') && (
-                                                <div className="mt-2 px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-300 text-tiny leading-snug">
-                                                    Library One is OFF — Rekordbox will not auto-detect this stick. Tracks only show after manual rekordbox.xml import.
-                                                </div>
-                                            )}
+                                            <div className="px-3 py-2 rounded-md bg-mx-input/40 border border-line-subtle text-tiny leading-snug text-ink-muted">
+                                                Both formats are written automatically:
+                                                <span className="block mt-1 text-ink-secondary">• <strong>exportLibrary.db</strong> — Rekordbox 6/7 + CDJ-3000 auto-detect</span>
+                                                <span className="block text-ink-secondary">• <strong>rekordbox.xml</strong> — older Rekordbox / manual import (Preferences → Advanced → Database)</span>
+                                            </div>
                                         </div>
                                     </div>
 

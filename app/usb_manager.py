@@ -1544,7 +1544,11 @@ class UsbActions:
 
             engine = UsbSyncEngine(local_db_path, profile["drive"])
             sync_mode = profile.get("sync_mode", "full")
-            library_types = profile.get("library_types", ["library_one"]) # Assuming library_types can be stored in profile
+            # Always sync both formats — Rekordbox auto-detect (library_one)
+            # AND legacy XML (library_legacy) — regardless of saved profile.
+            library_types = sorted(set(
+                (profile.get("library_types") or []) + ["library_one", "library_legacy"]
+            ))
 
             try:
                 if sync_mode == "full":
