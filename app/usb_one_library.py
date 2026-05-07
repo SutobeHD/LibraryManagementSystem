@@ -67,20 +67,41 @@ class OneLibraryUsbWriter:
         for d in (self.rb_dir, self.anlz_root, self.artwork_dir, self.music_dir):
             d.mkdir(parents=True, exist_ok=True)
 
-        # Optional legacy PDB stubs — see app/usb_pdb.py for the full status.
-        # Off by default because the row encoders aren't implemented yet:
-        # writing a header-only PDB on top of older CDJ firmware MIGHT show
-        # an empty library OR error out depending on the model. Users with a
-        # CDJ-2000nxs2 can opt in via `legacy_pdb_stub=true` in settings to
-        # force-write the stub.
+        # Legacy export.pdb / exportExt.pdb policy:
+        # * Stub disabled (default): DELETE any stale PDB left over from a
+        #   previous Rekordbox-native sync. Without this Rekordbox shows an
+        #   empty "Device Library" branch alongside our healthy "OneLibrary"
+        #   branch — looks broken even though OneLibrary is fine.
+        # * Stub enabled (`legacy_pdb_stub=true`): write the header-only
+        #   stub so older CDJ firmware sees a valid (if empty) PDB. Real
+        #   row encoders aren't implemented — see app/usb_pdb.py.
         try:
             from .services import SettingsManager
-            if SettingsManager.load().get("legacy_pdb_stub", False):
+            stub_enabled = SettingsManager.load().get("legacy_pdb_stub", False)
+        except Exception:
+            stub_enabled = False
+
+        if stub_enabled:
+            try:
                 from . import usb_pdb
                 usb_pdb.write_export_pdb(self.usb_root)
                 usb_pdb.write_export_ext_pdb(self.usb_root)
-        except Exception as exc:
-            logger.debug("[OneLibrary] legacy PDB stub skipped: %s", exc)
+            except Exception as exc:
+                logger.debug("[OneLibrary] legacy PDB stub skipped: %s", exc)
+        else:
+            for stale_name in ("export.pdb", "exportExt.pdb"):
+                stale_path = self.rb_dir / stale_name
+                if stale_path.exists():
+                    try:
+                        stale_path.unlink()
+                        logger.info(
+                            "[OneLibrary] removed stale %s (no row encoder yet — "
+                            "prevents empty 'Device Library' branch in Rekordbox)",
+                            stale_name,
+                        )
+                    except OSError as exc:
+                        logger.warning("[OneLibrary] could not remove stale %s: %s",
+                                       stale_path, exc)
 
     # Path to the bundled template DB (built by app.templates.build_template
     # from any Rekordbox-exported stick). The template ships with N
