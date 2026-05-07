@@ -381,8 +381,16 @@ class OneLibraryUsbWriter:
             shutil.copy2(str(src), str(target / src.name))
 
     def _write_playlists(self, db, source, content_id_map: Dict[str, str]) -> None:
-        """Walks playlist tree, creates folders / playlists, links tracks."""
-        playlists = list(source.iter_playlists())
+        """Walks playlist tree, creates folders / playlists, links tracks.
+
+        System playlists like "Import" are filtered out — see
+        usb_manager.EXCLUDED_USB_PLAYLISTS.
+        """
+        from .usb_manager import _is_excluded_playlist
+        playlists = [
+            p for p in source.iter_playlists()
+            if not _is_excluded_playlist(p.get("name", ""))
+        ]
         # Build parent → children map
         by_parent: Dict[str, List[Dict]] = {}
         for p in playlists:

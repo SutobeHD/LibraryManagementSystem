@@ -29,6 +29,17 @@ try:
 except Exception:
     pass
 
+# Playlist names that should NEVER be propagated to a USB stick.
+# Lowercased + matched case-insensitively. The "Import" playlist is auto-
+# created by ImportManager for every locally imported file — it's a working-
+# memory bucket and would just clutter the CDJ playlist menu.
+EXCLUDED_USB_PLAYLISTS: frozenset = frozenset({"import"})
+
+
+def _is_excluded_playlist(name: str) -> bool:
+    return (name or "").strip().lower() in EXCLUDED_USB_PLAYLISTS
+
+
 @contextmanager
 def locked_sync(usb_root: Path):
     """Req 24: Prevent concurrent access via explicit lock file."""
@@ -1120,16 +1131,23 @@ class UsbSyncEngine:
             
             # Also export the Playlists if provided.
             # Same rbox method-name fix as above (get_playlist_by_id + get_playlist_contents).
+            # System playlists like "Import" are filtered out — they're local
+            # working-memory buckets and would just clutter the CDJ menu.
             if playlist_ids:
                 node_pl = ET.SubElement(root, "PLAYLISTS")
                 for pl_id in playlist_ids:
                     try:
                         pl = db.get_playlist_by_id(str(pl_id))
-                        if pl:
-                            pl_elem = ET.SubElement(node_pl, "NODE",
-                                Name=self._xml_safe(getattr(pl, 'name', '') or ''), Type="1")
-                            for content in db.get_playlist_contents(str(pl_id)):
-                                ET.SubElement(pl_elem, "TRACK", Key=str(content.id))
+                        if not pl:
+                            continue
+                        pl_name = getattr(pl, 'name', '') or ''
+                        if _is_excluded_playlist(pl_name):
+                            logger.info(f"[USB-Legacy] Skipping excluded playlist '{pl_name}'")
+                            continue
+                        pl_elem = ET.SubElement(node_pl, "NODE",
+                            Name=self._xml_safe(pl_name), Type="1")
+                        for content in db.get_playlist_contents(str(pl_id)):
+                            ET.SubElement(pl_elem, "TRACK", Key=str(content.id))
                     except Exception as e:
                         logger.warning(f"Failed to export playlist {pl_id} to XML: {type(e).__name__}: {e}")
 
@@ -1265,11 +1283,19 @@ class UsbSyncEngine:
                     "progress": int((i / max(len(tracks_to_export), 1)) * 90),
                 }
 
-        # Playlist tree
+        # Playlist tree — filter out excluded playlists ("Import" etc.)
+        all_playlists = [
+            pl for pl in source.iter_playlists()
+            if not _is_excluded_playlist(pl.get("name", ""))
+        ]
+        excluded_count = len(list(source.iter_playlists())) - len(all_playlists)
+        if excluded_count:
+            logger.info(f"[USB-Legacy-XML] Excluded {excluded_count} system playlist(s) from USB export")
+
         playlists_root = ET.SubElement(root, "PLAYLISTS")
         playlists_root_node = ET.SubElement(playlists_root, "NODE", Name="ROOT", Type="0",
-                                            Count=str(len(list(source.iter_playlists()))))
-        for pl in source.iter_playlists():
+                                            Count=str(len(all_playlists)))
+        for pl in all_playlists:
             if playlist_ids and str(pl["id"]) not in playlist_ids:
                 continue
             node = ET.SubElement(
