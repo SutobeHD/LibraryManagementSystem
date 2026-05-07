@@ -67,7 +67,30 @@ def write_companion_anlz(file_path: Path, analysis_result: Optional[Dict[str, An
             analysis_result=analysis_result,
             filename_base="ANLZ0000",
         )
-        logger.info("anlz_sidecar: %s → %s", file_path.name, target)
+        # Sanity-check the color-waveform data — three-band FFT should produce
+        # 1190+/1200 non-zero entries on any real audio. Warn loudly if we're
+        # accidentally shipping zero/stub waveforms (regression guard).
+        wf = analysis_result.get("waveform", {}) or {}
+        pwv6 = wf.get("pwv6") or []
+        if pwv6:
+            nonzero = sum(1 for e in pwv6 if any(e) if isinstance(e, (list, tuple)))
+            ratio = nonzero / max(len(pwv6), 1)
+            if ratio < 0.5:
+                logger.warning(
+                    "anlz_sidecar: %s — only %.0f%% of pwv6 entries non-zero "
+                    "(suspect stub waveform)",
+                    file_path.name, ratio * 100,
+                )
+            else:
+                logger.info(
+                    "anlz_sidecar: %s → %s (color-waveform: %d/%d entries, "
+                    "%d hd-detail)",
+                    file_path.name, target.name,
+                    nonzero, len(pwv6), len(wf.get("pwv7") or []),
+                )
+        else:
+            logger.info("anlz_sidecar: %s → %s (no color waveform data)",
+                        file_path.name, target.name)
         return target
     except Exception as exc:
         logger.warning("anlz_sidecar: write failed for %s: %s", file_path.name, exc)
