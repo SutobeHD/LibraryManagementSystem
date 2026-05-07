@@ -258,12 +258,20 @@ class OneLibraryUsbWriter:
                     except Exception as exc:
                         logger.debug("[OneLibrary] artwork skipped for slot %s: %s", slot.id, exc)
 
+                # ANLZ sidecars (DAT/EXT/2EX) — beatgrid + cues + waveforms.
+                # Done before update_content so the analysis_data_file_path
+                # field can land in the same write.
+                if copy_anlz:
+                    try:
+                        anlz_rel = self._generate_or_copy_anlz_for(t, str(slot.id), source)
+                        if anlz_rel:
+                            slot.analysis_data_file_path = anlz_rel
+                    except Exception as exc:
+                        logger.debug("[OneLibrary] ANLZ skipped for slot %s: %s", slot.id, exc)
+
                 db.update_content(slot)
                 content_id_map[t["id"]] = str(slot.id)
                 used_slots += 1
-
-                if copy_anlz:
-                    self._copy_anlz_for(t, str(slot.id), source)
 
                 if i % 5 == 0 or i == slot_count - 1:
                     yield {
@@ -475,18 +483,82 @@ class OneLibraryUsbWriter:
         except Exception as e:
             logger.debug(f"Artwork copy skipped: {e}")
 
-    def _copy_anlz_for(self, track: Dict, content_id: str, source) -> None:
-        """Copy companion ANLZ files to the CDJ-bucket layout."""
+    @staticmethod
+    def _anlz_bucket(content_id: int) -> tuple:
+        """CDJ bucket layout: PIONEER/USBANLZ/P<bucket-hex>/<inner-hex>/.
+
+        Real Rekordbox exports use bucket = `P{(id // 256):03X}` and inner =
+        `{id:08X}`. Both are upper-case hex. Verified against an F: drive
+        export. The exact convention isn't strictly required — Rekordbox
+        and CDJs read the path from the DB — but matching it makes the
+        result indistinguishable from a real Rekordbox stick.
+        """
+        cid = max(int(content_id), 0)
+        bucket = f"P{(cid // 256):03X}".upper()
+        inner = f"{cid:08X}".upper()
+        return bucket, inner
+
+    def _generate_or_copy_anlz_for(
+        self, track: Dict, content_id: str, source,
+    ) -> Optional[str]:
+        """Drop the per-track ANLZ sidecar trio into PIONEER/USBANLZ/.
+
+        Strategy:
+          1. Look for cached sidecars in <music_dir>/.lms_anlz/<hash>/ —
+             written at import-time by `anlz_sidecar.write_companion_anlz`.
+             If present, just copy.
+          2. Otherwise run the analysis on demand (slow but bounded — same
+             code path as the importer uses) and cache the output.
+          3. Either way, copy the resulting DAT/EXT/2EX into the CDJ
+             bucket layout so they ride out to the stick.
+
+        Returns the relative `analysis_data_file_path` (matches
+        Rekordbox's own value in exportLibrary.db) or None on failure.
+        """
         sidecar_dir = source.get_anlz_sidecar_dir(track)
-        if not sidecar_dir or not sidecar_dir.exists():
-            return
-        # CDJ layout: PIONEER/USBANLZ/P000/<8-hex>/ANLZ0000.{DAT,EXT,2EX}
-        bucket = "P" + str(int(content_id) // 1000).zfill(3) if content_id.isdigit() else "P000"
-        h = hashlib.sha1(content_id.encode()).hexdigest()[:8].upper()
-        target = self.anlz_root / bucket / h
-        target.mkdir(parents=True, exist_ok=True)
+
+        # Auto-generate if no cached sidecar — but only if we have an audio
+        # source. Streaming pseudo-tracks (SoundCloud URI etc.) get None.
+        if not (sidecar_dir and sidecar_dir.exists()):
+            audio_path_str = track.get("path")
+            if not audio_path_str:
+                return None
+            audio_path = Path(audio_path_str)
+            if not audio_path.exists():
+                return None
+            try:
+                from . import anlz_sidecar
+                sidecar_dir = anlz_sidecar.write_companion_anlz(audio_path)
+            except Exception as exc:
+                logger.debug("[ANLZ] generation failed for %s: %s", audio_path.name, exc)
+                return None
+            if not sidecar_dir or not sidecar_dir.exists():
+                return None
+
+        bucket, inner = self._anlz_bucket(int(content_id))
+        target_dir = self.anlz_root / bucket / inner
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        copied = []
         for src in sidecar_dir.glob("ANLZ*"):
-            shutil.copy2(str(src), str(target / src.name))
+            dst = target_dir / src.name
+            try:
+                shutil.copy2(str(src), str(dst))
+                copied.append(src.name)
+            except OSError as exc:
+                logger.debug("[ANLZ] copy %s -> %s failed: %s", src, dst, exc)
+
+        if not copied:
+            return None
+
+        # Relative path stored in OneLibrary `content.analysis_data_file_path`
+        # — must point at the .DAT specifically (CDJ infers .EXT/.2EX from there)
+        return f"/PIONEER/USBANLZ/{bucket}/{inner}/ANLZ0000.DAT"
+
+    # Back-compat shim — old `_copy_anlz_for` callers should switch to
+    # `_generate_or_copy_anlz_for`. Kept while we transition the call sites.
+    def _copy_anlz_for(self, track: Dict, content_id: str, source) -> None:
+        self._generate_or_copy_anlz_for(track, content_id, source)
 
     def _write_playlists(self, db, source, content_id_map: Dict[str, str]) -> None:
         """Walks playlist tree, creates folders / playlists, links tracks.
