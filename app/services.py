@@ -1037,11 +1037,42 @@ class ImportManager:
             except Exception as e:
                 logger.warning(f"Failed to extract artwork: {e}")
             
-            # 2. Prepare track data
+            # 2. Read native tags (ID3/Vorbis/MP4/WAV-RIFF) before falling
+            # back to filename-based defaults. Without this every imported
+            # track ended up as Artist="New Import" / Album="Imported" which
+            # then poisoned the USB folder layout (PIONEER/Contents/<Artist>
+            # /<Album>/file). See audio_tags.read_tags for the probe order.
+            try:
+                from . import audio_tags
+                tags = audio_tags.read_tags(file_path)
+            except Exception as exc:
+                logger.warning(f"Tag read failed for {file_path}: {exc}")
+                tags = {}
+
+            title = tags.get("title") or file_path.stem
+            artist = tags.get("artist") or "Unknown Artist"
+            album = tags.get("album") or ""
+            genre = tags.get("genre") or ""
+            comment = tags.get("comment") or ""
+            try:
+                year = int(tags.get("year") or 0)
+            except (TypeError, ValueError):
+                year = 0
+
+            logger.info(
+                "Import metadata resolved: title=%r artist=%r album=%r genre=%r year=%s",
+                title, artist, album, genre, year,
+            )
+
+            # 3. Prepare track data
             track_data = {
-                "Title": file_path.stem,
-                "Artist": "New Import",
-                "Album": "Imported",
+                "Title": title,
+                "Artist": artist,
+                "Album": album,
+                "Genre": genre,
+                "Comment": comment,
+                "ReleaseYear": year,
+                "ISRC": tags.get("isrc") or "",
                 "BPM": analysis["bpm"],
                 "Key": analysis["key"],
                 "Camelot": analysis["camelot"],

@@ -24,6 +24,8 @@ import mimetypes
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import mutagen
+
 logger = logging.getLogger("AUDIO_TAGS")
 
 # Map app-level field names → format-agnostic keys we know how to write.
@@ -278,3 +280,100 @@ def load_artwork(image_path: str | Path) -> Optional[bytes]:
     except Exception as exc:
         logger.warning("Could not load artwork %s: %s", image_path, exc)
         return None
+
+
+# Tag-key candidates per format. Mutagen's auto-detected `File` exposes raw
+# tag containers, so we probe each format's canonical keys in priority order.
+# WORKAROUND for older M4A files that store the data under different atoms.
+_READ_KEYS = {
+    "title":   ["TIT2", "title", "\xa9nam", "Title", "TITLE"],
+    "artist":  ["TPE1", "artist", "\xa9ART", "Artist", "ARTIST", "TPE2"],
+    "album":   ["TALB", "album", "\xa9alb", "Album", "ALBUM"],
+    "albumartist": ["TPE2", "albumartist", "aART", "AlbumArtist"],
+    "genre":   ["TCON", "genre", "\xa9gen", "Genre", "GENRE"],
+    "year":    ["TDRC", "TYER", "date", "\xa9day", "Year", "YEAR", "DATE"],
+    "comment": ["COMM::eng", "COMM", "comment", "\xa9cmt", "Comment", "COMMENT"],
+    "bpm":     ["TBPM", "bpm", "tmpo", "BPM"],
+    "key":     ["TKEY", "initialkey", "----:com.apple.iTunes:initialkey", "Key", "INITIALKEY"],
+    "isrc":    ["TSRC", "isrc", "----:com.apple.iTunes:ISRC", "ISRC"],
+}
+
+
+def _coerce_tag_value(raw) -> str:
+    """Reduce mutagen's various return types (Frame, list, MP4FreeForm) to a clean str."""
+    if raw is None:
+        return ""
+    # mutagen ID3 frames have a `.text` attribute (TIT2, TPE1, …) or are
+    # already iterable (COMM). MP4 atoms come back as a list.
+    text = getattr(raw, "text", raw)
+    if isinstance(text, list):
+        if not text:
+            return ""
+        text = text[0]
+    if isinstance(text, bytes):
+        try:
+            text = text.decode("utf-8", errors="ignore")
+        except Exception:
+            return ""
+    return str(text).strip()
+
+
+def _parse_filename(stem: str) -> Dict[str, str]:
+    """Fallback parser for "Artist - Title" patterns common in DJ pools.
+
+    Splits on the first " - " (en-dash and em-dash also accepted). Returns
+    `{"artist": "...", "title": "..."}` or `{"title": stem}` if no separator.
+    """
+    import re
+    parts = re.split(r"\s+[-–—]\s+", stem, maxsplit=1)
+    if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+        return {"artist": parts[0].strip(), "title": parts[1].strip()}
+    return {"title": stem.strip()}
+
+
+def read_tags(path: str | Path) -> Dict[str, str]:
+    """Read metadata tags from any supported audio file.
+
+    Strategy:
+      1. mutagen.File() auto-detects the format
+      2. Probe each canonical key list per logical field
+      3. If artist/title missing, fall back to filename "Artist - Title" parsing
+
+    Returns a dict with possibly-empty string values: title, artist, album,
+    albumartist, genre, year, comment, bpm, key, isrc. Never raises.
+    """
+    p = Path(path)
+    out: Dict[str, str] = {k: "" for k in _READ_KEYS}
+
+    try:
+        audio = mutagen.File(str(p))
+    except Exception as exc:
+        logger.debug("mutagen.File failed for %s: %s", p, exc)
+        audio = None
+
+    if audio is not None:
+        tags = getattr(audio, "tags", None) or audio
+        for field, candidates in _READ_KEYS.items():
+            for key in candidates:
+                try:
+                    if key in tags:
+                        val = _coerce_tag_value(tags[key])
+                        if val:
+                            out[field] = val
+                            break
+                except Exception:
+                    continue
+
+    # Filename fallback — only fills missing fields, never overwrites real tags
+    if not out["artist"] or not out["title"]:
+        parsed = _parse_filename(p.stem)
+        if not out["artist"] and "artist" in parsed:
+            out["artist"] = parsed["artist"]
+        if not out["title"]:
+            out["title"] = parsed.get("title", p.stem)
+
+    # Year normalisation: trim "2024-01-15" → "2024"
+    if out["year"] and len(out["year"]) >= 4:
+        out["year"] = out["year"][:4]
+
+    return out
