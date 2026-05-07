@@ -7,6 +7,7 @@ settings.json
 *.log.*
 *.tmp
 *.db
+!app/templates/*.db
 *.sqlite
 *.sqlite3
 .DS_Store
@@ -110,6 +111,7 @@ archive/
 
 # --- Development Scripts (debug/test/utilities) ---
 debug_*.py
+diag_*.py
 inspect_*.py
 check_*.py
 verify_*.py

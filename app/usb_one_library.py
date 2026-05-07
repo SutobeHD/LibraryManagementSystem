@@ -66,87 +66,146 @@ class OneLibraryUsbWriter:
         for d in (self.rb_dir, self.anlz_root, self.artwork_dir, self.music_dir):
             d.mkdir(parents=True, exist_ok=True)
 
+    # Path to the bundled template DB (built by app.templates.build_template
+    # from any Rekordbox-exported stick). The template ships with N
+    # placeholder content rows that we mutate via update_content, working
+    # around rbox 0.1.7's broken create_content path.
+    TEMPLATE_DB = Path(__file__).parent / "templates" / "exportLibrary_template.db"
+
     def sync(self, source, audio_copy: bool = True, copy_anlz: bool = True) -> Generator[Dict, None, None]:
         """Main entry: yields progress events.
 
-        KNOWN UPSTREAM BUG (rbox 0.1.5–0.1.7): `OneLibrary.create()` returns
-        a database that fails Diesel FK validation on every subsequent
-        insert. The DB exists on disk but cannot accept content/image/
-        artist rows — every write yields:
-          "Diesel error: foreign key mismatch - <table> referencing <ref>"
-        Until this is fixed upstream the OneLibrary path is best-effort:
-        we still create the empty DB so Rekordbox detects the stick, log
-        the failure pattern, and continue. Tracks become visible only via
-        the legacy rekordbox.xml import path (Preferences → Advanced →
-        Database → Import rekordbox.xml).
+        TEMPLATE-BASED APPROACH (rbox 0.1.7 workaround):
+
+        rbox 0.1.7's `OneLibrary.create()` returns a DB whose schema fails
+        Diesel FK validation on every subsequent insert (verified
+        empirically). Even on a real Rekordbox-created DB,
+        `create_content(path)` raises "Unexpected null for non-null column".
+        There is no Python-level constructor for `NewContent` so
+        `insert_content` is unreachable too.
+
+        Workaround: ship a clean template DB derived from a real Rekordbox
+        export (see app/templates/build_template.py). The template contains
+        N placeholder content rows. We copy it onto the USB, then mutate
+        each row via `update_content` to populate user data — that path
+        works fine. `create_image`, `create_artist`, `create_album` etc.
+        also work, so reference tables get populated normally.
+
+        Hard limit: the number of user tracks per OneLibrary sync is capped
+        at the template's slot count (currently 16 from F: drive). Beyond
+        that we skip the extras and log clearly. The legacy rekordbox.xml
+        export (always written) covers the full library.
         """
         if not RBOX_AVAILABLE:
             yield {"stage": "error", "message": "rbox library missing — cannot write OneLibrary", "progress": -1}
             return
 
+        if not self.TEMPLATE_DB.exists():
+            logger.warning(
+                "[OneLibrary] No template DB at %s — Rekordbox auto-detect "
+                "will be unavailable. Build one with: python -m "
+                "app.templates.build_template <path_to_rekordbox_stick>",
+                self.TEMPLATE_DB,
+            )
+            yield {
+                "stage": "warning",
+                "message": (
+                    "OneLibrary template missing — Rekordbox won't auto-detect this stick. "
+                    "Run `python -m app.templates.build_template <Rekordbox-exported-stick>` "
+                    "once to build the template, then re-sync. Legacy XML still works for manual import."
+                ),
+                "progress": 100,
+            }
+            return
+
         yield {"stage": "preparing", "message": "Creating USB structure", "progress": 1}
         self.ensure_structure()
 
-        # Wipe + recreate exportLibrary.db (cleaner than diff-merge for now)
-        if self.db_path.exists():
-            try:
-                self.db_path.unlink()
-            except OSError as e:
-                yield {"stage": "error", "message": f"Cannot remove old DB: {e}", "progress": -1}
-                return
+        # Stage 1 — copy template to USB (DB + WAL + SHM together)
+        for ext in ("", "-shm", "-wal"):
+            src = Path(str(self.TEMPLATE_DB) + ext)
+            dst = Path(str(self.db_path) + ext)
+            dst.unlink(missing_ok=True)
+            if src.exists():
+                shutil.copy2(str(src), str(dst))
+        logger.info("[OneLibrary] Copied template to %s (%d B)",
+                    self.db_path, self.db_path.stat().st_size)
 
         try:
-            # rbox.OneLibrary.create(path: str, my_tag_master_dbid: int)
-            # The C signature wants a 32-bit unsigned int — derive a stable
-            # device-unique value from the USB root path. NB: must be int,
-            # not str — rbox raises TypeError on string and the previous
-            # implementation silently failed in production.
+            db = rbox.OneLibrary(str(self.db_path))
+        except Exception as e:
+            logger.error("[OneLibrary] Failed to open templated DB: %s", e, exc_info=True)
+            yield {"stage": "error", "message": f"Cannot open template DB: {e}", "progress": -1}
+            return
+
+        # Set our device-unique my_tag_master_dbid so different sticks have
+        # distinct Property records (CDJ behaviour expectation).
+        try:
             mytag_dbid = int(
                 hashlib.sha1(str(self.usb_root).encode()).hexdigest()[:8], 16
             ) & 0x7FFFFFFF
-            db = rbox.OneLibrary.create(str(self.db_path), mytag_dbid)
-            logger.info(
-                "[OneLibrary] Created DB at %s (dbid=%d, size=%d)",
-                self.db_path, mytag_dbid,
-                self.db_path.stat().st_size if self.db_path.exists() else 0,
-            )
-        except Exception as e:
-            logger.error("[OneLibrary] create failed: %s", e, exc_info=True)
-            yield {"stage": "error", "message": f"OneLibrary.create failed: {e}", "progress": -1}
-            return
+            prop = list(db.get_properties())[0]
+            prop.my_tag_master_dbid = mytag_dbid
+            try:
+                db.update_property(prop)
+            except Exception as exc:
+                logger.debug("[OneLibrary] update_property skipped: %s", exc)
+        except Exception as exc:
+            logger.debug("[OneLibrary] property dbid update skipped: %s", exc)
 
-        yield {"stage": "preparing", "message": "DB created. Building lookups…", "progress": 5}
+        yield {"stage": "preparing", "message": "Reading placeholder slots…", "progress": 5}
 
-        # Caches: name → id (avoid duplicate inserts)
+        # Sorted by id — gives deterministic slot allocation
+        placeholders = sorted(db.get_contents(), key=lambda c: c.id)
+        slot_count = len(placeholders)
+        logger.info("[OneLibrary] Template provides %d content slots", slot_count)
+
+        # Reference-table caches (these CAN be created fresh — only
+        # create_content is broken, the others work).
         artist_cache: Dict[str, str] = {}
         album_cache: Dict[str, str] = {}
         genre_cache: Dict[str, str] = {}
         key_cache: Dict[str, str] = {}
         label_cache: Dict[str, str] = {}
 
-        # Track id mapping: source-track-id → onelibrary content-id
+        # Pre-warm caches with what's already in the template
+        try:
+            for a in db.get_artists():
+                artist_cache.setdefault((a.name or ""), str(a.id))
+            for a in db.get_albums():
+                album_cache.setdefault((a.name or ""), str(a.id))
+            for g in db.get_genres():
+                genre_cache.setdefault((g.name or ""), str(g.id))
+            for k in db.get_keys():
+                key_cache.setdefault((k.name or ""), str(k.id))
+            for lab in db.get_labels():
+                label_cache.setdefault((lab.name or ""), str(lab.id))
+        except Exception as exc:
+            logger.debug("[OneLibrary] cache pre-warm skipped: %s", exc)
+
         content_id_map: Dict[str, str] = {}
-
         all_tracks = list(source.iter_tracks())
-        total = max(1, len(all_tracks))
+        total = len(all_tracks)
+        used_slots = 0
+        skipped_overflow = 0
 
-        # Track FK-failure pattern so we can warn the user clearly. The
-        # upstream rbox bug means every create_* call returns "Diesel error:
-        # foreign key mismatch" — log once, count failures, surface a
-        # meaningful summary instead of dumping the same exception 3000x.
-        fk_fail_count = 0
-
+        # Stage 2 — populate slots via update_content (the working path)
         for i, t in enumerate(all_tracks):
+            if i >= slot_count:
+                skipped_overflow += 1
+                continue
             try:
-                # Resolve refs (artist/album/genre/key/label)
-                artist_id = self._get_or_create_artist(db, artist_cache, t["artist"])
-                album_id = self._get_or_create_album(db, album_cache, t["album"], artist_id)
-                genre_id = self._get_or_create_genre(db, genre_cache, t["genre"])
-                key_id = self._get_or_create_key(db, key_cache, t["key"])
-                label_id = self._get_or_create_label(db, label_cache, t["label"])
+                slot = placeholders[i]
 
-                # Audio file copy → USB
-                src_path = Path(t["path"]) if t["path"] else None
+                # Resolve refs
+                artist_id = self._get_or_create_artist(db, artist_cache, t.get("artist") or "")
+                album_id = self._get_or_create_album(db, album_cache, t.get("album") or "", artist_id)
+                genre_id = self._get_or_create_genre(db, genre_cache, t.get("genre") or "")
+                key_id = self._get_or_create_key(db, key_cache, t.get("key") or "")
+                label_id = self._get_or_create_label(db, label_cache, t.get("label") or "")
+
+                # Audio file copy → USB (Pioneer-canonical /Contents/<Artist>/<Title>/)
+                src_path = Path(t["path"]) if t.get("path") else None
                 if audio_copy and src_path and src_path.exists():
                     if self._dest_resolver is not None:
                         dest_path = self._dest_resolver(
@@ -159,82 +218,85 @@ class OneLibraryUsbWriter:
                     if not dest_path.exists():
                         dest_path.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(str(src_path), str(dest_path))
-                    usb_relative_path = "/" + str(dest_path.relative_to(self.usb_root)).replace("\\", "/")
+                    usb_rel_path = "/" + str(dest_path.relative_to(self.usb_root)).replace("\\", "/")
                 else:
-                    usb_relative_path = ""
+                    usb_rel_path = ""
 
-                # Insert content (track) — rbox API expects path as primary arg
-                content = db.create_content(usb_relative_path)
-                content_id = str(getattr(content, "id", "") or content)
-                content_id_map[t["id"]] = content_id
+                # Mutate the placeholder slot with user track data
+                slot.title = t.get("title") or ""
+                slot.title_for_search = (t.get("title") or "").lower()
+                slot.subtitle = ""
+                slot.path = usb_rel_path
+                slot.file_name = (src_path.name if src_path else "")
+                slot.dj_comment = t.get("comment") or ""
+                slot.bpmx100 = int((t.get("bpm") or 0) * 100)
+                slot.length = int((t.get("duration_ms") or 0) / 1000)
+                slot.rating = int(t.get("rating") or 0) * 51  # 0-5 → 0-255
+                slot.release_year = int(t.get("release_year") or 0)
+                slot.bitrate = int(t.get("bitrate") or 0)
+                slot.isrc = ""
+                if artist_id is not None:
+                    slot.artist_id = int(artist_id)
+                if album_id is not None:
+                    slot.album_id = int(album_id)
+                if genre_id is not None:
+                    slot.genre_id = int(genre_id)
+                if key_id is not None:
+                    slot.key_id = int(key_id)
+                if label_id is not None:
+                    slot.label_id = int(label_id)
 
-                # Update track metadata
-                try:
-                    db.update_content(
-                        content_id,
-                        title=t["title"],
-                        artist_id=artist_id,
-                        album_id=album_id,
-                        genre_id=genre_id,
-                        key_id=key_id,
-                        label_id=label_id,
-                        bpm=int(t["bpm"] * 100) if t["bpm"] else 0,  # CDJ stores BPM × 100
-                        rating=t["rating"] * 51 if t["rating"] else 0,  # 0–5 stars → 0–255
-                        comment=t["comment"],
-                        play_count=t["play_count"],
-                        release_year=t["release_year"],
-                        bitrate=t["bitrate"],
-                    )
-                except Exception as e:
-                    logger.debug(f"update_content partial failure for {t['id']}: {e}")
+                db.update_content(slot)
+                content_id_map[t["id"]] = str(slot.id)
+                used_slots += 1
 
-                # ANLZ sidecar copy
                 if copy_anlz:
-                    self._copy_anlz_for(t, content_id, source)
+                    self._copy_anlz_for(t, str(slot.id), source)
+                self._copy_artwork(t, str(slot.id))
 
-                # Cover artwork copy → PIONEER/Artwork/
-                self._copy_artwork(t, content_id)
-
-                if i % 10 == 0 or i == total - 1:
+                if i % 5 == 0 or i == slot_count - 1:
                     yield {
                         "stage": "tracks",
-                        "message": f"Imported {i+1}/{total}: {t['title'][:40]}",
-                        "progress": 5 + int(70 * (i + 1) / total),
+                        "message": f"Slot {i+1}/{slot_count}: {(t.get('title') or '?')[:40]}",
+                        "progress": 5 + int(70 * (i + 1) / max(slot_count, 1)),
                     }
             except Exception as e:
-                msg = str(e)
-                if "foreign key mismatch" in msg:
-                    fk_fail_count += 1
-                    if fk_fail_count == 1:
-                        logger.error(
-                            "[OneLibrary] Upstream rbox bug: OneLibrary.create() produces "
-                            "a DB that fails FK validation on every insert. Tracks will not "
-                            "land in exportLibrary.db. The rekordbox.xml fallback is still "
-                            "written — import it via Rekordbox Preferences → Advanced → "
-                            "Database → rekordbox.xml. First failure: %s", msg,
-                        )
-                else:
-                    logger.warning(f"Track sync skipped (id={t.get('id')}): {e}")
+                logger.warning(f"[OneLibrary] Slot {i} update failed for track {t.get('id')}: {e}",
+                               exc_info=False)
 
-        # Build playlist tree
+        # Stage 3 — delete unused placeholder rows so the CDJ menu doesn't
+        # show "__placeholder_X__" entries
+        for unused in placeholders[used_slots:]:
+            try:
+                db.delete_content(unused.id)
+            except Exception as exc:
+                logger.debug(f"[OneLibrary] couldn't delete unused slot {unused.id}: {exc}")
+
+        # Stage 4 — playlist tree (create_playlist works, no template needed)
         yield {"stage": "playlists", "message": "Writing playlist tree…", "progress": 80}
         try:
             self._write_playlists(db, source, content_id_map)
         except Exception as e:
             logger.warning(f"[OneLibrary] playlist tree write skipped: {e}")
 
-        if fk_fail_count > 0:
+        # Final summary
+        if skipped_overflow > 0:
             yield {
                 "stage": "warning",
                 "message": (
-                    f"OneLibrary DB created but {fk_fail_count} tracks could not be "
-                    f"inserted (rbox upstream FK bug). Stick still works via manual "
-                    f"rekordbox.xml import in Rekordbox."
+                    f"OneLibrary: {used_slots}/{total} tracks written "
+                    f"({skipped_overflow} skipped — template has only {slot_count} slots). "
+                    f"Rebuild template from a Rekordbox stick with more tracks for a higher cap. "
+                    f"All {total} tracks are in rekordbox.xml for manual import."
                 ),
                 "progress": 100,
             }
         else:
-            yield {"stage": "complete", "message": f"OneLibrary export written: {len(content_id_map)} tracks", "progress": 100}
+            yield {
+                "stage": "complete",
+                "message": f"OneLibrary export written: {used_slots} tracks",
+                "progress": 100,
+            }
 
     # ─── helpers ─────────────────────────────────────────────────────────
 
