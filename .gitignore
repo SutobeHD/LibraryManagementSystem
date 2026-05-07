@@ -149,3 +149,8 @@ test_*.json
 .idea/workspace.xml
 .idea/shelf/
 *.orig
+
+# --- Local test/library artifacts ---
+standalone.xml
+rekordbox.xml
+download_registry.db

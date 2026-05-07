@@ -133,6 +133,22 @@ def get_current_device_id() -> str:
 
 # ── Deduplication ─────────────────────────────────────────────────────────────
 
+def get_record(sc_track_id: str) -> Optional[Dict]:
+    """Return full DB row for a SoundCloud track ID, or None if not present."""
+    if not sc_track_id:
+        return None
+    try:
+        with _conn() as db:
+            row = db.execute(
+                "SELECT * FROM download_history WHERE sc_track_id = ? LIMIT 1",
+                (str(sc_track_id),)
+            ).fetchone()
+        return dict(row) if row else None
+    except sqlite3.Error as exc:
+        logger.error("[Registry] get_record failed: %s", exc)
+        return None
+
+
 def is_already_downloaded(sc_track_id: str) -> bool:
     """
     O(1) dedup check by SoundCloud track ID.

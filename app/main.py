@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Response, BackgroundTasks
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Response, BackgroundTasks, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
@@ -90,11 +90,18 @@ logger = logging.getLogger("APP_MAIN")
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
-app = FastAPI(title="Rekordbox Editor Pro")
+app = FastAPI(title="Music Library Manager")
 
 # --- SECURITY: Internal shutdown token (generated per session) ---
 SHUTDOWN_TOKEN = secrets.token_urlsafe(32)
-logger.info(f"Session security token generated.")
+
+# Don't spam the log when this module is re-imported by a Windows subprocess
+# (ProcessPoolExecutor in app.anlz_safe spawns child workers — on Windows that
+# always means re-running every top-level statement here). The token only
+# matters in the parent FastAPI process.
+import multiprocessing as _mp
+if _mp.current_process().name == "MainProcess":
+    logger.info("Session security token generated.")
 
 # --- SECURITY: Allowed audio directories for streaming/processing ---
 # Users can only stream/process audio from these root directories.
@@ -121,7 +128,8 @@ def _init_allowed_roots():
         if dj_path.exists():
             roots.append(dj_path.resolve())
     ALLOWED_AUDIO_ROOTS.extend(roots)
-    logger.info(f"Allowed audio roots: {[str(r) for r in ALLOWED_AUDIO_ROOTS]}")
+    if _mp.current_process().name == "MainProcess":
+        logger.info(f"Allowed audio roots: {[str(r) for r in ALLOWED_AUDIO_ROOTS]}")
 
 _init_allowed_roots()
 
@@ -420,13 +428,10 @@ class DBModeReq(BaseModel):
 from fastapi import Request
 
 @app.get("/api/stream")
-async def stream_audio(path: str):
-    """Streams audio file from absolute path — SECURITY: validates path against allowed roots."""
-    logger.info(f"Stream request for: {path}")
-    
-    # SECURITY: Validate path is within allowed audio directories
+async def stream_audio(path: str, request: Request):
+    """Streams audio file with HTTP Range support — required for browser seeking."""
     file_path = validate_audio_path(path)
-    
+
     mime_types = {
         '.mp3': 'audio/mpeg',
         '.wav': 'audio/wav',
@@ -439,11 +444,72 @@ async def stream_audio(path: str):
     ext = file_path.suffix.lower()
     media_type = mime_types.get(ext, 'application/octet-stream')
 
-    return FileResponse(
-        file_path, 
+    file_size = file_path.stat().st_size
+    range_header = request.headers.get("range") or request.headers.get("Range")
+
+    # No Range header → still expose Accept-Ranges so browsers know seeking is possible
+    if not range_header:
+        async def _full():
+            with open(file_path, "rb") as f:
+                while True:
+                    chunk = f.read(64 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+        return StreamingResponse(
+            _full(),
+            media_type=media_type,
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(file_size),
+                "Content-Disposition": f'inline; filename="{file_path.name}"',
+                "Cache-Control": "no-cache",
+            },
+        )
+
+    # Parse "bytes=START-END"
+    try:
+        units, _, rng = range_header.partition("=")
+        if units.strip().lower() != "bytes":
+            raise ValueError("only byte ranges supported")
+        start_s, _, end_s = rng.strip().partition("-")
+        start = int(start_s) if start_s else 0
+        end = int(end_s) if end_s else file_size - 1
+        end = min(end, file_size - 1)
+        if start > end or start < 0:
+            raise ValueError("invalid range")
+    except Exception as e:
+        return Response(
+            status_code=416,
+            headers={"Content-Range": f"bytes */{file_size}"},
+            content=f"Invalid range: {e}",
+        )
+
+    chunk_size = end - start + 1
+
+    async def _ranged():
+        with open(file_path, "rb") as f:
+            f.seek(start)
+            remaining = chunk_size
+            buf = 64 * 1024
+            while remaining > 0:
+                data = f.read(min(buf, remaining))
+                if not data:
+                    break
+                remaining -= len(data)
+                yield data
+
+    return StreamingResponse(
+        _ranged(),
+        status_code=206,
         media_type=media_type,
-        filename=file_path.name,
-        content_disposition_type="inline"
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Content-Length": str(chunk_size),
+            "Content-Disposition": f'inline; filename="{file_path.name}"',
+            "Cache-Control": "no-cache",
+        },
     )
 
 @app.get("/api/audio/waveform")
@@ -455,6 +521,31 @@ async def get_multiband_waveform(path: str, pps: int = 50):
     except Exception as e:
         logger.error(f"Waveform generation failed: {e}")
         raise HTTPException(500, safe_error_message(e))
+
+class FileRevealReq(BaseModel):
+    path: str
+
+
+@app.post("/api/file/reveal")
+def file_reveal(r: FileRevealReq):
+    """Open the OS file explorer pointing at the given file/folder path."""
+    try:
+        p = Path(r.path)
+        if not p.exists():
+            raise HTTPException(404, f"Not found: {r.path}")
+        import sys, subprocess
+        if sys.platform == "win32":
+            subprocess.run(["explorer", "/select,", str(p)], check=False)
+        elif sys.platform == "darwin":
+            subprocess.run(["open", "-R", str(p)], check=False)
+        else:
+            subprocess.run(["xdg-open", str(p.parent)], check=False)
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, safe_error_message(e))
+
 
 @app.post("/api/file/write")
 async def file_write(r: FileWriteReq):
@@ -670,10 +761,11 @@ async def stream_audio(path: str):
     return FileResponse(valid_path, headers={"Accept-Ranges": "bytes"})
 
 
-# ── Pioneer "My Tag" (live mode only) ────────────────────────────────────────
+# ── Pioneer "My Tag" (mode-agnostic — XML + Live both supported) ──────────────
 def _require_live_db():
-    if db.mode != "live" or not db.active_db or not hasattr(db.active_db, "list_mytags"):
-        raise HTTPException(409, "MyTag is only available in Live (master.db) mode.")
+    """Backwards-compatible name. Now returns whichever active_db has MyTag support."""
+    if not db.active_db or not hasattr(db.active_db, "list_mytags"):
+        raise HTTPException(409, "MyTag is not available — library not loaded.")
     return db.active_db
 
 
@@ -848,6 +940,110 @@ def reorder_pl_track(r: PlReorderReq):
         logger.error(f"Reorder error: {e}")
         raise HTTPException(500, safe_error_message(e))
 
+
+# ─── Smart Playlist Endpoints ─────────────────────────────────────────────
+
+class SmartPlaylistCreateReq(BaseModel):
+    name: str
+    parent_id: str = "ROOT"
+    criteria: Dict = {}
+
+
+class SmartPlaylistUpdateReq(BaseModel):
+    pid: str
+    criteria: Dict
+
+
+@app.post("/api/playlists/smart/create")
+def create_smart_pl(r: SmartPlaylistCreateReq):
+    try:
+        node = db.create_smart_playlist(r.name, r.criteria, r.parent_id)
+        if node:
+            return {"status": "success", "id": str(node.get("ID") or node)}
+        raise HTTPException(400, "create_smart_playlist not supported in current mode")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Smart playlist create failed: {e}")
+        raise HTTPException(500, safe_error_message(e))
+
+
+@app.post("/api/playlists/smart/update")
+def update_smart_pl(r: SmartPlaylistUpdateReq):
+    try:
+        ok = db.update_smart_playlist(r.pid, r.criteria)
+        return {"status": "success" if ok else "error"}
+    except Exception as e:
+        raise HTTPException(500, safe_error_message(e))
+
+
+@app.get("/api/playlists/smart/{pid}/evaluate")
+def evaluate_smart_pl(pid: str):
+    """Run smart-playlist criteria → list of matching track dicts."""
+    try:
+        return db.evaluate_smart_playlist(pid)
+    except Exception as e:
+        logger.error(f"Smart eval failed: {e}")
+        raise HTTPException(500, safe_error_message(e))
+
+
+class UsbHistoryReq(BaseModel):
+    drive: str  # e.g. "E:\\"
+
+
+@app.post("/api/usb/history")
+def read_usb_history(r: UsbHistoryReq):
+    """
+    Read CDJ-written history (history_entries / history_contents) from a USB stick
+    after a gig. Returns the played tracks per session so the user can review what
+    was played, in what order.
+    """
+    try:
+        import rbox
+        from pathlib import Path as _P
+        usb = _P(r.drive)
+        if len(r.drive) == 2 and r.drive[1] == ":":
+            usb = _P(r.drive + "\\")
+        db_path = usb / "PIONEER" / "rekordbox" / "exportLibrary.db"
+        if not db_path.exists():
+            raise HTTPException(404, f"No exportLibrary.db on {usb}")
+        ol = rbox.OneLibrary(str(db_path))
+        sessions = []
+        for h in ol.get_histories():
+            children = ol.get_history_contents(h.id) if hasattr(ol, "get_history_contents") else []
+            sessions.append({
+                "id": str(h.id),
+                "name": getattr(h, "name", ""),
+                "date": getattr(h, "date_created", ""),
+                "tracks": [
+                    {
+                        "content_id": str(getattr(c, "content_id", c)),
+                        "seq": getattr(c, "seq", 0),
+                    } for c in children
+                ],
+            })
+        return {"sessions": sessions}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"USB history read failed: {e}")
+        raise HTTPException(500, safe_error_message(e))
+
+
+@app.post("/api/playlists/folder/create")
+def create_folder_pl(r: CreatePlReq):
+    """Convenience: create a folder (Type=0). Equivalent to /create with type='0'."""
+    try:
+        node = db.create_folder(r.name, r.parent_id) if hasattr(db, "create_folder") else \
+            db.create_playlist(r.name, r.parent_id, is_folder=True)
+        if node:
+            return {"status": "success", "id": str(node.get("ID") if isinstance(node, dict) else node)}
+        raise HTTPException(400, "Could not create folder")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, safe_error_message(e))
+
 # --- RESTORED ENDPOINTS ---
 
 @app.get("/api/tools/duplicates")
@@ -1010,19 +1206,24 @@ def get_backup_diff(commit_hash: str):
         return engine.get_diff(commit_hash)
     return {"error": "Not available in current mode"}
 
+class LoadLibReq(BaseModel):
+    path: Optional[str] = None
+
 @app.post("/api/library/load")
-def load_lib():
+def load_lib(r: LoadLibReq = Body(default=None)):
+    requested_path = r.path if r else None
     try:
-        # success = db.load_library() 
-        # Inline logic to avoid potential AttributeError if db.load_library is missing in runtime
         if db.mode == "live":
             success = db.active_db.load()
         else:
-            success = db.xml_db.load_xml("rekordbox.xml")
+            xml_path = requested_path or str(db.xml_db.xml_path) or "rekordbox.xml"
+            success = db.xml_db.load_xml(xml_path)
+        db.loaded = success
         return {
             "status": "success" if success else "error",
             "message": "Library loaded" if success else "Failed to load library",
-            "tracks": len(db.tracks)
+            "tracks": len(db.tracks),
+            "path": str(db.xml_db.xml_path) if db.mode == "xml" else str(db.live_db_path),
         }
     except Exception as e:
         logger.error(f"Failed to load library: {e}\n{traceback.format_exc()}")
@@ -1120,10 +1321,20 @@ async def import_paths(data: Dict[str, Any]):
     Import a mixed list of absolute filesystem paths (files OR directories).
     Used by drag-drop in the desktop app, where the OS hands us full paths
     instead of upload-able File blobs. Dedup via _is_known_audio_path.
+
+    Optional body fields:
+      group_into_playlist: bool — if true, every audio file (incl. duplicates
+                                  already in the library) is gathered into a
+                                  single playlist named after the source folder
+                                  (or `playlist_name` if given).
+      playlist_name: str        — explicit playlist name override.
     """
     raw = data.get("paths") or []
     if not isinstance(raw, list) or not raw:
         raise HTTPException(status_code=400, detail="'paths' must be a non-empty list")
+
+    group_into_playlist = bool(data.get("group_into_playlist", False))
+    explicit_pl_name = (data.get("playlist_name") or "").strip()
 
     targets: list[Path] = []
     queued_dirs = 0
@@ -1147,45 +1358,141 @@ async def import_paths(data: Dict[str, Any]):
     if not targets:
         return {"status": "ok", "queued_dirs": 0, "queued_files": 0, "message": "No importable paths."}
 
+    from . import import_tracker
+
+    counters = {"imported": 0, "skipped": 0, "linked": 0}
+
+    # ── Phase 1: enumerate and register tasks UPFRONT ─────────────────────
+    queued: list[tuple[Path, str]] = []  # (path, task_id)
+    folder_for_pl: Optional[Path] = None
+    for t in targets:
+        try:
+            if t.is_dir():
+                if folder_for_pl is None:
+                    folder_for_pl = t
+                for f in t.rglob("*"):
+                    if f.is_file() and f.suffix.lower() in folder_watcher.AUDIO_EXTENSIONS:
+                        tid = import_tracker.register(str(f), source="drag-drop")
+                        queued.append((f, tid))
+            elif t.is_file():
+                tid = import_tracker.register(str(t), source="drag-drop")
+                queued.append((t, tid))
+        except Exception as exc:
+            logger.warning("[Drop] Scan failed for %s: %s", t, exc)
+    logger.info("[Drop] queued %d files for import (group=%s)", len(queued), group_into_playlist)
+
+    # Determine playlist name once. Empty → fall through to per-file 'Import' default.
+    playlist_name = ""
+    if group_into_playlist:
+        if explicit_pl_name:
+            playlist_name = explicit_pl_name
+        elif folder_for_pl is not None:
+            playlist_name = folder_for_pl.name
+    collected_track_ids: list[str] = []
+
+    def _process_one(f: Path, tid: str) -> None:
+        local_id: Optional[str] = None
+        if _is_known_audio_path(f):
+            local_id = _track_id_for_path(f)
+            import_tracker.update(
+                tid, status="Skipped", progress=100,
+                error="Already in library",
+                local_track_id=local_id,
+            )
+            counters["skipped"] += 1
+            if local_id and group_into_playlist:
+                collected_track_ids.append(local_id)
+            return
+        threading.current_thread()._lms_import_tid = tid
+        try:
+            import_tracker.update(tid, status="Analyzing", progress=20)
+            result = ImportManager.process_import(f)
+            import_tracker.update(tid, status="Importing", progress=60)
+            local_id_raw, analysis = (result if isinstance(result, tuple) else (result, {}))
+            local_id = str(local_id_raw) if local_id_raw else None
+            import_tracker.update(
+                tid, status="Completed", progress=100,
+                local_track_id=local_id,
+                bpm=analysis.get("bpm") if isinstance(analysis, dict) else None,
+                key=analysis.get("key") if isinstance(analysis, dict) else None,
+            )
+            counters["imported"] += 1
+            if local_id and group_into_playlist:
+                collected_track_ids.append(local_id)
+        except Exception as exc:
+            logger.warning("[Drop] Import failed for %s: %s", f, exc)
+            import_tracker.update(tid, status="Failed", progress=100, error=str(exc))
+            counters["skipped"] += 1
+        finally:
+            try: del threading.current_thread()._lms_import_tid
+            except AttributeError: pass
+
+    def _bundle_into_playlist():
+        """After all files are processed, drop them into a single playlist."""
+        if not group_into_playlist or not playlist_name:
+            return
+        try:
+            # Find or create playlist (avoid creating duplicates of same name at ROOT)
+            pid = None
+            for p in db.playlists:
+                if p.get("Name") == playlist_name:
+                    pid = str(p.get("ID"))
+                    break
+            if not pid and hasattr(db, "create_playlist"):
+                node = db.create_playlist(playlist_name, "ROOT", is_folder=False)
+                pid = str(node.get("ID")) if isinstance(node, dict) else str(node)
+            if not pid:
+                logger.warning("[Drop] Could not create playlist '%s'", playlist_name)
+                return
+            for tid_local in collected_track_ids:
+                try:
+                    db.add_track_to_playlist(pid, tid_local)
+                    counters["linked"] += 1
+                except Exception as exc:
+                    logger.debug("[Drop] add_track_to_playlist(%s, %s) failed: %s",
+                                 pid, tid_local, exc)
+            logger.info("[Drop] Bundled %d tracks into playlist '%s' (pid=%s)",
+                        counters["linked"], playlist_name, pid)
+        except Exception as exc:
+            logger.warning("[Drop] Playlist bundling failed: %s", exc)
+
     def _run():
-        imported = 0
-        skipped = 0
-        for t in targets:
+        for f, tid in queued:
             try:
-                if t.is_dir():
-                    for f in t.rglob("*"):
-                        if not f.is_file() or f.suffix.lower() not in folder_watcher.AUDIO_EXTENSIONS:
-                            continue
-                        if _is_known_audio_path(f):
-                            skipped += 1
-                            continue
-                        try:
-                            ImportManager.process_import(f)
-                            imported += 1
-                        except Exception as exc:
-                            logger.warning("[Drop] Import failed for %s: %s", f, exc)
-                            skipped += 1
-                else:
-                    if _is_known_audio_path(t):
-                        skipped += 1
-                        continue
-                    try:
-                        ImportManager.process_import(t)
-                        imported += 1
-                    except Exception as exc:
-                        logger.warning("[Drop] Import failed for %s: %s", t, exc)
-                        skipped += 1
+                _process_one(f, tid)
             except Exception as exc:
-                logger.warning("[Drop] Scan failed for %s: %s", t, exc)
-        logger.info("[Drop] import-paths complete: imported=%d skipped=%d", imported, skipped)
+                logger.warning("[Drop] worker error for %s: %s", f, exc)
+        _bundle_into_playlist()
+        logger.info(
+            "[Drop] import-paths complete: imported=%d skipped=%d linked=%d playlist=%r",
+            counters["imported"], counters["skipped"], counters["linked"], playlist_name,
+        )
 
     threading.Thread(target=_run, daemon=True, name="drop-import").start()
+    pl_msg = f" → playlist '{playlist_name}'" if (group_into_playlist and playlist_name) else ""
     return {
         "status": "ok",
         "queued_dirs": queued_dirs,
         "queued_files": queued_files,
-        "message": f"Importing in background ({queued_dirs} folder(s), {queued_files} file(s))",
+        "queued_total": len(queued),
+        "playlist_name": playlist_name,
+        "group_into_playlist": group_into_playlist,
+        "message": f"Queued {len(queued)} audio file(s) for import (from {queued_dirs} folder(s), {queued_files} loose file(s)){pl_msg}",
     }
+
+@app.get("/api/import/tasks")
+def get_import_tasks():
+    """Live status of every local-file import (drag-drop / folder browse)."""
+    from . import import_tracker
+    return import_tracker.get_all()
+
+
+@app.post("/api/import/tasks/clear")
+def clear_import_tasks():
+    """Drop all completed/failed/skipped tasks from the tracker."""
+    from . import import_tracker
+    return {"removed": import_tracker.clear_finished()}
+
 
 @app.get("/api/artwork")
 async def get_artwork(path: str):
@@ -1394,14 +1701,16 @@ async def render(r: ExportRequest):
 @app.post("/api/audio/import")
 def import_audio(files: List[UploadFile] = File(...)):
     """Handles batch audio upload, analysis and library insertion."""
+    from . import import_tracker
     results = []
     for file in files:
+        track_task_id = None
         try:
             # SECURITY: Validate file extension
             if not file.filename or Path(file.filename).suffix.lower() not in ALLOWED_AUDIO_EXTENSIONS:
                 results.append({"filename": file.filename or "unknown", "status": "error", "message": "File type not allowed"})
                 continue
-            
+
             # SECURITY: Use only the basename to prevent path traversal
             safe_filename = Path(file.filename).name
             dest = MUSIC_DIR / safe_filename
@@ -1409,11 +1718,28 @@ def import_audio(files: List[UploadFile] = File(...)):
                 stem = safe_filename.rsplit('.', 1)[0]
                 ext = safe_filename.rsplit('.', 1)[-1]
                 dest = MUSIC_DIR / f"{stem}_{int(time.time())}.{ext}"
-            
+
+            track_task_id = import_tracker.register(str(dest), source="upload")
+            import_tracker.update(track_task_id, status="Importing", progress=10)
+
             with open(dest, "wb") as f:
                 shutil.copyfileobj(file.file, f)
-            
-            tid, analysis = ImportManager.process_import(dest)
+
+            import_tracker.update(track_task_id, status="Analyzing", progress=30)
+            # bind so process_import → anlz_sidecar can post ANLZ stage updates
+            threading.current_thread()._lms_import_tid = track_task_id
+            try:
+                tid, analysis = ImportManager.process_import(dest)
+            finally:
+                try: del threading.current_thread()._lms_import_tid
+                except AttributeError: pass
+
+            import_tracker.update(
+                track_task_id, status="Completed", progress=100,
+                local_track_id=str(tid) if tid else None,
+                bpm=(analysis or {}).get("bpm"),
+                key=(analysis or {}).get("key"),
+            )
             results.append({
                 "filename": file.filename, 
                 "status": "success", 
@@ -1423,6 +1749,8 @@ def import_audio(files: List[UploadFile] = File(...)):
             })
         except Exception as e:
             logger.error(f"Import failed for {file.filename}: {e}")
+            if track_task_id:
+                import_tracker.update(track_task_id, status="Failed", progress=100, error=str(e))
             results.append({"filename": file.filename, "status": "error", "message": safe_error_message(e)})
     return results
 
@@ -1469,6 +1797,25 @@ def _track_paths_snapshot() -> set[str]:
         except Exception:
             paths.add(p)
     return paths
+
+
+def _track_id_for_path(path: Path) -> Optional[str]:
+    """Return existing track-id for a given filesystem path, or None."""
+    try:
+        target = str(path.resolve())
+    except Exception:
+        target = str(path)
+    for tid, t in getattr(db, "tracks", {}).items():
+        p = t.get("path") if isinstance(t, dict) else None
+        if not p:
+            continue
+        try:
+            if str(Path(p).resolve()) == target:
+                return str(tid)
+        except Exception:
+            if str(p) == target:
+                return str(tid)
+    return None
 
 
 def _is_known_audio_path(path: Path) -> bool:
@@ -1647,10 +1994,23 @@ def cln(): return {"deleted_files": 0}
 def select_db_dialog():
     return {"path": "XML Mode"}
 
+class NewLibReq(BaseModel):
+    path: Optional[str] = None
+
 @app.post("/api/library/new")
-def create_new_lib():
-    db.create_new_library()
-    return {"status": "success", "message": "New empty library created."}
+def create_new_lib(r: NewLibReq = Body(default=None)):
+    path = r.path if r else None
+    try:
+        db.create_new_library(path)
+        return {
+            "status": "success",
+            "message": "New empty library created.",
+            "path": str(db.xml_db.xml_path),
+            "mode": db.mode,
+        }
+    except Exception as e:
+        logger.error(f"Failed to create new library: {e}")
+        return {"status": "error", "message": safe_error_message(e)}
 
 @app.post("/api/debug/load_xml")
 def debug_load_xml():
@@ -1735,9 +2095,10 @@ def usb_get_diff(device_id: str):
         if not dev:
             raise HTTPException(404, "Device not found")
         profile = UsbProfileManager.save_profile({"device_id": device_id, "label": dev.get("label", "USB"), "drive": dev["drive"]})
-    if not db.active_db or not hasattr(db.active_db, 'db_path'):
-        raise HTTPException(400, "No local database loaded")
-    engine = UsbSyncEngine(str(db.active_db.db_path), profile["drive"], profile.get("filesystem", ""))
+    if not db.active_db:
+        raise HTTPException(400, "No library loaded")
+    db_path = getattr(db.active_db, "db_path", None) or getattr(db.active_db, "xml_path", None)
+    engine = UsbSyncEngine(str(db_path), profile["drive"], profile.get("filesystem", ""))
     diff = engine.calculate_diff()
     # Add space estimate: ~10MB avg per track to add
     avg_track_size = 10 * 1024 * 1024
@@ -1762,12 +2123,15 @@ def _get_or_create_profile(device_id: str) -> dict:
 
 @app.post("/api/usb/sync")
 def usb_sync(r: UsbSyncReq):
-    """Sync a specific USB device."""
+    """Sync a specific USB device — works in both Live and XML modes."""
     profile = _get_or_create_profile(r.device_id)
-    if not db.active_db or not hasattr(db.active_db, 'db_path'):
-        raise HTTPException(400, "No local database loaded")
+    if not db.active_db:
+        raise HTTPException(400, "No library loaded")
 
-    engine = UsbSyncEngine(str(db.active_db.db_path), profile["drive"], profile.get("filesystem", ""))
+    # In Live mode pass master.db path, in XML mode pass xml path (legacy engine
+    # will fall back to OneLibrary writer which reads from db wrapper directly).
+    db_path = getattr(db.active_db, "db_path", None) or getattr(db.active_db, "xml_path", None)
+    engine = UsbSyncEngine(str(db_path), profile["drive"], profile.get("filesystem", ""))
     results = []
     libs = r.library_types or ["library_legacy"]
 
@@ -1787,10 +2151,11 @@ def usb_sync(r: UsbSyncReq):
 @app.post("/api/usb/sync/all")
 def usb_sync_all():
     """Sync all connected USB devices per their profiles."""
-    if not db.active_db or not hasattr(db.active_db, 'db_path'):
-        raise HTTPException(400, "No local database loaded")
+    if not db.active_db:
+        raise HTTPException(400, "No library loaded")
+    db_path = getattr(db.active_db, "db_path", None) or getattr(db.active_db, "xml_path", None)
     results = []
-    for event in UsbActions.update_all(str(db.active_db.db_path)):
+    for event in UsbActions.update_all(str(db_path)):
         results.append(event)
     last = results[-1] if results else {"stage": "complete", "message": "Nothing to sync"}
     return {"status": "success", "result": last, "events": results}
@@ -2304,6 +2669,87 @@ async def soundcloud_download(data: ScDownloadRequest, request: Request):
         sc_playlist_title=data.sc_playlist_title,
     )
     return {"status": "ok", "data": {"task_id": task_id}}
+
+
+class ScDownloadPlaylistReq(BaseModel):
+    playlist_id: int
+    is_likes: bool = False
+    playlist_title: Optional[str] = None  # for auto-playlist-sort folder
+    force: bool = False  # if True: wipe registry entries for these tracks → re-download
+
+
+@app.post("/api/soundcloud/download-playlist")
+async def soundcloud_download_playlist(r: ScDownloadPlaylistReq):
+    """Enqueue download for every track in a SoundCloud playlist."""
+    auth_token = keyring.get_password("library_management_system", "sc_token")
+    if not auth_token:
+        raise HTTPException(400, "SoundCloud auth token not configured")
+
+    # Write-permission guard
+    sc_dir = MUSIC_DIR / "SoundCloud"
+    sc_dir.mkdir(parents=True, exist_ok=True)
+    if not os.access(str(sc_dir), os.W_OK):
+        raise HTTPException(403, f"No write permission: {sc_dir}")
+
+    # Fetch full track list
+    try:
+        if r.is_likes:
+            likes = SoundCloudPlaylistAPI.get_likes(auth_token)
+            sc_tracks = likes.get("tracks", []) if likes else []
+        else:
+            sc_tracks = SoundCloudPlaylistAPI.get_full_playlist_tracks(r.playlist_id, auth_token)
+    except AuthExpiredError:
+        raise HTTPException(401, "auth_expired")
+    except Exception as e:
+        logger.error(f"[SC-DL-PL] Failed to fetch tracks: {e}")
+        raise HTTPException(502, f"Could not fetch playlist tracks: {e}")
+
+    if not sc_tracks:
+        return {"status": "success", "queued": 0, "skipped": 0, "task_ids": [], "message": "Playlist is empty or all tracks unavailable."}
+
+    task_ids = []
+    skipped = 0
+    forced_reset = 0
+    for t in sc_tracks:
+        sc_id = t.get("id")
+        title = t.get("title", "")
+        artist = t.get("artist", "")
+        if not sc_id or not title:
+            skipped += 1
+            continue
+
+        # Force re-download: wipe registry row so the gate doesn't skip us
+        if r.force:
+            try:
+                if download_registry.delete_entry(str(sc_id)):
+                    forced_reset += 1
+            except Exception as e:
+                logger.debug(f"[SC-DL-PL] registry delete failed for {sc_id}: {e}")
+
+        try:
+            tid = sc_downloader.download_track(
+                sc_track_id=str(sc_id),
+                sc_permalink_url=t.get("permalink_url", ""),
+                title=title,
+                artist=artist,
+                duration_ms=t.get("duration", 0),
+                downloadable=t.get("downloadable", False),
+                auth_token=auth_token,
+                sc_playlist_title=r.playlist_title,
+            )
+            task_ids.append(tid)
+        except Exception as e:
+            logger.warning(f"[SC-DL-PL] Skipped '{title}': {e}")
+            skipped += 1
+
+    return {
+        "status": "success",
+        "queued": len(task_ids),
+        "skipped": skipped,
+        "force_reset": forced_reset,
+        "task_ids": task_ids,
+        "message": f"Queued {len(task_ids)} downloads ({skipped} skipped, {forced_reset} reset).",
+    }
 
 
 @app.get("/api/soundcloud/tasks")

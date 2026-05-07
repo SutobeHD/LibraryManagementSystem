@@ -76,7 +76,7 @@ const DownloadQueueWidget = () => {
     );
 };
 
-const PlaylistCard = ({ playlist, selected, onToggle, onSync, onInspect, syncing }) => {
+const PlaylistCard = ({ playlist, selected, onToggle, onSync, onDownload, onInspect, syncing, downloading }) => {
     const [expanded, setExpanded] = useState(false);
     const isLikes = playlist.is_likes;
     const artworkUrl = playlist.artwork_url?.replace('-large', '-t300x300') || null;
@@ -144,6 +144,16 @@ const PlaylistCard = ({ playlist, selected, onToggle, onSync, onInspect, syncing
                             >
                                 {syncing ? <Loader2 size={10} className="animate-spin" /> : <ArrowUpDown size={10} />}
                                 Sync
+                            </button>
+
+                            <button
+                                onClick={() => onDownload(playlist)}
+                                disabled={downloading}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 rounded-lg text-[10px] font-bold border border-orange-500/30 transition-all disabled:opacity-30"
+                                title="Download all tracks of this playlist"
+                            >
+                                {downloading ? <Loader2 size={10} className="animate-spin" /> : <Download size={10} />}
+                                Download
                             </button>
 
                             <button
@@ -367,6 +377,42 @@ const SoundCloudSyncView = () => {
         } finally {
             setSyncing(false);
             isBusy.current = false;
+        }
+    };
+
+    const [downloadingPlaylistId, setDownloadingPlaylistId] = React.useState(null);
+
+    const handleDownloadPlaylist = async (playlist, forceFallback = false) => {
+        if (downloadingPlaylistId) return;
+        const force = forceFallback || (window.event?.shiftKey === true);
+        setDownloadingPlaylistId(playlist.id);
+        try {
+            const res = await api.post('/api/soundcloud/download-playlist', {
+                playlist_id: playlist.is_likes ? 0 : playlist.id,
+                is_likes: !!playlist.is_likes,
+                playlist_title: playlist.title || null,
+                force,
+            });
+            const { queued = 0, skipped = 0, force_reset = 0 } = res.data || {};
+            if (queued === 0 && skipped > 0 && !force) {
+                if (confirm(`Alle ${skipped} Tracks bereits in Registry. Erneut downloaden (Registry zurücksetzen)?`)) {
+                    setDownloadingPlaylistId(null);
+                    return handleDownloadPlaylist(playlist, true);
+                }
+            }
+            const extra = force_reset ? ` · Registry-Reset: ${force_reset}` : '';
+            toast.success(`${queued} Downloads gestartet${skipped ? ` (${skipped} übersprungen)` : ''}${extra}.`);
+        } catch (e) {
+            const status = e.response?.status;
+            const detail = e.response?.data?.detail || e.message;
+            if (status === 401 || detail === 'auth_expired') {
+                toast.error('Session abgelaufen. Bitte neu anmelden.');
+                showLoginScreen();
+            } else {
+                toast.error('Download fehlgeschlagen: ' + detail);
+            }
+        } finally {
+            setDownloadingPlaylistId(null);
         }
     };
 
@@ -703,8 +749,10 @@ const SoundCloudSyncView = () => {
                                     selected={selectedIds.has(pl.id)}
                                     onToggle={toggleSelect}
                                     onSync={handleSync}
+                                    onDownload={handleDownloadPlaylist}
                                     onInspect={setInspectorPlaylist}
                                     syncing={syncing}
+                                    downloading={downloadingPlaylistId === pl.id}
                                 />
                             ))}
                         </div>

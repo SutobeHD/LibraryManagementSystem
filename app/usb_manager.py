@@ -414,6 +414,7 @@ class UsbProfileManager:
                 statuses["library_one_status"] = "error"
 
         # --- Library Legacy: Try XML first, then PDB ---
+        legacy_playlists = []  # [{name, type, parent, track_keys: [...]}]
         if l_xml_path.exists():
             try:
                 tree = ET.parse(l_xml_path)
@@ -423,17 +424,42 @@ class UsbProfileManager:
                     for track in collection.findall("TRACK"):
                         loc = track.get("Location", "")
                         path = loc.split("localhost/")[-1] if "localhost/" in loc else loc
-                        
+
                         results["library_legacy"].append({
                             "ID": track.get("TrackID"),
                             "Title": track.get("Name"),
                             "ArtistName": track.get("Artist"),
+                            "Album": track.get("Album"),
+                            "Genre": track.get("Genre"),
+                            "Key": track.get("Tonality"),
                             "FolderPath": str(Path(path).parent).replace("\\", "/"),
                             "FileNameL": Path(path).name,
-                            "BPM": int(float(track.get("AverageBpm", 0)) * 100)
+                            "BPM": int(float(track.get("AverageBpm", 0)) * 100),
+                            "TotalTime": int(track.get("TotalTime") or 0),
                         })
+                # Walk <PLAYLISTS> tree (Rekordbox-XML schema with optional ROOT wrapper)
+                pls_root = root.find("PLAYLISTS")
+                if pls_root is not None:
+                    top_nodes = pls_root.findall("NODE")
+                    walk_root = top_nodes[0] if (len(top_nodes) == 1 and top_nodes[0].get("Type") == "0") else pls_root
+                    def _walk(n, parent):
+                        for child in n.findall("NODE"):
+                            ctype = child.get("Type", "1")
+                            entry = {
+                                "name": child.get("Name", ""),
+                                "type": ctype,
+                                "parent": parent,
+                                "track_keys": [t.get("Key") for t in child.findall("TRACK")],
+                            }
+                            legacy_playlists.append(entry)
+                            if ctype == "0":
+                                _walk(child, entry["name"])
+                    _walk(walk_root, "ROOT")
                 statuses["library_legacy_status"] = "loaded"
-                logger.info(f"Library Legacy (XML) loaded for {device_id}: {len(results['library_legacy'])} tracks")
+                logger.info(
+                    "Library Legacy (XML) loaded for %s: %d tracks, %d playlists",
+                    device_id, len(results['library_legacy']), len(legacy_playlists),
+                )
             except Exception as e:
                 logger.error(f"Error reading Library Legacy XML for {device_id}: {e}")
                 statuses["library_legacy_status"] = "error_corrupt"
@@ -477,8 +503,15 @@ class UsbProfileManager:
             return tree["children"]
 
         return {
+            # Filesystem-tree views (legacy UI)
             "library_one": build_tree(results["library_one"]),
             "library_legacy": build_tree(results["library_legacy"]),
+            # Flat track + playlist views — what the new UI consumes to render
+            # the stick like a normal library (sidebar + track table) instead
+            # of as a folder tree of audio paths.
+            "library_one_flat": results["library_one"],
+            "library_legacy_flat": results["library_legacy"],
+            "library_legacy_playlists": legacy_playlists,
             **statuses
         }
 
@@ -688,37 +721,51 @@ class UsbSyncEngine:
             "total_usb": len(usb_tracks),
         }
 
-    def sync_collection(self, profile: Dict, library_types: List[str] = ["library_legacy"]) -> Generator[Dict, None, None]:
+    def sync_collection(self, profile: Dict, library_types: List[str] = ["library_one", "library_legacy"]) -> Generator[Dict, None, None]:
         yield {"stage": "preparing", "message": "Preparing full sync...", "progress": 0}
         self._ensure_usb_structure()
 
         try:
             did_sync = False
-            
+
             with locked_sync(Path(profile["drive"])):
                 if "library_one" in library_types:
-                    logger.warning("Skipping Library One sync: exportLibrary.db requires SQLCipher encryption.")
-                    yield {"stage": "info", "message": "Library One sync disabled (Modern Rekordbox Database is Encrypted)", "progress": 10}
-                    if "library_legacy" not in library_types:
-                        library_types = list(library_types) + ["library_legacy"]
-                        logger.info("Auto-including library_legacy as fallback for encrypted library_one")
+                    yield {"stage": "info", "message": "Writing OneLibrary (exportLibrary.db) — CDJ-3000 native format…", "progress": 10}
+                    for event in self._sync_library_one(profile):
+                        yield event
+                    did_sync = True
 
                 if "library_legacy" in library_types or profile.get("sync_mirrored"):
-                    yield {"stage": "info", "message": "Starting Legacy XML Sync...", "progress": 20}
+                    yield {"stage": "info", "message": "Writing Legacy XML (rekordbox.xml)…", "progress": 60}
                     for event in self._sync_library_legacy(profile):
                         yield {
                             "stage": event.get("stage", "sync"),
                             "message": f"Legacy: {event.get('message', '')}",
-                            "progress": 20 + int(event.get("progress", 0) * 0.8)
+                            "progress": 60 + int(event.get("progress", 0) * 0.4),
                         }
                     did_sync = True
 
             if not did_sync:
-                yield {"stage": "complete", "message": "Sync finished (No compatible libraries selected — try enabling Legacy XML)", "progress": 100}
-            
+                yield {"stage": "complete", "message": "Nothing synced — enable library_one or library_legacy", "progress": 100}
+
         except Exception as e:
             logger.error(f"Collection sync failed: {e}")
             yield {"stage": "error", "message": str(e), "progress": -1}
+
+    def _sync_library_one(self, profile: Dict, playlist_ids: List[str] = None) -> Generator[Dict, None, None]:
+        """Sync via rbox.OneLibrary → exportLibrary.db + ANLZ + audio copy."""
+        try:
+            from .usb_one_library import OneLibraryUsbWriter
+            from .library_source import from_db
+            from .database import db as global_db
+
+            source = from_db(global_db)
+            writer = OneLibraryUsbWriter(profile["drive"])
+            for ev in writer.sync(source, audio_copy=True, copy_anlz=True):
+                yield ev
+        except Exception as e:
+            logger.error(f"OneLibrary sync failed: {e}", exc_info=True)
+            yield {"stage": "error", "message": f"OneLibrary: {e}", "progress": -1}
 
     def sync_playlists(self, profile: Dict, playlist_ids: List[str], library_types: List[str] = ["library_legacy"]) -> Generator[Dict, None, None]:
         if profile.get("sync_mirrored"):
@@ -737,14 +784,12 @@ class UsbSyncEngine:
             
             with locked_sync(Path(profile["drive"])):
                 if "library_one" in library_types:
-                    logger.warning("Skipping Library One playlist sync: exportLibrary.db requires SQLCipher encryption.")
-                    yield {"stage": "info", "message": "Library One sync disabled (Modern Rekordbox Database is Encrypted)", "progress": 10}
-                    if "library_legacy" not in library_types:
-                        library_types = list(library_types) + ["library_legacy"]
-                        logger.info("Auto-including library_legacy as fallback")
+                    yield {"stage": "info", "message": "Writing OneLibrary playlist export…", "progress": 10}
+                    for event in self._sync_library_one(profile, playlist_ids):
+                        yield event
 
                 if "library_legacy" in library_types or profile.get("sync_mirrored"):
-                    yield {"stage": "info", "message": "Starting Legacy XML Playlist Sync...", "progress": 20}
+                    yield {"stage": "info", "message": "Starting Legacy XML Playlist Sync...", "progress": 60}
                     for event in self._sync_library_legacy(profile, playlist_ids):
                         yield {
                             "stage": event.get("stage", "sync"),
@@ -883,6 +928,16 @@ class UsbSyncEngine:
         try:
             import xml.etree.ElementTree as ET
             target = self.usb_pioneer / "rekordbox.xml"
+
+            # Mode-agnostic source: when the active library is a Standalone-XML
+            # we cannot open it as SQLCipher-encrypted master.db. Fall back to
+            # the in-memory LibrarySource which iterates xml_db.tracks.
+            is_xml_source = str(self.local_path).lower().endswith(".xml")
+            if is_xml_source:
+                logger.info("[USB-Legacy] XML-mode source detected — using LibrarySource path")
+                yield from self._sync_library_legacy_from_xml(playlist_ids, target)
+                return
+
             # We use the local master.db to generate a clean XML
             import rbox
             db = rbox.MasterDb(str(self.local_path))
@@ -1099,6 +1154,146 @@ class UsbSyncEngine:
         except Exception as e:
             logger.error(f"Library Legacy sync failed: {e}")
             yield {"stage": "error", "message": f"Library Legacy sync failed: {e}", "progress": -1}
+
+    def _sync_library_legacy_from_xml(
+        self, playlist_ids: List[str], target: Path,
+    ) -> Generator[Dict, None, None]:
+        """Legacy XML sync sourced from RekordboxXMLDB (Standalone mode).
+        Mirrors _sync_library_legacy's master.db path but pulls everything
+        through LibrarySource so the operation works without rbox.MasterDb.
+        """
+        import xml.etree.ElementTree as ET
+        import urllib.parse
+        from .library_source import from_db
+        from .database import db as global_db
+
+        source = from_db(global_db)
+        all_tracks = list(source.iter_tracks())
+
+        # Filter by selected playlists
+        target_track_ids: set = set()
+        if playlist_ids:
+            for pid in playlist_ids:
+                target_track_ids.update(source.get_playlist_track_ids(pid))
+            if not target_track_ids:
+                yield {"stage": "error", "message": "No tracks in selected playlists", "progress": -1}
+                return
+
+        tracks_to_export = [t for t in all_tracks if not target_track_ids or t["id"] in target_track_ids]
+        logger.info(f"[USB-Legacy-XML] {len(tracks_to_export)} tracks to process")
+
+        root = ET.Element("DJ_PLAYLISTS", Version="1.0.0")
+        collection = ET.SubElement(root, "COLLECTION", Entries=str(len(tracks_to_export)))
+
+        skipped_missing = 0
+        skipped_streaming = 0
+        copied_ok = 0
+
+        for i, t in enumerate(tracks_to_export):
+            local_path_str = t.get("path") or ""
+            if not local_path_str:
+                skipped_missing += 1
+                continue
+
+            # Skip streaming pseudo-paths
+            if ":" in local_path_str[:12] and not local_path_str[1:3] in (":\\", ":/"):
+                if local_path_str.split(":", 1)[0].lower() in ("soundcloud", "spotify", "tidal", "beatport", "http", "https"):
+                    skipped_streaming += 1
+                    continue
+
+            try:
+                local_path = Path(local_path_str).resolve(strict=False)
+            except Exception:
+                local_path = Path(local_path_str)
+            local_file = local_path.name
+
+            usb_dest_path = None
+            if local_path.exists():
+                usb_dest_path = self._get_safe_dest_path(t.get("artist", ""), t.get("album", ""), local_file)
+                try:
+                    for _ in self._copy_file_stream(local_path, usb_dest_path):
+                        pass
+                    copied_ok += 1
+                except OSError as e:
+                    logger.warning(f"[USB-Legacy-XML] Copy failed for {local_file}: {e}")
+                    err_code = getattr(e, "winerror", None) or getattr(e, "errno", None)
+                    if err_code in (112, 39, 28) or "No space left" in str(e):
+                        raise Exception("Device is full (ENOSPC). Sync aborted.")
+                    if (err_code in (21, 31, 1167, 3)) or not self.usb_root.exists():
+                        raise Exception("USB Drive disconnected. Sync aborted.")
+                    continue
+            else:
+                skipped_missing += 1
+                logger.warning(f"[USB-Legacy-XML] Missing locally: {local_path}")
+
+            if usb_dest_path:
+                abs_dest = usb_dest_path.resolve()
+                loc_val = f"file://localhost/{str(abs_dest)}".replace("\\", "/")
+            else:
+                loc_val = f"file://localhost/{local_path_str}".replace("\\", "/")
+            loc_val = urllib.parse.quote(loc_val, safe=":/./-_~")
+
+            ET.SubElement(
+                collection, "TRACK",
+                TrackID=str(t["id"]),
+                Name=self._xml_safe(t.get("title", "")),
+                Artist=self._xml_safe(t.get("artist", "")),
+                Album=self._xml_safe(t.get("album", "")),
+                TotalTime=str(int((t.get("duration_ms", 0) or 0) / 1000)),
+                AverageBpm=f"{float(t.get('bpm', 0) or 0):.2f}",
+                Tonality=self._xml_safe(t.get("key", "")),
+                Genre=self._xml_safe(t.get("genre", "")),
+                Label=self._xml_safe(t.get("label", "")),
+                Rating=str(t.get("rating", 0)),
+                Comments=self._xml_safe(t.get("comment", "")),
+                Location=loc_val,
+            )
+            if i % 10 == 0:
+                yield {
+                    "stage": "lib_legacy",
+                    "message": f"Copying {i}/{len(tracks_to_export)}",
+                    "progress": int((i / max(len(tracks_to_export), 1)) * 90),
+                }
+
+        # Playlist tree
+        playlists_root = ET.SubElement(root, "PLAYLISTS")
+        playlists_root_node = ET.SubElement(playlists_root, "NODE", Name="ROOT", Type="0",
+                                            Count=str(len(list(source.iter_playlists()))))
+        for pl in source.iter_playlists():
+            if playlist_ids and str(pl["id"]) not in playlist_ids:
+                continue
+            node = ET.SubElement(
+                playlists_root_node, "NODE",
+                Name=self._xml_safe(pl.get("name", "")),
+                Type=pl.get("type", "1"),
+            )
+            if pl.get("type") in ("1", "4"):
+                node.set("Entries", str(len(pl.get("track_ids", []))))
+                for tid in pl.get("track_ids", []):
+                    ET.SubElement(node, "TRACK", Key=str(tid))
+
+        # Atomic write
+        corrupt_path = target.with_suffix(".xml.corrupt")
+        if corrupt_path.exists():
+            try: corrupt_path.unlink()
+            except Exception: pass
+        tree = ET.ElementTree(root)
+        with open(target, "wb") as f:
+            tree.write(f, encoding="UTF-8", xml_declaration=True)
+
+        yield {"stage": "flushing", "message": "Flushing OS buffers…", "progress": 99}
+        time.sleep(1.0)
+
+        summary = f"{copied_ok} copied, {skipped_missing} missing, {skipped_streaming} streaming (skipped)"
+        logger.info(f"[USB-Legacy-XML] complete: {summary}")
+        yield {
+            "stage": "complete",
+            "message": f"Synced (XML): {summary}",
+            "progress": 100,
+            "copied": copied_ok,
+            "skipped_missing": skipped_missing,
+            "skipped_streaming": skipped_streaming,
+        }
 
     def sync_metadata(self, profile: Dict, library_types: List[str] = ["library_legacy"]) -> Generator[Dict, None, None]:
         yield {"stage": "preparing", "message": "Syncing metadata...", "progress": 0}

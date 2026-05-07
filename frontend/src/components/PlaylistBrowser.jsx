@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import api from '../api/api';
 import { useToast } from './ToastContext';
 import { Folder, ListMusic, ChevronRight, ChevronDown, Music, Database, Settings, Plus, Sparkles, RotateCw, MoreVertical, Edit2, Trash2, FolderPlus, ArrowRightLeft, X, Upload, Star, Tag, GripVertical, Library, Disc } from 'lucide-react';
 import TrackTable from './TrackTable';
 import SoundCloudProgressModal from './SoundCloudProgressModal';
 import RenameModal from './RenameModal';
+import SmartPlaylistEditor from './SmartPlaylistEditor';
 
-const PlaylistNode = ({ node, level = 0, onSelect, onContextMenu, onMoveNode, isEditMode, onRename, selectedId }) => {
+const PlaylistNode = ({ node, level = 0, onSelect, onContextMenu, onMoveNode, onRename, selectedId }) => {
     const [open, setOpen] = useState(level < 1);
     const [dragOver, setDragOver] = useState(null); // "top", "center", "bottom"
     const isFolder = node.Type === "0";
@@ -15,12 +17,18 @@ const PlaylistNode = ({ node, level = 0, onSelect, onContextMenu, onMoveNode, is
 
     const handleContextMenu = (e) => {
         e.preventDefault();
+        e.stopPropagation();
         onContextMenu(e, node);
     };
 
     const handleDragStart = (e) => {
         if (isIntelligent) { e.preventDefault(); return; }
-        e.dataTransfer.setData("application/json", JSON.stringify({ id: node.ID, type: node.Type }));
+        e.stopPropagation();
+        const payload = { id: node.ID, type: node.Type, name: node.Name };
+        try {
+            e.dataTransfer.setData("application/json", JSON.stringify(payload));
+            e.dataTransfer.setData("text/plain", node.ID);  // fallback for some WebView2 quirks
+        } catch (_) {}
         e.dataTransfer.effectAllowed = "move";
     };
 
@@ -54,19 +62,27 @@ const PlaylistNode = ({ node, level = 0, onSelect, onContextMenu, onMoveNode, is
     const isSelected = selectedId === node.ID;
 
     return (
-        <div>
+        <div data-pl-row={node.ID}>
             <div
-                className={`flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-all duration-150 group relative
+                data-pl-id={node.ID}
+                className={`flex items-center gap-2 px-3 py-1.5 transition-all duration-150 group relative
                     ${isSelected ? 'bg-amber2/15 text-white' : 'text-ink-secondary hover:text-ink-primary hover:bg-white/5'}
+                    ${dragOver === "top" ? 'border-t-2 border-amber2' : ''}
+                    ${dragOver === "bottom" ? 'border-b-2 border-amber2' : ''}
                     ${dragOver === "center" ? 'ring-1 ring-amber2 bg-amber2/10' : ''}
                 `}
-                style={{ paddingLeft: `${12 + level * 16}px` }}
+                style={{
+                    paddingLeft: `${12 + level * 16}px`,
+                    cursor: isIntelligent ? 'pointer' : 'grab',
+                    userSelect: 'none',
+                }}
                 onClick={() => {
                     if (isFolder) setOpen(!open);
                     else onSelect(node);
                 }}
                 onContextMenu={handleContextMenu}
-                draggable={isEditMode && !isIntelligent}
+                onAuxClick={(e) => { if (e.button === 2) handleContextMenu(e); }}
+                draggable={!isIntelligent}
                 onDragStart={handleDragStart}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
@@ -74,10 +90,6 @@ const PlaylistNode = ({ node, level = 0, onSelect, onContextMenu, onMoveNode, is
             >
                 {dragOver === "top" && <div className="absolute top-0 left-0 right-0 h-0.5 bg-amber2 z-10" />}
                 {dragOver === "bottom" && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber2 z-10" />}
-
-                {isEditMode && !isIntelligent && (
-                    <GripVertical size={12} className="text-ink-placeholder shrink-0 cursor-grab" />
-                )}
 
                 {isFolder ? (
                     <>
@@ -102,7 +114,7 @@ const PlaylistNode = ({ node, level = 0, onSelect, onContextMenu, onMoveNode, is
                     <span className="text-[9px] text-purple-500/60 font-bold uppercase tracking-wider shrink-0">Smart</span>
                 )}
 
-                {isEditMode && !isIntelligent && (
+                {!isIntelligent && (
                     <button
                         onClick={(e) => { e.stopPropagation(); onRename(node); }}
                         className="opacity-0 group-hover:opacity-100 p-1 hover:bg-white/10 rounded transition-all shrink-0"
@@ -119,7 +131,6 @@ const PlaylistNode = ({ node, level = 0, onSelect, onContextMenu, onMoveNode, is
                     onSelect={onSelect}
                     onContextMenu={onContextMenu}
                     onMoveNode={onMoveNode}
-                    isEditMode={isEditMode}
                     onRename={onRename}
                     selectedId={selectedId}
                 />
@@ -139,14 +150,15 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
     const [dbLoaded, setDbLoaded] = useState(true);
     const [isProcessing, setIsProcessing] = useState(false);
     const [contextMenu, setContextMenu] = useState(null);
-    const [isEditMode, setIsEditMode] = useState(false);
+    const [showSmartEditor, setShowSmartEditor] = useState(false);
+    const [smartEditorParent, setSmartEditorParent] = useState("ROOT");
+    const [smartEditorEditing, setSmartEditorEditing] = useState(null);
     const [scExporting, setScExporting] = useState(false);
     const [showScProgress, setShowScProgress] = useState(false);
     const [renameNode, setRenameNode] = useState(null);
     const [collectionSearch, setCollectionSearch] = useState('');
     const [playlistSearch, setPlaylistSearch] = useState('');
     const [displayTracks, setDisplayTracks] = useState([]);
-    const toggleEditMode = () => setIsEditMode(!isEditMode);
 
     // Flatten tree to get all non-folder, non-intelligent playlists for "Add to Playlist" submenu
     const flattenPlaylists = (nodes) => {
@@ -292,6 +304,38 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
         setRenameNode(null);
     };
 
+    const handleDuplicate = async (node) => {
+        try {
+            const newName = `${node.Name} (Kopie)`;
+            if (node.Type === "4") {
+                await api.post('/api/playlists/smart/create', {
+                    name: newName,
+                    parent_id: node.ParentID || 'ROOT',
+                    criteria: node.SmartList || {},
+                });
+            } else {
+                // Normal playlist or folder: create + copy tracks
+                const res = await api.post('/api/playlists/create', {
+                    name: newName, parent_id: node.ParentID || 'ROOT',
+                    type: node.Type === '0' ? '0' : '1',
+                });
+                const newId = res.data?.id;
+                if (newId && node.Type === '1') {
+                    const tracks = await api.get(`/api/playlist/${node.ID}/tracks`);
+                    for (const t of (tracks.data || [])) {
+                        const tid = t.id || t.ID;
+                        if (tid) await api.post('/api/playlists/add-track', { pid: newId, track_id: String(tid) });
+                    }
+                }
+            }
+            loadTree();
+            toast.success(`"${node.Name}" dupliziert`);
+        } catch (e) {
+            toast.error('Duplizieren fehlgeschlagen');
+        }
+        setContextMenu(null);
+    };
+
     const handleDelete = async (node) => {
         if (!confirm(`Delete "${node.Name}"? This cannot be undone.`)) return;
         try {
@@ -385,8 +429,8 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
 
     const onPlaylistContextMenu = (e, node) => {
         e.preventDefault();
+        e.stopPropagation();
         setContextMenu({ x: e.clientX, y: e.clientY, node });
-        setTrackMenu(null);
     };
 
 
@@ -421,32 +465,110 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
     };
 
     useEffect(() => {
-        const handleClick = () => { setContextMenu(null); };
-        window.addEventListener('click', handleClick);
-        return () => window.removeEventListener('click', handleClick);
+        // Close context menu only on LEFT-click (button 0) outside the menu.
+        const handleMouseDown = (e) => {
+            if (e.button !== 0) return;
+            const menu = e.target.closest && e.target.closest('[data-context-menu="true"]');
+            if (menu) return;
+            setContextMenu(null);
+        };
+        window.addEventListener('mousedown', handleMouseDown);
+        return () => window.removeEventListener('mousedown', handleMouseDown);
+    }, []);
+
+    // ── FAILSAFE: document-level contextmenu listener ────────────────────
+    // React's per-node onContextMenu sometimes silently fails inside Tauri
+    // WebView2 when an ancestor toggles draggable mid-render. We catch
+    // contextmenu events at the document and resolve the right node from a
+    // data-pl-id attribute. Works regardless of React reconciliation timing.
+    useEffect(() => {
+        const handleDocCtx = (e) => {
+            // 1. Track-row right-click handled by TrackTable's own listener — skip
+            if (e.target.closest && e.target.closest('[data-track-row]')) return;
+            const cell = e.target.closest && e.target.closest('[data-pl-id]');
+            if (!cell) return;
+            const id = cell.getAttribute('data-pl-id');
+            // Walk current tree to resolve the full node object
+            const findInTree = (nodes) => {
+                for (const n of nodes || []) {
+                    if (String(n.ID) === id) return n;
+                    const hit = findInTree(n.Children);
+                    if (hit) return hit;
+                }
+                return null;
+            };
+            const node = findInTree(tree);
+            if (!node) return;
+            e.preventDefault();
+            e.stopPropagation();
+            setContextMenu({ x: e.clientX, y: e.clientY, node });
+        };
+        document.addEventListener('contextmenu', handleDocCtx, true);  // capture phase
+        return () => document.removeEventListener('contextmenu', handleDocCtx, true);
+    }, [tree]);
+
+    // Tokenized search supports operators:
+    //   bpm:120-130   bpm:>120   bpm:<128
+    //   key:Am   key:8A
+    //   genre:techno   label:exfunk   year:2024
+    //   plain text → free-text Title/Artist/Album/Comment
+    const matchesQuery = React.useCallback((t, q) => {
+        if (!q) return true;
+        const tokens = q.toLowerCase().split(/\s+/).filter(Boolean);
+        for (const tok of tokens) {
+            if (tok.includes(':')) {
+                const [field, ...rest] = tok.split(':');
+                const val = rest.join(':');
+                if (!val) continue;
+                if (field === 'bpm') {
+                    const bpm = parseFloat(t.BPM || 0);
+                    if (val.startsWith('>'))      { if (!(bpm > parseFloat(val.slice(1)))) return false; continue; }
+                    if (val.startsWith('<'))      { if (!(bpm < parseFloat(val.slice(1)))) return false; continue; }
+                    if (val.includes('-')) {
+                        const [lo, hi] = val.split('-').map(parseFloat);
+                        if (!(bpm >= lo && bpm <= hi)) return false; continue;
+                    }
+                    if (Math.round(bpm) !== Math.round(parseFloat(val))) return false; continue;
+                }
+                if (field === 'key') {
+                    if (!String(t.Key || '').toLowerCase().includes(val)) return false; continue;
+                }
+                if (field === 'genre') {
+                    if (!String(t.Genre || '').toLowerCase().includes(val)) return false; continue;
+                }
+                if (field === 'label') {
+                    if (!String(t.Label || '').toLowerCase().includes(val)) return false; continue;
+                }
+                if (field === 'year') {
+                    if (String(t.ReleaseYear || '') !== val) return false; continue;
+                }
+                if (field === 'rating') {
+                    const r = parseInt(t.Rating || 0);
+                    if (val.startsWith('>')) { if (!(r > parseInt(val.slice(1)))) return false; continue; }
+                    if (val.startsWith('<')) { if (!(r < parseInt(val.slice(1)))) return false; continue; }
+                    if (r !== parseInt(val)) return false; continue;
+                }
+                // Unknown field → treat token as plain
+            }
+            // Free-text against multiple fields
+            const hay = [t.Title, t.Artist, t.Album, t.Comment, t.Genre, t.Label]
+                .filter(Boolean).join(' ').toLowerCase();
+            if (!hay.includes(tok)) return false;
+        }
+        return true;
     }, []);
 
     // Filtered collection tracks
     const filteredCollectionTracks = React.useMemo(() => {
         if (!collectionSearch) return allTracks;
-        const q = collectionSearch.toLowerCase();
-        return allTracks.filter(t =>
-            (t.Title && t.Title.toLowerCase().includes(q)) ||
-            (t.Artist && t.Artist.toLowerCase().includes(q)) ||
-            (t.Album && t.Album.toLowerCase().includes(q))
-        );
-    }, [allTracks, collectionSearch]);
+        return allTracks.filter(t => matchesQuery(t, collectionSearch));
+    }, [allTracks, collectionSearch, matchesQuery]);
 
     // Filtered playlist tracks
     const filteredPlaylistTracks = React.useMemo(() => {
         if (!playlistSearch) return tracks;
-        const q = playlistSearch.toLowerCase();
-        return tracks.filter(t =>
-            (t.Title && t.Title.toLowerCase().includes(q)) ||
-            (t.Artist && t.Artist.toLowerCase().includes(q)) ||
-            (t.Album && t.Album.toLowerCase().includes(q))
-        );
-    }, [tracks, playlistSearch]);
+        return tracks.filter(t => matchesQuery(t, playlistSearch));
+    }, [tracks, playlistSearch, matchesQuery]);
 
     if (!loading && tree.length === 0 && !dbLoaded) {
         return (
@@ -492,13 +614,6 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                     <div className="flex justify-between items-center px-3 py-3">
                         <h3 className="text-[10px] font-bold text-ink-muted uppercase tracking-widest">Library</h3>
                         <div className="flex gap-0.5">
-                            <button
-                                onClick={toggleEditMode}
-                                className={`p-1.5 rounded transition-all ${isEditMode ? 'bg-amber-500/20 text-amber-400' : 'hover:bg-white/5 text-ink-muted'}`}
-                                title={isEditMode ? "Exit Edit Mode" : "Enter Edit Mode"}
-                            >
-                                <Edit2 size={12} />
-                            </button>
                             <button onClick={loadTree} className="p-1.5 hover:bg-white/5 rounded text-ink-muted" title="Refresh">
                                 <RotateCw size={12} className={loading ? 'animate-spin' : ''} />
                             </button>
@@ -517,6 +632,16 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                     className={`flex items-center gap-2.5 px-3 py-2.5 cursor-pointer transition-all border-b border-white/5
                         ${showCollection ? 'bg-amber2/10 text-white' : 'text-ink-secondary hover:text-ink-primary hover:bg-white/5'}`}
                     onClick={handleSelectCollection}
+                    onContextMenu={(e) => {
+                        // Treat collection like a virtual ROOT node so the
+                        // create / smart / folder actions are reachable here too.
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setContextMenu({
+                            x: e.clientX, y: e.clientY,
+                            node: { ID: "ROOT", Name: "Collection", Type: "0", ParentID: null }
+                        });
+                    }}
                 >
                     <div className={`p-1.5 rounded-lg ${showCollection ? 'bg-amber2/20' : 'bg-white/5'}`}>
                         <Database size={14} className="text-amber2" />
@@ -533,6 +658,16 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                 </div>
                 <div
                     className="flex-1 overflow-y-auto pb-4"
+                    onContextMenu={(e) => {
+                        // Right-click on empty area inside the tree → ROOT-level options
+                        if (e.target === e.currentTarget) {
+                            e.preventDefault();
+                            setContextMenu({
+                                x: e.clientX, y: e.clientY,
+                                node: { ID: "ROOT", Name: "Library", Type: "0", ParentID: null }
+                            });
+                        }
+                    }}
                     onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
                     onDrop={(e) => {
                         e.preventDefault();
@@ -551,37 +686,76 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                             onSelect={handleSelect}
                             onContextMenu={onPlaylistContextMenu}
                             onMoveNode={handleMoveNode}
-                            isEditMode={isEditMode}
                             onRename={handleRename}
                             selectedId={selectedPlaylist?.ID}
                         />
                     ))}
                 </div>
 
-                {/* Playlist Context Menu */}
-                {contextMenu && (
+                {/* Playlist Context Menu — rendered via portal to escape any
+                    overflow/z-index/transform contexts of the tree container. */}
+                {contextMenu && createPortal((
                     <div
-                        className="fixed z-[100] bg-mx-shell/95 border border-white/10 rounded-xl shadow-2xl py-1.5 min-w-[180px] animate-fade-in backdrop-blur-xl"
-                        style={{ top: contextMenu.y, left: contextMenu.x }}
+                        data-context-menu="true"
+                        className="bg-mx-shell border border-white/20 rounded-xl shadow-2xl py-1.5 min-w-[220px] animate-fade-in"
+                        style={{
+                            position: 'fixed',
+                            top: Math.min(contextMenu.y, window.innerHeight - 320),
+                            left: Math.min(contextMenu.x, window.innerWidth - 230),
+                            zIndex: 99999,
+                            backdropFilter: 'blur(12px)',
+                        }}
                     >
-                        {contextMenu.node.Type !== "4" && (
-                            <>
-                                <button onClick={() => handleRename(contextMenu.node)} className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-ink-primary">
-                                    <Edit2 size={14} className="text-ink-muted" /> Rename
-                                </button>
-                                <button onClick={() => handleDelete(contextMenu.node)} className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-red-400">
-                                    <Trash2 size={14} /> Delete
-                                </button>
-                                <div className="h-px bg-white/5 my-1" />
-                            </>
+                        <div className="mx-caption px-3 py-1.5 border-b border-white/5 truncate text-[10px]">
+                            {contextMenu.node.Name}
+                        </div>
+
+                        {/* Type=1 (playlist) and Type=4 (smart) — both have tracks */}
+                        {(contextMenu.node.Type === "1" || contextMenu.node.Type === "4") && (
+                            <button onClick={() => { handleSelect(contextMenu.node); setContextMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-ink-primary">
+                                <ListMusic size={14} className="text-amber2" /> Tracks anzeigen
+                            </button>
                         )}
+
+                        {/* Smart-Playlist edit (Type=4 only) */}
+                        {contextMenu.node.Type === "4" && (
+                            <button onClick={() => { setSmartEditorEditing({ id: contextMenu.node.ID, name: contextMenu.node.Name, criteria: contextMenu.node.SmartList || {} }); setShowSmartEditor(true); setContextMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-purple-300">
+                                <Sparkles size={14} /> Bedingungen bearbeiten
+                            </button>
+                        )}
+
+                        {/* Rename / Delete — supported for all node types */}
+                        <button onClick={() => handleRename(contextMenu.node)} className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-ink-primary">
+                            <Edit2 size={14} className="text-ink-muted" /> Umbenennen
+                        </button>
+                        <button onClick={() => handleDuplicate(contextMenu.node)} className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-cyan-300">
+                            <Plus size={14} /> Duplizieren
+                        </button>
+                        <button onClick={() => handleDelete(contextMenu.node)} className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-red-400">
+                            <Trash2 size={14} /> Löschen
+                        </button>
+
+                        <div className="h-px bg-white/5 my-1" />
+
                         <button onClick={handleCreateFolder} className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-amber-500">
-                            <FolderPlus size={14} /> New Folder
+                            <FolderPlus size={14} /> Neuer Ordner
                         </button>
                         <button onClick={handleCreatePlaylist} className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-amber2">
-                            <Plus size={14} /> New Playlist
+                            <Plus size={14} /> Neue Playlist
+                        </button>
+                        <button onClick={() => { setSmartEditorParent(contextMenu?.node?.Type === '0' ? contextMenu.node.ID : 'ROOT'); setShowSmartEditor(true); setContextMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-purple-400">
+                            <Sparkles size={14} /> Neue Smart-Playlist
                         </button>
                     </div>
+                ), document.body)}
+
+                {showSmartEditor && (
+                    <SmartPlaylistEditor
+                        parentId={smartEditorParent}
+                        existing={smartEditorEditing}
+                        onClose={() => { setShowSmartEditor(false); setSmartEditorEditing(null); }}
+                        onSaved={() => { setShowSmartEditor(false); setSmartEditorEditing(null); loadTree(); }}
+                    />
                 )}
 
             </div>

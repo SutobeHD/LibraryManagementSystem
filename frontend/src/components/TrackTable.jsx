@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Music, Star, X, Check, ChevronDown, ChevronUp, ChevronRight, Image as ImageIcon, Scissors, Trash2, Play, Plus, ListMusic } from 'lucide-react';
+import { Music, Star, X, Check, ChevronDown, ChevronUp, ChevronRight, Image as ImageIcon, Scissors, Trash2, Play, Plus, ListMusic, FolderOpen, Copy, Info, Tag } from 'lucide-react';
 import api from '../api/api';
+import toast from 'react-hot-toast';
 
 const DEFAULT_COLUMNS = [
     { id: 'index', label: '#', width: '32px', align: 'right', fixed: true },
@@ -12,6 +13,7 @@ const DEFAULT_COLUMNS = [
     { id: 'BPM', label: 'BPM', width: '48px', align: 'center', sortable: true },
     { id: 'Key', label: 'Key', width: '64px', align: 'center', sortable: true },
     { id: 'Rating', label: 'Rating', width: '64px', align: 'center', sortable: true },
+    { id: 'Color', label: 'C', width: '32px', align: 'center' },
     { id: 'Bitrate', label: 'kbps', width: '64px', align: 'center', sortable: true },
     { id: 'PlayCount', label: 'Plays', width: '48px', align: 'center', sortable: true },
     { id: 'Composer', label: 'Composer', width: '150px', sortable: true },
@@ -254,11 +256,43 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
                                     </span>
                                 </td>
                             )}
+                            {visibleColumns.includes('Color') && (
+                                <td className="p-1 text-center">
+                                    <ColorDot
+                                        track={t}
+                                        onChange={(newColor) => {
+                                            api.patch('/api/tracks/batch', {
+                                                track_ids: [t.id || t.ID],
+                                                updates: { ColorID: newColor }
+                                            }).then(() => { t.ColorID = String(newColor); }).catch(() => toast.error('Color speichern fehlgeschlagen'));
+                                        }}
+                                    />
+                                </td>
+                            )}
                             {visibleColumns.includes('Rating') && (
                                 <td className="p-1 text-center">
                                     <div className="flex justify-center gap-0.5 opacity-40 group-hover:opacity-100">
                                         {[1, 2, 3, 4, 5].map(star => (
-                                            <Star key={star} size={9} fill={star <= (t.Rating || 0) ? "currentColor" : "none"} className={star <= (t.Rating || 0) ? "text-amber2" : "text-ink-placeholder"} />
+                                            <Star
+                                                key={star}
+                                                size={11}
+                                                fill={star <= (t.Rating || 0) ? "currentColor" : "none"}
+                                                className={`cursor-pointer transition-transform hover:scale-125 ${
+                                                    star <= (t.Rating || 0) ? "text-amber2" : "text-ink-placeholder hover:text-amber2/60"
+                                                }`}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    // Toggle: clicking the current rating clears it
+                                                    const newRating = (t.Rating || 0) === star ? 0 : star;
+                                                    api.patch('/api/tracks/batch', {
+                                                        track_ids: [t.id || t.ID],
+                                                        updates: { Rating: newRating }
+                                                    }).then(() => {
+                                                        // Optimistic local update so the UI reacts immediately
+                                                        t.Rating = newRating;
+                                                    }).catch(() => toast.error('Rating speichern fehlgeschlagen'));
+                                                }}
+                                            />
                                         ))}
                                     </div>
                                 </td>
@@ -328,6 +362,7 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
                 <TrackContextMenuPopup
                     contextMenu={contextMenu}
                     onEditTrack={onEditTrack}
+                    onPlay={onPlay}
                     openSoundCloud={openSoundCloud}
                     onRemove={onRemove}
                     onDelete={onDelete}
@@ -341,59 +376,217 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
     );
 };
 
-const TrackContextMenuPopup = ({ contextMenu, onEditTrack, openSoundCloud, onRemove, onDelete, onAddToPlaylist, availablePlaylists, setContextMenu }) => {
+// Pioneer color palette — IDs 0-8 (None, Pink, Red, Orange, Yellow, Green, Aqua, Blue, Purple)
+const PIONEER_COLORS = [
+    { id: '0', name: 'Keine', hex: 'transparent', border: 'var(--line-default)' },
+    { id: '1', name: 'Pink',   hex: '#ff007f' },
+    { id: '2', name: 'Red',    hex: '#ff0000' },
+    { id: '3', name: 'Orange', hex: '#ff7f00' },
+    { id: '4', name: 'Yellow', hex: '#ffd700' },
+    { id: '5', name: 'Green',  hex: '#00d000' },
+    { id: '6', name: 'Aqua',   hex: '#00c8ff' },
+    { id: '7', name: 'Blue',   hex: '#0070ff' },
+    { id: '8', name: 'Purple', hex: '#a000ff' },
+];
+
+const ColorDot = ({ track, onChange }) => {
+    const [open, setOpen] = useState(false);
+    const ref = React.useRef(null);
+    const cur = String(track.ColorID || '0');
+    const color = PIONEER_COLORS.find(c => c.id === cur) || PIONEER_COLORS[0];
+
+    useEffect(() => {
+        if (!open) return;
+        const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+        document.addEventListener('mousedown', onDoc);
+        return () => document.removeEventListener('mousedown', onDoc);
+    }, [open]);
+
+    return (
+        <div className="relative inline-block" ref={ref}>
+            <button
+                onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
+                title={`Farbe: ${color.name}`}
+                className="w-3.5 h-3.5 rounded-full border-2 transition-transform hover:scale-125"
+                style={{
+                    background: color.hex,
+                    borderColor: color.id === '0' ? 'var(--ink-placeholder)' : color.hex,
+                    boxShadow: color.id === '0' ? 'none' : `0 0 4px ${color.hex}80`,
+                }}
+            />
+            {open && (
+                <div
+                    className="absolute top-5 left-1/2 -translate-x-1/2 z-50 flex gap-1 p-1.5 bg-mx-shell border border-white/15 rounded-lg shadow-2xl"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    {PIONEER_COLORS.map(c => (
+                        <button
+                            key={c.id}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onChange(c.id);
+                                setOpen(false);
+                            }}
+                            title={c.name}
+                            className={`w-4 h-4 rounded-full border-2 transition-transform hover:scale-125 ${cur === c.id ? 'ring-2 ring-white' : ''}`}
+                            style={{
+                                background: c.hex,
+                                borderColor: c.id === '0' ? 'var(--ink-placeholder)' : c.hex,
+                            }}
+                        />
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
+
+const TrackContextMenuPopup = ({ contextMenu, onEditTrack, onPlay, openSoundCloud, onRemove, onDelete, onAddToPlaylist, availablePlaylists, setContextMenu }) => {
     const [showAddSubmenu, setShowAddSubmenu] = useState(false);
+    const [pSearch, setPSearch] = useState("");
+    const closeTimer = React.useRef(null);
+    React.useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
+    const t = contextMenu.track;
+    const trackPath = t.path || t.Path || t.Location || "";
+
+    const handleReveal = async () => {
+        try {
+            await api.post('/api/file/reveal', { path: trackPath });
+        } catch (e) { toast.error('Konnte Datei nicht im Explorer öffnen'); }
+        setContextMenu(null);
+    };
+    const handleCopy = () => {
+        const text = `${t.Artist || '?'} - ${t.Title || '?'}`;
+        navigator.clipboard.writeText(text).then(
+            () => toast.success(`Kopiert: ${text}`),
+            () => toast.error('Clipboard-Zugriff verweigert'),
+        );
+        setContextMenu(null);
+    };
+    const handleEditMeta = async () => {
+        const newBpm = window.prompt('BPM:', String(Math.round(t.BPM || 0)));
+        if (newBpm === null) { setContextMenu(null); return; }
+        const newKey = window.prompt('Key (z.B. Am, 8A):', t.Key || '');
+        if (newKey === null) { setContextMenu(null); return; }
+        try {
+            await api.patch('/api/tracks/batch', {
+                track_ids: [t.id || t.ID],
+                updates: { BPM: parseFloat(newBpm) || 0, Key: newKey },
+            });
+            toast.success('Metadaten aktualisiert');
+        } catch (e) { toast.error('Update fehlgeschlagen: ' + (e.response?.data?.detail || e.message)); }
+        setContextMenu(null);
+    };
 
     return (
         <div
-            className="fixed z-[100] bg-mx-panel border border-line-default rounded-mx-md shadow-mx-lg min-w-[200px] animate-fade-in overflow-visible"
+            className="fixed z-[100] bg-mx-panel border border-line-default rounded-mx-md shadow-mx-lg min-w-[220px] animate-fade-in overflow-visible"
             style={{ top: contextMenu.y, left: contextMenu.x }}
             onClick={(e) => e.stopPropagation()}
         >
-            <div className="mx-caption px-3 py-2 border-b border-line-subtle truncate max-w-[220px]">
-                {contextMenu.track.Title}
+            <div className="mx-caption px-3 py-2 border-b border-line-subtle truncate max-w-[260px]">
+                {t.Title}
             </div>
+            {onPlay && (
+                <button
+                    onClick={() => { onPlay(t); setContextMenu(null); }}
+                    className="w-full flex items-center gap-3 px-4 py-2 hover:bg-mx-hover text-[12px] text-ink-secondary hover:text-amber2 transition-colors text-left"
+                >
+                    <Play size={14} fill="currentColor" /> Abspielen
+                </button>
+            )}
             <button
-                onClick={() => { onEditTrack && onEditTrack(contextMenu.track); setContextMenu(null); }}
+                onClick={() => { onEditTrack && onEditTrack(t); setContextMenu(null); }}
                 className="w-full flex items-center gap-3 px-4 py-2 hover:bg-mx-hover text-[12px] text-ink-secondary hover:text-amber2 transition-colors text-left"
             >
-                <Scissors size={14} /> Open in Waveform Editor
+                <Scissors size={14} /> Im Waveform-Editor öffnen
             </button>
             <button
-                onClick={() => { openSoundCloud(contextMenu.track); setContextMenu(null); }}
+                onClick={handleEditMeta}
+                className="w-full flex items-center gap-3 px-4 py-2 hover:bg-mx-hover text-[12px] text-ink-secondary hover:text-blue-400 transition-colors text-left"
+            >
+                <Tag size={14} /> Metadaten (BPM/Key)
+            </button>
+            <button
+                onClick={handleReveal}
+                disabled={!trackPath}
+                className="w-full flex items-center gap-3 px-4 py-2 hover:bg-mx-hover text-[12px] text-ink-secondary hover:text-cyan-400 transition-colors text-left disabled:opacity-30"
+            >
+                <FolderOpen size={14} /> Im Explorer zeigen
+            </button>
+            <button
+                onClick={handleCopy}
+                className="w-full flex items-center gap-3 px-4 py-2 hover:bg-mx-hover text-[12px] text-ink-secondary hover:text-ink-primary transition-colors text-left"
+            >
+                <Copy size={14} /> "Artist – Title" kopieren
+            </button>
+            <div className="h-px bg-line-subtle" />
+            <button
+                onClick={() => { openSoundCloud(t); setContextMenu(null); }}
                 className="w-full flex items-center gap-3 px-4 py-2 hover:bg-[#ff5500]/10 text-[12px] text-ink-secondary hover:text-[#ff5500] transition-colors text-left"
             >
                 <div className="w-3.5 h-3.5 bg-current mask-soundcloud" style={{ maskImage: 'url(https://a-v2.sndcdn.com/assets/images/sc-icons/ios-a62dfc8f.svg)', WebkitMaskImage: 'url(https://a-v2.sndcdn.com/assets/images/sc-icons/ios-a62dfc8f.svg)' }}></div>
-                Open in SoundCloud
+                Auf SoundCloud öffnen
             </button>
 
             {/* Add to Playlist */}
             {onAddToPlaylist && availablePlaylists.length > 0 && (
                 <>
                     <div className="h-px bg-line-subtle" />
-                    <div className="relative"
-                        onMouseEnter={() => setShowAddSubmenu(true)}
-                        onMouseLeave={() => setShowAddSubmenu(false)}
+                    <div
+                        className="relative"
+                        onMouseEnter={() => {
+                            if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
+                            setShowAddSubmenu(true);
+                        }}
+                        onMouseLeave={() => {
+                            // Delayed close so the cursor can travel into the submenu
+                            closeTimer.current = setTimeout(() => setShowAddSubmenu(false), 250);
+                        }}
                     >
-                        <button className="w-full flex items-center gap-3 px-4 py-2 hover:bg-mx-hover text-[12px] text-ink-secondary hover:text-ok transition-colors text-left">
+                        <button
+                            onClick={() => setShowAddSubmenu(v => !v)}
+                            className="w-full flex items-center gap-3 px-4 py-2 hover:bg-mx-hover text-[12px] text-ink-secondary hover:text-ok transition-colors text-left"
+                        >
                             <Plus size={14} className="text-ok" /> Add to Playlist
                             <ChevronRight size={12} className="ml-auto text-ink-muted" />
                         </button>
                         {showAddSubmenu && (
-                            <div className="absolute left-full top-0 ml-1 bg-mx-panel border border-line-default rounded-mx-md shadow-mx-lg py-1 min-w-[180px] max-h-[300px] overflow-y-auto z-[110]">
-                                {availablePlaylists.map(pl => (
-                                    <button
-                                        key={pl.ID}
-                                        onClick={() => {
-                                            onAddToPlaylist(pl.ID, contextMenu.track.id || contextMenu.track.ID);
-                                            setContextMenu(null);
-                                        }}
-                                        className="w-full flex items-center gap-2 px-4 py-1.5 hover:bg-mx-hover text-[12px] text-ink-secondary hover:text-ink-primary transition-colors truncate"
-                                    >
-                                        <ListMusic size={12} className="text-amber2/60 shrink-0" />
-                                        <span className="truncate">{pl.Name}</span>
-                                    </button>
-                                ))}
+                            <div
+                                className="absolute left-full top-0 -ml-px bg-mx-panel border border-line-default rounded-mx-md shadow-mx-lg py-1 min-w-[200px] max-h-[320px] overflow-y-auto z-[110]"
+                                style={{ paddingLeft: 4, marginLeft: -2 }}
+                                onMouseEnter={() => {
+                                    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
+                                    setShowAddSubmenu(true);
+                                }}
+                                onMouseLeave={() => {
+                                    closeTimer.current = setTimeout(() => setShowAddSubmenu(false), 200);
+                                }}
+                            >
+                                <input
+                                    type="text"
+                                    value={pSearch}
+                                    onChange={(e) => setPSearch(e.target.value)}
+                                    placeholder="Suchen…"
+                                    autoFocus
+                                    className="w-full px-3 py-1.5 mb-1 bg-mx-card border-b border-line-subtle text-[11px] text-ink-primary focus:outline-none"
+                                    onClick={(e) => e.stopPropagation()}
+                                />
+                                {availablePlaylists
+                                    .filter(pl => !pSearch || (pl.Name || '').toLowerCase().includes(pSearch.toLowerCase()))
+                                    .map(pl => (
+                                        <button
+                                            key={pl.ID}
+                                            onClick={() => {
+                                                onAddToPlaylist(pl.ID, contextMenu.track.id || contextMenu.track.ID);
+                                                setContextMenu(null);
+                                            }}
+                                            className="w-full flex items-center gap-2 px-4 py-1.5 hover:bg-mx-hover text-[12px] text-ink-secondary hover:text-ink-primary transition-colors truncate"
+                                        >
+                                            <ListMusic size={12} className="text-amber2/60 shrink-0" />
+                                            <span className="truncate">{pl.Name}</span>
+                                        </button>
+                                    ))}
                             </div>
                         )}
                     </div>
