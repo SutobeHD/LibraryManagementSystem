@@ -54,11 +54,12 @@ class OneLibraryUsbWriter:
         self.rb_dir = self.pioneer / "rekordbox"
         self.anlz_root = self.pioneer / "USBANLZ"
         self.artwork_dir = self.pioneer / "Artwork"
-        # Default music_dir aligned with UsbSyncEngine._get_safe_dest_path
-        # so library_one and library_legacy can run side-by-side without
-        # duplicating audio. The actual file path is determined by
-        # `dest_resolver` when one is supplied.
-        self.music_dir = self.pioneer / "Contents"
+        # Pioneer-canonical: audio at <USB>/Contents/, NOT under PIONEER/.
+        # Verified against a real Rekordbox-exported stick. The actual final
+        # path is determined by `dest_resolver` when one is supplied — the
+        # legacy XML writer passes its own resolver so both writers land in
+        # the same directory tree (no duplication).
+        self.music_dir = self.usb_root / "Contents"
         self.db_path = self.rb_dir / "exportLibrary.db"
         self._dest_resolver = dest_resolver
 
@@ -210,7 +211,7 @@ class OneLibraryUsbWriter:
                     if self._dest_resolver is not None:
                         dest_path = self._dest_resolver(
                             t.get("artist") or "",
-                            t.get("album") or "",
+                            t.get("title") or "",
                             src_path.name,
                         )
                     else:
@@ -399,12 +400,14 @@ class OneLibraryUsbWriter:
             return None
 
     def _dest_audio_path(self, track: Dict, src_path: Path) -> Path:
-        """Layout: <usb>/Contents/<Artist>/<Album>/<filename>"""
-        from .usb_manager import UsbSyncEngine
-        # Reuse FAT-safe filename logic if available
-        artist = self._safe_segment(track["artist"] or "Unknown Artist")
-        album = self._safe_segment(track["album"] or "Unknown Album")
-        return self.music_dir / artist / album / src_path.name
+        """Pioneer-canonical layout: <usb>/Contents/<Artist>/<Title>/<filename>.
+
+        Used as a fallback when no `dest_resolver` is supplied. Title (not
+        Album) is the second segment to match Rekordbox's own export format.
+        """
+        artist = self._safe_segment(track.get("artist") or "Unknown Artist")
+        title = self._safe_segment(track.get("title") or src_path.stem or "Unknown Title")
+        return self.music_dir / artist / title / src_path.name
 
     @staticmethod
     def _safe_segment(s: str) -> str:

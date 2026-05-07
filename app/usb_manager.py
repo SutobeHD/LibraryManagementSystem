@@ -862,7 +862,7 @@ class UsbSyncEngine:
             cleaned = f"_{cleaned}"
         return cleaned or "Unknown"
 
-    def _get_safe_dest_path(self, artist: str, album: str, filename: str) -> Path:
+    def _get_safe_dest_path(self, artist: str, title: str, filename: str) -> Path:
         """
         Build a safe destination path for a track on the USB drive.
 
@@ -871,14 +871,20 @@ class UsbSyncEngine:
           exFAT  → 255 chars per component (no strict total limit)
           NTFS   → 255 chars per component (no strict total limit on modern Windows)
 
-        Pioneer CDJs expect audio files under PIONEER/Contents/<Artist>/<Album>/<file>.
+        Pioneer-canonical layout (matches what Rekordbox itself produces):
+            <USB>/Contents/<Artist>/<Title>/<file>
+        Note: NOT under PIONEER/ and segment 2 is the TRACK TITLE, not the
+        album — verified against a real Rekordbox-exported stick. The earlier
+        `PIONEER/Contents/<Artist>/<Album>/` layout was non-standard and
+        mismatched the paths stored inside exportLibrary.db, which made
+        Rekordbox treat tracks as missing on insert.
         """
-        contents_dir = self.usb_pioneer / "Contents"
+        contents_dir = self.usb_root / "Contents"
         artist_clean = self._clean_filename(artist)[:40].strip() or "UnknownArtist"
-        album_clean = self._clean_filename(album)[:40].strip() or "UnknownAlbum"
+        title_clean = self._clean_filename(title)[:40].strip() or "UnknownTitle"
         file_clean = self._clean_filename(filename)
 
-        dest = contents_dir / artist_clean / album_clean / file_clean
+        dest = contents_dir / artist_clean / title_clean / file_clean
 
         # Only truncate total path length for FAT32 where MAX_PATH is a hard limit.
         # On NTFS/exFAT the per-component limit (255) is already enforced by _clean_filename.
@@ -887,7 +893,7 @@ class UsbSyncEngine:
             stem = dest.stem
             ext = dest.suffix
             if len(stem) > excess:
-                dest = contents_dir / artist_clean / album_clean / (stem[:-excess] + ext)
+                dest = contents_dir / artist_clean / title_clean / (stem[:-excess] + ext)
             else:
                 # Path too deep — flatten to contents root with hash-based name
                 dest = contents_dir / f"track_{hashlib.md5(filename.encode()).hexdigest()[:8]}{ext}"
@@ -1035,6 +1041,8 @@ class UsbSyncEngine:
                     except Exception as e:
                         logger.debug(f"album lookup failed for id={t.album_id}: {e}")
 
+                title = getattr(t, 'title', '') or ''
+
                 # rbox's DjmdContent.folder_path is actually the FULL FILE PATH
                 # (not a folder), e.g. '<user_dir>/Music/.../MTHN - Beginning.m4a'.
                 # The old code did `folder_path + '/' + file_name_l` which doubled
@@ -1062,7 +1070,9 @@ class UsbSyncEngine:
 
                 usb_dest_path = None
                 if local_path.exists():
-                    usb_dest_path = self._get_safe_dest_path(artist_name, album_name, local_file)
+                    # Path is keyed on title (Pioneer-canonical), but we still
+                    # surface album_name to the XML <Album> attribute below.
+                    usb_dest_path = self._get_safe_dest_path(artist_name, title, local_file)
                     try:
                         # Copy the file to USB with chunk streaming progress
                         for event in self._copy_file_stream(local_path, usb_dest_path):
@@ -1247,7 +1257,8 @@ class UsbSyncEngine:
 
             usb_dest_path = None
             if local_path.exists():
-                usb_dest_path = self._get_safe_dest_path(t.get("artist", ""), t.get("album", ""), local_file)
+                # Pioneer-canonical layout: <USB>/Contents/<Artist>/<Title>/<file>
+                usb_dest_path = self._get_safe_dest_path(t.get("artist", ""), t.get("title", ""), local_file)
                 try:
                     for _ in self._copy_file_stream(local_path, usb_dest_path):
                         pass
