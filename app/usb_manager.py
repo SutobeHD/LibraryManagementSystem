@@ -753,21 +753,31 @@ class UsbSyncEngine:
             yield {"stage": "error", "message": str(e), "progress": -1}
 
     def _sync_library_one(self, profile: Dict, playlist_ids: List[str] = None) -> Generator[Dict, None, None]:
-        """Sync via rbox.OneLibrary → exportLibrary.db + ANLZ + audio copy."""
+        """Sync via rbox.OneLibrary → exportLibrary.db + ANLZ + audio copy.
+
+        The OneLibrary writer reuses our `_get_safe_dest_path` resolver so
+        audio files land in the SAME directory as the legacy XML writer.
+        Without this both writers (when both library types are selected)
+        would copy each track twice — once to <usb>/Contents and once to
+        <usb>/PIONEER/Contents.
+        """
         try:
             from .usb_one_library import OneLibraryUsbWriter
             from .library_source import from_db
             from .database import db as global_db
 
             source = from_db(global_db)
-            writer = OneLibraryUsbWriter(profile["drive"])
+            writer = OneLibraryUsbWriter(
+                profile["drive"],
+                dest_resolver=self._get_safe_dest_path,
+            )
             for ev in writer.sync(source, audio_copy=True, copy_anlz=True):
                 yield ev
         except Exception as e:
             logger.error(f"OneLibrary sync failed: {e}", exc_info=True)
             yield {"stage": "error", "message": f"OneLibrary: {e}", "progress": -1}
 
-    def sync_playlists(self, profile: Dict, playlist_ids: List[str], library_types: List[str] = ["library_legacy"]) -> Generator[Dict, None, None]:
+    def sync_playlists(self, profile: Dict, playlist_ids: List[str], library_types: List[str] = ["library_one", "library_legacy"]) -> Generator[Dict, None, None]:
         if profile.get("sync_mirrored"):
             library_types = list(set(library_types + ["library_one", "library_legacy"]))
             logger.info(f"Mirrored sync enabled. Syncing both formats for {profile.get('drive')}")

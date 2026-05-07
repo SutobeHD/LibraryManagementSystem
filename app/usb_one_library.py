@@ -16,7 +16,7 @@ import logging
 import shutil
 import hashlib
 from pathlib import Path
-from typing import Dict, List, Optional, Generator
+from typing import Callable, Dict, List, Optional, Generator
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,18 @@ class OneLibraryUsbWriter:
     and audio files to a USB stick CDJ-3000 understands.
     """
 
-    def __init__(self, usb_root: str):
+    def __init__(
+        self,
+        usb_root: str,
+        dest_resolver: Optional[Callable[[str, str, str], Path]] = None,
+    ):
+        """
+        dest_resolver(artist, album, filename) -> absolute Path on the USB.
+        When provided, OneLibrary uses the SAME destination logic as the
+        legacy XML writer so files are not copied twice into different
+        directory trees. Falls back to an internal `_dest_audio_path` when
+        no resolver is passed (older callers, tests).
+        """
         if len(usb_root) == 2 and usb_root[1] == ":":
             usb_root = usb_root + "\\"
         self.usb_root = Path(usb_root)
@@ -43,8 +54,13 @@ class OneLibraryUsbWriter:
         self.rb_dir = self.pioneer / "rekordbox"
         self.anlz_root = self.pioneer / "USBANLZ"
         self.artwork_dir = self.pioneer / "Artwork"
-        self.music_dir = self.usb_root / "Contents"  # CDJ-recommended audio location
+        # Default music_dir aligned with UsbSyncEngine._get_safe_dest_path
+        # so library_one and library_legacy can run side-by-side without
+        # duplicating audio. The actual file path is determined by
+        # `dest_resolver` when one is supplied.
+        self.music_dir = self.pioneer / "Contents"
         self.db_path = self.rb_dir / "exportLibrary.db"
+        self._dest_resolver = dest_resolver
 
     def ensure_structure(self):
         for d in (self.rb_dir, self.anlz_root, self.artwork_dir, self.music_dir):
@@ -103,7 +119,14 @@ class OneLibraryUsbWriter:
                 # Audio file copy → USB
                 src_path = Path(t["path"]) if t["path"] else None
                 if audio_copy and src_path and src_path.exists():
-                    dest_path = self._dest_audio_path(t, src_path)
+                    if self._dest_resolver is not None:
+                        dest_path = self._dest_resolver(
+                            t.get("artist") or "",
+                            t.get("album") or "",
+                            src_path.name,
+                        )
+                    else:
+                        dest_path = self._dest_audio_path(t, src_path)
                     if not dest_path.exists():
                         dest_path.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(str(src_path), str(dest_path))
