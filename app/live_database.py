@@ -447,7 +447,15 @@ class LiveRekordboxDB:
         ATTR_TO_TYPE = {0: "1", 1: "0", 4: "4"}
         
         for pl in raw_playlists:
-            attr = getattr(pl, 'attribute', 0)
+            # rbox 0.1.7+ exposes `attribute` as a `builtins.PlaylistType` enum
+            # object that is NOT hashable, so `ATTR_TO_TYPE.get(attr, "1")`
+            # raised TypeError on every load. Coerce to int via explicit
+            # value/int casting.
+            raw_attr = getattr(pl, 'attribute', 0)
+            try:
+                attr = int(getattr(raw_attr, 'value', raw_attr))
+            except (TypeError, ValueError):
+                attr = 0
             pl_type = ATTR_TO_TYPE.get(attr, "1")  # default to playlist
             my_id = str(pl.id)
             
