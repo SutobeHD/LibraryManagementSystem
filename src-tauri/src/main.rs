@@ -13,6 +13,145 @@ use audio::fingerprint::{fingerprint_track, fingerprint_batch};
 use audio::engine::AudioController;
 use std::sync::Mutex;
 
+#[cfg(debug_assertions)]
+struct DevChildren {
+    backend: Option<std::process::Child>,
+    vite: Option<std::process::Child>,
+}
+
+#[cfg(debug_assertions)]
+struct DevBackendChild(Mutex<DevChildren>);
+
+#[cfg(debug_assertions)]
+fn find_repo_root() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let mut p = exe.parent()?.to_path_buf();
+    for _ in 0..8 {
+        if p.join("app").join("main.py").exists() {
+            return Some(p);
+        }
+        p = p.parent()?.to_path_buf();
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut p = cwd;
+        for _ in 0..8 {
+            if p.join("app").join("main.py").exists() {
+                return Some(p);
+            }
+            if !p.pop() { break; }
+        }
+    }
+    None
+}
+
+#[cfg(debug_assertions)]
+fn is_port_busy(port: u16) -> bool {
+    use std::net::TcpStream;
+    use std::time::Duration;
+    let addr = format!("127.0.0.1:{}", port);
+    if let Ok(sock) = addr.parse() {
+        TcpStream::connect_timeout(&sock, Duration::from_millis(200)).is_ok()
+    } else {
+        false
+    }
+}
+
+#[cfg(debug_assertions)]
+fn spawn_child(
+    label: &'static str,
+    program: &str,
+    args: &[&str],
+    cwd: &std::path::Path,
+) -> Option<std::process::Child> {
+    use std::process::{Command, Stdio};
+    use std::io::{BufRead, BufReader};
+
+    let mut cmd = Command::new(program);
+    cmd.args(args)
+        .current_dir(cwd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    match cmd.spawn() {
+        Ok(mut child) => {
+            if let Some(stdout) = child.stdout.take() {
+                let lbl = label;
+                std::thread::spawn(move || {
+                    for line in BufReader::new(stdout).lines().flatten() {
+                        println!("[{}] {}", lbl, line);
+                    }
+                });
+            }
+            if let Some(stderr) = child.stderr.take() {
+                let lbl = label;
+                std::thread::spawn(move || {
+                    for line in BufReader::new(stderr).lines().flatten() {
+                        eprintln!("[{}-err] {}", lbl, line);
+                    }
+                });
+            }
+            Some(child)
+        }
+        Err(e) => {
+            eprintln!("[{}] Failed to spawn {}: {}", label, program, e);
+            None
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+fn spawn_dev_backend(app: &tauri::AppHandle) {
+    use tauri::Manager;
+
+    let root = match find_repo_root() {
+        Some(r) => r,
+        None => {
+            eprintln!("[dev-spawn] Could not locate app/main.py — skipping auto-spawn.");
+            return;
+        }
+    };
+
+    let mut backend: Option<std::process::Child> = None;
+    let mut vite: Option<std::process::Child> = None;
+
+    // Backend (port 8000)
+    if is_port_busy(8000) {
+        println!("[backend] Port 8000 in use — skipping spawn.");
+    } else {
+        println!("[backend] Spawning python -m app.main from {}", root.display());
+        backend = spawn_child("backend", "python", &["-m", "app.main"], &root);
+    }
+
+    // Vite dev server (port 5173)
+    if is_port_busy(5173) {
+        println!("[vite] Port 5173 in use — skipping spawn.");
+    } else {
+        let frontend = root.join("frontend");
+        if frontend.join("package.json").exists() {
+            println!("[vite] Spawning npm run dev from {}", frontend.display());
+            // npm on Windows is a .cmd shim → run via cmd.exe
+            #[cfg(target_os = "windows")]
+            {
+                vite = spawn_child("vite", "cmd.exe", &["/c", "npm", "run", "dev"], &frontend);
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                vite = spawn_child("vite", "npm", &["run", "dev"], &frontend);
+            }
+        } else {
+            eprintln!("[vite] frontend/package.json missing — skipping.");
+        }
+    }
+
+    app.manage(DevBackendChild(Mutex::new(DevChildren { backend, vite })));
+}
+
 #[tauri::command]
 fn close_splashscreen(window: tauri::Window) {
     // Close splashscreen — use .ok() to avoid panic if window doesn't exist
@@ -182,11 +321,31 @@ fn main() {
             
             #[cfg(debug_assertions)]
             {
-                println!("Debug mode detected: Skipping sidecar spawn. Ensure the backend is running manually on port 8000.");
+                spawn_dev_backend(&app.handle());
             }
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app_handle, _event| {
+            #[cfg(debug_assertions)]
+            {
+                if let tauri::RunEvent::Exit = _event {
+                    use tauri::Manager;
+                    if let Some(state) = _app_handle.try_state::<DevBackendChild>() {
+                        if let Ok(mut guard) = state.0.lock() {
+                            if let Some(mut child) = guard.backend.take() {
+                                let _ = child.kill();
+                                println!("[backend] Killed on app exit.");
+                            }
+                            if let Some(mut child) = guard.vite.take() {
+                                let _ = child.kill();
+                                println!("[vite] Killed on app exit.");
+                            }
+                        }
+                    }
+                }
+            }
+        });
 }
