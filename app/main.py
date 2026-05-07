@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Response, BackgroundTasks
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Response, BackgroundTasks, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
@@ -420,13 +420,10 @@ class DBModeReq(BaseModel):
 from fastapi import Request
 
 @app.get("/api/stream")
-async def stream_audio(path: str):
-    """Streams audio file from absolute path — SECURITY: validates path against allowed roots."""
-    logger.info(f"Stream request for: {path}")
-    
-    # SECURITY: Validate path is within allowed audio directories
+async def stream_audio(path: str, request: Request):
+    """Streams audio file with HTTP Range support — required for browser seeking."""
     file_path = validate_audio_path(path)
-    
+
     mime_types = {
         '.mp3': 'audio/mpeg',
         '.wav': 'audio/wav',
@@ -439,11 +436,72 @@ async def stream_audio(path: str):
     ext = file_path.suffix.lower()
     media_type = mime_types.get(ext, 'application/octet-stream')
 
-    return FileResponse(
-        file_path, 
+    file_size = file_path.stat().st_size
+    range_header = request.headers.get("range") or request.headers.get("Range")
+
+    # No Range header → still expose Accept-Ranges so browsers know seeking is possible
+    if not range_header:
+        async def _full():
+            with open(file_path, "rb") as f:
+                while True:
+                    chunk = f.read(64 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+        return StreamingResponse(
+            _full(),
+            media_type=media_type,
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(file_size),
+                "Content-Disposition": f'inline; filename="{file_path.name}"',
+                "Cache-Control": "no-cache",
+            },
+        )
+
+    # Parse "bytes=START-END"
+    try:
+        units, _, rng = range_header.partition("=")
+        if units.strip().lower() != "bytes":
+            raise ValueError("only byte ranges supported")
+        start_s, _, end_s = rng.strip().partition("-")
+        start = int(start_s) if start_s else 0
+        end = int(end_s) if end_s else file_size - 1
+        end = min(end, file_size - 1)
+        if start > end or start < 0:
+            raise ValueError("invalid range")
+    except Exception as e:
+        return Response(
+            status_code=416,
+            headers={"Content-Range": f"bytes */{file_size}"},
+            content=f"Invalid range: {e}",
+        )
+
+    chunk_size = end - start + 1
+
+    async def _ranged():
+        with open(file_path, "rb") as f:
+            f.seek(start)
+            remaining = chunk_size
+            buf = 64 * 1024
+            while remaining > 0:
+                data = f.read(min(buf, remaining))
+                if not data:
+                    break
+                remaining -= len(data)
+                yield data
+
+    return StreamingResponse(
+        _ranged(),
+        status_code=206,
         media_type=media_type,
-        filename=file_path.name,
-        content_disposition_type="inline"
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Content-Length": str(chunk_size),
+            "Content-Disposition": f'inline; filename="{file_path.name}"',
+            "Cache-Control": "no-cache",
+        },
     )
 
 @app.get("/api/audio/waveform")
@@ -455,6 +513,31 @@ async def get_multiband_waveform(path: str, pps: int = 50):
     except Exception as e:
         logger.error(f"Waveform generation failed: {e}")
         raise HTTPException(500, safe_error_message(e))
+
+class FileRevealReq(BaseModel):
+    path: str
+
+
+@app.post("/api/file/reveal")
+def file_reveal(r: FileRevealReq):
+    """Open the OS file explorer pointing at the given file/folder path."""
+    try:
+        p = Path(r.path)
+        if not p.exists():
+            raise HTTPException(404, f"Not found: {r.path}")
+        import sys, subprocess
+        if sys.platform == "win32":
+            subprocess.run(["explorer", "/select,", str(p)], check=False)
+        elif sys.platform == "darwin":
+            subprocess.run(["open", "-R", str(p)], check=False)
+        else:
+            subprocess.run(["xdg-open", str(p.parent)], check=False)
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, safe_error_message(e))
+
 
 @app.post("/api/file/write")
 async def file_write(r: FileWriteReq):
@@ -670,10 +753,11 @@ async def stream_audio(path: str):
     return FileResponse(valid_path, headers={"Accept-Ranges": "bytes"})
 
 
-# ── Pioneer "My Tag" (live mode only) ────────────────────────────────────────
+# ── Pioneer "My Tag" (mode-agnostic — XML + Live both supported) ──────────────
 def _require_live_db():
-    if db.mode != "live" or not db.active_db or not hasattr(db.active_db, "list_mytags"):
-        raise HTTPException(409, "MyTag is only available in Live (master.db) mode.")
+    """Backwards-compatible name. Now returns whichever active_db has MyTag support."""
+    if not db.active_db or not hasattr(db.active_db, "list_mytags"):
+        raise HTTPException(409, "MyTag is not available — library not loaded.")
     return db.active_db
 
 
@@ -848,6 +932,110 @@ def reorder_pl_track(r: PlReorderReq):
         logger.error(f"Reorder error: {e}")
         raise HTTPException(500, safe_error_message(e))
 
+
+# ─── Smart Playlist Endpoints ─────────────────────────────────────────────
+
+class SmartPlaylistCreateReq(BaseModel):
+    name: str
+    parent_id: str = "ROOT"
+    criteria: Dict = {}
+
+
+class SmartPlaylistUpdateReq(BaseModel):
+    pid: str
+    criteria: Dict
+
+
+@app.post("/api/playlists/smart/create")
+def create_smart_pl(r: SmartPlaylistCreateReq):
+    try:
+        node = db.create_smart_playlist(r.name, r.criteria, r.parent_id)
+        if node:
+            return {"status": "success", "id": str(node.get("ID") or node)}
+        raise HTTPException(400, "create_smart_playlist not supported in current mode")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Smart playlist create failed: {e}")
+        raise HTTPException(500, safe_error_message(e))
+
+
+@app.post("/api/playlists/smart/update")
+def update_smart_pl(r: SmartPlaylistUpdateReq):
+    try:
+        ok = db.update_smart_playlist(r.pid, r.criteria)
+        return {"status": "success" if ok else "error"}
+    except Exception as e:
+        raise HTTPException(500, safe_error_message(e))
+
+
+@app.get("/api/playlists/smart/{pid}/evaluate")
+def evaluate_smart_pl(pid: str):
+    """Run smart-playlist criteria → list of matching track dicts."""
+    try:
+        return db.evaluate_smart_playlist(pid)
+    except Exception as e:
+        logger.error(f"Smart eval failed: {e}")
+        raise HTTPException(500, safe_error_message(e))
+
+
+class UsbHistoryReq(BaseModel):
+    drive: str  # e.g. "E:\\"
+
+
+@app.post("/api/usb/history")
+def read_usb_history(r: UsbHistoryReq):
+    """
+    Read CDJ-written history (history_entries / history_contents) from a USB stick
+    after a gig. Returns the played tracks per session so the user can review what
+    was played, in what order.
+    """
+    try:
+        import rbox
+        from pathlib import Path as _P
+        usb = _P(r.drive)
+        if len(r.drive) == 2 and r.drive[1] == ":":
+            usb = _P(r.drive + "\\")
+        db_path = usb / "PIONEER" / "rekordbox" / "exportLibrary.db"
+        if not db_path.exists():
+            raise HTTPException(404, f"No exportLibrary.db on {usb}")
+        ol = rbox.OneLibrary(str(db_path))
+        sessions = []
+        for h in ol.get_histories():
+            children = ol.get_history_contents(h.id) if hasattr(ol, "get_history_contents") else []
+            sessions.append({
+                "id": str(h.id),
+                "name": getattr(h, "name", ""),
+                "date": getattr(h, "date_created", ""),
+                "tracks": [
+                    {
+                        "content_id": str(getattr(c, "content_id", c)),
+                        "seq": getattr(c, "seq", 0),
+                    } for c in children
+                ],
+            })
+        return {"sessions": sessions}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"USB history read failed: {e}")
+        raise HTTPException(500, safe_error_message(e))
+
+
+@app.post("/api/playlists/folder/create")
+def create_folder_pl(r: CreatePlReq):
+    """Convenience: create a folder (Type=0). Equivalent to /create with type='0'."""
+    try:
+        node = db.create_folder(r.name, r.parent_id) if hasattr(db, "create_folder") else \
+            db.create_playlist(r.name, r.parent_id, is_folder=True)
+        if node:
+            return {"status": "success", "id": str(node.get("ID") if isinstance(node, dict) else node)}
+        raise HTTPException(400, "Could not create folder")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, safe_error_message(e))
+
 # --- RESTORED ENDPOINTS ---
 
 @app.get("/api/tools/duplicates")
@@ -1010,19 +1198,24 @@ def get_backup_diff(commit_hash: str):
         return engine.get_diff(commit_hash)
     return {"error": "Not available in current mode"}
 
+class LoadLibReq(BaseModel):
+    path: Optional[str] = None
+
 @app.post("/api/library/load")
-def load_lib():
+def load_lib(r: LoadLibReq = Body(default=None)):
+    requested_path = r.path if r else None
     try:
-        # success = db.load_library() 
-        # Inline logic to avoid potential AttributeError if db.load_library is missing in runtime
         if db.mode == "live":
             success = db.active_db.load()
         else:
-            success = db.xml_db.load_xml("rekordbox.xml")
+            xml_path = requested_path or str(db.xml_db.xml_path) or "rekordbox.xml"
+            success = db.xml_db.load_xml(xml_path)
+        db.loaded = success
         return {
             "status": "success" if success else "error",
             "message": "Library loaded" if success else "Failed to load library",
-            "tracks": len(db.tracks)
+            "tracks": len(db.tracks),
+            "path": str(db.xml_db.xml_path) if db.mode == "xml" else str(db.live_db_path),
         }
     except Exception as e:
         logger.error(f"Failed to load library: {e}\n{traceback.format_exc()}")
@@ -1647,10 +1840,23 @@ def cln(): return {"deleted_files": 0}
 def select_db_dialog():
     return {"path": "XML Mode"}
 
+class NewLibReq(BaseModel):
+    path: Optional[str] = None
+
 @app.post("/api/library/new")
-def create_new_lib():
-    db.create_new_library()
-    return {"status": "success", "message": "New empty library created."}
+def create_new_lib(r: NewLibReq = Body(default=None)):
+    path = r.path if r else None
+    try:
+        db.create_new_library(path)
+        return {
+            "status": "success",
+            "message": "New empty library created.",
+            "path": str(db.xml_db.xml_path),
+            "mode": db.mode,
+        }
+    except Exception as e:
+        logger.error(f"Failed to create new library: {e}")
+        return {"status": "error", "message": safe_error_message(e)}
 
 @app.post("/api/debug/load_xml")
 def debug_load_xml():
@@ -1735,9 +1941,10 @@ def usb_get_diff(device_id: str):
         if not dev:
             raise HTTPException(404, "Device not found")
         profile = UsbProfileManager.save_profile({"device_id": device_id, "label": dev.get("label", "USB"), "drive": dev["drive"]})
-    if not db.active_db or not hasattr(db.active_db, 'db_path'):
-        raise HTTPException(400, "No local database loaded")
-    engine = UsbSyncEngine(str(db.active_db.db_path), profile["drive"], profile.get("filesystem", ""))
+    if not db.active_db:
+        raise HTTPException(400, "No library loaded")
+    db_path = getattr(db.active_db, "db_path", None) or getattr(db.active_db, "xml_path", None)
+    engine = UsbSyncEngine(str(db_path), profile["drive"], profile.get("filesystem", ""))
     diff = engine.calculate_diff()
     # Add space estimate: ~10MB avg per track to add
     avg_track_size = 10 * 1024 * 1024
@@ -1762,12 +1969,15 @@ def _get_or_create_profile(device_id: str) -> dict:
 
 @app.post("/api/usb/sync")
 def usb_sync(r: UsbSyncReq):
-    """Sync a specific USB device."""
+    """Sync a specific USB device — works in both Live and XML modes."""
     profile = _get_or_create_profile(r.device_id)
-    if not db.active_db or not hasattr(db.active_db, 'db_path'):
-        raise HTTPException(400, "No local database loaded")
+    if not db.active_db:
+        raise HTTPException(400, "No library loaded")
 
-    engine = UsbSyncEngine(str(db.active_db.db_path), profile["drive"], profile.get("filesystem", ""))
+    # In Live mode pass master.db path, in XML mode pass xml path (legacy engine
+    # will fall back to OneLibrary writer which reads from db wrapper directly).
+    db_path = getattr(db.active_db, "db_path", None) or getattr(db.active_db, "xml_path", None)
+    engine = UsbSyncEngine(str(db_path), profile["drive"], profile.get("filesystem", ""))
     results = []
     libs = r.library_types or ["library_legacy"]
 
@@ -1787,10 +1997,11 @@ def usb_sync(r: UsbSyncReq):
 @app.post("/api/usb/sync/all")
 def usb_sync_all():
     """Sync all connected USB devices per their profiles."""
-    if not db.active_db or not hasattr(db.active_db, 'db_path'):
-        raise HTTPException(400, "No local database loaded")
+    if not db.active_db:
+        raise HTTPException(400, "No library loaded")
+    db_path = getattr(db.active_db, "db_path", None) or getattr(db.active_db, "xml_path", None)
     results = []
-    for event in UsbActions.update_all(str(db.active_db.db_path)):
+    for event in UsbActions.update_all(str(db_path)):
         results.append(event)
     last = results[-1] if results else {"stage": "complete", "message": "Nothing to sync"}
     return {"status": "success", "result": last, "events": results}
@@ -2304,6 +2515,87 @@ async def soundcloud_download(data: ScDownloadRequest, request: Request):
         sc_playlist_title=data.sc_playlist_title,
     )
     return {"status": "ok", "data": {"task_id": task_id}}
+
+
+class ScDownloadPlaylistReq(BaseModel):
+    playlist_id: int
+    is_likes: bool = False
+    playlist_title: Optional[str] = None  # for auto-playlist-sort folder
+    force: bool = False  # if True: wipe registry entries for these tracks → re-download
+
+
+@app.post("/api/soundcloud/download-playlist")
+async def soundcloud_download_playlist(r: ScDownloadPlaylistReq):
+    """Enqueue download for every track in a SoundCloud playlist."""
+    auth_token = keyring.get_password("library_management_system", "sc_token")
+    if not auth_token:
+        raise HTTPException(400, "SoundCloud auth token not configured")
+
+    # Write-permission guard
+    sc_dir = MUSIC_DIR / "SoundCloud"
+    sc_dir.mkdir(parents=True, exist_ok=True)
+    if not os.access(str(sc_dir), os.W_OK):
+        raise HTTPException(403, f"No write permission: {sc_dir}")
+
+    # Fetch full track list
+    try:
+        if r.is_likes:
+            likes = SoundCloudPlaylistAPI.get_likes(auth_token)
+            sc_tracks = likes.get("tracks", []) if likes else []
+        else:
+            sc_tracks = SoundCloudPlaylistAPI.get_full_playlist_tracks(r.playlist_id, auth_token)
+    except AuthExpiredError:
+        raise HTTPException(401, "auth_expired")
+    except Exception as e:
+        logger.error(f"[SC-DL-PL] Failed to fetch tracks: {e}")
+        raise HTTPException(502, f"Could not fetch playlist tracks: {e}")
+
+    if not sc_tracks:
+        return {"status": "success", "queued": 0, "skipped": 0, "task_ids": [], "message": "Playlist is empty or all tracks unavailable."}
+
+    task_ids = []
+    skipped = 0
+    forced_reset = 0
+    for t in sc_tracks:
+        sc_id = t.get("id")
+        title = t.get("title", "")
+        artist = t.get("artist", "")
+        if not sc_id or not title:
+            skipped += 1
+            continue
+
+        # Force re-download: wipe registry row so the gate doesn't skip us
+        if r.force:
+            try:
+                if download_registry.delete_entry(str(sc_id)):
+                    forced_reset += 1
+            except Exception as e:
+                logger.debug(f"[SC-DL-PL] registry delete failed for {sc_id}: {e}")
+
+        try:
+            tid = sc_downloader.download_track(
+                sc_track_id=str(sc_id),
+                sc_permalink_url=t.get("permalink_url", ""),
+                title=title,
+                artist=artist,
+                duration_ms=t.get("duration", 0),
+                downloadable=t.get("downloadable", False),
+                auth_token=auth_token,
+                sc_playlist_title=r.playlist_title,
+            )
+            task_ids.append(tid)
+        except Exception as e:
+            logger.warning(f"[SC-DL-PL] Skipped '{title}': {e}")
+            skipped += 1
+
+    return {
+        "status": "success",
+        "queued": len(task_ids),
+        "skipped": skipped,
+        "force_reset": forced_reset,
+        "task_ids": task_ids,
+        "message": f"Queued {len(task_ids)} downloads ({skipped} skipped, {forced_reset} reset).",
+    }
 
 
 @app.get("/api/soundcloud/tasks")

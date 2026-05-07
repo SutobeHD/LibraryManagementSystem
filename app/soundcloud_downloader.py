@@ -249,6 +249,40 @@ def _resolve_official_download_url(
         return None
 
 
+def _normalize_track_id(raw) -> Optional[str]:
+    """
+    Coerce a track-id value into a clean string ID.
+
+    Older registry rows accidentally stored the full
+    ``str((tid, analysis_dict))`` representation (the historical Tuple bug),
+    e.g. ``('1778088975330', {'bpm': 154.0, ...})``. We pull the first
+    numeric token out of that to recover a usable ID. Returns None when
+    nothing usable is found.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, (int,)):
+        return str(raw)
+    s = str(raw)
+    if not s or s.lower() == "none":
+        return None
+    # Already clean (purely digits, optional underscore prefix for XML mode)
+    if s.isdigit() or (s.startswith("pl_") is False and "_" not in s and " " not in s and "(" not in s):
+        return s
+    # Try to literal-eval in case it's a real tuple repr
+    try:
+        import ast
+        v = ast.literal_eval(s)
+        if isinstance(v, tuple) and v:
+            return _normalize_track_id(v[0])
+    except (ValueError, SyntaxError):
+        pass
+    # Fallback: regex out the first long digit run (tids are 13+ digits)
+    import re
+    m = re.search(r"\d{6,}", s)
+    return m.group(0) if m else None
+
+
 def _resolve_stream_via_transcodings(
     sc_track_id: str,
     auth_token: Optional[str],
@@ -270,9 +304,10 @@ def _resolve_stream_via_transcodings(
     """
     from .soundcloud_api import get_sc_client_id
 
-    headers = {"User-Agent": _UA, "Accept": "application/json"}
+    base_headers = {"User-Agent": _UA, "Accept": "application/json"}
+    auth_headers = dict(base_headers)
     if auth_token:
-        headers["Authorization"] = f"OAuth {auth_token}"
+        auth_headers["Authorization"] = f"OAuth {auth_token}"
 
     try:
         client_id = get_sc_client_id()
@@ -282,24 +317,49 @@ def _resolve_stream_via_transcodings(
     params = {"client_id": client_id}
 
     # Step 1 — fetch v2 track metadata (includes media.transcodings[]) ────────
-    try:
-        resp = requests.get(
-            f"{_V2_API_BASE}/tracks/{sc_track_id}",
-            headers=headers, params=params, timeout=_API_TIMEOUT,
-        )
-        if resp.status_code in (401, 403):
-            logger.warning(
-                "[SC-DL] No stream access for sc_id=%s (HTTP %s — paywall/removed)",
-                sc_track_id, resp.status_code,
+    # Try with OAuth first; if SC rejects (often because token's v1-style is
+    # incompatible with v2), retry anonymously like the soundcloud-dl extension
+    # does — client_id alone is enough for public tracks.
+    track_data = None
+    used_auth = bool(auth_token)
+    attempts = []
+    if auth_token:
+        attempts.append((auth_headers, "auth"))
+    attempts.append((base_headers, "anon"))
+    for attempt_headers, attempt_label in attempts:
+        try:
+            resp = requests.get(
+                f"{_V2_API_BASE}/tracks/{sc_track_id}",
+                headers=attempt_headers, params=params, timeout=_API_TIMEOUT,
             )
-            return None
-        resp.raise_for_status()
-        track_data = resp.json()
-    except requests.RequestException as exc:
-        logger.error("[SC-DL] v2 metadata fetch failed for sc_id=%s: %s", sc_track_id, exc)
-        return None
-    except ValueError:
-        logger.error("[SC-DL] v2 metadata returned non-JSON for sc_id=%s", sc_track_id)
+            if resp.status_code in (401, 403):
+                logger.info(
+                    "[SC-DL] v2 metadata HTTP %s on attempt=%s for sc_id=%s",
+                    resp.status_code, attempt_label, sc_track_id,
+                )
+                continue  # try next variant
+            resp.raise_for_status()
+            track_data = resp.json()
+            used_auth = (attempt_label == "auth")
+            break
+        except requests.RequestException as exc:
+            logger.warning(
+                "[SC-DL] v2 metadata fetch error attempt=%s sc_id=%s: %s",
+                attempt_label, sc_track_id, exc,
+            )
+            continue
+        except ValueError:
+            logger.warning(
+                "[SC-DL] v2 metadata non-JSON attempt=%s sc_id=%s",
+                attempt_label, sc_track_id,
+            )
+            continue
+
+    if track_data is None:
+        logger.warning(
+            "[SC-DL] No stream access for sc_id=%s (both auth and anon refused — paywall/removed)",
+            sc_track_id,
+        )
         return None
 
     transcodings = (track_data.get("media") or {}).get("transcodings") or []
@@ -348,25 +408,44 @@ def _resolve_stream_via_transcodings(
         return None
 
     # Step 2 — resolve the signed CDN URL ──────────────────────────────────────
+    # Use whichever variant succeeded for metadata.
+    sign_headers = auth_headers if used_auth else base_headers
     sign_params = {"client_id": client_id}
     if track_auth:
         sign_params["track_authorization"] = track_auth
 
-    try:
-        resp = requests.get(tc_url, headers=headers, params=sign_params, timeout=_API_TIMEOUT)
-        if resp.status_code in (401, 403):
+    signed = None
+    sign_attempts = [(sign_headers, "primary")]
+    if used_auth:
+        sign_attempts.append((base_headers, "anon-fallback"))
+    for s_headers, s_label in sign_attempts:
+        try:
+            resp = requests.get(tc_url, headers=s_headers, params=sign_params, timeout=_API_TIMEOUT)
+            if resp.status_code in (401, 403):
+                logger.info(
+                    "[SC-DL] Transcoding sign HTTP %s on %s for sc_id=%s",
+                    resp.status_code, s_label, sc_track_id,
+                )
+                continue
+            resp.raise_for_status()
+            signed = resp.json()
+            break
+        except requests.RequestException as exc:
             logger.warning(
-                "[SC-DL] Transcoding sign denied for sc_id=%s (HTTP %s)",
-                sc_track_id, resp.status_code,
+                "[SC-DL] Transcoding sign error %s sc_id=%s: %s", s_label, sc_track_id, exc,
             )
-            return None
-        resp.raise_for_status()
-        signed = resp.json()
-    except requests.RequestException as exc:
-        logger.error("[SC-DL] Transcoding sign failed for sc_id=%s: %s", sc_track_id, exc)
-        return None
-    except ValueError:
-        logger.error("[SC-DL] Transcoding sign returned non-JSON for sc_id=%s", sc_track_id)
+            continue
+        except ValueError:
+            logger.warning(
+                "[SC-DL] Transcoding sign non-JSON %s sc_id=%s", s_label, sc_track_id,
+            )
+            continue
+
+    if signed is None:
+        logger.warning(
+            "[SC-DL] Transcoding sign denied for sc_id=%s (all attempts failed)",
+            sc_track_id,
+        )
         return None
 
     cdn_url = signed.get("url")
@@ -571,15 +650,51 @@ class SoundCloudDownloader:
         # docstring): snipped previews, 401/403, and unavailable tracks are
         # skipped there.
 
-        # ── Gate: Deduplication — skip if already in registry ─────────────────
+        # ── Gate: Deduplication — skip download but STILL link to playlist ────
         if registry.is_already_downloaded(sc_track_id):
-            logger.info("[SC-DL] Skipped sc_id=%s '%s' — already in registry.", sc_track_id, title)
+            logger.info("[SC-DL] Skipped download sc_id=%s '%s' — already in registry. "
+                        "Linking to playlist if applicable.", sc_track_id, title)
+            existing = registry.get_record(sc_track_id) or {}
+            raw_id = existing.get("local_track_id")
+            local_track_id = _normalize_track_id(raw_id)
+            # Self-heal: if registry held a Tuple-string blob, persist the cleaned ID
+            if local_track_id and raw_id and str(raw_id) != local_track_id:
+                try:
+                    registry.update_analysis(
+                        sc_track_id=str(sc_track_id),
+                        bpm=existing.get("bpm"),
+                        key_str=existing.get("key_str"),
+                        confidence=existing.get("confidence"),
+                        local_track_id=local_track_id,
+                    )
+                    logger.info("[SC-DL] Registry self-heal sc_id=%s: %r → %s",
+                                sc_track_id, str(raw_id)[:40], local_track_id)
+                except Exception as exc:
+                    logger.debug("[SC-DL] registry self-heal skipped: %s", exc)
+            sorted_into_pl = False
+            if sc_playlist_title and local_track_id:
+                try:
+                    self._auto_add_to_playlist(str(local_track_id), sc_playlist_title)
+                    sorted_into_pl = True
+                except Exception as exc:
+                    logger.warning("[SC-DL] Playlist link on skip failed: %s", exc)
             self._set_task(task_id, {
                 "id": task_id, "sc_track_id": sc_track_id,
                 "title": title, "artist": artist,
-                "status": "Skipped", "progress": 100,
+                "playlist_title": sc_playlist_title or "",
+                "status": "Linked" if sorted_into_pl else "Skipped",
+                "progress": 100,
                 "duplicate": True, "error": None,
                 "start_time": time.time(),
+                "stage_history": [
+                    {"stage": "Skipped", "ts": time.time()},
+                    *([{"stage": "Sorting", "ts": time.time()}] if sorted_into_pl else []),
+                    *([{"stage": "Completed", "ts": time.time()}] if sorted_into_pl else []),
+                ],
+                "local_track_id": local_track_id,
+                "bpm": existing.get("bpm"),
+                "key": existing.get("key_str"),
+                "file_path": existing.get("file_path"),
             })
             if on_complete:
                 on_complete(task_id, True, None)
@@ -595,8 +710,12 @@ class SoundCloudDownloader:
         self._set_task(task_id, {
             "id": task_id, "sc_track_id": sc_track_id,
             "title": title, "artist": artist,
+            "playlist_title": sc_playlist_title or "",
             "status": "Starting", "progress": 0,
             "error": None, "start_time": time.time(),
+            "stage_history": [{"stage": "Starting", "ts": time.time()}],
+            "local_track_id": None, "bpm": None, "key": None,
+            "file_path": None,
         })
 
         def _run() -> None:
@@ -744,14 +863,15 @@ class SoundCloudDownloader:
                 status="downloaded",
             )
 
-            self._update_task(task_id, status="Completed", progress=100)
-            logger.info("[SC-DL] Completed: '%s' → %s", title, final_path)
+            self._update_task(task_id, status="Downloaded", progress=85)
+            logger.info("[SC-DL] Downloaded: '%s' → %s", title, final_path)
 
             if on_complete:
                 on_complete(task_id, True, final_path)
 
             # Step 6 — Trigger background analysis (must not raise) ────────────
-            self._trigger_analysis_async(sc_track_id, final_path, sc_playlist_title)
+            self._update_task(task_id, status="Analyzing", progress=88)
+            self._trigger_analysis_async(sc_track_id, final_path, sc_playlist_title, task_id=task_id)
 
         except Exception as exc:
             logger.error(
@@ -777,6 +897,7 @@ class SoundCloudDownloader:
         sc_track_id: str,
         file_path: Path,
         sc_playlist_title: Optional[str],
+        task_id: Optional[str] = None,
     ) -> None:
         """
         Spawn a daemon thread to run BPM/key analysis and auto-import.
@@ -790,16 +911,33 @@ class SoundCloudDownloader:
                     sc_track_id=sc_track_id, title="", artist="",
                     status="analyzing",
                 )
+                if task_id:
+                    self._update_task(task_id, status="Analyzing", progress=90)
 
                 from .analysis_engine import run_full_analysis
-                logger.info("[SC-DL] Analyzing: %s", file_path.name)
+                logger.info("[SC-DL] Analyzing (full pipeline): %s", file_path.name)
                 result = run_full_analysis(str(file_path))
                 bpm = result.get("bpm")
                 key = result.get("key")
-                conf = result.get("confidence")
+                conf = result.get("key_confidence", result.get("confidence"))
 
-                # Auto-import into Rekordbox library
-                local_track_id = self._auto_import(file_path)
+                # Auto-import into library — pass full analysis result so the
+                # importer can persist beatgrid + cues + waveform without
+                # re-running analysis.
+                if task_id:
+                    self._update_task(task_id, status="Importing", progress=93,
+                                      bpm=bpm, key=key, file_path=str(file_path))
+                local_track_id = self._auto_import(file_path, analysis_result=result)
+                if task_id and local_track_id:
+                    self._update_task(task_id, local_track_id=local_track_id)
+
+                # Write companion ANLZ binary files (DAT/EXT/2EX) so CDJs get
+                # beatgrid + cues + colored waveforms when this track lands on
+                # a USB stick.
+                try:
+                    self._write_companion_anlz(file_path, result)
+                except Exception as exc:
+                    logger.warning("[SC-DL] ANLZ generation failed for %s: %s", file_path.name, exc)
 
                 registry.update_analysis(
                     sc_track_id=sc_track_id, bpm=bpm,
@@ -813,27 +951,40 @@ class SoundCloudDownloader:
 
                 # Auto-sort into SC playlist after import
                 if sc_playlist_title and local_track_id:
+                    if task_id:
+                        self._update_task(task_id, status="Sorting", progress=98)
                     self._auto_add_to_playlist(local_track_id, sc_playlist_title)
+
+                if task_id:
+                    self._update_task(task_id, status="Completed", progress=100)
 
             except Exception as exc:
                 logger.error(
                     "[SC-DL] Background analysis failed for sc_id=%s: %s",
                     sc_track_id, exc, exc_info=True,
                 )
+                if task_id:
+                    self._update_task(task_id, status="Analysis Failed", progress=100, error=str(exc))
 
         thread = threading.Thread(
             target=_analyze, daemon=True, name=f"sc-analyze-{sc_track_id}"
         )
         thread.start()
 
-    def _auto_import(self, file_path: Path) -> Optional[str]:
+    def _auto_import(self, file_path: Path, analysis_result: Optional[Dict] = None) -> Optional[str]:
         """
-        Import the downloaded track into the Rekordbox XML library.
+        Import the downloaded track into the library.
         Returns the new local track_id string, or None on failure.
+        Passes full analysis result (if any) so the importer skips re-analysis.
         """
         try:
             from .services import ImportManager
-            track_id = ImportManager.process_import(file_path)
+            result = ImportManager.process_import(file_path, analysis_result=analysis_result)
+            # process_import returns (tid, analysis) tuple — unpack
+            if isinstance(result, tuple) and len(result) >= 1:
+                track_id = result[0]
+            else:
+                track_id = result
             if track_id:
                 logger.info("[SC-DL] Imported into library: track_id=%s", track_id)
             else:
@@ -842,6 +993,33 @@ class SoundCloudDownloader:
         except Exception as exc:
             logger.error("[SC-DL] Auto-import failed for %s: %s", file_path, exc)
             return None
+
+    def _write_companion_anlz(self, file_path: Path, result: Dict) -> None:
+        """
+        Write DAT/EXT/2EX sidecars next to the audio file so a later USB-sync
+        can copy them straight onto the stick (CDJ-3000 expects them under
+        PIONEER/USBANLZ/<bucket>/<hash>/ANLZ0000.{DAT,EXT,2EX}).
+
+        Storage convention:
+            <music_dir>/.lms_anlz/<sha-of-path>/ANLZ0000.DAT|EXT|2EX
+
+        The USB-sync engine resolves this directory and copies the bytes into
+        the CDJ-conforming bucket layout.
+        """
+        from .anlz_writer import write_anlz_files
+        import hashlib
+        sidecar_root = file_path.parent / ".lms_anlz"
+        # 8-char sha keeps the directory short; collisions extremely unlikely
+        h = hashlib.sha1(str(file_path).encode("utf-8")).hexdigest()[:16]
+        target_dir = sidecar_root / h
+        target_dir.mkdir(parents=True, exist_ok=True)
+        write_anlz_files(
+            anlz_dir=str(target_dir),
+            track_path=str(file_path),
+            analysis_result=result,
+            filename_base="ANLZ0000",
+        )
+        logger.info("[SC-DL] ANLZ written → %s", target_dir)
 
     def _auto_add_to_playlist(self, local_track_id: str, sc_playlist_title: str) -> None:
         """
@@ -893,6 +1071,15 @@ class SoundCloudDownloader:
     def _update_task(self, task_id: str, **kwargs) -> None:
         with self._lock:
             if task_id in self.tasks:
+                # Capture stage transitions in history for UI timeline
+                if "status" in kwargs:
+                    new_stage = kwargs["status"]
+                    cur = self.tasks[task_id]
+                    last = cur.get("stage_history", [])[-1:] or [{}]
+                    if last[0].get("stage") != new_stage:
+                        cur.setdefault("stage_history", []).append({
+                            "stage": new_stage, "ts": time.time(),
+                        })
                 self.tasks[task_id].update(kwargs)
 
     def get_task_status(self, task_id: str) -> Optional[Dict]:

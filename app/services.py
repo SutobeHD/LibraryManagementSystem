@@ -13,6 +13,7 @@ import logging
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from collections import defaultdict
+from typing import Optional, Dict, Any
 from .config import REKORDBOX_ROOT, DB_FILENAME, BACKUP_DIR, FFMPEG_BIN, EXPORT_DIR, MUSIC_DIR
 from .xml_generator import RekordboxXML
 from .database import db
@@ -166,16 +167,99 @@ class AudioEngine:
         if not os.path.exists(source_path): raise FileNotFoundError(f"File not found: {source_path}")
         temp_files = []
         try:
-            for i, cut in enumerate(cuts):
-                start, end = cut['start'], cut['end']
+            # ── Build timeline plan: (src_path, src_start, src_end) tuples ────
+            # cuts may contain three types:
+            #   - 'delete' / no type with start/end: remove that range from the source timeline
+            #   - 'insert': paste an extra slice at insertAt (from src, range [start..end])
+            # Anything not explicitly an insert/delete is treated as a literal slice
+            # (legacy "make-section" mode — preserves backwards compatibility).
+            from .config import MUSIC_DIR as _MUSIC
+
+            try:
+                src_dur = AudioEngine.get_duration(source_path) if hasattr(AudioEngine, "get_duration") else None
+            except Exception:
+                src_dur = None
+            if src_dur is None:
+                # ffprobe fallback
+                try:
+                    pr = subprocess.run(
+                        [FFMPEG_BIN.replace("ffmpeg", "ffprobe"),
+                         "-v", "error", "-show_entries", "format=duration",
+                         "-of", "default=noprint_wrappers=1:nokey=1", source_path],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    src_dur = float(pr.stdout.strip()) if pr.returncode == 0 else 0
+                except Exception:
+                    src_dur = 0
+
+            has_modes = any(c.get("type") in ("insert", "delete", "cut") for c in cuts)
+            timeline = []   # ordered (src, t_start, t_end)
+
+            if has_modes:
+                # 1. Start from full track
+                base_segments = [(source_path, 0.0, float(src_dur))]
+                # 2. Apply deletes (type == 'delete' or 'cut')
+                for c in [c for c in cuts if c.get("type") in ("delete", "cut")]:
+                    cs, ce = float(c["start"]), float(c["end"])
+                    if ce <= cs:
+                        continue
+                    new_segs = []
+                    for s, ts, te in base_segments:
+                        if ce <= ts or cs >= te:
+                            new_segs.append((s, ts, te))
+                            continue
+                        if cs > ts:
+                            new_segs.append((s, ts, cs))
+                        if ce < te:
+                            new_segs.append((s, ce, te))
+                    base_segments = new_segs
+                timeline = list(base_segments)
+                # 3. Apply inserts at insertAt position on the (already-deleted) timeline
+                for c in [c for c in cuts if c.get("type") == "insert"]:
+                    insert_at = float(c.get("insertAt", 0))
+                    seg_src = c.get("src", source_path)
+                    if not os.path.exists(seg_src):
+                        seg_src = source_path
+                    seg_start, seg_end = float(c["start"]), float(c["end"])
+                    if seg_end <= seg_start:
+                        continue
+                    # Walk current timeline, find the segment that contains insert_at
+                    new_tl = []
+                    cursor = 0.0
+                    inserted = False
+                    for s, ts, te in timeline:
+                        seg_dur = te - ts
+                        if not inserted and cursor + seg_dur >= insert_at:
+                            split_offset = insert_at - cursor
+                            split_point = ts + split_offset
+                            if split_offset > 0:
+                                new_tl.append((s, ts, split_point))
+                            new_tl.append((seg_src, seg_start, seg_end))
+                            if split_point < te:
+                                new_tl.append((s, split_point, te))
+                            inserted = True
+                        else:
+                            new_tl.append((s, ts, te))
+                        cursor += seg_dur
+                    if not inserted:
+                        new_tl.append((seg_src, seg_start, seg_end))
+                    timeline = new_tl
+            else:
+                # Legacy: literal cut list = ordered output segments
+                for c in cuts:
+                    s = c.get("src", source_path)
+                    if not os.path.exists(s):
+                        s = source_path
+                    timeline.append((s, float(c["start"]), float(c["end"])))
+
+            for i, (cut_src, start, end) in enumerate(timeline):
                 duration = end - start
-                
+
                 # Skip zero-duration segments which cause FFmpeg to fail
                 if duration <= 0:
                     logger.warning(f"Skipping zero-duration segment at index {i} ({start} - {end})")
                     continue
 
-                cut_src = cut.get('src', source_path)
                 logger.info(f"[Segment {i}] Checking source: {cut_src}")
                 if not cut_src or not os.path.exists(cut_src):
                     logger.warning(f"Segment source not found: {cut_src}, falling back to master source")
@@ -187,10 +271,12 @@ class AudioEngine:
                 
                 filters = []
                 if fade_in and i == 0: filters.append("afade=t=in:st=0:d=1.0")
-                if fade_out and i == len(cuts)-1: filters.append(f"afade=t=out:st={max(0, duration-1)}:d=1.0")
+                if fade_out and i == len(timeline)-1: filters.append(f"afade=t=out:st={max(0, duration-1)}:d=1.0")
                 f_arg = ["-af", ",".join(filters)] if filters else []
-                
-                cmd = [FFMPEG_BIN, "-y", "-ss", str(max(0, start)), "-t", str(duration), "-i", cut_src] + f_arg + ["-vn", "-map", "0:a", "-ar", "44100", "-ac", "2", "-c:a", "pcm_s16le", str(temp)]
+
+                # Sample-accurate seek: -ss AFTER -i (decode then trim) to avoid
+                # keyframe drift that misaligns pasted regions.
+                cmd = [FFMPEG_BIN, "-y", "-i", cut_src, "-ss", str(max(0, start)), "-t", str(duration)] + f_arg + ["-vn", "-map", "0:a", "-ar", "44100", "-ac", "2", "-c:a", "pcm_s16le", str(temp)]
                 logger.info(f"[Segment {i}] FFmpeg command: {' '.join(cmd)}")
                 logger.info(f"[Segment {i}] Cut details - start: {start}s, end: {end}s, duration: {duration}s")
                 logger.info(f"[Segment {i}] Source file: {cut_src}")
@@ -885,12 +971,30 @@ class BeatAnalyzer:
 
 class ImportManager:
     @staticmethod
-    def process_import(file_path: Path):
-        """Orchestrates analysis and library insertion for a new file."""
+    def process_import(file_path: Path, analysis_result: Optional[Dict] = None):
+        """Orchestrates analysis and library insertion for a new file.
+
+        analysis_result: optional, full output of run_full_analysis. If passed,
+        re-analysis is skipped and beatgrid/cues/waveform are taken from there.
+        """
         logger.info(f"Processing new import: {file_path}")
         try:
-            # 1. Analyze
-            analysis = BeatAnalyzer.analyze(str(file_path))
+            # 1. Analyze (skip if pre-computed result provided)
+            if analysis_result:
+                analysis = {
+                    "bpm": analysis_result.get("bpm", 0),
+                    "key": analysis_result.get("key", ""),
+                    "camelot": analysis_result.get("camelot", ""),
+                    "phrases": analysis_result.get("phrases", []),
+                    "lufs": analysis_result.get("lufs", 0),
+                    "peak": analysis_result.get("peak", 0),
+                    "totalTime": analysis_result.get("duration", 0),
+                    "beats": analysis_result.get("beats", []),
+                    "hot_cues": analysis_result.get("hot_cues", []),
+                    "memory_cues": analysis_result.get("memory_cues", []),
+                }
+            else:
+                analysis = BeatAnalyzer.analyze(str(file_path))
 
             # 1.5 Extract Cover Art
             artwork_path = ""
@@ -954,6 +1058,20 @@ class ImportManager:
             # 3. Add to Collection
             tid = db.add_track(track_data)
             logger.info(f"Import successful! Track ID: {tid}")
+
+            # 3.5 Mirror analysis into the audio file's native tags (best-effort).
+            try:
+                from . import audio_tags
+                from .services import SettingsManager as _SM
+                cfg = _SM.load() if hasattr(_SM, "load") else {}
+                if cfg.get("write_tags_to_files", True):
+                    audio_tags.write_tags(file_path, {
+                        "BPM": track_data.get("BPM"),
+                        "Key": track_data.get("Key"),
+                        "Comment": track_data.get("Comment"),
+                    })
+            except Exception as e:
+                logger.debug(f"ID3 sync after import skipped: {e}")
             
             # 4. Add to "Import" Playlist
             # Case-insensitive search
