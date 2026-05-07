@@ -81,43 +81,58 @@ class OneLibraryUsbWriter:
         except Exception:
             stub_enabled = False
 
-        # Whether the user opted into the stub OR not, we always replace the
-        # PDBs with our minimal header-only bytes. Reason: Rekordbox holds an
-        # exclusive read handle on these files while a stick is mounted, so
-        # `unlink` fails with "Device or resource busy" if the user didn't
-        # close Rekordbox first. Truncate-write (open 'wb') still works in
-        # that locked state — Windows allows the byte-replacement path even
-        # when delete is blocked. Result: our stub overwrites whatever stale
-        # row data was there, leaving Rekordbox with a structurally-valid
-        # but empty Device Library that won't show ghost tracks pointing at
-        # missing audio paths.
+        # PDB handling — three cases:
+        #
+        # 1. `legacy_pdb_stub=True` (opt-in)
+        #    Write the header-only stub unconditionally so CDJ-2000nxs2 sees a
+        #    valid (if empty) Device Library.
+        #
+        # 2. PDBs already exist on the stick (stale from a previous Rekordbox-
+        #    native export)
+        #    OVERWRITE with our header-only stub to neutralise potentially-
+        #    broken row data. We can't `unlink` while Rekordbox holds a read
+        #    handle (Windows refuses with "Device or resource busy"), but
+        #    truncate-write (open 'wb') still succeeds — that's the only way
+        #    we can clean up without forcing the user to close Rekordbox.
+        #    After overwrite, attempt unlink as best-effort: it will succeed
+        #    on a properly-ejected stick and remove the file completely so
+        #    the Device Library branch disappears in Rekordbox.
+        #
+        # 3. Stick has no PDB at all (fresh / our-app-managed lifetime)
+        #    Don't write anything. Rekordbox renders only OneLibrary — no
+        #    sibling Device Library branch.
         from . import usb_pdb
-        try:
-            # Even when stub is disabled we write the same header so the
-            # contents are deterministic and the previous (potentially
-            # corrupt) PDB is gone. Visible UX: empty Device Library next
-            # to a healthy OneLibrary, instead of a Device Library full of
-            # broken track references.
-            usb_pdb.write_export_pdb(self.usb_root)
-            usb_pdb.write_export_ext_pdb(self.usb_root)
-            logger.info(
-                "[OneLibrary] PDB overwritten with empty stub (stub_enabled=%s)",
-                stub_enabled,
-            )
-        except Exception as exc:
-            logger.warning("[OneLibrary] PDB overwrite failed: %s", exc)
+        existing_pdb = (self.rb_dir / "export.pdb").exists() \
+                    or (self.rb_dir / "exportExt.pdb").exists()
 
-        # Best-effort delete IF nothing has them locked — gives the cleanest
-        # final state on a fully-ejected stick. Failures are silent because
-        # the truncate above already neutralised the contents.
-        if not stub_enabled:
+        if stub_enabled:
+            try:
+                usb_pdb.write_export_pdb(self.usb_root)
+                usb_pdb.write_export_ext_pdb(self.usb_root)
+                logger.info("[OneLibrary] legacy PDB stub written (opt-in)")
+            except Exception as exc:
+                logger.warning("[OneLibrary] PDB stub write failed: %s", exc)
+
+        elif existing_pdb:
+            # Neutralise the stale bytes first, then try to delete.
+            try:
+                usb_pdb.write_export_pdb(self.usb_root)
+                usb_pdb.write_export_ext_pdb(self.usb_root)
+                logger.info("[OneLibrary] stale PDB neutralised with stub bytes")
+            except Exception as exc:
+                logger.warning("[OneLibrary] PDB neutralise failed: %s", exc)
             for stale_name in ("export.pdb", "exportExt.pdb"):
                 stale_path = self.rb_dir / stale_name
                 if stale_path.exists():
                     try:
                         stale_path.unlink()
+                        logger.info("[OneLibrary] removed %s (file now gone — "
+                                    "Device Library branch disappears in Rekordbox)",
+                                    stale_name)
                     except OSError:
-                        pass  # Rekordbox locks — content is already neutralised
+                        # Rekordbox is holding the file — content is already
+                        # neutralised so the branch shows as "0 Tracks".
+                        pass
 
     # Path to the bundled template DB (built by app.templates.build_template
     # from any Rekordbox-exported stick). The template ships with N
