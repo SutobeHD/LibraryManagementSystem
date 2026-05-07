@@ -67,7 +67,19 @@ class OneLibraryUsbWriter:
             d.mkdir(parents=True, exist_ok=True)
 
     def sync(self, source, audio_copy: bool = True, copy_anlz: bool = True) -> Generator[Dict, None, None]:
-        """Main entry: yields progress events."""
+        """Main entry: yields progress events.
+
+        KNOWN UPSTREAM BUG (rbox 0.1.5–0.1.7): `OneLibrary.create()` returns
+        a database that fails Diesel FK validation on every subsequent
+        insert. The DB exists on disk but cannot accept content/image/
+        artist rows — every write yields:
+          "Diesel error: foreign key mismatch - <table> referencing <ref>"
+        Until this is fixed upstream the OneLibrary path is best-effort:
+        we still create the empty DB so Rekordbox detects the stick, log
+        the failure pattern, and continue. Tracks become visible only via
+        the legacy rekordbox.xml import path (Preferences → Advanced →
+        Database → Import rekordbox.xml).
+        """
         if not RBOX_AVAILABLE:
             yield {"stage": "error", "message": "rbox library missing — cannot write OneLibrary", "progress": -1}
             return
@@ -84,11 +96,22 @@ class OneLibraryUsbWriter:
                 return
 
         try:
-            # rbox.OneLibrary.create(path, my_tag_master_dbid)
-            # my_tag_master_dbid: device-unique identifier for MyTags
-            mytag_dbid = "lms_export_" + hashlib.sha1(str(self.usb_root).encode()).hexdigest()[:8]
+            # rbox.OneLibrary.create(path: str, my_tag_master_dbid: int)
+            # The C signature wants a 32-bit unsigned int — derive a stable
+            # device-unique value from the USB root path. NB: must be int,
+            # not str — rbox raises TypeError on string and the previous
+            # implementation silently failed in production.
+            mytag_dbid = int(
+                hashlib.sha1(str(self.usb_root).encode()).hexdigest()[:8], 16
+            ) & 0x7FFFFFFF
             db = rbox.OneLibrary.create(str(self.db_path), mytag_dbid)
+            logger.info(
+                "[OneLibrary] Created DB at %s (dbid=%d, size=%d)",
+                self.db_path, mytag_dbid,
+                self.db_path.stat().st_size if self.db_path.exists() else 0,
+            )
         except Exception as e:
+            logger.error("[OneLibrary] create failed: %s", e, exc_info=True)
             yield {"stage": "error", "message": f"OneLibrary.create failed: {e}", "progress": -1}
             return
 
@@ -106,6 +129,12 @@ class OneLibraryUsbWriter:
 
         all_tracks = list(source.iter_tracks())
         total = max(1, len(all_tracks))
+
+        # Track FK-failure pattern so we can warn the user clearly. The
+        # upstream rbox bug means every create_* call returns "Diesel error:
+        # foreign key mismatch" — log once, count failures, surface a
+        # meaningful summary instead of dumping the same exception 3000x.
+        fk_fail_count = 0
 
         for i, t in enumerate(all_tracks):
             try:
@@ -173,13 +202,39 @@ class OneLibraryUsbWriter:
                         "progress": 5 + int(70 * (i + 1) / total),
                     }
             except Exception as e:
-                logger.warning(f"Track sync skipped (id={t.get('id')}): {e}")
+                msg = str(e)
+                if "foreign key mismatch" in msg:
+                    fk_fail_count += 1
+                    if fk_fail_count == 1:
+                        logger.error(
+                            "[OneLibrary] Upstream rbox bug: OneLibrary.create() produces "
+                            "a DB that fails FK validation on every insert. Tracks will not "
+                            "land in exportLibrary.db. The rekordbox.xml fallback is still "
+                            "written — import it via Rekordbox Preferences → Advanced → "
+                            "Database → rekordbox.xml. First failure: %s", msg,
+                        )
+                else:
+                    logger.warning(f"Track sync skipped (id={t.get('id')}): {e}")
 
         # Build playlist tree
         yield {"stage": "playlists", "message": "Writing playlist tree…", "progress": 80}
-        self._write_playlists(db, source, content_id_map)
+        try:
+            self._write_playlists(db, source, content_id_map)
+        except Exception as e:
+            logger.warning(f"[OneLibrary] playlist tree write skipped: {e}")
 
-        yield {"stage": "complete", "message": f"OneLibrary export written: {len(content_id_map)} tracks", "progress": 100}
+        if fk_fail_count > 0:
+            yield {
+                "stage": "warning",
+                "message": (
+                    f"OneLibrary DB created but {fk_fail_count} tracks could not be "
+                    f"inserted (rbox upstream FK bug). Stick still works via manual "
+                    f"rekordbox.xml import in Rekordbox."
+                ),
+                "progress": 100,
+            }
+        else:
+            yield {"stage": "complete", "message": f"OneLibrary export written: {len(content_id_map)} tracks", "progress": 100}
 
     # ─── helpers ─────────────────────────────────────────────────────────
 

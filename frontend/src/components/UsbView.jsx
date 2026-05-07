@@ -1266,6 +1266,11 @@ const UsbView = () => {
                                                 <span className="block mt-1 text-ink-secondary">• <strong>exportLibrary.db</strong> — Rekordbox 6/7 + CDJ-3000 auto-detect</span>
                                                 <span className="block text-ink-secondary">• <strong>rekordbox.xml</strong> — older Rekordbox / manual import (Preferences → Advanced → Database)</span>
                                             </div>
+                                            <div className="mt-2 px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-300 text-tiny leading-snug">
+                                                <strong>Stick nicht erkannt?</strong> Aktuell ist die OneLibrary-Erstellung
+                                                durch einen rbox-Library-Bug eingeschränkt. Workaround:
+                                                <span className="block mt-1">In Rekordbox → <strong>Preferences → Advanced → Database</strong> → "rekordbox xml" → File-Picker → die <code className="bg-black/30 px-1 rounded">PIONEER/rekordbox.xml</code> auf dem Stick auswählen → Import.</span>
+                                            </div>
                                         </div>
                                     </div>
 
