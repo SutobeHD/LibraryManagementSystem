@@ -23,7 +23,12 @@ const PlaylistNode = ({ node, level = 0, onSelect, onContextMenu, onMoveNode, on
 
     const handleDragStart = (e) => {
         if (isIntelligent) { e.preventDefault(); return; }
-        e.dataTransfer.setData("application/json", JSON.stringify({ id: node.ID, type: node.Type }));
+        e.stopPropagation();
+        const payload = { id: node.ID, type: node.Type, name: node.Name };
+        try {
+            e.dataTransfer.setData("application/json", JSON.stringify(payload));
+            e.dataTransfer.setData("text/plain", node.ID);  // fallback for some WebView2 quirks
+        } catch (_) {}
         e.dataTransfer.effectAllowed = "move";
     };
 
@@ -60,11 +65,17 @@ const PlaylistNode = ({ node, level = 0, onSelect, onContextMenu, onMoveNode, on
         <div data-pl-row={node.ID}>
             <div
                 data-pl-id={node.ID}
-                className={`flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-all duration-150 group relative
+                className={`flex items-center gap-2 px-3 py-1.5 transition-all duration-150 group relative
                     ${isSelected ? 'bg-amber2/15 text-white' : 'text-ink-secondary hover:text-ink-primary hover:bg-white/5'}
+                    ${dragOver === "top" ? 'border-t-2 border-amber2' : ''}
+                    ${dragOver === "bottom" ? 'border-b-2 border-amber2' : ''}
                     ${dragOver === "center" ? 'ring-1 ring-amber2 bg-amber2/10' : ''}
                 `}
-                style={{ paddingLeft: `${12 + level * 16}px` }}
+                style={{
+                    paddingLeft: `${12 + level * 16}px`,
+                    cursor: isIntelligent ? 'pointer' : 'grab',
+                    userSelect: 'none',
+                }}
                 onClick={() => {
                     if (isFolder) setOpen(!open);
                     else onSelect(node);
@@ -79,10 +90,6 @@ const PlaylistNode = ({ node, level = 0, onSelect, onContextMenu, onMoveNode, on
             >
                 {dragOver === "top" && <div className="absolute top-0 left-0 right-0 h-0.5 bg-amber2 z-10" />}
                 {dragOver === "bottom" && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber2 z-10" />}
-
-                {!isIntelligent && (
-                    <GripVertical size={12} className="text-ink-placeholder/40 group-hover:text-ink-placeholder shrink-0 cursor-grab" />
-                )}
 
                 {isFolder ? (
                     <>
@@ -500,27 +507,68 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
         return () => document.removeEventListener('contextmenu', handleDocCtx, true);
     }, [tree]);
 
+    // Tokenized search supports operators:
+    //   bpm:120-130   bpm:>120   bpm:<128
+    //   key:Am   key:8A
+    //   genre:techno   label:exfunk   year:2024
+    //   plain text → free-text Title/Artist/Album/Comment
+    const matchesQuery = React.useCallback((t, q) => {
+        if (!q) return true;
+        const tokens = q.toLowerCase().split(/\s+/).filter(Boolean);
+        for (const tok of tokens) {
+            if (tok.includes(':')) {
+                const [field, ...rest] = tok.split(':');
+                const val = rest.join(':');
+                if (!val) continue;
+                if (field === 'bpm') {
+                    const bpm = parseFloat(t.BPM || 0);
+                    if (val.startsWith('>'))      { if (!(bpm > parseFloat(val.slice(1)))) return false; continue; }
+                    if (val.startsWith('<'))      { if (!(bpm < parseFloat(val.slice(1)))) return false; continue; }
+                    if (val.includes('-')) {
+                        const [lo, hi] = val.split('-').map(parseFloat);
+                        if (!(bpm >= lo && bpm <= hi)) return false; continue;
+                    }
+                    if (Math.round(bpm) !== Math.round(parseFloat(val))) return false; continue;
+                }
+                if (field === 'key') {
+                    if (!String(t.Key || '').toLowerCase().includes(val)) return false; continue;
+                }
+                if (field === 'genre') {
+                    if (!String(t.Genre || '').toLowerCase().includes(val)) return false; continue;
+                }
+                if (field === 'label') {
+                    if (!String(t.Label || '').toLowerCase().includes(val)) return false; continue;
+                }
+                if (field === 'year') {
+                    if (String(t.ReleaseYear || '') !== val) return false; continue;
+                }
+                if (field === 'rating') {
+                    const r = parseInt(t.Rating || 0);
+                    if (val.startsWith('>')) { if (!(r > parseInt(val.slice(1)))) return false; continue; }
+                    if (val.startsWith('<')) { if (!(r < parseInt(val.slice(1)))) return false; continue; }
+                    if (r !== parseInt(val)) return false; continue;
+                }
+                // Unknown field → treat token as plain
+            }
+            // Free-text against multiple fields
+            const hay = [t.Title, t.Artist, t.Album, t.Comment, t.Genre, t.Label]
+                .filter(Boolean).join(' ').toLowerCase();
+            if (!hay.includes(tok)) return false;
+        }
+        return true;
+    }, []);
+
     // Filtered collection tracks
     const filteredCollectionTracks = React.useMemo(() => {
         if (!collectionSearch) return allTracks;
-        const q = collectionSearch.toLowerCase();
-        return allTracks.filter(t =>
-            (t.Title && t.Title.toLowerCase().includes(q)) ||
-            (t.Artist && t.Artist.toLowerCase().includes(q)) ||
-            (t.Album && t.Album.toLowerCase().includes(q))
-        );
-    }, [allTracks, collectionSearch]);
+        return allTracks.filter(t => matchesQuery(t, collectionSearch));
+    }, [allTracks, collectionSearch, matchesQuery]);
 
     // Filtered playlist tracks
     const filteredPlaylistTracks = React.useMemo(() => {
         if (!playlistSearch) return tracks;
-        const q = playlistSearch.toLowerCase();
-        return tracks.filter(t =>
-            (t.Title && t.Title.toLowerCase().includes(q)) ||
-            (t.Artist && t.Artist.toLowerCase().includes(q)) ||
-            (t.Album && t.Album.toLowerCase().includes(q))
-        );
-    }, [tracks, playlistSearch]);
+        return tracks.filter(t => matchesQuery(t, playlistSearch));
+    }, [tracks, playlistSearch, matchesQuery]);
 
     if (!loading && tree.length === 0 && !dbLoaded) {
         return (

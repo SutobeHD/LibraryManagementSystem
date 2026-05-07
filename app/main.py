@@ -1313,10 +1313,20 @@ async def import_paths(data: Dict[str, Any]):
     Import a mixed list of absolute filesystem paths (files OR directories).
     Used by drag-drop in the desktop app, where the OS hands us full paths
     instead of upload-able File blobs. Dedup via _is_known_audio_path.
+
+    Optional body fields:
+      group_into_playlist: bool — if true, every audio file (incl. duplicates
+                                  already in the library) is gathered into a
+                                  single playlist named after the source folder
+                                  (or `playlist_name` if given).
+      playlist_name: str        — explicit playlist name override.
     """
     raw = data.get("paths") or []
     if not isinstance(raw, list) or not raw:
         raise HTTPException(status_code=400, detail="'paths' must be a non-empty list")
+
+    group_into_playlist = bool(data.get("group_into_playlist", False))
+    explicit_pl_name = (data.get("playlist_name") or "").strip()
 
     targets: list[Path] = []
     queued_dirs = 0
@@ -1340,45 +1350,141 @@ async def import_paths(data: Dict[str, Any]):
     if not targets:
         return {"status": "ok", "queued_dirs": 0, "queued_files": 0, "message": "No importable paths."}
 
+    from . import import_tracker
+
+    counters = {"imported": 0, "skipped": 0, "linked": 0}
+
+    # ── Phase 1: enumerate and register tasks UPFRONT ─────────────────────
+    queued: list[tuple[Path, str]] = []  # (path, task_id)
+    folder_for_pl: Optional[Path] = None
+    for t in targets:
+        try:
+            if t.is_dir():
+                if folder_for_pl is None:
+                    folder_for_pl = t
+                for f in t.rglob("*"):
+                    if f.is_file() and f.suffix.lower() in folder_watcher.AUDIO_EXTENSIONS:
+                        tid = import_tracker.register(str(f), source="drag-drop")
+                        queued.append((f, tid))
+            elif t.is_file():
+                tid = import_tracker.register(str(t), source="drag-drop")
+                queued.append((t, tid))
+        except Exception as exc:
+            logger.warning("[Drop] Scan failed for %s: %s", t, exc)
+    logger.info("[Drop] queued %d files for import (group=%s)", len(queued), group_into_playlist)
+
+    # Determine playlist name once. Empty → fall through to per-file 'Import' default.
+    playlist_name = ""
+    if group_into_playlist:
+        if explicit_pl_name:
+            playlist_name = explicit_pl_name
+        elif folder_for_pl is not None:
+            playlist_name = folder_for_pl.name
+    collected_track_ids: list[str] = []
+
+    def _process_one(f: Path, tid: str) -> None:
+        local_id: Optional[str] = None
+        if _is_known_audio_path(f):
+            local_id = _track_id_for_path(f)
+            import_tracker.update(
+                tid, status="Skipped", progress=100,
+                error="Already in library",
+                local_track_id=local_id,
+            )
+            counters["skipped"] += 1
+            if local_id and group_into_playlist:
+                collected_track_ids.append(local_id)
+            return
+        threading.current_thread()._lms_import_tid = tid
+        try:
+            import_tracker.update(tid, status="Analyzing", progress=20)
+            result = ImportManager.process_import(f)
+            import_tracker.update(tid, status="Importing", progress=60)
+            local_id_raw, analysis = (result if isinstance(result, tuple) else (result, {}))
+            local_id = str(local_id_raw) if local_id_raw else None
+            import_tracker.update(
+                tid, status="Completed", progress=100,
+                local_track_id=local_id,
+                bpm=analysis.get("bpm") if isinstance(analysis, dict) else None,
+                key=analysis.get("key") if isinstance(analysis, dict) else None,
+            )
+            counters["imported"] += 1
+            if local_id and group_into_playlist:
+                collected_track_ids.append(local_id)
+        except Exception as exc:
+            logger.warning("[Drop] Import failed for %s: %s", f, exc)
+            import_tracker.update(tid, status="Failed", progress=100, error=str(exc))
+            counters["skipped"] += 1
+        finally:
+            try: del threading.current_thread()._lms_import_tid
+            except AttributeError: pass
+
+    def _bundle_into_playlist():
+        """After all files are processed, drop them into a single playlist."""
+        if not group_into_playlist or not playlist_name:
+            return
+        try:
+            # Find or create playlist (avoid creating duplicates of same name at ROOT)
+            pid = None
+            for p in db.playlists:
+                if p.get("Name") == playlist_name:
+                    pid = str(p.get("ID"))
+                    break
+            if not pid and hasattr(db, "create_playlist"):
+                node = db.create_playlist(playlist_name, "ROOT", is_folder=False)
+                pid = str(node.get("ID")) if isinstance(node, dict) else str(node)
+            if not pid:
+                logger.warning("[Drop] Could not create playlist '%s'", playlist_name)
+                return
+            for tid_local in collected_track_ids:
+                try:
+                    db.add_track_to_playlist(pid, tid_local)
+                    counters["linked"] += 1
+                except Exception as exc:
+                    logger.debug("[Drop] add_track_to_playlist(%s, %s) failed: %s",
+                                 pid, tid_local, exc)
+            logger.info("[Drop] Bundled %d tracks into playlist '%s' (pid=%s)",
+                        counters["linked"], playlist_name, pid)
+        except Exception as exc:
+            logger.warning("[Drop] Playlist bundling failed: %s", exc)
+
     def _run():
-        imported = 0
-        skipped = 0
-        for t in targets:
+        for f, tid in queued:
             try:
-                if t.is_dir():
-                    for f in t.rglob("*"):
-                        if not f.is_file() or f.suffix.lower() not in folder_watcher.AUDIO_EXTENSIONS:
-                            continue
-                        if _is_known_audio_path(f):
-                            skipped += 1
-                            continue
-                        try:
-                            ImportManager.process_import(f)
-                            imported += 1
-                        except Exception as exc:
-                            logger.warning("[Drop] Import failed for %s: %s", f, exc)
-                            skipped += 1
-                else:
-                    if _is_known_audio_path(t):
-                        skipped += 1
-                        continue
-                    try:
-                        ImportManager.process_import(t)
-                        imported += 1
-                    except Exception as exc:
-                        logger.warning("[Drop] Import failed for %s: %s", t, exc)
-                        skipped += 1
+                _process_one(f, tid)
             except Exception as exc:
-                logger.warning("[Drop] Scan failed for %s: %s", t, exc)
-        logger.info("[Drop] import-paths complete: imported=%d skipped=%d", imported, skipped)
+                logger.warning("[Drop] worker error for %s: %s", f, exc)
+        _bundle_into_playlist()
+        logger.info(
+            "[Drop] import-paths complete: imported=%d skipped=%d linked=%d playlist=%r",
+            counters["imported"], counters["skipped"], counters["linked"], playlist_name,
+        )
 
     threading.Thread(target=_run, daemon=True, name="drop-import").start()
+    pl_msg = f" → playlist '{playlist_name}'" if (group_into_playlist and playlist_name) else ""
     return {
         "status": "ok",
         "queued_dirs": queued_dirs,
         "queued_files": queued_files,
-        "message": f"Importing in background ({queued_dirs} folder(s), {queued_files} file(s))",
+        "queued_total": len(queued),
+        "playlist_name": playlist_name,
+        "group_into_playlist": group_into_playlist,
+        "message": f"Queued {len(queued)} audio file(s) for import (from {queued_dirs} folder(s), {queued_files} loose file(s)){pl_msg}",
     }
+
+@app.get("/api/import/tasks")
+def get_import_tasks():
+    """Live status of every local-file import (drag-drop / folder browse)."""
+    from . import import_tracker
+    return import_tracker.get_all()
+
+
+@app.post("/api/import/tasks/clear")
+def clear_import_tasks():
+    """Drop all completed/failed/skipped tasks from the tracker."""
+    from . import import_tracker
+    return {"removed": import_tracker.clear_finished()}
+
 
 @app.get("/api/artwork")
 async def get_artwork(path: str):
@@ -1587,14 +1693,16 @@ async def render(r: ExportRequest):
 @app.post("/api/audio/import")
 def import_audio(files: List[UploadFile] = File(...)):
     """Handles batch audio upload, analysis and library insertion."""
+    from . import import_tracker
     results = []
     for file in files:
+        track_task_id = None
         try:
             # SECURITY: Validate file extension
             if not file.filename or Path(file.filename).suffix.lower() not in ALLOWED_AUDIO_EXTENSIONS:
                 results.append({"filename": file.filename or "unknown", "status": "error", "message": "File type not allowed"})
                 continue
-            
+
             # SECURITY: Use only the basename to prevent path traversal
             safe_filename = Path(file.filename).name
             dest = MUSIC_DIR / safe_filename
@@ -1602,11 +1710,28 @@ def import_audio(files: List[UploadFile] = File(...)):
                 stem = safe_filename.rsplit('.', 1)[0]
                 ext = safe_filename.rsplit('.', 1)[-1]
                 dest = MUSIC_DIR / f"{stem}_{int(time.time())}.{ext}"
-            
+
+            track_task_id = import_tracker.register(str(dest), source="upload")
+            import_tracker.update(track_task_id, status="Importing", progress=10)
+
             with open(dest, "wb") as f:
                 shutil.copyfileobj(file.file, f)
-            
-            tid, analysis = ImportManager.process_import(dest)
+
+            import_tracker.update(track_task_id, status="Analyzing", progress=30)
+            # bind so process_import → anlz_sidecar can post ANLZ stage updates
+            threading.current_thread()._lms_import_tid = track_task_id
+            try:
+                tid, analysis = ImportManager.process_import(dest)
+            finally:
+                try: del threading.current_thread()._lms_import_tid
+                except AttributeError: pass
+
+            import_tracker.update(
+                track_task_id, status="Completed", progress=100,
+                local_track_id=str(tid) if tid else None,
+                bpm=(analysis or {}).get("bpm"),
+                key=(analysis or {}).get("key"),
+            )
             results.append({
                 "filename": file.filename, 
                 "status": "success", 
@@ -1616,6 +1741,8 @@ def import_audio(files: List[UploadFile] = File(...)):
             })
         except Exception as e:
             logger.error(f"Import failed for {file.filename}: {e}")
+            if track_task_id:
+                import_tracker.update(track_task_id, status="Failed", progress=100, error=str(e))
             results.append({"filename": file.filename, "status": "error", "message": safe_error_message(e)})
     return results
 
@@ -1662,6 +1789,25 @@ def _track_paths_snapshot() -> set[str]:
         except Exception:
             paths.add(p)
     return paths
+
+
+def _track_id_for_path(path: Path) -> Optional[str]:
+    """Return existing track-id for a given filesystem path, or None."""
+    try:
+        target = str(path.resolve())
+    except Exception:
+        target = str(path)
+    for tid, t in getattr(db, "tracks", {}).items():
+        p = t.get("path") if isinstance(t, dict) else None
+        if not p:
+            continue
+        try:
+            if str(Path(p).resolve()) == target:
+                return str(tid)
+        except Exception:
+            if str(p) == target:
+                return str(tid)
+    return None
 
 
 def _is_known_audio_path(path: Path) -> bool:

@@ -21,6 +21,7 @@ const DesignView = lazy(() => import('./components/DesignView'));
 const SoundCloudView = lazy(() => import('./components/SoundCloudView'));
 const SoundCloudSyncView = lazy(() => import('./components/SoundCloudSyncView'));
 const DownloadManagerView = lazy(() => import('./components/DownloadManagerView'));
+import ImportProgressBanner from './components/ImportProgressBanner';
 const PhraseGeneratorView = lazy(() => import('./components/PhraseGeneratorView'));
 const DuplicateView = lazy(() => import('./components/DuplicateView'));
 const UtilitiesView = lazy(() => import('./components/UtilitiesView'));
@@ -738,6 +739,9 @@ const App = () => {
           onMaximize={() => { setActiveTrack(playerTrack); setActiveTab('editor'); }}
         />
       )}
+
+      {/* Live import-progress banner (auto-hides when no active task) */}
+      <ImportProgressBanner onOpenManager={() => setActiveTab('downloads')} />
     </div>
   )
 }

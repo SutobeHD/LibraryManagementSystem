@@ -995,31 +995,15 @@ class SoundCloudDownloader:
             return None
 
     def _write_companion_anlz(self, file_path: Path, result: Dict) -> None:
+        """Write DAT/EXT/2EX sidecars next to the audio file. See
+        app/anlz_sidecar.py for the layout contract — kept unified across
+        every track-import path so USB-sync's OneLibraryUsbWriter has a
+        single place to look.
         """
-        Write DAT/EXT/2EX sidecars next to the audio file so a later USB-sync
-        can copy them straight onto the stick (CDJ-3000 expects them under
-        PIONEER/USBANLZ/<bucket>/<hash>/ANLZ0000.{DAT,EXT,2EX}).
-
-        Storage convention:
-            <music_dir>/.lms_anlz/<sha-of-path>/ANLZ0000.DAT|EXT|2EX
-
-        The USB-sync engine resolves this directory and copies the bytes into
-        the CDJ-conforming bucket layout.
-        """
-        from .anlz_writer import write_anlz_files
-        import hashlib
-        sidecar_root = file_path.parent / ".lms_anlz"
-        # 8-char sha keeps the directory short; collisions extremely unlikely
-        h = hashlib.sha1(str(file_path).encode("utf-8")).hexdigest()[:16]
-        target_dir = sidecar_root / h
-        target_dir.mkdir(parents=True, exist_ok=True)
-        write_anlz_files(
-            anlz_dir=str(target_dir),
-            track_path=str(file_path),
-            analysis_result=result,
-            filename_base="ANLZ0000",
-        )
-        logger.info("[SC-DL] ANLZ written → %s", target_dir)
+        from .anlz_sidecar import write_companion_anlz as _write
+        target = _write(file_path, result)
+        if target:
+            logger.info("[SC-DL] ANLZ written → %s", target)
 
     def _auto_add_to_playlist(self, local_track_id: str, sc_playlist_title: str) -> None:
         """

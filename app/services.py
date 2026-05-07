@@ -1107,6 +1107,26 @@ class ImportManager:
                 else:
                      logger.info(f"Track {tid} already in 'Import' playlist.")
 
+            # 5. Write ANLZ sidecar (DAT/EXT/2EX) so USB-sync can copy it onto
+            # the stick — gives CDJ-3000 cues, beatgrid and waveform data.
+            # Best-effort: never fail an import because of this.
+            try:
+                from .anlz_sidecar import write_companion_anlz
+                full_result = analysis_result if analysis_result else None
+                # If a tracker task is bound to this thread, surface ANLZ-stage progress
+                try:
+                    from . import import_tracker
+                    if hasattr(threading.current_thread(), "_lms_import_tid"):
+                        import_tracker.update(
+                            threading.current_thread()._lms_import_tid,
+                            status="ANLZ", progress=85,
+                        )
+                except Exception:
+                    pass
+                write_companion_anlz(file_path, full_result)
+            except Exception as anlz_err:
+                logger.debug(f"ANLZ sidecar skipped for {file_path}: {anlz_err}")
+
             return tid, analysis
         except Exception as e:
             logger.error(f"Import manager failed for {file_path}: {e}", exc_info=True)

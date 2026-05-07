@@ -95,18 +95,27 @@ const ImportView = ({ onSelectTrack, onImportComplete }) => {
      * backend for recursive import. Used by the Tauri drag-drop event and the
      * "Browse Folder" picker.
      */
-    const importPaths = useCallback(async (paths) => {
+    const importPaths = useCallback(async (paths, opts = {}) => {
         if (!paths || !paths.length) return;
+        // Default: bundle every folder import into a playlist named after the
+        // folder so the user immediately gets a coherent set to work with.
+        const groupIntoPlaylist = opts.groupIntoPlaylist !== false;
         try {
-            const res = await api.post('/api/library/import-paths', { paths });
-            const { queued_dirs = 0, queued_files = 0, message } = res.data || {};
-            if (queued_dirs || queued_files) {
-                toast.success(message || `Importing ${queued_dirs} folder(s), ${queued_files} file(s)`);
+            const res = await api.post('/api/library/import-paths', {
+                paths,
+                group_into_playlist: groupIntoPlaylist,
+                playlist_name: opts.playlistName || undefined,
+            });
+            const { queued_dirs = 0, queued_files = 0, queued_total = 0, playlist_name, message } = res.data || {};
+            if (queued_total > 0) {
+                const plBadge = playlist_name ? ` → "${playlist_name}"` : '';
+                toast.success(message || `Queued ${queued_total} audio file(s) for import${plBadge}`);
+            } else if (queued_dirs > 0 || queued_files > 0) {
+                toast('Folder enthält keine unterstützten Audio-Dateien.', { icon: 'ℹ️' });
             } else {
-                toast('Nothing to import — paths had no audio files.', { icon: 'ℹ️' });
+                toast.error('Import-Pfad ungültig oder nicht erreichbar.');
             }
             if (onImportComplete) {
-                // Refresh the library view shortly so newly-analysed tracks appear.
                 setTimeout(() => onImportComplete(), 1500);
             }
         } catch (err) {

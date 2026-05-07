@@ -6,14 +6,16 @@ import {
     BarChart3, Zap,
 } from 'lucide-react';
 
-// Stage pipeline (in execution order)
+// Stage pipeline (in execution order) — covers BOTH SC-DL and local-import
 const STAGES = [
+    { key: 'Queued',           label: 'Queued',     icon: Clock,        color: 'text-ink-muted',    },
     { key: 'Starting',         label: 'Queued',     icon: Clock,        color: 'text-ink-muted',    },
     { key: 'Resolving',        label: 'Resolve',    icon: Activity,     color: 'text-cyan-400',     },
     { key: 'Downloading',      label: 'Download',   icon: Download,     color: 'text-orange-400',   },
     { key: 'Downloaded',       label: 'Downloaded', icon: CheckCircle,  color: 'text-orange-300',   },
     { key: 'Analyzing',        label: 'Analyse',    icon: BarChart3,    color: 'text-purple-400',   },
-    { key: 'Importing',        label: 'Import',     icon: FolderInput,  color: 'text-blue-400',     },
+    { key: 'Importing',        label: 'Library',    icon: FolderInput,  color: 'text-blue-400',     },
+    { key: 'ANLZ',             label: 'ANLZ',       icon: Sparkles,     color: 'text-cyan-300',     },
     { key: 'Sorting',          label: 'Playlist',   icon: ListMusic,    color: 'text-amber2',       },
     { key: 'Completed',        label: 'Fertig',     icon: CheckCircle,  color: 'text-emerald-400',  },
 ];
@@ -126,11 +128,23 @@ const TaskCard = ({ task }) => {
                 <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
-                            <h3 className="text-sm font-bold text-white truncate" title={task.title}>
-                                {task.title || '(unbekannt)'}
-                            </h3>
-                            <div className="flex items-center gap-2 text-[11px] text-ink-muted mt-0.5">
+                            <div className="flex items-center gap-2 mb-0.5">
+                                {task._src === 'import' ? (
+                                    <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider bg-blue-500/20 text-blue-300 border border-blue-500/30">Lokal</span>
+                                ) : (
+                                    <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider bg-orange-500/20 text-orange-300 border border-orange-500/30">SC</span>
+                                )}
+                                <h3 className="text-sm font-bold text-white truncate flex-1" title={task.title}>
+                                    {task.title || '(unbekannt)'}
+                                </h3>
+                            </div>
+                            <div className="flex items-center gap-2 text-[11px] text-ink-muted">
                                 {task.artist && <span className="truncate max-w-[180px]">{task.artist}</span>}
+                                {task.file_path && task._src === 'import' && (
+                                    <span className="truncate max-w-[260px] font-mono text-[10px]" title={task.file_path}>
+                                        {task.file_path.split(/[\\\/]/).slice(-2).join('/')}
+                                    </span>
+                                )}
                                 {task.playlist_title && (
                                     <>
                                         <span className="text-ink-placeholder">·</span>
@@ -212,14 +226,20 @@ const StatCard = ({ icon: Icon, label, value, color = 'text-amber2' }) => (
 );
 
 const DownloadManagerView = () => {
-    const [tasks, setTasks] = useState({});
+    const [scTasks, setScTasks] = useState({});
+    const [importTasks, setImportTasks] = useState({});
+    const [source, setSource] = useState('all'); // all | soundcloud | import
     const [filter, setFilter] = useState('all'); // all | active | completed | failed
     const [autoRefresh, setAutoRefresh] = useState(true);
 
     const fetchTasks = async () => {
         try {
-            const res = await api.get('/api/soundcloud/tasks');
-            setTasks(res.data || {});
+            const [sc, imp] = await Promise.all([
+                api.get('/api/soundcloud/tasks').catch(() => ({ data: {} })),
+                api.get('/api/import/tasks').catch(() => ({ data: {} })),
+            ]);
+            setScTasks(sc.data || {});
+            setImportTasks(imp.data || {});
         } catch (e) { /* backend offline */ }
     };
 
@@ -230,7 +250,16 @@ const DownloadManagerView = () => {
         return () => clearInterval(i);
     }, [autoRefresh]);
 
-    const allTasks = Object.values(tasks).sort((a, b) => (b.start_time || 0) - (a.start_time || 0));
+    const merged = useMemo(() => {
+        const sc = Object.values(scTasks).map(t => ({ ...t, _src: 'soundcloud' }));
+        const imp = Object.values(importTasks).map(t => ({ ...t, _src: 'import' }));
+        let combined = [];
+        if (source === 'all' || source === 'soundcloud') combined = combined.concat(sc);
+        if (source === 'all' || source === 'import') combined = combined.concat(imp);
+        return combined.sort((a, b) => (b.start_time || 0) - (a.start_time || 0));
+    }, [scTasks, importTasks, source]);
+
+    const allTasks = merged;
 
     const stats = useMemo(() => {
         const active = allTasks.filter(t =>
@@ -271,8 +300,8 @@ const DownloadManagerView = () => {
                             <Download size={22} className="text-orange-400" />
                         </div>
                         <div>
-                            <h1 className="text-2xl font-bold tracking-tight">Download Manager</h1>
-                            <p className="text-xs text-ink-muted mt-0.5 font-mono">SoundCloud → Analyse → Library</p>
+                            <h1 className="text-2xl font-bold tracking-tight">Import Manager</h1>
+                            <p className="text-xs text-ink-muted mt-0.5 font-mono">SoundCloud · Lokal → Analyse → Library → ANLZ</p>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -305,9 +334,27 @@ const DownloadManagerView = () => {
                     <StatCard icon={TrendingUp}    label="Ø Dauer"  value={`${stats.avgDoneSec}s`} color="text-purple-400" />
                 </div>
 
-                {/* Filter pills */}
-                <div className="flex items-center gap-2 mt-4">
-                    <Filter size={12} className="text-ink-muted" />
+                {/* Source + Filter pills */}
+                <div className="flex flex-wrap items-center gap-2 mt-4">
+                    <span className="text-[10px] uppercase tracking-wider text-ink-muted mr-1">Quelle</span>
+                    {[
+                        { id: 'all',        label: 'Alle' },
+                        { id: 'soundcloud', label: 'SoundCloud' },
+                        { id: 'import',     label: 'Lokal' },
+                    ].map(s => (
+                        <button
+                            key={s.id}
+                            onClick={() => setSource(s.id)}
+                            className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all border ${
+                                source === s.id
+                                    ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
+                                    : 'bg-mx-card border-white/10 text-ink-secondary hover:bg-white/5'
+                            }`}
+                        >
+                            {s.label}
+                        </button>
+                    ))}
+                    <Filter size={12} className="text-ink-muted ml-3" />
                     {[
                         { id: 'all',       label: 'Alle' },
                         { id: 'active',    label: 'Aktiv' },
