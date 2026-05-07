@@ -37,11 +37,17 @@ class RekordboxXMLDB:
                 for t in collection.findall("TRACK"):
                     self._parse_track(t)
             
-            # PARSE PLAYLISTS
+            # PARSE PLAYLISTS (accept both schemas: with or without ROOT wrapper)
             playlists_root = root.find("PLAYLISTS")
             self.playlists = []
             if playlists_root is not None:
-                self.playlists = self._parse_playlist_node(playlists_root.find("NODE"), parent_id="ROOT")
+                top_nodes = playlists_root.findall("NODE")
+                # Standard Rekordbox-XML: single ROOT wrapper of Type=0 carrying all top-level playlists
+                if len(top_nodes) == 1 and top_nodes[0].get("Type") == "0":
+                    self.playlists = self._parse_playlist_node(top_nodes[0], parent_id="ROOT")
+                else:
+                    # Flat fallback: NODEs directly under PLAYLISTS are the top-level playlists
+                    self.playlists = self._recursive_playlist_parse(playlists_root, "ROOT")
 
             # Extract Metadata
             self._extract_metadata()
@@ -145,6 +151,14 @@ class RekordboxXMLDB:
             if child_type == "1":
                 self._cache_playlist_tracks(my_id, child)
                 node_data["Count"] = len(self.playlists_tracks[my_id])
+                node_data["Entries"] = child.get("Entries", "0")
+            elif child_type == "4":
+                # Smart playlist — parse SmartList sub-element if present
+                from .smart_playlist_engine import from_xml_node
+                sl = child.find("SmartList")
+                node_data["SmartList"] = from_xml_node(sl) if sl is not None else {}
+                # Cache materialised tracks too (snapshot at load)
+                self._cache_playlist_tracks(my_id, child)
                 node_data["Entries"] = child.get("Entries", "0")
             flat_list.append(node_data)
             if child_type == "0":
@@ -287,13 +301,261 @@ class RekordboxXMLDB:
         logger.info(f"Added track {tid} to XML library.")
         return tid
 
+    def create_playlist(self, name, parent_id="ROOT", is_folder=False):
+        """Create a new playlist node in the XML library.
+        Type "1" = playlist (holds tracks), Type "0" = folder (holds children).
+        """
+        pid = f"pl_{int(time.time() * 1000)}"
+        node = {
+            "ID": pid,
+            "Name": name,
+            "Type": "0" if is_folder else "1",
+            "ParentID": parent_id,
+            "Tracks": [],
+        }
+        self.playlists.append(node)
+        self.playlists_tracks[pid] = []
+        self.save_xml()
+        logger.info(f"Created XML playlist '{name}' (pid={pid})")
+        return node
+
+    def add_track_to_playlist(self, pid, tid):
+        """Append track tid to playlist pid in the XML library."""
+        pid = str(pid)
+        tid = str(tid)
+        track = self.tracks.get(tid)
+        if not track:
+            logger.warning(f"add_track_to_playlist: track {tid} not in library")
+            return False
+        existing_ids = {str(t.get("id") or t.get("TrackID")) for t in self.playlists_tracks.get(pid, [])}
+        if tid in existing_ids:
+            return True  # already there
+        self.playlists_tracks[pid].append(track)
+        self.save_xml()
+        return True
+
+    def find_playlist_by_name(self, name):
+        """Walk playlists tree, return first matching node."""
+        def _walk(nodes):
+            for n in nodes:
+                if n.get("Name") == name:
+                    return n
+                children = n.get("Children") or []
+                hit = _walk(children)
+                if hit:
+                    return hit
+            return None
+        return _walk(self.playlists)
+
+    def find_playlist(self, pid):
+        """Get playlist node by ID."""
+        pid = str(pid)
+        for p in self.playlists:
+            if str(p.get("ID")) == pid:
+                return p
+        return None
+
+    def get_playlist_tree(self):
+        """Build hierarchical tree (same shape as LiveRekordboxDB.get_playlist_tree)."""
+        if not self.playlists:
+            return []
+        node_map = {r['ID']: {**r, 'Children': []} for r in self.playlists}
+        tree = []
+        for r in self.playlists:
+            pid = r.get('ParentID')
+            if pid in node_map:
+                node_map[pid]['Children'].append(node_map[r['ID']])
+            elif str(pid).upper() == "ROOT":
+                tree.append(node_map[r['ID']])
+        for node in node_map.values():
+            node['Children'].sort(key=lambda x: x.get('Seq', 0))
+        tree.sort(key=lambda x: x.get('Seq', 0))
+        return tree
+
+    def remove_track_from_playlist(self, pid, tid):
+        """Remove track tid from playlist pid (does not delete from collection)."""
+        pid = str(pid); tid = str(tid)
+        if pid not in self.playlists_tracks:
+            return False
+        before = len(self.playlists_tracks[pid])
+        self.playlists_tracks[pid] = [
+            t for t in self.playlists_tracks[pid]
+            if str(t.get("id") or t.get("TrackID")) != tid
+        ]
+        if len(self.playlists_tracks[pid]) < before:
+            self.save_xml()
+            return True
+        return False
+
+    def reorder_playlist_track(self, pid, tid, new_index):
+        """Move track tid within playlist pid to position new_index (0-based)."""
+        pid = str(pid); tid = str(tid)
+        if pid not in self.playlists_tracks:
+            return False
+        tracks = self.playlists_tracks[pid]
+        idx = next((i for i, t in enumerate(tracks)
+                    if str(t.get("id") or t.get("TrackID")) == tid), -1)
+        if idx < 0:
+            return False
+        track = tracks.pop(idx)
+        new_index = max(0, min(new_index, len(tracks)))
+        tracks.insert(new_index, track)
+        self.save_xml()
+        return True
+
+    def rename_playlist(self, pid, new_name):
+        """Rename playlist/folder by id."""
+        node = self.find_playlist(pid)
+        if not node:
+            return False
+        node["Name"] = new_name
+        self.save_xml()
+        return True
+
+    def move_playlist(self, pid, new_parent_id, target_id=None, position=None):
+        """Move playlist node. position can be:
+           - int (XML-native order)
+           - "inside"/"before"/"after" with target_id (Live-DB style)
+        """
+        node = self.find_playlist(pid)
+        if not node:
+            return False
+        # Determine final parent
+        if position in ("inside",) and target_id:
+            new_parent_id = target_id
+        elif position in ("before", "after") and target_id:
+            sibling = self.find_playlist(target_id)
+            if sibling:
+                new_parent_id = sibling.get("ParentID") or "ROOT"
+        # Cycle protection
+        target = self.find_playlist(new_parent_id) if new_parent_id and new_parent_id != "ROOT" else None
+        if target:
+            cur = target
+            while cur:
+                if str(cur.get("ID")) == str(pid):
+                    logger.warning("move_playlist: cycle detected")
+                    return False
+                pp = cur.get("ParentID")
+                cur = self.find_playlist(pp) if pp and pp != "ROOT" else None
+        node["ParentID"] = str(new_parent_id) if new_parent_id else "ROOT"
+        if isinstance(position, int):
+            self.playlists.remove(node)
+            siblings = [p for p in self.playlists if p.get("ParentID") == node["ParentID"]]
+            if 0 <= position < len(siblings):
+                insert_at = self.playlists.index(siblings[position])
+            else:
+                insert_at = len(self.playlists)
+            self.playlists.insert(insert_at, node)
+        self.save_xml()
+        return True
+
+    def delete_playlist(self, pid):
+        """Delete playlist + all child playlists/folders recursively."""
+        pid = str(pid)
+        node = self.find_playlist(pid)
+        if not node:
+            return False
+
+        def _collect_descendants(parent_id):
+            result = [parent_id]
+            for p in self.playlists:
+                if p.get("ParentID") == parent_id:
+                    result.extend(_collect_descendants(str(p.get("ID"))))
+            return result
+
+        to_delete = set(_collect_descendants(pid))
+        self.playlists = [p for p in self.playlists if str(p.get("ID")) not in to_delete]
+        for did in to_delete:
+            self.playlists_tracks.pop(did, None)
+        self.save_xml()
+        logger.info(f"Deleted XML playlist tree rooted at {pid} ({len(to_delete)} nodes)")
+        return True
+
+    def create_folder(self, name, parent_id="ROOT"):
+        """Convenience wrapper: create_playlist(is_folder=True)."""
+        return self.create_playlist(name, parent_id=parent_id, is_folder=True)
+
+    def create_smart_playlist(self, name, criteria, parent_id="ROOT"):
+        """Smart playlist (Type=4). criteria = dict matching Rekordbox <SmartList> spec.
+        Example: {"LogicalOperator": "all", "AutomaticUpdate": "1",
+                  "conditions": [{"Field": "8", "Operator": "0", "ValueLeft": "120", "ValueRight": "130", "ValueUnit": "0"}]}
+        """
+        pid = f"pl_{int(time.time() * 1000)}"
+        node = {
+            "ID": pid,
+            "Name": name,
+            "Type": "4",
+            "ParentID": parent_id,
+            "Tracks": [],
+            "SmartList": criteria or {},
+        }
+        self.playlists.append(node)
+        self.playlists_tracks[pid] = []
+        self.save_xml()
+        return node
+
+    def update_smart_playlist(self, pid, criteria):
+        node = self.find_playlist(pid)
+        if not node:
+            return False
+        node["SmartList"] = criteria
+        self.save_xml()
+        return True
+
+    def evaluate_smart_playlist(self, pid):
+        """Apply smart-list criteria → list of matching tracks."""
+        from .smart_playlist_engine import evaluate
+        node = self.find_playlist(pid)
+        if not node or node.get("Type") != "4":
+            return []
+        return evaluate(node.get("SmartList", {}), list(self.tracks.values()))
+
+    # ── MyTags (Pioneer parity for XML mode) ───────────────────────────────
+    def _ensure_mytags(self):
+        if not hasattr(self, "_mytags"):
+            self._mytags = {}            # tag_id → name
+            self._track_mytags = {}      # track_id → set(tag_ids)
+
+    def list_mytags(self):
+        self._ensure_mytags()
+        return [{"id": tid, "name": n} for tid, n in self._mytags.items()]
+
+    def create_mytag(self, name):
+        self._ensure_mytags()
+        tid = f"mt_{int(time.time() * 1000)}"
+        self._mytags[tid] = name
+        self.save_xml()
+        return tid
+
+    def delete_mytag(self, tag_id):
+        self._ensure_mytags()
+        self._mytags.pop(str(tag_id), None)
+        for tids in self._track_mytags.values():
+            tids.discard(str(tag_id))
+        self.save_xml()
+        return True
+
+    def get_track_mytags(self, tid):
+        self._ensure_mytags()
+        ids = list(self._track_mytags.get(str(tid), set()))
+        return [{"id": i, "name": self._mytags.get(i, "")} for i in ids]
+
+    def set_track_mytags(self, tid, tag_ids):
+        self._ensure_mytags()
+        self._track_mytags[str(tid)] = set(str(x) for x in tag_ids)
+        self.save_xml()
+        return {"track_id": str(tid), "tag_ids": list(self._track_mytags[str(tid)])}
+
     def delete_track(self, tid):
         tid = str(tid)
         if tid in self.tracks:
             del self.tracks[tid]
-            # Also remove from playlists? 
-            # Ideally yes, but XML structure might be loose.
-            # For now, just remove from collection.
+            # Remove from every playlist
+            for pid in list(self.playlists_tracks.keys()):
+                self.playlists_tracks[pid] = [
+                    t for t in self.playlists_tracks[pid]
+                    if str(t.get("id") or t.get("TrackID")) != tid
+                ]
             self.save_xml()
             self.get_all_labels.cache_clear()
             self.get_all_albums.cache_clear()
@@ -341,19 +603,56 @@ class RekordboxXMLDB:
                     if mark.get("End"):
                         pm.set("End", str(mark["End"]))
             playlists_root = ET.SubElement(root, "PLAYLISTS")
+            # Wrap in a top-level ROOT NODE (Type=0) so the Rekordbox XML schema
+            # — and our own _recursive_playlist_parse — can walk the tree.
+            playlists_root_node = ET.SubElement(
+                playlists_root, "NODE", Name="ROOT", Type="0",
+                Count=str(len([p for p in self.playlists if p.get('ParentID') == 'ROOT'])),
+            )
+
+            def _add_smart_list(parent_node, criteria):
+                """Append <SmartList> with conditions inside a Type=4 playlist."""
+                if not criteria:
+                    return
+                sl = ET.SubElement(parent_node, "SmartList")
+                sl.set("LogicalOperator", str(criteria.get("LogicalOperator", "all")))
+                sl.set("AutomaticUpdate", str(criteria.get("AutomaticUpdate", "1")))
+                for c in criteria.get("conditions", []):
+                    cn = ET.SubElement(sl, "CONDITION")
+                    cn.set("Field", str(c.get("Field", "")))
+                    cn.set("Operator", str(c.get("Operator", "1")))
+                    cn.set("ValueLeft", str(c.get("ValueLeft", "")))
+                    cn.set("ValueRight", str(c.get("ValueRight", "")))
+                    cn.set("ValueUnit", str(c.get("ValueUnit", "0")))
+
             def build_xml_node(parent_node, pid):
                 children = [p for p in self.playlists if p['ParentID'] == pid]
                 for child in sorted(children, key=lambda x: x.get('Seq', 0)):
-                    node = ET.SubElement(parent_node, "NODE", Name=child['Name'], Type=child['Type'])
-                    if child['Type'] == "1":
+                    ctype = child.get('Type', '1')
+                    node = ET.SubElement(parent_node, "NODE", Name=child['Name'], Type=ctype)
+                    if ctype == "0":
+                        # Folder
+                        node.set("Count", str(len([p for p in self.playlists if p['ParentID'] == child['ID']])))
+                        build_xml_node(node, child['ID'])
+                    elif ctype == "4":
+                        # Smart playlist
+                        _add_smart_list(node, child.get("SmartList") or {})
+                        # Optional: also persist current materialised matches for tools that read XML literally
+                        try:
+                            from .smart_playlist_engine import evaluate as _eval_smart
+                            matched = _eval_smart(child.get("SmartList") or {}, list(self.tracks.values()))
+                        except Exception:
+                            matched = []
+                        node.set("Entries", str(len(matched)))
+                        for t in matched:
+                            ET.SubElement(node, "TRACK", Key=str(t.get('id') or t.get('TrackID')))
+                    else:
+                        # Normal playlist (Type=1)
                         tracks_in_pl = self.playlists_tracks.get(child['ID'], [])
                         node.set("Entries", str(len(tracks_in_pl)))
                         for t in tracks_in_pl:
                             ET.SubElement(node, "TRACK", Key=str(t['id']))
-                    else:
-                        node.set("Count", str(len([p for p in self.playlists if p['ParentID'] == child['ID']])))
-                        build_xml_node(node, child['ID'])
-            build_xml_node(playlists_root, "ROOT")
+            build_xml_node(playlists_root_node, "ROOT")
             tree = ET.ElementTree(root)
             tree.write(str(self.xml_path), encoding="utf-8", xml_declaration=True)
             logger.info(f"Saved XML to {self.xml_path}")
@@ -365,16 +664,39 @@ class RekordboxXMLDB:
 class RekordboxDB:
     def __init__(self):
         # Discover Live DB path
+        # 1. Try existing Rekordbox installation
         self.live_db_path = Path(os.path.expandvars(r"%APPDATA%\Pioneer\rekordbox\master.db"))
         if not self.live_db_path.exists():
             self.live_db_path = Path(os.path.expandvars(r"%APPDATA%\Pioneer\rekordbox6\master.db"))
+
+        # 2. Fallback: standalone master.db inside our own app-data folder
+        # (created on demand via OneLibrary.create — see ensure_standalone_master_db)
+        if not self.live_db_path.exists():
+            standalone_dir = Path(os.path.expandvars(r"%APPDATA%\LibraryManagementSystem\rekordbox"))
+            self.live_db_path = standalone_dir / "master.db"
 
         self.mode = "live" if self.live_db_path.exists() else "xml"
         self.xml_db = RekordboxXMLDB()
         self.live_db = None
         self.loaded = False
-        
         logger.info(f"Database initialized (Mode: {self.mode})")
+
+    def ensure_standalone_master_db(self) -> bool:
+        """Create an empty master.db at our private location if Rekordbox isn't installed.
+        Uses rbox.OneLibrary.create — produces a CDJ-compatible Library One DB.
+        """
+        if self.live_db_path.exists():
+            return True
+        try:
+            import rbox
+            self.live_db_path.parent.mkdir(parents=True, exist_ok=True)
+            mytag_dbid = "lms_local_master"
+            rbox.OneLibrary.create(str(self.live_db_path), mytag_dbid)
+            logger.info(f"Created standalone master.db at {self.live_db_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to create standalone master.db: {e}")
+            return False
 
     def _get_hide_streaming_setting(self):
         try:
@@ -427,6 +749,11 @@ class RekordboxDB:
 
     def set_mode(self, mode: str):
         if mode not in ["xml", "live"]: return False
+        if mode == "live" and not self.live_db_path.exists():
+            # auto-create our private standalone master.db so Live works without Rekordbox
+            if not self.ensure_standalone_master_db():
+                logger.error("Cannot switch to live mode: master.db unavailable and standalone creation failed")
+                return False
         self.mode = mode
         logger.info(f"Switched to mode: {self.mode}")
         return True
@@ -450,6 +777,22 @@ class RekordboxDB:
              self.live_db.tracks = {}
              self.live_db.loaded = False
         self.loaded = False
+        return True
+
+    def create_new_library(self, path: str = None):
+        target = Path(path) if path else Path("rekordbox.xml")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        self.xml_db.xml_path = target
+        self.xml_db.tracks = {}
+        self.xml_db.playlists = []
+        self.xml_db.playlists_tracks = defaultdict(list)
+        self.xml_db.artists = []
+        self.xml_db.genres = []
+        self.xml_db.loaded = True
+        self.mode = "xml"
+        self.loaded = True
+        self.xml_db.save_xml()
+        logger.info(f"Created new empty library at {target}")
         return True
 
     def refresh_metadata(self):
@@ -516,6 +859,55 @@ class RekordboxDB:
         if hasattr(self.active_db, "delete_playlist"):
             return self.active_db.delete_playlist(pid)
         return False
+
+    def reorder_playlist_track(self, pid, tid, new_index):
+        if hasattr(self.active_db, "reorder_playlist_track"):
+            return self.active_db.reorder_playlist_track(pid, tid, new_index)
+        return False
+
+    def create_folder(self, name, parent_id="ROOT"):
+        if hasattr(self.active_db, "create_folder"):
+            return self.active_db.create_folder(name, parent_id)
+        if hasattr(self.active_db, "create_playlist"):
+            return self.active_db.create_playlist(name, parent_id, is_folder=True)
+        return None
+
+    def create_smart_playlist(self, name, criteria, parent_id="ROOT"):
+        if hasattr(self.active_db, "create_smart_playlist"):
+            return self.active_db.create_smart_playlist(name, criteria, parent_id)
+        # Fallback for LiveDB: register the criteria on a normal Type-1 playlist
+        # and store SmartList JSON in our SC-side cache so evaluate still works.
+        if hasattr(self.active_db, "create_playlist"):
+            node = self.active_db.create_playlist(name, parent_id, is_folder=False)
+            if not node:
+                return None
+            pid = node.get("ID") if isinstance(node, dict) else getattr(node, "id", None)
+            if pid:
+                node["Type"] = "4"
+                node["SmartList"] = criteria or {}
+                if not hasattr(self, "_smart_overlay"):
+                    self._smart_overlay = {}
+                self._smart_overlay[str(pid)] = criteria or {}
+            return node
+        return None
+
+    def update_smart_playlist(self, pid, criteria):
+        if hasattr(self.active_db, "update_smart_playlist"):
+            return self.active_db.update_smart_playlist(pid, criteria)
+        if not hasattr(self, "_smart_overlay"):
+            self._smart_overlay = {}
+        self._smart_overlay[str(pid)] = criteria
+        return True
+
+    def evaluate_smart_playlist(self, pid):
+        if hasattr(self.active_db, "evaluate_smart_playlist"):
+            return self.active_db.evaluate_smart_playlist(pid)
+        # Fallback evaluator using our smart engine + DB-wrapper tracks
+        from .smart_playlist_engine import evaluate as _eval
+        criteria = (getattr(self, "_smart_overlay", {}) or {}).get(str(pid)) or {}
+        if not criteria:
+            return []
+        return _eval(criteria, list(self.tracks.values()))
 
     def get_tracks_missing_artwork(self):
         """Returns a list of tracks where Artwork is empty or None."""

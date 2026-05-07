@@ -688,37 +688,51 @@ class UsbSyncEngine:
             "total_usb": len(usb_tracks),
         }
 
-    def sync_collection(self, profile: Dict, library_types: List[str] = ["library_legacy"]) -> Generator[Dict, None, None]:
+    def sync_collection(self, profile: Dict, library_types: List[str] = ["library_one", "library_legacy"]) -> Generator[Dict, None, None]:
         yield {"stage": "preparing", "message": "Preparing full sync...", "progress": 0}
         self._ensure_usb_structure()
 
         try:
             did_sync = False
-            
+
             with locked_sync(Path(profile["drive"])):
                 if "library_one" in library_types:
-                    logger.warning("Skipping Library One sync: exportLibrary.db requires SQLCipher encryption.")
-                    yield {"stage": "info", "message": "Library One sync disabled (Modern Rekordbox Database is Encrypted)", "progress": 10}
-                    if "library_legacy" not in library_types:
-                        library_types = list(library_types) + ["library_legacy"]
-                        logger.info("Auto-including library_legacy as fallback for encrypted library_one")
+                    yield {"stage": "info", "message": "Writing OneLibrary (exportLibrary.db) — CDJ-3000 native format…", "progress": 10}
+                    for event in self._sync_library_one(profile):
+                        yield event
+                    did_sync = True
 
                 if "library_legacy" in library_types or profile.get("sync_mirrored"):
-                    yield {"stage": "info", "message": "Starting Legacy XML Sync...", "progress": 20}
+                    yield {"stage": "info", "message": "Writing Legacy XML (rekordbox.xml)…", "progress": 60}
                     for event in self._sync_library_legacy(profile):
                         yield {
                             "stage": event.get("stage", "sync"),
                             "message": f"Legacy: {event.get('message', '')}",
-                            "progress": 20 + int(event.get("progress", 0) * 0.8)
+                            "progress": 60 + int(event.get("progress", 0) * 0.4),
                         }
                     did_sync = True
 
             if not did_sync:
-                yield {"stage": "complete", "message": "Sync finished (No compatible libraries selected — try enabling Legacy XML)", "progress": 100}
-            
+                yield {"stage": "complete", "message": "Nothing synced — enable library_one or library_legacy", "progress": 100}
+
         except Exception as e:
             logger.error(f"Collection sync failed: {e}")
             yield {"stage": "error", "message": str(e), "progress": -1}
+
+    def _sync_library_one(self, profile: Dict, playlist_ids: List[str] = None) -> Generator[Dict, None, None]:
+        """Sync via rbox.OneLibrary → exportLibrary.db + ANLZ + audio copy."""
+        try:
+            from .usb_one_library import OneLibraryUsbWriter
+            from .library_source import from_db
+            from .database import db as global_db
+
+            source = from_db(global_db)
+            writer = OneLibraryUsbWriter(profile["drive"])
+            for ev in writer.sync(source, audio_copy=True, copy_anlz=True):
+                yield ev
+        except Exception as e:
+            logger.error(f"OneLibrary sync failed: {e}", exc_info=True)
+            yield {"stage": "error", "message": f"OneLibrary: {e}", "progress": -1}
 
     def sync_playlists(self, profile: Dict, playlist_ids: List[str], library_types: List[str] = ["library_legacy"]) -> Generator[Dict, None, None]:
         if profile.get("sync_mirrored"):
@@ -737,14 +751,12 @@ class UsbSyncEngine:
             
             with locked_sync(Path(profile["drive"])):
                 if "library_one" in library_types:
-                    logger.warning("Skipping Library One playlist sync: exportLibrary.db requires SQLCipher encryption.")
-                    yield {"stage": "info", "message": "Library One sync disabled (Modern Rekordbox Database is Encrypted)", "progress": 10}
-                    if "library_legacy" not in library_types:
-                        library_types = list(library_types) + ["library_legacy"]
-                        logger.info("Auto-including library_legacy as fallback")
+                    yield {"stage": "info", "message": "Writing OneLibrary playlist export…", "progress": 10}
+                    for event in self._sync_library_one(profile, playlist_ids):
+                        yield event
 
                 if "library_legacy" in library_types or profile.get("sync_mirrored"):
-                    yield {"stage": "info", "message": "Starting Legacy XML Playlist Sync...", "progress": 20}
+                    yield {"stage": "info", "message": "Starting Legacy XML Playlist Sync...", "progress": 60}
                     for event in self._sync_library_legacy(profile, playlist_ids):
                         yield {
                             "stage": event.get("stage", "sync"),
