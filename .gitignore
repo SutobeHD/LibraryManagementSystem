@@ -154,3 +154,9 @@ test_*.json
 standalone.xml
 rekordbox.xml
 download_registry.db
+
+# --- Local-only / dev backup ---
+.aiexclude
+.release-backup/
+CLAUDE_OLD.md
+backend_test.log

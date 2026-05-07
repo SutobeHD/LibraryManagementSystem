@@ -50,7 +50,7 @@ hiddenimports += collect_submodules('app')
 
 
 a = Analysis(
-    ['app/main.py'],
+    ['backend_entry.py'],
     pathex=['.'],
     binaries=binaries,
     datas=datas,

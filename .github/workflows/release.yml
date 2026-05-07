@@ -242,7 +242,7 @@ jobs:
 
             See [SECURITY.md](https://github.com/SutobeHD/LibraryManagementSystem/blob/main/docs/SECURITY.md) for verification details.
           releaseDraft: true
-          prerelease: ${{ contains(github.ref_name, 'Alpha') || contains(github.ref_name, 'Beta') || contains(github.ref_name, 'rc') }}
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'Alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'Beta') || contains(github.ref_name, 'rc') }}
           args: ${{ matrix.args }}
 
   # ============================================================
