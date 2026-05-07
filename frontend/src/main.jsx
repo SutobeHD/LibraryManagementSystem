@@ -1,7 +1,7 @@
 import React, { useState, Component, useEffect, useCallback, Suspense, lazy } from 'react'
 import { invoke } from '@tauri-apps/api/core'; // Tauri Invoke
 import ReactDOM from 'react-dom/client'
-import { Music, Cloud, Download, Scissors, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, Database, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2, Sparkles, Copy, Layers } from 'lucide-react'
+import { Music, Cloud, Download, Scissors, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, Database, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2, Sparkles, Copy, Layers, FilePlus, FolderOpen, ArrowLeft } from 'lucide-react'
 import './index.css'
 import { ToastProvider } from './components/ToastContext'
 import { Toaster } from 'react-hot-toast'
@@ -20,6 +20,7 @@ const BackupManager = lazy(() => import('./components/BackupManager'));
 const DesignView = lazy(() => import('./components/DesignView'));
 const SoundCloudView = lazy(() => import('./components/SoundCloudView'));
 const SoundCloudSyncView = lazy(() => import('./components/SoundCloudSyncView'));
+const DownloadManagerView = lazy(() => import('./components/DownloadManagerView'));
 const PhraseGeneratorView = lazy(() => import('./components/PhraseGeneratorView'));
 const DuplicateView = lazy(() => import('./components/DuplicateView'));
 const UtilitiesView = lazy(() => import('./components/UtilitiesView'));
@@ -165,6 +166,7 @@ const Sidebar = ({ activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnlo
             <NavBtn icon={<HardDrive size={14} />} label="USB Export" active={activeTab === 'usb'} onClick={() => setActiveTab('usb')} />
             <NavBtn icon={<Cloud size={14} />} label="SoundCloud" active={activeTab === 'soundcloud'} onClick={() => setActiveTab('soundcloud')} />
             <NavBtn icon={<Download size={14} />} label="SCloudLibrary" active={activeTab === 'sc-sync'} onClick={() => setActiveTab('sc-sync')} />
+            <NavBtn icon={<Download size={14} />} label="Downloads" active={activeTab === 'downloads'} onClick={() => setActiveTab('downloads')} />
           </NavGroup>
 
           <NavGroup label="Utilities">
@@ -240,6 +242,81 @@ const DotGridBackdrop = () => (
     }}
   />
 );
+
+const XmlSubmodeView = ({ onPick, onBack }) => {
+  const cards = [
+    {
+      id: 'new-empty',
+      icon: FilePlus,
+      title: 'New Empty',
+      desc: 'Create a fresh, empty rekordbox.xml in the app folder.',
+    },
+    {
+      id: 'standalone',
+      icon: Sparkles,
+      title: 'Standalone',
+      desc: 'Pick a custom location and create a new XML there — independent of Rekordbox.',
+    },
+    {
+      id: 'import',
+      icon: Upload,
+      title: 'Import',
+      desc: 'Drop or browse an existing rekordbox.xml export and load it.',
+    },
+    {
+      id: 'defined-path',
+      icon: FolderOpen,
+      title: 'Defined Path',
+      desc: 'Point at an existing XML on disk — edits write back to the same file.',
+    },
+  ];
+  return (
+    <div className="fixed inset-0 z-[110] bg-mx-deepest flex flex-col items-center justify-center p-8 animate-fade-in">
+      <DotGridBackdrop />
+      <div className="relative z-10 flex flex-col items-center max-w-5xl w-full">
+        <div className="flex items-end gap-1 mb-10">
+          {[28, 36, 44, 32, 20].map((h, i) => (
+            <div key={i} className="bg-amber2 rounded-[2px]" style={{ width: 6, height: h }} />
+          ))}
+        </div>
+
+        <h1 className="text-3xl font-bold text-ink-primary mb-3 tracking-tight">XML Mode</h1>
+        <p className="text-ink-secondary text-sm mb-12 text-center max-w-md">
+          Choose how to start the XML library.
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 w-full max-w-4xl">
+          {cards.map(({ id, icon: Icon, title, desc }) => (
+            <button
+              key={id}
+              onClick={() => onPick(id)}
+              className="group relative p-7 mx-card rounded-mx-lg hover:border-amber2 transition-all text-left overflow-hidden shadow-mx-md"
+            >
+              <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-15 transition-opacity">
+                <Icon size={120} className="text-amber2" />
+              </div>
+              <div
+                className="w-10 h-10 rounded-mx-md flex items-center justify-center mb-5"
+                style={{ background: 'var(--amber-bg)', color: 'var(--amber)' }}
+              >
+                <Icon size={20} />
+              </div>
+              <h3 className="text-lg font-semibold text-ink-primary mb-1.5">{title}</h3>
+              <p className="text-ink-secondary text-tiny leading-relaxed">{desc}</p>
+            </button>
+          ))}
+        </div>
+
+        <button
+          onClick={onBack}
+          className="mt-10 flex items-center gap-2 text-[11px] text-ink-muted hover:text-ink-secondary uppercase tracking-widest font-semibold transition-colors"
+        >
+          <ArrowLeft size={14} /> Back
+        </button>
+      </div>
+    </div>
+  );
+};
 
 const SelectionView = ({ onSelect }) => (
   <div className="fixed inset-0 z-[110] bg-mx-deepest flex flex-col items-center justify-center p-8 animate-fade-in">
@@ -336,15 +413,115 @@ const App = () => {
   }, []);
 
   const handleModeSelect = useCallback(async (mode) => {
+    if (mode === 'xml') {
+      // XML branch shows a submode picker first — no API call yet.
+      setAppMode('xml-submode');
+      return;
+    }
     setAppMode(mode);
     setIsInitialLoading(true);
     try {
       await api.post('/api/library/mode', { mode });
-      setActiveTab(mode === 'xml' ? 'xml' : 'library');
+      setActiveTab('library');
     } catch (e) {
       console.error("Mode select failed", e);
     }
   }, []);
+
+  const handleXmlSubmode = useCallback(async (submode) => {
+    try {
+      await api.post('/api/library/mode', { mode: 'xml' });
+    } catch (e) {
+      console.error("Failed to switch to xml mode", e);
+      return;
+    }
+
+    if (submode === 'new-empty') {
+      setAppMode('xml');
+      setIsInitialLoading(true);
+      try {
+        await api.post('/api/library/new', {});
+        setActiveTab('library');
+        await checkLibraryStatus();
+      } catch (e) {
+        console.error("Create empty library failed", e);
+        alert("Failed to create empty library.");
+      }
+      return;
+    }
+
+    if (submode === 'standalone') {
+      // Internal standalone XML — auto-create if missing, else open
+      const STANDALONE_PATH = 'standalone.xml';
+      setAppMode('xml');
+      setIsInitialLoading(true);
+      try {
+        const loadRes = await api.post('/api/library/load', { path: STANDALONE_PATH });
+        if (loadRes.data?.status !== 'success') {
+          // Missing/invalid → create then load
+          await api.post('/api/library/new', { path: STANDALONE_PATH });
+          await api.post('/api/library/load', { path: STANDALONE_PATH });
+        }
+        setActiveTab('library');
+        await checkLibraryStatus();
+      } catch (e) {
+        console.error("Standalone init failed", e);
+        try {
+          await api.post('/api/library/new', { path: STANDALONE_PATH });
+          await api.post('/api/library/load', { path: STANDALONE_PATH });
+          setActiveTab('library');
+          await checkLibraryStatus();
+        } catch (e2) {
+          console.error("Standalone fallback create failed", e2);
+          alert("Failed to init standalone XML.");
+          setIsInitialLoading(false);
+          setAppMode('xml-submode');
+        }
+      }
+      return;
+    }
+
+    if (submode === 'import') {
+      // Hand off to XmlCleanView — its existing drop-zone handles the upload.
+      setAppMode('xml');
+      setActiveTab('xml');
+      // Don't show the loading splash — the user is about to drop a file.
+      return;
+    }
+
+    if (submode === 'defined-path') {
+      let target = null;
+      try {
+        const { open } = await import('@tauri-apps/plugin-dialog');
+        target = await open({
+          title: 'Pick existing XML',
+          multiple: false,
+          filters: [{ name: 'Rekordbox XML', extensions: ['xml'] }],
+        });
+      } catch (_) {
+        target = prompt('Enter the path to an existing rekordbox.xml:');
+      }
+      if (!target) return;
+      setAppMode('xml');
+      setIsInitialLoading(true);
+      try {
+        const res = await api.post('/api/library/load', { path: target });
+        if (res.data.status !== 'success') {
+          alert(`Failed to load XML: ${res.data.message || 'unknown error'}`);
+          setIsInitialLoading(false);
+          setAppMode('xml-submode');
+          return;
+        }
+        setActiveTab('library');
+        await checkLibraryStatus();
+      } catch (e) {
+        console.error("Defined-path load failed", e);
+        alert("Failed to load XML at that path.");
+        setIsInitialLoading(false);
+        setAppMode('xml-submode');
+      }
+    }
+  }, [checkLibraryStatus]);
 
   const handleLoadLibrary = useCallback(async () => {
     try {
@@ -382,7 +559,7 @@ const App = () => {
     }, 5000);
 
     const checkInterval = setInterval(() => {
-      if (appMode !== 'choice' && !libraryStatus.loaded) {
+      if ((appMode === 'xml' || appMode === 'live') && !libraryStatus.loaded) {
         checkLibraryStatus();
       }
     }, 1000);
@@ -418,6 +595,12 @@ const App = () => {
   return (
     <div className="flex h-screen w-screen bg-mx-deepest text-ink-primary overflow-hidden font-sans">
       {appMode === 'choice' && <SelectionView onSelect={handleModeSelect} />}
+      {appMode === 'xml-submode' && (
+        <XmlSubmodeView
+          onPick={handleXmlSubmode}
+          onBack={() => setAppMode('choice')}
+        />
+      )}
 
       {isInitialLoading && (
         <div className="fixed inset-0 z-[120] bg-mx-deepest flex flex-col items-center justify-center p-8 animate-fade-in font-sans">
@@ -473,7 +656,7 @@ const App = () => {
       />
 
       <main className="flex-1 h-full overflow-hidden relative z-10 bg-mx-deepest">
-        <div className="h-full w-full relative pb-20">
+        <div className={`h-full w-full relative ${playerTrack ? 'pb-20' : ''}`}>
           <Suspense fallback={<ViewLoader />}>
             {/* STABILITY: Each view wrapped in its own ErrorBoundary */}
             <div className={activeTab === 'library' ? 'h-full' : 'hidden'}>
@@ -521,6 +704,12 @@ const App = () => {
             <div className={activeTab === 'sc-sync' ? 'h-full' : 'hidden'}>
               <ErrorBoundary key="eb-sc-sync">
                 <SoundCloudSyncView />
+              </ErrorBoundary>
+            </div>
+
+            <div className={activeTab === 'downloads' ? 'h-full' : 'hidden'}>
+              <ErrorBoundary key="eb-downloads">
+                <DownloadManagerView />
               </ErrorBoundary>
             </div>
 

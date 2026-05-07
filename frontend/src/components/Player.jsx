@@ -40,7 +40,35 @@ const Player = ({ track, onClose, onMaximize }) => {
     const handleTimeUpdate = () => {
         if (audioRef.current) {
             setProgress(audioRef.current.currentTime);
-            setDuration(audioRef.current.duration || 0);
+            const d = audioRef.current.duration;
+            if (Number.isFinite(d) && d > 0) {
+                setDuration(d);
+            }
+        }
+    };
+
+    const handleLoadedMeta = () => {
+        if (audioRef.current) {
+            const d = audioRef.current.duration;
+            if (Number.isFinite(d) && d > 0) setDuration(d);
+            else if (track?.TotalTime) setDuration(parseFloat(track.TotalTime) || 0);
+        }
+    };
+
+    const seekTo = (ratio) => {
+        if (!audioRef.current) return;
+        const d = audioRef.current.duration;
+        // Fallback: track metadata duration (HTML5 audio sometimes reports Infinity for chunked streams)
+        const safeDuration = Number.isFinite(d) && d > 0
+            ? d
+            : (parseFloat(track?.TotalTime) || duration || 0);
+        if (!safeDuration) return;
+        const target = Math.max(0, Math.min(1, ratio)) * safeDuration;
+        try {
+            audioRef.current.currentTime = target;
+            setProgress(target);
+        } catch (e) {
+            console.warn("Seek failed:", e);
         }
     };
 
@@ -70,7 +98,10 @@ const Player = ({ track, onClose, onMaximize }) => {
                     ref={audioRef}
                     src={`${api.defaults.baseURL}/api/stream?path=${encodeURIComponent(track.path || track.Path)}`}
                     onTimeUpdate={handleTimeUpdate}
+                    onLoadedMetadata={handleLoadedMeta}
+                    onDurationChange={handleLoadedMeta}
                     onEnded={() => setPlaying(false)}
+                    preload="metadata"
                 />
             )}
 
@@ -142,14 +173,26 @@ const Player = ({ track, onClose, onMaximize }) => {
                             <span className="font-mono text-[10px] text-ink-muted">{formatTime(duration)}</span>
                         </div>
                         <div
-                            className="h-[3px] rounded-full cursor-pointer relative group"
-                            style={{ background: 'var(--line-subtle)' }}
+                            className="py-2 -my-2 cursor-pointer relative group"
                             onClick={(e) => {
                                 if (streaming) return;
                                 const rect = e.currentTarget.getBoundingClientRect();
-                                const p = (e.clientX - rect.left) / rect.width;
-                                if (audioRef.current) audioRef.current.currentTime = p * audioRef.current.duration;
+                                seekTo((e.clientX - rect.left) / rect.width);
                             }}
+                            onMouseDown={(e) => {
+                                if (streaming) return;
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                const onMove = (ev) => seekTo((ev.clientX - rect.left) / rect.width);
+                                const onUp = () => {
+                                    document.removeEventListener('mousemove', onMove);
+                                    document.removeEventListener('mouseup', onUp);
+                                };
+                                document.addEventListener('mousemove', onMove);
+                                document.addEventListener('mouseup', onUp);
+                            }}
+                        ><div
+                            className="h-[3px] rounded-full relative pointer-events-none"
+                            style={{ background: 'var(--line-subtle)' }}
                         >
                             <div
                                 className="absolute inset-y-0 left-0 bg-amber2 rounded-full"
@@ -160,6 +203,7 @@ const Player = ({ track, onClose, onMaximize }) => {
                                     style={{ boxShadow: '0 0 6px var(--amber-glow)' }}
                                 />
                             </div>
+                        </div>
                         </div>
                     </>
                 )}
