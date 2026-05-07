@@ -608,6 +608,201 @@ def _stream_file_to_temp(
         return None
 
 
+# ── Metadata + post-processing helpers ─────────────────────────────────────────
+
+def _fetch_sc_metadata(
+    sc_track_id: str,
+    auth_token: Optional[str],
+) -> Optional[Dict]:
+    """Fetch SoundCloud v2 track metadata (independent of stream resolution).
+
+    Used to populate native ID3/MP4/AIFF tags on the downloaded file.
+    Tries OAuth first, then anonymous client_id — same fallback pattern as
+    `_resolve_stream_via_transcodings`. Returns the raw v2 dict or None.
+    """
+    from .soundcloud_api import get_sc_client_id
+
+    base_headers = {"User-Agent": _UA, "Accept": "application/json"}
+    auth_headers = dict(base_headers)
+    if auth_token:
+        auth_headers["Authorization"] = f"OAuth {auth_token}"
+
+    try:
+        client_id = get_sc_client_id()
+    except RuntimeError:
+        return None
+
+    params = {"client_id": client_id}
+    attempts = ([(auth_headers, "auth")] if auth_token else []) + [(base_headers, "anon")]
+
+    for headers, label in attempts:
+        try:
+            resp = requests.get(
+                f"{_V2_API_BASE}/tracks/{sc_track_id}",
+                headers=headers, params=params, timeout=_API_TIMEOUT,
+            )
+            if resp.status_code in (401, 403):
+                continue
+            resp.raise_for_status()
+            return resp.json()
+        except (requests.RequestException, ValueError) as exc:
+            logger.debug("[SC-DL] metadata fetch failed (%s): %s", label, exc)
+            continue
+    return None
+
+
+def _fetch_artwork_bytes(artwork_url: Optional[str]) -> Optional[bytes]:
+    """Download SC cover artwork. Replaces -large with -t500x500 for higher res.
+
+    SC's artwork_url returns 100x100 (-large.jpg) by convention. The same CDN
+    serves -t500x500.jpg for the bigger version we want embedded in the file.
+    Returns the bytes or None on any error (404, network, timeout).
+    """
+    if not artwork_url:
+        return None
+    hi_res = artwork_url.replace("-large.", "-t500x500.")
+    try:
+        resp = requests.get(hi_res, headers={"User-Agent": _UA}, timeout=_API_TIMEOUT)
+        if resp.status_code == 404 and hi_res != artwork_url:
+            # Fallback to original size
+            resp = requests.get(artwork_url, headers={"User-Agent": _UA}, timeout=_API_TIMEOUT)
+        resp.raise_for_status()
+        return resp.content
+    except requests.RequestException as exc:
+        logger.debug("[SC-DL] artwork fetch failed: %s", exc)
+        return None
+
+
+def _apply_sc_metadata(
+    file_path: Path,
+    sc_meta: Dict,
+    sc_playlist_title: Optional[str],
+) -> bool:
+    """Write SoundCloud track metadata (title/artist/genre/year/cover/ISRC) onto
+    the downloaded audio file via mutagen.
+
+    Maps SC fields:
+      title          → ID3 TIT2 / MP4 ©nam / Vorbis title
+      user.username  → ID3 TPE1 / MP4 ©ART / Vorbis artist
+      genre          → ID3 TCON / MP4 ©gen / Vorbis genre
+      created_at     → year (YYYY only)
+      permalink_url  → ID3 COMM / Vorbis comment (origin URL)
+      pub_meta.isrc  → ID3 TSRC / Vorbis isrc
+      artwork_url    → ID3 APIC / MP4 covr / FLAC Picture
+      sc_playlist    → ID3 TALB / MP4 ©alb (when provided — useful for filing)
+
+    Best-effort — never raises. Returns True on partial/full success.
+    """
+    from . import audio_tags
+
+    user = sc_meta.get("user") or {}
+    pub = sc_meta.get("publisher_metadata") or {}
+
+    artist = (
+        pub.get("artist")
+        or user.get("username")
+        or "Unknown Artist"
+    )
+    title = pub.get("release_title") or sc_meta.get("title") or file_path.stem
+    album = pub.get("album_title") or sc_playlist_title or ""
+
+    # Year: prefer release_date, fall back to created_at. Both are ISO-8601.
+    raw_date = sc_meta.get("release_date") or sc_meta.get("created_at") or ""
+    year = ""
+    if isinstance(raw_date, str) and len(raw_date) >= 4 and raw_date[:4].isdigit():
+        year = raw_date[:4]
+
+    updates = {
+        "Title": title,
+        "Artist": artist,
+        "Album": album,
+        "Genre": sc_meta.get("genre") or "",
+        "Year": year,
+        "Comment": sc_meta.get("permalink_url") or "",
+    }
+    isrc = pub.get("isrc")
+    if isrc:
+        # audio_tags.write_tags doesn't have an ISRC alias — skip silently.
+        # The library already stores it in the DB; file-level ISRC is optional.
+        logger.debug("[SC-DL] ISRC available but not yet wired into audio_tags: %s", isrc)
+
+    artwork_bytes = _fetch_artwork_bytes(sc_meta.get("artwork_url"))
+
+    try:
+        ok = audio_tags.write_tags(file_path, updates, artwork=artwork_bytes)
+        if ok:
+            logger.info(
+                "[SC-DL] Tags written: %s — title=%r artist=%r genre=%r year=%s art=%s",
+                file_path.name, title, artist, updates["Genre"], year,
+                len(artwork_bytes) if artwork_bytes else 0,
+            )
+        return ok
+    except Exception as exc:
+        logger.warning("[SC-DL] Tag write failed for %s: %s", file_path.name, exc)
+        return False
+
+
+def _convert_to_aiff(src_path: Path) -> Optional[Path]:
+    """Convert any audio file to AIFF (PCM s16le) via ffmpeg.
+
+    AIFF stores uncompressed PCM, identical to WAV — no further quality loss
+    beyond whatever was in the source. Returns the new path on success, or
+    None on any failure (caller should keep the original file).
+    """
+    if src_path.suffix.lower() in (".aiff", ".aif"):
+        return src_path  # already AIFF
+
+    aiff_path = src_path.with_suffix(".aiff")
+    cmd = [
+        FFMPEG_BIN,
+        "-hide_banner", "-loglevel", "error",
+        "-i", str(src_path),
+        "-c:a", "pcm_s16le",
+        "-vn",  # drop embedded artwork — re-applied via mutagen afterwards
+        "-y", str(aiff_path),
+    ]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True,
+            timeout=_DOWNLOAD_TIMEOUT,
+        )
+        if result.returncode != 0 or not aiff_path.exists() or aiff_path.stat().st_size < 1024:
+            logger.error(
+                "[SC-DL] AIFF conversion failed (code=%s): %s",
+                result.returncode, (result.stderr or "")[:300],
+            )
+            aiff_path.unlink(missing_ok=True)
+            return None
+
+        # Conversion succeeded — remove the original to free the slot
+        try:
+            src_path.unlink()
+        except OSError as exc:
+            logger.debug("[SC-DL] could not remove pre-AIFF source %s: %s", src_path, exc)
+
+        logger.info(
+            "[SC-DL] Converted to AIFF: %s (%d bytes)",
+            aiff_path.name, aiff_path.stat().st_size,
+        )
+        return aiff_path
+    except subprocess.TimeoutExpired:
+        logger.error("[SC-DL] ffmpeg AIFF conversion timed out")
+        aiff_path.unlink(missing_ok=True)
+        return None
+    except OSError as exc:
+        logger.error("[SC-DL] ffmpeg unavailable for AIFF conversion: %s", exc)
+        return None
+
+
+def _aiff_requested() -> bool:
+    """Cheap settings probe — defaults to False on any error."""
+    try:
+        from .services import SettingsManager
+        return SettingsManager.load().get("sc_download_format", "auto") == "aiff"
+    except Exception:
+        return False
+
+
 # ── Downloader ─────────────────────────────────────────────────────────────────
 
 class SoundCloudDownloader:
@@ -842,8 +1037,43 @@ class SoundCloudDownloader:
             final_path = _build_save_path(artist, title, ext)
             shutil.move(str(tmp_path), str(final_path))
             tmp_path = None  # moved, no longer needs cleanup
+            logger.info("[SC-DL] Saved: %s", final_path)
+
+            # Step 3a — Optional AIFF conversion (lossless PCM via ffmpeg) ─────
+            # The source codec is whatever SC served (MP3/AAC/WAV/FLAC). PCM AIFF
+            # neither gains nor loses quality vs. the source — it just lifts the
+            # file into a DJ-friendly uncompressed container. Hash + tags are
+            # applied to the AIFF artifact, not the discarded source.
+            if _aiff_requested():
+                self._update_task(task_id, status="Converting", progress=82)
+                aiff_path = _convert_to_aiff(final_path)
+                if aiff_path:
+                    final_path = aiff_path
+                    ext = ".aiff"
+                else:
+                    logger.warning(
+                        "[SC-DL] AIFF conversion failed, keeping source format: %s",
+                        final_path.name,
+                    )
+
+            # Step 3b — Write SC metadata + cover art onto the file ────────────
+            # Without this the downloaded file has whatever (often bare) tags
+            # the uploader set, and our ImportManager would fall back to
+            # filename parsing. Pulling SC's authoritative title/artist/genre/
+            # cover here means USB exports build a clean Artist/Album folder
+            # tree and ID3 readers (Rekordbox, Serato, …) show full metadata.
+            self._update_task(task_id, status="Tagging", progress=84)
+            sc_meta = _fetch_sc_metadata(sc_track_id, auth_token) or {}
+            if sc_meta:
+                try:
+                    _apply_sc_metadata(final_path, sc_meta, sc_playlist_title)
+                except Exception as exc:
+                    logger.warning("[SC-DL] Tag application failed for %s: %s", final_path.name, exc)
+            else:
+                logger.info("[SC-DL] No v2 metadata for tag-writing on sc_id=%s", sc_track_id)
+
             file_size = final_path.stat().st_size
-            logger.info("[SC-DL] Saved: %s (%d bytes)", final_path, file_size)
+            logger.info("[SC-DL] Final size: %d bytes (%s)", file_size, final_path.name)
 
             # Step 4 — SHA-256: content-based duplicate check ──────────────────
             self._update_task(task_id, status="Hashing", progress=88)

@@ -910,6 +910,21 @@ const SettingsView = () => {
                 </Field>
                 <p className="text-xs text-ink-muted">Leave empty to create SC_ playlists at the root level.</p>
 
+                <Field label="Download Format">
+                    <select
+                        value={settings.sc_download_format || 'auto'}
+                        onChange={e => set('sc_download_format', e.target.value)}
+                        className="input-glass w-full"
+                    >
+                        <option value="auto">Auto — keep source codec (mp3/m4a/wav/flac)</option>
+                        <option value="aiff">AIFF — uncompressed PCM (lossless re-container)</option>
+                    </select>
+                </Field>
+                <p className="text-xs text-ink-muted">
+                    AIFF re-wraps the source as PCM. No further quality loss vs. the served stream,
+                    but lossy sources (SC's MP3/AAC) stay lossy — files just become bigger and DJ-app friendly.
+                </p>
+
                 {/* Hidden expert toggle — reveal via 5x logo click on the section title */}
                 {settings._sc_expert_revealed && (
                     <div className="mt-4 p-3 rounded-lg border border-red-500/20 bg-red-500/5">

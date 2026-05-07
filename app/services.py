@@ -650,6 +650,7 @@ class SettingsManager:
         "last_lib_mode": "xml",
         "soundcloud_auth_token": "",
         "sc_sync_folder_id": None,   # local Rekordbox playlist ID to create SC playlists inside
+        "sc_download_format": "auto",  # "auto" (keep source codec) | "aiff" (convert to PCM AIFF lossless)
         "scan_folders": []           # absolute paths watched for new audio files (FolderWatcher)
     }
     @classmethod
