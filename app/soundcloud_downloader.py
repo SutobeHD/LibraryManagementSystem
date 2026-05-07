@@ -376,7 +376,28 @@ def _resolve_stream_via_transcodings(
     # SC serves when the user has NO full access to the track. Downloading the
     # preview and saving as a full file would be misleading and cross from
     # "what I can stream" into "what I'm circumventing".
-    full_transcodings = [t for t in transcodings if not t.get("snipped", False)]
+    #
+    # OPT-IN OVERRIDE: a hidden user setting (sc_aggressive_mode = true) skips
+    # this gate so the downloader behaves like the soundcloud-dl extension and
+    # tries every transcoding — including snipped ones. The user is explicitly
+    # opting in via Settings; we surface the resulting file size + duration in
+    # the registry so they can see whether they got a preview clip.
+    aggressive = False
+    try:
+        from .services import SettingsManager
+        aggressive = bool(SettingsManager.load().get("sc_aggressive_mode", False))
+    except Exception:
+        pass
+
+    if aggressive:
+        full_transcodings = list(transcodings)
+        if any(t.get("snipped") for t in full_transcodings):
+            logger.info(
+                "[SC-DL] sc_id=%s aggressive_mode=on — accepting snipped/preview transcodings",
+                sc_track_id,
+            )
+    else:
+        full_transcodings = [t for t in transcodings if not t.get("snipped", False)]
     if not full_transcodings:
         logger.warning(
             "[SC-DL] sc_id=%s only exposes snipped previews — "

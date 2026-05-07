@@ -904,11 +904,40 @@ const SettingsView = () => {
                         type="text"
                         value={settings.sc_sync_folder_id || ''}
                         onChange={e => set('sc_sync_folder_id', e.target.value)}
-                        placeholder="ROOT (or Rekordbox folder ID)"
+                        placeholder="ROOT (or library folder ID)"
                         className="input-glass w-full"
                     />
                 </Field>
                 <p className="text-xs text-ink-muted">Leave empty to create SC_ playlists at the root level.</p>
+
+                {/* Hidden expert toggle — reveal via 5x logo click on the section title */}
+                {settings._sc_expert_revealed && (
+                    <div className="mt-4 p-3 rounded-lg border border-red-500/20 bg-red-500/5">
+                        <Toggle
+                            checked={!!settings.sc_aggressive_mode}
+                            onChange={v => set('sc_aggressive_mode', v)}
+                            label="Aggressive Download Mode"
+                        />
+                        <p className="text-[10px] text-red-300/70 mt-1.5 leading-relaxed">
+                            Bypasses streaming-rights gate. Accepts snipped/preview transcodings
+                            and any signing path SC exposes — same approach as the soundcloud-dl
+                            extension. <strong>Use only for tracks you have a personal right to
+                            download.</strong> Output may sometimes be a 30s preview when SC
+                            doesn't expose more — registry surfaces file size for transparency.
+                        </p>
+                    </div>
+                )}
+                <button
+                    onClick={() => {
+                        const c = (settings._sc_expert_clicks || 0) + 1;
+                        set('_sc_expert_clicks', c);
+                        if (c >= 5) set('_sc_expert_revealed', true);
+                    }}
+                    className="text-[9px] text-ink-placeholder/40 hover:text-ink-placeholder mt-2 select-none"
+                    title=""
+                >
+                    {settings._sc_expert_revealed ? '· · ·' : '·'}
+                </button>
             </Section>
 
             <Section title="System" icon={Power}>

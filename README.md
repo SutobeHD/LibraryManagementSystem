@@ -1,15 +1,35 @@
-# LibraryManagementSystem
+# Music Library Manager
 
-Desktop companion for DJs. Bridges SoundCloud playlists with local Rekordbox-compatible library. Local-first, no shared backend.
+A standalone desktop DJ-library manager. **Competitor** to commercial library
+software like Rekordbox and Serato — built around an open USB export format
+that Pioneer CDJ-3000 and other modern hardware reads natively.
+
+Local-first. No cloud backend. No subscription. Bring your own SoundCloud API
+credentials. Optional Live mode integrates with an existing Rekordbox install,
+but the full feature set works **without Rekordbox** via the standalone XML
+mode.
 
 ## Features
 
-- **Live + XML Modes** — direct Rekordbox `master.db` or XML snapshot
-- **SoundCloud Sync** — playlists, likes, fuzzy match against local library
-- **Respectful Downloads** — only `downloadable=true` tracks + streams the user already has access to. No paywall bypass, no DRM.
-- **Audio Tools** — non-destructive editing, beatgrids, cues, 3-band waveform analysis (FFT)
-- **USB Sync** — incremental backup engine for CDJ devices
-- **Metadata QC** — bitrate, artwork, duplicate detection
+- **Standalone Mode** — own internal XML library, full CRUD, no Rekordbox required
+- **Live Mode** — read/write Rekordbox `master.db` via pyrekordbox (when installed)
+- **SoundCloud → Library → USB** — full pipeline: download, full-pipeline analyse
+  (BPM / Key / Beatgrid / Phrases / Auto-Hot-Cues / Waveform), auto-import,
+  auto-playlist (`SC_<name>`), USB-export
+- **Local-File Import** — drag-drop / folder browse → folder name becomes the
+  playlist, every file (incl. duplicates) gets bundled together
+- **Live Pipeline Transparency** — Import Manager view + sticky progress banner
+  show every track's stage (Queued → Analyzing → Importing → ANLZ → Completed)
+- **Playlist Workflow** — create / rename / delete / duplicate / move / drag
+  reorder, folders, smart playlists with field/operator/value/unit conditions
+- **Track-Table Inline Edits** — click-to-rate (5 stars), Pioneer color-tag
+  picker (9 colors), context menu with BPM/Key quick-edit
+- **Search Operators** — `bpm:120-130 key:Am genre:techno year:2024 rating:>3`
+- **USB Export to CDJ** — writes `PIONEER/rekordbox/exportLibrary.db` +
+  `PIONEER/USBANLZ/<bucket>/<hash>/ANLZ0000.{DAT,EXT,2EX}` (beatgrid + cues +
+  waveform) + audio + cover art. CDJ-3000 reads everything natively.
+- **Audio Tools** — non-destructive Waveform Editor (cut/insert/delete/paste,
+  ffmpeg sample-accurate seek), 3-band waveform FFT
 
 ## Stack
 

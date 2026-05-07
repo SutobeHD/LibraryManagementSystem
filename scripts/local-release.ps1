@@ -23,7 +23,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $gh = "C:\Program Files\GitHub CLI\gh.exe"
-$repo = "SutobeHD/LibaryMangementSystem"
+$repo = "SutobeHD/LibraryManagementSystem"
 
 function Write-Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 function Write-OK($msg)   { Write-Host "    [OK] $msg" -ForegroundColor Green }
