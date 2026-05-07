@@ -1,6 +1,6 @@
 [package]
 name = "library-management-system"
-version = "1.0.0-beta"
+version = "1.0.0"
 description = "Music Library Manager — standalone DJ library + USB exporter"
 edition = "2021"
 
