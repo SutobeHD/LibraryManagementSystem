@@ -67,6 +67,21 @@ class OneLibraryUsbWriter:
         for d in (self.rb_dir, self.anlz_root, self.artwork_dir, self.music_dir):
             d.mkdir(parents=True, exist_ok=True)
 
+        # Optional legacy PDB stubs — see app/usb_pdb.py for the full status.
+        # Off by default because the row encoders aren't implemented yet:
+        # writing a header-only PDB on top of older CDJ firmware MIGHT show
+        # an empty library OR error out depending on the model. Users with a
+        # CDJ-2000nxs2 can opt in via `legacy_pdb_stub=true` in settings to
+        # force-write the stub.
+        try:
+            from .services import SettingsManager
+            if SettingsManager.load().get("legacy_pdb_stub", False):
+                from . import usb_pdb
+                usb_pdb.write_export_pdb(self.usb_root)
+                usb_pdb.write_export_ext_pdb(self.usb_root)
+        except Exception as exc:
+            logger.debug("[OneLibrary] legacy PDB stub skipped: %s", exc)
+
     # Path to the bundled template DB (built by app.templates.build_template
     # from any Rekordbox-exported stick). The template ships with N
     # placeholder content rows that we mutate via update_content, working
