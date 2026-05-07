@@ -287,6 +287,196 @@ const PlaylistTreeNode = ({ node, depth = 0, selectedIds, onToggle }) => {
 //  USB CONTENTS TREE
 // ────────────────────────────────────────────────────────────────────
 
+/**
+ * USB-Library panel — renders the stick like a normal music library:
+ *   sidebar = playlist tree (parsed from PIONEER/rekordbox.xml <PLAYLISTS>)
+ *   main    = flat track table (filterable)
+ *
+ * Falls back gracefully when the stick has tracks but no playlist tree
+ * (e.g. exportLibrary.db that we couldn't decrypt) — then it's just the
+ * flat track table.
+ */
+const UsbLibraryPanel = ({ usbTracks, activeLibrary, setActiveLibrary, loadingContents }) => {
+    const [selectedPlaylist, setSelectedPlaylist] = React.useState(null);
+    const [search, setSearch] = React.useState('');
+
+    const flatKey = activeLibrary === 'library_one' ? 'library_one_flat' : 'library_legacy_flat';
+    const allTracks = usbTracks[flatKey] || [];
+    const playlists = activeLibrary === 'library_legacy' ? (usbTracks.library_legacy_playlists || []) : [];
+
+    // Build minimal id-set from selected playlist (track_keys point at TrackID)
+    const filteredTracks = React.useMemo(() => {
+        let list = allTracks;
+        if (selectedPlaylist) {
+            const keep = new Set((selectedPlaylist.track_keys || []).map(String));
+            list = list.filter(t => keep.has(String(t.ID)));
+        }
+        if (search) {
+            const q = search.toLowerCase();
+            list = list.filter(t =>
+                (t.Title || '').toLowerCase().includes(q) ||
+                (t.ArtistName || '').toLowerCase().includes(q) ||
+                (t.Album || '').toLowerCase().includes(q)
+            );
+        }
+        return list;
+    }, [allTracks, selectedPlaylist, search]);
+
+    // Tree structure: type "0" = folder, "1" = playlist, "4" = smart
+    const playlistTree = React.useMemo(() => {
+        // Flatten parent strings into a 2-level grouped list (folder → playlists).
+        const folders = playlists.filter(p => p.type === '0');
+        const leaves = playlists.filter(p => p.type !== '0');
+        const tree = [
+            ...folders.map(f => ({
+                ...f,
+                children: leaves.filter(l => l.parent === f.name),
+            })),
+            // Top-level playlists (parent="ROOT" or no matching folder)
+            ...leaves.filter(l => l.parent === 'ROOT' || !folders.find(f => f.name === l.parent)),
+        ];
+        return tree;
+    }, [playlists]);
+
+    const formatBPM = (b) => b ? (b / 100).toFixed(1) : '—';
+    const formatDur = (sec) => {
+        if (!sec) return '—';
+        const m = Math.floor(sec / 60), s = sec % 60;
+        return `${m}:${String(s).padStart(2, '0')}`;
+    };
+
+    return (
+        <div className="mx-card overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-line-subtle">
+                <div className="flex items-center gap-2">
+                    <Database size={12} className="text-amber2" />
+                    <span className="mx-caption">USB Library</span>
+                    <span className="text-[10px] text-ink-muted font-mono">
+                        · {allTracks.length} tracks{playlists.length ? ` · ${playlists.length} playlists` : ''}
+                    </span>
+                </div>
+                <div className="flex gap-2 items-center">
+                    <input
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                        placeholder="Suchen…"
+                        className="px-2 py-1 bg-mx-input border border-line-subtle rounded text-tiny w-40"
+                    />
+                    <div className="flex gap-1 bg-mx-input p-0.5 rounded-mx-sm border border-line-subtle">
+                        <PillTab active={activeLibrary === 'library_one'} onClick={() => { setActiveLibrary('library_one'); setSelectedPlaylist(null); }}>One</PillTab>
+                        <PillTab active={activeLibrary === 'library_legacy'} onClick={() => { setActiveLibrary('library_legacy'); setSelectedPlaylist(null); }}>Legacy</PillTab>
+                    </div>
+                </div>
+            </div>
+
+            {loadingContents ? (
+                <div className="p-12 flex flex-col items-center gap-3 text-ink-muted text-tiny">
+                    <Loader2 size={20} className="animate-spin text-amber2" />
+                    Reading USB database…
+                </div>
+            ) : allTracks.length === 0 ? (
+                <div className="p-12 flex flex-col items-center gap-2 text-ink-placeholder text-center">
+                    <Music size={28} strokeWidth={1.2} />
+                    <p className="text-tiny">No tracks in {activeLibrary === 'library_one' ? 'Newer' : 'Legacy'} format</p>
+                    <p className="text-[10px]">Run sync to populate</p>
+                </div>
+            ) : (
+                <div className="flex" style={{ maxHeight: 500 }}>
+                    {/* Playlist sidebar */}
+                    {activeLibrary === 'library_legacy' && playlists.length > 0 && (
+                        <div className="w-56 border-r border-line-subtle overflow-y-auto py-1 shrink-0">
+                            <button
+                                onClick={() => setSelectedPlaylist(null)}
+                                className={`w-full text-left flex items-center gap-2 px-3 py-1.5 transition-colors ${
+                                    !selectedPlaylist ? 'bg-amber2/10 text-amber2' : 'text-ink-secondary hover:bg-white/5'
+                                }`}
+                            >
+                                <Database size={11} />
+                                <span className="text-[11px] font-semibold flex-1">All Tracks</span>
+                                <span className="text-[10px] text-ink-muted font-mono">{allTracks.length}</span>
+                            </button>
+                            {playlistTree.map((node, i) => (
+                                <UsbPlaylistTreeNode
+                                    key={i}
+                                    node={node}
+                                    selected={selectedPlaylist?.name === node.name}
+                                    onSelect={setSelectedPlaylist}
+                                    selectedName={selectedPlaylist?.name}
+                                />
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Track list */}
+                    <div className="flex-1 overflow-y-auto">
+                        <table className="w-full text-tiny">
+                            <thead className="sticky top-0 bg-mx-shell border-b border-line-subtle">
+                                <tr className="text-ink-muted text-[10px] uppercase tracking-wider">
+                                    <th className="text-left px-3 py-2 font-semibold">Title</th>
+                                    <th className="text-left px-3 py-2 font-semibold">Artist</th>
+                                    <th className="text-left px-3 py-2 font-semibold">Album</th>
+                                    <th className="text-center px-2 py-2 font-semibold w-14">BPM</th>
+                                    <th className="text-center px-2 py-2 font-semibold w-12">Key</th>
+                                    <th className="text-right px-3 py-2 font-semibold w-14">Time</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filteredTracks.map((t, i) => (
+                                    <tr key={i} className="border-b border-line-subtle/30 hover:bg-mx-hover transition-colors">
+                                        <td className="px-3 py-1.5 text-ink-primary truncate max-w-[280px]" title={t.Title}>{t.Title || '—'}</td>
+                                        <td className="px-3 py-1.5 text-ink-secondary truncate max-w-[200px]">{t.ArtistName || '—'}</td>
+                                        <td className="px-3 py-1.5 text-ink-muted truncate max-w-[180px]">{t.Album || '—'}</td>
+                                        <td className="px-2 py-1.5 text-center font-mono text-amber2">{formatBPM(t.BPM)}</td>
+                                        <td className="px-2 py-1.5 text-center font-mono text-blue-300">{t.Key || '—'}</td>
+                                        <td className="px-3 py-1.5 text-right text-ink-muted font-mono">{formatDur(t.TotalTime)}</td>
+                                    </tr>
+                                ))}
+                                {filteredTracks.length === 0 && (
+                                    <tr><td colSpan={6} className="px-3 py-8 text-center text-ink-placeholder text-[11px]">
+                                        Keine Tracks {selectedPlaylist ? `in "${selectedPlaylist.name}"` : ''}{search ? ` für "${search}"` : ''}
+                                    </td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+const UsbPlaylistTreeNode = ({ node, onSelect, selectedName }) => {
+    const [open, setOpen] = React.useState(true);
+    const isFolder = node.type === '0';
+    const isSelected = selectedName === node.name;
+    return (
+        <div>
+            <button
+                onClick={() => isFolder ? setOpen(o => !o) : onSelect(node)}
+                className={`w-full text-left flex items-center gap-2 px-3 py-1 transition-colors ${
+                    isSelected ? 'bg-amber2/15 text-amber2' : 'text-ink-secondary hover:bg-white/5'
+                }`}
+                title={node.name}
+            >
+                {isFolder ? (
+                    open ? <ChevronDown size={10} className="text-amber-500/60" /> : <ChevronRight size={10} className="text-amber-500/60" />
+                ) : (
+                    <ListMusic size={10} className="text-amber2/50" />
+                )}
+                <span className="text-[11px] flex-1 truncate">{node.name}</span>
+                {!isFolder && (
+                    <span className="text-[10px] text-ink-muted font-mono">{(node.track_keys || []).length}</span>
+                )}
+            </button>
+            {isFolder && open && (node.children || []).map((c, i) => (
+                <div key={i} style={{ paddingLeft: 12 }}>
+                    <UsbPlaylistTreeNode node={c} onSelect={onSelect} selectedName={selectedName} />
+                </div>
+            ))}
+        </div>
+    );
+};
+
 const UsbLibraryTree = ({ item, level = 0 }) => {
     const [isExpanded, setIsExpanded] = useState(level < 1);
 
@@ -1124,45 +1314,13 @@ const UsbView = () => {
                                         </div>
                                     </div>
 
-                                    {/* Library contents */}
-                                    <div className="mx-card overflow-hidden">
-                                        <div className="flex items-center justify-between px-4 py-3 border-b border-line-subtle">
-                                            <div className="flex items-center gap-2">
-                                                <Database size={12} className="text-amber2" />
-                                                <span className="mx-caption">USB Library Contents</span>
-                                            </div>
-                                            <div className="flex gap-1 bg-mx-input p-0.5 rounded-mx-sm border border-line-subtle">
-                                                <PillTab
-                                                    active={activeLibrary === 'library_one'}
-                                                    onClick={() => setActiveLibrary('library_one')}
-                                                >One</PillTab>
-                                                <PillTab
-                                                    active={activeLibrary === 'library_legacy'}
-                                                    onClick={() => setActiveLibrary('library_legacy')}
-                                                >Legacy</PillTab>
-                                            </div>
-                                        </div>
-                                        <div className="max-h-[500px] overflow-y-auto">
-                                            {loadingContents ? (
-                                                <div className="p-12 flex flex-col items-center gap-3 text-ink-muted text-tiny">
-                                                    <Loader2 size={20} className="animate-spin text-amber2" />
-                                                    Reading USB database…
-                                                </div>
-                                            ) : (usbTracks[activeLibrary] || []).length === 0 ? (
-                                                <div className="p-12 flex flex-col items-center gap-2 text-ink-placeholder text-center">
-                                                    <Music size={28} strokeWidth={1.2} />
-                                                    <p className="text-tiny">No tracks in {activeLibrary === 'library_one' ? 'Newer' : 'Legacy'} format</p>
-                                                    <p className="text-[10px]">Run sync to populate</p>
-                                                </div>
-                                            ) : (
-                                                <div className="py-1">
-                                                    {(usbTracks[activeLibrary] || []).map((item, i) => (
-                                                        <UsbLibraryTree key={i} item={item} />
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
+                                    {/* USB Library — playlist sidebar + flat track list */}
+                                    <UsbLibraryPanel
+                                        usbTracks={usbTracks}
+                                        activeLibrary={activeLibrary}
+                                        setActiveLibrary={setActiveLibrary}
+                                        loadingContents={loadingContents}
+                                    />
 
                                     {/* Stats footer */}
                                     <div className="flex items-center gap-3 text-[10px] text-ink-placeholder font-mono px-1">

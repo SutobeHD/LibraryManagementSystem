@@ -90,11 +90,18 @@ logger = logging.getLogger("APP_MAIN")
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
-app = FastAPI(title="Rekordbox Editor Pro")
+app = FastAPI(title="Music Library Manager")
 
 # --- SECURITY: Internal shutdown token (generated per session) ---
 SHUTDOWN_TOKEN = secrets.token_urlsafe(32)
-logger.info(f"Session security token generated.")
+
+# Don't spam the log when this module is re-imported by a Windows subprocess
+# (ProcessPoolExecutor in app.anlz_safe spawns child workers — on Windows that
+# always means re-running every top-level statement here). The token only
+# matters in the parent FastAPI process.
+import multiprocessing as _mp
+if _mp.current_process().name == "MainProcess":
+    logger.info("Session security token generated.")
 
 # --- SECURITY: Allowed audio directories for streaming/processing ---
 # Users can only stream/process audio from these root directories.
@@ -121,7 +128,8 @@ def _init_allowed_roots():
         if dj_path.exists():
             roots.append(dj_path.resolve())
     ALLOWED_AUDIO_ROOTS.extend(roots)
-    logger.info(f"Allowed audio roots: {[str(r) for r in ALLOWED_AUDIO_ROOTS]}")
+    if _mp.current_process().name == "MainProcess":
+        logger.info(f"Allowed audio roots: {[str(r) for r in ALLOWED_AUDIO_ROOTS]}")
 
 _init_allowed_roots()
 
