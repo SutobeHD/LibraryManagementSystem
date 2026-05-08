@@ -348,8 +348,8 @@ def encode_track_row(track: Dict[str, Any]) -> bytes:
         int(track.get("album_id") or 0),     # 0x40 album_id
         int(track.get("artist_id") or 0),    # 0x44 artist_id
         int(track.get("id") or 0),           # 0x48 id
-        0,                                   # 0x4C disc_number
-        0,                                   # 0x4E play_count
+        int(track.get("disc_number") or 0),  # 0x4C disc_number
+        int(track.get("play_count") or 0),   # 0x4E play_count
         int(track.get("year") or 0),         # 0x50 year
         int(track.get("sample_depth") or 0), # 0x52 sample_depth
         duration,                            # 0x54 duration
@@ -409,6 +409,8 @@ class PdbBuilder:
         self.artists: List[bytes] = []
         self.albums: List[bytes] = []
         self.keys: List[bytes] = []
+        self.genres: List[bytes] = []
+        self.labels: List[bytes] = []
         self.playlists: List[bytes] = []
         self.playlist_entries: List[bytes] = []
         # Pre-populate static colour rows so PCOB-color FKs from track rows
@@ -430,6 +432,12 @@ class PdbBuilder:
 
     def add_key(self, key_id: int, name: str) -> None:
         self.keys.append(encode_key_row(key_id, name))
+
+    def add_genre(self, genre_id: int, name: str) -> None:
+        self.genres.append(encode_genre_row(genre_id, name))
+
+    def add_label(self, label_id: int, name: str) -> None:
+        self.labels.append(encode_label_row(label_id, name))
 
     def add_playlist(
         self, pl_id: int, parent_id: int, name: str,
@@ -493,8 +501,10 @@ class PdbBuilder:
         for table_type in TABLE_ORDER:
             rows = {
                 T_TRACKS:    self.tracks,
+                T_GENRES:    self.genres,
                 T_ARTISTS:   self.artists,
                 T_ALBUMS:    self.albums,
+                T_LABELS:    self.labels,
                 T_KEYS:      self.keys,
                 T_COLORS:    self.colors,
                 T_PLAYLISTS: self.playlists,
@@ -556,6 +566,8 @@ def write_export_pdb(
     artists: Optional[Dict[int, str]] = None,
     albums: Optional[Dict[int, Tuple[str, int]]] = None,
     keys: Optional[Dict[int, str]] = None,
+    genres: Optional[Dict[int, str]] = None,
+    labels: Optional[Dict[int, str]] = None,
     playlists: Optional[List[Dict[str, Any]]] = None,
     playlist_entries: Optional[List[Tuple[int, int, int]]] = None,
 ) -> Optional[Path]:
@@ -588,6 +600,10 @@ def write_export_pdb(
         builder.add_album(int(aid), name, int(artist_id))
     for kid, name in (keys or {}).items():
         builder.add_key(int(kid), name)
+    for gid, name in (genres or {}).items():
+        builder.add_genre(int(gid), name)
+    for lid, name in (labels or {}).items():
+        builder.add_label(int(lid), name)
     for pl in (playlists or []):
         builder.add_playlist(
             int(pl["id"]),

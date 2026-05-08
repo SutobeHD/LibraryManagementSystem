@@ -469,6 +469,8 @@ class OneLibraryUsbWriter:
             for a in db.get_albums()
         }
         keys = {int(k.id): (k.name or "") for k in db.get_keys()}
+        genres = {int(g.id): (g.name or "") for g in db.get_genres()}
+        labels = {int(lab.id): (lab.name or "") for lab in db.get_labels()}
 
         contents_data = []
         for c in db.get_contents():
@@ -476,6 +478,13 @@ class OneLibraryUsbWriter:
             title = c.title or ""
             if title.startswith("__placeholder_"):
                 continue
+            # Format date_added as YYYY-MM-DD (Rekordbox convention)
+            date_added_str = ""
+            try:
+                if getattr(c, "date_added", None):
+                    date_added_str = c.date_added.strftime("%Y-%m-%d")
+            except Exception:
+                pass
             contents_data.append({
                 "id":        int(c.id),
                 "title":     title,
@@ -498,40 +507,66 @@ class OneLibraryUsbWriter:
                 "file_name": getattr(c, "file_name", "") or "",
                 "comment":   getattr(c, "dj_comment", "") or "",
                 "isrc":      getattr(c, "isrc", "") or "",
-                "date_added": "",
+                "date_added": date_added_str,
                 "file_type": int(getattr(c, "file_type", 0) or 0),
+                "play_count": int(getattr(c, "play_count", 0) or 0),
             })
 
-        # Playlist tree
+        # Playlist tree — preserve folder hierarchy + per-sibling sort order.
+        # rbox 0.1.7 returns `attribute` as a `PlaylistType` enum (unhashable),
+        # so coerce via `int()` per the live_database.py shim.
         pls_by_id = {p.id: p for p in db.get_playlists()}
+
+        def _attr_int(p):
+            raw = getattr(p, "attribute", 0)
+            try:
+                return int(getattr(raw, "value", raw))
+            except (TypeError, ValueError):
+                return 0
+
+        # Sort siblings within each parent so seq values reflect display order
+        # in Rekordbox (matches what users see in the source library).
+        siblings: Dict[int, List[Any]] = {}
+        for p in pls_by_id.values():
+            parent = int(getattr(p, "parent_id", 0) or 0)
+            siblings.setdefault(parent, []).append(p)
+        for kids in siblings.values():
+            kids.sort(key=lambda x: int(getattr(x, "seq", 0) or 0))
+
         playlists_pdb: List[Dict[str, Any]] = []
         playlist_entries_pdb: List[tuple] = []
-        for pid, p in pls_by_id.items():
-            pname = p.name or ""
-            if _is_excluded_playlist(pname):
-                continue
-            is_folder = (getattr(p, "attribute", 0) == 1)
-            playlists_pdb.append({
-                "id": int(pid),
-                "parent_id": int(getattr(p, "parent_id", 0) or 0),
-                "sort_order": int(getattr(p, "seq", 0) or 0),
-                "is_folder": is_folder,
-                "name": pname,
-            })
-            if not is_folder:
-                try:
-                    # rbox quirk: `get_playlist_contents` returns the joined
-                    # Content rows themselves (not the link rows), so the
-                    # content id is `pc.id`, not `pc.content_id`. Earlier
-                    # version used the wrong attribute and shipped an empty
-                    # playlist_entries table.
-                    contents = db.get_playlist_contents(int(pid))
-                    for entry_idx, pc in enumerate(contents):
-                        cid = int(getattr(pc, "id", 0) or 0)
-                        if cid:
-                            playlist_entries_pdb.append((entry_idx, cid, int(pid)))
-                except Exception as exc:
-                    logger.debug("[OneLibrary] PDB playlist_contents skipped for %s: %s", pid, exc)
+        for parent_id, kids in siblings.items():
+            for sort_idx, p in enumerate(kids):
+                pname = p.name or ""
+                if _is_excluded_playlist(pname):
+                    continue
+                is_folder = (_attr_int(p) == 1)
+                playlists_pdb.append({
+                    "id": int(p.id),
+                    "parent_id": parent_id,
+                    "sort_order": sort_idx,  # 0-based within siblings
+                    "is_folder": is_folder,
+                    "name": pname,
+                })
+                if not is_folder:
+                    try:
+                        # rbox quirk: `get_playlist_contents` returns the
+                        # joined Content rows themselves (not the link rows),
+                        # so the content id is `pc.id`, not `pc.content_id`.
+                        # Earlier version used the wrong attribute and
+                        # shipped an empty playlist_entries table.
+                        contents = db.get_playlist_contents(int(p.id))
+                        for entry_idx, pc in enumerate(contents):
+                            cid = int(getattr(pc, "id", 0) or 0)
+                            if cid:
+                                playlist_entries_pdb.append(
+                                    (entry_idx, cid, int(p.id))
+                                )
+                    except Exception as exc:
+                        logger.debug(
+                            "[OneLibrary] PDB playlist_contents skipped for %s: %s",
+                            p.id, exc,
+                        )
 
         # ── Write ──────────────────────────────────────────────────────
         # Truncate-write succeeds even if Rekordbox holds a read handle.
@@ -541,6 +576,8 @@ class OneLibraryUsbWriter:
             artists=artists,
             albums=albums,
             keys=keys,
+            genres=genres,
+            labels=labels,
             playlists=playlists_pdb,
             playlist_entries=playlist_entries_pdb,
         )
