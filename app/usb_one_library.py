@@ -520,9 +520,14 @@ class OneLibraryUsbWriter:
             })
             if not is_folder:
                 try:
+                    # rbox quirk: `get_playlist_contents` returns the joined
+                    # Content rows themselves (not the link rows), so the
+                    # content id is `pc.id`, not `pc.content_id`. Earlier
+                    # version used the wrong attribute and shipped an empty
+                    # playlist_entries table.
                     contents = db.get_playlist_contents(int(pid))
                     for entry_idx, pc in enumerate(contents):
-                        cid = int(getattr(pc, "content_id", 0) or 0)
+                        cid = int(getattr(pc, "id", 0) or 0)
                         if cid:
                             playlist_entries_pdb.append((entry_idx, cid, int(pid)))
                 except Exception as exc:
