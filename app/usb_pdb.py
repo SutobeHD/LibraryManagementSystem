@@ -154,27 +154,42 @@ class _Page:
     def build(self) -> bytes:
         """Assemble the on-disk page image, spec-compliant layout.
 
-        Row index footer per Crate-Digger spec (verified against F: real
-        Rekordbox export):
+        Index pages (page_flags & 0x40 set) have NO data heap and NO row
+        index footer — header reports free_size=0, used_size=0, and u6/u7
+        carry the magic constants Rekordbox stamps on every index page.
 
-            For each 16-row group N at base = page_size - (N * 0x24):
-              base - 4    u2  row_present_flags  (bit i = row i present)
-              base - 6    u2  row 0 offset
-              base - 8    u2  row 1 offset
-              ...
-              base - 38   u2  row 15 offset
-              (base + 0..1: unused / transaction-flag area)
-
-        So group 0 occupies the LAST 36 bytes of the page (bytes 4060..4095
-        for a 4 KiB page). Inside that footer block, layout from start:
-
-            block[0:32]   = row 15..0 offsets (reversed)
-            block[32:34]  = row_present_flags (closest-to-end = bit 0)
-            block[34:36]  = trailing pad (= transaction_row_flags? unused)
-
-        Subsequent groups (rows 16+) come BEFORE group 0 in physical order,
-        each their own 36-byte block.
+        Data pages have:
+          * heap of row bytes growing forward from offset 0x28
+          * row index footer growing BACKWARD from end of page in 36-byte
+            groups of up to 16 rows. Footer layout per group (start of
+            block in physical bytes, group 0 closest to page tail):
+              block[0:32]   = row 15..0 offsets (reversed)
+              block[32:34]  = row_present_flags (bit i = row i present)
+              block[34:36]  = trailing pad (zero)
         """
+        is_index = (self.page_flags & 0x40) != 0
+
+        if is_index:
+            # Index pages keep heap empty and footer absent — Rekordbox
+            # writes them this way (verified F: drive byte-for-byte on
+            # page 1). u6=0x03EC and u7=0x0003 are the constants F:
+            # uses on every index page, almost certainly a Rekordbox
+            # internal "page kind" or write-state hash.
+            page_header = struct.pack(
+                "<IIIIIII",
+                0, self.page_index, self.table_type,
+                self.next_page, self.seqpage, 0, 0,
+            )
+            row_counts_bytes = (0).to_bytes(3, "little")
+            page_header = page_header[:0x18] + row_counts_bytes + bytes([self.page_flags])
+            page_header += struct.pack("<HH", 0, 0)
+            page_header += struct.pack("<HHHH", 0x1FFF, 0x1FFF, 0x03EC, 0x0003)
+            assert len(page_header) == PDB_PAGE_HEADER_LEN
+
+            body = bytearray(PDB_PAGE_SIZE)
+            body[0:PDB_PAGE_HEADER_LEN] = page_header
+            return bytes(body)
+
         heap = bytearray()
         offsets: List[int] = []
         for row in self.rows_data:
@@ -194,26 +209,14 @@ class _Page:
             rows_in_group = min(16, num_rows - g_start)
             present_flags = ((1 << rows_in_group) - 1) & 0xFFFF
 
-            # Build the 36-byte block:
-            #   bytes 0..31  → row 15..0 offsets (reversed)
-            #   bytes 32..33 → present_flags
-            #   bytes 34..35 → trailing pad (zero — Rekordbox seems to
-            #                  ignore this for the last-row group)
             block = bytearray(36)
             for i in range(16):
-                # row i offset goes at byte (30 - 2*i) within the block.
-                # That places row 0 at block[30:32] (= page byte base-6)
-                # and row 15 at block[0:2] (= page byte base-36).
                 block[30 - 2 * i : 30 - 2 * i + 2] = struct.pack(
                     "<H", g_offsets[i] & 0xFFFF
                 )
             struct.pack_into("<H", block, 32, present_flags)
-            # block[34:36] left as zero
             groups.append(bytes(block))
 
-        # Group 0 lives at end of page; group 1 immediately before it; etc.
-        # So the on-disk order is [...group N...group 1][group 0] — we
-        # simply emit groups in REVERSE creation order.
         index_bytes = b"".join(reversed(groups))
 
         used_size = len(heap)
@@ -229,20 +232,13 @@ class _Page:
 
         page_header = struct.pack(
             "<IIIIIII",
-            0,
-            self.page_index,
-            self.table_type,
-            self.next_page,
-            self.seqpage,
-            0,
-            0,
+            0, self.page_index, self.table_type,
+            self.next_page, self.seqpage, 0, 0,
         )
         page_header = page_header[:0x18] + row_counts_bytes + bytes([self.page_flags])
         page_header += struct.pack("<HH", free_size & 0xFFFF, used_size & 0xFFFF)
-        # tx_count / tx_idx: real Rekordbox writes the 13-bit "no current
-        # transaction" sentinel 0x1FFF here, not row counts. Putting our
-        # row count there made Rekordbox flag the page as mid-transaction
-        # (= corrupt) on every read. u6/u7 stay zero per F: data pages.
+        # Data pages: tx_count/tx_idx = 0x1FFF sentinel (no transaction),
+        # u6/u7 = 0 per F: drive observation.
         page_header += struct.pack("<HHHH", 0x1FFF, 0x1FFF, 0, 0)
         assert len(page_header) == PDB_PAGE_HEADER_LEN
 
