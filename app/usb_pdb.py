@@ -20,11 +20,27 @@ WRITES (for exportExt.pdb):
     populated. Modern Rekordbox + CDJ-3000 read everything they need
     from exportLibrary.db; older firmware just sees an empty-ext file.
 
-NOT YET IMPLEMENTED:
-    Index pages (the I-flagged secondary indices used by CDJs for fast
-    lookup). For libraries up to ~500 tracks the linear scan over data
-    pages is acceptable — Rekordbox / CDJs work fine without indices,
-    just slower. Larger libraries should add proper indexing.
+DEFERRED FOR LATER (NOT BLOCKERS):
+  * Index pages — The I-flagged (page_flags bit 6 set) secondary
+    lookup pages real Rekordbox writes for big libraries. Format is
+    documented in the Crate Digger spec but isn't trivial to write
+    correctly from scratch (B-tree-style key sorting + per-page
+    presence bits + cross-page next/prev pointers). For libraries up
+    to ~500 tracks CDJs do a linear scan across data pages and play
+    fine without indices — just slower to navigate. We deliberately
+    chose data-only output to ship a working file in a single session.
+    A future PR adding index pages would let us mark first_page in
+    the table descriptor as the index head (matching the page_flags
+    0x64 we observe on real Rekordbox sticks vs. our 0x24 data-page
+    flag) and would speed up CDJ menu paging on libraries > 1k tracks.
+
+  * exportExt.pdb playlist-extension columns — the file currently
+    ships MyTag definitions + tag-track links. Some Rekordbox 7+
+    builds also use it for per-track waveform colour overrides and
+    custom-comment overrides. Not required for playback.
+
+  * History playlist tables (0x11–0x13) — left empty. CDJs write to
+    these themselves while playing.
 
 DEVICE-SQL STRINGS:
     The format uses two encodings:
