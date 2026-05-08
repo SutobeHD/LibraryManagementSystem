@@ -173,11 +173,25 @@ class _Page:
         is_index = (self.page_flags & 0x40) != 0
 
         if is_index:
-            # Index pages keep heap empty and footer absent — Rekordbox
-            # writes them this way (verified F: drive byte-for-byte on
-            # page 1). u6=0x03EC and u7=0x0003 are the constants F:
-            # uses on every index page, almost certainly a Rekordbox
-            # internal "page kind" or write-state hash.
+            # Index pages: header reports free_size=0, used_size=0, num_rows=0.
+            # u6 = 0x03EC (=1004 dec) is constant across all F: index pages
+            # ("strange block" marker per flesniak). u7 carries the number of
+            # B-tree index entries stored in the heap — for our writer that
+            # is always 0 because we don't generate B-tree entries.
+            #
+            # Index-page HEAP layout (24-byte header + entries + padding,
+            # reverse-engineered from 20 F: drive index pages, all tables):
+            #   off  size  field
+            #   ───  ────  ──────────────────────────────────────────────────
+            #   0x00 u32   this_page_index            (mirrors page header)
+            #   0x04 u32   next_page in B-tree chain  (0x03FFFFFF if none)
+            #   0x08 u32   const = 0x03FFFFFF
+            #   0x0C u32   const = 0
+            #   0x10 u16   num_b_tree_entries         (matches u7)
+            #   0x12 u16   sentinel = 0x1FFF
+            #   0x14…      u32 entries × num_b_tree_entries
+            #   …          0x1FFFFFF8 sentinels until end of page (4096 B)
+            num_entries = 0  # Our writer never emits B-tree entries
             page_header = struct.pack(
                 "<IIIIIII",
                 0, self.page_index, self.table_type,
@@ -186,25 +200,27 @@ class _Page:
             row_counts_bytes = (0).to_bytes(3, "little")
             page_header = page_header[:0x18] + row_counts_bytes + bytes([self.page_flags])
             page_header += struct.pack("<HH", 0, 0)
-            page_header += struct.pack("<HHHH", 0x1FFF, 0x1FFF, 0x03EC, 0x0003)
+            page_header += struct.pack("<HHHH", 0x1FFF, 0x1FFF, 0x03EC, num_entries)
             assert len(page_header) == PDB_PAGE_HEADER_LEN
 
             body = bytearray(PDB_PAGE_SIZE)
             body[0:PDB_PAGE_HEADER_LEN] = page_header
-            # Fill the index-page heap with the 0x1FFFFFF8 "empty slot"
-            # sentinel instead of leaving it as zeros. Real Rekordbox
-            # exports (F: drive) write this pattern across the entire
-            # unused portion of every index page — verified byte-for-byte.
-            # The first 32 bytes of F:'s heap carry an undocumented metadata
-            # header (page_idx, next_page, marker, kind/count, row offsets)
-            # but those values reference real rows that we don't have, so
-            # writing them blindly would lie to Rekordbox. Padding alone is
-            # consistent and means "every slot is unused".
-            sentinel = b"\xf8\xff\xff\x1f"
-            heap_size = PDB_PAGE_SIZE - PDB_PAGE_HEADER_LEN
-            body[PDB_PAGE_HEADER_LEN:PDB_PAGE_HEADER_LEN + heap_size] = (
-                sentinel * (heap_size // 4)
+            # Heap header: 24 bytes of structured fields then padding.
+            # Without B-tree entries, next-in-chain is the 0x03FFFFFF terminator.
+            heap_struct = struct.pack(
+                "<IIIIHH",
+                self.page_index,
+                0x03FFFFFF,         # no next index page in B-tree
+                0x03FFFFFF,         # const observed in every F: index page
+                0,                  # const observed in every F: index page
+                num_entries,        # num B-tree entries (0)
+                0x1FFF,             # sentinel
             )
+            heap_size = PDB_PAGE_SIZE - PDB_PAGE_HEADER_LEN
+            sentinel = b"\xf8\xff\xff\x1f"
+            pad_bytes = heap_size - len(heap_struct)
+            body[PDB_PAGE_HEADER_LEN:PDB_PAGE_HEADER_LEN + len(heap_struct)] = heap_struct
+            body[PDB_PAGE_HEADER_LEN + len(heap_struct):] = sentinel * (pad_bytes // 4)
             return bytes(body)
 
         heap = bytearray()
@@ -624,6 +640,17 @@ class PdbBuilder:
         num_tables = len(TABLE_ORDER)
         next_unused = 1 + len(all_pages)
 
+        # Patch terminator next_page values: real Rekordbox writes
+        # `next_unused_page` (past the end of the file) on the last page in
+        # each chain rather than 0, because page 0 is the file header and
+        # would resolve to garbage if a Rekordbox client follows the chain
+        # blindly. Verified across F: drive — every chain-tail page has
+        # next_page == file's next_unused_page. Pages with a real successor
+        # already point to it, so we only patch the 0-terminators.
+        for p in all_pages:
+            if p.next_page == 0:
+                p.next_page = next_unused
+
         # File header — match real Rekordbox values where they're known
         header = struct.pack(
             "<IIIIIIII",
@@ -855,6 +882,12 @@ class PdbExtBuilder:
 
         num_tables = len(EXT_TABLE_ORDER)
         next_unused = 1 + len(all_pages)
+        # See PdbBuilder.build() — patch chain-terminator next_page=0 to
+        # next_unused_page so Rekordbox doesn't follow a chain into page 0
+        # (which is the file header).
+        for p in all_pages:
+            if p.next_page == 0:
+                p.next_page = next_unused
         header = struct.pack(
             "<IIIIIIII",
             0,                   # magic
