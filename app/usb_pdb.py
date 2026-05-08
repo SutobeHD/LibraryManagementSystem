@@ -152,49 +152,70 @@ class _Page:
     rows_data: List[bytes] = field(default_factory=list)
 
     def build(self) -> bytes:
-        # Heap starts at PDB_PAGE_HEADER_LEN (0x28). Rows go forward, row
-        # index goes BACKWARD from end. Row counts are bit-packed.
+        """Assemble the on-disk page image, spec-compliant layout.
+
+        Row index footer per Crate-Digger spec (verified against F: real
+        Rekordbox export):
+
+            For each 16-row group N at base = page_size - (N * 0x24):
+              base - 4    u2  row_present_flags  (bit i = row i present)
+              base - 6    u2  row 0 offset
+              base - 8    u2  row 1 offset
+              ...
+              base - 38   u2  row 15 offset
+              (base + 0..1: unused / transaction-flag area)
+
+        So group 0 occupies the LAST 36 bytes of the page (bytes 4060..4095
+        for a 4 KiB page). Inside that footer block, layout from start:
+
+            block[0:32]   = row 15..0 offsets (reversed)
+            block[32:34]  = row_present_flags (closest-to-end = bit 0)
+            block[34:36]  = trailing pad (= transaction_row_flags? unused)
+
+        Subsequent groups (rows 16+) come BEFORE group 0 in physical order,
+        each their own 36-byte block.
+        """
         heap = bytearray()
         offsets: List[int] = []
         for row in self.rows_data:
             offsets.append(len(heap))
             heap.extend(row)
-            # Word-align the next offset so we don't end up writing odd
-            # offsets (some readers truncate odd addresses).
             if len(heap) & 1:
                 heap.append(0)
 
         num_rows = len(self.rows_data)
-        num_row_offsets = num_rows  # we don't free rows, so they're equal
+        num_row_offsets = num_rows
 
-        # Row index footer — laid out in 16-row groups, growing backward
-        # from end of page. Each group: [presence flags][16 × u16 offset]
-        # [transaction flags] = 2+32+2 = 36 bytes per group of up to 16.
-        groups = []
-        for g_start in range(0, num_rows, 16):
+        groups: List[bytes] = []
+        for g_start in range(0, max(num_rows, 1), 16):
             g_offsets = offsets[g_start : g_start + 16]
-            # Pad missing slots with 0xFFFF
             while len(g_offsets) < 16:
-                g_offsets.append(0xFFFF)
-            present = (1 << min(16, num_rows - g_start)) - 1  # bits set per real row
-            present_flags = present & 0xFFFF
-            tx_flags = present_flags  # all rows touched in this transaction
-            # Spec layout in the file: tx_flags THEN offsets THEN presence
-            # — physical order at end of page is reversed when we WRITE
-            # the page, so logical order is the order shown above.
-            block = struct.pack("<H", tx_flags)
-            for ofs in g_offsets:
-                block += struct.pack("<H", ofs & 0xFFFF)
-            block += struct.pack("<H", present_flags)
-            groups.append(block)
+                g_offsets.append(0)
+            rows_in_group = min(16, num_rows - g_start)
+            present_flags = ((1 << rows_in_group) - 1) & 0xFFFF
 
-        # Concatenate groups starting at the page tail going backward —
-        # group 0 (rows 0-15) lives at the very end of the page.
-        index_bytes = b""
-        for grp in groups:
-            index_bytes = grp + index_bytes  # later groups precede group 0
+            # Build the 36-byte block:
+            #   bytes 0..31  → row 15..0 offsets (reversed)
+            #   bytes 32..33 → present_flags
+            #   bytes 34..35 → trailing pad (zero — Rekordbox seems to
+            #                  ignore this for the last-row group)
+            block = bytearray(36)
+            for i in range(16):
+                # row i offset goes at byte (30 - 2*i) within the block.
+                # That places row 0 at block[30:32] (= page byte base-6)
+                # and row 15 at block[0:2] (= page byte base-36).
+                block[30 - 2 * i : 30 - 2 * i + 2] = struct.pack(
+                    "<H", g_offsets[i] & 0xFFFF
+                )
+            struct.pack_into("<H", block, 32, present_flags)
+            # block[34:36] left as zero
+            groups.append(bytes(block))
 
-        # Compute heap occupancy
+        # Group 0 lives at end of page; group 1 immediately before it; etc.
+        # So the on-disk order is [...group N...group 1][group 0] — we
+        # simply emit groups in REVERSE creation order.
+        index_bytes = b"".join(reversed(groups))
+
         used_size = len(heap)
         free_size = PDB_PAGE_SIZE - PDB_PAGE_HEADER_LEN - len(index_bytes) - used_size
         if free_size < 0:
@@ -203,29 +224,24 @@ class _Page:
                 f"index={len(index_bytes)} budget={PDB_PAGE_SIZE - PDB_PAGE_HEADER_LEN}"
             )
 
-        # Bit-pack row counts: bits 0-12 num_row_offsets, bits 13-23 num_rows
         rc = (num_rows << 13) | num_row_offsets
         row_counts_bytes = rc.to_bytes(3, "little")
 
         page_header = struct.pack(
             "<IIIIIII",
-            0,                       # 0x00 reserved
-            self.page_index,         # 0x04 page_index
-            self.table_type,         # 0x08 type (mirror)
-            self.next_page,          # 0x0C next_page
-            self.seqpage,            # 0x10 seqpage
-            0,                       # 0x14 unknown2
-            0,                       # 0x18-0x1B placeholder — we override
+            0,
+            self.page_index,
+            self.table_type,
+            self.next_page,
+            self.seqpage,
+            0,
+            0,
         )
-        # Patch row_counts (3 bytes) + page_flags (1 byte) into 0x18
         page_header = page_header[:0x18] + row_counts_bytes + bytes([self.page_flags])
-        # 0x1C-0x1F: free_size + used_size
         page_header += struct.pack("<HH", free_size & 0xFFFF, used_size & 0xFFFF)
-        # 0x20-0x27: tx_count, tx_index, u6, u7
         page_header += struct.pack("<HHHH", num_rows & 0xFFFF, 0, 0, 0)
         assert len(page_header) == PDB_PAGE_HEADER_LEN
 
-        # Final page = header + heap + 0x00 padding + row index (at tail)
         body = bytearray(PDB_PAGE_SIZE)
         body[0:PDB_PAGE_HEADER_LEN] = page_header
         body[PDB_PAGE_HEADER_LEN : PDB_PAGE_HEADER_LEN + used_size] = heap
