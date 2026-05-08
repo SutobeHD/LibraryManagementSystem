@@ -148,7 +148,10 @@ class _Page:
     table_type: int
     next_page: int = 0
     seqpage: int = 0
-    page_flags: int = 0x24  # data page (no I flag, no D flag)
+    # Data-page flag MUST be 0x34, not 0x24. Bit 4 (0x10) is present on every
+    # data page Rekordbox writes (verified F: drive). Without it Rekordbox
+    # flags the device library as corrupted on stick insert.
+    page_flags: int = 0x34
     rows_data: List[bytes] = field(default_factory=list)
 
     def build(self) -> bytes:
@@ -625,7 +628,14 @@ class PdbBuilder:
         for table_type in TABLE_ORDER:
             first = first_page_per_type.get(table_type, 0)
             last = last_page_per_type.get(table_type, 0)
-            header += struct.pack("<IIII", table_type, 0, first, last)
+            # empty_candidate MUST NOT be 0 — page 0 is the file header, not
+            # a valid candidate for "next available empty page". Rekordbox
+            # validates this and flags the device library as corrupted when
+            # it sees empty_candidate=0. Real Rekordbox exports always set
+            # this to a real page number; for our linear-allocation writer
+            # the safest choice is last_page (which is the data page that
+            # has free heap space for additional rows).
+            header += struct.pack("<IIII", table_type, last, first, last)
 
         if len(header) > PDB_PAGE_SIZE:
             raise ValueError(f"File header overflow: {len(header)} bytes")
@@ -842,7 +852,9 @@ class PdbExtBuilder:
         for table_type in EXT_TABLE_ORDER:
             first = first_page_per_type.get(table_type, 0)
             last = last_page_per_type.get(table_type, 0)
-            header += struct.pack("<IIII", table_type, 0, first, last)
+            # See PdbBuilder.build() — empty_candidate=0 fails Rekordbox
+            # validation. Use last_page (the data page with free space).
+            header += struct.pack("<IIII", table_type, last, first, last)
         if len(header) > PDB_PAGE_SIZE:
             raise ValueError(f"Ext header overflow: {len(header)} bytes")
         header += b"\x00" * (PDB_PAGE_SIZE - len(header))
