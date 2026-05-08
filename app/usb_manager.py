@@ -363,33 +363,74 @@ class UsbProfileManager:
 
     @classmethod
     def prune_duplicates(cls) -> int:
-        """Collapse duplicate profiles for the same physical stick.
+        """Collapse duplicate profiles + migrate to current device IDs.
 
-        Windows assigns a NEW volume serial every time a stick is formatted,
-        and our `device_id = md5(serial or drive)` therefore generates a
-        new id per format. Result: the profile list grows by one ESD-USB
-        entry every time the user wipes the stick.
+        Windows assigns a NEW volume serial every time a stick is
+        reformatted, and our `device_id = md5(serial or drive)[:12]`
+        therefore generates a fresh id per format. Two failure modes:
 
-        Policy (per (drive, label) group):
-          1. Always keep the currently-connected profile (live serial).
-          2. Otherwise keep the most recently synced one.
-          3. Delete every other sibling — they're zombies from past
-             reformats. Their `sync_playlists` value isn't lost because
-             the kept profile inherits any non-default config from the
-             newest deleted sibling before it goes.
+        1. After a reformat the OLD profile (with its sync_playlists,
+           last_sync, etc.) gets orphaned — it's not in the scan and the
+           connected device has no profile yet. UI renders the old
+           profile as "offline" and the connected stick as "no profile".
+
+        2. Repeated reformats grow the profile list unbounded — each old
+           serial leaves a zombie entry.
+
+        Two-step policy:
+          A. **Migrate** — for each currently-connected device whose
+             device_id has no profile, find an existing profile with the
+             same (drive, label) and re-key it to the connected id.
+             That preserves sync_playlists / last_sync across reformats.
+          B. **Prune** — for each (drive, label) group, keep the
+             currently-connected profile (post-migrate that's the
+             freshly re-keyed one) or fall back to the newest by
+             last_sync. Delete the rest, inheriting playlists from the
+             newest deleted sibling if the keeper had none.
 
         Returns the number of profiles deleted.
         """
         data = cls._load_all()
         profiles = data.get("profiles", {})
 
-        # Determine connected device ids ONCE (avoids N rescans below)
+        # Snapshot the live device list once
         try:
-            connected = {d["device_id"] for d in UsbDetector.scan()}
-        except Exception:
-            connected = set()
+            scan_results = UsbDetector.scan()
+        except Exception as e:
+            logger.warning("[Profiles] scan failed during prune: %s", e)
+            scan_results = []
+        scanned_by_id = {d["device_id"]: d for d in scan_results}
+        connected_ids = set(scanned_by_id.keys())
 
-        # Group by (drive, label)
+        # ── Step A: migrate each connected device with no matching profile
+        # ── into the existing same-(drive,label) profile ───────────────
+        migrated = 0
+        for new_id, dev in list(scanned_by_id.items()):
+            if new_id in profiles:
+                continue   # device already has a profile — skip
+            new_drive = dev.get("drive", "")
+            new_label = dev.get("label", "")
+            # Find existing profile that matches (drive, label) but has a
+            # stale id. Prefer the most-recently-synced match.
+            candidates = [
+                did for did, p in profiles.items()
+                if p.get("drive") == new_drive and p.get("label") == new_label
+            ]
+            if not candidates:
+                continue
+            old_id = max(candidates, key=lambda d: profiles[d].get("last_sync")
+                                                  or profiles[d].get("created_at") or "")
+            old_profile = profiles.pop(old_id)
+            old_profile["device_id"] = new_id
+            profiles[new_id] = old_profile
+            migrated += 1
+            logger.info(
+                "[Profiles] migrated %s → %s (drive=%s label=%s, %d playlist(s) preserved)",
+                old_id, new_id, new_drive, new_label,
+                len(old_profile.get("sync_playlists") or []),
+            )
+
+        # Re-build groups after migration
         groups: Dict[tuple, List[str]] = {}
         for did, p in profiles.items():
             key = (p.get("drive", ""), p.get("label", ""))
@@ -399,25 +440,22 @@ class UsbProfileManager:
             p = profiles[did]
             return p.get("last_sync") or p.get("created_at") or ""
 
+        # ── Step B: prune non-canonical siblings ───────────────────────
         removed = 0
         for key, dids in groups.items():
             if len(dids) <= 1:
                 continue
 
-            # Pick the canonical id: connected first, else newest
-            connected_in_group = [d for d in dids if d in connected]
+            connected_in_group = [d for d in dids if d in connected_ids]
             keep_id = (
                 connected_in_group[0]
                 if connected_in_group
                 else max(dids, key=_ts)
             )
 
-            # Inherit any non-empty `sync_playlists` from siblings so the
-            # user doesn't lose a track-list configured on a reformatted
-            # stick that now has a different serial.
+            # Inherit playlists if keeper has none
             keeper = profiles[keep_id]
             if not keeper.get("sync_playlists"):
-                # Take from newest sibling that has one
                 for d in sorted(dids, key=_ts, reverse=True):
                     if d == keep_id:
                         continue
@@ -429,21 +467,20 @@ class UsbProfileManager:
                         )
                         break
 
-            # Delete everyone except keeper
             for stale_id in dids:
                 if stale_id == keep_id:
                     continue
                 del profiles[stale_id]
                 removed += 1
-            if removed:
-                logger.info(
-                    "[Profiles] kept %s, pruned %d sibling(s) (drive=%s label=%s)",
-                    keep_id, len(dids) - 1, key[0], key[1],
-                )
+            logger.info(
+                "[Profiles] kept %s, pruned %d sibling(s) (drive=%s label=%s)",
+                keep_id, len(dids) - 1, key[0], key[1],
+            )
 
-        if removed:
+        if migrated or removed:
             data["profiles"] = profiles
             cls._save_all(data)
+            logger.info("[Profiles] prune summary: migrated=%d removed=%d", migrated, removed)
         return removed
 
     @classmethod
