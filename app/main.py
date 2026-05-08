@@ -2155,6 +2155,19 @@ def usb_sync(r: UsbSyncReq):
     last = results[-1] if results else {"stage": "error", "message": "No events"}
     return {"status": "success" if last.get("stage") == "complete" else "error", "result": last}
 
+@app.post("/api/usb/profiles/prune")
+def usb_prune_profiles():
+    """Force-collapse duplicate USB profiles for the same physical stick.
+
+    Windows generates a new volume serial after every reformat which makes
+    our device_id (md5 of serial) shift. Repeated stick wipes therefore
+    pile up zombie profiles in the sidebar. The pruner keeps the most
+    recently synced profile per (drive, label) pair and deletes orphan
+    siblings that have no playlist history.
+    """
+    removed = UsbProfileManager.prune_duplicates()
+    return {"status": "ok", "removed": removed}
+
 @app.post("/api/usb/sync/all")
 def usb_sync_all():
     """Sync all connected USB devices per their profiles."""

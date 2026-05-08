@@ -314,6 +314,15 @@ class UsbProfileManager:
 
     @classmethod
     def get_profiles(cls) -> List[Dict]:
+        # Auto-prune obvious dupes on every read so the UI never shows
+        # the long zombie list users get after several stick reformats.
+        try:
+            removed = cls.prune_duplicates()
+            if removed:
+                logger.info("[Profiles] auto-pruned %d duplicate(s)", removed)
+        except Exception as exc:
+            logger.warning("[Profiles] prune skipped: %s", exc)
+
         data = cls._load_all()
         profiles = list(data.get("profiles", {}).values())
         # Enrich with connection status
@@ -351,6 +360,91 @@ class UsbProfileManager:
             cls._save_all(data)
             return True
         return False
+
+    @classmethod
+    def prune_duplicates(cls) -> int:
+        """Collapse duplicate profiles for the same physical stick.
+
+        Windows assigns a NEW volume serial every time a stick is formatted,
+        and our `device_id = md5(serial or drive)` therefore generates a
+        new id per format. Result: the profile list grows by one ESD-USB
+        entry every time the user wipes the stick.
+
+        Policy (per (drive, label) group):
+          1. Always keep the currently-connected profile (live serial).
+          2. Otherwise keep the most recently synced one.
+          3. Delete every other sibling — they're zombies from past
+             reformats. Their `sync_playlists` value isn't lost because
+             the kept profile inherits any non-default config from the
+             newest deleted sibling before it goes.
+
+        Returns the number of profiles deleted.
+        """
+        data = cls._load_all()
+        profiles = data.get("profiles", {})
+
+        # Determine connected device ids ONCE (avoids N rescans below)
+        try:
+            connected = {d["device_id"] for d in UsbDetector.scan()}
+        except Exception:
+            connected = set()
+
+        # Group by (drive, label)
+        groups: Dict[tuple, List[str]] = {}
+        for did, p in profiles.items():
+            key = (p.get("drive", ""), p.get("label", ""))
+            groups.setdefault(key, []).append(did)
+
+        def _ts(did: str) -> str:
+            p = profiles[did]
+            return p.get("last_sync") or p.get("created_at") or ""
+
+        removed = 0
+        for key, dids in groups.items():
+            if len(dids) <= 1:
+                continue
+
+            # Pick the canonical id: connected first, else newest
+            connected_in_group = [d for d in dids if d in connected]
+            keep_id = (
+                connected_in_group[0]
+                if connected_in_group
+                else max(dids, key=_ts)
+            )
+
+            # Inherit any non-empty `sync_playlists` from siblings so the
+            # user doesn't lose a track-list configured on a reformatted
+            # stick that now has a different serial.
+            keeper = profiles[keep_id]
+            if not keeper.get("sync_playlists"):
+                # Take from newest sibling that has one
+                for d in sorted(dids, key=_ts, reverse=True):
+                    if d == keep_id:
+                        continue
+                    if profiles[d].get("sync_playlists"):
+                        keeper["sync_playlists"] = profiles[d]["sync_playlists"]
+                        logger.info(
+                            "[Profiles] inherited %d playlist(s) from %s into %s",
+                            len(keeper["sync_playlists"]), d, keep_id,
+                        )
+                        break
+
+            # Delete everyone except keeper
+            for stale_id in dids:
+                if stale_id == keep_id:
+                    continue
+                del profiles[stale_id]
+                removed += 1
+            if removed:
+                logger.info(
+                    "[Profiles] kept %s, pruned %d sibling(s) (drive=%s label=%s)",
+                    keep_id, len(dids) - 1, key[0], key[1],
+                )
+
+        if removed:
+            data["profiles"] = profiles
+            cls._save_all(data)
+        return removed
 
     @classmethod
     def get_settings(cls) -> Dict:
