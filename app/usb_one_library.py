@@ -510,6 +510,20 @@ class OneLibraryUsbWriter:
                 "date_added": date_added_str,
                 "file_type": int(getattr(c, "file_type", 0) or 0),
                 "play_count": int(getattr(c, "play_count", 0) or 0),
+                # FK back into the PC-side rekordbox masterdb. Real
+                # Rekordbox embeds these in every PDB track row so the
+                # CDJ can match a played track back to the desktop
+                # library when sticks rejoin. Without them present (the
+                # "magic constant" path the writer used previously),
+                # Rekordbox flags the PDB as corrupt on import.
+                "master_db_id":      int(getattr(c, "master_db_id", 0) or 0),
+                "master_content_id": int(getattr(c, "master_content_id", 0) or 0),
+                # Bitmask + index_shift are observed non-zero on real
+                # exports (analysis-state flags). 0x000C0700 is the
+                # "fully analysed" bitmask seen on F: drive — safe
+                # default that doesn't claim missing analysis we lack.
+                "bitmask":           int(getattr(c, "bitmask", 0x000C0700) or 0x000C0700),
+                "index_shift":       int(getattr(c, "index_shift", 0) or 0),
             })
 
         # Playlist tree — preserve folder hierarchy + per-sibling sort order.

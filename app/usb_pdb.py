@@ -361,39 +361,51 @@ def encode_track_row(track: Dict[str, Any]) -> bytes:
     duration = int(track.get("length_seconds") or 0)
     file_type = int(track.get("file_type") or 0)
 
+    def u32(v: int) -> int:
+        """Mask negative ints to their unsigned 32-bit two's-complement.
+
+        master_db_id values come out of OneLibrary as Python ints that can
+        be negative (e.g. -322436710), but the PDB stores them as u32.
+        """
+        return int(v) & 0xFFFFFFFF
+
+    # Layout: 2H + 18I + 6H + 2B + 2H = 94 bytes (0x5E header).
+    # Previously offsets 0x18+0x1A held two "magic" u16s (0x4A38, 0x78D7)
+    # — but byte-level diff against F:'s real Rekordbox export proved these
+    # are actually master_db_id (a u32) split across the same 4 bytes.
+    # u32 at 0x14 is master_content_id (also previously hardcoded to 0).
     fixed = struct.pack(
-        "<HHIIIIIHHIIIIIIIIIIIIHHHHHHBBHH",
-        0x0024,                              # 0x00 subtype
-        0,                                   # 0x02 index_shift
-        0,                                   # 0x04 bitmask
-        int(track.get("sample_rate") or 0),  # 0x08 sample_rate
-        0,                                   # 0x0C composer_id
-        int(track.get("file_size") or 0),    # 0x10 file_size
-        0,                                   # 0x14 u2
-        0x4A38,                              # 0x18 u3 magic
-        0x78D7,                              # 0x1A u4 magic
-        int(track.get("artwork_id") or 0),   # 0x1C artwork_id
-        int(track.get("key_id") or 0),       # 0x20 key_id
-        0,                                   # 0x24 original_artist_id
-        int(track.get("label_id") or 0),     # 0x28 label_id
-        0,                                   # 0x2C remixer_id
-        int(track.get("bitrate") or 0),      # 0x30 bitrate
-        int(track.get("track_number") or 0), # 0x34 track_number
-        bpm_x100,                            # 0x38 tempo
-        int(track.get("genre_id") or 0),     # 0x3C genre_id
-        int(track.get("album_id") or 0),     # 0x40 album_id
-        int(track.get("artist_id") or 0),    # 0x44 artist_id
-        int(track.get("id") or 0),           # 0x48 id
-        int(track.get("disc_number") or 0),  # 0x4C disc_number
-        int(track.get("play_count") or 0),   # 0x4E play_count
-        int(track.get("year") or 0),         # 0x50 year
-        int(track.get("sample_depth") or 0), # 0x52 sample_depth
-        duration,                            # 0x54 duration
-        0x0029,                              # 0x56 u5 magic
-        int(track.get("color_id") or 0),     # 0x58 color_id
-        int(track.get("rating") or 0),       # 0x59 rating
-        file_type,                           # 0x5A file_type
-        0x0003,                              # 0x5C u7 magic
+        "<HHIIIIIIIIIIIIIIIIIIHHHHHHBBHH",
+        0x0024,                                        # 0x00 subtype
+        int(track.get("index_shift") or 0),            # 0x02 index_shift
+        u32(track.get("bitmask") or 0),                # 0x04 bitmask
+        int(track.get("sample_rate") or 0),            # 0x08 sample_rate
+        0,                                             # 0x0C composer_id
+        int(track.get("file_size") or 0),              # 0x10 file_size
+        u32(track.get("master_content_id") or 0),      # 0x14 master_content_id
+        u32(track.get("master_db_id") or 0),           # 0x18 master_db_id
+        int(track.get("artwork_id") or 0),             # 0x1C artwork_id
+        int(track.get("key_id") or 0),                 # 0x20 key_id
+        0,                                             # 0x24 original_artist_id
+        int(track.get("label_id") or 0),               # 0x28 label_id
+        0,                                             # 0x2C remixer_id
+        int(track.get("bitrate") or 0),                # 0x30 bitrate
+        int(track.get("track_number") or 0),           # 0x34 track_number
+        bpm_x100,                                      # 0x38 tempo
+        int(track.get("genre_id") or 0),               # 0x3C genre_id
+        int(track.get("album_id") or 0),               # 0x40 album_id
+        int(track.get("artist_id") or 0),              # 0x44 artist_id
+        int(track.get("id") or 0),                     # 0x48 id
+        int(track.get("disc_number") or 0),            # 0x4C disc_number
+        int(track.get("play_count") or 0),             # 0x4E play_count
+        int(track.get("year") or 0),                   # 0x50 year
+        int(track.get("sample_depth") or 0),           # 0x52 sample_depth
+        duration,                                      # 0x54 duration
+        0x0029,                                        # 0x56 u5 magic
+        int(track.get("color_id") or 0),               # 0x58 color_id
+        int(track.get("rating") or 0),                 # 0x59 rating
+        file_type,                                     # 0x5A file_type
+        0x0003,                                        # 0x5C u7 magic
     )
     assert len(fixed) == 0x5E, f"track fixed header size {len(fixed)} != 0x5E"
 
