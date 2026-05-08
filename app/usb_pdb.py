@@ -239,7 +239,11 @@ class _Page:
         )
         page_header = page_header[:0x18] + row_counts_bytes + bytes([self.page_flags])
         page_header += struct.pack("<HH", free_size & 0xFFFF, used_size & 0xFFFF)
-        page_header += struct.pack("<HHHH", num_rows & 0xFFFF, 0, 0, 0)
+        # tx_count / tx_idx: real Rekordbox writes the 13-bit "no current
+        # transaction" sentinel 0x1FFF here, not row counts. Putting our
+        # row count there made Rekordbox flag the page as mid-transaction
+        # (= corrupt) on every read. u6/u7 stay zero per F: data pages.
+        page_header += struct.pack("<HHHH", 0x1FFF, 0x1FFF, 0, 0)
         assert len(page_header) == PDB_PAGE_HEADER_LEN
 
         body = bytearray(PDB_PAGE_SIZE)
@@ -524,11 +528,25 @@ class PdbBuilder:
     # --- output -----------------------------------------------------------
 
     def build(self) -> bytes:
-        """Assemble the binary file."""
-        # Convert each table's row list into pages
+        """Assemble the binary file.
+
+        Layout per Crate-Digger / verified against F: drive Rekordbox export:
+
+          page 0   = file header + 20 table descriptors
+          page 1   = INDEX page for table 0 (flags=0x64), next_page → 2
+          page 2   = data page for table 0 (rows live here, flags=0x24/0x34)
+          page 3+  = additional data pages for table 0 (chained via next_page)
+          …        = same pattern for subsequent tables
+
+        The first_page in each table descriptor MUST point to an INDEX
+        page; data pages follow via next_page. Without this Rekordbox
+        flags every page as "transaction in progress" / "corrupted".
+        """
         all_pages: List[_Page] = []
         first_page_per_type: Dict[int, int] = {}
         last_page_per_type: Dict[int, int] = {}
+
+        page_seq = 0  # incrementing seqpage across the whole file
 
         for table_type in TABLE_ORDER:
             rows = {
@@ -543,34 +561,57 @@ class PdbBuilder:
                 T_PL_ENTRIES: self.playlist_entries,
             }.get(table_type, [])
 
-            pages = self._pages_for_rows(rows, table_type)
-            first_idx = len(all_pages) + 1   # +1 because page 0 is reserved for the file header
-            for i, p in enumerate(pages):
-                p.page_index = first_idx + i
-                if i + 1 < len(pages):
-                    p.next_page = first_idx + i + 1
-                else:
-                    p.next_page = 0
+            data_pages = self._pages_for_rows(rows, table_type)
+
+            # Prepend an empty INDEX page (flags=0x64) — Rekordbox expects
+            # first_page in table descriptor to point at an index, not raw
+            # data. Even tables with zero rows get an index page.
+            index_page = _Page(
+                page_index=0,        # patched below
+                table_type=table_type,
+                next_page=0,         # patched below if data follows
+                page_flags=0x64,     # I-bit set (index page)
+                rows_data=[],
+            )
+
+            first_idx = len(all_pages) + 1
+            index_page.page_index = first_idx
+            page_seq += 1
+            index_page.seqpage = page_seq
+            if data_pages:
+                # Index page chains to the FIRST data page
+                index_page.next_page = first_idx + 1
+            all_pages.append(index_page)
+
+            for i, p in enumerate(data_pages):
+                p.page_index = first_idx + 1 + i
+                page_seq += 1
+                p.seqpage = page_seq
+                # Data pages chain forward; last one terminates with 0
+                p.next_page = (first_idx + 1 + i + 1) if (i + 1 < len(data_pages)) else 0
                 all_pages.append(p)
+
             first_page_per_type[table_type] = first_idx
-            last_page_per_type[table_type] = first_idx + len(pages) - 1
+            last_page_per_type[table_type] = (
+                first_idx + len(data_pages) if data_pages else first_idx
+            )
 
-        # File header — page 0
         num_tables = len(TABLE_ORDER)
-        next_unused = 1 + len(all_pages)  # one past the last allocated page
+        next_unused = 1 + len(all_pages)
 
+        # File header — match real Rekordbox values where they're known
         header = struct.pack(
             "<IIIIIIII",
-            0,                   # magic
-            PDB_PAGE_SIZE,       # page_size
-            num_tables,          # num_tables
-            next_unused,         # next_unused_page
-            0,                   # 0x10 ?
-            1,                   # 0x14 seqdb
-            0, 0,                # 0x18, 0x1C reserved
+            0,                  # 0x00 magic
+            PDB_PAGE_SIZE,      # 0x04 page_size
+            num_tables,         # 0x08 num_tables
+            next_unused,        # 0x0C next_unused_page
+            5,                  # 0x10 unknown (real exports have ~5)
+            177,                # 0x14 sequence (real exports have higher
+                                #      values — 177 lets Rekordbox treat
+                                #      this as a "mature" export)
+            0, 0,               # 0x18, 0x1C
         )
-        # Patch table descriptors at offset 0x1C (8 × 4 = 0x20 — overshoots by 4)
-        # Actually the spec says "Table pointers begin at 0x1C", so trim header
         header = header[:0x1C]
 
         for table_type in TABLE_ORDER:
@@ -578,12 +619,10 @@ class PdbBuilder:
             last = last_page_per_type.get(table_type, 0)
             header += struct.pack("<IIII", table_type, 0, first, last)
 
-        # Pad page 0 to PDB_PAGE_SIZE
         if len(header) > PDB_PAGE_SIZE:
             raise ValueError(f"File header overflow: {len(header)} bytes")
         header += b"\x00" * (PDB_PAGE_SIZE - len(header))
 
-        # Concatenate
         out = bytearray(header)
         for p in all_pages:
             out.extend(p.build())
@@ -747,20 +786,40 @@ class PdbExtBuilder:
         self.tag_tracks.append(encode_tag_track_row(track_id, tag_id))
 
     def build(self) -> bytes:
+        # Same index-page-then-data layout as the main builder so
+        # Rekordbox accepts the file without a corruption warning.
         all_pages: List[_Page] = []
         first_page_per_type: Dict[int, int] = {}
         last_page_per_type: Dict[int, int] = {}
+        page_seq = 0
 
         for table_type in EXT_TABLE_ORDER:
             rows = {0x03: self.tags, 0x04: self.tag_tracks}.get(table_type, [])
-            pages = PdbBuilder._pages_for_rows(rows, table_type)
+            data_pages = PdbBuilder._pages_for_rows(rows, table_type)
+
+            index_page = _Page(
+                page_index=0, table_type=table_type, next_page=0,
+                page_flags=0x64, rows_data=[],
+            )
             first_idx = len(all_pages) + 1
-            for i, p in enumerate(pages):
-                p.page_index = first_idx + i
-                p.next_page = first_idx + i + 1 if i + 1 < len(pages) else 0
+            index_page.page_index = first_idx
+            page_seq += 1
+            index_page.seqpage = page_seq
+            if data_pages:
+                index_page.next_page = first_idx + 1
+            all_pages.append(index_page)
+
+            for i, p in enumerate(data_pages):
+                p.page_index = first_idx + 1 + i
+                page_seq += 1
+                p.seqpage = page_seq
+                p.next_page = (first_idx + 1 + i + 1) if (i + 1 < len(data_pages)) else 0
                 all_pages.append(p)
+
             first_page_per_type[table_type] = first_idx
-            last_page_per_type[table_type] = first_idx + len(pages) - 1
+            last_page_per_type[table_type] = (
+                first_idx + len(data_pages) if data_pages else first_idx
+            )
 
         num_tables = len(EXT_TABLE_ORDER)
         next_unused = 1 + len(all_pages)
@@ -770,7 +829,7 @@ class PdbExtBuilder:
             PDB_PAGE_SIZE,
             num_tables,
             next_unused,
-            0, 1, 0, 0,
+            5, 177, 0, 0,        # unknown counters mirroring real exports
         )[:0x1C]
         for table_type in EXT_TABLE_ORDER:
             first = first_page_per_type.get(table_type, 0)
