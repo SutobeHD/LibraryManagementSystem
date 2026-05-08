@@ -81,58 +81,15 @@ class OneLibraryUsbWriter:
         except Exception:
             stub_enabled = False
 
-        # PDB handling — three cases:
-        #
-        # 1. `legacy_pdb_stub=True` (opt-in)
-        #    Write the header-only stub unconditionally so CDJ-2000nxs2 sees a
-        #    valid (if empty) Device Library.
-        #
-        # 2. PDBs already exist on the stick (stale from a previous Rekordbox-
-        #    native export)
-        #    OVERWRITE with our header-only stub to neutralise potentially-
-        #    broken row data. We can't `unlink` while Rekordbox holds a read
-        #    handle (Windows refuses with "Device or resource busy"), but
-        #    truncate-write (open 'wb') still succeeds — that's the only way
-        #    we can clean up without forcing the user to close Rekordbox.
-        #    After overwrite, attempt unlink as best-effort: it will succeed
-        #    on a properly-ejected stick and remove the file completely so
-        #    the Device Library branch disappears in Rekordbox.
-        #
-        # 3. Stick has no PDB at all (fresh / our-app-managed lifetime)
-        #    Don't write anything. Rekordbox renders only OneLibrary — no
-        #    sibling Device Library branch.
-        from . import usb_pdb
-        existing_pdb = (self.rb_dir / "export.pdb").exists() \
-                    or (self.rb_dir / "exportExt.pdb").exists()
-
-        if stub_enabled:
-            try:
-                usb_pdb.write_export_pdb(self.usb_root)
-                usb_pdb.write_export_ext_pdb(self.usb_root)
-                logger.info("[OneLibrary] legacy PDB stub written (opt-in)")
-            except Exception as exc:
-                logger.warning("[OneLibrary] PDB stub write failed: %s", exc)
-
-        elif existing_pdb:
-            # Neutralise the stale bytes first, then try to delete.
-            try:
-                usb_pdb.write_export_pdb(self.usb_root)
-                usb_pdb.write_export_ext_pdb(self.usb_root)
-                logger.info("[OneLibrary] stale PDB neutralised with stub bytes")
-            except Exception as exc:
-                logger.warning("[OneLibrary] PDB neutralise failed: %s", exc)
-            for stale_name in ("export.pdb", "exportExt.pdb"):
-                stale_path = self.rb_dir / stale_name
-                if stale_path.exists():
-                    try:
-                        stale_path.unlink()
-                        logger.info("[OneLibrary] removed %s (file now gone — "
-                                    "Device Library branch disappears in Rekordbox)",
-                                    stale_name)
-                    except OSError:
-                        # Rekordbox is holding the file — content is already
-                        # neutralised so the branch shows as "0 Tracks".
-                        pass
+        # PDB stub policy — preserved here for the case where the row-encoder
+        # path can't run yet (e.g. write_export_pdb hasn't been wired up by
+        # the sync loop). The full PDB write happens later in `sync()` after
+        # the OneLibrary DB has been populated, because we need the track
+        # IDs the writer assigned in order to FK them from the PDB rows.
+        # On `ensure_structure`, do nothing destructive — `sync()` overwrites
+        # the PDBs with real data, or the stub policy below kicks in for
+        # the `_legacy_pdb_stub` setting.
+        self._stub_only = stub_enabled
 
     # Path to the bundled template DB (built by app.templates.build_template
     # from any Rekordbox-exported stick). The template ships with N
@@ -365,6 +322,17 @@ class OneLibraryUsbWriter:
         except Exception as e:
             logger.warning(f"[OneLibrary] playlist tree write skipped: {e}")
 
+        # Stage 5 — Mirror everything we just wrote into export.pdb /
+        # exportExt.pdb so older CDJs (CDJ-2000nxs2 era) and Rekordbox's
+        # "Device Library" view see the same tracks + playlists. We pull
+        # the data straight from the OneLibrary DB so the FKs are
+        # guaranteed to line up between the two formats.
+        yield {"stage": "pdb", "message": "Writing legacy PDB…", "progress": 90}
+        try:
+            self._write_pdb_from_db(db, source)
+        except Exception as e:
+            logger.warning(f"[OneLibrary] PDB write skipped: {e}", exc_info=False)
+
         # Final summary
         if skipped_overflow > 0:
             yield {
@@ -483,6 +451,101 @@ class OneLibraryUsbWriter:
             return cache[name]
         except Exception:
             return None
+
+    def _write_pdb_from_db(self, db, source) -> None:
+        """Mirror the freshly-built OneLibrary DB into export.pdb / exportExt.pdb.
+
+        Pulled from the OneLibrary DB rather than the source LibrarySource so
+        the IDs are guaranteed to match what's in exportLibrary.db (each
+        playlist_content row, every artist FK on every track, etc.).
+        """
+        from . import usb_pdb
+        from .usb_manager import _is_excluded_playlist
+
+        # ── Gather rows ────────────────────────────────────────────────
+        artists = {int(a.id): (a.name or "") for a in db.get_artists()}
+        albums = {
+            int(a.id): (a.name or "", int(getattr(a, "artist_id", 0) or 0))
+            for a in db.get_albums()
+        }
+        keys = {int(k.id): (k.name or "") for k in db.get_keys()}
+
+        contents_data = []
+        for c in db.get_contents():
+            # Skip placeholder rows that still have the template title
+            title = c.title or ""
+            if title.startswith("__placeholder_"):
+                continue
+            contents_data.append({
+                "id":        int(c.id),
+                "title":     title,
+                "artist_id": int(getattr(c, "artist_id", 0) or 0),
+                "album_id":  int(getattr(c, "album_id", 0) or 0),
+                "genre_id":  int(getattr(c, "genre_id", 0) or 0),
+                "key_id":    int(getattr(c, "key_id", 0) or 0),
+                "label_id":  int(getattr(c, "label_id", 0) or 0),
+                "color_id":  int(getattr(c, "color_id", 0) or 0),
+                "artwork_id": int(getattr(c, "image_id", 0) or 0),
+                "bpm":       (int(getattr(c, "bpmx100", 0) or 0)) / 100.0,
+                "length_seconds": int(getattr(c, "length", 0) or 0),
+                "bitrate":   int(getattr(c, "bitrate", 0) or 0),
+                "year":      int(getattr(c, "release_year", 0) or 0),
+                "rating":    int(getattr(c, "rating", 0) or 0),
+                "sample_rate": int(getattr(c, "sampling_rate", 0) or 0),
+                "sample_depth": int(getattr(c, "bit_depth", 0) or 0),
+                "file_size": int(getattr(c, "file_size", 0) or 0),
+                "file_path": getattr(c, "path", "") or "",
+                "file_name": getattr(c, "file_name", "") or "",
+                "comment":   getattr(c, "dj_comment", "") or "",
+                "isrc":      getattr(c, "isrc", "") or "",
+                "date_added": "",
+                "file_type": int(getattr(c, "file_type", 0) or 0),
+            })
+
+        # Playlist tree
+        pls_by_id = {p.id: p for p in db.get_playlists()}
+        playlists_pdb: List[Dict[str, Any]] = []
+        playlist_entries_pdb: List[tuple] = []
+        for pid, p in pls_by_id.items():
+            pname = p.name or ""
+            if _is_excluded_playlist(pname):
+                continue
+            is_folder = (getattr(p, "attribute", 0) == 1)
+            playlists_pdb.append({
+                "id": int(pid),
+                "parent_id": int(getattr(p, "parent_id", 0) or 0),
+                "sort_order": int(getattr(p, "seq", 0) or 0),
+                "is_folder": is_folder,
+                "name": pname,
+            })
+            if not is_folder:
+                try:
+                    contents = db.get_playlist_contents(int(pid))
+                    for entry_idx, pc in enumerate(contents):
+                        cid = int(getattr(pc, "content_id", 0) or 0)
+                        if cid:
+                            playlist_entries_pdb.append((entry_idx, cid, int(pid)))
+                except Exception as exc:
+                    logger.debug("[OneLibrary] PDB playlist_contents skipped for %s: %s", pid, exc)
+
+        # ── Write ──────────────────────────────────────────────────────
+        # Truncate-write succeeds even if Rekordbox holds a read handle.
+        usb_pdb.write_export_pdb(
+            self.usb_root,
+            contents=contents_data,
+            artists=artists,
+            albums=albums,
+            keys=keys,
+            playlists=playlists_pdb,
+            playlist_entries=playlist_entries_pdb,
+        )
+        usb_pdb.write_export_ext_pdb(self.usb_root)
+        logger.info(
+            "[OneLibrary] PDB written: %d tracks, %d artists, %d albums, "
+            "%d playlists, %d entries",
+            len(contents_data), len(artists), len(albums),
+            len(playlists_pdb), len(playlist_entries_pdb),
+        )
 
     def _write_track_artwork(self, db, slot, audio_path: Path) -> None:
         """Generate the bucketed artwork pair for one track and update the
