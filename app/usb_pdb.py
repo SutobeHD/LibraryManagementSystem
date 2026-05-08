@@ -626,18 +626,174 @@ def write_export_pdb(
         return None
 
 
-def write_export_ext_pdb(usb_root: Path) -> Optional[Path]:
-    """Header-only exportExt.pdb — extension columns / tags not written.
+EXT_TABLE_ORDER = [0x00, 0x01, 0x02, 0x03, 0x04]
+"""exportExt.pdb has its own 5-entry table directory: 0x03 = tags,
+0x04 = tag_tracks (matches reverse-engineered Rekordbox 6 sticks).
+Tables 0..2 exist as placeholders for forward-compat — Rekordbox
+allocates them but leaves them empty on libraries with no MyTags."""
 
-    Modern firmware reads everything from exportLibrary.db; older CDJs
-    only need this file to exist as a sentinel.
+
+def encode_tag_row(tag_id: int, name: str, category_id: int = 0,
+                   category_pos: int = 0, is_category: bool = False) -> bytes:
+    """Tag row (subtype 0x0684 — far name).
+
+    Layout (from Crate Digger spec):
+      0x00 u16 subtype     (0x0684 = far-name variant)
+      0x02 u16 tag_index   (filled by parent — leave 0)
+      0x04 u32 unknown1    (typically zero)
+      0x08 u32 unknown2    (typically zero)
+      0x0C u32 category_id (0 if this row IS the category)
+      0x10 u32 category_pos
+      0x14 u32 id
+      0x18 u32 raw_is_category (non-zero ⇒ folder)
+      0x1C u32 unknown3    (always ends in 0x03 byte 0x1D — empirical)
+      0x1E ofs_name_far  (offset to DeviceSQL name string on heap)
+      …    name payload
+    """
+    name_str = encode_devicesql_string(name)
+    empty_str = encode_devicesql_string("")
+    # u32 fields are unsigned — mask negatives just in case (rbox tag IDs
+    # can be in the high u32 range).
+    def u32(v: int) -> int:
+        return v & 0xFFFFFFFF
+
+    # Layout per Crate Digger spec for far-name variant (subtype 0x0684):
+    #   0x00 H subtype           0x18 I raw_is_category
+    #   0x02 H tag_index         0x1C H unknown3 (low byte = 0x03)
+    #   0x04 I unknown1          0x1E H ofs_name_far
+    #   0x08 I unknown2          0x20 H ofs_unknown_far
+    #   0x0C I category_id       — header total: 34 bytes (0x22)
+    #   0x10 I category_pos      Then name string + empty unknown string
+    #   0x14 I id                  on the heap.
+    header_size = 0x22
+    ofs_name = header_size
+    ofs_unknown = ofs_name + len(name_str)
+    header = struct.pack(
+        "<HHIIIIIIHHH",
+        0x0684,                       # 0x00 subtype
+        0,                            # 0x02 tag_index
+        0,                            # 0x04 unknown1
+        0,                            # 0x08 unknown2
+        u32(category_id),             # 0x0C category_id
+        u32(category_pos),            # 0x10 category_pos
+        u32(tag_id),                  # 0x14 id
+        1 if is_category else 0,      # 0x18 raw_is_category
+        0x0003,                       # 0x1C unknown3 (Rekordbox always 0x0003)
+        ofs_name,                     # 0x1E ofs_name_far
+        ofs_unknown,                  # 0x20 ofs_unknown_far
+    )
+    assert len(header) == header_size, f"tag header size {len(header)} != {header_size}"
+    return _aligned(header + name_str + empty_str)
+
+
+def encode_tag_track_row(track_id: int, tag_id: int) -> bytes:
+    """Tag-Track association row — 16 bytes flat."""
+    return struct.pack("<IIII", 0, track_id, tag_id, 0)
+
+
+class PdbExtBuilder:
+    """exportExt.pdb has its own table layout (5 tables).
+
+    Most users ship a stick with no MyTags so all tables stay empty; the
+    file just exists as a sentinel for older firmware. When tags ARE
+    populated we write tag rows in table 0x03 and tag-track associations
+    in table 0x04.
+    """
+
+    def __init__(self) -> None:
+        self.tags: List[bytes] = []
+        self.tag_tracks: List[bytes] = []
+
+    def add_tag(self, tag_id: int, name: str,
+                category_id: int = 0, category_pos: int = 0,
+                is_category: bool = False) -> None:
+        self.tags.append(
+            encode_tag_row(tag_id, name, category_id, category_pos, is_category)
+        )
+
+    def add_tag_track(self, track_id: int, tag_id: int) -> None:
+        self.tag_tracks.append(encode_tag_track_row(track_id, tag_id))
+
+    def build(self) -> bytes:
+        all_pages: List[_Page] = []
+        first_page_per_type: Dict[int, int] = {}
+        last_page_per_type: Dict[int, int] = {}
+
+        for table_type in EXT_TABLE_ORDER:
+            rows = {0x03: self.tags, 0x04: self.tag_tracks}.get(table_type, [])
+            pages = PdbBuilder._pages_for_rows(rows, table_type)
+            first_idx = len(all_pages) + 1
+            for i, p in enumerate(pages):
+                p.page_index = first_idx + i
+                p.next_page = first_idx + i + 1 if i + 1 < len(pages) else 0
+                all_pages.append(p)
+            first_page_per_type[table_type] = first_idx
+            last_page_per_type[table_type] = first_idx + len(pages) - 1
+
+        num_tables = len(EXT_TABLE_ORDER)
+        next_unused = 1 + len(all_pages)
+        header = struct.pack(
+            "<IIIIIIII",
+            0,                   # magic
+            PDB_PAGE_SIZE,
+            num_tables,
+            next_unused,
+            0, 1, 0, 0,
+        )[:0x1C]
+        for table_type in EXT_TABLE_ORDER:
+            first = first_page_per_type.get(table_type, 0)
+            last = last_page_per_type.get(table_type, 0)
+            header += struct.pack("<IIII", table_type, 0, first, last)
+        if len(header) > PDB_PAGE_SIZE:
+            raise ValueError(f"Ext header overflow: {len(header)} bytes")
+        header += b"\x00" * (PDB_PAGE_SIZE - len(header))
+
+        out = bytearray(header)
+        for p in all_pages:
+            out.extend(p.build())
+        return bytes(out)
+
+
+def write_export_ext_pdb(
+    usb_root: Path,
+    tags: Optional[Dict[int, str]] = None,
+    tag_categories: Optional[Dict[int, str]] = None,
+    tag_track_links: Optional[List[Tuple[int, int]]] = None,
+) -> Optional[Path]:
+    """Write `<usb>/PIONEER/rekordbox/exportExt.pdb`.
+
+    Args:
+        tags: id → name for MyTag definitions.
+        tag_categories: id → name for tag categories (organisational
+            parents — show up as folders in CDJ tag-browse view).
+        tag_track_links: list of (track_id, tag_id) associations.
+
+    All args optional. Empty inputs produce a valid 5-table sentinel
+    that older firmware accepts as "no MyTags on this stick".
     """
     rb_dir = Path(usb_root) / "PIONEER" / "rekordbox"
     rb_dir.mkdir(parents=True, exist_ok=True)
     target = rb_dir / "exportExt.pdb"
+    builder = PdbExtBuilder()
+
+    # Categories first (they get IDs in the same id space as tags)
+    for cat_id, name in (tag_categories or {}).items():
+        builder.add_tag(int(cat_id), name, is_category=True)
+    pos = 0
+    for tag_id, name in (tags or {}).items():
+        builder.add_tag(int(tag_id), name, category_id=0, category_pos=pos)
+        pos += 1
+    for track_id, tag_id in (tag_track_links or []):
+        builder.add_tag_track(int(track_id), int(tag_id))
+
     try:
-        builder = PdbBuilder()
         target.write_bytes(builder.build())
+        logger.info(
+            "[PDB-Ext] wrote %s (%d B, %d tags, %d links)",
+            target, target.stat().st_size,
+            len(tags or {}) + len(tag_categories or {}),
+            len(tag_track_links or []),
+        )
         return target
     except Exception as exc:
         logger.warning("[PDB-Ext] write failed: %s", exc)

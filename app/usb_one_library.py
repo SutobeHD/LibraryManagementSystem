@@ -16,7 +16,7 @@ import logging
 import shutil
 import hashlib
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Generator
+from typing import Any, Callable, Dict, List, Optional, Generator, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -581,7 +581,39 @@ class OneLibraryUsbWriter:
             playlists=playlists_pdb,
             playlist_entries=playlist_entries_pdb,
         )
-        usb_pdb.write_export_ext_pdb(self.usb_root)
+
+        # exportExt.pdb — MyTag definitions + tag-track associations.
+        # Categories (rbox attribute MyTagType.Folder=1) and tags
+        # (MyTagType.List=0) live in the same id space, so we just split
+        # them by `attribute` and pass both buckets into the ext writer.
+        tag_categories: Dict[int, str] = {}
+        tags: Dict[int, str] = {}
+        for mt in db.get_my_tags():
+            attr_raw = getattr(mt, "attribute", 0)
+            try:
+                attr_int = int(getattr(attr_raw, "value", attr_raw))
+            except (TypeError, ValueError):
+                attr_int = 0
+            if attr_int == 1:
+                tag_categories[int(mt.id)] = mt.name or ""
+            else:
+                tags[int(mt.id)] = mt.name or ""
+        tag_track_links: List[Tuple[int, int]] = []
+        for tag_id in tags.keys():
+            try:
+                for tc in db.get_my_tag_contents(tag_id):
+                    track_id = int(getattr(tc, "id", 0) or 0)
+                    if track_id:
+                        tag_track_links.append((track_id, tag_id))
+            except Exception:
+                pass
+
+        usb_pdb.write_export_ext_pdb(
+            self.usb_root,
+            tags=tags,
+            tag_categories=tag_categories,
+            tag_track_links=tag_track_links,
+        )
         logger.info(
             "[OneLibrary] PDB written: %d tracks, %d artists, %d albums, "
             "%d playlists, %d entries",
