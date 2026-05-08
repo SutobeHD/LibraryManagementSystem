@@ -191,6 +191,20 @@ class _Page:
 
             body = bytearray(PDB_PAGE_SIZE)
             body[0:PDB_PAGE_HEADER_LEN] = page_header
+            # Fill the index-page heap with the 0x1FFFFFF8 "empty slot"
+            # sentinel instead of leaving it as zeros. Real Rekordbox
+            # exports (F: drive) write this pattern across the entire
+            # unused portion of every index page — verified byte-for-byte.
+            # The first 32 bytes of F:'s heap carry an undocumented metadata
+            # header (page_idx, next_page, marker, kind/count, row offsets)
+            # but those values reference real rows that we don't have, so
+            # writing them blindly would lie to Rekordbox. Padding alone is
+            # consistent and means "every slot is unused".
+            sentinel = b"\xf8\xff\xff\x1f"
+            heap_size = PDB_PAGE_SIZE - PDB_PAGE_HEADER_LEN
+            body[PDB_PAGE_HEADER_LEN:PDB_PAGE_HEADER_LEN + heap_size] = (
+                sentinel * (heap_size // 4)
+            )
             return bytes(body)
 
         heap = bytearray()
