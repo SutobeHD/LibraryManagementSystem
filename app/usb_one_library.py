@@ -507,14 +507,27 @@ class OneLibraryUsbWriter:
         labels = {int(lab.id): (lab.name or "") for lab in db.get_labels()}
 
         contents_data = []
-        from datetime import datetime as _dt
-        analyze_today = _dt.utcnow().strftime("%Y-%m-%d")
         for c in db.get_contents():
             # Skip placeholder rows that still have the template title
             title = c.title or ""
             if title.startswith("__placeholder_"):
                 continue
-            # Format date_added as YYYY-MM-DD (Rekordbox convention)
+            # Date semantics — verified vs F: drive byte-by-byte:
+            #   PDB slot 10 ("date_added") <- OneLibrary `date_created`
+            #     (date when track first entered any rekordbox library)
+            #   PDB slot 15 ("analyze_date") <- OneLibrary `date_added`
+            #     (date when track was added to / synced onto the stick)
+            # Despite the slot names, F: drive Pioneer exports use the
+            # SWAPPED mapping above. Setting them the "obvious" way (using
+            # date_added for slot 10) caused Rekordbox to flag the library
+            # as corrupted — the dates didn't match what Rekordbox expected
+            # to find based on its master.db record for the same content_id.
+            date_created_str = ""
+            try:
+                if getattr(c, "date_created", None):
+                    date_created_str = c.date_created.strftime("%Y-%m-%d")
+            except Exception:
+                pass
             date_added_str = ""
             try:
                 if getattr(c, "date_added", None):
@@ -547,9 +560,10 @@ class OneLibraryUsbWriter:
                 "file_name": getattr(c, "file_name", "") or "",
                 "comment":   getattr(c, "dj_comment", "") or "",
                 "isrc":      getattr(c, "isrc", "") or "",
-                "date_added": date_added_str,
+                # See date semantics comment above — slots are swapped on F: drive.
+                "date_added": date_created_str,    # PDB slot 10 ← OneLibrary date_created
                 "analyze_path": analyze_path_str,
-                "analyze_date": analyze_today,
+                "analyze_date": date_added_str,    # PDB slot 15 ← OneLibrary date_added
                 "file_type": int(getattr(c, "file_type", 0) or 0),
                 "play_count": int(getattr(c, "play_count", 0) or 0),
                 # FK back into the PC-side rekordbox masterdb. Real

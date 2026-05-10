@@ -706,17 +706,17 @@ class PdbBuilder:
             if p.next_page == 0:
                 p.next_page = next_unused
 
-        # File header — match real Rekordbox values where they're known
+        # File header — match real Rekordbox layout. F: drive shows that
+        # both fields at 0x10 and 0x14 increment over time (Rekordbox bumps
+        # them on every USB sync). 5 + 128 are mid-range observed values.
         header = struct.pack(
             "<IIIIIIII",
             0,                  # 0x00 magic
             PDB_PAGE_SIZE,      # 0x04 page_size
             num_tables,         # 0x08 num_tables
             next_unused,        # 0x0C next_unused_page
-            5,                  # 0x10 unknown (real exports have ~5)
-            177,                # 0x14 sequence (real exports have higher
-                                #      values — 177 lets Rekordbox treat
-                                #      this as a "mature" export)
+            5,                  # 0x10 unknown — F: drive observed: 5
+            128,                # 0x14 sequence — mid range value
             0, 0,               # 0x18, 0x1C
         )
         header = header[:0x1C]
@@ -962,7 +962,9 @@ class PdbExtBuilder:
             PDB_PAGE_SIZE,
             num_tables,
             next_unused,
-            5, 177, 0, 0,        # unknown counters mirroring real exports
+            5,                   # 0x10 unknown — F: drive observed: 5
+            128,                 # 0x14 sequence — mid range value
+            0, 0,
         )[:0x1C]
         for table_type in EXT_TABLE_ORDER:
             first = first_page_per_type.get(table_type, 0)
