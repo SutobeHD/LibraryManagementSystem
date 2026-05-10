@@ -241,13 +241,20 @@ const DawTimeline = React.memo(({
                 if (Math.abs(delta) > 0.5) {
                     // Linear lerp; no easing needed at this rate
                     d.scrollX += delta * 0.18;
-                    // Rebuild bitmap when scroll has moved enough that
-                    // the visible peaks no longer line up. 24 px is a
-                    // good balance: small enough to look continuous,
-                    // large enough to avoid per-frame rebuilds.
-                    if (Math.abs(d.scrollX - d.lastBuiltScrollX) > 24) {
+                    // Rebuild bitmap when the scroll delta exceeds the
+                    // safe overscan range. drawFrame translates the
+                    // bitmap by (lastBuiltScrollX - scrollX) so smaller
+                    // deltas remain visually continuous without rebuild;
+                    // we only rebuild when the bitmap's right edge would
+                    // start uncovering the view (≈100 px of headroom
+                    // here, leaving a thin un-translated strip that
+                    // disappears on the next rebuild). The actual
+                    // lastBuiltScrollX update happens at the rebuild
+                    // site below — setting it here would tell the
+                    // translation code that the bitmap was already
+                    // re-anchored before it actually was.
+                    if (Math.abs(d.scrollX - (d.lastBuiltScrollX || 0)) > 100) {
                         d.needsWaveformRebuild = true;
-                        d.lastBuiltScrollX = d.scrollX;
                     }
                 }
                 // Push state.scrollX in sync periodically so the scrollbar
@@ -279,9 +286,13 @@ const DawTimeline = React.memo(({
             }
             d.lastFrameTime = ts;
 
-            // Rebuild static waveform bitmap when needed
+            // Rebuild static waveform bitmap when needed. Stamp the
+            // scrollX it was built for so drawFrame can translate the
+            // bitmap by the live-vs-built delta (smooth scroll without
+            // forcing a per-frame rebuild).
             if (d.needsWaveformRebuild && d.width > 0) {
                 waveformBitmap.current = buildWaveformBitmap(d);
+                d.lastBuiltScrollX = d.scrollX;
                 d.needsWaveformRebuild = false;
                 d.needsRedraw = true;
             }
@@ -648,8 +659,17 @@ function drawFrame(ctx, d, bitmap) {
     const endTime   = (d.scrollX + d.width) / d.zoom;
 
     // ── LAYER 0: Waveform bitmap ──
+    // Translate the bitmap by the delta between the scrollX it was built
+    // for (d.lastBuiltScrollX) and the LIVE d.scrollX. Without this offset
+    // the bitmap stays anchored to (0, 0) showing the OLD scroll position
+    // even as d.scrollX smoothly advances — the playhead, drawn against
+    // the live scrollX, then visibly leads the waveform by 0..24 px (the
+    // rebuild threshold). The drift is non-constant (resets every rebuild)
+    // and produces the user-reported "visuelles geht voraus, nicht
+    // konstant" + "ruckelt" symptoms.
     if (bitmap) {
-        ctx.drawImage(bitmap, 0, 0, width, height);
+        const offset = (d.lastBuiltScrollX || 0) - d.scrollX;
+        ctx.drawImage(bitmap, offset, 0, width, height);
     }
 
     // ── LAYER 1: Grid + interactive ──
