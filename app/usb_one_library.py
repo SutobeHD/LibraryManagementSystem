@@ -356,6 +356,37 @@ class OneLibraryUsbWriter:
         except Exception as e:
             logger.warning(f"[OneLibrary] playlist tree write skipped: {e}")
 
+        # Stage 4.5 — Force SQLite WAL checkpoint into main DB. WITHOUT this
+        # step our `update_content` writes sit in the -wal file forever
+        # because rbox 0.1.7 doesn't expose a checkpoint API and Pioneer's
+        # OneLibrary uses an undisclosed SQLCipher key that we can't use to
+        # call `PRAGMA wal_checkpoint(TRUNCATE)` from outside.
+        #
+        # Workaround: SQLite auto-checkpoints when WAL exceeds 1000 pages
+        # (~4 MB). We trigger that by re-writing every content row N more
+        # times — each transaction appends frames to WAL and once the
+        # threshold is hit SQLite merges WAL into main DB and truncates
+        # the WAL file. Without the merge, Rekordbox reads the main DB
+        # alone and sees `__placeholder_*` titles → "Device library is
+        # corrupted" dialog on stick insert.
+        try:
+            real_slots = [p for p in placeholders[:used_slots]]
+            # 200 cycles × N tracks × ~5 pages/op = ~1000 WAL pages, enough
+            # to trip auto-checkpoint and flush all writes to main DB.
+            cycles = max(1, 1100 // max(len(real_slots), 1))
+            for _ in range(cycles):
+                for slot in real_slots:
+                    try:
+                        db.update_content(slot)
+                    except Exception:
+                        pass
+            logger.info(
+                "[OneLibrary] Forced WAL checkpoint via %d × %d dummy updates",
+                cycles, len(real_slots),
+            )
+        except Exception as e:
+            logger.warning(f"[OneLibrary] WAL checkpoint trigger failed: {e}")
+
         # Stage 5 — Mirror everything we just wrote into export.pdb /
         # exportExt.pdb so older CDJs (CDJ-2000nxs2 era) and Rekordbox's
         # "Device Library" view see the same tracks + playlists. We pull
