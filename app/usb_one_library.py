@@ -507,6 +507,8 @@ class OneLibraryUsbWriter:
         labels = {int(lab.id): (lab.name or "") for lab in db.get_labels()}
 
         contents_data = []
+        from datetime import datetime as _dt
+        analyze_today = _dt.utcnow().strftime("%Y-%m-%d")
         for c in db.get_contents():
             # Skip placeholder rows that still have the template title
             title = c.title or ""
@@ -519,6 +521,10 @@ class OneLibraryUsbWriter:
                     date_added_str = c.date_added.strftime("%Y-%m-%d")
             except Exception:
                 pass
+            # analyze_path: copy from OneLibrary's analysis_data_file_path —
+            # without it the PDB row has no link to the .DAT sidecar and
+            # Rekordbox flags the device library as corrupted.
+            analyze_path_str = getattr(c, "analysis_data_file_path", "") or ""
             contents_data.append({
                 "id":        int(c.id),
                 "title":     title,
@@ -542,6 +548,8 @@ class OneLibraryUsbWriter:
                 "comment":   getattr(c, "dj_comment", "") or "",
                 "isrc":      getattr(c, "isrc", "") or "",
                 "date_added": date_added_str,
+                "analyze_path": analyze_path_str,
+                "analyze_date": analyze_today,
                 "file_type": int(getattr(c, "file_type", 0) or 0),
                 "play_count": int(getattr(c, "play_count", 0) or 0),
                 # FK back into the PC-side rekordbox masterdb. Real

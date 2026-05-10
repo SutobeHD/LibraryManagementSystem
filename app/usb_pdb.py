@@ -366,6 +366,8 @@ def encode_track_row(track: Dict[str, Any]) -> bytes:
     date_added  = track.get("date_added") or ""
     comment     = track.get("comment") or ""
     isrc        = track.get("isrc") or ""
+    analyze_path = track.get("analyze_path") or ""
+    analyze_date = track.get("analyze_date") or ""
 
     # Encode the strings that go on the row's tail. Order MUST match the
     # 21-entry string-offset table indexes 0..20:
@@ -373,12 +375,29 @@ def encode_track_row(track: Dict[str, Any]) -> bytes:
     #  7 autoload_hotcues  8 us5  9 us6  10 date_added  11 release_date
     #  12 mix_name  13 us7  14 analyze_path  15 analyze_date  16 comment
     #  17 title  18 us8  19 filename  20 file_path
+    #
+    # Pioneer-canonical defaults verified against F: drive Rekordbox export:
+    #   us2 = "2"   (single ASCII digit, encoded as 2-byte short string)
+    #   us3 = "2"
+    #   autoload_hotcues = "ON"  (3-byte, signals CDJ should auto-load cues)
+    # Empty `analyze_path` / `analyze_date` make Rekordbox flag the device
+    # library as corrupted — these MUST be populated even if just placeholder
+    # paths, because Rekordbox follows them to load the .DAT analysis sidecar.
     string_payloads: List[bytes] = []
     for i in range(21):
         if i == 0:
             string_payloads.append(encode_devicesql_string(isrc))
+        elif i == 2 or i == 3:
+            # Pioneer convention — exact constants seen on every F: row
+            string_payloads.append(encode_devicesql_string("2"))
+        elif i == 7:
+            string_payloads.append(encode_devicesql_string("ON"))
         elif i == 10:
             string_payloads.append(encode_devicesql_string(date_added))
+        elif i == 14:
+            string_payloads.append(encode_devicesql_string(analyze_path))
+        elif i == 15:
+            string_payloads.append(encode_devicesql_string(analyze_date))
         elif i == 16:
             string_payloads.append(encode_devicesql_string(comment))
         elif i == 17:
