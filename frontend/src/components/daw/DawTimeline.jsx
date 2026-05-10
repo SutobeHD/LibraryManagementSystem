@@ -117,6 +117,9 @@ const DawTimeline = React.memo(({
     // ── SYNC REACT → DRAW STATE ──────────────────────────────────────────────────
     useEffect(() => {
         const d = ds.current;
+        // dispatch is needed by the RAF loop to keep state.scrollX in sync
+        // with the smoothly auto-following d.scrollX during playback.
+        d.dispatch = dispatch;
         d.zoom = state.zoom;
 
         if (!state.isPlaying || Math.abs(d.scrollX - state.scrollX) > window.innerWidth * 0.5) {
@@ -216,19 +219,44 @@ const DawTimeline = React.memo(({
         const frame = (ts) => {
             const d = ds.current;
 
-            // Dead reckoning playhead during playback
+            // Smooth auto-follow during playback. The previous threshold
+            // approach (jump scrollX by 40% when playhead crosses 70%)
+            // produced a visible jerk every few seconds AND left the
+            // scrollbar's state.scrollX out of sync — so when playback
+            // stopped, the waveform snapped back to the saved scroll
+            // position. Both visible as the user-reported "scroll bar
+            // grows then springs back".
+            //
+            // New behavior: each frame, lerp d.scrollX toward a target
+            // that keeps the playhead 30% from the left edge. Smooth
+            // linear interpolation (factor 0.18) catches up over ~6
+            // frames (~100ms) without per-frame jumps. Bitmap is only
+            // rebuilt when the smoothed scrollX drifts beyond a
+            // tolerance — keeps RAF fast.
             if (d.isPlaying) {
                 d.playhead = DawEngine.getCurrentTime();
                 const phPx = d.playhead * d.zoom;
-                const limitR = d.scrollX + d.width * 0.7;
-                if (phPx > limitR) {
-                    d.scrollX = Math.max(0, phPx - d.width * 0.3);
-                    // BUGFIX: The waveform bitmap is rendered for the visible window only,
-                    // anchored to the scrollX at build time. When auto-follow advances scrollX
-                    // during playback, the bitmap goes stale → the playhead scrolls but the
-                    // peaks under it stay frozen. Force a rebuild so the waveform tracks the
-                    // playhead.
-                    d.needsWaveformRebuild = true;
+                const targetScroll = Math.max(0, phPx - d.width * 0.3);
+                const delta = targetScroll - d.scrollX;
+                if (Math.abs(delta) > 0.5) {
+                    // Linear lerp; no easing needed at this rate
+                    d.scrollX += delta * 0.18;
+                    // Rebuild bitmap when scroll has moved enough that
+                    // the visible peaks no longer line up. 24 px is a
+                    // good balance: small enough to look continuous,
+                    // large enough to avoid per-frame rebuilds.
+                    if (Math.abs(d.scrollX - d.lastBuiltScrollX) > 24) {
+                        d.needsWaveformRebuild = true;
+                        d.lastBuiltScrollX = d.scrollX;
+                    }
+                }
+                // Push state.scrollX in sync periodically so the scrollbar
+                // tracks the waveform AND so playback stop doesn't snap
+                // the view back to the pre-play scroll position.
+                d.scrollSyncAccum = (d.scrollSyncAccum || 0) + 1;
+                if (d.scrollSyncAccum >= 12) {  // ~5 dispatches/sec at 60fps
+                    d.scrollSyncAccum = 0;
+                    if (d.dispatch) d.dispatch({ type: 'SET_SCROLL_X', payload: d.scrollX });
                 }
             }
 
@@ -492,31 +520,61 @@ function buildWaveformBitmap(d) {
 // ─── SMOOTH PATH2D BAND SILHOUETTE ──────────────────────────────────────────────
 
 function drawSmoothBandPath(ctx, peaks, bandKey, region, rStartPx, rEndPx, scrollX, zoom, totalDuration, centerY, maxAmp, lodLevel, width, height) {
-    const step = Math.max(2, lodLevel * 2); // sample density
+    const widthPx = Math.max(1, Math.ceil(rEndPx) - Math.floor(rStartPx));
+    // Sample density. Cap step so even narrow regions get >= 3 samples —
+    // otherwise small pasted clips (e.g., 8 px wide at LOD 4 with step=8)
+    // render with < 2 points and the early-return below skips them
+    // entirely. Audio plays but waveform is invisible — visible as a
+    // "missing region with audio still playing" gap.
+    const baseStep = Math.max(2, lodLevel * 2);
+    const step = Math.min(baseStep, Math.max(1, Math.floor(widthPx / 3)));
     const pts  = [];
 
-    // Sample peak data across visible region pixels
-    for (let px = Math.floor(rStartPx); px <= Math.ceil(rEndPx); px += step) {
-        const time       = (px + scrollX) / zoom;
-        const srcTime    = region.sourceStart + (time - region.timelineStart);
-        const rawIdx     = (srcTime / totalDuration) * peaks.length;
-        const idx        = Math.floor(rawIdx);
-        const frac       = rawIdx - idx;
+    const samplePixel = (px) => {
+        const time     = (px + scrollX) / zoom;
+        const srcTime  = region.sourceStart + (time - region.timelineStart);
+        const rawIdx   = (srcTime / totalDuration) * peaks.length;
+        const idx      = Math.floor(rawIdx);
+        const frac     = rawIdx - idx;
 
-        if (idx < 0 || idx >= peaks.length) continue;
+        if (idx < 0 || idx >= peaks.length) return null;
         const p0 = peaks[idx];
         const p1 = idx + 1 < peaks.length ? peaks[idx + 1] : p0;
+        if (!p0 || isNaN(p0.max) || isNaN(p0.min)) return null;
 
-        if (!p0 || isNaN(p0.max) || isNaN(p0.min)) continue; // EC12
-
-        // Bi-linear interpolation (EC2)
         const iMax = p0.max + (p1.max - p0.max) * frac;
         const iMin = p0.min + (p1.min - p0.min) * frac;
+        return { px, yTop: centerY - iMax * maxAmp, yBot: centerY - iMin * maxAmp };
+    };
 
-        pts.push({ px, yTop: centerY - iMax * maxAmp, yBot: centerY - iMin * maxAmp });
+    // Sample peak data across visible region pixels
+    const startPx = Math.floor(rStartPx);
+    const endPx = Math.ceil(rEndPx);
+    for (let px = startPx; px <= endPx; px += step) {
+        const pt = samplePixel(px);
+        if (pt) pts.push(pt);
+    }
+    // Always sample exactly at the right edge so very narrow regions
+    // get the second point they need to render. Without this, rounding
+    // can leave the rightmost pixel un-sampled and a thin pasted clip
+    // still falls below the < 2 threshold.
+    if (pts.length === 0 || pts[pts.length - 1].px < endPx) {
+        const tail = samplePixel(endPx);
+        if (tail) pts.push(tail);
     }
 
-    if (pts.length < 2) return;
+    if (pts.length < 2) {
+        // Last-resort fallback: draw a thin centerline strip so the user
+        // sees SOMETHING where the region is, instead of silent emptiness.
+        // Happens when a region is so narrow that only one sample point
+        // could be extracted (e.g., 1-pixel wide region after drag).
+        if (pts.length === 1) {
+            const c = COLORS[bandKey] || COLORS.fallback;
+            ctx.fillStyle = c.top;
+            ctx.fillRect(pts[0].px, pts[0].yTop, 1, pts[0].yBot - pts[0].yTop);
+        }
+        return;
+    }
 
     // Build gradient for this band
     const grad = ctx.createLinearGradient(0, centerY - maxAmp, 0, centerY + maxAmp);

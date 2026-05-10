@@ -313,6 +313,16 @@ export function dawReducer(state, action) {
                         timelineStart: intersectStart,
                         duration: newDuration,
                         sourceStart: newSourceStart,
+                        // sourceEnd MUST track sourceStart — without this the
+                        // clipboard inherits the original region's sourceEnd
+                        // (which still points at the old, larger boundary).
+                        // DawEngine's playRegions falls back to sourceEnd
+                        // when sourceDuration is missing, and the offline
+                        // export renderer uses sourceEnd directly. A stale
+                        // sourceEnd makes small clipped sections play extra
+                        // audio past the visible region edge (audible as
+                        // ghost content beyond the displayed waveform).
+                        sourceEnd: newSourceStart + newDuration,
                         sourceDuration: newDuration,
                         _beatStart: undefined, _beatEnd: undefined
                     };
