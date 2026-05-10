@@ -148,11 +148,24 @@ class _Page:
     table_type: int
     next_page: int = 0
     seqpage: int = 0
-    # Data-page flag MUST be 0x34, not 0x24. Bit 4 (0x10) is present on every
-    # data page Rekordbox writes (verified F: drive). Without it Rekordbox
-    # flags the device library as corrupted on stick insert.
-    page_flags: int = 0x34
+    # Data-page flags vary by table_type on real F: drive exports:
+    #   * TRACKS data pages (table_type=0):     0x34 (bit 0x10 set)
+    #   * Other tables' data pages:             0x24 (bit 0x10 cleared)
+    # Bit 0x10 appears to be a "main content table" indicator that only
+    # the tracks table sets. Earlier comment claimed all data pages use
+    # 0x34 — that was wrong; F: drive byte-by-byte verification shows
+    # only the 7 TRACKS pages use 0x34, the other 12 data pages use 0x24.
+    # Index pages (caller overrides to 0x64) and the dataclass default for
+    # data pages (0x24) should match what Rekordbox expects per table type.
+    page_flags: int = 0x24
     rows_data: List[bytes] = field(default_factory=list)
+    # Only set on INDEX pages (flag 0x64). When the table has data pages,
+    # this holds the first data page's index (e.g. 2). When the table is
+    # empty (single index page only), it stays at the 0x03FFFFFF "no chain"
+    # sentinel. Verified across 20 F: drive index pages — pattern is
+    # consistent: pages 9 and 19 (single-page LABELS / type 9) carry
+    # 0x03FFFFFF, all others carry first_data_page.
+    next_btree: int = 0x03FFFFFF
 
     def build(self) -> bytes:
         """Assemble the on-disk page image, spec-compliant layout.
@@ -210,7 +223,7 @@ class _Page:
             heap_struct = struct.pack(
                 "<IIIIHH",
                 self.page_index,
-                0x03FFFFFF,         # no next index page in B-tree
+                self.next_btree,    # first_data_page when chain follows, else 0x03FFFFFF
                 0x03FFFFFF,         # const observed in every F: index page
                 0,                  # const observed in every F: index page
                 num_entries,        # num B-tree entries (0)
@@ -538,10 +551,15 @@ class PdbBuilder:
         Greedy: fill page until adding the next row would overflow once
         the row index footer is included. Each row needs 2 bytes of
         offset; each 16-row group needs +4 bytes of flags.
+
+        Empty tables: returns []. The caller appends ONLY the index page
+        and sets descriptor first=last=index_page (matches F: drive
+        single-page convention for tables with no rows). Writing a sentinel
+        empty data page made Rekordbox compute last_page=first+1 which
+        contradicts F: drive's single-page layout for empty tables.
         """
         if not rows:
-            # Sentinel single empty page
-            return [_Page(page_index=0, table_type=table_type)]
+            return []
 
         budget = PDB_PAGE_SIZE - PDB_PAGE_HEADER_LEN
         pages: List[_Page] = []
@@ -604,6 +622,14 @@ class PdbBuilder:
 
             data_pages = self._pages_for_rows(rows, table_type)
 
+            # F: drive convention: TRACKS table data pages carry bit 0x10
+            # (flag 0x34); every other table's data pages use 0x24. Apply
+            # only here in the MAIN PDB builder — the exportExt builder
+            # uses its own type space (no TRACKS) and keeps the 0x24 default.
+            if table_type == T_TRACKS:
+                for p in data_pages:
+                    p.page_flags = 0x34
+
             # Prepend an empty INDEX page (flags=0x64) — Rekordbox expects
             # first_page in table descriptor to point at an index, not raw
             # data. Even tables with zero rows get an index page.
@@ -622,6 +648,10 @@ class PdbBuilder:
             if data_pages:
                 # Index page chains to the FIRST data page
                 index_page.next_page = first_idx + 1
+                # F: drive convention: index page heap stores first data page
+                # index in next_btree when the chain has data pages, else
+                # 0x03FFFFFF sentinel. Verified across 20 real index pages.
+                index_page.next_btree = first_idx + 1
             all_pages.append(index_page)
 
             for i, p in enumerate(data_pages):
@@ -669,14 +699,19 @@ class PdbBuilder:
         for table_type in TABLE_ORDER:
             first = first_page_per_type.get(table_type, 0)
             last = last_page_per_type.get(table_type, 0)
-            # empty_candidate MUST NOT be 0 — page 0 is the file header, not
-            # a valid candidate for "next available empty page". Rekordbox
-            # validates this and flags the device library as corrupted when
-            # it sees empty_candidate=0. Real Rekordbox exports always set
-            # this to a real page number; for our linear-allocation writer
-            # the safest choice is last_page (which is the data page that
-            # has free heap space for additional rows).
-            header += struct.pack("<IIII", table_type, last, first, last)
+            # empty_candidate = next_unused (past EOF). Verified vs. F: drive:
+            #   TRACKS:  empty=55, last=54, next_unused=56 → empty between last and next_unused
+            #   LABELS:  empty=10, last=9                  → empty = last+1
+            #   GENRES:  empty=53, last=4                  → empty in pre-allocated pool
+            # Common invariant across all 20 F: descriptors: empty_candidate
+            # > last_page (always points to a page that DOESN'T contain
+            # current table's data). Our previous value `empty=last_page`
+            # pointed to a USED data page, which Rekordbox rejects as
+            # "Device library is corrupted" because following empty_candidate
+            # to allocate a new row hits a heap that's already full.
+            # Setting it to next_unused (1 past EOF) is the safe linear-alloc
+            # equivalent of Pioneer's pre-allocated empty pool.
+            header += struct.pack("<IIII", table_type, next_unused, first, last)
 
         if len(header) > PDB_PAGE_SIZE:
             raise ValueError(f"File header overflow: {len(header)} bytes")
@@ -866,6 +901,9 @@ class PdbExtBuilder:
             index_page.seqpage = page_seq
             if data_pages:
                 index_page.next_page = first_idx + 1
+                # See PdbBuilder.build() — index heap next_btree must equal
+                # first_data_page (not 0x03FFFFFF) when chain has data.
+                index_page.next_btree = first_idx + 1
             all_pages.append(index_page)
 
             for i, p in enumerate(data_pages):
@@ -899,9 +937,11 @@ class PdbExtBuilder:
         for table_type in EXT_TABLE_ORDER:
             first = first_page_per_type.get(table_type, 0)
             last = last_page_per_type.get(table_type, 0)
-            # See PdbBuilder.build() — empty_candidate=0 fails Rekordbox
-            # validation. Use last_page (the data page with free space).
-            header += struct.pack("<IIII", table_type, last, first, last)
+            # See PdbBuilder.build() — empty_candidate must point to a page
+            # WITHOUT current table's data. F: drive uses next_unused or a
+            # pre-allocated empty page. Pointing to last_page (a USED page)
+            # makes Rekordbox flag the device library as corrupted.
+            header += struct.pack("<IIII", table_type, next_unused, first, last)
         if len(header) > PDB_PAGE_SIZE:
             raise ValueError(f"Ext header overflow: {len(header)} bytes")
         header += b"\x00" * (PDB_PAGE_SIZE - len(header))
