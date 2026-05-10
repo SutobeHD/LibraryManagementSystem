@@ -142,7 +142,23 @@ const DawTimeline = React.memo(({
 
         // Detect waveform data change → force rebuild. scrollX is included so manual
         // scroll/zoom triggers a rebuild (the bitmap covers only the visible window).
-        const newKey = `${state.totalDuration?.toFixed(2)}-${state.zoom?.toFixed(0)}-${Math.round(d.scrollX)}-${d.lodLevel}-${!!state.bandPeaks}-${!!state.fallbackPeaks}-${state.waveformStyle}`;
+        // regionsSig is critical: insert/paste/move/delete of regions changes the
+        // bitmap content but leaves zoom/scroll/peaks/style untouched, so without
+        // a per-region signature here the cached bitmap would show the OLD region
+        // layout while audio plays the NEW one — visible as "gap where audio
+        // continues through". Hash uses timelineStart + duration + sourceStart so
+        // any structural mutation triggers a rebuild; length-only would miss
+        // in-place edits (drag, trim).
+        let regionsSig = state.regions?.length || 0;
+        if (state.regions?.length) {
+            let h = 0;
+            for (const r of state.regions) {
+                const sample = ((r.timelineStart || 0) + (r.duration || 0) + (r.sourceStart || 0)) * 1000;
+                h = ((h << 5) - h + Math.floor(sample)) | 0;
+            }
+            regionsSig = `${state.regions.length}:${h}`;
+        }
+        const newKey = `${state.totalDuration?.toFixed(2)}-${state.zoom?.toFixed(0)}-${Math.round(d.scrollX)}-${d.lodLevel}-${!!state.bandPeaks}-${!!state.fallbackPeaks}-${state.waveformStyle}-${regionsSig}`;
         if (newKey !== waveformKey.current) {
             d.needsWaveformRebuild = true;
             waveformKey.current = newKey;
