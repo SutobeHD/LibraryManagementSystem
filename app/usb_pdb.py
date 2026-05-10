@@ -435,6 +435,28 @@ def encode_label_row(label_id: int, name: str) -> bytes:
     return _aligned(header + name_str)
 
 
+def encode_artwork_row(artwork_id: int, path: str) -> bytes:
+    """Artwork row (table 0x0D) — id + DeviceSQL path, padded to 4-byte boundary.
+
+    Verified F: drive byte layout (page 28):
+      Row 0  (29-char path "/PIONEER/Artwork/00001/a1.jpg"):
+        01 00 00 00 3D 2F 50 49 4F 4E ... 6A 70 67 00 00     (36 bytes)
+        4 (id) + 30 (DSQL: lk=0x3D + 29 chars) + 2 pad = 36
+
+      Row 9  (30-char path "/PIONEER/Artwork/00001/a10.jpg"):
+        0A 00 00 00 3F 2F 50 49 4F 4E ... 6A 70 67 00         (36 bytes)
+        4 (id) + 31 (DSQL: lk=0x3F + 30 chars) + 1 pad = 36
+
+    Pad-to-4 alignment is artwork-specific (other tables use align=2).
+    Without it the path string is followed by no padding (34 B row),
+    Rekordbox computes wrong row offsets for the next entry, and the
+    djmdArtwork table is shown empty even though our heap has data.
+    """
+    name_str = encode_devicesql_string(path)
+    header = struct.pack("<I", artwork_id)
+    return _aligned(header + name_str, align=4)
+
+
 def encode_genre_row(genre_id: int, name: str) -> bytes:
     """Genre row — id + DeviceSQL name (no mirror, no constant).
 
@@ -629,6 +651,7 @@ class PdbBuilder:
         self.labels: List[bytes] = []
         self.playlists: List[bytes] = []
         self.playlist_entries: List[bytes] = []
+        self.artworks: List[bytes] = []
         # Pre-populate static colour rows so PCOB-color FKs from track rows
         # have someone to point at.
         self.colors: List[bytes] = [
@@ -667,6 +690,9 @@ class PdbBuilder:
         self.playlist_entries.append(
             encode_playlist_entry_row(entry_index, track_id, playlist_id)
         )
+
+    def add_artwork(self, artwork_id: int, path: str) -> None:
+        self.artworks.append(encode_artwork_row(artwork_id, path))
 
     # --- pagination -------------------------------------------------------
 
@@ -744,6 +770,7 @@ class PdbBuilder:
                 T_COLORS:    self.colors,
                 T_PLAYLISTS: self.playlists,
                 T_PL_ENTRIES: self.playlist_entries,
+                T_ARTWORK:   self.artworks,
             }.get(table_type, [])
 
             data_pages = self._pages_for_rows(rows, table_type)
@@ -886,6 +913,7 @@ def write_export_pdb(
     labels: Optional[Dict[int, str]] = None,
     playlists: Optional[List[Dict[str, Any]]] = None,
     playlist_entries: Optional[List[Tuple[int, int, int]]] = None,
+    artworks: Optional[Dict[int, str]] = None,
 ) -> Optional[Path]:
     """Build + write `<usb>/PIONEER/rekordbox/export.pdb`.
 
@@ -894,6 +922,9 @@ def write_export_pdb(
         artists / albums / keys: id → name lookups.
         playlists: list of {id, parent_id, sort_order, is_folder, name}.
         playlist_entries: list of (entry_index, track_id, playlist_id).
+        artworks: id → USB-relative path (e.g. "/PIONEER/Artwork/00001/a1.jpg").
+                  Track rows reference these via their `artwork_id` field;
+                  the legacy CDJ uses this table to find cover art on disk.
 
     Returns the written path or None on failure. Empty inputs produce a
     minimal-but-valid file (Rekordbox shows "Device Library: 0 tracks").
@@ -930,6 +961,8 @@ def write_export_pdb(
         )
     for entry in (playlist_entries or []):
         builder.add_playlist_entry(*entry)
+    for art_id, path in (artworks or {}).items():
+        builder.add_artwork(int(art_id), path)
 
     try:
         data = builder.build()

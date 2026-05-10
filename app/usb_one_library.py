@@ -605,6 +605,17 @@ class OneLibraryUsbWriter:
 
         # ── Gather rows ────────────────────────────────────────────────
         artists = {int(a.id): (a.name or "") for a in db.get_artists()}
+        # Artwork rows: pull image table out of OneLibrary so the legacy
+        # PDB's djmdArtwork has the same id ↔ path mapping the modern
+        # OneLibrary DB has. Track rows already store their image_id;
+        # without this table CDJ-2000NXS2-era hardware shows generic
+        # placeholders instead of cover art (Rekordbox 7 native view
+        # falls back to OneLibrary so it isn't affected).
+        artworks = {
+            int(img.id): (img.path or "")
+            for img in db.get_images()
+            if (img.path or "").strip()
+        }
         albums = {
             int(a.id): (a.name or "", int(getattr(a, "artist_id", 0) or 0))
             for a in db.get_albums()
@@ -757,6 +768,7 @@ class OneLibraryUsbWriter:
             labels=labels,
             playlists=playlists_pdb,
             playlist_entries=playlist_entries_pdb,
+            artworks=artworks,
         )
 
         # exportExt.pdb — MyTag definitions + tag-track associations.
