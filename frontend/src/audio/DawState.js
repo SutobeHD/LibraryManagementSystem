@@ -350,37 +350,44 @@ export function dawReducer(state, action) {
             console.log('Reducer: PASTE_INSERT', state.clipboard);
             if (state.clipboard.length === 0) return state;
 
-            const insertTime = state.playhead;
-            // Prefer the explicit clipboardSpan stored at copy time (full
-            // selection-range width or first-start → last-end). Fall back
-            // to summing offsets+durations only for legacy clipboards from
-            // pre-fix sessions where the field wasn't recorded — without
-            // the span, trailing empty space in the original selection is
-            // lost and the next region drifts by that amount.
-            const contentSpan = state.clipboard.reduce(
-                (acc, r) => Math.max(acc, r._offset + r.duration),
-                0
+            const EPSILON = 0.001;
+            const rawInsertTime = state.playhead;
+
+            // Snap insertTime to the previous region's END if the playhead
+            // sits in dead space (no region under it). Rekordbox's editor
+            // does the same — clicking past the last clip and pasting
+            // attaches the new clip flush against the existing content
+            // rather than leaving a leading silence gap. Only snaps
+            // FORWARD-LOOKING (no jump backwards across a real gap that
+            // the user might want to span).
+            const sortedExisting = [...state.regions].sort(
+                (a, b) => a.timelineStart - b.timelineStart
             );
-            const clipboardDuration = Math.max(
-                state.clipboardSpan ?? 0,
-                contentSpan
+            const containing = sortedExisting.find(r =>
+                rawInsertTime > r.timelineStart - EPSILON &&
+                rawInsertTime < r.timelineStart + r.duration - EPSILON
             );
+            let insertTime = rawInsertTime;
+            if (!containing) {
+                let prevEnd = 0;
+                for (const r of sortedExisting) {
+                    const rEnd = r.timelineStart + r.duration;
+                    if (rEnd <= rawInsertTime + EPSILON && rEnd > prevEnd) {
+                        prevEnd = rEnd;
+                    }
+                }
+                if (prevEnd > 0 && prevEnd < rawInsertTime - EPSILON) {
+                    insertTime = prevEnd;
+                }
+            }
 
             let tempRegions = [...state.regions];
 
             // 1. Check if we need to split a region at insertTime
-            const EPSILON = 0.001;
             const intersectIdx = tempRegions.findIndex(r =>
                 insertTime > r.timelineStart + EPSILON &&
                 insertTime < r.timelineStart + r.duration - EPSILON
             );
-
-            console.log('Reducer: PASTE_INSERT debug', {
-                insertTime,
-                clipboardDuration,
-                intersectIdx,
-                regionCount: tempRegions.length
-            });
 
             if (intersectIdx !== -1) {
                 const r = tempRegions[intersectIdx];
@@ -412,22 +419,47 @@ export function dawReducer(state, action) {
                 tempRegions.splice(intersectIdx, 1, leftRegion, rightRegion);
             }
 
-            // 2. Ripple Shift: Move everything >= insertTime to the right
+            // 2. Pack the clipboard items contiguously at insertTime —
+            // collapse any internal gaps the original selection had. The
+            // user's "the gap remains in the paste" complaint comes from
+            // the previous behaviour of preserving _offset (which encoded
+            // the position INSIDE the original selection, gaps included).
+            // For a single-region clipboard this changes nothing.
+            const sortedClip = [...state.clipboard].sort(
+                (a, b) => (a._offset ?? 0) - (b._offset ?? 0)
+            );
+            let cursor = insertTime;
+            const pastedRegions = sortedClip.map(r => {
+                const placed = {
+                    ...r,
+                    id: crypto.randomUUID(),
+                    timelineStart: cursor,
+                    timelineEnd: cursor + r.duration,
+                    _offset: undefined,
+                };
+                cursor += r.duration;
+                return placed;
+            });
+            const pastedSpan = cursor - insertTime;
+
+            console.log('Reducer: PASTE_INSERT debug', {
+                rawInsertTime,
+                insertTime,
+                pastedSpan,
+                intersectIdx,
+                regionCount: tempRegions.length,
+            });
+
+            // 3. Ripple Shift: Move everything >= insertTime to the right
+            //    by EXACTLY the packed paste span. Using pastedSpan rather
+            //    than the original clipboardSpan keeps the next region
+            //    flush against the last pasted item.
             const shiftedRegions = tempRegions.map(r => {
-                if (r.timelineStart >= insertTime - 0.0001) { // Epsilon for float issues
-                    return { ...r, timelineStart: r.timelineStart + clipboardDuration };
+                if (r.timelineStart >= insertTime - 0.0001) {
+                    return { ...r, timelineStart: r.timelineStart + pastedSpan };
                 }
                 return r;
             });
-
-            // 3. Insert Clipboard
-            const pastedRegions = state.clipboard.map(r => ({
-                ...r,
-                id: crypto.randomUUID(),
-                timelineStart: insertTime + r._offset,
-                timelineEnd: insertTime + r._offset + r.duration,
-                _offset: undefined
-            }));
 
             const finalRegions = [...shiftedRegions, ...pastedRegions].sort((a, b) => a.timelineStart - b.timelineStart);
 
