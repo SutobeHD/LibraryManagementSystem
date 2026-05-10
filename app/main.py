@@ -2089,14 +2089,7 @@ def usb_get_contents(device_id: str):
 @app.get("/api/usb/diff/{device_id}")
 def usb_get_diff(device_id: str):
     """Preview what would change in a sync operation."""
-    profile = UsbProfileManager.get_profile(device_id)
-    if not profile:
-        # Try to auto-create from scan data
-        devices = UsbDetector.scan()
-        dev = next((d for d in devices if d["device_id"] == device_id), None)
-        if not dev:
-            raise HTTPException(404, "Device not found")
-        profile = UsbProfileManager.save_profile({"device_id": device_id, "label": dev.get("label", "USB"), "drive": dev["drive"]})
+    profile = _get_or_create_profile(device_id)
     if not db.active_db:
         raise HTTPException(400, "No library loaded")
     db_path = getattr(db.active_db, "db_path", None) or getattr(db.active_db, "xml_path", None)
@@ -2109,18 +2102,35 @@ def usb_get_diff(device_id: str):
     return diff
 
 def _get_or_create_profile(device_id: str) -> dict:
-    """Get existing profile or auto-create from scan data."""
+    """Get existing profile or auto-create from scan data.
+
+    Refreshes `drive` and `filesystem` from the live scan on every call.
+    Drive letters can change between Windows mounts (FAT32 → exFAT
+    reformat, USB hub re-enumeration). The filesystem field MUST be
+    fresh because UsbSyncEngine uses it to pick the path-length limit:
+    stale "FAT32" on an exFAT stick truncates paths unnecessarily.
+    """
     profile = UsbProfileManager.get_profile(device_id)
-    if profile:
-        return profile
     devices = UsbDetector.scan()
     dev = next((d for d in devices if d["device_id"] == device_id), None)
+    if profile:
+        if dev:
+            updates = {}
+            if dev.get("drive") and dev["drive"] != profile.get("drive"):
+                updates["drive"] = dev["drive"]
+            fs = dev.get("filesystem")
+            if fs and fs != profile.get("filesystem"):
+                updates["filesystem"] = fs
+            if updates:
+                profile = UsbProfileManager.save_profile({"device_id": device_id, **updates})
+        return profile
     if not dev:
         raise HTTPException(404, "Device not connected — cannot create profile")
     return UsbProfileManager.save_profile({
         "device_id": device_id,
         "label": dev.get("label", "USB Drive"),
-        "drive": dev["drive"]
+        "drive": dev["drive"],
+        "filesystem": dev.get("filesystem", ""),
     })
 
 @app.post("/api/usb/sync")

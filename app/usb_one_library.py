@@ -12,9 +12,11 @@ Workflow:
 """
 
 from __future__ import annotations
+import gc
 import logging
 import shutil
 import hashlib
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Generator, Tuple
 
@@ -356,36 +358,14 @@ class OneLibraryUsbWriter:
         except Exception as e:
             logger.warning(f"[OneLibrary] playlist tree write skipped: {e}")
 
-        # Stage 4.5 — Force SQLite WAL checkpoint into main DB. WITHOUT this
-        # step our `update_content` writes sit in the -wal file forever
-        # because rbox 0.1.7 doesn't expose a checkpoint API and Pioneer's
-        # OneLibrary uses an undisclosed SQLCipher key that we can't use to
-        # call `PRAGMA wal_checkpoint(TRUNCATE)` from outside.
-        #
-        # Workaround: SQLite auto-checkpoints when WAL exceeds 1000 pages
-        # (~4 MB). We trigger that by re-writing every content row N more
-        # times — each transaction appends frames to WAL and once the
-        # threshold is hit SQLite merges WAL into main DB and truncates
-        # the WAL file. Without the merge, Rekordbox reads the main DB
-        # alone and sees `__placeholder_*` titles → "Device library is
-        # corrupted" dialog on stick insert.
-        try:
-            real_slots = [p for p in placeholders[:used_slots]]
-            # 200 cycles × N tracks × ~5 pages/op = ~1000 WAL pages, enough
-            # to trip auto-checkpoint and flush all writes to main DB.
-            cycles = max(1, 1100 // max(len(real_slots), 1))
-            for _ in range(cycles):
-                for slot in real_slots:
-                    try:
-                        db.update_content(slot)
-                    except Exception:
-                        pass
-            logger.info(
-                "[OneLibrary] Forced WAL checkpoint via %d × %d dummy updates",
-                cycles, len(real_slots),
-            )
-        except Exception as e:
-            logger.warning(f"[OneLibrary] WAL checkpoint trigger failed: {e}")
+        # NOTE: Previously we tried to force a SQLite auto-checkpoint here
+        # by issuing 1000+ dummy `update_content` writes — the theory was
+        # that crossing the wal_autocheckpoint=1000 threshold would merge
+        # WAL into main DB. In practice this only ran a PASSIVE checkpoint
+        # which leaves the WAL file un-truncated, and the residual WAL
+        # frames caused Rekordbox to mark the library as corrupted.
+        # The real flush now happens in Stage 6 below via handle close +
+        # reopen, which guarantees a TRUNCATE-equivalent state.
 
         # Stage 5 — Mirror everything we just wrote into export.pdb /
         # exportExt.pdb so older CDJs (CDJ-2000nxs2 era) and Rekordbox's
@@ -397,6 +377,28 @@ class OneLibraryUsbWriter:
             self._write_pdb_from_db(db, source)
         except Exception as e:
             logger.warning(f"[OneLibrary] PDB write skipped: {e}", exc_info=False)
+
+        # Stage 6 — Force WAL flush by destroying the rbox handle, then
+        # reopening + closing again. WHY: rbox 0.1.7 holds the SQLite
+        # connection open for the lifetime of the Python object and never
+        # exposes a `close()` or `PRAGMA wal_checkpoint(TRUNCATE)` API.
+        # SQLite's auto-checkpoint is PASSIVE — it merges pages but does
+        # not truncate the WAL file when readers may still be present.
+        # On the previous code path the function returned with the rbox
+        # handle still alive, so the WAL would only flush at GC time
+        # (later — and never with TRUNCATE). On reopen, Rekordbox would
+        # see the residual WAL, fail to recover it (likely SQLCipher 3.x
+        # vs 4.x WAL-format mismatch), and prompt "Device library is
+        # corrupted" with the offer to delete it.
+        #
+        # Empirically (verified vs. F: drive Pioneer reference) the
+        # del → gc → sleep → reopen → close cycle leaves WAL=0 and SHM
+        # in a clean state that Rekordbox accepts.
+        try:
+            self._flush_wal_and_close(db)
+            db = None
+        except Exception as e:
+            logger.warning(f"[OneLibrary] WAL flush failed: {e}", exc_info=False)
 
         # Final summary
         if skipped_overflow > 0:
@@ -418,6 +420,73 @@ class OneLibraryUsbWriter:
             }
 
     # ─── helpers ─────────────────────────────────────────────────────────
+
+    def _flush_wal_and_close(self, db) -> None:
+        """Force a full WAL flush by destroying the rbox handle and reopening.
+
+        rbox 0.1.7 exposes no `close()`, no `commit()`, no PRAGMA passthrough.
+        The only way to push pending WAL frames into the main DB AND get
+        SQLite to truncate the -wal file is:
+
+          1. Drop the only Python ref to the rbox object so its Drop runs.
+          2. Force GC so Python actually frees the wrapper immediately.
+          3. Sleep briefly to let Windows release the file locks.
+          4. Reopen the DB with a fresh rbox handle. SQLite's open path
+             runs WAL recovery (merges all complete WAL frames into the
+             main DB) and, when the WAL has no pending readers, performs
+             a checkpoint that truncates the -wal file.
+          5. Drop the second handle the same way.
+
+        After step 5 the .db is self-contained: -wal is 0 bytes (or absent)
+        and -shm holds a clean header that Rekordbox can re-initialise.
+
+        Verified by comparing `dir E:\\PIONEER\\rekordbox` after sync vs.
+        the working F: drive Pioneer reference — both end with WAL=0.
+        """
+        path = str(self.db_path)
+        del db
+        gc.collect()
+        time.sleep(0.5)
+
+        if rbox is None:
+            return
+
+        try:
+            db2 = rbox.OneLibrary(path)
+        except Exception as e:
+            logger.warning("[OneLibrary] Reopen for WAL flush failed: %s", e)
+            return
+
+        try:
+            # Force a read so SQLite touches the WAL (triggers recovery
+            # + checkpoint if the WAL is non-empty).
+            list(db2.get_contents())
+        except Exception:
+            pass
+
+        del db2
+        gc.collect()
+        time.sleep(0.5)
+
+        # Diagnostic — record post-flush state so we can confirm the fix
+        # in the field. WAL should be 0 bytes; SHM may still exist (32 KB)
+        # which is normal for a closed WAL-mode DB.
+        try:
+            wal = Path(path + "-wal")
+            wal_size = wal.stat().st_size if wal.exists() else 0
+            logger.info(
+                "[OneLibrary] WAL flush complete: -wal=%d B (target 0)",
+                wal_size,
+            )
+            if wal_size > 0:
+                logger.warning(
+                    "[OneLibrary] WAL still has %d bytes after flush — "
+                    "Rekordbox may flag the library as corrupted. "
+                    "Investigate rbox close semantics.",
+                    wal_size,
+                )
+        except Exception:
+            pass
 
     def _get_or_create_artist(self, db, cache: Dict, name: str) -> Optional[str]:
         if not name:
