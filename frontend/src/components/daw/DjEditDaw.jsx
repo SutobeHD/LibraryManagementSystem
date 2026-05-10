@@ -54,6 +54,14 @@ function extendedReducer(state, action) {
 const DjEditDaw = ({ track: initialTrack }) => {
     console.log('[DjEditDaw] Mounting with track:', initialTrack);
     const [state, dispatch] = useReducer(extendedReducer, null, () => createInitialState());
+
+    // Diagnostic hook — exposes the live DAW state on `window.__dawState`
+    // so the user can dump regions/clipboard from DevTools when debugging
+    // visual-vs-audio mismatches. Read-only; mutations are not reflected.
+    if (typeof window !== 'undefined') {
+        window.__dawState = state;
+        window.__dawDispatch = dispatch;
+    }
     const [showExport, setShowExport] = useState(false);
     const [activeTrack, setActiveTrack] = useState(initialTrack);
     const [isLoading, setIsLoading] = useState(false);
