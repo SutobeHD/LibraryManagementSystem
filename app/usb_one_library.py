@@ -378,25 +378,25 @@ class OneLibraryUsbWriter:
         except Exception as e:
             logger.warning(f"[OneLibrary] PDB write skipped: {e}", exc_info=False)
 
-        # Stage 6 — Force WAL flush by destroying the rbox handle, then
-        # reopening + closing again. WHY: rbox 0.1.7 holds the SQLite
-        # connection open for the lifetime of the Python object and never
-        # exposes a `close()` or `PRAGMA wal_checkpoint(TRUNCATE)` API.
-        # SQLite's auto-checkpoint is PASSIVE — it merges pages but does
-        # not truncate the WAL file when readers may still be present.
-        # On the previous code path the function returned with the rbox
-        # handle still alive, so the WAL would only flush at GC time
-        # (later — and never with TRUNCATE). On reopen, Rekordbox would
-        # see the residual WAL, fail to recover it (likely SQLCipher 3.x
-        # vs 4.x WAL-format mismatch), and prompt "Device library is
-        # corrupted" with the offer to delete it.
+        # Stage 6 — Force WAL flush by destroying the rbox handle. WHY:
+        # rbox 0.1.7 holds the SQLite connection open for the lifetime of
+        # the Python wrapper and exposes no `close()` / no PRAGMA passthrough.
+        # If `db` falls out of scope only at function return, the WAL
+        # (~400 KB of unmerged frames) survives on the USB stick and
+        # Rekordbox prompts "Device library is corrupted" on insert.
         #
-        # Empirically (verified vs. F: drive Pioneer reference) the
-        # del → gc → sleep → reopen → close cycle leaves WAL=0 and SHM
-        # in a clean state that Rekordbox accepts.
+        # CRITICAL: the `del db` MUST run in this scope — passing `db` to
+        # a helper and `del`-ing the parameter inside the helper only
+        # drops the local binding; the outer ref keeps the rbox object
+        # alive and the handle is never released. Same trap with closures.
+        # Verified: helper-based del leaves -wal=387312 B; inline del
+        # leaves -wal=0 B.
         try:
-            self._flush_wal_and_close(db)
-            db = None
+            del db
+            gc.collect()
+            time.sleep(0.5)
+            self._reopen_for_recovery()
+            self._log_post_flush_state()
         except Exception as e:
             logger.warning(f"[OneLibrary] WAL flush failed: {e}", exc_info=False)
 
@@ -421,58 +421,41 @@ class OneLibraryUsbWriter:
 
     # ─── helpers ─────────────────────────────────────────────────────────
 
-    def _flush_wal_and_close(self, db) -> None:
-        """Force a full WAL flush by destroying the rbox handle and reopening.
+    def _reopen_for_recovery(self) -> None:
+        """Open + immediately close the DB once more to force WAL recovery.
 
-        rbox 0.1.7 exposes no `close()`, no `commit()`, no PRAGMA passthrough.
-        The only way to push pending WAL frames into the main DB AND get
-        SQLite to truncate the -wal file is:
+        Caller MUST have already `del`'d its own reference to the rbox
+        handle and run `gc.collect()` BEFORE calling this — otherwise the
+        first connection is still alive and SQLite can't truncate the WAL.
 
-          1. Drop the only Python ref to the rbox object so its Drop runs.
-          2. Force GC so Python actually frees the wrapper immediately.
-          3. Sleep briefly to let Windows release the file locks.
-          4. Reopen the DB with a fresh rbox handle. SQLite's open path
-             runs WAL recovery (merges all complete WAL frames into the
-             main DB) and, when the WAL has no pending readers, performs
-             a checkpoint that truncates the -wal file.
-          5. Drop the second handle the same way.
-
-        After step 5 the .db is self-contained: -wal is 0 bytes (or absent)
-        and -shm holds a clean header that Rekordbox can re-initialise.
-
-        Verified by comparing `dir E:\\PIONEER\\rekordbox` after sync vs.
-        the working F: drive Pioneer reference — both end with WAL=0.
+        SQLite's open path runs WAL recovery (merges complete frames into
+        the main DB) and, when no other connection holds the WAL,
+        performs a TRUNCATE checkpoint that empties the -wal file.
         """
-        path = str(self.db_path)
-        del db
-        gc.collect()
-        time.sleep(0.5)
-
         if rbox is None:
             return
-
+        path = str(self.db_path)
         try:
             db2 = rbox.OneLibrary(path)
         except Exception as e:
             logger.warning("[OneLibrary] Reopen for WAL flush failed: %s", e)
             return
-
         try:
-            # Force a read so SQLite touches the WAL (triggers recovery
-            # + checkpoint if the WAL is non-empty).
             list(db2.get_contents())
         except Exception:
             pass
-
         del db2
         gc.collect()
         time.sleep(0.5)
 
-        # Diagnostic — record post-flush state so we can confirm the fix
-        # in the field. WAL should be 0 bytes; SHM may still exist (32 KB)
-        # which is normal for a closed WAL-mode DB.
+    def _log_post_flush_state(self) -> None:
+        """Diagnostic — verify the fix worked in the field.
+
+        Target: -wal = 0 B. SHM may still exist (~32 KB) which is normal
+        for a cleanly-closed WAL-mode SQLCipher DB.
+        """
         try:
-            wal = Path(path + "-wal")
+            wal = Path(str(self.db_path) + "-wal")
             wal_size = wal.stat().st_size if wal.exists() else 0
             logger.info(
                 "[OneLibrary] WAL flush complete: -wal=%d B (target 0)",
