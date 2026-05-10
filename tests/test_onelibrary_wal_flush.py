@@ -98,7 +98,17 @@ def main():
 
         source = FakeSource(make_tracks(8))
 
-        events = list(writer.sync(source, audio_copy=False, copy_anlz=False, playlist_filter=["pl1"]))
+        # Test the OneLibrary-only path (write_pdb=False) — this is the
+        # default in usb_manager.py since the PDB writer's empty_candidate
+        # field still doesn't match Pioneer's F: drive reference and
+        # triggers a corruption dialog in Rekordbox 7.
+        events = list(writer.sync(
+            source,
+            audio_copy=False,
+            copy_anlz=False,
+            playlist_filter=["pl1"],
+            write_pdb=False,
+        ))
 
         for ev in events:
             stage = ev.get("stage", "")
@@ -121,7 +131,10 @@ def main():
         print(f"  exportLibrary.db     : {db_path.stat().st_size if db_path.exists() else 'MISSING'} B")
         print(f"  exportLibrary.db-wal : {wal_path.stat().st_size if wal_path.exists() else 'absent'} B")
         print(f"  exportLibrary.db-shm : {shm_path.stat().st_size if shm_path.exists() else 'absent'} B")
-        print(f"  export.pdb           : {pdb_path.stat().st_size if pdb_path.exists() else 'MISSING'} B")
+        # With write_pdb=False the writer must NOT leave a stale PDB file
+        # on the stick — Rekordbox would still read the broken PDB.
+        print(f"  export.pdb           : {pdb_path.stat().st_size if pdb_path.exists() else 'absent (correct for write_pdb=False)'} B")
+        pdb_absent = not pdb_path.exists()
 
         # Verify Rekordbox-readable: open the DB with rbox once more (this is what
         # Rekordbox does internally — open + read all contents). If WAL is broken
@@ -152,7 +165,13 @@ def main():
             # PASS criteria
             wal_after = wal_path.stat().st_size if wal_path.exists() else 0
             written_count = len(non_placeholder)
-            ok = (wal_after == 0) and (written_count == 8) and (len(playlists) == 1) and (len(playlist_contents) == 8)
+            ok = (
+                wal_after == 0
+                and written_count == 8
+                and len(playlists) == 1
+                and len(playlist_contents) == 8
+                and pdb_absent
+            )
             print()
             print(f"WAL after re-open : {wal_after} B  (target 0)")
             print(f"Tracks written    : {written_count}/8")

@@ -973,11 +973,22 @@ class UsbSyncEngine:
                 profile["drive"],
                 dest_resolver=self._get_safe_dest_path,
             )
+            # Default-OFF for write_pdb: the legacy PDB writer's blank-page
+            # allocation doesn't match the F: drive Pioneer reference (we
+            # use one shared blank, F: uses 20 per-table blanks). On
+            # Rekordbox 7 this triggers "Device library is corrupted" on
+            # stick insert. Until the PDB structural fix lands, default to
+            # OneLibrary-only so the stick stays usable. Users on legacy
+            # CDJ-2000NXS2 firmware can opt back in via the
+            # `usb_write_legacy_pdb` setting once we know it's safe.
+            settings = UsbProfileManager.get_settings() or {}
+            write_pdb = bool(settings.get("usb_write_legacy_pdb", False))
             for ev in writer.sync(
                 source,
                 audio_copy=True,
                 copy_anlz=True,
                 playlist_filter=playlist_ids or None,
+                write_pdb=write_pdb,
             ):
                 yield ev
         except Exception as e:

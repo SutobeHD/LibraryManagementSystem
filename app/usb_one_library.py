@@ -105,6 +105,7 @@ class OneLibraryUsbWriter:
         audio_copy: bool = True,
         copy_anlz: bool = True,
         playlist_filter: Optional[List[str]] = None,
+        write_pdb: bool = True,
     ) -> Generator[Dict, None, None]:
         """Main entry: yields progress events.
 
@@ -372,11 +373,34 @@ class OneLibraryUsbWriter:
         # "Device Library" view see the same tracks + playlists. We pull
         # the data straight from the OneLibrary DB so the FKs are
         # guaranteed to line up between the two formats.
-        yield {"stage": "pdb", "message": "Writing legacy PDB…", "progress": 90}
-        try:
-            self._write_pdb_from_db(db, source)
-        except Exception as e:
-            logger.warning(f"[OneLibrary] PDB write skipped: {e}", exc_info=False)
+        #
+        # `write_pdb=False` escape hatch: the PDB writer's empty_candidate
+        # field still doesn't match the F: drive Pioneer reference (we use
+        # one global blank page; F: uses 20 per-table blanks). When the
+        # mismatched .pdb is on the stick, Rekordbox 7 prompts "Device
+        # library is corrupted" even though the OneLibrary DB itself is
+        # valid. Skipping the PDB writes lets the user keep working with
+        # OneLibrary-only sticks (CDJ-3000 / Rekordbox-7 native path)
+        # until the PDB structural fix lands.
+        if write_pdb:
+            yield {"stage": "pdb", "message": "Writing legacy PDB…", "progress": 90}
+            try:
+                self._write_pdb_from_db(db, source)
+            except Exception as e:
+                logger.warning(f"[OneLibrary] PDB write skipped: {e}", exc_info=False)
+        else:
+            # Make sure no stale PDB from a prior sync stays on the stick —
+            # otherwise Rekordbox keeps reading the old (broken) PDB and
+            # our skip would have no effect.
+            for stale in (
+                self.rb_dir / "export.pdb",
+                self.rb_dir / "exportExt.pdb",
+            ):
+                try:
+                    stale.unlink(missing_ok=True)
+                except Exception as exc:
+                    logger.debug("[OneLibrary] couldn't remove stale PDB %s: %s", stale, exc)
+            logger.info("[OneLibrary] PDB write disabled (write_pdb=False) — OneLibrary-only sync")
 
         # Stage 6 — Force WAL flush by destroying the rbox handle. WHY:
         # rbox 0.1.7 holds the SQLite connection open for the lifetime of
