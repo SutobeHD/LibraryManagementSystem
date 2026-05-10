@@ -279,12 +279,27 @@ export function stopPlayback() {
 
 /**
  * Get the current playback position on the timeline (seconds).
+ *
+ * Returns the time the user is HEARING right now, not the time the
+ * audio engine has scheduled. Web Audio's `audioContext.currentTime`
+ * is the clock the scheduler uses; samples queued at that timestamp
+ * still have to traverse `baseLatency + outputLatency` worth of audio
+ * pipeline before reaching the speakers. Without subtracting that
+ * delay, the visual playhead races ahead of the audible position by
+ * 10-50 ms (whatever the OS audio stack reports). Visible as the
+ * user-reported "visuelles geht voraus".
+ *
+ * Both latency fields are in seconds and may be undefined on older
+ * browsers — fall back to 0 in that case (no compensation, matches
+ * pre-fix behaviour).
+ *
  * @returns {number}
  */
 export function getCurrentTime() {
     if (!_isPlaying || !audioContext) return playbackOffset;
     const elapsed = audioContext.currentTime - playbackStartTime;
-    return playbackOffset + elapsed;
+    const latency = (audioContext.baseLatency || 0) + (audioContext.outputLatency || 0);
+    return Math.max(playbackOffset, playbackOffset + elapsed - latency);
 }
 
 /**
