@@ -668,7 +668,13 @@ class PdbBuilder:
             )
 
         num_tables = len(TABLE_ORDER)
-        next_unused = 1 + len(all_pages)
+        # Allocate ONE all-zero blank page at end of file. F: drive Pioneer
+        # exports always have at least one such page (4096 bytes of 0x00)
+        # that descriptors' `empty_candidate` field references — Rekordbox
+        # follows that pointer when allocating new rows. Pointing past EOF
+        # (no real page there) is what made it flag the library as corrupt.
+        blank_page_idx = 1 + len(all_pages)
+        next_unused = blank_page_idx + 1
 
         # Patch terminator next_page values: real Rekordbox writes
         # `next_unused_page` (past the end of the file) on the last page in
@@ -699,19 +705,14 @@ class PdbBuilder:
         for table_type in TABLE_ORDER:
             first = first_page_per_type.get(table_type, 0)
             last = last_page_per_type.get(table_type, 0)
-            # empty_candidate = next_unused (past EOF). Verified vs. F: drive:
-            #   TRACKS:  empty=55, last=54, next_unused=56 → empty between last and next_unused
-            #   LABELS:  empty=10, last=9                  → empty = last+1
-            #   GENRES:  empty=53, last=4                  → empty in pre-allocated pool
-            # Common invariant across all 20 F: descriptors: empty_candidate
-            # > last_page (always points to a page that DOESN'T contain
-            # current table's data). Our previous value `empty=last_page`
-            # pointed to a USED data page, which Rekordbox rejects as
-            # "Device library is corrupted" because following empty_candidate
-            # to allocate a new row hits a heap that's already full.
-            # Setting it to next_unused (1 past EOF) is the safe linear-alloc
-            # equivalent of Pioneer's pre-allocated empty pool.
-            header += struct.pack("<IIII", table_type, next_unused, first, last)
+            # empty_candidate = blank page index. Real Rekordbox exports
+            # ALWAYS have empty_candidate point to a real all-zero page that
+            # exists in the file; Rekordbox follows it when allocating new
+            # rows. Setting it past-EOF (no real page) made Rekordbox flag
+            # the device library as corrupted on stick insert. Verified F:
+            # drive: every descriptor's empty_candidate is a valid index of
+            # an all-zero blank page (e.g. 2, 4, 6, 10, 12, 20, 41-49, 51-53).
+            header += struct.pack("<IIII", table_type, blank_page_idx, first, last)
 
         if len(header) > PDB_PAGE_SIZE:
             raise ValueError(f"File header overflow: {len(header)} bytes")
@@ -720,6 +721,10 @@ class PdbBuilder:
         out = bytearray(header)
         for p in all_pages:
             out.extend(p.build())
+        # Append the all-zero blank page that descriptors' empty_candidate
+        # points to. F: drive convention — Rekordbox follows that pointer
+        # when allocating new rows.
+        out.extend(b"\x00" * PDB_PAGE_SIZE)
         return bytes(out)
 
 
@@ -791,9 +796,13 @@ def write_export_pdb(
         return None
 
 
-EXT_TABLE_ORDER = [0x00, 0x01, 0x02, 0x03, 0x04]
-"""exportExt.pdb has its own 5-entry table directory: 0x03 = tags,
-0x04 = tag_tracks (matches reverse-engineered Rekordbox 6 sticks).
+EXT_TABLE_ORDER = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
+"""exportExt.pdb has its own 9-entry table directory (verified vs.
+F: drive Pioneer reference). Tables 0x03 = tags, 0x04 = tag_tracks
+are the only ones we populate. Tables 0..2 and 5..8 stay empty
+(single index page each) but MUST be declared in the file header —
+omitting them made Rekordbox flag the device library as corrupted
+because num_tables=5 contradicted the F: drive value of 9.
 Tables 0..2 exist as placeholders for forward-compat — Rekordbox
 allocates them but leaves them empty on libraries with no MyTags."""
 
@@ -919,7 +928,9 @@ class PdbExtBuilder:
             )
 
         num_tables = len(EXT_TABLE_ORDER)
-        next_unused = 1 + len(all_pages)
+        # Same blank-page allocation as PdbBuilder — see PdbBuilder.build().
+        blank_page_idx = 1 + len(all_pages)
+        next_unused = blank_page_idx + 1
         # See PdbBuilder.build() — patch chain-terminator next_page=0 to
         # next_unused_page so Rekordbox doesn't follow a chain into page 0
         # (which is the file header).
@@ -937,11 +948,10 @@ class PdbExtBuilder:
         for table_type in EXT_TABLE_ORDER:
             first = first_page_per_type.get(table_type, 0)
             last = last_page_per_type.get(table_type, 0)
-            # See PdbBuilder.build() — empty_candidate must point to a page
-            # WITHOUT current table's data. F: drive uses next_unused or a
-            # pre-allocated empty page. Pointing to last_page (a USED page)
-            # makes Rekordbox flag the device library as corrupted.
-            header += struct.pack("<IIII", table_type, next_unused, first, last)
+            # See PdbBuilder.build() — empty_candidate must point to a real
+            # all-zero blank page that exists in the file. Pointing to a
+            # USED page or past EOF makes Rekordbox flag corruption.
+            header += struct.pack("<IIII", table_type, blank_page_idx, first, last)
         if len(header) > PDB_PAGE_SIZE:
             raise ValueError(f"Ext header overflow: {len(header)} bytes")
         header += b"\x00" * (PDB_PAGE_SIZE - len(header))
@@ -949,6 +959,8 @@ class PdbExtBuilder:
         out = bytearray(header)
         for p in all_pages:
             out.extend(p.build())
+        # Append the all-zero blank page (see PdbBuilder.build()).
+        out.extend(b"\x00" * PDB_PAGE_SIZE)
         return bytes(out)
 
 

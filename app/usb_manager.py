@@ -274,11 +274,17 @@ class UsbDetector:
             pioneer_path = Path(drive) / cls.PIONEER_MARKER
             rb_path = pioneer_path / "rekordbox"
             rb_path.mkdir(parents=True, exist_ok=True)
-            
-            # The .PIONEER hidden directory is often checked by CDJs
-            hidden_pioneer = Path(drive) / ".PIONEER"
-            hidden_pioneer.mkdir(parents=True, exist_ok=True)
-            
+
+            # NOTE: F: drive Pioneer reference does NOT have a `.PIONEER`
+            # hidden folder nor a `DEVICE.PIONEER` marker file — both were
+            # speculative workarounds we added based on a forum post.
+            # Real Rekordbox-exported sticks just have:
+            #   /PIONEER/{MYSETTING.DAT, MYSETTING2.DAT, DJMMYSETTING.DAT,
+            #             DEVSETTING.DAT, djprofile.nxs, rekordbox/, Artwork/,
+            #             USBANLZ/, extracted/}
+            # /Contents/<Artist>/<Title>/<file>.m4a
+            # We mirror that shape exactly — no extra .PIONEER nor DEVICE.PIONEER.
+
             # Create default DEVSETTING files inside PIONEER
             settings_files = {
                 "DEVSETTING.DAT": b"\x00" * 140,
@@ -288,10 +294,6 @@ class UsbDetector:
             }
             for name, content in settings_files.items():
                 (pioneer_path / name).write_bytes(content)
-
-            # CDJ device-identification marker (some firmware needs this to mount
-            # the stick as a Rekordbox device).
-            cls._write_device_pioneer(pioneer_path)
 
             logger.info(f"Initialized Rekordbox library at {rb_path}")
             
@@ -745,8 +747,9 @@ class UsbSyncEngine:
         self.usb_rb.mkdir(parents=True, exist_ok=True)
         self.usb_anlz.mkdir(parents=True, exist_ok=True)
         (self.usb_pioneer / "Artwork").mkdir(exist_ok=True)
-        # Ensure CDJ device-identification marker exists on already-prepared sticks.
-        UsbDetector._write_device_pioneer(self.usb_pioneer)
+        # NOTE: DEVICE.PIONEER + .PIONEER hidden folder removed — F: drive
+        # Pioneer reference does not have them. They were speculative
+        # additions that never matched real Rekordbox-exported sticks.
 
         # Seed MYSETTING / MYSETTING2 / DJMMYSETTING with pyrekordbox factory
         # defaults if they're missing. The user can later overwrite these via
@@ -1673,7 +1676,7 @@ class UsbActions:
                 if proc.returncode != 0:
                     return {"status": "error", "message": (proc.stderr or proc.stdout or "Format failed").strip()}
 
-                # Re-create PIONEER skeleton + DEVICE.PIONEER marker.
+                # Re-create PIONEER skeleton (settings DATs).
                 drive_root = f"{drive_letter}:\\"
                 UsbDetector.initialize_usb(drive_root)
                 return {
