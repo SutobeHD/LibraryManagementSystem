@@ -90,6 +90,7 @@ export function createInitialState(overrides = {}) {
         // UI state
         activeTool: 'select',  // 'select' | 'split' | 'trim'
         clipboard: [],         // Array of regions to paste
+        clipboardSpan: 0,      // Total span of last copy (selection-range width)
 
         ...overrides,
     };
@@ -277,11 +278,20 @@ export function dawReducer(state, action) {
 
             let regionsToCopy = [];
             let copyStart = 0;
+            // Total span of the user's selection. When a time-range was
+            // selected this MUST equal range.end - range.start, even if
+            // the regions inside don't fully cover the range. Otherwise
+            // PASTE_INSERT's ripple shift falls short by the trailing
+            // (or leading) empty space and the next region snuggles up
+            // against the paste — the visible "missing half between two
+            // region lines" the user reported.
+            let clipboardSpan = 0;
 
             // 1. Check for Time Selection Range
             if (state.selectionRange && Math.abs(state.selectionRange.end - state.selectionRange.start) > 0.001) {
                 const { start, end } = state.selectionRange;
                 copyStart = start;
+                clipboardSpan = end - start;
 
                 // Find regions intersecting the selection range
                 const intersecting = state.regions.filter(r =>
@@ -313,6 +323,12 @@ export function dawReducer(state, action) {
                 if (regionsToCopy.length > 0) {
                     regionsToCopy.sort((a, b) => a.timelineStart - b.timelineStart);
                     copyStart = regionsToCopy[0].timelineStart;
+                    // For whole-region selection, span = first start → last end
+                    const lastEnd = regionsToCopy.reduce(
+                        (acc, r) => Math.max(acc, r.timelineStart + r.duration),
+                        copyStart
+                    );
+                    clipboardSpan = lastEnd - copyStart;
                 }
             }
 
@@ -327,7 +343,7 @@ export function dawReducer(state, action) {
                 _offset: r.timelineStart - copyStart
             }));
 
-            return { ...state, clipboard: clipboardData };
+            return { ...state, clipboard: clipboardData, clipboardSpan };
         }
 
         case 'PASTE_INSERT': {
@@ -335,7 +351,20 @@ export function dawReducer(state, action) {
             if (state.clipboard.length === 0) return state;
 
             const insertTime = state.playhead;
-            const clipboardDuration = state.clipboard.reduce((acc, r) => Math.max(acc, r._offset + r.duration), 0);
+            // Prefer the explicit clipboardSpan stored at copy time (full
+            // selection-range width or first-start → last-end). Fall back
+            // to summing offsets+durations only for legacy clipboards from
+            // pre-fix sessions where the field wasn't recorded — without
+            // the span, trailing empty space in the original selection is
+            // lost and the next region drifts by that amount.
+            const contentSpan = state.clipboard.reduce(
+                (acc, r) => Math.max(acc, r._offset + r.duration),
+                0
+            );
+            const clipboardDuration = Math.max(
+                state.clipboardSpan ?? 0,
+                contentSpan
+            );
 
             let tempRegions = [...state.regions];
 
