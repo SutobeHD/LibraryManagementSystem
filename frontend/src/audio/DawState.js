@@ -99,8 +99,75 @@ export function createInitialState(overrides = {}) {
 // ─── REDUCER ───────────────────────────────────────────────────────────────────
 
 /**
+ * Coerce a region into a self-consistent state. Many mutation paths
+ * (drag, resize, project hydration, third-party tooling that wrote
+ * .rbep files) leave one of duration/sourceDuration/sourceEnd stale
+ * relative to the others — the export renderer trusts sourceDuration,
+ * the playback engine prefers sourceDuration but falls back to
+ * sourceEnd, and the timeline visual reads timelineStart + duration.
+ * Mismatches manifest as audio cutting out before the visible region
+ * ends, audio bleeding past the visible right edge, or export
+ * sounding pitch-shifted vs. live playback. Normalising at every
+ * dispatch makes those classes of bug structurally impossible.
+ *
+ * Rules (in priority order):
+ *   1. duration > 0 (drop region if zero/negative)
+ *   2. sourceStart defaults to 0
+ *   3. sourceDuration mirrors duration (1:1 native-rate playback);
+ *      if a caller already set a DIFFERENT sourceDuration we keep it
+ *      and warn — that's intentional time-stretching, rare for cut/
+ *      paste workflows but legal for tempo-locked .rbep imports
+ *   4. sourceEnd is always sourceStart + sourceDuration
+ *   5. timelineEnd is always timelineStart + duration
+ */
+function normalizeRegion(r) {
+    if (!r) return r;
+    const duration = Math.max(0, r.duration || 0);
+    if (duration === 0) return null;  // caller will filter
+    const timelineStart = Math.max(0, r.timelineStart || 0);
+    const sourceStart = Math.max(0, r.sourceStart || 0);
+    let sourceDuration = r.sourceDuration;
+    if (sourceDuration == null || sourceDuration <= 0) {
+        // Fall back to sourceEnd-derived duration if available, else mirror timeline
+        if (r.sourceEnd != null && r.sourceEnd > sourceStart) {
+            sourceDuration = r.sourceEnd - sourceStart;
+        } else {
+            sourceDuration = duration;
+        }
+    }
+    // If the caller's intent was time-stretching (explicit mismatch by
+    // > 1ms), let it through but log so we can see this in the console
+    // when debugging weird playback. Cut/paste produces match.
+    if (Math.abs(sourceDuration - duration) > 0.001) {
+        console.warn(
+            '[normalizeRegion] sourceDuration != duration — keeping as time-stretch',
+            { id: r.id, timelineStart, duration, sourceDuration }
+        );
+    }
+    return {
+        ...r,
+        timelineStart,
+        duration,
+        timelineEnd: timelineStart + duration,
+        sourceStart,
+        sourceDuration,
+        sourceEnd: sourceStart + sourceDuration,
+    };
+}
+
+function normalizeRegions(regions) {
+    if (!Array.isArray(regions)) return [];
+    const out = [];
+    for (const r of regions) {
+        const n = normalizeRegion(r);
+        if (n) out.push(n);
+    }
+    return out;
+}
+
+/**
  * DAW state reducer. All state changes go through here.
- * 
+ *
  * @param {Object} state - Current state
  * @param {Object} action - { type, payload }
  * @returns {Object} New state
@@ -149,12 +216,14 @@ export function dawReducer(state, action) {
         case 'SET_REGIONS':
             return {
                 ...state,
-                regions: action.payload,
+                regions: normalizeRegions(action.payload),
                 project: { ...state.project, dirty: true },
             };
 
         case 'ADD_REGION': {
-            const newRegions = [...state.regions, action.payload]
+            const normalized = normalizeRegion(action.payload);
+            if (!normalized) return state;
+            const newRegions = [...state.regions, normalized]
                 .sort((a, b) => a.timelineStart - b.timelineStart);
             return {
                 ...state,
@@ -180,7 +249,7 @@ export function dawReducer(state, action) {
         case 'UPDATE_REGION': {
             const { id, updates } = action.payload;
             const updatedRegions = state.regions.map(r =>
-                r.id === id ? { ...r, ...updates } : r
+                r.id === id ? (normalizeRegion({ ...r, ...updates }) || r) : r
             );
             return {
                 ...state,
@@ -225,10 +294,11 @@ export function dawReducer(state, action) {
                 _songBeatEnd: undefined,
             };
 
-            const newRegions = state.regions
-                .filter(r => r.id !== regionId)
-                .concat([leftRegion, rightRegion])
-                .sort((a, b) => a.timelineStart - b.timelineStart);
+            const newRegions = normalizeRegions(
+                state.regions
+                    .filter(r => r.id !== regionId)
+                    .concat([leftRegion, rightRegion])
+            ).sort((a, b) => a.timelineStart - b.timelineStart);
 
             return {
                 ...state,
@@ -471,7 +541,9 @@ export function dawReducer(state, action) {
                 return r;
             });
 
-            const finalRegions = [...shiftedRegions, ...pastedRegions].sort((a, b) => a.timelineStart - b.timelineStart);
+            const finalRegions = normalizeRegions(
+                [...shiftedRegions, ...pastedRegions]
+            ).sort((a, b) => a.timelineStart - b.timelineStart);
 
             return {
                 ...state,
@@ -498,7 +570,9 @@ export function dawReducer(state, action) {
                 timelineEnd: r.timelineStart + duration + r.duration
             }));
 
-            const finalRegions = [...state.regions, ...duplicates].sort((a, b) => a.timelineStart - b.timelineStart);
+            const finalRegions = normalizeRegions(
+                [...state.regions, ...duplicates]
+            ).sort((a, b) => a.timelineStart - b.timelineStart);
 
             return {
                 ...state,
@@ -742,9 +816,15 @@ export function dawReducer(state, action) {
 
         // ── Hydrate (load entire project state) ──
         case 'HYDRATE':
+            // Loaded projects (.rbep / saved DAW state) routinely have stale
+            // sourceEnd / mismatched sourceDuration left over by older
+            // codepaths or third-party tools. Normalising on hydrate fixes
+            // those at load time so the user can't carry old corruption
+            // forward indefinitely.
             return {
                 ...state,
                 ...action.payload,
+                regions: normalizeRegions(action.payload.regions || state.regions),
                 undoStack: [],
                 redoStack: [],
                 selectedRegionIds: new Set(),
