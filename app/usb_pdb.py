@@ -254,6 +254,14 @@ class _Page:
                 g_offsets.append(0)
             rows_in_group = min(16, num_rows - g_start)
             present_flags = ((1 << rows_in_group) - 1) & 0xFFFF
+            # F: drive convention: block[34:36] = 1 << (rows_in_group - 1)
+            # — bit position of the last row in this group. Verified across
+            # F: pages 4 (1 row → 0x0001), 6 (14 → 0x2000), 8 (16 → 0x8000),
+            # 12 (10 → 0x0200). For the pre-baked "colors" table F: writes
+            # the full present_flags here instead — likely Pioneer-tool
+            # internal state we don't track. Going with the row-bit
+            # convention since it matches user-data tables.
+            last_row_bit = (1 << (rows_in_group - 1)) & 0xFFFF if rows_in_group > 0 else 0
 
             block = bytearray(36)
             for i in range(16):
@@ -261,16 +269,39 @@ class _Page:
                     "<H", g_offsets[i] & 0xFFFF
                 )
             struct.pack_into("<H", block, 32, present_flags)
+            struct.pack_into("<H", block, 34, last_row_bit)
             groups.append(bytes(block))
 
         index_bytes = b"".join(reversed(groups))
 
         used_size = len(heap)
-        free_size = PDB_PAGE_SIZE - PDB_PAGE_HEADER_LEN - len(index_bytes) - used_size
+        # F: drive convention: free_size counts the row-offset footer at its
+        # EFFECTIVE size (the bytes that hold real data), not the physical
+        # 36-byte block size. Verified across 6 F: pages with row counts
+        # 1, 8, 10, 14, 16, 27:
+        #   effective_footer = (full_groups × 36) + (2 × partial_rows + 4)
+        #     full_groups   = num_rows // 16
+        #     partial_rows  = num_rows  % 16   (0..15; if 0 and num_rows>0
+        #                                        then the last group is full,
+        #                                        no partial-only entry)
+        # The PHYSICAL footer (what we actually write to disk) is still the
+        # full 36-byte blocks — but Rekordbox uses the EFFECTIVE size to
+        # validate page accounting. Setting free_size from len(index_bytes)
+        # made every multi-group page look ~30 bytes too small.
+        if num_rows == 0:
+            effective_footer = 4   # one empty group header (slot 0 + flags)
+        else:
+            full_groups = num_rows // 16
+            partial = num_rows % 16
+            if partial == 0:
+                effective_footer = full_groups * 36
+            else:
+                effective_footer = full_groups * 36 + (2 * partial + 4)
+        free_size = PDB_PAGE_SIZE - PDB_PAGE_HEADER_LEN - effective_footer - used_size
         if free_size < 0:
             raise ValueError(
                 f"Page overflow: rows={num_rows} heap={used_size} "
-                f"index={len(index_bytes)} budget={PDB_PAGE_SIZE - PDB_PAGE_HEADER_LEN}"
+                f"footer_eff={effective_footer} budget={PDB_PAGE_SIZE - PDB_PAGE_HEADER_LEN}"
             )
 
         rc = (num_rows << 13) | num_row_offsets
@@ -283,9 +314,21 @@ class _Page:
         )
         page_header = page_header[:0x18] + row_counts_bytes + bytes([self.page_flags])
         page_header += struct.pack("<HH", free_size & 0xFFFF, used_size & 0xFFFF)
-        # Data pages: tx_count/tx_idx = 0x1FFF sentinel (no transaction),
-        # u6/u7 = 0 per F: drive observation.
-        page_header += struct.pack("<HHHH", 0x1FFF, 0x1FFF, 0, 0)
+        # F: drive convention for tx_count + tx_idx on data pages:
+        #   single group (≤16 rows): tx_count=1, tx_idx=num_rows-1
+        #   multi-group   (>16):    tx_count=num_rows, tx_idx=0
+        # Pages with deletions or pre-baked tables use different values
+        # (sentinel 0x1FFF for "no current transaction", or num_rows
+        # mirror like the colors page). For our writer's fresh-write
+        # case the rule above matches every F: drive page we measured
+        # (4, 6, 8, 12, 16, 18, 28, 34, 36, 38).
+        if num_rows == 0:
+            tx_count, tx_idx = 0x1FFF, 0x1FFF
+        elif num_rows <= 16:
+            tx_count, tx_idx = 1, max(num_rows - 1, 0)
+        else:
+            tx_count, tx_idx = num_rows, 0
+        page_header += struct.pack("<HHHH", tx_count, tx_idx, 0, 0)
         assert len(page_header) == PDB_PAGE_HEADER_LEN
 
         body = bytearray(PDB_PAGE_SIZE)
@@ -298,50 +341,114 @@ class _Page:
 # ─── Row encoders ─────────────────────────────────────────────────────────
 
 def encode_artist_row(artist_id: int, name: str) -> bytes:
-    """Subtype 0x0064 (far name) — works for any name length."""
+    """Artist row — subtype 0x0060 (far name).
+
+    Verified F: drive byte layout (page 6, artist id=1 "Brojski"):
+        60 00       u16 subtype (0x0060)
+        00 00       u16 padding
+        01 00 00 00 u32 id
+        03          u8 literal (always 0x03 — observed)
+        0A          u8 string_offset (= 10, position of DeviceSQL string)
+        ..          DeviceSQL string (header byte + ASCII)
+
+    Header is 10 bytes total. Previous writer used subtype 0x0064 with
+    a 12-byte header (u16 literal/offset instead of u8) — Rekordbox
+    rejects the page on insert.
+    """
     name_str = encode_devicesql_string(name)
-    # Far-name layout: header (12 bytes), then name string follows on heap
-    # subtype(2) shift(2) id(4) literal(2) ofs(2) = 12 bytes, name appended
-    header = struct.pack("<HHIHH", 0x0064, 0, artist_id, 0x0003, 12)
+    header = struct.pack("<HHIBB", 0x0060, 0, artist_id, 0x03, 10)
     return _aligned(header + name_str)
 
 
 def encode_album_row(album_id: int, name: str, artist_id: int = 0) -> bytes:
-    """Subtype 0x0084 (far name)."""
+    """Album row — subtype 0x0080 (far name).
+
+    Verified F: drive byte layout (page 8, album id=1 "Dark Serenade"):
+        80 00       u16 subtype (0x0080)
+        00 00       u16 padding
+        00 00 00 00 u32 unknown_1 (always 0 observed)
+        00 00 00 00 u32 artist_id (= 0 in F: drive sample)
+        01 00 00 00 u32 album_id
+        00 00 00 00 u32 unknown_2 (always 0 observed)
+        03          u8 literal (always 0x03)
+        16          u8 string_offset (= 22)
+        ..          DeviceSQL string
+
+    Header is 22 bytes total. Previous writer used 0x0084 + 20-byte
+    header — Rekordbox rejects.
+    """
     name_str = encode_devicesql_string(name)
-    # 16-byte header + name
-    header = struct.pack("<HHIIIHH",
-        0x0084, 0, artist_id, album_id, 0, 0x0003, 16)
+    header = struct.pack("<HHIIIIBB",
+        0x0080, 0, 0, artist_id, album_id, 0, 0x03, 22)
     return _aligned(header + name_str)
 
 
 def encode_key_row(key_id: int, name: str) -> bytes:
-    """Key table — same shape as Genre/Label: id + name."""
+    """Key row — id + id_mirror + DeviceSQL name.
+
+    Verified F: drive byte layout (page 12, key id=1 "11A"):
+        01 00 00 00 u32 id
+        01 00 00 00 u32 id_mirror (== id, NOT a constant 1)
+        09 31 31 41 DeviceSQL string ("11A")
+
+    Previous writer wrote constant `1` for the mirror — wrong for any
+    key id != 1.
+    """
     name_str = encode_devicesql_string(name)
-    header = struct.pack("<II", key_id, 1)  # second u32 = ID2 (mirror)
+    header = struct.pack("<II", key_id, key_id)
     return _aligned(header + name_str)
 
 
 def encode_color_row(color_id: int, name: str) -> bytes:
+    """Color row — 8-byte header with id mirror.
+
+    Verified F: drive byte layout (page 14, color id=1 "Vocal"):
+        00 00 00 00 u32 padding
+        01          u8 color_id
+        01          u8 color_id_mirror (== color_id, NOT 0)
+        00 00       u16 padding
+        0D 56 6F .. DeviceSQL string
+
+    Header is 8 bytes total. Previous writer had 9 bytes and wrote 0
+    for the mirror — both wrong.
+    """
     name_str = encode_devicesql_string(name)
-    header = struct.pack("<IBBHB",
-        0,                    # padding
-        color_id & 0xFF,      # u8 id
-        0,                    # u8 unknown
-        0,                    # u16 unknown
-        0)                    # u8 unknown
+    header = struct.pack("<IBBH",
+        0,                       # u32 padding
+        color_id & 0xFF,         # u8 color_id
+        color_id & 0xFF,         # u8 color_id mirror
+        0)                       # u16 padding
     return _aligned(header + name_str)
 
 
 def encode_label_row(label_id: int, name: str) -> bytes:
+    """Label row — id + DeviceSQL name (no mirror, like Genre).
+
+    F: drive label table is empty in the reference dump so the layout
+    can't be verified directly, but pyrekordbox sources and the parallel
+    structure with Genre/Artist rows give high confidence in this
+    format. Previous writer added a constant `1` after the id — same
+    bug as encode_genre_row.
+    """
     name_str = encode_devicesql_string(name)
-    header = struct.pack("<II", label_id, 1)
+    header = struct.pack("<I", label_id)
     return _aligned(header + name_str)
 
 
 def encode_genre_row(genre_id: int, name: str) -> bytes:
+    """Genre row — id + DeviceSQL name (no mirror, no constant).
+
+    Verified F: drive byte layout (page 4, genre id=1 "Raw"):
+        01 00 00 00 u32 id
+        09 52 61 77 DeviceSQL string ("Raw")
+
+    Total: 8 bytes. Previous writer added a constant `1` u32 after the
+    id (4 extra bytes), which made every page's used_size larger than
+    F: and shifted the row index footer — Rekordbox flagged the table
+    as corrupted.
+    """
     name_str = encode_devicesql_string(name)
-    header = struct.pack("<II", genre_id, 1)
+    header = struct.pack("<I", genre_id)
     return _aligned(header + name_str)
 
 
@@ -739,7 +846,7 @@ class PdbBuilder:
             PDB_PAGE_SIZE,           # 0x04 page_size
             num_tables,              # 0x08 num_tables
             next_unused,             # 0x0C next_unused_page
-            5,                       # 0x10 unknown — F: 4, observed elsewhere 5
+            4,                       # 0x10 unknown — F: drive observed 4
             page_seq + 1,            # 0x14 next sequence to allocate
             0, 0,                    # 0x18, 0x1C
         )
