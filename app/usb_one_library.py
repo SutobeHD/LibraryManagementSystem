@@ -97,7 +97,13 @@ class OneLibraryUsbWriter:
     # around rbox 0.1.7's broken create_content path.
     TEMPLATE_DB = Path(__file__).parent / "templates" / "exportLibrary_template.db"
 
-    def sync(self, source, audio_copy: bool = True, copy_anlz: bool = True) -> Generator[Dict, None, None]:
+    def sync(
+        self,
+        source,
+        audio_copy: bool = True,
+        copy_anlz: bool = True,
+        playlist_filter: Optional[List[str]] = None,
+    ) -> Generator[Dict, None, None]:
         """Main entry: yields progress events.
 
         TEMPLATE-BASED APPROACH (rbox 0.1.7 workaround):
@@ -120,6 +126,11 @@ class OneLibraryUsbWriter:
         at the template's slot count (currently 16 from F: drive). Beyond
         that we skip the extras and log clearly. The legacy rekordbox.xml
         export (always written) covers the full library.
+
+        `playlist_filter` (optional list of playlist IDs from the source):
+        when set, only tracks reachable through these playlists are written,
+        and the playlist tree on USB is restricted to those playlists +
+        their folder ancestors. None / empty list = full library.
         """
         if not RBOX_AVAILABLE:
             yield {"stage": "error", "message": "rbox library missing — cannot write OneLibrary", "progress": -1}
@@ -210,6 +221,29 @@ class OneLibraryUsbWriter:
 
         content_id_map: Dict[str, str] = {}
         all_tracks = list(source.iter_tracks())
+
+        # Restrict to the playlists the user checked in the UI. Without this
+        # the OneLibrary placeholder slots get overwritten with the first N
+        # tracks of the entire library — playlist selection in the UI was a
+        # no-op for everything except SetSticks.
+        if playlist_filter:
+            target_ids = set()
+            for pid in playlist_filter:
+                try:
+                    target_ids.update(
+                        str(tid) for tid in source.get_playlist_track_ids(pid)
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "[OneLibrary] couldn't resolve playlist %s: %s", pid, exc,
+                    )
+            before = len(all_tracks)
+            all_tracks = [t for t in all_tracks if str(t.get("id")) in target_ids]
+            logger.info(
+                "[OneLibrary] Playlist filter: %d/%d tracks kept (%d playlists)",
+                len(all_tracks), before, len(playlist_filter),
+            )
+
         total = len(all_tracks)
         used_slots = 0
         skipped_overflow = 0
@@ -318,7 +352,7 @@ class OneLibraryUsbWriter:
         # Stage 4 — playlist tree (create_playlist works, no template needed)
         yield {"stage": "playlists", "message": "Writing playlist tree…", "progress": 80}
         try:
-            self._write_playlists(db, source, content_id_map)
+            self._write_playlists(db, source, content_id_map, playlist_filter)
         except Exception as e:
             logger.warning(f"[OneLibrary] playlist tree write skipped: {e}")
 
@@ -778,7 +812,13 @@ class OneLibraryUsbWriter:
     def _copy_anlz_for(self, track: Dict, content_id: str, source) -> None:
         self._generate_or_copy_anlz_for(track, content_id, source)
 
-    def _write_playlists(self, db, source, content_id_map: Dict[str, str]) -> None:
+    def _write_playlists(
+        self,
+        db,
+        source,
+        content_id_map: Dict[str, str],
+        playlist_filter: Optional[List[str]] = None,
+    ) -> None:
         """Walks playlist tree, creates folders / playlists, links tracks.
 
         rbox 0.1.7 caveat: `create_playlist_content(playlist_id, content_id,
@@ -789,12 +829,41 @@ class OneLibraryUsbWriter:
 
         System playlists like "Import" are filtered out — see
         usb_manager.EXCLUDED_USB_PLAYLISTS.
+
+        When `playlist_filter` is set, only those playlists (plus the folder
+        ancestors needed to reach them in the tree) are emitted — keeps the
+        CDJ menu clean when the user picks a subset to push.
         """
         from .usb_manager import _is_excluded_playlist
         playlists = [
             p for p in source.iter_playlists()
             if not _is_excluded_playlist(p.get("name", ""))
         ]
+
+        # Prune to selected playlists + folder ancestors. We walk parent_id
+        # chains so a deeply nested checked playlist still has its folders
+        # written first (otherwise create_playlist would orphan it).
+        if playlist_filter:
+            keep = {str(p) for p in playlist_filter}
+            by_id = {str(p["id"]): p for p in playlists}
+            ancestors: set = set()
+            for pid in list(keep):
+                cur = by_id.get(pid)
+                while cur:
+                    parent = str(cur.get("parent_id") or "")
+                    if not parent or parent.upper() == "ROOT":
+                        break
+                    if parent in ancestors or parent in keep:
+                        break
+                    ancestors.add(parent)
+                    cur = by_id.get(parent)
+            keep |= ancestors
+            before = len(playlists)
+            playlists = [p for p in playlists if str(p["id"]) in keep]
+            logger.info(
+                "[OneLibrary] Playlist filter: %d/%d playlists kept (incl. %d ancestor folders)",
+                len(playlists), before, len(ancestors),
+            )
         # Build parent → children map
         by_parent: Dict[str, List[Dict]] = {}
         for p in playlists:

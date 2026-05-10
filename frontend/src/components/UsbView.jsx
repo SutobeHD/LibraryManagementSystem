@@ -706,12 +706,12 @@ const UsbView = () => {
 
     const runSync = async () => {
         if (!sel) return;
-        // Sync-Inhalt aus USB-Typ ableiten — keine doppelte Auswahl
-        const isPlaylistOnly = sel.type === 'SetStick';
-        const sync_type      = isPlaylistOnly ? 'playlists' : 'collection';
-        const playlistIds    = isPlaylistOnly ? (sel.sync_playlists || []) : [];
-        if (isPlaylistOnly && playlistIds.length === 0) {
-            toast.error('Select at least one playlist for the Set Stick');
+        // Always playlist-scoped: only checked playlists are pushed to USB.
+        // Both Pioneer formats (exportLibrary.db + export.pdb) + rekordbox.xml
+        // are written. User selects playlists via the sidebar tree → toggle.
+        const playlistIds = sel.sync_playlists || [];
+        if (playlistIds.length === 0) {
+            toast.error('Select at least one playlist to sync');
             return;
         }
         setSyncing(sel.device_id);
@@ -719,7 +719,7 @@ const UsbView = () => {
         try {
             const res = await api.post('/api/usb/sync', {
                 device_id: sel.device_id,
-                sync_type,
+                sync_type: 'playlists',
                 playlist_ids: playlistIds,
                 // Always export both formats — Rekordbox auto-detects via
                 // exportLibrary.db, older CDJs / manual import use rekordbox.xml.
@@ -1186,7 +1186,8 @@ const UsbView = () => {
 
                                         <button
                                             onClick={runSync}
-                                            disabled={!!syncing || !isConnected(sel)}
+                                            disabled={!!syncing || !isConnected(sel) || !(sel.sync_playlists || []).length}
+                                            title={(sel.sync_playlists || []).length ? '' : 'Select at least one playlist'}
                                             className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed"
                                         >
                                             {syncing === sel.device_id

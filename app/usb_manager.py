@@ -941,6 +941,11 @@ class UsbSyncEngine:
         Without this both writers (when both library types are selected)
         would copy each track twice — once to <usb>/Contents and once to
         <usb>/PIONEER/Contents.
+
+        When `playlist_ids` is set, only tracks reachable through those
+        playlists are written — both into exportLibrary.db AND the mirrored
+        export.pdb. Playlist tree on USB is also pruned to only the
+        selected playlists (plus the folder ancestors needed to reach them).
         """
         try:
             from .usb_one_library import OneLibraryUsbWriter
@@ -952,7 +957,12 @@ class UsbSyncEngine:
                 profile["drive"],
                 dest_resolver=self._get_safe_dest_path,
             )
-            for ev in writer.sync(source, audio_copy=True, copy_anlz=True):
+            for ev in writer.sync(
+                source,
+                audio_copy=True,
+                copy_anlz=True,
+                playlist_filter=playlist_ids or None,
+            ):
                 yield ev
         except Exception as e:
             logger.error(f"OneLibrary sync failed: {e}", exc_info=True)
