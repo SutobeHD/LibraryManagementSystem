@@ -74,6 +74,12 @@ const DjEditDaw = ({ track: initialTrack }) => {
     // activeTrack loadTrack useEffect to skip re-initializing the regions/audio,
     // so it doesn't overwrite the 9 parsed regions with a single default region.
     const skipNextAutoLoad = useRef(false);
+    // When set (to a timeline-time number), the next regions-changed effect
+    // will resume playback from that position with the freshly-mutated
+    // regions array. Used by paste/duplicate to make audio reflect new
+    // regions immediately instead of after the user manually re-pressing
+    // play. Cleared once consumed.
+    const pendingResumeAt = useRef(null);
 
     // Configurable keyboard shortcuts — loaded from /api/settings on mount.
     // Stored in a ref (not state) so the keydown handler closure always reads
@@ -254,6 +260,29 @@ const DjEditDaw = ({ track: initialTrack }) => {
             if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
         };
     }, [state.isPlaying]);
+
+    // ─── RESUME PLAYBACK AFTER MID-PLAYBACK PASTE / DUPLICATE ─────
+    // The keyboard handler stops Web Audio + sets pendingResumeAt before
+    // dispatching PASTE_INSERT or DUPLICATE_SELECTION. This effect then
+    // fires after React commits the new regions array and re-schedules
+    // playback with the fresh regions, starting from the captured time.
+    // Without it, the audio engine would keep playing the source.start()
+    // calls it had queued before the mutation — the user's reported
+    // "audio von davor" symptom.
+    useEffect(() => {
+        const resumeAt = pendingResumeAt.current;
+        if (resumeAt == null) return;
+        pendingResumeAt.current = null;
+        if (!state.sourceBuffer) return;
+        DawEngine.playRegions(
+            state.regions,
+            state.sourceBuffer,
+            resumeAt,
+            state.loopEnabled ? state.loopEnd : null,
+            () => dispatch({ type: 'SET_PLAYING', payload: false })
+        );
+        dispatch({ type: 'SET_PLAYING', payload: true });
+    }, [state.regions]);
 
     // ─── FILE OPERATIONS ───
 
@@ -675,17 +704,30 @@ const DjEditDaw = ({ track: initialTrack }) => {
                 return;
             }
 
-            // Paste
+            // Paste / Duplicate — must reschedule playback if running.
+            // Web Audio's source.start() calls are queued at playRegions
+            // time and don't pick up regions added afterward. Without the
+            // restart, the user keeps hearing the OLD scheduled audio
+            // across the paste point ("audio von davor"). We mark the
+            // intent to resume; a useEffect on state.regions runs after
+            // the reducer commits and re-schedules with the fresh array.
             if (matches(e, sc().paste)) {
                 e.preventDefault();
+                if (state.isPlaying) {
+                    pendingResumeAt.current = DawEngine.getCurrentTime();
+                    DawEngine.stopPlayback();
+                }
                 dispatch({ type: 'PASTE_INSERT' });
                 toast.success('Pasted insert');
                 return;
             }
 
-            // Duplicate
             if (matches(e, sc().duplicate)) {
                 e.preventDefault();
+                if (state.isPlaying) {
+                    pendingResumeAt.current = DawEngine.getCurrentTime();
+                    DawEngine.stopPlayback();
+                }
                 dispatch({ type: 'DUPLICATE_SELECTION' });
                 toast.success('Duplicated selection');
                 return;
