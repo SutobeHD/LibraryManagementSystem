@@ -81,7 +81,8 @@ function makeBandGradient(ctx, centerY, maxAmp, bandKey) {
 const DawTimeline = React.memo(({
     state,
     dispatch,
-    canvasHeight = 280,
+    canvasHeight = null, // null = fill container (preferred). Number = fixed pixel height
+    minCanvasHeight = 200, // floor when filling container (avoid degenerate state during layout)
     onRegionClick,
     onContextMenu,
 }) => {
@@ -101,7 +102,8 @@ const DawTimeline = React.memo(({
 
     // Mutable draw state — decoupled from React renders
     const ds = useRef({
-        width: 0, height: canvasHeight, dpr: window.devicePixelRatio || 1,
+        // height starts at minimum; resize observer takes over on mount.
+        width: 0, height: canvasHeight ?? minCanvasHeight, dpr: window.devicePixelRatio || 1,
         zoom: 100, scrollX: 0, playhead: 0, isPlaying: false,
         regions: [], selectedIds: new Set(),
         bpm: 128, firstBeatSec: 0, totalDuration: 0,
@@ -183,7 +185,12 @@ const DawTimeline = React.memo(({
             const d = ds.current;
             d.dpr   = window.devicePixelRatio || 1;
             d.width = rect.width;
-            d.height = canvasHeight;
+            // Dynamic-height mode: derive from container so the timeline
+            // expands into whatever vertical space DjEditDaw's flex layout
+            // hands it. Fixed-height callers can still pass a `canvasHeight`
+            // number. `minCanvasHeight` guards against rare cases where the
+            // container reports 0 mid-mount (e.g., display:none ancestor).
+            d.height = canvasHeight ?? Math.max(minCanvasHeight, rect.height);
             const canvas = canvasRef.current;
             if (canvas) {
                 canvas.width  = Math.round(d.width  * d.dpr);
@@ -208,7 +215,7 @@ const DawTimeline = React.memo(({
             roRef.current?.disconnect();
             clearTimeout(resizeTimerRef.current);
         };
-    }, [canvasHeight]);
+    }, [canvasHeight, minCanvasHeight]);
 
     // ── MAIN RAF LOOP ─────────────────────────────────────────────────────────────
     useEffect(() => {
@@ -437,8 +444,15 @@ const DawTimeline = React.memo(({
         }
     }, [dispatch]);
 
+    // When canvasHeight is null → fill the parent (h-full); when it's a number,
+    // pin to that exact pixel height for back-compat with fixed-height callers.
+    const containerStyle = canvasHeight != null ? { height: canvasHeight } : undefined;
+    const containerClass = canvasHeight != null
+        ? 'relative w-full select-none'
+        : 'relative w-full h-full select-none';
+
     return (
-        <div ref={containerRef} className="relative w-full select-none" style={{ height: canvasHeight }}>
+        <div ref={containerRef} className={containerClass} style={containerStyle}>
             <canvas
                 ref={canvasRef}
                 className="absolute inset-0 cursor-crosshair"

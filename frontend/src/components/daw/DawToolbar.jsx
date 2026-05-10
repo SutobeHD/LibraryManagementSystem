@@ -109,17 +109,24 @@ const DawToolbar = React.memo(({ state, dispatch, onSave, onOpen, onExport, onSp
             {/* Removed Edit Tools & Undo/Redo (moved to Control Strip) */}
 
             {/* Spacer */}
-            <div className="flex-1" />
+            <div className="flex-1 min-w-4" />
 
-            {/* Track info */}
+            {/* Track info — single-line, capped to 35% of toolbar so it can't
+                collapse to "Ti..." but also can't crowd the buttons on narrow
+                windows. `flex-shrink min-w-0` lets the inner ellipsis trigger
+                instead of truncating the parent's box. */}
             {state.trackMeta.title && (
-                <div className="flex items-center gap-2 text-right min-w-0">
-                    <div className="truncate">
-                        <span className="text-xs text-ink-secondary truncate">
+                <div
+                    className="flex items-center text-right min-w-0 shrink"
+                    style={{ maxWidth: '35%' }}
+                    title={`${state.trackMeta.artist || ''} — ${state.trackMeta.title || ''}`}
+                >
+                    <div className="truncate text-xs">
+                        <span className="text-ink-secondary">
                             {state.trackMeta.artist}
                         </span>
-                        <span className="text-xs text-ink-placeholder mx-1">—</span>
-                        <span className="text-xs text-ink-primary font-medium truncate">
+                        <span className="text-ink-placeholder mx-1">—</span>
+                        <span className="text-ink-primary font-medium">
                             {state.trackMeta.title}
                         </span>
                     </div>

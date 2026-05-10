@@ -787,16 +787,18 @@ const DjEditDaw = ({ track: initialTrack }) => {
                 />
 
                 {/* Middle: Overview + Timeline Area */}
-                <div className="flex-1 flex flex-col overflow-hidden relative">
+                <div className="flex-1 flex flex-col overflow-hidden relative min-h-0">
                     {/* Waveform Overview Mini-Map (always shown, placeholder when no track) */}
                     <WaveformOverview state={state} dispatch={dispatch} />
 
                     {activeTrack ? (
-                        <div className="flex-1 relative">
+                        // min-h-0 lets this flex child shrink/grow correctly so
+                        // DawTimeline's ResizeObserver picks up the real available
+                        // height instead of staying pinned at its default.
+                        <div className="flex-1 relative min-h-0">
                             <DawTimeline
                                 state={state}
                                 dispatch={dispatch}
-                                canvasHeight={300}
                                 onRegionClick={handleRegionClick}
                             />
                             {/* Scrollbar Overlay at bottom of timeline area */}

@@ -141,9 +141,14 @@ const DawBrowser = React.memo(({ onLoadTrack, onOpenProject, isCollapsed, onTogg
                                     {searchQuery ? 'No matches' : 'No tracks loaded'}
                                 </p>
                             ) : (
-                                filteredTracks.map((track) => (
+                                filteredTracks.map((track, idx) => (
+                                    // Index fallback prevents duplicate `undefined` keys when
+                                    // the backend returns tracks without `id`/`TrackID` (e.g.,
+                                    // freshly imported rows). Without this fallback, React
+                                    // emits the "Each child in a list should have a unique
+                                    // key prop" warning every render.
                                     <div
-                                        key={track.id || track.TrackID}
+                                        key={track.id ?? track.TrackID ?? `idx-${idx}`}
                                         onDoubleClick={() => onLoadTrack?.(track)}
                                         className="flex items-center px-4 py-1 hover:bg-white/5 transition-colors group cursor-pointer border-b border-white/5 text-xs text-ink-primary"
                                     >
