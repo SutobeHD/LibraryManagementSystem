@@ -1,0 +1,15 @@
+{
+  "name": "rb-editor-pro-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tauri WebDriver E2E tests via tauri-driver + selenium-webdriver",
+  "type": "module",
+  "scripts": {
+    "test": "mocha --timeout 60000 smoke.test.js",
+    "test:all": "mocha --timeout 60000 **/*.test.js"
+  },
+  "devDependencies": {
+    "mocha": "10.7.3",
+    "selenium-webdriver": "4.25.0"
+  }
+}

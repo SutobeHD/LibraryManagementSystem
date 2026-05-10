@@ -1,7 +1,7 @@
 # FILE_MAP.md — LibraryManagementSystem
 
 > **Read this first.** One-line-per-file map of the entire codebase. Use this to find the right file for any task without searching blindly.
-> Last updated: 2026-05-05
+> Last updated: 2026-05-11
 
 ---
 
@@ -189,6 +189,22 @@
 |------|---------|
 | `docs/PROJECT_OVERVIEW.md` | High-level project overview |
 | `docs/DOWNLOAD_EVALUATION.md` | SoundCloud track download evaluation notes |
+| `docs/e2e-testing.md` | E2E interaction workflows: (A) Web Preview via `mcp__Claude_Preview__*` on Vite :5173 + FastAPI :8000, (B) Tauri WebDriver via `tauri-driver` + `msedgedriver`. Channel-picker, Selenium cheatsheet, native-dialog caveats |
+
+---
+
+## tests-e2e/ — Tauri WebDriver Tests
+
+| File | Purpose |
+|------|---------|
+| `tests-e2e/package.json` | Mocha + selenium-webdriver. Scripts: `test` (smoke), `test:all` (glob) |
+| `tests-e2e/smoke.test.js` | Boot test: connects to `tauri-driver` @ 127.0.0.1:4444, launches the built `Music Library Manager.exe`, asserts Select Mode renders + Rekordbox Live click advances UI. Override exe path via `TAURI_APP_BIN` env |
+| `tests-e2e/run-driver.ps1` | Launches `tauri-driver --port 4444 --native-driver %USERPROFILE%\.tauri-webdriver\msedgedriver.exe`. Keep terminal open while tests run |
+| `tests-e2e/.gitignore` | Excludes `node_modules/`, `package-lock.json` |
+
+External binaries (not in repo):
+- `%USERPROFILE%\.cargo\bin\tauri-driver.exe` (install: `cargo install tauri-driver --locked`)
+- `%USERPROFILE%\.tauri-webdriver\msedgedriver.exe` (must match WebView2 runtime version — currently 147.0.3912.98)
 
 ---
 
@@ -201,6 +217,7 @@
 | `docs/frontend-index.md` | React component index: props, key functions, Tauri IPC calls |
 | `docs/backend-index.md` | FastAPI routes, Python class/method index, response envelopes |
 | `docs/rust-index.md` | Tauri commands, Rust module index, event system, crate list |
+| `.claude/launch.json` | `mcp__Claude_Preview__preview_start` server definitions — named entries `backend` (`python -m app.main`, :8000) and `frontend` (`npm run dev --prefix frontend`, :5173) |
 | `.claude/agents/director.md` | Orchestrator agent — routes tasks to specialist agents |
 | `.claude/agents/frontend-agent.md` | React/TS specialist |
 | `.claude/agents/backend-agent.md` | Python/FastAPI specialist |
