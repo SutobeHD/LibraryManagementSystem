@@ -1275,9 +1275,9 @@ const UsbView = () => {
                                         </div>
                                     </div>
 
-                                    {/* Danger zone */}
-                                    <div className="mx-card p-4" style={{ borderColor: 'rgba(232, 92, 74, 0.20)' }}>
-                                        <div className="mx-caption mb-3" style={{ color: 'var(--bad)' }}>Danger Zone</div>
+                                    {/* Drive actions — non-destructive */}
+                                    <div className="mx-card p-4">
+                                        <div className="mx-caption mb-3">Drive Actions</div>
                                         <div className="flex items-center gap-2 flex-wrap">
                                             <button
                                                 onClick={handleRename}
@@ -1285,6 +1285,13 @@ const UsbView = () => {
                                             >
                                                 <Edit2 size={12} /> Rename Drive
                                             </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Danger zone — destructive only */}
+                                    <div className="mx-card p-4" style={{ borderColor: 'rgba(232, 92, 74, 0.20)' }}>
+                                        <div className="mx-caption mb-3" style={{ color: 'var(--bad)' }}>Danger Zone</div>
+                                        <div className="flex items-center gap-2 flex-wrap">
                                             <button
                                                 onClick={() => deleteProfile(sel.device_id)}
                                                 className="flex items-center gap-2 px-3 py-2 bg-bad/10 hover:bg-bad/20 text-bad rounded-mx-sm text-tiny font-semibold border border-bad/30 transition-all"

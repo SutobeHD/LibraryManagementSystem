@@ -225,9 +225,22 @@ class UsbDetector:
             db_path = Path(drive) / cls.RB_DB_PATH if is_rb else None
             has_legacy = (Path(drive) / cls.LEGACY_PDB).exists() if is_rb else False
 
+            # Cheap track count from exportLibrary.db when present.
+            # rbox opens the SQLCipher DB and we count rows lazily — wrapped
+            # in try/except because Rekordbox may hold a read handle on it
+            # which can cause transient open failures.
             track_count = 0
-            if has_legacy:
-                pass
+            try:
+                l1_path = Path(drive) / "PIONEER" / "rekordbox" / "exportLibrary.db"
+                if l1_path.exists():
+                    import rbox as _rbox
+                    _onedb = _rbox.OneLibrary(str(l1_path))
+                    track_count = sum(
+                        1 for c in _onedb.get_contents()
+                        if not (c.title or "").startswith("__placeholder_")
+                    )
+            except Exception as e:
+                logger.debug(f"track_count probe failed for {drive}: {e}")
 
             dev_info = {
                 "device_id": device_id,
