@@ -2744,7 +2744,9 @@ async def soundcloud_download(data: ScDownloadRequest, request: Request):
             raise HTTPException(status_code=400, detail="Either 'url' or 'sc_track_id' is required.")
         logger.info("[SC-DL API] Resolving URL: %s", permalink_url)
         try:
-            track_meta = SoundCloudPlaylistAPI.resolve_track_from_url(permalink_url, auth_token)
+            track_meta = await asyncio.to_thread(
+                SoundCloudPlaylistAPI.resolve_track_from_url, permalink_url, auth_token,
+            )
         except AuthExpiredError:
             raise HTTPException(status_code=401, detail="SoundCloud auth token expired.")
         except Exception as exc:
@@ -2805,10 +2807,12 @@ async def soundcloud_download_playlist(r: ScDownloadPlaylistReq):
     # Fetch full track list
     try:
         if r.is_likes:
-            likes = SoundCloudPlaylistAPI.get_likes(auth_token)
+            likes = await asyncio.to_thread(SoundCloudPlaylistAPI.get_likes, auth_token)
             sc_tracks = likes.get("tracks", []) if likes else []
         else:
-            sc_tracks = SoundCloudPlaylistAPI.get_full_playlist_tracks(r.playlist_id, auth_token)
+            sc_tracks = await asyncio.to_thread(
+                SoundCloudPlaylistAPI.get_full_playlist_tracks, r.playlist_id, auth_token,
+            )
     except AuthExpiredError:
         raise HTTPException(401, "auth_expired")
     except Exception as e:
@@ -3147,11 +3151,11 @@ async def sync_soundcloud_playlists(r: ScSyncReq, request: Request):
     async with _sync_lock:
         try:
             engine = SoundCloudSyncEngine(db)
-            all_playlists = SoundCloudPlaylistAPI.get_playlists(auth_token)
+            all_playlists = await asyncio.to_thread(SoundCloudPlaylistAPI.get_playlists, auth_token)
             to_sync = [pl for pl in all_playlists if pl["id"] in r.playlist_ids]
 
             if r.include_likes:
-                likes = SoundCloudPlaylistAPI.get_likes(auth_token)
+                likes = await asyncio.to_thread(SoundCloudPlaylistAPI.get_likes, auth_token)
                 to_sync.append(likes)
 
             results = engine.sync_all(to_sync, auth_token)
@@ -3193,9 +3197,9 @@ async def preview_soundcloud_matches(r: ScPreviewReq, request: Request):
         engine = SoundCloudSyncEngine(db)
 
         if r.is_likes:
-            playlist_data = SoundCloudPlaylistAPI.get_likes(auth_token)
+            playlist_data = await asyncio.to_thread(SoundCloudPlaylistAPI.get_likes, auth_token)
         else:
-            all_pls = SoundCloudPlaylistAPI.get_playlists(auth_token)
+            all_pls = await asyncio.to_thread(SoundCloudPlaylistAPI.get_playlists, auth_token)
             playlist_data = next((pl for pl in all_pls if pl["id"] == r.playlist_id), None)
             if not playlist_data:
                 raise HTTPException(404, f"Playlist {r.playlist_id} not found")
@@ -3237,8 +3241,8 @@ async def sync_all_soundcloud(request: Request):
     async with _sync_lock:
         try:
             engine = SoundCloudSyncEngine(db)
-            all_playlists = SoundCloudPlaylistAPI.get_playlists(auth_token)
-            likes = SoundCloudPlaylistAPI.get_likes(auth_token)
+            all_playlists = await asyncio.to_thread(SoundCloudPlaylistAPI.get_playlists, auth_token)
+            likes = await asyncio.to_thread(SoundCloudPlaylistAPI.get_likes, auth_token)
             all_playlists.append(likes)
 
             results = engine.sync_all(all_playlists, auth_token)
@@ -3310,7 +3314,7 @@ async def merge_soundcloud_playlists(r: ScMergeReq, request: Request):
             pass
 
         local_tracks = db.tracks if hasattr(db, 'tracks') else {}
-        all_playlists = SoundCloudPlaylistAPI.get_playlists(auth_token)
+        all_playlists = await asyncio.to_thread(SoundCloudPlaylistAPI.get_playlists, auth_token)
         selected_pls = [pl for pl in all_playlists if pl["id"] in r.playlist_ids]
 
         source_track_sets: dict = {}  # sc_playlist_id → set of local track IDs matched
@@ -3318,7 +3322,9 @@ async def merge_soundcloud_playlists(r: ScMergeReq, request: Request):
 
         # ── 3. Match & add tracks ──────────────────────────────────────────────
         for pl in selected_pls:
-            sc_tracks = SoundCloudPlaylistAPI.get_full_playlist_tracks(pl["id"], auth_token)
+            sc_tracks = await asyncio.to_thread(
+                SoundCloudPlaylistAPI.get_full_playlist_tracks, pl["id"], auth_token,
+            )
             matched_for_pl: set = set()
             for sc_track in sc_tracks:
                 matched = engine._fuzzy_match_track(
