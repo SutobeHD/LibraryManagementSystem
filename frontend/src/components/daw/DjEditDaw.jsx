@@ -125,7 +125,11 @@ const DjEditDaw = ({ track: initialTrack }) => {
                 DawEngine.getAudioContext();
 
                 const track = activeTrack;
-                const filepath = track.FilePath || track.filepath || track.Location;
+                // /api/library/tracks returns rekordbox tracks with `path`
+                // (lowercase). Older .rbep paths used `FilePath`/`filepath`/
+                // `Location`. Try all four so library-list double-clicks
+                // actually load instead of silently warning.
+                const filepath = track.FilePath || track.filepath || track.Location || track.path;
                 if (!filepath) {
                     console.warn('[DjEditDaw] No filepath on track:', track);
                     return;
@@ -139,7 +143,7 @@ const DjEditDaw = ({ track: initialTrack }) => {
                         artist: track.Artist || track.artist || '',
                         album: track.Album || track.album || '',
                         filepath,
-                        id: track.TrackID || track.id || '',
+                        id: track.TrackID || track.ID || track.id || '',
                     }
                 });
 
@@ -183,10 +187,14 @@ const DjEditDaw = ({ track: initialTrack }) => {
                 toast.loading('Analyzing waveform...', { id: 'daw-load' });
 
                 // Peak resolution targets — base count of `targetPeaks` peaks
-                // across the full source audio (≈ 20 peaks/sec at 408s).
-                // 8000 (was 4000) doubles density so the timeline stays
-                // crisp when zoomed-in instead of looking blocky.
-                const targetPeaks   = 8000;
+                // across the full source audio. 16 000 ≈ 40 peaks/sec for a
+                // 400s track — 4× the previous 4 000 base while still
+                // generating in <5s in a browser via Web Audio OfflineContext.
+                // 32k was tried but the BiquadFilter offline rendering of 3
+                // band chains over a 408s buffer (~18M samples * 3) hung the
+                // main thread for too long. The LOD pyramid below decimates
+                // this base into r2/r4 for zoomed-out views.
+                const targetPeaks   = 16000;
                 const samplesPerPixel = Math.ceil(audioBuffer.length / targetPeaks);
 
                 // 1. Always generate mono fallback peaks first (instant, guaranteed)
@@ -392,12 +400,12 @@ const DjEditDaw = ({ track: initialTrack }) => {
                 newState.bpm = projectBpm;
                 newState.sourceBuffer = audioBuffer;
 
-                // Generate waveform peaks — matches loadTrack path (8 000 base
+                // Generate waveform peaks — matches loadTrack path (32k base
                 // peaks, multi-resolution LOD). The peak arrays index against
                 // the SOURCE audio length (audioBuffer.duration), NOT the
                 // edit timeline — this is critical for .rbep projects whose
                 // editTimelineEnd can differ from audioBuffer.duration.
-                const samplesPerPixel = Math.ceil(audioBuffer.length / 8000);
+                const samplesPerPixel = Math.ceil(audioBuffer.length / 16000);
                 const fallback = AudioBandAnalyzer.generatePeaks(audioBuffer, samplesPerPixel);
                 newState.fallbackPeaks = fallback;
                 try {

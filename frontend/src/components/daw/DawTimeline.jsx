@@ -554,7 +554,9 @@ function buildWaveformBitmap(d) {
             }
         } else if (hasBand && activePeaks.low?.length && activePeaks.mid?.length && activePeaks.high?.length) {
             // Default '3band' (and any unknown style with band data available)
-            drawRgbColumnWaveform(ctx, activePeaks, region, rStartPx, rEndPx, scrollX, zoom, sourceDuration, centerY, maxAmp);
+            // → Mixxx-style stacked colour zones (low/mid/high as discrete
+            // vertical bands from center outward, asymmetric min/max envelope).
+            drawMixxxFilteredWaveform(ctx, activePeaks, region, rStartPx, rEndPx, scrollX, zoom, sourceDuration, centerY, maxAmp);
         } else if (hasMono) {
             drawSmoothBandPath(ctx, fallbackPeaks, 'fallback', region, rStartPx, rEndPx, scrollX, zoom, sourceDuration, centerY, maxAmp, lodLevel, width, height);
         }
@@ -565,23 +567,42 @@ function buildWaveformBitmap(d) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// PER-PIXEL RGB COLUMN WAVEFORM (Rekordbox / CDJ-style 3-band visualisation)
+// MIXXX-STYLE 3-BAND STACKED FILTERED WAVEFORM
 // ═══════════════════════════════════════════════════════════════════════════════
 //
-// For every pixel column we read each band's local peak and paint a single
-// vertical bar whose:
-//   • HEIGHT  encodes overall loudness  (max amp across bands)
-//   • HUE     encodes which band dominates
-//                low-only  → red          | mid-only  → green      | high-only → blue
-//                low+mid   → yellow       | mid+high  → cyan       | low+high  → magenta
-//                all three → white
+// Inspired by Mixxx's WaveformRendererFilteredSignal. For each pixel column,
+// stack the three bands as discrete coloured zones extending outward from the
+// centerline:
 //
-// Compared to the old stacked-silhouette renderer, bands no longer occlude
-// each other and bass-heavy moments visibly differ from hi-hat moments at a
-// glance — matching how Pioneer CDJs and Rekordbox draw 3-band waveforms.
+//   ┌─ HIGH (blue)  outermost — high amplitude
+//   ├─ MID  (green) middle
+//   ├─ LOW  (red)   innermost (closest to center) — bass body
+//   ── centerline ────────────────────────────────────────
+//   ├─ LOW  (red)
+//   ├─ MID  (green)
+//   └─ HIGH (blue)
+//
+// Asymmetric: positive peaks (max) drive the top half, negative peaks (min)
+// drive the bottom half — real audio is rarely symmetric. This produces a
+// realistic stem/silhouette shape rather than the comb of single-color bars
+// the previous renderer drew.
+//
+// Each band's zone height is linear in its peak value, with a γ=1.1 boost
+// so transients (kicks, snares) clearly dominate body-level content. The
+// per-band heights are summed; the column's total height is therefore the
+// SUM of all three band amplitudes (not the max) — matches how Mixxx and
+// Rekordbox build their envelopes.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function drawRgbColumnWaveform(ctx, bandPeaks, region, rStartPx, rEndPx, scrollX, zoom, sourceDuration, centerY, maxAmp) {
+const MIXXX_COLORS = {
+    // RGB values — saturated CDJ-style. Picked for contrast against the
+    // #090c17 background. Alpha left to ctx (1.0).
+    low:  [255, 70, 90],     // red — bass / kick / sub
+    mid:  [70, 220, 130],    // green — vocals / instruments
+    high: [70, 150, 255],    // blue — hi-hats / cymbals / air
+};
+
+function drawMixxxFilteredWaveform(ctx, bandPeaks, region, rStartPx, rEndPx, scrollX, zoom, sourceDuration, centerY, maxAmp) {
     const low  = bandPeaks.low;
     const mid  = bandPeaks.mid;
     const high = bandPeaks.high;
@@ -593,13 +614,26 @@ function drawRgbColumnWaveform(ctx, bandPeaks, region, rStartPx, rEndPx, scrollX
     const endPx   = Math.ceil(rEndPx);
     if (endPx <= startPx) return;
 
-    // peak-index step per pixel — used to average multiple peaks per column
-    // when one pixel covers several peaks (downsampling), preventing aliasing.
+    // peaks-per-pixel ratio: when > 1, we're downsampling (multiple peaks
+    // per pixel column) and must take the loudest. When < 1, we're upsampling
+    // (multiple pixels per peak) and adjacent columns reuse the same peak.
     const pxToPeakRatio = peakLen / (sourceDuration * zoom);
 
+    // Per-band gain — calibrated so that a typical loud track fills ~80% of
+    // the silhouette area without clipping. BiquadFilter resonance allows
+    // individual band peaks slightly above 1.0, but the SUM of three bands
+    // is rarely > 2.0 in practice. Scale so 2.0 ≈ maxAmp.
+    const BAND_GAIN = 0.5; // each band contributes up to ~0.5 of maxAmp
+    const GAMMA = 1.1;     // gentle transient boost
+
+    // Pre-compute fillStyle strings so we don't re-format inside the loop.
+    const colLow  = `rgb(${MIXXX_COLORS.low[0]},${MIXXX_COLORS.low[1]},${MIXXX_COLORS.low[2]})`;
+    const colMid  = `rgb(${MIXXX_COLORS.mid[0]},${MIXXX_COLORS.mid[1]},${MIXXX_COLORS.mid[2]})`;
+    const colHigh = `rgb(${MIXXX_COLORS.high[0]},${MIXXX_COLORS.high[1]},${MIXXX_COLORS.high[2]})`;
+
     for (let px = startPx; px < endPx; px++) {
-        const time     = (px + scrollX) / zoom;
-        const srcTime  = region.sourceStart + (time - region.timelineStart);
+        const time    = (px + scrollX) / zoom;
+        const srcTime = region.sourceStart + (time - region.timelineStart);
         if (srcTime < 0 || srcTime > sourceDuration) continue;
 
         // Range of peak indices covered by this pixel column
@@ -608,50 +642,69 @@ function drawRgbColumnWaveform(ctx, bandPeaks, region, rStartPx, rEndPx, scrollX
         const idx0  = Math.floor(fIdx0);
         const idx1  = Math.min(peakLen - 1, Math.ceil(fIdx1));
 
-        // Take the loudest peak in the range for each band (preserves transients)
-        let lowAmp = 0, midAmp = 0, highAmp = 0;
+        // Asymmetric envelope: track positive (max) and negative (min)
+        // peaks separately so the silhouette retains the natural shape of
+        // the audio (DC-offset bass, transient asymmetry).
+        let lowPos = 0, midPos = 0, highPos = 0;
+        let lowNeg = 0, midNeg = 0, highNeg = 0;
         for (let i = idx0; i <= idx1; i++) {
             const lp = low[i]; const mp = mid[i]; const hp = high[i];
             if (!lp || !mp || !hp) continue;
-            const la = Math.abs(lp.max) > Math.abs(lp.min) ? Math.abs(lp.max) : Math.abs(lp.min);
-            const ma = Math.abs(mp.max) > Math.abs(mp.min) ? Math.abs(mp.max) : Math.abs(mp.min);
-            const ha = Math.abs(hp.max) > Math.abs(hp.min) ? Math.abs(hp.max) : Math.abs(hp.min);
-            if (la > lowAmp)  lowAmp  = la;
-            if (ma > midAmp)  midAmp  = ma;
-            if (ha > highAmp) highAmp = ha;
+            if (lp.max > lowPos)   lowPos  = lp.max;
+            if (mp.max > midPos)   midPos  = mp.max;
+            if (hp.max > highPos)  highPos = hp.max;
+            const ln = -lp.min, mn = -mp.min, hn = -hp.min;
+            if (ln > lowNeg)  lowNeg  = ln;
+            if (mn > midNeg)  midNeg  = mn;
+            if (hn > highNeg) highNeg = hn;
         }
 
-        // Clamp — BiquadFilter resonance can push peaks slightly above 1.0
-        if (lowAmp  > 1) lowAmp  = 1;
-        if (midAmp  > 1) midAmp  = 1;
-        if (highAmp > 1) highAmp = 1;
+        // Apply γ curve + gain
+        const scale = maxAmp * BAND_GAIN;
+        const lT = Math.pow(Math.min(1, lowPos),  GAMMA) * scale;
+        const mT = Math.pow(Math.min(1, midPos),  GAMMA) * scale;
+        const hT = Math.pow(Math.min(1, highPos), GAMMA) * scale;
+        const lB = Math.pow(Math.min(1, lowNeg),  GAMMA) * scale;
+        const mB = Math.pow(Math.min(1, midNeg),  GAMMA) * scale;
+        const hB = Math.pow(Math.min(1, highNeg), GAMMA) * scale;
 
-        const maxBand = lowAmp > midAmp ? (lowAmp > highAmp ? lowAmp : highAmp) : (midAmp > highAmp ? midAmp : highAmp);
-        if (maxBand < 0.005) continue; // pixel is silent → skip
+        // ── TOP HALF — stacked outward from centerline ──
+        if (lT + mT + hT > 0.5) {
+            let y = centerY;
+            if (lT > 0.5) {
+                ctx.fillStyle = colLow;
+                ctx.fillRect(px, y - lT, 1, lT);
+                y -= lT;
+            }
+            if (mT > 0.5) {
+                ctx.fillStyle = colMid;
+                ctx.fillRect(px, y - mT, 1, mT);
+                y -= mT;
+            }
+            if (hT > 0.5) {
+                ctx.fillStyle = colHigh;
+                ctx.fillRect(px, y - hT, 1, hT);
+            }
+        }
 
-        // HUE: each channel scaled against the dominant band, then γ-curved
-        // (1.6 — suppressive) so non-dominant bands fall off quickly. This
-        // gives vivid colours: pure bass → saturated red instead of pink,
-        // pure mids → saturated green instead of pastel lime. With γ < 1
-        // (e.g. 0.7) the colours washed out to near-white for typical music
-        // where all three bands have some content.
-        const GAMMA_HUE = 1.6;
-        const rNorm = Math.pow(lowAmp  / maxBand, GAMMA_HUE);
-        const gNorm = Math.pow(midAmp  / maxBand, GAMMA_HUE);
-        const bNorm = Math.pow(highAmp / maxBand, GAMMA_HUE);
-        const r = Math.round(255 * rNorm);
-        const g = Math.round(255 * gNorm);
-        const b = Math.round(255 * bNorm);
-
-        // HEIGHT: linear with a gentle γ > 1 so loud transients (kick, snare)
-        // visibly dominate body-level content. √-curve (γ < 1) was too
-        // forgiving — it pushed every column near full height on loud
-        // tracks, killing the peaks-and-valleys silhouette.
-        const amp   = Math.pow(maxBand, 1.15);
-        const halfH = Math.max(1, amp * maxAmp);
-
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
-        ctx.fillRect(px, centerY - halfH, 1, halfH * 2);
+        // ── BOTTOM HALF — mirror, stacked outward downward ──
+        if (lB + mB + hB > 0.5) {
+            let y = centerY;
+            if (lB > 0.5) {
+                ctx.fillStyle = colLow;
+                ctx.fillRect(px, y, 1, lB);
+                y += lB;
+            }
+            if (mB > 0.5) {
+                ctx.fillStyle = colMid;
+                ctx.fillRect(px, y, 1, mB);
+                y += mB;
+            }
+            if (hB > 0.5) {
+                ctx.fillStyle = colHigh;
+                ctx.fillRect(px, y, 1, hB);
+            }
+        }
     }
 }
 
