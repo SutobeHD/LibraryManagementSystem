@@ -152,6 +152,12 @@ fn spawn_dev_backend(app: &tauri::AppHandle) {
     app.manage(DevBackendChild(Mutex::new(DevChildren { backend, vite })));
 }
 
+/// Close the splashscreen and reveal the main window.
+///
+/// Called by the frontend once the React shell has finished hydrating.
+/// Both windows are looked up by label (`"splashscreen"`, `"main"`); a
+/// missing window is silently ignored so the command can't fail and
+/// therefore returns `()` rather than `Result<_, _>`.
 #[tauri::command]
 fn close_splashscreen(window: tauri::Window) {
     // Close splashscreen — use .ok() to avoid panic if window doesn't exist
@@ -164,6 +170,19 @@ fn close_splashscreen(window: tauri::Window) {
     }
 }
 
+/// Run the full SoundCloud OAuth 2.1 + PKCE flow and return the access token.
+///
+/// The flow blocks on a one-shot localhost HTTP listener for the OAuth
+/// callback, then exchanges the auth code for an access token. Progress
+/// stages are emitted on the `sc-login-progress` event:
+/// - `auth`: opening browser → waiting for callback → exchanging code
+/// - `done`: success
+///
+/// # Errors
+/// - "Configuration error" if `SC_CLIENT_ID` / `SC_CLIENT_SECRET` are missing
+/// - "Could not open browser" if the OS browser launcher fails
+/// - "Task join error" / "Callback error" if the local HTTP listener fails
+/// - "Token exchange failed" if SoundCloud rejects the auth code
 #[tauri::command]
 async fn login_to_soundcloud(app: tauri::AppHandle) -> Result<String, String> {
     // Step 1: Generate auth URL with PKCE
@@ -204,6 +223,24 @@ struct ExportTrack {
     duration_ms: u64,
 }
 
+/// Create a SoundCloud playlist from `tracks` and return a summary string.
+///
+/// Runs the same OAuth flow as `login_to_soundcloud` (currently inline —
+/// see `TODO(oauth-helper)` / HANDOVER Phase 2.9) and then searches SC
+/// for each `(artist, title)` pair using a duration heuristic. Tracks
+/// that didn't match are listed in the returned summary.
+///
+/// Stages emitted on the `sc-export-progress` event:
+/// - `auth`: OAuth flow
+/// - `searching`: per-track lookup `{current, total, message, trackName}`
+/// - `creating`: final playlist POST
+///
+/// # Errors
+/// - "Configuration error" if SC credentials are missing
+/// - "Could not open browser" if the OS browser launcher fails
+/// - "Callback error" / "Token exchange failed" for OAuth failures
+/// - "Playlist creation failed (...)" if SoundCloud rejects the create
+/// - "No tracks were found on SoundCloud" if every search came back empty
 #[tauri::command]
 async fn export_to_soundcloud(app: tauri::AppHandle, playlist_name: String, tracks: Vec<ExportTrack>) -> Result<String, String> {
     let sc_tracks: Vec<Track> = tracks
