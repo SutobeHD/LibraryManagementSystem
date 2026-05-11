@@ -160,11 +160,15 @@ class LiveRekordboxDB:
             try:
                 last_archive = datetime.fromisoformat(last_archive_str)
                 delta = now - last_archive
-                
+
                 if freq == "daily" and delta.days >= 1: should_archive = True
                 elif freq == "weekly" and delta.days >= 7: should_archive = True
                 elif freq == "monthly" and delta.days >= 30: should_archive = True
-            except:
+            except (ValueError, TypeError) as e:
+                logger.warning(
+                    "live_database: failed to parse last_archive_date %r — forcing archive (%s)",
+                    last_archive_str, e,
+                )
                 should_archive = True
         
         if should_archive:
@@ -265,18 +269,26 @@ class LiveRekordboxDB:
         self.label_map = {l.id: l.name for l in self.db.get_labels()}
         self.key_map = {k.id: k.name for k in self.db.get_keys()}
         
-        # Extended metadata maps with graceful fallback
+        # Extended metadata maps with graceful fallback. rbox versions older
+        # than 0.1.5 don't expose composer/remixer/lyricist accessors at all,
+        # so AttributeError + any rbox-internal error is silenced — log only.
         self.composer_map = {}
-        try: self.composer_map = {c.id: c.name for c in self.db.get_composers()}
-        except: pass
-        
+        try:
+            self.composer_map = {c.id: c.name for c in self.db.get_composers()}
+        except Exception as e:
+            logger.debug("live_database: composer map unavailable (%s)", e)
+
         self.remixer_map = {}
-        try: self.remixer_map = {r.id: r.name for r in self.db.get_remixers()}
-        except: pass
-        
+        try:
+            self.remixer_map = {r.id: r.name for r in self.db.get_remixers()}
+        except Exception as e:
+            logger.debug("live_database: remixer map unavailable (%s)", e)
+
         self.lyricist_map = {}
-        try: self.lyricist_map = {l.id: l.name for l in self.db.get_lyricists()}
-        except: pass
+        try:
+            self.lyricist_map = {l.id: l.name for l in self.db.get_lyricists()}
+        except Exception as e:
+            logger.debug("live_database: lyricist map unavailable (%s)", e)
 
         logger.info(f"Metadata maps cached. Artists: {len(self.artist_map)}, Genres: {len(self.genre_map)}")
 
@@ -508,7 +520,11 @@ class LiveRekordboxDB:
                         if hasattr(s, 'content_id'):
                             self.playlists_tracks[pid].append(str(s.content_id))
                             count += 1
-                except:
+                except Exception as e:
+                    logger.warning(
+                        "live_database: get_playlist_songs(%s) failed — skipping (%s)",
+                        pid, e,
+                    )
                     continue
                 
             logger.info(f"Loaded {count} playlist track mappings via rbox.")
@@ -535,7 +551,10 @@ class LiveRekordboxDB:
         try:
             from .services import SettingsManager
             threshold = SettingsManager.load().get("artist_view_threshold", 0)
-        except: pass
+        except (OSError, ValueError, KeyError, AttributeError) as e:
+            logger.warning(
+                "live_database: failed to load artist_view_threshold — using 0 (%s)", e,
+            )
 
         for i, (name, count) in enumerate(sorted(artist_counts.items())):
             if count >= threshold:
@@ -594,7 +613,10 @@ class LiveRekordboxDB:
             from .services import MetadataManager
             mapped = MetadataManager.get_mapped_name("artists", name)
             if mapped != name: return mapped
-        except: pass
+        except Exception as e:
+            logger.debug(
+                "live_database: artist-name mapping failed for %r (%s)", name, e,
+            )
 
         # 1. Strip leading numbers like "01 ", "1. ", "02-", "1 "
         name = re.sub(r'^\d{1,2}[\s.-]+', '', name)
@@ -934,12 +956,15 @@ class LiveRekordboxDB:
         # 2. Remove from all playlists (internal cache)
         for pid, tracks in self.playlists_tracks.items():
             if tid in [str(t.id) if hasattr(t, 'id') else str(t['ID']) for t in tracks]:
-                # This is tricky because we store objects or dicts. 
+                # This is tricky because we store objects or dicts.
                 # Ideally we call remove_track_from_playlist
                 try:
                     self.remove_track_from_playlist(pid, tid)
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(
+                        "live_database: remove_track_from_playlist(%s, %s) failed: %s",
+                        pid, tid, e,
+                    )
 
         # 3. Warn about Master DB
         logger.warning(f"Track {tid} removed from cache/playlists, but RBOX library does not support direct deletion from Master DB via this API.")
@@ -966,19 +991,31 @@ class LiveRekordboxDB:
                 try:
                     item.rating = int(updates["Rating"])
                     changed = True
-                except: pass
+                except (ValueError, TypeError) as e:
+                    logger.warning(
+                        "live_database: invalid Rating %r for track %s (%s)",
+                        updates.get("Rating"), tid, e,
+                    )
             if "ColorID" in updates:
                 try:
                     item.color_id = int(updates["ColorID"])
                     changed = True
-                except:
-                    # Fallback to string if rbox expects it? (logs suggest it wants str for ID)
-                    # But master.db uses INTEGER for ColorID. 
-                    # If rbox complains about 'int' object, maybe it DOES want str?
+                except (ValueError, TypeError) as e:
+                    # rbox occasionally returns ColorID as a string label; fall
+                    # back to str() before giving up so theme syncs don't fail
+                    # silently. master.db itself stores ColorID as INTEGER.
+                    logger.debug(
+                        "live_database: ColorID %r not int for track %s (%s) — trying str fallback",
+                        updates.get("ColorID"), tid, e,
+                    )
                     try:
                         item.color_id = str(updates["ColorID"])
                         changed = True
-                    except: pass
+                    except Exception as inner:
+                        logger.warning(
+                            "live_database: ColorID for track %s rejected as int and str (%s)",
+                            tid, inner,
+                        )
             
             if changed:
                 logger.info(f"Applying direct field updates for track {tid}...")
