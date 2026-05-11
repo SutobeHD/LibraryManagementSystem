@@ -107,6 +107,13 @@ const DawTimeline = React.memo(({
         zoom: 100, scrollX: 0, playhead: 0, isPlaying: false,
         regions: [], selectedIds: new Set(),
         bpm: 128, firstBeatSec: 0, totalDuration: 0,
+        // CRITICAL: peaks are generated from the SOURCE AudioBuffer, so
+        // peak-index calculations MUST use the source audio duration —
+        // NOT `totalDuration`, which can be a longer/shorter edit timeline
+        // in .rbep projects (regions rearrange / repeat the source). Mixing
+        // the two yields a waveform whose samples are off by the ratio
+        // `totalDuration / sourceDuration` (visual drift vs. playback).
+        sourceDuration: 0,
         hotCues: [], memoryCues: [], loops: [], activeLoopIndex: -1,
         snapEnabled: true, snapDivision: '1/4', slipMode: false,
         selectionRange: null, bandPeaks: null, fallbackPeaks: null,
@@ -136,6 +143,13 @@ const DawTimeline = React.memo(({
         d.snapDivision = state.snapDivision || '1/4';
         d.firstBeatSec = ((state.tempoMap?.[0]?.positionMs || 0) / 1000) + (state.gridOffsetSec || 0);
         d.totalDuration = state.totalDuration;
+        // Source duration drives peak indexing. AudioBuffer wins (most
+        // authoritative). trackMeta.duration is set in handleFileSelect for
+        // .rbep loads. totalDuration is the last-resort fallback for simple
+        // track-loads where source == timeline.
+        d.sourceDuration = state.sourceBuffer?.duration
+            || state.trackMeta?.duration
+            || state.totalDuration;
         d.hotCues      = state.hotCues;
         d.memoryCues   = state.memoryCues;
         d.loops        = state.loops;
@@ -472,13 +486,16 @@ const DawTimeline = React.memo(({
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function buildWaveformBitmap(d) {
-    const { width, height, dpr, zoom, scrollX, regions, bandPeaks, fallbackPeaks, totalDuration, lodLevel, waveformStyle } = d;
+    const { width, height, dpr, zoom, scrollX, regions, bandPeaks, fallbackPeaks, sourceDuration, lodLevel, waveformStyle } = d;
     if (width <= 0 || height <= 0) return null;
 
     const hasBand  = bandPeaks && (bandPeaks.low?.length > 0 || bandPeaks.lod?.r1?.low?.length > 0);
     const hasMono  = fallbackPeaks && fallbackPeaks.length > 0;
     if (!hasBand && !hasMono) return null;
-    if (totalDuration <= 0) return null;
+    // sourceDuration is the audio-buffer length the peaks were generated
+    // from. Without it, peak-index calculations would mis-stretch the
+    // waveform across the edit timeline (.rbep projects).
+    if (!sourceDuration || sourceDuration <= 0) return null;
 
     const oc = new OffscreenCanvas(Math.round(width * dpr), Math.round(height * dpr));
     const ctx = oc.getContext('2d', { alpha: true });
@@ -516,25 +533,30 @@ function buildWaveformBitmap(d) {
         const rEndPx   = Math.min(width, regionEnd            * zoom - scrollX);
         if (rEndPx <= rStartPx) continue;
 
-        // Mono mode: always use fallback mono peaks
+        // Style dispatcher:
+        //   '3band' (default) → per-pixel RGB composition (Rekordbox-style:
+        //                       hue encodes band dominance, height encodes
+        //                       overall amplitude — bands don't occlude).
+        //   'liquid'          → smooth Path2D bezier silhouette per band
+        //                       (legacy; bands stack with alpha so the
+        //                       top-most one tends to dominate).
+        //   'mono'            → silhouette of mono fallback peaks.
+        //   'bass'            → silhouette of LOW band only.
         if (waveformStyle === 'mono' && hasMono) {
-            drawSmoothBandPath(ctx, fallbackPeaks, 'fallback', region, rStartPx, rEndPx, scrollX, zoom, totalDuration, centerY, maxAmp, lodLevel, width, height);
-        } else if (hasBand && activePeaks) {
-            const isBass = waveformStyle === 'bass';
-            const bands = isBass
-                ? [{ p: activePeaks.low, bk: 'low' }]
-                : [
-                    { p: activePeaks.low,  bk: 'low'  },
-                    { p: activePeaks.mid,  bk: 'mid'  },
-                    { p: activePeaks.high, bk: 'high' },
-                  ];
-
-            for (const { p, bk } of bands) {
+            drawSmoothBandPath(ctx, fallbackPeaks, 'fallback', region, rStartPx, rEndPx, scrollX, zoom, sourceDuration, centerY, maxAmp, lodLevel, width, height);
+        } else if (waveformStyle === 'bass' && hasBand && activePeaks.low?.length) {
+            drawSmoothBandPath(ctx, activePeaks.low, 'low', region, rStartPx, rEndPx, scrollX, zoom, sourceDuration, centerY, maxAmp, lodLevel, width, height);
+        } else if (waveformStyle === 'liquid' && hasBand && activePeaks) {
+            for (const bk of ['low', 'mid', 'high']) {
+                const p = activePeaks[bk];
                 if (!p?.length) continue;
-                drawSmoothBandPath(ctx, p, bk, region, rStartPx, rEndPx, scrollX, zoom, totalDuration, centerY, maxAmp, lodLevel, width, height);
+                drawSmoothBandPath(ctx, p, bk, region, rStartPx, rEndPx, scrollX, zoom, sourceDuration, centerY, maxAmp, lodLevel, width, height);
             }
+        } else if (hasBand && activePeaks.low?.length && activePeaks.mid?.length && activePeaks.high?.length) {
+            // Default '3band' (and any unknown style with band data available)
+            drawRgbColumnWaveform(ctx, activePeaks, region, rStartPx, rEndPx, scrollX, zoom, sourceDuration, centerY, maxAmp);
         } else if (hasMono) {
-            drawSmoothBandPath(ctx, fallbackPeaks, 'fallback', region, rStartPx, rEndPx, scrollX, zoom, totalDuration, centerY, maxAmp, lodLevel, width, height);
+            drawSmoothBandPath(ctx, fallbackPeaks, 'fallback', region, rStartPx, rEndPx, scrollX, zoom, sourceDuration, centerY, maxAmp, lodLevel, width, height);
         }
     }
 
@@ -542,9 +564,100 @@ function buildWaveformBitmap(d) {
     return oc.transferToImageBitmap();
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// PER-PIXEL RGB COLUMN WAVEFORM (Rekordbox / CDJ-style 3-band visualisation)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// For every pixel column we read each band's local peak and paint a single
+// vertical bar whose:
+//   • HEIGHT  encodes overall loudness  (max amp across bands)
+//   • HUE     encodes which band dominates
+//                low-only  → red          | mid-only  → green      | high-only → blue
+//                low+mid   → yellow       | mid+high  → cyan       | low+high  → magenta
+//                all three → white
+//
+// Compared to the old stacked-silhouette renderer, bands no longer occlude
+// each other and bass-heavy moments visibly differ from hi-hat moments at a
+// glance — matching how Pioneer CDJs and Rekordbox draw 3-band waveforms.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function drawRgbColumnWaveform(ctx, bandPeaks, region, rStartPx, rEndPx, scrollX, zoom, sourceDuration, centerY, maxAmp) {
+    const low  = bandPeaks.low;
+    const mid  = bandPeaks.mid;
+    const high = bandPeaks.high;
+    if (!low?.length || !mid?.length || !high?.length) return;
+    if (sourceDuration <= 0) return;
+
+    const peakLen = Math.min(low.length, mid.length, high.length);
+    const startPx = Math.max(0, Math.floor(rStartPx));
+    const endPx   = Math.ceil(rEndPx);
+    if (endPx <= startPx) return;
+
+    // peak-index step per pixel — used to average multiple peaks per column
+    // when one pixel covers several peaks (downsampling), preventing aliasing.
+    const pxToPeakRatio = peakLen / (sourceDuration * zoom);
+
+    for (let px = startPx; px < endPx; px++) {
+        const time     = (px + scrollX) / zoom;
+        const srcTime  = region.sourceStart + (time - region.timelineStart);
+        if (srcTime < 0 || srcTime > sourceDuration) continue;
+
+        // Range of peak indices covered by this pixel column
+        const fIdx0 = (srcTime / sourceDuration) * peakLen;
+        const fIdx1 = fIdx0 + Math.max(1, pxToPeakRatio);
+        const idx0  = Math.floor(fIdx0);
+        const idx1  = Math.min(peakLen - 1, Math.ceil(fIdx1));
+
+        // Take the loudest peak in the range for each band (preserves transients)
+        let lowAmp = 0, midAmp = 0, highAmp = 0;
+        for (let i = idx0; i <= idx1; i++) {
+            const lp = low[i]; const mp = mid[i]; const hp = high[i];
+            if (!lp || !mp || !hp) continue;
+            const la = Math.abs(lp.max) > Math.abs(lp.min) ? Math.abs(lp.max) : Math.abs(lp.min);
+            const ma = Math.abs(mp.max) > Math.abs(mp.min) ? Math.abs(mp.max) : Math.abs(mp.min);
+            const ha = Math.abs(hp.max) > Math.abs(hp.min) ? Math.abs(hp.max) : Math.abs(hp.min);
+            if (la > lowAmp)  lowAmp  = la;
+            if (ma > midAmp)  midAmp  = ma;
+            if (ha > highAmp) highAmp = ha;
+        }
+
+        // Clamp — BiquadFilter resonance can push peaks slightly above 1.0
+        if (lowAmp  > 1) lowAmp  = 1;
+        if (midAmp  > 1) midAmp  = 1;
+        if (highAmp > 1) highAmp = 1;
+
+        const maxBand = lowAmp > midAmp ? (lowAmp > highAmp ? lowAmp : highAmp) : (midAmp > highAmp ? midAmp : highAmp);
+        if (maxBand < 0.005) continue; // pixel is silent → skip
+
+        // HUE: each channel scaled against the dominant band, then γ-curved
+        // (1.6 — suppressive) so non-dominant bands fall off quickly. This
+        // gives vivid colours: pure bass → saturated red instead of pink,
+        // pure mids → saturated green instead of pastel lime. With γ < 1
+        // (e.g. 0.7) the colours washed out to near-white for typical music
+        // where all three bands have some content.
+        const GAMMA_HUE = 1.6;
+        const rNorm = Math.pow(lowAmp  / maxBand, GAMMA_HUE);
+        const gNorm = Math.pow(midAmp  / maxBand, GAMMA_HUE);
+        const bNorm = Math.pow(highAmp / maxBand, GAMMA_HUE);
+        const r = Math.round(255 * rNorm);
+        const g = Math.round(255 * gNorm);
+        const b = Math.round(255 * bNorm);
+
+        // HEIGHT: linear with a gentle γ > 1 so loud transients (kick, snare)
+        // visibly dominate body-level content. √-curve (γ < 1) was too
+        // forgiving — it pushed every column near full height on loud
+        // tracks, killing the peaks-and-valleys silhouette.
+        const amp   = Math.pow(maxBand, 1.15);
+        const halfH = Math.max(1, amp * maxAmp);
+
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.fillRect(px, centerY - halfH, 1, halfH * 2);
+    }
+}
+
 // ─── SMOOTH PATH2D BAND SILHOUETTE ──────────────────────────────────────────────
 
-function drawSmoothBandPath(ctx, peaks, bandKey, region, rStartPx, rEndPx, scrollX, zoom, totalDuration, centerY, maxAmp, lodLevel, width, height) {
+function drawSmoothBandPath(ctx, peaks, bandKey, region, rStartPx, rEndPx, scrollX, zoom, sourceDuration, centerY, maxAmp, lodLevel, width, height) {
     const widthPx = Math.max(1, Math.ceil(rEndPx) - Math.floor(rStartPx));
     // Sample density. Cap step so even narrow regions get >= 3 samples —
     // otherwise small pasted clips (e.g., 8 px wide at LOD 4 with step=8)
@@ -558,7 +671,14 @@ function drawSmoothBandPath(ctx, peaks, bandKey, region, rStartPx, rEndPx, scrol
     const samplePixel = (px) => {
         const time     = (px + scrollX) / zoom;
         const srcTime  = region.sourceStart + (time - region.timelineStart);
-        const rawIdx   = (srcTime / totalDuration) * peaks.length;
+        // BUG FIX 2026-05-11: was `srcTime / totalDuration` — `totalDuration`
+        // is the edit-timeline length, which can differ from the source
+        // audio length in .rbep projects whose regions rearrange or repeat
+        // sections. Peaks are indexed against the source audio, so we must
+        // divide by sourceDuration. Symptom of the old bug: waveform
+        // sample-positions drifted by the ratio (totalDur / sourceDur);
+        // visible as "waveform doesn't match audio" during playback.
+        const rawIdx   = (srcTime / sourceDuration) * peaks.length;
         const idx      = Math.floor(rawIdx);
         const frac     = rawIdx - idx;
 

@@ -182,8 +182,14 @@ const DjEditDaw = ({ track: initialTrack }) => {
                 // Generate waveform peaks for visualization
                 toast.loading('Analyzing waveform...', { id: 'daw-load' });
 
+                // Peak resolution targets — base count of `targetPeaks` peaks
+                // across the full source audio (≈ 20 peaks/sec at 408s).
+                // 8000 (was 4000) doubles density so the timeline stays
+                // crisp when zoomed-in instead of looking blocky.
+                const targetPeaks   = 8000;
+                const samplesPerPixel = Math.ceil(audioBuffer.length / targetPeaks);
+
                 // 1. Always generate mono fallback peaks first (instant, guaranteed)
-                const samplesPerPixel = Math.ceil(audioBuffer.length / 4000);
                 try {
                     const fallback = AudioBandAnalyzer.generatePeaks(audioBuffer, samplesPerPixel);
                     dispatch({ type: 'SET_FALLBACK_PEAKS', payload: fallback });
@@ -194,13 +200,32 @@ const DjEditDaw = ({ track: initialTrack }) => {
                 // 2. Try backend 3-band waveform (Butterworth, Rekordbox-quality)
                 let usedBackendWaveform = false;
                 try {
-                    const pps = Math.max(30, Math.ceil(4000 / audioBuffer.duration));
+                    // pps (peaks-per-second) — derived from targetPeaks so
+                    // backend matches client-side resolution.
+                    const pps = Math.max(30, Math.ceil(targetPeaks / audioBuffer.duration));
                     const resp = await api.get('/api/audio/waveform', {
                         params: { path: filepath, pps },
                         timeout: 15000,
                     });
                     if (resp.data?.low?.length > 0) {
                         const bandPeaks = convertBackendWaveform(resp.data);
+                        // Backend returns single-resolution arrays — wrap into
+                        // LOD shape so the renderer's LOD-aware code path
+                        // (r1/r2/r4) works. We synthesise r2/r4 by decimating
+                        // r1 client-side.
+                        bandPeaks.lod = {
+                            r1: { low: bandPeaks.low, mid: bandPeaks.mid, high: bandPeaks.high },
+                            r2: {
+                                low:  AudioBandAnalyzer._decimatePeaks(bandPeaks.low,  2),
+                                mid:  AudioBandAnalyzer._decimatePeaks(bandPeaks.mid,  2),
+                                high: AudioBandAnalyzer._decimatePeaks(bandPeaks.high, 2),
+                            },
+                            r4: {
+                                low:  AudioBandAnalyzer._decimatePeaks(bandPeaks.low,  4),
+                                mid:  AudioBandAnalyzer._decimatePeaks(bandPeaks.mid,  4),
+                                high: AudioBandAnalyzer._decimatePeaks(bandPeaks.high, 4),
+                            },
+                        };
                         dispatch({ type: 'SET_BAND_PEAKS', payload: bandPeaks });
                         usedBackendWaveform = true;
                     }
@@ -208,10 +233,15 @@ const DjEditDaw = ({ track: initialTrack }) => {
                     console.warn('[DjEditDaw] Backend waveform unavailable, falling back to client-side:', err.message);
                 }
 
-                // 3. Fallback: client-side band splitting (BiquadFilter, less accurate)
+                // 3. Fallback: client-side band splitting with multi-resolution
+                // LOD (BiquadFilter — less accurate than backend Butterworth
+                // but always available). Returns { low, mid, high, mono, lod }.
                 if (!usedBackendWaveform) {
                     try {
-                        const bandPeaks = await AudioBandAnalyzer.generateBandPeaks(audioBuffer, samplesPerPixel);
+                        const bandPeaks = await AudioBandAnalyzer.generateMultiResolutionPeaks(
+                            audioBuffer,
+                            samplesPerPixel,
+                        );
                         dispatch({ type: 'SET_BAND_PEAKS', payload: bandPeaks });
                     } catch (err) {
                         console.warn('[DjEditDaw] Band peaks failed, using mono fallback:', err);
@@ -362,15 +392,19 @@ const DjEditDaw = ({ track: initialTrack }) => {
                 newState.bpm = projectBpm;
                 newState.sourceBuffer = audioBuffer;
 
-                // Generate waveform peaks
-                // 1. Try to generate band peaks (expensive)
-                // 2. Fallback to simple peaks
-                const samplesPerPixel = Math.ceil(audioBuffer.length / 4000);
+                // Generate waveform peaks — matches loadTrack path (8 000 base
+                // peaks, multi-resolution LOD). The peak arrays index against
+                // the SOURCE audio length (audioBuffer.duration), NOT the
+                // edit timeline — this is critical for .rbep projects whose
+                // editTimelineEnd can differ from audioBuffer.duration.
+                const samplesPerPixel = Math.ceil(audioBuffer.length / 8000);
                 const fallback = AudioBandAnalyzer.generatePeaks(audioBuffer, samplesPerPixel);
                 newState.fallbackPeaks = fallback;
-                // Trigger background band analysis? optional.
                 try {
-                    const bandPeaks = await AudioBandAnalyzer.generateBandPeaks(audioBuffer, samplesPerPixel);
+                    const bandPeaks = await AudioBandAnalyzer.generateMultiResolutionPeaks(
+                        audioBuffer,
+                        samplesPerPixel,
+                    );
                     newState.bandPeaks = bandPeaks;
                 } catch (err) {
                     console.warn('[DjEditDaw] Band peaks failed during open, using fallback:', err);
