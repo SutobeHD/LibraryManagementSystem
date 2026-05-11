@@ -567,31 +567,39 @@ function buildWaveformBitmap(d) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// MIXXX-STYLE 3-BAND STACKED FILTERED WAVEFORM
+// MIXXX-STYLE 3-BAND STACKED FILTERED WAVEFORM (SMOOTH POLYGON RENDERER)
 // ═══════════════════════════════════════════════════════════════════════════════
 //
-// Inspired by Mixxx's WaveformRendererFilteredSignal. For each pixel column,
-// stack the three bands as discrete coloured zones extending outward from the
-// centerline:
+// Inspired by Mixxx's WaveformRendererFilteredSignal. Three bands stacked
+// outward from the centerline produce a layered envelope where the colour
+// at any height tells you the spectral content there:
 //
-//   ┌─ HIGH (blue)  outermost — high amplitude
-//   ├─ MID  (green) middle
-//   ├─ LOW  (red)   innermost (closest to center) — bass body
+//   ┌─ HIGH (blue)  outermost — hi-hats, cymbals, air
+//   ├─ MID  (green) middle    — vocals, instruments
+//   ├─ LOW  (red)   innermost — kick, bass body
 //   ── centerline ────────────────────────────────────────
 //   ├─ LOW  (red)
 //   ├─ MID  (green)
 //   └─ HIGH (blue)
 //
-// Asymmetric: positive peaks (max) drive the top half, negative peaks (min)
-// drive the bottom half — real audio is rarely symmetric. This produces a
-// realistic stem/silhouette shape rather than the comb of single-color bars
-// the previous renderer drew.
+// Asymmetric: positive peaks (max) drive the top half, negative peaks
+// (min) drive the bottom half. Real audio is rarely symmetric, so an
+// asymmetric envelope preserves the natural stem/transient shape.
 //
-// Each band's zone height is linear in its peak value, with a γ=1.1 boost
-// so transients (kicks, snares) clearly dominate body-level content. The
-// per-band heights are summed; the column's total height is therefore the
-// SUM of all three band amplitudes (not the max) — matches how Mixxx and
-// Rekordbox build their envelopes.
+// SMOOTHING — three layers of defence against the "blocky comb" look:
+//
+//   1. Sampling stride of 1-2 px depending on peak density (avoids
+//      single-pixel spikes when one peak covers many pixels)
+//   2. Light 1-2-1 horizontal smoothing kernel on every band/direction
+//      array (suppresses isolated bumps without blurring transients —
+//      coefficients sum to 1, no DC shift)
+//   3. Quadratic Bezier curves via Path2D between adjacent samples
+//      using midpoint control points (the curve passes through every
+//      midpoint, with each original sample acting as a control vertex)
+//
+// Each band is rendered as a filled Path2D POLYGON, not column-by-column
+// rectangles — adjacent columns are connected by curves so the silhouette
+// flows continuously, like a real waveform display.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const MIXXX_COLORS = {
@@ -614,37 +622,47 @@ function drawMixxxFilteredWaveform(ctx, bandPeaks, region, rStartPx, rEndPx, scr
     const endPx   = Math.ceil(rEndPx);
     if (endPx <= startPx) return;
 
-    // peaks-per-pixel ratio: when > 1, we're downsampling (multiple peaks
-    // per pixel column) and must take the loudest. When < 1, we're upsampling
-    // (multiple pixels per peak) and adjacent columns reuse the same peak.
     const pxToPeakRatio = peakLen / (sourceDuration * zoom);
 
-    // Per-band gain — calibrated so that a typical loud track fills ~80% of
-    // the silhouette area without clipping. BiquadFilter resonance allows
+    // Per-band gain — calibrated so that a loud track fills ~80% of the
+    // silhouette area without clipping. BiquadFilter resonance allows
     // individual band peaks slightly above 1.0, but the SUM of three bands
     // is rarely > 2.0 in practice. Scale so 2.0 ≈ maxAmp.
-    const BAND_GAIN = 0.5; // each band contributes up to ~0.5 of maxAmp
-    const GAMMA = 1.1;     // gentle transient boost
+    const BAND_GAIN = 0.5;
+    const GAMMA = 1.1;
 
-    // Pre-compute fillStyle strings so we don't re-format inside the loop.
-    const colLow  = `rgb(${MIXXX_COLORS.low[0]},${MIXXX_COLORS.low[1]},${MIXXX_COLORS.low[2]})`;
-    const colMid  = `rgb(${MIXXX_COLORS.mid[0]},${MIXXX_COLORS.mid[1]},${MIXXX_COLORS.mid[2]})`;
-    const colHigh = `rgb(${MIXXX_COLORS.high[0]},${MIXXX_COLORS.high[1]},${MIXXX_COLORS.high[2]})`;
+    // ── PASS 1: gather band amplitudes per pixel column ──
+    // Sampling stride: 1 px gives the most detail; we widen to 2 px at
+    // narrow per-band ratios so the smoothed curve doesn't get drowned by
+    // single-pixel noise. Both top (positive peak) and bottom (negative
+    // peak) are sampled — asymmetric envelope.
+    const STRIDE = pxToPeakRatio > 0.5 ? 1 : 2;
+    const sampleCount = Math.ceil((endPx - startPx) / STRIDE) + 1;
+    // Flat typed arrays — one entry per sample column.
+    const sX  = new Float32Array(sampleCount);
+    const slT = new Float32Array(sampleCount);  // low top  height (px)
+    const smT = new Float32Array(sampleCount);  // mid top  height (px)
+    const shT = new Float32Array(sampleCount);  // high top height (px)
+    const slB = new Float32Array(sampleCount);  // low bot  height (px)
+    const smB = new Float32Array(sampleCount);  // mid bot  height (px)
+    const shB = new Float32Array(sampleCount);  // high bot height (px)
+    let n = 0;
 
-    for (let px = startPx; px < endPx; px++) {
+    for (let px = startPx; px <= endPx; px += STRIDE) {
         const time    = (px + scrollX) / zoom;
         const srcTime = region.sourceStart + (time - region.timelineStart);
-        if (srcTime < 0 || srcTime > sourceDuration) continue;
+        if (srcTime < 0 || srcTime > sourceDuration) {
+            sX[n] = px;
+            // explicit zero — Float32Array is already zero-initialised
+            n++;
+            continue;
+        }
 
-        // Range of peak indices covered by this pixel column
         const fIdx0 = (srcTime / sourceDuration) * peakLen;
         const fIdx1 = fIdx0 + Math.max(1, pxToPeakRatio);
         const idx0  = Math.floor(fIdx0);
         const idx1  = Math.min(peakLen - 1, Math.ceil(fIdx1));
 
-        // Asymmetric envelope: track positive (max) and negative (min)
-        // peaks separately so the silhouette retains the natural shape of
-        // the audio (DC-offset bass, transient asymmetry).
         let lowPos = 0, midPos = 0, highPos = 0;
         let lowNeg = 0, midNeg = 0, highNeg = 0;
         for (let i = idx0; i <= idx1; i++) {
@@ -659,53 +677,112 @@ function drawMixxxFilteredWaveform(ctx, bandPeaks, region, rStartPx, rEndPx, scr
             if (hn > highNeg) highNeg = hn;
         }
 
-        // Apply γ curve + gain
         const scale = maxAmp * BAND_GAIN;
-        const lT = Math.pow(Math.min(1, lowPos),  GAMMA) * scale;
-        const mT = Math.pow(Math.min(1, midPos),  GAMMA) * scale;
-        const hT = Math.pow(Math.min(1, highPos), GAMMA) * scale;
-        const lB = Math.pow(Math.min(1, lowNeg),  GAMMA) * scale;
-        const mB = Math.pow(Math.min(1, midNeg),  GAMMA) * scale;
-        const hB = Math.pow(Math.min(1, highNeg), GAMMA) * scale;
-
-        // ── TOP HALF — stacked outward from centerline ──
-        if (lT + mT + hT > 0.5) {
-            let y = centerY;
-            if (lT > 0.5) {
-                ctx.fillStyle = colLow;
-                ctx.fillRect(px, y - lT, 1, lT);
-                y -= lT;
-            }
-            if (mT > 0.5) {
-                ctx.fillStyle = colMid;
-                ctx.fillRect(px, y - mT, 1, mT);
-                y -= mT;
-            }
-            if (hT > 0.5) {
-                ctx.fillStyle = colHigh;
-                ctx.fillRect(px, y - hT, 1, hT);
-            }
-        }
-
-        // ── BOTTOM HALF — mirror, stacked outward downward ──
-        if (lB + mB + hB > 0.5) {
-            let y = centerY;
-            if (lB > 0.5) {
-                ctx.fillStyle = colLow;
-                ctx.fillRect(px, y, 1, lB);
-                y += lB;
-            }
-            if (mB > 0.5) {
-                ctx.fillStyle = colMid;
-                ctx.fillRect(px, y, 1, mB);
-                y += mB;
-            }
-            if (hB > 0.5) {
-                ctx.fillStyle = colHigh;
-                ctx.fillRect(px, y, 1, hB);
-            }
-        }
+        sX[n]  = px;
+        slT[n] = Math.pow(Math.min(1, lowPos),  GAMMA) * scale;
+        smT[n] = Math.pow(Math.min(1, midPos),  GAMMA) * scale;
+        shT[n] = Math.pow(Math.min(1, highPos), GAMMA) * scale;
+        slB[n] = Math.pow(Math.min(1, lowNeg),  GAMMA) * scale;
+        smB[n] = Math.pow(Math.min(1, midNeg),  GAMMA) * scale;
+        shB[n] = Math.pow(Math.min(1, highNeg), GAMMA) * scale;
+        n++;
     }
+    if (n < 2) return;
+
+    // ── PASS 2: light 1-2-1 horizontal smoothing on each band/direction ──
+    // Removes single-pixel spikes so the polygon's bezier curve flows
+    // continuously instead of jagging at every sample. We re-use the
+    // sample arrays in-place after copying via slice.
+    const smooth = (arr) => {
+        if (n < 3) return arr;
+        const out = new Float32Array(n);
+        out[0] = arr[0];
+        out[n - 1] = arr[n - 1];
+        for (let i = 1; i < n - 1; i++) {
+            out[i] = arr[i - 1] * 0.25 + arr[i] * 0.5 + arr[i + 1] * 0.25;
+        }
+        return out;
+    };
+    const sLT = smooth(slT), sMT = smooth(smT), sHT = smooth(shT);
+    const sLB = smooth(slB), sMB = smooth(smB), sHB = smooth(shB);
+
+    // ── PASS 3: build & fill 6 smooth polygons (3 top, 3 bottom) ──
+    // Each band's polygon spans the row between its inner edge (closer to
+    // centerline) and its outer edge. Inner edges are CUMULATIVE — mid's
+    // inner edge sits on top of low's outer edge, etc. This gives the
+    // stacked-band look (red core, green mantle, blue tip).
+    const colLow  = `rgb(${MIXXX_COLORS.low[0]},${MIXXX_COLORS.low[1]},${MIXXX_COLORS.low[2]})`;
+    const colMid  = `rgb(${MIXXX_COLORS.mid[0]},${MIXXX_COLORS.mid[1]},${MIXXX_COLORS.mid[2]})`;
+    const colHigh = `rgb(${MIXXX_COLORS.high[0]},${MIXXX_COLORS.high[1]},${MIXXX_COLORS.high[2]})`;
+
+    // ── TOP HALF ──
+    // low: inner = centerY, outer = centerY - lT
+    fillSmoothBand(ctx, sX, n, (i) => centerY,                          (i) => centerY - sLT[i],                        colLow);
+    // mid: inner = centerY - lT, outer = centerY - lT - mT
+    fillSmoothBand(ctx, sX, n, (i) => centerY - sLT[i],                 (i) => centerY - sLT[i] - sMT[i],               colMid);
+    // high: inner = centerY - lT - mT, outer = centerY - lT - mT - hT
+    fillSmoothBand(ctx, sX, n, (i) => centerY - sLT[i] - sMT[i],        (i) => centerY - sLT[i] - sMT[i] - sHT[i],      colHigh);
+
+    // ── BOTTOM HALF (mirrored) ──
+    fillSmoothBand(ctx, sX, n, (i) => centerY,                          (i) => centerY + sLB[i],                        colLow);
+    fillSmoothBand(ctx, sX, n, (i) => centerY + sLB[i],                 (i) => centerY + sLB[i] + sMB[i],               colMid);
+    fillSmoothBand(ctx, sX, n, (i) => centerY + sLB[i] + sMB[i],        (i) => centerY + sLB[i] + sMB[i] + sHB[i],      colHigh);
+}
+
+/**
+ * Fill a horizontal band whose vertical span is defined by two y-curves
+ * (inner and outer). Uses quadraticCurveTo with midpoint control points
+ * to smoothly connect adjacent sample columns — same trick Mixxx and
+ * Rekordbox use to avoid the "comb" look that 1-px rectangles produce.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {Float32Array} xs           pixel positions, length n
+ * @param {number} n                  number of valid samples
+ * @param {(i:number)=>number} yInner inner-edge y (closer to centerline)
+ * @param {(i:number)=>number} yOuter outer-edge y (farther from centerline)
+ * @param {string} fillStyle
+ */
+function fillSmoothBand(ctx, xs, n, yInner, yOuter, fillStyle) {
+    // Skip the polygon entirely if the band is fully collapsed (would
+    // otherwise emit zero-area paths that still cost fill time).
+    let maxThickness = 0;
+    for (let i = 0; i < n; i++) {
+        const t = Math.abs(yOuter(i) - yInner(i));
+        if (t > maxThickness) maxThickness = t;
+        if (maxThickness > 0.5) break;
+    }
+    if (maxThickness < 0.5) return;
+
+    const path = new Path2D();
+
+    // Outer edge — left to right, smoothed.
+    // Move to first outer point.
+    path.moveTo(xs[0], yOuter(0));
+    // Quadratic bezier through each subsequent point using the previous
+    // point as the control and the midpoint as the new endpoint. This is
+    // the standard "midpoint Catmull-Rom-ish" smoothing technique.
+    for (let i = 1; i < n; i++) {
+        const mx = (xs[i - 1] + xs[i]) * 0.5;
+        const my = (yOuter(i - 1) + yOuter(i)) * 0.5;
+        path.quadraticCurveTo(xs[i - 1], yOuter(i - 1), mx, my);
+    }
+    // Anchor to the last outer point so the right edge isn't curved off
+    path.lineTo(xs[n - 1], yOuter(n - 1));
+
+    // Drop down/up to the inner edge at the right end
+    path.lineTo(xs[n - 1], yInner(n - 1));
+
+    // Inner edge — right to left, smoothed in the same way
+    for (let i = n - 2; i >= 0; i--) {
+        const mx = (xs[i + 1] + xs[i]) * 0.5;
+        const my = (yInner(i + 1) + yInner(i)) * 0.5;
+        path.quadraticCurveTo(xs[i + 1], yInner(i + 1), mx, my);
+    }
+    path.lineTo(xs[0], yInner(0));
+
+    path.closePath();
+    ctx.fillStyle = fillStyle;
+    ctx.fill(path);
 }
 
 // ─── SMOOTH PATH2D BAND SILHOUETTE ──────────────────────────────────────────────
