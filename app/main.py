@@ -1074,8 +1074,8 @@ async def batch_comment(r: BatchCommentReq):
         
         # Call the worker script
         cmd = [
-            sys.executable, 
-            os.path.join(APP_DIR, "batch_worker.py"),
+            sys.executable,
+            str(Path(APP_DIR) / "batch_worker.py"),
             "--db", str(live_db_path),
             "--source", r.source_id,
             "--action", r.action
@@ -1931,7 +1931,7 @@ async def startup_event():
     # State Recovery: purge orphaned temp files from previous hard crashes
     import tempfile, glob
     tmp_base = tempfile.gettempdir()
-    for stale_file in glob.glob(os.path.join(tmp_base, "rbpro_sc_*")):
+    for stale_file in glob.glob(str(Path(tmp_base) / "rbpro_sc_*")):
         try:
             os.remove(stale_file)
             logger.info("Purged stale download temp: %s", stale_file)
@@ -3481,7 +3481,7 @@ async def usb_playcount_resolve(body: PlayCountResolveRequest):
     try:
         from .config import DB_FILENAME
         import os as _os
-        rb_root = _os.path.join(_os.environ.get("APPDATA", ""), "Pioneer", "rekordbox")
+        rb_root = str(Path(_os.environ.get("APPDATA", "")) / "Pioneer" / "rekordbox")
         pc_db_path = str(Path(rb_root) / DB_FILENAME) if hasattr(Path(rb_root), "__str__") else ""
 
         resolutions_dicts = [r.model_dump() for r in body.resolutions]
@@ -3550,7 +3550,7 @@ async def phrase_generate(body: PhraseGenerateRequest):
 
         from .config import DB_FILENAME
         import os as _os
-        rb_root = _os.path.join(_os.environ.get("APPDATA", ""), "Pioneer", "rekordbox")
+        rb_root = str(Path(_os.environ.get("APPDATA", "")) / "Pioneer" / "rekordbox")
         db_path = str(Path(rb_root) / DB_FILENAME)
 
         # Extract beats in executor so we don't block the event loop
@@ -3609,7 +3609,7 @@ async def phrase_commit(body: PhraseCommitRequest):
 
         from .config import DB_FILENAME
         import os as _os
-        rb_root = _os.path.join(_os.environ.get("APPDATA", ""), "Pioneer", "rekordbox")
+        rb_root = str(Path(_os.environ.get("APPDATA", "")) / "Pioneer" / "rekordbox")
         db_path = str(Path(rb_root) / DB_FILENAME)
 
         await asyncio.get_event_loop().run_in_executor(

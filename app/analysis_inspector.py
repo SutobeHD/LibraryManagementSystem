@@ -57,7 +57,7 @@ def inspect_sample_anlz():
                      count += 1
                      if count >= 10: break
                  print(f"  Iterated {count} columns.")
-                 dump_path = os.path.join(r"<user_dir>\Documents\Appp\RB_Editor_Pro", "analysis_dump.txt")
+                 dump_path = str(Path(r"<user_dir>\Documents\Appp\RB_Editor_Pro") / "analysis_dump.txt")
                  with open(dump_path, "w") as f:
                      for i, col in enumerate(first_few):
                          h = getattr(col, 'high', 'N/A')

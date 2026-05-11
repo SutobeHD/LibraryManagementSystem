@@ -697,8 +697,8 @@ def _backup_existing_anlz(anlz_dir: str, basename: str) -> List[str]:
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     created: List[str] = []
     for ext in ("DAT", "EXT", "2EX"):
-        src = os.path.join(anlz_dir, f"{basename}.{ext}")
-        if not os.path.exists(src):
+        src = str(Path(anlz_dir) / f"{basename}.{ext}")
+        if not Path(src).exists():
             continue
         dst = src + f".bak-{timestamp}"
         try:
@@ -714,7 +714,7 @@ def _prune_anlz_backups(anlz_dir: str, keep: int = _DEFAULT_BACKUP_KEEP) -> int:
     Keep only the N most recent backups per ANLZ basename.
     Returns the number of files removed.
     """
-    pattern = os.path.join(anlz_dir, "*.bak-*")
+    pattern = str(Path(anlz_dir) / "*.bak-*")
     backups = glob.glob(pattern)
     by_prefix: Dict[str, List[str]] = {}
     for path in backups:
@@ -784,7 +784,7 @@ def write_anlz_files(
             hot_cues=hot_cues,
             memory_cues=memory_cues,
         )
-        dat_path = os.path.join(anlz_dir, f"{filename_base}.DAT")
+        dat_path = str(Path(anlz_dir) / f"{filename_base}.DAT")
         with open(dat_path, 'wb') as f:
             f.write(dat_data)
         paths["dat"] = dat_path
@@ -806,7 +806,7 @@ def write_anlz_files(
             memory_cues=memory_cues,
             bpm=bpm,
         )
-        ext_path = os.path.join(anlz_dir, f"{filename_base}.EXT")
+        ext_path = str(Path(anlz_dir) / f"{filename_base}.EXT")
         with open(ext_path, 'wb') as f:
             f.write(ext_data)
         paths["ext"] = ext_path
@@ -824,7 +824,7 @@ def write_anlz_files(
                 pwv7=pwv7,
                 pwv6=pwv6,
             )
-            ex2_path = os.path.join(anlz_dir, f"{filename_base}.2EX")
+            ex2_path = str(Path(anlz_dir) / f"{filename_base}.2EX")
             with open(ex2_path, 'wb') as f:
                 f.write(ex2_data)
             paths["2ex"] = ex2_path

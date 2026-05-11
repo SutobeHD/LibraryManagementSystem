@@ -41,12 +41,7 @@ class AnalysisCache:
 
     def __init__(self, cache_dir: Optional[str] = None):
         if cache_dir is None:
-            cache_dir = os.path.join(
-                os.path.expanduser("~"),
-                ".cache",
-                "rb_editor_pro",
-                "analysis_cache",
-            )
+            cache_dir = str(Path.home() / ".cache" / "rb_editor_pro" / "analysis_cache")
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.index_file = self.cache_dir / "index.json"
