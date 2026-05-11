@@ -132,10 +132,25 @@ pub fn estimate_bpm(samples: &[f32], sample_rate: u32) -> f32 {
     if bpm < 60.0 { bpm * 2.0 } else if bpm > 180.0 { bpm / 2.0 } else { bpm }
 }
 
-/// Placeholder for Musical Key Analysis (e.g., Camelot)
+/// Returns the estimated musical key in Camelot notation.
+///
+/// **NOT IMPLEMENTED** — this Rust path has always been a stub that returned
+/// a hardcoded `"8A"`, which lied to the UI and made the key column
+/// meaningless. The Python backend (`app/analysis_engine.py`) does proper
+/// key detection via Essentia's `KeyExtractor`; anything that needs an
+/// accurate key should go through `POST /api/audio/analyze` instead of this
+/// function.
+///
+/// The empty string returned here lets the frontend fall through to the
+/// backend-supplied key (or render "—") rather than confidently displaying
+/// the wrong one.
+///
+/// TODO(rust-key-detect): implement Krumhansl-Schmuckler / pitch-class
+/// profile detection so the native Rust path can match the Python engine.
+/// Must land with `#[cfg(test)]` coverage before re-enabling — see
+/// docs/HANDOVER.md Phase 2.2.
 pub fn detect_key(_samples: &[f32], _sample_rate: u32) -> String {
-    // Real chroma-analysis would take more space. Returning a placeholder that mimics the API.
-    "8A".to_string() // Camelot 8A (Am)
+    String::new()
 }
 
 fn calculate_energy(slice: &[Complex<f32>]) -> f32 {
