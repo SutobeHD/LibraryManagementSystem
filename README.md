@@ -97,6 +97,7 @@ Detail docs:
 - [docs/frontend-index.md](./docs/frontend-index.md) — React index
 - [docs/backend-index.md](./docs/backend-index.md) — FastAPI index
 - [docs/rust-index.md](./docs/rust-index.md) — Tauri index
+- [docs/research/](./docs/research/README.md) — open research topics + feature investigations (persistent across chat sessions)
 
 ## Security
 

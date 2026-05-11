@@ -82,7 +82,15 @@ RB_Editor_Pro/
 │       └── rust-index.md     # Rust/Tauri command and module index
 │
 ├── docs/
-│   └── PROJECT_OVERVIEW.md
+│   ├── PROJECT_OVERVIEW.md
+│   ├── FILE_MAP.md            # master file navigation
+│   ├── architecture.md        # this file
+│   ├── {frontend,backend,rust}-index.md  # symbol/endpoint indexes
+│   └── research/              # open research topics, persistent across chats
+│       ├── README.md          # how the research-log system works
+│       ├── _TEMPLATE.md       # copy to start a new topic
+│       ├── _INDEX.md          # living list of topics + status
+│       └── <slug>.md          # one file per topic
 ├── scripts/                # Dev/build utility scripts
 ├── CLAUDE.md               # Claude Code configuration (this project's AI guide)
 ├── PROJECT_WIKI.md         # Detailed feature documentation
