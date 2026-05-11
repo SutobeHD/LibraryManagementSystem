@@ -74,15 +74,40 @@ where F: Fn(f32, &str) {
     // 4. Apply Regions & Fades
     progress(0.50, "Mixing regions...");
     for region in &state.regions {
+        // Validate region bounds upfront. A region with `end <= start` or
+        // non-finite times would later cause a usize underflow on
+        // `re_samples - rs_samples` and crash the export. Refuse it
+        // explicitly so the caller can fix the timeline state.
+        if !region.start.is_finite()
+            || !region.end.is_finite()
+            || !region.track_start.is_finite()
+            || region.start < 0.0
+            || region.track_start < 0.0
+            || region.end <= region.start
+        {
+            return Err(format!(
+                "invalid region {:?}: start={} end={} track_start={}",
+                region.id, region.start, region.end, region.track_start,
+            ));
+        }
+
         let rs_samples = (region.start * sample_rate as f32) as usize * channels;
         let re_samples = (region.end * sample_rate as f32) as usize * channels;
         let ts_samples = (region.track_start * sample_rate as f32) as usize * channels;
-        
-        let slice_len = vec![re_samples - rs_samples, mix_buffer.len() - ts_samples, source_samples.len() - rs_samples]
-            .into_iter()
-            .min()
-            .unwrap_or(0);
-        
+
+        // `saturating_sub` for all three legs — even with the up-front
+        // validation, `rs_samples > source_samples.len()` is possible when
+        // a region points past the end of the decoded source, and we'd
+        // rather silently clip the slice than panic on usize underflow.
+        let slice_len = [
+            re_samples.saturating_sub(rs_samples),
+            mix_buffer.len().saturating_sub(ts_samples),
+            source_samples.len().saturating_sub(rs_samples),
+        ]
+        .into_iter()
+        .min()
+        .unwrap_or(0);
+
         let fade_in_samples = region.fade_in.as_ref().map_or(0, |f| (f.end * sample_rate as f32) as usize * channels);
         let fade_out_samples = region.fade_out.as_ref().map_or(0, |f| (f.end * sample_rate as f32) as usize * channels);
 
