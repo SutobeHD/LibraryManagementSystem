@@ -18,7 +18,13 @@ pub struct AudioEngine;
 
 impl AudioEngine {
     /// Load and decode an audio file using memory mapping.
-    pub fn load_file<P: AsRef<Path>>(path: P) -> Result<(Box<dyn FormatReader>, Box<dyn Decoder>, u32, u32), String> {
+    ///
+    /// Returns `(format_reader, decoder, track_id, sample_rate, channels)`.
+    /// `channels` comes from the codec params; a file with no channel info
+    /// falls back to 2 (stereo) — see the inline default. Mono / 5.1 / 7.1
+    /// files now report their actual channel count instead of being
+    /// silently treated as stereo by downstream analysis + export.
+    pub fn load_file<P: AsRef<Path>>(path: P) -> Result<(Box<dyn FormatReader>, Box<dyn Decoder>, u32, u32, usize), String> {
         let file_path = path.as_ref();
         
         // 1. Open the file
@@ -65,13 +71,16 @@ impl AudioEngine {
 
         let track_id = track.id;
         let sample_rate = track.codec_params.sample_rate.unwrap_or(44100);
+        let channels = track.codec_params.channels
+            .map(|c| c.count())
+            .unwrap_or(2);
 
         let dec_opts: DecoderOptions = Default::default();
         let decoder = symphonia::default::get_codecs()
             .make(&track.codec_params, &dec_opts)
             .map_err(|e| format!("Failed to create decoder: {}", e))?;
 
-        Ok((format, decoder, track_id, sample_rate))
+        Ok((format, decoder, track_id, sample_rate, channels))
     }
 }
 
@@ -98,11 +107,12 @@ impl AudioController {
         self.stop_signal.store(true, Ordering::SeqCst);
         self.playback.pause();
 
-        let (mut format, mut decoder, track_id, sample_rate) = AudioEngine::load_file(path)?;
+        let (mut format, mut decoder, track_id, sample_rate, channels) = AudioEngine::load_file(path)?;
 
-        // Create ringbuffer for holding 1 second of audio (e.g. 44100 * 2 channels)
-        // Adjust for stereo
-        let capacity = (sample_rate * 2) as usize; 
+        // Create ringbuffer for ~1 second of interleaved audio. Sized off the
+        // actual channel count so mono and multi-channel files don't over- or
+        // under-allocate.
+        let capacity = (sample_rate as usize).saturating_mul(channels.max(1));
         let rb = HeapRb::<f32>::new(capacity);
         let (mut producer, consumer) = rb.split();
 

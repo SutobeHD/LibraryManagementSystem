@@ -35,8 +35,9 @@ pub fn render_project<F>(state: ProjectState, progress: F) -> Result<String, Str
 where F: Fn(f32, &str) {
     progress(0.05, "Decoding source file...");
     // 1. Decode original file into memory (f32)
-    let (mut format, mut decoder, track_id, sample_rate) = AudioEngine::load_file(&state.source_file)?;
-    
+    let (mut format, mut decoder, track_id, sample_rate, channels) =
+        AudioEngine::load_file(&state.source_file)?;
+
     // We will decode the ENTIRE source file into a single massive float buffer first.
     // (Optimization for future: stream only needed chunks. But for DJ mixes, full decode is fine thanks to mmap)
     let mut source_samples: Vec<f32> = Vec::new();
@@ -48,7 +49,7 @@ where F: Fn(f32, &str) {
             Err(_) => break, // EOF
         };
         if packet.track_id() != track_id { continue; }
-        
+
         if let Ok(decoded) = decoder.decode(&packet) {
             if sample_buf.is_none() {
                 sample_buf = Some(SampleBuffer::<f32>::new(decoded.capacity() as u64, *decoded.spec()));
@@ -60,8 +61,9 @@ where F: Fn(f32, &str) {
         }
     }
 
-    // Default to stereo = 2
-    let channels = 2;
+    // `channels` came from the decoder. Clamp to 1 so multiplications below
+    // can't step-by-zero on a malformed codec params entry.
+    let channels = channels.max(1);
 
     progress(0.40, "Preparing timeline...");
     // 2. Calculate the total timeline length based on regions.

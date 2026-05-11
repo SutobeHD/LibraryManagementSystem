@@ -24,7 +24,10 @@ fn hz_to_bin(hz: f32, frame_size: usize, sample_rate: u32) -> usize {
 }
 
 pub fn compute_waveform<P: AsRef<Path>>(path: P) -> Result<Vec<u8>, String> {
-    let (mut format, mut decoder, track_id, sample_rate) = AudioEngine::load_file(path)?;
+    // Channel count is intentionally ignored here — `buf.samples()` already
+    // yields a single interleaved stream and the FFT operates on the raw
+    // f32 sequence regardless of channel layout.
+    let (mut format, mut decoder, track_id, sample_rate, _channels) = AudioEngine::load_file(path)?;
 
     let mut planner = FftPlanner::new();
     // 1024 samples per frame
@@ -98,9 +101,14 @@ pub fn compute_waveform<P: AsRef<Path>>(path: P) -> Result<Vec<u8>, String> {
     Ok(binary_payload)
 }
 
-/// Simplified BPM Analysis using energy peaks
-pub fn estimate_bpm(samples: &[f32], sample_rate: u32) -> f32 {
-    let channels = 2; // Assuming stereo
+/// Simplified BPM Analysis using energy peaks.
+///
+/// `channels` is the source's actual channel count from the decoder — pass
+/// 1 for mono, 2 for stereo, 6 for 5.1, etc. The previous implementation
+/// hardcoded 2 and silently mis-windowed mono / multi-channel sources.
+/// Values < 1 are clamped to 1 to avoid the step-by-zero panic.
+pub fn estimate_bpm(samples: &[f32], sample_rate: u32, channels: usize) -> f32 {
+    let channels = channels.max(1);
     let window_size = (sample_rate as f32 * 0.05) as usize; // 50ms window
     let mut energies = Vec::new();
 
@@ -176,13 +184,27 @@ mod tests {
     #[test]
     fn estimate_bpm_returns_default_on_empty_input() {
         // Previously panicked on `energies.len() - 1` underflow.
-        assert_eq!(estimate_bpm(&[], 44100), 120.0);
+        assert_eq!(estimate_bpm(&[], 44100, 2), 120.0);
     }
 
     #[test]
     fn estimate_bpm_returns_default_on_too_short_input() {
         // 4 samples can't fill three 50 ms windows at 44.1 kHz.
-        assert_eq!(estimate_bpm(&[0.1, 0.2, 0.3, 0.4], 44100), 120.0);
+        assert_eq!(estimate_bpm(&[0.1, 0.2, 0.3, 0.4], 44100, 2), 120.0);
+    }
+
+    #[test]
+    fn estimate_bpm_handles_mono_input() {
+        // channels=1 must not underflow / step by zero. We just want
+        // the function to terminate gracefully.
+        let _ = estimate_bpm(&[0.0; 4096], 44100, 1);
+    }
+
+    #[test]
+    fn estimate_bpm_clamps_zero_channels() {
+        // channels=0 used to cause `step_by(0)` panic. The clamp at the
+        // top of estimate_bpm now floors it to 1.
+        let _ = estimate_bpm(&[0.0; 4096], 44100, 0);
     }
 
     #[test]

@@ -46,8 +46,9 @@ pub async fn load_audio(
 pub async fn get_3band_waveform(path: String) -> Result<serde_json::Value, String> {
     // Computes FFT and analysis in background
     tokio::task::spawn_blocking(move || {
-        let (mut format, mut decoder, track_id, sample_rate) = crate::audio::engine::AudioEngine::load_file(&path)?;
-        
+        let (mut format, mut decoder, track_id, sample_rate, channels) =
+            crate::audio::engine::AudioEngine::load_file(&path)?;
+
         // Fully decode for analysis (simpler for prototype)
         let mut source_samples: Vec<f32> = Vec::new();
         let mut sample_buf: Option<symphonia::core::audio::SampleBuffer<f32>> = None;
@@ -67,7 +68,7 @@ pub async fn get_3band_waveform(path: String) -> Result<serde_json::Value, Strin
         }
 
         let waveform = analysis::compute_waveform(&path)?;
-        let bpm = analysis::estimate_bpm(&source_samples, sample_rate);
+        let bpm = analysis::estimate_bpm(&source_samples, sample_rate, channels);
         let key = analysis::detect_key(&source_samples, sample_rate);
 
         Ok(serde_json::json!({
