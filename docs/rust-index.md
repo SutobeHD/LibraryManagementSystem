@@ -22,7 +22,7 @@
 | `audio/engine.rs` | `AudioEngine`, `AudioController` | Memory-mapped file loading (memmap2, zero-copy). Symphonia codec support: MP3, FLAC, WAV, ALAC, ISOMP4. Decoder abstraction over format readers |
 | `audio/playback.rs` | `PlaybackEngine` | CPAL device-agnostic audio output stream. ringbuf lock-free producer/consumer sample queue. Stream init + error recovery (`StreamError::DeviceNotAvailable`). **Holds a `cpal::Stream` (`!Send + !Sync`)** with a manual `unsafe impl Send + Sync` justified by the `// SAFETY:` block immediately above the impls — CPAL initialises COM in MTA mode on Windows so the WASAPI handles are callable from any thread, and all mutations go through `Mutex<AudioController>`. Marked `TODO(audio-thread-refactor)` for a future move of the Stream onto a dedicated audio thread — see Phase 1.9 in `docs/HANDOVER.md`. |
 | `audio/commands.rs` | `AudioCommandState`, Tauri IPC handlers | `load_audio`, `get_3band_waveform`, `start_project_export` — all return `Result<T, String>`. Owns `Arc<Mutex<AudioEngine>>` and `Arc<Mutex<PlaybackEngine>>` |
-| `audio/analysis.rs` | `compute_waveform()`, `estimate_bpm()`, `detect_key()` | RustFFT-based waveform computation. 3-band frequency split. BPM tempo detection. Chromatic key detection |
+| `audio/analysis.rs` | `compute_waveform()`, `estimate_bpm()`, `detect_key()`, `hz_to_bin()` | RustFFT-based waveform computation. 3-band frequency split with **Hz-based band boundaries** (20-250-4000-20000 Hz, sample-rate-correct via `hz_to_bin()` — previously hardcoded bin indices broke at non-44.1k sample rates). BPM tempo detection. Chromatic key detection |
 | `audio/export.rs` | `render_project()`, `AudioRegion`, `ProjectState`, `Fade` | Offline audio synthesis / project render to WAV (hound) or MP3 |
 | `audio/metadata.rs` | tag read/write functions | ID3 (MP3), FLAC, ALAC, AIFF metadata via lofty crate |
 
@@ -154,10 +154,14 @@ pub async fn my_command(state: tauri::State<'_, AudioCommandState>) -> Result<My
 
 ### FFT Band Frequencies
 ```rust
-// Standard 3-band split used throughout the codebase:
-// Low:  20 Hz  – 300 Hz  (bass / kick)
-// Mid:  300 Hz – 4 kHz   (mids / snare)
-// High: 4 kHz  – 20 kHz  (hi-hats / cymbals / presence)
+// Standard 3-band split used throughout the codebase (boundaries are
+// constants in `src-tauri/src/audio/analysis.rs`):
+// Low:  20 Hz   – 250 Hz  (bass / kick)
+// Mid:  250 Hz  – 4 kHz   (mids / vocals / snare)
+// High: 4 kHz   – 20 kHz  (hi-hats / cymbals / presence / air)
+//
+// Always convert Hz → FFT bin via `hz_to_bin(hz, frame_size, sample_rate)`
+// — never hardcode bin indices; they shift with the source's sample rate.
 ```
 
 ### Clippy
