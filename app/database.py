@@ -796,7 +796,7 @@ class RekordboxDB:
             return self.live_db
         return self.xml_db
 
-    def set_mode(self, mode: str):
+    def set_mode(self, mode: str) -> bool:
         if mode not in ["xml", "live"]: return False
         if mode == "live" and not self.live_db_path.exists():
             # auto-create our private standalone master.db so Live works without Rekordbox
@@ -807,7 +807,7 @@ class RekordboxDB:
         logger.info(f"Switched to mode: {self.mode}")
         return True
 
-    def load_library(self, path=None):
+    def load_library(self, path: Optional[str] = None) -> bool:
         if self.mode == "live":
             success = self.active_db.load()
             self.loaded = success
@@ -818,7 +818,7 @@ class RekordboxDB:
             self.loaded = success
             return success
 
-    def unload_library(self):
+    def unload_library(self) -> bool:
         self.xml_db.tracks = {}
         self.xml_db.playlists = []
         self.xml_db.loaded = False
@@ -828,7 +828,7 @@ class RekordboxDB:
         self.loaded = False
         return True
 
-    def create_new_library(self, path: str = None):
+    def create_new_library(self, path: Optional[str] = None) -> bool:
         target = Path(path) if path else Path("rekordbox.xml")
         target.parent.mkdir(parents=True, exist_ok=True)
         self.xml_db.xml_path = target
@@ -844,7 +844,7 @@ class RekordboxDB:
         logger.info(f"Created new empty library at {target}")
         return True
 
-    def refresh_metadata(self):
+    def refresh_metadata(self) -> None:
         if not self.active_db: return
         if hasattr(self.active_db, "_finalize_ui_metadata"):
             self.active_db._finalize_ui_metadata()
@@ -852,76 +852,83 @@ class RekordboxDB:
             self.active_db._extract_metadata()
 
     # Delegate methods
-    def get_all_tracks(self):
+    def get_all_tracks(self) -> List[Dict[str, Any]]:
         return list(self.tracks.values())
 
-    def get_all_artists(self): return self.active_db.artists
-    def get_all_genres(self): return self.active_db.genres
-    def get_all_labels(self):
+    def get_all_artists(self) -> List[Dict[str, Any]]: return self.active_db.artists
+    def get_all_genres(self) -> List[Dict[str, Any]]: return self.active_db.genres
+    def get_all_labels(self) -> List[Dict[str, Any]]:
         if hasattr(self.active_db, "get_all_labels"):
             return self.active_db.get_all_labels()
         return []
 
-    def get_all_albums(self):
+    def get_all_albums(self) -> List[Dict[str, Any]]:
         if hasattr(self.active_db, "get_all_albums"):
             return self.active_db.get_all_albums()
         return []
-    def get_playlist_tree(self):
+    def get_playlist_tree(self) -> List[Dict[str, Any]]:
         if hasattr(self.active_db, "get_playlist_tree"):
             return self.active_db.get_playlist_tree()
         return []
-    def get_tracks_by_artist(self, aid): 
+    def get_tracks_by_artist(self, aid: str) -> List[Dict[str, Any]]:
         return self._filter_tracks(self.active_db.get_tracks_by_artist(aid))
-    def get_tracks_by_label(self, aid):
+    def get_tracks_by_label(self, aid: str) -> List[Dict[str, Any]]:
         if hasattr(self.active_db, "get_tracks_by_label"):
             return self._filter_tracks(self.active_db.get_tracks_by_label(aid))
         return []
-    def get_tracks_by_album(self, aid):
+    def get_tracks_by_album(self, aid: str) -> List[Dict[str, Any]]:
         if hasattr(self.active_db, "get_tracks_by_album"):
             return self._filter_tracks(self.active_db.get_tracks_by_album(aid))
         return []
-    def get_playlist_tracks(self, pid): 
+    def get_playlist_tracks(self, pid: str) -> List[Dict[str, Any]]:
         return self._filter_tracks(self.active_db.get_playlist_tracks(pid))
-    def get_track_details(self, tid): return self.active_db.get_track_details(tid)
-    
-    def add_track(self, track_data):
+    def get_track_details(self, tid: str) -> Optional[Dict[str, Any]]:
+        return self.active_db.get_track_details(tid)
+
+    def add_track(self, track_data: Dict[str, Any]) -> Optional[str]:
         if hasattr(self.active_db, "add_track"):
             return self.active_db.add_track(track_data)
         return None
 
-    def delete_track(self, tid):
+    def delete_track(self, tid: str) -> bool:
         if hasattr(self.active_db, "delete_track"):
             return self.active_db.delete_track(tid)
         return False
 
-    def rename_playlist(self, pid, name):
+    def rename_playlist(self, pid: str, name: str) -> bool:
         if hasattr(self.active_db, "rename_playlist"):
             return self.active_db.rename_playlist(pid, name)
         return False
 
-    def move_playlist(self, pid, new_parent_id, target_id=None, position=None):
+    def move_playlist(
+        self,
+        pid: str,
+        new_parent_id: str,
+        target_id: Optional[str] = None,
+        position: Optional[str] = None,
+    ) -> bool:
         if hasattr(self.active_db, "move_playlist"):
             return self.active_db.move_playlist(pid, new_parent_id, target_id, position)
         return False
 
-    def delete_playlist(self, pid):
+    def delete_playlist(self, pid: str) -> bool:
         if hasattr(self.active_db, "delete_playlist"):
             return self.active_db.delete_playlist(pid)
         return False
 
-    def reorder_playlist_track(self, pid, tid, new_index):
+    def reorder_playlist_track(self, pid: str, tid: str, new_index: int) -> bool:
         if hasattr(self.active_db, "reorder_playlist_track"):
             return self.active_db.reorder_playlist_track(pid, tid, new_index)
         return False
 
-    def create_folder(self, name, parent_id="ROOT"):
+    def create_folder(self, name: str, parent_id: str = "ROOT") -> Optional[Dict[str, Any]]:
         if hasattr(self.active_db, "create_folder"):
             return self.active_db.create_folder(name, parent_id)
         if hasattr(self.active_db, "create_playlist"):
             return self.active_db.create_playlist(name, parent_id, is_folder=True)
         return None
 
-    def create_smart_playlist(self, name, criteria, parent_id="ROOT"):
+    def create_smart_playlist(self, name: str, criteria: Dict[str, Any], parent_id: str = "ROOT") -> Optional[Dict[str, Any]]:
         if hasattr(self.active_db, "create_smart_playlist"):
             return self.active_db.create_smart_playlist(name, criteria, parent_id)
         # Fallback for LiveDB: register the criteria on a normal Type-1 playlist
@@ -940,7 +947,7 @@ class RekordboxDB:
             return node
         return None
 
-    def update_smart_playlist(self, pid, criteria):
+    def update_smart_playlist(self, pid: str, criteria: Dict[str, Any]) -> bool:
         if hasattr(self.active_db, "update_smart_playlist"):
             return self.active_db.update_smart_playlist(pid, criteria)
         if not hasattr(self, "_smart_overlay"):
@@ -948,7 +955,7 @@ class RekordboxDB:
         self._smart_overlay[str(pid)] = criteria
         return True
 
-    def evaluate_smart_playlist(self, pid):
+    def evaluate_smart_playlist(self, pid: str) -> List[Dict[str, Any]]:
         if hasattr(self.active_db, "evaluate_smart_playlist"):
             return self.active_db.evaluate_smart_playlist(pid)
         # Fallback evaluator using our smart engine + DB-wrapper tracks
@@ -958,15 +965,21 @@ class RekordboxDB:
             return []
         return _eval(criteria, list(self.tracks.values()))
 
-    def get_tracks_missing_artwork(self):
+    def get_tracks_missing_artwork(self) -> List[Dict[str, Any]]:
         """Returns a list of tracks where Artwork is empty or None."""
-        missing = []
+        missing: List[Dict[str, Any]] = []
         for t in self.tracks.values():
             if not t.get('Artwork'):
                 missing.append(t)
         return missing
 
-    def create_playlist(self, name, parent_id="ROOT", is_folder=False, tracks=None):
+    def create_playlist(
+        self,
+        name: str,
+        parent_id: str = "ROOT",
+        is_folder: bool = False,
+        tracks: Optional[List[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
         if hasattr(self.active_db, "create_playlist"):
             pl = self.active_db.create_playlist(name, parent_id, is_folder)
             if pl and tracks:
@@ -977,22 +990,22 @@ class RekordboxDB:
             return pl
         return None
 
-    def add_track_to_playlist(self, pid, tid):
+    def add_track_to_playlist(self, pid: str, tid: str) -> bool:
         if hasattr(self.active_db, "add_track_to_playlist"):
             return self.active_db.add_track_to_playlist(pid, tid)
         return False
 
-    def remove_track_from_playlist(self, pid, tid):
+    def remove_track_from_playlist(self, pid: str, tid: str) -> bool:
         if hasattr(self.active_db, "remove_track_from_playlist"):
             return self.active_db.remove_track_from_playlist(pid, tid)
         return False
-    
-    def save(self):
+
+    def save(self) -> bool:
         if hasattr(self.active_db, "save_xml"):
             return self.active_db.save_xml()
         return True # Live DB is auto-saved or handled via updates
 
-    def update_tracks_metadata(self, track_ids, updates):
+    def update_tracks_metadata(self, track_ids: List[str], updates: Dict[str, Any]) -> bool:
         success = True
         for tid in track_ids:
             if self.mode == "live":
@@ -1012,7 +1025,7 @@ class RekordboxDB:
             
         return success
 
-    def update_track_comment(self, tid, comment):
+    def update_track_comment(self, tid: str, comment: str) -> bool:
         return self.update_tracks_metadata([tid], {"Comment": comment})
 
 
