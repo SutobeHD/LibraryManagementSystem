@@ -456,10 +456,16 @@ export async function loadRbepFile(filepath) {
         const xmlString = await invoke('plugin:fs|read_text_file', { path: filepath });
         return parseRbep(xmlString);
     } catch {
-        // Fallback: try fetch
-        const res = await fetch(`http://localhost:8000/api/file/read?path=${encodeURIComponent(filepath)}`);
-        const xmlString = await res.text();
-        return parseRbep(xmlString);
+        // Fallback: read the .rbep via the backend file proxy. Goes through the
+        // shared axios instance so session-token + 401-refresh + 429-backoff all
+        // apply just like every other API call.
+        const { default: api } = await import('../api/api');
+        const res = await api.get('/api/file/read', {
+            params: { path: filepath },
+            responseType: 'text',
+            transformResponse: [(d) => d],  // keep the raw XML string
+        });
+        return parseRbep(res.data);
     }
 }
 

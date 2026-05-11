@@ -497,17 +497,11 @@ const NonDestructiveEditor = ({
     const handleSaveGrid = useCallback(async () => {
         if (!track?.id) return;
         try {
-            const response = await fetch('/api/track/grid/save', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    track_id: track.id,
-                    beat_grid: state.beatGrid
-                })
+            await api.post('/api/track/grid/save', {
+                track_id: track.id,
+                beat_grid: state.beatGrid,
             });
-            if (response.ok) {
-                log.debug("Grid saved successfully");
-            }
+            log.debug("Grid saved successfully");
         } catch (err) {
             console.error("Failed to save grid:", err);
         }

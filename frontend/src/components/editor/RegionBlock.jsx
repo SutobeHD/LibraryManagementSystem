@@ -6,6 +6,7 @@
 
 import React, { useRef, useEffect, useMemo, useCallback } from 'react';
 import { GripVertical, Volume2, VolumeX } from 'lucide-react';
+import api from '../../api/api';
 
 const RegionBlock = ({
     region,
@@ -37,9 +38,10 @@ const RegionBlock = ({
         const fetchWaveform = async () => {
             setIsProcessing(true);
             try {
-                const response = await fetch(`/api/audio/waveform?path=${encodeURIComponent(region.sourcePath)}&pps=${pixelsPerSecond}`);
-                const data = await response.json();
-                setMultibandData(data);
+                const response = await api.get('/api/audio/waveform', {
+                    params: { path: region.sourcePath, pps: pixelsPerSecond },
+                });
+                setMultibandData(response.data);
             } catch (err) {
                 console.error("Failed to fetch multiband waveform:", err);
             }

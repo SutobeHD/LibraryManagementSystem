@@ -568,11 +568,10 @@ const App = () => {
     // SPEED: Heartbeat at 5s instead of 2s — sufficient for keepalive
     const hbInterval = setInterval(async () => {
       try {
-        const res = await fetch('http://localhost:8000/api/system/heartbeat', { method: 'POST' });
-        const data = await res.json();
+        const res = await api.post('/api/system/heartbeat');
         // SECURITY: Capture session token from heartbeat response
-        if (data.token) {
-          setSessionToken(data.token);
+        if (res.data?.token) {
+          setSessionToken(res.data.token);
         }
       } catch (e) { /* backend offline */ }
     }, HEARTBEAT_INTERVAL_MS);
