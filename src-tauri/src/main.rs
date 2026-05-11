@@ -170,49 +170,75 @@ fn close_splashscreen(window: tauri::Window) {
     }
 }
 
-/// Run the full SoundCloud OAuth 2.1 + PKCE flow and return the access token.
+/// Drive the SoundCloud OAuth 2.1 + PKCE handshake to completion.
 ///
-/// The flow blocks on a one-shot localhost HTTP listener for the OAuth
-/// callback, then exchanges the auth code for an access token. Progress
-/// stages are emitted on the `sc-login-progress` event:
-/// - `auth`: opening browser → waiting for callback → exchanging code
-/// - `done`: success
+/// Emits three `{stage: "auth", message: ...}` progress events on
+/// `progress_event` as the flow advances (opening browser → waiting →
+/// exchanging code) and returns the access token on success. Callers
+/// that need a terminal "done" event must emit it themselves after this
+/// returns — login and export use different final-stage payloads.
 ///
 /// # Errors
 /// - "Configuration error" if `SC_CLIENT_ID` / `SC_CLIENT_SECRET` are missing
 /// - "Could not open browser" if the OS browser launcher fails
 /// - "Task join error" / "Callback error" if the local HTTP listener fails
 /// - "Token exchange failed" if SoundCloud rejects the auth code
-#[tauri::command]
-async fn login_to_soundcloud(app: tauri::AppHandle) -> Result<String, String> {
+async fn ensure_oauth_token(
+    app: &tauri::AppHandle,
+    progress_event: &str,
+) -> Result<String, String> {
     // Step 1: Generate auth URL with PKCE
     let (auth_url, code_verifier) = soundcloud_client::get_auth_url()
         .map_err(|e| format!("Configuration error: {}", e))?;
     log::info!("[SoundCloud] Opening browser for login...");
-    
+
     // Emit event: auth started
-    let _ = app.emit("sc-login-progress", serde_json::json!({ "stage": "auth", "message": "Opening browser for login..." }));
-    
+    let _ = app.emit(progress_event, serde_json::json!({
+        "stage": "auth", "message": "Opening browser for login..."
+    }));
+
     if let Err(e) = open::that(&auth_url) {
         return Err(format!("Could not open browser: {}", e));
     }
 
     // Step 2: Wait for OAuth callback
-    let _ = app.emit("sc-login-progress", serde_json::json!({ "stage": "auth", "message": "Waiting for authorization..." }));
+    let _ = app.emit(progress_event, serde_json::json!({
+        "stage": "auth", "message": "Waiting for authorization..."
+    }));
     let code = tokio::task::spawn_blocking(soundcloud_client::wait_for_callback)
         .await
         .map_err(|e| format!("Task join error: {}", e))?
         .map_err(|e| format!("Callback error: {}", e))?;
 
     // Step 3: Exchange code for access token
-    let _ = app.emit("sc-login-progress", serde_json::json!({ "stage": "auth", "message": "Exchanging code for token..." }));
+    let _ = app.emit(progress_event, serde_json::json!({
+        "stage": "auth", "message": "Exchanging code for token..."
+    }));
     let token = soundcloud_client::exchange_code_for_token(&code, &code_verifier)
         .await
         .map_err(|e| format!("Token exchange failed: {}", e))?;
-    
+
+    Ok(token)
+}
+
+/// Run the full SoundCloud OAuth 2.1 + PKCE flow and return the access token.
+///
+/// Delegates to `ensure_oauth_token` for the actual handshake, then emits a
+/// final `{stage: "done", message: "Authorization successful."}` on
+/// `sc-login-progress` so the frontend knows it's safe to call subsequent
+/// SC endpoints.
+///
+/// # Errors
+/// Propagates every variant from `ensure_oauth_token`.
+#[tauri::command]
+async fn login_to_soundcloud(app: tauri::AppHandle) -> Result<String, String> {
+    let token = ensure_oauth_token(&app, "sc-login-progress").await?;
+
     log::info!("[SoundCloud] ✓ Authorization successful.");
-    let _ = app.emit("sc-login-progress", serde_json::json!({ "stage": "done", "message": "Authorization successful." }));
-    
+    let _ = app.emit("sc-login-progress", serde_json::json!({
+        "stage": "done", "message": "Authorization successful."
+    }));
+
     Ok(token)
 }
 
@@ -225,20 +251,17 @@ struct ExportTrack {
 
 /// Create a SoundCloud playlist from `tracks` and return a summary string.
 ///
-/// Runs the same OAuth flow as `login_to_soundcloud` (currently inline —
-/// see `TODO(oauth-helper)` / HANDOVER Phase 2.9) and then searches SC
-/// for each `(artist, title)` pair using a duration heuristic. Tracks
-/// that didn't match are listed in the returned summary.
+/// Delegates the OAuth handshake to `ensure_oauth_token`, then searches SC
+/// for each `(artist, title)` pair using a duration heuristic. Tracks that
+/// didn't match are listed in the returned summary.
 ///
 /// Stages emitted on the `sc-export-progress` event:
-/// - `auth`: OAuth flow
+/// - `auth`: OAuth flow (three sub-stages from `ensure_oauth_token`)
 /// - `searching`: per-track lookup `{current, total, message, trackName}`
 /// - `creating`: final playlist POST
 ///
 /// # Errors
-/// - "Configuration error" if SC credentials are missing
-/// - "Could not open browser" if the OS browser launcher fails
-/// - "Callback error" / "Token exchange failed" for OAuth failures
+/// - All `ensure_oauth_token` errors are propagated
 /// - "Playlist creation failed (...)" if SoundCloud rejects the create
 /// - "No tracks were found on SoundCloud" if every search came back empty
 #[tauri::command]
@@ -252,33 +275,9 @@ async fn export_to_soundcloud(app: tauri::AppHandle, playlist_name: String, trac
         })
         .collect();
 
-    // Step 1: Generate auth URL with PKCE
-    let (auth_url, code_verifier) = soundcloud_client::get_auth_url()
-        .map_err(|e| format!("Configuration error: {}", e))?;
-    log::info!("[SoundCloud] Opening browser for login...");
-    
-    // Emit event: auth started
-    let _ = app.emit("sc-export-progress", serde_json::json!({ "stage": "auth", "message": "Opening browser for login..." }));
-    
-    if let Err(e) = open::that(&auth_url) {
-        return Err(format!("Could not open browser: {}", e));
-    }
-
-    // Step 2: Wait for OAuth callback (blocking listener on 127.0.0.1:5001)
-    let _ = app.emit("sc-export-progress", serde_json::json!({ "stage": "auth", "message": "Waiting for authorization..." }));
-    let code = tokio::task::spawn_blocking(soundcloud_client::wait_for_callback)
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
-        .map_err(|e| format!("Callback error: {}", e))?;
-
-    // Step 3: Exchange code for access token
-    let _ = app.emit("sc-export-progress", serde_json::json!({ "stage": "auth", "message": "Exchanging code for token..." }));
-    let token = soundcloud_client::exchange_code_for_token(&code, &code_verifier)
-        .await
-        .map_err(|e| format!("Token exchange failed: {}", e))?;
+    let token = ensure_oauth_token(&app, "sc-export-progress").await?;
     log::info!("[SoundCloud] ✓ Access token received.");
 
-    // Step 4: Search tracks and create playlist
     // Step 4: Search tracks and create playlist
     let result = soundcloud_client::search_and_create_playlist(&token, &playlist_name, sc_tracks, Some(app))
         .await
