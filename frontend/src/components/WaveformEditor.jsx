@@ -40,7 +40,7 @@ const saveEditsForTrack = (trackId, data) => {
 };
 const clearEditsForTrack = (trackId) => {
     if (!trackId) return;
-    try { localStorage.removeItem(STORAGE_KEY_PREFIX + trackId); } catch (e) { }
+    try { localStorage.removeItem(STORAGE_KEY_PREFIX + trackId); } catch (e) { log.debug('WaveformEditor clearEditsForTrack failed', e); }
 };
 
 // --- Shared decode context (reused, not recreated per insert) ---
@@ -338,7 +338,7 @@ const WaveformEditorInner = forwardRef(({ track, blobUrl = null, simpleMode = fa
         return url;
     }, []);
     const revokeAllBlobUrls = useCallback(() => {
-        blobUrlsRef.current.forEach(u => { try { URL.revokeObjectURL(u); } catch (e) { } });
+        blobUrlsRef.current.forEach(u => { try { URL.revokeObjectURL(u); } catch (e) { log.debug('WaveformEditor revokeObjectURL failed', e); } });
         blobUrlsRef.current = [];
     }, []);
 
@@ -1077,7 +1077,7 @@ const WaveformEditorInner = forwardRef(({ track, blobUrl = null, simpleMode = fa
             clearTimeout(t2);
             scrollEl.removeEventListener('scroll', scheduleDraw);
             ro.disconnect();
-            try { wavesurfer.current?.un('zoom', zoomHandler); } catch (e) { }
+            try { wavesurfer.current?.un('zoom', zoomHandler); } catch (e) { log.debug('WaveformEditor zoom listener cleanup failed', e); }
         };
     }, [beats, zoom, duration, bpm]);
 

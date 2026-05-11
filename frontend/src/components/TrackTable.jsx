@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Music, Star, X, Check, ChevronDown, ChevronUp, ChevronRight, Image as ImageIcon, Scissors, Trash2, Play, Plus, ListMusic, FolderOpen, Copy, Info, Tag } from 'lucide-react';
 import api from '../api/api';
 import toast from 'react-hot-toast';
+import { log } from '../utils/log';
 
 const DEFAULT_COLUMNS = [
     { id: 'index', label: '#', width: '32px', align: 'right', fixed: true },
@@ -191,7 +192,10 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
                                     if (onReorder && data.type === 'track' && data.playlistId === playlistId && data.trackId !== t.id) {
                                         onReorder(data.trackId, index);
                                     }
-                                } catch (err) { }
+                                } catch (err) {
+                                    // Drop payload wasn't our JSON shape (e.g. native OS drag) — ignore.
+                                    log.debug('TrackTable drop JSON parse failed', err);
+                                }
                             }}
                         >
                             {visibleColumns.includes('index') && (

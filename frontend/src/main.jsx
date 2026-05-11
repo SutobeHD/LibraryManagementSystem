@@ -5,6 +5,7 @@ import { Music, Cloud, Download, Scissors, Settings, Folder, Wrench, Zap, FileCo
 import './index.css'
 import { ToastProvider } from './components/ToastContext'
 import { Toaster } from 'react-hot-toast'
+import { log } from './utils/log'
 
 // SPEED: Lazy-load heavy views — only the active view is loaded into the bundle
 // const WaveformEditor = lazy(() => import('./components/WaveformEditor')); // Replaced by DjEditDaw
@@ -69,7 +70,11 @@ const Sidebar = ({ activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnlo
         const token = getSessionToken();
         await api.post('/api/system/shutdown', null, { params: { token } });
       }
-      catch (e) { }
+      catch (e) {
+        // Best-effort shutdown ping — backend might already be down by the
+        // time we get here (Tauri runtime closes before this resolves).
+        log.debug('shutdown ping failed', e);
+      }
       window.close();
       document.body.innerHTML = "<div style='color:white;display:flex;justify-content:center;height:100vh;align-items:center;background:#0f172a;font-family:sans-serif'>Application Closed</div>";
     }

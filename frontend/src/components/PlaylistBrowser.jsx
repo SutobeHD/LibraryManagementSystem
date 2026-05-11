@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import api from '../api/api';
+import { log } from '../utils/log';
 import { useToast } from './ToastContext';
 import { Folder, ListMusic, ChevronRight, ChevronDown, Music, Database, Settings, Plus, Sparkles, RotateCw, MoreVertical, Edit2, Trash2, FolderPlus, ArrowRightLeft, X, Upload, Star, Tag, GripVertical, Library, Disc } from 'lucide-react';
 import TrackTable from './TrackTable';
@@ -28,7 +29,11 @@ const PlaylistNode = ({ node, level = 0, onSelect, onContextMenu, onMoveNode, on
         try {
             e.dataTransfer.setData("application/json", JSON.stringify(payload));
             e.dataTransfer.setData("text/plain", node.ID);  // fallback for some WebView2 quirks
-        } catch (_) {}
+        } catch (err) {
+            // WebView2 occasionally rejects dataTransfer.setData mid-drag —
+            // ignore but trace so we notice if it becomes systematic.
+            log.debug('PlaylistBrowser drag setData failed', err);
+        }
         e.dataTransfer.effectAllowed = "move";
     };
 

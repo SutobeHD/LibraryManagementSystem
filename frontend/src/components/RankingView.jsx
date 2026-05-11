@@ -64,7 +64,7 @@ const RankingView = ({ libraryStatus, appMode }) => {
             isMountedRef.current = false;
             // Force stop
             if (wavesurferRef.current && wavesurferRef.current.stop) {
-                try { wavesurferRef.current.stop(); } catch (e) { }
+                try { wavesurferRef.current.stop(); } catch (e) { log.debug('RankingView wavesurfer stop on unmount failed', e); }
             }
         };
     }, []);
