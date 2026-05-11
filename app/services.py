@@ -1041,7 +1041,9 @@ class ImportManager:
                 COVERS_DIR = Path(REKORDBOX_ROOT).parent / "app" / "data" / "covers"
                 COVERS_DIR.mkdir(parents=True, exist_ok=True)
                 
-                # Check for existing cover to avoid re-extraction logic if hash match (TODO) - for now simple extraction
+                # Each import re-extracts cover art rather than hash-matching against existing
+                # cover files; the disk hit is negligible vs. the cost of the surrounding
+                # mutagen probe, and dedup would need a SHA index we don't currently maintain.
                 has_art = False
                 art_data = None
                 

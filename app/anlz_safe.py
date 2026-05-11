@@ -30,10 +30,13 @@ Defense in depth
    bad id is blacklisted for the rest of the session so the same panic
    never re-fires on reload.
 
-TODO: When rbox upstream fixes the unwrap (file an issue at
-https://github.com/dylanljones/rbox referencing
-`masterdb/database.rs:1162`) we can revisit whether subprocess
-isolation is still required.
+TODO(upstream-rbox-unwrap): the subprocess isolation here can be dropped
+once rbox upstream guards the `unwrap()` at `masterdb/database.rs:1162`.
+File an issue at https://github.com/dylanljones/rbox citing that line
+and the symptom (Windows exit 0xC0000409 / `Option::unwrap()` on `None`
+when iterating `get_content_anlz_paths` over a row with a stale ANLZ
+pointer). When the upstream fix lands, swap `SafeAnlzParser` for direct
+`rbox.Anlz` calls and remove `ProcessPoolExecutor` overhead.
 """
 from __future__ import annotations
 

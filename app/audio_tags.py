@@ -284,7 +284,10 @@ def load_artwork(image_path: str | Path) -> Optional[bytes]:
 
 # Tag-key candidates per format. Mutagen's auto-detected `File` exposes raw
 # tag containers, so we probe each format's canonical keys in priority order.
-# WORKAROUND for older M4A files that store the data under different atoms.
+# This is deliberate (not a workaround): older M4A and legacy ID3v1 files use
+# different atoms / frame ids than the modern spec, and the only reliable read
+# strategy is "try each known key, take the first hit". The lists below are the
+# canonical-first / legacy-last fallback chains.
 _READ_KEYS = {
     "title":   ["TIT2", "title", "\xa9nam", "Title", "TITLE"],
     "artist":  ["TPE1", "artist", "\xa9ART", "Artist", "ARTIST", "TPE2"],
