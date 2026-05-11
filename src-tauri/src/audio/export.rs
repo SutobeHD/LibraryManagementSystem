@@ -64,10 +64,36 @@ where F: Fn(f32, &str) {
     let channels = 2;
 
     progress(0.40, "Preparing timeline...");
-    // 2. Calculate the total timeline length based on regions
-    let max_timeline_end = state.regions.iter().map(|r| r.track_end).fold(0.0, f32::max);
-    let total_samples = (max_timeline_end * sample_rate as f32) as usize * channels;
-    
+    // 2. Calculate the total timeline length based on regions.
+    //
+    // `track_end` is clamped to >= 0 per region so a stray negative value
+    // (e.g. uninitialised f32 ending up at -0.0 after a transform) can't
+    // pull the whole timeline negative. We then check finiteness once and
+    // do the f32→usize cast through `i64` + `usize::try_from` so an
+    // attacker-controlled or runaway project state can't crash the
+    // exporter with a UB cast on 32-bit hosts.
+    let max_timeline_end = state.regions
+        .iter()
+        .map(|r| r.track_end.max(0.0))
+        .fold(0.0_f32, f32::max);
+
+    if !max_timeline_end.is_finite() {
+        return Err(format!(
+            "timeline contains non-finite track_end: {}", max_timeline_end,
+        ));
+    }
+
+    // f64 for the multiplication so we don't lose precision on long
+    // (>>16.7 M sample) timelines.
+    let total_samples_f = (max_timeline_end as f64)
+        * (sample_rate as f64)
+        * (channels as f64);
+    let total_samples = usize::try_from(total_samples_f.round() as i64)
+        .map_err(|_| format!(
+            "total_samples out of usize range: {} (max_timeline_end={}, sample_rate={}, channels={})",
+            total_samples_f, max_timeline_end, sample_rate, channels,
+        ))?;
+
     // 3. Create the 32-bit mixing buffer initialized to silence
     let mut mix_buffer: Vec<f32> = vec![0.0; total_samples];
 
