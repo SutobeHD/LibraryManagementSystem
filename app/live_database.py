@@ -9,6 +9,7 @@ import threading
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from collections import defaultdict
+from typing import Any, Dict, List, Optional
 import rbox
 from .config import BACKUP_DIR
 from .anlz_safe import SafeAnlzParser
@@ -77,7 +78,7 @@ class LiveRekordboxDB:
         except Exception as e:
             logger.error(f"Failed to cleanup session backups: {e}")
 
-    def get_available_backups(self):
+    def get_available_backups(self) -> List[Dict[str, Any]]:
         """Returns a sorted list of available backups."""
         backups = []
         if not BACKUP_DIR.exists(): return []
@@ -113,7 +114,7 @@ class LiveRekordboxDB:
         # Sort by timestamp descending (newest first)
         return sorted(backups, key=lambda x: x["timestamp"], reverse=True)
 
-    def restore_backup(self, filename):
+    def restore_backup(self, filename: str) -> bool:
         """
         Restores a backup file to master.db.
         Create a 'Pre-Restore' backup of current state first.
@@ -186,7 +187,7 @@ class LiveRekordboxDB:
             except Exception as e:
                 logger.error(f"Failed to create archival backup: {e}")
 
-    def load(self):
+    def load(self) -> bool:
         """Loads the library from the live master.db.
 
         Beatgrid loading is dispatched to a background thread because
@@ -566,7 +567,7 @@ class LiveRekordboxDB:
                 })
         self.genres = [{"id": f"gen_{i}", "name": name, "track_count": count} for i, (name, count) in enumerate(sorted(genre_counts.items()))]
 
-    def get_all_labels(self):
+    def get_all_labels(self) -> List[Dict[str, Any]]:
         label_counts = defaultdict(int)
         label_artworks = {}
         for t in self.tracks.values():
@@ -583,7 +584,7 @@ class LiveRekordboxDB:
             if count >= 0 # Respect threshold?
         ]
 
-    def get_all_albums(self):
+    def get_all_albums(self) -> List[Dict[str, Any]]:
         album_counts = defaultdict(int)
         album_artworks = {}
         for t in self.tracks.values():
@@ -630,26 +631,26 @@ class LiveRekordboxDB:
         
         return name.strip()
 
-    def get_all_tracks(self):
+    def get_all_tracks(self) -> List[Dict[str, Any]]:
         return list(self.tracks.values())
 
-    def get_tracks_by_artist(self, aid):
+    def get_tracks_by_artist(self, aid: str) -> List[Dict[str, Any]]:
         # find artist name by id
         artist_name = next((a["name"] for a in self.artists if a["id"] == aid), None)
         if not artist_name: return []
         return [t for t in self.tracks.values() if artist_name in self._split_artists(t.get("Artist", ""))]
 
-    def get_tracks_by_label(self, aid):
+    def get_tracks_by_label(self, aid: str) -> List[Dict[str, Any]]:
         label_name = next((l["name"] for l in self.get_all_labels() if l["id"] == aid), None)
         if not label_name: return []
         return [t for t in self.tracks.values() if self._normalize_artist_name(t.get("Label", "")) == label_name]
 
-    def get_tracks_by_album(self, aid):
+    def get_tracks_by_album(self, aid: str) -> List[Dict[str, Any]]:
         album_name = next((a["name"] for a in self.get_all_albums() if a["id"] == aid), None)
         if not album_name: return []
         return [t for t in self.tracks.values() if t.get("Album") == album_name]
 
-    def get_playlist_tree(self):
+    def get_playlist_tree(self) -> List[Dict[str, Any]]:
         if not self.playlists: return []
         
         # 1. Map all nodes
@@ -684,7 +685,7 @@ class LiveRekordboxDB:
         
         return tree
 
-    def get_playlist_tracks(self, pid):
+    def get_playlist_tracks(self, pid: str) -> List[Dict[str, Any]]:
         try:
             # Pre-calculate parent-child mapping for speed
             parent_to_children = defaultdict(list)
@@ -893,10 +894,10 @@ class LiveRekordboxDB:
 
         return res
 
-    def get_track_details(self, tid):
+    def get_track_details(self, tid: str) -> Optional[Dict[str, Any]]:
         return self.tracks.get(tid)
 
-    def add_track(self, track_data):
+    def add_track(self, track_data: Dict[str, Any]) -> Optional[str]:
         path = track_data.get("path")
         if not path:
             raise ValueError("Track path missing")
@@ -946,7 +947,7 @@ class LiveRekordboxDB:
             logger.error(f"Failed to add track to live DB: {e}")
             raise e
 
-    def delete_track(self, tid):
+    def delete_track(self, tid: str) -> bool:
         tid = str(tid)
         
         # 1. Remove from local cache
@@ -970,10 +971,10 @@ class LiveRekordboxDB:
         logger.warning(f"Track {tid} removed from cache/playlists, but RBOX library does not support direct deletion from Master DB via this API.")
         return True
 
-    def update_track_comment(self, tid, comment):
+    def update_track_comment(self, tid: str, comment: str) -> bool:
         return self.update_track_metadata(tid, {"Comment": comment})
 
-    def update_track_metadata(self, tid, updates):
+    def update_track_metadata(self, tid: str, updates: Dict[str, Any]) -> bool:
         try:
             tid = str(tid)
             logger.info(f"Updating metadata for track ID: '{tid}'")
@@ -1055,11 +1056,11 @@ class LiveRekordboxDB:
     # set of plausible names and surface a clear error if none of them work.
     # Reads use the snapshot loaded by `_load_mytags()` (no extra DB hit).
 
-    def list_mytags(self):
+    def list_mytags(self) -> List[Dict[str, Any]]:
         """Return all defined MyTag entries as [{id, name}, …]."""
         return [{"id": tid, "name": name} for tid, name in self.tag_id_to_name.items()]
 
-    def get_track_mytags(self, tid):
+    def get_track_mytags(self, tid: str) -> List[Dict[str, Any]]:
         """Return MyTag IDs assigned to the given track."""
         tid = str(tid)
         ids = list(self.track_to_tag_ids.get(tid, []))
