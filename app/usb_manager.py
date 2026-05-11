@@ -46,16 +46,20 @@ def locked_sync(usb_root: Path):
     lock_file = usb_root / ".rbep_sync_lock"
     if lock_file.exists():
         if time.time() - lock_file.stat().st_mtime > 600: # 10 mins stale
-            try: lock_file.unlink()
-            except: pass
+            try:
+                lock_file.unlink()
+            except OSError as e:
+                logger.debug("usb_manager: stale lock_file cleanup failed (%s)", e)
         else:
             raise Exception("Sync is currently locked by another process or aborted recently. Wait or delete .rbep_sync_lock on the USB.")
     try:
         lock_file.touch()
         yield
     finally:
-        try: lock_file.unlink()
-        except: pass
+        try:
+            lock_file.unlink()
+        except OSError as e:
+            logger.debug("usb_manager: lock_file release failed (%s)", e)
 
 # --- USB Detection ---
 
@@ -649,8 +653,13 @@ class UsbProfileManager:
                 logger.error(f"Error reading Library Legacy XML for {device_id}: {e}")
                 statuses["library_legacy_status"] = "error_corrupt"
                 # Req 17: Fallback by isolating corrupted XML so next sync starts fresh
-                try: l_xml_path.rename(l_xml_path.with_suffix(".xml.corrupt"))
-                except: pass
+                try:
+                    l_xml_path.rename(l_xml_path.with_suffix(".xml.corrupt"))
+                except OSError as e:
+                    logger.warning(
+                        "usb_manager: failed to isolate corrupt XML %s (%s)",
+                        l_xml_path, e,
+                    )
 
         # Fallback: Try PDB if XML didn't yield results
         if not results["library_legacy"] and l_pdb_path.exists():
@@ -771,8 +780,13 @@ class UsbSyncEngine:
                 conn.close()
             except Exception as e:
                 logger.warning(f"USB DB is corrupted or encrypted (Error: {e}). Rebuilding.")
-                try: self.usb_db_path.unlink()
-                except: pass
+                try:
+                    self.usb_db_path.unlink()
+                except OSError as unlink_err:
+                    logger.warning(
+                        "usb_manager: failed to remove corrupted DB %s (%s)",
+                        self.usb_db_path, unlink_err,
+                    )
 
     def _track_hash(self, row: Dict) -> str:
         """Create a deterministic hash of track metadata for comparison."""
@@ -821,7 +835,11 @@ class UsbSyncEngine:
                     try:
                         a = db.get_artist(artist_id)
                         if a: a_name = getattr(a, 'name', '')
-                    except: pass
+                    except Exception as e:
+                        logger.debug(
+                            "usb_manager: rbox.get_artist(%s) failed (%s)",
+                            artist_id, e,
+                        )
 
                 r = {
                     "ID": tid,
@@ -1140,8 +1158,13 @@ class UsbSyncEngine:
         except Exception as e:
             # Cleanup temp file on failure
             if tmp_dest.exists():
-                try: tmp_dest.unlink()
-                except: pass
+                try:
+                    tmp_dest.unlink()
+                except OSError as cleanup_err:
+                    logger.warning(
+                        "usb_manager: temp cleanup of %s failed (%s)",
+                        tmp_dest, cleanup_err,
+                    )
             raise e
 
     @staticmethod
@@ -1531,8 +1554,13 @@ class UsbSyncEngine:
         # Atomic write
         corrupt_path = target.with_suffix(".xml.corrupt")
         if corrupt_path.exists():
-            try: corrupt_path.unlink()
-            except Exception: pass
+            try:
+                corrupt_path.unlink()
+            except OSError as e:
+                logger.debug(
+                    "usb_manager: failed to remove stale corrupt file %s (%s)",
+                    corrupt_path, e,
+                )
         tree = ET.ElementTree(root)
         with open(target, "wb") as f:
             tree.write(f, encoding="UTF-8", xml_declaration=True)
