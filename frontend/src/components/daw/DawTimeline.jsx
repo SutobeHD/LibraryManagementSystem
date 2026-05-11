@@ -567,24 +567,34 @@ function buildWaveformBitmap(d) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// MIXXX-STYLE 3-BAND STACKED FILTERED WAVEFORM (SMOOTH POLYGON RENDERER)
+// REKORDBOX-STYLE 3-BAND WAVEFORM (smooth polygon renderer, proportional slices)
 // ═══════════════════════════════════════════════════════════════════════════════
 //
-// Inspired by Mixxx's WaveformRendererFilteredSignal. Three bands stacked
-// outward from the centerline produce a layered envelope where the colour
-// at any height tells you the spectral content there:
+// Mimics the Pioneer Rekordbox 6/7 main waveform: ONE continuous envelope
+// silhouette per region (no stacking that grows taller when more bands
+// play at once), with the colour inside the envelope divided into three
+// proportional slices reflecting the spectral content there.
 //
-//   ┌─ HIGH (blue)  outermost — hi-hats, cymbals, air
-//   ├─ MID  (green) middle    — vocals, instruments
-//   ├─ LOW  (red)   innermost — kick, bass body
+//   ┌─ HIGH (sky blue)   outer band — hi-hats, cymbals, air
+//   ├─ MID  (emerald)    middle band — vocals, instruments
+//   ├─ LOW  (orange-red) inner band — kick, bass body
 //   ── centerline ────────────────────────────────────────
-//   ├─ LOW  (red)
-//   ├─ MID  (green)
-//   └─ HIGH (blue)
+//   ├─ LOW
+//   ├─ MID
+//   └─ HIGH
+//
+// Envelope-height model:
+//   envelope_y(x) = MAX(low(x), mid(x), high(x)) * maxAmp
+//   slice_band(x) = (band(x) / sum_of_bands(x)) * envelope_y(x)
+//
+// Examples:
+//   • Pure bass               → 100% red, height = lowAmp * maxAmp
+//   • Bass-heavy w/ some mids → ~70% red, ~30% green, height = lowAmp * maxAmp
+//   • Full-spectrum mix       → ~33% each, height = max-band * maxAmp
+//     (same height as pure bass at same loudness — coloured differently)
 //
 // Asymmetric: positive peaks (max) drive the top half, negative peaks
-// (min) drive the bottom half. Real audio is rarely symmetric, so an
-// asymmetric envelope preserves the natural stem/transient shape.
+// (min) drive the bottom half. Preserves natural stem/transient asymmetry.
 //
 // SMOOTHING — three layers of defence against the "blocky comb" look:
 //
@@ -599,15 +609,16 @@ function buildWaveformBitmap(d) {
 //
 // Each band is rendered as a filled Path2D POLYGON, not column-by-column
 // rectangles — adjacent columns are connected by curves so the silhouette
-// flows continuously, like a real waveform display.
+// flows continuously like the real Rekordbox display.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const MIXXX_COLORS = {
-    // RGB values — saturated CDJ-style. Picked for contrast against the
-    // #090c17 background. Alpha left to ctx (1.0).
-    low:  [255, 70, 90],     // red — bass / kick / sub
-    mid:  [70, 220, 130],    // green — vocals / instruments
-    high: [70, 150, 255],    // blue — hi-hats / cymbals / air
+    // Rekordbox CDJ-style palette — warmer reds for bass body, brighter
+    // emerald for mids, sky-blue for highs. Picked from samples of the
+    // Pioneer Rekordbox 6/7 main waveform.
+    low:  [255, 80, 40],     // orange-red — bass / kick / sub
+    mid:  [70, 230, 100],    // emerald green — vocals / instruments
+    high: [60, 180, 255],    // sky blue — hi-hats / cymbals / air
 };
 
 function drawMixxxFilteredWaveform(ctx, bandPeaks, region, rStartPx, rEndPx, scrollX, zoom, sourceDuration, centerY, maxAmp) {
@@ -624,12 +635,26 @@ function drawMixxxFilteredWaveform(ctx, bandPeaks, region, rStartPx, rEndPx, scr
 
     const pxToPeakRatio = peakLen / (sourceDuration * zoom);
 
-    // Per-band gain — calibrated so that a loud track fills ~80% of the
-    // silhouette area without clipping. BiquadFilter resonance allows
-    // individual band peaks slightly above 1.0, but the SUM of three bands
-    // is rarely > 2.0 in practice. Scale so 2.0 ≈ maxAmp.
-    const BAND_GAIN = 0.5;
-    const GAMMA = 1.1;
+    // ENVELOPE = MAX-BAND model (Rekordbox-style)
+    // -------------------------------------------
+    // The total silhouette height at a column equals the LOUDEST band's
+    // amplitude there — so the waveform reads as a single coherent envelope
+    // (one shape), not a stack that grows higher when multiple bands sound
+    // at once. Inside that envelope, each band gets a SLICE proportional to
+    // its share of the spectral content.
+    //
+    // Example:
+    //   lowAmp=1.0, midAmp=0.5, highAmp=0.0
+    //     → envelope = 1.0 (= max)
+    //     → slices: low 67%, mid 33%, high 0%
+    //     → visible: 2/3 red (innermost), 1/3 green, no blue
+    //   lowAmp=1.0, midAmp=1.0, highAmp=1.0 (full-spectrum)
+    //     → envelope = 1.0
+    //     → 1/3 each — coloured but at SAME total height as pure bass
+    //
+    // This matches what Pioneer CDJs draw: a continuous loudness silhouette
+    // whose internal colour mix reveals spectral content WITHIN the envelope.
+    const GAMMA = 0.9;     // slight expansion so quiet content is still visible
 
     // ── PASS 1: gather band amplitudes per pixel column ──
     // Sampling stride: 1 px gives the most detail; we widen to 2 px at
@@ -677,14 +702,33 @@ function drawMixxxFilteredWaveform(ctx, bandPeaks, region, rStartPx, rEndPx, scr
             if (hn > highNeg) highNeg = hn;
         }
 
-        const scale = maxAmp * BAND_GAIN;
+        // γ-curve raw band amplitudes (Rekordbox uses ~0.8-1.0 — slight
+        // expansion of quiet content without crushing loud peaks)
+        const lP = Math.pow(Math.min(1, lowPos),  GAMMA);
+        const mP = Math.pow(Math.min(1, midPos),  GAMMA);
+        const hP = Math.pow(Math.min(1, highPos), GAMMA);
+        const lN = Math.pow(Math.min(1, lowNeg),  GAMMA);
+        const mN = Math.pow(Math.min(1, midNeg),  GAMMA);
+        const hN = Math.pow(Math.min(1, highNeg), GAMMA);
+
+        // ENVELOPE = MAX BAND. Inner band slices are proportional to share
+        // of the total band sum — see header comment for the rationale.
+        const envT  = Math.max(lP, mP, hP) * maxAmp;
+        const sumT  = lP + mP + hP;
+        const envB  = Math.max(lN, mN, hN) * maxAmp;
+        const sumB  = lN + mN + hN;
+
         sX[n]  = px;
-        slT[n] = Math.pow(Math.min(1, lowPos),  GAMMA) * scale;
-        smT[n] = Math.pow(Math.min(1, midPos),  GAMMA) * scale;
-        shT[n] = Math.pow(Math.min(1, highPos), GAMMA) * scale;
-        slB[n] = Math.pow(Math.min(1, lowNeg),  GAMMA) * scale;
-        smB[n] = Math.pow(Math.min(1, midNeg),  GAMMA) * scale;
-        shB[n] = Math.pow(Math.min(1, highNeg), GAMMA) * scale;
+        if (sumT > 0.0001) {
+            slT[n] = (lP / sumT) * envT;
+            smT[n] = (mP / sumT) * envT;
+            shT[n] = (hP / sumT) * envT;
+        }
+        if (sumB > 0.0001) {
+            slB[n] = (lN / sumB) * envB;
+            smB[n] = (mN / sumB) * envB;
+            shB[n] = (hN / sumB) * envB;
+        }
         n++;
     }
     if (n < 2) return;
