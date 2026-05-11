@@ -327,7 +327,14 @@ fn main() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error while building tauri application")
+        .unwrap_or_else(|err| {
+            // Setup-phase failure: `tauri-plugin-log` hasn't been wired in
+            // yet, so we can't go through `log::error!`. Print to stderr
+            // and exit 1 — a panic here would also kill the process but
+            // leaves a confusing stack trace for the user.
+            eprintln!("[fatal] error while building tauri application: {err}");
+            std::process::exit(1);
+        })
         .run(|_app_handle, _event| {
             #[cfg(debug_assertions)]
             {
