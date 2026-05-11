@@ -47,6 +47,13 @@ except ImportError:
         "and lost on restart. Run: pip install keyring"
     )
 
+# OS-keyring service identifier — must be a single source of truth so that
+# token reads and writes line up across every route. Was previously hard-
+# coded as `"library_management_system"` at 10 call sites.
+KEYRING_SERVICE = "library_management_system"
+# Keyring entry name for the SoundCloud OAuth bearer token.
+KEYRING_SC_TOKEN = "sc_token"
+
 from .services import AudioEngine, FileManager, LibraryTools, SettingsManager, SystemCleaner, XMLProcessor, BeatAnalyzer, ImportManager, ProjectManager
 from .database import db
 from .config import EXPORT_DIR, LOG_DIR, TEMP_DIR, MUSIC_DIR
@@ -2721,7 +2728,7 @@ async def soundcloud_download(data: ScDownloadRequest, request: Request):
 
     Returns: { task_id: str }
     """
-    auth_token = keyring.get_password("library_management_system", "sc_token")
+    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
 
     # Write-permission guard
     sc_dir = MUSIC_DIR / "SoundCloud"
@@ -2794,7 +2801,7 @@ class ScDownloadPlaylistReq(BaseModel):
 @app.post("/api/soundcloud/download-playlist")
 async def soundcloud_download_playlist(r: ScDownloadPlaylistReq):
     """Enqueue download for every track in a SoundCloud playlist."""
-    auth_token = keyring.get_password("library_management_system", "sc_token")
+    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
     if not auth_token:
         raise HTTPException(400, "SoundCloud auth token not configured")
 
@@ -2985,12 +2992,12 @@ async def set_soundcloud_auth_token(r: ScAuthTokenReq, response: Response):
 
 
     if token:
-        keyring.set_password("library_management_system", "sc_token", token)
+        keyring.set_password(KEYRING_SERVICE, KEYRING_SC_TOKEN, token)
         logger.info("[SC] Auth token stored in OS keyring.")
     else:
         # Empty token → clear credentials (logout)
         try:
-            keyring.delete_password("library_management_system", "sc_token")
+            keyring.delete_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
         except Exception:
             pass
         logger.info("[SC] Auth token cleared from keyring (logout).")
@@ -3050,7 +3057,7 @@ async def get_soundcloud_playlists(request: Request):
     or invalid token) now raise AuthExpiredError instead of leaking the raw
     "404 Client Error: Not Found" string to the frontend toast.
     """
-    auth_token = keyring.get_password("library_management_system", "sc_token")
+    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
 
     if not auth_token:
         logger.warning("[SC] /api/soundcloud/playlists: no auth token in keyring — returning 401.")
@@ -3110,7 +3117,7 @@ async def get_soundcloud_me(request: Request):
     Returns the SC account info (username, avatar) independently of playlists.
     Useful for the account card/header component without re-fetching all playlists.
     """
-    auth_token = keyring.get_password("library_management_system", "sc_token")
+    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
     if not auth_token:
         raise HTTPException(401, detail="auth_expired")
 
@@ -3141,7 +3148,7 @@ async def sync_soundcloud_playlists(r: ScSyncReq, request: Request):
     if _sync_lock.locked():
         raise HTTPException(409, "A sync operation is already in progress. Please wait.")
 
-    auth_token = keyring.get_password("library_management_system", "sc_token")
+    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
     if not auth_token:
         raise HTTPException(400, "SoundCloud auth token not configured")
 
@@ -3187,7 +3194,7 @@ async def preview_soundcloud_matches(r: ScPreviewReq, request: Request):
     Does NOT write anything to the database.
     Used by the Inspector Panel in the frontend.
     """
-    auth_token = keyring.get_password("library_management_system", "sc_token")
+    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
     if not auth_token:
         raise HTTPException(401, detail="auth_expired")
     if not db.active_db:
@@ -3231,7 +3238,7 @@ async def sync_all_soundcloud(request: Request):
     if _sync_lock.locked():
         raise HTTPException(409, "A sync operation is already in progress. Please wait.")
 
-    auth_token = keyring.get_password("library_management_system", "sc_token")
+    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
     if not auth_token:
         raise HTTPException(400, "SoundCloud auth token not configured")
 
@@ -3275,7 +3282,7 @@ async def merge_soundcloud_playlists(r: ScMergeReq, request: Request):
     if _sync_lock.locked():
         raise HTTPException(409, "A sync operation is already in progress. Please wait.")
 
-    auth_token = keyring.get_password("library_management_system", "sc_token")
+    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
     if not auth_token:
         raise HTTPException(400, "SoundCloud auth token not configured")
 
