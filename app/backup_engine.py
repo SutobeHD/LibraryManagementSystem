@@ -6,12 +6,13 @@ Stores database changes as compressed JSON changesets instead of full copies.
 import json
 import gzip
 import hashlib
+import re
 import sqlite3
 import logging
 import time
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import Dict, FrozenSet, List, Optional, Tuple
 from .config import BACKUP_DIR
 
 logger = logging.getLogger(__name__)
@@ -20,8 +21,8 @@ COMMITS_DIR = BACKUP_DIR / "commits"
 HEAD_FILE = BACKUP_DIR / "HEAD"
 TIMELINE_FILE = BACKUP_DIR / "timeline.json"
 
-# Tables we track for diffs
-TRACKED_TABLES = [
+# Tables we track for diffs. Immutable tuple — ordering matters for `_snapshot_db`.
+TRACKED_TABLES: Tuple[str, ...] = (
     "djmdContent",
     "djmdPlaylist",
     "djmdSongPlaylist",
@@ -32,7 +33,35 @@ TRACKED_TABLES = [
     "djmdLabel",
     "djmdKey",
     "djmdColor",
-]
+)
+
+# O(1) membership set used for SQL identifier whitelisting. NEVER interpolate
+# a table name into SQL without first calling `_check_table_name()`.
+_TABLE_ALLOWLIST: FrozenSet[str] = frozenset(TRACKED_TABLES)
+
+# Defensive: column names come from PRAGMA table_info() (DB-trusted) but we
+# still validate them before interpolation so a poisoned schema can't escape.
+_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+
+
+def _check_table_name(table: str) -> None:
+    """Reject any identifier that is not in the static `TRACKED_TABLES` allowlist.
+
+    Raises:
+        ValueError: if `table` is not whitelisted.
+    """
+    if table not in _TABLE_ALLOWLIST:
+        raise ValueError(f"backup_engine: table {table!r} is not in TRACKED_TABLES")
+
+
+def _check_identifier(name: str) -> None:
+    """Reject any SQL identifier (e.g. column name) that doesn't match `_IDENT_RE`.
+
+    Raises:
+        ValueError: if `name` is malformed.
+    """
+    if not _IDENT_RE.match(name):
+        raise ValueError(f"backup_engine: invalid SQL identifier {name!r}")
 
 
 class BackupEngine:
@@ -45,25 +74,29 @@ class BackupEngine:
     # ── Snapshot & Diff ────────────────────────────────────────────
 
     def _read_table(self, db_path: Path, table: str) -> Dict[str, Dict]:
-        """Read all rows from a table into a dict keyed by ID."""
-        rows = {}
-        # Req 3: SQL Injection Prevention -> Whitelist table names
-        if table not in TRACKED_TABLES:
-            logger.warning(f"Blocked attempt to read untracked/invalid table: {table}")
-            return rows
-            
+        """Read all rows from a table into a dict keyed by ID.
+
+        The `table` argument is interpolated into a literal `SELECT` because
+        SQLite cannot parameterize identifiers. The allowlist check below is
+        the ONLY thing standing between this and SQL injection — never bypass.
+
+        Raises:
+            ValueError: if `table` is not in `TRACKED_TABLES`.
+        """
+        _check_table_name(table)
+        rows: Dict[str, Dict] = {}
+
         try:
             conn = sqlite3.connect(str(db_path), timeout=30.0)
             conn.row_factory = sqlite3.Row
-            # Check if table exists
             cur = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
             )
             if not cur.fetchone():
                 conn.close()
                 return rows
-            
-            cur = conn.execute(f"SELECT * FROM {table}")
+
+            cur = conn.execute(f"SELECT * FROM {table}")  # nosec B608 - table allowlisted
             for row in cur:
                 d = dict(row)
                 row_id = str(d.get("ID", d.get("id", hash(json.dumps(d, default=str)))))
@@ -231,9 +264,13 @@ class BackupEngine:
             conn.execute("PRAGMA busy_timeout=30000;")
 
             for table, rows in snapshot.items():
-                # Req 3: SQL Injection Prevention -> Whitelist table names before any CREATE/DELETE/INSERT
-                if table not in TRACKED_TABLES:
-                    logger.warning(f"Blocked attempt to restore untracked/invalid table: {table}")
+                # Allowlist gate — snapshot data could be from a historical
+                # commit that referenced a now-untracked table. Skip rather
+                # than crash so partial restore stays possible.
+                try:
+                    _check_table_name(table)
+                except ValueError as exc:
+                    logger.warning("backup_engine.restore: skipping table — %s", exc)
                     continue
 
                 # Check if table exists
@@ -243,17 +280,22 @@ class BackupEngine:
                 if not cur.fetchone():
                     continue
 
-                # Get column names
-                cur = conn.execute(f"PRAGMA table_info({table})")
+                # Get column names directly from the live schema.
+                cur = conn.execute(f"PRAGMA table_info({table})")  # nosec B608 - table allowlisted
                 columns = [row[1] for row in cur.fetchall()]
 
                 # Clear table
-                conn.execute(f"DELETE FROM {table}")
+                conn.execute(f"DELETE FROM {table}")  # nosec B608 - table allowlisted
 
                 # Insert all rows
                 for row_id, row_data in rows.items():
-                    # Only insert columns that exist in the table
-                    valid_cols = [c for c in columns if c in row_data]
+                    # Defence in depth: each surviving column name must match
+                    # `_IDENT_RE` before it gets interpolated. PRAGMA output is
+                    # trusted but a poisoned schema would otherwise be lethal.
+                    valid_cols = [
+                        c for c in columns
+                        if c in row_data and _IDENT_RE.match(c)
+                    ]
                     if not valid_cols:
                         continue
                     placeholders = ", ".join(["?"] * len(valid_cols))
@@ -261,7 +303,7 @@ class BackupEngine:
                     values = [row_data.get(c) for c in valid_cols]
                     try:
                         conn.execute(
-                            f"INSERT OR REPLACE INTO {table} ({col_names}) VALUES ({placeholders})",
+                            f"INSERT OR REPLACE INTO {table} ({col_names}) VALUES ({placeholders})",  # nosec B608 - identifiers allowlisted
                             values
                         )
                     except Exception as e:

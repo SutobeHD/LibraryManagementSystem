@@ -424,6 +424,18 @@ Git-like incremental backup (~95% smaller than full copies via compressed JSON d
 | `get_timeline()` | `[Commit]` | All commits with timestamp, hash, summary |
 | `restore(commit_id)` | `bool` | Roll back library to a specific commit |
 
+**SQL safety**: SQLite cannot parameterize identifiers, so table names and column names are interpolated literally. The module enforces a strict allowlist:
+
+| Symbol | Purpose |
+|--------|---------|
+| `TRACKED_TABLES: tuple[str, ...]` | Canonical ordered list of tables that may appear in any SQL `SELECT`/`DELETE`/`INSERT` interpolation |
+| `_TABLE_ALLOWLIST: frozenset[str]` | O(1) lookup set built from `TRACKED_TABLES`; the only thing standing between caller-supplied table names and SQL injection |
+| `_IDENT_RE` | Regex `^[A-Za-z_][A-Za-z0-9_]{0,63}$` — defensive check on column names read from `PRAGMA table_info` before they are interpolated |
+| `_check_table_name(table)` | Raises `ValueError` if `table` is not in `_TABLE_ALLOWLIST` |
+| `_check_identifier(name)` | Raises `ValueError` if `name` doesn't match `_IDENT_RE` |
+
+**Rule for new code**: never f-string an identifier into SQL without calling the matching validator first. Add a `# nosec B608` only after the validator call so reviewers can grep for unprotected sites.
+
 ---
 
 ## Other Modules
