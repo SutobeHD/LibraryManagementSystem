@@ -139,7 +139,10 @@ class SystemGuard:
         for proc in psutil.process_iter(['name']):
             try:
                 if "rekordbox" in proc.info['name'].lower(): return True
-            except: pass
+            except (AttributeError, KeyError, psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                logger.debug(
+                    "services.is_rekordbox_running: skipped pid=%s (%s)", proc.pid, e,
+                )
         return False
     @staticmethod
     def create_backup():
@@ -147,8 +150,14 @@ class SystemGuard:
         if not source.exists(): return None
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         dest = BACKUP_DIR / f"{DB_FILENAME}.backup_{timestamp}"
-        try: shutil.copy2(source, dest); return str(dest)
-        except: return None
+        try:
+            shutil.copy2(source, dest)
+            return str(dest)
+        except (OSError, shutil.Error) as e:
+            logger.warning(
+                "services.create_backup: failed to copy %s -> %s (%s)", source, dest, e,
+            )
+            return None
 
 class AudioEngine:
     @staticmethod
@@ -156,8 +165,8 @@ class AudioEngine:
         try:
             subprocess.run([FFMPEG_BIN, "-version"], capture_output=True, check=True)
             return True
-        except:
-            logger.error("FFmpeg not found in PATH")
+        except (FileNotFoundError, OSError, subprocess.SubprocessError) as e:
+            logger.error("FFmpeg not available at %s (%s)", FFMPEG_BIN, e)
             return False
 
     @staticmethod
@@ -656,8 +665,13 @@ class SettingsManager:
     }
     @classmethod
     def load(cls):
-        try: return {**cls.DEFAULT, **json.load(open(cls.CONFIG))}
-        except: return cls.DEFAULT
+        try:
+            return {**cls.DEFAULT, **json.load(open(cls.CONFIG))}
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning(
+                "services.SettingsManager.load: falling back to defaults — %s", e,
+            )
+            return cls.DEFAULT
     @classmethod
     def save(cls, cfg): json.dump(cfg, open(cls.CONFIG, "w"), indent=2)
 
@@ -671,7 +685,10 @@ class MetadataManager:
         try:
             with open(cls.MAPPINGS_FILE, "r", encoding='utf-8') as f:
                 return json.load(f)
-        except:
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning(
+                "services.MetadataManager.load: returning empty mappings — %s", e,
+            )
             return {"artists": {}, "labels": {}, "albums": {}}
 
     @classmethod
@@ -698,9 +715,14 @@ class SystemCleaner:
         cutoff = time.time() - (days * 86400)
         count = 0
         for b in BACKUP_DIR.glob("master.db.backup_*"):
-            if b.stat().st_mtime < cutoff: 
-                try: os.remove(b); count += 1
-                except: pass
+            if b.stat().st_mtime < cutoff:
+                try:
+                    os.remove(b)
+                    count += 1
+                except OSError as e:
+                    logger.warning(
+                        "services.cleanup_old_backups: failed to remove %s (%s)", b, e,
+                    )
         return count
 
 class BeatAnalyzer:
@@ -1016,13 +1038,21 @@ class ImportManager:
                             if isinstance(tag, APIC):
                                 art_data = tag.data
                                 break
-                    except: pass
+                    except Exception as e:
+                        logger.debug(
+                            "services: ID3 artwork lookup failed for %s (%s)",
+                            file_path, e,
+                        )
                 elif file_path.suffix.lower() == ".flac":
                     try:
                         audio = FLAC(file_path)
                         if audio.pictures:
                             art_data = audio.pictures[0].data
-                    except: pass
+                    except Exception as e:
+                        logger.debug(
+                            "services: FLAC artwork lookup failed for %s (%s)",
+                            file_path, e,
+                        )
                 
                 if art_data:
                     # Save with unique name based on file stem
