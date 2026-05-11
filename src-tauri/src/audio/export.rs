@@ -207,7 +207,7 @@ where F: Fn(f32, &str) {
     // 8. Metadata Injection (Req 2)
     progress(0.98, "Injecting metadata...");
     if let Err(e) = crate::audio::metadata::copy_metadata(&state.source_file, &state.output_file) {
-        eprintln!("Metadata injection failed: {}", e);
+        log::warn!("Metadata injection failed: {}", e);
         // We don't fail the whole export if just metadata fails, but we log it
     }
 

@@ -120,7 +120,8 @@ Implements OAuth 2.1 + PKCE:
 | `serde` / `serde_json` | — | Serialization for IPC types and payloads |
 | `reqwest` | — | HTTP client for OAuth token exchange |
 | `open` | — | Open URLs in system browser |
-| `log` | 0.4 | Logging facade (impl via tauri's built-in logger). `log::info!`, `log::warn!`, etc. |
+| `log` | 0.4 | Logging facade. `log::info!`, `log::warn!`, `log::error!`. Backend is `env_logger` (initialised at the top of `fn main()` with `LevelFilter::Info`, RUST_LOG-overridable). The crate has zero `println!` / `eprintln!` outside `#[cfg(test)]` except one documented fatal-exit path in `main.rs`. |
+| `env_logger` | 0.11 | Logger backend for the `log` facade. Writes to stderr with timestamps + module path. |
 
 ---
 

@@ -84,7 +84,7 @@ fn spawn_child(
                 let lbl = label;
                 std::thread::spawn(move || {
                     for line in BufReader::new(stdout).lines().flatten() {
-                        println!("[{}] {}", lbl, line);
+                        log::info!("[{}] {}", lbl, line);
                     }
                 });
             }
@@ -92,14 +92,14 @@ fn spawn_child(
                 let lbl = label;
                 std::thread::spawn(move || {
                     for line in BufReader::new(stderr).lines().flatten() {
-                        eprintln!("[{}-err] {}", lbl, line);
+                        log::warn!("[{}-err] {}", lbl, line);
                     }
                 });
             }
             Some(child)
         }
         Err(e) => {
-            eprintln!("[{}] Failed to spawn {}: {}", label, program, e);
+            log::error!("[{}] Failed to spawn {}: {}", label, program, e);
             None
         }
     }
@@ -112,7 +112,7 @@ fn spawn_dev_backend(app: &tauri::AppHandle) {
     let root = match find_repo_root() {
         Some(r) => r,
         None => {
-            eprintln!("[dev-spawn] Could not locate app/main.py — skipping auto-spawn.");
+            log::warn!("[dev-spawn] Could not locate app/main.py — skipping auto-spawn.");
             return;
         }
     };
@@ -122,19 +122,19 @@ fn spawn_dev_backend(app: &tauri::AppHandle) {
 
     // Backend (port 8000)
     if is_port_busy(8000) {
-        println!("[backend] Port 8000 in use — skipping spawn.");
+        log::info!("[backend] Port 8000 in use — skipping spawn.");
     } else {
-        println!("[backend] Spawning python -m app.main from {}", root.display());
+        log::info!("[backend] Spawning python -m app.main from {}", root.display());
         backend = spawn_child("backend", "python", &["-m", "app.main"], &root);
     }
 
     // Vite dev server (port 5173)
     if is_port_busy(5173) {
-        println!("[vite] Port 5173 in use — skipping spawn.");
+        log::info!("[vite] Port 5173 in use — skipping spawn.");
     } else {
         let frontend = root.join("frontend");
         if frontend.join("package.json").exists() {
-            println!("[vite] Spawning npm run dev from {}", frontend.display());
+            log::info!("[vite] Spawning npm run dev from {}", frontend.display());
             // npm on Windows is a .cmd shim → run via cmd.exe
             #[cfg(target_os = "windows")]
             {
@@ -145,7 +145,7 @@ fn spawn_dev_backend(app: &tauri::AppHandle) {
                 vite = spawn_child("vite", "npm", &["run", "dev"], &frontend);
             }
         } else {
-            eprintln!("[vite] frontend/package.json missing — skipping.");
+            log::warn!("[vite] frontend/package.json missing — skipping.");
         }
     }
 
@@ -169,7 +169,7 @@ async fn login_to_soundcloud(app: tauri::AppHandle) -> Result<String, String> {
     // Step 1: Generate auth URL with PKCE
     let (auth_url, code_verifier) = soundcloud_client::get_auth_url()
         .map_err(|e| format!("Configuration error: {}", e))?;
-    println!("[SoundCloud] Opening browser for login...");
+    log::info!("[SoundCloud] Opening browser for login...");
     
     // Emit event: auth started
     let _ = app.emit("sc-login-progress", serde_json::json!({ "stage": "auth", "message": "Opening browser for login..." }));
@@ -191,7 +191,7 @@ async fn login_to_soundcloud(app: tauri::AppHandle) -> Result<String, String> {
         .await
         .map_err(|e| format!("Token exchange failed: {}", e))?;
     
-    println!("[SoundCloud] ✓ Authorization successful.");
+    log::info!("[SoundCloud] ✓ Authorization successful.");
     let _ = app.emit("sc-login-progress", serde_json::json!({ "stage": "done", "message": "Authorization successful." }));
     
     Ok(token)
@@ -218,7 +218,7 @@ async fn export_to_soundcloud(app: tauri::AppHandle, playlist_name: String, trac
     // Step 1: Generate auth URL with PKCE
     let (auth_url, code_verifier) = soundcloud_client::get_auth_url()
         .map_err(|e| format!("Configuration error: {}", e))?;
-    println!("[SoundCloud] Opening browser for login...");
+    log::info!("[SoundCloud] Opening browser for login...");
     
     // Emit event: auth started
     let _ = app.emit("sc-export-progress", serde_json::json!({ "stage": "auth", "message": "Opening browser for login..." }));
@@ -239,7 +239,7 @@ async fn export_to_soundcloud(app: tauri::AppHandle, playlist_name: String, trac
     let token = soundcloud_client::exchange_code_for_token(&code, &code_verifier)
         .await
         .map_err(|e| format!("Token exchange failed: {}", e))?;
-    println!("[SoundCloud] ✓ Access token received.");
+    log::info!("[SoundCloud] ✓ Access token received.");
 
     // Step 4: Search tracks and create playlist
     // Step 4: Search tracks and create playlist
@@ -261,10 +261,19 @@ async fn export_to_soundcloud(app: tauri::AppHandle, playlist_name: String, trac
 }
 
 fn main() {
+    // Initialise the global logger backend (stderr, default INFO level).
+    // Without this every `log::info!` / `log::warn!` / `log::error!` macro
+    // elsewhere in the crate would be a no-op. RUST_LOG env var overrides
+    // the default — e.g. `RUST_LOG=debug` for verbose dev builds.
+    env_logger::Builder::new()
+        .filter_level(log::LevelFilter::Info)
+        .parse_default_env()
+        .init();
+
     // Robust .env loading: search in current and parent dirs
     match dotenvy::dotenv() {
-        Ok(path) => println!("[LibraryManagementSystem] Found .env at: {:?}", path),
-        Err(_) => println!("[LibraryManagementSystem] No .env file found. Using system environment variables."),
+        Ok(path) => log::info!("[LibraryManagementSystem] Found .env at: {:?}", path),
+        Err(_) => log::info!("[LibraryManagementSystem] No .env file found. Using system environment variables."),
     }
     
     tauri::Builder::default()
@@ -302,13 +311,13 @@ fn main() {
                             Some(event) => {
                                 match event {
                                     CommandEvent::Stdout(line) => {
-                                        println!("backend: {}", String::from_utf8_lossy(&line).trim());
+                                        log::info!("backend: {}", String::from_utf8_lossy(&line).trim());
                                     }
                                     CommandEvent::Stderr(line) => {
-                                        eprintln!("backend-error: {}", String::from_utf8_lossy(&line).trim());
+                                        log::warn!("backend-error: {}", String::from_utf8_lossy(&line).trim());
                                     }
                                     CommandEvent::Error(err) => {
-                                        eprintln!("backend-critical: {}", err);
+                                        log::error!("backend-critical: {}", err);
                                     }
                                     _ => {}
                                 }
@@ -328,10 +337,13 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .unwrap_or_else(|err| {
-            // Setup-phase failure: `tauri-plugin-log` hasn't been wired in
-            // yet, so we can't go through `log::error!`. Print to stderr
-            // and exit 1 — a panic here would also kill the process but
-            // leaves a confusing stack trace for the user.
+            // Last-resort fatal exit path. We deliberately use `eprintln!`
+            // rather than `log::error!` here — the logger backend may have
+            // failed to come up, or its sink could be the very thing that
+            // crashed the Builder. Writing directly to stderr is the most
+            // reliable channel we have to surface the error before the
+            // process exits non-zero. This is the only println/eprintln
+            // outside `#[cfg(test)]` in the crate, by design.
             eprintln!("[fatal] error while building tauri application: {err}");
             std::process::exit(1);
         })
@@ -344,11 +356,11 @@ fn main() {
                         if let Ok(mut guard) = state.0.lock() {
                             if let Some(mut child) = guard.backend.take() {
                                 let _ = child.kill();
-                                println!("[backend] Killed on app exit.");
+                                log::info!("[backend] Killed on app exit.");
                             }
                             if let Some(mut child) = guard.vite.take() {
                                 let _ = child.kill();
-                                println!("[vite] Killed on app exit.");
+                                log::info!("[vite] Killed on app exit.");
                             }
                         }
                     }

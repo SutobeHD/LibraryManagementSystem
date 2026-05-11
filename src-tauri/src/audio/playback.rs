@@ -68,7 +68,7 @@ impl PlaybackEngine {
 
         let err_fn = |err: StreamError| {
             // Req 1: Device Disconnects
-            eprintln!("an error occurred on stream: {}", err);
+            log::error!("an error occurred on stream: {}", err);
             // In a full implementation, we would emit an event to Tauri here.
         };
 

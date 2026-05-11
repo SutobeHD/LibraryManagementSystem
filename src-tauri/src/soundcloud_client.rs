@@ -160,8 +160,8 @@ pub fn get_auth_url() -> Result<(String, String), String> {
         .append_pair("state", &state);
 
     let final_url = url.to_string();
-    println!("[SoundCloud] Auth URL generated (state: {})", state);
-    
+    log::info!("[SoundCloud] Auth URL generated (state: {})", state);
+
     Ok((final_url, code_verifier))
 }
 
@@ -281,7 +281,7 @@ pub async fn search_and_create_playlist(
     for (i, track) in tracks.iter().enumerate() {
         let query = format!("{} {}", track.artist, track.title);
         let progress_msg = format!("Searching ({}/{}): {}", i + 1, tracks.len(), query);
-        println!("[SoundCloud] {}", progress_msg);
+        log::info!("[SoundCloud] {}", progress_msg);
         
         // Emit progress event
         if let Some(ref app) = app_handle {
@@ -296,15 +296,15 @@ pub async fn search_and_create_playlist(
 
         match search_track(token, &query, track.duration_ms).await {
             Ok(Some(id)) => {
-                println!("[SoundCloud]   ✓ Found track ID {}", id);
+                log::info!("[SoundCloud]   ✓ Found track ID {}", id);
                 found_ids.push(id);
             }
             Ok(None) => {
-                println!("[SoundCloud]   ✗ Not found, skipping.");
+                log::info!("[SoundCloud]   ✗ Not found, skipping.");
                 failed_tracks.push(format!("{} - {}", track.artist, track.title));
             }
             Err(e) => {
-                println!("[SoundCloud]   ✗ Error: {}, skipping.", e);
+                log::warn!("[SoundCloud]   ✗ Error: {}, skipping.", e);
                 failed_tracks.push(format!("{} - {} (Error)", track.artist, track.title));
             }
         }
@@ -318,7 +318,7 @@ pub async fn search_and_create_playlist(
     }
 
     let create_msg = format!("Creating playlist '{}' with {} tracks...", playlist_name, found_ids.len());
-    println!("[SoundCloud] {}", create_msg);
+    log::info!("[SoundCloud] {}", create_msg);
     
     // Emit progress event for playlist creation
     if let Some(ref app) = app_handle {
@@ -360,7 +360,7 @@ pub async fn search_and_create_playlist(
         return Err(format!("Playlist creation failed ({}): {}", status, body_text).into());
     }
 
-    println!("[SoundCloud] ✓ Playlist '{}' created successfully!", playlist_name);
+    log::info!("[SoundCloud] ✓ Playlist '{}' created successfully!", playlist_name);
     Ok(ExportResult {
         success_count: found_ids.len(),
         failed_tracks,
@@ -384,7 +384,7 @@ pub fn wait_for_callback() -> Result<String, ScError> {
         .unwrap_or(5001);
     let bind_addr = format!("127.0.0.1:{}", port);
     let listener = TcpListener::bind(&bind_addr)?;
-    println!("[SoundCloud] Waiting for OAuth callback on {}...", redirect);
+    log::info!("[SoundCloud] Waiting for OAuth callback on {}...", redirect);
 
     // Accept only the first connection
     let (mut stream, _) = listener.accept()?;
@@ -441,7 +441,7 @@ pub fn wait_for_callback() -> Result<String, ScError> {
     );
     stream.write_all(response.as_bytes())?;
 
-    println!("[SoundCloud] ✓ Received authorization code.");
+    log::info!("[SoundCloud] ✓ Received authorization code.");
     Ok(code)
 }
 

@@ -115,7 +115,7 @@ impl AudioController {
 
         // Inform decoder about potential sample rate mismatch (Req 5 placeholder/log)
         if sample_rate != device_sr {
-            println!("Warning: File SR {} != Device SR {}. Resampling needed.", sample_rate, device_sr);
+            log::warn!("File SR {} != Device SR {}. Resampling needed.", sample_rate, device_sr);
             // We should use rubato here, but sticking to basic decode loop for now.
         }
 
@@ -142,11 +142,11 @@ impl AudioController {
                 let packet = match format.next_packet() {
                     Ok(p) => p,
                     Err(SymphoniaError::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
-                        println!("End of stream reached.");
+                        log::info!("End of stream reached.");
                         break;
                     }
                     Err(e) => {
-                        eprintln!("Decoding error: {}", e);
+                        log::error!("Decoding error: {}", e);
                         break;
                     }
                 };
@@ -179,7 +179,7 @@ impl AudioController {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Decode error: {}", e);
+                        log::error!("Decode error: {}", e);
                     }
                 }
             }
@@ -194,7 +194,7 @@ impl AudioController {
         // to call format.seek(). For now, we will just pause the engine.
         // In a true implementation, we'd use a crossbeam channel to instruct the background thread.
         self.playback.pause();
-        println!("Seek requested to {}s. (Decoder IPC not fully wired in prototype)", position_secs);
+        log::warn!("Seek requested to {}s. (Decoder IPC not fully wired in prototype)", position_secs);
         self.playback.resume();
     }
 }
