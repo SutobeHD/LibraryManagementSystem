@@ -831,7 +831,7 @@ def save_grid(r: GridReq): return {"status": "success" if db.save_track_beatgrid
 
 @app.post("/api/track/{tid}")
 def update_track(tid: str, r: TrackUpdateReq):
-    updates = {k: v for k, v in r.dict().items() if v is not None}
+    updates = {k: v for k, v in r.model_dump().items() if v is not None}
     if not updates: return {"status": "no_change"}
     try:
         if not db.update_tracks_metadata([tid], updates):
@@ -2078,7 +2078,7 @@ def usb_get_profiles():
 @app.post("/api/usb/profiles")
 def usb_save_profile(r: UsbProfileReq):
     """Create or update a USB device profile."""
-    profile = UsbProfileManager.save_profile(r.dict())
+    profile = UsbProfileManager.save_profile(r.model_dump())
     return {"status": "success", "profile": profile}
 
 @app.delete("/api/usb/profiles/{device_id}")
@@ -3450,7 +3450,7 @@ async def usb_playcount_resolve(body: PlayCountResolveRequest):
         rb_root = _os.path.join(_os.environ.get("APPDATA", ""), "Pioneer", "rekordbox")
         pc_db_path = str(Path(rb_root) / DB_FILENAME) if hasattr(Path(rb_root), "__str__") else ""
 
-        resolutions_dicts = [r.dict() for r in body.resolutions]
+        resolutions_dicts = [r.model_dump() for r in body.resolutions]
         result = await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: resolve_playcounts(resolutions_dicts, pc_db_path, body.usb_xml_path),
