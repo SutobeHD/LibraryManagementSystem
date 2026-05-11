@@ -13,7 +13,7 @@ import logging
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from collections import defaultdict
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from .config import REKORDBOX_ROOT, DB_FILENAME, BACKUP_DIR, FFMPEG_BIN, EXPORT_DIR, MUSIC_DIR
 from .xml_generator import RekordboxXML
 from .database import db
@@ -145,7 +145,7 @@ class SystemGuard:
                 )
         return False
     @staticmethod
-    def create_backup():
+    def create_backup() -> Optional[str]:
         source = REKORDBOX_ROOT / DB_FILENAME
         if not source.exists(): return None
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -161,7 +161,7 @@ class SystemGuard:
 
 class AudioEngine:
     @staticmethod
-    def check_ffmpeg():
+    def check_ffmpeg() -> bool:
         try:
             subprocess.run([FFMPEG_BIN, "-version"], capture_output=True, check=True)
             return True
@@ -678,7 +678,7 @@ class SettingsManager:
         "scan_folders": []           # absolute paths watched for new audio files (FolderWatcher)
     }
     @classmethod
-    def load(cls):
+    def load(cls) -> Dict[str, Any]:
         try:
             return {**cls.DEFAULT, **json.load(open(cls.CONFIG))}
         except (OSError, json.JSONDecodeError) as e:
@@ -687,13 +687,14 @@ class SettingsManager:
             )
             return cls.DEFAULT
     @classmethod
-    def save(cls, cfg): json.dump(cfg, open(cls.CONFIG, "w"), indent=2)
+    def save(cls, cfg: Dict[str, Any]) -> None:
+        json.dump(cfg, open(cls.CONFIG, "w"), indent=2)
 
 class MetadataManager:
     MAPPINGS_FILE = Path("metadata_mappings.json")
 
     @classmethod
-    def load(cls):
+    def load(cls) -> Dict[str, Dict[str, str]]:
         if not cls.MAPPINGS_FILE.exists():
             return {"artists": {}, "labels": {}, "albums": {}}
         try:
@@ -706,25 +707,25 @@ class MetadataManager:
             return {"artists": {}, "labels": {}, "albums": {}}
 
     @classmethod
-    def save(cls, data):
+    def save(cls, data: Dict[str, Dict[str, str]]) -> None:
         with open(cls.MAPPINGS_FILE, "w", encoding='utf-8') as f:
             json.dump(data, f, indent=2)
 
     @classmethod
-    def add_mapping(cls, category, source_name, target_name):
+    def add_mapping(cls, category: str, source_name: str, target_name: str) -> None:
         data = cls.load()
         if category not in data: data[category] = {}
         data[category][source_name] = target_name
         cls.save(data)
 
     @classmethod
-    def get_mapped_name(cls, category, name):
+    def get_mapped_name(cls, category: str, name: str) -> str:
         data = cls.load()
         return data.get(category, {}).get(name, name)
 
 class SystemCleaner:
     @staticmethod
-    def cleanup_old_backups():
+    def cleanup_old_backups() -> int:
         days = SettingsManager.load().get("backup_retention_days", 30)
         cutoff = time.time() - (days * 86400)
         count = 0
@@ -1215,11 +1216,11 @@ class ProjectManager:
     PROJECTS_DIR = Path("PRJ")
 
     @staticmethod
-    def ensure_dir():
+    def ensure_dir() -> None:
         ProjectManager.PROJECTS_DIR.mkdir(exist_ok=True)
 
     @staticmethod
-    def save_project(name, data):
+    def save_project(name: str, data: Dict[str, Any]) -> str:
         ProjectManager.ensure_dir()
         filename = ProjectManager.PROJECTS_DIR / f"{name}.prj"
         try:
@@ -1231,7 +1232,7 @@ class ProjectManager:
             raise e
 
     @staticmethod
-    def load_project(name):
+    def load_project(name: str) -> Optional[Dict[str, Any]]:
         filename = ProjectManager.PROJECTS_DIR / f"{name}.prj"
         if not filename.exists():
              # Try without extension if passed
@@ -1246,7 +1247,7 @@ class ProjectManager:
             raise e
 
     @staticmethod
-    def list_projects():
+    def list_projects() -> List[str]:
         ProjectManager.ensure_dir()
         projects = []
         for f in ProjectManager.PROJECTS_DIR.glob("*.prj"):
