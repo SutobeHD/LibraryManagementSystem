@@ -3012,10 +3012,6 @@ async def get_soundcloud_playlists(request: Request):
     """
     auth_token = keyring.get_password("library_management_system", "sc_token")
 
-    # DOD Verification Print
-    safe_token = f"{auth_token[:10]}..." if auth_token else "NONE"
-    print(f"DEBUG: Playlist Route aufgerufen mit Token: {safe_token}")
-
     if not auth_token:
         logger.warning("[SC] /api/soundcloud/playlists: no auth token in keyring — returning 401.")
         raise HTTPException(401, detail="auth_expired")
