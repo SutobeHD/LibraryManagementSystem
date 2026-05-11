@@ -17,9 +17,43 @@ use std::net::TcpListener;
 use url::Url;
 use tauri::Emitter;
 
-/// Convenience error type – Send + Sync so it can cross thread boundaries
-/// (required by `tokio::task::spawn_blocking`).
-type ScError = Box<dyn std::error::Error + Send + Sync>;
+/// Typed error enum for the SoundCloud client.
+///
+/// Replaces the previous `Box<dyn Error + Send + Sync>` alias so call sites
+/// in this crate can match on a finite set of variants (transient network,
+/// permanent OAuth/auth, malformed input) instead of stringifying and
+/// re-parsing. `Send + Sync` is preserved via the derived impls so values
+/// can still cross thread boundaries (required by
+/// `tokio::task::spawn_blocking`).
+#[derive(thiserror::Error, Debug)]
+pub enum ScError {
+    /// HTTP transport / TLS / DNS failures from reqwest.
+    #[error("HTTP error: {0}")]
+    Network(#[from] reqwest::Error),
+
+    /// Filesystem / socket / pipe failures (TcpListener, BufReader, write_all).
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// Ad-hoc / domain errors — auth-flow failures, missing query params,
+    /// non-2xx responses from the SC API, configuration problems. Kept as a
+    /// catch-all so the existing `format!(...).into()` and `"...".into()`
+    /// patterns at call sites compile unchanged.
+    #[error("{0}")]
+    Other(String),
+}
+
+impl From<String> for ScError {
+    fn from(s: String) -> Self {
+        ScError::Other(s)
+    }
+}
+
+impl From<&str> for ScError {
+    fn from(s: &str) -> Self {
+        ScError::Other(s.to_string())
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Configuration
