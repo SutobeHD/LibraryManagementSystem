@@ -1646,10 +1646,20 @@ class UsbActions:
         drive_letter = drive.rstrip("\\").rstrip(":")
         try:
             # Use PowerShell to eject
+            ps_cmd = (
+                f"(New-Object -COM Shell.Application)"
+                f".NameSpace(17).ParseName('{drive_letter}:').InvokeVerb('Eject')"
+            )
+            logger.info("ps eject start: drive=%s:", drive_letter)
+            _t0 = time.monotonic()
             result = subprocess.run(
-                ["powershell", "-Command",
-                 f"(New-Object -COM Shell.Application).NameSpace(17).ParseName('{drive_letter}:').InvokeVerb('Eject')"],
+                ["powershell", "-Command", ps_cmd],
                 capture_output=True, text=True, timeout=10
+            )
+            _elapsed = time.monotonic() - _t0
+            logger.info(
+                "ps eject done: drive=%s: rc=%s elapsed=%.2fs",
+                drive_letter, result.returncode, _elapsed,
             )
             
             # Polling loop: Wait up to 5s for the OS to unmount it

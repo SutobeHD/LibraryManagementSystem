@@ -291,16 +291,20 @@ class AudioEngine:
                 logger.info(f"[Segment {i}] Source file: {cut_src}")
                 logger.info(f"[Segment {i}] Source exists: {os.path.exists(cut_src)}")
                 logger.info(f"[Segment {i}] Output file: {temp}")
-                
+
+                _ffmpeg_t0 = time.monotonic()
                 result = subprocess.run(cmd, capture_output=True, text=True)
+                _ffmpeg_elapsed = time.monotonic() - _ffmpeg_t0
                 if result.returncode != 0:
-                    logger.error(f"[Segment {i}] FFmpeg FAILED")
-                    logger.error(f"[Segment {i}] Return code: {result.returncode}")
+                    logger.error(f"[Segment {i}] FFmpeg FAILED (rc={result.returncode}, elapsed={_ffmpeg_elapsed:.2f}s)")
                     logger.error(f"[Segment {i}] STDERR: {result.stderr}")
                     logger.error(f"[Segment {i}] STDOUT: {result.stdout}")
                     raise RuntimeError(f"FFmpeg failed for segment {i}: {result.stderr}")
-                
-                logger.info(f"[Segment {i}] Successfully created temp file: {temp}")
+
+                logger.info(
+                    f"[Segment {i}] FFmpeg ok: rc=0 elapsed=%.2fs out=%s"
+                    % (_ffmpeg_elapsed, temp),
+                )
                 temp_files.append(temp)
 
             if not temp_files:
@@ -429,10 +433,20 @@ class AudioEngine:
         ]
         
         try:
+            logger.info("ffmpeg slice start: args=%s", " ".join(cmd))
+            _t0 = time.monotonic()
             result = subprocess.run(cmd, capture_output=True, text=True)
+            _elapsed = time.monotonic() - _t0
             if result.returncode != 0:
-                logger.error(f"FFmpeg slice failed: {result.stderr}")
+                logger.error(
+                    "ffmpeg slice FAILED: rc=%s elapsed=%.2fs stderr=%s",
+                    result.returncode, _elapsed, result.stderr,
+                )
                 raise RuntimeError(f"FFmpeg slice failed: {result.stderr}")
+            logger.info(
+                "ffmpeg slice done: rc=0 elapsed=%.2fs out=%s",
+                _elapsed, temp_path,
+            )
             return str(temp_path)
         except Exception as e:
             logger.error(f"Slice error: {e}")
