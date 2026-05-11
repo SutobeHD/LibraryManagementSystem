@@ -15,7 +15,7 @@ tauri-plugin-fs = "2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 reqwest = { version = "0.12", features = ["json"] }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "fs"] }
 sha2 = "0.10"
 base64 = "0.22"
 rand = "0.9"
@@ -30,9 +30,7 @@ thiserror = "2"
 cpal = "0.15"
 memmap2 = "0.9"
 rustfft = "6.1"
-rubato = "0.14"
 ringbuf = "0.3"
-crossbeam-channel = "0.5"
 
 # --- Export & Metadata ---
 hound = "3.5"

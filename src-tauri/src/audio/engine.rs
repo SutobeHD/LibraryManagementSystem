@@ -109,10 +109,12 @@ impl AudioController {
         // Start playback pulling from the consumer
         let device_sr = self.playback.start_stream(consumer)?;
 
-        // Inform decoder about potential sample rate mismatch (Req 5 placeholder/log)
+        // Inform decoder about potential sample rate mismatch (Req 5 placeholder/log).
+        // Resampling is not yet wired in — the rubato crate was removed from
+        // Cargo.toml in Phase 2.12; when proper resampling lands, pull it
+        // back in and replace this warn! with the actual conversion.
         if sample_rate != device_sr {
             log::warn!("File SR {} != Device SR {}. Resampling needed.", sample_rate, device_sr);
-            // We should use rubato here, but sticking to basic decode loop for now.
         }
 
         self.stop_signal = Arc::new(AtomicBool::new(false));
