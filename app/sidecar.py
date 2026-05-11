@@ -1,6 +1,9 @@
 import json
+import logging
 import os
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 DATA_FILE = Path("app_data.json")
 
@@ -14,7 +17,10 @@ class SidecarStorage:
         try:
             with open(DATA_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except:
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning(
+                "sidecar: failed to load %s — returning empty data (%s)", DATA_FILE, e,
+            )
             return {"artists": {}}
 
     def _save(self):
