@@ -265,16 +265,12 @@ const DawTimeline = React.memo(({
                     // Rebuild bitmap when the scroll delta exceeds the
                     // safe overscan range. drawFrame translates the
                     // bitmap by (lastBuiltScrollX - scrollX) so smaller
-                    // deltas remain visually continuous without rebuild;
-                    // we only rebuild when the bitmap's right edge would
-                    // start uncovering the view (≈100 px of headroom
-                    // here, leaving a thin un-translated strip that
-                    // disappears on the next rebuild). The actual
-                    // lastBuiltScrollX update happens at the rebuild
-                    // site below — setting it here would tell the
-                    // translation code that the bitmap was already
-                    // re-anchored before it actually was.
-                    if (Math.abs(d.scrollX - (d.lastBuiltScrollX || 0)) > 100) {
+                    // deltas remain visually continuous without rebuild.
+                    // Threshold raised 100 → 400 px so we rebuild ~4× less
+                    // often during auto-follow scroll, eliminating the
+                    // micro-shape variation the user sees as "waves
+                    // wiggling during playback".
+                    if (Math.abs(d.scrollX - (d.lastBuiltScrollX || 0)) > 400) {
                         d.needsWaveformRebuild = true;
                     }
                 }
@@ -288,8 +284,16 @@ const DawTimeline = React.memo(({
                 }
             }
 
-            // LOD hysteresis (EC25)
-            if (d.lastFrameTime > 0) {
+            // LOD hysteresis (EC25) — frame-rate-adaptive peak resolution.
+            // GATED OFF during playback. Switching LOD levels mid-playback
+            // re-samples the peaks at a different density and yields a
+            // visibly different waveform shape between consecutive bitmap
+            // rebuilds — user-reported "waves change all the time, looks
+            // weird". The shape MUST stay identical for a given (time, zoom)
+            // so the only visible motion during play is the playhead and the
+            // auto-follow scroll. LOD adjustments are still allowed while
+            // paused (the user is exploring; sluggish frames are tolerated).
+            if (!d.isPlaying && d.lastFrameTime > 0) {
                 const delta = ts - d.lastFrameTime;
                 if (delta > 22) {
                     goodFrames.current = 0;
@@ -596,16 +600,20 @@ function buildWaveformBitmap(d) {
 // Asymmetric: positive peaks (max) drive the top half, negative peaks
 // (min) drive the bottom half. Preserves natural stem/transient asymmetry.
 //
-// SMOOTHING — three layers of defence against the "blocky comb" look:
+// SMOOTHING — deterministic per (time, zoom) so the shape never changes
+// between bitmap rebuilds during auto-follow scroll or playback:
 //
-//   1. Sampling stride of 1-2 px depending on peak density (avoids
-//      single-pixel spikes when one peak covers many pixels)
-//   2. Light 1-2-1 horizontal smoothing kernel on every band/direction
-//      array (suppresses isolated bumps without blurring transients —
-//      coefficients sum to 1, no DC shift)
-//   3. Quadratic Bezier curves via Path2D between adjacent samples
-//      using midpoint control points (the curve passes through every
-//      midpoint, with each original sample acting as a control vertex)
+//   • Fixed sampling stride of 1 px (varying stride caused window-shift
+//     wobble when the visible range moved between rebuilds)
+//   • Quadratic Bezier curves via Path2D between adjacent samples using
+//     midpoint control points — purely geometric, depends only on the
+//     sampled values not on their array position
+//
+// A 1-2-1 sample-kernel was previously applied here. It is deliberately
+// REMOVED: by mixing each sample with its array neighbours it made the
+// drawn shape of the SAME time range vary between rebuilds (different
+// neighbours after the window shifted) — visible as "waves wiggling
+// during playback". The bezier already smooths visually.
 //
 // Each band is rendered as a filled Path2D POLYGON, not column-by-column
 // rectangles — adjacent columns are connected by curves so the silhouette
@@ -657,11 +665,14 @@ function drawMixxxFilteredWaveform(ctx, bandPeaks, region, rStartPx, rEndPx, scr
     const GAMMA = 0.9;     // slight expansion so quiet content is still visible
 
     // ── PASS 1: gather band amplitudes per pixel column ──
-    // Sampling stride: 1 px gives the most detail; we widen to 2 px at
-    // narrow per-band ratios so the smoothed curve doesn't get drowned by
-    // single-pixel noise. Both top (positive peak) and bottom (negative
-    // peak) are sampled — asymmetric envelope.
-    const STRIDE = pxToPeakRatio > 0.5 ? 1 : 2;
+    // Fixed stride = 1 px. Earlier versions flipped between 1 and 2 px
+    // depending on `pxToPeakRatio`, but that meant the stride could change
+    // between successive bitmap rebuilds (auto-follow scroll moves the
+    // window; LOD swaps would also change `peakLen`). The shifted sampling
+    // grid would alter the smoothed shape of the SAME time range,
+    // producing the user-visible "waves keep wiggling during playback".
+    // Stride = 1 keeps every rebuild deterministic for a given (time,zoom).
+    const STRIDE = 1;
     const sampleCount = Math.ceil((endPx - startPx) / STRIDE) + 1;
     // Flat typed arrays — one entry per sample column.
     const sX  = new Float32Array(sampleCount);
@@ -733,22 +744,17 @@ function drawMixxxFilteredWaveform(ctx, bandPeaks, region, rStartPx, rEndPx, scr
     }
     if (n < 2) return;
 
-    // ── PASS 2: light 1-2-1 horizontal smoothing on each band/direction ──
-    // Removes single-pixel spikes so the polygon's bezier curve flows
-    // continuously instead of jagging at every sample. We re-use the
-    // sample arrays in-place after copying via slice.
-    const smooth = (arr) => {
-        if (n < 3) return arr;
-        const out = new Float32Array(n);
-        out[0] = arr[0];
-        out[n - 1] = arr[n - 1];
-        for (let i = 1; i < n - 1; i++) {
-            out[i] = arr[i - 1] * 0.25 + arr[i] * 0.5 + arr[i + 1] * 0.25;
-        }
-        return out;
-    };
-    const sLT = smooth(slT), sMT = smooth(smT), sHT = smooth(shT);
-    const sLB = smooth(slB), sMB = smooth(smB), sHB = smooth(shB);
+    // ── PASS 2: (removed)
+    // A 1-2-1 smoothing kernel used to run here. It made the shape of the
+    // SAME time range vary slightly between rebuilds: when the visible
+    // window shifts during auto-follow scroll, a peak at time T sits at a
+    // different sample index, so the kernel's neighbour weighting changes
+    // and the output ripples by 1-2 px. Visible as "waves wiggling during
+    // playback". The mid-point bezier in Path2D already smooths visually
+    // (purely geometric, deterministic per sample value), so we skip the
+    // pre-bezier kernel entirely.
+    const sLT = slT, sMT = smT, sHT = shT;
+    const sLB = slB, sMB = smB, sHB = shB;
 
     // ── PASS 3: build & fill 6 smooth polygons (3 top, 3 bottom) ──
     // Each band's polygon spans the row between its inner edge (closer to
