@@ -1087,19 +1087,27 @@ async def batch_comment(r: BatchCommentReq):
             cmd.extend(["--replace", r.replace])
             
         logger.info(f"Running batch worker: {cmd}")
-        
-        # Run and capture output
-        result = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
+
+        # Run and capture output. timeout=600s — batch workers can legitimately
+        # run minutes over large libraries, but past that point we treat the
+        # process as hung and reclaim resources rather than blocking the
+        # request thread forever.
+        result = subprocess.check_output(
+            cmd, text=True, stderr=subprocess.STDOUT, timeout=600
+        )
         logger.info(f"Batch worker output: {result}")
-        
+
         # Parse count
         count = 0
         for line in result.split("\n"):
             if line.startswith("COUNT:"):
                 count = int(line.split(":")[1])
-                
+
         return {"status": "success", "count": count}
 
+    except subprocess.TimeoutExpired as e:
+        logger.error("Batch worker exceeded 600s timeout — killed (%s)", e)
+        raise HTTPException(504, detail="Batch worker timed out after 600s") from e
     except subprocess.CalledProcessError as e:
         logger.error(f"Batch worker failed: {e.output}")
         raise HTTPException(500, "Batch processing failed. Check logs for details.")

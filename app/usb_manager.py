@@ -156,15 +156,21 @@ class UsbDetector:
         try:
             CREATE_NO_WINDOW = 0x08000000
             ps_cmd = 'Get-Disk | Select-Object Number, BusType | ConvertTo-Json -Compress'
-            output = subprocess.check_output(['powershell', '-NoProfile', '-Command', ps_cmd], text=True, creationflags=CREATE_NO_WINDOW)
+            output = subprocess.check_output(
+                ['powershell', '-NoProfile', '-Command', ps_cmd],
+                text=True, creationflags=CREATE_NO_WINDOW, timeout=10,
+            )
             disks = json.loads(output)
             if isinstance(disks, dict): disks = [disks]
-            
+
             ps_part = 'Get-Partition | Select-Object DiskNumber, DriveLetter | ConvertTo-Json -Compress'
-            out_part = subprocess.check_output(['powershell', '-NoProfile', '-Command', ps_part], text=True, creationflags=CREATE_NO_WINDOW)
+            out_part = subprocess.check_output(
+                ['powershell', '-NoProfile', '-Command', ps_part],
+                text=True, creationflags=CREATE_NO_WINDOW, timeout=10,
+            )
             parts = json.loads(out_part)
             if isinstance(parts, dict): parts = [parts]
-            
+
             bus_map = {}
             disk_bus = {d['Number']: d['BusType'] for d in disks}
             for p in parts:
@@ -173,6 +179,9 @@ class UsbDetector:
                     letter = f"{dl}:\\"
                     bus_map[letter] = disk_bus.get(p['DiskNumber'])
             return bus_map
+        except subprocess.TimeoutExpired as e:
+            logger.error("usb_manager: PowerShell bus-type query timed out (%s)", e)
+            return {}
         except Exception as e:
             logger.error(f"Failed to get bus types: {e}")
             return {}
