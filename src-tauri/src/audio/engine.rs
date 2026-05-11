@@ -11,16 +11,12 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
-pub struct AudioEngine {
-    // We'll store the decoder and format reader here later
-    // For now, this struct represents the core audio processing
-}
+/// Namespace for the audio loader helpers. Unit struct rather than an
+/// instance type because `load_file` is a stateless static method —
+/// callers do `AudioEngine::load_file(...)` directly.
+pub struct AudioEngine;
 
 impl AudioEngine {
-    pub fn new() -> Self {
-        AudioEngine {}
-    }
-
     /// Load and decode an audio file using memory mapping.
     pub fn load_file<P: AsRef<Path>>(path: P) -> Result<(Box<dyn FormatReader>, Box<dyn Decoder>, u32, u32), String> {
         let file_path = path.as_ref();
@@ -188,14 +184,5 @@ impl AudioController {
         Ok(())
     }
 
-    /// Flushes the audio stream and jumps to a specific timestamp (Req 6)
-    pub fn seek(&self, position_secs: f64) {
-        // To implement seek fully we would need to pass a message to the decoder thread 
-        // to call format.seek(). For now, we will just pause the engine.
-        // In a true implementation, we'd use a crossbeam channel to instruct the background thread.
-        self.playback.pause();
-        log::warn!("Seek requested to {}s. (Decoder IPC not fully wired in prototype)", position_secs);
-        self.playback.resume();
-    }
 }
 
