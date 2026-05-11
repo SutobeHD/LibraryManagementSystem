@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import api from '../api/api';
 import toast from 'react-hot-toast';
+import { confirmModal } from './ConfirmModal';
 
 const formatSize = (bytes) => {
     if (!bytes) return '0 B';
@@ -73,7 +74,11 @@ const BackupManager = ({ onClose }) => {
             ? `Restore legacy backup "${backup.filename}"? Current state will be backed up automatically.`
             : `Restore to commit ${backup.hash}? Current state will be backed up automatically.`;
 
-        if (!confirm(confirmMsg)) return;
+        if (!(await confirmModal({
+            title: 'Restore backup',
+            message: confirmMsg,
+            confirmLabel: 'Continue',
+        }))) return;
 
         setRestoring(backup.hash);
         try {

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import api from '../api/api';
+import { confirmModal } from './ConfirmModal';
 import { Upload, FileCode, CheckCircle, AlertTriangle, Zap, Server } from 'lucide-react';
 
 const XmlCleanView = () => {
@@ -104,7 +105,12 @@ const XmlCleanView = () => {
                             <div className="h-px bg-white/5 w-full my-2" />
                             <button
                                 onClick={async () => {
-                                    if (confirm("Create a fresh, empty library? (rekordbox.xml)")) {
+                                    const ok = await confirmModal({
+                                        title: 'Create new library?',
+                                        message: 'Create a fresh, empty library? (rekordbox.xml)',
+                                        confirmLabel: 'Create',
+                                    });
+                                    if (ok) {
                                         const res = await api.post('/api/library/new');
                                         setScanResult({ tracks: 0, playlists: 0 });
                                     }

@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import MatchInspectorModal from './MatchInspectorModal';
+import { confirmModal } from './ConfirmModal';
 import { log } from '../utils/log';
 
 const formatDuration = (ms) => {
@@ -396,7 +397,13 @@ const SoundCloudSyncView = () => {
             });
             const { queued = 0, skipped = 0, force_reset = 0 } = res.data || {};
             if (queued === 0 && skipped > 0 && !force) {
-                if (confirm(`Alle ${skipped} Tracks bereits in Registry. Erneut downloaden (Registry zurücksetzen)?`)) {
+                const ok = await confirmModal({
+                    title: 'Erneut downloaden?',
+                    message: `Alle ${skipped} Tracks bereits in Registry. Erneut downloaden (Registry zurücksetzen)?`,
+                    confirmLabel: 'Ja',
+                    cancelLabel: 'Nein',
+                });
+                if (ok) {
                     setDownloadingPlaylistId(null);
                     return handleDownloadPlaylist(playlist, true);
                 }

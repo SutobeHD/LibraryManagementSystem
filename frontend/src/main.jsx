@@ -5,6 +5,9 @@ import { Music, Cloud, Download, Scissors, Settings, Folder, Wrench, Zap, FileCo
 import './index.css'
 import { ToastProvider } from './components/ToastContext'
 import { Toaster } from 'react-hot-toast'
+import toast from 'react-hot-toast'
+import { ConfirmModalRoot, confirmModal } from './components/ConfirmModal'
+import { PromptModalRoot, promptModal } from './components/PromptModal'
 import { log } from './utils/log'
 import { HEARTBEAT_INTERVAL_MS, LIBRARY_STATUS_INTERVAL_MS } from './config/constants'
 
@@ -66,7 +69,7 @@ const Sidebar = ({ activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnlo
   const [showBackups, setShowBackups] = useState(false);
 
   const handleExit = async () => {
-    if (confirm("Exit Application?")) {
+    if (await confirmModal({ title: "Exit Application?", confirmLabel: "Exit" })) {
       try {
         const token = getSessionToken();
         await api.post('/api/system/shutdown', null, { params: { token } });
@@ -454,7 +457,7 @@ const App = () => {
         await checkLibraryStatus();
       } catch (e) {
         console.error("Create empty library failed", e);
-        alert("Failed to create empty library.");
+        toast.error("Failed to create empty library.");
       }
       return;
     }
@@ -482,7 +485,7 @@ const App = () => {
           await checkLibraryStatus();
         } catch (e2) {
           console.error("Standalone fallback create failed", e2);
-          alert("Failed to init standalone XML.");
+          toast.error("Failed to init standalone XML.");
           setIsInitialLoading(false);
           setAppMode('xml-submode');
         }
@@ -508,7 +511,10 @@ const App = () => {
           filters: [{ name: 'Rekordbox XML', extensions: ['xml'] }],
         });
       } catch (_) {
-        target = prompt('Enter the path to an existing rekordbox.xml:');
+        target = await promptModal({
+          title: 'Existing rekordbox.xml',
+          message: 'Enter the path to an existing rekordbox.xml:',
+        });
       }
       if (!target) return;
       setAppMode('xml');
@@ -516,7 +522,7 @@ const App = () => {
       try {
         const res = await api.post('/api/library/load', { path: target });
         if (res.data.status !== 'success') {
-          alert(`Failed to load XML: ${res.data.message || 'unknown error'}`);
+          toast.error(`Failed to load XML: ${res.data.message || 'unknown error'}`);
           setIsInitialLoading(false);
           setAppMode('xml-submode');
           return;
@@ -525,7 +531,7 @@ const App = () => {
         await checkLibraryStatus();
       } catch (e) {
         console.error("Defined-path load failed", e);
-        alert("Failed to load XML at that path.");
+        toast.error("Failed to load XML at that path.");
         setIsInitialLoading(false);
         setAppMode('xml-submode');
       }
@@ -538,15 +544,19 @@ const App = () => {
       if (res.data.status === 'success') {
         checkLibraryStatus();
       } else {
-        alert("Failed to load library: " + res.data.message);
+        toast.error("Failed to load library: " + res.data.message);
       }
     } catch (e) {
-      alert("Error loading library");
+      toast.error("Error loading library");
     }
   }, [checkLibraryStatus]);
 
   const handleUnloadLibrary = useCallback(async () => {
-    if (!confirm("Are you sure you want to unload the library?")) return;
+    if (!(await confirmModal({
+      title: "Unload library?",
+      message: "Are you sure you want to unload the library?",
+      confirmLabel: "Unload",
+    }))) return;
     try {
       await api.post('/api/library/unload');
       setAppMode('choice');
@@ -782,6 +792,8 @@ root.render(
         error: { duration: 4000 }
       }}
     />
+    <ConfirmModalRoot />
+    <PromptModalRoot />
     <App />
   </ToastProvider>
 );

@@ -23,6 +23,8 @@ import {
 } from 'lucide-react';
 import api from '../api/api';
 import toast from 'react-hot-toast';
+import { confirmModal } from './ConfirmModal';
+import { promptModal } from './PromptModal';
 
 // ────────────────────────────────────────────────────────────────────
 //  COMPATIBILITY DATA
@@ -694,7 +696,12 @@ const UsbView = () => {
     };
 
     const deleteProfile = async (deviceId) => {
-        if (!confirm('Delete this device profile? This cannot be undone.')) return;
+        if (!(await confirmModal({
+            title: 'Delete device profile?',
+            message: 'Delete this device profile? This cannot be undone.',
+            confirmLabel: 'Delete',
+            danger: true,
+        }))) return;
         try {
             await api.delete(`/api/usb/profiles/${deviceId}`);
             setProfiles(prev => prev.filter(p => p.device_id !== deviceId));
@@ -766,7 +773,11 @@ const UsbView = () => {
 
     const ejectDrive = async () => {
         if (!sel?.drive) return;
-        if (!confirm(`Safely eject ${sel.drive}?`)) return;
+        if (!(await confirmModal({
+            title: 'Eject drive',
+            message: `Safely eject ${sel.drive}?`,
+            confirmLabel: 'Eject',
+        }))) return;
         try {
             const res = await api.post('/api/usb/eject', { drive: sel.drive });
             res.data.status === 'success' ? toast.success(res.data.message) : toast.error(res.data.message);
@@ -778,7 +789,12 @@ const UsbView = () => {
 
     const resetUsb = async () => {
         if (!sel?.device_id) return;
-        if (!confirm('This will DELETE all Rekordbox data on this USB. Continue?')) return;
+        if (!(await confirmModal({
+            title: 'Reset USB?',
+            message: 'This will DELETE all Rekordbox data on this USB. Continue?',
+            confirmLabel: 'Delete data',
+            danger: true,
+        }))) return;
         try {
             const res = await api.post('/api/usb/reset', { device_id: sel.device_id });
             res.data.status === 'success' ? toast.success(res.data.message) : toast.error(res.data.message);
@@ -790,7 +806,11 @@ const UsbView = () => {
 
     const handleRename = async () => {
         if (!sel?.drive) return;
-        const newLabel = prompt('Enter new name for USB drive:', sel.label);
+        const newLabel = await promptModal({
+            title: 'Rename USB drive',
+            message: 'Enter new name for USB drive:',
+            defaultValue: sel.label,
+        });
         if (!newLabel || newLabel === sel.label) return;
         try {
             const res = await api.post('/api/usb/rename', { drive: sel.drive, new_label: newLabel });

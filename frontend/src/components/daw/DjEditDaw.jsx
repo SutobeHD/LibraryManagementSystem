@@ -30,6 +30,7 @@ const DawScrollbar = lazy(() => import('./DawScrollbar'));
 import { parseRbep, serializeRbep, buildTempoMap, loadRbepFile, saveRbepFile } from '../../audio/RbepSerializer';
 import AudioBandAnalyzer from '../../utils/AudioBandAnalyzer';
 import api from '../../api/api';
+import { promptModal } from '../PromptModal';
 
 // UI imports
 import DawToolbar from './DawToolbar';
@@ -622,7 +623,11 @@ const DjEditDaw = ({ track: initialTrack }) => {
             // Prompt for name if missing or untitiled
             let projectName = state.project.name || 'Untitled Project';
             if (!state.project.name || state.project.name === 'Untitled Project') {
-                const name = prompt('Enter project name:', projectName);
+                const name = await promptModal({
+                    title: 'Save project',
+                    message: 'Enter project name:',
+                    defaultValue: projectName,
+                });
                 if (!name) return; // User cancelled
                 projectName = name;
                 dispatch({

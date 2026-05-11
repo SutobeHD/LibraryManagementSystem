@@ -22,6 +22,7 @@ import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { Save, RotateCcw, Sliders, HardDrive, Info, Loader2, AlertTriangle } from 'lucide-react';
 import api from '../api/api';
 import { useToast } from './ToastContext';
+import { confirmModal } from './ConfirmModal';
 
 // File-tab label + descriptive subtitle for the panel header
 const FILE_TABS = [
@@ -214,9 +215,17 @@ export default function UsbSettingsView() {
           <label className="mx-caption">Device</label>
           <select
             value={selectedDeviceId}
-            onChange={e => {
-              if (dirty && !confirm('You have unsaved changes. Discard?')) return;
-              setSelectedDeviceId(e.target.value);
+            onChange={async e => {
+              const nextValue = e.target.value;
+              if (dirty) {
+                const ok = await confirmModal({
+                  title: 'Unsaved changes',
+                  message: 'You have unsaved changes. Discard?',
+                  confirmLabel: 'Discard',
+                });
+                if (!ok) return;
+              }
+              setSelectedDeviceId(nextValue);
             }}
             className="input-glass min-w-[260px]"
           >

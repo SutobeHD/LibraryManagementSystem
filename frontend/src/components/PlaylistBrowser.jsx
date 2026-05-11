@@ -8,6 +8,8 @@ import TrackTable from './TrackTable';
 import SoundCloudProgressModal from './SoundCloudProgressModal';
 import RenameModal from './RenameModal';
 import SmartPlaylistEditor from './SmartPlaylistEditor';
+import { confirmModal } from './ConfirmModal';
+import { promptModal } from './PromptModal';
 
 const PlaylistNode = ({ node, level = 0, onSelect, onContextMenu, onMoveNode, onRename, selectedId }) => {
     const [open, setOpen] = useState(level < 1);
@@ -264,7 +266,11 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
     };
 
     const handleCreatePlaylist = async () => {
-        const name = prompt("Enter playlist name:");
+        const name = await promptModal({
+            title: 'New playlist',
+            message: 'Enter playlist name:',
+            placeholder: 'My Playlist',
+        });
         if (!name) return;
         try {
             const parentId = contextMenu?.node?.Type === "0" ? contextMenu.node.ID : (selectedPlaylist?.Type === "0" ? selectedPlaylist.ID : "ROOT");
@@ -278,7 +284,11 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
     };
 
     const handleCreateFolder = async () => {
-        const name = prompt("Enter folder name:");
+        const name = await promptModal({
+            title: 'New folder',
+            message: 'Enter folder name:',
+            placeholder: 'My Folder',
+        });
         if (!name) return;
         try {
             const parentId = contextMenu?.node?.Type === "0" ? contextMenu.node.ID : (selectedPlaylist?.Type === "0" ? selectedPlaylist.ID : "ROOT");
@@ -342,7 +352,12 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
     };
 
     const handleDelete = async (node) => {
-        if (!confirm(`Delete "${node.Name}"? This cannot be undone.`)) return;
+        if (!(await confirmModal({
+            title: `Delete "${node.Name}"?`,
+            message: 'This cannot be undone.',
+            confirmLabel: 'Delete',
+            danger: true,
+        }))) return;
         try {
             await api.post('/api/playlists/delete', { pid: node.ID });
             loadTree();
@@ -365,7 +380,12 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
     };
 
     const handleDeleteFromCollection = async (trackId) => {
-        if (!confirm("Delete this track from the entire collection? This cannot be undone.")) return;
+        if (!(await confirmModal({
+            title: 'Delete track from collection?',
+            message: 'Delete this track from the entire collection? This cannot be undone.',
+            confirmLabel: 'Delete',
+            danger: true,
+        }))) return;
         try {
             await api.delete(`/api/track/${trackId}`);
             toast.success("Track deleted from library.");

@@ -9,12 +9,14 @@
  */
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import toast from 'react-hot-toast';
 import {
     Play, Pause, SkipBack, SkipForward, Scissors, Copy, Clipboard,
     ZoomIn, ZoomOut, Magnet, Trash2, Download, Undo2, Redo2,
     Grid3X3, Volume2, Loader2, Music, ChevronDown, Save, FolderOpen, X
 } from 'lucide-react';
 import api from '../../api/api';
+import { promptModal } from '../PromptModal';
 import { log } from '../../utils/log';
 
 import TimelineCanvas from './TimelineCanvas';
@@ -246,7 +248,11 @@ const NonDestructiveEditor = ({
 
     // Project Persistence
     const handleSaveProject = useCallback(async () => {
-        const name = prompt("Enter project name:", track?.Title || "Untitled Project");
+        const name = await promptModal({
+            title: 'Save project',
+            message: 'Enter project name:',
+            defaultValue: track?.Title || "Untitled Project",
+        });
         if (!name) return;
 
         // Serialize state: Remove AudioBuffers (circular/large)
@@ -275,10 +281,10 @@ const NonDestructiveEditor = ({
 
         try {
             await api.post('/api/projects/save', { name, data: projectData });
-            alert("Project saved successfully!");
+            toast.success("Project saved successfully!");
         } catch (error) {
             console.error(error);
-            alert("Failed to save project.");
+            toast.error("Failed to save project.");
         }
     }, [state, sourcePath, track]);
 
@@ -287,7 +293,7 @@ const NonDestructiveEditor = ({
             const res = await api.get('/api/projects/rbep/list');
             setProjectList(res.data || []);
             setShowLoadModal(true);
-        } catch (e) { alert("Failed to list projects"); }
+        } catch (e) { toast.error("Failed to list projects"); }
     }, []);
 
     const loadProject = async (prjName) => {
@@ -298,7 +304,7 @@ const NonDestructiveEditor = ({
             const data = res.data;
 
             if (!data.tracks || data.tracks.length === 0) {
-                alert('Project has no tracks');
+                toast.error('Project has no tracks');
                 setIsLoading(false);
                 return;
             }
@@ -374,7 +380,7 @@ const NonDestructiveEditor = ({
             setIsLoading(false);
         } catch (e) {
             console.error(e);
-            alert("Failed to load project: " + e.message);
+            toast.error("Failed to load project: " + e.message);
             setIsLoading(false);
         }
     };

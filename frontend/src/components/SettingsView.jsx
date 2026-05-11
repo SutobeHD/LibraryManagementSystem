@@ -18,6 +18,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api/api';
 import toast from 'react-hot-toast';
+import { confirmModal } from './ConfirmModal';
+import { promptModal } from './PromptModal';
 import { HEARTBEAT_INTERVAL_MS } from '../config/constants';
 import {
     Settings, Database, HardDrive, RefreshCw, Save, Trash2, Shield,
@@ -293,7 +295,12 @@ const SettingsView = () => {
     }, []);
 
     const deleteUsbProfile = useCallback(async (deviceId) => {
-        if (!confirm('Delete this USB profile? This does not affect the actual USB drive.')) return;
+        if (!(await confirmModal({
+            title: 'Delete USB profile?',
+            message: 'Delete this USB profile? This does not affect the actual USB drive.',
+            confirmLabel: 'Delete',
+            danger: true,
+        }))) return;
         try {
             await api.delete(`/api/usb/profiles/${deviceId}`);
             setUsbProfiles(prev => prev.filter(p => p.device_id !== deviceId));
@@ -681,7 +688,10 @@ const SettingsView = () => {
                     </button>
                     <button
                         onClick={async () => {
-                            const path = prompt('Rekordbox XML export path:');
+                            const path = await promptModal({
+                                title: 'Import from XML',
+                                message: 'Rekordbox XML export path:',
+                            });
                             if (!path) return;
                             try {
                                 const res = await api.post('/api/rekordbox/import', { xml_path: path });

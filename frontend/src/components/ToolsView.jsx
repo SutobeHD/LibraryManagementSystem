@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api/api';
 import toast from 'react-hot-toast';
+import { confirmModal } from './ConfirmModal';
 import { Download, RefreshCw, Scissors, Copy, Wand2, Search, Check, X, Merge, Sparkles, Loader2 } from 'lucide-react';
 
 const ToolsView = () => {
@@ -46,7 +47,11 @@ const ToolsView = () => {
         const removeIds = selectedDuplicate.ids.filter(id => String(id) !== keepId).map(String);
 
         if (removeIds.length === 0) return;
-        if (!window.confirm(`Keep "${keepTrack.Title}" and merge ${removeIds.length} duplicate(s)? Playlist memberships will be transferred.`)) return;
+        if (!(await confirmModal({
+            title: 'Merge duplicates',
+            message: `Keep "${keepTrack.Title}" and merge ${removeIds.length} duplicate(s)? Playlist memberships will be transferred.`,
+            confirmLabel: 'Merge',
+        }))) return;
 
         setMerging(true);
         try {
@@ -75,7 +80,11 @@ const ToolsView = () => {
     };
 
     const handleMergeAll = async () => {
-        if (!window.confirm(`Auto-merge all ${duplicates.length} duplicate groups? This keeps the highest-quality version and transfers playlist memberships.`)) return;
+        if (!(await confirmModal({
+            title: 'Auto-merge all duplicates',
+            message: `Auto-merge all ${duplicates.length} duplicate groups? This keeps the highest-quality version and transfers playlist memberships.`,
+            confirmLabel: 'Auto-merge',
+        }))) return;
         setMerging(true);
         try {
             const res = await api.post('/api/tools/duplicates/merge-all');
@@ -99,7 +108,11 @@ const ToolsView = () => {
     };
 
     const handleCommentRun = async () => {
-        if (!window.confirm("This will modify comments for all selected tracks. Continue?")) return;
+        if (!(await confirmModal({
+            title: 'Modify comments',
+            message: 'This will modify comments for all selected tracks. Continue?',
+            confirmLabel: 'Continue',
+        }))) return;
         setCommentProcessing(true);
         try {
             const res = await api.post('/api/tools/batch-comment', {
@@ -108,10 +121,10 @@ const ToolsView = () => {
                 find: commentData.find,
                 replace: commentData.replace
             });
-            alert(`Updated comments for ${res.data.count} tracks!`);
+            toast.success(`Updated comments for ${res.data.count} tracks!`);
         } catch (e) {
             console.error(e);
-            alert("Update failed.");
+            toast.error("Update failed.");
         } finally {
             setCommentProcessing(false);
         }

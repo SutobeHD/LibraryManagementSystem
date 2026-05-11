@@ -3,6 +3,7 @@ import { toast } from 'react-hot-toast';
 import api from '../api/api';
 import TrackTable from './TrackTable';
 import PlaylistBrowser from './PlaylistBrowser';
+import { promptModal } from './PromptModal';
 import { Search, User, ArrowLeft, Tag, Disc, GitMerge, Music, List, RotateCw } from 'lucide-react';
 
 const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }) => {
@@ -68,7 +69,11 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
   }, [tracks, trackFilter, searchTerm, selectedItem]);
 
   const handleMerge = async (sourceName) => {
-    const targetName = prompt(`Merge all variations of "${sourceName}" into which name?`, sourceName);
+    const targetName = await promptModal({
+      title: 'Merge variations',
+      message: `Merge all variations of "${sourceName}" into which name?`,
+      defaultValue: sourceName,
+    });
     if (!targetName || targetName === sourceName) return;
 
     try {
@@ -79,7 +84,7 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
       });
       loadItems();
     } catch (e) {
-      alert("Merge failed");
+      toast.error("Merge failed");
     }
   };
 

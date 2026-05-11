@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import toast from 'react-hot-toast';
 import api from '../api/api';
 import { Star, Palette, Save, X } from 'lucide-react';
 
@@ -34,7 +35,7 @@ const BatchEditBar = ({ selectedTracks, onClearSelection, onUpdateComplete }) =>
             onClearSelection();
         } catch (err) {
             console.error(err);
-            alert("Failed to update tracks");
+            toast.error("Failed to update tracks");
         } finally {
             setSaving(false);
         }

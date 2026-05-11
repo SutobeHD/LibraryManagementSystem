@@ -2,6 +2,8 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Music, Star, X, Check, ChevronDown, ChevronUp, ChevronRight, Image as ImageIcon, Scissors, Trash2, Play, Plus, ListMusic, FolderOpen, Copy, Info, Tag } from 'lucide-react';
 import api from '../api/api';
 import toast from 'react-hot-toast';
+import { confirmModal } from './ConfirmModal';
+import { promptModal } from './PromptModal';
 import { log } from '../utils/log';
 
 const DEFAULT_COLUMNS = [
@@ -468,9 +470,17 @@ const TrackContextMenuPopup = ({ contextMenu, onEditTrack, onPlay, openSoundClou
         setContextMenu(null);
     };
     const handleEditMeta = async () => {
-        const newBpm = window.prompt('BPM:', String(Math.round(t.BPM || 0)));
+        const newBpm = await promptModal({
+            title: 'Edit BPM',
+            message: 'BPM:',
+            defaultValue: String(Math.round(t.BPM || 0)),
+        });
         if (newBpm === null) { setContextMenu(null); return; }
-        const newKey = window.prompt('Key (z.B. Am, 8A):', t.Key || '');
+        const newKey = await promptModal({
+            title: 'Edit Key',
+            message: 'Key (z.B. Am, 8A):',
+            defaultValue: t.Key || '',
+        });
         if (newKey === null) { setContextMenu(null); return; }
         try {
             await api.patch('/api/tracks/batch', {
@@ -618,8 +628,14 @@ const TrackContextMenuPopup = ({ contextMenu, onEditTrack, onPlay, openSoundClou
                 <>
                     <div className="h-px bg-line-subtle" />
                     <button
-                        onClick={() => {
-                            if (window.confirm(`Are you sure you want to PERMANENTLY delete "${contextMenu.track.Title}" from the library?`)) {
+                        onClick={async () => {
+                            const ok = await confirmModal({
+                                title: 'Delete track permanently?',
+                                message: `Are you sure you want to PERMANENTLY delete "${contextMenu.track.Title}" from the library?`,
+                                confirmLabel: 'Delete',
+                                danger: true,
+                            });
+                            if (ok) {
                                 onDelete(contextMenu.track.id || contextMenu.track.ID);
                             }
                             setContextMenu(null);
