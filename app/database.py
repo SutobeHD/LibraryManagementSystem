@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import threading
 import time
 import re
 import xml.etree.ElementTree as ET
@@ -8,11 +9,49 @@ import shutil
 from urllib.parse import unquote
 from pathlib import Path
 from collections import defaultdict
-from functools import lru_cache
+from contextlib import contextmanager
+from functools import lru_cache, wraps
 from .config import REKORDBOX_ROOT, DB_FILENAME, BACKUP_DIR
 from .live_database import LiveRekordboxDB
 
 logger = logging.getLogger(__name__)
+
+# Module-level reentrant lock that serialises all mutating operations on the
+# global `db` singleton against concurrent FastAPI request threads.
+# RLock is used so methods that internally call other mutating methods
+# (e.g. `update_tracks_metadata` → `save_xml`) don't deadlock themselves.
+_db_write_lock = threading.RLock()
+
+
+@contextmanager
+def db_lock():
+    """Acquire `_db_write_lock` for the duration of the `with` block.
+
+    Use this when several mutations must form one atomic transaction
+    from a route handler, e.g.::
+
+        with db_lock():
+            db.add_track(...)
+            db.add_track_to_playlist(...)
+
+    Individual mutating methods on `RekordboxDB` are already wrapped, so
+    you only need this for multi-step transactions.
+    """
+    with _db_write_lock:
+        yield
+
+
+def _serialised(method):
+    """Decorator: serialise a method against `_db_write_lock`.
+
+    Applied below to every mutating method on `RekordboxDB` so individual
+    calls are already lock-safe without callers needing to remember.
+    """
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with _db_write_lock:
+            return method(self, *args, **kwargs)
+    return wrapper
 
 class RekordboxXMLDB:
     def __init__(self):
@@ -975,5 +1014,22 @@ class RekordboxDB:
 
     def update_track_comment(self, tid, comment):
         return self.update_tracks_metadata([tid], {"Comment": comment})
+
+
+# Wrap every mutating method on the facade with the module-level write
+# lock so concurrent route handlers can't race against each other.
+# Reads (tracks property, get_track_details, get_playlist_tracks, etc.)
+# are NOT wrapped — they snapshot the underlying dicts on access.
+for _name in (
+    "set_mode", "load_library", "unload_library", "create_new_library",
+    "refresh_metadata", "add_track", "delete_track", "rename_playlist",
+    "move_playlist", "delete_playlist", "reorder_playlist_track",
+    "create_folder", "create_smart_playlist", "update_smart_playlist",
+    "create_playlist", "add_track_to_playlist", "remove_track_from_playlist",
+    "save", "update_tracks_metadata", "update_track_comment",
+):
+    setattr(RekordboxDB, _name, _serialised(getattr(RekordboxDB, _name)))
+del _name
+
 
 db = RekordboxDB()

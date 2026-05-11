@@ -208,6 +208,8 @@ All classes are instantiated on import; most methods are instance methods unless
 ### `app/database.py` — `RekordboxXMLDB`
 XML-based library (default mode). In-memory dict cache for fast lookups. Also contains `RekordboxDB` for direct SQLite via rbox.
 
+**Concurrency**: the module-level `_db_write_lock` (a `threading.RLock`) serialises every mutating method on `RekordboxDB` against concurrent FastAPI request threads. Each mutation is wrapped at module load via a `@_serialised` decorator pass over `RekordboxDB` (see the loop just above `db = RekordboxDB()`). Routes that need to chain several mutations atomically should use the `db_lock()` context manager (exposed from this module) instead of calling individual methods in sequence — RLock is reentrant so nested acquires from within an already-wrapped method are safe.
+
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `load_xml(path)` | None | Parse XML into memory cache |
