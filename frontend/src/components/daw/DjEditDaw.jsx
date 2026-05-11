@@ -39,6 +39,7 @@ import DawBrowser from './DawBrowser';
 import WaveformOverview from './WaveformOverview';
 import ExportModal from './ExportModal';
 import { log } from '../../utils/log';
+import { TOAST_DURATION_LONG_MS } from '../../config/constants';
 
 // ─── EXTENDED REDUCER ──────────────────────────────────────────────────────────
 
@@ -470,9 +471,9 @@ const DjEditDaw = ({ track: initialTrack }) => {
                 console.error(err);
                 if (err.message.includes('fetch')) {
                     // If fetch failed, it might be backend or path issue
-                    toast.error(`Failed to load: ${err.message} (${audioPath || 'Unknown Path'})`, { id: 'daw-open', duration: 5000 });
+                    toast.error(`Failed to load: ${err.message} (${audioPath || 'Unknown Path'})`, { id: 'daw-open', duration: TOAST_DURATION_LONG_MS });
                 } else {
-                    toast.error(`Failed to open project: ${err.message}`, { id: 'daw-open', duration: 5000 });
+                    toast.error(`Failed to open project: ${err.message}`, { id: 'daw-open', duration: TOAST_DURATION_LONG_MS });
                 }
             }
         };

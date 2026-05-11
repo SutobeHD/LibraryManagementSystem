@@ -18,6 +18,7 @@ import { X, FolderOpen, Music, CheckCircle2, AlertCircle, Download, Loader2 } fr
 import * as DawEngine from '../../audio/DawEngine';
 import api from '../../api/api';
 import { log } from '../../utils/log';
+import { RENDER_API_TIMEOUT_MS, BLOB_URL_REVOKE_DELAY_MS } from '../../config/constants';
 
 // ─── TAURI HELPERS (graceful fallback for browser/dev) ──────────────────────────
 
@@ -235,7 +236,7 @@ const ExportModal = React.memo(({ state, onClose }) => {
             };
 
             setProgress(30);
-            const resp = await api.post('/api/audio/render', payload, { timeout: 180000 });
+            const resp = await api.post('/api/audio/render', payload, { timeout: RENDER_API_TIMEOUT_MS });
             setProgress(75);
 
             const dl = resp.data?.download_url || (resp.data?.filename ? `/exports/${resp.data.filename}` : null);
@@ -305,7 +306,7 @@ const ExportModal = React.memo(({ state, onClose }) => {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        setTimeout(() => URL.revokeObjectURL(url), BLOB_URL_REVOKE_DELAY_MS);
     }
 
     return (

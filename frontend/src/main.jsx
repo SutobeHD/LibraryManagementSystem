@@ -6,6 +6,7 @@ import './index.css'
 import { ToastProvider } from './components/ToastContext'
 import { Toaster } from 'react-hot-toast'
 import { log } from './utils/log'
+import { HEARTBEAT_INTERVAL_MS, LIBRARY_STATUS_INTERVAL_MS } from './config/constants'
 
 // SPEED: Lazy-load heavy views — only the active view is loaded into the bundle
 // const WaveformEditor = lazy(() => import('./components/WaveformEditor')); // Replaced by DjEditDaw
@@ -564,13 +565,13 @@ const App = () => {
           setSessionToken(data.token);
         }
       } catch (e) { /* backend offline */ }
-    }, 5000);
+    }, HEARTBEAT_INTERVAL_MS);
 
     const checkInterval = setInterval(() => {
       if ((appMode === 'xml' || appMode === 'live') && !libraryStatus.loaded) {
         checkLibraryStatus();
       }
-    }, 1000);
+    }, LIBRARY_STATUS_INTERVAL_MS);
 
     // Close Tauri splashscreen (only in desktop context — no-op in browser)
     if (window.__TAURI__) {

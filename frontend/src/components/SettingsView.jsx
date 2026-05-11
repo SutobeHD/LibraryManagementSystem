@@ -18,6 +18,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api/api';
 import toast from 'react-hot-toast';
+import { HEARTBEAT_INTERVAL_MS } from '../config/constants';
 import {
     Settings, Database, HardDrive, RefreshCw, Save, Trash2, Shield,
     User, Globe, Moon, Bell, Info, CheckCircle, AlertCircle, FileOutput,
@@ -262,7 +263,7 @@ const SettingsView = () => {
     useEffect(() => {
         if (activeTab !== 'library') return;
         refreshWatcherStatus();
-        const id = setInterval(refreshWatcherStatus, 5000);
+        const id = setInterval(refreshWatcherStatus, HEARTBEAT_INTERVAL_MS);
         return () => clearInterval(id);
     }, [activeTab, refreshWatcherStatus]);
 
