@@ -9,6 +9,31 @@ pub struct PlaybackEngine {
     is_playing: Arc<AtomicBool>,
 }
 
+// SAFETY: `cpal::Stream` is `!Send` and `!Sync` on Windows because it owns
+// COM/WASAPI handles (`IAudioClient`, `IAudioRenderClient`) that are
+// apartment-bound at the COM ABI level. We assert `Send` + `Sync` manually
+// because Tauri's command state — `Mutex<AudioController>` — requires
+// `AudioController: Send`, and `AudioController` owns this struct.
+//
+// This is sound IN PRACTICE because:
+//
+// 1. CPAL's Windows backend initialises COM in MTA mode (`COINIT_MULTITHREADED`),
+//    so the COM interfaces inside the Stream are callable from any thread.
+// 2. Every mutating access goes through `Mutex<AudioController>` in
+//    `src-tauri/src/audio/commands.rs`, serialising callers.
+// 3. The only cross-thread use of the Stream's internals is CPAL's own audio
+//    callback closure, which CPAL spawns + synchronises itself; nothing else
+//    reaches into its captured state.
+//
+// This is STRUCTURALLY FRAGILE — a future CPAL backend with thread-bound
+// state (e.g. an STA COM apartment, or some platforms' `AudioUnit`) would
+// silently turn this into UB. The correct long-term fix is to confine the
+// `Stream` to a dedicated audio thread and communicate via channels /
+// `AtomicBool`, dropping the `unsafe impl` entirely.
+//
+// TODO(audio-thread-refactor): spawn a dedicated OS thread that owns the
+// Stream; expose only `Send + Sync` control signals from `PlaybackEngine`.
+// Tracked in docs/HANDOVER.md Phase 1.9.
 unsafe impl Send for PlaybackEngine {}
 unsafe impl Sync for PlaybackEngine {}
 

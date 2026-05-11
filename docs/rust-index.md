@@ -20,7 +20,7 @@
 |------|-------------------|----------------------|
 | `audio/mod.rs` | Module re-exports | Aggregates all audio submodules for `main.rs` |
 | `audio/engine.rs` | `AudioEngine`, `AudioController` | Memory-mapped file loading (memmap2, zero-copy). Symphonia codec support: MP3, FLAC, WAV, ALAC, ISOMP4. Decoder abstraction over format readers |
-| `audio/playback.rs` | `PlaybackEngine` | CPAL device-agnostic audio output stream. ringbuf lock-free producer/consumer sample queue. Stream init + error recovery (`StreamError::DeviceNotAvailable`) |
+| `audio/playback.rs` | `PlaybackEngine` | CPAL device-agnostic audio output stream. ringbuf lock-free producer/consumer sample queue. Stream init + error recovery (`StreamError::DeviceNotAvailable`). **Holds a `cpal::Stream` (`!Send + !Sync`)** with a manual `unsafe impl Send + Sync` justified by the `// SAFETY:` block immediately above the impls — CPAL initialises COM in MTA mode on Windows so the WASAPI handles are callable from any thread, and all mutations go through `Mutex<AudioController>`. Marked `TODO(audio-thread-refactor)` for a future move of the Stream onto a dedicated audio thread — see Phase 1.9 in `docs/HANDOVER.md`. |
 | `audio/commands.rs` | `AudioCommandState`, Tauri IPC handlers | `load_audio`, `get_3band_waveform`, `start_project_export` — all return `Result<T, String>`. Owns `Arc<Mutex<AudioEngine>>` and `Arc<Mutex<PlaybackEngine>>` |
 | `audio/analysis.rs` | `compute_waveform()`, `estimate_bpm()`, `detect_key()` | RustFFT-based waveform computation. 3-band frequency split. BPM tempo detection. Chromatic key detection |
 | `audio/export.rs` | `render_project()`, `AudioRegion`, `ProjectState`, `Fade` | Offline audio synthesis / project render to WAV (hound) or MP3 |
