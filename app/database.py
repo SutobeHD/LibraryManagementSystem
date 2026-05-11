@@ -195,7 +195,10 @@ class RekordboxXMLDB:
         try:
             from .services import SettingsManager
             threshold = SettingsManager.load().get("artist_view_threshold", 0)
-        except: pass
+        except (OSError, ValueError, KeyError, AttributeError) as e:
+            logger.warning(
+                "database: failed to load artist_view_threshold — using 0 (%s)", e,
+            )
 
         for i, (name, count) in enumerate(sorted(artist_counts.items())):
             if count >= threshold:
@@ -238,7 +241,10 @@ class RekordboxXMLDB:
             from .services import MetadataManager
             mapped = MetadataManager.get_mapped_name("artists", name)
             if mapped != name: return mapped
-        except: pass
+        except Exception as e:
+            logger.debug(
+                "database: artist-name mapping failed for %r (%s)", name, e,
+            )
 
         # 1. Strip leading numbers like "01 ", "1. ", "02-", "1 "
         name = re.sub(r'^\d{1,2}[\s.-]+', '', name)
@@ -702,7 +708,11 @@ class RekordboxDB:
         try:
             from .services import SettingsManager
             return SettingsManager.load().get("hide_streaming", False)
-        except:
+        except (OSError, ValueError, KeyError, AttributeError) as e:
+            logger.warning(
+                "database: failed to read hide_streaming setting — defaulting to False (%s)",
+                e,
+            )
             return False
 
     def _filter_tracks(self, tracks_source):
