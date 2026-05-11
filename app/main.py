@@ -1283,14 +1283,29 @@ def gen_smart(r: SmartPlReq):
     return {"status": "success" if status else "error"}
 
 
+class PathRequest(BaseModel):
+    """Generic single-path body used by every endpoint that needs to point at
+    a filesystem location (scan-folder, folder-watcher add/remove, etc.)."""
+    path: str
+
+
+class ImportPathsReq(BaseModel):
+    """Drag-drop import body. `paths` is mixed files + directories; the
+    optional `group_into_playlist` + `playlist_name` group every imported
+    track into a single playlist (defaults to the dropped folder's name)."""
+    paths: List[str]
+    group_into_playlist: bool = False
+    playlist_name: Optional[str] = None
+
+
 @app.post("/api/library/scan-folder")
-async def scan_folder(data: Dict[str, str]):
+async def scan_folder(r: PathRequest):
     """
     Trigger an import scan of a specific directory.
     Walks the folder recursively and imports any audio files not yet in the library.
     Long-running — runs in a background thread via BackgroundTasks.
     """
-    path_str = data.get("path", "").strip()
+    path_str = r.path.strip()
     if not path_str:
         raise HTTPException(status_code=400, detail="'path' is required.")
 
@@ -1324,7 +1339,7 @@ async def scan_folder(data: Dict[str, str]):
 
 
 @app.post("/api/library/import-paths")
-async def import_paths(data: Dict[str, Any]):
+async def import_paths(r: ImportPathsReq):
     """
     Import a mixed list of absolute filesystem paths (files OR directories).
     Used by drag-drop in the desktop app, where the OS hands us full paths
@@ -1337,12 +1352,12 @@ async def import_paths(data: Dict[str, Any]):
                                   (or `playlist_name` if given).
       playlist_name: str        — explicit playlist name override.
     """
-    raw = data.get("paths") or []
-    if not isinstance(raw, list) or not raw:
+    raw = r.paths
+    if not raw:
         raise HTTPException(status_code=400, detail="'paths' must be a non-empty list")
 
-    group_into_playlist = bool(data.get("group_into_playlist", False))
-    explicit_pl_name = (data.get("playlist_name") or "").strip()
+    group_into_playlist = r.group_into_playlist
+    explicit_pl_name = (r.playlist_name or "").strip()
 
     targets: list[Path] = []
     queued_dirs = 0
@@ -1843,8 +1858,8 @@ def folder_watcher_status():
 
 
 @app.post("/api/library/folder-watcher/add")
-def folder_watcher_add(data: Dict[str, str]):
-    path = (data.get("path") or "").strip()
+def folder_watcher_add(r: PathRequest):
+    path = r.path.strip()
     if not path:
         raise HTTPException(status_code=400, detail="'path' is required.")
     if not Path(path).is_dir():
@@ -1866,8 +1881,8 @@ def folder_watcher_add(data: Dict[str, str]):
 
 
 @app.post("/api/library/folder-watcher/remove")
-def folder_watcher_remove(data: Dict[str, str]):
-    path = (data.get("path") or "").strip()
+def folder_watcher_remove(r: PathRequest):
+    path = r.path.strip()
     if not path:
         raise HTTPException(status_code=400, detail="'path' is required.")
 
@@ -2415,10 +2430,17 @@ def usb_get_settings():
     """Get USB global settings."""
     return UsbProfileManager.get_settings()
 
+class UsbSettingsReq(BaseModel):
+    """USB-global settings body. Fields are open-ended (forward-compat
+    with whatever `UsbProfileManager.save_settings` accepts) — `extra =
+    "allow"` lets the frontend add new keys without bumping this model."""
+    model_config = {"extra": "allow"}
+
+
 @app.post("/api/usb/settings")
-def usb_save_settings(r: dict):
+def usb_save_settings(r: UsbSettingsReq):
     """Save USB global settings."""
-    UsbProfileManager.save_settings(r)
+    UsbProfileManager.save_settings(r.model_dump())
     return {"status": "success"}
 
 # ─── Enhanced Duplicate Scanner ───────────────────────────────────────────────
@@ -2925,14 +2947,20 @@ async def delete_history_entry(sc_track_id: str):
     return {"status": "ok", "data": {"deleted": sc_track_id}}
 
 
+class ScAuthTokenReq(BaseModel):
+    """SoundCloud OAuth access-token body — single `token` field, validated
+    by `set_soundcloud_auth_token` for length (10–2048 chars) and ASCII."""
+    token: str
+
+
 @app.post("/api/soundcloud/auth-token")
-async def set_soundcloud_auth_token(data: Dict[str, str], response: Response):
+async def set_soundcloud_auth_token(r: ScAuthTokenReq, response: Response):
     """
     EC7/EC13: Persist the SC OAuth token in the OS keyring (not in cookies or JSON).
     Sets a lightweight HttpOnly sentinel cookie so frontend can detect auth state
     without ever seeing the raw token.
     """
-    token = data.get("token", "").strip()
+    token = r.token.strip()
 
     # EC13: Token format validation.
     # SoundCloud OAuth 2.1 issues JWT access tokens that are typically 400–900+ chars.
