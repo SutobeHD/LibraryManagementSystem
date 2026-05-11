@@ -110,6 +110,14 @@ pub fn estimate_bpm(samples: &[f32], sample_rate: u32) -> f32 {
         energies.push(energy);
     }
 
+    // Need at least 3 energy windows to compare neighbours. A clip too
+    // short to fill 3 × 50 ms windows can't yield a meaningful BPM and
+    // would previously panic on the `energies.len() - 1` subtraction below
+    // (usize underflow when len == 0).
+    if energies.len() < 3 {
+        return 120.0;
+    }
+
     // Identify peaks in energy
     let mut peaks = Vec::new();
     for i in 1..energies.len()-1 {
@@ -163,7 +171,19 @@ fn calculate_energy(slice: &[Complex<f32>]) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::hz_to_bin;
+    use super::{estimate_bpm, hz_to_bin};
+
+    #[test]
+    fn estimate_bpm_returns_default_on_empty_input() {
+        // Previously panicked on `energies.len() - 1` underflow.
+        assert_eq!(estimate_bpm(&[], 44100), 120.0);
+    }
+
+    #[test]
+    fn estimate_bpm_returns_default_on_too_short_input() {
+        // 4 samples can't fill three 50 ms windows at 44.1 kHz.
+        assert_eq!(estimate_bpm(&[0.1, 0.2, 0.3, 0.4], 44100), 120.0);
+    }
 
     #[test]
     fn hz_to_bin_maps_44k1() {
