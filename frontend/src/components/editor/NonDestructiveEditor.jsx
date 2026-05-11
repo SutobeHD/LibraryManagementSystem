@@ -15,6 +15,7 @@ import {
     Grid3X3, Volume2, Loader2, Music, ChevronDown, Save, FolderOpen, X
 } from 'lucide-react';
 import api from '../../api/api';
+import { log } from '../../utils/log';
 
 import TimelineCanvas from './TimelineCanvas';
 import Palette from './Palette';
@@ -472,7 +473,7 @@ const NonDestructiveEditor = ({
 
     const handleNormalize = useCallback(() => {
         // Placeholder for normalization logic
-        console.log("Normalize clicked!");
+        log.debug("Normalize clicked!");
         // This would typically involve analyzing the audio buffer and applying gain
         // to reach a target loudness/peak level.
         // For now, it's just a console log.
@@ -499,7 +500,7 @@ const NonDestructiveEditor = ({
                 })
             });
             if (response.ok) {
-                console.log("Grid saved successfully");
+                log.debug("Grid saved successfully");
             }
         } catch (err) {
             console.error("Failed to save grid:", err);

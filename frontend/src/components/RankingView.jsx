@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api/api';
+import { log } from '../utils/log';
 import { Star, Zap, SkipForward, SkipBack, Folder, ChevronRight, ChevronDown, Tag, Disc, PlayCircle, Pause, Play, ListMusic, Save, Search, Filter, ArrowRight, ArrowLeft, Check, Hash, User, Volume2 } from 'lucide-react';
 import WaveformEditor from './WaveformEditor';
 import { useHotkeys } from 'react-hotkeys-hook';
@@ -95,7 +96,7 @@ const RankingView = ({ libraryStatus, appMode }) => {
         if (libraryStatus?.loaded) {
             api.get('/api/playlists/tree').then(res => {
                 setTree(res.data);
-                console.log("[RankingView] Loaded tree:", res.data);
+                log.debug("[RankingView] Loaded tree:", res.data);
                 if (res.data.length === 0) console.warn("[RankingView] Warning: Tree is empty!");
             }).catch(err => console.error("[RankingView] Failed to load tree:", err));
             api.get('/api/genres').then(res => setGenres(res.data));
@@ -189,7 +190,7 @@ const RankingView = ({ libraryStatus, appMode }) => {
         };
 
         try {
-            console.log("Saving track...", currentTrack);
+            log.debug("Saving track...", currentTrack);
             if (!currentTrack.ID) console.warn("Track ID is missing!");
             await api.post(`/api/track/${encodeURIComponent(currentTrack.ID)}`, payload);
             // Persist MyTags too (live mode); failure is non-fatal.

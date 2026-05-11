@@ -17,6 +17,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { X, FolderOpen, Music, CheckCircle2, AlertCircle, Download, Loader2 } from 'lucide-react';
 import * as DawEngine from '../../audio/DawEngine';
 import api from '../../api/api';
+import { log } from '../../utils/log';
 
 // ─── TAURI HELPERS (graceful fallback for browser/dev) ──────────────────────────
 
@@ -31,7 +32,7 @@ const isTauri = typeof window !== 'undefined' && (
     Boolean(window.isTauri)
 );
 
-console.log('[ExportModal] Tauri detection:', {
+log.info('[ExportModal] Tauri detection:', {
     isTauri,
     __TAURI_INTERNALS__: !!window.__TAURI_INTERNALS__,
     __TAURI__: !!window.__TAURI__,
@@ -59,12 +60,12 @@ async function createFolderIfNotExists(path) {
         const lastSlash = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
         if (lastSlash <= 0) return;
         const dir = path.substring(0, lastSlash);
-        console.log('[ExportModal] Creating folder:', dir);
+        log.debug('[ExportModal] Creating folder:', dir);
         await mkdir(dir, { recursive: true });
-        console.log('[ExportModal] Folder ready');
+        log.debug('[ExportModal] Folder ready');
     } catch (err) {
         // mkdir may fail because folder already exists — that's fine
-        console.log('[ExportModal] mkdir result:', err.message);
+        log.debug('[ExportModal] mkdir result:', err.message);
     }
 }
 
@@ -76,7 +77,7 @@ async function createFolderIfNotExists(path) {
 async function writeBinaryFile(path, uint8) {
     try {
         const fs = await import('@tauri-apps/plugin-fs');
-        console.log('[ExportModal] Writing', uint8.length, 'bytes to:', path);
+        log.debug('[ExportModal] Writing', uint8.length, 'bytes to:', path);
 
         // Tauri 2 unified API
         if (typeof fs.writeFile === 'function') {
@@ -89,7 +90,7 @@ async function writeBinaryFile(path, uint8) {
             throw new Error('No fs write function found in plugin-fs');
         }
 
-        console.log('[ExportModal] Write successful');
+        log.debug('[ExportModal] Write successful');
         return true;
     } catch (err) {
         const msg = err.message || String(err);

@@ -1,10 +1,12 @@
 /**
  * DawState — Central state management for the DJ Edit DAW
- * 
+ *
  * Uses an immutable reducer pattern for predictable state updates.
  * Includes undo/redo via full-state snapshots of the regions array.
  * Manages regions, cue points, loops, selection, transport, and project metadata.
  */
+
+import { log } from '../utils/log';
 
 // ─── INITIAL STATE ─────────────────────────────────────────────────────────────
 
@@ -341,7 +343,7 @@ export function dawReducer(state, action) {
 
         // ── Clipboard / Editing ──────────────
         case 'COPY_SELECTION': {
-            console.log('Reducer: COPY_SELECTION', {
+            log.debug('Reducer: COPY_SELECTION', {
                 selectedIds: Array.from(state.selectedRegionIds),
                 range: state.selectionRange
             });
@@ -427,7 +429,7 @@ export function dawReducer(state, action) {
         }
 
         case 'PASTE_INSERT': {
-            console.log('Reducer: PASTE_INSERT', state.clipboard);
+            log.debug('Reducer: PASTE_INSERT', state.clipboard);
             if (state.clipboard.length === 0) return state;
 
             const EPSILON = 0.001;
@@ -522,7 +524,7 @@ export function dawReducer(state, action) {
             });
             const pastedSpan = cursor - insertTime;
 
-            console.log('Reducer: PASTE_INSERT debug', {
+            log.debug('Reducer: PASTE_INSERT debug', {
                 rawInsertTime,
                 insertTime,
                 pastedSpan,
@@ -554,7 +556,7 @@ export function dawReducer(state, action) {
         }
 
         case 'DUPLICATE_SELECTION': {
-            console.log('Reducer: DUPLICATE_SELECTION', state.selectedRegionIds);
+            log.debug('Reducer: DUPLICATE_SELECTION', state.selectedRegionIds);
             const selectedRegions = state.regions.filter(r => state.selectedRegionIds.has(r.id));
             if (selectedRegions.length === 0) return state;
 

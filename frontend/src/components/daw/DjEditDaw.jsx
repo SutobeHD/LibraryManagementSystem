@@ -38,6 +38,7 @@ import DawControlStrip from './DawControlStrip';
 import DawBrowser from './DawBrowser';
 import WaveformOverview from './WaveformOverview';
 import ExportModal from './ExportModal';
+import { log } from '../../utils/log';
 
 // ─── EXTENDED REDUCER ──────────────────────────────────────────────────────────
 
@@ -52,7 +53,7 @@ function extendedReducer(state, action) {
 // ─── MAIN COMPONENT ────────────────────────────────────────────────────────────
 
 const DjEditDaw = ({ track: initialTrack }) => {
-    console.log('[DjEditDaw] Mounting with track:', initialTrack);
+    log.info('[DjEditDaw] Mounting with track:', initialTrack);
     const [state, dispatch] = useReducer(extendedReducer, null, () => createInitialState());
 
     // Diagnostic hook — exposes the live DAW state on `window.__dawState`
@@ -101,7 +102,7 @@ const DjEditDaw = ({ track: initialTrack }) => {
     // ── LIFECYCLE CLEANUP ──
     useEffect(() => {
         return () => {
-            console.log('[DjEditDaw] Unmounting, disposing DawEngine...');
+            log.info('[DjEditDaw] Unmounting, disposing DawEngine...');
             DawEngine.dispose();
         };
     }, []);
@@ -116,7 +117,7 @@ const DjEditDaw = ({ track: initialTrack }) => {
         // with a single default full-track region, making the export equal the original.
         if (skipNextAutoLoad.current) {
             skipNextAutoLoad.current = false;
-            console.log('[DjEditDaw] Skipping auto-load — regions already hydrated from .rbep');
+            log.debug('[DjEditDaw] Skipping auto-load — regions already hydrated from .rbep');
             return;
         }
 

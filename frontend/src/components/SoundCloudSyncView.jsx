@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import MatchInspectorModal from './MatchInspectorModal';
+import { log } from '../utils/log';
 
 const formatDuration = (ms) => {
     if (!ms) return '0:00';
@@ -242,7 +243,7 @@ const SoundCloudSyncView = () => {
             }
 
             // DoD proof: log the raw payload in DevTools so we can confirm mapping works.
-            console.log('[SC] fetchPlaylists API Response Success:', res.data);
+            log.debug('[SC] fetchPlaylists API Response Success:', res.data);
 
             const pls = Array.isArray(res.data?.playlists) ? res.data.playlists : [];
             const lks = res.data?.likes ?? null;
@@ -252,8 +253,8 @@ const SoundCloudSyncView = () => {
                 console.warn('[SC] API returned SUCCESS but playlists array is EMPTY.');
             }
 
-            console.log(`[SC] Summary: ${pls.length} playlists, likes: ${lks?.track_count ?? 0} tracks, user: ${usr?.username}`);
-            console.log('[SC] Mapped Playlists for UI:', pls);
+            log.debug(`[SC] Summary: ${pls.length} playlists, likes: ${lks?.track_count ?? 0} tracks, user: ${usr?.username}`);
+            log.debug('[SC] Mapped Playlists for UI:', pls);
 
             setPlaylists(pls);
             setLikes(lks);

@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback, forwardRef, useImperativeHandle } from 'react';
 import AudioBandAnalyzer from '../utils/AudioBandAnalyzer';
 import api from '../api/api';
+import { log } from '../utils/log';
 import { useToast } from './ToastContext';
 import EditorBrowser from './editor/EditorBrowser';
 import {
@@ -1391,7 +1392,7 @@ const WaveformEditorInner = forwardRef(({ track, blobUrl = null, simpleMode = fa
                 fade_in: false,
                 fade_out: false
             };
-            console.log("Render Payload:", payload);
+            log.debug("Render Payload:", payload);
             setRenderProgress(30);
             const res = await api.post('/api/audio/render', payload);
             setRenderProgress(100);

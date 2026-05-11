@@ -7,6 +7,7 @@
  */
 
 import { convertFileSrc } from '@tauri-apps/api/core';
+import { log } from '../utils/log';
 
 // ─── ENGINE STATE ──────────────────────────────────────────────────────────────
 
@@ -28,7 +29,7 @@ let animFrameId = null;
 export function getAudioContext() {
     if (!audioContext) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        console.log('[DawEngine] AudioContext created, state:', audioContext.state);
+        log.info('[DawEngine] AudioContext created, state:', audioContext.state);
     }
     return audioContext;
 }
@@ -42,7 +43,7 @@ export async function resumeContext() {
     if (ctx.state === 'suspended') {
         await ctx.resume();
         isResumed = true;
-        console.log('[DawEngine] AudioContext resumed');
+        log.info('[DawEngine] AudioContext resumed');
     }
 }
 
@@ -70,7 +71,7 @@ export async function dispose() {
         }
         audioContext = null;
         isResumed = false;
-        console.log('[DawEngine] AudioContext closed and disposed');
+        log.info('[DawEngine] AudioContext closed and disposed');
     }
     clearCache();
 }
@@ -112,8 +113,8 @@ export async function loadAudio(filepath) {
         url = `http://localhost:8000/api/audio/stream?path=${encodeURIComponent(filepath)}`;
     }
 
-    console.log('[DawEngine] Loading audio:', filepath);
-    console.log('[DawEngine] constructed URL:', url);
+    log.debug('[DawEngine] Loading audio:', filepath);
+    log.debug('[DawEngine] constructed URL:', url);
 
     try {
         let response = await fetch(url);
@@ -122,7 +123,7 @@ export async function loadAudio(filepath) {
         if (!response.ok && !useBackend) {
             console.warn(`[DawEngine] Asset URL fetch failed (${response.status}), retrying with backend...`);
             const backendUrl = `http://localhost:8000/api/audio/stream?path=${encodeURIComponent(filepath)}`;
-            console.log('[DawEngine] Retrying with:', backendUrl);
+            log.debug('[DawEngine] Retrying with:', backendUrl);
             response = await fetch(backendUrl);
         }
 
@@ -131,13 +132,13 @@ export async function loadAudio(filepath) {
             throw new Error(`Failed to fetch audio: ${response.status} ${response.statusText}`);
         }
 
-        console.log('[DawEngine] Fetch success, content-length:', response.headers.get('content-length'));
+        log.debug('[DawEngine] Fetch success, content-length:', response.headers.get('content-length'));
 
         const arrayBuffer = await response.arrayBuffer();
         const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
 
         bufferCache.set(filepath, audioBuffer);
-        console.log('[DawEngine] Decoded:', filepath, `${audioBuffer.duration.toFixed(1)}s`);
+        log.debug('[DawEngine] Decoded:', filepath, `${audioBuffer.duration.toFixed(1)}s`);
 
         return audioBuffer;
 
@@ -147,7 +148,7 @@ export async function loadAudio(filepath) {
             console.warn('[DawEngine] Network error with asset URL, retrying with backend:', err);
             try {
                 const backendUrl = `http://localhost:8000/api/audio/stream?path=${encodeURIComponent(filepath)}`;
-                console.log('[DawEngine] Retrying with:', backendUrl);
+                log.debug('[DawEngine] Retrying with:', backendUrl);
                 const response = await fetch(backendUrl);
                 if (!response.ok) throw new Error(`Backend fetch failed: ${response.status}`);
 
@@ -155,7 +156,7 @@ export async function loadAudio(filepath) {
                 const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
                 bufferCache.set(filepath, audioBuffer);
 
-                console.log('[DawEngine] Decoded (Retry):', filepath);
+                log.debug('[DawEngine] Decoded (Retry):', filepath);
                 return audioBuffer;
             } catch (retryErr) {
                 console.error('[DawEngine] Backend fallback failed:', retryErr);

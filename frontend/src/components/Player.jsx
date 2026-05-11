@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Play, Pause, SkipBack, SkipForward, Volume2, Maximize2, X } from 'lucide-react';
 import api from '../api/api';
+import { log } from '../utils/log';
 
 const Player = ({ track, onClose, onMaximize }) => {
     const [playing, setPlaying] = useState(false);
@@ -27,7 +28,7 @@ const Player = ({ track, onClose, onMaximize }) => {
 
     useEffect(() => {
         if (audioRef.current && !isStreaming(track)) {
-            playing ? audioRef.current.play().catch(e => console.log("Play error", e)) : audioRef.current.pause();
+            playing ? audioRef.current.play().catch(e => log.warn("Play error", e)) : audioRef.current.pause();
         }
     }, [playing, track]);
 
