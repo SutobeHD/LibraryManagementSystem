@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-    Database, Download, RotateCw, Clock, AlertTriangle, X, Check, Save,
-    GitCommit, ChevronRight, ChevronDown, Archive, Trash2, Loader2, Plus, History
+    Database, RotateCw, Clock, X, ChevronRight, Archive, Loader2, Plus, History
 } from 'lucide-react';
 import api from '../api/api';
 import toast from 'react-hot-toast';
@@ -43,7 +42,8 @@ const BackupManager = ({ onClose }) => {
         try {
             const res = await api.get('/api/library/backups');
             setBackups(res.data || []);
-        } catch (e) {
+        } catch (err) {
+            console.error('[BackupManager] load failed', err);
             toast.error('Failed to load backups');
         }
         setLoading(false);
@@ -63,7 +63,8 @@ const BackupManager = ({ onClose }) => {
                 toast.error(res.data.message || 'Backup failed');
             }
             loadBackups();
-        } catch (e) {
+        } catch (err) {
+            console.error('[BackupManager] create failed', err);
             toast.error('Backup failed');
         }
         setCreating(false);
@@ -93,8 +94,10 @@ const BackupManager = ({ onClose }) => {
             } else {
                 toast.error(res.data.message || 'Restore failed');
             }
-        } catch (e) {
-            toast.error('Restore failed');
+        } catch (err) {
+            console.error('[BackupManager] restore failed', err);
+            const detail = err?.response?.data?.detail;
+            toast.error(typeof detail === 'string' ? detail : 'Restore failed');
         }
         setRestoring(null);
     };
@@ -109,7 +112,8 @@ const BackupManager = ({ onClose }) => {
         try {
             const res = await api.get(`/api/library/backup/${hash}/diff`);
             setCommitDiff(res.data);
-        } catch {
+        } catch (err) {
+            console.error('[BackupManager] diff failed', err);
             setCommitDiff(null);
         }
     };

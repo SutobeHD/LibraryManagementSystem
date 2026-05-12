@@ -16,9 +16,15 @@ const SettingsBackup = ({ settings, setSettings }) => {
     const triggerBackup = async () => {
         try {
             const res = await api.post('/api/library/backup');
-            if (res.data.status === 'success') toast.success('Backup created');
-            else toast.error('Backup failed: ' + (res.data.message || 'Unknown error'));
-        } catch {
+            if (res.data.status === 'success') {
+                toast.success('Backup created');
+            } else if (res.data.status === 'unchanged') {
+                toast('No changes to backup', { icon: '📋' });
+            } else {
+                toast.error('Backup failed: ' + (res.data.message || 'Unknown error'));
+            }
+        } catch (err) {
+            console.error('[SettingsBackup] trigger failed', err);
             toast.error('Backup error');
         }
     };
@@ -81,8 +87,18 @@ const SettingsBackup = ({ settings, setSettings }) => {
                     onClick={async () => {
                         try {
                             const res = await api.post('/api/system/cleanup');
-                            toast.success(res.data.message || 'Old backups removed');
-                        } catch { toast.error('Cleanup failed'); }
+                            const data = res.data || {};
+                            const total = (data.deleted_legacy || 0) + (data.deleted_commits || 0);
+                            const freedMb = ((data.freed_bytes || 0) / 1048576).toFixed(1);
+                            if (total === 0) {
+                                toast('No backups older than retention window', { icon: '🧹' });
+                            } else {
+                                toast.success(`Removed ${total} backup${total === 1 ? '' : 's'} (${freedMb} MB freed)`);
+                            }
+                        } catch (err) {
+                            console.error('[SettingsBackup] cleanup failed', err);
+                            toast.error('Cleanup failed');
+                        }
                     }}
                     className="text-xs border border-red-500/20 hover:border-red-500/40 bg-red-500/5 hover:bg-red-500/10 text-red-400 rounded-xl px-4 py-2.5 flex items-center gap-2 transition-all"
                 >
