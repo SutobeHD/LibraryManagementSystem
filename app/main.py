@@ -3,6 +3,7 @@ import logging
 import os
 import secrets
 import shutil
+import sqlite3
 import sys
 import threading
 import time
@@ -18,6 +19,7 @@ from fastapi import (
     FastAPI,
     File,
     Form,
+    Header,
     HTTPException,
     Request,
     Response,
@@ -26,7 +28,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 # EC9: Load .env file so SOUNDCLOUD_CLIENT_ID etc. are available as env-vars.
 # python-dotenv is a soft dependency; if missing we fall back to os.environ silently.
@@ -70,7 +72,7 @@ from . import audio_tags, download_registry, folder_watcher
 from .audio_analyzer import LIBROSA_AVAILABLE, AudioAnalyzer
 from .backup_engine import BackupEngine
 from .config import EXPORT_DIR, LOG_DIR, MUSIC_DIR, TEMP_DIR
-from .database import db
+from .database import db, db_lock
 from .phrase_generator import (
     commit_cues_to_db,
     detect_first_downbeat,
@@ -94,6 +96,7 @@ from .services import (
     LibraryTools,
     ProjectManager,
     SettingsManager,
+    SystemCleaner,
 )
 from .soundcloud_api import (
     AuthExpiredError,
@@ -1191,74 +1194,138 @@ def set_lib_mode(r: DBModeReq):
         logger.info(f"Library reloaded in {r.mode} mode. Tracks: {len(db.tracks)}")
     return {"status": "success" if success else "error", "mode": db.mode}
 
+def _live_db_path() -> str | None:
+    """Return the active live-mode master.db path, or None if not in live mode."""
+    if db.mode != "live" or not db.active_db or not hasattr(db.active_db, "db_path"):
+        return None
+    return str(db.active_db.db_path)
+
+
 @app.post("/api/library/backup")
 def trigger_backup():
-    """Create an incremental backup using the Git-like engine."""
-    if db.mode == "live" and db.active_db and hasattr(db.active_db, 'db_path'):
+    """Create an incremental backup. Holds ``_db_write_lock`` so concurrent
+    rbox writers can't race against the snapshot read."""
+    path = _live_db_path()
+    if not path:
+        return {"status": "error", "message": "Backups only supported in live mode"}
+    try:
+        engine = BackupEngine(path)
+        with db_lock():
+            return engine.snapshot("Manual backup")
+    except (OSError, sqlite3.Error) as e:
+        logger.error("trigger_backup: snapshot failed err=%s — falling back to legacy", e)
         try:
-            engine = BackupEngine(str(db.active_db.db_path))
-            result = engine.snapshot("Manual backup")
-            return result
-        except Exception as e:
-            logger.error(f"Incremental backup failed, falling back to legacy: {e}")
-            success = db.active_db._ensure_backup()
+            with db_lock():
+                success = db.active_db._ensure_backup()
             return {"status": "success" if success else "error", "fallback": True}
-    return {"status": "error", "message": "Backups only supported in live mode"}
+        except (OSError, sqlite3.Error) as e2:
+            logger.error("trigger_backup: legacy fallback also failed err=%s", e2)
+            return {"status": "error", "message": str(e2)}
+
 
 @app.post("/api/library/sync")
 def sync_lib():
+    """Triggered by 'Create Backup' (formerly Sync).
+
+    Live Mode: incremental snapshot under ``_db_write_lock``.
+    XML Mode: writes the XML.
     """
-    Triggered by 'Create Backup' (formerly Sync).
-    In Live Mode: Creates incremental snapshot.
-    In XML Mode: Saves XML.
-    """
-    if db.mode == "live" and db.active_db and hasattr(db.active_db, 'db_path'):
+    path = _live_db_path()
+    if path:
         try:
-            engine = BackupEngine(str(db.active_db.db_path))
-            result = engine.snapshot("Sync backup")
+            engine = BackupEngine(path)
+            with db_lock():
+                result = engine.snapshot("Sync backup")
             return {"status": "success", "message": "Backup created successfully", **result}
-        except Exception as e:
+        except (OSError, sqlite3.Error) as e:
+            logger.error("sync_lib: snapshot failed err=%s", e)
             return {"status": "error", "message": str(e)}
     success = db.save()
     return {"status": "success" if success else "error"}
 
+
 @app.get("/api/library/backups")
 def list_backups():
     """Get backup history (incremental commits + legacy backups)."""
-    if db.mode == "live" and db.active_db and hasattr(db.active_db, 'db_path'):
-        try:
-            engine = BackupEngine(str(db.active_db.db_path))
-            return engine.get_history()
-        except Exception as e:
-            logger.error(f"Incremental history failed, falling back: {e}")
-            return db.active_db.get_available_backups()
-    return []
+    path = _live_db_path()
+    if not path:
+        return []
+    try:
+        engine = BackupEngine(path)
+        return engine.get_history()
+    except OSError as e:
+        logger.error("list_backups: history read failed err=%s — falling back to legacy", e)
+        return db.active_db.get_available_backups()
+
 
 class RestoreReq(BaseModel):
-    filename: str
+    """Restore request. Exactly one of ``filename`` or ``commit_hash`` must
+    be populated. Empty strings count as unset."""
+
+    filename: str = ""
     commit_hash: str | None = None
 
+    @model_validator(mode="after")
+    def _require_one_target(self) -> "RestoreReq":
+        has_filename = bool(self.filename and self.filename.strip())
+        has_hash = bool(self.commit_hash and self.commit_hash.strip())
+        if not has_filename and not has_hash:
+            raise ValueError("Either 'filename' (legacy) or 'commit_hash' (incremental) must be provided")
+        return self
+
+
 @app.post("/api/library/restore")
-def restore_backup(r: RestoreReq):
-    """Restore from incremental commit or legacy backup."""
-    if db.mode == "live" and db.active_db and hasattr(db.active_db, 'db_path'):
-        # Try incremental restore first
-        if r.commit_hash:
-            engine = BackupEngine(str(db.active_db.db_path))
-            return engine.restore(r.commit_hash)
-        # Fall back to legacy restore
-        if r.filename:
+def restore_backup(
+    r: RestoreReq,
+    x_session_token: str = Header(default=""),
+):
+    """Restore from incremental commit or legacy backup.
+
+    Both paths take ``_db_write_lock`` because they rewrite the active
+    ``master.db``. Legacy path replaces the file outright via ``shutil.copy2``
+    while rbox might still hold it — the lock prevents concurrent writers
+    from making it worse.
+
+    Restore is destructive (overwrites the entire library) so it sits behind
+    the same ``X-Session-Token`` as ``/api/system/shutdown``. The frontend
+    axios interceptor attaches the header automatically; non-browser clients
+    must pick the token up from ``GET /api/system/heartbeat``.
+    """
+    if x_session_token != SHUTDOWN_TOKEN:
+        logger.warning("SECURITY: Unauthorized restore attempt (token mismatch)")
+        raise HTTPException(status_code=403, detail="Invalid session token")
+
+    path = _live_db_path()
+    if not path:
+        return {"status": "error", "message": "Restore only available in Live mode"}
+
+    if r.commit_hash:
+        try:
+            engine = BackupEngine(path)
+            with db_lock():
+                return engine.restore(r.commit_hash)
+        except (OSError, sqlite3.Error) as e:
+            logger.error("restore_backup: incremental failed hash=%s err=%s", r.commit_hash, e)
+            return {"status": "error", "message": str(e)}
+
+    # Legacy path: filename-based full-copy restore.
+    try:
+        with db_lock():
             success, msg = db.active_db.restore_backup(r.filename)
-            return {"status": "success" if success else "error", "message": msg}
-    return {"status": "error", "message": "Restore only available in Live mode"}
+        return {"status": "success" if success else "error", "message": msg}
+    except OSError as e:
+        logger.error("restore_backup: legacy failed file=%s err=%s", r.filename, e)
+        return {"status": "error", "message": str(e)}
+
 
 @app.get("/api/library/backup/{commit_hash}/diff")
 def get_backup_diff(commit_hash: str):
     """Get detailed diff for a specific backup commit."""
-    if db.mode == "live" and db.active_db and hasattr(db.active_db, 'db_path'):
-        engine = BackupEngine(str(db.active_db.db_path))
-        return engine.get_diff(commit_hash)
-    return {"error": "Not available in current mode"}
+    path = _live_db_path()
+    if not path:
+        return {"error": "Not available in current mode"}
+    engine = BackupEngine(path)
+    return engine.get_diff(commit_hash)
 
 class LoadLibReq(BaseModel):
     path: str | None = None
@@ -2111,7 +2178,17 @@ async def restart(token: str = ""):
     return {"message": "Restarting backend..."}
 
 @app.post("/api/system/cleanup")
-def cln(): return {"deleted_files": 0}
+def system_cleanup():
+    """Prune legacy + incremental backups older than the retention window.
+
+    Driven by ``backup_retention_days`` in settings. Keeps the newest of
+    each legacy kind and the commit on HEAD. Returns counts.
+    """
+    try:
+        return SystemCleaner.cleanup_old_backups()
+    except OSError as e:
+        logger.error("system_cleanup: failed err=%s", e)
+        return {"deleted_legacy": 0, "deleted_commits": 0, "freed_bytes": 0, "error": str(e)}
 
 @app.post("/api/system/select_db")
 def select_db_dialog():
