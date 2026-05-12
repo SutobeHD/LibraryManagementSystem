@@ -54,6 +54,14 @@
       "Bash(git checkout -b *)",
       "Bash(git switch *)",
       "Bash(git switch -c *)",
+      "Bash(git push)",
+      "Bash(git push origin)",
+      "Bash(git push origin main)",
+      "Bash(git push origin HEAD)",
+      "Bash(git push origin *:*)",
+      "Bash(git push -u *)",
+      "Bash(git push --set-upstream *)",
+      "Bash(git revert *)",
 
       "Bash(gh pr view*)",
       "Bash(gh pr list*)",
@@ -134,10 +142,6 @@
       "Write(**/master.db)"
     ],
     "ask": [
-      "Bash(git push)",
-      "Bash(git push origin*)",
-      "Bash(git push --set-upstream*)",
-      "Bash(git push -u*)",
       "Bash(git merge*)",
       "Bash(git rebase*)",
       "Bash(git cherry-pick*)",

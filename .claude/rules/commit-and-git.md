@@ -69,11 +69,43 @@ For multi-line bodies pass via HEREDOC, include the `Co-Authored-By: Claude Opus
 
 ---
 
-## Push policy — stays confirmed
+## Push policy — autonomous but always revertable
 
-- **`git push` requires user confirmation.** Always. Even for `main`.
-- **Never `--force` push** without explicit, scoped permission. Never to `main`/`master`.
-- Run `git fetch && git status -sb` **before** push and surface drift.
+User wants commits pushed to `origin/main` (or feature branches) **automatically** after they land locally — no asking. The constraint is that **every push must remain revertable via a future `git revert` commit**. That rules out anything that rewrites public history.
+
+### Allowed (autonomous, no confirmation)
+
+- `git push`, `git push origin main`, `git push origin HEAD`, `git push origin <branch>:<branch>` — normal fast-forward pushes.
+- `git push -u origin <branch>`, `git push --set-upstream origin <branch>` — first-time push of a new branch.
+- `git revert <sha>` — produces a new commit that inverts a previous one. The canonical "undo button" once something is public.
+
+### Forbidden (in `deny` list of `.claude/settings.json`, hard-blocked)
+
+- `git push --force` / `git push -f` — rewrites remote history. Cannot be undone without coordinated rebases on every clone.
+- `git push --force-with-lease` — still rewrites history; the lease just makes it slightly less hostile.
+- `git commit --amend` on an already-pushed commit — would require force-push to land.
+- `git rebase -i` on already-pushed commits — same problem.
+- `git reset --hard origin/main` (or `origin/master`) — destroys local commits silently.
+- `git branch -D` — destroys a branch outright.
+- `--no-verify` to skip pre-commit hooks.
+
+### Before push — always
+
+Run `git fetch --quiet && git status -sb` first. If `behind`, **stop and surface the drift** — don't push on a stale base. The user can choose to `git pull --ff-only` (safe) or investigate the upstream commits. The agent does **not** rebase or merge to "fix" the drift autonomously, because rebase produces a different SHA chain that may not be revertable cleanly.
+
+### What "revertable" means in practice
+
+- Every committed change must land as a normal commit (not amend, not squash).
+- Every push must be a fast-forward (no force).
+- If something was wrong: `git revert <sha>` → new commit, push that. Public history grows but never shrinks.
+- If a sequence of commits needs to come out together: revert them in reverse order (`git revert <newest>..<oldest>` or one-by-one). Cleanest for shared history.
+
+### What this does NOT cover
+
+- Tags (`git tag`) — still in `ask`. Tagging a release is a deliberate action.
+- Merges (`git merge`) — still in `ask`. Merge commits are revertable, but the user usually wants to decide the merge strategy.
+- Cherry-pick (`git cherry-pick`) — still in `ask`. Mostly used in recovery flows where intent matters.
+- PR creation (`gh pr create`) — still in `ask`. The choice between direct-push and PR is a workflow decision.
 
 ---
 
