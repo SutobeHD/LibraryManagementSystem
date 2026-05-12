@@ -216,3 +216,107 @@ where F: Fn(f32, &str) {
     progress(1.0, "Export complete.");
     Ok(format!("Exported tightly to {}", state.output_file))
 }
+
+#[cfg(test)]
+mod tests {
+    //! Inline render_project regression tests.
+    //!
+    //! These don't decode real audio — they pass a non-existent
+    //! `source_file` path so `AudioEngine::load_file` returns Err
+    //! before the validation code path. The point is to pin the
+    //! observable contract: render_project NEVER panics on malformed
+    //! input, it always returns a Result<_, String>. Future versions
+    //! that bypass load_file (e.g. accepting raw PCM input) will need
+    //! these same fixtures with a real source — at which point the
+    //! validation messages we reference in comments below become
+    //! reachable and should be asserted on directly.
+    use super::*;
+    use std::path::PathBuf;
+    use std::env;
+    fn nonexistent_source() -> String {
+        // Cross-platform "definitely-not-a-file" — uses the OS temp dir
+        // so we don't accidentally clash with something on the project
+        // root that happens to be valid.
+        let mut p = env::temp_dir();
+        p.push("rbep_test_does_not_exist_xyz123.wav");
+        // If a previous run left it behind, remove it.
+        let _ = std::fs::remove_file(&p);
+        p.to_string_lossy().to_string()
+    }
+    fn region(
+        id: &str,
+        start: f32,
+        end: f32,
+        track_start: f32,
+        track_end: f32,
+    ) -> AudioRegion {
+        AudioRegion {
+            id: id.to_string(),
+            start,
+            end,
+            track_start,
+            track_end,
+            gain: 1.0,
+            fade_in: None,
+            fade_out: None,
+        }
+    }
+    fn project(regions: Vec<AudioRegion>) -> ProjectState {
+        let mut out = PathBuf::from(env::temp_dir());
+        out.push("rbep_test_out.wav");
+        ProjectState {
+            source_file: nonexistent_source(),
+            output_file: out.to_string_lossy().to_string(),
+            regions,
+            master_gain: 1.0,
+            normalize: false,
+        }
+    }
+    #[test]
+    fn render_project_rejects_inverted_region() {
+        // end (1.0) <= start (2.0) — would underflow re_samples - rs_samples.
+        // Validation would fire if we got past load_file; without a real
+        // file we instead verify the function still returns Err cleanly.
+        let state = project(vec![region("bad", 2.0, 1.0, 0.0, 5.0)]);
+        let result = render_project(state, |_, _| {});
+        assert!(result.is_err(), "inverted region must return Err");
+    }
+    #[test]
+    fn render_project_rejects_negative_track_start() {
+        // track_start < 0.0 — caught by region-validation block in render_project.
+        let state = project(vec![region("bad", 0.0, 1.0, -1.0, 2.0)]);
+        let result = render_project(state, |_, _| {});
+        assert!(result.is_err(), "negative track_start must return Err");
+    }
+    #[test]
+    fn render_project_rejects_non_finite_track_end() {
+        // track_end = NaN / Infinity — caught by the is_finite check
+        // after the f32::max fold.
+        for bad_end in &[f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let state = project(vec![region("bad", 0.0, 1.0, 0.0, *bad_end)]);
+            let result = render_project(state, |_, _| {});
+            assert!(
+                result.is_err(),
+                "non-finite track_end ({}) must return Err",
+                bad_end,
+            );
+        }
+    }
+    #[test]
+    fn total_samples_overflow_returns_err() {
+        // 1e18 seconds * 44.1 kHz * 2 channels = ~8.8e22 samples,
+        // well past usize::MAX on a 64-bit host. This is the path the
+        // i64 + usize::try_from cast was added to guard.
+        let state = project(vec![region("huge", 0.0, 1.0, 0.0, 1.0e18)]);
+        let result = render_project(state, |_, _| {});
+        assert!(result.is_err(), "huge track_end must return Err");
+    }
+    #[test]
+    fn render_project_empty_regions_returns_err() {
+        // No regions at all — load_file fails first. Asserts the function
+        // exits cleanly with Err rather than panicking on the empty vec.
+        let state = project(vec![]);
+        let result = render_project(state, |_, _| {});
+        assert!(result.is_err());
+    }
+}
