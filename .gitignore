@@ -92,9 +92,13 @@ temp/
 scratch/
 work/
 
-# --- Claude Development (local-only) ---
-.claude/
-CLAUDE.md
+# --- Claude Code (committed team config; only local overrides ignored) ---
+# CLAUDE.md and .claude/ ARE committed — they're the team-shared agent config.
+# Only personal/local overrides go here:
+.claude/settings.local.json
+.claude/.mcp.local.json
+.claude/cache/
+.claude/state/
 
 # --- Local-only archives & experiments ---
 archive/
