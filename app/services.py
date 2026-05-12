@@ -16,7 +16,7 @@ import psutil
 from mutagen.flac import FLAC
 from mutagen.id3 import APIC, ID3
 
-from .config import BACKUP_DIR, DB_FILENAME, EXPORT_DIR, FFMPEG_BIN, REKORDBOX_ROOT
+from .config import DB_FILENAME, EXPORT_DIR, FFMPEG_BIN, REKORDBOX_ROOT
 from .database import db
 
 try:
@@ -143,21 +143,6 @@ class SystemGuard:
                     "services.is_rekordbox_running: skipped pid=%s (%s)", proc.pid, e,
                 )
         return False
-    @staticmethod
-    def create_backup() -> str | None:
-        source = REKORDBOX_ROOT / DB_FILENAME
-        if not source.exists(): return None
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        dest = BACKUP_DIR / f"{DB_FILENAME}.backup_{timestamp}"
-        try:
-            shutil.copy2(source, dest)
-            return str(dest)
-        except (OSError, shutil.Error) as e:
-            logger.warning(
-                "services.create_backup: failed to copy %s -> %s (%s)", source, dest, e,
-            )
-            return None
-
 class AudioEngine:
     @staticmethod
     def check_ffmpeg() -> bool:
@@ -654,7 +639,6 @@ class LibraryTools:
 class SettingsManager:
     CONFIG = Path("settings.json")
     DEFAULT = {
-        "backup_retention_days": 7,
         "default_export_format": "wav",
         "default_export_dir": "",  # If empty, falls back to EXPORT_DIR (./exports). User can pick any folder.
         "theme": "dark",
@@ -662,8 +646,6 @@ class SettingsManager:
         "db_path": "",
         "artist_view_threshold": 0,
         "ranking_filter_mode": "all", # all, unrated, untagged
-        "archive_frequency": "daily", # off, daily, weekly, monthly
-        "last_archive_date": "",
         "insights_playcount_threshold": 0,
         "insights_bitrate_threshold": 320,
         "hide_streaming": False,
@@ -674,8 +656,6 @@ class SettingsManager:
         "sc_download_format": "auto",  # "auto" (keep source codec) | "aiff" (convert to PCM AIFF lossless)
         "legacy_pdb_stub": False,  # opt-in: write header-only export.pdb for CDJ-2000nxs2 (experimental — see app/usb_pdb.py)
         "scan_folders": [],          # absolute paths watched for new audio files (FolderWatcher)
-        "auto_backup": False,
-        "auto_backup_interval_min": 0,  # 0 = manual only; otherwise minutes
     }
     @classmethod
     def load(cls) -> dict[str, Any]:
@@ -743,108 +723,6 @@ class MetadataManager:
     def get_mapped_name(cls, category: str, name: str) -> str:
         data = cls.load()
         return data.get(category, {}).get(name, name)
-
-class SystemCleaner:
-    @staticmethod
-    def cleanup_old_backups() -> dict[str, int]:
-        """Prune legacy + incremental backups older than retention window.
-
-        Returns ``{deleted_legacy, deleted_commits, freed_bytes}``.
-
-        Safety rules:
-        - Keeps the *newest* of each legacy kind (session / archive /
-          prerestore) so the user always has at least one fallback per kind.
-        - Never deletes the commit on HEAD (the active restore base).
-        - ``retention_days < 1`` is a no-op (used as the off-switch).
-        """
-        days = SettingsManager.load().get("backup_retention_days", 7)
-        result = {"deleted_legacy": 0, "deleted_commits": 0, "freed_bytes": 0}
-        if days < 1:
-            return result
-
-        cutoff = time.time() - days * 86400
-
-        # ---- Legacy full-copy backups: master_session_*.db, master_ARCHIVE_*.db, ...
-        try:
-            legacy_paths = sorted(
-                BACKUP_DIR.glob("master_*.db"),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True,
-            )
-        except OSError as e:
-            logger.warning(
-                "services.SystemCleaner: legacy listing failed err=%s", e,
-            )
-            legacy_paths = []
-
-        kinds_seen: set[str] = set()
-        for path in legacy_paths:
-            try:
-                stat = path.stat()
-            except OSError:
-                continue
-            if "ARCHIVE" in path.name:
-                kind = "archive"
-            elif "prerestore" in path.name:
-                kind = "prerestore"
-            elif "session" in path.name:
-                kind = "session"
-            else:
-                kind = "other"
-            if kind not in kinds_seen:
-                kinds_seen.add(kind)
-                continue
-            if stat.st_mtime < cutoff:
-                try:
-                    path.unlink()
-                    result["deleted_legacy"] += 1
-                    result["freed_bytes"] += stat.st_size
-                except OSError as e:
-                    logger.warning(
-                        "services.SystemCleaner: failed to remove legacy=%s err=%s",
-                        path, e,
-                    )
-
-        # ---- Incremental commits: backups/commits/<hash>.json.gz
-        head_file = BACKUP_DIR / "HEAD"
-        head_hash = ""
-        try:
-            if head_file.exists():
-                head_hash = head_file.read_text(encoding="utf-8").strip()
-        except OSError as e:
-            logger.warning(
-                "services.SystemCleaner: HEAD read failed err=%s", e,
-            )
-
-        commits_dir = BACKUP_DIR / "commits"
-        if commits_dir.exists():
-            for commit_file in commits_dir.glob("*.json.gz"):
-                try:
-                    stat = commit_file.stat()
-                except OSError:
-                    continue
-                commit_hash = commit_file.name.removesuffix(".json.gz")
-                if commit_hash == head_hash:
-                    continue
-                if stat.st_mtime < cutoff:
-                    try:
-                        commit_file.unlink()
-                        result["deleted_commits"] += 1
-                        result["freed_bytes"] += stat.st_size
-                    except OSError as e:
-                        logger.warning(
-                            "services.SystemCleaner: failed to remove commit=%s err=%s",
-                            commit_file.name, e,
-                        )
-
-        logger.info(
-            "services.SystemCleaner.cleanup_old_backups: days=%d legacy=%d commits=%d freed=%dB",
-            days,
-            result["deleted_legacy"],
-            result["deleted_commits"],
-            result["freed_bytes"],
-        )
-        return result
 
 class BeatAnalyzer:
     """
