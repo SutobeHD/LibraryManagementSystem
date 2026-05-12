@@ -48,6 +48,11 @@ const ACTIONS = {
     DELETE_LOOP: 'DELETE_LOOP',
     SET_ACTIVE_LOOP: 'SET_ACTIVE_LOOP',
     UPDATE_LOOP_FIELDS: 'UPDATE_LOOP_FIELDS',
+    // Slice 3 — beatgrid
+    LOAD_BEATGRID: 'LOAD_BEATGRID',
+    ANCHOR_SHIFT: 'ANCHOR_SHIFT',
+    SET_BPM: 'SET_BPM',
+    UPDATE_BEAT: 'UPDATE_BEAT',
 };
 
 function reducer(state, action) {
@@ -129,6 +134,37 @@ function reducer(state, action) {
                     l.id === action.payload.id ? { ...l, ...action.payload.fields } : l,
                 ),
             };
+        case ACTIONS.LOAD_BEATGRID:
+            return { ...state, beatgrid: action.payload.beatgrid || [] };
+        case ACTIONS.ANCHOR_SHIFT: {
+            const dt = action.payload.delta_ms;
+            return {
+                ...state,
+                beatgrid: state.beatgrid.map((b) => ({ ...b, time_ms: b.time_ms + dt })),
+            };
+        }
+        case ACTIONS.SET_BPM: {
+            // Regenerate beats from the existing anchor at the new BPM.
+            // Preserves beat count and downbeat phase.
+            const anchorMs = state.beatgrid[0]?.time_ms || 0;
+            const count = state.beatgrid.length;
+            if (count === 0) return state;
+            const beatMs = (60 / Math.max(60, action.payload.bpm)) * 1000;
+            const tempoCents = Math.round(action.payload.bpm * 100);
+            const newGrid = Array.from({ length: count }, (_, i) => ({
+                beat_number: (i % 4) + 1,
+                time_ms: Math.round(anchorMs + i * beatMs),
+                tempo: tempoCents,
+            }));
+            return { ...state, beatgrid: newGrid };
+        }
+        case ACTIONS.UPDATE_BEAT:
+            return {
+                ...state,
+                beatgrid: state.beatgrid.map((b, i) =>
+                    i === action.payload.index ? { ...b, ...action.payload.fields } : b,
+                ),
+            };
         default:
             return state;
     }
@@ -192,6 +228,27 @@ export function TrackEditorProvider({ children }) {
         [],
     );
 
+    // Slice 3 — beatgrid action creators
+    const loadBeatgrid = useCallback(
+        ({ beatgrid }) =>
+            dispatch({ type: ACTIONS.LOAD_BEATGRID, payload: { beatgrid } }),
+        [],
+    );
+    const anchorShift = useCallback(
+        (delta_ms) =>
+            dispatch({ type: ACTIONS.ANCHOR_SHIFT, payload: { delta_ms } }),
+        [],
+    );
+    const setBpm = useCallback(
+        (bpm) => dispatch({ type: ACTIONS.SET_BPM, payload: { bpm } }),
+        [],
+    );
+    const updateBeat = useCallback(
+        (index, fields) =>
+            dispatch({ type: ACTIONS.UPDATE_BEAT, payload: { index, fields } }),
+        [],
+    );
+
     const value = {
         state,
         dispatch,
@@ -209,6 +266,11 @@ export function TrackEditorProvider({ children }) {
         deleteLoop,
         setActiveLoop,
         updateLoopFields,
+        // Slice 3 — beatgrid
+        loadBeatgrid,
+        anchorShift,
+        setBpm,
+        updateBeat,
     };
 
     return (

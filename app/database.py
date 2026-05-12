@@ -1082,6 +1082,11 @@ class RekordboxDB:
 
         return Path(LOG_DIR) / "cue_overrides.json"
 
+    def _beatgrid_sidecar_path(self) -> Path:
+        from .config import LOG_DIR
+
+        return Path(LOG_DIR) / "beatgrid_overrides.json"
+
     def save_track_cues(self, tid: str, cues: list[dict]) -> bool:
         """Persist cue overrides for a track to the JSON sidecar.
 
@@ -1137,6 +1142,56 @@ class RekordboxDB:
             return track["Cues"]
         return []
 
+    # --- Beatgrid persistence (Slice 3 of waveform-editor-extensions) ---
+    #
+    # `app/main.py:864` calls `db.save_track_beatgrid`, which previously
+    # did not exist (AttributeError). Same JSON-sidecar stopgap as the
+    # cue methods. Proper rbox + ANLZ (PQTZ/PQT2) wiring deferred.
+
+    def save_track_beatgrid(self, tid: str, beat_grid: list[dict]) -> bool:
+        sidecar = self._beatgrid_sidecar_path()
+        try:
+            data: dict[str, Any] = {}
+            if sidecar.exists():
+                try:
+                    data = json.loads(sidecar.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError) as e:
+                    logger.warning(
+                        "save_track_beatgrid: sidecar unreadable, starting fresh: %s", e
+                    )
+                    data = {}
+            data[str(tid)] = beat_grid
+
+            sidecar.parent.mkdir(parents=True, exist_ok=True)
+            tmp = sidecar.with_suffix(".json.tmp")
+            tmp.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            tmp.replace(sidecar)
+            logger.info(
+                "save_track_beatgrid: track=%s persisted %d beats", tid, len(beat_grid)
+            )
+            return True
+        except OSError as e:
+            logger.error("save_track_beatgrid: write failed for track %s: %s", tid, e)
+            return False
+
+    def get_track_beatgrid(self, tid: str) -> list[dict]:
+        sidecar = self._beatgrid_sidecar_path()
+        if sidecar.exists():
+            try:
+                data = json.loads(sidecar.read_text(encoding="utf-8"))
+                override = data.get(str(tid))
+                if override is not None:
+                    return override
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("get_track_beatgrid: sidecar unreadable: %s", e)
+
+        track = self.get_track_details(tid)
+        if track and "BeatGrid" in track:
+            return track["BeatGrid"]
+        return []
+
 
 # Wrap every mutating method on the facade with the module-level write
 # lock so concurrent route handlers can't race against each other.
@@ -1149,7 +1204,7 @@ for _name in (
     "create_folder", "create_smart_playlist", "update_smart_playlist",
     "create_playlist", "add_track_to_playlist", "remove_track_from_playlist",
     "save", "update_tracks_metadata", "update_track_comment",
-    "update_track_path", "save_track_cues",
+    "update_track_path", "save_track_cues", "save_track_beatgrid",
 ):
     setattr(RekordboxDB, _name, _serialised(getattr(RekordboxDB, _name)))
 del _name

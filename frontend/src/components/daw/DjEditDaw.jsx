@@ -36,7 +36,8 @@ import { log } from '../../utils/log';
 import { TrackEditorProvider } from '../waveform/state/useTrackEditorState';
 import CuePanel from '../waveform/panels/CuePanel';
 import LoopPanel from '../waveform/panels/LoopPanel';
-import { FEATURE_CUE_PANEL, FEATURE_LOOP_PANEL } from '../../config/constants';
+import BeatgridPanel from '../waveform/panels/BeatgridPanel';
+import { FEATURE_CUE_PANEL, FEATURE_LOOP_PANEL, FEATURE_BEATGRID_PANEL } from '../../config/constants';
 
 const DawScrollbar = lazy(() => import('./DawScrollbar'));
 
@@ -312,6 +313,7 @@ const DjEditDaw = ({ track: initialTrack }) => {
             <TrackEditorProvider>
             {FEATURE_CUE_PANEL && <CuePanel track={activeTrack} currentTime={(state.playhead || 0)} />}
             {FEATURE_LOOP_PANEL && <LoopPanel track={activeTrack} currentTime={(state.playhead || 0)} bpm={state.bpm || 128} />}
+            {FEATURE_BEATGRID_PANEL && <BeatgridPanel track={activeTrack} bpm={state.bpm || 128} beatGrid={state.beatGrid || []} />}
             <DawLayout
                 activeTrack={activeTrack}
                 isLibraryCollapsed={isLibraryCollapsed}

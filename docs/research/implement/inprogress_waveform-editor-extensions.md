@@ -816,6 +816,61 @@ All 14 backend tests pass.
   `WaveformEditor.jsx`) — still owned by `useState`-bag; not merged
   into the hook. Same rationale as Slice 1: minimise refactor surface.
 
+### 2026-05-13 — Slice 3 (Beatgrid)
+
+**Pre-existing fix:** `app/main.py:864` calls `db.save_track_beatgrid`
+which **did not exist** anywhere in the codebase. Slice 3 adds the same
+JSON-sidecar stopgap as the cue methods.
+
+- `RekordboxDB.save_track_beatgrid(tid, beat_grid)` writes to
+  `LOG_DIR / "beatgrid_overrides.json"`. Atomic via tmp + rename.
+- `RekordboxDB.get_track_beatgrid(tid)` reads from the sidecar first,
+  then falls back to `track["BeatGrid"]`.
+- Added to the `_serialised` wrap list.
+
+**Hook extension:** 4 new actions on `useTrackEditorState.jsx`:
+
+- `LOAD_BEATGRID` — seed the array from the WaveformEditor's
+  `useState`-bag or from the persisted override.
+- `ANCHOR_SHIFT` — shift every beat by `delta_ms`.
+- `SET_BPM` — regenerate beats from the existing anchor at the new
+  BPM. Preserves beat count and downbeat phase (`beat_number = (i % 4) + 1`).
+- `UPDATE_BEAT` — partial-update by array index (used by the future
+  per-beat inline editor; not surfaced in Slice 3 UI).
+
+**New file:** `frontend/src/components/waveform/panels/BeatgridPanel.jsx`
+(~220 LOC). Three-tab UI:
+
+- **Anchor Shift** (default, per Q7 user spec): ±10 buttons + numeric
+  input. Apply button calls `anchorShift(delta_ms)`.
+- **Tap BPM**: large TAP button accumulates timestamps. After 4+
+  taps, computed BPM = `60000 / avg_interval_ms`. Apply regenerates
+  the grid via `setBpm(computedBpm)`. Reset button clears taps.
+- **Per-Beat**: read-only list of the first 50 beats with index,
+  beat-number, and time. Inline editing is deferred (would need
+  `WaveformCanvas` drag-on-marker work — bigger surface than Slice 3).
+
+**Mounted** in `WaveformEditor.jsx` and `daw/DjEditDaw.jsx` behind
+`FEATURE_BEATGRID_PANEL` (default `false`).
+
+**Tests:** new file `tests/test_beatgrid_endpoint_roundtrip.py` with
+5 cases (create, get, empty unknown, overwrite, monotonic times). All
+pass.
+
+**Plan deviations:**
+
+- **New backend route `POST /api/track/{tid}/beatgrid/anchor`** —
+  not added. The existing `POST /api/track/grid/save` covers the same
+  case (frontend computes the new grid client-side and POSTs the
+  result). One sidecar, one endpoint, fewer moving parts.
+- **Per-beat inline editing** — UI shows beats but doesn't allow
+  inline change yet. Reason: needs `WaveformCanvas`-level drag-on-beat
+  interaction, which would multiply the slice's surface. Deferred to a
+  follow-up.
+- **Migration of `WaveformEditor.jsx` `[beatGrid, setBeatGrid]`** —
+  still in the `useState`-bag; hook only mirrors via prop on mount.
+  Same rationale as Slices 1 & 2.
+
 ---
 
 ## Decision / Outcome
