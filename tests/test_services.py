@@ -14,6 +14,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+# app.services transitively imports app.database -> app.live_database -> rbox.
+# Skip on platforms without pyrekordbox (Linux CI runners).
+pytest.importorskip("rbox", reason="pyrekordbox not installed on this platform")
+
 from app.services import (
     MetadataManager,
     SettingsManager,

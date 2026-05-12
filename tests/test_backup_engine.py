@@ -7,11 +7,14 @@ between this and SQL injection. These tests pin that contract.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import sqlite3
 from pathlib import Path
 
 import pytest
+
+_HAS_RBOX = importlib.util.find_spec("rbox") is not None
 
 from app.backup_engine import (
     _IDENT_RE,
@@ -474,7 +477,16 @@ class TestHistoryAndPrune:
 # ---------------------------------------------------------------------------
 
 class TestRestoreReqValidation:
-    """Pin the contract that restore needs at least one populated target."""
+    """Pin the contract that restore needs at least one populated target.
+
+    Skipped on platforms without ``rbox`` because ``app.main`` transitively
+    imports ``app.database`` -> ``app.live_database`` -> ``rbox``.
+    """
+
+    pytestmark = pytest.mark.skipif(
+        not _HAS_RBOX,
+        reason="pyrekordbox not installed on this platform",
+    )
 
     def test_blank_filename_and_null_hash_is_rejected(self) -> None:
         # Defer imports so the module is only loaded when running this test
