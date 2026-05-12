@@ -263,13 +263,21 @@ Don't run `git fetch` then proceed silently if there's drift. Always tell the us
 After **every code edit**, before reporting done, do these in this order:
 
 1. **Run the relevant linter / formatter:**
-   - Python files → `ruff check <file>` then `ruff format <file>` if available; otherwise just check syntax with `python -c "import ast; ast.parse(open('<file>').read())"`.
-   - Rust files → `cargo check --manifest-path src-tauri/Cargo.toml` and `cargo fmt --manifest-path src-tauri/Cargo.toml`.
-   - JS/TSX → `npx prettier --write <file>` if prettier is configured.
-2. **Run the tests that cover the file you changed**, not the entire suite (unless the change is cross-cutting).
-3. **For UI changes:** start `npm run dev:full` and verify the feature in a browser. Type-check passing ≠ feature working. If you can't launch a browser, say so explicitly.
-4. **Re-read `docs/FILE_MAP.md` if you added a file or significantly changed an existing one** — update the relevant row. The map is the single source of truth for navigating this repo.
-5. **Summarise in 1–2 sentences** what changed and what's verified. No long recaps — the diff speaks for itself.
+   - Python: `ruff check <file>` + `ruff format <file>` (config in `pyproject.toml`). For type checks: `mypy <file>`. As fallback: `python -c "import ast; ast.parse(open('<file>').read())"`.
+   - Rust: `cargo check --manifest-path src-tauri/Cargo.toml` + `cargo fmt --manifest-path src-tauri/Cargo.toml` + `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`.
+   - JS/JSX: `npx prettier --write <file>` + `npx eslint <file>` (config in `frontend/.eslintrc.cjs`).
+2. **Run the tests that cover the file you changed**, not the entire suite. Backend: `pytest tests/test_<area>.py -v`. Rust: `cargo test --manifest-path src-tauri/Cargo.toml <test_name>`. Frontend: `node --experimental-vm-modules frontend/src/audio/dawState/dawReducer.test.js` (or whatever the test scaffold is). Use `test-runner` subagent for a focused run + failure analysis.
+3. **For UI changes:** verify in a real browser. **Preferred:** use `e2e-tester` subagent with `preview_*` tools — it spawns dev servers, navigates, captures screenshots + console logs. Fallback: start `npm run dev:full` manually. Type-check passing ≠ feature working.
+4. **Re-read `docs/FILE_MAP.md` if you added a file or significantly changed an existing one** — update the relevant row. The map is the single source of truth for navigating this repo. Use the `doc-syncer` subagent for non-trivial doc sync.
+5. **If working in `docs/research/implement/inprogress_<slug>.md` and code just shipped:**
+   - Update `docs/architecture.md` to reflect the new data flow.
+   - Update `docs/FILE_MAP.md` with new files.
+   - Update the relevant `docs/{backend,frontend,rust}-index.md`.
+   - Update `CHANGELOG.md` if user-visible.
+   - `git mv` the doc to `docs/research/archived/implemented_<slug>_<YYYY-MM-DD>.md`.
+   - Append a `Lifecycle` line and update `docs/research/_INDEX.md`.
+   - Only then commit.
+6. **Summarise in 1–2 sentences** what changed and what's verified. No long recaps — the diff speaks for itself.
 
 If a step fails, fix the root cause. Don't bypass.
 
@@ -277,17 +285,40 @@ If a step fails, fix the root cause. Don't bypass.
 
 ## Where to find things — fast
 
-- **Master map:** `docs/FILE_MAP.md` (one-line-per-file for the whole codebase)
+### Navigation docs (start here)
+
+- **Master map:** `docs/FILE_MAP.md` — one-line-per-file for the whole codebase
 - **Architecture & data flows:** `docs/architecture.md`
-- **123 FastAPI routes:** `app/main.py` (see `docs/backend-index.md` for grouped route list)
+- **146 FastAPI routes:** `app/main.py` (see `docs/backend-index.md` for grouped route list)
 - **React component index:** `docs/frontend-index.md`
 - **Rust/Tauri index:** `docs/rust-index.md`
+
+### Feature lifecycle (work-in-flight)
+
+- **Research pipeline:** `docs/research/` — feature lifecycle (`research/` → `implement/` → `archived/`). Each feature gets its own `<state>_<slug>.md` doc.
+- **Live dashboard:** `docs/research/_INDEX.md` — mirrors the file system; check first when user mentions a feature area.
+- **Topic template:** `docs/research/_TEMPLATE.md` — copy when starting a new topic (use `/research-new` slash command).
+- **Pipeline rules:** `docs/research/README.md` — stages, prefixes, transition workflow, AI-assistant section.
+
+### Mission docs (active multi-phase work)
+
+- **Active handover protocols:** `docs/HANDOVER.md` — multi-phase mission briefings with DoD, status reporting, escalation rules.
+- **E2E testing channels:** `docs/e2e-testing.md` — Web Preview (`preview_*` tools) vs Tauri WebDriver, when to use which.
+
+### Reference docs
+
 - **Security model:** `docs/SECURITY.md`
-- **Project overview & history:** `docs/PROJECT_OVERVIEW.md`
+- **Project overview:** `docs/PROJECT_OVERVIEW.md`
 - **Naming conventions:** `docs/NAMING_MAP.md`
 - **Changelog:** `CHANGELOG.md`
 
-When unsure where logic lives, search `docs/FILE_MAP.md` first. It's cheaper than grepping.
+### Tooling config
+
+- **Python:** `pyproject.toml` — `ruff` (lint+format), `black` (legacy), `mypy` (type-check), `pytest` config. CI enforces all four green.
+- **Frontend:** `frontend/.eslintrc.cjs` + `frontend/.prettierrc` — ESLint react-standard + Prettier. `npm run lint` from `frontend/`.
+- **CI workflows:** `.github/workflows/ci.yml` (lint/test on push+PR), `release.yml` (release builds).
+
+When unsure where logic lives, search `docs/FILE_MAP.md` first. It's cheaper than grepping. When the user mentions a feature area, check `docs/research/_INDEX.md` second — it tells you if there's an in-flight plan you must not contradict.
 
 ---
 
@@ -305,6 +336,7 @@ Defined in `.claude/commands/`:
 - `/full-check` — run everything: lint + test + audit + cargo check
 - `/sync-check` — fetch + report local-vs-origin drift + open PRs
 - `/commit` — stage + atomic commit with Conventional-Commits message (splits unrelated changes)
+- `/research-new` — start a new research topic in `docs/research/research/idea_<slug>.md` (guided template copy + `_INDEX.md` update)
 
 ---
 
@@ -312,9 +344,11 @@ Defined in `.claude/commands/`:
 
 Defined in `.claude/agents/`:
 
-- `doc-syncer` — keep `docs/FILE_MAP.md`, `backend-index.md`, `frontend-index.md`, `rust-index.md` in sync with the codebase
+- `doc-syncer` — keep `docs/FILE_MAP.md`, `backend-index.md`, `frontend-index.md`, `rust-index.md` **and** `docs/research/_INDEX.md` in sync with the codebase + research-folder filesystem
 - `route-architect` — design + scaffold new FastAPI routes including auth gates, DB locks, and response models
 - `audio-stack-reviewer` — cross-stack reviewer for Python (librosa/madmom) + Rust (cpal/symphonia/rubato) audio paths
+- `test-runner` — run pytest / cargo test / frontend tests autonomously, parse output, surface first failure with file:line, suggest fix or escalate
+- `e2e-tester` — drive the actual app like a user via `preview_*` tools (web preview) or Tauri WebDriver, verify UI flows, capture screenshots + console logs
 
 Use them when a task fits — they keep the main context clean.
 
@@ -328,6 +362,21 @@ Use them when a task fits — they keep the main context clean.
 - **No new markdown files unless asked.** This file is enough.
 - **Parallel tool calls** are free. Use them.
 - **Commit autonomously, intensely, atomically** (see Commit strategy). **Never auto-push** — always confirm.
+
+---
+
+## Research-first rule for features
+
+**If the user asks for a feature that touches ≥ 2 modules or has multiple plausible approaches, start in `docs/research/`.** Don't dive into code first.
+
+Workflow:
+
+1. **Check `docs/research/_INDEX.md`** — is there already an in-flight doc for this area? If yes, read it end-to-end before suggesting anything. Findings and tried-options live there.
+2. **If no existing doc:** run `/research-new <slug>` to scaffold `docs/research/research/idea_<slug>.md` from the template, fill the Problem / Options / Constraints sections.
+3. **Move through stages explicitly:** `idea_` → `exploring_` → `evaluated_` → (sign-off) → `implement/draftplan_` → `review_` → `accepted_` → `inprogress_` → `archived/implemented_<date>`. State change = `git mv` + Lifecycle line + `_INDEX.md` update.
+4. **Skip the pipeline for:** one-off bug fixes, single-file refactors, plain questions, doc edits.
+
+**You may NOT promote states unilaterally.** `review_` → `accepted_` and `inprogress_` → `implemented_` require explicit user sign-off. Re-read `docs/research/README.md` for the rules.
 
 ---
 
