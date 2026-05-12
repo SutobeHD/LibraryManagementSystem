@@ -33,4 +33,13 @@ export const TOAST_DURATION_LONG_MS = 5000;
 // key + ANLZ write). Large WAV files (>30 MB) routinely take 30–60 s.
 // `0` disables the timeout completely — we trust the backend to either
 // finish or return an explicit error.
+//
+// Kept for backwards-compat: as of the async-import refactor the endpoint
+// returns 202-style {task_id} immediately and the frontend polls
+// /api/import/tasks, so the timeout is no longer load-bearing.
 export const AUDIO_IMPORT_TIMEOUT_MS = 0;
+
+// Poll cadence for /api/import/tasks while one or more uploaded files are
+// still being analysed in the background. 1 s feels live without spamming
+// the backend; the import_tracker snapshot is cheap (in-memory dict copy).
+export const IMPORT_TASK_POLL_INTERVAL_MS = 1000;

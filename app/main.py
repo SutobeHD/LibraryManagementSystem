@@ -888,7 +888,18 @@ def move_t(r: MoveReq):
     return {"moved": 0, "errors": ["Not supported in XML-only mode yet"]}
 
 @app.post("/api/tools/rename")
-def ren_t(r: RenameReq): return {"success": [], "errors": ["Not supported in XML-only mode yet"]}
+def ren_t(r: RenameReq):
+    """Bulk smart-rename audio files on disk using a token pattern.
+
+    Pattern tokens: %Artist%, %Title%, %BPM%, %Key%. Windows-illegal
+    characters are stripped. Returns {"success": [...], "errors": [...]}.
+    See LibraryTools.smart_rename for details.
+    """
+    try:
+        return LibraryTools.smart_rename(r.track_ids, r.pattern)
+    except Exception as e:
+        logger.error("smart_rename failed: %s", e, exc_info=True)
+        return {"success": [], "errors": [str(e)]}
 
 @app.get("/api/playlists/tree")
 def get_tree():
@@ -1728,9 +1739,43 @@ async def render(r: ExportRequest):
         logger.error(f"Render failed: {e}")
         raise HTTPException(500, safe_error_message(e))
 
+def _run_import_analysis(dest: Path, track_task_id: str) -> None:
+    """Worker: heavy analysis pipeline for one uploaded file. Runs in a daemon
+    thread; reports progress + final status into the import_tracker so the
+    frontend can pick it up via /api/import/tasks."""
+    from . import import_tracker
+    threading.current_thread()._lms_import_tid = track_task_id
+    try:
+        import_tracker.update(track_task_id, status="Analyzing", progress=30)
+        tid, analysis = ImportManager.process_import(dest)
+        import_tracker.update(
+            track_task_id, status="Completed", progress=100,
+            local_track_id=str(tid) if tid else None,
+            bpm=(analysis or {}).get("bpm"),
+            key=(analysis or {}).get("key"),
+            total_time=(analysis or {}).get("totalTime"),
+        )
+    except Exception as exc:
+        logger.error(f"Background import failed for {dest}: {exc}")
+        import_tracker.update(track_task_id, status="Failed", progress=100, error=str(exc))
+    finally:
+        try: del threading.current_thread()._lms_import_tid
+        except AttributeError: pass
+
+
 @app.post("/api/audio/import")
-def import_audio(files: List[UploadFile] = File(...)):
-    """Handles batch audio upload, analysis and library insertion."""
+def import_audio(files: List[UploadFile] = File(...), wait: bool = False):
+    """Batch audio upload + analysis + library insertion.
+
+    Default (wait=False, async):
+        Validates every file, copies it to MUSIC_DIR, registers a tracker
+        task, and spawns a daemon thread to run the analysis pipeline.
+        Returns immediately with [{filename, task_id, status: "Queued"}]
+        per file. Frontend polls /api/import/tasks for completion.
+
+    Synchronous (wait=true): kept for CLI / test usage — blocks until every
+        file has been analysed and returns the full result objects.
+    """
     from . import import_tracker
     results = []
     for file in files:
@@ -1750,38 +1795,57 @@ def import_audio(files: List[UploadFile] = File(...)):
                 dest = MUSIC_DIR / f"{stem}_{int(time.time())}.{ext}"
 
             track_task_id = import_tracker.register(str(dest), source="upload")
-            import_tracker.update(track_task_id, status="Importing", progress=10)
+            import_tracker.update(track_task_id, status="Uploading", progress=10)
 
             with open(dest, "wb") as f:
                 shutil.copyfileobj(file.file, f)
 
-            import_tracker.update(track_task_id, status="Analyzing", progress=30)
-            # bind so process_import → anlz_sidecar can post ANLZ stage updates
-            threading.current_thread()._lms_import_tid = track_task_id
-            try:
-                tid, analysis = ImportManager.process_import(dest)
-            finally:
-                try: del threading.current_thread()._lms_import_tid
-                except AttributeError: pass
+            import_tracker.update(track_task_id, status="Queued", progress=20)
 
-            import_tracker.update(
-                track_task_id, status="Completed", progress=100,
-                local_track_id=str(tid) if tid else None,
-                bpm=(analysis or {}).get("bpm"),
-                key=(analysis or {}).get("key"),
-            )
-            results.append({
-                "filename": file.filename, 
-                "status": "success", 
-                "id": tid,
-                "bpm": analysis.get("bpm"),
-                "totalTime": analysis.get("totalTime")
-            })
+            if wait:
+                # Synchronous path — preserve the legacy response shape so any
+                # CLI / test that still expects {id, bpm, totalTime} keeps working.
+                threading.current_thread()._lms_import_tid = track_task_id
+                try:
+                    import_tracker.update(track_task_id, status="Analyzing", progress=30)
+                    tid, analysis = ImportManager.process_import(dest)
+                finally:
+                    try: del threading.current_thread()._lms_import_tid
+                    except AttributeError: pass
+
+                import_tracker.update(
+                    track_task_id, status="Completed", progress=100,
+                    local_track_id=str(tid) if tid else None,
+                    bpm=(analysis or {}).get("bpm"),
+                    key=(analysis or {}).get("key"),
+                )
+                results.append({
+                    "filename": file.filename,
+                    "task_id": track_task_id,
+                    "status": "success",
+                    "id": tid,
+                    "bpm": analysis.get("bpm"),
+                    "totalTime": analysis.get("totalTime"),
+                })
+            else:
+                # Async path — kick off the heavy work in a daemon thread and
+                # return the task_id so the frontend can poll /api/import/tasks.
+                threading.Thread(
+                    target=_run_import_analysis,
+                    args=(dest, track_task_id),
+                    daemon=True,
+                    name=f"import-{track_task_id}",
+                ).start()
+                results.append({
+                    "filename": file.filename,
+                    "task_id": track_task_id,
+                    "status": "Queued",
+                })
         except Exception as e:
             logger.error(f"Import failed for {file.filename}: {e}")
             if track_task_id:
                 import_tracker.update(track_task_id, status="Failed", progress=100, error=str(e))
-            results.append({"filename": file.filename, "status": "error", "message": safe_error_message(e)})
+            results.append({"filename": file.filename, "task_id": track_task_id, "status": "error", "message": safe_error_message(e)})
     return results
 
 @app.get("/api/settings")

@@ -1,8 +1,8 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Upload, FileAudio, CheckCircle2, AlertCircle, Loader2, Play, Trash2, Scissors, HardDrive, RefreshCw, Shield, FolderOpen } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/api';
-import { AUDIO_IMPORT_TIMEOUT_MS } from '../config/constants';
+import { AUDIO_IMPORT_TIMEOUT_MS, IMPORT_TASK_POLL_INTERVAL_MS } from '../config/constants';
 
 const AUDIO_EXTENSIONS = ['.wav', '.mp3', '.flac', '.aiff', '.aif', '.alac', '.m4a', '.aac', '.ogg', '.wma', '.opus'];
 
@@ -79,6 +79,26 @@ const ImportView = ({ onSelectTrack, onImportComplete }) => {
     const [sampleRate, setSampleRate] = useState('original');
     const [backupOriginals, setBackupOriginals] = useState(true);
     const [qualityStats, setQualityStats] = useState({ lossless: 0, lossy: 0, total: 0 });
+
+    // Holds the setInterval id for the /api/import/tasks poll loop so we can
+    // tear it down on unmount and when every active row reaches a terminal
+    // state. Kept in a ref because we don't want a re-render on every tick.
+    const pollIntervalRef = useRef(null);
+    // Set of task_ids the polling loop is still tracking. When this empties
+    // we stop polling. Kept in a ref so the interval callback always sees
+    // the latest value without re-creating the interval.
+    const activeTaskIdsRef = useRef(new Set());
+
+    // Cleanup on unmount — never leak an interval if the user navigates away
+    // mid-import.
+    useEffect(() => {
+        return () => {
+            if (pollIntervalRef.current) {
+                clearInterval(pollIntervalRef.current);
+                pollIntervalRef.current = null;
+            }
+        };
+    }, []);
 
     useEffect(() => {
         api.get('/api/library/quality-stats').then(res => {
@@ -209,19 +229,97 @@ const ImportView = ({ onSelectTrack, onImportComplete }) => {
             status: 'pending',
             progress: 0,
             error: null,
-            trackId: null
+            trackId: null,
+            // taskId is assigned after the /api/audio/import POST returns.
+            // While null the poll loop skips the row.
+            taskId: null,
+            bpm: null,
+            totalTime: null,
         }));
         setFiles(prev => [...prev, ...fileObjects]);
     };
+
+    // Map a backend tracker status (Queued/Uploading/Analyzing/Importing/
+    // Completed/Failed/Skipped) onto the three states the row UI knows about
+    // (uploading / success / error). Any non-terminal stage stays "uploading"
+    // because the progress bar + spinner already convey "still working".
+    const trackerToRowStatus = (taskStatus) => {
+        if (taskStatus === 'Completed') return 'success';
+        if (taskStatus === 'Failed') return 'error';
+        if (taskStatus === 'Skipped') return 'success';  // already in library counts as done
+        return 'uploading';
+    };
+
+    const stopPolling = useCallback(() => {
+        if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
+        }
+        activeTaskIdsRef.current.clear();
+    }, []);
+
+    const pollImportTasks = useCallback(async () => {
+        if (!activeTaskIdsRef.current.size) {
+            stopPolling();
+            return;
+        }
+        try {
+            const res = await api.get('/api/import/tasks');
+            const snapshot = res.data || {};
+            const stillActive = new Set();
+            let anyTerminal = false;
+
+            setFiles(prev => prev.map(row => {
+                if (!row.taskId || !activeTaskIdsRef.current.has(row.taskId)) return row;
+                const task = snapshot[row.taskId];
+                if (!task) {
+                    // Tracker hasn't picked it up yet — keep polling.
+                    stillActive.add(row.taskId);
+                    return row;
+                }
+                const taskStatus = task.status;
+                const terminal = ['Completed', 'Failed', 'Skipped'].includes(taskStatus);
+                if (!terminal) stillActive.add(row.taskId);
+                else anyTerminal = true;
+
+                return {
+                    ...row,
+                    status: trackerToRowStatus(taskStatus),
+                    progress: typeof task.progress === 'number' ? task.progress : row.progress,
+                    trackId: task.local_track_id || row.trackId,
+                    bpm: typeof task.bpm === 'number' ? task.bpm : row.bpm,
+                    totalTime: typeof task.total_time === 'number' ? task.total_time : row.totalTime,
+                    error: taskStatus === 'Failed' ? (task.error || 'Import failed') : row.error,
+                };
+            }));
+
+            activeTaskIdsRef.current = stillActive;
+
+            if (!stillActive.size) {
+                stopPolling();
+                setImporting(false);
+                if (anyTerminal && onImportComplete) onImportComplete();
+            }
+        } catch (err) {
+            console.warn('[Import] task-poll failed', err);
+        }
+    }, [onImportComplete, stopPolling]);
 
     const startImport = async () => {
         if (files.length === 0 || importing) return;
         setImporting(true);
 
-        for (let i = 0; i < files.length; i++) {
-            if (files[i].status !== 'pending') continue;
-            const current = files[i];
-            updateFileStatus(current.id, { status: 'uploading' });
+        // Snapshot the pending rows up-front so we don't re-iterate stale state
+        // between async POSTs. We mutate setFiles after each response to bind
+        // the returned task_id to the row.
+        const pending = files.filter(f => f.status === 'pending');
+        if (!pending.length) {
+            setImporting(false);
+            return;
+        }
+
+        for (const current of pending) {
+            updateFileStatus(current.id, { status: 'uploading', progress: 0 });
 
             const formData = new FormData();
             formData.append('files', current.file);
@@ -230,31 +328,44 @@ const ImportView = ({ onSelectTrack, onImportComplete }) => {
                 const res = await api.post('/api/audio/import', formData, {
                     timeout: AUDIO_IMPORT_TIMEOUT_MS,
                     onUploadProgress: (progressEvent) => {
-                        const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+                        // Upload-only progress: caps at ~30 because the
+                        // tracker takes over once the backend starts
+                        // analysing. Keeps the bar moving during the upload.
+                        const percent = Math.round((progressEvent.loaded * 30) / progressEvent.total);
                         updateFileStatus(current.id, { progress: percent });
                     }
                 });
 
-                if (res.data && res.data[0].status === 'success') {
+                const entry = Array.isArray(res.data) ? res.data[0] : null;
+                if (entry && entry.task_id && entry.status !== 'error') {
+                    activeTaskIdsRef.current.add(entry.task_id);
                     updateFileStatus(current.id, {
-                        status: 'success',
-                        progress: 100,
-                        trackId: res.data[0].id,
-                        bpm: res.data[0].bpm,
-                        totalTime: res.data[0].totalTime
+                        status: 'uploading',
+                        taskId: entry.task_id,
+                        progress: 30,
                     });
-                    if (onImportComplete) onImportComplete();
                 } else {
                     updateFileStatus(current.id, {
                         status: 'error',
-                        error: res.data[0]?.message || 'Import failed'
+                        error: entry?.message || 'Import failed',
                     });
                 }
             } catch (err) {
                 updateFileStatus(current.id, { status: 'error', error: err.message });
             }
         }
-        setImporting(false);
+
+        // Start (or refresh) the shared poll loop. Idempotent — we only
+        // create the interval if there's nothing running yet.
+        if (activeTaskIdsRef.current.size && !pollIntervalRef.current) {
+            pollIntervalRef.current = setInterval(pollImportTasks, IMPORT_TASK_POLL_INTERVAL_MS);
+            // Fire one immediately so the user doesn't sit on stale state
+            // for a full interval.
+            pollImportTasks();
+        } else if (!activeTaskIdsRef.current.size) {
+            // Every upload errored out before queueing — no point polling.
+            setImporting(false);
+        }
     };
 
     const updateFileStatus = (id, updates) => {

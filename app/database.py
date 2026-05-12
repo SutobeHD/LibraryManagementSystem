@@ -1029,6 +1029,47 @@ class RekordboxDB:
     def update_track_comment(self, tid: str, comment: str) -> bool:
         return self.update_tracks_metadata([tid], {"Comment": comment})
 
+    def update_track_path(self, tid: str, new_path: str) -> bool:
+        """Update the on-disk file path of a track after a rename operation.
+
+        XML mode: rewrites both the in-memory track dict's ``path`` key and
+        re-encodes ``Location`` on the next ``save_xml()`` (Location is
+        derived from path, not stored separately in memory). The XML file
+        is persisted before returning.
+
+        Live mode: rbox's master.db stores FolderPath / FileNameL as two
+        separate columns and the rbox API does not expose a stable
+        write path for the file-name component. We attempt the in-memory
+        cache update so the UI stays consistent, but the master.db itself
+        is not modified — direct file-rename inside Rekordbox is fragile
+        and best done via Rekordbox's own "Relocate" feature. Returns
+        False in live mode after logging a warning so callers can surface
+        the limitation to the user.
+        """
+        tid = str(tid)
+        if self.mode == "xml":
+            if tid not in self.xml_db.tracks:
+                logger.warning("update_track_path: track %s not in XML DB", tid)
+                return False
+            self.xml_db.tracks[tid]["path"] = new_path
+            self.xml_db.save_xml()
+            logger.info("update_track_path: XML track %s -> %s", tid, new_path)
+            return True
+        else:
+            # Live mode: keep the cached path in sync so the UI reflects
+            # the on-disk rename, but don't touch master.db — rbox track
+            # path mutations require split FolderPath/FileNameL writes
+            # that are not safely exposed.
+            if self.live_db and tid in self.live_db.tracks:
+                self.live_db.tracks[tid]["path"] = new_path
+            logger.warning(
+                "update_track_path: live-mode rename for track %s — in-memory cache "
+                "updated but master.db FolderPath/FileNameL was NOT persisted. Use "
+                "Rekordbox's 'Relocate' feature to repair the link.",
+                tid,
+            )
+            return False
+
 
 # Wrap every mutating method on the facade with the module-level write
 # lock so concurrent route handlers can't race against each other.
@@ -1041,6 +1082,7 @@ for _name in (
     "create_folder", "create_smart_playlist", "update_smart_playlist",
     "create_playlist", "add_track_to_playlist", "remove_track_from_playlist",
     "save", "update_tracks_metadata", "update_track_comment",
+    "update_track_path",
 ):
     setattr(RekordboxDB, _name, _serialised(getattr(RekordboxDB, _name)))
 del _name

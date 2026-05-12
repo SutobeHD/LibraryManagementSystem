@@ -2,7 +2,30 @@ import React, { useState, useEffect } from 'react';
 import api from '../api/api';
 import toast from 'react-hot-toast';
 import { confirmModal } from './ConfirmModal';
-import { Download, RefreshCw, Scissors, Copy, Wand2, Search, Check, X, Merge, Sparkles, Loader2 } from 'lucide-react';
+import { log } from '../utils/log';
+import { Download, RefreshCw, Scissors, Copy, Wand2, Search, Check, X, Merge, Sparkles, Loader2, Eye, AlertTriangle } from 'lucide-react';
+
+const RENAME_PATTERN_LS_KEY = 'rb-editor:smart-rename:last-pattern';
+const DEFAULT_RENAME_PATTERN = '%Artist% - %Title% [%BPM%]';
+const RENAME_TOKENS = ['%Artist%', '%Title%', '%BPM%', '%Key%'];
+
+// Mirror of LibraryTools.smart_rename's token substitution + sanitisation,
+// used for the client-side preview only. The backend remains the source of
+// truth for the actual rename.
+const buildRenameName = (track, pattern) => {
+    const artist = track.Artist || '';
+    const title = track.Title || '';
+    const bpm = String(Math.round(Number(track.BPM) || 0));
+    const key = track.Key || '';
+    let name = pattern
+        .replaceAll('%Artist%', artist)
+        .replaceAll('%Title%', title)
+        .replaceAll('%BPM%', bpm)
+        .replaceAll('%Key%', key);
+    // Match Python re.sub(r'[<>:"/\\|?*]', '', ...).strip()
+    name = name.replace(/[<>:"/\\|?*]/g, '').trim();
+    return name;
+};
 
 const ToolsView = () => {
     const [activeTab, setActiveTab] = useState('duplicates');
@@ -12,8 +35,25 @@ const ToolsView = () => {
     const [scanning, setScanning] = useState(false);
     const [merging, setMerging] = useState(false);
 
-    // Rename State
-    const [pattern, setPattern] = useState("%artist% - %title%");
+    // Smart Rename State
+    // Pattern is persisted to localStorage so the user doesn't retype it
+    // between sessions. Default matches LibraryTools.smart_rename's token set.
+    const [pattern, setPattern] = useState(() => {
+        try {
+            return localStorage.getItem(RENAME_PATTERN_LS_KEY) || DEFAULT_RENAME_PATTERN;
+        } catch {
+            return DEFAULT_RENAME_PATTERN;
+        }
+    });
+    // TODO: ToolsView is not currently passed track-selection from a parent.
+    // For now Smart Rename operates on ALL tracks in the library; the UI
+    // makes this explicit and the confirm modal warns before any rename.
+    const [allTracks, setAllTracks] = useState([]);
+    const [tracksLoading, setTracksLoading] = useState(false);
+    const [renamePreview, setRenamePreview] = useState([]); // { id, from, to, sameName }
+    const [renamePreviewBuilt, setRenamePreviewBuilt] = useState(false);
+    const [renameRunning, setRenameRunning] = useState(false);
+    const [renameResult, setRenameResult] = useState(null); // { success, errors }
 
     // Comment Editor State
     const [playlists, setPlaylists] = useState([]);
@@ -105,6 +145,89 @@ const ToolsView = () => {
             setDuplicates(res.data);
         } catch (e) { console.error(e); }
         finally { setScanning(false); }
+    };
+
+    // Persist pattern as the user edits it so a refresh / tab switch
+    // doesn't blow away their work.
+    useEffect(() => {
+        try { localStorage.setItem(RENAME_PATTERN_LS_KEY, pattern); } catch (e) { log.warn('rename pattern persist failed', e); }
+    }, [pattern]);
+
+    // Lazy-load the track list the first time the user opens the Rename tab.
+    useEffect(() => {
+        if (activeTab !== 'rename') return;
+        if (allTracks.length > 0 || tracksLoading) return;
+        setTracksLoading(true);
+        api.get('/api/library/tracks')
+            .then(res => setAllTracks(Array.isArray(res.data) ? res.data : []))
+            .catch(e => { log.error('failed to fetch library tracks for rename preview', e); toast.error('Could not load track list'); })
+            .finally(() => setTracksLoading(false));
+    }, [activeTab, allTracks.length, tracksLoading]);
+
+    const insertToken = (token) => setPattern(prev => `${prev}${token}`);
+
+    const handleRenamePreview = () => {
+        if (!pattern.trim()) {
+            toast.error('Pattern is empty');
+            return;
+        }
+        if (allTracks.length === 0) {
+            toast.error('No tracks loaded yet');
+            return;
+        }
+        const rows = allTracks.map(t => {
+            const tid = String(t.id || t.ID || '');
+            const from = (t.path || t.FolderPath || '').split(/[\\/]/).pop() || `(track ${tid})`;
+            const baseName = buildRenameName(t, pattern);
+            // Preserve extension from current path so the preview is honest
+            const ext = (from.includes('.') ? from.slice(from.lastIndexOf('.')) : '');
+            const to = baseName ? `${baseName}${ext}` : '(empty)';
+            return { id: tid, from, to, sameName: from === to };
+        });
+        setRenamePreview(rows);
+        setRenamePreviewBuilt(true);
+        setRenameResult(null);
+    };
+
+    const handleRenameApply = async () => {
+        if (!pattern.trim()) { toast.error('Pattern is empty'); return; }
+        if (allTracks.length === 0) { toast.error('No tracks loaded'); return; }
+        const trackIds = allTracks
+            .map(t => String(t.id || t.ID || ''))
+            .filter(Boolean);
+        if (trackIds.length === 0) { toast.error('No valid track IDs'); return; }
+        if (!(await confirmModal({
+            title: `Rename ${trackIds.length} tracks?`,
+            message: `Every audio file in the library will be renamed on disk using:\n\n${pattern}\n\nThis modifies files outside this app and cannot be undone automatically. Make sure you have a backup.`,
+            confirmLabel: 'Rename All',
+            danger: true,
+        }))) return;
+
+        setRenameRunning(true);
+        setRenameResult(null);
+        try {
+            const res = await api.post('/api/tools/rename', {
+                track_ids: trackIds,
+                pattern,
+            });
+            const success = Array.isArray(res.data?.success) ? res.data.success : [];
+            const errors = Array.isArray(res.data?.errors) ? res.data.errors : [];
+            setRenameResult({ success, errors });
+            if (errors.length === 0) {
+                toast.success(`Renamed ${success.length} tracks`);
+            } else if (success.length === 0) {
+                toast.error(`Rename failed (${errors.length} errors)`);
+            } else {
+                toast.success(`Renamed ${success.length} of ${trackIds.length} (${errors.length} errors)`);
+            }
+            log.info('smart_rename result', { success: success.length, errors });
+        } catch (e) {
+            log.error('rename request failed', e);
+            toast.error('Rename request failed');
+            setRenameResult({ success: [], errors: [String(e?.message || e)] });
+        } finally {
+            setRenameRunning(false);
+        }
     };
 
     const handleCommentRun = async () => {
@@ -303,25 +426,110 @@ const ToolsView = () => {
                                 <Scissors size={20} /> Smart Rename
                             </h2>
 
-                            <div className="mb-6">
+                            <div className="mb-4 flex items-start gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                                <AlertTriangle size={14} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                                <p className="text-xs text-amber-200 leading-relaxed">
+                                    Smart Rename currently operates on every track in the library. Files are renamed on disk and library links are rewritten — this cannot be undone automatically.
+                                </p>
+                            </div>
+
+                            <div className="mb-4">
                                 <label className="text-[10px] text-ink-muted uppercase font-bold mb-2 block tracking-widest leading-none">Pattern</label>
                                 <input
                                     value={pattern}
                                     onChange={e => setPattern(e.target.value)}
+                                    placeholder={DEFAULT_RENAME_PATTERN}
                                     className="input-glass w-full font-mono text-fuchsia-400"
                                 />
-                                <p className="text-xs text-ink-muted mt-2">Available: %artist%, %title%, %bpm%, %key%</p>
-                            </div>
-
-                            <div className="flex-1 bg-black/20 rounded-xl mb-4 overflow-hidden border border-white/5 relative">
-                                <div className="absolute inset-0 flex items-center justify-center text-ink-placeholder font-bold text-lg opacity-20 rotate-[-12deg]">
-                                    PREVIEW MODE
+                                <div className="flex flex-wrap items-center gap-2 mt-3">
+                                    <span className="text-[10px] text-ink-muted uppercase font-bold tracking-widest">Tokens</span>
+                                    {RENAME_TOKENS.map(tok => (
+                                        <button
+                                            key={tok}
+                                            type="button"
+                                            onClick={() => insertToken(tok)}
+                                            className="px-2 py-1 bg-fuchsia-500/10 hover:bg-fuchsia-500/20 border border-fuchsia-500/30 text-fuchsia-300 text-[11px] font-mono rounded transition-colors"
+                                        >
+                                            {tok}
+                                        </button>
+                                    ))}
                                 </div>
                             </div>
 
-                            <button className="btn-ghost w-full border-fuchsia-500/30 text-fuchsia-400 hover:bg-fuchsia-500/10 flex justify-center gap-2 py-4">
-                                <Wand2 size={18} /> Apply Rename Pattern
-                            </button>
+                            <div className="mb-4 flex items-center justify-between text-xs">
+                                <div className="text-ink-muted">
+                                    Affected: <span className="text-ink-primary font-bold">{tracksLoading ? '…' : allTracks.length}</span> tracks
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={handleRenamePreview}
+                                        disabled={tracksLoading || allTracks.length === 0 || renameRunning}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 text-ink-primary rounded-lg border border-white/10 transition-colors text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <Eye size={12} /> Preview
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleRenameApply}
+                                        disabled={tracksLoading || allTracks.length === 0 || renameRunning}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-fuchsia-500/20 hover:bg-fuchsia-500/30 text-fuchsia-300 rounded-lg border border-fuchsia-500/40 transition-colors text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {renameRunning ? <RefreshCw size={12} className="animate-spin" /> : <Wand2 size={12} />}
+                                        {renameRunning ? 'Renaming…' : 'Rename All'}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="flex-1 bg-black/20 rounded-xl overflow-hidden border border-white/5 flex flex-col">
+                                {tracksLoading ? (
+                                    <div className="flex-1 flex items-center justify-center text-ink-muted">
+                                        <Loader2 size={28} className="animate-spin opacity-50" />
+                                    </div>
+                                ) : !renamePreviewBuilt ? (
+                                    <div className="flex-1 flex flex-col items-center justify-center text-ink-muted px-8 text-center">
+                                        <Eye size={48} className="mb-4 opacity-20" />
+                                        <p className="text-sm">Click <span className="text-fuchsia-300 font-bold">Preview</span> to see the first 5 renames before applying.</p>
+                                    </div>
+                                ) : (
+                                    <div className="flex-1 overflow-y-auto p-3 space-y-2 scrollbar-hide">
+                                        <div className="text-[10px] text-ink-muted uppercase font-bold tracking-widest mb-1 px-1">
+                                            Preview (first 5 of {renamePreview.length})
+                                        </div>
+                                        {renamePreview.slice(0, 5).map((row, i) => (
+                                            <div
+                                                key={row.id || i}
+                                                className={`flex items-center gap-3 px-3 py-2 rounded-lg border text-xs font-mono ${row.sameName ? 'bg-white/[0.02] border-white/5 text-ink-muted' : 'bg-fuchsia-500/5 border-fuchsia-500/20 text-ink-primary'}`}
+                                            >
+                                                <div className="flex-1 truncate" title={row.from}>{row.from}</div>
+                                                <div className="text-fuchsia-400 flex-shrink-0">→</div>
+                                                <div className="flex-1 truncate text-right" title={row.to}>{row.to}</div>
+                                            </div>
+                                        ))}
+                                        {renamePreview.length > 5 && (
+                                            <div className="text-[11px] text-ink-muted text-center pt-2">
+                                                … and {renamePreview.length - 5} more
+                                            </div>
+                                        )}
+                                        {renameResult && (
+                                            <div className="mt-4 pt-4 border-t border-white/5 space-y-1">
+                                                <div className="text-[10px] text-ink-muted uppercase font-bold tracking-widest">Last Result</div>
+                                                <div className="text-xs text-emerald-400">{renameResult.success.length} succeeded</div>
+                                                {renameResult.errors.length > 0 && (
+                                                    <div className="text-xs text-red-400">{renameResult.errors.length} error(s):
+                                                        <ul className="list-disc list-inside mt-1 space-y-0.5 text-ink-muted font-mono">
+                                                            {renameResult.errors.slice(0, 5).map((err, idx) => (
+                                                                <li key={idx} className="truncate" title={err}>{err}</li>
+                                                            ))}
+                                                            {renameResult.errors.length > 5 && <li>… and {renameResult.errors.length - 5} more</li>}
+                                                        </ul>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     )}
 
