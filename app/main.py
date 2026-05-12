@@ -3,7 +3,6 @@ import logging
 import os
 import secrets
 import shutil
-import sqlite3
 import sys
 import threading
 import time
@@ -19,7 +18,6 @@ from fastapi import (
     FastAPI,
     File,
     Form,
-    Header,
     HTTPException,
     Request,
     Response,
@@ -28,7 +26,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel
 
 # EC9: Load .env file so SOUNDCLOUD_CLIENT_ID etc. are available as env-vars.
 # python-dotenv is a soft dependency; if missing we fall back to os.environ silently.
@@ -70,9 +68,8 @@ KEYRING_SC_TOKEN = "sc_token"
 
 from . import audio_tags, download_registry, folder_watcher
 from .audio_analyzer import LIBROSA_AVAILABLE, AudioAnalyzer
-from .backup_engine import BackupEngine
 from .config import EXPORT_DIR, LOG_DIR, MUSIC_DIR, TEMP_DIR
-from .database import db, db_lock
+from .database import db
 from .phrase_generator import (
     commit_cues_to_db,
     detect_first_downbeat,
@@ -96,7 +93,6 @@ from .services import (
     LibraryTools,
     ProjectManager,
     SettingsManager,
-    SystemCleaner,
 )
 from .soundcloud_api import (
     AuthExpiredError,
@@ -319,7 +315,6 @@ class SetReq(BaseModel):
     # checked; everything else is preserved verbatim via model_extra.
     model_config = {"extra": "allow"}
 
-    backup_retention_days: int = 7
     default_export_format: str = "wav"
     default_export_dir: str = ""  # User-selectable default folder for audio exports; empty = backend EXPORT_DIR
     theme: str = "dark"
@@ -331,8 +326,6 @@ class SetReq(BaseModel):
     remember_lib_mode: bool = False
     last_lib_mode: str = "xml"
     ranking_filter_mode: str = "all"
-    archive_frequency: str = "daily"
-    last_archive_date: str = ""
     insights_playcount_threshold: int = 0
     insights_bitrate_threshold: int = 320
     soundcloud_auth_token: str = ""
@@ -1194,138 +1187,18 @@ def set_lib_mode(r: DBModeReq):
         logger.info(f"Library reloaded in {r.mode} mode. Tracks: {len(db.tracks)}")
     return {"status": "success" if success else "error", "mode": db.mode}
 
-def _live_db_path() -> str | None:
-    """Return the active live-mode master.db path, or None if not in live mode."""
-    if db.mode != "live" or not db.active_db or not hasattr(db.active_db, "db_path"):
-        return None
-    return str(db.active_db.db_path)
-
-
-@app.post("/api/library/backup")
-def trigger_backup():
-    """Create an incremental backup. Holds ``_db_write_lock`` so concurrent
-    rbox writers can't race against the snapshot read."""
-    path = _live_db_path()
-    if not path:
-        return {"status": "error", "message": "Backups only supported in live mode"}
-    try:
-        engine = BackupEngine(path)
-        with db_lock():
-            return engine.snapshot("Manual backup")
-    except (OSError, sqlite3.Error) as e:
-        logger.error("trigger_backup: snapshot failed err=%s — falling back to legacy", e)
-        try:
-            with db_lock():
-                success = db.active_db._ensure_backup()
-            return {"status": "success" if success else "error", "fallback": True}
-        except (OSError, sqlite3.Error) as e2:
-            logger.error("trigger_backup: legacy fallback also failed err=%s", e2)
-            return {"status": "error", "message": str(e2)}
-
-
 @app.post("/api/library/sync")
 def sync_lib():
-    """Triggered by 'Create Backup' (formerly Sync).
+    """Persist the in-memory library.
 
-    Live Mode: incremental snapshot under ``_db_write_lock``.
-    XML Mode: writes the XML.
+    XML mode: writes ``rekordbox.xml`` to disk.
+    Live mode: no-op — rbox writes through on every mutation, so there is
+    nothing extra to commit.
     """
-    path = _live_db_path()
-    if path:
-        try:
-            engine = BackupEngine(path)
-            with db_lock():
-                result = engine.snapshot("Sync backup")
-            return {"status": "success", "message": "Backup created successfully", **result}
-        except (OSError, sqlite3.Error) as e:
-            logger.error("sync_lib: snapshot failed err=%s", e)
-            return {"status": "error", "message": str(e)}
+    if db.mode == "live":
+        return {"status": "success", "message": "Live mode — changes auto-saved"}
     success = db.save()
     return {"status": "success" if success else "error"}
-
-
-@app.get("/api/library/backups")
-def list_backups():
-    """Get backup history (incremental commits + legacy backups)."""
-    path = _live_db_path()
-    if not path:
-        return []
-    try:
-        engine = BackupEngine(path)
-        return engine.get_history()
-    except OSError as e:
-        logger.error("list_backups: history read failed err=%s — falling back to legacy", e)
-        return db.active_db.get_available_backups()
-
-
-class RestoreReq(BaseModel):
-    """Restore request. Exactly one of ``filename`` or ``commit_hash`` must
-    be populated. Empty strings count as unset."""
-
-    filename: str = ""
-    commit_hash: str | None = None
-
-    @model_validator(mode="after")
-    def _require_one_target(self) -> "RestoreReq":
-        has_filename = bool(self.filename and self.filename.strip())
-        has_hash = bool(self.commit_hash and self.commit_hash.strip())
-        if not has_filename and not has_hash:
-            raise ValueError("Either 'filename' (legacy) or 'commit_hash' (incremental) must be provided")
-        return self
-
-
-@app.post("/api/library/restore")
-def restore_backup(
-    r: RestoreReq,
-    x_session_token: str = Header(default=""),
-):
-    """Restore from incremental commit or legacy backup.
-
-    Both paths take ``_db_write_lock`` because they rewrite the active
-    ``master.db``. Legacy path replaces the file outright via ``shutil.copy2``
-    while rbox might still hold it — the lock prevents concurrent writers
-    from making it worse.
-
-    Restore is destructive (overwrites the entire library) so it sits behind
-    the same ``X-Session-Token`` as ``/api/system/shutdown``. The frontend
-    axios interceptor attaches the header automatically; non-browser clients
-    must pick the token up from ``GET /api/system/heartbeat``.
-    """
-    if x_session_token != SHUTDOWN_TOKEN:
-        logger.warning("SECURITY: Unauthorized restore attempt (token mismatch)")
-        raise HTTPException(status_code=403, detail="Invalid session token")
-
-    path = _live_db_path()
-    if not path:
-        return {"status": "error", "message": "Restore only available in Live mode"}
-
-    if r.commit_hash:
-        try:
-            engine = BackupEngine(path)
-            with db_lock():
-                return engine.restore(r.commit_hash)
-        except (OSError, sqlite3.Error) as e:
-            logger.error("restore_backup: incremental failed hash=%s err=%s", r.commit_hash, e)
-            return {"status": "error", "message": str(e)}
-
-    # Legacy path: filename-based full-copy restore.
-    try:
-        with db_lock():
-            success, msg = db.active_db.restore_backup(r.filename)
-        return {"status": "success" if success else "error", "message": msg}
-    except OSError as e:
-        logger.error("restore_backup: legacy failed file=%s err=%s", r.filename, e)
-        return {"status": "error", "message": str(e)}
-
-
-@app.get("/api/library/backup/{commit_hash}/diff")
-def get_backup_diff(commit_hash: str):
-    """Get detailed diff for a specific backup commit."""
-    path = _live_db_path()
-    if not path:
-        return {"error": "Not available in current mode"}
-    engine = BackupEngine(path)
-    return engine.get_diff(commit_hash)
 
 class LoadLibReq(BaseModel):
     path: str | None = None
@@ -2070,56 +1943,6 @@ def folder_watcher_remove(r: PathRequest):
 
 # --- GRACEFUL SHUTDOWN ---
 _shutdown_event = threading.Event()
-_auto_backup_task: asyncio.Task | None = None
-
-
-async def _auto_backup_loop() -> None:
-    """Background loop that snapshots the live DB on the configured cadence.
-
-    Re-reads settings every iteration so interval / enable toggles apply
-    without a backend restart. Errors are logged but never crash the loop
-    — a single failed snapshot must not stop future ones.
-
-    When disabled (``auto_backup_interval_min <= 0``) the loop polls
-    settings every 60 s so re-enabling takes effect within a minute.
-    """
-    logger.info("auto-backup loop: started")
-    while True:
-        try:
-            cfg = SettingsManager.load()
-            interval_min = max(0, int(cfg.get("auto_backup_interval_min") or 0))
-            if interval_min < 1:
-                await asyncio.sleep(60.0)
-                continue
-
-            await asyncio.sleep(interval_min * 60.0)
-
-            path = _live_db_path()
-            if not path:
-                continue
-
-            def _snap() -> dict:
-                engine = BackupEngine(path)
-                with db_lock():
-                    return engine.snapshot(f"Auto-backup (every {interval_min}min)")
-
-            result = await asyncio.to_thread(_snap)
-            status = result.get("status")
-            if status == "success":
-                logger.info(
-                    "auto-backup: hash=%s stats=%s",
-                    result.get("hash"), result.get("stats"),
-                )
-            elif status == "unchanged":
-                logger.debug("auto-backup: unchanged hash=%s", result.get("hash"))
-            else:
-                logger.warning("auto-backup: %s", result.get("message"))
-        except asyncio.CancelledError:
-            logger.info("auto-backup loop: cancelled")
-            raise
-        except (OSError, sqlite3.Error) as e:
-            logger.error("auto-backup: iteration failed err=%s", e)
-            await asyncio.sleep(60.0)
 
 def _graceful_shutdown():
     """Performs cleanup before shutting down the backend."""
@@ -2189,46 +2012,12 @@ async def startup_event():
     except Exception as e:
         logger.error(f"FolderWatcher startup failed: {e}", exc_info=True)
 
-    # Auto-backup on launch (snapshot once if enabled). Runs after the library
-    # has loaded so ``_live_db_path()`` resolves.
-    try:
-        cfg = SettingsManager.load()
-        if cfg.get("auto_backup") and _live_db_path():
-            path = _live_db_path()
-
-            def _launch_snap() -> dict:
-                engine = BackupEngine(path)
-                with db_lock():
-                    return engine.snapshot("Auto-backup on launch")
-
-            result = await asyncio.to_thread(_launch_snap)
-            logger.info(
-                "auto-backup on launch: status=%s hash=%s",
-                result.get("status"), result.get("hash"),
-            )
-    except (OSError, sqlite3.Error) as e:
-        logger.error("auto-backup on launch failed err=%s", e)
-
-    # Background snapshot loop driven by ``auto_backup_interval_min``.
-    global _auto_backup_task
-    _auto_backup_task = asyncio.create_task(_auto_backup_loop())
-
-
 @app.on_event("shutdown")
 async def shutdown_watcher_event():
     try:
         folder_watcher.shutdown_watcher()
     except Exception as exc:
         logger.warning("FolderWatcher shutdown error: %s", exc)
-
-    global _auto_backup_task
-    if _auto_backup_task is not None:
-        _auto_backup_task.cancel()
-        try:
-            await _auto_backup_task
-        except asyncio.CancelledError:
-            pass
-        _auto_backup_task = None
 
 @app.post("/api/system/heartbeat")
 def heartbeat():
@@ -2260,18 +2049,6 @@ async def restart(token: str = ""):
     threading.Thread(target=restart_proc, daemon=True).start()
     return {"message": "Restarting backend..."}
 
-@app.post("/api/system/cleanup")
-def system_cleanup():
-    """Prune legacy + incremental backups older than the retention window.
-
-    Driven by ``backup_retention_days`` in settings. Keeps the newest of
-    each legacy kind and the commit on HEAD. Returns counts.
-    """
-    try:
-        return SystemCleaner.cleanup_old_backups()
-    except OSError as e:
-        logger.error("system_cleanup: failed err=%s", e)
-        return {"deleted_legacy": 0, "deleted_commits": 0, "freed_bytes": 0, "error": str(e)}
 
 @app.post("/api/system/select_db")
 def select_db_dialog():
