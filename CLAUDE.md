@@ -135,19 +135,28 @@ Defined in `.claude/commands/`:
 
 ---
 
-## Subagents available
+## Subagents — DEFAULT ON, not optional
 
-Defined in `.claude/agents/`:
+Spawn an agent when its trigger fires. **Don't do the agent's work inline** — that's what the agent exists for, and inline-doing it floods the main context with tool output you'll have to re-read later.
 
-| Agent | Use when |
-|-------|----------|
-| `doc-syncer` | Sync FILE_MAP / backend/frontend/rust-index / research/_INDEX against code+FS |
-| `route-architect` | Design new FastAPI routes with all conventions applied |
-| `audio-stack-reviewer` | Review Python DSP + Rust audio. Actively runs cargo check/clippy + ruff + mypy |
-| `test-runner` | Run pytest / cargo test / frontend / e2e tests. Parse failures. Classify |
-| `e2e-tester` | Drive the app like a user via `preview_*` or Tauri WebDriver. Screenshots + console + network |
+| Agent | Must spawn when… | Replaces what inline work |
+|-------|------------------|---------------------------|
+| `doc-syncer` | Non-trivial multi-file change, file rename/move, new module, or research-pipeline `git mv` | Manually editing FILE_MAP.md + index docs |
+| `route-architect` | **Before** editing `app/main.py` for any new/changed FastAPI route | Drafting the route inline; researching the cluster + conventions yourself |
+| `audio-stack-reviewer` | Any edit to `app/{analysis,anlz,audio,usb_pdb,phrase_generator}_*.py` or `src-tauri/src/audio/**` | Running cargo check + clippy + ruff + mypy yourself and copy-pasting output |
+| `test-runner` | Any non-trivial code change, before commit/push | Running `pytest`/`cargo test`/`node` yourself and reading raw output |
+| `e2e-tester` | Any UI-affecting change (frontend OR backend route the UI calls) | Starting `npm run dev:full` and manually navigating |
 
-Use them when a task fits — they keep the main context clean.
+### Generic agents (also underused)
+
+| Agent | Must spawn when… |
+|-------|------------------|
+| `Explore` | You're about to run 3+ sequential Read/Grep calls to "find where X lives" |
+| `general-purpose` | Open-ended question or multi-step research that touches > 2 files |
+| `Plan` | Designing implementation strategy for a feature with > 1 plausible approach |
+| `claude-code-guide` | Question about Claude Code config / hooks / MCP / Anthropic SDK |
+
+**Cost calibration:** ~5 inline tool calls on the same sub-task ≈ the cost of one subagent spawn. Default to spawning earlier, not later. Full delegation guide in `.claude/rules/working-style.md` (Subagent delegation section).
 
 ---
 

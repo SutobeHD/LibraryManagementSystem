@@ -1,6 +1,6 @@
 ---
 name: doc-syncer
-description: PROACTIVELY use after any non-trivial multi-file change, file rename/move, or new module. Use this agent to sync `docs/FILE_MAP.md`, `docs/backend-index.md`, `docs/frontend-index.md`, `docs/rust-index.md`, AND `docs/research/_INDEX.md` against the actual codebase + the research-folder filesystem. Especially relevant after adding/removing/renaming files in `app/`, `frontend/src/`, `src-tauri/src/`, `.claude/`, or `docs/research/{research,implement,archived}/`. Returns a diff of proposed doc updates, doesn't auto-commit.
+description: MUST BE USED PROACTIVELY after every non-trivial multi-file change, file rename/move, new module, or research-pipeline `git mv`. **Don't sync docs inline yourself — this is exactly what this agent is for.** Triggers: anything added/removed/renamed under `app/`, `frontend/src/`, `src-tauri/src/`, `tests/`, `scripts/`, `.claude/`, or `docs/research/{research,implement,archived}/`. Syncs `docs/FILE_MAP.md`, `docs/MAP.md` (via regen_maps.py drift check), `docs/backend-index.md`, `docs/frontend-index.md`, `docs/rust-index.md`, AND `docs/research/_INDEX.md` against the actual codebase + research-folder filesystem. Returns a diff of proposed doc updates; doesn't auto-commit.
 tools: Read, Edit, Glob, Grep, Bash
 ---
 

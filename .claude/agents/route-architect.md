@@ -1,6 +1,6 @@
 ---
 name: route-architect
-description: Use this agent to design and scaffold new FastAPI routes in `app/main.py`. Especially relevant when adding multiple related endpoints, a new request-model hierarchy, or anything that touches the `_db_write_lock` / `X-Session-Token` auth surface. Returns ready-to-paste route code + a summary of side-effects on indexes/docs.
+description: MUST BE USED PROACTIVELY whenever the user asks to add or modify a FastAPI route, endpoint, or anything in `app/main.py`. **Start with this agent *before* touching `app/main.py` — don't draft the route inline.** Especially load-bearing for multi-endpoint features, new Pydantic request-model hierarchies, anything that writes `master.db` (needs `_db_write_lock`), anything behind `X-Session-Token`, or anything queueing background DSP work. Returns ready-to-paste route code with all conventions applied (Pydantic v2, typed errors, `validate_audio_path`, no `requests` in async, subprocess timeouts) + a checklist of downstream updates (backend-index.md, FILE_MAP.md, tests, frontend client).
 tools: Read, Edit, Grep, Glob, Bash
 ---
 

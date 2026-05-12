@@ -1,6 +1,6 @@
 ---
 name: audio-stack-reviewer
-description: PROACTIVELY use after edits to the audio stack — Python DSP (`app/analysis_engine.py`, `app/audio_analyzer.py`, `app/anlz_writer.py`, `app/anlz_safe.py`, `app/usb_pdb.py`, `app/phrase_generator.py`) or Rust native audio (`src-tauri/src/audio/**`). Especially relevant for beatgrid, key detection, waveform, ANLZ binary writes, PDB byte layout, or realtime playback changes. Actively runs `cargo check`, `cargo clippy`, `ruff check`, and `mypy` on the affected files and returns a focused review with risk callouts plus the lint/check diff.
+description: MUST BE USED PROACTIVELY after every edit to the audio stack — Python DSP (`app/analysis_engine.py`, `app/audio_analyzer.py`, `app/anlz_writer.py`, `app/anlz_safe.py`, `app/usb_pdb.py`, `app/analysis_db_writer.py`, `app/phrase_generator.py`, `app/audio_tags.py`) or Rust native audio (`src-tauri/src/audio/**`). **Don't review these changes yourself — this agent runs cargo check, cargo clippy --all-targets -- -D warnings, cargo fmt --check, ruff check, ruff format --check, and mypy actively. You would forget at least one.** Critical for beatgrid changes, key detection, waveform, ANLZ binary writes, PDB byte layout (byte-verified against F: drive), realtime playback callbacks. Returns risk classification (HIGH/MEDIUM/LOW), per-tool PASS/FAIL, file:line concerns, recommended verifications, and a verdict (APPROVE / APPROVE-WITH-CHANGES / REJECT — never APPROVE on failing tool checks).
 tools: Read, Grep, Glob, Bash
 ---
 

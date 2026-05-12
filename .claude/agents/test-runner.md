@@ -1,6 +1,6 @@
 ---
 name: test-runner
-description: PROACTIVELY use after any non-trivial code change to run the relevant tests. Use this agent to run pytest (backend), cargo test (Rust), frontend tests, or e2e tests, parse output, surface the first failure with file:line, and suggest a root-cause fix. Especially relevant after edits to `app/*.py`, `src-tauri/src/**`, `frontend/src/audio/**`, or anything in `tests/`. Returns: pass/fail verdict + first failure detail + suggested next step.
+description: MUST BE USED PROACTIVELY after every non-trivial code change, before declaring the work done and before any commit/push. **Don't run pytest/cargo test inline and read the output yourself — this agent parses, classifies (real-bug / flaky / stale-test / setup-error), and summarises in 5 lines max.** Has explicit test-path mappings per area: app/database.py → tests/test_database.py, app/usb_pdb.py → tests/test_pdb_structure.py (byte fidelity!), app/usb_one_library.py → tests/test_onelibrary_wal_flush.py, src-tauri/src/audio/ → cargo test, frontend/src/audio/dawState/ → node --experimental-vm-modules. Knows fragile areas (rbox panic isolation, FFmpeg-on-PATH, WebView2 versions). Returns: PASS/FAIL verdict + first failure detail + suggested next step.
 tools: Read, Bash, Grep, Glob
 ---
 
