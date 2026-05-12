@@ -180,6 +180,16 @@
             "args": [".claude/hooks/format-on-edit.py"]
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": [".claude/hooks/auto-push-after-commit.py"]
+          }
+        ]
       }
     ]
   }
