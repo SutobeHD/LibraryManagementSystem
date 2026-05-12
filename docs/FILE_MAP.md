@@ -193,14 +193,14 @@
 
 ---
 
-## tests-e2e/ — Tauri WebDriver Tests
+## tests/e2e/ — Tauri WebDriver Tests
 
 | File | Purpose |
 |------|---------|
-| `tests-e2e/package.json` | Mocha + selenium-webdriver. Scripts: `test` (smoke), `test:all` (glob) |
-| `tests-e2e/smoke.test.js` | Boot test: connects to `tauri-driver` @ 127.0.0.1:4444, launches the built `Music Library Manager.exe`, asserts Select Mode renders + Rekordbox Live click advances UI. Override exe path via `TAURI_APP_BIN` env |
-| `tests-e2e/run-driver.ps1` | Launches `tauri-driver --port 4444 --native-driver %USERPROFILE%\.tauri-webdriver\msedgedriver.exe`. Keep terminal open while tests run |
-| `tests-e2e/.gitignore` | Excludes `node_modules/`, `package-lock.json` |
+| `tests/e2e/package.json` | Mocha + selenium-webdriver. Scripts: `test` (smoke), `test:all` (glob) |
+| `tests/e2e/smoke.test.js` | Boot test: connects to `tauri-driver` @ 127.0.0.1:4444, launches the built `Music Library Manager.exe`, asserts Select Mode renders + Rekordbox Live click advances UI. Override exe path via `TAURI_APP_BIN` env |
+| `tests/e2e/run-driver.ps1` | Launches `tauri-driver --port 4444 --native-driver %USERPROFILE%\.tauri-webdriver\msedgedriver.exe`. Keep terminal open while tests run |
+| `tests/e2e/.gitignore` | Excludes `node_modules/`, `package-lock.json` |
 
 External binaries (not in repo):
 - `%USERPROFILE%\.cargo\bin\tauri-driver.exe` (install: `cargo install tauri-driver --locked`)

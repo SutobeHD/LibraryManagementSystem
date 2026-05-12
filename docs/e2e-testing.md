@@ -44,7 +44,7 @@ preview_eval(<frontend_id>, "window.location.pathname")
 ### One-time setup (done)
 - `tauri-driver` installed → `%USERPROFILE%\.cargo\bin\tauri-driver.exe` (`cargo install tauri-driver --locked`)
 - `msedgedriver` v147.0.3912.98 → `%USERPROFILE%\.tauri-webdriver\msedgedriver.exe` (matches installed WebView2 runtime)
-- E2E project scaffolded under `tests-e2e/`
+- E2E project scaffolded under `tests/e2e/`
 
 ### Required: build the app once
 ```powershell
@@ -64,7 +64,7 @@ npm run e2e:driver
 **Terminal 2 — tests:**
 ```powershell
 npm run e2e:install     # once: installs mocha + selenium-webdriver
-npm run e2e:test        # runs tests-e2e/smoke.test.js
+npm run e2e:test        # runs tests/e2e/smoke.test.js
 ```
 
 The smoke test connects to `http://127.0.0.1:4444`, asks the driver to launch the app via the `tauri:options.application` capability, and drives it via standard Selenium 4 APIs.

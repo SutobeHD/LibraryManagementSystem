@@ -11,9 +11,9 @@
     "tauri": "tauri",
     "audit": "npm audit --audit-level=high && npm audit signatures",
     "lint:lockfile": "npx --yes lockfile-lint --path frontend/package-lock.json --type npm --validate-https --allowed-hosts npm --validate-package-names",
-    "e2e:driver": "powershell -ExecutionPolicy Bypass -File tests-e2e/run-driver.ps1",
-    "e2e:test": "npm test --prefix tests-e2e",
-    "e2e:install": "npm install --prefix tests-e2e",
+    "e2e:driver": "powershell -ExecutionPolicy Bypass -File tests/e2e/run-driver.ps1",
+    "e2e:test": "npm test --prefix tests/e2e",
+    "e2e:install": "npm install --prefix tests/e2e",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
