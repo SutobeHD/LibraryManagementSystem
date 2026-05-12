@@ -27,3 +27,10 @@ export const BLOB_URL_REVOKE_DELAY_MS = 5000;
 // (full failure paths in DAW / export). The react-hot-toast default is
 // 4 s — bumped to 5 s here so a multi-line message has reading room.
 export const TOAST_DURATION_LONG_MS = 5000;
+
+// Axios timeout for the synchronous audio-import endpoint
+// (/api/audio/import → full analysis pipeline: copy + decode + BPM +
+// key + ANLZ write). Large WAV files (>30 MB) routinely take 30–60 s.
+// `0` disables the timeout completely — we trust the backend to either
+// finish or return an explicit error.
+export const AUDIO_IMPORT_TIMEOUT_MS = 0;

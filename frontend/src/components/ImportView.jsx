@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { Upload, FileAudio, CheckCircle2, AlertCircle, Loader2, Play, Trash2, Scissors, HardDrive, RefreshCw, Shield, FolderOpen } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../api/api';
+import { AUDIO_IMPORT_TIMEOUT_MS } from '../config/constants';
 
 const AUDIO_EXTENSIONS = ['.wav', '.mp3', '.flac', '.aiff', '.aif', '.alac', '.m4a', '.aac', '.ogg', '.wma', '.opus'];
 
@@ -227,6 +228,7 @@ const ImportView = ({ onSelectTrack, onImportComplete }) => {
 
             try {
                 const res = await api.post('/api/audio/import', formData, {
+                    timeout: AUDIO_IMPORT_TIMEOUT_MS,
                     onUploadProgress: (progressEvent) => {
                         const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
                         updateFileStatus(current.id, { progress: percent });
