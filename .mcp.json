@@ -1,0 +1,4 @@
+{
+  "$comment": "Repo-scoped MCP server registry. Servers here are auto-detected by Claude Code when run from this directory. Local-only / personal servers go in .claude/.mcp.local.json (gitignored).",
+  "mcpServers": {}
+}

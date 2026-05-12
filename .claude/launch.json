@@ -1,0 +1,29 @@
+{
+  "$comment": "Named server definitions consumed by mcp__Claude_Preview__preview_start. Format is repo-internal — confirmed by docs/e2e-testing.md.",
+  "servers": [
+    {
+      "name": "backend",
+      "command": "python",
+      "args": ["-m", "app.main"],
+      "cwd": ".",
+      "url": "http://127.0.0.1:8000",
+      "healthEndpoint": "/api/system/health",
+      "readyTimeoutMs": 30000,
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      }
+    },
+    {
+      "name": "frontend",
+      "command": "npm",
+      "args": ["run", "dev", "--prefix", "frontend"],
+      "cwd": ".",
+      "url": "http://localhost:5173",
+      "readyTimeoutMs": 60000,
+      "env": {
+        "BROWSER": "none"
+      }
+    }
+  ]
+}
