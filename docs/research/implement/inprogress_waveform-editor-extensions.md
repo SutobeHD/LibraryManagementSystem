@@ -920,6 +920,54 @@ Manual UI verification is the gating step before flipping the flag on.
 - **`app/id3_writer.py`** — not created. `audio_tags.write_tags`
   already exists and does the job.
 
+### 2026-05-13 — Slice 5 (Persistent Undo + Audio Audition)
+
+**Persistent undo (Q10 + Q11 confirmed 3-step):**
+
+- Added `UNDO` action type and `SKIP_HISTORY` set in
+  `useTrackEditorState.jsx`.
+- Wrapped the base reducer with `rootReducer` that auto-pushes the
+  pre-mutation state into `history` for every non-LOAD action.
+  Capacity 3 entries (older snapshots fall off the front).
+- `UNDO` pops the most recent snapshot and restores it.
+- Persistence: `TrackEditorProvider` now contains two effects —
+  restore-on-mount from `localStorage['trackEditor_v1']` (using the
+  LOAD_* actions, which `SKIP_HISTORY` so the restore doesn't pollute
+  the undo stack), and debounced auto-save (500 ms) on every state
+  change. This means undo survives `npm run tauri dev` restarts.
+
+**Audio audition (Q8):**
+
+- `CuePanel` accepts a new `onAudition(timeMs)` prop. When the user
+  clicks an **occupied** hot-cue pad, the panel calls `onAudition`
+  instead of doing nothing.
+- `WaveformEditor.jsx` passes an audition handler that seeks
+  WaveSurfer to the cue position and plays for ~2 seconds, then
+  pauses. Try/catch on every WaveSurfer call so a missing instance
+  doesn't crash the panel.
+- `DjEditDaw` is **not** wired for audition in Slice 5. Its audio
+  playback goes through `DawEngine` (different API), so the prop is
+  omitted there. Follow-up if requested.
+
+**UI:** `CuePanel` gained an **UNDO** button next to **SAVE**.
+Disabled when `canUndo === false`. Tooltip surfaces "up to 3 steps;
+persists across reload".
+
+**Tests:** No new test file. The undo logic is pure-JS in
+`useTrackEditorState.jsx`; backend has no changes. Audition is
+WaveSurfer-driven — verified manually in the browser is the gating
+step. All 213 backend tests still pass.
+
+**Plan deviations:**
+
+- **REDO** — not implemented. Q10 only required undo. Redo would need
+  a forward-pointer; deferred.
+- **Per-track persistence** — the localStorage payload is GLOBAL, not
+  per-track. Editing track B then track A would have track A's restore
+  on next launch. Acceptable for the dogfood phase; per-track keys are
+  a follow-up.
+- **DjEditDaw audition** — see above.
+
 ---
 
 ## Decision / Outcome

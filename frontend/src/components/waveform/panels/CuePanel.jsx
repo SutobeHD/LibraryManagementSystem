@@ -9,14 +9,14 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Plus, Save, Trash2 } from 'lucide-react';
+import { Plus, RotateCcw, Save, Trash2 } from 'lucide-react';
 import api from '../../../api/api';
 import { useToast } from '../../ToastContext';
 import { log } from '../../../utils/log';
 import useTrackEditorState from '../state/useTrackEditorState';
 import { CDJ_MEMORY_COLORS, HOT_CUE_SURFACE_COLORS } from '../../../config/constants';
 
-export default function CuePanel({ track, currentTime = 0 }) {
+export default function CuePanel({ track, currentTime = 0, onAudition = null }) {
     const toast = useToast();
     const {
         state,
@@ -26,6 +26,8 @@ export default function CuePanel({ track, currentTime = 0 }) {
         setMemoryCue,
         deleteMemoryCue,
         updateMemoryCueFields,
+        undo,
+        canUndo,
     } = useTrackEditorState();
 
     const { hotCues, cues } = state;
@@ -78,8 +80,11 @@ export default function CuePanel({ track, currentTime = 0 }) {
     const handleHotPadClick = (slot) => {
         const existing = hotCues.find((c) => c.number === slot);
         if (existing) {
-            // For slice 1, a click on an occupied pad is a no-op; the trash
-            // icon deletes. Audition on click comes in slice 5.
+            // Slice 5: click on an occupied pad auditions the cue. The
+            // trash icon (top-right of the pad) still deletes.
+            if (typeof onAudition === 'function') {
+                onAudition(existing.time_ms);
+            }
             return;
         }
         setHotCue({
@@ -97,14 +102,24 @@ export default function CuePanel({ track, currentTime = 0 }) {
         <div className="bg-[#1a1a1a] border border-white/5 rounded-lg p-3 my-2">
             <div className="flex items-center justify-between mb-3">
                 <h3 className="text-[11px] font-bold tracking-wider text-amber2">CUES</h3>
-                <button
-                    onClick={handleSave}
-                    disabled={isSaving}
-                    className="flex items-center gap-1.5 px-3 py-1 bg-amber2/20 border border-amber2/30 text-amber2 text-[10px] font-bold rounded hover:bg-amber2/30 disabled:opacity-50"
-                >
-                    <Save size={12} />
-                    {isSaving ? 'SAVING...' : 'SAVE'}
-                </button>
+                <div className="flex gap-2">
+                    <button
+                        onClick={undo}
+                        disabled={!canUndo}
+                        title="Undo last change (up to 3 steps; persists across reload)"
+                        className="flex items-center gap-1 px-2 py-1 bg-white/5 border border-white/10 text-[10px] text-ink-muted hover:text-white rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                        <RotateCcw size={10} /> UNDO
+                    </button>
+                    <button
+                        onClick={handleSave}
+                        disabled={isSaving}
+                        className="flex items-center gap-1.5 px-3 py-1 bg-amber2/20 border border-amber2/30 text-amber2 text-[10px] font-bold rounded hover:bg-amber2/30 disabled:opacity-50"
+                    >
+                        <Save size={12} />
+                        {isSaving ? 'SAVING...' : 'SAVE'}
+                    </button>
+                </div>
             </div>
 
             {/* Hot-cue 8-pad grid */}

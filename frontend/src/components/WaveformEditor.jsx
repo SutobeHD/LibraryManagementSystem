@@ -394,7 +394,25 @@ const WaveformEditorInner = forwardRef(({ track, blobUrl = null, simpleMode = fa
             />
 
             <ConfirmModal modal={confirmModal} setModal={setConfirmModal} />
-            {FEATURE_CUE_PANEL && <CuePanel track={fullTrack} currentTime={currentTime} />}
+            {FEATURE_CUE_PANEL && (
+                <CuePanel
+                    track={fullTrack}
+                    currentTime={currentTime}
+                    onAudition={(timeMs) => {
+                        // Slice 5 — seek WaveSurfer + play for ~2 s, then pause.
+                        if (!wavesurfer.current) return;
+                        const dur = wavesurfer.current.getDuration();
+                        if (!dur) return;
+                        try {
+                            wavesurfer.current.seekTo(Math.min(1, Math.max(0, timeMs / 1000 / dur)));
+                            wavesurfer.current.play();
+                            setTimeout(() => {
+                                try { wavesurfer.current?.pause(); } catch (_) { /* noop */ }
+                            }, 2000);
+                        } catch (_) { /* noop */ }
+                    }}
+                />
+            )}
             {FEATURE_LOOP_PANEL && <LoopPanel track={fullTrack} currentTime={currentTime} bpm={bpm} />}
             {FEATURE_BEATGRID_PANEL && <BeatgridPanel track={fullTrack} bpm={bpm} beatGrid={beatGrid} />}
             {FEATURE_METADATA_PANEL && <MetadataPanel track={fullTrack} />}
