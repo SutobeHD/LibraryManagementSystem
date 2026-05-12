@@ -1,0 +1,168 @@
+# Python tooling config for the FastAPI backend.
+#
+# Run from the repo root:
+#   ruff check app/ tests/        # lint
+#   ruff format app/ tests/       # format (replaces black for new code)
+#   black app/ tests/             # legacy formatter — same defaults as ruff format
+#   mypy app/                     # type-check
+#   pytest tests/                 # tests
+#
+# CI enforces:
+#   - `ruff check` clean
+#   - `ruff format --check` clean
+#   - `mypy app/` clean (exclusions documented below)
+#   - `pytest tests/` green
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "library-management-system"
+version = "1.0.0"
+description = "Music Library Manager — Rekordbox editor with native audio engine"
+requires-python = ">=3.10"
+
+# ---------------------------------------------------------------------------
+# Ruff (linter + formatter, replaces flake8 + isort + most black usage)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [
+    "build",
+    "dist",
+    ".venv",
+    "node_modules",
+    "src-tauri/target",
+    # Dev/debug scripts under app/ aren't lint-clean by design.
+    "app/brute_force_*.py",
+    "app/inspect_*.py",
+    "app/debug_*.py",
+    "app/diag_*.py",
+    "app/check_*.py",
+    "app/verify_*.py",
+    "app/find_*.py",
+    "app/fix_*.py",
+    "app/calibrate_*.py",
+    "app/final_*.py",
+    "app/mass_verify*.py",
+    "app/analysis_inspector.py",
+]
+
+[tool.ruff.lint]
+# Conservative starting rule set — bugs first, style second.
+# Each rule is justified; expand the set in a follow-up commit.
+select = [
+    "E",     # pycodestyle errors
+    "F",     # pyflakes — undefined names, unused imports
+    "W",     # pycodestyle warnings
+    "I",     # isort — import ordering
+    "B",     # flake8-bugbear — likely-bug patterns (mutable default args, …)
+    "UP",    # pyupgrade — flag legacy syntax (str.format → f-string, etc.)
+    "RUF",  # ruff-specific lints
+    "SIM",   # flake8-simplify — common refactor suggestions
+]
+# Things we want to allow / address later:
+ignore = [
+    "E501",   # line-too-long — printf-style log strings are unavoidable
+    "B008",   # function-call-in-default-arg — FastAPI Depends() needs it
+    "SIM108", # use ternary — actually less readable for guarded fallbacks
+    "UP007",  # Optional[X] vs X | None — keep Optional for clarity on 3.10
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests can be relaxed — fixtures shadow imports, asserts are bare, etc.
+"tests/**/*.py" = ["B011", "F401", "F811"]
+"app/__init__.py" = ["F401"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ---------------------------------------------------------------------------
+# Black (still here for editor integrations that don't speak ruff format)
+# ---------------------------------------------------------------------------
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+extend-exclude = '''
+/(
+    build
+  | dist
+  | \.venv
+  | node_modules
+  | src-tauri/target
+)/
+'''
+
+# ---------------------------------------------------------------------------
+# Mypy (static type checking — gradual, lenient at first)
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.10"
+files = ["app"]
+# Forgiving defaults — tighten once the codebase is fully annotated.
+check_untyped_defs = false
+disallow_untyped_defs = false
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+strict_optional = true
+no_implicit_optional = true
+ignore_missing_imports = true
+exclude = [
+    "build",
+    "dist",
+    "\\.venv",
+    "node_modules",
+    "src-tauri",
+    # Dev scripts ignored — they're staged for relocation in Phase 5.3.
+    "app/brute_force_.*\\.py",
+    "app/inspect_.*\\.py",
+    "app/debug_.*\\.py",
+    "app/diag_.*\\.py",
+    "app/check_.*\\.py",
+    "app/verify_.*\\.py",
+    "app/find_.*\\.py",
+    "app/fix_.*\\.py",
+    "app/calibrate_.*\\.py",
+    "app/final_.*\\.py",
+    "app/mass_verify.*\\.py",
+    "app/analysis_inspector\\.py",
+]
+
+# Third-party libraries without type stubs.
+[[tool.mypy.overrides]]
+module = [
+    "rbox.*",
+    "madmom.*",
+    "essentia.*",
+    "librosa.*",
+    "mutagen.*",
+    "keyring.*",
+    "soundfile",
+    "lameenc",
+    "numba.*",
+    "scipy.*",
+    "pyrekordbox.*",
+]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--tb=short",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: requires live Rekordbox DB / USB stick / network",
+]
