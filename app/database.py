@@ -11,6 +11,7 @@ from pathlib import Path
 from collections import defaultdict
 from contextlib import contextmanager
 from functools import lru_cache, wraps
+from typing import Any, Dict, List, Optional
 from .config import REKORDBOX_ROOT, DB_FILENAME, BACKUP_DIR
 from .live_database import LiveRekordboxDB
 
