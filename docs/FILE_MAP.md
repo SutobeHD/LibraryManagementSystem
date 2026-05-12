@@ -105,7 +105,12 @@
 | `frontend/src/components/ToolsView.jsx` | Batch operations: rename, clean titles, find duplicates, batch comments |
 | `frontend/src/components/DesignView.jsx` | Design Lab: 10 feature mockup pages (Stems, Smart Playlist, Batch Tag, Set Planner, Streaming Hub, DVS, Collab, Harmonic Mixing, Routing Matrix, Macros) + 20 selectable tileable line-pattern background themes (Beat Grid/Wave Lines/Cue Markers/Spectrum/Crosshatch/Circuit/Constellations/Sunburst/Tribal/Notes/Bold Stripes/Thick Diagonals/Arcs/Chevron/Heavy Grid/Wave+Cues/Pulse+Cues/Segmented Wave/Dual Wave/Stepped Wave) stored in localStorage |
 | `frontend/src/components/UtilitiesView.jsx` | Utilities hub grid dashboard: Phrase Cues, Duplicate Finder, XML Cleaner, Mass Format Converter (placeholder). Sub-views open inline with back button |
-| `frontend/src/components/WaveformEditor.jsx` | Legacy waveform editor (superseded by `DjEditDaw`) |
+| `frontend/src/components/WaveformEditor.jsx` | Legacy waveform editor (superseded by `DjEditDaw`); also hosts the WaveformEditor extension panels (cues / loops / beatgrid / metadata) behind `FEATURE_*_PANEL` flags. |
+| `frontend/src/components/waveform/state/useTrackEditorState.jsx` | Shared state hook (Context + useReducer) for the cue / loop / beatgrid / metadata editor panels. 3-step persistent undo via localStorage. Slice 0–5 of waveform-editor-extensions. |
+| `frontend/src/components/waveform/panels/CuePanel.jsx` | Hot-cue 8-pad grid + memory-cue list with inline-edit comment + CDJ-color picker. Click-to-audition on occupied hot pads. |
+| `frontend/src/components/waveform/panels/LoopPanel.jsx` | Loop list with active-loop radio toggle (Q5 invariant: max 1 active), color picker, numerator/denominator. |
+| `frontend/src/components/waveform/panels/BeatgridPanel.jsx` | Beatgrid editor with three modes: anchor-shift (default), tap-BPM, per-beat (read-only display in v1). |
+| `frontend/src/components/waveform/panels/MetadataPanel.jsx` | Inline-edit Title / Artist / Album / Genre / BPM / Key / Rating / Comment. Save dual-writes to `master.db` + ID3 tags. |
 | `frontend/src/components/PhraseGeneratorView.jsx` | **NEW** Phrase & Auto-Cue Generator: track selector, phrase length picker (8/16/32), generate preview list (amber phrase / grey bar markers), two-step Generate → Commit flow |
 | `frontend/src/components/DuplicateView.jsx` | **NEW** Acoustic Duplicate Finder: scan library, group by fingerprint similarity, left group list + right card detail panel, master selection, merge play counts, POST /api/duplicates/merge |
 

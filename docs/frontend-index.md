@@ -11,7 +11,12 @@
 |------|---------|
 | `main.jsx` | App root — sidebar, mode picker (Live/XML/standalone/import/defined-path), error boundary, lazy-loaded tab router (Suspense), heartbeat + library-status polling, session-token injection. |
 | `utils/log.js` | Dev-only logger; `log.debug` / `log.info` no-op in production via Vite's `import.meta.env.DEV` guard. `log.warn` / `log.error` always pass through. |
-| `config/constants.js` | Frontend-wide tunables: `HEARTBEAT_INTERVAL_MS`, `LIBRARY_STATUS_INTERVAL_MS`, `RENDER_API_TIMEOUT_MS`, `BLOB_URL_REVOKE_DELAY_MS`, `TOAST_DURATION_LONG_MS`. |
+| `config/constants.js` | Frontend-wide tunables: `HEARTBEAT_INTERVAL_MS`, `LIBRARY_STATUS_INTERVAL_MS`, `RENDER_API_TIMEOUT_MS`, `BLOB_URL_REVOKE_DELAY_MS`, `TOAST_DURATION_LONG_MS`, `FEATURE_*_PANEL` flags, `CDJ_MEMORY_COLORS`, `HOT_CUE_SURFACE_COLORS`. |
+| `components/waveform/state/useTrackEditorState.jsx` | Shared state hook (Context + `useReducer`) for the editor extension panels. Slices: 1=cues, 2=loops, 3=beatgrid, 4=metadata, 5=persistent undo. |
+| `components/waveform/panels/CuePanel.jsx` | Hot-cue 8-pad grid + memory-cue list + CDJ-color picker. Behind `FEATURE_CUE_PANEL`. |
+| `components/waveform/panels/LoopPanel.jsx` | Loop list with active-loop radio + numerator/denominator. Behind `FEATURE_LOOP_PANEL`. |
+| `components/waveform/panels/BeatgridPanel.jsx` | Beatgrid editor (anchor-shift / tap-BPM / per-beat). Behind `FEATURE_BEATGRID_PANEL`. |
+| `components/waveform/panels/MetadataPanel.jsx` | Title / Artist / Album / etc. dual-save to `master.db` + ID3. Behind `FEATURE_METADATA_PANEL`. |
 
 ---
 

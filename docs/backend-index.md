@@ -20,8 +20,8 @@ FastAPI app (~1700 lines). Security: CORS locked to localhost, session token aut
 | POST | `/api/track/{tid}` | Update track metadata fields |
 | DELETE | `/api/track/{tid}` | Delete a track |
 | POST | `/api/track/delete` | Delete track by body param |
-| POST | `/api/track/cues/save` | Save cue points for a track |
-| POST | `/api/track/grid/save` | Save beatgrid for a track |
+| POST | `/api/track/cues/save` | Save cue points for a track. Persists via `RekordboxDB.save_track_cues` (JSON sidecar at `LOG_DIR/cue_overrides.json`). Accepts hot cues, memory cues, loops (any with `loop_len_ms > 0` or `type ∈ {hot_loop, memory_loop}`). |
+| POST | `/api/track/grid/save` | Save beatgrid for a track. Persists via `RekordboxDB.save_track_beatgrid` (JSON sidecar at `LOG_DIR/beatgrid_overrides.json`). |
 | PATCH | `/api/tracks/batch` | Batch update metadata on multiple tracks |
 | POST | `/api/tracks/move` | Move tracks between playlists |
 | GET | `/api/artists` | All artists (normalized) |

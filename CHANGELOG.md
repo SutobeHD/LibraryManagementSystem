@@ -1,5 +1,36 @@
 # Changelog
 
+## [Unreleased]
+
+### Added (behind feature flags — not user-visible yet)
+- **WaveformEditor extension** (`docs/research/implement/inprogress_waveform-editor-extensions.md`):
+  Soft-DAW-style per-track editor with 4 panels — cues, loops, beatgrid, metadata —
+  mounted in both `WaveformEditor` and `daw/DjEditDaw` behind feature flags
+  (`FEATURE_CUE_PANEL`, `FEATURE_LOOP_PANEL`, `FEATURE_BEATGRID_PANEL`,
+  `FEATURE_METADATA_PANEL`, all `false` in production).
+  - Shared state via `useTrackEditorState` hook (Context + `useReducer`).
+  - 3-step persistent undo across app restart (`localStorage['trackEditor_v1']`).
+  - Audio audition on hot-cue pad clicks (WaveformEditor only).
+  - 8-CDJ-color memory-cue palette + 16-color hot-cue surface palette.
+  - Active-loop radio invariant (max 1 active per track).
+  - Beatgrid: anchor-shift / tap-BPM / per-beat (read-only display).
+  - Metadata dual-save to Rekordbox `master.db` + ID3 tags.
+
+### Fixed
+- `db.save_track_cues`, `db.get_track_cues`, `db.save_track_beatgrid` were
+  referenced from `app/main.py` but did not exist anywhere — every call would
+  have raised `AttributeError`. Slice 0–3 of the WaveformEditor extension work
+  added minimal JSON-sidecar persistence so the existing endpoints don't crash.
+
+### Changed
+- `app/anlz_writer.py`:
+  - `_build_pcpt_entry` reads `status` from the cue dict
+    (backward-compat default preserves the previous hardcoded behaviour).
+  - `_build_pcp2_entry` reads `loop_numerator` / `loop_denominator` from the
+    cue dict (default `0`).
+- `app/main.py` `TrackUpdateReq` Pydantic model extended with `Title`,
+  `Artist`, `Album`, `BPM`, `Key` fields (all optional / nullable).
+
 ## v1.0.0-beta — 2026-05-07
 
 First public **beta**. Standalone DJ-library manager that competes with

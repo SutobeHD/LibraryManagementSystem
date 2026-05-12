@@ -968,6 +968,49 @@ step. All 213 backend tests still pass.
   a follow-up.
 - **DjEditDaw audition** — see above.
 
+### 2026-05-13 — Slice 6 (Cleanup — doc sync)
+
+**Doc sync (required for graduation per `.claude/rules/research-pipeline.md`):**
+
+- `CHANGELOG.md` — `[Unreleased]` section added describing the feature
+  behind flags, the pre-existing AttributeError fixes
+  (`save_track_cues` / `get_track_cues` / `save_track_beatgrid`), and the
+  `anlz_writer.py` + `TrackUpdateReq` changes.
+- `docs/FILE_MAP.md` — added 5 rows for the new files
+  (`useTrackEditorState.jsx` + 4 panels) and clarified
+  `WaveformEditor.jsx`'s role.
+- `docs/frontend-index.md` — added rows for the new state hook + 4
+  panels; updated `constants.js` description with feature flags + color
+  palettes.
+- `docs/backend-index.md` — updated descriptions of
+  `/api/track/cues/save` and `/api/track/grid/save` to reference the new
+  sidecar persistence.
+
+**NOT done in Slice 6 (deliberate, gated by dogfood):**
+
+- **Feature-flag flip** — flags remain `false` in production. They flip
+  on after manual dogfood verification of each panel in both surfaces.
+- **Removal of legacy `useState`-bag entries** in `WaveformEditor.jsx`
+  (`[hotCues, setHotCues]`, `[beatGrid, setBeatGrid]`, etc.) — these
+  are still the source of truth for the **old** hot-cue strip in
+  `WaveformControls.jsx`. Removing them would force the new panels to
+  be live everywhere, which contradicts the flag-gated rollout. Cleanup
+  waits for "flags on" signal.
+- **Removal of `daw/dawState/cues.js` reducer slice** — same dogfood
+  gate.
+- **Archive to `docs/research/archived/implemented_*.md`** — per the
+  research pipeline (`research-pipeline.md`),
+  `inprogress_` → `implemented_` requires **explicit user sign-off**.
+  The doc stays in `inprogress_` until the user confirms after dogfood.
+
+**State as of Slice 6:**
+
+- 6 atomic commits: Slice 0 (foundation) → Slice 5 (undo + audition).
+- 213 backend tests pass; 19 of those are new (slices 0, 1, 2, 3).
+- All 4 panels mounted in both surfaces behind their feature flags.
+- No regression in existing behaviour (`pytest tests/test_pdb_structure.py`
+  passes; the old WaveformControls hot-cue strip is untouched).
+
 ---
 
 ## Decision / Outcome
