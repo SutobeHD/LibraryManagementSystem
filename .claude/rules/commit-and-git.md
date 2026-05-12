@@ -1,5 +1,55 @@
 # Commit strategy + Git workflow
 
+## Git identity — use the GitHub noreply email
+
+**Always use the GitHub-provided noreply email for commits.** Format:
+
+```
+<github-numeric-id>+<github-username>@users.noreply.github.com
+```
+
+For this repo: `46030159+SutobeHD@users.noreply.github.com`. The author name is `SutobeHD`.
+
+### Why noreply
+
+- GitHub's privacy setting "Block command line pushes that expose my email" rejects pushes (`GH007`) whose commits carry a non-public email. Without noreply, the first push blocks with: `remote rejected — push declined due to email privacy restrictions`.
+- Even if you disable that setting and force-publish your real email into git history, it lives there forever — no way to scrub without rewriting history. Noreply avoids the leak in the first place.
+- The KIT student email (`uzfzk@student.kit.edu`) is the user's personal default `git config user.email` outside this repo. Don't carry it into a public open-source repo.
+
+### Setup — first-time per fresh clone
+
+The agent must verify this **before the first commit** in any new clone:
+
+```bash
+git config user.email                    # expect: 46030159+SutobeHD@users.noreply.github.com
+git config user.name                     # expect: SutobeHD
+
+# If not set correctly, set them in the local repo config:
+git config user.email "46030159+SutobeHD@users.noreply.github.com"
+git config user.name "SutobeHD"
+```
+
+These are **per-repo** settings (no `--global`) so they don't leak to other repos on the same machine.
+
+### If you discover the email was wrong AFTER local commits but BEFORE first push
+
+Rewriting commits *before* they're public is **not** a public-history rewrite — the "revertable" rule does not apply, because there's nothing remote yet for anyone to be holding a reference to.
+
+Use:
+```bash
+git rebase --root --exec 'git commit --amend --no-edit --reset-author'
+```
+
+`--reset-author` reuses whatever `git config user.email` + `user.name` are currently set to. Run after fixing the config. Push afterwards.
+
+The settings allowlist permits this *specific* rebase invocation (`--root --exec` with `--reset-author`). Pauschales `git rebase` and `git rebase -i*` stay confirmed/denied so this stays a deliberate setup step, not an everyday operation.
+
+### NEVER do this AFTER first push
+
+Once any of the commits are on `origin`, `git rebase --root --exec` is the same as a force-push — it rewrites SHAs that other clones may already track. The fix at that point is `git revert <bad-author-sha>` + a new commit with the correct author, **not** a history rewrite.
+
+---
+
 ## Commit strategy — commit intensely, atomically, autonomously
 
 **Default: commit aggressively without asking.** The user wants a dense, atomic commit history. After **every logical unit of work**, create a new commit. Don't batch unrelated changes. Don't wait until the end of a long session.

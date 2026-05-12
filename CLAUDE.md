@@ -151,6 +151,17 @@ Use them when a task fits — they keep the main context clean.
 
 ---
 
+## Git identity — verify before first commit in a fresh clone
+
+```bash
+git config user.email   # must be: 46030159+SutobeHD@users.noreply.github.com
+git config user.name    # must be: SutobeHD
+```
+
+If not, set them per-repo (no `--global`). Full reasoning + rewrite recipe for already-committed-but-not-yet-pushed commits in `.claude/rules/commit-and-git.md`.
+
+---
+
 ## When in doubt
 
 1. Check `docs/MAP.md` (or `FILE_MAP.md`) for the file.

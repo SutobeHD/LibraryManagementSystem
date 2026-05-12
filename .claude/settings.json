@@ -62,6 +62,9 @@
       "Bash(git push -u *)",
       "Bash(git push --set-upstream *)",
       "Bash(git revert *)",
+      "Bash(git rebase --root --exec *)",
+      "Bash(git config user.email *)",
+      "Bash(git config user.name *)",
 
       "Bash(gh pr view*)",
       "Bash(gh pr list*)",
@@ -143,7 +146,9 @@
     ],
     "ask": [
       "Bash(git merge*)",
-      "Bash(git rebase*)",
+      "Bash(git rebase -i*)",
+      "Bash(git rebase main*)",
+      "Bash(git rebase origin/*)",
       "Bash(git cherry-pick*)",
       "Bash(git tag*)",
       "Bash(git pull)",

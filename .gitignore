@@ -97,11 +97,14 @@ work/
 
 # --- Claude Code (committed team config; only local overrides ignored) ---
 # CLAUDE.md and .claude/ ARE committed — they're the team-shared agent config.
-# Only personal/local overrides go here:
+# Only personal/local overrides + runtime state go here:
 .claude/settings.local.json
 .claude/.mcp.local.json
 .claude/cache/
 .claude/state/
+.claude/worktrees/
+.claude/logs/
+.claude/sessions/
 
 # --- Local-only archives & experiments ---
 archive/
