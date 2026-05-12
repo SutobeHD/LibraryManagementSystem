@@ -37,115 +37,142 @@ class LiveRekordboxDB:
             self._local.conn = rbox.MasterDb(str(self.db_path))
         return self._local.conn
 
-    def _ensure_backup(self):
-        """
-        Creates a session backup and manages archival schedule.
-        Keeps only the last 3 session backups.
+    def _ensure_backup(self) -> bool:
+        """Create a session backup and run the archival schedule.
+
+        Keeps only the three newest session backups. Returns False if the
+        source DB is missing or the copy fails — callers must respect that
+        before mutating the original.
         """
         if not self.db_path.exists():
-            logger.error(f"Cannot backup: {self.db_path} does not exist.")
+            logger.error("live_database._ensure_backup: source missing path=%s", self.db_path)
             return False
 
         from .services import SettingsManager
         settings = SettingsManager.load()
 
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-
-        # 1. Session Backup
-        session_backup_name = f"master_session_{timestamp}.db"
-        session_backup_path = BACKUP_DIR / session_backup_name
+        session_backup_path = BACKUP_DIR / f"master_session_{timestamp}.db"
 
         try:
             shutil.copy2(self.db_path, session_backup_path)
-            logger.info(f"Created session backup: {session_backup_path}")
-            self._cleanup_session_backups()
-
-            # 2. Check for Archival
-            self._handle_archival(settings)
-
-            return True
-        except Exception as e:
-            logger.error(f"Backup system failed: {e}")
+        except (OSError, shutil.Error) as e:
+            logger.error(
+                "live_database._ensure_backup: copy failed src=%s dst=%s err=%s",
+                self.db_path, session_backup_path, e,
+            )
             return False
 
-    def _cleanup_session_backups(self):
-        """Keeps only the latest 3 session backups."""
+        logger.info("live_database._ensure_backup: created path=%s", session_backup_path)
+        self._cleanup_session_backups()
+        self._handle_archival(settings)
+        return True
+
+    def _cleanup_session_backups(self) -> None:
+        """Keep only the three newest session backups."""
         try:
-            backups = sorted(BACKUP_DIR.glob("master_session_*.db"), key=os.path.getmtime, reverse=True)
-            if len(backups) > 3:
-                for old_backup in backups[3:]:
-                    os.remove(old_backup)
-                    logger.debug(f"Removed old session backup: {old_backup}")
-        except Exception as e:
-            logger.error(f"Failed to cleanup session backups: {e}")
+            backups = sorted(
+                BACKUP_DIR.glob("master_session_*.db"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+        except OSError as e:
+            logger.error("live_database._cleanup_session_backups: listing failed err=%s", e)
+            return
+        if len(backups) <= 3:
+            return
+        for old_backup in backups[3:]:
+            try:
+                old_backup.unlink()
+                logger.debug("live_database._cleanup_session_backups: removed path=%s", old_backup)
+            except OSError as e:
+                logger.warning(
+                    "live_database._cleanup_session_backups: failed path=%s err=%s",
+                    old_backup, e,
+                )
 
     def get_available_backups(self) -> list[dict[str, Any]]:
-        """Returns a sorted list of available backups."""
-        backups = []
-        if not BACKUP_DIR.exists(): return []
+        """Return a sorted list of legacy full-copy backups, newest first."""
+        backups: list[dict[str, Any]] = []
+        if not BACKUP_DIR.exists():
+            return backups
 
         for f in BACKUP_DIR.glob("*.db"):
             try:
-                # Parse filename: master_session_20260215_225416.db or master_ARCHIVE_20260215.db
-                name = f.name
-                path = str(f)
-                size = f.stat().st_size
-                mtime = f.stat().st_mtime
+                stat = f.stat()
+            except OSError as e:
+                logger.warning(
+                    "live_database.get_available_backups: stat failed path=%s err=%s", f, e,
+                )
+                continue
 
+            name = f.name
+            if "session" in name:
+                b_type = "Session"
+            elif "ARCHIVE" in name:
+                b_type = "Archive"
+            elif "prerestore" in name:
+                b_type = "Pre-Restore"
+            else:
                 b_type = "Unknown"
-                if "session" in name: b_type = "Session"
-                elif "ARCHIVE" in name: b_type = "Archive"
-                elif "prerestore" in name: b_type = "Pre-Restore"
 
-                # Extract timestamp string for display if possible, else use mtime
-                # Simple extraction based on known formats
-                display_date = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
-
-                backups.append({
+            backups.append(
+                {
                     "filename": name,
-                    "path": path,
+                    "path": str(f),
                     "type": b_type,
-                    "size": size,
-                    "date": display_date,
-                    "timestamp": mtime
-                })
-            except Exception as e:
-                logger.error(f"Error parsing backup {f}: {e}")
+                    "size": stat.st_size,
+                    "date": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                    "timestamp": stat.st_mtime,
+                }
+            )
 
-        # Sort by timestamp descending (newest first)
         return sorted(backups, key=lambda x: x["timestamp"], reverse=True)
 
-    def restore_backup(self, filename: str) -> bool:
-        """
-        Restores a backup file to master.db.
-        Create a 'Pre-Restore' backup of current state first.
+    def restore_backup(self, filename: str) -> tuple[bool, str]:
+        """Restore a legacy full-copy backup to ``master.db``.
+
+        Writes a ``master_prerestore_<ts>.db`` safety copy first, then
+        overwrites the live DB via ``shutil.copy2``. rbox may still hold
+        the original file open — the FastAPI route wraps this call in
+        ``_db_write_lock`` so at least no other Python writers run
+        concurrently. The user is asked to restart after.
         """
         target_path = BACKUP_DIR / filename
         if not target_path.exists():
-            logger.error(f"Restore failed: File not found {target_path}")
+            logger.error(
+                "live_database.restore_backup: file missing path=%s", target_path,
+            )
             return False, "Backup file not found"
 
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        pre_restore_path = BACKUP_DIR / f"master_prerestore_{timestamp}.db"
         try:
-            # 1. Safety Backup
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            pre_restore_name = f"master_prerestore_{timestamp}.db"
-            pre_restore_path = BACKUP_DIR / pre_restore_name
             shutil.copy2(self.db_path, pre_restore_path)
-            logger.info(f"Created pre-restore backup: {pre_restore_path}")
+            logger.info(
+                "live_database.restore_backup: pre-restore safety copy path=%s",
+                pre_restore_path,
+            )
+        except (OSError, shutil.Error) as e:
+            logger.error(
+                "live_database.restore_backup: pre-restore copy failed err=%s", e,
+            )
+            return False, f"Pre-restore safety backup failed: {e}"
 
-            # 2. Restore
-            # We must close the DB connection if possible, but rbox might hold it.
-            # In a live app, replacing the file while open is risky but often works on Windows if just reading.
-            # Ideally we'd close 'self.db' here but rbox wrapper might not expose close().
-            # Let's try copy2 replace.
-
+        try:
             shutil.copy2(target_path, self.db_path)
-            logger.info(f"Restored backup {filename} to {self.db_path}")
-
-            return True, "Backup restored successfully. Please restart the application."
-        except Exception as e:
-            logger.error(f"Restore failed: {e}")
+        except (OSError, shutil.Error) as e:
+            logger.error(
+                "live_database.restore_backup: restore copy failed src=%s err=%s",
+                target_path, e,
+            )
             return False, str(e)
+
+        logger.info(
+            "live_database.restore_backup: ok file=%s -> %s",
+            filename, self.db_path,
+        )
+        return True, "Backup restored successfully. Please restart the application."
 
     def _handle_archival(self, settings):
         """Creates a permanent archive backup based on user-defined frequency."""
@@ -173,18 +200,19 @@ class LiveRekordboxDB:
 
         if should_archive:
             timestamp = now.strftime("%Y%m%d")
-            archive_name = f"master_ARCHIVE_{timestamp}.db"
-            archive_path = BACKUP_DIR / archive_name
+            archive_path = BACKUP_DIR / f"master_ARCHIVE_{timestamp}.db"
             try:
                 shutil.copy2(self.db_path, archive_path)
-                logger.info(f"Created archival backup: {archive_path}")
-
-                # Update settings
+                logger.info(
+                    "live_database._handle_archival: created path=%s", archive_path,
+                )
                 settings["last_archive_date"] = now.isoformat()
                 from .services import SettingsManager
                 SettingsManager.save(settings)
-            except Exception as e:
-                logger.error(f"Failed to create archival backup: {e}")
+            except (OSError, shutil.Error) as e:
+                logger.error(
+                    "live_database._handle_archival: archive failed err=%s", e,
+                )
 
     def load(self) -> bool:
         """Loads the library from the live master.db.
