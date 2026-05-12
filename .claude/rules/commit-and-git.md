@@ -35,14 +35,15 @@ These are **per-repo** settings (no `--global`) so they don't leak to other repo
 
 Rewriting commits *before* they're public is **not** a public-history rewrite — the "revertable" rule does not apply, because there's nothing remote yet for anyone to be holding a reference to.
 
-Use:
+**Important:** rebase **from `origin/main`**, not `--root`. `--root` would also rewrite the upstream commits that are already public, which would force-push them (forbidden). Bound the rebase to your local-only commits:
+
 ```bash
-git rebase --root --exec 'git commit --amend --no-edit --reset-author'
+git rebase --exec 'git commit --amend --no-edit --reset-author' origin/main
 ```
 
-`--reset-author` reuses whatever `git config user.email` + `user.name` are currently set to. Run after fixing the config. Push afterwards.
+`--reset-author` reuses whatever `git config user.email` + `user.name` are currently set to. Run after fixing the config. Push afterwards (normal fast-forward push — your commit SHAs are new, but `origin/main` only knows about the merge-base, so the rebased branch is a strict descendant).
 
-The settings allowlist permits this *specific* rebase invocation (`--root --exec` with `--reset-author`). Pauschales `git rebase` and `git rebase -i*` stay confirmed/denied so this stays a deliberate setup step, not an everyday operation.
+The settings allowlist permits this *specific* form. `git rebase --root*` is in the **deny** list — never run `--root` on a branch that has any commits already on `origin`.
 
 ### NEVER do this AFTER first push
 

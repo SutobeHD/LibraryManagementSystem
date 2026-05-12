@@ -62,7 +62,8 @@
       "Bash(git push -u *)",
       "Bash(git push --set-upstream *)",
       "Bash(git revert *)",
-      "Bash(git rebase --root --exec *)",
+      "Bash(git rebase --exec * origin/main)",
+      "Bash(git rebase origin/main --exec *)",
       "Bash(git config user.email *)",
       "Bash(git config user.name *)",
 
@@ -121,6 +122,7 @@
       "Bash(gh repo archive*)",
       "Bash(*--no-verify*)",
       "Bash(*--no-gpg-sign*)",
+      "Bash(git rebase --root*)",
 
       "Read(./.env)",
       "Read(./.env.local)",
