@@ -356,11 +356,22 @@ Use them when a task fits — they keep the main context clean.
 
 ## Working style
 
-- **Be terse.** German is the user's default conversation language; replies in Caveman style (no articles/filler) for code and config tasks. Code/file contents stay in English to match the repo.
+### Communication — internal vs output
+
+- **Internal** (tool calls, plans, reasoning, search queries, sub-agent prompts): **Caveman style** for token efficiency. Drop articles, filler, hedges. Fragments are fine. Direct nouns + minimal verbs.
+- **Output to user** (visible turn replies): **Detailed and thorough but without fluff**. No "Great!", no "Let me help you with that", no marketing phrases, no hedging ("could potentially maybe"). Get to substance immediately. Use lists/tables when structure helps clarity. Concrete verbs > vague phrases. The reply is allowed — and expected — to be long when there's real content to convey; what's banned is the *padding around* that content.
+
+**Language:** German for conversation. Code, filenames, commit messages, file contents stay English (the repo is English).
+
+### Code & files
+
 - **Edit existing files** before creating new ones.
 - **No comments unless the WHY is non-obvious** (a workaround, a known panic, a verified-against-byte-layout invariant). Don't narrate WHAT.
 - **No new markdown files unless asked.** This file is enough.
-- **Parallel tool calls** are free. Use them.
+
+### Tooling discipline
+
+- **Parallel tool calls** are free. Use them when steps are independent.
 - **Commit autonomously, intensely, atomically** (see Commit strategy). **Never auto-push** — always confirm.
 
 ---
