@@ -2,7 +2,10 @@
 .env
 .env.local
 .env.*.local
-settings.json
+# Generic settings.json — used by some legacy local tooling. Negate the .claude/
+# settings.json explicitly so the committed agent config isn't accidentally swallowed.
+/settings.json
+!.claude/settings.json
 *.log
 *.log.*
 *.tmp
