@@ -1,0 +1,13 @@
+{
+  "//": "Copy to settings.local.json and customise per machine. This file is gitignored.",
+  "//permissions": "Add machine-specific allow/deny here. Merged on top of settings.json.",
+  "permissions": {
+    "allow": [
+      "Bash(C:/ffmpeg/bin/ffmpeg.exe*)",
+      "Bash(C:/ffmpeg/bin/ffprobe.exe*)"
+    ]
+  },
+  "env": {
+    "//FFMPEG_BIN": "Optional override of FFmpeg path if not on PATH"
+  }
+}
