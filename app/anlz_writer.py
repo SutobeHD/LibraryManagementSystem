@@ -192,9 +192,13 @@ def _build_pcpt_entry(cue: dict[str, Any]) -> bytes:
         0x1C,           # header_length
         0x38,           # total_length
     )
+    # status: 4 = active loop, 0 = regular cue / memory. Read from the cue
+    # dict so Slice 2 (loops, active-loop toggle) can set it explicitly;
+    # backward-compat default preserves the previous hardcoded behaviour.
+    status = int(cue.get("status", 4 if is_hot else 0))
     buf += struct.pack('>III',
         cue_num,        # hot_cue (0=memory, 1..8=hot)
-        4 if is_hot else 0,   # status: 4=active hot cue, 0=loaded memory
+        status,
         0x00100000,     # observed flags
     )
     buf += struct.pack('>HHB3x',
@@ -269,9 +273,14 @@ def _build_pcp2_entry(cue: dict[str, Any]) -> bytes:
         color_id,           # color id (palette index)
         r, g, b,            # explicit RGB
     )
+    # Quantised loop length (e.g. numerator=4, denominator=1 = 4-beat loop).
+    # Slice 2 (loops) starts passing real values; default 0 preserves the
+    # previous hardcoded behaviour for callers that don't set the fields.
+    loop_numerator = int(cue.get("loop_numerator", 0))
+    loop_denominator = int(cue.get("loop_denominator", 0))
     body += struct.pack('>II',
-        0,                  # loop numerator
-        0,                  # loop denominator
+        loop_numerator,
+        loop_denominator,
     )
     body += struct.pack('>I', len(name_bytes))
     body += name_bytes

@@ -41,7 +41,7 @@ _(none)_
 _(none)_
 
 ### inprogress
-_(none)_
+- [inprogress_waveform-editor-extensions.md](implement/inprogress_waveform-editor-extensions.md) — WaveformEditor extension — editor surface for all per-track metadata (2026-05-13)
 
 ### blocked
 _(none)_

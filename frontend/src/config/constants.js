@@ -43,3 +43,13 @@ export const AUDIO_IMPORT_TIMEOUT_MS = 0;
 // still being analysed in the background. 1 s feels live without spamming
 // the backend; the import_tracker snapshot is cheap (in-memory dict copy).
 export const IMPORT_TASK_POLL_INTERVAL_MS = 1000;
+
+// --- WaveformEditor extension feature flags ---
+// Gate each panel of the cue/loop/beatgrid/metadata editor while it is
+// being rolled out slice by slice. All default false in production;
+// flipped on per-slice during beta. See
+// docs/research/implement/inprogress_waveform-editor-extensions.md.
+export const FEATURE_CUE_PANEL = false;
+export const FEATURE_LOOP_PANEL = false;
+export const FEATURE_BEATGRID_PANEL = false;
+export const FEATURE_METADATA_PANEL = false;
