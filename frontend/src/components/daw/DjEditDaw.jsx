@@ -33,6 +33,9 @@ import useDawKeyhandlers from './useDawKeyhandlers';
 import useDawShortcuts from './useDawShortcuts';
 import useTrackLoader from './useTrackLoader';
 import { log } from '../../utils/log';
+import { TrackEditorProvider } from '../waveform/state/useTrackEditorState';
+import CuePanel from '../waveform/panels/CuePanel';
+import { FEATURE_CUE_PANEL } from '../../config/constants';
 
 const DawScrollbar = lazy(() => import('./DawScrollbar'));
 
@@ -305,6 +308,8 @@ const DjEditDaw = ({ track: initialTrack }) => {
     // ── RENDER ──
     try {
         return (
+            <TrackEditorProvider>
+            {FEATURE_CUE_PANEL && <CuePanel track={activeTrack} currentTime={(state.playhead || 0)} />}
             <DawLayout
                 activeTrack={activeTrack}
                 isLibraryCollapsed={isLibraryCollapsed}
@@ -368,6 +373,7 @@ const DjEditDaw = ({ track: initialTrack }) => {
                     />
                 }
             />
+            </TrackEditorProvider>
         );
     } catch (err) {
         console.error('[DjEditDaw] Render Error:', err);

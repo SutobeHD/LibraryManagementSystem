@@ -53,3 +53,41 @@ export const FEATURE_CUE_PANEL = false;
 export const FEATURE_LOOP_PANEL = false;
 export const FEATURE_BEATGRID_PANEL = false;
 export const FEATURE_METADATA_PANEL = false;
+
+// 8 CDJ memory-cue colors (Pioneer fixed palette). The `id` is the
+// CDJ-internal palette index; the `hex` is an approximation for UI
+// rendering. CDJs render the same palette index in hardware regardless
+// of the RGB we ship, but RGB is also stored in ANLZ PCP2 for off-CDJ
+// players that respect the explicit value.
+export const CDJ_MEMORY_COLORS = [
+    { id: 1, name: 'Pink',   hex: '#FF7BAA' },
+    { id: 2, name: 'Red',    hex: '#FF3F3F' },
+    { id: 3, name: 'Orange', hex: '#FF9F45' },
+    { id: 4, name: 'Yellow', hex: '#FFD93F' },
+    { id: 5, name: 'Green',  hex: '#4FCB6B' },
+    { id: 6, name: 'Aqua',   hex: '#3FE0D6' },
+    { id: 7, name: 'Blue',   hex: '#4FA6FF' },
+    { id: 8, name: 'Purple', hex: '#A874E3' },
+];
+
+// 16 Rekordbox hot-cue surface colors — the subset of the 64-color
+// internal palette that Rekordbox UI exposes for hot cues. Approximate
+// hex values; exact CDJ rendering uses the palette `id` lookup.
+export const HOT_CUE_SURFACE_COLORS = [
+    { id: 1,  hex: '#16C172' },
+    { id: 2,  hex: '#22B6E0' },
+    { id: 3,  hex: '#4A9EFF' },
+    { id: 4,  hex: '#9B6BFF' },
+    { id: 5,  hex: '#E456D9' },
+    { id: 6,  hex: '#FF4F8A' },
+    { id: 7,  hex: '#FF7155' },
+    { id: 8,  hex: '#FFA63E' },
+    { id: 9,  hex: '#FFE03E' },
+    { id: 10, hex: '#C7E03E' },
+    { id: 11, hex: '#7CE03E' },
+    { id: 12, hex: '#3EE07C' },
+    { id: 13, hex: '#3EE0C7' },
+    { id: 14, hex: '#789EA6' },
+    { id: 15, hex: '#C5C9CC' },
+    { id: 16, hex: '#888B8C' },
+];

@@ -706,6 +706,63 @@ co-exports a `TrackEditorProvider` JSX component. Project convention is
 working unchanged — the new dict keys default to the previously hardcoded
 values.
 
+### 2026-05-13 — Slice 1 (Cues)
+
+**Pre-existing fix:** `app/main.py:742` (`get_cues`) and `app/main.py:861`
+(`save_cues`) were calling `db.get_track_cues` / `db.save_track_cues`
+which **did not exist** anywhere in the codebase — every call would have
+raised AttributeError on the first hit. Slice 1 adds minimal
+JSON-sidecar persistence so the endpoints actually work and the new
+CuePanel has a working save path.
+
+- `RekordboxDB.save_track_cues(tid, cues)` writes to
+  `LOG_DIR / "cue_overrides.json"` (track-id keyed). Atomic via
+  write-to-tmp + rename. Added to the `_serialised` wrap list so writes
+  acquire `_db_write_lock`.
+- `RekordboxDB.get_track_cues(tid)` reads from the sidecar first, then
+  falls back to `track["Cues"]` (rbox `_load_cues` output).
+- This is intentionally a **stopgap**. The proper rbox + ANLZ
+  persistence path is deferred — likely Slice 4 (metadata) when the
+  dual-save infrastructure lands, or Slice 6 cleanup.
+
+**Slice 1 frontend:**
+
+- `frontend/src/config/constants.js` — added `CDJ_MEMORY_COLORS` (8
+  fixed Pioneer colours) and `HOT_CUE_SURFACE_COLORS` (16 surface
+  palette approximations).
+- `frontend/src/components/waveform/state/useTrackEditorState.jsx` —
+  reducer filled with `LOAD_CUES`, `SET_HOT_CUE`, `DELETE_HOT_CUE`,
+  `SET_MEMORY_CUE`, `DELETE_MEMORY_CUE`, `UPDATE_HOT_CUE_FIELDS`,
+  `UPDATE_MEMORY_CUE_FIELDS`. Provider exposes convenience action
+  creators.
+- `frontend/src/components/waveform/panels/CuePanel.jsx` — new panel.
+  8-pad hot-cue grid (click empty pad → set at `currentTime`,
+  trash-icon → delete). Memory-cue list with inline-edit comment +
+  click-swatch CDJ-colour picker. Save button POSTs to
+  `/api/track/cues/save`.
+- `WaveformEditor.jsx` and `daw/DjEditDaw.jsx` — wrapped render in
+  `<TrackEditorProvider>` and conditionally render `<CuePanel>` behind
+  `FEATURE_CUE_PANEL`. Flag is `false` in production; panel does not
+  appear yet for end users.
+
+**Tests:** `tests/test_cue_endpoint_roundtrip.py` — 5 sidecar tests
+(create, get, empty, unicode, overwrite). All pass.
+
+**Plan deviations:**
+
+- **Migration of `WaveformEditor.jsx` `useState`-bag `[hotCues,
+  setHotCues]`** — not done in Slice 1. The old hot-cue strip in
+  `WaveformControls.jsx` still owns its state. Both panels coexist;
+  when `FEATURE_CUE_PANEL` flips on the user sees both. Slice 6 cleanup
+  will retire the old strip. Rationale: the strip is deeply wired into
+  `useWaveformInteractions.js` handlers and migrating it now would
+  multiply the slice's risk surface.
+- **Migration of `frontend/src/audio/dawState/cues.js` reducer slice**
+  — same deferral, same rationale.
+- **Mocha tests for `CuePanel`** — skipped this session (no setup
+  time); backend pytest tests gate the save / get roundtrip.
+- **Audio audition on pad click** — explicitly Slice 5 work.
+
 ---
 
 ## Decision / Outcome

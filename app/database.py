@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import re
@@ -1068,6 +1069,74 @@ class RekordboxDB:
             )
             return False
 
+    # --- Cue persistence (Slice 1 of waveform-editor-extensions) ---
+    #
+    # The endpoints `POST /api/track/cues/save` and `GET /api/track/{tid}/cues`
+    # in `app/main.py` previously called these methods, but they did not exist
+    # anywhere — every call would have raised AttributeError. Slice 1 adds a
+    # minimal JSON-sidecar so the CuePanel UI has a working save path until
+    # the proper rbox + ANLZ persistence wiring lands in a later slice.
+
+    def _cue_sidecar_path(self) -> Path:
+        from .config import LOG_DIR
+
+        return Path(LOG_DIR) / "cue_overrides.json"
+
+    def save_track_cues(self, tid: str, cues: list[dict]) -> bool:
+        """Persist cue overrides for a track to the JSON sidecar.
+
+        Atomic write via tmp-file + rename so a crash mid-write does not
+        leave a half-written sidecar.
+        """
+        sidecar = self._cue_sidecar_path()
+        try:
+            data: dict[str, Any] = {}
+            if sidecar.exists():
+                try:
+                    data = json.loads(sidecar.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError) as e:
+                    logger.warning(
+                        "save_track_cues: sidecar unreadable, starting fresh: %s", e
+                    )
+                    data = {}
+            data[str(tid)] = cues
+
+            sidecar.parent.mkdir(parents=True, exist_ok=True)
+            tmp = sidecar.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.replace(sidecar)
+            logger.info(
+                "save_track_cues: track=%s persisted %d cues to sidecar", tid, len(cues)
+            )
+            return True
+        except OSError as e:
+            logger.error("save_track_cues: write failed for track %s: %s", tid, e)
+            return False
+
+    def get_track_cues(self, tid: str) -> list[dict]:
+        """Return cues for a track.
+
+        Lookup order:
+          1. Sidecar JSON (overrides from the CuePanel — Slice 1).
+          2. ``track["Cues"]`` from the active DB (rbox `_load_cues` output —
+             pre-existing behaviour, read-only).
+        Returns an empty list if neither has anything.
+        """
+        sidecar = self._cue_sidecar_path()
+        if sidecar.exists():
+            try:
+                data = json.loads(sidecar.read_text(encoding="utf-8"))
+                override = data.get(str(tid))
+                if override is not None:
+                    return override
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("get_track_cues: sidecar unreadable: %s", e)
+
+        track = self.get_track_details(tid)
+        if track and "Cues" in track:
+            return track["Cues"]
+        return []
+
 
 # Wrap every mutating method on the facade with the module-level write
 # lock so concurrent route handlers can't race against each other.
@@ -1080,7 +1149,7 @@ for _name in (
     "create_folder", "create_smart_playlist", "update_smart_playlist",
     "create_playlist", "add_track_to_playlist", "remove_track_from_playlist",
     "save", "update_tracks_metadata", "update_track_comment",
-    "update_track_path",
+    "update_track_path", "save_track_cues",
 ):
     setattr(RekordboxDB, _name, _serialised(getattr(RekordboxDB, _name)))
 del _name
