@@ -122,16 +122,6 @@ audio_tags — write metadata back to the source audio file.
 - `load_artwork()` — Read an artwork file from disk into bytes, or None on any failure.
 - `read_tags()` — Read metadata tags from any supported audio file.
 
-### `app/backup_engine.py`
-
-Git-like incremental backup engine for Rekordbox Editor Pro.
-
-- `BackupEngine` — Incremental diff-based backup system inspired by Git.
-- `  BackupEngine.snapshot()` — Create an incremental backup.
-- `  BackupEngine.restore()` — Restore the database to a specific commit state.
-- `  BackupEngine.get_history()` — Get commit history (newest first).
-- `  BackupEngine.get_diff()` — Get the detailed changeset for a specific commit.
-
 ### `app/batch_worker.py`
 
 Setup logging
@@ -296,8 +286,6 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 
 - `LiveRekordboxDB`
 - `  LiveRekordboxDB.db()` — Thread-safe access to the database connection.
-- `  LiveRekordboxDB.get_available_backups()` — Returns a sorted list of available backups.
-- `  LiveRekordboxDB.restore_backup()` — Restores a backup file to master.db.
 - `  LiveRekordboxDB.load()` — Loads the library from the live master.db.
 - `  LiveRekordboxDB.get_all_labels()`
 - `  LiveRekordboxDB.get_all_albums()`
@@ -434,12 +422,7 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `clean_titles()`
 - `get_lib_status()`
 - `set_lib_mode()`
-- `trigger_backup()` — Create an incremental backup using the Git-like engine.
-- `sync_lib()` — Triggered by 'Create Backup' (formerly Sync).
-- `list_backups()` — Get backup history (incremental commits + legacy backups).
-- `RestoreReq`
-- `restore_backup()` — Restore from incremental commit or legacy backup.
-- `get_backup_diff()` — Get detailed diff for a specific backup commit.
+- `sync_lib()` — Persist the in-memory library.
 - `LoadLibReq`
 - `load_lib()`
 - `unload_lib()`
@@ -476,7 +459,6 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `heartbeat()`
 - `shutdown()` — SECURITY: Requires session token to trigger shutdown.
 - `restart()` — SECURITY: Requires session token to trigger restart.
-- `cln()`
 - `select_db_dialog()`
 - `NewLibReq`
 - `create_new_lib()`
@@ -615,7 +597,6 @@ RBEP Parser — Parses Rekordbox Editor Project (.rbep) files.
 - `  XMLProcessor.process()`
 - `SystemGuard`
 - `  SystemGuard.is_rekordbox_running()`
-- `  SystemGuard.create_backup()`
 - `AudioEngine`
 - `  AudioEngine.check_ffmpeg()`
 - `  AudioEngine.render_segment()`
@@ -630,14 +611,12 @@ RBEP Parser — Parses Rekordbox Editor Project (.rbep) files.
 - `  LibraryTools.smart_rename()`
 - `SettingsManager`
 - `  SettingsManager.load()`
-- `  SettingsManager.save()`
+- `  SettingsManager.save()` — Write settings atomically: tmp file + os.replace.
 - `MetadataManager`
 - `  MetadataManager.load()`
 - `  MetadataManager.save()`
 - `  MetadataManager.add_mapping()`
 - `  MetadataManager.get_mapped_name()`
-- `SystemCleaner`
-- `  SystemCleaner.cleanup_old_backups()`
 - `BeatAnalyzer` — Track analyzer used by POST /api/track/{tid}/analyze.
 - `  BeatAnalyzer.analyze()` — Full track analysis with Rekordbox-grade accuracy.
 - `  BeatAnalyzer.detect_key()` — Key detection -- delegates to engine if available, else basic K-S.
@@ -1082,10 +1061,6 @@ Dev-only logging utility.
 
 - `log()`
 
-### `frontend/src/components/BackupManager.jsx`
-
-*(no module docstring)*
-
 ### `frontend/src/components/BatchEditBar.jsx`
 
 *(no module docstring)*
@@ -1237,10 +1212,6 @@ SettingsAppearance — Waveform band colours, locale picker.
 ### `frontend/src/components/settings/SettingsAudio.jsx`
 
 SettingsAudio — CPAL output device picker (Tauri-only enumeration).
-
-### `frontend/src/components/settings/SettingsBackup.jsx`
-
-SettingsBackup — Retention policy, auto-backup intervals, cleanup.
 
 ### `frontend/src/components/settings/SettingsControls.jsx`
 
@@ -1536,29 +1507,6 @@ Regression tests for the analysis pipeline.
 - `test_cue_toggles_kwarg_overrides_settings()` — Per-call kwarg overrides the global setting.
 - `test_e2e_anlz_write_roundtrip()`
 
-### `tests/test_backup_engine.py`
-
-Tests for `app/backup_engine.py`.
-
-- `TestTableAllowlist` — The static allowlist must reject anything outside TRACKED_TABLES.
-- `  TestTableAllowlist.test_tracked_tables_is_immutable()`
-- `  TestTableAllowlist.test_table_allowlist_is_frozenset()`
-- `  TestTableAllowlist.test_table_allowlist_covers_every_tracked_table()`
-- `  TestTableAllowlist.test_known_table_passes()`
-- `  TestTableAllowlist.test_injection_attempts_rejected()`
-- `TestIdentifierRegex` — `_IDENT_RE` gates column names interpolated into INSERT statements.
-- `  TestIdentifierRegex.test_valid_column_names()`
-- `  TestIdentifierRegex.test_invalid_identifier_rejected()`
-- `  TestIdentifierRegex.test_max_length_enforced()`
-- `tiny_master_db()` — Create a throwaway SQLite DB with one row in djmdContent.
-- `TestReadTable` — `_read_table` is private but is the gate that the allowlist guards.
-- `  TestReadTable.test_known_table_returns_rows()`
-- `  TestReadTable.test_unknown_table_raises()`
-- `  TestReadTable.test_missing_table_returns_empty()`
-- `TestSnapshotRoundtrip` — Create a snapshot, mutate the DB, restore the snapshot, observe revert.
-- `  TestSnapshotRoundtrip.test_snapshot_then_restore_recovers_state()`
-- `  TestSnapshotRoundtrip.test_unknown_table_in_snapshot_is_skipped_not_panicked()` — A snapshot that references a now-deprecated table must skip, not raise.
-
 ### `tests/test_database.py`
 
 Tests for `app/database.py`.
@@ -1635,6 +1583,10 @@ Tests for `app/services.py`.
 - `  TestCleanTag.test_clean_tag_pairs()`
 - `  TestCleanTag.test_clean_tag_none_input()` — Passing None must return empty string (defensive — used in
 - `  TestCleanTag.test_repeated_removal()` — Both markers in one string are both stripped.
+- `TestSettingsAtomicSave` — The save path is atomic: tmp file + os.replace.
+- `  TestSettingsAtomicSave.test_save_writes_complete_json()`
+- `  TestSettingsAtomicSave.test_save_leaves_no_tmp_files()`
+- `  TestSettingsAtomicSave.test_save_overwrites_existing_file()`
 
 ### `tests/test_soundcloud_api.py`
 

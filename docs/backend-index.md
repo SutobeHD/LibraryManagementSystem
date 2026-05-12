@@ -78,11 +78,7 @@ FastAPI app (~1700 lines). Security: CORS locked to localhost, session token aut
 | POST | `/api/library/load` | Load a Rekordbox XML file into memory |
 | POST | `/api/library/unload` | Unload current library |
 | POST | `/api/library/new` | Create a new empty library |
-| POST | `/api/library/backup` | Create an incremental backup snapshot |
-| GET | `/api/library/backups` | List all backup commits with timestamps |
-| GET | `/api/library/backup/{commit_hash}/diff` | Show diff for a specific backup commit |
-| POST | `/api/library/restore` | Restore library to a specific backup commit |
-| POST | `/api/library/sync` | Sync current XML with live DB state |
+| POST | `/api/library/sync` | Persist current state (XML mode writes rekordbox.xml; live mode is a no-op) |
 | POST | `/api/library/smart-playlists` | Generate smart playlists from rules |
 | POST | `/api/library/scan-folder` | **[NEW]** Background scan of a directory; auto-imports audio files not yet in library. Body: `{ path: str }` |
 | POST | `/api/library/clean-titles` | Clean track title strings (remove tags, fix encoding) |
@@ -172,7 +168,6 @@ FastAPI app (~1700 lines). Security: CORS locked to localhost, session token aut
 | `REKORDBOX_ROOT` | `%APPDATA%/Pioneer/rekordbox` | Pioneer Rekordbox database directory |
 | `DB_FILENAME` | `master.db` | Rekordbox SQLite database filename |
 | `FFMPEG_BIN` | `ffmpeg` | FFmpeg binary (must be in PATH) |
-| `BACKUP_DIR` | `./backups` | Incremental backup storage |
 | `EXPORT_DIR` | `./exports` | Audio export output |
 | `LOG_DIR` | `./logs` | Application log files |
 | `TEMP_DIR` | `./temp_uploads` | Temporary file processing |
@@ -190,13 +185,12 @@ All classes are instantiated on import; most methods are instance methods unless
 | Class | Key Methods | Purpose |
 |-------|------------|---------|
 | `XMLProcessor` | `clean_xml(path)`, `create_artist_playlists()`, `create_label_playlists()` | Clean/transform Rekordbox XML (strip tags, normalize, create derived playlists) |
-| `SystemGuard` | `is_rekordbox_running() → bool`, `create_backup()` | Check if Rekordbox process is running before writes; create pre-modification backups |
+| `SystemGuard` | `is_rekordbox_running() → bool` | Check if Rekordbox process is running before writes |
 | `AudioEngine` | `convert(src, dst, format)`, `render(params)`, `slice(path, positions)` | FFmpeg wrapper — format conversion, render exports, slice at beat positions |
 | `FileManager` | `copy(src, dst)`, `delete(path)`, `compress(path)` | File I/O operations (copy/delete/compress) |
 | `LibraryTools` | `extract_metadata(path)`, `batch_update(ids, fields)` | Track metadata extraction, batch metadata operations |
 | `SettingsManager` | `load() → dict`, `save(settings)` | User preferences persistence (JSON file) |
 | `MetadataManager` | `read(path)`, `write(path, fields)` | Read/write embedded audio metadata tags |
-| `SystemCleaner` | `clean_temp()`, `clean_expired_caches()` | Remove temp files and expired analysis caches |
 | `BeatAnalyzer` | `analyze(path) → {bpm, key, confidence}` | BPM/key analysis wrapper (delegates to `AnalysisEngine`) |
 | `ImportManager` | `import_file(path)`, `import_url(url)` | Import tracks from filesystem or URL into library |
 | `ProjectManager` | `save(name, state)`, `load(name) → state`, `list() → [names]`, `delete(name)` | `.rbep` non-destructive edit project CRUD |
@@ -413,30 +407,6 @@ SC web player itself.
 - Copy-error classification: only real disconnects — `winerror` in `(21, 31, 1167, 3)` OR `self.usb_root.exists()` returning False — abort the batch. Plain ENOENT on a single bad path is logged and skipped so one bad track doesn't kill a 3000-track sync.
 - Uses file lock (`.rbep_sync_lock`) to prevent concurrent syncs
 - All sync methods are generators: yield `{ stage, message, progress }` events; `stage="complete"` or `stage="error"` on finish
-
----
-
-## Backup Engine (`app/backup_engine.py`) — `BackupEngine`
-
-Git-like incremental backup (~95% smaller than full copies via compressed JSON diffs).
-
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `commit()` | `str` (commit hash) | Diff vs HEAD, compress changeset, update HEAD |
-| `get_timeline()` | `[Commit]` | All commits with timestamp, hash, summary |
-| `restore(commit_id)` | `bool` | Roll back library to a specific commit |
-
-**SQL safety**: SQLite cannot parameterize identifiers, so table names and column names are interpolated literally. The module enforces a strict allowlist:
-
-| Symbol | Purpose |
-|--------|---------|
-| `TRACKED_TABLES: tuple[str, ...]` | Canonical ordered list of tables that may appear in any SQL `SELECT`/`DELETE`/`INSERT` interpolation |
-| `_TABLE_ALLOWLIST: frozenset[str]` | O(1) lookup set built from `TRACKED_TABLES`; the only thing standing between caller-supplied table names and SQL injection |
-| `_IDENT_RE` | Regex `^[A-Za-z_][A-Za-z0-9_]{0,63}$` — defensive check on column names read from `PRAGMA table_info` before they are interpolated |
-| `_check_table_name(table)` | Raises `ValueError` if `table` is not in `_TABLE_ALLOWLIST` |
-| `_check_identifier(name)` | Raises `ValueError` if `name` doesn't match `_IDENT_RE` |
-
-**Rule for new code**: never f-string an identifier into SQL without calling the matching validator first. Add a `# nosec B608` only after the validator call so reviewers can grep for unprotected sites.
 
 ---
 

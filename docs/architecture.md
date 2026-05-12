@@ -52,7 +52,6 @@ RB_Editor_Pro/
 │   ├── soundcloud_api.py   # SC unofficial API + sync engine
 │   ├── soundcloud_downloader.py  # Track download + metadata
 │   ├── usb_manager.py      # USB detection, sync engine, profiles
-│   ├── backup_engine.py    # Git-like incremental backup system
 │   ├── rekordbox_export.py # Export to Rekordbox XML format
 │   ├── rekordbox_bridge.py # Import/export bridge
 │   ├── rbep_parser.py      # Parse/serialize .rbep project files
@@ -194,17 +193,9 @@ User clicks sync to USB
   → Progress streamed back via SSE or polling
 ```
 
-### 8. Backup System
-```
-User triggers backup (or auto-backup on change)
-  → POST /api/backup/create
-  → app/backup_engine.py: BackupEngine.commit()
-    → Diffs current library state vs HEAD snapshot
-    → Writes compressed JSON changeset (95% smaller than full copy)
-    → Updates HEAD pointer + commit history
-  → GET /api/backup/timeline → list of commits
-  → POST /api/backup/restore/{commit_id} → rollback
-```
+The library DB (``master.db``) is not backed up by this app — Rekordbox
+itself maintains versioned copies in its install directory. If a user
+needs to revert in-app edits, they restore from Rekordbox.
 
 ---
 
