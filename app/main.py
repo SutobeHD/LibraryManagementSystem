@@ -285,10 +285,18 @@ class BatchReq(BaseModel):
     updates: dict[str, Any]
 
 class TrackUpdateReq(BaseModel):
+    # Existing fields
     Rating: int | None = None
     ColorID: int | None = None
     Comment: str | None = None
     Genre: str | None = None
+    # Slice 4 of waveform-editor-extensions: editable from MetadataPanel.
+    # All optional / nullable — old callers continue to work unchanged.
+    Title: str | None = None
+    Artist: str | None = None
+    Album: str | None = None
+    BPM: float | None = None
+    Key: str | None = None
 
 class MoveReq(BaseModel):
     track_ids: list[str]

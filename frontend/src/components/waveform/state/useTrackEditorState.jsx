@@ -53,6 +53,9 @@ const ACTIONS = {
     ANCHOR_SHIFT: 'ANCHOR_SHIFT',
     SET_BPM: 'SET_BPM',
     UPDATE_BEAT: 'UPDATE_BEAT',
+    // Slice 4 — metadata
+    LOAD_METADATA: 'LOAD_METADATA',
+    UPDATE_METADATA_FIELDS: 'UPDATE_METADATA_FIELDS',
 };
 
 function reducer(state, action) {
@@ -165,6 +168,13 @@ function reducer(state, action) {
                     i === action.payload.index ? { ...b, ...action.payload.fields } : b,
                 ),
             };
+        case ACTIONS.LOAD_METADATA:
+            return { ...state, metadata: action.payload.metadata };
+        case ACTIONS.UPDATE_METADATA_FIELDS:
+            return {
+                ...state,
+                metadata: { ...(state.metadata || {}), ...action.payload.fields },
+            };
         default:
             return state;
     }
@@ -249,6 +259,18 @@ export function TrackEditorProvider({ children }) {
         [],
     );
 
+    // Slice 4 — metadata action creators
+    const loadMetadata = useCallback(
+        ({ metadata }) =>
+            dispatch({ type: ACTIONS.LOAD_METADATA, payload: { metadata } }),
+        [],
+    );
+    const updateMetadataFields = useCallback(
+        (fields) =>
+            dispatch({ type: ACTIONS.UPDATE_METADATA_FIELDS, payload: { fields } }),
+        [],
+    );
+
     const value = {
         state,
         dispatch,
@@ -271,6 +293,9 @@ export function TrackEditorProvider({ children }) {
         anchorShift,
         setBpm,
         updateBeat,
+        // Slice 4 — metadata
+        loadMetadata,
+        updateMetadataFields,
     };
 
     return (

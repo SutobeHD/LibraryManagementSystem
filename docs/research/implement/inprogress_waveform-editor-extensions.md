@@ -871,6 +871,55 @@ pass.
   still in the `useState`-bag; hook only mirrors via prop on mount.
   Same rationale as Slices 1 & 2.
 
+### 2026-05-13 — Slice 4 (Metadata)
+
+**Backend reuse:** the existing `POST /api/track/{tid}` endpoint in
+`app/main.py:866` already does the dual-write — `db.update_tracks_metadata`
+writes to `master.db` under `_db_write_lock`, then
+`audio_tags.write_tags` writes ID3 tags to the source audio file (gated
+by the `write_tags_to_files` setting, default `true`).
+
+The only backend change is the `TrackUpdateReq` Pydantic model:
+
+- Added `Title`, `Artist`, `Album`, `BPM`, `Key` (all optional /
+  nullable). `Rating`, `ColorID`, `Comment`, `Genre` unchanged.
+- Backward-compat: old callers send a subset of fields, all `None` →
+  `{"status": "no_change"}`. New callers send the superset.
+
+**Hook extension:** 2 new actions on `useTrackEditorState.jsx`:
+
+- `LOAD_METADATA` — replace the metadata object.
+- `UPDATE_METADATA_FIELDS` — partial merge.
+
+**New file:** `frontend/src/components/waveform/panels/MetadataPanel.jsx`
+(~140 LOC). 2-column grid of 8 input fields (Title / Artist / Album /
+Genre / BPM / Key / Rating / Comment). On save:
+
+1. Filter out empty / null / undefined values
+2. POST `/api/track/{tid}` with the dict
+3. Display the ID3 tag-write status returned from the backend
+   (`written` / `failed` / `skipped`).
+
+**Mounted** in `WaveformEditor.jsx` and `daw/DjEditDaw.jsx` behind
+`FEATURE_METADATA_PANEL` (default `false`).
+
+**Tests:** no new test file added in Slice 4 — the existing
+`POST /api/track/{tid}` route is already covered by the project's
+`update_tracks_metadata` tests and `audio_tags.write_tags` tests.
+Manual UI verification is the gating step before flipping the flag on.
+
+**Plan deviations:**
+
+- **`PATCH /api/track/{tid}/metadata`** — not added. The existing
+  `POST /api/track/{tid}` covers the same case (and already has the
+  dual-save path wired). Adding a separate PATCH route would have
+  duplicated logic.
+- **Divergence detection toast** — not implemented. The existing
+  endpoint always overwrites both `master.db` AND ID3 with the editor
+  value. Add later if user reports a real divergence problem.
+- **`app/id3_writer.py`** — not created. `audio_tags.write_tags`
+  already exists and does the job.
+
 ---
 
 ## Decision / Outcome

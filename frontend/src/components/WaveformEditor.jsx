@@ -21,7 +21,8 @@ import { TrackEditorProvider } from './waveform/state/useTrackEditorState';
 import CuePanel from './waveform/panels/CuePanel';
 import LoopPanel from './waveform/panels/LoopPanel';
 import BeatgridPanel from './waveform/panels/BeatgridPanel';
-import { FEATURE_CUE_PANEL, FEATURE_LOOP_PANEL, FEATURE_BEATGRID_PANEL } from '../config/constants';
+import MetadataPanel from './waveform/panels/MetadataPanel';
+import { FEATURE_CUE_PANEL, FEATURE_LOOP_PANEL, FEATURE_BEATGRID_PANEL, FEATURE_METADATA_PANEL } from '../config/constants';
 
 const ZOOM_DEFAULT = 200;
 
@@ -396,6 +397,7 @@ const WaveformEditorInner = forwardRef(({ track, blobUrl = null, simpleMode = fa
             {FEATURE_CUE_PANEL && <CuePanel track={fullTrack} currentTime={currentTime} />}
             {FEATURE_LOOP_PANEL && <LoopPanel track={fullTrack} currentTime={currentTime} bpm={bpm} />}
             {FEATURE_BEATGRID_PANEL && <BeatgridPanel track={fullTrack} bpm={bpm} beatGrid={beatGrid} />}
+            {FEATURE_METADATA_PANEL && <MetadataPanel track={fullTrack} />}
         </div>
         </TrackEditorProvider>
     );
