@@ -111,6 +111,17 @@ Detail docs:
 
 Reads your own SC playlists, likes, streams via your own OAuth token. Downloads only when the creator enabled the download button OR the stream is one your account is already authorised for. Snipped previews are skipped. No DRM bypass, no paywall circumvention.
 
+## Working with Claude Code
+
+This repo ships a team-shared agent config so [Claude Code](https://claude.com/claude-code) works productively from the first `git clone`:
+
+- **[CLAUDE.md](./CLAUDE.md)** — agent operating manual (stack overview, build commands, coding rules, autonomy boundaries)
+- **`.claude/settings.json`** — committed permission allowlist (npm / pytest / cargo / git read-only — always allowed; pushes / commits / new deps — confirmed)
+- **`.claude/commands/`** — slash commands: `/dev-full`, `/tauri-dev`, `/tauri-build`, `/test-py`, `/audit`, `/sync-docs`, `/route-add`, `/full-check`, `/sync-check`, `/commit`
+- **`.claude/agents/`** — focused subagents: `doc-syncer`, `route-architect`, `audio-stack-reviewer`
+
+Per-machine overrides go in `.claude/settings.local.json` (gitignored). Copy from `.claude/settings.local.json.example` to start.
+
 ## License
 
 See [LICENSE](./LICENSE).
