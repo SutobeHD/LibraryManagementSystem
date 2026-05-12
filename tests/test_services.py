@@ -64,7 +64,7 @@ class TestSettingsManager:
         assert result["theme"] == "light"
         assert result["auto_snap"] is False
         # Defaults still present:
-        assert result["backup_retention_days"] == 30
+        assert result["backup_retention_days"] == 7
 
     def test_default_contract_pins_critical_keys(self) -> None:
         """Other modules read these keys via SettingsManager.load() — if
