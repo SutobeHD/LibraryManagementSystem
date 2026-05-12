@@ -1,0 +1,95 @@
+# Pre-commit hooks — enforce lint/format/syntax checks before every commit.
+#
+# One-time install (per machine):
+#   pip install pre-commit
+#   pre-commit install
+#
+# Manual run (all files):
+#   pre-commit run --all-files
+#
+# Bypass (emergency only — must justify in commit body):
+#   git commit --no-verify
+# But: `--no-verify` is in the deny-list of .claude/settings.json, so the
+# agent cannot use it. That's by design.
+
+repos:
+  # ── Generic hygiene ──────────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.md$|\.diff$'
+      - id: end-of-file-fixer
+        exclude: '\.md$'
+      - id: check-yaml
+      - id: check-json
+        exclude: '^\.vscode/'
+      - id: check-toml
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+        exclude: '\.ps1$'  # PowerShell scripts keep CRLF
+
+  # ── Python — Ruff (lint + format) ────────────────────────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      - id: ruff
+        args: ["--fix", "--exit-non-zero-on-fix"]
+        files: '^(app|tests)/'
+      - id: ruff-format
+        files: '^(app|tests)/'
+
+  # ── Python — mypy (type-check) ───────────────────────────────────────────
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.15.0
+    hooks:
+      - id: mypy
+        files: '^app/'
+        # Don't include test files (mypy on tests is noisy without stubs)
+        additional_dependencies:
+          - "pydantic>=2.0"
+        args: ["--config-file=pyproject.toml"]
+
+  # ── Rust — fmt check ─────────────────────────────────────────────────────
+  # Runs `cargo fmt --check` against src-tauri/. Doesn't auto-fix to keep the
+  # commit deterministic; user re-runs `cargo fmt` if it fails.
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt --check
+        entry: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+        language: system
+        files: '^src-tauri/.*\.rs$'
+        pass_filenames: false
+
+  # ── JS/JSX — Prettier + ESLint ───────────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: prettier-frontend
+        name: prettier (frontend)
+        entry: npx --no-install prettier --write
+        language: system
+        files: '^frontend/src/.*\.(js|jsx|mjs|cjs|json|css)$'
+      - id: eslint-frontend
+        name: eslint (frontend)
+        entry: npx --no-install eslint --fix
+        language: system
+        files: '^frontend/src/.*\.(js|jsx)$'
+
+  # ── Forbid secrets / large user data ─────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: forbid-env-files
+        name: forbid .env in staged changes
+        entry: 'bash -c "git diff --cached --name-only | grep -E ''(^|/)\\.env($|\\.)'' && exit 1 || exit 0"'
+        language: system
+        pass_filenames: false
+      - id: forbid-master-db
+        name: forbid master.db in staged changes
+        entry: 'bash -c "git diff --cached --name-only | grep -E ''master\\.db'' && exit 1 || exit 0"'
+        language: system
+        pass_filenames: false
