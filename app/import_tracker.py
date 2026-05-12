@@ -22,12 +22,11 @@ import logging
 import threading
 import time
 import uuid
-from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
-_TASKS: Dict[str, Dict] = {}
+_TASKS: dict[str, dict] = {}
 _LOCK = threading.Lock()
 _MAX_KEEP = 500   # cap retention so memory stays bounded over a long session
 
@@ -83,13 +82,13 @@ def update(task_id: str, **kwargs) -> None:
         t.update(kwargs)
 
 
-def get_all() -> Dict[str, Dict]:
+def get_all() -> dict[str, dict]:
     """Return a shallow copy of all current tasks (for the API)."""
     with _LOCK:
         return {k: dict(v) for k, v in _TASKS.items()}
 
 
-def get(task_id: str) -> Optional[Dict]:
+def get(task_id: str) -> dict | None:
     with _LOCK:
         v = _TASKS.get(task_id)
         return dict(v) if v else None

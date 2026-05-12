@@ -12,13 +12,15 @@ Workflow:
 """
 
 from __future__ import annotations
+
 import gc
+import hashlib
 import logging
 import shutil
-import hashlib
 import time
+from collections.abc import Callable, Generator
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Generator, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +42,7 @@ class OneLibraryUsbWriter:
     def __init__(
         self,
         usb_root: str,
-        dest_resolver: Optional[Callable[[str, str, str], Path]] = None,
+        dest_resolver: Callable[[str, str, str], Path] | None = None,
     ):
         """
         dest_resolver(artist, album, filename) -> absolute Path on the USB.
@@ -104,9 +106,9 @@ class OneLibraryUsbWriter:
         source,
         audio_copy: bool = True,
         copy_anlz: bool = True,
-        playlist_filter: Optional[List[str]] = None,
+        playlist_filter: list[str] | None = None,
         write_pdb: bool = True,
-    ) -> Generator[Dict, None, None]:
+    ) -> Generator[dict, None, None]:
         """Main entry: yields progress events.
 
         TEMPLATE-BASED APPROACH (rbox 0.1.7 workaround):
@@ -201,11 +203,11 @@ class OneLibraryUsbWriter:
 
         # Reference-table caches (these CAN be created fresh — only
         # create_content is broken, the others work).
-        artist_cache: Dict[str, str] = {}
-        album_cache: Dict[str, str] = {}
-        genre_cache: Dict[str, str] = {}
-        key_cache: Dict[str, str] = {}
-        label_cache: Dict[str, str] = {}
+        artist_cache: dict[str, str] = {}
+        album_cache: dict[str, str] = {}
+        genre_cache: dict[str, str] = {}
+        key_cache: dict[str, str] = {}
+        label_cache: dict[str, str] = {}
 
         # Pre-warm caches with what's already in the template
         try:
@@ -222,7 +224,7 @@ class OneLibraryUsbWriter:
         except Exception as exc:
             logger.debug("[OneLibrary] cache pre-warm skipped: %s", exc)
 
-        content_id_map: Dict[str, str] = {}
+        content_id_map: dict[str, str] = {}
         all_tracks = list(source.iter_tracks())
 
         # Restrict to the playlists the user checked in the UI. Without this
@@ -495,7 +497,7 @@ class OneLibraryUsbWriter:
         except Exception:
             pass
 
-    def _get_or_create_artist(self, db, cache: Dict, name: str) -> Optional[str]:
+    def _get_or_create_artist(self, db, cache: dict, name: str) -> str | None:
         if not name:
             return None
         if name in cache:
@@ -515,7 +517,7 @@ class OneLibraryUsbWriter:
             logger.debug(f"create_artist failed for {name}: {e}")
             return None
 
-    def _get_or_create_album(self, db, cache: Dict, name: str, artist_id: Optional[str]) -> Optional[str]:
+    def _get_or_create_album(self, db, cache: dict, name: str, artist_id: str | None) -> str | None:
         if not name:
             return None
         key = f"{name}|{artist_id or ''}"
@@ -536,7 +538,7 @@ class OneLibraryUsbWriter:
             logger.debug(f"create_album failed: {e}")
             return None
 
-    def _get_or_create_genre(self, db, cache: Dict, name: str) -> Optional[str]:
+    def _get_or_create_genre(self, db, cache: dict, name: str) -> str | None:
         if not name:
             return None
         if name in cache:
@@ -555,7 +557,7 @@ class OneLibraryUsbWriter:
         except Exception:
             return None
 
-    def _get_or_create_key(self, db, cache: Dict, name: str) -> Optional[str]:
+    def _get_or_create_key(self, db, cache: dict, name: str) -> str | None:
         if not name:
             return None
         if name in cache:
@@ -574,7 +576,7 @@ class OneLibraryUsbWriter:
         except Exception:
             return None
 
-    def _get_or_create_label(self, db, cache: Dict, name: str) -> Optional[str]:
+    def _get_or_create_label(self, db, cache: dict, name: str) -> str | None:
         if not name:
             return None
         if name in cache:
@@ -714,15 +716,15 @@ class OneLibraryUsbWriter:
 
         # Sort siblings within each parent so seq values reflect display order
         # in Rekordbox (matches what users see in the source library).
-        siblings: Dict[int, List[Any]] = {}
+        siblings: dict[int, list[Any]] = {}
         for p in pls_by_id.values():
             parent = int(getattr(p, "parent_id", 0) or 0)
             siblings.setdefault(parent, []).append(p)
         for kids in siblings.values():
             kids.sort(key=lambda x: int(getattr(x, "seq", 0) or 0))
 
-        playlists_pdb: List[Dict[str, Any]] = []
-        playlist_entries_pdb: List[tuple] = []
+        playlists_pdb: list[dict[str, Any]] = []
+        playlist_entries_pdb: list[tuple] = []
         for parent_id, kids in siblings.items():
             for sort_idx, p in enumerate(kids):
                 pname = p.name or ""
@@ -775,8 +777,8 @@ class OneLibraryUsbWriter:
         # Categories (rbox attribute MyTagType.Folder=1) and tags
         # (MyTagType.List=0) live in the same id space, so we just split
         # them by `attribute` and pass both buckets into the ext writer.
-        tag_categories: Dict[int, str] = {}
-        tags: Dict[int, str] = {}
+        tag_categories: dict[int, str] = {}
+        tags: dict[int, str] = {}
         for mt in db.get_my_tags():
             attr_raw = getattr(mt, "attribute", 0)
             try:
@@ -787,8 +789,8 @@ class OneLibraryUsbWriter:
                 tag_categories[int(mt.id)] = mt.name or ""
             else:
                 tags[int(mt.id)] = mt.name or ""
-        tag_track_links: List[Tuple[int, int]] = []
-        for tag_id in tags.keys():
+        tag_track_links: list[tuple[int, int]] = []
+        for tag_id in tags:
             try:
                 for tc in db.get_my_tag_contents(tag_id):
                     track_id = int(getattr(tc, "id", 0) or 0)
@@ -843,7 +845,7 @@ class OneLibraryUsbWriter:
         except Exception as exc:
             logger.debug("[OneLibrary] update_image path skipped: %s", exc)
 
-    def _dest_audio_path(self, track: Dict, src_path: Path) -> Path:
+    def _dest_audio_path(self, track: dict, src_path: Path) -> Path:
         """Pioneer-canonical layout: <usb>/Contents/<Artist>/<Title>/<filename>.
 
         Used as a fallback when no `dest_resolver` is supplied. Title (not
@@ -859,7 +861,7 @@ class OneLibraryUsbWriter:
         out = "".join(c if c not in bad else "_" for c in s).strip()
         return out[:80] or "Unknown"
 
-    def _copy_artwork(self, track: Dict, content_id: str) -> None:
+    def _copy_artwork(self, track: dict, content_id: str) -> None:
         """Copy cover-art into PIONEER/Artwork/<bucket>/<hash>.jpg if available."""
         art = track.get("artwork")
         if not art:
@@ -892,8 +894,8 @@ class OneLibraryUsbWriter:
         return bucket, inner
 
     def _generate_or_copy_anlz_for(
-        self, track: Dict, content_id: str, source,
-    ) -> Optional[str]:
+        self, track: dict, content_id: str, source,
+    ) -> str | None:
         """Drop the per-track ANLZ sidecar trio into PIONEER/USBANLZ/.
 
         Strategy:
@@ -950,15 +952,15 @@ class OneLibraryUsbWriter:
 
     # Back-compat shim — old `_copy_anlz_for` callers should switch to
     # `_generate_or_copy_anlz_for`. Kept while we transition the call sites.
-    def _copy_anlz_for(self, track: Dict, content_id: str, source) -> None:
+    def _copy_anlz_for(self, track: dict, content_id: str, source) -> None:
         self._generate_or_copy_anlz_for(track, content_id, source)
 
     def _write_playlists(
         self,
         db,
         source,
-        content_id_map: Dict[str, str],
-        playlist_filter: Optional[List[str]] = None,
+        content_id_map: dict[str, str],
+        playlist_filter: list[str] | None = None,
     ) -> None:
         """Walks playlist tree, creates folders / playlists, links tracks.
 
@@ -1006,14 +1008,14 @@ class OneLibraryUsbWriter:
                 len(playlists), before, len(ancestors),
             )
         # Build parent → children map
-        by_parent: Dict[str, List[Dict]] = {}
+        by_parent: dict[str, list[dict]] = {}
         for p in playlists:
             by_parent.setdefault(p["parent_id"], []).append(p)
 
         # ID-translation: source-pid → onelibrary-pid (kept as int)
-        id_map: Dict[str, Optional[int]] = {"ROOT": None}
+        id_map: dict[str, int | None] = {"ROOT": None}
 
-        def _emit(parent_src_id: str, parent_one_id: Optional[int]):
+        def _emit(parent_src_id: str, parent_one_id: int | None):
             children = by_parent.get(parent_src_id, [])
             for seq, child in enumerate(children):
                 try:

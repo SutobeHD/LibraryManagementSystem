@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ def sidecar_dir_for(file_path: Path) -> Path:
     return file_path.parent / ".lms_anlz" / h
 
 
-def write_companion_anlz(file_path: Path, analysis_result: Optional[Dict[str, Any]] = None) -> Optional[Path]:
+def write_companion_anlz(file_path: Path, analysis_result: dict[str, Any] | None = None) -> Path | None:
     """
     Write DAT/EXT/2EX next to file_path. Returns the sidecar directory on
     success, None on failure.

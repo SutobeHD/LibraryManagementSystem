@@ -5,11 +5,9 @@ edits: volume envelopes, BPM maps, hot cues, memory cues, active censors,
 and beat grid data.
 """
 
-import os
 import logging
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +48,7 @@ class RbepProject:
         except Exception as e:
             logger.error(f"Error reading RBEP file {self.filepath}: {e}")
 
-    def _parse_track(self, track_el) -> Optional[Dict]:
+    def _parse_track(self, track_el) -> dict | None:
         """Parse a single <track> element."""
         track_id = track_el.get("trackid", "")
         song_el = track_el.find("song")
@@ -137,7 +135,7 @@ class RbepProject:
 
         return track
 
-    def _parse_edit(self, edit_el) -> Dict:
+    def _parse_edit(self, edit_el) -> dict:
         """Parse <edit> element containing volume, BPM, hotcue, memorycue, activecensor data."""
         edit = {
             "volume": [],
@@ -209,7 +207,7 @@ class RbepProject:
 
         return edit
 
-    def _parse_songgrid(self, songgrid_el) -> List[Dict]:
+    def _parse_songgrid(self, songgrid_el) -> list[dict]:
         """Parse <songgrid> element containing beat positions."""
         beats = []
         orggrid = songgrid_el.find("orggrid")
@@ -224,7 +222,7 @@ class RbepProject:
                     })
         return beats
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Convert the project to a JSON-serializable dict."""
         return {
             "name": self.name,
@@ -235,7 +233,7 @@ class RbepProject:
         }
 
 
-def list_projects(prj_dir: str = None) -> List[Dict]:
+def list_projects(prj_dir: str = None) -> list[dict]:
     """List all available .rbep project files."""
     directory = Path(prj_dir) if prj_dir else DEFAULT_PRJ_DIR
     if not directory.exists():
@@ -256,7 +254,7 @@ def list_projects(prj_dir: str = None) -> List[Dict]:
     return projects
 
 
-def parse_project(name: str, prj_dir: str = None) -> Optional[Dict]:
+def parse_project(name: str, prj_dir: str = None) -> dict | None:
     """Parse a specific .rbep project file by name."""
     directory = Path(prj_dir) if prj_dir else DEFAULT_PRJ_DIR
     filepath = directory / f"{name}.rbep"

@@ -8,10 +8,10 @@ prefixed with RB_ANALYSIS_ (e.g. RB_ANALYSIS_BPM_OUTPUT_MIN=70).
 """
 from __future__ import annotations
 
-import os
 import logging
-from dataclasses import dataclass, fields, replace as dataclass_replace
-from typing import ClassVar
+import os
+from dataclasses import dataclass, fields
+from dataclasses import replace as dataclass_replace
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ class AnalysisSettings:
 
     # ---------------------------------------------------------------------
     @classmethod
-    def from_env(cls) -> "AnalysisSettings":
+    def from_env(cls) -> AnalysisSettings:
         """Build settings, overriding fields from environment variables."""
         defaults = cls()
         kwargs = {}

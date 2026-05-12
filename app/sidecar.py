@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -15,7 +14,7 @@ class SidecarStorage:
         if not DATA_FILE.exists():
             return {"artists": {}}
         try:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
+            with open(DATA_FILE, encoding="utf-8") as f:
                 return json.load(f)
         except (OSError, json.JSONDecodeError) as e:
             logger.warning(

@@ -22,12 +22,12 @@ import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # Lazy-initialized — resolved after config module is loaded
-_REGISTRY_DB: Optional[Path] = None
+_REGISTRY_DB: Path | None = None
 
 
 def _registry_path() -> Path:
@@ -133,7 +133,7 @@ def get_current_device_id() -> str:
 
 # ── Deduplication ─────────────────────────────────────────────────────────────
 
-def get_record(sc_track_id: str) -> Optional[Dict]:
+def get_record(sc_track_id: str) -> dict | None:
     """Return full DB row for a SoundCloud track ID, or None if not present."""
     if not sc_track_id:
         return None
@@ -173,7 +173,7 @@ def is_already_downloaded(sc_track_id: str) -> bool:
     return False
 
 
-def find_by_hash(sha256: str) -> Optional[Dict]:
+def find_by_hash(sha256: str) -> dict | None:
     """
     Content-based dedup. Returns the existing record dict if a file with the
     same SHA-256 hash already exists — even if it has a different sc_track_id
@@ -203,13 +203,13 @@ def register_download(
     artist: str,
     duration_ms: int = 0,
     sc_permalink_url: str = "",
-    sc_playlist_title: Optional[str] = None,
-    file_path: Optional[Path] = None,
-    file_format: Optional[str] = None,
-    file_size_bytes: Optional[int] = None,
-    sha256_hash: Optional[str] = None,
+    sc_playlist_title: str | None = None,
+    file_path: Path | None = None,
+    file_format: str | None = None,
+    file_size_bytes: int | None = None,
+    sha256_hash: str | None = None,
     status: str = "downloaded",
-    error_message: Optional[str] = None,
+    error_message: str | None = None,
 ) -> bool:
     """
     Insert or update a download record. Idempotent (UPSERT on sc_track_id).
@@ -256,10 +256,10 @@ def register_download(
 def update_analysis(
     *,
     sc_track_id: str,
-    bpm: Optional[float] = None,
-    key_str: Optional[str] = None,
-    confidence: Optional[float] = None,
-    local_track_id: Optional[str] = None,
+    bpm: float | None = None,
+    key_str: str | None = None,
+    confidence: float | None = None,
+    local_track_id: str | None = None,
 ) -> bool:
     """Store DSP analysis results and mark the record as 'analyzed'."""
     now = datetime.now(timezone.utc).isoformat()
@@ -321,10 +321,10 @@ def get_history(
     *,
     limit: int = 100,
     offset: int = 0,
-    status: Optional[str] = None,
-    device_id: Optional[str] = None,
-    search: Optional[str] = None,
-) -> List[Dict]:
+    status: str | None = None,
+    device_id: str | None = None,
+    search: str | None = None,
+) -> list[dict]:
     """
     Paginated history log, newest-first.
 
@@ -333,8 +333,8 @@ def get_history(
       device_id  — filter to a specific device (pass get_current_device_id() for this device)
       search     — substring match on title or artist (case-insensitive)
     """
-    clauses: List[str] = []
-    params: List[Any] = []
+    clauses: list[str] = []
+    params: list[Any] = []
 
     if status:
         clauses.append("status = ?")
@@ -365,7 +365,7 @@ def get_history(
         return []
 
 
-def get_stats() -> Dict:
+def get_stats() -> dict:
     """Aggregate statistics for the history dashboard widget."""
     try:
         with _conn() as db:
@@ -389,7 +389,7 @@ def get_stats() -> Dict:
 
 # ── File hashing ──────────────────────────────────────────────────────────────
 
-def compute_sha256(path: Path, chunk_size: int = 65_536) -> Optional[str]:
+def compute_sha256(path: Path, chunk_size: int = 65_536) -> str | None:
     """
     Stream-hash a file with SHA-256. Returns hex digest or None on I/O error.
     chunk_size=65536 balances memory use and speed for audio files (30–500 MB).

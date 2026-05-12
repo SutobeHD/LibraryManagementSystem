@@ -21,12 +21,11 @@ Public surface:
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
@@ -53,7 +52,7 @@ def _is_audio(path: Path) -> bool:
 class _Handler(FileSystemEventHandler):
     """watchdog handler — forwards every audio file event to the watcher."""
 
-    def __init__(self, watcher: "FolderWatcher", root: Path):
+    def __init__(self, watcher: FolderWatcher, root: Path):
         self.watcher = watcher
         self.root = root
 
@@ -84,8 +83,8 @@ class FolderWatcher:
     ):
         self._import = import_callback
         self._is_known = is_known_callback
-        self._observers: Dict[str, Observer] = {}
-        self._timers: Dict[str, threading.Timer] = {}
+        self._observers: dict[str, Observer] = {}
+        self._timers: dict[str, threading.Timer] = {}
         self._inflight: set[str] = set()
         self._lock = threading.RLock()
         self._executor = ThreadPoolExecutor(
@@ -281,11 +280,11 @@ class FolderWatcher:
 
 # ── module-level singleton + helpers ──────────────────────────────────────
 
-_instance: Optional[FolderWatcher] = None
+_instance: FolderWatcher | None = None
 _instance_lock = threading.Lock()
 
 
-def get_watcher() -> Optional[FolderWatcher]:
+def get_watcher() -> FolderWatcher | None:
     return _instance
 
 

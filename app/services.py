@@ -1,25 +1,24 @@
-import shutil
-import wave
-import struct
-import psutil
 import datetime
-import subprocess
-import os
-import gc
 import json
-import time
-import re
 import logging
+import os
+import re
+import shutil
+import subprocess
+import time
+import wave
 import xml.etree.ElementTree as ET
-from pathlib import Path
 from collections import defaultdict
-from typing import Optional, Dict, Any, List
-from .config import REKORDBOX_ROOT, DB_FILENAME, BACKUP_DIR, FFMPEG_BIN, EXPORT_DIR, MUSIC_DIR
-from .xml_generator import RekordboxXML
+from pathlib import Path
+from typing import Any
+
+import psutil
+from mutagen.flac import FLAC
+from mutagen.id3 import APIC, ID3
+
+from .config import BACKUP_DIR, DB_FILENAME, EXPORT_DIR, FFMPEG_BIN, REKORDBOX_ROOT
 from .database import db
-import mutagen
-from mutagen.id3 import ID3, APIC
-from mutagen.flac import FLAC, Picture
+
 try:
     import soundfile as sf
     _HAS_SOUNDFILE = True
@@ -83,7 +82,7 @@ class XMLProcessor:
         tree = ET.parse(input_path)
         root = tree.getroot()
         if root.tag != "DJ_PLAYLISTS": raise ValueError("Invalid Rekordbox XML")
-        
+
         collection = root.find("COLLECTION")
         playlists_root = root.find("PLAYLISTS")
         if collection is None or playlists_root is None: raise ValueError("Invalid XML Structure")
@@ -91,10 +90,10 @@ class XMLProcessor:
         tracks = list(collection.findall("TRACK"))
         artist_map = defaultdict(list)
         label_map = defaultdict(list)
-        
+
         for track in tracks:
             tid = track.get("TrackID")
-            
+
             # Cleaning
             for attr in ["Name", "Artist", "Album", "Label"]:
                 track.set(attr, XMLProcessor.clean_tag(track.get(attr, "")))
@@ -105,7 +104,7 @@ class XMLProcessor:
                 track.set("Artist", XMLProcessor.MISSING_ARTIST_NAME)
                 track.set("ColorID", XMLProcessor.MISSING_ARTIST_COLOR_ID)
                 artist_val = XMLProcessor.MISSING_ARTIST_NAME
-            
+
             if artist_val: artist_map[artist_val].append(tid)
             label_val = track.get("Label", "").strip()
             if label_val: label_map[label_val].append(tid)
@@ -145,7 +144,7 @@ class SystemGuard:
                 )
         return False
     @staticmethod
-    def create_backup() -> Optional[str]:
+    def create_backup() -> str | None:
         source = REKORDBOX_ROOT / DB_FILENAME
         if not source.exists(): return None
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -182,7 +181,6 @@ class AudioEngine:
             #   - 'insert': paste an extra slice at insertAt (from src, range [start..end])
             # Anything not explicitly an insert/delete is treated as a literal slice
             # (legacy "make-section" mode — preserves backwards compatibility).
-            from .config import MUSIC_DIR as _MUSIC
 
             try:
                 src_dur = AudioEngine.get_duration(source_path) if hasattr(AudioEngine, "get_duration") else None
@@ -277,7 +275,7 @@ class AudioEngine:
                 # Use unique filename with microsecond precision
                 unique_id = f"{int(time.time() * 1000)}_{i}"
                 temp = EXPORT_DIR / f"temp_{unique_id}.wav"
-                
+
                 filters = []
                 if fade_in and i == 0: filters.append("afade=t=in:st=0:d=1.0")
                 if fade_out and i == len(timeline)-1: filters.append(f"afade=t=out:st={max(0, duration-1)}:d=1.0")
@@ -397,7 +395,7 @@ class AudioEngine:
                 logger.warning(f"Could not add exported track to DB (non-fatal): {db_err}")
 
             return new_tid
-        except Exception as e: 
+        except Exception as e:
             logger.error(f"Render failed: {e}")
             raise RuntimeError(f"Render failed: {e}")
         finally:
@@ -413,25 +411,25 @@ class AudioEngine:
     def slice_audio(source_path: str, start: float, end: float):
         if not AudioEngine.check_ffmpeg():
              raise RuntimeError("FFmpeg not found")
-        
+
         if not os.path.exists(source_path): raise FileNotFoundError(f"Source not found: {source_path}")
 
         duration = end - start
         if duration <= 0: raise ValueError("Invalid duration")
-        
+
         unique_id = f"slice_{int(time.time()*1000)}"
         temp_path = EXPORT_DIR / f"{unique_id}.wav"
-        
+
         # Standardize to WAV PCM for frontend compatibility
         cmd = [
-            FFMPEG_BIN, "-y", 
-            "-ss", str(float(start)), 
-            "-t", str(float(duration)), 
+            FFMPEG_BIN, "-y",
+            "-ss", str(float(start)),
+            "-t", str(float(duration)),
             "-i", source_path,
             "-ac", "2", "-ar", "44100", "-c:a", "pcm_s16le",
             str(temp_path)
         ]
-        
+
         try:
             logger.info("ffmpeg slice start: args=%s", " ".join(cmd))
             _t0 = time.monotonic()
@@ -460,12 +458,12 @@ class AudioEngine:
         from scipy.signal import butter, lfilter
 
         logger.info(f"Generating multiband waveform for {path} at {pixels_per_second} pps")
-        
+
         # 1. Load audio (Mono, downsampled for speed)
         y, sr = librosa.load(path, sr=22050, mono=True)
         duration = librosa.get_duration(y=y, sr=sr)
         points = int(duration * pixels_per_second)
-        
+
         # 2. Filter Design
         def butter_lowpass(cut, fs, order=3):
             nyq = 0.5 * fs
@@ -491,7 +489,7 @@ class AudioEngine:
 
         # 4. Extract Envelope (RMS)
         hop = max(1, len(y) // points)
-        
+
         def get_envelopes(data):
             # Pad to match points exactly
             env = librosa.feature.rms(y=data, frame_length=hop*2, hop_length=hop)[0]
@@ -542,7 +540,7 @@ class LibraryTools:
         for tid, track in db.tracks.items():
             key = (track.get("Title", "").lower(), track.get("Artist", "").lower())
             counts[key].append(tid)
-        
+
         duplicates = []
         for key, ids in counts.items():
             if len(ids) > 1:
@@ -561,15 +559,15 @@ class LibraryTools:
         for tid in track_ids:
             track = db.get_track_details(tid)
             if not track: continue
-            
+
             title = track.get("Title", "")
             artist = track.get("Artist", "")
             if not title or not artist: continue
 
             # Pattern 1: "Artist - Title"
-            # Pattern 2: "Title (feat. Artist)" - maybe keep this? 
+            # Pattern 2: "Title (feat. Artist)" - maybe keep this?
             # User specifically mentioned "Artist in title field".
-            
+
             new_title = title
             # Try some common delimiters
             for sep in [" - ", " – ", " — ", " | "]:
@@ -583,7 +581,7 @@ class LibraryTools:
                     elif parts[-1].strip().lower() == artist.lower():
                         new_title = sep.join(parts[:-1]).strip()
                         break
-            
+
             if new_title != title:
                 db.update_track_title(tid, new_title)
                 results["success"].append({"id": tid, "old": title, "new": new_title})
@@ -595,7 +593,7 @@ class LibraryTools:
         # Note: XMLProcessor already does something similar, but this is for dynamic calling
         artist_map = defaultdict(list)
         label_map = defaultdict(list)
-        
+
         for tid, track in db.tracks.items():
             artist = track.get("Artist")
             label = track.get("Label")
@@ -606,7 +604,7 @@ class LibraryTools:
         auto_folder_node = next((p for p in db.playlists if p['Name'] == "Auto Playlists" and p['Type'] == "0"), None)
         if not auto_folder_node:
             auto_folder_node = db.create_playlist("Auto Playlists", parent_id="ROOT", is_folder=True)
-        
+
         if not auto_folder_node: return False
         auto_folder_id = auto_folder_node['ID']
 
@@ -614,7 +612,7 @@ class LibraryTools:
         art_folder_node = next((p for p in db.playlists if p['Name'] == "By Artist" and p['ParentID'] == auto_folder_id), None)
         if not art_folder_node:
             art_folder_node = db.create_playlist("By Artist", parent_id=auto_folder_id, is_folder=True)
-        
+
         if art_folder_node:
             art_folder_id = art_folder_node['ID']
             for art, tids in artist_map.items():
@@ -625,7 +623,7 @@ class LibraryTools:
         lbl_folder_node = next((p for p in db.playlists if p['Name'] == "By Label" and p['ParentID'] == auto_folder_id), None)
         if not lbl_folder_node:
             lbl_folder_node = db.create_playlist("By Label", parent_id=auto_folder_id, is_folder=True)
-            
+
         if lbl_folder_node:
             lbl_folder_id = lbl_folder_node['ID']
             for lbl, tids in label_map.items():
@@ -678,7 +676,7 @@ class SettingsManager:
         "scan_folders": []           # absolute paths watched for new audio files (FolderWatcher)
     }
     @classmethod
-    def load(cls) -> Dict[str, Any]:
+    def load(cls) -> dict[str, Any]:
         try:
             return {**cls.DEFAULT, **json.load(open(cls.CONFIG))}
         except (OSError, json.JSONDecodeError) as e:
@@ -687,18 +685,18 @@ class SettingsManager:
             )
             return cls.DEFAULT
     @classmethod
-    def save(cls, cfg: Dict[str, Any]) -> None:
+    def save(cls, cfg: dict[str, Any]) -> None:
         json.dump(cfg, open(cls.CONFIG, "w"), indent=2)
 
 class MetadataManager:
     MAPPINGS_FILE = Path("metadata_mappings.json")
 
     @classmethod
-    def load(cls) -> Dict[str, Dict[str, str]]:
+    def load(cls) -> dict[str, dict[str, str]]:
         if not cls.MAPPINGS_FILE.exists():
             return {"artists": {}, "labels": {}, "albums": {}}
         try:
-            with open(cls.MAPPINGS_FILE, "r", encoding='utf-8') as f:
+            with open(cls.MAPPINGS_FILE, encoding='utf-8') as f:
                 return json.load(f)
         except (OSError, json.JSONDecodeError) as e:
             logger.warning(
@@ -707,7 +705,7 @@ class MetadataManager:
             return {"artists": {}, "labels": {}, "albums": {}}
 
     @classmethod
-    def save(cls, data: Dict[str, Dict[str, str]]) -> None:
+    def save(cls, data: dict[str, dict[str, str]]) -> None:
         with open(cls.MAPPINGS_FILE, "w", encoding='utf-8') as f:
             json.dump(data, f, indent=2)
 
@@ -911,13 +909,14 @@ class BeatAnalyzer:
             }
         except Exception as e:
             logger.error(f"Legacy analysis failed for {path}: {e}", exc_info=True)
-            raise RuntimeError(f"Audio analysis failed: {str(e)}")
+            raise RuntimeError(f"Audio analysis failed: {e!s}")
 
     @staticmethod
     def detect_key(y, sr):
         """Key detection -- delegates to engine if available, else basic K-S."""
         try:
-            from .analysis_engine import detect_key as engine_detect_key, _ensure_libs
+            from .analysis_engine import _ensure_libs
+            from .analysis_engine import detect_key as engine_detect_key
             if _ensure_libs():
                 result = engine_detect_key(y, sr)
                 return {"key": result.get("key", "Unknown"), "camelot": result.get("camelot", "")}
@@ -954,7 +953,8 @@ class BeatAnalyzer:
     def detect_phrases(y, sr, bpm, duration):
         """Phrase detection -- delegates to engine if available."""
         try:
-            from .analysis_engine import detect_phrases as engine_detect_phrases, _ensure_libs
+            from .analysis_engine import _ensure_libs
+            from .analysis_engine import detect_phrases as engine_detect_phrases
             if _ensure_libs():
                 phrases = engine_detect_phrases(y, sr, bpm, duration)
                 return [
@@ -994,7 +994,8 @@ class BeatAnalyzer:
     def calculate_lufs(y, sr):
         """LUFS calculation -- delegates to engine if available."""
         try:
-            from .analysis_engine import calculate_lufs as engine_lufs, _ensure_libs
+            from .analysis_engine import _ensure_libs
+            from .analysis_engine import calculate_lufs as engine_lufs
             if _ensure_libs():
                 return engine_lufs(y, sr)
         except ImportError:
@@ -1010,7 +1011,7 @@ class BeatAnalyzer:
 
 class ImportManager:
     @staticmethod
-    def process_import(file_path: Path, analysis_result: Optional[Dict] = None):
+    def process_import(file_path: Path, analysis_result: dict | None = None):
         """Orchestrates analysis and library insertion for a new file.
 
         analysis_result: optional, full output of run_full_analysis. If passed,
@@ -1041,13 +1042,13 @@ class ImportManager:
                 # Ensure covers dir exists
                 COVERS_DIR = Path(REKORDBOX_ROOT).parent / "app" / "data" / "covers"
                 COVERS_DIR.mkdir(parents=True, exist_ok=True)
-                
+
                 # Each import re-extracts cover art rather than hash-matching against existing
                 # cover files; the disk hit is negligible vs. the cost of the surrounding
                 # mutagen probe, and dedup would need a SHA index we don't currently maintain.
                 has_art = False
                 art_data = None
-                
+
                 if file_path.suffix.lower() == ".mp3":
                     try:
                         audio = ID3(file_path)
@@ -1070,7 +1071,7 @@ class ImportManager:
                             "services: FLAC artwork lookup failed for %s (%s)",
                             file_path, e,
                         )
-                
+
                 if art_data:
                     # Save with unique name based on file stem
                     bg_name = f"{file_path.stem}_{int(time.time())}.jpg"
@@ -1085,7 +1086,7 @@ class ImportManager:
                     logger.info(f"Extracted artwork to {artwork_path}")
             except Exception as e:
                 logger.warning(f"Failed to extract artwork: {e}")
-            
+
             # 2. Read native tags (ID3/Vorbis/MP4/WAV-RIFF) before falling
             # back to filename-based defaults. Without this every imported
             # track ended up as Artist="New Import" / Album="Imported" which
@@ -1134,7 +1135,7 @@ class ImportManager:
                 "Artwork": artwork_path,
                 "positionMarks": []
             }
-            
+
             # 3. Add to Collection
             tid = db.add_track(track_data)
             logger.info(f"Import successful! Track ID: {tid}")
@@ -1152,11 +1153,11 @@ class ImportManager:
                     })
             except Exception as e:
                 logger.debug(f"ID3 sync after import skipped: {e}")
-            
+
             # 4. Add to "Import" Playlist
             # Case-insensitive search
             import_playlists = [p for p in db.playlists if p['Name'].lower() == "import"]
-            
+
             if not import_playlists:
                 logger.info("Creating 'Import' playlist...")
                 target_pl = db.create_playlist("Import")
@@ -1167,7 +1168,7 @@ class ImportManager:
                     # Optional: We could consolidate here, but that might be a heavy operation for an import.
                     # For now, just pick one.
                 target_pl = import_playlists[0]
-            
+
             if target_pl:
                 pid = target_pl['ID']
                 # Check if track is already in playlist to avoid duplicates
@@ -1175,7 +1176,7 @@ class ImportManager:
                 if not any(str(t.get('ID') or t.get('id')) == str(tid) for t in current_tracks):
                      if db.add_track_to_playlist(pid, tid):
                          logger.info(f"Added track {tid} to 'Import' playlist ({pid})")
-                         
+
                          # AUTO-EXPORT: Trigger Bridge XML generation so Rekordbox sees it
                          try:
                              from .rekordbox_bridge import RekordboxBridge
@@ -1220,7 +1221,7 @@ class ProjectManager:
         ProjectManager.PROJECTS_DIR.mkdir(exist_ok=True)
 
     @staticmethod
-    def save_project(name: str, data: Dict[str, Any]) -> str:
+    def save_project(name: str, data: dict[str, Any]) -> str:
         ProjectManager.ensure_dir()
         filename = ProjectManager.PROJECTS_DIR / f"{name}.prj"
         try:
@@ -1232,22 +1233,22 @@ class ProjectManager:
             raise e
 
     @staticmethod
-    def load_project(name: str) -> Optional[Dict[str, Any]]:
+    def load_project(name: str) -> dict[str, Any] | None:
         filename = ProjectManager.PROJECTS_DIR / f"{name}.prj"
         if not filename.exists():
              # Try without extension if passed
              filename = ProjectManager.PROJECTS_DIR / name
              if not filename.exists(): raise FileNotFoundError("Project not found")
-        
+
         try:
-            with open(filename, 'r', encoding='utf-8') as f:
+            with open(filename, encoding='utf-8') as f:
                 return json.load(f)
         except Exception as e:
             logger.error(f"Failed to load project {name}: {e}")
             raise e
 
     @staticmethod
-    def list_projects() -> List[str]:
+    def list_projects() -> list[str]:
         ProjectManager.ensure_dir()
         projects = []
         for f in ProjectManager.PROJECTS_DIR.glob("*.prj"):

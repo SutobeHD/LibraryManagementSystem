@@ -10,10 +10,10 @@ Endpoints that use this:
   GET  /api/audio/analyze/{id}  -> AudioAnalyzer.get_status()
 """
 
-import os
 import logging
-from concurrent.futures import ProcessPoolExecutor, Future
-from typing import Dict, Any, Optional
+import os
+from concurrent.futures import Future, ProcessPoolExecutor
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ except ImportError:
 
 # Import the production engine (lazy -- won't load heavy libs until needed)
 try:
-    from .analysis_engine import AnalysisEngine, run_full_analysis, _ensure_libs
+    from .analysis_engine import AnalysisEngine, _ensure_libs, run_full_analysis
     _ENGINE_AVAILABLE = True
 except ImportError:
     _ENGINE_AVAILABLE = False
@@ -45,8 +45,8 @@ class AudioAnalyzer:
       - "speed": Lighter analysis (still uses AnalysisEngine but with duration cap)
     """
 
-    _executor: Optional[ProcessPoolExecutor] = None
-    _tasks: Dict[str, Future] = {}
+    _executor: ProcessPoolExecutor | None = None
+    _tasks: dict[str, Future] = {}
 
     @classmethod
     def get_executor(cls):
@@ -62,7 +62,7 @@ class AudioAnalyzer:
             cls._executor = None
 
     @classmethod
-    def analyze_track(cls, task_id: str, file_path: str, mode: str = "accuracy") -> Dict[str, Any]:
+    def analyze_track(cls, task_id: str, file_path: str, mode: str = "accuracy") -> dict[str, Any]:
         """Submit an analysis job to the worker pool."""
         executor = cls.get_executor()
 
@@ -78,7 +78,7 @@ class AudioAnalyzer:
         return {"task_id": task_id, "status": "processing"}
 
     @classmethod
-    def get_status(cls, task_id: str) -> Dict[str, Any]:
+    def get_status(cls, task_id: str) -> dict[str, Any]:
         """Check the status of an ongoing analysis job."""
         future = cls._tasks.get(task_id)
         if not future:
@@ -95,7 +95,7 @@ class AudioAnalyzer:
         return {"status": "processing"}
 
     @classmethod
-    def analyze_sync(cls, file_path: str, mode: str = "accuracy") -> Dict[str, Any]:
+    def analyze_sync(cls, file_path: str, mode: str = "accuracy") -> dict[str, Any]:
         """Synchronous analysis. Blocks until done."""
         if _ENGINE_AVAILABLE:
             duration_cap = 120.0 if mode == "speed" else None
@@ -104,7 +104,7 @@ class AudioAnalyzer:
         return cls._run_legacy_analysis(file_path, mode)
 
     @classmethod
-    def capabilities(cls) -> Dict[str, Any]:
+    def capabilities(cls) -> dict[str, Any]:
         """Report which analysis backends are available."""
         if _ENGINE_AVAILABLE:
             return AnalysisEngine.capabilities()
@@ -117,7 +117,7 @@ class AudioAnalyzer:
         }
 
     @staticmethod
-    def _normalize_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_result(result: dict[str, Any]) -> dict[str, Any]:
         """
         Ensure the result dict is compatible with existing API consumers.
         Maps the new AnalysisEngine output back to the legacy format expected
@@ -144,7 +144,7 @@ class AudioAnalyzer:
         return normalized
 
     @staticmethod
-    def _run_legacy_analysis(file_path: str, mode: str) -> Dict[str, Any]:
+    def _run_legacy_analysis(file_path: str, mode: str) -> dict[str, Any]:
         """
         Legacy fallback when analysis_engine is not available.
         Uses basic librosa for BPM detection.

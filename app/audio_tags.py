@@ -20,9 +20,8 @@ format the function logs and returns False; the DB write still stands.
 from __future__ import annotations
 
 import logging
-import mimetypes
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import mutagen
 
@@ -43,8 +42,8 @@ _FIELD_ALIASES = {
 }
 
 
-def _normalize_fields(updates: Dict[str, Any]) -> Dict[str, Any]:
-    out: Dict[str, Any] = {}
+def _normalize_fields(updates: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
     for k, v in (updates or {}).items():
         if v is None:
             continue
@@ -64,10 +63,20 @@ def _rating_to_popm(stars: int) -> int:
     return {0: 0, 1: 1, 2: 64, 3: 128, 4: 196, 5: 255}[s]
 
 
-def _write_mp3(path: Path, fields: Dict[str, Any], artwork: Optional[bytes]) -> bool:
+def _write_mp3(path: Path, fields: dict[str, Any], artwork: bytes | None) -> bool:
     from mutagen.id3 import (
-        ID3, ID3NoHeaderError, TIT2, TPE1, TALB, TCON, TYER, TBPM, TKEY,
-        COMM, POPM, APIC,
+        APIC,
+        COMM,
+        ID3,
+        POPM,
+        TALB,
+        TBPM,
+        TCON,
+        TIT2,
+        TKEY,
+        TPE1,
+        TYER,
+        ID3NoHeaderError,
     )
     try:
         try:
@@ -99,7 +108,7 @@ def _write_mp3(path: Path, fields: Dict[str, Any], artwork: Optional[bytes]) -> 
         return False
 
 
-def _write_flac(path: Path, fields: Dict[str, Any], artwork: Optional[bytes]) -> bool:
+def _write_flac(path: Path, fields: dict[str, Any], artwork: bytes | None) -> bool:
     from mutagen.flac import FLAC, Picture
     try:
         f = FLAC(str(path))
@@ -132,7 +141,7 @@ def _write_flac(path: Path, fields: Dict[str, Any], artwork: Optional[bytes]) ->
         return False
 
 
-def _write_mp4(path: Path, fields: Dict[str, Any], artwork: Optional[bytes]) -> bool:
+def _write_mp4(path: Path, fields: dict[str, Any], artwork: bytes | None) -> bool:
     from mutagen.mp4 import MP4, MP4Cover
     try:
         m = MP4(str(path))
@@ -164,7 +173,7 @@ def _write_mp4(path: Path, fields: Dict[str, Any], artwork: Optional[bytes]) -> 
         return False
 
 
-def _write_ogg(path: Path, fields: Dict[str, Any], artwork: Optional[bytes]) -> bool:
+def _write_ogg(path: Path, fields: dict[str, Any], artwork: bytes | None) -> bool:
     """Covers .ogg (Vorbis) and .opus (OggOpus). Artwork in Ogg is rare; skipped."""
     try:
         if path.suffix.lower() == ".opus":
@@ -186,7 +195,7 @@ def _write_ogg(path: Path, fields: Dict[str, Any], artwork: Optional[bytes]) -> 
         return False
 
 
-def _write_aiff_wav(path: Path, fields: Dict[str, Any], artwork: Optional[bytes]) -> bool:
+def _write_aiff_wav(path: Path, fields: dict[str, Any], artwork: bytes | None) -> bool:
     """AIFF and WAV both store an ID3 chunk; mutagen has dedicated wrappers."""
     try:
         suffix = path.suffix.lower()
@@ -198,7 +207,16 @@ def _write_aiff_wav(path: Path, fields: Dict[str, Any], artwork: Optional[bytes]
         if c.tags is None:
             c.add_tags()
         from mutagen.id3 import (
-            TIT2, TPE1, TALB, TCON, TYER, TBPM, TKEY, COMM, POPM, APIC,
+            APIC,
+            COMM,
+            POPM,
+            TALB,
+            TBPM,
+            TCON,
+            TIT2,
+            TKEY,
+            TPE1,
+            TYER,
         )
         tags = c.tags
         if "title" in fields:    tags.delall("TIT2"); tags.add(TIT2(encoding=3, text=str(fields["title"])))
@@ -235,8 +253,8 @@ _DISPATCH = {
 
 def write_tags(
     path: str | Path,
-    updates: Dict[str, Any],
-    artwork: Optional[bytes] = None,
+    updates: dict[str, Any],
+    artwork: bytes | None = None,
 ) -> bool:
     """
     Mirror updates into the audio file's native tag format.
@@ -268,7 +286,7 @@ def write_tags(
         return False
 
 
-def load_artwork(image_path: str | Path) -> Optional[bytes]:
+def load_artwork(image_path: str | Path) -> bytes | None:
     """Read an artwork file from disk into bytes, or None on any failure."""
     if not image_path:
         return None
@@ -321,7 +339,7 @@ def _coerce_tag_value(raw) -> str:
     return str(text).strip()
 
 
-def _parse_filename(stem: str) -> Dict[str, str]:
+def _parse_filename(stem: str) -> dict[str, str]:
     """Fallback parser for "Artist - Title" patterns common in DJ pools.
 
     Splits on the first " - " (en-dash and em-dash also accepted). Returns
@@ -334,7 +352,7 @@ def _parse_filename(stem: str) -> Dict[str, str]:
     return {"title": stem.strip()}
 
 
-def read_tags(path: str | Path) -> Dict[str, str]:
+def read_tags(path: str | Path) -> dict[str, str]:
     """Read metadata tags from any supported audio file.
 
     Strategy:
@@ -346,7 +364,7 @@ def read_tags(path: str | Path) -> Dict[str, str]:
     albumartist, genre, year, comment, bpm, key, isrc. Never raises.
     """
     p = Path(path)
-    out: Dict[str, str] = {k: "" for k in _READ_KEYS}
+    out: dict[str, str] = {k: "" for k in _READ_KEYS}
 
     try:
         audio = mutagen.File(str(p))

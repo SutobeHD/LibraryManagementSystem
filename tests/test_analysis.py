@@ -29,7 +29,7 @@ def _synth_track(
     duration_s: float = 12.0,
     sr: int = 44100,
     stereo: bool = False,
-) -> Tuple[np.ndarray, int]:
+) -> tuple[np.ndarray, int]:
     """Generate a synthetic 4/4 track with kick/snare/hihat for tests."""
     n = int(sr * duration_s)
     y = np.zeros(n, dtype=np.float32)
@@ -300,7 +300,7 @@ def test_e2e_full_analysis_synth():
 
 
 def test_e2e_quick_analysis_faster():
-    from app.analysis_engine import run_quick_analysis, run_full_analysis, _ensure_libs
+    from app.analysis_engine import _ensure_libs, run_full_analysis, run_quick_analysis
     _ensure_libs()  # warm imports
     y, sr = _synth_track(bpm=130.0, duration_s=10.0)
     path = _write_wav(y, sr)

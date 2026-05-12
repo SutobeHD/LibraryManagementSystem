@@ -23,7 +23,6 @@ from __future__ import annotations
 import io
 import logging
 from pathlib import Path
-from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +39,7 @@ def _bucket_for(image_id: int) -> str:
     return f"{int(image_id) // 1000:05d}"
 
 
-def _extract_embedded(audio_path: Path) -> Optional[bytes]:
+def _extract_embedded(audio_path: Path) -> bytes | None:
     """Try to pull a cover image out of an audio file's embedded tags.
 
     Supports MP3 (APIC), FLAC (Picture block), MP4/M4A/AAC (covr atom).
@@ -97,7 +96,7 @@ def _extract_embedded(audio_path: Path) -> Optional[bytes]:
     return None
 
 
-def _extract_sidecar(audio_path: Path) -> Optional[bytes]:
+def _extract_sidecar(audio_path: Path) -> bytes | None:
     """Sidecar fallback — try common cover filenames next to the audio."""
     parent = audio_path.parent
     for name in ("cover.jpg", "cover.jpeg", "cover.png", "folder.jpg", "folder.png"):
@@ -110,7 +109,7 @@ def _extract_sidecar(audio_path: Path) -> Optional[bytes]:
     return None
 
 
-def get_artwork_bytes(audio_path: Path) -> Optional[bytes]:
+def get_artwork_bytes(audio_path: Path) -> bytes | None:
     """Public single-shot extractor — embedded → sidecar → None.
 
     Returned bytes are guaranteed only to be a non-empty image; the caller
@@ -121,7 +120,7 @@ def get_artwork_bytes(audio_path: Path) -> Optional[bytes]:
     return _extract_embedded(audio_path) or _extract_sidecar(audio_path)
 
 
-def _resize_to_jpeg(raw: bytes, size: Tuple[int, int], quality: int) -> Optional[bytes]:
+def _resize_to_jpeg(raw: bytes, size: tuple[int, int], quality: int) -> bytes | None:
     """Decode any image format → resize → reencode as JPEG."""
     try:
         from PIL import Image
@@ -160,7 +159,7 @@ def write_artwork_pair(
     audio_path: Path,
     image_id: int,
     pioneer_dir: Path,
-) -> Optional[Tuple[Path, Path]]:
+) -> tuple[Path, Path] | None:
     """Extract+write small/medium artwork JPEGs to the bucketed CDJ layout.
 
     Returns (small_path, medium_path) on success, or None when no usable art

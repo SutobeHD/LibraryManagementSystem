@@ -14,14 +14,13 @@ from pathlib import Path
 import pytest
 
 from app.backup_engine import (
-    BackupEngine,
-    TRACKED_TABLES,
     _IDENT_RE,
     _TABLE_ALLOWLIST,
+    TRACKED_TABLES,
+    BackupEngine,
     _check_identifier,
     _check_table_name,
 )
-
 
 # ---------------------------------------------------------------------------
 # Allowlist invariants

@@ -22,13 +22,13 @@ Dependencies: librosa, scipy, numpy (required)
 Optional:     madmom (better beats), essentia (better key)
 """
 
-import os
-import json
 import logging
-import numpy as np
+import os
 import warnings
-from typing import Dict, Any, List, Optional, Tuple
-from concurrent.futures import ProcessPoolExecutor, Future
+from concurrent.futures import Future, ProcessPoolExecutor
+from typing import Any
+
+import numpy as np
 
 from .analysis_settings import get_settings
 
@@ -231,7 +231,7 @@ _REKORDBOX_KEY_ID = {
 }
 
 
-def _correlate_key(chroma_vector: np.ndarray) -> Tuple[str, str, float]:
+def _correlate_key(chroma_vector: np.ndarray) -> tuple[str, str, float]:
     """
     Multi-profile key correlation against all 24 major/minor keys.
     Uses both Krumhansl-Kessler AND Temperley profiles, takes the consensus.
@@ -277,7 +277,7 @@ def _correlate_key(chroma_vector: np.ndarray) -> Tuple[str, str, float]:
     return (best_key, best_mode, best_corr)
 
 
-def detect_key_essentia(y: np.ndarray, sr: int) -> Dict[str, str]:
+def detect_key_essentia(y: np.ndarray, sr: int) -> dict[str, str]:
     """
     Professional key detection using essentia's KeyExtractor.
     Equivalent to Mixed In Key quality. Uses the HPCP-based algorithm
@@ -315,7 +315,7 @@ def detect_key_essentia(y: np.ndarray, sr: int) -> Dict[str, str]:
         return None
 
 
-def detect_key(y: np.ndarray, sr: int) -> Dict[str, str]:
+def detect_key(y: np.ndarray, sr: int) -> dict[str, str]:
     """
     Detect musical key. Tries essentia first (if available), falls back
     to improved Krumhansl-Schmuckler with multi-profile ensemble.
@@ -515,7 +515,7 @@ def _compute_beat_confidence(
     onset_strength: np.ndarray,
     sr: int,
     hop: int,
-) -> List[float]:
+) -> list[float]:
     """
     Per-beat confidence in [0, 1] based on local onset strength.
 
@@ -530,7 +530,7 @@ def _compute_beat_confidence(
     if max_strength <= 0:
         return [0.0] * len(beat_times)
 
-    confidences: List[float] = []
+    confidences: list[float] = []
     for t in beat_times:
         frame = int(round(t * sr / hop))
         # Look at ±2 frames around beat for max onset (sub-frame jitter tolerant)
@@ -549,14 +549,16 @@ def detect_beats_madmom(
     y: np.ndarray, sr: int,
     encoder_delay: float = 0.0,
     first_signal_t: float = 0.0,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """
     RNN-based beat tracking using madmom.
     Significantly more accurate than librosa for electronic music,
     especially for syncopated and breakbeat genres.
     """
     try:
-        import tempfile, soundfile as sf
+        import tempfile
+
+        import soundfile as sf
 
         # madmom needs a file path -- write temp WAV
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
@@ -654,7 +656,7 @@ def detect_beats(
     y: np.ndarray, sr: int,
     encoder_delay: float = 0.0,
     first_signal_t: float = 0.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     High-accuracy BPM and beat grid detection.
     Tries madmom RNN first, falls back to librosa with parabolic interpolation.
@@ -882,7 +884,7 @@ def generate_waveform_data(
     y: np.ndarray,
     sr: int,
     detail_fps: int = 150  # Rekordbox: 150 entries per second
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Generate ALL waveform data required for Rekordbox ANLZ files:
     - PWAV: Monochrome preview (400 columns)
@@ -1062,7 +1064,7 @@ def _resample_array(arr: np.ndarray, target_len: int) -> np.ndarray:
     return np.interp(x_new, x_old, arr)
 
 
-def _empty_waveform() -> Dict[str, Any]:
+def _empty_waveform() -> dict[str, Any]:
     return {
         "pwav": [0] * 400, "pwv2": [0] * 100, "pwv3": [], "pwv4": [],
         "pwv5": [], "pwv6": [], "pwv7": [],
@@ -1085,7 +1087,7 @@ _PHRASE_LABELS = {
 
 def detect_phrases(
     y: np.ndarray, sr: int, bpm: float, duration: float
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Adaptive song-structure detection (Energy + MFCC timbre changes).
 
@@ -1113,8 +1115,8 @@ def detect_phrases(
             return []
 
         # -- Per-window features: RMS + MFCC ------------------------------
-        phrase_energies: List[float] = []
-        phrase_mfccs: List[np.ndarray] = []
+        phrase_energies: list[float] = []
+        phrase_mfccs: list[np.ndarray] = []
         for i in range(n_phrases):
             start_sample = int(i * phrase_duration * sr)
             end_sample = int((i + 1) * phrase_duration * sr)
@@ -1211,7 +1213,7 @@ def detect_phrases(
         # a 32-bar Chorus from collapsing into 1 phrase entry, which would
         # rob the cue generator of mid-section transition points.
         max_merge = _S.phrase_merge_max_bars
-        merged: List[Dict[str, Any]] = []
+        merged: list[dict[str, Any]] = []
         for p in phrases:
             same_label = bool(merged) and merged[-1]["label"] == p["label"]
             current_bars = merged[-1].get("bars", phrase_bars) if merged else 0
@@ -1251,11 +1253,11 @@ _DEFAULT_CUE_COLOR = {"id": 0, "rgb": (0xFF, 0xFF, 0xFF)}
 
 
 def generate_hot_cues(
-    phrases: List[Dict[str, Any]],
-    beats: List[Dict[str, Any]],
+    phrases: list[dict[str, Any]],
+    beats: list[dict[str, Any]],
     duration: float,
-    max_cues: Optional[int] = None,
-) -> List[Dict[str, Any]]:
+    max_cues: int | None = None,
+) -> list[dict[str, Any]]:
     if max_cues is None:
         max_cues = _S.cue_max_hot
     """
@@ -1277,7 +1279,7 @@ def generate_hot_cues(
             "loop_len_ms": 0,         # 0 = single cue, >0 = loop
         }
     """
-    cues: List[Dict[str, Any]] = []
+    cues: list[dict[str, Any]] = []
 
     # Build a sorted list of beat times (ms) for snapping
     beat_times_ms = sorted(b["time_ms"] for b in beats) if beats else []
@@ -1313,7 +1315,7 @@ def generate_hot_cues(
     # -- Score phrases by impact (energy delta + label priority) ----------
     label_priority = {"Drop": 5, "Chorus": 4, "Bridge": 3, "Up": 3, "Outro": 2, "Verse": 1, "Down": 1, "Intro": 0}
 
-    scored: List[Tuple[float, Dict[str, Any]]] = []
+    scored: list[tuple[float, dict[str, Any]]] = []
     for i, p in enumerate(phrases):
         if i == 0:
             continue  # Intro already covered by Cue A
@@ -1349,10 +1351,10 @@ def generate_hot_cues(
 
 
 def generate_memory_cues(
-    phrases: List[Dict[str, Any]],
-    beats: List[Dict[str, Any]],
-    max_cues: Optional[int] = None,
-) -> List[Dict[str, Any]]:
+    phrases: list[dict[str, Any]],
+    beats: list[dict[str, Any]],
+    max_cues: int | None = None,
+) -> list[dict[str, Any]]:
     if max_cues is None:
         max_cues = _S.cue_max_memory
     """
@@ -1391,16 +1393,14 @@ def generate_memory_cues(
         bar_to_ms = beat_ms * 4
     min_spacing_ms = bar_to_ms * 16
 
-    cues: List[Dict[str, Any]] = []
+    cues: list[dict[str, Any]] = []
     last_cue_ms = -1e18
     for i, p in enumerate(phrases):
         label = p.get("label", "Verse")
         start_ms = int(p.get("start_ms", 0))
 
         keep = False
-        if label in always_keep:
-            keep = True
-        elif start_ms - last_cue_ms >= min_spacing_ms:
+        if label in always_keep or start_ms - last_cue_ms >= min_spacing_ms:
             keep = True
 
         if not keep:
@@ -1428,7 +1428,7 @@ def generate_memory_cues(
 # 5. PVBR -- VBR INDEX GENERATION  [NEW]
 # =========================================================================== #
 
-def generate_pvbr(duration: float, file_path: Optional[str] = None) -> List[int]:
+def generate_pvbr(duration: float, file_path: str | None = None) -> list[int]:
     """
     Generate PVBR (VBR Index) -- 400 ms-positions for accurate seek in MP3.
 
@@ -1448,7 +1448,7 @@ def generate_pvbr(duration: float, file_path: Optional[str] = None) -> List[int]
     return [int(round(i * (duration * 1000) / 400)) for i in range(400)]
 
 
-def _read_mp3_xing_toc(file_path: str, duration: float) -> Optional[List[int]]:
+def _read_mp3_xing_toc(file_path: str, duration: float) -> list[int] | None:
     """
     Parse Xing/Info VBR header TOC and convert to 400 ms positions.
 
@@ -1496,7 +1496,7 @@ def _read_mp3_xing_toc(file_path: str, duration: float) -> Optional[List[int]]:
         # TOC[i] = byte at i% of duration / 256 of total file size.
         # We need 400 ms-positions; interpolate.
         total_ms = duration * 1000.0
-        result: List[int] = []
+        result: list[int] = []
         for i in range(400):
             pct = i / 400.0           # 0.0 .. 1.0
             toc_idx = pct * 100.0
@@ -1523,7 +1523,7 @@ def _read_mp3_xing_toc(file_path: str, duration: float) -> Optional[List[int]]:
 # 5b. STEREO FEATURES  [NEW]
 # =========================================================================== #
 
-def compute_stereo_features(y_stereo: np.ndarray, sr: int) -> Optional[Dict[str, Any]]:
+def compute_stereo_features(y_stereo: np.ndarray, sr: int) -> dict[str, Any] | None:
     """
     Stereo-image metrics. Only meaningful when input has 2 channels.
 
@@ -1637,7 +1637,7 @@ def calculate_lufs(y: np.ndarray, sr: int) -> float:
 REPLAY_GAIN_TARGET_LUFS = _S.replay_gain_target_lufs
 
 
-def calculate_replay_gain(lufs: float, target: Optional[float] = None) -> float:
+def calculate_replay_gain(lufs: float, target: float | None = None) -> float:
     """
     ReplayGain 2.0 value. Apply this as a gain (in dB) to bring the track
     to the target loudness. Negative for loud-mastered tracks; positive for
@@ -1655,7 +1655,7 @@ def calculate_replay_gain(lufs: float, target: Optional[float] = None) -> float:
 
 def detect_mood(
     y: np.ndarray, sr: int, bpm: float, lufs: float,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Heuristic mood/texture classification from spectral features.
 
@@ -1752,9 +1752,9 @@ def hint_genre(bpm: float, brightness: float, texture: float) -> str:
 
 def detect_tempo_changes(
     y: np.ndarray, sr: int, global_bpm: float,
-    change_threshold: Optional[float] = None,
-    min_anchor_spacing_s: Optional[float] = None,
-) -> List[Dict[str, Any]]:
+    change_threshold: float | None = None,
+    min_anchor_spacing_s: float | None = None,
+) -> list[dict[str, Any]]:
     """
     Tempo-change anchors via change-point detection.
 
@@ -1843,8 +1843,8 @@ class AnalysisEngine:
         # result contains: bpm, key, beats[], waveform data, phrases, lufs, etc.
     """
 
-    _executor: Optional[ProcessPoolExecutor] = None
-    _tasks: Dict[str, Future] = {}
+    _executor: ProcessPoolExecutor | None = None
+    _tasks: dict[str, Future] = {}
 
     @classmethod
     def get_executor(cls):
@@ -1865,9 +1865,9 @@ class AnalysisEngine:
         task_id: str,
         file_path: str,
         quick: bool = False,
-        auto_hot_cues: Optional[bool] = None,
-        auto_memory_cues: Optional[bool] = None,
-    ) -> Dict[str, Any]:
+        auto_hot_cues: bool | None = None,
+        auto_memory_cues: bool | None = None,
+    ) -> dict[str, Any]:
         """
         Submit an analysis job to the background worker pool.
 
@@ -1886,7 +1886,7 @@ class AnalysisEngine:
         return {"task_id": task_id, "status": "processing", "pass": "quick" if quick else "full"}
 
     @classmethod
-    def get_status(cls, task_id: str) -> Dict[str, Any]:
+    def get_status(cls, task_id: str) -> dict[str, Any]:
         """Check the status of an analysis job."""
         future = cls._tasks.get(task_id)
         if not future:
@@ -1900,12 +1900,12 @@ class AnalysisEngine:
         return {"status": "processing"}
 
     @classmethod
-    def analyze_sync(cls, file_path: str, duration_cap: Optional[float] = None) -> Dict[str, Any]:
+    def analyze_sync(cls, file_path: str, duration_cap: float | None = None) -> dict[str, Any]:
         """Synchronous analysis (blocks until done). For scripts/CLI."""
         return run_full_analysis(file_path, duration_cap)
 
     @classmethod
-    def capabilities(cls) -> Dict[str, Any]:
+    def capabilities(cls) -> dict[str, Any]:
         """Report which backends are available."""
         _ensure_libs()
         return {
@@ -1919,8 +1919,8 @@ class AnalysisEngine:
 
 def run_quick_analysis(
     file_path: str,
-    progress_callback: Optional[Any] = None,
-) -> Dict[str, Any]:
+    progress_callback: Any | None = None,
+) -> dict[str, Any]:
     """
     Pass-1 analysis: BPM, key, beats only. Fast (~3-8s typical).
 
@@ -1991,12 +1991,12 @@ def run_quick_analysis(
 
 def run_full_analysis(
     file_path: str,
-    duration_cap_arg: Optional[float] = None,
+    duration_cap_arg: float | None = None,
     use_cache: bool = True,
-    progress_callback: Optional[Any] = None,
-    auto_hot_cues: Optional[bool] = None,
-    auto_memory_cues: Optional[bool] = None,
-) -> Dict[str, Any]:
+    progress_callback: Any | None = None,
+    auto_hot_cues: bool | None = None,
+    auto_memory_cues: bool | None = None,
+) -> dict[str, Any]:
     """
     Full analysis pipeline. Runs in a worker process.
 
@@ -2216,7 +2216,7 @@ def run_full_analysis(
         return _fallback_result(file_path, str(e))
 
 
-def _fallback_result(file_path: str, error: str) -> Dict[str, Any]:
+def _fallback_result(file_path: str, error: str) -> dict[str, Any]:
     """Safe fallback -- never crash the batch pipeline."""
     return {
         "file": file_path, "duration": 0, "sample_rate": 44100,

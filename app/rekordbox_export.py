@@ -1,8 +1,9 @@
-import xml.etree.ElementTree as ET
-import xml.dom.minidom as minidom
 import os
 import time
-from typing import Dict, Any, List
+import xml.dom.minidom as minidom
+import xml.etree.ElementTree as ET
+from typing import Any
+
 
 def format_time_ms_to_sec(ms: int) -> str:
     """Format milliseconds to seconds with 3 decimal places."""
@@ -12,12 +13,12 @@ def format_tempo_int_to_str(tempo: int) -> str:
     """Format Rekordbox integer tempo (BPM*100) to string with 2 decimal places."""
     return f"{tempo / 100:.2f}"
 
-def analysis_to_xml_track(track_id: str, analysis_result: Dict[str, Any], metadata: Dict[str, str]) -> ET.Element:
+def analysis_to_xml_track(track_id: str, analysis_result: dict[str, Any], metadata: dict[str, str]) -> ET.Element:
     """
     Convert an AnalysisEngine result into a Rekordbox XML <TRACK> element.
     """
     track = ET.Element("TRACK")
-    
+
     # Track Metadata (required fields)
     track.set("TrackID", str(track_id))
     track.set("Name", metadata.get("title", os.path.basename(analysis_result.get("file", "Unknown"))))
@@ -49,16 +50,16 @@ def analysis_to_xml_track(track_id: str, analysis_result: Dict[str, Any], metada
     # Rekordbox XML tempo nodes describe *changes* in BPM.
     # We only have 1 global BPM for now from our analysis, so we write a single TEMPO tag.
     bpm_str = f"{analysis_result.get('bpm', 120.0):.2f}"
-    
+
     # We must set the 'Inizio' (Start time of beat 1) to align the grid!
     # Our downbeat_index tells us which beat is beat 1.
     downbeat_idx = analysis_result.get("downbeat_index", 0)
     beats = analysis_result.get("beats", [])
-    
+
     inizio_ms = 0
     if len(beats) > downbeat_idx:
         inizio_ms = beats[downbeat_idx].get("time_ms", 0)
-    
+
     tempo_node = ET.SubElement(track, "TEMPO")
     tempo_node.set("Inizio", format_time_ms_to_sec(inizio_ms))
     tempo_node.set("Bpm", bpm_str)
@@ -74,13 +75,13 @@ def analysis_to_xml_track(track_id: str, analysis_result: Dict[str, Any], metada
 
     return track
 
-def create_rekordbox_xml(tracks_xml: List[ET.Element], output_path: str) -> None:
+def create_rekordbox_xml(tracks_xml: list[ET.Element], output_path: str) -> None:
     """
     Wrap track elements in the root DJ_PLAYLISTS Rekordbox XML structure and save.
     """
     root = ET.Element("DJ_PLAYLISTS")
     root.set("Version", "1.0.0")
-    
+
     prod = ET.SubElement(root, "PRODUCT")
     prod.set("Name", "rekordbox")
     prod.set("Version", "6.6.4") # Use a modern version number
@@ -88,10 +89,10 @@ def create_rekordbox_xml(tracks_xml: List[ET.Element], output_path: str) -> None
 
     collection = ET.SubElement(root, "COLLECTION")
     collection.set("Entries", str(len(tracks_xml)))
-    
+
     for track in tracks_xml:
         collection.append(track)
-        
+
     playlists = ET.SubElement(root, "PLAYLISTS")
     node = ET.SubElement(playlists, "NODE")
     node.set("Type", "0")
@@ -102,6 +103,6 @@ def create_rekordbox_xml(tracks_xml: List[ET.Element], output_path: str) -> None
     xml_str = ET.tostring(root, 'utf-8')
     parsed = minidom.parseString(xml_str)
     pretty_xml = parsed.toprettyxml(indent="  ")
-    
+
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(pretty_xml)

@@ -1,18 +1,19 @@
-import os
-import shutil
 import logging
-import time
-from datetime import datetime
-import sqlite3
+import os
 import re
+import shutil
 import threading
+import time
 import xml.etree.ElementTree as ET
-from pathlib import Path
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
 import rbox
-from .config import BACKUP_DIR
+
 from .anlz_safe import SafeAnlzParser
+from .config import BACKUP_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -44,24 +45,24 @@ class LiveRekordboxDB:
         if not self.db_path.exists():
             logger.error(f"Cannot backup: {self.db_path} does not exist.")
             return False
-        
+
         from .services import SettingsManager
         settings = SettingsManager.load()
-        
+
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        
+
         # 1. Session Backup
         session_backup_name = f"master_session_{timestamp}.db"
         session_backup_path = BACKUP_DIR / session_backup_name
-        
+
         try:
             shutil.copy2(self.db_path, session_backup_path)
             logger.info(f"Created session backup: {session_backup_path}")
             self._cleanup_session_backups()
-            
+
             # 2. Check for Archival
             self._handle_archival(settings)
-            
+
             return True
         except Exception as e:
             logger.error(f"Backup system failed: {e}")
@@ -78,11 +79,11 @@ class LiveRekordboxDB:
         except Exception as e:
             logger.error(f"Failed to cleanup session backups: {e}")
 
-    def get_available_backups(self) -> List[Dict[str, Any]]:
+    def get_available_backups(self) -> list[dict[str, Any]]:
         """Returns a sorted list of available backups."""
         backups = []
         if not BACKUP_DIR.exists(): return []
-        
+
         for f in BACKUP_DIR.glob("*.db"):
             try:
                 # Parse filename: master_session_20260215_225416.db or master_ARCHIVE_20260215.db
@@ -90,16 +91,16 @@ class LiveRekordboxDB:
                 path = str(f)
                 size = f.stat().st_size
                 mtime = f.stat().st_mtime
-                
+
                 b_type = "Unknown"
                 if "session" in name: b_type = "Session"
                 elif "ARCHIVE" in name: b_type = "Archive"
                 elif "prerestore" in name: b_type = "Pre-Restore"
-                
+
                 # Extract timestamp string for display if possible, else use mtime
                 # Simple extraction based on known formats
                 display_date = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
-                
+
                 backups.append({
                     "filename": name,
                     "path": path,
@@ -123,7 +124,7 @@ class LiveRekordboxDB:
         if not target_path.exists():
             logger.error(f"Restore failed: File not found {target_path}")
             return False, "Backup file not found"
-            
+
         try:
             # 1. Safety Backup
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -131,16 +132,16 @@ class LiveRekordboxDB:
             pre_restore_path = BACKUP_DIR / pre_restore_name
             shutil.copy2(self.db_path, pre_restore_path)
             logger.info(f"Created pre-restore backup: {pre_restore_path}")
-            
+
             # 2. Restore
             # We must close the DB connection if possible, but rbox might hold it.
             # In a live app, replacing the file while open is risky but often works on Windows if just reading.
             # Ideally we'd close 'self.db' here but rbox wrapper might not expose close().
             # Let's try copy2 replace.
-            
+
             shutil.copy2(target_path, self.db_path)
             logger.info(f"Restored backup {filename} to {self.db_path}")
-            
+
             return True, "Backup restored successfully. Please restart the application."
         except Exception as e:
             logger.error(f"Restore failed: {e}")
@@ -150,10 +151,10 @@ class LiveRekordboxDB:
         """Creates a permanent archive backup based on user-defined frequency."""
         freq = settings.get("archive_frequency", "daily")
         if freq == "off": return
-        
+
         last_archive_str = settings.get("last_archive_date", "")
         now = datetime.now()
-        
+
         should_archive = False
         if not last_archive_str:
             should_archive = True
@@ -162,16 +163,14 @@ class LiveRekordboxDB:
                 last_archive = datetime.fromisoformat(last_archive_str)
                 delta = now - last_archive
 
-                if freq == "daily" and delta.days >= 1: should_archive = True
-                elif freq == "weekly" and delta.days >= 7: should_archive = True
-                elif freq == "monthly" and delta.days >= 30: should_archive = True
+                if (freq == "daily" and delta.days >= 1) or (freq == "weekly" and delta.days >= 7) or (freq == "monthly" and delta.days >= 30): should_archive = True
             except (ValueError, TypeError) as e:
                 logger.warning(
                     "live_database: failed to parse last_archive_date %r — forcing archive (%s)",
                     last_archive_str, e,
                 )
                 should_archive = True
-        
+
         if should_archive:
             timestamp = now.strftime("%Y%m%d")
             archive_name = f"master_ARCHIVE_{timestamp}.db"
@@ -179,7 +178,7 @@ class LiveRekordboxDB:
             try:
                 shutil.copy2(self.db_path, archive_path)
                 logger.info(f"Created archival backup: {archive_path}")
-                
+
                 # Update settings
                 settings["last_archive_date"] = now.isoformat()
                 from .services import SettingsManager
@@ -250,7 +249,7 @@ class LiveRekordboxDB:
         def _runner() -> None:
             try:
                 self._load_beatgrids_from_anlz()
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 logger.error("Background beatgrid loader crashed: %s", e, exc_info=True)
 
         self._beatgrid_thread = threading.Thread(
@@ -269,7 +268,7 @@ class LiveRekordboxDB:
         self.album_map = {a.id: a.name for a in self.db.get_albums()}
         self.label_map = {l.id: l.name for l in self.db.get_labels()}
         self.key_map = {k.id: k.name for k in self.db.get_keys()}
-        
+
         # Extended metadata maps with graceful fallback. rbox versions older
         # than 0.1.5 don't expose composer/remixer/lyricist accessors at all,
         # so AttributeError + any rbox-internal error is silenced — log only.
@@ -304,7 +303,7 @@ class LiveRekordboxDB:
                     name = getattr(t, 'name', 'Unknown')
                     if not tid: continue
                     self.tag_id_to_name[tid] = name
-                    
+
                     # Fetch contents for this specific tag
                     try:
                         tag_contents = self.db.get_my_tag_contents(tid)
@@ -314,7 +313,7 @@ class LiveRekordboxDB:
                             self.track_to_tag_ids[cid].append(tid)
                     except Exception as tag_err:
                         logger.warning(f"Failed to fetch contents for tag {name} ({tid}): {tag_err}")
-                
+
                 logger.info(f"MyTags loaded. Definitions: {len(self.tag_id_to_name)}, Mappings (tracks): {len(self.track_to_tag_ids)}")
             except Exception as e:
                 logger.error(f"Failed to load MyTags: {e}")
@@ -371,30 +370,30 @@ class LiveRekordboxDB:
 
             all_cues = self.db.get_cues()
             count = 0
-            
+
             # Pre-load all content IDs for fast lookup
             tracks_by_id = self.tracks
-            
+
             for cue in all_cues:
                 if not hasattr(cue, 'content_id'): continue
                 cid = str(cue.content_id)
-                
+
                 if cid in tracks_by_id:
                     track = tracks_by_id[cid]
                     if "Cues" not in track:
                         track["Cues"] = []
-                    
+
                     # Convert cue object to dict safely
                     cue_data = {
                         "ID": str(cue.id) if hasattr(cue, 'id') else "",
-                        "Type": int(getattr(cue, 'type', 0) or 0), 
+                        "Type": int(getattr(cue, 'type', 0) or 0),
                         "InMsec": int(getattr(cue, 'in_msec', 0) or 0),
                         "Num": int(getattr(cue, 'hot_cue', 0) or 0), # Hot Cue Number (0 if memory cue)
                         "Comment": getattr(cue, 'commnt', "")
                     }
                     track["Cues"].append(cue_data)
                     count += 1
-            
+
             logger.info(f"Loaded {count} cues across library.")
         except Exception as e:
             logger.error(f"Failed to load cues: {e}")
@@ -426,7 +425,7 @@ class LiveRekordboxDB:
         start = time.monotonic()
         try:
             beatgrids = parser.load_all_beatgrids(str(self.db_path), track_ids)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.error("ANLZ batch loader failed: %s", e, exc_info=True)
             beatgrids = {}
         finally:
@@ -453,12 +452,12 @@ class LiveRekordboxDB:
     def _load_playlists(self):
         self.playlists = []
         raw_playlists = self.db.get_playlists()
-        
+
         # Rbox Attribute values:  0 = normal playlist, 1 = folder, 4 = intelligent playlist
         # Frontend Type values:   "0" = folder, "1" = normal playlist, "4" = intelligent playlist
         # We must remap 0↔1 to match what PlaylistNode expects.
         ATTR_TO_TYPE = {0: "1", 1: "0", 4: "4"}
-        
+
         for pl in raw_playlists:
             # rbox 0.1.7+ exposes `attribute` as a `builtins.PlaylistType` enum
             # object that is NOT hashable, so `ATTR_TO_TYPE.get(attr, "1")`
@@ -471,13 +470,13 @@ class LiveRekordboxDB:
                 attr = 0
             pl_type = ATTR_TO_TYPE.get(attr, "1")  # default to playlist
             my_id = str(pl.id)
-            
+
             # Update status for frontend feedback
             self.loading_status = f"Loading: {pl.name}"
-            
+
             parent_id = str(pl.parent_id) if pl.parent_id else "ROOT"
             if parent_id.lower() == "root": parent_id = "ROOT"
-            
+
             # pyrekordbox may expose smart playlist XML as 'SmartList', 'smart_list', or
             # via a raw attribute — try all known names so intelligent playlists aren't empty.
             smart_list_xml = None
@@ -500,7 +499,7 @@ class LiveRekordboxDB:
                 "smart_list": smart_list_xml
             }
             self.playlists.append(node_data)
-        
+
         # Ensure playlists are sorted by Seq for baseline
         self.playlists.sort(key=lambda x: x.get("Seq", 0))
 
@@ -527,7 +526,7 @@ class LiveRekordboxDB:
                         pid, e,
                     )
                     continue
-                
+
             logger.info(f"Loaded {count} playlist track mappings via rbox.")
         except Exception as e:
             logger.error(f"Failed to load playlist tracks via rbox: {e}")
@@ -537,7 +536,7 @@ class LiveRekordboxDB:
         genre_counts = defaultdict(int)
         artist_artworks = {}
         for t in self.tracks.values():
-            if t.get("Artist"): 
+            if t.get("Artist"):
                 track_artists = self._split_artists(t["Artist"])
                 for artist in track_artists:
                     artist_counts[artist] += 1
@@ -546,7 +545,7 @@ class LiveRekordboxDB:
                         artist_artworks[artist] = t["Artwork"]
 
             if t.get("Genre"): genre_counts[t["Genre"]] += 1
-        
+
         self.artists = []
         threshold = 0
         try:
@@ -560,14 +559,14 @@ class LiveRekordboxDB:
         for i, (name, count) in enumerate(sorted(artist_counts.items())):
             if count >= threshold:
                 self.artists.append({
-                    "id": f"art_{i}", 
-                    "name": name, 
+                    "id": f"art_{i}",
+                    "name": name,
                     "track_count": count,
                     "Artwork": artist_artworks.get(name, "")
                 })
         self.genres = [{"id": f"gen_{i}", "name": name, "track_count": count} for i, (name, count) in enumerate(sorted(genre_counts.items()))]
 
-    def get_all_labels(self) -> List[Dict[str, Any]]:
+    def get_all_labels(self) -> list[dict[str, Any]]:
         label_counts = defaultdict(int)
         label_artworks = {}
         for t in self.tracks.values():
@@ -577,14 +576,14 @@ class LiveRekordboxDB:
                 label_counts[normalized] += 1
                 if normalized not in label_artworks and t.get("Artwork"):
                     label_artworks[normalized] = t["Artwork"]
-        
+
         return [
             {"id": f"lbl_{i}", "name": name, "track_count": count, "Artwork": label_artworks.get(name, "")}
             for i, (name, count) in enumerate(sorted(label_counts.items()))
             if count >= 0 # Respect threshold?
         ]
 
-    def get_all_albums(self) -> List[Dict[str, Any]]:
+    def get_all_albums(self) -> list[dict[str, Any]]:
         album_counts = defaultdict(int)
         album_artworks = {}
         for t in self.tracks.values():
@@ -593,7 +592,7 @@ class LiveRekordboxDB:
                 album_counts[album] += 1
                 if album not in album_artworks and t.get("Artwork"):
                     album_artworks[album] = t["Artwork"]
-        
+
         return [
             {"id": f"alb_{i}", "name": name, "track_count": count, "Artwork": album_artworks.get(name, "")}
             for i, (name, count) in enumerate(sorted(album_counts.items()))
@@ -608,7 +607,7 @@ class LiveRekordboxDB:
 
     def _normalize_artist_name(self, name):
         if not name: return ""
-        
+
         # 0. Check for manual mapping first
         try:
             from .services import MetadataManager
@@ -621,42 +620,42 @@ class LiveRekordboxDB:
 
         # 1. Strip leading numbers like "01 ", "1. ", "02-", "1 "
         name = re.sub(r'^\d{1,2}[\s.-]+', '', name)
-        
+
         # 2. Strip common prefixes (case insensitive) - anywhere near the start
         name = re.sub(r'(?i)^.*(supported by|premiere:?|exclusive:?|dj\s+)\s*', '', name)
-        
+
         # 3. Strip common suffixes (case insensitive)
         # Avoid stripping if it's part of the name (e.g. "The Edit"), so we use boundaries or specific patterns
         name = re.sub(r'(?i)\s+(re-?edit|edit|r[em]+ix|rework|bootleg|flip|cut|vip)\s*.*$', '', name)
-        
+
         return name.strip()
 
-    def get_all_tracks(self) -> List[Dict[str, Any]]:
+    def get_all_tracks(self) -> list[dict[str, Any]]:
         return list(self.tracks.values())
 
-    def get_tracks_by_artist(self, aid: str) -> List[Dict[str, Any]]:
+    def get_tracks_by_artist(self, aid: str) -> list[dict[str, Any]]:
         # find artist name by id
         artist_name = next((a["name"] for a in self.artists if a["id"] == aid), None)
         if not artist_name: return []
         return [t for t in self.tracks.values() if artist_name in self._split_artists(t.get("Artist", ""))]
 
-    def get_tracks_by_label(self, aid: str) -> List[Dict[str, Any]]:
+    def get_tracks_by_label(self, aid: str) -> list[dict[str, Any]]:
         label_name = next((l["name"] for l in self.get_all_labels() if l["id"] == aid), None)
         if not label_name: return []
         return [t for t in self.tracks.values() if self._normalize_artist_name(t.get("Label", "")) == label_name]
 
-    def get_tracks_by_album(self, aid: str) -> List[Dict[str, Any]]:
+    def get_tracks_by_album(self, aid: str) -> list[dict[str, Any]]:
         album_name = next((a["name"] for a in self.get_all_albums() if a["id"] == aid), None)
         if not album_name: return []
         return [t for t in self.tracks.values() if t.get("Album") == album_name]
 
-    def get_playlist_tree(self) -> List[Dict[str, Any]]:
+    def get_playlist_tree(self) -> list[dict[str, Any]]:
         if not self.playlists: return []
-        
+
         # 1. Map all nodes
         node_map = {r['ID']: {**r, 'Children': []} for r in self.playlists}
         tree = []
-        
+
         # 2. Build Tree
         for r in self.playlists:
             pid = r['ParentID']
@@ -664,7 +663,7 @@ class LiveRekordboxDB:
                 node_map[pid]['Children'].append(node_map[r['ID']])
             elif str(pid).upper() == "ROOT":
                 tree.append(node_map[r['ID']])
-        
+
         # 3. Sort nodes by Seq
         for node in node_map.values():
             if node['Children']:
@@ -676,16 +675,16 @@ class LiveRekordboxDB:
         if len(tree) == 1:
             root = tree[0]
             logger.info(f"Single root detected: Name='{root['Name']}', Type='{root.get('Type')}', Children={len(root['Children'])}")
-            
+
             # Smart Unwrap: Hoist children if root is a generic container
             if root['Name'].lower() in ['root', 'library', 'collection', 'playlists']:
                  if root['Children']:
                      logger.info(f"Hoisting children of generic root: {root['Name']}")
                      return root['Children']
-        
+
         return tree
 
-    def get_playlist_tracks(self, pid: str) -> List[Dict[str, Any]]:
+    def get_playlist_tracks(self, pid: str) -> list[dict[str, Any]]:
         try:
             # Pre-calculate parent-child mapping for speed
             parent_to_children = defaultdict(list)
@@ -695,17 +694,15 @@ class LiveRekordboxDB:
 
             # Check if it's a folder (Type 0 OR has children)
             node = next((p for p in self.playlists if str(p["ID"]) == str(pid)), None)
-            
+
             is_folder = False
-            if node and str(node.get("Type")) == "0":
+            if (node and str(node.get("Type")) == "0") or str(pid) in parent_to_children:
                 is_folder = True
-            elif str(pid) in parent_to_children:
-                is_folder = True
-                
+
             # Recursive collection for Folders
             if is_folder:
                 logger.info(f"Recursively fetching tracks for folder: {node['Name'] if node else pid}")
-                
+
                 # 1. Collect all node IDs in the tree (including self)
                 all_node_ids = [str(pid)]
                 queue = [str(pid)]
@@ -717,7 +714,7 @@ class LiveRekordboxDB:
                         # If it has children, explore it too
                         if child_id in parent_to_children:
                             queue.append(child_id)
-                
+
                 # 2. Fetch tracks for ALL nodes in the set
                 all_tracks = {} # Use dict to deduplicate by ID
                 for nid in all_node_ids:
@@ -725,7 +722,7 @@ class LiveRekordboxDB:
                     for cid in cids:
                         if cid in self.tracks:
                             all_tracks[cid] = self.tracks[cid]
-                
+
                 logger.info(f"Total tracks collected from folder {pid}: {len(all_tracks)}")
                 return list(all_tracks.values())
 
@@ -742,7 +739,7 @@ class LiveRekordboxDB:
 
             # Preserve order from items
             result = [self.tracks[cid] for cid in cids if cid in self.tracks]
-            
+
             logger.info(f"Found {len(result)} tracks for playlist {pid} from cache")
             return result
         except Exception as e:
@@ -754,18 +751,18 @@ class LiveRekordboxDB:
         if not xml_rules:
             logger.warning("_get_smart_playlist_tracks: No xml_rules provided")
             return []
-        
+
         rules = self._parse_smart_rules(xml_rules)
         if not rules:
             logger.warning("_get_smart_playlist_tracks: Failed to parse rules")
             return []
-        
+
         logger.debug(f"Filtering with rules: {rules}")
         filtered = []
         for tid, track in self.tracks.items():
             if self._apply_smart_rules(track, rules):
                 filtered.append(track)
-        
+
         logger.debug(f"Dynamic filter complete. Found {len(filtered)} matches.")
         return filtered
 
@@ -793,11 +790,11 @@ class LiveRekordboxDB:
     def _apply_smart_rules(self, track, rules):
         logical_op = rules["op"]
         conditions = rules["conditions"]
-        
+
         if not conditions: return True
-        
+
         # logger.debug(f"Applying rules to track: {track.get('Title')}")
-        
+
         # AND (LogicalOperator=1)
         if logical_op == 1:
             for cond in conditions:
@@ -816,7 +813,7 @@ class LiveRekordboxDB:
         op = cond["Operator"]
         val_l = cond["ValueLeft"]
         val_r = cond["ValueRight"]
-        
+
         # Map Rekordbox smart-playlist PropertyName → track dict field.
         # "grouping" = ColorID (Rekordbox color tag, stored as integer 0-8).
         # "duration" = TotalTime in seconds (rbox `length` column).
@@ -894,20 +891,20 @@ class LiveRekordboxDB:
 
         return res
 
-    def get_track_details(self, tid: str) -> Optional[Dict[str, Any]]:
+    def get_track_details(self, tid: str) -> dict[str, Any] | None:
         return self.tracks.get(tid)
 
-    def add_track(self, track_data: Dict[str, Any]) -> Optional[str]:
+    def add_track(self, track_data: dict[str, Any]) -> str | None:
         path = track_data.get("path")
         if not path:
             raise ValueError("Track path missing")
-        
+
         try:
             # 1. Create content entry in master.db
             logger.info(f"Creating content entry in master.db for: {path}")
             item = self.db.create_content(path)
             tid = str(item.id)
-            
+
             # 2. Update metadata (Artist, Album, etc.)
             updates = {
                 "Title": track_data.get("Title"),
@@ -919,10 +916,10 @@ class LiveRekordboxDB:
             }
             # Remove None values
             updates = {k: v for k, v in updates.items() if v is not None}
-            
+
             if updates:
                 self.update_track_metadata(tid, updates)
-            
+
             # 3. Cache the new track locally
             self.tracks[tid] = {
                 "ID": tid,
@@ -936,24 +933,24 @@ class LiveRekordboxDB:
                 "Comment": track_data.get("Comment", ""),
                 "Artwork": track_data.get("Artwork", "")
             }
-            
+
             return tid
         except Exception as e:
             error_msg = str(e)
             if "Path is not unique" in error_msg:
                 logger.warning(f"Duplicate track path: {path}")
                 raise ValueError(f"Track already exists in Rekordbox: {os.path.basename(path)}")
-            
+
             logger.error(f"Failed to add track to live DB: {e}")
             raise e
 
     def delete_track(self, tid: str) -> bool:
         tid = str(tid)
-        
+
         # 1. Remove from local cache
         if tid in self.tracks:
             del self.tracks[tid]
-            
+
         # 2. Remove from all playlists (internal cache)
         for pid, tracks in self.playlists_tracks.items():
             if tid in [str(t.id) if hasattr(t, 'id') else str(t['ID']) for t in tracks]:
@@ -974,7 +971,7 @@ class LiveRekordboxDB:
     def update_track_comment(self, tid: str, comment: str) -> bool:
         return self.update_track_metadata(tid, {"Comment": comment})
 
-    def update_track_metadata(self, tid: str, updates: Dict[str, Any]) -> bool:
+    def update_track_metadata(self, tid: str, updates: dict[str, Any]) -> bool:
         try:
             tid = str(tid)
             logger.info(f"Updating metadata for track ID: '{tid}'")
@@ -982,7 +979,7 @@ class LiveRekordboxDB:
             if not item:
                 logger.error(f"Track {tid} not found in DB")
                 raise Exception(f"Track {tid} not found in Live DB")
-            
+
             changed = False
             # 1. Direct fields
             if "Comment" in updates:
@@ -1017,7 +1014,7 @@ class LiveRekordboxDB:
                             "live_database: ColorID for track %s rejected as int and str (%s)",
                             tid, inner,
                         )
-            
+
             if changed:
                 logger.info(f"Applying direct field updates for track {tid}...")
                 self.db.update_content(item)
@@ -1043,7 +1040,7 @@ class LiveRekordboxDB:
                 logger.info(f"Updating Album for {tid}...")
                 self.db.update_content_album(str(tid), updates["Album"])
                 if tid in self.tracks: self.tracks[tid]["Album"] = updates["Album"]
-            
+
             logger.info(f"Update sequence complete for {tid}")
             return True
         except Exception as e:
@@ -1056,11 +1053,11 @@ class LiveRekordboxDB:
     # set of plausible names and surface a clear error if none of them work.
     # Reads use the snapshot loaded by `_load_mytags()` (no extra DB hit).
 
-    def list_mytags(self) -> List[Dict[str, Any]]:
+    def list_mytags(self) -> list[dict[str, Any]]:
         """Return all defined MyTag entries as [{id, name}, …]."""
         return [{"id": tid, "name": name} for tid, name in self.tag_id_to_name.items()]
 
-    def get_track_mytags(self, tid: str) -> List[Dict[str, Any]]:
+    def get_track_mytags(self, tid: str) -> list[dict[str, Any]]:
         """Return MyTag IDs assigned to the given track."""
         tid = str(tid)
         ids = list(self.track_to_tag_ids.get(tid, []))
@@ -1194,7 +1191,7 @@ class LiveRekordboxDB:
             sibling = None
             actual_parent = None
             target_seq = 0
-            
+
             if position == "inside" and target_id:
                 actual_parent = None if str(target_id).upper() == "ROOT" else str(target_id)
                 # Max seq + 1 for new parent
@@ -1213,29 +1210,29 @@ class LiveRekordboxDB:
             else:
                 actual_parent = None if str(new_parent_id).upper() == "ROOT" else str(new_parent_id)
                 target_seq = 0
-            
+
             logger.info(f"Moving playlist {pid} to parent_id={actual_parent}, seq={target_seq}")
-            
+
             # 2. Call DB (rbox should handle the shift if seq is provided)
             # If rbox move_playlist(pid, seq=target_seq, parent_id=actual_parent) works as expected:
             self.db.move_playlist(str(pid), seq=target_seq, parent_id=actual_parent)
-            
+
             # 3. Update Cache & Re-sort siblings locally to reflect the move
             resolved_parent = str(actual_parent) if actual_parent else "ROOT"
-            
+
             for p in self.playlists:
                 if p['ID'] == str(pid):
                     p['ParentID'] = resolved_parent
                     p['Seq'] = target_seq
                     break
-            
+
             # Simple local re-sequencing for siblings to keep cache in sync
             parent_siblings = [p for p in self.playlists if p['ParentID'] == resolved_parent]
             parent_siblings.sort(key=lambda x: (x.get('Seq', 0), 0 if x['ID'] == str(pid) else 1))
-            
+
             for i, p in enumerate(parent_siblings):
                 p['Seq'] = i
-                
+
             self.playlists.sort(key=lambda x: x.get('Seq', 0))
             return True
         except Exception as e:
@@ -1261,7 +1258,7 @@ class LiveRekordboxDB:
                 new_pl = self.db.create_playlist_folder(name, target_parent)
             else:
                 new_pl = self.db.create_playlist(name, target_parent)
-            
+
             # Add to cache (simplistic, real schema has more attributes)
             node_data = {
                 "ID": str(new_pl.id),
@@ -1289,7 +1286,7 @@ class LiveRekordboxDB:
     def remove_track_from_playlist(self, pid, tid):
         try:
 
-            # delete_playlist_song expects (playlist_id, track_id) ? 
+            # delete_playlist_song expects (playlist_id, track_id) ?
             # Actually dir showed: delete_playlist_song and delete_playlist_songs
             # Usually it takes the playlist ID and the track ID.
             self.db.delete_playlist_song(str(pid), str(tid))

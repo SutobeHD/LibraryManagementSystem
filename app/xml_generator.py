@@ -1,6 +1,7 @@
 import xml.etree.ElementTree as ET
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
 
 class RekordboxXML:
     @staticmethod
@@ -11,7 +12,7 @@ class RekordboxXML:
         """
         root = ET.Element("DJ_PLAYLISTS", Version="1.0.0")
         collection = ET.SubElement(root, "COLLECTION", Entries=str(len(tracks_data)))
-        
+
         for i, data in enumerate(tracks_data):
             track = ET.SubElement(collection, "TRACK")
             track.set("TrackID", str(i + 1))
@@ -21,7 +22,7 @@ class RekordboxXML:
             track.set("Genre", data.get("Genre", ""))
             track.set("Kind", data.get("Kind", "WAV File"))
             track.set("TotalTime", str(int(data.get("TotalTime", 0))))
-            
+
             abs_path = str(Path(data["path"]).absolute()).replace("\\", "/")
             location = f"file://localhost/{abs_path}"
             track.set("Location", location)
@@ -55,7 +56,7 @@ class RekordboxXML:
             # Type: 0=Cue/HotCue/MemoryCue, 1=FadeIn, 2=FadeOut, 3=Load, 4=Loop
             # Num: -1=MemoryCue/Loop, 0-7=HotCue A-H
             cues = data.get("positionMarks", [])
-            
+
             # Add detected drop as a specific Memory Cue if available
             if "dropTime" in data:
                 cues.append({"Name": "DROP", "Type": "0", "Start": str(data["dropTime"]), "Num": "-1"})
@@ -66,11 +67,11 @@ class RekordboxXML:
                 mark.set("Type", str(cue.get("Type", "0")))
                 mark.set("Start", str(cue.get("Start", "0")))
                 mark.set("Num", str(cue.get("Num", "-1")))
-                
+
                 # Support for Loops (Type 4)
                 if str(cue.get("Type")) == "4" and "End" in cue:
                     mark.set("End", str(cue["End"]))
-                
+
                 # Colors (Optional in XML but supported)
                 if "Red" in cue:
                     mark.set("Red", str(cue.get("Red", 0)))

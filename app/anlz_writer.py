@@ -15,14 +15,14 @@ References:
   - Reverse-engineered from real Rekordbox 7.x ANLZ files
 """
 
-import struct
+import glob
 import logging
 import os
-import glob
 import shutil
+import struct
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ def _build_ppth(track_path: str) -> bytes:
     return buf
 
 
-def _build_pvbr(pvbr_data: List[int]) -> bytes:
+def _build_pvbr(pvbr_data: list[int]) -> bytes:
     """
     PVBR — VBR index (400 × 4-byte entries = 1600 bytes data).
     Layout: tag(4) + hdr_len(4) + total_len(4) + reserved(4) + data(1600)
@@ -101,7 +101,7 @@ def _build_pvbr(pvbr_data: List[int]) -> bytes:
     return buf
 
 
-def _build_pqtz(beats: List[Dict[str, Any]]) -> bytes:
+def _build_pqtz(beats: list[dict[str, Any]]) -> bytes:
     """
     PQTZ — Quantized beat grid.
     Header (24 bytes): tag(4) + hdr_len(4) + total_len(4) + reserved(4) + reserved(4) + entry_count(4)
@@ -127,7 +127,7 @@ def _build_pqtz(beats: List[Dict[str, Any]]) -> bytes:
     return buf
 
 
-def _build_pwav(waveform_data: List[int]) -> bytes:
+def _build_pwav(waveform_data: list[int]) -> bytes:
     """
     PWAV — Monochrome waveform preview (400 entries, 1 byte each).
     Header (20 bytes): tag(4) + hdr_len(4) + total_len(4) + entry_count(4) + entry_size_and_reserved(4)
@@ -148,7 +148,7 @@ def _build_pwav(waveform_data: List[int]) -> bytes:
     return buf
 
 
-def _build_pwv2(waveform_data: List[int]) -> bytes:
+def _build_pwv2(waveform_data: list[int]) -> bytes:
     """
     PWV2 — Tiny waveform preview (100 entries, 1 byte each).
     """
@@ -168,7 +168,7 @@ def _build_pwv2(waveform_data: List[int]) -> bytes:
     return buf
 
 
-def _build_pcpt_entry(cue: Dict[str, Any]) -> bytes:
+def _build_pcpt_entry(cue: dict[str, Any]) -> bytes:
     """
     PCPT — single cue point entry inside a PCOB list.
     Layout (56 bytes total):
@@ -210,7 +210,7 @@ def _build_pcpt_entry(cue: Dict[str, Any]) -> bytes:
     return buf
 
 
-def _build_pcob(cue_type: int, cues: Optional[List[Dict[str, Any]]] = None) -> bytes:
+def _build_pcob(cue_type: int, cues: list[dict[str, Any]] | None = None) -> bytes:
     """
     PCOB — Cue list container.
     cue_type: 0 = memory cues, 1 = hot cues
@@ -243,7 +243,7 @@ def _build_pcob(cue_type: int, cues: Optional[List[Dict[str, Any]]] = None) -> b
     return buf
 
 
-def _build_pcp2_entry(cue: Dict[str, Any]) -> bytes:
+def _build_pcp2_entry(cue: dict[str, Any]) -> bytes:
     """
     PCP2 — extended cue entry (used inside PCO2 in .EXT).
     Includes RGB color + comment (UTF-16BE NUL-terminated).
@@ -281,7 +281,7 @@ def _build_pcp2_entry(cue: Dict[str, Any]) -> bytes:
     return struct.pack('>4sII', b'PCP2', hdr_len, total_len) + body
 
 
-def _build_pco2(cue_type: int, cues: Optional[List[Dict[str, Any]]] = None) -> bytes:
+def _build_pco2(cue_type: int, cues: list[dict[str, Any]] | None = None) -> bytes:
     """
     PCO2 — Extended cue list (used in .EXT). Carries color + comment per cue.
     """
@@ -306,7 +306,7 @@ def _build_pco2(cue_type: int, cues: Optional[List[Dict[str, Any]]] = None) -> b
     return buf
 
 
-def _build_pwv3(waveform_data: List[int], fps: int = 150) -> bytes:
+def _build_pwv3(waveform_data: list[int], fps: int = 150) -> bytes:
     """
     PWV3 — Monochrome waveform detail (1 byte per entry, 150 entries/sec).
     Header (24 bytes): tag(4) + hdr_len(4) + total_len(4) + entry_size(4) + entry_count(4) + fps(2) + reserved(2)
@@ -328,7 +328,7 @@ def _build_pwv3(waveform_data: List[int], fps: int = 150) -> bytes:
     return buf
 
 
-def _build_pwv5(waveform_u16: List[int], fps: int = 150) -> bytes:
+def _build_pwv5(waveform_u16: list[int], fps: int = 150) -> bytes:
     """
     PWV5 — Color waveform detail (2 bytes per entry, 150 entries/sec).
     Packed as u16: R(3) | G(3) | B(3) | H(5) | reserved(2)
@@ -352,7 +352,7 @@ def _build_pwv5(waveform_u16: List[int], fps: int = 150) -> bytes:
     return buf
 
 
-def _build_pwv4(color_preview: List[List[int]]) -> bytes:
+def _build_pwv4(color_preview: list[list[int]]) -> bytes:
     """
     PWV4 — Color waveform preview (1200 entries, 6 bytes each).
     Each entry: [R_high, G_mid, B_low, height, R_low_half, B_low_half]
@@ -380,7 +380,7 @@ def _build_pwv4(color_preview: List[List[int]]) -> bytes:
     return buf
 
 
-def _build_pwv6(hd_preview: List[List[int]]) -> bytes:
+def _build_pwv6(hd_preview: list[list[int]]) -> bytes:
     """
     PWV6 — 3-band waveform preview (3 bytes per entry, ~1200 entries).
     rbox identifies this as Waveform3BandPreview: [low, mid, high] per entry.
@@ -403,7 +403,7 @@ def _build_pwv6(hd_preview: List[List[int]]) -> bytes:
     return buf
 
 
-def _build_pwv7(hd_detail: List[List[int]], fps: int = 150) -> bytes:
+def _build_pwv7(hd_detail: list[list[int]], fps: int = 150) -> bytes:
     """
     PWV7 — 3-band waveform detail (3 bytes per entry, 150/sec).
     rbox identifies this as Waveform3BandDetail: [low, mid, high] per entry.
@@ -446,7 +446,7 @@ def _build_pwvc() -> bytes:
 
 
 def _build_pssi(
-    phrases: List[Dict[str, Any]],
+    phrases: list[dict[str, Any]],
     bpm: float,
     duration_ms: int,
 ) -> bytes:
@@ -475,7 +475,7 @@ def _build_pssi(
 
     # Mood = most common across track
     mood_map = {"high": 1, "mid": 2, "low": 3}
-    mood_counts: Dict[str, int] = {}
+    mood_counts: dict[str, int] = {}
     for p in phrases:
         m = p.get("mood", "mid")
         mood_counts[m] = mood_counts.get(m, 0) + 1
@@ -531,7 +531,7 @@ def _build_pssi(
     return buf
 
 
-def _build_pqt2(beats: List[Dict[str, Any]], bpm: float) -> bytes:
+def _build_pqt2(beats: list[dict[str, Any]], bpm: float) -> bytes:
     """
     PQT2 — Extended beat grid (used in .EXT for CDJ-3000 / Rekordbox 7+).
 
@@ -586,12 +586,12 @@ def _build_pqt2(beats: List[Dict[str, Any]], bpm: float) -> bytes:
 
 def build_dat(
     track_path: str,
-    beats: List[Dict[str, Any]],
-    pvbr: List[int],
-    pwav: List[int],
-    pwv2: List[int],
-    hot_cues: Optional[List[Dict[str, Any]]] = None,
-    memory_cues: Optional[List[Dict[str, Any]]] = None,
+    beats: list[dict[str, Any]],
+    pvbr: list[int],
+    pwav: list[int],
+    pwv2: list[int],
+    hot_cues: list[dict[str, Any]] | None = None,
+    memory_cues: list[dict[str, Any]] | None = None,
 ) -> bytes:
     """
     Build a complete .DAT ANLZ file.
@@ -624,14 +624,14 @@ def build_dat(
 
 def build_ext(
     track_path: str,
-    beats: List[Dict[str, Any]],
-    pwv3: List[int],
-    pwv5: List[int],
-    pwv4: List[List[int]],
-    phrases: Optional[List[Dict[str, Any]]] = None,
+    beats: list[dict[str, Any]],
+    pwv3: list[int],
+    pwv5: list[int],
+    pwv4: list[list[int]],
+    phrases: list[dict[str, Any]] | None = None,
     duration_ms: int = 0,
-    hot_cues: Optional[List[Dict[str, Any]]] = None,
-    memory_cues: Optional[List[Dict[str, Any]]] = None,
+    hot_cues: list[dict[str, Any]] | None = None,
+    memory_cues: list[dict[str, Any]] | None = None,
     bpm: float = 0.0,
 ) -> bytes:
     """
@@ -662,8 +662,8 @@ def build_ext(
 
 def build_2ex(
     track_path: str,
-    pwv7: List[List[int]],
-    pwv6: List[List[int]],
+    pwv7: list[list[int]],
+    pwv6: list[list[int]],
 ) -> bytes:
     """
     Build a complete .2EX ANLZ file (CDJ-3000 HD waveforms).
@@ -686,7 +686,7 @@ def build_2ex(
 _DEFAULT_BACKUP_KEEP = 3
 
 
-def _backup_existing_anlz(anlz_dir: str, basename: str) -> List[str]:
+def _backup_existing_anlz(anlz_dir: str, basename: str) -> list[str]:
     """
     Move existing .DAT/.EXT/.2EX to timestamped .bak files.
 
@@ -695,7 +695,7 @@ def _backup_existing_anlz(anlz_dir: str, basename: str) -> List[str]:
     Returns list of backup paths created.
     """
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    created: List[str] = []
+    created: list[str] = []
     for ext in ("DAT", "EXT", "2EX"):
         src = str(Path(anlz_dir) / f"{basename}.{ext}")
         if not Path(src).exists():
@@ -716,7 +716,7 @@ def _prune_anlz_backups(anlz_dir: str, keep: int = _DEFAULT_BACKUP_KEEP) -> int:
     """
     pattern = str(Path(anlz_dir) / "*.bak-*")
     backups = glob.glob(pattern)
-    by_prefix: Dict[str, List[str]] = {}
+    by_prefix: dict[str, list[str]] = {}
     for path in backups:
         prefix = path.rsplit(".bak-", 1)[0]
         by_prefix.setdefault(prefix, []).append(path)
@@ -737,10 +737,10 @@ def _prune_anlz_backups(anlz_dir: str, keep: int = _DEFAULT_BACKUP_KEEP) -> int:
 def write_anlz_files(
     anlz_dir: str,
     track_path: str,
-    analysis_result: Dict[str, Any],
+    analysis_result: dict[str, Any],
     filename_base: str = "ANLZ0000",
     backup_existing: bool = True,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Write all three ANLZ files (.DAT, .EXT, .2EX) from AnalysisEngine output.
 

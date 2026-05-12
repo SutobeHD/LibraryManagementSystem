@@ -1,20 +1,32 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Response, BackgroundTasks, Body
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
+import asyncio
+import logging
 import os
 import secrets
 import shutil
-import uvicorn
-import urllib.parse
-import sys, time, threading, signal
-import asyncio
-import subprocess
-import logging
+import sys
+import threading
+import time
 import traceback
+import urllib.parse
 from pathlib import Path
+from typing import Any
+
+import uvicorn
+from fastapi import (
+    BackgroundTasks,
+    Body,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 # EC9: Load .env file so SOUNDCLOUD_CLIENT_ID etc. are available as env-vars.
 # python-dotenv is a soft dependency; if missing we fall back to os.environ silently.
@@ -54,32 +66,43 @@ KEYRING_SERVICE = "library_management_system"
 # Keyring entry name for the SoundCloud OAuth bearer token.
 KEYRING_SC_TOKEN = "sc_token"
 
-from .services import AudioEngine, FileManager, LibraryTools, SettingsManager, SystemCleaner, XMLProcessor, BeatAnalyzer, ImportManager, ProjectManager
-from .database import db
-from .config import EXPORT_DIR, LOG_DIR, TEMP_DIR, MUSIC_DIR
-from .usb_manager import UsbDetector, UsbProfileManager, UsbSyncEngine, UsbActions
+from . import audio_tags, download_registry, folder_watcher
+from .audio_analyzer import LIBROSA_AVAILABLE, AudioAnalyzer
 from .backup_engine import BackupEngine
-from .rbep_parser import list_projects as rbep_list_projects, parse_project as rbep_parse_project
-from .rekordbox_bridge import RekordboxBridge
-from .soundcloud_downloader import sc_downloader
-from .audio_analyzer import AudioAnalyzer, LIBROSA_AVAILABLE
-from .soundcloud_api import SoundCloudPlaylistAPI, SoundCloudSyncEngine, AuthExpiredError, RateLimitError
-from . import download_registry
-from .playcount_sync import (
-    load_usb_sync_meta,
-    save_usb_sync_meta,
-    diff_playcounts,
-    resolve_playcounts,
-    read_usb_xml_playcounts,
-)
+from .config import EXPORT_DIR, LOG_DIR, MUSIC_DIR, TEMP_DIR
+from .database import db
 from .phrase_generator import (
-    extract_beats_from_db,
-    detect_first_downbeat,
-    generate_phrase_cues,
     commit_cues_to_db,
+    detect_first_downbeat,
+    extract_beats_from_db,
+    generate_phrase_cues,
 )
-from . import folder_watcher
-from . import audio_tags
+from .playcount_sync import (
+    diff_playcounts,
+    load_usb_sync_meta,
+    read_usb_xml_playcounts,
+    resolve_playcounts,
+    save_usb_sync_meta,
+)
+from .rbep_parser import list_projects as rbep_list_projects
+from .rbep_parser import parse_project as rbep_parse_project
+from .rekordbox_bridge import RekordboxBridge
+from .services import (
+    AudioEngine,
+    BeatAnalyzer,
+    ImportManager,
+    LibraryTools,
+    ProjectManager,
+    SettingsManager,
+)
+from .soundcloud_api import (
+    AuthExpiredError,
+    RateLimitError,
+    SoundCloudPlaylistAPI,
+    SoundCloudSyncEngine,
+)
+from .soundcloud_downloader import sc_downloader
+from .usb_manager import UsbActions, UsbDetector, UsbProfileManager, UsbSyncEngine
 
 # Per-operation lock — prevents race conditions on concurrent sync requests (Criterion 10)
 _sync_lock = asyncio.Lock()
@@ -107,6 +130,7 @@ SHUTDOWN_TOKEN = secrets.token_urlsafe(32)
 # always means re-running every top-level statement here). The token only
 # matters in the parent FastAPI process.
 import multiprocessing as _mp
+
 if _mp.current_process().name == "MainProcess":
     logger.info("Session security token generated.")
 
@@ -151,15 +175,15 @@ def validate_audio_path(path_str: str) -> Path:
         file_path = Path(path_str).resolve()
     except (ValueError, OSError):
         raise HTTPException(status_code=400, detail="Invalid file path")
-    
+
     # Check extension
     if file_path.suffix.lower() not in ALLOWED_AUDIO_EXTENSIONS:
         raise HTTPException(status_code=400, detail="File type not allowed")
-    
+
     # Check file exists
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
-    
+
     # Check that the file is within an allowed directory
     is_allowed = any(
         str(file_path).startswith(str(root))
@@ -171,7 +195,7 @@ def validate_audio_path(path_str: str) -> Path:
         if str(file_path) not in known_paths and path_str not in known_paths:
             logger.warning(f"SECURITY: Blocked access to path outside allowed roots: {file_path}")
             raise HTTPException(status_code=403, detail="Access denied: path outside allowed directories")
-    
+
     return file_path
 
 def safe_error_message(e: Exception) -> str:
@@ -201,8 +225,9 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -250,27 +275,27 @@ class FileWriteReq(BaseModel):
 class ExportRequest(BaseModel):
     source_path: str
     filename: str
-    cuts: List[dict]
+    cuts: list[dict]
     output_name: str
     fade_in: bool = False
     fade_out: bool = False
 
 class BatchReq(BaseModel):
-    track_ids: List[str]
-    updates: Dict[str, Any]
+    track_ids: list[str]
+    updates: dict[str, Any]
 
 class TrackUpdateReq(BaseModel):
-    Rating: Optional[int] = None
-    ColorID: Optional[int] = None
-    Comment: Optional[str] = None
-    Genre: Optional[str] = None
+    Rating: int | None = None
+    ColorID: int | None = None
+    Comment: str | None = None
+    Genre: str | None = None
 
 class MoveReq(BaseModel):
-    track_ids: List[str]
+    track_ids: list[str]
     target_folder: str
 
 class RenameReq(BaseModel):
-    track_ids: List[str]
+    track_ids: list[str]
     pattern: str
 
 class ScReq(BaseModel):
@@ -279,11 +304,11 @@ class ScReq(BaseModel):
 
 class CueReq(BaseModel):
     track_id: str
-    cues: List[dict]
+    cues: list[dict]
 
 class GridReq(BaseModel):
     track_id: str
-    beat_grid: List[dict]
+    beat_grid: list[dict]
 
 class SetReq(BaseModel):
     # Permissive: the frontend stores arbitrary preference keys (shortcuts,
@@ -308,7 +333,7 @@ class SetReq(BaseModel):
     insights_playcount_threshold: int = 0
     insights_bitrate_threshold: int = 320
     soundcloud_auth_token: str = ""
-    scan_folders: List[str] = []
+    scan_folders: list[str] = []
 
 class SmartPlReq(BaseModel):
     artist_threshold: int = 3
@@ -329,15 +354,15 @@ class PlDeleteReq(BaseModel):
 class PlMoveReq(BaseModel):
     pid: str
     parent_id: str = "ROOT"
-    target_id: Optional[str] = None
-    position: Optional[str] = "inside"
+    target_id: str | None = None
+    position: str | None = "inside"
 
 class PlRemoveTrackReq(BaseModel):
     pid: str
     track_id: str
 
 class CleanTitlesReq(BaseModel):
-    track_ids: List[str]
+    track_ids: list[str]
 
 class DeleteTrackReq(BaseModel):
     track_id: str
@@ -346,7 +371,7 @@ class CreatePlReq(BaseModel):
     name: str
     parent_id: str = "ROOT"
     type: str = "1" # 1=Playlist, 0=Folder
-    track_ids: List[str] = []
+    track_ids: list[str] = []
 
 class RenamePlReq(BaseModel):
     pid: str
@@ -355,8 +380,8 @@ class RenamePlReq(BaseModel):
 class MovePlReq(BaseModel):
     pid: str
     parent_id: str
-    target_id: Optional[str] = None
-    position: Optional[str] = "inside"
+    target_id: str | None = None
+    position: str | None = "inside"
 
 class DeletePlReq(BaseModel):
     pid: str
@@ -376,7 +401,7 @@ class AnalyzeFullReq(BaseModel):
     force: bool = False   # Re-analyze even if already analyzed
 
 class AnalyzeBatchReq(BaseModel):
-    track_ids: Optional[List[str]] = None  # None = auto-detect unanalyzed
+    track_ids: list[str] | None = None  # None = auto-detect unanalyzed
     force: bool = False
 
 
@@ -386,8 +411,8 @@ class MergeReq(BaseModel):
     target_name: str
 
 class RbxSyncReq(BaseModel):
-    track_ids: List[str]
-    filename: Optional[str] = "rekordbox_export.xml"
+    track_ids: list[str]
+    filename: str | None = "rekordbox_export.xml"
 
 class RbxImportReq(BaseModel):
     xml_path: str
@@ -407,7 +432,7 @@ class PlDeleteReq(BaseModel):
 class PlMoveReq(BaseModel):
     pid: str
     parent_id: str
-    target_id: Optional[str] = None
+    target_id: str | None = None
     position: str = "inside"
 
 class PlReorderReq(BaseModel):
@@ -421,7 +446,7 @@ class PlRemoveTrackReq(BaseModel):
 
 class ProjectReq(BaseModel):
     name: str
-    data: Dict[str, Any]
+    data: dict[str, Any]
 
 class DBModeReq(BaseModel):
     mode: str # "xml" or "live"
@@ -433,6 +458,7 @@ class DBModeReq(BaseModel):
 # --- ENDPOINTS ---
 
 from fastapi import Request
+
 
 @app.get("/api/stream")
 async def stream_audio(path: str, request: Request):
@@ -540,7 +566,8 @@ def file_reveal(r: FileRevealReq):
         p = Path(r.path)
         if not p.exists():
             raise HTTPException(404, f"Not found: {r.path}")
-        import sys, subprocess
+        import subprocess
+        import sys
         if sys.platform == "win32":
             subprocess.run(["explorer", "/select,", str(p)], check=False)
         elif sys.platform == "darwin":
@@ -563,12 +590,12 @@ async def file_write(r: FileWriteReq):
         path = Path(r.path)
         if not path.is_absolute():
              path = Path(APP_DIR).parent / r.path
-        
+
         path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         with open(path, "w", encoding="utf-8") as f:
             f.write(r.content)
-            
+
         return {"status": "success", "path": str(path)}
     except Exception as e:
         logger.error(f"File write error: {e}")
@@ -584,21 +611,21 @@ async def clean_xml(
         # SECURITY: Validate file extension
         if not file.filename or not file.filename.lower().endswith('.xml'):
             raise HTTPException(400, "Only XML files are accepted")
-        
+
         # SECURITY: Fixed target path — no user-controlled filename
         target_path = Path("rekordbox.xml")
         with open(target_path, "wb") as f:
              shutil.copyfileobj(file.file, f)
-        
+
         # Reload DB
         db.load_xml(str(target_path))
-        
+
         return {
             "status": "success",
             "message": "XML Uploaded and Scanned",
             "tracks": len(db.tracks),
             "playlists": len(db.playlists)
-        } 
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -630,15 +657,15 @@ def get_low_quality_tracks():
 
     tracks = []
     source = db.tracks.values()
-    
+
     for t in source:
         try:
             br = t.get("Bitrate", t.get("BitRate", 0))
-            if int(br) < threshold and int(br) > 0: 
+            if int(br) < threshold and int(br) > 0:
                tracks.append(t)
         except (ValueError, TypeError) as e:
             logger.debug(f"Skipping track with invalid bitrate: {t.get('Name', '?')}: {e}")
-        
+
     return tracks
 
 @app.get("/api/insights/no_artwork")
@@ -652,7 +679,7 @@ def get_no_artwork_tracks():
 @app.get("/api/insights/lost")
 def get_lost_tracks():
     logger.info("Fetching lost tracks (low play count)...")
-    
+
     threshold = 0
     try:
         from .services import SettingsManager
@@ -660,7 +687,7 @@ def get_lost_tracks():
         threshold = int(settings.get("insights_playcount_threshold", 0))
     except Exception as e:
         logger.warning(f"Could not load playcount threshold from settings: {e}")
-    
+
     tracks = []
     for t in db.tracks.values():
         try:
@@ -723,22 +750,22 @@ async def analyze_track(tid: str):
     track = db.get_track_details(tid)
     if not track:
         raise HTTPException(404, "Track not found")
-    
+
     path = track.get("path")
     if not path or not os.path.exists(path):
         raise HTTPException(404, "Audio file not found")
-    
+
     try:
         # Perform analysis in a separate process pool to avoid blocking the event loop
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(AudioAnalyzer.get_executor(), BeatAnalyzer.analyze, path)
-        
+
         # PERSIST TO DATABASE IN-MEMORY
         track["BPM"] = result["bpm"]
         track["beatGrid"] = result["beats"]
         track["TotalTime"] = result["totalTime"]
         track["dropTime"] = result["dropTime"]
-        
+
         # Add a "DROP" position mark if not already present
         marks = track.get("positionMarks", [])
         if not any(m.get("name") == "DROP" for m in marks):
@@ -750,7 +777,7 @@ async def analyze_track(tid: str):
                 "red": 255, "green": 0, "blue": 0
             })
             track["positionMarks"] = marks
-        
+
         db.save_xml()
         return result
     except Exception as e:
@@ -761,10 +788,10 @@ async def analyze_track(tid: str):
 async def stream_audio(path: str):
     """Streams an audio file from the local filesystem"""
     logger.info(f"Stream request for: {path}")
-    
+
     # SECURITY: Validate against allowed audio roots to prevent path traversal
     valid_path = validate_audio_path(path)
-    
+
     return FileResponse(valid_path, headers={"Accept-Ranges": "bytes"})
 
 
@@ -781,7 +808,7 @@ class MyTagCreateReq(BaseModel):
 
 
 class TrackMyTagsReq(BaseModel):
-    tag_ids: List[str] = []
+    tag_ids: list[str] = []
 
 
 @app.get("/api/mytags")
@@ -868,7 +895,7 @@ def update_track(tid: str, r: TrackUpdateReq):
         raise
     except Exception as e:
         logger.error(f"Update failed for {tid}: {e}")
-        raise HTTPException(500, f"Update failed: {str(e)}")
+        raise HTTPException(500, f"Update failed: {e!s}")
 
 @app.patch("/api/tracks/batch")
 def batch_up(r: BatchReq): return {"status": "success" if db.update_tracks_metadata(r.track_ids, r.updates) else "error"}
@@ -964,12 +991,12 @@ def reorder_pl_track(r: PlReorderReq):
 class SmartPlaylistCreateReq(BaseModel):
     name: str
     parent_id: str = "ROOT"
-    criteria: Dict = {}
+    criteria: dict = {}
 
 
 class SmartPlaylistUpdateReq(BaseModel):
     pid: str
-    criteria: Dict
+    criteria: dict
 
 
 @app.post("/api/playlists/smart/create")
@@ -1017,8 +1044,9 @@ def read_usb_history(r: UsbHistoryReq):
     was played, in what order.
     """
     try:
-        import rbox
         from pathlib import Path as _P
+
+        import rbox
         usb = _P(r.drive)
         if len(r.drive) == 2 and r.drive[1] == ":":
             usb = _P(r.drive + "\\")
@@ -1070,26 +1098,26 @@ def get_dupes(): return LibraryTools.find_duplicates()
 class BatchCommentReq(BaseModel):
     source_id: str  # "LIB" or playlist_id
     action: str     # remove, replace, append, set
-    find: Optional[str] = ""
-    replace: Optional[str] = ""
+    find: str | None = ""
+    replace: str | None = ""
 
 @app.post("/api/tools/batch-comment")
 async def batch_comment(r: BatchCommentReq):
     try:
+        import os
         import subprocess
         import sys
-        import os
         from pathlib import Path
-        
+
         # Manually resolve DB path to avoid touching the global 'db' object
         # which contains thread-unsafe Rust objects.
         live_db_path = Path(os.path.expandvars(r"%APPDATA%\Pioneer\rekordbox\master.db"))
         if not live_db_path.exists():
             live_db_path = Path(os.path.expandvars(r"%APPDATA%\Pioneer\rekordbox6\master.db"))
-            
+
         if not live_db_path.exists():
              raise HTTPException(400, "Could not find Rekordbox master.db")
-        
+
         # Call the worker script
         cmd = [
             sys.executable,
@@ -1098,12 +1126,12 @@ async def batch_comment(r: BatchCommentReq):
             "--source", r.source_id,
             "--action", r.action
         ]
-        
+
         if r.find:
             cmd.extend(["--find", r.find])
         if r.replace:
             cmd.extend(["--replace", r.replace])
-            
+
         logger.info(f"Running batch worker: {cmd}")
 
         # Run and capture output. timeout=600s — batch workers can legitimately
@@ -1158,7 +1186,7 @@ def set_lib_mode(r: DBModeReq):
         if s.get("remember_lib_mode"):
             s["last_lib_mode"] = r.mode
             SettingsManager.save(s)
-            
+
         db.load_library() # Reload in new mode
         logger.info(f"Library reloaded in {r.mode} mode. Tracks: {len(db.tracks)}")
     return {"status": "success" if success else "error", "mode": db.mode}
@@ -1208,7 +1236,7 @@ def list_backups():
 
 class RestoreReq(BaseModel):
     filename: str
-    commit_hash: Optional[str] = None
+    commit_hash: str | None = None
 
 @app.post("/api/library/restore")
 def restore_backup(r: RestoreReq):
@@ -1233,7 +1261,7 @@ def get_backup_diff(commit_hash: str):
     return {"error": "Not available in current mode"}
 
 class LoadLibReq(BaseModel):
-    path: Optional[str] = None
+    path: str | None = None
 
 @app.post("/api/library/load")
 def load_lib(r: LoadLibReq = Body(default=None)):
@@ -1283,7 +1311,7 @@ async def rbx_import(r: RbxImportReq):
     try:
         if not os.path.exists(r.xml_path):
              raise HTTPException(404, "XML file not found")
-        
+
         results = RekordboxBridge.import_library(r.xml_path)
         return {
             "status": "success",
@@ -1311,9 +1339,9 @@ class ImportPathsReq(BaseModel):
     """Drag-drop import body. `paths` is mixed files + directories; the
     optional `group_into_playlist` + `playlist_name` group every imported
     track into a single playlist (defaults to the dropped folder's name)."""
-    paths: List[str]
+    paths: list[str]
     group_into_playlist: bool = False
-    playlist_name: Optional[str] = None
+    playlist_name: str | None = None
 
 
 @app.post("/api/library/scan-folder")
@@ -1405,7 +1433,7 @@ async def import_paths(r: ImportPathsReq):
 
     # ── Phase 1: enumerate and register tasks UPFRONT ─────────────────────
     queued: list[tuple[Path, str]] = []  # (path, task_id)
-    folder_for_pl: Optional[Path] = None
+    folder_for_pl: Path | None = None
     for t in targets:
         try:
             if t.is_dir():
@@ -1432,7 +1460,7 @@ async def import_paths(r: ImportPathsReq):
     collected_track_ids: list[str] = []
 
     def _process_one(f: Path, tid: str) -> None:
-        local_id: Optional[str] = None
+        local_id: str | None = None
         if _is_known_audio_path(f):
             local_id = _track_id_for_path(f)
             import_tracker.update(
@@ -1542,7 +1570,7 @@ async def get_artwork(path: str):
     """
     if not path:
         raise HTTPException(404, "No path provided")
-    
+
     # Try resolving Rekordbox relative paths (e.g. /PIONEER/Artwork/...)
     p_path = path
     if path.startswith("/PIONEER/"):
@@ -1557,7 +1585,7 @@ async def get_artwork(path: str):
             logger.warning("APPDATA not found, cannot resolve PIONEER artwork path")
 
     file_path = Path(p_path).resolve()
-    
+
     # SECURITY: Directory Jail & Extension Validation
     ALLOWED_ARTWORK_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif'}
     if file_path.suffix.lower() not in ALLOWED_ARTWORK_EXTENSIONS:
@@ -1571,7 +1599,7 @@ async def get_artwork(path: str):
         rb_share_dir = (Path(os.environ.get("APPDATA")) / "Pioneer" / "rekordbox" / "share").resolve()
         if str(file_path).startswith(str(rb_share_dir)):
             is_allowed = True
-            
+
     # As a fallback, if not in defined locations, allow only if it's explicitly tracked in the DB as artwork.
     # Note: we mostly rely on the above checks for safety.
     if not is_allowed:
@@ -1580,7 +1608,7 @@ async def get_artwork(path: str):
 
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(404, "Artwork file not found")
-        
+
     return FileResponse(file_path)
 
 @app.get("/api/library/tracks")
@@ -1594,7 +1622,7 @@ def get_library_tracks():
     return tracks
 
 @app.get("/api/playlist/{pid}/tracks")
-def get_ptracks(pid: str): 
+def get_ptracks(pid: str):
     try:
         tracks = []
         raw_tracks = db.get_playlist_tracks(pid)
@@ -1725,17 +1753,17 @@ async def render(r: ExportRequest):
         safe_name = Path(r.output_name).name  # Strip any path components
         if not safe_name.endswith(('.wav', '.mp3', '.flac')):
             safe_name += ".wav"
-            
+
         tid = await asyncio.to_thread(AudioEngine.render_segment, r.source_path, r.cuts, safe_name, r.fade_in, r.fade_out)
         return {
-            "status": "success", 
+            "status": "success",
             "track_id": tid,
             "filename": safe_name,
             "download_url": f"/exports/{safe_name}"
         }
     except HTTPException:
         raise
-    except Exception as e: 
+    except Exception as e:
         logger.error(f"Render failed: {e}")
         raise HTTPException(500, safe_error_message(e))
 
@@ -1764,7 +1792,7 @@ def _run_import_analysis(dest: Path, track_task_id: str) -> None:
 
 
 @app.post("/api/audio/import")
-def import_audio(files: List[UploadFile] = File(...), wait: bool = False):
+def import_audio(files: list[UploadFile] = File(...), wait: bool = False):
     """Batch audio upload + analysis + library insertion.
 
     Default (wait=False, async):
@@ -1893,7 +1921,7 @@ def _track_paths_snapshot() -> set[str]:
     return paths
 
 
-def _track_id_for_path(path: Path) -> Optional[str]:
+def _track_id_for_path(path: Path) -> str | None:
     """Return existing track-id for a given filesystem path, or None."""
     try:
         target = str(path.resolve())
@@ -1991,8 +2019,8 @@ def _graceful_shutdown():
 
 @app.on_event("startup")
 async def startup_event():
-    logger.info(f"Backend started. Binding to 127.0.0.1:8000 only.")
-    
+    logger.info("Backend started. Binding to 127.0.0.1:8000 only.")
+
     # Initialize download registry (creates SQLite DB if not exists)
     try:
         download_registry.init_registry()
@@ -2000,7 +2028,8 @@ async def startup_event():
         logger.error("[startup] download_registry.init_registry() failed: %s", _e)
 
     # State Recovery: purge orphaned temp files from previous hard crashes
-    import tempfile, glob
+    import glob
+    import tempfile
     tmp_base = tempfile.gettempdir()
     for stale_file in glob.glob(str(Path(tmp_base) / "rbpro_sc_*")):
         try:
@@ -2061,7 +2090,7 @@ def heartbeat():
 async def shutdown(token: str = ""):
     """SECURITY: Requires session token to trigger shutdown."""
     if token != SHUTDOWN_TOKEN:
-        logger.warning(f"SECURITY: Unauthorized shutdown attempt!")
+        logger.warning("SECURITY: Unauthorized shutdown attempt!")
         raise HTTPException(status_code=403, detail="Invalid shutdown token")
     threading.Thread(target=_graceful_shutdown, daemon=True).start()
     return {"message": "Shutting down..."}
@@ -2089,7 +2118,7 @@ def select_db_dialog():
     return {"path": "XML Mode"}
 
 class NewLibReq(BaseModel):
-    path: Optional[str] = None
+    path: str | None = None
 
 @app.post("/api/library/new")
 def create_new_lib(r: NewLibReq = Body(default=None)):
@@ -2115,31 +2144,31 @@ def debug_load_xml():
 
 class UsbProfileReq(BaseModel):
     device_id: str
-    label: Optional[str] = None
-    drive: Optional[str] = None
-    type: Optional[str] = "Collection"  # MainCollection, Collection, PartCollection, SetStick
-    sync_mode: Optional[str] = "full"   # full, playlists_only, metadata_only, selective
-    sync_playlists: Optional[List[str]] = []
-    auto_sync: Optional[bool] = False
+    label: str | None = None
+    drive: str | None = None
+    type: str | None = "Collection"  # MainCollection, Collection, PartCollection, SetStick
+    sync_mode: str | None = "full"   # full, playlists_only, metadata_only, selective
+    sync_playlists: list[str] | None = []
+    auto_sync: bool | None = False
 
     # Per-profile audio export settings (used during sync if conversion is needed)
-    audio_format: Optional[str] = "original"   # 'original' | 'mp3' | 'flac' | 'wav' | 'aac'
-    audio_bitrate: Optional[str] = "320"       # for lossy formats: '128', '192', '256', '320'
-    audio_sample_rate: Optional[str] = "44100" # '44100' | '48000' | '96000'
+    audio_format: str | None = "original"   # 'original' | 'mp3' | 'flac' | 'wav' | 'aac'
+    audio_bitrate: str | None = "320"       # for lossy formats: '128', '192', '256', '320'
+    audio_sample_rate: str | None = "44100" # '44100' | '48000' | '96000'
 
     # Library type / sync direction (already used elsewhere — declared here so frontend can update)
-    sync_direction: Optional[str] = "pc_main"  # 'pc_main' | 'usb_main'
-    sync_mirrored:  Optional[bool] = False
-    sync_primary:   Optional[str] = None
-    library_types:  Optional[List[str]] = None
+    sync_direction: str | None = "pc_main"  # 'pc_main' | 'usb_main'
+    sync_mirrored:  bool | None = False
+    sync_primary:   str | None = None
+    library_types:  list[str] | None = None
 
 class UsbSyncReq(BaseModel):
     device_id: str
-    sync_type: Optional[str] = "collection"  # collection, playlists, metadata
-    playlist_ids: Optional[List[str]] = []
+    sync_type: str | None = "collection"  # collection, playlists, metadata
+    playlist_ids: list[str] | None = []
     # Default to BOTH formats so Rekordbox auto-detects (exportLibrary.db) AND
     # older Rekordbox / manual XML import (rekordbox.xml) both work out of the box.
-    library_types: Optional[List[str]] = ["library_one", "library_legacy"]
+    library_types: list[str] | None = ["library_one", "library_legacy"]
 
 class UsbEjectReq(BaseModel):
     drive: str
@@ -2149,7 +2178,7 @@ class UsbResetReq(BaseModel):
 
 class DupMergeReq(BaseModel):
     keep_id: str
-    remove_ids: List[str]
+    remove_ids: list[str]
 
 @app.get("/api/usb/devices")
 def usb_scan_devices():
@@ -2316,7 +2345,7 @@ def usb_initialize(r: UsbInitReq):
 
 class UsbMySettingsReq(BaseModel):
     device_id: str
-    values: Dict[str, Dict[str, str]]  # {"MYSETTING": {"auto_cue": "off", …}}
+    values: dict[str, dict[str, str]]  # {"MYSETTING": {"auto_cue": "off", …}}
 
 
 @app.get("/api/usb/mysettings/schema")
@@ -2615,11 +2644,11 @@ def analyze_audio(req: AudioImportReq):
     """Submit an audio file for high-accuracy background analysis."""
     if not LIBROSA_AVAILABLE:
         logger.warning("Librosa not installed. Audio analysis will be mocked.")
-    
+
     file_path = Path(req.file_path)
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Audio file not found")
-        
+
     task_id = f"analysis_{secrets.token_hex(8)}"
     return AudioAnalyzer.analyze_track(task_id, str(file_path), req.mode)
 
@@ -2762,13 +2791,13 @@ class ScDownloadRequest(BaseModel):
     (see app/soundcloud_downloader.py module docstring): snipped previews,
     401/403 responses, and unavailable tracks are skipped there.
     """
-    url: Optional[str] = None               # SC permalink URL (mode B)
-    sc_track_id: Optional[str] = None       # SoundCloud track ID (mode A)
-    title: Optional[str] = None
-    artist: Optional[str] = None
+    url: str | None = None               # SC permalink URL (mode B)
+    sc_track_id: str | None = None       # SoundCloud track ID (mode A)
+    title: str | None = None
+    artist: str | None = None
     duration_ms: int = 0
     downloadable: bool = False              # hint for path selection; see class docstring
-    sc_playlist_title: Optional[str] = None # for auto-playlist sort
+    sc_playlist_title: str | None = None # for auto-playlist sort
 
 
 @app.post("/api/soundcloud/download")
@@ -2858,7 +2887,7 @@ async def soundcloud_download(data: ScDownloadRequest, request: Request):
 class ScDownloadPlaylistReq(BaseModel):
     playlist_id: int
     is_likes: bool = False
-    playlist_title: Optional[str] = None  # for auto-playlist-sort folder
+    playlist_title: str | None = None  # for auto-playlist-sort folder
     force: bool = False  # if True: wipe registry entries for these tracks → re-download
 
 
@@ -2959,9 +2988,9 @@ async def get_soundcloud_task_status(task_id: str):
 async def get_download_history(
     limit: int = 100,
     offset: int = 0,
-    status: Optional[str] = None,
-    device_id: Optional[str] = None,
-    search: Optional[str] = None,
+    status: str | None = None,
+    device_id: str | None = None,
+    search: str | None = None,
     this_device_only: bool = False,
 ):
     """
@@ -3082,7 +3111,7 @@ async def set_soundcloud_auth_token(r: ScAuthTokenReq, response: Response):
 # ─── SoundCloud Playlist Sync API ─────────────────────────────────────────────
 
 class ScSettingsReq(BaseModel):
-    sc_sync_folder_id: Optional[str] = None  # Rekordbox playlist ID or None for ROOT
+    sc_sync_folder_id: str | None = None  # Rekordbox playlist ID or None for ROOT
 
 @app.get("/api/soundcloud/settings")
 async def get_sc_settings():
@@ -3136,12 +3165,12 @@ async def get_soundcloud_playlists(request: Request):
     import functools
     import time as pytime
     start_time = pytime.time()
-    
+
     try:
         # asyncio.gather: runs profile + playlists + likes concurrently on the thread pool.
         # This is faster and prevents slow SC servers from stalling the event loop.
-        logger.info(f"[SC] Starting parallel fetch for user profile, playlists, and likes...")
-        
+        logger.info("[SC] Starting parallel fetch for user profile, playlists, and likes...")
+
         profile, playlists, likes = await asyncio.gather(
             asyncio.to_thread(SoundCloudPlaylistAPI.get_user_profile, auth_token),
             asyncio.to_thread(functools.partial(SoundCloudPlaylistAPI.get_playlists, auth_token)),
@@ -3202,7 +3231,7 @@ async def get_soundcloud_me(request: Request):
 
 
 class ScSyncReq(BaseModel):
-    playlist_ids: List[int] = []
+    playlist_ids: list[int] = []
     include_likes: bool = False
 
 @app.post("/api/soundcloud/sync")
@@ -3331,7 +3360,7 @@ async def sync_all_soundcloud(request: Request):
             raise HTTPException(500, safe_error_message(e))
 
 class ScMergeReq(BaseModel):
-    playlist_ids: List[int]
+    playlist_ids: list[int]
     merged_name: str
     delete_originals: bool = False  # Originals deleted ONLY after full verification
 
@@ -3481,7 +3510,7 @@ class PlayCountResolveItem(BaseModel):
     usb_last_played: float = 0.0
 
 class PlayCountResolveRequest(BaseModel):
-    resolutions: List[PlayCountResolveItem]
+    resolutions: list[PlayCountResolveItem]
     usb_root: str
     usb_xml_path: str
 
@@ -3550,8 +3579,9 @@ async def usb_playcount_resolve(body: PlayCountResolveRequest):
         len(body.resolutions), body.usb_root,
     )
     try:
-        from .config import DB_FILENAME
         import os as _os
+
+        from .config import DB_FILENAME
         rb_root = str(Path(_os.environ.get("APPDATA", "")) / "Pioneer" / "rekordbox")
         pc_db_path = str(Path(rb_root) / DB_FILENAME) if hasattr(Path(rb_root), "__str__") else ""
 
@@ -3585,12 +3615,12 @@ async def usb_playcount_resolve(body: PlayCountResolveRequest):
 class PhraseGenerateRequest(BaseModel):
     """Request to generate phrase cues for a track."""
     track_id: int
-    phrase_length: Optional[int] = 16  # bars
+    phrase_length: int | None = 16  # bars
 
 class PhraseCommitRequest(BaseModel):
     """Request to commit generated cues to the DB."""
     track_id: int
-    cues: List[Dict[str, Any]]
+    cues: list[dict[str, Any]]
 
 
 @app.post("/api/phrase/generate")
@@ -3619,8 +3649,9 @@ async def phrase_generate(body: PhraseGenerateRequest):
                 detail=f"phrase_length must be 8, 16, or 32 — got {phrase_len}",
             )
 
-        from .config import DB_FILENAME
         import os as _os
+
+        from .config import DB_FILENAME
         rb_root = str(Path(_os.environ.get("APPDATA", "")) / "Pioneer" / "rekordbox")
         db_path = str(Path(rb_root) / DB_FILENAME)
 
@@ -3678,8 +3709,9 @@ async def phrase_commit(body: PhraseCommitRequest):
         if not db.loaded:
             raise HTTPException(status_code=400, detail="Library not loaded")
 
-        from .config import DB_FILENAME
         import os as _os
+
+        from .config import DB_FILENAME
         rb_root = str(Path(_os.environ.get("APPDATA", "")) / "Pioneer" / "rekordbox")
         db_path = str(Path(rb_root) / DB_FILENAME)
 
@@ -3709,21 +3741,21 @@ async def phrase_commit(body: PhraseCommitRequest):
 
 # In-memory job store for background fingerprint jobs
 # {job_id: {"status": "running"|"done"|"error", "groups": [...], "error": str}}
-_dup_jobs: Dict[str, Dict[str, Any]] = {}
+_dup_jobs: dict[str, dict[str, Any]] = {}
 
 
 class DuplicateScanRequest(BaseModel):
     """Start a background duplicate scan over provided track paths."""
-    track_paths: List[str]
+    track_paths: list[str]
 
 class DuplicateMergeRequest(BaseModel):
     """Merge a set of duplicate tracks into one master."""
     keep_path: str
-    remove_paths: List[str]
+    remove_paths: list[str]
     merge_play_counts: bool = True
 
 
-def _fingerprint_python_fallback(path: str) -> Optional[bytes]:
+def _fingerprint_python_fallback(path: str) -> bytes | None:
     """
     Python fallback fingerprint: MD5 of first 30 seconds of decoded PCM.
 
@@ -3755,9 +3787,9 @@ def _fingerprint_python_fallback(path: str) -> Optional[bytes]:
 
 
 def _group_duplicates(
-    fingerprints: Dict[str, Any],
+    fingerprints: dict[str, Any],
     similarity_threshold: float = 0.85,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Group paths by fingerprint similarity.
 
@@ -3821,7 +3853,7 @@ def _group_duplicates(
     return groups
 
 
-async def _run_duplicate_scan(job_id: str, track_paths: List[str]) -> None:
+async def _run_duplicate_scan(job_id: str, track_paths: list[str]) -> None:
     """
     Background task: fingerprint all tracks and group duplicates.
 
@@ -3833,7 +3865,7 @@ async def _run_duplicate_scan(job_id: str, track_paths: List[str]) -> None:
     _dup_jobs[job_id] = {"status": "running", "groups": [], "total": len(track_paths), "done": 0}
 
     try:
-        fingerprints: Dict[str, Any] = {}
+        fingerprints: dict[str, Any] = {}
 
         for idx, path in enumerate(track_paths):
             fp = await asyncio.get_event_loop().run_in_executor(
@@ -3855,7 +3887,7 @@ async def _run_duplicate_scan(job_id: str, track_paths: List[str]) -> None:
             members_info = []
             for p in group["members"]:
                 # Find track metadata from library
-                track_meta: Dict[str, Any] = {"path": p, "title": "", "artist": "", "size_mb": 0.0, "format": "", "bitrate": 0, "play_count": 0}
+                track_meta: dict[str, Any] = {"path": p, "title": "", "artist": "", "size_mb": 0.0, "format": "", "bitrate": 0, "play_count": 0}
                 try:
                     file_path = Path(p)
                     if file_path.exists():

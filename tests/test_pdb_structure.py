@@ -17,6 +17,7 @@ Pass if all invariants hold AND the file is parseable by rbox.
 Run from repo root: PYTHONIOENCODING=utf-8 python tests/test_pdb_structure.py
 """
 from __future__ import annotations
+
 import struct
 import sys
 import tempfile
@@ -123,7 +124,7 @@ def main():
 
         # 1. empty_candidate uniqueness (the fix)
         empties = [d["empty"] for d in descriptors]
-        results.append((f"all 20 empty_candidate values UNIQUE", len(set(empties)) == 20))
+        results.append(("all 20 empty_candidate values UNIQUE", len(set(empties)) == 20))
 
         # 2. each empty_candidate page is all-zero
         all_blanks_zero = True

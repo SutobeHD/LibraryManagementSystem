@@ -3,16 +3,15 @@ Git-like incremental backup engine for Rekordbox Editor Pro.
 Stores database changes as compressed JSON changesets instead of full copies.
 ~95% smaller than full-copy backups for typical edit sessions.
 """
-import json
 import gzip
 import hashlib
+import json
+import logging
 import re
 import sqlite3
-import logging
-import time
-from pathlib import Path
 from datetime import datetime
-from typing import Dict, FrozenSet, List, Optional, Tuple
+from pathlib import Path
+
 from .config import BACKUP_DIR
 
 logger = logging.getLogger(__name__)
@@ -22,7 +21,7 @@ HEAD_FILE = BACKUP_DIR / "HEAD"
 TIMELINE_FILE = BACKUP_DIR / "timeline.json"
 
 # Tables we track for diffs. Immutable tuple — ordering matters for `_snapshot_db`.
-TRACKED_TABLES: Tuple[str, ...] = (
+TRACKED_TABLES: tuple[str, ...] = (
     "djmdContent",
     "djmdPlaylist",
     "djmdSongPlaylist",
@@ -37,7 +36,7 @@ TRACKED_TABLES: Tuple[str, ...] = (
 
 # O(1) membership set used for SQL identifier whitelisting. NEVER interpolate
 # a table name into SQL without first calling `_check_table_name()`.
-_TABLE_ALLOWLIST: FrozenSet[str] = frozenset(TRACKED_TABLES)
+_TABLE_ALLOWLIST: frozenset[str] = frozenset(TRACKED_TABLES)
 
 # Defensive: column names come from PRAGMA table_info() (DB-trusted) but we
 # still validate them before interpolation so a poisoned schema can't escape.
@@ -73,7 +72,7 @@ class BackupEngine:
 
     # ── Snapshot & Diff ────────────────────────────────────────────
 
-    def _read_table(self, db_path: Path, table: str) -> Dict[str, Dict]:
+    def _read_table(self, db_path: Path, table: str) -> dict[str, dict]:
         """Read all rows from a table into a dict keyed by ID.
 
         The `table` argument is interpolated into a literal `SELECT` because
@@ -84,7 +83,7 @@ class BackupEngine:
             ValueError: if `table` is not in `TRACKED_TABLES`.
         """
         _check_table_name(table)
-        rows: Dict[str, Dict] = {}
+        rows: dict[str, dict] = {}
 
         try:
             conn = sqlite3.connect(str(db_path), timeout=30.0)
@@ -106,19 +105,19 @@ class BackupEngine:
             logger.warning(f"Could not read table {table}: {e}")
         return rows
 
-    def _snapshot_db(self) -> Dict[str, Dict[str, Dict]]:
+    def _snapshot_db(self) -> dict[str, dict[str, dict]]:
         """Take a full snapshot of all tracked tables."""
         snapshot = {}
         for table in TRACKED_TABLES:
             snapshot[table] = self._read_table(self.db_path, table)
         return snapshot
 
-    def _load_head_snapshot(self) -> Optional[Dict]:
+    def _load_head_snapshot(self) -> dict | None:
         """Load the snapshot stored in HEAD commit, or None if no history."""
         head_hash = self._get_head()
         if not head_hash:
             return None
-        
+
         # Rebuild state by reading the base snapshot + applying diffs
         # For simplicity and reliability, we store a state hash and compare
         # against current state rather than replaying diffs
@@ -127,7 +126,7 @@ class BackupEngine:
             return commit["_snapshot"]
         return None
 
-    def _diff_tables(self, old: Dict[str, Dict], new: Dict[str, Dict]) -> Dict:
+    def _diff_tables(self, old: dict[str, dict], new: dict[str, dict]) -> dict:
         """Calculate diff between two table snapshots."""
         modified = []
         added = []
@@ -161,7 +160,7 @@ class BackupEngine:
 
     # ── Commit Operations ──────────────────────────────────────────
 
-    def snapshot(self, message: str = "Manual backup") -> Dict:
+    def snapshot(self, message: str = "Manual backup") -> dict:
         """
         Create an incremental backup.
         Diffs the current DB state against HEAD and stores only changes.
@@ -245,7 +244,7 @@ class BackupEngine:
             "timestamp": timestamp
         }
 
-    def restore(self, commit_hash: str) -> Dict:
+    def restore(self, commit_hash: str) -> dict:
         """Restore the database to a specific commit state."""
         commit = self._load_commit(commit_hash)
         if not commit:
@@ -326,7 +325,7 @@ class BackupEngine:
 
     # ── History & Inspection ───────────────────────────────────────
 
-    def get_history(self, limit: int = 50) -> List[Dict]:
+    def get_history(self, limit: int = 50) -> list[dict]:
         """Get commit history (newest first)."""
         timeline = self._load_timeline()
         # Also include legacy full-copy backups for backwards compatibility
@@ -335,7 +334,7 @@ class BackupEngine:
         combined.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
         return combined[:limit]
 
-    def get_diff(self, commit_hash: str) -> Dict:
+    def get_diff(self, commit_hash: str) -> dict:
         """Get the detailed changeset for a specific commit."""
         commit = self._load_commit(commit_hash)
         if not commit:
@@ -359,7 +358,7 @@ class BackupEngine:
 
     # ── Internal helpers ───────────────────────────────────────────
 
-    def _get_head(self) -> Optional[str]:
+    def _get_head(self) -> str | None:
         try:
             if HEAD_FILE.exists():
                 return HEAD_FILE.read_text().strip()
@@ -367,7 +366,7 @@ class BackupEngine:
             pass
         return None
 
-    def _load_commit(self, commit_hash: str) -> Optional[Dict]:
+    def _load_commit(self, commit_hash: str) -> dict | None:
         path = COMMITS_DIR / f"{commit_hash}.json.gz"
         if not path.exists():
             return None
@@ -378,7 +377,7 @@ class BackupEngine:
             logger.error(f"Failed to load commit {commit_hash}: {e}")
             return None
 
-    def _load_timeline(self) -> List[Dict]:
+    def _load_timeline(self) -> list[dict]:
         try:
             if TIMELINE_FILE.exists():
                 return json.loads(TIMELINE_FILE.read_text(encoding="utf-8"))
@@ -386,10 +385,10 @@ class BackupEngine:
             pass
         return []
 
-    def _save_timeline(self, timeline: List[Dict]):
+    def _save_timeline(self, timeline: list[dict]):
         TIMELINE_FILE.write_text(json.dumps(timeline, default=str, indent=2), encoding="utf-8")
 
-    def _get_legacy_backups(self) -> List[Dict]:
+    def _get_legacy_backups(self) -> list[dict]:
         """List old full-copy backups for backwards compatibility."""
         legacy = []
         for f in BACKUP_DIR.glob("master_*.db"):

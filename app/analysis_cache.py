@@ -14,14 +14,14 @@ Cache layout:
 """
 from __future__ import annotations
 
-import json
 import gzip
-import os
 import hashlib
+import json
 import logging
+import os
 import threading
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class AnalysisCache:
     Cross-process safety: index is read on miss, written atomically via temp+rename.
     """
 
-    def __init__(self, cache_dir: Optional[str] = None):
+    def __init__(self, cache_dir: str | None = None):
         if cache_dir is None:
             cache_dir = str(Path.home() / ".cache" / "rb_editor_pro" / "analysis_cache")
         self.cache_dir = Path(cache_dir)
@@ -49,7 +49,7 @@ class AnalysisCache:
         self._index = self._load_index()
 
     # ------------------------------------------------------------------
-    def get(self, file_path: str) -> Optional[Dict[str, Any]]:
+    def get(self, file_path: str) -> dict[str, Any] | None:
         """Return cached result if file is unchanged, else None."""
         try:
             abs_path = os.path.abspath(file_path)
@@ -93,7 +93,7 @@ class AnalysisCache:
             return None
 
     # ------------------------------------------------------------------
-    def put(self, file_path: str, result: Dict[str, Any]) -> None:
+    def put(self, file_path: str, result: dict[str, Any]) -> None:
         """Store analysis result, replacing any prior cached entry."""
         try:
             abs_path = os.path.abspath(file_path)
@@ -112,7 +112,7 @@ class AnalysisCache:
             logger.warning(f"Cache write failed: {e}")
             return
 
-        entry: Dict[str, Any] = {
+        entry: dict[str, Any] = {
             "mtime": st.st_mtime,
             "size": st.st_size,
             "cache_id": cache_id,
@@ -156,7 +156,7 @@ class AnalysisCache:
             self._save_index()
         return count
 
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         """Return cache size + entry count."""
         total_bytes = sum(
             f.stat().st_size for f in self.cache_dir.glob("*.json.gz")
@@ -170,11 +170,11 @@ class AnalysisCache:
         }
 
     # ------------------------------------------------------------------
-    def _load_index(self) -> Dict[str, Any]:
+    def _load_index(self) -> dict[str, Any]:
         if not self.index_file.exists():
             return {}
         try:
-            with open(self.index_file, "r", encoding="utf-8") as f:
+            with open(self.index_file, encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             logger.warning(f"Cache index unreadable, starting fresh: {e}")
@@ -230,7 +230,7 @@ def _json_default(obj):
 
 
 # Module-level singleton (lazy)
-_default_cache: Optional[AnalysisCache] = None
+_default_cache: AnalysisCache | None = None
 
 
 def get_default_cache() -> AnalysisCache:

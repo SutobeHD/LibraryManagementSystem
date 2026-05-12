@@ -57,7 +57,7 @@ import logging
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +158,7 @@ class _Page:
     # Index pages (caller overrides to 0x64) and the dataclass default for
     # data pages (0x24) should match what Rekordbox expects per table type.
     page_flags: int = 0x24
-    rows_data: List[bytes] = field(default_factory=list)
+    rows_data: list[bytes] = field(default_factory=list)
     # Only set on INDEX pages (flag 0x64). When the table has data pages,
     # this holds the first data page's index (e.g. 2). When the table is
     # empty (single index page only), it stays at the 0x03FFFFFF "no chain"
@@ -237,7 +237,7 @@ class _Page:
             return bytes(body)
 
         heap = bytearray()
-        offsets: List[int] = []
+        offsets: list[int] = []
         for row in self.rows_data:
             offsets.append(len(heap))
             heap.extend(row)
@@ -247,7 +247,7 @@ class _Page:
         num_rows = len(self.rows_data)
         num_row_offsets = num_rows
 
-        groups: List[bytes] = []
+        groups: list[bytes] = []
         for g_start in range(0, max(num_rows, 1), 16):
             g_offsets = offsets[g_start : g_start + 16]
             while len(g_offsets) < 16:
@@ -474,7 +474,7 @@ def encode_genre_row(genre_id: int, name: str) -> bytes:
     return _aligned(header + name_str)
 
 
-def encode_track_row(track: Dict[str, Any]) -> bytes:
+def encode_track_row(track: dict[str, Any]) -> bytes:
     """Build a djmdContent row.
 
     Layout: 0x5E bytes of fixed-width fields + 21 u16 string offsets.
@@ -512,7 +512,7 @@ def encode_track_row(track: Dict[str, Any]) -> bytes:
     # Empty `analyze_path` / `analyze_date` make Rekordbox flag the device
     # library as corrupted — these MUST be populated even if just placeholder
     # paths, because Rekordbox follows them to load the .DAT analysis sidecar.
-    string_payloads: List[bytes] = []
+    string_payloads: list[bytes] = []
     for i in range(21):
         if i == 0:
             string_payloads.append(encode_devicesql_string(isrc))
@@ -541,7 +541,7 @@ def encode_track_row(track: Dict[str, Any]) -> bytes:
     # Header = 0x5E bytes of typed fields + 21 × 2 bytes = 0x5E + 42 = 0x88
     header_size = 0x5E + 42
     # Compute string offsets — each relative to row start
-    str_offsets: List[int] = []
+    str_offsets: list[int] = []
     cursor = header_size
     for payload in string_payloads:
         str_offsets.append(cursor)
@@ -643,24 +643,24 @@ class PdbBuilder:
     """
 
     def __init__(self) -> None:
-        self.tracks: List[bytes] = []
-        self.artists: List[bytes] = []
-        self.albums: List[bytes] = []
-        self.keys: List[bytes] = []
-        self.genres: List[bytes] = []
-        self.labels: List[bytes] = []
-        self.playlists: List[bytes] = []
-        self.playlist_entries: List[bytes] = []
-        self.artworks: List[bytes] = []
+        self.tracks: list[bytes] = []
+        self.artists: list[bytes] = []
+        self.albums: list[bytes] = []
+        self.keys: list[bytes] = []
+        self.genres: list[bytes] = []
+        self.labels: list[bytes] = []
+        self.playlists: list[bytes] = []
+        self.playlist_entries: list[bytes] = []
+        self.artworks: list[bytes] = []
         # Pre-populate static colour rows so PCOB-color FKs from track rows
         # have someone to point at.
-        self.colors: List[bytes] = [
+        self.colors: list[bytes] = [
             encode_color_row(cid, name) for cid, name in DEFAULT_COLORS
         ]
 
     # --- public adders ----------------------------------------------------
 
-    def add_track(self, track: Dict[str, Any]) -> None:
+    def add_track(self, track: dict[str, Any]) -> None:
         self.tracks.append(encode_track_row(track))
 
     def add_artist(self, artist_id: int, name: str) -> None:
@@ -697,7 +697,7 @@ class PdbBuilder:
     # --- pagination -------------------------------------------------------
 
     @staticmethod
-    def _pages_for_rows(rows: List[bytes], table_type: int) -> List[_Page]:
+    def _pages_for_rows(rows: list[bytes], table_type: int) -> list[_Page]:
         """Pack rows into as many 4-KiB pages as they need.
 
         Greedy: fill page until adding the next row would overflow once
@@ -714,7 +714,7 @@ class PdbBuilder:
             return []
 
         budget = PDB_PAGE_SIZE - PDB_PAGE_HEADER_LEN
-        pages: List[_Page] = []
+        pages: list[_Page] = []
         current = _Page(page_index=0, table_type=table_type)
         used = 0
         index_overhead = 4   # at least one group's flags
@@ -753,9 +753,9 @@ class PdbBuilder:
         page; data pages follow via next_page. Without this Rekordbox
         flags every page as "transaction in progress" / "corrupted".
         """
-        all_pages: List[_Page] = []
-        first_page_per_type: Dict[int, int] = {}
-        last_page_per_type: Dict[int, int] = {}
+        all_pages: list[_Page] = []
+        first_page_per_type: dict[int, int] = {}
+        last_page_per_type: dict[int, int] = {}
 
         page_seq = 0  # incrementing seqpage across the whole file
 
@@ -841,7 +841,7 @@ class PdbBuilder:
         # contiguous tail layout still satisfies the "blank page exists at
         # empty_candidate index" invariant Rekordbox checks.
         first_blank_page = 1 + len(all_pages)
-        empty_per_type: Dict[int, int] = {}
+        empty_per_type: dict[int, int] = {}
         for i, table_type in enumerate(TABLE_ORDER):
             empty_per_type[table_type] = first_blank_page + i
         last_blank_page = first_blank_page + num_tables - 1
@@ -905,16 +905,16 @@ class PdbBuilder:
 
 def write_export_pdb(
     usb_root: Path,
-    contents: Optional[List[Dict[str, Any]]] = None,
-    artists: Optional[Dict[int, str]] = None,
-    albums: Optional[Dict[int, Tuple[str, int]]] = None,
-    keys: Optional[Dict[int, str]] = None,
-    genres: Optional[Dict[int, str]] = None,
-    labels: Optional[Dict[int, str]] = None,
-    playlists: Optional[List[Dict[str, Any]]] = None,
-    playlist_entries: Optional[List[Tuple[int, int, int]]] = None,
-    artworks: Optional[Dict[int, str]] = None,
-) -> Optional[Path]:
+    contents: list[dict[str, Any]] | None = None,
+    artists: dict[int, str] | None = None,
+    albums: dict[int, tuple[str, int]] | None = None,
+    keys: dict[int, str] | None = None,
+    genres: dict[int, str] | None = None,
+    labels: dict[int, str] | None = None,
+    playlists: list[dict[str, Any]] | None = None,
+    playlist_entries: list[tuple[int, int, int]] | None = None,
+    artworks: dict[int, str] | None = None,
+) -> Path | None:
     """Build + write `<usb>/PIONEER/rekordbox/export.pdb`.
 
     Args:
@@ -1054,8 +1054,8 @@ class PdbExtBuilder:
     """
 
     def __init__(self) -> None:
-        self.tags: List[bytes] = []
-        self.tag_tracks: List[bytes] = []
+        self.tags: list[bytes] = []
+        self.tag_tracks: list[bytes] = []
 
     def add_tag(self, tag_id: int, name: str,
                 category_id: int = 0, category_pos: int = 0,
@@ -1070,9 +1070,9 @@ class PdbExtBuilder:
     def build(self) -> bytes:
         # Same index-page-then-data layout as the main builder so
         # Rekordbox accepts the file without a corruption warning.
-        all_pages: List[_Page] = []
-        first_page_per_type: Dict[int, int] = {}
-        last_page_per_type: Dict[int, int] = {}
+        all_pages: list[_Page] = []
+        first_page_per_type: dict[int, int] = {}
+        last_page_per_type: dict[int, int] = {}
         page_seq = 0
 
         for table_type in EXT_TABLE_ORDER:
@@ -1110,7 +1110,7 @@ class PdbExtBuilder:
 
         # Per-table blanks (see PdbBuilder.build() for full reasoning).
         first_blank_page = 1 + len(all_pages)
-        empty_per_type: Dict[int, int] = {}
+        empty_per_type: dict[int, int] = {}
         for i, table_type in enumerate(EXT_TABLE_ORDER):
             empty_per_type[table_type] = first_blank_page + i
         next_unused = first_blank_page + num_tables
@@ -1150,10 +1150,10 @@ class PdbExtBuilder:
 
 def write_export_ext_pdb(
     usb_root: Path,
-    tags: Optional[Dict[int, str]] = None,
-    tag_categories: Optional[Dict[int, str]] = None,
-    tag_track_links: Optional[List[Tuple[int, int]]] = None,
-) -> Optional[Path]:
+    tags: dict[int, str] | None = None,
+    tag_categories: dict[int, str] | None = None,
+    tag_track_links: list[tuple[int, int]] | None = None,
+) -> Path | None:
     """Write `<usb>/PIONEER/rekordbox/exportExt.pdb`.
 
     Args:

@@ -36,10 +36,11 @@ Unit (for date/duration):
 """
 
 from __future__ import annotations
+
 import logging
 import time
-from datetime import datetime, timedelta
-from typing import Any, Dict, List
+from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +101,7 @@ def _shift_unit(value: float, unit: str) -> float:
     return value
 
 
-def _check_condition(track: Dict, cond: Dict) -> bool:
+def _check_condition(track: dict, cond: dict) -> bool:
     field = str(cond.get("Field", ""))
     op = str(cond.get("Operator", "1"))
     val_l = cond.get("ValueLeft")
@@ -170,7 +171,7 @@ def _check_condition(track: Dict, cond: Dict) -> bool:
     return False
 
 
-def evaluate(criteria: Dict, tracks: List[Dict]) -> List[Dict]:
+def evaluate(criteria: dict, tracks: list[dict]) -> list[dict]:
     """Apply criteria → matching tracks."""
     if not criteria:
         return list(tracks)
@@ -184,16 +185,14 @@ def evaluate(criteria: Dict, tracks: List[Dict]) -> List[Dict]:
     for t in tracks:
         try:
             checks = [_check_condition(t, c) for c in conditions]
-            if use_all and all(checks):
-                result.append(t)
-            elif not use_all and any(checks):
+            if (use_all and all(checks)) or (not use_all and any(checks)):
                 result.append(t)
         except Exception as e:
             logger.debug(f"smart-eval skip track {t.get('id')}: {e}")
     return result
 
 
-def to_xml_attrs(criteria: Dict) -> Dict[str, str]:
+def to_xml_attrs(criteria: dict) -> dict[str, str]:
     """Serialize SmartList criteria to XML <SmartList> attributes (root-level)."""
     if not criteria:
         return {}
@@ -203,7 +202,7 @@ def to_xml_attrs(criteria: Dict) -> Dict[str, str]:
     }
 
 
-def from_xml_node(node) -> Dict:
+def from_xml_node(node) -> dict:
     """Parse <SmartList> XML element → criteria dict."""
     if node is None:
         return {}

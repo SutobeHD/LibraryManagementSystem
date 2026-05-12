@@ -10,13 +10,14 @@ This replaces the need for Rekordbox to analyze tracks — our analysis
 is injected directly, and Rekordbox will read it as if it analyzed the track itself.
 """
 
-import os
-import logging
-import time
 import hashlib
+import logging
+import os
+import time
+from collections.abc import Generator
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Generator
-from concurrent.futures import ProcessPoolExecutor, Future
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ class AnalysisDBWriter:
             live_db: LiveRekordboxDB instance (must be loaded and connected)
         """
         self.live_db = live_db
-        self._executor: Optional[ProcessPoolExecutor] = None
+        self._executor: ProcessPoolExecutor | None = None
 
     def _get_executor(self) -> ProcessPoolExecutor:
         if self._executor is None:
@@ -72,7 +73,7 @@ class AnalysisDBWriter:
         self,
         track_id: str,
         force: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Full pipeline: analyze a track and write results to Rekordbox DB + ANLZ files.
 
@@ -83,7 +84,6 @@ class AnalysisDBWriter:
         Returns:
             Dict with analysis results and write status
         """
-        import rbox
 
         # 1. Validate track exists
         track = self.live_db.tracks.get(str(track_id))
@@ -157,7 +157,7 @@ class AnalysisDBWriter:
             "elapsed": round(elapsed_total, 2),
         }
 
-    def _write_anlz(self, track_id: str, file_path: str, analysis: Dict[str, Any]) -> Dict[str, str]:
+    def _write_anlz(self, track_id: str, file_path: str, analysis: dict[str, Any]) -> dict[str, str]:
         """Write ANLZ binary files to the Rekordbox ANLZ directory."""
         try:
             from .anlz_writer import write_anlz_files
@@ -178,7 +178,7 @@ class AnalysisDBWriter:
             logger.error(f"Failed to write ANLZ files for track {track_id}: {e}")
             return {}
 
-    def _resolve_anlz_dir(self, track_id: str) -> Optional[str]:
+    def _resolve_anlz_dir(self, track_id: str) -> str | None:
         """
         Find the existing ANLZ directory for a track.
         Returns the directory path, or None if no ANLZ dir exists yet.
@@ -220,7 +220,7 @@ class AnalysisDBWriter:
         logger.info(f"Created new ANLZ directory: {anlz_dir}")
         return str(anlz_dir)
 
-    def _update_db(self, track_id: str, analysis: Dict[str, Any]) -> bool:
+    def _update_db(self, track_id: str, analysis: dict[str, Any]) -> bool:
         """
         Update djmdContent fields in master.db via rbox.
 
@@ -263,7 +263,7 @@ class AnalysisDBWriter:
             logger.error(f"DB update failed for track {track_id}: {e}")
             return False
 
-    def _update_cache(self, track_id: str, analysis: Dict[str, Any]):
+    def _update_cache(self, track_id: str, analysis: dict[str, Any]):
         """Update the in-memory track cache with analysis results."""
         tid = str(track_id)
         if tid not in self.live_db.tracks:
@@ -288,7 +288,7 @@ class AnalysisDBWriter:
         logger.debug(f"Cache updated for track {tid}: BPM={track['BPM']}, Key={track['Key']}")
 
     @staticmethod
-    def _key_id_to_name(key_id: int) -> Optional[str]:
+    def _key_id_to_name(key_id: int) -> str | None:
         """Convert Rekordbox key_id to the full key name (e.g., 'Am' or 'Cmaj')."""
         # Reverse of _REKORDBOX_KEY_ID from analysis_engine
         _ID_TO_KEY = {
@@ -307,9 +307,9 @@ class AnalysisDBWriter:
 
     def analyze_batch(
         self,
-        track_ids: List[str],
+        track_ids: list[str],
         force: bool = False,
-    ) -> Generator[Dict[str, Any], None, None]:
+    ) -> Generator[dict[str, Any], None, None]:
         """
         Analyze multiple tracks sequentially, yielding progress after each.
 
@@ -360,7 +360,7 @@ class AnalysisDBWriter:
 
         logger.info(f"Batch analysis complete: {analyzed} analyzed, {skipped} skipped, {errors} errors")
 
-    def get_unanalyzed_tracks(self) -> List[str]:
+    def get_unanalyzed_tracks(self) -> list[str]:
         """
         Find tracks in the library that have no analysis data (BPM=0 or no ANLZ files).
 

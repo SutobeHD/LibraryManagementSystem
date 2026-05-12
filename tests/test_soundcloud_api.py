@@ -21,7 +21,6 @@ from app.soundcloud_api import (
     _sc_get,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers — a minimal fake of the requests.Response surface _sc_get uses
 # ---------------------------------------------------------------------------
@@ -30,9 +29,9 @@ class _FakeResponse:
     def __init__(
         self,
         status_code: int,
-        json_data: Optional[Any] = None,
+        json_data: Any | None = None,
         text: str = "",
-        headers: Optional[Dict[str, str]] = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         self.status_code = status_code
         self._json = json_data
@@ -50,7 +49,7 @@ class _FakeResponse:
             raise RuntimeError(f"HTTP {self.status_code}")
 
 
-def _make_get_stub(responses: List[_FakeResponse]):
+def _make_get_stub(responses: list[_FakeResponse]):
     """Return a callable that returns each response in order on successive
     calls. Tracks call count so tests can assert."""
     state = {"i": 0, "calls": []}

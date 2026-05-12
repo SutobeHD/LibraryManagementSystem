@@ -5,9 +5,10 @@ Used by USB-sync to read tracks/playlists/cues regardless of mode.
 """
 
 from __future__ import annotations
+
 import logging
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -16,20 +17,20 @@ class LibrarySource:
     """Common interface."""
     mode: str = ""
 
-    def iter_tracks(self) -> Iterable[Dict]:
+    def iter_tracks(self) -> Iterable[dict]:
         raise NotImplementedError
 
-    def iter_playlists(self) -> Iterable[Dict]:
+    def iter_playlists(self) -> Iterable[dict]:
         """yields {id, name, parent_id, type ('0'|'1'|'4'), track_ids: list}"""
         raise NotImplementedError
 
-    def get_track(self, tid) -> Optional[Dict]:
+    def get_track(self, tid) -> dict | None:
         raise NotImplementedError
 
-    def get_playlist_track_ids(self, pid) -> List[str]:
+    def get_playlist_track_ids(self, pid) -> list[str]:
         raise NotImplementedError
 
-    def get_anlz_sidecar_dir(self, track: Dict) -> Optional[Path]:
+    def get_anlz_sidecar_dir(self, track: dict) -> Path | None:
         """Returns directory containing prebuilt ANLZ files (from import-time analysis), if any."""
         path = track.get("path")
         if not path:
@@ -51,15 +52,15 @@ class XmlLibrarySource(LibrarySource):
     def __init__(self, xml_db):
         self.db = xml_db
 
-    def iter_tracks(self) -> Iterable[Dict]:
+    def iter_tracks(self) -> Iterable[dict]:
         for tid, t in self.db.tracks.items():
             yield self._normalize(tid, t)
 
-    def get_track(self, tid) -> Optional[Dict]:
+    def get_track(self, tid) -> dict | None:
         t = self.db.tracks.get(str(tid))
         return self._normalize(str(tid), t) if t else None
 
-    def iter_playlists(self) -> Iterable[Dict]:
+    def iter_playlists(self) -> Iterable[dict]:
         for p in self.db.playlists:
             pid = str(p.get("ID"))
             t_ids = [
@@ -75,7 +76,7 @@ class XmlLibrarySource(LibrarySource):
                 "smart_list": p.get("SmartList") if p.get("Type") == "4" else None,
             }
 
-    def get_playlist_track_ids(self, pid) -> List[str]:
+    def get_playlist_track_ids(self, pid) -> list[str]:
         pid = str(pid)
         return [
             str(t.get("id") or t.get("TrackID"))
@@ -83,7 +84,7 @@ class XmlLibrarySource(LibrarySource):
         ]
 
     @staticmethod
-    def _normalize(tid: str, t: Dict) -> Dict:
+    def _normalize(tid: str, t: dict) -> dict:
         return {
             "id": tid,
             "title": t.get("Title") or "",
@@ -114,15 +115,15 @@ class LiveLibrarySource(LibrarySource):
     def __init__(self, live_db):
         self.live_db = live_db
 
-    def iter_tracks(self) -> Iterable[Dict]:
+    def iter_tracks(self) -> Iterable[dict]:
         for tid, t in self.live_db.tracks.items():
             yield self._normalize(str(tid), t)
 
-    def get_track(self, tid) -> Optional[Dict]:
+    def get_track(self, tid) -> dict | None:
         t = self.live_db.tracks.get(str(tid))
         return self._normalize(str(tid), t) if t else None
 
-    def iter_playlists(self) -> Iterable[Dict]:
+    def iter_playlists(self) -> Iterable[dict]:
         for p in self.live_db.playlists:
             pid = str(p.get("ID"))
             tracks = self.live_db.get_playlist_tracks(pid) if hasattr(self.live_db, "get_playlist_tracks") else []
@@ -135,13 +136,13 @@ class LiveLibrarySource(LibrarySource):
                 "smart_list": p.get("SmartList") if p.get("Type") == "4" else None,
             }
 
-    def get_playlist_track_ids(self, pid) -> List[str]:
+    def get_playlist_track_ids(self, pid) -> list[str]:
         if hasattr(self.live_db, "get_playlist_tracks"):
             return [str(t.get("id") or t.get("ID")) for t in self.live_db.get_playlist_tracks(str(pid))]
         return []
 
     @staticmethod
-    def _normalize(tid: str, t: Dict) -> Dict:
+    def _normalize(tid: str, t: dict) -> dict:
         return {
             "id": tid,
             "title": t.get("Title") or t.get("title") or "",

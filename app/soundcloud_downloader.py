@@ -61,13 +61,13 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Dict, Optional
 
 import requests
 
-from .config import FFMPEG_BIN, MUSIC_DIR
 from . import download_registry as registry
+from .config import FFMPEG_BIN, MUSIC_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ _UA = (
 )
 
 # Content-Type → extension mapping
-_CT_MAP: Dict[str, str] = {
+_CT_MAP: dict[str, str] = {
     "audio/mpeg": ".mp3",
     "audio/mp3": ".mp3",
     "audio/wav": ".wav",
@@ -194,8 +194,8 @@ def _guess_extension(content_type: str, url: str) -> str:
 
 def _resolve_official_download_url(
     sc_track_id: str,
-    auth_token: Optional[str],
-) -> Optional[str]:
+    auth_token: str | None,
+) -> str | None:
     """
     Resolve the official download URL for a downloadable SC track.
 
@@ -207,7 +207,7 @@ def _resolve_official_download_url(
     """
     from .soundcloud_api import SC_API_BASE, get_sc_client_id
 
-    headers: Dict[str, str] = {
+    headers: dict[str, str] = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -216,7 +216,7 @@ def _resolve_official_download_url(
     if auth_token:
         headers["Authorization"] = f"OAuth {auth_token}"
 
-    params: Dict[str, str] = {} if auth_token else {"client_id": get_sc_client_id()}
+    params: dict[str, str] = {} if auth_token else {"client_id": get_sc_client_id()}
     url = f"{SC_API_BASE}/tracks/{sc_track_id}/download"
     logger.info("[SC-DL] Resolving official download URL: sc_id=%s", sc_track_id)
 
@@ -249,7 +249,7 @@ def _resolve_official_download_url(
         return None
 
 
-def _normalize_track_id(raw) -> Optional[str]:
+def _normalize_track_id(raw) -> str | None:
     """
     Coerce a track-id value into a clean string ID.
 
@@ -285,8 +285,8 @@ def _normalize_track_id(raw) -> Optional[str]:
 
 def _resolve_stream_via_transcodings(
     sc_track_id: str,
-    auth_token: Optional[str],
-) -> Optional[Dict]:
+    auth_token: str | None,
+) -> dict | None:
     """
     Resolve a signed CDN stream URL via the v2 `media.transcodings[]` array.
 
@@ -488,9 +488,9 @@ def _resolve_stream_via_transcodings(
 
 def _download_hls_to_temp(
     m3u8_url: str,
-    auth_token: Optional[str],
+    auth_token: str | None,
     mime_type: str,
-) -> Optional[Path]:
+) -> Path | None:
     """
     Download an HLS playlist via ffmpeg and copy-mux into a single audio file.
 
@@ -560,8 +560,8 @@ def _download_hls_to_temp(
 
 def _stream_file_to_temp(
     download_url: str,
-    auth_token: Optional[str],
-) -> Optional[Path]:
+    auth_token: str | None,
+) -> Path | None:
     """
     Stream the audio file from `download_url` into a secure named temp file.
 
@@ -569,7 +569,7 @@ def _stream_file_to_temp(
     Returns None on any network error.
     The caller is responsible for deleting the temp file on failure.
     """
-    headers: Dict[str, str] = {
+    headers: dict[str, str] = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -612,8 +612,8 @@ def _stream_file_to_temp(
 
 def _fetch_sc_metadata(
     sc_track_id: str,
-    auth_token: Optional[str],
-) -> Optional[Dict]:
+    auth_token: str | None,
+) -> dict | None:
     """Fetch SoundCloud v2 track metadata (independent of stream resolution).
 
     Used to populate native ID3/MP4/AIFF tags on the downloaded file.
@@ -651,7 +651,7 @@ def _fetch_sc_metadata(
     return None
 
 
-def _fetch_artwork_bytes(artwork_url: Optional[str]) -> Optional[bytes]:
+def _fetch_artwork_bytes(artwork_url: str | None) -> bytes | None:
     """Download SC cover artwork. Replaces -large with -t500x500 for higher res.
 
     SC's artwork_url returns 100x100 (-large.jpg) by convention. The same CDN
@@ -675,8 +675,8 @@ def _fetch_artwork_bytes(artwork_url: Optional[str]) -> Optional[bytes]:
 
 def _apply_sc_metadata(
     file_path: Path,
-    sc_meta: Dict,
-    sc_playlist_title: Optional[str],
+    sc_meta: dict,
+    sc_playlist_title: str | None,
 ) -> bool:
     """Write SoundCloud track metadata (title/artist/genre/year/cover/ISRC) onto
     the downloaded audio file via mutagen.
@@ -742,7 +742,7 @@ def _apply_sc_metadata(
         return False
 
 
-def _convert_to_aiff(src_path: Path) -> Optional[Path]:
+def _convert_to_aiff(src_path: Path) -> Path | None:
     """Convert any audio file to AIFF (PCM s16le) via ffmpeg.
 
     AIFF stores uncompressed PCM, identical to WAV — no further quality loss
@@ -817,7 +817,7 @@ class SoundCloudDownloader:
     """
 
     def __init__(self) -> None:
-        self.tasks: Dict[str, Dict] = {}
+        self.tasks: dict[str, dict] = {}
         self._lock = threading.Lock()
 
     # ── Public entry point ─────────────────────────────────────────────────────
@@ -831,9 +831,9 @@ class SoundCloudDownloader:
         artist: str,
         duration_ms: int = 0,
         downloadable: bool,
-        auth_token: Optional[str] = None,
-        sc_playlist_title: Optional[str] = None,
-        on_complete: Optional[Callable] = None,
+        auth_token: str | None = None,
+        sc_playlist_title: str | None = None,
+        on_complete: Callable | None = None,
     ) -> str:
         """
         Queue a track for download. Returns a task_id immediately.
@@ -965,12 +965,12 @@ class SoundCloudDownloader:
     def _do_download(
         self, *, task_id: str, sc_track_id: str, sc_permalink_url: str,
         title: str, artist: str, duration_ms: int, downloadable: bool,
-        auth_token: Optional[str], sc_playlist_title: Optional[str],
-        on_complete: Optional[Callable],
+        auth_token: str | None, sc_playlist_title: str | None,
+        on_complete: Callable | None,
     ) -> None:
         """Full download + hash + registry pipeline. Runs in a background thread."""
 
-        tmp_path: Optional[Path] = None
+        tmp_path: Path | None = None
 
         try:
             # Step 1 — Resolve a usable source URL.
@@ -983,7 +983,7 @@ class SoundCloudDownloader:
                 sc_track_id, title, downloadable,
             )
 
-            source: Optional[Dict] = None
+            source: dict | None = None
             if downloadable:
                 official_url = _resolve_official_download_url(sc_track_id, auth_token)
                 if official_url:
@@ -1147,15 +1147,15 @@ class SoundCloudDownloader:
         self,
         sc_track_id: str,
         file_path: Path,
-        sc_playlist_title: Optional[str],
-        task_id: Optional[str] = None,
+        sc_playlist_title: str | None,
+        task_id: str | None = None,
     ) -> None:
         """
         Spawn a daemon thread to run BPM/key analysis and auto-import.
         Errors here must NOT bubble up — the download itself already succeeded.
         """
         def _analyze() -> None:
-            local_track_id: Optional[str] = None
+            local_track_id: str | None = None
             try:
                 # Mark as analyzing in registry
                 registry.register_download(
@@ -1222,7 +1222,7 @@ class SoundCloudDownloader:
         )
         thread.start()
 
-    def _auto_import(self, file_path: Path, analysis_result: Optional[Dict] = None) -> Optional[str]:
+    def _auto_import(self, file_path: Path, analysis_result: dict | None = None) -> str | None:
         """
         Import the downloaded track into the library.
         Returns the new local track_id string, or None on failure.
@@ -1245,7 +1245,7 @@ class SoundCloudDownloader:
             logger.error("[SC-DL] Auto-import failed for %s: %s", file_path, exc)
             return None
 
-    def _write_companion_anlz(self, file_path: Path, result: Dict) -> None:
+    def _write_companion_anlz(self, file_path: Path, result: dict) -> None:
         """Write DAT/EXT/2EX sidecars next to the audio file. See
         app/anlz_sidecar.py for the layout contract — kept unified across
         every track-import path so USB-sync's OneLibraryUsbWriter has a
@@ -1299,7 +1299,7 @@ class SoundCloudDownloader:
 
     # ── State helpers ──────────────────────────────────────────────────────────
 
-    def _set_task(self, task_id: str, data: Dict) -> None:
+    def _set_task(self, task_id: str, data: dict) -> None:
         with self._lock:
             self.tasks[task_id] = data
 
@@ -1317,7 +1317,7 @@ class SoundCloudDownloader:
                         })
                 self.tasks[task_id].update(kwargs)
 
-    def get_task_status(self, task_id: str) -> Optional[Dict]:
+    def get_task_status(self, task_id: str) -> dict | None:
         with self._lock:
             return self.tasks.get(task_id)
 

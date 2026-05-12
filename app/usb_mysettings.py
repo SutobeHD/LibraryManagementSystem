@@ -23,16 +23,16 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 try:
     from pyrekordbox import (
-        MySettingFile,
-        MySetting2File,
-        DjmMySettingFile,
         DevSettingFile,
+        DjmMySettingFile,
+        MySetting2File,
+        MySettingFile,
     )
     from pyrekordbox.mysettings import structs as _ms_structs
     _PYRB_AVAILABLE = True
@@ -86,7 +86,7 @@ def _humanize(value: str) -> str:
     return value.replace("_", " ").strip().title()
 
 
-def _enum_options(enum_name: str) -> List[Dict[str, str]]:
+def _enum_options(enum_name: str) -> list[dict[str, str]]:
     """Pull `value → display label` pairs from pyrekordbox's construct enums."""
     if not _PYRB_AVAILABLE:
         return []
@@ -95,7 +95,7 @@ def _enum_options(enum_name: str) -> List[Dict[str, str]]:
         return []
     # construct Enum stores its mapping in `.encmapping`
     members = getattr(enum_obj, "encmapping", None) or {}
-    out: List[Dict[str, str]] = []
+    out: list[dict[str, str]] = []
     for name in members.keys():
         # Python identifier suffix `_` is used to avoid keyword collisions
         clean = name.rstrip("_")
@@ -104,7 +104,7 @@ def _enum_options(enum_name: str) -> List[Dict[str, str]]:
 
 
 # Full schema — each entry maps a pyrekordbox file → its editable fields.
-SCHEMA: Dict[str, List[Dict[str, Any]]] = {
+SCHEMA: dict[str, list[dict[str, Any]]] = {
     "MYSETTING": [
         # Auto-Cue + Memory
         {"key": "auto_cue",            "label": "Auto Cue",            "enum": "AutoCue",            "group": "Auto Cue",  "help": "Automatically place a cue point at the first audible peak."},
@@ -167,7 +167,7 @@ SCHEMA: Dict[str, List[Dict[str, Any]]] = {
 }
 
 
-def get_schema() -> Dict[str, Any]:
+def get_schema() -> dict[str, Any]:
     """Return the full editable-field schema, plus the current default value
     of each field (so the frontend can show the deck's factory default)."""
     if not _PYRB_AVAILABLE:
@@ -178,7 +178,7 @@ def get_schema() -> Dict[str, Any]:
         "MYSETTING2":    MySetting2File,
         "DJMMYSETTING":  DjmMySettingFile,
     }
-    out: Dict[str, Any] = {"available": True, "files": {}}
+    out: dict[str, Any] = {"available": True, "files": {}}
     for file_id, fields in SCHEMA.items():
         cls = file_classes[file_id]
         defaults_inst = cls()
@@ -217,7 +217,7 @@ def _file_class(file_id: str):
     }[file_id]
 
 
-def read_settings(usb_root: Path) -> Dict[str, Dict[str, str]]:
+def read_settings(usb_root: Path) -> dict[str, dict[str, str]]:
     """Read all four MYSETTING files from a stick (use defaults where missing).
 
     Returns: {file_id: {field_key: enum_value_str, …}, …}
@@ -226,7 +226,7 @@ def read_settings(usb_root: Path) -> Dict[str, Dict[str, str]]:
         return {}
 
     pioneer = Path(usb_root) / "PIONEER"
-    out: Dict[str, Dict[str, str]] = {}
+    out: dict[str, dict[str, str]] = {}
     for file_id in ("MYSETTING", "MYSETTING2", "DJMMYSETTING"):
         cls = _file_class(file_id)
         path = pioneer / _file_filename(file_id)
@@ -241,10 +241,10 @@ def read_settings(usb_root: Path) -> Dict[str, Dict[str, str]]:
 
 def write_settings(
     usb_root: Path,
-    values: Dict[str, Dict[str, str]],
+    values: dict[str, dict[str, str]],
     *,
     only_create_missing: bool = False,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Write MYSETTING files to <USB>/PIONEER/. Returns {file_id: written_path}.
 
     `values` shape: {"MYSETTING": {"auto_cue": "off", …}, "MYSETTING2": {…}, …}.
@@ -261,7 +261,7 @@ def write_settings(
     pioneer = Path(usb_root) / "PIONEER"
     pioneer.mkdir(parents=True, exist_ok=True)
 
-    written: Dict[str, str] = {}
+    written: dict[str, str] = {}
     for file_id in ("MYSETTING", "MYSETTING2", "DJMMYSETTING"):
         target = pioneer / _file_filename(file_id)
         if only_create_missing and target.exists():
@@ -299,7 +299,7 @@ def write_settings(
     return written
 
 
-def write_defaults(usb_root: Path) -> Dict[str, str]:
+def write_defaults(usb_root: Path) -> dict[str, str]:
     """Convenience: write all-defaults MYSETTING files (used at sync time
     when the user hasn't customised anything)."""
     return write_settings(usb_root, values={}, only_create_missing=True)

@@ -25,11 +25,11 @@ is no way to construct a `NewContent` builder from Python. The only working
 write path is `update_content(existing_row)`, which means we MUST start from
 a template that already contains content slot rows.
 """
+import gc
 import logging
 import shutil
 import sys
 import time
-import gc
 from pathlib import Path
 
 logger = logging.getLogger(__name__)

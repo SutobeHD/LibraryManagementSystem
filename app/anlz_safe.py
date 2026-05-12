@@ -42,12 +42,14 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Iterable
 from concurrent.futures import (
     BrokenExecutor,
     ProcessPoolExecutor,
+)
+from concurrent.futures import (
     TimeoutError as FuturesTimeout,
 )
-from typing import Iterable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -129,9 +131,9 @@ def _validate_anlz_header_worker(dat_path: str) -> bool:
         return False
 
 
-def _parse_pqtz_in_worker(dat_path: str) -> Optional[list[dict]]:
+def _parse_pqtz_in_worker(dat_path: str) -> list[dict] | None:
     """Single-file PQTZ parse. Used by `SafeAnlzParser.parse_pqtz`."""
-    import rbox  # noqa: WPS433
+    import rbox
 
     anlz = rbox.Anlz(dat_path)
     pqtz = getattr(anlz, "pqtz", None)
@@ -158,7 +160,7 @@ def _load_beatgrids_batch_in_worker(
     single bad row doesn't abort the chunk; rbox panics still kill the
     worker and are handled by the parent's bisect logic.
     """
-    import rbox  # noqa: WPS433
+    import rbox
 
     db = rbox.MasterDb(db_path)
     out: dict[str, list[dict]] = {}
@@ -218,7 +220,7 @@ class SafeAnlzParser:
     """
 
     def __init__(self) -> None:
-        self._executor: Optional[ProcessPoolExecutor] = None
+        self._executor: ProcessPoolExecutor | None = None
         self._bad_ids: set[str] = set()
         self._panic_count: int = 0
 
@@ -235,7 +237,7 @@ class SafeAnlzParser:
         if self._executor is not None:
             try:
                 self._executor.shutdown(wait=False, cancel_futures=True)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.debug("SafeAnlzParser: shutdown error: %s", exc)
             self._executor = None
 
@@ -344,7 +346,7 @@ class SafeAnlzParser:
                 # Don't bisect on timeout: a hung worker is a different
                 # failure mode and bisecting would just hang again.
 
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning(
                     "SafeAnlzParser: batch failed (%s) — skipping %d tracks",
                     exc,
@@ -365,7 +367,7 @@ class SafeAnlzParser:
     # ------------------------------------------------------------------
     def parse_pqtz(
         self, track_id: str, dat_path: str
-    ) -> Optional[list[dict]]:
+    ) -> list[dict] | None:
         """Parse PQTZ entries from one ANLZ DAT file.
 
         Returns ``None`` on any failure (invalid track id, header check
@@ -405,7 +407,7 @@ class SafeAnlzParser:
             self._bad_ids.add(track_id)
             self._restart_executor()
             return None
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(
                 "SafeAnlzParser: parse failed for track=%s: %s",
                 track_id,

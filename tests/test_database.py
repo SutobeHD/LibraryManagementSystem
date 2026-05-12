@@ -20,7 +20,6 @@ from app.database import (
     db_lock,
 )
 
-
 # ---------------------------------------------------------------------------
 # Lock primitives
 # ---------------------------------------------------------------------------
@@ -40,15 +39,13 @@ class TestLockPrimitives:
         # The contract: db_lock() can re-acquire from the same thread
         # without deadlock. If someone swaps RLock → Lock this test
         # will hang the suite, which is the desired loud failure.
-        with db_lock():
-            with db_lock():
-                pass  # nested acquire must not block
+        with db_lock(), db_lock():
+            pass  # nested acquire must not block
 
     def test_db_lock_releases_on_exception(self) -> None:
         """Context manager exits cleanly when the body raises."""
-        with pytest.raises(RuntimeError, match="boom"):
-            with db_lock():
-                raise RuntimeError("boom")
+        with pytest.raises(RuntimeError, match="boom"), db_lock():
+            raise RuntimeError("boom")
         # If the lock weren't released, the next acquire would block
         # forever — running it here proves it was released.
         acquired = _db_write_lock.acquire(timeout=1.0)

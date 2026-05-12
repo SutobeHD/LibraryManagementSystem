@@ -11,10 +11,8 @@ survives USB unmount/remount without affecting Rekordbox's own files.
 
 import json
 import logging
-import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +53,7 @@ def load_usb_sync_meta(usb_root: str) -> dict:
         return {"last_sync_ts": 0.0, "tracks": {}}
 
     try:
-        with open(meta_path, "r", encoding="utf-8") as fh:
+        with open(meta_path, encoding="utf-8") as fh:
             data = json.load(fh)
         if not isinstance(data, dict):
             raise ValueError(f"expected dict, got {type(data)}")

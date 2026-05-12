@@ -15,6 +15,7 @@ Pass criteria after sync():
 Run from repo root: PYTHONIOENCODING=utf-8 python tests/test_onelibrary_wal_flush.py
 """
 from __future__ import annotations
+
 import shutil
 import sys
 import tempfile

@@ -9,16 +9,14 @@ Resilience features:
   - Full pagination following next_href (Criterion 8)
 """
 
-import os
-import requests
 import logging
-import time
+import os
 import re
-import json
-from pathlib import Path
-from typing import List, Dict, Optional
+import time
 from difflib import SequenceMatcher
 from functools import lru_cache
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +29,7 @@ logger = logging.getLogger(__name__)
 # Dynamic Client ID Scraper
 # ──────────────────────────────────────────────────────────────────────────────
 
-_DYNAMIC_CLIENT_ID: Optional[str] = None
+_DYNAMIC_CLIENT_ID: str | None = None
 _DYNAMIC_CLIENT_ID_EXPIRES: float = 0.0
 
 
@@ -70,10 +68,10 @@ def get_sc_client_id() -> str:
 
     try:
         logger.info("[SC Scraper] Attempting to scrape dynamic client_id from soundcloud.com...")
-        
+
         # Fast timeout (5s) to avoid stalling the backend if SC is hanging or proxying via Cloudflare challenge
         resp = requests.get("https://soundcloud.com", headers=stealth_headers, timeout=5.0)
-        
+
         logger.info(f"[SC Scraper] Main page status: {resp.status_code}, HTML length: {len(resp.text)} bytes")
         resp.raise_for_status()
 
@@ -150,7 +148,7 @@ class RateLimitError(Exception):
 # Rate-Limited HTTP helper
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _get_proxy() -> Optional[dict]:
+def _get_proxy() -> dict | None:
     """
     Read the HTTP proxy URL from app settings (persisted in settings.json).
     Returns a requests-compatible proxies dict, or None if no proxy is configured.
@@ -242,7 +240,7 @@ class SoundCloudPlaylistAPI:
     """Fetches playlist and track data from SoundCloud."""
 
     @staticmethod
-    def _get_headers(auth_token: Optional[str] = None) -> dict:
+    def _get_headers(auth_token: str | None = None) -> dict:
         headers = {
             "Accept": "application/json",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -268,7 +266,7 @@ class SoundCloudPlaylistAPI:
         return user_id
 
     @staticmethod
-    def get_user_profile(auth_token: str) -> Dict:
+    def get_user_profile(auth_token: str) -> dict:
         """
         Fetch the authenticated user's public profile from SoundCloud.
         Returns a dict with: id, username, full_name, avatar_url, permalink_url,
@@ -296,7 +294,7 @@ class SoundCloudPlaylistAPI:
         }
 
     @staticmethod
-    def _normalize_track(raw: dict) -> Optional[Dict]:
+    def _normalize_track(raw: dict) -> dict | None:
         """
         Convert a raw SoundCloud track object into our canonical format.
         Returns None for dead/deleted tracks (Criterion 9, 12).
@@ -332,7 +330,7 @@ class SoundCloudPlaylistAPI:
         }
 
     @staticmethod
-    def resolve_track_from_url(permalink_url: str, auth_token: Optional[str] = None) -> Optional[Dict]:
+    def resolve_track_from_url(permalink_url: str, auth_token: str | None = None) -> dict | None:
         """
         Resolve a SoundCloud permalink URL to a normalized track dict.
 
@@ -375,7 +373,7 @@ class SoundCloudPlaylistAPI:
 
     @staticmethod
     @lru_cache(maxsize=32)
-    def get_playlists(auth_token: str) -> List[Dict]:
+    def get_playlists(auth_token: str) -> list[dict]:
         """
         Fetch ALL playlists for the authenticated user.
         Follows next_href pagination until exhausted (Criterion 8).
@@ -384,8 +382,8 @@ class SoundCloudPlaylistAPI:
         user_id = SoundCloudPlaylistAPI._resolve_user_id(auth_token)
         headers = SoundCloudPlaylistAPI._get_headers(auth_token)
 
-        playlists: List[Dict] = []
-        url: Optional[str] = f"{SC_API_BASE}/users/{user_id}/playlists"
+        playlists: list[dict] = []
+        url: str | None = f"{SC_API_BASE}/users/{user_id}/playlists"
         params = {"limit": 50, "offset": 0}
         if not auth_token:
             params["client_id"] = get_sc_client_id()
@@ -440,7 +438,7 @@ class SoundCloudPlaylistAPI:
 
     @staticmethod
     @lru_cache(maxsize=32)
-    def get_likes(auth_token: str, max_tracks: int = 500) -> Dict:
+    def get_likes(auth_token: str, max_tracks: int = 500) -> dict:
         """
         Fetch user's liked tracks as a virtual playlist.
         Paginates until max_tracks reached or list exhausted (Criterion 8).
@@ -449,8 +447,8 @@ class SoundCloudPlaylistAPI:
         user_id = SoundCloudPlaylistAPI._resolve_user_id(auth_token)
         headers = SoundCloudPlaylistAPI._get_headers(auth_token)
 
-        tracks: List[Dict] = []
-        url: Optional[str] = f"{SC_API_BASE}/users/{user_id}/favorites"
+        tracks: list[dict] = []
+        url: str | None = f"{SC_API_BASE}/users/{user_id}/favorites"
         params = {"limit": 50, "offset": 0}
         if not auth_token:
             params["client_id"] = get_sc_client_id()
@@ -503,7 +501,7 @@ class SoundCloudPlaylistAPI:
 
     @staticmethod
     @lru_cache(maxsize=128)
-    def get_full_playlist_tracks(playlist_id: int, auth_token: str) -> List[Dict]:
+    def get_full_playlist_tracks(playlist_id: int, auth_token: str) -> list[dict]:
         """
         Fetch ALL tracks for a specific playlist (not just the 20-track preview).
         Uses full representation and paginates (Criterion 8).
@@ -560,12 +558,12 @@ class SoundCloudSyncEngine:
     def _normalize_title(self, title: str) -> str:
         return re.sub(r'[^\w\s]', '', title.lower().strip())
 
-    def _fuzzy_match_track(self, sc_title: str, sc_artist: str, local_tracks: Dict) -> Optional[str]:
+    def _fuzzy_match_track(self, sc_title: str, sc_artist: str, local_tracks: dict) -> str | None:
         """Find the best matching local track. Returns the local track ID or None."""
         tid, _ = self._fuzzy_match_with_score(sc_title, sc_artist, local_tracks)
         return tid
 
-    def _fuzzy_match_with_score(self, sc_title: str, sc_artist: str, local_tracks: Dict):
+    def _fuzzy_match_with_score(self, sc_title: str, sc_artist: str, local_tracks: dict):
         """Find the best match and return (local_track_id, score). Score 0..1."""
         sc_combined = f"{sc_artist} - {sc_title}".lower()
         sc_norm_title = self._normalize_title(sc_title)
@@ -588,7 +586,7 @@ class SoundCloudSyncEngine:
 
         return best_match, round(best_ratio, 3)
 
-    def find_or_create_playlist(self, sc_playlist_title: str) -> Optional[str]:
+    def find_or_create_playlist(self, sc_playlist_title: str) -> str | None:
         """Find existing synced playlist or create a new one. Returns playlist ID string.
         Respects the 'sc_sync_folder_id' setting: if set, creates the playlist inside
         that local Rekordbox folder instead of ROOT.
@@ -617,7 +615,7 @@ class SoundCloudSyncEngine:
             logger.error(f"[SC] Failed to create playlist {sync_name}: {exc}")
         return None
 
-    def sync_playlist(self, sc_playlist: Dict, auth_token: str) -> Dict:
+    def sync_playlist(self, sc_playlist: dict, auth_token: str) -> dict:
         """
         Sync a single SoundCloud playlist to local collection.
         Handles dead tracks gracefully (Criterion 9).
@@ -689,7 +687,7 @@ class SoundCloudSyncEngine:
 
         return result
 
-    def sync_all(self, playlists: List[Dict], auth_token: str) -> List[Dict]:
+    def sync_all(self, playlists: list[dict], auth_token: str) -> list[dict]:
         """Sync all provided playlists sequentially."""
         results = []
         for pl in playlists:
@@ -697,7 +695,7 @@ class SoundCloudSyncEngine:
             results.append(result)
         return results
 
-    def preview_matches(self, sc_playlist: Dict, auth_token: str) -> List[Dict]:
+    def preview_matches(self, sc_playlist: dict, auth_token: str) -> list[dict]:
         """
         Dry-run: return per-track match details WITHOUT writing to the DB.
         Used by the Inspector Panel endpoint.

@@ -1,7 +1,7 @@
 import logging
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import List, Dict, Optional
+
 from .database import db
 from .xml_generator import RekordboxXML
 
@@ -9,21 +9,21 @@ logger = logging.getLogger(__name__)
 
 class RekordboxBridge:
     @staticmethod
-    def export_collection(track_ids: List[str], output_path: Path) -> str:
+    def export_collection(track_ids: list[str], output_path: Path) -> str:
         """Exports selected tracks to a Rekordbox-compatible XML."""
         tracks_to_export = []
         for tid in track_ids:
             track = db.get_track_details(tid)
             if track:
                 tracks_to_export.append(track)
-        
+
         if not tracks_to_export:
             raise ValueError("No tracks found for export.")
-            
+
         return RekordboxXML.generate(tracks_to_export, output_path)
 
     @staticmethod
-    def import_library(xml_path: str) -> Dict:
+    def import_library(xml_path: str) -> dict:
         """Imports data from a Rekordbox XML and updates the local database."""
         results = {"added": 0, "updated": 0, "errors": []}
         try:
@@ -39,7 +39,7 @@ class RekordboxBridge:
                     location = track_el.get("Location", "")
                     # Convert file://localhost/C:/... to C:/...
                     clean_path = location.replace("file://localhost/", "").replace("/", "\\")
-                    
+
                     track_data = {
                         "Title": track_el.get("Name"),
                         "Artist": track_el.get("Artist"),
@@ -76,7 +76,7 @@ class RekordboxBridge:
                         if t.get("path") == clean_path:
                             existing_id = tid
                             break
-                    
+
                     if existing_id:
                         db.update_track(existing_id, track_data)
                         results["updated"] += 1
@@ -86,7 +86,7 @@ class RekordboxBridge:
 
                 except Exception as e:
                     results["errors"].append(str(e))
-            
+
             db.save()
             return results
         except Exception as e:
