@@ -12,9 +12,9 @@
 | `CLAUDE.md` | AI agent coding rules, principles, mandatory post-edit workflow |
 | `package.json` | Root npm scripts: `dev:full` (starts all), `tauri dev`, `tauri build` |
 | `requirements.txt` | Python deps: FastAPI, uvicorn, psutil, requests, sqlalchemy, librosa, scipy, numba, keyring, python-dotenv, soundfile, lameenc, numpy, rbox, madmom, essentia |
-| `docker-compose.yml` | Docker: backend port 8000 + frontend port 5173 with volume mounts |
+| `pyproject.toml` | Python tooling config (ruff + black + mypy) |
 | `README.md` | Project overview, features, tech stack, setup instructions |
-| `PROJECT_WIKI.md` | Extended feature documentation and architectural detail |
+| `docs/HANDOVER.md` | Cleanup-protocol used by Phase 1-5 cleanup work |
 
 ---
 

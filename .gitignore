@@ -12,51 +12,44 @@ settings.json
 *.sqlite3
 .DS_Store
 Thumbs.db
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
 .project
 .classpath
 
 # --- Python ---
 **/__pycache__/
 *.py[cod]
-*.pyc
 *.pyo
 **/venv/
 **/env/
 .pytest_cache/
 .tox/
 *.egg-info/
-dist/
-build/
 rb-backend.spec
 .coverage
 htmlcov/
 
-# --- Node/JS ---
+# --- Node / JS ---
 **/node_modules/
-**/dist/
 .cache/
 
-# --- Tauri/Rust ---
+# --- Tauri / Rust ---
 src-tauri/target/
 src-tauri/gen/
 src-tauri/cargo_check_output.txt
 
-# --- Data & Media (Recursive) ---
-# User data and large files (should never be committed)
+# --- Universal build artifacts (cover Python + JS + Rust) ---
+**/dist/
+**/build/
+**/target/
+**/binaries/
+
+# --- Data & Media (user data — never commit) ---
 **/backups/
 **/exports/
 **/music/
 **/temp_uploads/
 **/screenshots/
 **/logs/
-**/binaries/
-**/build/
-**/target/
 
 # Audio files (large media)
 **/rekordbox.xml
@@ -69,7 +62,7 @@ src-tauri/cargo_check_output.txt
 **/*.opus
 **/*.wma
 
-# Build & installer artifacts
+# Installer artifacts
 **/*.exe
 **/*.pkg
 **/*.dmg
@@ -92,24 +85,23 @@ src-tauri/cargo_check_output.txt
 **/rekordbox_db/
 **/*.rbxml
 
-# --- Temporary & Scratch Directories ---
+# --- Temporary & scratch ---
 tmp/
 temp/
 .tmp/
 scratch/
 work/
 
-# --- Claude Development (local-only configuration, not to be committed) ---
+# --- Claude Development (local-only) ---
 .claude/
 CLAUDE.md
 
-# --- Local-Only Archives & Development ---
-# User data and experimental code — not part of the public repo
+# --- Local-only archives & experiments ---
 archive/
 /research/
 /experimental/
 
-# --- Development Scripts (debug/test/utilities) ---
+# --- Development scripts (debug / test / utilities) ---
 debug_*.py
 diag_*.py
 inspect_*.py
@@ -133,7 +125,7 @@ snippet_*.py
 *_debug.py
 *_local.py
 
-# --- Local Configuration & Backups ---
+# --- Local configuration & backups ---
 usb_profiles.json
 *.bak
 *.bak.*
@@ -145,19 +137,20 @@ test_*.json
 .secrets
 .keys/
 
-# --- IDE & Editor Artifacts ---
-.vscode/settings.json
-.vscode/launch.json
-.idea/workspace.xml
-.idea/shelf/
+# --- IDE / editor (everything, then re-add nothing) ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 *.orig
 
-# --- Local test/library artifacts ---
+# --- Local test / library artifacts ---
 standalone.xml
 rekordbox.xml
 download_registry.db
 
-# --- Local-only / dev backup ---
+# --- Local-only dev backup ---
 .aiexclude
 .release-backup/
 CLAUDE_OLD.md
