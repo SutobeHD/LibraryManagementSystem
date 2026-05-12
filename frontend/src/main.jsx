@@ -1,7 +1,7 @@
 import React, { useState, Component, useEffect, useCallback, Suspense, lazy } from 'react'
 import { invoke } from '@tauri-apps/api/core'; // Tauri Invoke
 import ReactDOM from 'react-dom/client'
-import { Music, Cloud, Download, Scissors, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, Database, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2, Sparkles, Copy, Layers, FilePlus, FolderOpen, ArrowLeft, Sliders } from 'lucide-react'
+import { Music, Cloud, Download, Scissors, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2, Sparkles, Copy, Layers, FilePlus, FolderOpen, ArrowLeft, Sliders } from 'lucide-react'
 import './index.css'
 import { ToastProvider } from './components/ToastContext'
 import { Toaster } from 'react-hot-toast'
@@ -22,7 +22,6 @@ const MetadataView = lazy(() => import('./components/MetadataView'));
 const ImportView = lazy(() => import('./components/ImportView'));
 const UsbView = lazy(() => import('./components/UsbView'));
 const UsbSettingsView = lazy(() => import('./components/UsbSettingsView'));
-const BackupManager = lazy(() => import('./components/BackupManager'));
 const DesignView = lazy(() => import('./components/DesignView'));
 const SoundCloudView = lazy(() => import('./components/SoundCloudView'));
 const SoundCloudSyncView = lazy(() => import('./components/SoundCloudSyncView'));
@@ -66,8 +65,6 @@ class ErrorBoundary extends Component {
 }
 
 const Sidebar = ({ activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnloadLibrary }) => {
-  const [showBackups, setShowBackups] = useState(false);
-
   const handleExit = async () => {
     if (await confirmModal({ title: "Exit Application?", confirmLabel: "Exit" })) {
       try {
@@ -192,12 +189,6 @@ const Sidebar = ({ activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnlo
 
         {/* Footer */}
         <div className="border-t border-line-subtle py-2">
-          {libraryStatus?.loaded && libraryStatus?.mode === 'live' && (
-            <div onClick={() => setShowBackups(true)} className="nav-item">
-              <Database size={14} />
-              <span>Backups</span>
-            </div>
-          )}
           <NavBtn icon={<Settings size={14} />} label="Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
           <div onClick={handleExit} className="nav-item" style={{ color: 'var(--bad)' }}>
             <AlertTriangle size={14} />
@@ -205,19 +196,6 @@ const Sidebar = ({ activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnlo
           </div>
         </div>
       </div>
-
-      {/* Backup Manager Modal */}
-      {showBackups && (
-        <Suspense
-          fallback={
-            <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center">
-              <Loader2 className="animate-spin text-amber2" size={32} />
-            </div>
-          }
-        >
-          <BackupManager onClose={() => setShowBackups(false)} />
-        </Suspense>
-      )}
     </>
   )
 }
@@ -365,7 +343,7 @@ const SelectionView = ({ onSelect }) => (
           </div>
           <h3 className="text-lg font-semibold text-ink-primary mb-1.5">Rekordbox Live</h3>
           <p className="text-ink-secondary text-tiny leading-relaxed">
-            Direct integration with your <span className="font-mono">master.db</span>. Fast, live edits and backups.
+            Direct integration with your <span className="font-mono">master.db</span>. Fast, live edits — Rekordbox keeps its own backups.
           </p>
         </button>
 

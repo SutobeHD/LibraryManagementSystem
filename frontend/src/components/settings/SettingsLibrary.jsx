@@ -10,7 +10,7 @@ import api from '../../api/api';
 import toast from 'react-hot-toast';
 import { HEARTBEAT_INTERVAL_MS } from '../../config/constants';
 import {
-    Database, Save, Shield, Folder, Plus, X, FolderOpen,
+    Database, Shield, Folder, Plus, X, FolderOpen,
 } from 'lucide-react';
 import { Toggle, Section, Field } from './SettingsControls';
 
@@ -53,16 +53,6 @@ const SettingsLibrary = ({ settings, setSettings }) => {
             }
         } catch {
             toast.error('Failed to switch library mode');
-        }
-    };
-
-    const triggerBackup = async () => {
-        try {
-            const res = await api.post('/api/library/backup');
-            if (res.data.status === 'success') toast.success('Backup created');
-            else toast.error('Backup failed: ' + (res.data.message || 'Unknown error'));
-        } catch {
-            toast.error('Backup error');
         }
     };
 
@@ -142,11 +132,8 @@ const SettingsLibrary = ({ settings, setSettings }) => {
                     label="Remember mode selection"
                 />
                 {libStatus.mode === 'live' && (
-                    <div className="flex items-center justify-between p-3 bg-amber2/5 border border-amber2/20 rounded-xl">
+                    <div className="p-3 bg-amber2/5 border border-amber2/20 rounded-xl">
                         <p className="text-xs text-ink-secondary font-mono truncate">{libStatus.path}</p>
-                        <button onClick={triggerBackup} className="ml-3 flex-shrink-0 text-xs text-amber2 hover:text-amber2-hover flex items-center gap-1.5 border border-amber2/20 rounded-lg px-3 py-1.5 hover:bg-amber2/10 transition-all">
-                            <Save size={12} /> Backup
-                        </button>
                     </div>
                 )}
             </Section>
