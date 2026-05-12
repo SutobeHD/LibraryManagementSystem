@@ -2070,6 +2070,56 @@ def folder_watcher_remove(r: PathRequest):
 
 # --- GRACEFUL SHUTDOWN ---
 _shutdown_event = threading.Event()
+_auto_backup_task: asyncio.Task | None = None
+
+
+async def _auto_backup_loop() -> None:
+    """Background loop that snapshots the live DB on the configured cadence.
+
+    Re-reads settings every iteration so interval / enable toggles apply
+    without a backend restart. Errors are logged but never crash the loop
+    — a single failed snapshot must not stop future ones.
+
+    When disabled (``auto_backup_interval_min <= 0``) the loop polls
+    settings every 60 s so re-enabling takes effect within a minute.
+    """
+    logger.info("auto-backup loop: started")
+    while True:
+        try:
+            cfg = SettingsManager.load()
+            interval_min = max(0, int(cfg.get("auto_backup_interval_min") or 0))
+            if interval_min < 1:
+                await asyncio.sleep(60.0)
+                continue
+
+            await asyncio.sleep(interval_min * 60.0)
+
+            path = _live_db_path()
+            if not path:
+                continue
+
+            def _snap() -> dict:
+                engine = BackupEngine(path)
+                with db_lock():
+                    return engine.snapshot(f"Auto-backup (every {interval_min}min)")
+
+            result = await asyncio.to_thread(_snap)
+            status = result.get("status")
+            if status == "success":
+                logger.info(
+                    "auto-backup: hash=%s stats=%s",
+                    result.get("hash"), result.get("stats"),
+                )
+            elif status == "unchanged":
+                logger.debug("auto-backup: unchanged hash=%s", result.get("hash"))
+            else:
+                logger.warning("auto-backup: %s", result.get("message"))
+        except asyncio.CancelledError:
+            logger.info("auto-backup loop: cancelled")
+            raise
+        except (OSError, sqlite3.Error) as e:
+            logger.error("auto-backup: iteration failed err=%s", e)
+            await asyncio.sleep(60.0)
 
 def _graceful_shutdown():
     """Performs cleanup before shutting down the backend."""
@@ -2139,6 +2189,30 @@ async def startup_event():
     except Exception as e:
         logger.error(f"FolderWatcher startup failed: {e}", exc_info=True)
 
+    # Auto-backup on launch (snapshot once if enabled). Runs after the library
+    # has loaded so ``_live_db_path()`` resolves.
+    try:
+        cfg = SettingsManager.load()
+        if cfg.get("auto_backup") and _live_db_path():
+            path = _live_db_path()
+
+            def _launch_snap() -> dict:
+                engine = BackupEngine(path)
+                with db_lock():
+                    return engine.snapshot("Auto-backup on launch")
+
+            result = await asyncio.to_thread(_launch_snap)
+            logger.info(
+                "auto-backup on launch: status=%s hash=%s",
+                result.get("status"), result.get("hash"),
+            )
+    except (OSError, sqlite3.Error) as e:
+        logger.error("auto-backup on launch failed err=%s", e)
+
+    # Background snapshot loop driven by ``auto_backup_interval_min``.
+    global _auto_backup_task
+    _auto_backup_task = asyncio.create_task(_auto_backup_loop())
+
 
 @app.on_event("shutdown")
 async def shutdown_watcher_event():
@@ -2146,6 +2220,15 @@ async def shutdown_watcher_event():
         folder_watcher.shutdown_watcher()
     except Exception as exc:
         logger.warning("FolderWatcher shutdown error: %s", exc)
+
+    global _auto_backup_task
+    if _auto_backup_task is not None:
+        _auto_backup_task.cancel()
+        try:
+            await _auto_backup_task
+        except asyncio.CancelledError:
+            pass
+        _auto_backup_task = None
 
 @app.post("/api/system/heartbeat")
 def heartbeat():
