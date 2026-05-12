@@ -117,26 +117,30 @@ def tiny_master_db(tmp_path: Path) -> Path:
     return db_path
 
 
-class TestReadTable:
-    """`_read_table` is private but is the gate that the allowlist guards."""
+class TestSnapshotDb:
+    """`_snapshot_db` is the gate that the allowlist guards.
 
-    def test_known_table_returns_rows(self, tiny_master_db: Path) -> None:
-        engine = BackupEngine(str(tiny_master_db))
-        rows = engine._read_table(tiny_master_db, "djmdContent")
-        assert "1" in rows
-        assert rows["1"]["Title"] == "foo"
+    `_check_table_name` is exercised directly above via `TestTableAllowlist`;
+    here we only verify the snapshot output contract.
+    """
 
-    def test_unknown_table_raises(self, tiny_master_db: Path) -> None:
+    def test_known_table_rows_appear(self, tiny_master_db: Path) -> None:
         engine = BackupEngine(str(tiny_master_db))
-        with pytest.raises(ValueError, match="not in TRACKED_TABLES"):
-            engine._read_table(tiny_master_db, "evil_table")
+        snap = engine._snapshot_db()
+        assert "1" in snap["djmdContent"]
+        assert snap["djmdContent"]["1"]["Title"] == "foo"
 
-    def test_missing_table_returns_empty(self, tiny_master_db: Path) -> None:
-        # Table is in the allowlist but the SQLite schema doesn't actually have
-        # it — should return an empty dict, not raise.
+    def test_missing_table_yields_empty_dict(self, tiny_master_db: Path) -> None:
+        # djmdCue is tracked but not present in this fixture — should appear
+        # in the snapshot as an empty dict, not raise.
         engine = BackupEngine(str(tiny_master_db))
-        rows = engine._read_table(tiny_master_db, "djmdCue")
-        assert rows == {}
+        snap = engine._snapshot_db()
+        assert snap["djmdCue"] == {}
+
+    def test_every_tracked_table_appears_in_snapshot(self, tiny_master_db: Path) -> None:
+        engine = BackupEngine(str(tiny_master_db))
+        snap = engine._snapshot_db()
+        assert set(snap.keys()) == set(TRACKED_TABLES)
 
 
 # ---------------------------------------------------------------------------
