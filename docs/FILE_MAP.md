@@ -185,11 +185,36 @@
 
 ## docs/
 
+### Navigation + reference
+
 | File | Purpose |
 |------|---------|
-| `docs/PROJECT_OVERVIEW.md` | High-level project overview |
-| `docs/DOWNLOAD_EVALUATION.md` | SoundCloud track download evaluation notes |
+| `docs/FILE_MAP.md` | **This file** — master project navigation map, one-line-per-file |
+| `docs/architecture.md` | System architecture, data flows (8 flows), security model, performance characteristics |
+| `docs/frontend-index.md` | React component index: props, key functions, Tauri IPC calls |
+| `docs/backend-index.md` | All 146 FastAPI routes grouped by feature + Python class/method index |
+| `docs/rust-index.md` | Tauri commands, Rust module index, event system, crate list |
+| `docs/SECURITY.md` | Dependency hardening (Schicht A), threat model, accepted risks |
+| `docs/NAMING_MAP.md` | Mapping doc for v0.0.2 rename refactor — kept for audit trail |
+| `docs/PROJECT_OVERVIEW.md` | High-level overview (duplicates parts of architecture.md — kept for first-skim) |
+| `docs/DOWNLOAD_EVALUATION.md` | SoundCloud track download evaluation notes (research artifact) |
+| `docs/HANDOVER.md` | Multi-phase mission briefing (Slopcode-Cleanup) with DoD, status reporting, escalation rules — pattern doc for handing work to fresh AI instances |
 | `docs/e2e-testing.md` | E2E interaction workflows: (A) Web Preview via `mcp__Claude_Preview__*` on Vite :5173 + FastAPI :8000, (B) Tauri WebDriver via `tauri-driver` + `msedgedriver`. Channel-picker, Selenium cheatsheet, native-dialog caveats |
+| `docs/index.html` | Static HTML viewer for the markdown index docs (not auto-generated) |
+
+### Research & Implementation Pipeline (`docs/research/`)
+
+Feature lifecycle: `research/` → `implement/` → `archived/`. State lives in folder + filename prefix.
+
+| File | Purpose |
+|------|---------|
+| `docs/research/README.md` | Pipeline rules: stages, prefixes (`idea_`, `exploring_`, `evaluated_`, `parked_`, `draftplan_`, `review_`, `accepted_`, `inprogress_`, `blocked_`, `implemented_`, `superseded_`, `abandoned_`), transition workflow, AI-assistant rules |
+| `docs/research/_INDEX.md` | Live dashboard mirroring the file system — update on every `git mv` |
+| `docs/research/_TEMPLATE.md` | Copy-on-start template for a new research topic |
+| `docs/research/research/exploring_recommender-rules-baseline.md` | Active: BPM/Key/Genre/MyTag/Energy ranking + Camelot harmonic mixing (local + SC modes) |
+| `docs/research/research/exploring_recommender-taste-llm-audio.md` | Active: LLM/embedding-based recommender learning from listening behaviour + audio features |
+| `docs/research/implement/.gitkeep` | Placeholder; in-flight implementation docs land here |
+| `docs/research/archived/.gitkeep` | Placeholder; terminal-state docs land here |
 
 ---
 
@@ -208,21 +233,43 @@ External binaries (not in repo):
 
 ---
 
-## .claude/
+## .claude/ — Claude Code agent configuration
+
+Team-shared agent setup for [Claude Code](https://claude.com/claude-code). Committed to repo so every contributor gets the same allowlist + commands + agents.
+
+### Root config
 
 | File | Purpose |
 |------|---------|
-| `docs/FILE_MAP.md` | **This file** — master project navigation map |
-| `docs/architecture.md` | System architecture, data flows, security model, performance characteristics |
-| `docs/frontend-index.md` | React component index: props, key functions, Tauri IPC calls |
-| `docs/backend-index.md` | FastAPI routes, Python class/method index, response envelopes |
-| `docs/rust-index.md` | Tauri commands, Rust module index, event system, crate list |
-| `.claude/launch.json` | `mcp__Claude_Preview__preview_start` server definitions — named entries `backend` (`python -m app.main`, :8000) and `frontend` (`npm run dev --prefix frontend`, :5173) |
-| `.claude/agents/director.md` | Orchestrator agent — routes tasks to specialist agents |
-| `.claude/agents/frontend-agent.md` | React/TS specialist |
-| `.claude/agents/backend-agent.md` | Python/FastAPI specialist |
-| `.claude/agents/rust-agent.md` | Rust/Tauri specialist |
-| `.claude/agents/qa-agent.md` | QA/defensive programming reviewer |
+| `CLAUDE.md` | **Agent operating manual** — stack overview, build/dev/test commands, coding rules, autonomy boundaries, commit strategy (intensive atomic), git-sync heuristic, research-first rule, self-correction loop with research-lifecycle graduation |
+| `.claude/settings.json` | Committed permission allowlist (~70 patterns): npm/pip/pytest/cargo/git-read/gh-read/git-commit + git-fetch/pull-ff-only/branch-switching in `allow`; rm/force-push/.env-writes/master.db-writes in `deny`; push/merge/new-deps in `ask`. Env: `PYTHONDONTWRITEBYTECODE=1`, `PYTHONUNBUFFERED=1` |
+| `.claude/settings.local.json.example` | Template for per-machine overrides (e.g. local FFmpeg path). Copy to `.claude/settings.local.json` (gitignored) |
+
+### Slash commands (`.claude/commands/`)
+
+| File | Triggers | Purpose |
+|------|----------|---------|
+| `.claude/commands/dev-full.md` | `/dev-full` | Start backend (:8000) + frontend (:5173) concurrently |
+| `.claude/commands/tauri-dev.md` | `/tauri-dev` | Launch full Tauri desktop app (Rust + Python sidecar + React) |
+| `.claude/commands/tauri-build.md` | `/tauri-build` | Production desktop build → `.msi` / `.exe` installers |
+| `.claude/commands/test-py.md` | `/test-py [pattern]` | Run pytest with optional filter; reports failing tests with first stack-frame |
+| `.claude/commands/audit.md` | `/audit` | npm audit + lockfile-lint + platform security-audit script |
+| `.claude/commands/sync-docs.md` | `/sync-docs [subsystem]` | Reconcile `FILE_MAP.md` + index docs against current code via `doc-syncer` |
+| `.claude/commands/route-add.md` | `/route-add <METHOD> <path> <purpose>` | Guided FastAPI route scaffold with auth/lock/model boilerplate via `route-architect` |
+| `.claude/commands/full-check.md` | `/full-check` | All quality gates: ruff + pytest + cargo check/fmt/clippy + npm build + audit |
+| `.claude/commands/sync-check.md` | `/sync-check` | git fetch + 1-line verdict on local-vs-origin drift + open PRs |
+| `.claude/commands/commit.md` | `/commit [hint]` | Stage + atomic commit with Conventional-Commits message; auto-splits unrelated changes |
+| `.claude/commands/research-new.md` | `/research-new <slug>` | Scaffold new research topic from `_TEMPLATE.md` into `docs/research/research/idea_<slug>.md` + update `_INDEX.md` |
+
+### Subagents (`.claude/agents/`)
+
+| File | Use when | Tools |
+|------|----------|-------|
+| `.claude/agents/doc-syncer.md` | Sync `FILE_MAP.md` / backend/frontend/rust-index.md + `docs/research/_INDEX.md` against code + research-folder filesystem | Read, Edit, Glob, Grep, Bash |
+| `.claude/agents/route-architect.md` | Design new FastAPI route(s) including `_db_write_lock`, `X-Session-Token`, Pydantic models, error handling | Read, Edit, Grep, Glob, Bash |
+| `.claude/agents/audio-stack-reviewer.md` | Review Python DSP (`analysis_engine`, `anlz_writer`, `usb_pdb`) or Rust audio (`src-tauri/src/audio/`) for realtime correctness + byte-layout invariants | Read, Grep, Glob, Bash |
+| `.claude/agents/test-runner.md` | Run pytest / cargo test / frontend tests, parse output, surface first failure with file:line, suggest fix or escalate | Read, Bash, Grep |
+| `.claude/agents/e2e-tester.md` | Drive the actual app via `preview_*` tools (web preview) or Tauri WebDriver. Navigate, click, fill, screenshot, capture console+network logs | All preview tools, Read, Bash |
 
 ---
 
