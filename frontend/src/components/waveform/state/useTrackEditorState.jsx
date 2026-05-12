@@ -42,6 +42,12 @@ const ACTIONS = {
     DELETE_MEMORY_CUE: 'DELETE_MEMORY_CUE',
     UPDATE_HOT_CUE_FIELDS: 'UPDATE_HOT_CUE_FIELDS',
     UPDATE_MEMORY_CUE_FIELDS: 'UPDATE_MEMORY_CUE_FIELDS',
+    // Slice 2 — loops
+    LOAD_LOOPS: 'LOAD_LOOPS',
+    SET_LOOP: 'SET_LOOP',
+    DELETE_LOOP: 'DELETE_LOOP',
+    SET_ACTIVE_LOOP: 'SET_ACTIVE_LOOP',
+    UPDATE_LOOP_FIELDS: 'UPDATE_LOOP_FIELDS',
 };
 
 function reducer(state, action) {
@@ -92,6 +98,37 @@ function reducer(state, action) {
                     c.id === action.payload.id ? { ...c, ...action.payload.fields } : c,
                 ),
             };
+        case ACTIONS.LOAD_LOOPS:
+            return { ...state, loops: action.payload.loops || [] };
+        case ACTIONS.SET_LOOP: {
+            const loop = action.payload;
+            const filtered = state.loops.filter((l) => l.id !== loop.id);
+            return {
+                ...state,
+                loops: [...filtered, loop].sort((a, b) => a.time_ms - b.time_ms),
+            };
+        }
+        case ACTIONS.DELETE_LOOP:
+            return {
+                ...state,
+                loops: state.loops.filter((l) => l.id !== action.payload.id),
+            };
+        case ACTIONS.SET_ACTIVE_LOOP:
+            // Only one loop may be active per track (Q5 — CDJ active-loop).
+            return {
+                ...state,
+                loops: state.loops.map((l) => ({
+                    ...l,
+                    status: l.id === action.payload.id ? 4 : 0,
+                })),
+            };
+        case ACTIONS.UPDATE_LOOP_FIELDS:
+            return {
+                ...state,
+                loops: state.loops.map((l) =>
+                    l.id === action.payload.id ? { ...l, ...action.payload.fields } : l,
+                ),
+            };
         default:
             return state;
     }
@@ -132,9 +169,33 @@ export function TrackEditorProvider({ children }) {
         [],
     );
 
+    // Slice 2 — loop action creators
+    const loadLoops = useCallback(
+        ({ loops }) => dispatch({ type: ACTIONS.LOAD_LOOPS, payload: { loops } }),
+        [],
+    );
+    const setLoop = useCallback(
+        (loop) => dispatch({ type: ACTIONS.SET_LOOP, payload: loop }),
+        [],
+    );
+    const deleteLoop = useCallback(
+        (id) => dispatch({ type: ACTIONS.DELETE_LOOP, payload: { id } }),
+        [],
+    );
+    const setActiveLoop = useCallback(
+        (id) => dispatch({ type: ACTIONS.SET_ACTIVE_LOOP, payload: { id } }),
+        [],
+    );
+    const updateLoopFields = useCallback(
+        (id, fields) =>
+            dispatch({ type: ACTIONS.UPDATE_LOOP_FIELDS, payload: { id, fields } }),
+        [],
+    );
+
     const value = {
         state,
         dispatch,
+        // Slice 1 — cues
         loadCues,
         setHotCue,
         deleteHotCue,
@@ -142,6 +203,12 @@ export function TrackEditorProvider({ children }) {
         deleteMemoryCue,
         updateHotCueFields,
         updateMemoryCueFields,
+        // Slice 2 — loops
+        loadLoops,
+        setLoop,
+        deleteLoop,
+        setActiveLoop,
+        updateLoopFields,
     };
 
     return (

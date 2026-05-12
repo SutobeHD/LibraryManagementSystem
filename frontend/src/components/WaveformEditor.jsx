@@ -19,7 +19,8 @@ import useEditPersistence from './waveform/useEditPersistence';
 import computeBeats from './waveform/computeBeats';
 import { TrackEditorProvider } from './waveform/state/useTrackEditorState';
 import CuePanel from './waveform/panels/CuePanel';
-import { FEATURE_CUE_PANEL } from '../config/constants';
+import LoopPanel from './waveform/panels/LoopPanel';
+import { FEATURE_CUE_PANEL, FEATURE_LOOP_PANEL } from '../config/constants';
 
 const ZOOM_DEFAULT = 200;
 
@@ -392,6 +393,7 @@ const WaveformEditorInner = forwardRef(({ track, blobUrl = null, simpleMode = fa
 
             <ConfirmModal modal={confirmModal} setModal={setConfirmModal} />
             {FEATURE_CUE_PANEL && <CuePanel track={fullTrack} currentTime={currentTime} />}
+            {FEATURE_LOOP_PANEL && <LoopPanel track={fullTrack} currentTime={currentTime} bpm={bpm} />}
         </div>
         </TrackEditorProvider>
     );

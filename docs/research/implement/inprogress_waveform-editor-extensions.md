@@ -763,6 +763,59 @@ CuePanel has a working save path.
   time); backend pytest tests gate the save / get roundtrip.
 - **Audio audition on pad click** — explicitly Slice 5 work.
 
+### 2026-05-13 — Slice 2 (Loops)
+
+**Hook extension:** added `loops` slice actions to
+`useTrackEditorState.jsx`:
+
+- `LOAD_LOOPS` — replace the loops array
+- `SET_LOOP` — upsert by id (sorted by `time_ms`)
+- `DELETE_LOOP` — remove by id
+- `SET_ACTIVE_LOOP` — **enforces Q5 invariant**: exactly one loop per
+  track is active. Setting active on a new loop clears `status` on all
+  others. `setActiveLoop(null)` clears all.
+- `UPDATE_LOOP_FIELDS` — partial-update by id
+
+**New file:** `frontend/src/components/waveform/panels/LoopPanel.jsx`
+(~230 LOC). Loop list with active-loop radio toggle (Q5 CDJ semantics),
+8-CDJ-color picker, comment input, loop-length display
+(`numerator/denominator`), `ADD AT <time>` button that creates a default
+4-beat memory loop at the current playhead.
+
+**Mounted** in `WaveformEditor.jsx` and `daw/DjEditDaw.jsx` behind
+`FEATURE_LOOP_PANEL` (default `false`).
+
+**Persistence model:** loops go through the **same**
+`POST /api/track/cues/save` endpoint as cues. The sidecar JSON stores
+the full mixed list per track id. The frontend filters on
+`loop_len_ms > 0` or `type` ∈ {`hot_loop`, `memory_loop`} to separate
+the two for the LoopPanel.
+
+**Tests:** `tests/test_cue_endpoint_roundtrip.py` extended with two
+loop scenarios:
+
+- `test_save_track_cues_preserves_loop_fields` — `loop_len_ms`,
+  `loop_numerator`, `loop_denominator`, `status=4` all roundtrip.
+- `test_save_track_cues_mixed_cues_and_loops` — cues and loops persist
+  together correctly.
+
+All 14 backend tests pass.
+
+**Plan deviations:**
+
+- **Hot-loop pad grid** — the plan envisioned a separate pad-grid for
+  hot loops. Slice 2 ships only the unified loop list; the pad grid can
+  come as Slice 2.5 or later if user feedback warrants. Rationale: the
+  pad metaphor for loops overlaps awkwardly with hot cues (same 8 slots
+  on CDJ pads) and the list view covers both hot and memory loops
+  uniformly.
+- **`loop_numerator/denominator` UI editing** — shown as text but not
+  editable yet in Slice 2 (only set via the default ADD button). Slice
+  6 cleanup or follow-up can add an inline editor if needed.
+- **Session-loop state migration** (`loopIn`/`loopOut`/`isLooping` in
+  `WaveformEditor.jsx`) — still owned by `useState`-bag; not merged
+  into the hook. Same rationale as Slice 1: minimise refactor surface.
+
 ---
 
 ## Decision / Outcome

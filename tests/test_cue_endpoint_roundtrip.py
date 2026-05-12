@@ -89,3 +89,59 @@ def test_save_track_cues_overwrites_previous(tmp_log_dir):
     got = db.get_track_cues("track-9")
     assert len(got) == 1
     assert got[0]["id"] == "b"
+
+
+# --- Slice 2: loops -----------------------------------------------------
+
+
+def test_save_track_cues_preserves_loop_fields(tmp_log_dir):
+    """Loops are persisted alongside cues with the new fields intact."""
+    from app.database import db
+
+    loops = [
+        {
+            "id": "loop-1",
+            "type": "memory_loop",
+            "time_ms": 12000,
+            "loop_len_ms": 1875,
+            "loop_numerator": 4,
+            "loop_denominator": 1,
+            "color_id": 5,
+            "color_rgb": [79, 203, 107],
+            "name": "Drop loop",
+            "status": 4,  # active
+        }
+    ]
+    assert db.save_track_cues("track-loop", loops) is True
+
+    got = db.get_track_cues("track-loop")
+    assert len(got) == 1
+    assert got[0]["loop_len_ms"] == 1875
+    assert got[0]["loop_numerator"] == 4
+    assert got[0]["loop_denominator"] == 1
+    assert got[0]["status"] == 4
+
+
+def test_save_track_cues_mixed_cues_and_loops(tmp_log_dir):
+    """Sidecar stores cues and loops together in one list per track id."""
+    from app.database import db
+
+    payload = [
+        {"id": "cue-1", "type": "hot_cue", "number": 1, "time_ms": 500, "name": "Intro"},
+        {
+            "id": "loop-1",
+            "type": "memory_loop",
+            "time_ms": 8000,
+            "loop_len_ms": 2000,
+            "loop_numerator": 4,
+            "loop_denominator": 1,
+        },
+    ]
+    assert db.save_track_cues("track-mix", payload) is True
+
+    got = db.get_track_cues("track-mix")
+    assert len(got) == 2
+    cue = next(c for c in got if c["type"] == "hot_cue")
+    loop = next(c for c in got if c["type"] == "memory_loop")
+    assert cue["number"] == 1
+    assert loop["loop_numerator"] == 4
