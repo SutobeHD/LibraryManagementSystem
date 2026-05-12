@@ -1,5 +1,5 @@
 {
-  "name": "music-library-manager",
+  "name": "library-management-system",
   "version": "1.0.0",
   "description": "LibraryManagementSystem — Rekordbox library editor with native audio engine",
   "main": "index.js",
