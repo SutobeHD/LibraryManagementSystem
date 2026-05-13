@@ -19,6 +19,7 @@ related: []
 
 - 2026-05-13 — `research/idea_` — created (request: combine Spotify-FLAC download via SpotiFLAC with existing SoundCloud pipeline; auto-pick highest quality on 100% match)
 - 2026-05-13 — `research/exploring_` — owner resolved Q1-Q14; 3 expanded goals added (auto-search, AIFF default, genre-sync); core algorithms sketched (D1-D8)
+- 2026-05-13 — content update — Claude resolved D2/D5/D8/Q9 + version pins (SpotiFLAC==0.5.0, mutagen already 1.47.0). Discovered reuse: `app/audio_tags.py` covers tagging, SpotiFLAC's `LinkResolver` covers Songlink, `SpotifyMetadataClient` covers search-without-OAuth. Scope shrunk: dropped 2 planned new modules (tagging.py, songlink.py).
 
 ---
 
@@ -64,10 +65,10 @@ Today the project can only download from SoundCloud (`app/soundcloud_downloader.
 - **SpotiFLAC stability**: third-party API endpoints can disappear (DMCA, rate limits, IP bans). The README explicitly warns "metadata fetching can fail due to IP rate-limits → VPN suggested". We must surface failures cleanly, never silently produce a low-quality fallback when the user asked for FLAC.
 - **Legal posture shift**: today's `soundcloud_downloader.py` has a 20-line `LEGAL BOUNDARIES` block that documents a careful ToS-mindful posture (no `snipped:true`, no `hq` probing beyond paid tier, no re-encode). SpotiFLAC's upstream APIs pull lossless audio from paid streaming services without per-user subscription verification. **This is a different category and must be acknowledged as accepted risk in the implementation doc, not silently absorbed.**
 - **UPX / antivirus**: SpotiFLAC's standalone binaries are UPX-compressed and frequently flagged. We use the **Python module** (no UPX), not the bundled binary — sidesteps the AV noise but we should still document the risk.
-- **Mutagen pin** ([mutagen.readthedocs.io](https://mutagen.readthedocs.io/)): cross-format tag-write library. Pin `mutagen==<latest>` in `requirements.txt`. Even though Q13 resolved to "COMMENT-field only", we still need a library that handles Vorbis Comments (FLAC), ID3v2 (MP3 / AIFF / WAV), and MP4 atoms (M4A/ALAC) uniformly. Mutagen is mature, pure-Python, zero native build deps.
+- **Mutagen pin** ([mutagen.readthedocs.io](https://mutagen.readthedocs.io/)): cross-format tag-write library. **Already pinned `mutagen==1.47.0`** in `requirements.txt` line 53 (used by existing `app/audio_tags.py`). No new pin needed. Latest stable 1.47.0 (2023-09-03), Python 3.7+, covers all target containers (FLAC/MP3/M4A/AIFF/WAV/OGG/OPUS).
 - **FFmpeg AIFF conversion** (Q11): `ffmpeg -i <src> -c:a pcm_s16le -map_metadata 0 <dst>.aiff` for 16-bit sources, `pcm_s24le` for 24-bit. `-map_metadata 0` carries over the source's tags (artist/title/album/etc.) so the post-download tagger only adds our additions (provenance URLs, normalised genre, ISRC, cover-art if missing). Bit-depth detection via `ffprobe -show_streams` → `bits_per_raw_sample`.
 - **Songlink/Odesli API** (Q1d): for cross-platform URL resolution from any input URL. Free tier, no auth, public endpoint (`https://api.song.link/v1-alpha.1/links?url=<encoded>`). Rate-limit unclear → bounded retry + cache (1-week TTL acceptable since URLs are stable).
-- **Spotify search without OAuth** (open in `exploring_`): SpotiFLAC scrapes the Web Player without credentials. Investigate whether it exposes a usable `search()` entry point or whether we have to add Client-Credentials-Flow with `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` in `.env` (matches existing `SOUNDCLOUD_CLIENT_ID` pattern). Either way, no user-OAuth — `non-goals` still hold.
+- **Spotify search without OAuth** (RESOLVED 2026-05-13): SpotiFLAC's `SpotifyMetadataClient` uses **hardcoded shared base64-encoded Spotify Web API client credentials** (verified in `SpotiFLAC/providers/spotify_metadata.py`). No `.env` keys needed on our side. **Caveat / risk**: the shared client can be revoked by Spotify at any time → SpotiFLAC upstream must respond; we'd lose Spotify search until they ship a new client. Mitigation: monitor `spotbye/SpotiFLAC` issues for credential-revocation events; ship optional fallback path that lets users add their own `SPOTIFY_CLIENT_ID`/`SPOTIFY_CLIENT_SECRET` in `.env` if the shared client dies.
 
 ## Open Questions
 
@@ -379,6 +380,102 @@ Re-runs: settings UI has a "Re-benchmark" button. Auto-rerun after
 ISP/network change is out of scope for v1.
 ```
 
+### 2026-05-13 — exploring results (D2/D5/D8/Q9 + version pins + reuse opportunities)
+
+Five owner-blocked open items resolved by Claude this round; two material reuse opportunities discovered that shrink scope.
+
+**Version pins (Q14 sub-resolution)**
+
+| Package | Latest stable | Released | Python | Status in our repo |
+|---|---|---|---|---|
+| `SpotiFLAC` | **0.5.0** | 2026-05-13 (today) | >=3.9 | Not yet in `requirements.txt` |
+| `mutagen` | **1.47.0** | 2023-09-03 | >=3.7 | **Already pinned** in `requirements.txt` line 53 (used by `app/audio_tags.py`) |
+
+→ Pin `SpotiFLAC==0.5.0`. Note: SpotiFLAC released today — recommend 1-2 day burn-in before merge to catch any post-release bug surfacing in upstream issues. Mutagen pin already satisfied — no action needed.
+
+**(Reuse-A) `app/audio_tags.py` already covers our tagging needs**
+
+Discovered the repo already has a cross-format tag-write module that satisfies Q13's COMMENT-write requirement **without writing a new module**:
+
+- **Public API**: `write_tags(path, updates: dict, artwork: bytes | None) -> bool` (line 254)
+- **Format coverage**: MP3 (ID3v2.4) / FLAC (Vorbis) / M4A/MP4 (iTunes atoms) / OGG/OPUS (Vorbis) / **AIFF/WAV (ID3 chunk)**
+- **Field aliases**: title, artist, album, **genre**, **comment**, rating, year, bpm, key (all six containers handled)
+- **ISRC mapping already wired**: `_READ_KEYS["isrc"] = ["TSRC", "isrc", "----:com.apple.iTunes:ISRC", "ISRC"]` (line 319)
+- **Non-fatal**: returns `False` on PermissionError / unsupported format / crash, never raises — same pattern we'd want
+- **Already uses mutagen** (line 26) — single dependency entry-point already there
+
+**Implication**: drop `app/downloader/tagging.py` from the planned files-list. Instead **extend `app/audio_tags.py`** with two thin helpers: `serialise_provenance(candidates, picked) -> str` (Q13b format: comma-space-joined URLs, descending quality) and `read_provenance(comment_str) -> list[(platform, url, was_picked)]`. The orchestrator then calls existing `write_tags(file_path, {"comment": serialised, "isrc": isrc, "genre": normalised, "year": year}, artwork_bytes)`.
+
+**(Reuse-B) SpotiFLAC ships its own `LinkResolver` + `SpotifyMetadataClient`**
+
+Examined `ShuShuzinhuu/SpotiFLAC-Module-Version` source. Key findings (`SpotiFLAC/__init__.py` exports):
+
+- **`SpotifyMetadataClient`** — Spotify URL parsing + metadata + search. Uses **hardcoded shared Spotify Web API client credentials** (base64-encoded in `SpotiFLAC/providers/spotify_metadata.py` to dodge GitHub credential scanners): `_CLIENT_ID = base64.b64decode("ODNlNDQzMGI0NzAwNDM0YmFhMjEyMjhhOWM3ZDExYzU=")`. → **No `SPOTIFY_CLIENT_ID`/`_SECRET` in our `.env` needed**.
+- **`LinkResolver`** (`SpotiFLAC/core/link_resolver.py`): wraps `https://api.song.link/v1-alpha.1/links` already. Method `resolve_all(track_id) -> Dict[str, str]` returns `{platform: url}` mapping. → **Drop `app/downloader/providers/songlink.py`** from planned files-list.
+- **Individual provider classes exposed**: `QobuzProvider`, `TidalProvider`, `AmazonProvider`, `AppleMusicProvider`, `DeezerProvider`. → Option-B per-source probing is **directly supported** — we call each provider class individually instead of using the high-level `SpotiFLAC()` fallback-chain.
+- **ISRC infrastructure**: `core/isrc_finder.py`, `core/isrc_helper.py`, `core/isrc_cache.py` already lookup ISRCs for cross-platform matching. We can either piggyback on these or run our own dedup logic.
+- **Pydantic v2 dataclasses**: `TrackMetadata`, `DownloadResult` are `pydantic.BaseModel` subclasses (verified in `core/models.py`). Matches our `coding-rules.md` Pydantic-v2 stance.
+
+**Risk added**: SpotiFLAC's shared Spotify client could be revoked by Spotify at any time. Mitigation: monitor `spotbye/SpotiFLAC` issues for credential-revocation events; ship a fallback path where users can add optional `SPOTIFY_CLIENT_ID`/`SPOTIFY_CLIENT_SECRET` in `.env` if the shared client dies.
+
+**(D5 resolved) Rekordbox genre vocabulary**
+
+Searched Pioneer DJ docs, Rekordbox 7 manual, forum threads, Mp3tag community discussions:
+
+- Rekordbox does **NOT enforce a fixed genre dropdown / preset list**. Genre is a free-text field, populated from the file's `TCON` (ID3v2), `GENRE` (Vorbis), or `gnre`/`©gen` (MP4 atom) tag on import.
+- Rekordbox 7 reads/writes ID3v1, v2.2/2.3/2.4, Vorbis Comments, and MP4 atoms.
+- CDJ-3000 displays whatever string is in the Rekordbox library — long values are visually truncated on screen but the Track Filter / category browse still operates on the full string.
+- Rekordbox's "My Tag" system (genre/components/situation) is a **separate internal-DB taxonomy**, NOT the ID3 genre field. My Tags don't write back to file tags.
+
+**Decision**: canonical genre table stays **user-defined**, not mirrored from any Rekordbox preset (there is none to mirror). Ship a curated default of ~50-100 DJ-relevant genres seeded into `master.db` on first run (e.g. `["Tech House", "Deep House", "Techno", "Drum & Bass", "Trance", "Hardstyle", "Future Bass", ...]` — short plain strings, normalised casing). Apply Q11-genre-sync normalisation on incoming Spotify/Tidal/Qobuz genre strings → canonical → file tag. **Emit only short plain strings** (CDJ display safety). Multi-genre / subgenre fan-out lives in a separate DB column (`subgenres` JSON), not in the ID3 genre field.
+
+**(Q9 resolved) SoundCloud ISRC backfill**
+
+Verified the SC V2 API:
+
+- Track responses expose **`publisher_metadata.isrc`** (string, nullable). Schema also includes `upc_or_ean`, `artist`, `album_title`, `p_line`, `c_line`, `writer_composer`, `release_title`, `publisher`, `explicit`, `contains_music`.
+- Newer top-level Track schema documents an `isrc: Option[String]` field directly on the track.
+- ISRC is **only populated when the track was distributed through SoundCloud-for-Artists or a label-distribution pipeline** (required for monetisation).
+- Pure user-uploads from non-monetised accounts have `isrc: null`. Empirical expectation: **<30% hit rate** across a typical DJ library skewed toward edits/bootlegs/promos.
+
+**Decision**: backfill is **opportunistic, best-effort**. In `app/soundcloud_api.py:_normalize_track`, extend the output dict with:
+```python
+"isrc": (raw.get("publisher_metadata") or {}).get("isrc") or raw.get("isrc"),
+```
+If present, store as third dedup key in `download_registry`. If absent, skip silently — do not retry, do not log as warning. Dedup priority order: ISRC (when both sides have it) > content-SHA256 > track-id.
+
+**(D2 resolved) Spotify search path**
+
+SpotiFLAC's `SpotifyMetadataClient` exposes Spotify metadata + search **without our own OAuth setup** (uses hardcoded shared base64-encoded creds). → No `spotipy` dependency, no `.env` keys. → Q1d auto-search feasibility confirmed.
+
+**(D8 resolved) Concurrency benchmark methodology**
+
+Baseline endpoint: **SoundCloud V2 `/resolve`** (stable, public, fast, idempotent — already exercised by `app/soundcloud_api.py:resolve_track_from_url`).
+
+Algorithm:
+```
+1. Pick 4 unique stable SC track URLs (e.g. seed list shipped with the app)
+2. Pre-warm: fire one throwaway request (DNS + TLS handshake amortisation)
+3. Batch A — parallel: fire all 4 at once via threadpool, measure wall-time
+4. Batch B — sequential: fire one at a time, measure cumulative wall-time
+5. speedup = batch_b_total / batch_a_total
+6. Apply thresholds (already in (D8) section above)
+7. Persist to settings.json as unified_downloader.max_concurrency
+```
+
+Cache 7 days. Settings UI exposes "Re-benchmark" button for manual rerun. Auto-rerun on ISP/network change explicitly out of scope.
+
+**Songlink/Odesli rate-limit policy**
+
+10 RPM unauthenticated (per IP) / 60 RPM keyed. API key is free — request via contact form on odesli.co. Our recommended policy: **request a production key**, throttle to 8 RPM anon / 50 RPM keyed, cache responses for **30 days** (URLs are stable), retry 3x with exponential backoff (1s/4s/16s), honour `Retry-After` header on 429.
+
+**Open items remaining for `exploring_`:**
+
+- **D1**: 50-entry test-set for title-variance algorithm — **needs owner input** (real URL pairs from owner's library)
+- **D3**: actual `pip install SpotiFLAC` + test-call in `ProcessPoolExecutor` — gated by owner's "no implementation" constraint, defer to `accepted_` phase
+- **D5 starter list**: curated default genre-pool content — can be derived from owner's existing library on first run, but starter (~50 genres) needs a quick taste-pass from owner
+- **Risk acknowledgements** for `evaluated_` phase: (a) shared Spotify client could be revoked, (b) Songlink rate-limit without key is tight, (c) SpotiFLAC released same-day as this research — burn-in needed
+
 ## Options Considered
 
 > Required by `evaluated_`. Sketched now as starting points; deepen in `exploring_`.
@@ -429,14 +526,20 @@ ISP/network change is out of scope for v1.
 
 **Failure-UX** (Q7-a→b): no 100%-match → surface closest candidates (≥ 85% Sørensen-Dice threshold) with explicit confirm; if no candidate ≥ threshold, hard-fail with diagnostic ("tried 6 sources, closest match was 71% on Spotify — review your input").
 
-Confirm in `exploring_` (open):
+Resolved in `exploring_` 2026-05-13:
 
-- D1 — title-variance-detection algorithm precision/recall on a hand-curated 50-entry test set from owner's actual library (gate: ≥ 95% precision / ≥ 90% recall)
-- D2 — Spotify search API path: does SpotiFLAC expose `search()`, or do we need `spotipy` + `SPOTIFY_CLIENT_ID/_SECRET` in `.env`?
-- D3 — SpotiFLAC-in-PPE feasibility: does the module survive being called over the IPC boundary? Test by importing and invoking inside a `ProcessPoolExecutor` with a sample URL
-- Q9 — ISRC backfill from SoundCloud (does the SC V2 API expose ISRC on the `/tracks/{id}` endpoint?)
-- D8 — concurrency auto-detection: which baseline (the SC `/search` endpoint? a known-cached public URL?) yields a reproducible benchmark
-- D5 — Rekordbox genre vocabulary alignment: should our canonical table mirror RB's expected genre strings, or is "whatever the user has" the right canonical?
+- ~~D2~~ ✅ — Spotify search via SpotiFLAC's `SpotifyMetadataClient` (hardcoded shared creds, no `.env` keys needed; revocation-risk acknowledged)
+- ~~Q9~~ ✅ — SC V2 API exposes `publisher_metadata.isrc` (nullable, <30% hit rate expected, opportunistic backfill)
+- ~~D5~~ ✅ — Rekordbox has no fixed genre vocabulary → ship curated user-extensible default ~50 short DJ genres; short plain strings only
+- ~~D8~~ ✅ — concurrency benchmark uses SC V2 `/resolve` baseline, 4 unique URLs, pre-warm + parallel-vs-sequential ratio
+- ~~Versions~~ ✅ — `SpotiFLAC==0.5.0` (new pin), `mutagen==1.47.0` (already pinned)
+
+Still open (carried into next round):
+
+- **D1** — 50-entry title-variance test-set from owner's actual library (Spotify-URL → expected SC-URL pairs). Algorithm precision/recall gate at ≥ 95% / ≥ 90%. **Blocked on owner input.**
+- **D3** — actual `pip install SpotiFLAC==0.5.0` + test-call inside a `ProcessPoolExecutor(max_workers=1)`. Confirm module survives IPC boundary (pickle barrier, top-level imports, hardcoded creds). **Blocked by owner's no-implementation constraint** — defer to `accepted_` phase first sanity-check.
+- **D5-starter** — initial content of the curated genre table. Can be derived from owner's existing library on first-run scan, but a starter ~50-entry hand-curated default would smooth onboarding.
+- **Risk-list for `evaluated_`**: (a) shared Spotify client revocation, (b) Songlink rate-limit (request key recommended), (c) SpotiFLAC same-day-release burn-in.
 
 ---
 
@@ -454,24 +557,26 @@ Confirm in `exploring_` (open):
 ### Files touched (expected)
 - `app/downloader/__init__.py` (new) — orchestrator + `SourceProvider` ABC + `Candidate` dataclass
 - `app/downloader/resolver.py` (new) — phase-1 parallel probe across providers, returns `Candidate[]`
-- `app/downloader/search.py` (new) — phase-1 search mode for free-form input, cross-platform expansion via Songlink/Odesli
-- `app/downloader/providers/soundcloud.py` (new) — wrap existing `soundcloud_downloader.py` (URL-resolve + V2 `/search/tracks`)
-- `app/downloader/providers/spotiflac.py` (new) — wrap SpotiFLAC inside `ProcessPoolExecutor(max_workers=1)` worker (D3)
-- `app/downloader/providers/songlink.py` (new) — Songlink/Odesli API client for cross-platform URL expansion
-- `app/downloader/quality.py` (new) — quality-ranking (5 tiers, see Findings) + best-quality picker (file-size + bit-depth + sample-rate)
-- `app/downloader/match.py` (new) — title-variance match algorithm (D1, hard duration gate + normalisation pipeline)
+- `app/downloader/search.py` (new) — phase-1 search mode for free-form input; leverages SpotiFLAC's `LinkResolver` for cross-platform pivot (no own Songlink client needed — see Reuse-B finding)
+- `app/downloader/providers/soundcloud.py` (new) — wrap existing `soundcloud_downloader.py` + V2 `/search/tracks`; extend `app/soundcloud_api.py:_normalize_track` to include `isrc` via `publisher_metadata.isrc`
+- `app/downloader/providers/spotiflac.py` (new) — wrap SpotiFLAC inside `ProcessPoolExecutor(max_workers=1)` worker (D3); import `QobuzProvider` / `TidalProvider` / `AmazonProvider` / `AppleMusicProvider` / `DeezerProvider` individually for per-service probing; import `SpotifyMetadataClient` for search; import `LinkResolver` for Songlink pivot
+- ~~`app/downloader/providers/songlink.py`~~ — **dropped**, use SpotiFLAC's bundled `core/link_resolver.py:LinkResolver`
+- `app/downloader/quality.py` (new) — quality-ranking (5 tiers, see Findings) + best-quality picker (file-size + bit-depth + sample-rate, Q3-c rule)
+- `app/downloader/match.py` (new) — title-variance match algorithm (D1, hard duration gate + 5 identity tests + Sørensen-Dice ≥ 0.92 fallback)
 - `app/downloader/match_rules.py` (new) — maintained regex list of remix/version/featuring tags for normalisation
-- `app/downloader/tagging.py` (new) — `COMMENT`-field provenance write + standard-metadata write via mutagen (per-format dispatch)
-- `app/downloader/aiff.py` (new) — FFmpeg AIFF conversion (preserve bit-depth + sample-rate, `-map_metadata 0`)
-- `app/downloader/genre_sync.py` (new) — incoming-genre → library-canonical normaliser (lookup-table + fuzzy ≥ 90% + confirm-on-novelty)
-- `app/downloader/concurrency.py` (new) — first-run benchmark (D8) → settings recommendation
-- `app/downloader/migration.py` (new) — first-launch `MUSIC_DIR/SoundCloud/<artist>/` → `MUSIC_DIR/<artist>/` migration (D7)
+- ~~`app/downloader/tagging.py`~~ — **dropped**, extend existing `app/audio_tags.py` with `serialise_provenance()` + `read_provenance()` helpers (see Reuse-A); orchestrator calls existing `write_tags(file_path, {"comment": serialised, "isrc": isrc, "genre": normalised, "year": year}, artwork_bytes)`
+- `app/downloader/aiff.py` (new) — FFmpeg AIFF conversion (preserve bit-depth + sample-rate, `-map_metadata 0`); `ffprobe` for `bits_per_raw_sample` detection
+- `app/downloader/genre_sync.py` (new) — incoming-genre → library-canonical normaliser (lookup-table + Sørensen-Dice ≥ 0.90 + confirm-on-novelty dialog); ship curated ~50 short DJ-genre default list
+- `app/downloader/concurrency.py` (new) — first-run benchmark (D8): SC V2 `/resolve` baseline, 4 unique URLs, pre-warm + parallel-vs-sequential, 7-day cache, "Re-benchmark" button hook
+- `app/downloader/migration.py` (new) — first-launch `MUSIC_DIR/SoundCloud/<artist>/` → `MUSIC_DIR/<artist>/` migration (D7); idempotent
 - `app/main.py` — new routes: `POST /api/downloads/unified/resolve`, `POST /api/downloads/unified/search`, `POST /api/downloads/unified/fetch`, all behind `X-Session-Token`
 - `app/download_registry.py` — add columns: `isrc TEXT`, `source TEXT`, `provenance_urls TEXT` (JSON), `picked_quality_tier INTEGER`
-- `requirements.txt` — pin `SpotiFLAC==<v>` + `mutagen==<v>` + (if Spotify-search needs OAuth) `spotipy==<v>`
-- `.env.example` — optional `SPOTIFY_CLIENT_ID` + `SPOTIFY_CLIENT_SECRET` (only if D2-investigation shows OAuth required for search)
+- `app/soundcloud_api.py` — **extend** `_normalize_track` output dict with `"isrc": (raw.get("publisher_metadata") or {}).get("isrc") or raw.get("isrc")` (Q9 opportunistic backfill)
+- `app/audio_tags.py` — **extend** with two helpers: `serialise_provenance(candidates, picked) -> str` + `read_provenance(comment_str) -> list[(platform, url, was_picked)]` (Q13 format)
+- `requirements.txt` — pin `SpotiFLAC==0.5.0` (new; mutagen already pinned 1.47.0 line 53)
+- `.env.example` — **optional** `SPOTIFY_CLIENT_ID` + `SPOTIFY_CLIENT_SECRET` as fallback only (default uses SpotiFLAC's shared creds; users opt-in if Spotify revokes the shared client)
 - `frontend/src/components/Download/*` — new UI: search-bar input mode, candidate-grid view with platform-icons + quality-badges, picked-source highlight, novel-genre confirmation dialog
-- `tests/test_unified_downloader_match.py` (new) — 50-entry test set for D1 algorithm
+- `tests/test_unified_downloader_match.py` (new) — 50-entry test set for D1 algorithm (blocked on owner input)
 - `tests/test_unified_downloader_quality.py` (new) — quality-ranker fixtures
 - `tests/test_unified_downloader_e2e.py` (new) — end-to-end fixtures (mocked providers)
 - `docs/architecture.md`, `docs/FILE_MAP.md`, `docs/backend-index.md`, `docs/frontend-index.md`, `CHANGELOG.md` — update at graduation
