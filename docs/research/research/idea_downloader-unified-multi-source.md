@@ -37,6 +37,7 @@ Today the project can only download from SoundCloud (`app/soundcloud_downloader.
 - Two-layer dedup (track-ID + content hash) must continue to work across sources.
 - BPM/key analysis + library auto-import flow stays the same regardless of source.
 - Surface per-candidate metadata to the UI before commit: which source, what quality, what file size, what licensing — let user override the auto-pick.
+- **Provenance write-back**: every source URL we resolved for this track (whether downloaded from or not) lands in the downloaded file's metadata — so later inspection of the file alone (in Rekordbox, on a CDJ display, via `ffprobe`, in our own UI) shows the full cross-reference set: "this track also exists on Spotify here, on Tidal here, on SoundCloud here". Includes the **picked** source plus all **rejected-but-matched** sources.
 
 **Non-goals** (deliberately out of scope)
 - Re-implementing Spotify/Tidal/Qobuz/Amazon clients ourselves. SpotiFLAC's reverse-engineered Web Player + third-party APIs (hifi-api, dabmusic.xyz, musicdl.me) are the sole bridge.
@@ -76,6 +77,11 @@ Today the project can only download from SoundCloud (`app/soundcloud_downloader.
 10. **Provider on/off in settings**: SpotiFLAC as a feature-flag, default off, gated by explicit user opt-in with disclaimer? Recommended yes (legal-posture acknowledgement happens once at first activation).
 11. **Tagging / metadata write-back**: when we get the Spotify-side metadata (album art, year, ISRC, genre), do we write it into the FLAC tags or rely on our own DB? Proposal: write standard Vorbis comments + cover-art block into the downloaded file (FLAC native), keep DB as source of truth for relational queries.
 12. **Concurrency budget**: how many sources do we probe in parallel per request? Each source = N HTTP requests + possible API key resolution. Proposal: bounded parallelism (4 sources, each with internal sequential retries).
+13. **Provenance-URLs: which tag(s)?**: container-specific decision. FLAC/OGG (Vorbis Comments) supports multi-value keys — natural fit. ID3v2 (MP3) needs either repeated `COMM` frames with distinct `desc`/`lang` or a dedicated `TXXX:SOURCES`. MP4/M4A (Apple Lossless / Amazon HD AAC) uses iTunes-style atoms (`----:com.apple.iTunes:SOURCES`). Three sub-questions:
+    - a) **Comment field vs. custom tag**: write into the standard `COMMENT` field (visible on CDJ-3000 "Comment" display, but display is short and may truncate), or use a dedicated custom tag (`SOURCES` / `TXXX:SOURCES`) that's invisible on the CDJ but visible to Rekordbox + our app? Proposal: **both** — short summary (e.g. `"sources: spotify, tidal, soundcloud"`) into `COMMENT` so it's CDJ-visible, full URL set into the custom tag.
+    - b) **Format of the custom tag**: single JSON blob (`{"spotify":"https://...","tidal":"https://...","soundcloud":"https://..."}`), or one tag per source (`SPOTIFY_URL=...`, `TIDAL_URL=...`, …), or multi-value `SOURCE=spotify|https://...` lines? Trade-off: JSON is compact + extensible but Rekordbox won't parse it; per-source tags read cleanly in `kid3` / `mp3tag` / `ffprobe`. Proposal: per-source tags (`SPOTIFY_URL`, `TIDAL_URL`, `QOBUZ_URL`, `AMAZON_URL`, `SOUNDCLOUD_URL`, `APPLEMUSIC_URL`, `YOUTUBE_URL`).
+    - c) **Picked-source marker**: how do we mark which source we actually downloaded from vs. ones that matched but weren't picked? Proposal: separate `DOWNLOADED_FROM=<source-key>` tag pointing at one of the URL keys above.
+14. **Tagging library**: [`mutagen`](https://mutagen.readthedocs.io/) is the canonical Python lib for cross-format audio tagging (handles Vorbis Comments, ID3v2, MP4 atoms, ASF, etc.) — already widely used and pinnable. Confirm: pin `mutagen==<latest>` and route all writes through it? Alternative is per-format libs (`flacstream`, `eyed3`, `mutagen.mp4`) which is more code for no gain.
 
 ## Findings / Investigation
 
@@ -130,6 +136,21 @@ Within a tier, source-priority is a settings concern (open question 3).
 **Risk acknowledgement** (must surface in `evaluated_` / `accepted_`):
 - Current `soundcloud_downloader.py` has a written `LEGAL BOUNDARIES` block. Adding SpotiFLAC moves the project from "user accesses what they have rights to on SC" to "user receives lossless audio from paid streaming services they may not subscribe to". This is **the user's call to make**, but the doc must record the decision explicitly — not slip it in via feature-creep.
 
+**Tagging — per-container reality** (re Q13):
+
+| Container | Standard tag system | Multi-value support | "Comment" field name | Custom-tag idiom |
+|---|---|---|---|---|
+| FLAC | Vorbis Comments | yes (repeat key) | `COMMENT` | uppercase free-form (`SPOTIFY_URL=...`) |
+| OGG / Opus | Vorbis Comments | yes | `COMMENT` | same as FLAC |
+| MP3 | ID3v2.3 / v2.4 | per-frame (`COMM` w/ `desc`+`lang`, or `TXXX` w/ key) | `COMM` frame | `TXXX:SPOTIFY_URL` (User-defined text frame) |
+| M4A / ALAC | MP4 atoms | yes (multi-value atoms) | `©cmt` | `----:com.apple.iTunes:SPOTIFY_URL` (reverse-DNS atom) |
+| WAV | ID3v2 chunk or LIST/INFO | partial | `ICMT` (LIST/INFO) or ID3 `COMM` | ID3v2 path recommended for parity with MP3 |
+| AIFF | ID3v2 chunk | same as MP3 | `COMM` | `TXXX:SPOTIFY_URL` |
+
+[`mutagen`](https://mutagen.readthedocs.io/) abstracts all six. One write-back module (`app/downloader/tagging.py`) implements `write_provenance(file_path, urls_dict, picked_source)` and dispatches by extension.
+
+**CDJ-3000 visibility note**: the CDJ reads Rekordbox-exported PDB metadata, not the raw file tags directly. So our PDB writer (`app/usb_pdb.py`) needs to know about the `COMMENT` content too if we want it on the CDJ display — separate sub-task. The raw file tags help in Rekordbox-on-desktop and in our own UI immediately, regardless.
+
 ## Options Considered
 
 > Required by `evaluated_`. Sketched now as starting points; deepen in `exploring_`.
@@ -182,9 +203,10 @@ Working hypothesis: **Option B (Resolver / Downloader split) with parallel probe
 - `app/downloader/providers/soundcloud.py` (new) — wrap existing `soundcloud_downloader.py` logic
 - `app/downloader/providers/spotiflac.py` (new) — wrap SpotiFLAC module
 - `app/downloader/quality.py` (new) — quality-ranking + 100%-match logic
+- `app/downloader/tagging.py` (new) — provenance-URL write-back via mutagen (cross-format dispatch)
 - `app/main.py` — new routes (`/api/downloads/unified/*`)
-- `app/download_registry.py` — add `isrc` column + `source` column
-- `requirements.txt` — pin `SpotiFLAC==<version>`
+- `app/download_registry.py` — add `isrc` column + `source` column + `provenance_urls` JSON column
+- `requirements.txt` — pin `SpotiFLAC==<version>` + `mutagen==<version>`
 - `frontend/src/components/Download*` — new UI entry point + candidate-list view
 - `docs/architecture.md`, `docs/FILE_MAP.md`, `docs/backend-index.md`, `docs/frontend-index.md` — update at graduation
 
