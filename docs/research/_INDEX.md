@@ -12,11 +12,12 @@ If this index drifts from the file system, the file system wins — re-derive wi
 ## research/
 
 ### idea
-- [idea_downloader-unified-multi-source.md](research/idea_downloader-unified-multi-source.md) — Unified downloader: combine SpotiFLAC (Spotify→Tidal/Qobuz/Amazon FLAC) with existing SoundCloud pipeline; auto-pick best quality on 100% match (2026-05-13)
+_(none)_
 
 ### exploring
 - [exploring_recommender-rules-baseline.md](research/exploring_recommender-rules-baseline.md) — Teil 1: BPM/Key/Genre/MyTag/Energy ranking + Camelot harmonic mixing; local + SoundCloud modes (2026-05-11)
 - [exploring_recommender-taste-llm-audio.md](research/exploring_recommender-taste-llm-audio.md) — Teil 2: LLM/embedding-based recommender that learns taste from listening behaviour + audio features (2026-05-11)
+- [exploring_downloader-unified-multi-source.md](research/exploring_downloader-unified-multi-source.md) — Unified downloader: Q1-Q14 resolved, D1-D8 designs (auto-search, AIFF default, genre-sync, title-variance match, SpotiFLAC PPE-isolation, unified folder layout) (2026-05-13)
 
 ### evaluated
 _(none)_
