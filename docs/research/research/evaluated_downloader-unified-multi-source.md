@@ -20,6 +20,7 @@ related: []
 - 2026-05-13 — `research/idea_` — created (request: combine Spotify-FLAC download via SpotiFLAC with existing SoundCloud pipeline; auto-pick highest quality on 100% match)
 - 2026-05-13 — `research/exploring_` — owner resolved Q1-Q14; 3 expanded goals added (auto-search, AIFF default, genre-sync); core algorithms sketched (D1-D8)
 - 2026-05-13 — content update — Claude resolved D2/D5/D8/Q9 + version pins (SpotiFLAC==0.5.0, mutagen already 1.47.0). Discovered reuse: `app/audio_tags.py` covers tagging, SpotiFLAC's `LinkResolver` covers Songlink, `SpotifyMetadataClient` covers search-without-OAuth. Scope shrunk: dropped 2 planned new modules (tagging.py, songlink.py).
+- 2026-05-13 — `research/evaluated_` — exploring round 1 complete; consolidated Risks R1-R7 with impact × probability ratings + mitigations; ready for `draftplan_` (signoff-gated).
 
 ---
 
@@ -540,6 +541,47 @@ Still open (carried into next round):
 - **D3** — actual `pip install SpotiFLAC==0.5.0` + test-call inside a `ProcessPoolExecutor(max_workers=1)`. Confirm module survives IPC boundary (pickle barrier, top-level imports, hardcoded creds). **Blocked by owner's no-implementation constraint** — defer to `accepted_` phase first sanity-check.
 - **D5-starter** — initial content of the curated genre table. Can be derived from owner's existing library on first-run scan, but a starter ~50-entry hand-curated default would smooth onboarding.
 - **Risk-list for `evaluated_`**: (a) shared Spotify client revocation, (b) Songlink rate-limit (request key recommended), (c) SpotiFLAC same-day-release burn-in.
+
+---
+
+## Risks & Mitigations (consolidated for `evaluated_`)
+
+> Sourced from Findings sections above. Each risk has a mitigation that becomes actionable in `accepted_` / `inprogress_`. Rated by Impact (`low`/`medium`/`high`) × Probability (`unlikely`/`possible`/`likely`).
+
+### R1 — SpotiFLAC's shared Spotify client revocation
+- **Impact**: medium — we lose Spotify search + URL resolution; Tidal/Qobuz/Amazon paths unaffected
+- **Probability**: possible — shared clients have a history of being killed; the credentials are findable in upstream sources
+- **Mitigation**: ship optional fallback path that accepts user-provided `SPOTIFY_CLIENT_ID` + `SPOTIFY_CLIENT_SECRET` in `.env`. Detection: catch 401/403 from SpotiFLAC's Spotify calls → surface "Spotify search unavailable, see Settings → API Keys" toast. Monitor `spotbye/SpotiFLAC` issues for revocation events upstream.
+
+### R2 — Songlink/Odesli unauthenticated rate limit (10 RPM)
+- **Impact**: medium — cross-platform URL pivot stalls; falls back to per-platform search only
+- **Probability**: likely — 10 RPM is tight for any concurrent user; first auto-search session likely hits it
+- **Mitigation**: throttle to 8 RPM until a key is provisioned; cache responses 30 days; request free production key via odesli.co contact form (administrative — owner action); rebind throttle to 50 RPM once key lands in `.env`.
+
+### R3 — SpotiFLAC same-day release (v0.5.0 released 2026-05-13)
+- **Impact**: high — panics / regressions in upstream code crash our PPE worker repeatedly
+- **Probability**: possible — any same-day release carries unsurfaced post-release bugs
+- **Mitigation**: 1-2 day burn-in window before merging the pin. Check upstream issues + release notes daily during burn-in. PPE-isolation (D3) means crashes are recoverable but not invisible — log + surface to user. Have a `SpotiFLAC==0.4.x` fallback pin ready if a critical bug is found post-merge.
+
+### R4 — SoundCloud V2 `client_id` rotation (inherited from existing SC pipeline)
+- **Impact**: medium — entire SC provider stops working until ID is refreshed
+- **Probability**: likely — already a known operational risk today, mitigated by existing dynamic scraper in `app/soundcloud_api.py`
+- **Mitigation**: existing `get_sc_client_id()` already handles this — 1-hour memory cache + live scrape fallback. No new code needed in the unified downloader; just inherit the helper.
+
+### R5 — Tidal/Qobuz/Amazon upstream API breakage (transitive via hifi-api, dabmusic.xyz, musicdl.me)
+- **Impact**: high — specific provider goes dark, e.g. losing hi-res FLAC source
+- **Probability**: likely over a 12-month horizon — third-party APIs that depend on reverse engineering have short half-lives
+- **Mitigation**: per-provider feature flag in settings → user can disable a dead provider without crashing the whole downloader. Surface "<provider> currently unavailable, last working <timestamp>" to UI. Don't auto-fall-back to a lower-quality provider silently — surface the degradation explicitly.
+
+### R6 — Legal-posture shift (kept for completeness; carried from `idea_`)
+- **Impact**: high — project category shifts from "ToS-mindful SC downloader" to "streaming-ripping tool"
+- **Probability**: certain if SpotiFLAC ships (this is a property of the feature, not a runtime risk)
+- **Mitigation**: explicit owner-acknowledgement at first-activation onboarding (Q10-c chosen). Risk is **accepted** by owner per the existing decision; re-document at `review_` so any future maintainer sees the acceptance trail.
+
+### R7 — Genre-sync novel-genre dialog UX dead-end on bootstrap
+- **Impact**: low — user gets stuck if every Spotify-genre is novel during initial library bootstrap
+- **Probability**: possible — a user with no library yet would see the dialog on every track of the first batch import
+- **Mitigation**: dialog has a "always do this for unknown genres → [add as new]" persistence option so the user only hits the dialog once per import session, not once per track. Seed the canonical table from the ~50 DJ-genre starter list at install time so the bootstrap session has a base vocabulary.
 
 ---
 

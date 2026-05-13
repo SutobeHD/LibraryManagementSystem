@@ -17,10 +17,9 @@ _(none)_
 ### exploring
 - [exploring_recommender-rules-baseline.md](research/exploring_recommender-rules-baseline.md) — Teil 1: BPM/Key/Genre/MyTag/Energy ranking + Camelot harmonic mixing; local + SoundCloud modes (2026-05-11)
 - [exploring_recommender-taste-llm-audio.md](research/exploring_recommender-taste-llm-audio.md) — Teil 2: LLM/embedding-based recommender that learns taste from listening behaviour + audio features (2026-05-11)
-- [exploring_downloader-unified-multi-source.md](research/exploring_downloader-unified-multi-source.md) — Unified downloader: Q1-Q14 resolved, D1-D8 designs (auto-search, AIFF default, genre-sync, title-variance match, SpotiFLAC PPE-isolation, unified folder layout) (2026-05-13)
 
 ### evaluated
-_(none)_
+- [evaluated_downloader-unified-multi-source.md](research/evaluated_downloader-unified-multi-source.md) — Unified downloader: Q1-Q14 + D1-D8 + D2/D5/D8/Q9 resolved, R1-R7 risks consolidated, ready for draftplan signoff (2026-05-13)
 
 ### parked
 _(none)_
