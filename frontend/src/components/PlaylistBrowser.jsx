@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import api from '../api/api';
 import { log } from '../utils/log';
@@ -168,7 +168,14 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
     const [renameNode, setRenameNode] = useState(null);
     const [collectionSearch, setCollectionSearch] = useState('');
     const [playlistSearch, setPlaylistSearch] = useState('');
-    const [displayTracks, setDisplayTracks] = useState([]);
+    // displayTracks holds the table's current sorted/filtered order, read
+    // only by the SoundCloud export. A ref (not state) so TrackTable
+    // echoing the order back on every sort/keystroke doesn't trigger a
+    // second full parent re-render.
+    const displayTracksRef = useRef([]);
+    const handleSortedTracksChange = useCallback((sorted) => {
+        displayTracksRef.current = sorted;
+    }, []);
 
     // Flatten tree to get all non-folder, non-intelligent playlists for "Add to Playlist" submenu
     const flattenPlaylists = (nodes) => {
@@ -460,7 +467,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                 return;
             }
             const { invoke } = await import('@tauri-apps/api/core');
-            const exportTracks = displayTracks.length > 0 ? displayTracks : tracks;
+            const exportTracks = displayTracksRef.current.length > 0 ? displayTracksRef.current : tracks;
             const scTracks = exportTracks.map(t => ({
                 artist: t.Artist || '',
                 title: t.Title || '',
@@ -848,7 +855,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                                     onEditTrack={onEditTrack}
                                     onPlay={onPlayTrack}
                                     variant="minimal"
-                                    onSortedTracksChange={setDisplayTracks}
+                                    onSortedTracksChange={handleSortedTracksChange}
                                     onReorder={selectedPlaylist && !isIntelligentSelected ? (trackId, newIndex) => {
                                         api.post('/api/playlists/reorder', { pid: selectedPlaylist.ID, track_id: trackId, target_index: newIndex })
                                             .then(() => {
