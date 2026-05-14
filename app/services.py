@@ -694,8 +694,15 @@ class SettingsManager:
 class MetadataManager:
     MAPPINGS_FILE = Path("metadata_mappings.json")
 
+    # In-process cache. get_mapped_name() runs once per artist-part per track
+    # during library load (100k+ calls) — without this it re-opened and
+    # re-parsed the mappings file on every single call. Keyed on MAPPINGS_FILE
+    # so the per-test monkeypatch of that path stays isolated.
+    _cache: dict[str, dict[str, str]] | None = None
+    _cache_key: Path | None = None
+
     @classmethod
-    def load(cls) -> dict[str, dict[str, str]]:
+    def _read_from_disk(cls) -> dict[str, dict[str, str]]:
         if not cls.MAPPINGS_FILE.exists():
             return {"artists": {}, "labels": {}, "albums": {}}
         try:
@@ -708,9 +715,19 @@ class MetadataManager:
             return {"artists": {}, "labels": {}, "albums": {}}
 
     @classmethod
+    def load(cls) -> dict[str, dict[str, str]]:
+        if cls._cache is not None and cls._cache_key == cls.MAPPINGS_FILE:
+            return cls._cache
+        cls._cache = cls._read_from_disk()
+        cls._cache_key = cls.MAPPINGS_FILE
+        return cls._cache
+
+    @classmethod
     def save(cls, data: dict[str, dict[str, str]]) -> None:
         with open(cls.MAPPINGS_FILE, "w", encoding='utf-8') as f:
             json.dump(data, f, indent=2)
+        cls._cache = data
+        cls._cache_key = cls.MAPPINGS_FILE
 
     @classmethod
     def add_mapping(cls, category: str, source_name: str, target_name: str) -> None:
