@@ -23,6 +23,7 @@ related: []
 - 2026-05-13 — `research/evaluated_` — exploring round 1 complete; consolidated Risks R1-R7 with impact × probability ratings + mitigations; ready for `draftplan_` (signoff-gated).
 - 2026-05-13 — `implement/draftplan_` — Implementation Plan filled: Scope (in/out), 7-phase step-by-step (22 steps), testing approach, implementation-specific rollback. Cross-stage move research/ → implement/.
 - 2026-05-13 — content update — Plan-agent pre-review at `draftplan_` stage: 6 factual repo-errors corrected in-place (`_db_write_lock` location, `X-Session-Token` nonexistence, `audio_tags` ISRC write-gap, `anlz_safe` pattern mis-copy, `_convert_to_aiff` overlap + 24-bit downgrade bug, `httpx`/`tenacity` pin). 2 new owner decisions raised (OQ-A route auth, OQ-B D3 timing). Doc stays in `draftplan_` until both answered.
+- 2026-05-13 — `implement/review_` — owner answered all 3 sign-off-blocking decisions: OQ-A (no route gate; gap logged as `idea_api-route-auth-model`), OQ-B (D3 ran → PASS), legal-posture (two-mode: ToS-friendly default + opt-in Settings "backdoor" toggle). Review checklist fully ticked. Plan ready for `accepted_` — awaiting explicit owner sign-off.
 
 ---
 
@@ -63,10 +64,10 @@ Today the project can only download from SoundCloud (`app/soundcloud_downloader.
 - **Concurrency** (CORRECTED 2026-05-13 pre-review): the lock is `app/database.py:22` `_db_write_lock` (RLock), exposed via the `db_lock()` context manager at `database.py:26` — **not** in `app/main.py`. It serialises mutations on the **Rekordbox `master.db` / XML singleton only**. The `download_registry` is a **separate SQLite file** (`MUSIC_DIR/download_registry.db`, `download_registry.py:38`) with its own per-call WAL-mode connection — it does **not** use `_db_write_lock` and must not. The real lock concern for this feature: the post-download pipeline's writes into `master.db` (library auto-import, genre-sync canonical table if stored there) must go through `db_lock()`. Registry writes do not.
 - **Filesystem sandbox**: downloads land under `MUSIC_DIR` only. Path validation goes through `validate_audio_path` so symlink-escape tricks fail. New per-source subfolders (`MUSIC_DIR/Spotify/`, `MUSIC_DIR/Tidal/`, …) follow the existing `MUSIC_DIR/SoundCloud/<artist>/<title>.<ext>` convention.
 - **FFmpeg in PATH**: required for HLS remux on SC and for any Tidal/Qobuz container conversion if SpotiFLAC delegates.
-- **Route auth** (CORRECTED 2026-05-13 pre-review): there is **no `X-Session-Token` and no `init-token` endpoint** in the codebase. The only token in `app/main.py` is `SHUTDOWN_TOKEN` (`main.py:126`, `secrets.token_urlsafe(32)`), used solely as a `?token=` query param for `/shutdown` + `/restart`. Existing SC download routes (e.g. `/api/soundcloud/download`) have **no token gate** — they rely on a `keyring`-stored OAuth token for the upstream API call, not a route-level gate. → **Open decision OQ-A** (see Pre-review section): either (a) spec a net-new `init-token` endpoint as part of this feature, or (b) match the existing SC pattern (no route-level token gate; the unified routes are functionally analogous to the SC download routes). Owner must decide before `review_`.
+- **Route auth** (RESOLVED 2026-05-13 — OQ-A, owner decision): there is **no `X-Session-Token` and no `init-token` endpoint** in the codebase (only `SHUTDOWN_TOKEN` at `main.py:126` for `/shutdown`+`/restart`; SC download routes have no route-level gate). **Owner decision**: option (b) — **no route-level token gate for v1**, consistent with the existing `/api/soundcloud/download` routes. The gap (no auth on local-API mutation routes generally) is **logged as a separate research topic** — `docs/research/research/idea_api-route-auth-model.md` — for future hardening, so it's tracked and not silently forgotten.
 - **No `requests.get()` in async path**: any new orchestration in FastAPI handlers uses `httpx.AsyncClient` (see `coding-rules.md`). SpotiFLAC itself is sync — wrap it in `run_in_threadpool` or a `ProcessPoolExecutor` (parallel to the `SafeAnlzParser` pattern in `app/anlz_safe.py`).
 - **SpotiFLAC stability**: third-party API endpoints can disappear (DMCA, rate limits, IP bans). The README explicitly warns "metadata fetching can fail due to IP rate-limits → VPN suggested". We must surface failures cleanly, never silently produce a low-quality fallback when the user asked for FLAC.
-- **Legal posture shift**: today's `soundcloud_downloader.py` has a 20-line `LEGAL BOUNDARIES` block that documents a careful ToS-mindful posture (no `snipped:true`, no `hq` probing beyond paid tier, no re-encode). SpotiFLAC's upstream APIs pull lossless audio from paid streaming services without per-user subscription verification. **This is a different category and must be acknowledged as accepted risk in the implementation doc, not silently absorbed.**
+- **Legal posture — two-mode design** (RESOLVED 2026-05-13, owner decision): today's `soundcloud_downloader.py` has a 20-line `LEGAL BOUNDARIES` block documenting a careful ToS-mindful posture. SpotiFLAC's upstream APIs pull lossless audio from paid streaming services without per-user subscription verification — a different category. **Owner decision**: the project ships **ToS-friendly by default** — the default mode is SoundCloud-only and inherits the existing `LEGAL BOUNDARIES` posture unchanged. SpotiFLAC's Tidal/Qobuz/Amazon full-rip lives behind an explicit **Settings "backdoor" toggle**, default **OFF**, with a legal disclaimer shown at activation. A fresh install is posture-identical to today's SC-only downloader; the rip capability is strictly opt-in.
 - **UPX / antivirus**: SpotiFLAC's standalone binaries are UPX-compressed and frequently flagged. We use the **Python module** (no UPX), not the bundled binary — sidesteps the AV noise but we should still document the risk.
 - **Mutagen pin** ([mutagen.readthedocs.io](https://mutagen.readthedocs.io/)): cross-format tag-write library. **Already pinned `mutagen==1.47.0`** in `requirements.txt` line 53 (used by existing `app/audio_tags.py`). No new pin needed. Latest stable 1.47.0 (2023-09-03), Python 3.7+, covers all target containers (FLAC/MP3/M4A/AIFF/WAV/OGG/OPUS).
 - **FFmpeg AIFF conversion** (Q11): `ffmpeg -i <src> -c:a pcm_s16le -map_metadata 0 <dst>.aiff` for 16-bit sources, `pcm_s24le` for 24-bit. `-map_metadata 0` carries over the source's tags (artist/title/album/etc.) so the post-download tagger only adds our additions (provenance URLs, normalised genre, ISRC, cover-art if missing). Bit-depth detection via `ffprobe -show_streams` → `bits_per_raw_sample`.
@@ -178,7 +179,7 @@ Captured directly from owner response. Numbers match `## Open Questions` above.
 | 7 | Failure UX | **a** then **b** fallback | Closest candidates first; if literally none ≥ threshold, hard-fail with diagnostic |
 | 8 | SpotiFLAC integration | **c** — `ProcessPoolExecutor(max_workers=1)` | Owner wants "im Core, aber isoliert" → import the Python module but run it in a worker process. Exactly the `SafeAnlzParser` pattern (`app/anlz_safe.py`). Explained in detail below. |
 | 9 | ISRC dedup | **a** (chosen by me, owner "idk") | ISRC as 3rd dedup key alongside SC-track-id + SHA-256; low cost, high payoff. Will explicitly re-confirm at `evaluated_`. |
-| 10 | Provider on/off | **c** — default on, one-time onboarding disclaimer | Legal acknowledgement happens in onboarding flow, not per-activation |
+| 10 | Provider on/off | **REVISED 2026-05-13 at sign-off** — two-mode: default ToS-friendly (SC-only, inherits existing `LEGAL BOUNDARIES`); SpotiFLAC full-rip behind explicit Settings "backdoor" toggle, default **OFF**, disclaimer at activation | Owner revised the earlier Q10-c "default-on" decision: project stays ToS-friendly by default, the rip capability is opt-in |
 | 11 | Standard metadata + format | **a** + AIFF-as-default + genre-sync | Album-art/year/ISRC/genre all written; output container is AIFF (lossless PCM, CDJ-native); genres normalised against library |
 | 12 | Concurrency budget | **d** + auto-detect default | Settings-configurable; first-run benchmark sets default based on CPU/RAM/network |
 | 13a | Provenance write location | **c** — `COMMENT` field only | Single field, simple, no custom-tag schema |
@@ -502,10 +503,28 @@ An independent `Plan`-agent review of the filled Implementation Plan validated i
 5. **AIFF / metadata work partly already exists** — plan listed `aiff.py` as greenfield. Reality: `_convert_to_aiff` exists at `soundcloud_downloader.py:745` and is hardcoded `pcm_s16le` — it would **downgrade 24-bit sources**, contradicting goal D4. `_apply_sc_metadata` (`:676`) already writes `permalink_url` into `COMMENT` (`:721`) — collides with our provenance write. → Corrected to "refactor not greenfield" in Step 13 + Files-touched; collision reconciliation added.
 6. **`httpx` / `tenacity` not pinned** — plan's Constraints referenced `httpx.AsyncClient` but neither lib is in `requirements.txt`. → Corrected in Files-touched: default plan keeps the SC provider sync-wrapped via `asyncio.to_thread` (the existing `main.py` pattern), so no `httpx` for v1; if async orchestration is kept, both must be Schicht-A pinned.
 
-**New open decisions surfaced by the pre-review (owner must answer before `review_` → sign-off):**
+**New open decisions surfaced by the pre-review — ALL RESOLVED 2026-05-13:**
 
-- **OQ-A — Route auth model**: (a) spec a net-new `init-token` endpoint for the unified-downloader routes, or (b) match the existing SC download routes (no route-level token gate). Recommendation: **(b)** — the unified routes are functionally analogous to `/api/soundcloud/download`, which has no gate; adding a token primitive that doesn't exist yet is scope creep.
-- **OQ-B — D3 feasibility-test timing**: D3 (`pip install SpotiFLAC` + PPE test-call) gates the entire `spotiflac.py` design but conflicts with the "no implementation" constraint. (a) lift the constraint for one throwaway script run *before* sign-off, or (b) accept that Phase 1's provider design enters sign-off unverified. Recommendation: **(a)** — it's a ~20-line throwaway script, not `app/` code, and it's the cheapest possible point to catch a fatal design flaw.
+- ~~**OQ-A — Route auth model**~~ ✅ **RESOLVED**: owner chose **(b)** — no route-level token gate for v1, consistent with existing `/api/soundcloud/download`. The general gap (no auth on local mutation routes) is logged as a separate research topic `idea_api-route-auth-model.md` for future hardening.
+- ~~**OQ-B — D3 feasibility-test timing**~~ ✅ **RESOLVED**: owner chose **(a)** — lifted the no-implementation constraint for the one throwaway test. D3 ran 2026-05-13, **PASS** (see Step 2 + Findings § "D3 feasibility test executed"). `spotiflac.py` design verified before sign-off.
+- ~~**Legal-posture**~~ ✅ **RESOLVED** (Review checklist item 6): owner chose **two-mode** — default ToS-friendly (SC-only), SpotiFLAC full-rip behind an explicit Settings "backdoor" toggle (default OFF, disclaimer at activation). Q10 + R6 + Constraints + Scope all updated.
+
+### 2026-05-13 — D3 feasibility test executed (PASS)
+
+Owner lifted the no-implementation constraint for this one throwaway test (OQ-B). Ran in an isolated temp venv, deleted afterwards — zero project-deps touched:
+
+- `pip install SpotiFLAC==0.5.0` — clean install, no build errors
+- Inside a `ProcessPoolExecutor(max_workers=1)` worker, with lazy in-worker imports (the `anlz_safe.py` pattern):
+  - `import SpotiFLAC` → `__version__ == "0.5.0"`
+  - `from SpotiFLAC import SpotifyMetadataClient, QobuzProvider, TidalProvider` → all import
+  - `from SpotiFLAC.core.link_resolver import LinkResolver` → imports
+  - `from SpotiFLAC.providers.spotify_metadata import parse_spotify_url` → imports
+  - `parse_spotify_url("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT")` → `{'type': 'track', 'id': '4cOdK2wGLETKBW3PvgPWqT'}` — offline parse round-trips across the IPC/pickle boundary
+- Warm-reuse: 2 sequential `submit()`s to the same executor both succeeded
+
+**Verdict: PASS.** Option-B + PPE-isolation architecture is feasible — no pickle-barrier issues, no breaking top-level-import side effects, offline parser round-trips cleanly. Phase 1's `spotiflac.py` is unblocked.
+
+**Carry-forward**: the D3 test only proved import/instantiation feasibility. The production `spotiflac.py` must still copy the *full* `anlz_safe.py` crash-recovery shape — `future.result(timeout=...)`, `BrokenExecutor` catch + worker restart, panic budget. That scaffolding is the whole point of the PPE choice and is not optional.
 
 ## Options Considered
 
@@ -567,10 +586,10 @@ Resolved in `exploring_` 2026-05-13:
 
 Still open (carried into next round):
 
-- **D1** — 50-entry title-variance test-set from owner's actual library (Spotify-URL → expected SC-URL pairs). Algorithm precision/recall gate at ≥ 95% / ≥ 90%. **Blocked on owner input.**
-- **D3** — actual `pip install SpotiFLAC==0.5.0` + test-call inside a `ProcessPoolExecutor(max_workers=1)`. Confirm module survives IPC boundary (pickle barrier, top-level imports, hardcoded creds). **Blocked by owner's no-implementation constraint** — defer to `accepted_` phase first sanity-check.
-- **D5-starter** — initial content of the curated genre table. Can be derived from owner's existing library on first-run scan, but a starter ~50-entry hand-curated default would smooth onboarding.
-- **Risk-list for `evaluated_`**: (a) shared Spotify client revocation, (b) Songlink rate-limit (request key recommended), (c) SpotiFLAC same-day-release burn-in.
+- **D1** — 50-entry title-variance test-set from owner's actual library (Spotify-URL → expected SC-URL pairs). Algorithm precision/recall gate at ≥ 95% / ≥ 90%. **Blocked on owner input** — but this is a test asset filled during Phase 2, not a sign-off blocker.
+- ~~**D3**~~ ✅ **DONE 2026-05-13, PASS** — `pip install SpotiFLAC==0.5.0` in an isolated venv + PPE-boundary test-call. Module survives the IPC boundary, classes import inside the worker, warm-reuse holds. `spotiflac.py` design verified feasible.
+- **D5-starter** — initial content of the curated genre table. Can be derived from owner's existing library on first-run scan; a starter ~50-entry hand-curated default would smooth onboarding. Not a sign-off blocker — implementation detail for Phase 4.
+- **Risk-list**: (a) shared Spotify client revocation [R1], (b) Songlink rate-limit [R2], (c) SpotiFLAC same-day-release burn-in [R3] — all carried into the consolidated Risks section below.
 
 ---
 
@@ -606,7 +625,7 @@ Still open (carried into next round):
 ### R6 — Legal-posture shift (kept for completeness; carried from `idea_`)
 - **Impact**: high — project category shifts from "ToS-mindful SC downloader" to "streaming-ripping tool"
 - **Probability**: certain if SpotiFLAC ships (this is a property of the feature, not a runtime risk)
-- **Mitigation**: explicit owner-acknowledgement at first-activation onboarding (Q10-c chosen). Risk is **accepted** by owner per the existing decision; re-document at `review_` so any future maintainer sees the acceptance trail.
+- **Mitigation** (REVISED 2026-05-13, owner decision): the project ships **ToS-friendly by default** — SpotiFLAC's paid-streaming-rip is OFF until the user explicitly enables the Settings "backdoor" toggle, which shows the legal disclaimer at activation. A default install is posture-identical to today's SC-only downloader. Risk is **explicitly accepted** by owner with this two-mode mitigation in place — see corrected Constraints "Legal posture — two-mode design".
 
 ### R7 — Genre-sync novel-genre dialog UX dead-end on bootstrap
 - **Impact**: low — user gets stuck if every Spotify-genre is novel during initial library bootstrap
@@ -633,7 +652,7 @@ Still open (carried into next round):
   - Unified `MUSIC_DIR/<artist>/` folder layout (Q6) + one-time idempotent migration from `MUSIC_DIR/SoundCloud/<artist>/` (D7)
   - Concurrency auto-detection benchmark (Q12-d, D8) + Settings override
   - ISRC as third dedup key (Q9) — opportunistic backfill, never blocking
-  - Per-provider feature flags + SpotiFLAC default-on with one-time onboarding disclaimer (Q10-c)
+  - Two-mode design (Q10 REVISED 2026-05-13): default **ToS-friendly mode** (SoundCloud-only, inherits existing `LEGAL BOUNDARIES` posture); SpotiFLAC's Tidal/Qobuz/Amazon full-rip behind an explicit Settings "backdoor" toggle, default **OFF**, disclaimer at activation; per-provider feature flags within the backdoor mode
 
 - **Out (deliberately)**:
   - Lyrics / LRC sync — SpotiFLAC supports it, but it's a separate research topic
@@ -651,7 +670,7 @@ Still open (carried into next round):
 
 **Phase 0 — Foundation**
 1. Burn-in wait: monitor `spotbye/SpotiFLAC` issues for 1-2 days post-0.5.0-release (R3). Then add `SpotiFLAC==0.5.0` to `requirements.txt`.
-2. **D3 feasibility test — see Open decision OQ-B.** `pip install SpotiFLAC==0.5.0` + a throwaway script that imports + calls a SpotiFLAC provider inside `ProcessPoolExecutor(max_workers=1)` with a sample URL; confirm it survives the pickle/IPC boundary. This gates the *entire* `spotiflac.py` provider design — so it should ideally run **before owner sign-off**, not after. But it requires installing the package + running code, which conflicts with the owner's "no implementation" constraint. Owner must decide (OQ-B): (a) lift the no-implementation constraint for this one throwaway script, or (b) explicitly accept that Phase 1's provider design ships into sign-off unverified.
+2. **D3 feasibility test — DONE 2026-05-13, PASS** (owner lifted the no-implementation constraint for this one throwaway test per OQ-B). SpotiFLAC 0.5.0 installed cleanly in an isolated temp venv (no project-deps touched); `SpotifyMetadataClient` / `QobuzProvider` / `TidalProvider` / `LinkResolver` all import inside a `ProcessPoolExecutor(max_workers=1)` worker; the offline `parse_spotify_url()` returns `{'type':'track','id':...}` correctly across the IPC/pickle boundary; warm-reuse (2 sequential submits) survives. **The `spotiflac.py` provider design is verified feasible** — Phase 1 is unblocked. When this graduates to real code, copy the *full* `anlz_safe.py` shape (panic budget, `BrokenExecutor` handling, `future.result(timeout=)`, restart logic) — not the simplified sketch.
 3. `download_registry` schema migration: additive columns only — `isrc TEXT`, `source TEXT`, `provenance_urls TEXT` (JSON), `picked_quality_tier INTEGER`. Old code ignores them; no drops. Migration uses `download_registry.py`'s own WAL connection — **does NOT touch `_db_write_lock`** (separate DB; corrected per pre-review).
 
 **Phase 1 — Provider layer**
@@ -678,7 +697,7 @@ Still open (carried into next round):
 
 **Phase 5 — Orchestration + API**
 18. Orchestrator in `app/downloader/__init__.py` — wire the 9-step post-download pipeline from the Recommendation. Writes into `master.db` (library auto-import, genre canonical table) go through `db_lock()` from `app/database.py`; writes into `download_registry.db` use that module's own WAL connection (corrected per pre-review).
-19. `app/main.py` routes: `POST /api/downloads/unified/{resolve,search,fetch}`. Auth model per **OQ-A** decision (no `X-Session-Token` exists today — see corrected Constraints). Use `route-architect` agent before touching `main.py`.
+19. `app/main.py` routes: `POST /api/downloads/unified/{resolve,search,fetch}`. **No route-level token gate** (OQ-A resolved — matches existing `/api/soundcloud/download` pattern). Use `route-architect` agent before touching `main.py`.
 
 **Phase 6 — Frontend**
 20. `frontend/src/components/Download/*` — search-bar input mode, candidate-grid with platform-icons + quality-badges, picked-source highlight, novel-genre confirmation dialog. Routes through `frontend/src/api/api.js` axios instance.
@@ -757,17 +776,17 @@ Risk register R1-R7 above covers the runtime/operational risks with mitigations.
 **Pre-review (2026-05-13, `Plan` agent, `draftplan_` stage)**: independent validation against the real repo. Found the risk/rollback/docs work solid, caught 6 factual errors (all corrected in-place — see Findings § "Pre-review corrections"). Surfaced 2 new owner decisions (OQ-A, OQ-B) that block `review_` → sign-off. Checklist status reflects the pre-review:
 
 - [x] Plan addresses all goals — *PASS-with-caveat: provenance/`COMMENT` collision with existing SC pipeline noted + reconciliation added to Step 15 / Files-touched*
-- [x] Open questions answered or explicitly deferred — *D1 + D5-starter deferred to owner input; D3 timing escalated as OQ-B*
+- [x] Open questions answered or explicitly deferred — *D1 + D5-starter deferred (test asset / Phase-4 detail, not sign-off blockers); D3 executed → PASS*
 - [x] Risk mitigations defined — *R1-R7 + implementation-specific rollback section*
 - [x] Rollback path clear — *kill-switch default-off, additive-only migration, per-provider flags, atomic per-phase commits, Phase-0 gate*
 - [x] Affected docs identified — *`architecture.md`, `FILE_MAP.md`, `backend-index.md`, `frontend-index.md`, `CHANGELOG.md`*
-- [ ] **Legal-posture shift acknowledged and accepted by owner** — *owner-only, pending*
-- [ ] **OQ-A answered** — route auth model: net-new `init-token` vs. match existing SC pattern (owner-only, pending; recommendation: match SC pattern)
-- [ ] **OQ-B answered** — D3 feasibility-test timing: run before sign-off vs. accept unverified Phase-1 design (owner-only, pending; recommendation: run before sign-off)
+- [x] **Legal-posture shift acknowledged and accepted by owner** — *RESOLVED 2026-05-13: owner chose the two-mode design (default ToS-friendly, SpotiFLAC rip behind an opt-in Settings "backdoor" toggle). Explicitly accepted.*
+- [x] **OQ-A answered** — *RESOLVED: option (b), no route-level token gate (matches existing SC routes); general gap logged as `idea_api-route-auth-model.md`.*
+- [x] **OQ-B answered** — *RESOLVED: option (a), D3 ran before sign-off → PASS.*
 
 **Rework reasons / notes:**
 - Pre-review corrections were applied **in-place** rather than via a `rework_` round-trip — the doc was still in `draftplan_` ("plan is being written"), not yet formally submitted to `review_`. Full audit trail in Findings § "Pre-review corrections".
-- The doc stays in `draftplan_` (not promoted to `review_`) until OQ-A + OQ-B are answered — only then is the plan genuinely "ready, waiting for sign-off".
+- 2026-05-13: OQ-A + OQ-B + legal-posture all answered by owner; doc promoted `draftplan_` → `review_`. The plan is now "ready, waiting for sign-off". The remaining `review_` → `accepted_` promotion requires **explicit owner sign-off** per `.claude/rules/research-pipeline.md` — this review checklist being fully ticked is a precondition, not the sign-off itself.
 
 ## Implementation Log
 

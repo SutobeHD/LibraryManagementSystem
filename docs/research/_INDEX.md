@@ -12,7 +12,7 @@ If this index drifts from the file system, the file system wins — re-derive wi
 ## research/
 
 ### idea
-_(none)_
+- [idea_api-route-auth-model.md](research/idea_api-route-auth-model.md) — Local FastAPI mutation routes have no route-level auth gate; deliberate decision needed (spun off from downloader OQ-A) (2026-05-13)
 
 ### exploring
 - [exploring_recommender-rules-baseline.md](research/exploring_recommender-rules-baseline.md) — Teil 1: BPM/Key/Genre/MyTag/Energy ranking + Camelot harmonic mixing; local + SoundCloud modes (2026-05-11)
@@ -29,10 +29,10 @@ _(none)_
 ## implement/
 
 ### draftplan
-- [draftplan_downloader-unified-multi-source.md](implement/draftplan_downloader-unified-multi-source.md) — Unified downloader: plan filled + Plan-agent pre-review done (6 repo-errors corrected in-place). Blocked on owner decisions OQ-A (route auth) + OQ-B (D3 timing) before review_ → signoff (2026-05-13)
+_(none)_
 
 ### review
-_(none)_
+- [review_downloader-unified-multi-source.md](implement/review_downloader-unified-multi-source.md) — Unified downloader: all 3 sign-off-blocking owner decisions resolved (OQ-A no route gate, OQ-B D3→PASS, legal-posture two-mode). Review checklist fully ticked. Awaiting explicit owner `accepted_` sign-off (2026-05-13)
 
 ### rework
 _(none)_
