@@ -21,6 +21,7 @@ related: []
 - 2026-05-13 — `research/exploring_` — owner resolved Q1-Q14; 3 expanded goals added (auto-search, AIFF default, genre-sync); core algorithms sketched (D1-D8)
 - 2026-05-13 — content update — Claude resolved D2/D5/D8/Q9 + version pins (SpotiFLAC==0.5.0, mutagen already 1.47.0). Discovered reuse: `app/audio_tags.py` covers tagging, SpotiFLAC's `LinkResolver` covers Songlink, `SpotifyMetadataClient` covers search-without-OAuth. Scope shrunk: dropped 2 planned new modules (tagging.py, songlink.py).
 - 2026-05-13 — `research/evaluated_` — exploring round 1 complete; consolidated Risks R1-R7 with impact × probability ratings + mitigations; ready for `draftplan_` (signoff-gated).
+- 2026-05-13 — `implement/draftplan_` — Implementation Plan filled: Scope (in/out), 7-phase step-by-step (22 steps), testing approach, implementation-specific rollback. Cross-stage move research/ → implement/.
 
 ---
 
@@ -590,11 +591,72 @@ Still open (carried into next round):
 > Required from `implement/draftplan_` onward. Not filled at `idea_` stage.
 
 ### Scope
-- **In**: …
-- **Out (deliberately)**: …
+
+- **In**:
+  - Single-track resolution + download across Spotify / SoundCloud / Tidal / Qobuz / Amazon / Apple Music / YouTube (any platform URL as input)
+  - Playlist-batch download (Q5-b) — same per-track resolution loop applied over a playlist URL
+  - Auto-search mode (Q1-d, D2) — free-form `Artist – Title` input → parallel platform search → candidate grid
+  - Best-quality auto-pick among 100%-match candidates (Q3-c, D1 match + quality ranker)
+  - AIFF-as-default output container (Q11, D4) — lossless source → AIFF; lossy source stays in original container
+  - Provenance-URL write into `COMMENT` field (Q13, D6) via extended `app/audio_tags.py`
+  - Standard metadata write-back: year, ISRC, album-art, normalised genre (Q11)
+  - Genre-sync against a user-extensible canonical table (D5) with novel-genre confirmation dialog
+  - Unified `MUSIC_DIR/<artist>/` folder layout (Q6) + one-time idempotent migration from `MUSIC_DIR/SoundCloud/<artist>/` (D7)
+  - Concurrency auto-detection benchmark (Q12-d, D8) + Settings override
+  - ISRC as third dedup key (Q9) — opportunistic backfill, never blocking
+  - Per-provider feature flags + SpotiFLAC default-on with one-time onboarding disclaimer (Q10-c)
+
+- **Out (deliberately)**:
+  - Lyrics / LRC sync — SpotiFLAC supports it, but it's a separate research topic
+  - Spotify OAuth / user-account login — public metadata only (uses SpotiFLAC's shared client)
+  - Private-playlist read — only public playlists in v1
+  - Target-format choice — AIFF is the *only* lossless target in v1; no user-selectable FLAC/WAV output
+  - Auto-rerun of the concurrency benchmark on network/ISP change — manual "Re-benchmark" button only
+  - CDJ-3000 PDB `COMMENT` propagation — the raw file tags are written, but threading the comment into `app/usb_pdb.py`'s PDB writer so it shows on the CDJ display is a **separate follow-up sub-task**
+  - Re-implementing any streaming-service client — SpotiFLAC is the sole bridge
+  - Hi-res *down*-conversion as a default — preserved by default (Q4-c); opt-in setting only
 
 ### Step-by-step
-1. …
+
+> Phased so each phase ends in a green, independently-committable state. Atomic commit per numbered step where practical.
+
+**Phase 0 — Foundation**
+1. Burn-in wait: monitor `spotbye/SpotiFLAC` issues for 1-2 days post-0.5.0-release (R3). Then add `SpotiFLAC==0.5.0` to `requirements.txt`.
+2. D3 sanity check (first implementation act): `pip install SpotiFLAC==0.5.0`, write a throwaway script that imports + calls a SpotiFLAC provider inside `ProcessPoolExecutor(max_workers=1)` with a sample URL. Confirm it survives the pickle/IPC boundary. **If it fails → escalate, this gates the whole `spotiflac.py` provider design.**
+3. `download_registry` schema migration: additive columns only — `isrc TEXT`, `source TEXT`, `provenance_urls TEXT` (JSON), `picked_quality_tier INTEGER`. Old code ignores them; no drops. Migration acquires `_db_write_lock`.
+
+**Phase 1 — Provider layer**
+4. `app/downloader/__init__.py` — `SourceProvider` ABC (`resolve()`, `search()`, `download()`) + `Candidate` Pydantic-v2 dataclass (url, platform, claimed_quality, format, bit_depth, sample_rate, isrc, match_score, quality_tier_int).
+5. `app/downloader/providers/spotiflac.py` — `ProcessPoolExecutor(max_workers=1)` worker (D3 pattern, mirrors `app/anlz_safe.py`). Import `QobuzProvider`/`TidalProvider`/`AmazonProvider`/`AppleMusicProvider`/`DeezerProvider`/`SpotifyMetadataClient`/`LinkResolver` *inside* the worker.
+6. Extend `app/soundcloud_api.py:_normalize_track` — add `"isrc"` field (Q9 one-liner).
+7. `app/downloader/providers/soundcloud.py` — wrap existing `soundcloud_downloader.py` acquisition logic + add V2 `/search/tracks` for search mode.
+
+**Phase 2 — Matching + quality**
+8. `app/downloader/match_rules.py` — maintained regex lists (remix/version/featuring tags, separators).
+9. `app/downloader/match.py` — title-variance algorithm (D1): duration hard-gate + normalisation pipeline + 5 identity tests + Sørensen-Dice ≥ 0.92 fallback.
+10. `app/downloader/quality.py` — 5-tier quality ranking + best-pick (Q3-c: bit-depth → sample-rate → file-size).
+
+**Phase 3 — Resolver + Search**
+11. `app/downloader/resolver.py` — phase-1 parallel probe across enabled providers (bounded concurrency from D8 setting), returns `Candidate[]` filtered through `match.py`.
+12. `app/downloader/search.py` — free-form search → parallel platform search → SpotiFLAC `LinkResolver` cross-platform pivot → ISRC-dedupe → candidate grid.
+
+**Phase 4 — Post-download pipeline**
+13. `app/downloader/aiff.py` — FFmpeg conversion (D4): `ffprobe` bit-depth detection → `pcm_s16le`/`pcm_s24le` → `-map_metadata 0`.
+14. `app/downloader/genre_sync.py` — canonical-table normaliser + ~50-genre starter seed + novel-genre dialog hook.
+15. Extend `app/audio_tags.py` — `serialise_provenance()` + `read_provenance()` helpers (D6).
+16. `app/downloader/migration.py` — idempotent `SoundCloud/<artist>/` → `<artist>/` folder migration (D7).
+17. `app/downloader/concurrency.py` — first-run benchmark (D8) → `settings.json`.
+
+**Phase 5 — Orchestration + API**
+18. Orchestrator in `app/downloader/__init__.py` — wire the 9-step post-download pipeline from the Recommendation; all `master.db` writes acquire `_db_write_lock`.
+19. `app/main.py` routes: `POST /api/downloads/unified/{resolve,search,fetch}` behind `X-Session-Token`. Use `route-architect` agent before touching `main.py`.
+
+**Phase 6 — Frontend**
+20. `frontend/src/components/Download/*` — search-bar input mode, candidate-grid with platform-icons + quality-badges, picked-source highlight, novel-genre confirmation dialog. Routes through `frontend/src/api/api.js` axios instance.
+
+**Phase 7 — Tests + graduation**
+21. Test suite (see Testing approach).
+22. Docs: `architecture.md` data-flow, `FILE_MAP.md`, `backend-index.md`, `frontend-index.md`, `CHANGELOG.md`. Then `git mv` doc → `archived/implemented_<date>`.
 
 ### Files touched (expected)
 - `app/downloader/__init__.py` (new) — orchestrator + `SourceProvider` ABC + `Candidate` dataclass
@@ -624,10 +686,39 @@ Still open (carried into next round):
 - `docs/architecture.md`, `docs/FILE_MAP.md`, `docs/backend-index.md`, `docs/frontend-index.md`, `CHANGELOG.md` — update at graduation
 
 ### Testing approach
-- …
+
+- **Unit**
+  - `tests/test_unified_downloader_match.py` — D1 algorithm against the 50-entry owner-curated test-set. **Gate: ≥ 95% precision / ≥ 90% recall.** Phase 2 does not complete until this passes.
+  - `tests/test_unified_downloader_quality.py` — quality-ranker fixtures: synthetic `Candidate[]` lists, assert correct tier ordering + tiebreak (bit-depth → sample-rate → file-size).
+  - `genre_sync` fuzzy-match — known incoming strings → expected canonical (Sørensen-Dice ≥ 0.90 boundary cases).
+  - `audio_tags` provenance round-trip — `serialise_provenance()` output fed back through `read_provenance()` must reconstruct order + picked-flag.
+- **Integration** (pytest `integration` marker)
+  - `resolver.py` with mocked providers — assert parallel probe aggregates + filters to 100%-match correctly.
+  - `migration.py` idempotency — run twice, assert second run is a no-op; assert DB path rows updated.
+  - `concurrency.py` benchmark determinism — mock the SC `/resolve` latencies, assert threshold mapping.
+  - `download_registry` schema migration — assert additive columns present, old rows readable.
+- **E2E** (`e2e-tester` subagent)
+  - Real dev servers (`npm run dev:full`): paste a Spotify URL → candidate grid renders → pick → download → file lands in `MUSIC_DIR/<artist>/` as `.aiff` with correct `COMMENT` provenance + ISRC + genre tags.
+  - Auto-search path: free-form input → grid with platform-icons → download.
+  - Novel-genre dialog: import a track with an unknown genre → dialog appears → "always add" persists.
+- **Manual gates**
+  - D3 PPE-feasibility (Phase 0, step 2) — blocks Phase 1.
+  - SpotiFLAC burn-in monitoring (Phase 0, step 1) — blocks the `requirements.txt` pin.
+  - `audio-stack-reviewer` subagent on `aiff.py` (FFmpeg invocation, bit-depth handling).
+  - `route-architect` subagent before `app/main.py` edits; `test-runner` after each phase; `doc-syncer` before graduation.
+- **Per-area runner**: invoke `test-runner` subagent after each phase, not the whole suite — area-scoped runs (`pytest tests/test_unified_downloader_*.py -v`).
 
 ### Risks & rollback
-- …
+
+Risk register R1-R7 above covers the runtime/operational risks with mitigations. Implementation-specific rollback:
+
+- **Master kill-switch**: `unified_downloader.enabled` setting, **default `false`** until the full test suite is green + E2E passes. Feature is dark in production until explicitly switched on.
+- **DB migration is additive-only** — four new columns, zero drops/renames. Old code paths ignore unknown columns; rolling back the code leaves the columns harmlessly present. No down-migration needed.
+- **Folder migration (D7) is idempotent + flagged** — `legacy_per_source_folders` setting. Migration itself is not auto-reverted (files already moved), but the flag stops *new* downloads from using the unified layout if the user wants the old behaviour back.
+- **Per-provider feature flags** — each of SpotiFLAC / SoundCloud / each sub-provider can be independently disabled in Settings. A dead upstream (R5) degrades gracefully instead of breaking the whole downloader.
+- **SpotiFLAC pin fallback** — keep `SpotiFLAC==0.4.x` known-good as a documented fallback pin (R3). Pin bump is one-line revert.
+- **Atomic commits per phase** — each numbered step lands as its own commit, so `git revert <sha>` cleanly backs out any single phase without unravelling the rest.
+- **Phase 0 gate** — if D3 (PPE feasibility) fails, the entire `spotiflac.py` design is invalid and the plan returns to `rework_` before any provider code is written. This is the cheapest possible failure point.
 
 ## Review
 
