@@ -221,7 +221,8 @@ app.add_middleware(
     ],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=["*"],
+    expose_headers=["X-Total-Count"],
 )
 
 from fastapi.exceptions import RequestValidationError
@@ -630,16 +631,6 @@ async def clean_xml(
 
 @app.get("/api/genres")
 def get_genres(): return db.get_all_genres()
-
-@app.get("/api/library/tracks")
-def get_library_tracks():
-    try:
-        tracks = db.get_all_tracks()
-        logger.info(f"Returning {len(tracks)} tracks for library view")
-        return tracks
-    except Exception as e:
-        logger.error(f"Failed to fetch library tracks: {e}")
-        return []
 
 @app.get("/api/insights/low_quality")
 def get_low_quality_tracks():
@@ -1552,13 +1543,44 @@ async def get_artwork(path: str):
     return FileResponse(file_path)
 
 @app.get("/api/library/tracks")
-def get_library_tracks():
-    logger.info("Fetching all library tracks...")
+def get_library_tracks(
+    response: Response,
+    limit: int | None = None,
+    offset: int = 0,
+    light: bool = False,
+):
+    """Return library tracks as a JSON array.
+
+    No params -> full list, all fields (backward-compat: frontend callers
+    rely on res.data being a plain array). `light=true` drops the heavy
+    `beatGrid` / `Cues` fields per track. `limit`/`offset` paginate the slice.
+    `X-Total-Count` always carries the full pre-slice count.
+    """
+    logger.info(
+        "Fetching library tracks (limit=%s offset=%s light=%s)", limit, offset, light
+    )
     if not db.active_db:
         logger.warning("No active DB found for library tracks.")
+        response.headers["X-Total-Count"] = "0"
         return []
+
+    # get_all_tracks() returns REFERENCES to live cached dicts — never mutate.
     tracks = db.active_db.get_all_tracks()
-    logger.info(f"Returning {len(tracks)} tracks from library.")
+    total = len(tracks)
+    response.headers["X-Total-Count"] = str(total)
+
+    if limit is not None:
+        tracks = tracks[offset : offset + limit]
+    elif offset:
+        tracks = tracks[offset:]
+
+    if light:
+        tracks = [
+            {k: v for k, v in t.items() if k not in ("beatGrid", "Cues")}
+            for t in tracks
+        ]
+
+    logger.info("Returning %d of %d library tracks.", len(tracks), total)
     return tracks
 
 @app.get("/api/playlist/{pid}/tracks")
