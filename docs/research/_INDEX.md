@@ -29,7 +29,7 @@ _(none)_
 ## implement/
 
 ### draftplan
-- [draftplan_downloader-unified-multi-source.md](implement/draftplan_downloader-unified-multi-source.md) — Unified downloader: Implementation Plan filled (Scope, 7-phase/22-step plan, testing approach, rollback). Awaiting review_ → accepted_ signoff (2026-05-13)
+- [draftplan_downloader-unified-multi-source.md](implement/draftplan_downloader-unified-multi-source.md) — Unified downloader: plan filled + Plan-agent pre-review done (6 repo-errors corrected in-place). Blocked on owner decisions OQ-A (route auth) + OQ-B (D3 timing) before review_ → signoff (2026-05-13)
 
 ### review
 _(none)_

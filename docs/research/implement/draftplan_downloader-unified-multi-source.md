@@ -22,6 +22,7 @@ related: []
 - 2026-05-13 — content update — Claude resolved D2/D5/D8/Q9 + version pins (SpotiFLAC==0.5.0, mutagen already 1.47.0). Discovered reuse: `app/audio_tags.py` covers tagging, SpotiFLAC's `LinkResolver` covers Songlink, `SpotifyMetadataClient` covers search-without-OAuth. Scope shrunk: dropped 2 planned new modules (tagging.py, songlink.py).
 - 2026-05-13 — `research/evaluated_` — exploring round 1 complete; consolidated Risks R1-R7 with impact × probability ratings + mitigations; ready for `draftplan_` (signoff-gated).
 - 2026-05-13 — `implement/draftplan_` — Implementation Plan filled: Scope (in/out), 7-phase step-by-step (22 steps), testing approach, implementation-specific rollback. Cross-stage move research/ → implement/.
+- 2026-05-13 — content update — Plan-agent pre-review at `draftplan_` stage: 6 factual repo-errors corrected in-place (`_db_write_lock` location, `X-Session-Token` nonexistence, `audio_tags` ISRC write-gap, `anlz_safe` pattern mis-copy, `_convert_to_aiff` overlap + 24-bit downgrade bug, `httpx`/`tenacity` pin). 2 new owner decisions raised (OQ-A route auth, OQ-B D3 timing). Doc stays in `draftplan_` until both answered.
 
 ---
 
@@ -59,10 +60,10 @@ Today the project can only download from SoundCloud (`app/soundcloud_downloader.
 > External facts that bound the solution space.
 
 - **Schicht-A pinning** ([SECURITY.md](../../SECURITY.md), [coding-rules.md](../../../.claude/rules/coding-rules.md)): `SpotiFLAC==X.Y.Z` in `requirements.txt` — no `>=`. Lock both SpotiFLAC and its transitive deps. Verify CVE notes before any bump.
-- **Concurrency**: every DB write through `master.db` must acquire `app/main.py:_db_write_lock` (RLock). The `download_registry` is already on it via the SC path — new sources must use the same registry, not a parallel table.
+- **Concurrency** (CORRECTED 2026-05-13 pre-review): the lock is `app/database.py:22` `_db_write_lock` (RLock), exposed via the `db_lock()` context manager at `database.py:26` — **not** in `app/main.py`. It serialises mutations on the **Rekordbox `master.db` / XML singleton only**. The `download_registry` is a **separate SQLite file** (`MUSIC_DIR/download_registry.db`, `download_registry.py:38`) with its own per-call WAL-mode connection — it does **not** use `_db_write_lock` and must not. The real lock concern for this feature: the post-download pipeline's writes into `master.db` (library auto-import, genre-sync canonical table if stored there) must go through `db_lock()`. Registry writes do not.
 - **Filesystem sandbox**: downloads land under `MUSIC_DIR` only. Path validation goes through `validate_audio_path` so symlink-escape tricks fail. New per-source subfolders (`MUSIC_DIR/Spotify/`, `MUSIC_DIR/Tidal/`, …) follow the existing `MUSIC_DIR/SoundCloud/<artist>/<title>.<ext>` convention.
 - **FFmpeg in PATH**: required for HLS remux on SC and for any Tidal/Qobuz container conversion if SpotiFLAC delegates.
-- **`X-Session-Token` gate**: any new `/api/spotify/...` or `/api/downloads/unified/...` route writing the DB must follow the same token policy as existing `system_*` endpoints.
+- **Route auth** (CORRECTED 2026-05-13 pre-review): there is **no `X-Session-Token` and no `init-token` endpoint** in the codebase. The only token in `app/main.py` is `SHUTDOWN_TOKEN` (`main.py:126`, `secrets.token_urlsafe(32)`), used solely as a `?token=` query param for `/shutdown` + `/restart`. Existing SC download routes (e.g. `/api/soundcloud/download`) have **no token gate** — they rely on a `keyring`-stored OAuth token for the upstream API call, not a route-level gate. → **Open decision OQ-A** (see Pre-review section): either (a) spec a net-new `init-token` endpoint as part of this feature, or (b) match the existing SC pattern (no route-level token gate; the unified routes are functionally analogous to the SC download routes). Owner must decide before `review_`.
 - **No `requests.get()` in async path**: any new orchestration in FastAPI handlers uses `httpx.AsyncClient` (see `coding-rules.md`). SpotiFLAC itself is sync — wrap it in `run_in_threadpool` or a `ProcessPoolExecutor` (parallel to the `SafeAnlzParser` pattern in `app/anlz_safe.py`).
 - **SpotiFLAC stability**: third-party API endpoints can disappear (DMCA, rate limits, IP bans). The README explicitly warns "metadata fetching can fail due to IP rate-limits → VPN suggested". We must surface failures cleanly, never silently produce a low-quality fallback when the user asked for FLAC.
 - **Legal posture shift**: today's `soundcloud_downloader.py` has a 20-line `LEGAL BOUNDARIES` block that documents a careful ToS-mindful posture (no `snipped:true`, no `hq` probing beyond paid tier, no re-encode). SpotiFLAC's upstream APIs pull lossless audio from paid streaming services without per-user subscription verification. **This is a different category and must be acknowledged as accepted risk in the implementation doc, not silently absorbed.**
@@ -478,6 +479,34 @@ Cache 7 days. Settings UI exposes "Re-benchmark" button for manual rerun. Auto-r
 - **D5 starter list**: curated default genre-pool content — can be derived from owner's existing library on first run, but starter (~50 genres) needs a quick taste-pass from owner
 - **Risk acknowledgements** for `evaluated_` phase: (a) shared Spotify client could be revoked, (b) Songlink rate-limit without key is tight, (c) SpotiFLAC released same-day as this research — burn-in needed
 
+### 2026-05-13 — Pre-review corrections (Plan agent, draftplan_ stage)
+
+An independent `Plan`-agent review of the filled Implementation Plan validated its assumptions against the actual repo. It found the risk/rollback/docs work solid but caught **6 factual errors / under-specifications** about the codebase. All are corrected in-place above; this subsection is the audit trail.
+
+**5-item checklist verdict** (item 6, legal-posture, is owner-only):
+
+| # | Item | Verdict |
+|---|---|---|
+| 1 | Plan addresses all goals | PASS-with-caveat — `COMMENT`-only provenance collides with existing SC pipeline's `permalink_url` write |
+| 2 | Open questions deferred safely | PASS-with-caveat — D3 deferral was backwards (gate deferred *past* sign-off) |
+| 3 | Risk mitigations defined | PASS |
+| 4 | Rollback path clear | PASS |
+| 5 | Affected docs identified | PASS |
+
+**Corrections applied:**
+
+1. **`_db_write_lock` location + applicability** — plan said `app/main.py:_db_write_lock` and claimed `download_registry` "is already on it". Reality: lock is `app/database.py:22` (`db_lock()` ctx mgr at `:26`), guards `master.db` only. `download_registry.db` is a **separate SQLite file** (`download_registry.py:38`) with its own WAL connection — does not and must not use the lock. → Corrected in Constraints, Step 3, Step 18.
+2. **`X-Session-Token` does not exist** — plan gated routes "behind `X-Session-Token`" and referenced a `system_*` token policy. Reality: only `SHUTDOWN_TOKEN` exists (`main.py:126`), as a `?token=` param for `/shutdown`+`/restart`. SC download routes have no route-level token gate at all. → Corrected in Constraints + Step 19; raised as **OQ-A**.
+3. **`audio_tags.py` cannot currently write ISRC** — plan's Step 15 assumed `write_tags(..., {"isrc": ...})` works. Reality: `_FIELD_ALIASES` has no `isrc` entry; no `_write_*` handler emits `TSRC`. The gap is explicitly documented at `soundcloud_downloader.py:723-727`. The extension is bigger than "2 thin helpers" — needs write-side ISRC aliasing + per-format wiring. → Corrected in Step 15 + Files-touched.
+4. **`anlz_safe.py` PPE pattern mis-copied** — plan's D3 snippet wrapped the executor call in `anyio.to_thread.run_sync`; `anlz_safe.py` submits to the executor directly and calls `future.result(timeout=...)`. The snippet also omitted the load-bearing parts (`PER_CHUNK_TIMEOUT_S`, `BrokenExecutor` handling, panic budget, restart logic) and had no `timeout=` (a `coding-rules.md` violation). → Will be corrected when the D3 snippet graduates to real `spotiflac.py`; noted here so the implementer copies the *full* `anlz_safe` shape, not the sketch.
+5. **AIFF / metadata work partly already exists** — plan listed `aiff.py` as greenfield. Reality: `_convert_to_aiff` exists at `soundcloud_downloader.py:745` and is hardcoded `pcm_s16le` — it would **downgrade 24-bit sources**, contradicting goal D4. `_apply_sc_metadata` (`:676`) already writes `permalink_url` into `COMMENT` (`:721`) — collides with our provenance write. → Corrected to "refactor not greenfield" in Step 13 + Files-touched; collision reconciliation added.
+6. **`httpx` / `tenacity` not pinned** — plan's Constraints referenced `httpx.AsyncClient` but neither lib is in `requirements.txt`. → Corrected in Files-touched: default plan keeps the SC provider sync-wrapped via `asyncio.to_thread` (the existing `main.py` pattern), so no `httpx` for v1; if async orchestration is kept, both must be Schicht-A pinned.
+
+**New open decisions surfaced by the pre-review (owner must answer before `review_` → sign-off):**
+
+- **OQ-A — Route auth model**: (a) spec a net-new `init-token` endpoint for the unified-downloader routes, or (b) match the existing SC download routes (no route-level token gate). Recommendation: **(b)** — the unified routes are functionally analogous to `/api/soundcloud/download`, which has no gate; adding a token primitive that doesn't exist yet is scope creep.
+- **OQ-B — D3 feasibility-test timing**: D3 (`pip install SpotiFLAC` + PPE test-call) gates the entire `spotiflac.py` design but conflicts with the "no implementation" constraint. (a) lift the constraint for one throwaway script run *before* sign-off, or (b) accept that Phase 1's provider design enters sign-off unverified. Recommendation: **(a)** — it's a ~20-line throwaway script, not `app/` code, and it's the cheapest possible point to catch a fatal design flaw.
+
 ## Options Considered
 
 > Required by `evaluated_`. Sketched now as starting points; deepen in `exploring_`.
@@ -622,8 +651,8 @@ Still open (carried into next round):
 
 **Phase 0 — Foundation**
 1. Burn-in wait: monitor `spotbye/SpotiFLAC` issues for 1-2 days post-0.5.0-release (R3). Then add `SpotiFLAC==0.5.0` to `requirements.txt`.
-2. D3 sanity check (first implementation act): `pip install SpotiFLAC==0.5.0`, write a throwaway script that imports + calls a SpotiFLAC provider inside `ProcessPoolExecutor(max_workers=1)` with a sample URL. Confirm it survives the pickle/IPC boundary. **If it fails → escalate, this gates the whole `spotiflac.py` provider design.**
-3. `download_registry` schema migration: additive columns only — `isrc TEXT`, `source TEXT`, `provenance_urls TEXT` (JSON), `picked_quality_tier INTEGER`. Old code ignores them; no drops. Migration acquires `_db_write_lock`.
+2. **D3 feasibility test — see Open decision OQ-B.** `pip install SpotiFLAC==0.5.0` + a throwaway script that imports + calls a SpotiFLAC provider inside `ProcessPoolExecutor(max_workers=1)` with a sample URL; confirm it survives the pickle/IPC boundary. This gates the *entire* `spotiflac.py` provider design — so it should ideally run **before owner sign-off**, not after. But it requires installing the package + running code, which conflicts with the owner's "no implementation" constraint. Owner must decide (OQ-B): (a) lift the no-implementation constraint for this one throwaway script, or (b) explicitly accept that Phase 1's provider design ships into sign-off unverified.
+3. `download_registry` schema migration: additive columns only — `isrc TEXT`, `source TEXT`, `provenance_urls TEXT` (JSON), `picked_quality_tier INTEGER`. Old code ignores them; no drops. Migration uses `download_registry.py`'s own WAL connection — **does NOT touch `_db_write_lock`** (separate DB; corrected per pre-review).
 
 **Phase 1 — Provider layer**
 4. `app/downloader/__init__.py` — `SourceProvider` ABC (`resolve()`, `search()`, `download()`) + `Candidate` Pydantic-v2 dataclass (url, platform, claimed_quality, format, bit_depth, sample_rate, isrc, match_score, quality_tier_int).
@@ -641,15 +670,15 @@ Still open (carried into next round):
 12. `app/downloader/search.py` — free-form search → parallel platform search → SpotiFLAC `LinkResolver` cross-platform pivot → ISRC-dedupe → candidate grid.
 
 **Phase 4 — Post-download pipeline**
-13. `app/downloader/aiff.py` — FFmpeg conversion (D4): `ffprobe` bit-depth detection → `pcm_s16le`/`pcm_s24le` → `-map_metadata 0`.
+13. `app/downloader/aiff.py` — **refactor, not greenfield** (corrected per pre-review). `_convert_to_aiff` already exists at `soundcloud_downloader.py:745` but is hardcoded `pcm_s16le` — it would **downgrade 24-bit sources**, contradicting goal D4. Extract it into `app/downloader/aiff.py`, add `ffprobe` bit-depth detection → `pcm_s16le`/`pcm_s24le`, add `-map_metadata 0`, then point the existing SC pipeline at the refactored function so there's one AIFF converter, not two.
 14. `app/downloader/genre_sync.py` — canonical-table normaliser + ~50-genre starter seed + novel-genre dialog hook.
-15. Extend `app/audio_tags.py` — `serialise_provenance()` + `read_provenance()` helpers (D6).
+15. Extend `app/audio_tags.py` (corrected per pre-review — **more than 2 helpers**): (a) `serialise_provenance()` + `read_provenance()` helpers (D6); (b) **write-side ISRC support** — `_FIELD_ALIASES` currently has no `isrc` entry and no `_write_*` handler emits `TSRC`/`isrc`/`----:com.apple.iTunes:ISRC` (the gap is explicitly documented at `soundcloud_downloader.py:723-727`). Add the `isrc` alias + per-format frame wiring across all six `_write_*` handlers.
 16. `app/downloader/migration.py` — idempotent `SoundCloud/<artist>/` → `<artist>/` folder migration (D7).
 17. `app/downloader/concurrency.py` — first-run benchmark (D8) → `settings.json`.
 
 **Phase 5 — Orchestration + API**
-18. Orchestrator in `app/downloader/__init__.py` — wire the 9-step post-download pipeline from the Recommendation; all `master.db` writes acquire `_db_write_lock`.
-19. `app/main.py` routes: `POST /api/downloads/unified/{resolve,search,fetch}` behind `X-Session-Token`. Use `route-architect` agent before touching `main.py`.
+18. Orchestrator in `app/downloader/__init__.py` — wire the 9-step post-download pipeline from the Recommendation. Writes into `master.db` (library auto-import, genre canonical table) go through `db_lock()` from `app/database.py`; writes into `download_registry.db` use that module's own WAL connection (corrected per pre-review).
+19. `app/main.py` routes: `POST /api/downloads/unified/{resolve,search,fetch}`. Auth model per **OQ-A** decision (no `X-Session-Token` exists today — see corrected Constraints). Use `route-architect` agent before touching `main.py`.
 
 **Phase 6 — Frontend**
 20. `frontend/src/components/Download/*` — search-bar input mode, candidate-grid with platform-icons + quality-badges, picked-source highlight, novel-genre confirmation dialog. Routes through `frontend/src/api/api.js` axios instance.
@@ -669,15 +698,16 @@ Still open (carried into next round):
 - `app/downloader/match.py` (new) — title-variance match algorithm (D1, hard duration gate + 5 identity tests + Sørensen-Dice ≥ 0.92 fallback)
 - `app/downloader/match_rules.py` (new) — maintained regex list of remix/version/featuring tags for normalisation
 - ~~`app/downloader/tagging.py`~~ — **dropped**, extend existing `app/audio_tags.py` with `serialise_provenance()` + `read_provenance()` helpers (see Reuse-A); orchestrator calls existing `write_tags(file_path, {"comment": serialised, "isrc": isrc, "genre": normalised, "year": year}, artwork_bytes)`
-- `app/downloader/aiff.py` (new) — FFmpeg AIFF conversion (preserve bit-depth + sample-rate, `-map_metadata 0`); `ffprobe` for `bits_per_raw_sample` detection
+- `app/downloader/aiff.py` (new, but **refactor of existing code** — see pre-review) — extract `soundcloud_downloader.py:745:_convert_to_aiff`, fix its hardcoded `pcm_s16le` to bit-depth-aware `pcm_s16le`/`pcm_s24le` via `ffprobe`, add `-map_metadata 0`. Existing SC pipeline re-points at this single converter.
 - `app/downloader/genre_sync.py` (new) — incoming-genre → library-canonical normaliser (lookup-table + Sørensen-Dice ≥ 0.90 + confirm-on-novelty dialog); ship curated ~50 short DJ-genre default list
 - `app/downloader/concurrency.py` (new) — first-run benchmark (D8): SC V2 `/resolve` baseline, 4 unique URLs, pre-warm + parallel-vs-sequential, 7-day cache, "Re-benchmark" button hook
 - `app/downloader/migration.py` (new) — first-launch `MUSIC_DIR/SoundCloud/<artist>/` → `MUSIC_DIR/<artist>/` migration (D7); idempotent
 - `app/main.py` — new routes: `POST /api/downloads/unified/resolve`, `POST /api/downloads/unified/search`, `POST /api/downloads/unified/fetch`, all behind `X-Session-Token`
 - `app/download_registry.py` — add columns: `isrc TEXT`, `source TEXT`, `provenance_urls TEXT` (JSON), `picked_quality_tier INTEGER`
 - `app/soundcloud_api.py` — **extend** `_normalize_track` output dict with `"isrc": (raw.get("publisher_metadata") or {}).get("isrc") or raw.get("isrc")` (Q9 opportunistic backfill)
-- `app/audio_tags.py` — **extend** with two helpers: `serialise_provenance(candidates, picked) -> str` + `read_provenance(comment_str) -> list[(platform, url, was_picked)]` (Q13 format)
-- `requirements.txt` — pin `SpotiFLAC==0.5.0` (new; mutagen already pinned 1.47.0 line 53)
+- `app/audio_tags.py` — **extend** (corrected scope per pre-review): (1) `serialise_provenance()` + `read_provenance()` helpers (Q13 format); (2) **write-side ISRC** — add `isrc` to `_FIELD_ALIASES` + wire `TSRC` (ID3), `isrc` (Vorbis), `----:com.apple.iTunes:ISRC` (MP4) into all six `_write_*` handlers. Gap is documented at `soundcloud_downloader.py:723-727`.
+- `app/soundcloud_downloader.py` — **refactor** (added per pre-review): re-point `_convert_to_aiff` (line 745) at the new bit-depth-aware `app/downloader/aiff.py`; reconcile `_apply_sc_metadata` (line 676) `Comment`-field write (currently `permalink_url`, line 721) with the unified provenance serialisation so the two don't collide — the SC permalink becomes one entry in the provenance URL list, not a separate overwrite.
+- `requirements.txt` — pin `SpotiFLAC==0.5.0` (new; mutagen already pinned 1.47.0 line 53). **If** async orchestration uses `httpx.AsyncClient` + retry, also pin `httpx==<v>` + `tenacity==<v>` (neither is currently in `requirements.txt`). Default plan: keep SC provider sync-wrapped via `asyncio.to_thread` (the existing `main.py` pattern) → no `httpx` needed for v1.
 - `.env.example` — **optional** `SPOTIFY_CLIENT_ID` + `SPOTIFY_CLIENT_SECRET` as fallback only (default uses SpotiFLAC's shared creds; users opt-in if Spotify revokes the shared client)
 - `frontend/src/components/Download/*` — new UI: search-bar input mode, candidate-grid view with platform-icons + quality-badges, picked-source highlight, novel-genre confirmation dialog
 - `tests/test_unified_downloader_match.py` (new) — 50-entry test set for D1 algorithm (blocked on owner input)
@@ -722,17 +752,22 @@ Risk register R1-R7 above covers the runtime/operational risks with mitigations.
 
 ## Review
 
-> Filled by reviewer at `review_`.
+> Filled by reviewer at `review_`. A pre-review already ran at `draftplan_` stage — see below.
 
-- [ ] Plan addresses all goals
-- [ ] Open questions answered or explicitly deferred
-- [ ] Risk mitigations defined
-- [ ] Rollback path clear
-- [ ] Affected docs identified (`architecture.md`, `FILE_MAP.md`, indexes, `CHANGELOG.md`)
-- [ ] **Legal-posture shift acknowledged and accepted by owner** (this doc, specifically — SpotiFLAC moves us from ToS-mindful SC posture to paid-streaming-rip)
+**Pre-review (2026-05-13, `Plan` agent, `draftplan_` stage)**: independent validation against the real repo. Found the risk/rollback/docs work solid, caught 6 factual errors (all corrected in-place — see Findings § "Pre-review corrections"). Surfaced 2 new owner decisions (OQ-A, OQ-B) that block `review_` → sign-off. Checklist status reflects the pre-review:
 
-**Rework reasons** (only if applicable):
-- …
+- [x] Plan addresses all goals — *PASS-with-caveat: provenance/`COMMENT` collision with existing SC pipeline noted + reconciliation added to Step 15 / Files-touched*
+- [x] Open questions answered or explicitly deferred — *D1 + D5-starter deferred to owner input; D3 timing escalated as OQ-B*
+- [x] Risk mitigations defined — *R1-R7 + implementation-specific rollback section*
+- [x] Rollback path clear — *kill-switch default-off, additive-only migration, per-provider flags, atomic per-phase commits, Phase-0 gate*
+- [x] Affected docs identified — *`architecture.md`, `FILE_MAP.md`, `backend-index.md`, `frontend-index.md`, `CHANGELOG.md`*
+- [ ] **Legal-posture shift acknowledged and accepted by owner** — *owner-only, pending*
+- [ ] **OQ-A answered** — route auth model: net-new `init-token` vs. match existing SC pattern (owner-only, pending; recommendation: match SC pattern)
+- [ ] **OQ-B answered** — D3 feasibility-test timing: run before sign-off vs. accept unverified Phase-1 design (owner-only, pending; recommendation: run before sign-off)
+
+**Rework reasons / notes:**
+- Pre-review corrections were applied **in-place** rather than via a `rework_` round-trip — the doc was still in `draftplan_` ("plan is being written"), not yet formally submitted to `review_`. Full audit trail in Findings § "Pre-review corrections".
+- The doc stays in `draftplan_` (not promoted to `review_`) until OQ-A + OQ-B are answered — only then is the plan genuinely "ready, waiting for sign-off".
 
 ## Implementation Log
 
