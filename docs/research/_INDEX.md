@@ -17,6 +17,7 @@ _(none)_
 ### exploring
 - [exploring_recommender-rules-baseline.md](research/exploring_recommender-rules-baseline.md) — Teil 1: BPM/Key/Genre/MyTag/Energy ranking + Camelot harmonic mixing; local + SoundCloud modes (2026-05-11)
 - [exploring_recommender-taste-llm-audio.md](research/exploring_recommender-taste-llm-audio.md) — Teil 2: LLM/embedding-based recommender that learns taste from listening behaviour + audio features (2026-05-11)
+- [exploring_linux-dj-workflow.md](research/exploring_linux-dj-workflow.md) — Linux end-to-end DJ workflow — SoundCloud → analysis → CDJ-3000 USB without Rekordbox (2026-05-13)
 
 ### evaluated
 _(none)_
