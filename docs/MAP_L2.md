@@ -368,7 +368,6 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `file_write()` — Writes text content to a file (used for .rbep project saving).
 - `clean_xml()`
 - `get_genres()`
-- `get_library_tracks()`
 - `get_low_quality_tracks()`
 - `get_no_artwork_tracks()`
 - `get_lost_tracks()`
@@ -395,7 +394,6 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `save_grid()`
 - `update_track()`
 - `batch_up()`
-- `system_heartbeat()`
 - `del_trk()`
 - `move_t()`
 - `ren_t()` — Bulk smart-rename audio files on disk using a token pattern.
@@ -436,7 +434,7 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `get_import_tasks()` — Live status of every local-file import (drag-drop / folder browse).
 - `clear_import_tasks()` — Drop all completed/failed/skipped tasks from the tracker.
 - `get_artwork()` — Serves artwork image from absolute path or Rekordbox relative path.
-- `get_library_tracks()`
+- `get_library_tracks()` — Return library tracks as a JSON array.
 - `get_ptracks()`
 - `get_arttracks()`
 - `get_lbltracks()`
@@ -1051,6 +1049,19 @@ Frontend-wide constants.
 - `AUDIO_IMPORT_TIMEOUT_MS()` — Axios timeout for the synchronous audio-import endpoint (/api/audio/import → full analysis pipeline…
 - `IMPORT_TASK_POLL_INTERVAL_MS()` — Poll cadence for /api/import/tasks while one or more uploaded files are still being analysed in the…
 
+### `frontend/src/hooks/useLibraryTracks.js`
+
+Shared module-level cache for the full library track list.
+
+- `loadLibraryTracks()` — Fetch (or refetch with force=true) the library track list into the shared cache.
+- `useLibraryTracks()` — Read the shared library track list.
+
+### `frontend/src/hooks/useVirtualRows.js`
+
+Windowing for long scrollable lists.
+
+- `useVirtualRows()` — Windowing for long scrollable lists.
+
 ### `frontend/src/utils/AudioBandAnalyzer.js`
 
 AudioBandAnalyzer Splits an AudioBuffer into 3 frequency bands (Rekordbox-style): - Low: < 400 Hz (Bass / Kick / Punch) - Mid: 400 Hz - 200…
@@ -1124,7 +1135,7 @@ DuplicateView — Acoustic Duplicate Finder & Merge UI Left panel: list of dupli
 
 ### `frontend/src/components/editor/EditorBrowser.jsx`
 
-Ensure we have an array
+Track list comes from the shared library cache — one fetch across views.
 
 ### `frontend/src/components/editor/EditorToolbar.jsx`
 
@@ -1279,7 +1290,7 @@ Mirror of LibraryTools.smart_rename's token substitution + sanitisation,
 
 ### `frontend/src/components/TrackTable.jsx`
 
-Camelot
+Fixed row height (px).
 
 ### `frontend/src/components/usb/MetadataSyncPanel.jsx`
 

@@ -89,6 +89,8 @@
 | `frontend/src/components/waveform/useWaveformInteractions.js` | Imperative editing + hotkey wiring extracted from WaveformEditor. |
 | `frontend/src/components/waveform/useWaveSurfer.js` | Owns the master WaveSurfer + Overview lifecycle: |
 | `frontend/src/config/constants.js` | Frontend-wide constants. |
+| `frontend/src/hooks/useLibraryTracks.js` | Shared module-level cache for the full library track list. |
+| `frontend/src/hooks/useVirtualRows.js` | Windowing for long scrollable lists. |
 | `frontend/src/utils/AudioBandAnalyzer.js` | AudioBandAnalyzer Splits an AudioBuffer into 3 frequency bands (Rekordbox-style): - Low: < 400 Hz (Bass / Kic… |
 | `frontend/src/utils/log.js` | Dev-only logging utility. |
 | `frontend/src/components/BatchEditBar.jsx` | *(no module docstring)* |
@@ -105,7 +107,7 @@
 | `frontend/src/components/DesignView.jsx` | *(no module docstring)* |
 | `frontend/src/components/DownloadManagerView.jsx` | Stage pipeline (in execution order) — covers BOTH SC-DL and local-import |
 | `frontend/src/components/DuplicateView.jsx` | DuplicateView — Acoustic Duplicate Finder & Merge UI Left panel: list of duplicate groups with similarity bad… |
-| `frontend/src/components/editor/EditorBrowser.jsx` | Ensure we have an array |
+| `frontend/src/components/editor/EditorBrowser.jsx` | Track list comes from the shared library cache — one fetch across views. |
 | `frontend/src/components/editor/EditorToolbar.jsx` | EditorToolbar - Top toolbar + edit toolbar for NonDestructiveEditor. |
 | `frontend/src/components/editor/EnvelopeOverlay.jsx` | EnvelopeOverlay - Interactive envelope editor for audio regions Provides draggable nodes for: - Fade-in durat… |
 | `frontend/src/components/editor/NonDestructiveEditor.jsx` | NonDestructiveEditor - Main component for the non-destructive audio editor Slim container: owns TimelineState… |
@@ -141,7 +143,7 @@
 | `frontend/src/components/SoundCloudView.jsx` | EC11: Ref-based guard prevents multiple simultaneous login requests |
 | `frontend/src/components/ToastContext.jsx` | *(no module docstring)* |
 | `frontend/src/components/ToolsView.jsx` | Mirror of LibraryTools.smart_rename's token substitution + sanitisation, |
-| `frontend/src/components/TrackTable.jsx` | Camelot |
+| `frontend/src/components/TrackTable.jsx` | Fixed row height (px). |
 | `frontend/src/components/usb/MetadataSyncPanel.jsx` | MetadataSyncPanel — collapsible per-device metadata sync controls. |
 | `frontend/src/components/usb/PlayCountSync.jsx` | PlayCountSync — collapsible section inside UsbView. |
 | `frontend/src/components/usb/UsbControls.jsx` | UsbControls — shared helpers used across the USB sub-components. |
