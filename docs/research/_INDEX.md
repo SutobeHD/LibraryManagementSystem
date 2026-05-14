@@ -19,7 +19,7 @@ _(none)_
 - [exploring_recommender-taste-llm-audio.md](research/exploring_recommender-taste-llm-audio.md) — Teil 2: LLM/embedding-based recommender that learns taste from listening behaviour + audio features (2026-05-11)
 
 ### evaluated
-- [evaluated_downloader-unified-multi-source.md](research/evaluated_downloader-unified-multi-source.md) — Unified downloader: Q1-Q14 + D1-D8 + D2/D5/D8/Q9 resolved, R1-R7 risks consolidated, ready for draftplan signoff (2026-05-13)
+_(none)_
 
 ### parked
 _(none)_
@@ -29,7 +29,7 @@ _(none)_
 ## implement/
 
 ### draftplan
-_(none)_
+- [draftplan_downloader-unified-multi-source.md](implement/draftplan_downloader-unified-multi-source.md) — Unified downloader: Implementation Plan filled (Scope, 7-phase/22-step plan, testing approach, rollback). Awaiting review_ → accepted_ signoff (2026-05-13)
 
 ### review
 _(none)_
