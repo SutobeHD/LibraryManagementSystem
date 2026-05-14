@@ -183,9 +183,11 @@ def validate_audio_path(path_str: str) -> Path:
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
 
-    # Check that the file is within an allowed directory
+    # Check that the file is within an allowed directory. is_relative_to()
+    # is boundary-aware — str.startswith() would let "C:\Music_secret\..."
+    # pass for an allowed root of "C:\Music".
     is_allowed = any(
-        str(file_path).startswith(str(root))
+        file_path.is_relative_to(Path(root).resolve())
         for root in ALLOWED_AUDIO_ROOTS
     )
     # Also allow paths from the database (track paths stored in library)
@@ -886,12 +888,6 @@ def update_track(tid: str, r: TrackUpdateReq):
 
 @app.patch("/api/tracks/batch")
 def batch_up(r: BatchReq): return {"status": "success" if db.update_tracks_metadata(r.track_ids, r.updates) else "error"}
-
-@app.post("/api/system/heartbeat")
-def system_heartbeat():
-    global last_heartbeat
-    last_heartbeat = time.time()
-    return {"status": "alive", "token": SHUTDOWN_TOKEN}
 
 @app.post("/api/track/delete")
 def del_trk(r: DeleteTrackReq): return {"status": "success" if db.delete_track(r.track_id) else "error"}
@@ -2087,7 +2083,7 @@ def heartbeat():
 @app.post("/api/system/shutdown")
 async def shutdown(token: str = ""):
     """SECURITY: Requires session token to trigger shutdown."""
-    if token != SHUTDOWN_TOKEN:
+    if not secrets.compare_digest(token, SHUTDOWN_TOKEN):
         logger.warning("SECURITY: Unauthorized shutdown attempt!")
         raise HTTPException(status_code=403, detail="Invalid shutdown token")
     threading.Thread(target=_graceful_shutdown, daemon=True).start()
@@ -2096,7 +2092,7 @@ async def shutdown(token: str = ""):
 @app.post("/api/system/restart")
 async def restart(token: str = ""):
     """SECURITY: Requires session token to trigger restart."""
-    if token != SHUTDOWN_TOKEN:
+    if not secrets.compare_digest(token, SHUTDOWN_TOKEN):
         raise HTTPException(status_code=403, detail="Invalid restart token")
     def restart_proc():
         logger.info("Restarting backend...")
