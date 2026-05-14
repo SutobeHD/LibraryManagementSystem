@@ -8,7 +8,7 @@
  * "Insights" ist jetzt für DJ-Analytics reserviert (Genre-Verteilung, BPM-Histogramm, etc.).
  */
 
-import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useMemo, useDeferredValue, Suspense, lazy } from 'react';
 import {
     Layers, Copy, FileCode, RefreshCw, ArrowLeft, Loader2, Wrench,
     Activity, TrendingDown, PlayCircle, ImageOff, Search, AlertCircle, Music
@@ -42,6 +42,8 @@ const UtilitiesView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus 
     const [tracks, setTracks]       = useState([]);
     const [loading, setLoading]     = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
+    // Deferred so typing stays responsive — the O(n) filter runs at lower priority.
+    const deferredSearchTerm = useDeferredValue(searchTerm);
 
     useEffect(() => {
         if (section !== 'health' || !libraryStatus?.loaded) return;
@@ -53,13 +55,13 @@ const UtilitiesView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus 
     }, [section, healthTab, libraryStatus?.loaded]);
 
     const filteredTracks = useMemo(() => {
-        if (!searchTerm) return tracks;
-        const q = searchTerm.toLowerCase();
+        if (!deferredSearchTerm) return tracks;
+        const q = deferredSearchTerm.toLowerCase();
         return tracks.filter(t =>
             (t.Title  && t.Title.toLowerCase().includes(q)) ||
             (t.Artist && t.Artist.toLowerCase().includes(q))
         );
-    }, [tracks, searchTerm]);
+    }, [tracks, deferredSearchTerm]);
 
     // ── Tool drill-in ────────────────────────────────────────────────────────────
     if (activeTool) {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useDeferredValue } from 'react';
 import { toast } from 'react-hot-toast';
 import api from '../api/api';
 import TrackTable from './TrackTable';
@@ -14,6 +14,10 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
   const [tracks, setTracks] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [trackFilter, setTrackFilter] = useState("");
+  // Deferred so typing in the search box stays responsive — the O(n)
+  // filters below run at lower priority instead of on every keystroke.
+  const deferredSearchTerm = useDeferredValue(searchTerm);
+  const deferredTrackFilter = useDeferredValue(trackFilter);
 
   const [isLoading, setIsLoading] = useState(false);
 
@@ -55,18 +59,18 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
   };
 
   const filteredItems = useMemo(() => {
-    return items.filter(a => a.name.toLowerCase().includes(searchTerm.toLowerCase()));
-  }, [items, searchTerm]);
+    return items.filter(a => a.name.toLowerCase().includes(deferredSearchTerm.toLowerCase()));
+  }, [items, deferredSearchTerm]);
 
   const filteredTracks = useMemo(() => {
-    const q = (selectedItem ? trackFilter : searchTerm).toLowerCase();
+    const q = (selectedItem ? deferredTrackFilter : deferredSearchTerm).toLowerCase();
     if (!q) return tracks;
     return tracks.filter(t =>
       (t.Title && t.Title.toLowerCase().includes(q)) ||
       (t.Artist && t.Artist.toLowerCase().includes(q)) ||
       (t.Album && t.Album.toLowerCase().includes(q))
     );
-  }, [tracks, trackFilter, searchTerm, selectedItem]);
+  }, [tracks, deferredTrackFilter, deferredSearchTerm, selectedItem]);
 
   const handleMerge = async (sourceName) => {
     const targetName = await promptModal({

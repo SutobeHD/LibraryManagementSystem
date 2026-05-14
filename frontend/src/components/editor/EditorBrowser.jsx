@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo, useDeferredValue } from 'react';
 import { Search, Music, Disc, User, Play, Plus, X, ListMusic } from 'lucide-react';
 import { useLibraryTracks } from '../../hooks/useLibraryTracks';
 
@@ -7,20 +7,16 @@ const EditorBrowser = ({ onLoadTrack, onClose }) => {
     const [searchTerm, setSearchTerm] = useState("");
     // Track list comes from the shared library cache — one fetch across views.
     const { tracks, loading } = useLibraryTracks();
-    const [filteredTracks, setFilteredTracks] = useState([]);
-
-    useEffect(() => {
-        if (!searchTerm) {
-            setFilteredTracks(tracks.slice(0, 100)); // Limit initial view for perf
-            return;
-        }
-        const lower = searchTerm.toLowerCase();
-        const filtered = tracks.filter(t =>
+    // Deferred so typing stays responsive; filtered list is derived, not state.
+    const deferredSearchTerm = useDeferredValue(searchTerm);
+    const filteredTracks = useMemo(() => {
+        if (!deferredSearchTerm) return tracks.slice(0, 100); // limit initial view for perf
+        const lower = deferredSearchTerm.toLowerCase();
+        return tracks.filter(t =>
             (t.Title?.toLowerCase() || "").includes(lower) ||
             (t.Artist?.toLowerCase() || "").includes(lower)
-        );
-        setFilteredTracks(filtered.slice(0, 100));
-    }, [searchTerm, tracks]);
+        ).slice(0, 100);
+    }, [deferredSearchTerm, tracks]);
 
     return (
         <div className="h-full flex flex-col bg-mx-shell/95 backdrop-blur-xl border-r border-white/10 w-80 flex-shrink-0 transition-all">

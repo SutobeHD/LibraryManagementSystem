@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
 import api from '../api/api';
 import { log } from '../utils/log';
@@ -168,6 +168,9 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
     const [renameNode, setRenameNode] = useState(null);
     const [collectionSearch, setCollectionSearch] = useState('');
     const [playlistSearch, setPlaylistSearch] = useState('');
+    // Deferred so typing stays responsive — matchesQuery is O(n) per keystroke.
+    const deferredCollectionSearch = useDeferredValue(collectionSearch);
+    const deferredPlaylistSearch = useDeferredValue(playlistSearch);
     // displayTracks holds the table's current sorted/filtered order, read
     // only by the SoundCloud export. A ref (not state) so TrackTable
     // echoing the order back on every sort/keystroke doesn't trigger a
@@ -582,15 +585,15 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
 
     // Filtered collection tracks
     const filteredCollectionTracks = React.useMemo(() => {
-        if (!collectionSearch) return allTracks;
-        return allTracks.filter(t => matchesQuery(t, collectionSearch));
-    }, [allTracks, collectionSearch, matchesQuery]);
+        if (!deferredCollectionSearch) return allTracks;
+        return allTracks.filter(t => matchesQuery(t, deferredCollectionSearch));
+    }, [allTracks, deferredCollectionSearch, matchesQuery]);
 
     // Filtered playlist tracks
     const filteredPlaylistTracks = React.useMemo(() => {
-        if (!playlistSearch) return tracks;
-        return tracks.filter(t => matchesQuery(t, playlistSearch));
-    }, [tracks, playlistSearch, matchesQuery]);
+        if (!deferredPlaylistSearch) return tracks;
+        return tracks.filter(t => matchesQuery(t, deferredPlaylistSearch));
+    }, [tracks, deferredPlaylistSearch, matchesQuery]);
 
     if (!loading && tree.length === 0 && !dbLoaded) {
         return (
