@@ -297,7 +297,10 @@ class LiveRekordboxDB:
 
     def _load_playlists(self):
         self.playlists = []
-        raw_playlists = self.db.get_playlists()
+        # Materialized and stashed so _load_playlist_tracks() can reuse it
+        # instead of issuing a second get_playlists() DB scan.
+        raw_playlists = list(self.db.get_playlists())
+        self._raw_playlists = raw_playlists
 
         # Rbox Attribute values:  0 = normal playlist, 1 = folder, 4 = intelligent playlist
         # Frontend Type values:   "0" = folder, "1" = normal playlist, "4" = intelligent playlist
@@ -354,7 +357,9 @@ class LiveRekordboxDB:
         logger.info("Caching all playlist tracks via rbox...")
         try:
             self.playlists_tracks.clear()
-            playlists = self.db.get_playlists()
+            # Reuse the list materialized by _load_playlists() (runs first in
+            # load()) — avoids a redundant second get_playlists() DB scan.
+            playlists = self._raw_playlists
             count = 0
             for pl in playlists:
                 pid = str(pl.id)
