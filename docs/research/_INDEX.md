@@ -17,6 +17,7 @@ _(none)_
 ### exploring
 - [exploring_recommender-rules-baseline.md](research/exploring_recommender-rules-baseline.md) — Teil 1: BPM/Key/Genre/MyTag/Energy ranking + Camelot harmonic mixing; local + SoundCloud modes (2026-05-11)
 - [exploring_recommender-taste-llm-audio.md](research/exploring_recommender-taste-llm-audio.md) — Teil 2: LLM/embedding-based recommender that learns taste from listening behaviour + audio features (2026-05-11)
+- [exploring_tooling-pnpm-migration.md](research/exploring_tooling-pnpm-migration.md) — von npm auf pnpm 11.x wechseln (2026-05-14)
 
 ### evaluated
 _(none)_
