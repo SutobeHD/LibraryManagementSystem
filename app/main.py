@@ -1293,16 +1293,22 @@ async def scan_folder(r: PathRequest):
     def _scan():
         imported = 0
         skipped = 0
+        # Snapshot the library's known paths ONCE. Checking each scanned
+        # file via a global rebuild was O(files x tracks).
+        known = _track_paths_snapshot()
         for audio_file in scan_path.rglob("*"):
             if not audio_file.is_file() or audio_file.suffix.lower() not in folder_watcher.AUDIO_EXTENSIONS:
                 continue
             try:
-                if _is_known_audio_path(audio_file):
+                if _is_known_audio_path(audio_file, snapshot=known):
                     skipped += 1
                     continue
                 result = ImportManager.process_import(audio_file)
                 if result:
                     imported += 1
+                    # Track the new path so a later duplicate in this same
+                    # scan is caught without a rebuild.
+                    known.add(_resolve_path_str(audio_file))
                 else:
                     skipped += 1
             except Exception as exc:
@@ -1390,10 +1396,10 @@ async def import_paths(r: ImportPathsReq):
             playlist_name = folder_for_pl.name
     collected_track_ids: list[str] = []
 
-    def _process_one(f: Path, tid: str) -> None:
+    def _process_one(f: Path, tid: str, known_paths: set[str], id_map: dict[str, str]) -> None:
         local_id: str | None = None
-        if _is_known_audio_path(f):
-            local_id = _track_id_for_path(f)
+        if _is_known_audio_path(f, snapshot=known_paths):
+            local_id = _track_id_for_path(f, id_map=id_map)
             import_tracker.update(
                 tid, status="Skipped", progress=100,
                 error="Already in library",
@@ -1417,6 +1423,12 @@ async def import_paths(r: ImportPathsReq):
                 key=analysis.get("key") if isinstance(analysis, dict) else None,
             )
             counters["imported"] += 1
+            # Register the new path so a later duplicate in this same batch
+            # is recognized without a DB round-trip.
+            resolved = _resolve_path_str(f)
+            known_paths.add(resolved)
+            if local_id:
+                id_map[resolved] = local_id
             if local_id and group_into_playlist:
                 collected_track_ids.append(local_id)
         except Exception as exc:
@@ -1457,9 +1469,13 @@ async def import_paths(r: ImportPathsReq):
             logger.warning("[Drop] Playlist bundling failed: %s", exc)
 
     def _run():
+        # Build the dedup snapshot + id map ONCE for the whole batch.
+        # Per-file rebuilds made drag-drop import O(files x tracks).
+        known_paths = _track_paths_snapshot()
+        id_map = _track_id_map()
         for f, tid in queued:
             try:
-                _process_one(f, tid)
+                _process_one(f, tid, known_paths, id_map)
             except Exception as exc:
                 logger.warning("[Drop] worker error for %s: %s", f, exc)
         _bundle_into_playlist()
@@ -1869,45 +1885,56 @@ def save_s(s: SetReq):
 # Live auto-import: configured via settings.scan_folders. These endpoints let
 # the UI inspect / toggle individual folders without a full settings round-trip.
 
+def _resolve_path_str(path: Path | str) -> str:
+    """Best-effort resolved-path string; falls back to the raw string."""
+    try:
+        return str(Path(path).resolve())
+    except Exception:
+        return str(path)
+
+
 def _track_paths_snapshot() -> set[str]:
     """Resolved-path set of every track currently in the library."""
     paths: set[str] = set()
     for t in getattr(db, "tracks", {}).values():
         p = t.get("path") if isinstance(t, dict) else None
-        if not p:
-            continue
-        try:
-            paths.add(str(Path(p).resolve()))
-        except Exception:
-            paths.add(p)
+        if p:
+            paths.add(_resolve_path_str(p))
     return paths
 
 
-def _track_id_for_path(path: Path) -> str | None:
-    """Return existing track-id for a given filesystem path, or None."""
-    try:
-        target = str(path.resolve())
-    except Exception:
-        target = str(path)
+def _track_id_map() -> dict[str, str]:
+    """Resolved-path -> track-id map. Build once, then do O(1) lookups."""
+    out: dict[str, str] = {}
     for tid, t in getattr(db, "tracks", {}).items():
         p = t.get("path") if isinstance(t, dict) else None
-        if not p:
-            continue
-        try:
-            if str(Path(p).resolve()) == target:
-                return str(tid)
-        except Exception:
-            if str(p) == target:
-                return str(tid)
-    return None
+        if p:
+            out[_resolve_path_str(p)] = str(tid)
+    return out
 
 
-def _is_known_audio_path(path: Path) -> bool:
-    try:
-        resolved = str(path.resolve())
-    except Exception:
-        resolved = str(path)
-    return resolved in _track_paths_snapshot()
+def _track_id_for_path(path: Path, id_map: dict[str, str] | None = None) -> str | None:
+    """Existing track-id for a filesystem path, or None.
+
+    Pass a prebuilt `id_map` when calling in a loop — otherwise this
+    rebuilds the whole map on every call (O(n) per lookup).
+    """
+    target = _resolve_path_str(path)
+    if id_map is None:
+        id_map = _track_id_map()
+    return id_map.get(target)
+
+
+def _is_known_audio_path(path: Path, snapshot: set[str] | None = None) -> bool:
+    """True if `path` is already a known track.
+
+    Pass a prebuilt `snapshot` when calling in a loop — otherwise this
+    rebuilds the whole path set on every call (O(n) per check).
+    """
+    resolved = _resolve_path_str(path)
+    if snapshot is None:
+        snapshot = _track_paths_snapshot()
+    return resolved in snapshot
 
 
 @app.get("/api/library/folder-watcher/status")
