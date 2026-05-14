@@ -5,6 +5,11 @@ import toast from 'react-hot-toast';
 import { confirmModal } from './ConfirmModal';
 import { promptModal } from './PromptModal';
 import { log } from '../utils/log';
+import { useVirtualRows } from '../hooks/useVirtualRows';
+
+// Fixed row height (px). The artwork cell (36px) + p-1 padding is the
+// tallest content; enforced per <tr> so the virtualizer math is exact.
+const ROW_HEIGHT = 44;
 
 const DEFAULT_COLUMNS = [
     { id: 'index', label: '#', width: '32px', align: 'right', fixed: true },
@@ -104,6 +109,14 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
         }
     }, [sortedTracks, onSortedTracksChange]);
 
+    // Virtualize: render only the rows in/near the viewport. Without this,
+    // a 100k-track library mounts 100k <tr> nodes and freezes the browser.
+    const { scrollRef, startIndex, endIndex, padTop, padBottom } = useVirtualRows({
+        rowCount: sortedTracks.length,
+        rowHeight: ROW_HEIGHT,
+    });
+    const visibleTracks = sortedTracks.slice(startIndex, endIndex);
+
     const toggleColumn = (colId) => {
         setVisibleColumns(prev => {
             if (prev.includes(colId)) return prev.filter(c => c !== colId);
@@ -135,7 +148,7 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
     };
 
     return (
-        <div className={`h-full overflow-auto relative ${variant === 'default' ? 'bg-mx-shell border border-line-subtle rounded-mx-md mx-2 mb-2 pb-20' : ''}`}>
+        <div ref={scrollRef} className={`h-full overflow-auto relative ${variant === 'default' ? 'bg-mx-shell border border-line-subtle rounded-mx-md mx-2 mb-2 pb-20' : ''}`}>
             <table className="w-full text-left border-collapse min-w-[800px] table-fixed">
                 <thead className="sticky top-0 z-10 select-none" style={{ background: 'var(--mx-shell)', borderBottom: '1px solid var(--line-subtle)' }}>
                     <tr onContextMenu={(e) => {
@@ -167,7 +180,14 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
                     </tr>
                 </thead>
                 <tbody>
-                    {sortedTracks.map((t, index) => (
+                    {padTop > 0 && (
+                        <tr aria-hidden="true" style={{ height: padTop }}>
+                            <td colSpan={99} className="p-0 border-0" />
+                        </tr>
+                    )}
+                    {visibleTracks.map((t, i) => {
+                        const index = startIndex + i;
+                        return (
                         <tr
                             key={t.id || index}
                             onClick={() => onSelectTrack && onSelectTrack(t)}
@@ -178,7 +198,7 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
                                 setHeaderMenu(null);
                             }}
                             className="group transition-colors cursor-pointer text-[12px] hover:bg-mx-hover"
-                            style={{ borderBottom: '1px solid var(--line-subtle)' }}
+                            style={{ height: ROW_HEIGHT, borderBottom: '1px solid var(--line-subtle)' }}
                             draggable={!!onReorder}
                             onDragStart={(e) => {
                                 if (onReorder) {
@@ -335,7 +355,13 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
                                 </td>
                             )}
                         </tr>
-                    ))}
+                        );
+                    })}
+                    {padBottom > 0 && (
+                        <tr aria-hidden="true" style={{ height: padBottom }}>
+                            <td colSpan={99} className="p-0 border-0" />
+                        </tr>
+                    )}
                 </tbody>
             </table>
 
