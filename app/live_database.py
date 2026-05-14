@@ -24,6 +24,11 @@ class LiveRekordboxDB:
         self.playlists_tracks = defaultdict(list)
         self.artists = []
         self.genres = []
+        self.labels = []
+        self.albums = []
+        self._artist_id_to_name = {}
+        self._label_id_to_name = {}
+        self._album_id_to_name = {}
         self.loaded = False
         self.loading_status = "Idle"
 
@@ -383,21 +388,44 @@ class LiveRekordboxDB:
             logger.error(f"Failed to load playlist tracks via rbox: {e}")
 
     def _finalize_ui_metadata(self):
+        # Single pass over all tracks builds the artist/genre/label/album
+        # aggregates at once. get_all_labels()/get_all_albums() used to
+        # re-iterate the whole library on every call, and get_tracks_by_*()
+        # rebuilt those lists just to resolve one id->name. Everything is
+        # precomputed here now; the id->name maps give O(1) drill-down.
         artist_counts = defaultdict(int)
         genre_counts = defaultdict(int)
+        label_counts = defaultdict(int)
+        album_counts = defaultdict(int)
         artist_artworks = {}
+        label_artworks = {}
+        album_artworks = {}
         for t in self.tracks.values():
+            artwork = t.get("Artwork")
             if t.get("Artist"):
-                track_artists = self._split_artists(t["Artist"])
-                for artist in track_artists:
+                for artist in self._split_artists(t["Artist"]):
                     artist_counts[artist] += 1
-                    # Capture first available artwork for this artist
-                    if artist not in artist_artworks and t.get("Artwork"):
-                        artist_artworks[artist] = t["Artwork"]
+                    if artist not in artist_artworks and artwork:
+                        artist_artworks[artist] = artwork
 
-            if t.get("Genre"): genre_counts[t["Genre"]] += 1
+            if t.get("Genre"):
+                genre_counts[t["Genre"]] += 1
+
+            label = t.get("Label")
+            if label:
+                normalized = self._normalize_artist_name(label)
+                label_counts[normalized] += 1
+                if normalized not in label_artworks and artwork:
+                    label_artworks[normalized] = artwork
+
+            album = t.get("Album")
+            if album:
+                album_counts[album] += 1
+                if album not in album_artworks and artwork:
+                    album_artworks[album] = artwork
 
         self.artists = []
+        self._artist_id_to_name = {}
         threshold = 0
         try:
             from .services import SettingsManager
@@ -409,45 +437,45 @@ class LiveRekordboxDB:
 
         for i, (name, count) in enumerate(sorted(artist_counts.items())):
             if count >= threshold:
+                aid = f"art_{i}"
                 self.artists.append({
-                    "id": f"art_{i}",
+                    "id": aid,
                     "name": name,
                     "track_count": count,
                     "Artwork": artist_artworks.get(name, "")
                 })
+                self._artist_id_to_name[aid] = name
         self.genres = [{"id": f"gen_{i}", "name": name, "track_count": count} for i, (name, count) in enumerate(sorted(genre_counts.items()))]
 
-    def get_all_labels(self) -> list[dict[str, Any]]:
-        label_counts = defaultdict(int)
-        label_artworks = {}
-        for t in self.tracks.values():
-            label = t.get("Label")
-            if label:
-                normalized = self._normalize_artist_name(label) # Use same normalization for simplicity
-                label_counts[normalized] += 1
-                if normalized not in label_artworks and t.get("Artwork"):
-                    label_artworks[normalized] = t["Artwork"]
+        self.labels = []
+        self._label_id_to_name = {}
+        for i, (name, count) in enumerate(sorted(label_counts.items())):
+            lid = f"lbl_{i}"
+            self.labels.append({
+                "id": lid,
+                "name": name,
+                "track_count": count,
+                "Artwork": label_artworks.get(name, "")
+            })
+            self._label_id_to_name[lid] = name
 
-        return [
-            {"id": f"lbl_{i}", "name": name, "track_count": count, "Artwork": label_artworks.get(name, "")}
-            for i, (name, count) in enumerate(sorted(label_counts.items()))
-            if count >= 0 # Respect threshold?
-        ]
+        self.albums = []
+        self._album_id_to_name = {}
+        for i, (name, count) in enumerate(sorted(album_counts.items())):
+            alid = f"alb_{i}"
+            self.albums.append({
+                "id": alid,
+                "name": name,
+                "track_count": count,
+                "Artwork": album_artworks.get(name, "")
+            })
+            self._album_id_to_name[alid] = name
+
+    def get_all_labels(self) -> list[dict[str, Any]]:
+        return self.labels
 
     def get_all_albums(self) -> list[dict[str, Any]]:
-        album_counts = defaultdict(int)
-        album_artworks = {}
-        for t in self.tracks.values():
-            album = t.get("Album")
-            if album:
-                album_counts[album] += 1
-                if album not in album_artworks and t.get("Artwork"):
-                    album_artworks[album] = t["Artwork"]
-
-        return [
-            {"id": f"alb_{i}", "name": name, "track_count": count, "Artwork": album_artworks.get(name, "")}
-            for i, (name, count) in enumerate(sorted(album_counts.items()))
-        ]
+        return self.albums
 
     def _split_artists(self, artist_str):
         if not artist_str: return []
@@ -485,18 +513,17 @@ class LiveRekordboxDB:
         return list(self.tracks.values())
 
     def get_tracks_by_artist(self, aid: str) -> list[dict[str, Any]]:
-        # find artist name by id
-        artist_name = next((a["name"] for a in self.artists if a["id"] == aid), None)
+        artist_name = self._artist_id_to_name.get(aid)
         if not artist_name: return []
         return [t for t in self.tracks.values() if artist_name in self._split_artists(t.get("Artist", ""))]
 
     def get_tracks_by_label(self, aid: str) -> list[dict[str, Any]]:
-        label_name = next((l["name"] for l in self.get_all_labels() if l["id"] == aid), None)
+        label_name = self._label_id_to_name.get(aid)
         if not label_name: return []
         return [t for t in self.tracks.values() if self._normalize_artist_name(t.get("Label", "")) == label_name]
 
     def get_tracks_by_album(self, aid: str) -> list[dict[str, Any]]:
-        album_name = next((a["name"] for a in self.get_all_albums() if a["id"] == aid), None)
+        album_name = self._album_id_to_name.get(aid)
         if not album_name: return []
         return [t for t in self.tracks.values() if t.get("Album") == album_name]
 
