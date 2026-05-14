@@ -116,7 +116,6 @@
       "Bash(cargo publish*)",
       "Bash(gh release create*)",
       "Bash(gh release delete*)",
-      "Bash(gh pr merge*)",
       "Bash(gh pr close*)",
       "Bash(gh repo delete*)",
       "Bash(gh repo archive*)",
@@ -161,6 +160,7 @@
       "Bash(cargo add*)",
       "Bash(cargo remove*)",
       "Bash(gh pr create*)",
+      "Bash(gh pr merge*)",
       "Bash(gh issue create*)"
     ]
   },

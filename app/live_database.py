@@ -1,7 +1,6 @@
 import logging
 import os
 import re
-import shutil
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -13,7 +12,6 @@ from typing import Any
 import rbox
 
 from .anlz_safe import SafeAnlzParser
-from .config import BACKUP_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -37,155 +35,6 @@ class LiveRekordboxDB:
             self._local.conn = rbox.MasterDb(str(self.db_path))
         return self._local.conn
 
-    def _ensure_backup(self):
-        """
-        Creates a session backup and manages archival schedule.
-        Keeps only the last 3 session backups.
-        """
-        if not self.db_path.exists():
-            logger.error(f"Cannot backup: {self.db_path} does not exist.")
-            return False
-
-        from .services import SettingsManager
-        settings = SettingsManager.load()
-
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-
-        # 1. Session Backup
-        session_backup_name = f"master_session_{timestamp}.db"
-        session_backup_path = BACKUP_DIR / session_backup_name
-
-        try:
-            shutil.copy2(self.db_path, session_backup_path)
-            logger.info(f"Created session backup: {session_backup_path}")
-            self._cleanup_session_backups()
-
-            # 2. Check for Archival
-            self._handle_archival(settings)
-
-            return True
-        except Exception as e:
-            logger.error(f"Backup system failed: {e}")
-            return False
-
-    def _cleanup_session_backups(self):
-        """Keeps only the latest 3 session backups."""
-        try:
-            backups = sorted(BACKUP_DIR.glob("master_session_*.db"), key=os.path.getmtime, reverse=True)
-            if len(backups) > 3:
-                for old_backup in backups[3:]:
-                    os.remove(old_backup)
-                    logger.debug(f"Removed old session backup: {old_backup}")
-        except Exception as e:
-            logger.error(f"Failed to cleanup session backups: {e}")
-
-    def get_available_backups(self) -> list[dict[str, Any]]:
-        """Returns a sorted list of available backups."""
-        backups = []
-        if not BACKUP_DIR.exists(): return []
-
-        for f in BACKUP_DIR.glob("*.db"):
-            try:
-                # Parse filename: master_session_20260215_225416.db or master_ARCHIVE_20260215.db
-                name = f.name
-                path = str(f)
-                size = f.stat().st_size
-                mtime = f.stat().st_mtime
-
-                b_type = "Unknown"
-                if "session" in name: b_type = "Session"
-                elif "ARCHIVE" in name: b_type = "Archive"
-                elif "prerestore" in name: b_type = "Pre-Restore"
-
-                # Extract timestamp string for display if possible, else use mtime
-                # Simple extraction based on known formats
-                display_date = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
-
-                backups.append({
-                    "filename": name,
-                    "path": path,
-                    "type": b_type,
-                    "size": size,
-                    "date": display_date,
-                    "timestamp": mtime
-                })
-            except Exception as e:
-                logger.error(f"Error parsing backup {f}: {e}")
-
-        # Sort by timestamp descending (newest first)
-        return sorted(backups, key=lambda x: x["timestamp"], reverse=True)
-
-    def restore_backup(self, filename: str) -> bool:
-        """
-        Restores a backup file to master.db.
-        Create a 'Pre-Restore' backup of current state first.
-        """
-        target_path = BACKUP_DIR / filename
-        if not target_path.exists():
-            logger.error(f"Restore failed: File not found {target_path}")
-            return False, "Backup file not found"
-
-        try:
-            # 1. Safety Backup
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            pre_restore_name = f"master_prerestore_{timestamp}.db"
-            pre_restore_path = BACKUP_DIR / pre_restore_name
-            shutil.copy2(self.db_path, pre_restore_path)
-            logger.info(f"Created pre-restore backup: {pre_restore_path}")
-
-            # 2. Restore
-            # We must close the DB connection if possible, but rbox might hold it.
-            # In a live app, replacing the file while open is risky but often works on Windows if just reading.
-            # Ideally we'd close 'self.db' here but rbox wrapper might not expose close().
-            # Let's try copy2 replace.
-
-            shutil.copy2(target_path, self.db_path)
-            logger.info(f"Restored backup {filename} to {self.db_path}")
-
-            return True, "Backup restored successfully. Please restart the application."
-        except Exception as e:
-            logger.error(f"Restore failed: {e}")
-            return False, str(e)
-
-    def _handle_archival(self, settings):
-        """Creates a permanent archive backup based on user-defined frequency."""
-        freq = settings.get("archive_frequency", "daily")
-        if freq == "off": return
-
-        last_archive_str = settings.get("last_archive_date", "")
-        now = datetime.now()
-
-        should_archive = False
-        if not last_archive_str:
-            should_archive = True
-        else:
-            try:
-                last_archive = datetime.fromisoformat(last_archive_str)
-                delta = now - last_archive
-
-                if (freq == "daily" and delta.days >= 1) or (freq == "weekly" and delta.days >= 7) or (freq == "monthly" and delta.days >= 30): should_archive = True
-            except (ValueError, TypeError) as e:
-                logger.warning(
-                    "live_database: failed to parse last_archive_date %r — forcing archive (%s)",
-                    last_archive_str, e,
-                )
-                should_archive = True
-
-        if should_archive:
-            timestamp = now.strftime("%Y%m%d")
-            archive_name = f"master_ARCHIVE_{timestamp}.db"
-            archive_path = BACKUP_DIR / archive_name
-            try:
-                shutil.copy2(self.db_path, archive_path)
-                logger.info(f"Created archival backup: {archive_path}")
-
-                # Update settings
-                settings["last_archive_date"] = now.isoformat()
-                from .services import SettingsManager
-                SettingsManager.save(settings)
-            except Exception as e:
-                logger.error(f"Failed to create archival backup: {e}")
-
     def load(self) -> bool:
         """Loads the library from the live master.db.
 
@@ -197,9 +46,6 @@ class LiveRekordboxDB:
         within a few seconds of the load returning).
         """
         try:
-            # Always backup before opening
-            self._ensure_backup()
-
             logger.info("Opening Live Database...")
             # Trigger connection on main thread
             _ = self.db

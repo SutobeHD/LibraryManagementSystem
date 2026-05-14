@@ -6,6 +6,7 @@ Run with: pytest tests/ -xvs
 """
 from __future__ import annotations
 
+import importlib.util
 import os
 import struct
 import sys
@@ -19,6 +20,14 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import numpy as np
+
+# E2E pipeline tests need librosa (and friends). CI Linux runners don't
+# install the heavy audio stack, so the e2e/kwarg tests skip there. The
+# helper / pure-numpy tests in this file still run.
+_requires_librosa = pytest.mark.skipif(
+    importlib.util.find_spec("librosa") is None,
+    reason="librosa not installed on this platform",
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -278,6 +287,7 @@ def test_pqt2_compact_format():
 # E2E with synthetic audio
 # ---------------------------------------------------------------------------
 
+@_requires_librosa
 def test_e2e_full_analysis_synth():
     from app.analysis_engine import run_full_analysis
     y, sr = _synth_track(bpm=130.0, duration_s=10.0)
@@ -299,6 +309,7 @@ def test_e2e_full_analysis_synth():
         os.unlink(path)
 
 
+@_requires_librosa
 def test_e2e_quick_analysis_faster():
     from app.analysis_engine import _ensure_libs, run_full_analysis, run_quick_analysis
     _ensure_libs()  # warm imports
@@ -322,6 +333,7 @@ def test_e2e_quick_analysis_faster():
         os.unlink(path)
 
 
+@_requires_librosa
 def test_e2e_cache_hit():
     from app.analysis_engine import run_full_analysis
     y, sr = _synth_track(bpm=130.0, duration_s=8.0)
@@ -370,6 +382,7 @@ def test_cue_toggles_via_settings(monkeypatch):
         os.unlink(path)
 
 
+@_requires_librosa
 def test_cue_toggles_kwarg_overrides_settings(monkeypatch):
     """Per-call kwarg overrides the global setting."""
     monkeypatch.setenv("RB_ANALYSIS_AUTO_HOT_CUES", "0")  # disable globally

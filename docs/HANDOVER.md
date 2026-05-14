@@ -181,7 +181,6 @@ Aktueller Stand: 3 Tests für 50+ Module. Mindest-Ziel:
 |---|---|---|
 | `app/database.py` | `tests/test_database.py` | CRUD-Tracks, Playlists |
 | `app/services.py` | `tests/test_services.py` | XML-Export, BPM-Analysis-Mock |
-| `app/backup_engine.py` | `tests/test_backup_engine.py` | Table-Whitelist, Restore |
 | `app/usb_manager.py` | `tests/test_usb_manager.py` | Mock-FS, profile-load/save |
 | `app/soundcloud_api.py` | `tests/test_soundcloud_api.py` | httpx-mock, 429-retry |
 | `src-tauri/src/audio/analysis.rs` | inline `#[cfg(test)]` | FFT-Band-Mapping, edge cases |

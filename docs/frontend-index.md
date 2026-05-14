@@ -73,7 +73,6 @@ All DAW state is managed in this directory. Do NOT duplicate in component-local 
 | `components/DuplicateView.jsx` | Acoustic duplicate finder + merge UI — group list (similarity badge), per-track radio for master selection, "Auto" picks highest-bitrate, merge play-counts option. Lazy-loaded inside `UtilitiesView`. | `POST /api/duplicates/scan`, `GET /api/duplicates/results`, `POST /api/duplicates/merge` |
 | `components/SettingsView.jsx` | Tabbed preferences panel **container** — owns merged `settings` state and active-tab pointer; loads on mount (`GET /api/settings`) and saves on demand (`POST /api/settings`). Each tab body lives in `components/settings/*`. Routes to: `settings`. | `GET /api/settings`, `POST /api/settings` |
 | `components/DesignView.jsx` | UI mock-up gallery for upcoming features (stem separation, smart playlists, set planner, etc.). Routes to: `design`. | — |
-| `components/BackupManager.jsx` | Library backup/restore modal — snapshot timeline, create/restore, view diffs, archive cleanup. Mounted from sidebar (not a tab). | `GET /api/library/backups`, `POST /api/library/backup`, `POST /api/library/restore` |
 | `components/WaveformEditor.jsx` | Standalone WaveSurfer.js editor used by `RankingView` (`simpleMode`). Slim orchestrator that composes the hooks + sub-components under `components/waveform/`. Exposes ref API: `stop()`, `setTime(t)`, `getCurrentTime()`, `playPause()`; fires `onPlayPause(bool)` on play/pause/finish. |
 
 > Legacy reference: `components/LibraryView.jsx` and `components/ToolsView.jsx` still ship but are not lazy-mounted from `main.jsx` — they remain importable for reuse. `LibraryView` is a minimal Camelot-coloured `TrackTable` wrapper; `ToolsView` is the older batch-tools hub superseded by `UtilitiesView`.
@@ -110,7 +109,6 @@ Non-lazy components used by feature views.
 |------|---------|
 | `components/settings/SettingsControls.jsx` | **Shared field primitives** — `Toggle`, `Section`, `Field`, `Select`, `KeyCapture` (shortcut capture button). Every other settings tab consumes these. |
 | `components/settings/SettingsLibrary.jsx` | DB connection mode, watched folders, library filter; owns local watcher-status polling (1× heartbeat interval). |
-| `components/settings/SettingsBackup.jsx` | Retention policy, auto-backup intervals, manual backup trigger, archive cleanup. |
 | `components/settings/SettingsExport.jsx` | Default export folder, format/bitrate/sample-rate defaults, Rekordbox bridge target path. |
 | `components/settings/SettingsUsb.jsx` | Per-stick USB profile CRUD (label, type, audio format). Loads profiles lazily. |
 | `components/settings/SettingsAudio.jsx` | CPAL output device picker — enumerates `list_audio_devices` Tauri command (desktop only). |
