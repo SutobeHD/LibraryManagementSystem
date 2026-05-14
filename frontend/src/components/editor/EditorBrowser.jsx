@@ -1,31 +1,13 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Music, Disc, User, Play, Plus, X, ListMusic } from 'lucide-react';
-import api from '../../api/api';
+import { useLibraryTracks } from '../../hooks/useLibraryTracks';
 
 const EditorBrowser = ({ onLoadTrack, onClose }) => {
     const [searchTerm, setSearchTerm] = useState("");
-    const [tracks, setTracks] = useState([]);
-    const [loading, setLoading] = useState(false);
+    // Track list comes from the shared library cache — one fetch across views.
+    const { tracks, loading } = useLibraryTracks();
     const [filteredTracks, setFilteredTracks] = useState([]);
-
-    useEffect(() => {
-        loadLibrary();
-    }, []);
-
-    const loadLibrary = async () => {
-        setLoading(true);
-        try {
-            const res = await api.get('/api/library/tracks');
-            // Ensure we have an array
-            const data = Array.isArray(res.data) ? res.data : [];
-            setTracks(data);
-        } catch (e) {
-            console.error("Failed to load library", e);
-        } finally {
-            setLoading(false);
-        }
-    };
 
     useEffect(() => {
         if (!searchTerm) {

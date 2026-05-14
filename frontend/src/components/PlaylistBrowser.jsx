@@ -10,6 +10,7 @@ import RenameModal from './RenameModal';
 import SmartPlaylistEditor from './SmartPlaylistEditor';
 import { confirmModal } from './ConfirmModal';
 import { promptModal } from './PromptModal';
+import { useLibraryTracks } from '../hooks/useLibraryTracks';
 
 const PlaylistNode = ({ node, level = 0, onSelect, onContextMenu, onMoveNode, onRename, selectedId }) => {
     const [open, setOpen] = useState(level < 1);
@@ -152,7 +153,9 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
     const [selectedPlaylist, setSelectedPlaylist] = useState(null);
     const [showCollection, setShowCollection] = useState(false);
     const [tracks, setTracks] = useState([]);
-    const [allTracks, setAllTracks] = useState([]);
+    // Collection track list comes from the shared library cache — one fetch
+    // across all views. reloadAllTracks() forces a refetch after writes.
+    const { tracks: allTracks, reload: reloadAllTracks } = useLibraryTracks();
     const [loading, setLoading] = useState(false);
     const [dbLoaded, setDbLoaded] = useState(true);
     const [isProcessing, setIsProcessing] = useState(false);
@@ -196,27 +199,14 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
             .finally(() => setLoading(false));
     };
 
-    const loadAllTracks = () => {
-        api.get('/api/library/tracks')
-            .then(res => {
-                if (Array.isArray(res.data)) setAllTracks(res.data);
-            })
-            .catch(err => console.error("Failed to load all tracks", err));
-    };
-
+    // Playlist tree loads here; the track list comes from the shared
+    // useLibraryTracks() cache (one fetch across all views). This used to
+    // be two effects that each also re-fetched the full library.
     useEffect(() => {
         if (libraryStatus?.loaded) {
             loadTree();
-            loadAllTracks();
         }
     }, [libraryStatus?.loaded]);
-
-    useEffect(() => {
-        if (libraryStatus?.loaded) {
-            loadTree();
-            loadAllTracks();
-        }
-    }, []);
 
     const handleSelectCollection = () => {
         setSelectedPlaylist(null);
@@ -257,7 +247,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
             const res = await api.post('/api/library/clean-titles', { track_ids: trackIds });
             toast.success(`Cleaned ${res.data.success.length} titles!`);
             if (selectedPlaylist) handleSelect(selectedPlaylist);
-            else loadAllTracks();
+            else reloadAllTracks();
         } catch (err) {
             toast.error("Cleanup failed.");
         } finally {
@@ -390,7 +380,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
             await api.delete(`/api/track/${trackId}`);
             toast.success("Track deleted from library.");
             if (selectedPlaylist) handleSelect(selectedPlaylist);
-            loadAllTracks();
+            reloadAllTracks();
             loadTree();
         } catch (err) {
             toast.error("Failed to delete track.");

@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import api from '../api/api';
 import toast from 'react-hot-toast';
+import { useLibraryTracks } from '../hooks/useLibraryTracks';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Constants
@@ -92,8 +93,8 @@ const CueRow = ({ cue }) => {
 
 const PhraseGeneratorView = () => {
     // ── Track selector ──────────────────────────────────────────────────────
-    const [tracks, setTracks] = useState([]);
-    const [tracksLoading, setTracksLoading] = useState(false);
+    // Track list comes from the shared library cache — one fetch across views.
+    const { tracks, loading: tracksLoading } = useLibraryTracks();
     const [trackSearch, setTrackSearch] = useState('');
     const [selectedTrack, setSelectedTrack] = useState(null);
     const [selectorOpen, setSelectorOpen] = useState(false);
@@ -110,25 +111,6 @@ const PhraseGeneratorView = () => {
     // ── Commit state ────────────────────────────────────────────────────────
     const [committing, setCommitting] = useState(false);
     const [committed, setCommitted] = useState(false);
-
-    // ─── Load track list ─────────────────────────────────────────────────────
-    useEffect(() => {
-        const fetchTracks = async () => {
-            setTracksLoading(true);
-            log('info', 'loading track list');
-            try {
-                const res = await api.get('/api/library/tracks');
-                const list = res.data?.tracks ?? res.data?.data ?? res.data ?? [];
-                setTracks(Array.isArray(list) ? list : []);
-                log('info', `loaded ${list.length} tracks`);
-            } catch (e) {
-                log('error', 'failed to load tracks', e);
-            } finally {
-                setTracksLoading(false);
-            }
-        };
-        fetchTracks();
-    }, []);
 
     // ── Filtered track list ──────────────────────────────────────────────────
     const filteredTracks = useMemo(() => {
