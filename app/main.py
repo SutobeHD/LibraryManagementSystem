@@ -2033,12 +2033,22 @@ async def startup_event():
         except OSError:
             pass
 
-    # Req 29: Timeout Handling - Prevent infinite hangs on DB locks during boot
+    # Req 29: Timeout Handling - Prevent infinite hangs on DB locks during boot.
+    # 300s (not 30s): a 100k+ track library legitimately takes minutes to
+    # load. The timeout exists to catch a genuine infinite DB-lock hang,
+    # not to abort a slow-but-progressing load — 30s silently failed large
+    # libraries.
+    LIBRARY_LOAD_TIMEOUT_S = 300.0
     try:
-        logger.info("Auto-loading library with 30s timeout...")
-        await asyncio.wait_for(asyncio.to_thread(db.load_library), timeout=30.0)
+        logger.info("Auto-loading library (timeout %.0fs)...", LIBRARY_LOAD_TIMEOUT_S)
+        await asyncio.wait_for(
+            asyncio.to_thread(db.load_library), timeout=LIBRARY_LOAD_TIMEOUT_S
+        )
     except asyncio.TimeoutError:
-        logger.error("Library auto-load timed out after 30 seconds (Possible strict DB lock).")
+        logger.error(
+            "Library auto-load timed out after %.0fs (possible strict DB lock).",
+            LIBRARY_LOAD_TIMEOUT_S,
+        )
     except Exception as e:
         logger.error(f"Failed to auto-load library on startup: {e}")
 
