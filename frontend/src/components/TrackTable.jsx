@@ -60,6 +60,207 @@ const getKeyColor = (key) => {
     return CAMELOT_COLORS[cleanKey] || '#888';
 };
 
+const formatTime = (seconds) => {
+    if (!seconds) return '-';
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+};
+
+const openSoundCloud = (track) => {
+    if (!track) return;
+    const query = encodeURIComponent(`${track.Artist} ${track.Title}`);
+    window.open(`https://soundcloud.com/search?q=${query}`, '_blank');
+};
+
+// Per-row component, memoized so re-renders of TrackTable (sort, filter,
+// search keystroke) only reconcile rows whose track or visible-columns
+// reference actually changed. Closures live here so TrackTable's render
+// doesn't allocate them for every visible row on every keystroke.
+const TrackRow = React.memo(function TrackRow({
+    t,
+    index,
+    visibleColumns,
+    customColumns,
+    onSelectTrack,
+    onPlay,
+    onEditTrack,
+    onRemove,
+    onReorder,
+    playlistId,
+    setContextMenu,
+    setHeaderMenu,
+}) {
+    return (
+        <tr
+            onClick={() => onSelectTrack && onSelectTrack(t)}
+            onDoubleClick={() => onPlay ? onPlay(t) : (onEditTrack && onEditTrack(t))}
+            onContextMenu={(e) => {
+                e.preventDefault();
+                setContextMenu({ x: e.clientX, y: e.clientY, track: t });
+                setHeaderMenu(null);
+            }}
+            className="group transition-colors cursor-pointer text-[12px] hover:bg-mx-hover"
+            style={{ height: ROW_HEIGHT, borderBottom: '1px solid var(--line-subtle)' }}
+            draggable={!!onReorder}
+            onDragStart={(e) => {
+                if (onReorder) {
+                    e.dataTransfer.setData("application/json", JSON.stringify({ type: 'track', playlistId, trackId: t.id, index }));
+                    e.dataTransfer.effectAllowed = "move";
+                }
+            }}
+            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+            onDrop={(e) => {
+                e.preventDefault();
+                try {
+                    const data = JSON.parse(e.dataTransfer.getData("application/json"));
+                    if (onReorder && data.type === 'track' && data.playlistId === playlistId && data.trackId !== t.id) {
+                        onReorder(data.trackId, index);
+                    }
+                } catch (err) {
+                    // Drop payload wasn't our JSON shape (e.g. native OS drag) — ignore.
+                    log.debug('TrackTable drop JSON parse failed', err);
+                }
+            }}
+        >
+            {visibleColumns.includes('index') && (
+                <td className="p-1 font-mono text-ink-muted text-right pr-2 text-[11px]">{index + 1}</td>
+            )}
+            {visibleColumns.includes('preview') && (
+                <td
+                    className="p-1 text-center opacity-50 hover:opacity-100 cursor-pointer hover:text-amber2"
+                    onClick={(e) => { e.stopPropagation(); onPlay && onPlay(t); }}
+                >
+                    <Play size={12} className="mx-auto fill-current" />
+                </td>
+            )}
+            {visibleColumns.includes('artwork') && (
+                <td className="p-1 px-2 text-center w-[48px]">
+                    {t.Artwork ? (
+                        <div className="w-9 h-9 rounded-mx-sm overflow-hidden mx-auto bg-mx-card border border-line-subtle relative group-hover:scale-105 transition-transform">
+                            <img
+                                src={`${api.defaults.baseURL || ''}/api/artwork?path=${encodeURIComponent(t.Artwork)}`}
+                                alt={t.Title}
+                                className="w-full h-full object-cover"
+                                loading="lazy"
+                                onError={(e) => {
+                                    e.target.style.display = 'none';
+                                    e.target.parentElement.classList.add('flex', 'items-center', 'justify-center');
+                                    if (!e.target.parentElement.querySelector('svg')) {
+                                        e.target.parentElement.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-700"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>';
+                                    }
+                                }}
+                            />
+                        </div>
+                    ) : (
+                        <div className="w-9 h-9 bg-mx-card rounded-mx-sm border border-line-subtle flex items-center justify-center mx-auto text-ink-placeholder">
+                            <ImageIcon size={14} />
+                        </div>
+                    )}
+                </td>
+            )}
+            {visibleColumns.includes('Title') && (
+                <td className="p-1 px-2 font-medium text-ink-primary group-hover:text-amber2 transition-colors truncate" title={t.Title}>{t.Title}</td>
+            )}
+            {visibleColumns.includes('Artist') && (
+                <td className="p-1 text-ink-secondary truncate" title={t.Artist}>{t.Artist}</td>
+            )}
+            {visibleColumns.includes('Album') && (
+                <td className="p-1 text-ink-muted truncate" title={t.Album}>{t.Album || '-'}</td>
+            )}
+            {visibleColumns.includes('BPM') && (
+                <td className="p-1 text-amber2 text-center font-mono">{t.BPM ? parseFloat(t.BPM).toFixed(2) : '-'}</td>
+            )}
+            {visibleColumns.includes('Key') && (
+                <td className="p-1 text-center font-mono font-bold">
+                    <span
+                        className="px-2 py-0.5 rounded-full text-[9px] shadow-lg"
+                        style={{
+                            backgroundColor: `${getKeyColor(t.Key)}22`,
+                            color: getKeyColor(t.Key),
+                            border: `1px solid ${getKeyColor(t.Key)}44`
+                        }}
+                    >
+                        {t.Key || '-'}
+                    </span>
+                </td>
+            )}
+            {visibleColumns.includes('Color') && (
+                <td className="p-1 text-center">
+                    <ColorDot
+                        track={t}
+                        onChange={(newColor) => {
+                            api.patch('/api/tracks/batch', {
+                                track_ids: [t.id || t.ID],
+                                updates: { ColorID: newColor }
+                            }).then(() => { t.ColorID = String(newColor); }).catch(() => toast.error('Color speichern fehlgeschlagen'));
+                        }}
+                    />
+                </td>
+            )}
+            {visibleColumns.includes('Rating') && (
+                <td className="p-1 text-center">
+                    <div className="flex justify-center gap-0.5 opacity-40 group-hover:opacity-100">
+                        {[1, 2, 3, 4, 5].map(star => (
+                            <Star
+                                key={star}
+                                size={11}
+                                fill={star <= (t.Rating || 0) ? "currentColor" : "none"}
+                                className={`cursor-pointer transition-transform hover:scale-125 ${
+                                    star <= (t.Rating || 0) ? "text-amber2" : "text-ink-placeholder hover:text-amber2/60"
+                                }`}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    // Toggle: clicking the current rating clears it
+                                    const newRating = (t.Rating || 0) === star ? 0 : star;
+                                    api.patch('/api/tracks/batch', {
+                                        track_ids: [t.id || t.ID],
+                                        updates: { Rating: newRating }
+                                    }).then(() => {
+                                        // Optimistic local update so the UI reacts immediately
+                                        t.Rating = newRating;
+                                    }).catch(() => toast.error('Rating speichern fehlgeschlagen'));
+                                }}
+                            />
+                        ))}
+                    </div>
+                </td>
+            )}
+            {[
+                { id: 'Bitrate', value: t.Bitrate || '-' },
+                { id: 'PlayCount', value: t.PlayCount || '-' },
+                { id: 'Composer', value: t.Composer },
+                { id: 'Remixer', value: t.Remixer }
+            ].map(field => visibleColumns.includes(field.id) && (
+                <td key={field.id} className={`p-1 truncate ${field.id === 'Bitrate' || field.id === 'PlayCount' ? 'text-center font-mono text-ink-secondary' : 'text-ink-muted'}`} title={field.value}>
+                    {field.value || '-'}
+                </td>
+            ))}
+            {visibleColumns.includes('TotalTime') && (
+                <td className="p-1 text-ink-secondary text-center font-mono">{formatTime(t.TotalTime)}</td>
+            )}
+            {visibleColumns.includes('DateAdded') && (
+                <td className="p-1 text-ink-muted text-right pr-2 text-[10px] font-mono">{t.DateAdded || '-'}</td>
+            )}
+            {customColumns && customColumns.map(col => (
+                <td key={col.id} className="p-1">{col.render ? col.render(t) : '-'}</td>
+            ))}
+            {visibleColumns.includes('actions') && (
+                <td className="p-1 text-right pr-4">
+                    {onRemove && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onRemove(t.id); }}
+                            className="p-1 px-2 hover:bg-bad/10 rounded-mx-sm text-bad/60 hover:text-bad transition-all opacity-0 group-hover:opacity-100"
+                        >
+                            <X size={12} />
+                        </button>
+                    )}
+                </td>
+            )}
+        </tr>
+    );
+});
+
 const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder, onRemove, onDelete, onAddToPlaylist, availablePlaylists = [], playlistId, customColumns, variant = 'default', onSortedTracksChange }) => {
     const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
     const [visibleColumns, setVisibleColumns] = useState(() => {
@@ -134,19 +335,6 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
         return () => window.removeEventListener('click', handleClick);
     }, []);
 
-    const formatTime = (seconds) => {
-        if (!seconds) return '-';
-        const m = Math.floor(seconds / 60);
-        const s = Math.floor(seconds % 60);
-        return `${m}:${s.toString().padStart(2, '0')}`;
-    };
-
-    const openSoundCloud = (track) => {
-        if (!track) return;
-        const query = encodeURIComponent(`${track.Artist} ${track.Title}`);
-        window.open(`https://soundcloud.com/search?q=${query}`, '_blank');
-    };
-
     return (
         <div ref={scrollRef} className={`h-full overflow-auto relative ${variant === 'default' ? 'bg-mx-shell border border-line-subtle rounded-mx-md mx-2 mb-2 pb-20' : ''}`}>
             <table className="w-full text-left border-collapse min-w-[800px] table-fixed">
@@ -188,173 +376,21 @@ const TrackTable = ({ tracks = [], onSelectTrack, onEditTrack, onPlay, onReorder
                     {visibleTracks.map((t, i) => {
                         const index = startIndex + i;
                         return (
-                        <tr
-                            key={t.id || index}
-                            onClick={() => onSelectTrack && onSelectTrack(t)}
-                            onDoubleClick={() => onPlay ? onPlay(t) : (onEditTrack && onEditTrack(t))}
-                            onContextMenu={(e) => {
-                                e.preventDefault();
-                                setContextMenu({ x: e.clientX, y: e.clientY, track: t });
-                                setHeaderMenu(null);
-                            }}
-                            className="group transition-colors cursor-pointer text-[12px] hover:bg-mx-hover"
-                            style={{ height: ROW_HEIGHT, borderBottom: '1px solid var(--line-subtle)' }}
-                            draggable={!!onReorder}
-                            onDragStart={(e) => {
-                                if (onReorder) {
-                                    e.dataTransfer.setData("application/json", JSON.stringify({ type: 'track', playlistId, trackId: t.id, index }));
-                                    e.dataTransfer.effectAllowed = "move";
-                                }
-                            }}
-                            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
-                            onDrop={(e) => {
-                                e.preventDefault();
-                                try {
-                                    const data = JSON.parse(e.dataTransfer.getData("application/json"));
-                                    if (onReorder && data.type === 'track' && data.playlistId === playlistId && data.trackId !== t.id) {
-                                        onReorder(data.trackId, index);
-                                    }
-                                } catch (err) {
-                                    // Drop payload wasn't our JSON shape (e.g. native OS drag) — ignore.
-                                    log.debug('TrackTable drop JSON parse failed', err);
-                                }
-                            }}
-                        >
-                            {visibleColumns.includes('index') && (
-                                <td className="p-1 font-mono text-ink-muted text-right pr-2 text-[11px]">{index + 1}</td>
-                            )}
-                            {visibleColumns.includes('preview') && (
-                                <td
-                                    className="p-1 text-center opacity-50 hover:opacity-100 cursor-pointer hover:text-amber2"
-                                    onClick={(e) => { e.stopPropagation(); onPlay && onPlay(t); }}
-                                >
-                                    <Play size={12} className="mx-auto fill-current" />
-                                </td>
-                            )}
-                            {visibleColumns.includes('artwork') && (
-                                <td className="p-1 px-2 text-center w-[48px]">
-                                    {t.Artwork ? (
-                                        <div className="w-9 h-9 rounded-mx-sm overflow-hidden mx-auto bg-mx-card border border-line-subtle relative group-hover:scale-105 transition-transform">
-                                            <img
-                                                src={`${api.defaults.baseURL || ''}/api/artwork?path=${encodeURIComponent(t.Artwork)}`}
-                                                alt={t.Title}
-                                                className="w-full h-full object-cover"
-                                                loading="lazy"
-                                                onError={(e) => {
-                                                    e.target.style.display = 'none';
-                                                    e.target.parentElement.classList.add('flex', 'items-center', 'justify-center');
-                                                    if (!e.target.parentElement.querySelector('svg')) {
-                                                        e.target.parentElement.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-700"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>';
-                                                    }
-                                                }}
-                                            />
-                                        </div>
-                                    ) : (
-                                        <div className="w-9 h-9 bg-mx-card rounded-mx-sm border border-line-subtle flex items-center justify-center mx-auto text-ink-placeholder">
-                                            <ImageIcon size={14} />
-                                        </div>
-                                    )}
-                                </td>
-                            )}
-                            {visibleColumns.includes('Title') && (
-                                <td className="p-1 px-2 font-medium text-ink-primary group-hover:text-amber2 transition-colors truncate" title={t.Title}>{t.Title}</td>
-                            )}
-                            {visibleColumns.includes('Artist') && (
-                                <td className="p-1 text-ink-secondary truncate" title={t.Artist}>{t.Artist}</td>
-                            )}
-                            {visibleColumns.includes('Album') && (
-                                <td className="p-1 text-ink-muted truncate" title={t.Album}>{t.Album || '-'}</td>
-                            )}
-                            {visibleColumns.includes('BPM') && (
-                                <td className="p-1 text-amber2 text-center font-mono">{t.BPM ? parseFloat(t.BPM).toFixed(2) : '-'}</td>
-                            )}
-                            {visibleColumns.includes('Key') && (
-                                <td className="p-1 text-center font-mono font-bold">
-                                    <span
-                                        className="px-2 py-0.5 rounded-full text-[9px] shadow-lg"
-                                        style={{
-                                            backgroundColor: `${getKeyColor(t.Key)}22`, // 22 is ~13% opacity
-                                            color: getKeyColor(t.Key),
-                                            border: `1px solid ${getKeyColor(t.Key)}44`
-                                        }}
-                                    >
-                                        {t.Key || '-'}
-                                    </span>
-                                </td>
-                            )}
-                            {visibleColumns.includes('Color') && (
-                                <td className="p-1 text-center">
-                                    <ColorDot
-                                        track={t}
-                                        onChange={(newColor) => {
-                                            api.patch('/api/tracks/batch', {
-                                                track_ids: [t.id || t.ID],
-                                                updates: { ColorID: newColor }
-                                            }).then(() => { t.ColorID = String(newColor); }).catch(() => toast.error('Color speichern fehlgeschlagen'));
-                                        }}
-                                    />
-                                </td>
-                            )}
-                            {visibleColumns.includes('Rating') && (
-                                <td className="p-1 text-center">
-                                    <div className="flex justify-center gap-0.5 opacity-40 group-hover:opacity-100">
-                                        {[1, 2, 3, 4, 5].map(star => (
-                                            <Star
-                                                key={star}
-                                                size={11}
-                                                fill={star <= (t.Rating || 0) ? "currentColor" : "none"}
-                                                className={`cursor-pointer transition-transform hover:scale-125 ${
-                                                    star <= (t.Rating || 0) ? "text-amber2" : "text-ink-placeholder hover:text-amber2/60"
-                                                }`}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    // Toggle: clicking the current rating clears it
-                                                    const newRating = (t.Rating || 0) === star ? 0 : star;
-                                                    api.patch('/api/tracks/batch', {
-                                                        track_ids: [t.id || t.ID],
-                                                        updates: { Rating: newRating }
-                                                    }).then(() => {
-                                                        // Optimistic local update so the UI reacts immediately
-                                                        t.Rating = newRating;
-                                                    }).catch(() => toast.error('Rating speichern fehlgeschlagen'));
-                                                }}
-                                            />
-                                        ))}
-                                    </div>
-                                </td>
-                            )}
-                            {[
-                                { id: 'Bitrate', value: t.Bitrate || '-' },
-                                { id: 'PlayCount', value: t.PlayCount || '-' },
-                                { id: 'Composer', value: t.Composer },
-                                { id: 'Remixer', value: t.Remixer }
-                            ].map(field => visibleColumns.includes(field.id) && (
-                                <td key={field.id} className={`p-1 truncate ${field.id === 'Bitrate' || field.id === 'PlayCount' ? 'text-center font-mono text-ink-secondary' : 'text-ink-muted'}`} title={field.value}>
-                                    {field.value || '-'}
-                                </td>
-                            ))}
-                            {visibleColumns.includes('TotalTime') && (
-                                <td className="p-1 text-ink-secondary text-center font-mono">{formatTime(t.TotalTime)}</td>
-                            )}
-                            {visibleColumns.includes('DateAdded') && (
-                                <td className="p-1 text-ink-muted text-right pr-2 text-[10px] font-mono">{t.DateAdded || '-'}</td>
-                            )}
-                            {customColumns && customColumns.map(col => (
-                                <td key={col.id} className="p-1">{col.render ? col.render(t) : '-'}</td>
-                            ))}
-                            {visibleColumns.includes('actions') && (
-                                <td className="p-1 text-right pr-4">
-                                    {onRemove && (
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); onRemove(t.id); }}
-                                            className="p-1 px-2 hover:bg-bad/10 rounded-mx-sm text-bad/60 hover:text-bad transition-all opacity-0 group-hover:opacity-100"
-                                        >
-                                            <X size={12} />
-                                        </button>
-                                    )}
-                                </td>
-                            )}
-                        </tr>
+                            <TrackRow
+                                key={t.id || index}
+                                t={t}
+                                index={index}
+                                visibleColumns={visibleColumns}
+                                customColumns={customColumns}
+                                onSelectTrack={onSelectTrack}
+                                onPlay={onPlay}
+                                onEditTrack={onEditTrack}
+                                onRemove={onRemove}
+                                onReorder={onReorder}
+                                playlistId={playlistId}
+                                setContextMenu={setContextMenu}
+                                setHeaderMenu={setHeaderMenu}
+                            />
                         );
                     })}
                     {padBottom > 0 && (
