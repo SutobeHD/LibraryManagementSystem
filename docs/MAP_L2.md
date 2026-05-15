@@ -1528,6 +1528,7 @@ Tests for `app/database.py`.
 - `  TestLockPrimitives.test_db_lock_releases_on_exception()` — Context manager exits cleanly when the body raises.
 - `TestSerialisedDecorator` — Every mutating method on RekordboxDB must be wrapped.
 - `  TestSerialisedDecorator.test_method_is_wrapped()` — The module-level for-loop should have wrapped every mutator
+- `  TestSerialisedDecorator.test_update_tracks_metadata_locks_manually()` — update_tracks_metadata is NOT @_serialised — it locks
 - `  TestSerialisedDecorator.test_decorator_releases_after_call()` — `_serialised` must release the lock when the wrapped method returns.
 - `  TestSerialisedDecorator.test_decorator_releases_on_exception()`
 - `TestSetMode` — `set_mode` rejects unknown values and lazily creates standalone master.db.
