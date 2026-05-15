@@ -123,6 +123,14 @@ app = FastAPI(title="Music Library Manager")
 
 # --- SECURITY: Internal shutdown token (generated per session) ---
 SHUTDOWN_TOKEN = secrets.token_urlsafe(32)
+# Tracks whether the first heartbeat consumer has captured the session
+# token. After that, heartbeat responses omit it — narrows the window in
+# which an unauthenticated /heartbeat call from any local process can
+# grab the shutdown/restart token. The frontend's heartbeat handler is
+# already defensive (only stores the token when present), so subsequent
+# heartbeats no-op safely.
+_TOKEN_ISSUED = False
+_token_issued_lock = threading.Lock()
 
 # Don't spam the log when this module is re-imported by a Windows subprocess
 # (ProcessPoolExecutor in app.anlz_safe spawns child workers — on Windows that
@@ -2076,8 +2084,13 @@ async def shutdown_watcher_event():
 
 @app.post("/api/system/heartbeat")
 def heartbeat():
-    global last_heartbeat
+    global last_heartbeat, _TOKEN_ISSUED
     last_heartbeat = time.time()
+    with _token_issued_lock:
+        if _TOKEN_ISSUED:
+            return {"status": "alive"}
+        _TOKEN_ISSUED = True
+    logger.info("Session token issued to first heartbeat consumer.")
     return {"status": "alive", "token": SHUTDOWN_TOKEN}
 
 @app.post("/api/system/shutdown")
