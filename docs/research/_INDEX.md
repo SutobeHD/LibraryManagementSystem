@@ -32,13 +32,13 @@ _(none)_
 _(none)_
 
 ### review
-- [review_downloader-unified-multi-source.md](implement/review_downloader-unified-multi-source.md) — Unified downloader: all 3 sign-off-blocking owner decisions resolved (OQ-A no route gate, OQ-B D3→PASS, legal-posture two-mode). Review checklist fully ticked. Awaiting explicit owner `accepted_` sign-off (2026-05-13)
+_(none)_
 
 ### rework
 _(none)_
 
 ### accepted
-_(none)_
+- [accepted_downloader-unified-multi-source.md](implement/accepted_downloader-unified-multi-source.md) — Unified downloader: **owner sign-off granted 2026-05-13.** Plan accepted; ready for `inprogress_` when implementation is unblocked. D3 feasibility proven (PASS) (2026-05-13)
 
 ### inprogress
 _(none)_
