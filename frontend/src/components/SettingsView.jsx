@@ -12,7 +12,6 @@
  *
  * Tabs:
  *   Library    — DB mode, scan folders, library filter
- *   Backup     — retention, auto-backup interval, archive frequency
  *   Export     — format, bitrate, sample rate, default output dir, RB bridge
  *   USB        — per-stick USB profile CRUD
  *   Audio      — CPAL output device picker (Tauri)
@@ -32,7 +31,6 @@ import {
 } from 'lucide-react';
 
 import SettingsLibrary from './settings/SettingsLibrary';
-import SettingsBackup from './settings/SettingsBackup';
 import SettingsExport from './settings/SettingsExport';
 import SettingsUsb from './settings/SettingsUsb';
 import SettingsAudio from './settings/SettingsAudio';
@@ -45,10 +43,6 @@ import SettingsNetwork from './settings/SettingsNetwork';
 // Merged with whatever the backend returns; unrecognised keys are preserved.
 const DEFAULTS = {
     // Library
-    backup_retention_days: 7,
-    auto_backup: true,
-    archive_frequency: 'daily',
-    auto_backup_interval_min: 30,   // 0 = session-only
     remember_lib_mode: false,
     hide_streaming: false,
     scan_folders: [],               // extra watched folders
@@ -101,7 +95,6 @@ const DEFAULTS = {
 
 const TABS = [
     { id: 'library',    label: 'Library',    icon: Database },
-    { id: 'backup',     label: 'Backup',     icon: HardDrive },
     { id: 'export',     label: 'Export',     icon: FileOutput },
     { id: 'usb',        label: 'USB Profiles', icon: HardDrive },
     { id: 'audio',      label: 'Audio',      icon: Music },
@@ -145,7 +138,6 @@ const SettingsView = () => {
     const renderActiveTab = () => {
         switch (activeTab) {
             case 'library':    return <SettingsLibrary    settings={settings} setSettings={setSettings} />;
-            case 'backup':     return <SettingsBackup     settings={settings} setSettings={setSettings} />;
             case 'export':     return <SettingsExport     settings={settings} setSettings={setSettings} />;
             case 'usb':        return <SettingsUsb />;
             case 'audio':      return <SettingsAudio      settings={settings} setSettings={setSettings} />;

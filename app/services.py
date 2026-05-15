@@ -16,7 +16,7 @@ import psutil
 from mutagen.flac import FLAC
 from mutagen.id3 import APIC, ID3
 
-from .config import BACKUP_DIR, DB_FILENAME, EXPORT_DIR, FFMPEG_BIN, REKORDBOX_ROOT
+from .config import DB_FILENAME, EXPORT_DIR, FFMPEG_BIN, REKORDBOX_ROOT
 from .database import db
 
 try:
@@ -143,21 +143,6 @@ class SystemGuard:
                     "services.is_rekordbox_running: skipped pid=%s (%s)", proc.pid, e,
                 )
         return False
-    @staticmethod
-    def create_backup() -> str | None:
-        source = REKORDBOX_ROOT / DB_FILENAME
-        if not source.exists(): return None
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        dest = BACKUP_DIR / f"{DB_FILENAME}.backup_{timestamp}"
-        try:
-            shutil.copy2(source, dest)
-            return str(dest)
-        except (OSError, shutil.Error) as e:
-            logger.warning(
-                "services.create_backup: failed to copy %s -> %s (%s)", source, dest, e,
-            )
-            return None
-
 class AudioEngine:
     @staticmethod
     def check_ffmpeg() -> bool:
@@ -654,7 +639,6 @@ class LibraryTools:
 class SettingsManager:
     CONFIG = Path("settings.json")
     DEFAULT = {
-        "backup_retention_days": 30,
         "default_export_format": "wav",
         "default_export_dir": "",  # If empty, falls back to EXPORT_DIR (./exports). User can pick any folder.
         "theme": "dark",
@@ -662,8 +646,6 @@ class SettingsManager:
         "db_path": "",
         "artist_view_threshold": 0,
         "ranking_filter_mode": "all", # all, unrated, untagged
-        "archive_frequency": "daily", # off, daily, weekly, monthly
-        "last_archive_date": "",
         "insights_playcount_threshold": 0,
         "insights_bitrate_threshold": 320,
         "hide_streaming": False,
@@ -673,20 +655,41 @@ class SettingsManager:
         "sc_sync_folder_id": None,   # local Rekordbox playlist ID to create SC playlists inside
         "sc_download_format": "auto",  # "auto" (keep source codec) | "aiff" (convert to PCM AIFF lossless)
         "legacy_pdb_stub": False,  # opt-in: write header-only export.pdb for CDJ-2000nxs2 (experimental — see app/usb_pdb.py)
-        "scan_folders": []           # absolute paths watched for new audio files (FolderWatcher)
+        "scan_folders": [],          # absolute paths watched for new audio files (FolderWatcher)
     }
     @classmethod
     def load(cls) -> dict[str, Any]:
         try:
-            return {**cls.DEFAULT, **json.load(open(cls.CONFIG))}
+            with open(cls.CONFIG, encoding="utf-8") as f:
+                return {**cls.DEFAULT, **json.load(f)}
         except (OSError, json.JSONDecodeError) as e:
             logger.warning(
                 "services.SettingsManager.load: falling back to defaults — %s", e,
             )
-            return cls.DEFAULT
+            return dict(cls.DEFAULT)
+
     @classmethod
     def save(cls, cfg: dict[str, Any]) -> None:
-        json.dump(cfg, open(cls.CONFIG, "w"), indent=2)
+        """Write settings atomically: tmp file + os.replace.
+
+        A crash mid-write would otherwise leave ``settings.json`` truncated
+        and the next startup would silently fall back to defaults.
+        """
+        payload = json.dumps(cfg, indent=2)
+        tmp_path = cls.CONFIG.with_suffix(cls.CONFIG.suffix + ".tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(payload)
+            os.replace(tmp_path, cls.CONFIG)
+        except OSError as e:
+            logger.error(
+                "services.SettingsManager.save: write failed err=%s", e,
+            )
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+            raise
 
 class MetadataManager:
     MAPPINGS_FILE = Path("metadata_mappings.json")
@@ -720,23 +723,6 @@ class MetadataManager:
     def get_mapped_name(cls, category: str, name: str) -> str:
         data = cls.load()
         return data.get(category, {}).get(name, name)
-
-class SystemCleaner:
-    @staticmethod
-    def cleanup_old_backups() -> int:
-        days = SettingsManager.load().get("backup_retention_days", 30)
-        cutoff = time.time() - (days * 86400)
-        count = 0
-        for b in BACKUP_DIR.glob("master.db.backup_*"):
-            if b.stat().st_mtime < cutoff:
-                try:
-                    os.remove(b)
-                    count += 1
-                except OSError as e:
-                    logger.warning(
-                        "services.cleanup_old_backups: failed to remove %s (%s)", b, e,
-                    )
-        return count
 
 class BeatAnalyzer:
     """

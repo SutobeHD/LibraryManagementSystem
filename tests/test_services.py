@@ -14,6 +14,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+# app.services transitively imports app.database -> app.live_database -> rbox.
+# Skip on platforms without pyrekordbox (Linux CI runners).
+pytest.importorskip("rbox", reason="pyrekordbox not installed on this platform")
+
 from app.services import (
     MetadataManager,
     SettingsManager,
@@ -64,7 +68,8 @@ class TestSettingsManager:
         assert result["theme"] == "light"
         assert result["auto_snap"] is False
         # Defaults still present:
-        assert result["backup_retention_days"] == 30
+        assert result["theme"] == "light"  # explicit user override survives merge
+        assert "default_export_format" in result  # default key still merged in
 
     def test_default_contract_pins_critical_keys(self) -> None:
         """Other modules read these keys via SettingsManager.load() — if
@@ -72,7 +77,7 @@ class TestSettingsManager:
         suddenly fail with a KeyError or silent wrong-default behaviour."""
         d = SettingsManager.DEFAULT
         for key in (
-            "backup_retention_days", "theme", "hide_streaming",
+            "theme", "hide_streaming",
             "artist_view_threshold", "last_lib_mode",
         ):
             assert key in d, f"DEFAULT lost the {key!r} key"
@@ -226,3 +231,38 @@ class TestCleanTag:
         assert "Original Mix" not in cleaned
         assert "Extended Mix" not in cleaned
         assert cleaned.startswith("A")
+
+
+# ---------------------------------------------------------------------------
+# SettingsManager — atomic save
+# ---------------------------------------------------------------------------
+
+class TestSettingsAtomicSave:
+    """The save path is atomic: tmp file + os.replace. A crash mid-write
+    must not leave ``settings.json`` truncated."""
+
+    def test_save_writes_complete_json(self, tmp_path: Path, monkeypatch) -> None:
+        cfg = tmp_path / "settings.json"
+        monkeypatch.setattr(SettingsManager, "CONFIG", cfg)
+        SettingsManager.save({"theme": "dark", "auto_snap": True})
+        import json
+        loaded = json.loads(cfg.read_text(encoding="utf-8"))
+        assert loaded["theme"] == "dark"
+        assert loaded["auto_snap"] is True
+
+    def test_save_leaves_no_tmp_files(self, tmp_path: Path, monkeypatch) -> None:
+        cfg = tmp_path / "settings.json"
+        monkeypatch.setattr(SettingsManager, "CONFIG", cfg)
+        SettingsManager.save({"theme": "dark"})
+        leftovers = [p for p in tmp_path.iterdir() if p.name != "settings.json"]
+        assert leftovers == []
+
+    def test_save_overwrites_existing_file(self, tmp_path: Path, monkeypatch) -> None:
+        cfg = tmp_path / "settings.json"
+        cfg.write_text('{"theme": "old"}', encoding="utf-8")
+        monkeypatch.setattr(SettingsManager, "CONFIG", cfg)
+        SettingsManager.save({"theme": "new"})
+        import json
+        assert json.loads(cfg.read_text(encoding="utf-8"))["theme"] == "new"
+
+

@@ -24,7 +24,6 @@
 | `app/anlz_writer.py` | LibraryManagementSystem -- ANLZ Binary File Writer |
 | `app/audio_analyzer.py` | LibraryManagementSystem -- Audio Analyzer (Unified Wrapper) |
 | `app/audio_tags.py` | audio_tags — write metadata back to the source audio file. |
-| `app/backup_engine.py` | Git-like incremental backup engine for Rekordbox Editor Pro. |
 | `app/batch_worker.py` | Setup logging |
 | `app/config.py` | *(no module docstring)* |
 | `app/database.py` | *(no module docstring)* |
@@ -92,7 +91,6 @@
 | `frontend/src/config/constants.js` | Frontend-wide constants. |
 | `frontend/src/utils/AudioBandAnalyzer.js` | AudioBandAnalyzer Splits an AudioBuffer into 3 frequency bands (Rekordbox-style): - Low: < 400 Hz (Bass / Kic… |
 | `frontend/src/utils/log.js` | Dev-only logging utility. |
-| `frontend/src/components/BackupManager.jsx` | *(no module docstring)* |
 | `frontend/src/components/BatchEditBar.jsx` | *(no module docstring)* |
 | `frontend/src/components/ConfirmModal.jsx` | Module-level subscriber registry so a single mounted <ConfirmModalRoot /> |
 | `frontend/src/components/daw/DawBrowser.jsx` | DawBrowser — Left panel file/library browser for the DJ Edit DAW Lists tracks from the library and recent .rb… |
@@ -129,7 +127,6 @@
 | `frontend/src/components/settings/SettingsAnalysis.jsx` | SettingsAnalysis — Quality preset, ranking filter, library insight thresholds. |
 | `frontend/src/components/settings/SettingsAppearance.jsx` | SettingsAppearance — Waveform band colours, locale picker. |
 | `frontend/src/components/settings/SettingsAudio.jsx` | SettingsAudio — CPAL output device picker (Tauri-only enumeration). |
-| `frontend/src/components/settings/SettingsBackup.jsx` | SettingsBackup — Retention policy, auto-backup intervals, cleanup. |
 | `frontend/src/components/settings/SettingsControls.jsx` | SettingsControls — Shared building blocks for the tabbed Settings panel. |
 | `frontend/src/components/settings/SettingsExport.jsx` | SettingsExport — Default export folder, format defaults, Rekordbox bridge. |
 | `frontend/src/components/settings/SettingsLibrary.jsx` | SettingsLibrary — DB connection mode, watched folders, library filter. |
@@ -187,7 +184,6 @@
 |------|---------|
 | `tests/__init__.py` | *(no module docstring)* |
 | `tests/test_analysis.py` | Regression tests for the analysis pipeline. |
-| `tests/test_backup_engine.py` | Tests for `app/backup_engine.py`. |
 | `tests/test_database.py` | Tests for `app/database.py`. |
 | `tests/test_onelibrary_wal_flush.py` | End-to-end regression test for OneLibraryUsbWriter — runs the FULL |
 | `tests/test_pdb_structure.py` | PDB writer structural test against F: drive Pioneer reference. |

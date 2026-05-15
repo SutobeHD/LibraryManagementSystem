@@ -68,7 +68,6 @@ KEYRING_SC_TOKEN = "sc_token"
 
 from . import audio_tags, download_registry, folder_watcher
 from .audio_analyzer import LIBROSA_AVAILABLE, AudioAnalyzer
-from .backup_engine import BackupEngine
 from .config import EXPORT_DIR, LOG_DIR, MUSIC_DIR, TEMP_DIR
 from .database import db
 from .phrase_generator import (
@@ -316,7 +315,6 @@ class SetReq(BaseModel):
     # checked; everything else is preserved verbatim via model_extra.
     model_config = {"extra": "allow"}
 
-    backup_retention_days: int = 7
     default_export_format: str = "wav"
     default_export_dir: str = ""  # User-selectable default folder for audio exports; empty = backend EXPORT_DIR
     theme: str = "dark"
@@ -328,8 +326,6 @@ class SetReq(BaseModel):
     remember_lib_mode: bool = False
     last_lib_mode: str = "xml"
     ranking_filter_mode: str = "all"
-    archive_frequency: str = "daily"
-    last_archive_date: str = ""
     insights_playcount_threshold: int = 0
     insights_bitrate_threshold: int = 320
     soundcloud_auth_token: str = ""
@@ -1191,74 +1187,18 @@ def set_lib_mode(r: DBModeReq):
         logger.info(f"Library reloaded in {r.mode} mode. Tracks: {len(db.tracks)}")
     return {"status": "success" if success else "error", "mode": db.mode}
 
-@app.post("/api/library/backup")
-def trigger_backup():
-    """Create an incremental backup using the Git-like engine."""
-    if db.mode == "live" and db.active_db and hasattr(db.active_db, 'db_path'):
-        try:
-            engine = BackupEngine(str(db.active_db.db_path))
-            result = engine.snapshot("Manual backup")
-            return result
-        except Exception as e:
-            logger.error(f"Incremental backup failed, falling back to legacy: {e}")
-            success = db.active_db._ensure_backup()
-            return {"status": "success" if success else "error", "fallback": True}
-    return {"status": "error", "message": "Backups only supported in live mode"}
-
 @app.post("/api/library/sync")
 def sync_lib():
+    """Persist the in-memory library.
+
+    XML mode: writes ``rekordbox.xml`` to disk.
+    Live mode: no-op — rbox writes through on every mutation, so there is
+    nothing extra to commit.
     """
-    Triggered by 'Create Backup' (formerly Sync).
-    In Live Mode: Creates incremental snapshot.
-    In XML Mode: Saves XML.
-    """
-    if db.mode == "live" and db.active_db and hasattr(db.active_db, 'db_path'):
-        try:
-            engine = BackupEngine(str(db.active_db.db_path))
-            result = engine.snapshot("Sync backup")
-            return {"status": "success", "message": "Backup created successfully", **result}
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
+    if db.mode == "live":
+        return {"status": "success", "message": "Live mode — changes auto-saved"}
     success = db.save()
     return {"status": "success" if success else "error"}
-
-@app.get("/api/library/backups")
-def list_backups():
-    """Get backup history (incremental commits + legacy backups)."""
-    if db.mode == "live" and db.active_db and hasattr(db.active_db, 'db_path'):
-        try:
-            engine = BackupEngine(str(db.active_db.db_path))
-            return engine.get_history()
-        except Exception as e:
-            logger.error(f"Incremental history failed, falling back: {e}")
-            return db.active_db.get_available_backups()
-    return []
-
-class RestoreReq(BaseModel):
-    filename: str
-    commit_hash: str | None = None
-
-@app.post("/api/library/restore")
-def restore_backup(r: RestoreReq):
-    """Restore from incremental commit or legacy backup."""
-    if db.mode == "live" and db.active_db and hasattr(db.active_db, 'db_path'):
-        # Try incremental restore first
-        if r.commit_hash:
-            engine = BackupEngine(str(db.active_db.db_path))
-            return engine.restore(r.commit_hash)
-        # Fall back to legacy restore
-        if r.filename:
-            success, msg = db.active_db.restore_backup(r.filename)
-            return {"status": "success" if success else "error", "message": msg}
-    return {"status": "error", "message": "Restore only available in Live mode"}
-
-@app.get("/api/library/backup/{commit_hash}/diff")
-def get_backup_diff(commit_hash: str):
-    """Get detailed diff for a specific backup commit."""
-    if db.mode == "live" and db.active_db and hasattr(db.active_db, 'db_path'):
-        engine = BackupEngine(str(db.active_db.db_path))
-        return engine.get_diff(commit_hash)
-    return {"error": "Not available in current mode"}
 
 class LoadLibReq(BaseModel):
     path: str | None = None
@@ -2072,7 +2012,6 @@ async def startup_event():
     except Exception as e:
         logger.error(f"FolderWatcher startup failed: {e}", exc_info=True)
 
-
 @app.on_event("shutdown")
 async def shutdown_watcher_event():
     try:
@@ -2110,8 +2049,6 @@ async def restart(token: str = ""):
     threading.Thread(target=restart_proc, daemon=True).start()
     return {"message": "Restarting backend..."}
 
-@app.post("/api/system/cleanup")
-def cln(): return {"deleted_files": 0}
 
 @app.post("/api/system/select_db")
 def select_db_dialog():

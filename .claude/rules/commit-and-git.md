@@ -120,9 +120,27 @@ For multi-line bodies pass via HEREDOC, include the `Co-Authored-By: Claude Opus
 
 ---
 
-## Push policy — autonomous but always revertable
+## Push policy — autonomous, auto-triggered after every commit
 
-User wants commits pushed to `origin/main` (or feature branches) **automatically** after they land locally — no asking. The constraint is that **every push must remain revertable via a future `git revert` commit**. That rules out anything that rewrites public history.
+User wants commits pushed to `origin/main` (or the current branch's tracking remote) **automatically and immediately** after each commit lands locally. No asking, no batching at end-of-session.
+
+### How it actually fires
+
+Two layers of enforcement, defense-in-depth:
+
+1. **Soft rule (this doc):** after every `git commit ...` you run, follow it with `git push origin <current-branch>` unless the soft-rule escape clause applies (see below).
+2. **Hard hook:** `.claude/hooks/auto-push-after-commit.py` is wired as a PostToolUse hook in `.claude/settings.json` matching `Bash`. After every `Bash(git commit ...)` it parses the just-landed commit, runs `git fetch --quiet`, checks drift, and pushes. Whether the agent forgets the soft rule or not, the hook still fires.
+
+### Escape clauses (when NOT to auto-push)
+
+- **The commit message contains `[skip-push]` or `[no-push]`** (case-insensitive, in subject or body). Use this when you're about to do multiple related commits and only want to push once at the end.
+- **Local is behind origin.** The hook detects this via `git status -sb` after `git fetch` and aborts with a stderr note. Don't auto-rebase or auto-merge — that would change SHAs in non-revertable ways. User pulls manually, then pushes.
+- **Detached HEAD.** No upstream branch — skip.
+- **Push fails** (GH007 private-email, auth, network). Hook surfaces the error on stderr but never reverts the commit. Agent notices and fixes (typically a git-identity issue — see "Git identity" above).
+
+### Constraint that survives auto-push: revertable history
+
+Every push must remain revertable via a future `git revert` commit. That rules out anything that rewrites public history.
 
 ### Allowed (autonomous, no confirmation)
 
@@ -140,9 +158,11 @@ User wants commits pushed to `origin/main` (or feature branches) **automatically
 - `git branch -D` — destroys a branch outright.
 - `--no-verify` to skip pre-commit hooks.
 
-### Before push — always
+### Before push — always (handled by the hook)
 
-Run `git fetch --quiet && git status -sb` first. If `behind`, **stop and surface the drift** — don't push on a stale base. The user can choose to `git pull --ff-only` (safe) or investigate the upstream commits. The agent does **not** rebase or merge to "fix" the drift autonomously, because rebase produces a different SHA chain that may not be revertable cleanly.
+The auto-push hook runs `git fetch --quiet && git status -sb` itself before pushing. If `behind`, the hook aborts and prints the count to stderr. The agent then surfaces this to the user. **The agent does not rebase or merge to "fix" the drift autonomously** — rebase produces a different SHA chain that may not be revertable cleanly.
+
+If you're invoking `git push` manually (not via auto-trigger), do the same fetch + status check yourself first.
 
 ### What "revertable" means in practice
 

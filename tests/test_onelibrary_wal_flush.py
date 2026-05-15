@@ -21,7 +21,12 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# Skip on systems without ``rbox`` (Linux CI doesn't install pyrekordbox).
+pytest.importorskip("rbox", reason="pyrekordbox not installed on this platform")
 
 import rbox
 

@@ -13,6 +13,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+# Skip on systems without ``rbox`` (Linux CI doesn't install pyrekordbox).
+# app.database -> app.live_database -> rbox, so the whole module needs it.
+pytest.importorskip("rbox", reason="pyrekordbox not installed on this platform")
+
 from app.database import (
     RekordboxDB,
     _db_write_lock,
