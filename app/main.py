@@ -183,12 +183,19 @@ def validate_audio_path(path_str: str) -> Path:
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
 
-    # Check that the file is within an allowed directory
+    # Check that the file is within an allowed directory.
+    # Uses Path.is_relative_to (proper path-segment match) instead of
+    # str.startswith (which incorrectly accepted "/foo/barX" as inside "/foo/bar").
+    # Required by .claude/rules/coding-rules.md (Secrets & paths section).
     is_allowed = any(
-        str(file_path).startswith(str(root))
+        file_path.is_relative_to(root)
         for root in ALLOWED_AUDIO_ROOTS
     )
-    # Also allow paths from the database (track paths stored in library)
+    # Also allow paths from the database (track paths stored in library).
+    # Exact-match only — NOT a prefix check — so this is not a sandbox escape
+    # as long as db.tracks remains user-trusted (populated from Rekordbox import).
+    # TODO(security-api-auth-hardening): revisit during Phase 1 — prefer adding
+    # the parent dirs of imported tracks to ALLOWED_AUDIO_ROOTS at import time.
     if not is_allowed:
         known_paths = {t.get('path', '') for t in db.tracks.values()} if hasattr(db, 'tracks') else set()
         if str(file_path) not in known_paths and path_str not in known_paths:
@@ -577,25 +584,56 @@ def file_reveal(r: FileRevealReq):
         raise HTTPException(500, safe_error_message(e))
 
 
+_FILE_WRITE_EXTENSIONS = {".rbep", ".json", ".txt", ".cue", ".m3u", ".m3u8"}
+
+
 @app.post("/api/file/write")
 async def file_write(r: FileWriteReq):
-    """Writes text content to a file (used for .rbep project saving)."""
+    """Writes text content to a file (used for .rbep project saving).
+
+    SECURITY: previously wrote to *any* path on disk ("we trust the path")
+    which made every unauthenticated caller a remote-file-write primitive.
+    Now constrained to:
+      - paths resolving inside ALLOWED_AUDIO_ROOTS, and
+      - an allow-list of text-project extensions (.rbep / .json / .txt /
+        .cue / .m3u / .m3u8).
+    Broader auth rework: docs/research/research/idea_security-api-auth-hardening.md.
+    """
     try:
-        # Simple security: only allow writing to specific directories?
-        # For now, we trust the path but ensure directory exists
         path = Path(r.path)
         if not path.is_absolute():
-             path = Path(APP_DIR).parent / r.path
+            path = Path(APP_DIR).parent / r.path
+        try:
+            resolved = path.resolve()
+        except (ValueError, OSError) as e:
+            raise HTTPException(status_code=400, detail=f"Invalid path: {e}")
 
-        path.parent.mkdir(parents=True, exist_ok=True)
+        if resolved.suffix.lower() not in _FILE_WRITE_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File extension not allowed for write: {resolved.suffix}",
+            )
 
-        with open(path, "w", encoding="utf-8") as f:
+        if not any(resolved.is_relative_to(root) for root in ALLOWED_AUDIO_ROOTS):
+            logger.warning(
+                "SECURITY: Blocked /api/file/write outside allowed roots: %s",
+                resolved,
+            )
+            raise HTTPException(
+                status_code=403,
+                detail="Path outside allowed directories",
+            )
+
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        with open(resolved, "w", encoding="utf-8") as f:
             f.write(r.content)
 
-        return {"status": "success", "path": str(path)}
+        return {"status": "success", "path": str(resolved)}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"File write error: {e}")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, safe_error_message(e))
 
 @app.post("/api/xml/clean")
 async def clean_xml(
@@ -897,10 +935,21 @@ def update_track(tid: str, r: TrackUpdateReq):
 def batch_up(r: BatchReq): return {"status": "success" if db.update_tracks_metadata(r.track_ids, r.updates) else "error"}
 
 @app.post("/api/system/heartbeat")
-def system_heartbeat():
+def system_heartbeat(request: Request):
+    """Lightweight keep-alive ping.
+
+    SECURITY: SHUTDOWN_TOKEN was previously returned to *any* caller, leaking
+    the only privileged credential to LAN/remote clients (and same-host malware
+    via loopback). Gated to same-host callers now; the broader auth rework
+    lives in docs/research/research/idea_security-api-auth-hardening.md.
+    """
     global last_heartbeat
     last_heartbeat = time.time()
-    return {"status": "alive", "token": SHUTDOWN_TOKEN}
+    payload: dict[str, Any] = {"status": "alive"}
+    client_host = request.client.host if request.client else ""
+    if client_host in ("127.0.0.1", "::1", "localhost"):
+        payload["token"] = SHUTDOWN_TOKEN
+    return payload
 
 @app.post("/api/track/delete")
 def del_trk(r: DeleteTrackReq): return {"status": "success" if db.delete_track(r.track_id) else "error"}
@@ -2019,12 +2068,6 @@ async def shutdown_watcher_event():
     except Exception as exc:
         logger.warning("FolderWatcher shutdown error: %s", exc)
 
-@app.post("/api/system/heartbeat")
-def heartbeat():
-    global last_heartbeat
-    last_heartbeat = time.time()
-    return {"status": "alive", "token": SHUTDOWN_TOKEN}
-
 @app.post("/api/system/shutdown")
 async def shutdown(token: str = ""):
     """SECURITY: Requires session token to trigger shutdown."""
@@ -2074,6 +2117,14 @@ def create_new_lib(r: NewLibReq = Body(default=None)):
 
 @app.post("/api/debug/load_xml")
 def debug_load_xml():
+    """Debug-only: force-load a hardcoded rekordbox.xml.
+
+    SECURITY: Disabled unless LMS_ENABLE_DEBUG_ROUTES=1 in the environment.
+    The route previously shipped in production builds with no gate — see
+    docs/research/research/idea_security-api-auth-hardening.md.
+    """
+    if os.environ.get("LMS_ENABLE_DEBUG_ROUTES", "") != "1":
+        raise HTTPException(status_code=404, detail="Not found")
     db.load_xml("rekordbox.xml")
     return {"status": "loaded", "tracks": len(db.tracks), "playlists": len(db.playlists)}
 
