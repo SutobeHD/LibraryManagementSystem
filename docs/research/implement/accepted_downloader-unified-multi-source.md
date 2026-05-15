@@ -25,6 +25,7 @@ related: []
 - 2026-05-13 — content update — Plan-agent pre-review at `draftplan_` stage: 6 factual repo-errors corrected in-place (`_db_write_lock` location, `X-Session-Token` nonexistence, `audio_tags` ISRC write-gap, `anlz_safe` pattern mis-copy, `_convert_to_aiff` overlap + 24-bit downgrade bug, `httpx`/`tenacity` pin). 2 new owner decisions raised (OQ-A route auth, OQ-B D3 timing). Doc stays in `draftplan_` until both answered.
 - 2026-05-13 — `implement/review_` — owner answered all 3 sign-off-blocking decisions: OQ-A (no route gate; gap logged as `idea_api-route-auth-model`), OQ-B (D3 ran → PASS), legal-posture (two-mode: ToS-friendly default + opt-in Settings "backdoor" toggle). Review checklist fully ticked. Plan ready for `accepted_` — awaiting explicit owner sign-off.
 - 2026-05-13 — `implement/accepted_` — **owner sign-off granted.** Plan accepted; ready for `inprogress_` once the no-implementation constraint is lifted for the build itself. D3 feasibility already proven (PASS) — Phase 1 `spotiflac.py` design is unblocked.
+- 2026-05-13 — content update — Implementation Detail section expanded: Pydantic v2 data models, DB schema migration SQL, 3 API contracts, settings schema additions, per-phase detailed specifications (P0-P7), D5 genre starter list (~55 entries), frontend component tree, test fixture skeletons. Doc now actionable end-to-end without further design work.
 
 ---
 
@@ -768,7 +769,1034 @@ Risk register R1-R7 above covers the runtime/operational risks with mitigations.
 - **Per-provider feature flags** — each of SpotiFLAC / SoundCloud / each sub-provider can be independently disabled in Settings. A dead upstream (R5) degrades gracefully instead of breaking the whole downloader.
 - **SpotiFLAC pin fallback** — keep `SpotiFLAC==0.4.x` known-good as a documented fallback pin (R3). Pin bump is one-line revert.
 - **Atomic commits per phase** — each numbered step lands as its own commit, so `git revert <sha>` cleanly backs out any single phase without unravelling the rest.
-- **Phase 0 gate** — if D3 (PPE feasibility) fails, the entire `spotiflac.py` design is invalid and the plan returns to `rework_` before any provider code is written. This is the cheapest possible failure point.
+- **Phase 0 gate** — D3 (PPE feasibility) already PASSED 2026-05-13; the cheap-failure point is retired. Remaining hard gates: `audio-stack-reviewer` subagent must clear `aiff.py`, D1 match algorithm must hit ≥ 95% precision / ≥ 90% recall before Phase 2 ships, full test suite + E2E must pass before `unified_downloader.enabled` flips to `true`.
+
+---
+
+## Implementation Detail
+
+> Expanded from the high-level Plan above. Each phase goes from "what" to "how + exactly what" — enough detail that an implementer can ship without re-deriving design. Pydantic v2 / FastAPI conventions per `.claude/rules/coding-rules.md`. All examples assume the project's `app/` package layout.
+
+### Shared data models (Pydantic v2)
+
+Defined in `app/downloader/models.py` (new). Imported by every phase from this module — single source of truth for inter-module data flow.
+
+```python
+from enum import IntEnum
+from typing import Literal
+from pydantic import BaseModel, Field, ConfigDict
+
+Platform = Literal[
+    "spotify", "soundcloud", "tidal", "qobuz", "amazon",
+    "apple_music", "deezer", "youtube",
+]
+
+AudioFormat = Literal[
+    "flac", "alac", "wav", "aiff", "mp3", "aac", "ogg", "opus", "m4a",
+]
+
+
+class QualityTier(IntEnum):
+    """Lower int = higher quality (so default tuple-sort descends quality)."""
+    HIRES_LOSSLESS  = 0  # FLAC/ALAC 24/96+, MQA HiRes
+    CD_LOSSLESS     = 1  # FLAC/ALAC 16/44.1, WAV, AIFF
+    HIGH_LOSSY      = 2  # 256+ kbps (Amazon HD, Tidal 320, SC Go+ AAC)
+    STANDARD_LOSSY  = 3  # 128-256 kbps lossy
+    LAST_RESORT     = 4  # YouTube MP3 (variable)
+
+
+class TrackMatch(BaseModel):
+    """One source's claim about a track — pre-download metadata only.
+    Quality is *claimed*; final verification happens at fetch time."""
+    model_config = ConfigDict(frozen=True)
+
+    platform: Platform
+    url: str
+    title: str
+    artist: str
+    duration_s: float
+    isrc: str | None = None
+    album: str | None = None
+    year: int | None = None
+    genre: str | None = None
+    cover_url: str | None = None
+
+    claimed_format: AudioFormat
+    claimed_bit_depth: int | None = None       # None when lossy
+    claimed_sample_rate_hz: int | None = None
+    claimed_bitrate_kbps: int | None = None    # None when lossless
+    claimed_filesize_bytes: int | None = None  # tiebreak signal
+    quality_tier: QualityTier
+
+    def quality_sort_key(self) -> tuple:
+        """Q3-c picker: tier, then bit-depth, then sample-rate, then bitrate, then filesize.
+        All terms keep 'lower tuple = better' invariant via negation for higher-better fields."""
+        return (
+            self.quality_tier.value,
+            -(self.claimed_bit_depth or 16),
+            -(self.claimed_sample_rate_hz or 44100),
+            -(self.claimed_bitrate_kbps or 0),
+            -(self.claimed_filesize_bytes or 0),
+        )
+
+
+class MatchResult(BaseModel):
+    """Output of D1 title-variance match algorithm."""
+    is_match: bool
+    confidence: float = Field(ge=0.0, le=1.0)
+    rule_fired: str  # e.g. "duration_gate+title_full_swap" or "duration_gate+sorensen_dice_0.94"
+
+
+class Candidate(BaseModel):
+    """A track that passed the 100%-match gate, eligible for ranking + download."""
+    match: TrackMatch
+    match_result: MatchResult
+
+    @property
+    def quality_sort_key(self) -> tuple:
+        return self.match.quality_sort_key()
+
+
+class ProvenanceRecord(BaseModel):
+    """What gets persisted (DB column + COMMENT tag) per downloaded file."""
+    picked_url: str
+    all_urls: list[str]                   # descending quality; all_urls[0] == picked_url
+    isrc: str | None = None
+    picked_quality_tier: QualityTier
+    picked_platform: Platform
+
+
+class ResolveRequest(BaseModel):
+    identifier: str = Field(
+        ...,
+        description="Any platform URL, free-form 'Artist - Title', or bare ISRC",
+    )
+    enabled_platforms: list[Platform] | None = None  # None → settings default
+
+
+class ResolveResponse(BaseModel):
+    request_id: str
+    needle: TrackMatch                          # canonical metadata from the input
+    candidates: list[Candidate]                 # sorted by quality_sort_key (best first)
+    auto_pick_index: int | None                 # None when no 100%-match found
+    near_misses: list[Candidate] = []           # Q7: closest <100% candidates if no exact match
+
+
+class SearchRequest(BaseModel):
+    query: str
+    enabled_platforms: list[Platform] | None = None
+
+
+class SearchHit(BaseModel):
+    """One ISRC-deduped cluster from the auto-search flow."""
+    cluster_id: str                              # ISRC if available, else hash(title+artist+duration)
+    representative: TrackMatch                   # the "best" claim in the cluster
+    cross_platform_urls: dict[Platform, str]     # filled via SpotiFLAC LinkResolver
+
+
+class SearchResponse(BaseModel):
+    request_id: str
+    hits: list[SearchHit]                       # deduplicated, sorted by best representative
+
+
+class FetchRequest(BaseModel):
+    request_id: str                              # from a prior /resolve or /search
+    candidate_index: int                         # index into the candidates / hits list
+
+
+class FetchResponse(BaseModel):
+    job_id: str
+    started_at: str                              # ISO-8601 UTC
+
+
+class JobStatus(BaseModel):
+    job_id: str
+    state: Literal["queued", "downloading", "converting", "tagging", "analyzing", "done", "failed"]
+    progress_pct: int = Field(ge=0, le=100)
+    final_path: str | None = None
+    error: str | None = None
+```
+
+### Database schema migration (Phase 0 step 3)
+
+```sql
+-- Run idempotently in app/download_registry.py:init_registry()
+-- All four columns are NULL-able + additive; old code paths ignore them.
+
+ALTER TABLE download_history ADD COLUMN isrc TEXT;
+ALTER TABLE download_history ADD COLUMN source TEXT;
+ALTER TABLE download_history ADD COLUMN provenance_urls TEXT;     -- JSON-encoded list
+ALTER TABLE download_history ADD COLUMN picked_quality_tier INTEGER;
+
+CREATE INDEX IF NOT EXISTS idx_dh_isrc
+    ON download_history(isrc) WHERE isrc IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_dh_source ON download_history(source);
+
+-- Genre-sync tables (Phase 4 step 14)
+CREATE TABLE IF NOT EXISTS canonical_genres (
+    name        TEXT PRIMARY KEY,    -- CDJ-display-safe short name (e.g. "Tech House")
+    added_at    TEXT NOT NULL,        -- ISO-8601
+    seeded      INTEGER NOT NULL DEFAULT 0  -- 1 = from D5 starter list, 0 = user-added
+);
+
+CREATE TABLE IF NOT EXISTS genre_mappings (
+    incoming         TEXT PRIMARY KEY,  -- lowercase-normalised incoming string
+    canonical        TEXT NOT NULL,      -- FK-like into canonical_genres.name
+    decision_made_at TEXT NOT NULL,
+    decision_source  TEXT NOT NULL       -- 'auto_exact' | 'auto_fuzzy_90' | 'owner_dialog'
+);
+CREATE INDEX IF NOT EXISTS idx_gm_canonical ON genre_mappings(canonical);
+```
+
+Idempotency: `ALTER TABLE ADD COLUMN` on SQLite fails if the column already exists. Wrap in a `PRAGMA table_info(download_history)` check, only run `ALTER` if column absent. The `CREATE TABLE IF NOT EXISTS` + `CREATE INDEX IF NOT EXISTS` are inherently safe.
+
+### API contracts (Phase 5 step 19)
+
+All three routes mount under `POST /api/downloads/unified/*`, JSON in + JSON out, no route-level auth gate (OQ-A). Sync wrappers around the async resolver/downloader.
+
+**`POST /api/downloads/unified/resolve`** — single-URL or single-identifier resolution.
+
+Request:
+```json
+{
+  "identifier": "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT",
+  "enabled_platforms": ["soundcloud", "tidal", "qobuz", "amazon"]
+}
+```
+
+Response:
+```json
+{
+  "request_id": "f3a8...",
+  "needle": {"platform": "spotify", "url": "...", "title": "Wake Me Up", "artist": "Avicii", "duration_s": 247.4, "isrc": "USUM71304455", ...},
+  "candidates": [
+    {"match": {"platform": "qobuz", "url": "https://www.qobuz.com/...", "claimed_format": "flac", "claimed_bit_depth": 24, "claimed_sample_rate_hz": 96000, "quality_tier": 0, ...}, "match_result": {"is_match": true, "confidence": 1.0, "rule_fired": "isrc_equality"}},
+    {"match": {"platform": "tidal", ..., "claimed_bit_depth": 16, "claimed_sample_rate_hz": 44100, "quality_tier": 1}, ...},
+    {"match": {"platform": "soundcloud", ..., "claimed_format": "mp3", "claimed_bitrate_kbps": 320, "quality_tier": 2}, ...}
+  ],
+  "auto_pick_index": 0,
+  "near_misses": []
+}
+```
+
+**`POST /api/downloads/unified/search`** — free-form query (Q1d auto-search).
+
+Request:
+```json
+{"query": "Avicii - Wake Me Up", "enabled_platforms": null}
+```
+
+Response:
+```json
+{
+  "request_id": "5b1c...",
+  "hits": [
+    {
+      "cluster_id": "USUM71304455",
+      "representative": {"platform": "spotify", ..., "duration_s": 247.4, "isrc": "USUM71304455"},
+      "cross_platform_urls": {"spotify": "...", "soundcloud": "...", "tidal": "...", "qobuz": "...", "amazon": "...", "apple_music": "...", "youtube": "..."}
+    }
+  ]
+}
+```
+
+**`POST /api/downloads/unified/fetch`** — commit a chosen candidate.
+
+Request:
+```json
+{"request_id": "f3a8...", "candidate_index": 0}
+```
+
+Response:
+```json
+{"job_id": "j-7c4f...", "started_at": "2026-05-13T22:14:08Z"}
+```
+
+Job status is polled via existing `GET /api/downloads/jobs/{job_id}` infrastructure (extend the existing SC download-job endpoint to recognise unified jobs by `source != 'soundcloud'` in the registry row).
+
+### Settings schema additions
+
+Merged into `settings.json` on first launch of the new code; defaults shown.
+
+```json
+{
+  "unified_downloader": {
+    "enabled": false,
+    "backdoor_mode_enabled": false,
+    "backdoor_disclaimer_acknowledged_at": null,
+    "max_concurrency": 4,
+    "downconvert_hires_to_16_44": false,
+    "legacy_per_source_folders": false,
+    "match_threshold_near_miss": 0.85,
+    "songlink_api_key": null,
+    "songlink_cache_ttl_days": 30,
+    "enabled_platforms": {
+      "soundcloud":  true,
+      "spotify":     false,
+      "tidal":       false,
+      "qobuz":       false,
+      "amazon":      false,
+      "apple_music": false,
+      "deezer":      false,
+      "youtube":     false
+    },
+    "spotify_credentials": {
+      "client_id": null,
+      "client_secret": null,
+      "_comment": "Fallback only — used if SpotiFLAC's shared client is revoked (R1 mitigation). Empty by default."
+    }
+  }
+}
+```
+
+Migration on first run with new code: if `unified_downloader` key absent → seed with the defaults above (single-write through `db_lock()` is NOT needed; this is `settings.json`, not `master.db`).
+
+When the user enables `backdoor_mode_enabled` the first time → show legal disclaimer modal → on accept, write `backdoor_disclaimer_acknowledged_at` = now and flip the toggle. Subsequent toggles are silent.
+
+### Phase 0 — Foundation (detailed)
+
+**P0.1 — SpotiFLAC burn-in (R3 mitigation)**
+
+Owner monitors `spotbye/SpotiFLAC` issues + `ShuShuzinhuu/SpotiFLAC-Module-Version` issues for 1-2 calendar days post-2026-05-13. Bail conditions before merging the pin:
+- New issue mentioning Spotify-client revocation (R1 trigger)
+- Any panic / regression report against 0.5.0 import path or `ProcessPoolExecutor` use
+- Sudden release of 0.5.1 (suggests post-release bug found)
+
+If green after burn-in window: add the pin line below to `requirements.txt`, line 53 area (after the existing mutagen pin):
+```
+SpotiFLAC==0.5.0
+```
+
+If a 0.4.x fallback is needed (R3 active), pin instead:
+```
+SpotiFLAC==0.4.x  # fallback per R3
+```
+
+**P0.2 — D3 PPE feasibility**
+
+Already executed 2026-05-13. Findings in § "D3 feasibility test executed". No re-run needed for sign-off.
+
+**P0.3 — DB schema migration**
+
+Implementation in `app/download_registry.py:init_registry()`:
+
+```python
+def _columns_of(conn, table: str) -> set[str]:
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+def _ensure_column(conn, table: str, col: str, decl: str) -> None:
+    if col not in _columns_of(conn, table):
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+        logger.info("[registry] migration: added %s.%s %s", table, col, decl)
+
+def init_registry() -> None:
+    with _conn() as db:
+        db.executescript(_BASE_SCHEMA)
+        _ensure_column(db, "download_history", "isrc",                "TEXT")
+        _ensure_column(db, "download_history", "source",              "TEXT")
+        _ensure_column(db, "download_history", "provenance_urls",     "TEXT")
+        _ensure_column(db, "download_history", "picked_quality_tier", "INTEGER")
+        db.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_dh_isrc   ON download_history(isrc)   WHERE isrc IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_dh_source ON download_history(source);
+            CREATE TABLE IF NOT EXISTS canonical_genres (
+                name TEXT PRIMARY KEY, added_at TEXT NOT NULL,
+                seeded INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS genre_mappings (
+                incoming TEXT PRIMARY KEY, canonical TEXT NOT NULL,
+                decision_made_at TEXT NOT NULL, decision_source TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_gm_canonical ON genre_mappings(canonical);
+        """)
+```
+
+Verify post-migration: `pytest tests/test_download_registry_schema.py -v` (new — see Phase 7).
+
+### Phase 1 — Provider layer (detailed)
+
+**P1.4 — `app/downloader/__init__.py` SourceProvider ABC**
+
+```python
+from abc import ABC, abstractmethod
+from .models import TrackMatch, ResolveRequest, Candidate, JobStatus
+
+class SourceProvider(ABC):
+    """Provider contract. One implementation per platform OR per coherent group."""
+
+    @property
+    @abstractmethod
+    def platform(self) -> Platform: ...
+
+    @abstractmethod
+    async def resolve_url(self, url: str) -> list[TrackMatch]:
+        """Phase-1 metadata-only probe. Returns 0-N claims (most providers return 1)."""
+
+    @abstractmethod
+    async def search(self, query: str, limit: int = 5) -> list[TrackMatch]:
+        """Free-form search. Some providers return [] (e.g. providers that need a URL)."""
+
+    @abstractmethod
+    async def fetch(self, match: TrackMatch, dest_dir: Path) -> Path:
+        """Phase-2 actual download. Returns final path on disk. Raises on failure."""
+```
+
+**P1.5 — `app/downloader/providers/spotiflac.py`**
+
+PPE worker layer; mirrors `app/anlz_safe.py` shape (panic budget, BrokenExecutor catch, restart). Key public functions are coroutines; the heavy lifting is in module-level worker functions that the PPE invokes.
+
+```python
+import logging
+from concurrent.futures import ProcessPoolExecutor, BrokenExecutor, TimeoutError as FuturesTimeout
+from pathlib import Path
+from anyio import to_thread
+
+logger = logging.getLogger(__name__)
+
+# --- PPE state (module-level singletons, restart-able) ---
+
+_EXECUTOR: ProcessPoolExecutor | None = None
+_PANIC_COUNT = 0
+_MAX_PANICS_PER_RUN = 16   # mirror anlz_safe budget
+_PER_CALL_TIMEOUT_S = 30   # subprocess timeout per coding-rules.md
+
+def _get_executor() -> ProcessPoolExecutor:
+    global _EXECUTOR
+    if _EXECUTOR is None:
+        _EXECUTOR = ProcessPoolExecutor(max_workers=1)
+    return _EXECUTOR
+
+def _restart_executor() -> None:
+    global _EXECUTOR, _PANIC_COUNT
+    if _EXECUTOR is not None:
+        _EXECUTOR.shutdown(wait=False, cancel_futures=True)
+    _EXECUTOR = ProcessPoolExecutor(max_workers=1)
+    _PANIC_COUNT += 1
+    logger.warning("[spotiflac] PPE restarted (panic %d/%d)", _PANIC_COUNT, _MAX_PANICS_PER_RUN)
+
+# --- Worker functions (top-level, picklable) ---
+# Lazy imports of SpotiFLAC happen INSIDE the worker (anlz_safe pattern).
+
+def _worker_resolve_spotify_url(url: str, services: list[str]) -> dict:
+    from SpotiFLAC.providers.spotify_metadata import parse_spotify_url, SpotifyMetadataClient
+    from SpotiFLAC.core.link_resolver import LinkResolver
+    from SpotiFLAC.providers import QobuzProvider, TidalProvider, AmazonProvider, AppleMusicProvider, DeezerProvider
+
+    PROVIDER_MAP = {
+        "qobuz": QobuzProvider, "tidal": TidalProvider,
+        "amazon": AmazonProvider, "apple_music": AppleMusicProvider, "deezer": DeezerProvider,
+    }
+    parsed = parse_spotify_url(url)
+    if not parsed or parsed["type"] != "track":
+        raise ValueError(f"Not a Spotify track URL: {url}")
+
+    spotify_client = SpotifyMetadataClient()
+    track_meta = spotify_client.fetch_track(parsed["id"])           # title/artist/duration/isrc/...
+    cross_urls = LinkResolver().resolve_all(parsed["id"]) or {}
+
+    # Per-service probes — quality, format, final URL claims
+    service_claims = {}
+    for svc in services:
+        provider = PROVIDER_MAP.get(svc)
+        if not provider:
+            continue
+        try:
+            claim = provider().probe(cross_urls.get(svc) or url)  # exact API depends on SpotiFLAC
+            service_claims[svc] = claim
+        except Exception as exc:
+            logger.debug("[spotiflac.worker] %s probe failed: %s", svc, exc)
+
+    return {
+        "needle":          _serialise_track_meta(track_meta),
+        "cross_urls":      cross_urls,
+        "service_claims":  service_claims,
+    }
+
+
+def _worker_fetch(service: str, url: str, dest_dir: str) -> str:
+    """Actually download the audio bytes for a given (service, url). Returns final path."""
+    from SpotiFLAC.providers import QobuzProvider, TidalProvider, AmazonProvider, AppleMusicProvider, DeezerProvider
+    PROVIDER_MAP = {...}  # as above
+    provider = PROVIDER_MAP[service]()
+    return str(provider.download(url, dest_dir=dest_dir))
+
+# --- Public async API ---
+
+async def resolve_spotify_url(url: str, services: list[str]) -> dict:
+    """Phase 1 entry-point. Returns the worker's serialised dict; orchestrator turns it into TrackMatch[]."""
+    return await _submit_with_recovery(_worker_resolve_spotify_url, url, services)
+
+async def fetch(service: str, url: str, dest_dir: Path) -> Path:
+    """Phase 2 entry-point."""
+    result = await _submit_with_recovery(_worker_fetch, service, url, str(dest_dir))
+    return Path(result)
+
+async def _submit_with_recovery(func, *args):
+    """Single retry on BrokenExecutor; abort if panic budget exceeded."""
+    global _PANIC_COUNT
+    for attempt in range(2):
+        try:
+            ex = _get_executor()
+            fut = ex.submit(func, *args)
+            return await to_thread.run_sync(lambda: fut.result(timeout=_PER_CALL_TIMEOUT_S))
+        except (BrokenExecutor, FuturesTimeout) as exc:
+            if _PANIC_COUNT >= _MAX_PANICS_PER_RUN:
+                raise RuntimeError(f"SpotiFLAC PPE exceeded panic budget ({_MAX_PANICS_PER_RUN})") from exc
+            _restart_executor()
+            if attempt == 1:
+                raise
+```
+
+**P1.6 — Extend `app/soundcloud_api.py:_normalize_track`**
+
+One-liner per Q9. After the existing fields:
+```python
+"isrc": (raw.get("publisher_metadata") or {}).get("isrc") or raw.get("isrc"),
+```
+
+**P1.7 — `app/downloader/providers/soundcloud.py`** wraps existing `app/soundcloud_downloader.py` as a `SourceProvider`. Method bodies dispatch to existing functions (`_resolve_official_download_url`, the streaming fallback, etc.). `search()` calls `https://api-v2.soundcloud.com/search/tracks?q=...&limit=5`.
+
+### Phase 2 — Matching + Quality (detailed)
+
+**P2.8 — `app/downloader/match_rules.py`**
+
+```python
+import re
+
+# Remix/version tags to strip during normalisation. Maintained list — append on miss.
+REMIX_TAGS = [
+    r"\(\s*original\s+mix\s*\)",
+    r"\[\s*original\s+mix\s*\]",
+    r"\(\s*extended\s+mix\s*\)",
+    r"\[\s*extended\s+mix\s*\]",
+    r"\(\s*radio\s+edit\s*\)",
+    r"\(\s*club\s+mix\s*\)",
+    r"\(\s*acoustic\s*\)",
+    r"\(\s*live\s*\)",
+    r"\(\s*instrumental\s*\)",
+    r"-\s*extended\s+mix",
+    r"-\s*extended",
+    r"-\s*radio\s+edit",
+    r"-\s*remastered(?:\s+\d{4})?",
+    r"\(\s*remastered(?:\s+\d{4})?\s*\)",
+    r"\(\s*\d{4}\s+remaster(?:ed)?\s*\)",
+    r"\[\s*bonus\s+track\s*\]",
+]
+REMIX_TAGS_RE = re.compile("|".join(REMIX_TAGS), re.IGNORECASE)
+
+FEAT_TAGS_RE = re.compile(
+    r"[\(\[]\s*(?:feat\.?|ft\.?|featuring)\s+[^\)\]]+[\)\]]",
+    re.IGNORECASE,
+)
+
+SEPARATORS_RE = re.compile(r"[-–—/_|]")  # any of these → single space
+NON_ALNUM_RE  = re.compile(r"[^a-z0-9 ']")
+
+ARTIST_SPLITTERS_RE = re.compile(
+    r"\s*(?:,|&|feat\.?|ft\.?|featuring|vs\.?|x)\s+",
+    re.IGNORECASE,
+)
+```
+
+**P2.9 — `app/downloader/match.py`**
+
+Algorithm in `match_track(needle, candidate) -> MatchResult` exactly per D1:
+
+```python
+import unicodedata
+from difflib import SequenceMatcher
+from .match_rules import REMIX_TAGS_RE, FEAT_TAGS_RE, SEPARATORS_RE, NON_ALNUM_RE, ARTIST_SPLITTERS_RE
+from .models import MatchResult, TrackMatch
+
+def _normalise(s: str) -> str:
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    s = s.lower()
+    s = REMIX_TAGS_RE.sub(" ", s)
+    s = FEAT_TAGS_RE.sub(" ", s)
+    s = SEPARATORS_RE.sub(" ", s)
+    s = NON_ALNUM_RE.sub(" ", s)
+    return " ".join(s.split())
+
+def _artists_set(s: str) -> frozenset[str]:
+    parts = [p for p in ARTIST_SPLITTERS_RE.split(s) if p.strip()]
+    return frozenset(_normalise(p) for p in parts)
+
+def _sorensen_dice(a: str, b: str) -> float:
+    bigrams = lambda s: {s[i:i+2] for i in range(len(s) - 1)}
+    A, B = bigrams(a), bigrams(b)
+    if not A or not B:
+        return 0.0
+    return 2 * len(A & B) / (len(A) + len(B))
+
+def match_track(needle: TrackMatch, candidate: TrackMatch) -> MatchResult:
+    # 0. ISRC fast-path (when both have it)
+    if needle.isrc and candidate.isrc and needle.isrc == candidate.isrc:
+        return MatchResult(is_match=True, confidence=1.0, rule_fired="isrc_equality")
+
+    # 1. Hard duration gate
+    if abs(needle.duration_s - candidate.duration_s) > 2:
+        return MatchResult(is_match=False, confidence=0.0, rule_fired="duration_gate_failed")
+
+    # 2. Five identity tests on normalised strings
+    nt, na = _normalise(needle.title),      _normalise(needle.artist)
+    ct, ca = _normalise(candidate.title),   _normalise(candidate.artist)
+    nas, cas = _artists_set(needle.artist), _artists_set(candidate.artist)
+
+    # T1: title equal + artist-set-overlap >= 1
+    if nt == ct and (nas & cas):
+        return MatchResult(is_match=True, confidence=1.0, rule_fired="duration_gate+title_eq+artist_overlap")
+    # T2: combined "title artist" equality
+    if f"{nt} {na}" == f"{ct} {ca}":
+        return MatchResult(is_match=True, confidence=1.0, rule_fired="duration_gate+combined_eq")
+    # T3: combined "artist title" equality
+    if f"{na} {nt}" == f"{ca} {ct}":
+        return MatchResult(is_match=True, confidence=1.0, rule_fired="duration_gate+swapped_combined_eq")
+    # T4: full title-artist swap
+    if nt == ca and na == ct:
+        return MatchResult(is_match=True, confidence=1.0, rule_fired="duration_gate+full_swap")
+    # T5: containment (handles "Title" vs "Title (Original Mix)")
+    nt_words, ct_words = set(nt.split()), set(ct.split())
+    if nt_words and ct_words and (nt_words <= ct_words or ct_words <= nt_words):
+        if nas & cas:
+            return MatchResult(is_match=True, confidence=1.0, rule_fired="duration_gate+containment+artist_overlap")
+
+    # 3. Sørensen-Dice fallback
+    score = _sorensen_dice(f"{nt} {na}", f"{ct} {ca}")
+    if score >= 0.92:
+        return MatchResult(is_match=True, confidence=score, rule_fired=f"duration_gate+sorensen_{score:.2f}")
+    return MatchResult(is_match=False, confidence=score, rule_fired=f"sorensen_below_threshold_{score:.2f}")
+```
+
+**P2.10 — `app/downloader/quality.py`**
+
+```python
+from .models import TrackMatch, QualityTier
+
+# Static mapping from (platform, format, bit_depth, sample_rate, bitrate) → QualityTier.
+def classify(m: TrackMatch) -> QualityTier:
+    if m.claimed_format in ("flac", "alac", "wav", "aiff"):
+        if (m.claimed_bit_depth or 16) >= 24 or (m.claimed_sample_rate_hz or 44100) > 44100:
+            return QualityTier.HIRES_LOSSLESS
+        return QualityTier.CD_LOSSLESS
+    # lossy
+    br = m.claimed_bitrate_kbps or 0
+    if br >= 256:
+        return QualityTier.HIGH_LOSSY
+    if br >= 128:
+        return QualityTier.STANDARD_LOSSY
+    return QualityTier.LAST_RESORT
+
+def pick_best(candidates: list[TrackMatch]) -> int:
+    """Return the index of the best-quality candidate. Stable on ties (insertion order tiebreaks)."""
+    if not candidates:
+        raise ValueError("no candidates")
+    indexed = list(enumerate(candidates))
+    indexed.sort(key=lambda iv: iv[1].quality_sort_key())
+    return indexed[0][0]
+```
+
+### Phase 3 — Resolver + Search (detailed)
+
+**P3.11 — `app/downloader/resolver.py`**
+
+Single-input → fan-out probe across enabled providers, gather TrackMatches, run them through `match.py`, return Candidates ranked by quality.
+
+```python
+import asyncio, uuid
+from .models import ResolveRequest, ResolveResponse, Candidate, TrackMatch
+from .match import match_track
+from .quality import classify, pick_best
+from . import providers
+
+async def resolve(req: ResolveRequest) -> ResolveResponse:
+    needle = await _identify_needle(req.identifier)
+    enabled = req.enabled_platforms or _settings_enabled_platforms()
+
+    # Probe enabled providers in parallel
+    tasks = [providers.get(p).resolve_url(needle.url) for p in enabled if providers.has(p)]
+    results: list[list[TrackMatch]] = await asyncio.gather(*tasks, return_exceptions=False)
+
+    all_matches = [m for sub in results for m in sub]
+    candidates: list[Candidate] = []
+    near_misses: list[Candidate] = []
+    threshold = _settings("match_threshold_near_miss", 0.85)
+
+    for m in all_matches:
+        m_with_tier = m.model_copy(update={"quality_tier": classify(m)})
+        result = match_track(needle, m_with_tier)
+        cand = Candidate(match=m_with_tier, match_result=result)
+        if result.is_match:
+            candidates.append(cand)
+        elif result.confidence >= threshold:
+            near_misses.append(cand)
+
+    candidates.sort(key=lambda c: c.quality_sort_key)
+    auto_pick = 0 if candidates else None
+
+    return ResolveResponse(
+        request_id=str(uuid.uuid4()),
+        needle=needle,
+        candidates=candidates,
+        auto_pick_index=auto_pick,
+        near_misses=sorted(near_misses, key=lambda c: -c.match_result.confidence)[:5],
+    )
+```
+
+**P3.12 — `app/downloader/search.py`**
+
+Free-form query → parallel platform search → per-hit SpotiFLAC LinkResolver pivot → ISRC-dedupe → SearchHit list. Concurrency-budget honored via `asyncio.Semaphore(settings.max_concurrency)`.
+
+### Phase 4 — Post-download pipeline (detailed)
+
+**P4.13 — `app/downloader/aiff.py`** (refactor of `soundcloud_downloader.py:745`)
+
+```python
+import json, subprocess
+from pathlib import Path
+from ..config import FFMPEG_BIN
+
+def detect_bit_depth(src: Path) -> int:
+    """Return 24 if source is 24-bit lossless, else 16. Best-effort via ffprobe."""
+    cmd = [FFMPEG_BIN.replace("ffmpeg", "ffprobe"),
+           "-v", "error", "-select_streams", "a:0",
+           "-show_entries", "stream=bits_per_raw_sample,sample_fmt",
+           "-of", "json", str(src)]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout
+        info = json.loads(out).get("streams", [{}])[0]
+        bps = int(info.get("bits_per_raw_sample") or 0)
+        if bps >= 24:
+            return 24
+        if info.get("sample_fmt", "").endswith(("32", "32p")) and bps != 16:
+            return 24
+    except Exception:
+        pass
+    return 16
+
+def convert_to_aiff(src: Path) -> Path | None:
+    """Lossless source → AIFF with preserved bit-depth. Lossy → no conversion (caller decides)."""
+    if src.suffix.lower() in (".aiff", ".aif"):
+        return src
+    if src.suffix.lower() not in (".flac", ".alac", ".wav", ".m4a"):
+        return None  # lossy — keep original
+
+    bit_depth = detect_bit_depth(src)
+    codec = "pcm_s24le" if bit_depth == 24 else "pcm_s16le"
+    dst = src.with_suffix(".aiff")
+    cmd = [FFMPEG_BIN, "-hide_banner", "-loglevel", "error",
+           "-i", str(src), "-c:a", codec, "-map_metadata", "0",
+           "-vn", "-y", str(dst)]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if result.returncode != 0 or not dst.exists() or dst.stat().st_size < 1024:
+        dst.unlink(missing_ok=True)
+        return None
+    src.unlink(missing_ok=True)
+    return dst
+```
+
+**P4.14 — `app/downloader/genre_sync.py`**
+
+```python
+from difflib import SequenceMatcher
+from datetime import datetime, timezone
+from ..download_registry import _conn
+
+def normalise_genre(s: str) -> str:
+    return " ".join(s.lower().replace("_", " ").replace("-", " ").split())
+
+def map_genre(incoming: str, *, owner_callback=None) -> str | None:
+    """incoming raw genre → canonical genre string, or None if owner skipped."""
+    norm = normalise_genre(incoming)
+    if not norm:
+        return None
+    with _conn() as db:
+        # 1. exact mapping cached?
+        row = db.execute("SELECT canonical FROM genre_mappings WHERE incoming = ?", (norm,)).fetchone()
+        if row:
+            return row["canonical"]
+        # 2. exact canonical match
+        row = db.execute("SELECT name FROM canonical_genres WHERE LOWER(name) = ?", (norm,)).fetchone()
+        if row:
+            _persist_mapping(db, norm, row["name"], "auto_exact")
+            return row["name"]
+        # 3. fuzzy ≥ 0.90
+        canonicals = [r["name"] for r in db.execute("SELECT name FROM canonical_genres").fetchall()]
+        best, best_score = None, 0.0
+        for c in canonicals:
+            s = SequenceMatcher(None, norm, c.lower()).ratio()
+            if s > best_score:
+                best, best_score = c, s
+        if best and best_score >= 0.90:
+            _persist_mapping(db, norm, best, f"auto_fuzzy_{best_score:.2f}")
+            return best
+    # 4. novel — escalate to owner via callback
+    if owner_callback is not None:
+        return owner_callback(incoming)  # returns canonical (existing or new) or None (skip)
+    return None  # no callback = silently skip
+
+def _persist_mapping(db, incoming, canonical, source):
+    db.execute(
+        "INSERT OR REPLACE INTO genre_mappings(incoming, canonical, decision_made_at, decision_source) VALUES (?,?,?,?)",
+        (incoming, canonical, datetime.now(timezone.utc).isoformat(), source),
+    )
+
+def seed_starter_genres(starter_list: list[str]) -> None:
+    """Phase 0 / first-run seed."""
+    with _conn() as db:
+        for g in starter_list:
+            db.execute(
+                "INSERT OR IGNORE INTO canonical_genres(name, added_at, seeded) VALUES (?,?,1)",
+                (g, datetime.now(timezone.utc).isoformat()),
+            )
+```
+
+**P4.15 — Extend `app/audio_tags.py`** — two pieces:
+
+(a) Provenance helpers:
+```python
+from typing import Sequence
+from .downloader.models import TrackMatch, ProvenanceRecord, Platform
+
+def serialise_provenance(candidates: Sequence[TrackMatch], picked: TrackMatch) -> str:
+    ordered = [picked] + sorted(
+        (c for c in candidates if c is not picked),
+        key=lambda c: c.quality_sort_key(),
+    )
+    return ", ".join(c.url for c in ordered)
+
+def read_provenance(comment_str: str) -> list[tuple[Platform, str, bool]]:
+    urls = [u.strip() for u in (comment_str or "").split(",") if u.strip().startswith("http")]
+    return [(_infer_platform(u), u, i == 0) for i, u in enumerate(urls)]
+
+def _infer_platform(url: str) -> Platform:
+    host_map = {
+        "open.spotify.com": "spotify", "spotify.com": "spotify",
+        "soundcloud.com": "soundcloud", "on.soundcloud.com": "soundcloud", "m.soundcloud.com": "soundcloud",
+        "tidal.com": "tidal", "listen.tidal.com": "tidal",
+        "qobuz.com": "qobuz", "www.qobuz.com": "qobuz", "play.qobuz.com": "qobuz",
+        "music.amazon.com": "amazon", "music.amazon.de": "amazon",
+        "music.apple.com": "apple_music",
+        "deezer.com": "deezer", "www.deezer.com": "deezer",
+        "youtube.com": "youtube", "youtu.be": "youtube", "music.youtube.com": "youtube",
+    }
+    for host, plat in host_map.items():
+        if host in url:
+            return plat  # type: ignore[return-value]
+    return "soundcloud"  # safe-default — unknown URLs surface as SC for legacy compat
+```
+
+(b) Write-side ISRC support — add an `isrc` entry to `_FIELD_ALIASES`, then in each `_write_*` handler emit the format-correct frame:
+```python
+_FIELD_ALIASES["ISRC"] = "isrc"
+_FIELD_ALIASES["isrc"] = "isrc"
+
+# In _write_mp3: from mutagen.id3 import TSRC; tags["TSRC"] = TSRC(encoding=3, text=[isrc])
+# In _write_flac/_write_ogg: tags["isrc"] = isrc
+# In _write_m4a: tags["----:com.apple.iTunes:ISRC"] = MP4FreeForm(isrc.encode("utf-8"))
+# In _write_aiff_wav: same as _write_mp3 (ID3 chunk)
+```
+
+**P4.16 — `app/downloader/migration.py`** (D7 folder migration)
+
+```python
+from pathlib import Path
+from ..config import MUSIC_DIR
+from ..download_registry import _conn
+
+def migrate_per_source_to_unified() -> dict:
+    """One-shot: move existing MUSIC_DIR/SoundCloud/<artist>/ files into MUSIC_DIR/<artist>/.
+    Idempotent — re-runs are no-ops because the row's path is already unified."""
+    moved, skipped = 0, 0
+    src_root = MUSIC_DIR / "SoundCloud"
+    if not src_root.is_dir():
+        return {"moved": 0, "skipped": 0, "reason": "no SoundCloud/ folder"}
+    with _conn() as db:
+        for artist_dir in src_root.iterdir():
+            if not artist_dir.is_dir(): continue
+            dst_dir = MUSIC_DIR / artist_dir.name
+            dst_dir.mkdir(parents=True, exist_ok=True)
+            for f in artist_dir.iterdir():
+                if not f.is_file(): continue
+                dst = dst_dir / f.name
+                if dst.exists():
+                    skipped += 1
+                    continue
+                f.rename(dst)
+                db.execute(
+                    "UPDATE download_history SET file_path = ?, source = COALESCE(source, 'soundcloud') WHERE file_path = ?",
+                    (str(dst), str(f)),
+                )
+                moved += 1
+    return {"moved": moved, "skipped": skipped}
+```
+
+**P4.17 — `app/downloader/concurrency.py`**
+
+Benchmark per D8 — 4 unique SC `/resolve` URLs, pre-warm, parallel-vs-sequential, threshold lookup, persist to `settings.json`.
+
+### Phase 5 — Orchestrator + API (detailed)
+
+**P5.18 — Orchestrator** in `app/downloader/__init__.py`. Wires the 9-step post-download pipeline (Recommendation block):
+
+```python
+from pathlib import Path
+from ..database import db_lock
+from ..download_registry import record_download
+from .. import audio_tags
+from .aiff import convert_to_aiff
+from .genre_sync import map_genre
+from .models import Candidate, ProvenanceRecord
+from . import providers
+
+async def execute_fetch(req_id: str, picked: Candidate, all_candidates: list[Candidate]) -> Path:
+    staging = (MUSIC_DIR / ".staging" / req_id); staging.mkdir(parents=True, exist_ok=True)
+
+    # 1. Fetch bytes
+    raw_path = await providers.get(picked.match.platform).fetch(picked.match, staging)
+
+    # 2. SHA-256 dedup (existing helper)
+    sha = _sha256_of(raw_path)
+    if _is_duplicate(sha, picked.match.isrc):
+        raw_path.unlink(missing_ok=True); return _existing_path(sha)
+
+    # 3. AIFF conversion (lossless only)
+    aiff_path = convert_to_aiff(raw_path) or raw_path
+
+    # 4. Genre normalise
+    canonical_genre = map_genre(picked.match.genre or "")
+
+    # 5. Provenance serialise
+    provenance = audio_tags.serialise_provenance(
+        [c.match for c in all_candidates], picked.match,
+    )
+
+    # 6. Tag write (mutagen, all standard metadata + provenance)
+    audio_tags.write_tags(aiff_path, {
+        "Title":   picked.match.title,
+        "Artist":  picked.match.artist,
+        "Album":   picked.match.album or "",
+        "Year":    str(picked.match.year or ""),
+        "Genre":   canonical_genre or "",
+        "ISRC":    picked.match.isrc or "",
+        "Comment": provenance,
+    }, artwork=_fetch_artwork(picked.match.cover_url))
+
+    # 7. Final move
+    final_dir = MUSIC_DIR / _sanitise(picked.match.artist)
+    final_dir.mkdir(parents=True, exist_ok=True)
+    final_path = final_dir / f"{_sanitise(picked.match.title)}{aiff_path.suffix}"
+    aiff_path.rename(final_path)
+
+    # 8. Registry update — uses registry's own WAL connection, NOT db_lock()
+    record_download(
+        sc_track_id=None,  # legacy column; set only for SC-source
+        sha256_hash=sha,
+        file_path=str(final_path),
+        isrc=picked.match.isrc,
+        source=picked.match.platform,
+        provenance_urls=provenance,
+        picked_quality_tier=int(picked.match.quality_tier),
+    )
+
+    # 9. Background BPM/key analysis (existing job-queue)
+    _schedule_analysis(final_path)
+    return final_path
+```
+
+**P5.19 — Routes in `app/main.py`**
+
+Spawn `route-architect` agent before writing. Three routes mounted under `/api/downloads/unified/`:
+- `POST /resolve` — calls `await resolver.resolve(ResolveRequest(...))`
+- `POST /search`  — calls `await search.search(SearchRequest(...))`
+- `POST /fetch`   — enqueues `execute_fetch(...)` on the existing job queue, returns `{job_id, started_at}`
+
+No `X-Session-Token` (OQ-A). No `_db_write_lock` at the route level — only `master.db` writers (auto-import path inside `execute_fetch` step 9) acquire `db_lock()` from `app/database.py`.
+
+### Phase 6 — Frontend (detailed)
+
+Component tree under `frontend/src/components/Download/`:
+
+```
+Download/
+├─ DownloadPage.jsx               # route container; tabs: "Single URL" / "Search" / "Playlist (batch)"
+├─ ResolveBar.jsx                 # URL/identifier input; calls POST /resolve
+├─ SearchBar.jsx                  # free-form text input; calls POST /search
+├─ CandidateGrid.jsx              # renders Candidate[] as cards
+│   ├─ CandidateCard.jsx          # one card: platform icon + quality badge + match-score chip
+│   ├─ QualityBadge.jsx           # "FLAC 24/96" / "FLAC 16/44" / "MP3 320" / etc.
+│   └─ PlatformIcon.jsx           # SVG icon per platform
+├─ SearchHitGrid.jsx              # SearchHit[] → grid (ISRC-clustered)
+├─ NearMissBanner.jsx             # only when auto_pick_index == null
+├─ NovelGenreDialog.jsx           # 3-button: [Add new] [Map to existing ▾] [Skip]
+├─ BackdoorToggleModal.jsx        # first-activation legal disclaimer
+└─ JobProgressList.jsx            # extends existing SC download-progress UI; per-job state pill
+```
+
+State management uses the existing Zustand store (`frontend/src/store/downloads.js`, extend with `unifiedJobs` slice). HTTP via the existing `frontend/src/api/api.js` axios instance — new functions `resolveUnified()`, `searchUnified()`, `fetchUnified()`.
+
+### Phase 7 — Tests (detailed)
+
+**Test files + minimum gate criteria:**
+
+| File | Coverage | Gate |
+|---|---|---|
+| `tests/test_unified_downloader_match.py` | D1 algorithm against owner's 50-entry test set | **≥ 95% precision / ≥ 90% recall** (hard gate; Phase 2 fails-build until met) |
+| `tests/test_unified_downloader_quality.py` | quality ranker tie-break logic via synthetic `TrackMatch[]` | every tier-pair ordered correctly + every tiebreak deterministic |
+| `tests/test_unified_downloader_resolver.py` | resolver with mocked providers (fakes returning canned TrackMatches) | parallel probe → match filter → quality sort produces the expected `Candidate[]` |
+| `tests/test_unified_downloader_aiff.py` | bit-depth detection + AIFF roundtrip | 16-bit FLAC → 16-bit AIFF, 24-bit FLAC → 24-bit AIFF, MP3 → no conversion |
+| `tests/test_unified_downloader_genre_sync.py` | normaliser, auto-exact, auto-fuzzy ≥ 0.90, novel→callback | known-good fixture pairs |
+| `tests/test_unified_downloader_migration.py` | folder migration idempotency | second run is a no-op; DB paths updated |
+| `tests/test_unified_downloader_concurrency.py` | benchmark threshold mapping | mocked latencies yield the documented thresholds |
+| `tests/test_audio_tags_provenance.py` | serialise/read round-trip + ISRC write across MP3/FLAC/AIFF/M4A | round-trip preserves order + picked-flag; ISRC reads back via existing `read_tags` |
+| `tests/test_download_registry_schema.py` | migration adds columns + indices, second-run no-op | columns present, indexes present, no errors on re-init |
+
+**E2E via `e2e-tester` subagent** (UI gate):
+1. Paste Spotify URL → candidate grid renders within 5s → pick best → progress → file lands in `MUSIC_DIR/<artist>/<title>.aiff` → `read_tags` returns expected fields including provenance in `comment`.
+2. Free-form search → grid → pick → download (same).
+3. Novel-genre dialog: tag a synthetic incoming genre `"PROGTRANCE_2026"` → dialog appears → choose "Add new" → next track with same genre auto-maps without dialog.
+4. Backdoor toggle: first enable → modal appears → accept → toggle visible/on. Second toggle: silent.
+
+### D5 — Genre starter list (~55 entries)
+
+Seeded into `canonical_genres` on first run with `seeded=1`. Short, CDJ-display-safe, plain casing. Owner can edit/delete via Settings UI.
+
+```
+[ House cluster ]
+  House, Tech House, Deep House, Progressive House, Future House, Bass House,
+  Tropical House, Afro House, Melodic House, Soulful House
+
+[ Techno cluster ]
+  Techno, Melodic Techno, Hard Techno, Minimal Techno, Industrial Techno,
+  Dub Techno, Acid Techno
+
+[ Trance cluster ]
+  Trance, Progressive Trance, Psytrance, Uplifting Trance, Tech Trance, Vocal Trance
+
+[ Drum & Bass / Breaks ]
+  Drum & Bass, Liquid DnB, Neurofunk, Jump Up, Jungle, Breakbeat, UK Garage,
+  Future Garage
+
+[ Hard cluster ]
+  Hardstyle, Hardcore, Frenchcore, Uptempo, Rawstyle
+
+[ Bass cluster ]
+  Dubstep, Riddim, Future Bass, Trap, Glitch Hop, Moombahton
+
+[ Disco / Funk ]
+  Disco, Nu Disco, Funk, Boogie
+
+[ Hip-Hop / Soul ]
+  Hip-Hop, Trap (Hip-Hop), R&B, Neo-Soul
+
+[ Electronica / Ambient ]
+  Electronica, IDM, Ambient, Downtempo, Chillout, Lo-Fi
+
+[ Misc DJ-relevant ]
+  Pop, Rock, Indie, Mashup, Edit, Bootleg, Remix
+```
+
+55 entries (a few "—" categories above are headers, not list members). Naming policy: Title-Case, no symbols except `&` and the trailing parenthesis disambiguator `Trap (Hip-Hop)`. List is maintained in `app/downloader/_genre_starter.py` as a Python tuple, easy to diff in PRs.
 
 ## Review
 
