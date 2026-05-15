@@ -12,7 +12,7 @@ If this index drifts from the file system, the file system wins — re-derive wi
 ## research/
 
 ### idea
-_(none)_
+- [idea_api-route-auth-model.md](research/idea_api-route-auth-model.md) — Local FastAPI mutation routes have no route-level auth gate; deliberate decision needed (spun off from downloader OQ-A) (2026-05-13)
 
 ### exploring
 - [exploring_recommender-rules-baseline.md](research/exploring_recommender-rules-baseline.md) — Teil 1: BPM/Key/Genre/MyTag/Energy ranking + Camelot harmonic mixing; local + SoundCloud modes (2026-05-11)
@@ -38,7 +38,7 @@ _(none)_
 _(none)_
 
 ### accepted
-_(none)_
+- [accepted_downloader-unified-multi-source.md](implement/accepted_downloader-unified-multi-source.md) — Unified downloader: **owner sign-off granted 2026-05-13.** Plan accepted; ready for `inprogress_` when implementation is unblocked. D3 feasibility proven (PASS) (2026-05-13)
 
 ### inprogress
 _(none)_
