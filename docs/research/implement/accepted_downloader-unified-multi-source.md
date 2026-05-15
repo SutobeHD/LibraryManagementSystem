@@ -24,6 +24,7 @@ related: []
 - 2026-05-13 — `implement/draftplan_` — Implementation Plan filled: Scope (in/out), 7-phase step-by-step (22 steps), testing approach, implementation-specific rollback. Cross-stage move research/ → implement/.
 - 2026-05-13 — content update — Plan-agent pre-review at `draftplan_` stage: 6 factual repo-errors corrected in-place (`_db_write_lock` location, `X-Session-Token` nonexistence, `audio_tags` ISRC write-gap, `anlz_safe` pattern mis-copy, `_convert_to_aiff` overlap + 24-bit downgrade bug, `httpx`/`tenacity` pin). 2 new owner decisions raised (OQ-A route auth, OQ-B D3 timing). Doc stays in `draftplan_` until both answered.
 - 2026-05-13 — `implement/review_` — owner answered all 3 sign-off-blocking decisions: OQ-A (no route gate; gap logged as `idea_api-route-auth-model`), OQ-B (D3 ran → PASS), legal-posture (two-mode: ToS-friendly default + opt-in Settings "backdoor" toggle). Review checklist fully ticked. Plan ready for `accepted_` — awaiting explicit owner sign-off.
+- 2026-05-13 — `implement/accepted_` — **owner sign-off granted.** Plan accepted; ready for `inprogress_` once the no-implementation constraint is lifted for the build itself. D3 feasibility already proven (PASS) — Phase 1 `spotiflac.py` design is unblocked.
 
 ---
 
@@ -787,6 +788,9 @@ Risk register R1-R7 above covers the runtime/operational risks with mitigations.
 **Rework reasons / notes:**
 - Pre-review corrections were applied **in-place** rather than via a `rework_` round-trip — the doc was still in `draftplan_` ("plan is being written"), not yet formally submitted to `review_`. Full audit trail in Findings § "Pre-review corrections".
 - 2026-05-13: OQ-A + OQ-B + legal-posture all answered by owner; doc promoted `draftplan_` → `review_`. The plan is now "ready, waiting for sign-off". The remaining `review_` → `accepted_` promotion requires **explicit owner sign-off** per `.claude/rules/research-pipeline.md` — this review checklist being fully ticked is a precondition, not the sign-off itself.
+
+**Sign-off:**
+- 2026-05-13 — **owner sign-off granted.** Plan accepted; doc promoted `review_` → `accepted_`. Implementation may begin at Phase 0 (registry migration + SpotiFLAC burn-in monitoring) once the no-implementation constraint is lifted. Phase 1's `spotiflac.py` design is already feasibility-verified by the D3 test that ran during `draftplan_`.
 
 ## Implementation Log
 
