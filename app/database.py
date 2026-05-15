@@ -20,6 +20,12 @@ logger = logging.getLogger(__name__)
 # RLock is used so methods that internally call other mutating methods
 # (e.g. `update_tracks_metadata` → `save_xml`) don't deadlock themselves.
 _db_write_lock = threading.RLock()
+# Separate lock for save_xml(). In-memory mutations are guarded by
+# _db_write_lock, but the (expensive) XML serialize over 100k tracks
+# should not block every other writer for its full duration.
+# _xml_save_lock serializes concurrent save_xml() calls so the on-disk
+# file can't be corrupted by interleaving writers.
+_xml_save_lock = threading.Lock()
 
 
 @contextmanager
@@ -608,6 +614,17 @@ class RekordboxXMLDB:
         return False
 
     def save_xml(self):
+        # _xml_save_lock serializes concurrent save_xml() calls so the
+        # on-disk file isn't corrupted. _db_write_lock no longer has to
+        # wrap this expensive full-library serialization — other
+        # writers can acquire it as soon as their in-memory mutations
+        # finish.
+        with _xml_save_lock:
+            return self._save_xml_unlocked()
+
+    def _save_xml_unlocked(self):
+        """Internal: serialise self.tracks/playlists to disk. Callers
+        must hold _xml_save_lock — go through save_xml()."""
         try:
             root = ET.Element("DJ_PLAYLISTS", Version="1.0.0")
             collection = ET.SubElement(root, "COLLECTION", Entries=str(len(self.tracks)))
@@ -1005,20 +1022,30 @@ class RekordboxDB:
         return True # Live DB is auto-saved or handled via updates
 
     def update_tracks_metadata(self, track_ids: list[str], updates: dict[str, Any]) -> bool:
+        # NOT in the _serialised wrap-list at the module bottom — we lock
+        # manually so save_xml() can run *outside* _db_write_lock. The
+        # XML serialize is expensive at 100k tracks; without this split,
+        # every batch PATCH held the write-lock across the full file
+        # rewrite, stalling every other writer (auto-import, drag-drop,
+        # tag edits, etc.) for the whole duration.
         success = True
-        for tid in track_ids:
-            if self.mode == "live":
-                if not self.active_db.update_track_metadata(tid, updates):
-                    success = False
-            else:
-                # XML Mode
-                if tid in self.xml_db.tracks:
-                    t = self.xml_db.tracks[tid]
-                    for k, v in updates.items():
-                        t[k] = v
+        with _db_write_lock:
+            for tid in track_ids:
+                if self.mode == "live":
+                    if not self.active_db.update_track_metadata(tid, updates):
+                        success = False
                 else:
-                    success = False
+                    # XML Mode
+                    if tid in self.xml_db.tracks:
+                        t = self.xml_db.tracks[tid]
+                        for k, v in updates.items():
+                            t[k] = v
+                    else:
+                        success = False
 
+        # save_xml takes its own _xml_save_lock and is safe to call
+        # without _db_write_lock — the file rewrite no longer blocks
+        # other writers.
         if self.mode == "xml" and success:
             self.xml_db.save_xml()
 
@@ -1079,8 +1106,10 @@ for _name in (
     "move_playlist", "delete_playlist", "reorder_playlist_track",
     "create_folder", "create_smart_playlist", "update_smart_playlist",
     "create_playlist", "add_track_to_playlist", "remove_track_from_playlist",
-    "save", "update_tracks_metadata", "update_track_comment",
-    "update_track_path",
+    "save", "update_track_comment", "update_track_path",
+    # NOTE: update_tracks_metadata is intentionally NOT in this list.
+    # It locks manually around the in-memory mutation only, then runs
+    # save_xml outside _db_write_lock (save_xml uses _xml_save_lock).
 ):
     setattr(RekordboxDB, _name, _serialised(getattr(RekordboxDB, _name)))
 del _name

@@ -72,7 +72,10 @@ class TestSerialisedDecorator:
             "move_playlist", "delete_playlist", "reorder_playlist_track",
             "create_folder", "create_smart_playlist", "update_smart_playlist",
             "create_playlist", "add_track_to_playlist", "remove_track_from_playlist",
-            "save", "update_tracks_metadata", "update_track_comment",
+            "save", "update_track_comment",
+            # NOTE: update_tracks_metadata is intentionally NOT in this
+            # list — it locks manually so save_xml can run outside
+            # _db_write_lock. See test_update_tracks_metadata_locks_manually.
         ],
     )
     def test_method_is_wrapped(self, method_name: str) -> None:
@@ -84,6 +87,23 @@ class TestSerialisedDecorator:
         assert hasattr(method, "__wrapped__"), (
             f"{method_name} is not decorated with @_serialised — "
             "concurrent mutations could race."
+        )
+
+    def test_update_tracks_metadata_locks_manually(self) -> None:
+        """update_tracks_metadata is NOT @_serialised — it locks
+        manually around the in-memory mutation only, then runs
+        save_xml outside _db_write_lock so the full library
+        re-serialize doesn't stall every other writer for the
+        duration of the file write."""
+        import app.database as dbm
+        method = dbm.RekordboxDB.update_tracks_metadata
+        assert not hasattr(method, "__wrapped__"), (
+            "update_tracks_metadata was re-added to the _serialised "
+            "list — that re-introduces the lock-stall on save_xml."
+        )
+        assert hasattr(dbm, "_xml_save_lock"), (
+            "save_xml lost its dedicated _xml_save_lock — concurrent "
+            "saves can corrupt the on-disk XML file."
         )
 
     def test_decorator_releases_after_call(self) -> None:
