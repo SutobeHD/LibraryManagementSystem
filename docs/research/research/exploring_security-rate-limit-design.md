@@ -19,57 +19,56 @@ related: [security-api-auth-hardening]
 - 2026-05-15 — `research/idea_` — section fill from thin scaffold
 - 2026-05-15 — research/idea_ — rework pass (quality-bar review pre-exploring_)
 - 2026-05-15 — research/exploring_ — promoted; quality-bar met (route inventory verified, 50 LOC defended via _format_tokens precedent, slowapi-vs-custom differentiated)
+- 2026-05-15 — research/exploring_ — perfect-quality rework loop (deep self-review pass)
 
 ---
 
 ## Problem
 
-No rate limiting today. Phase-1 auth draftplan explicitly defers slowapi to Phase 2. Design space to evaluate: slowapi (in-process, simple, fine for single-instance) vs fastapi-limiter (Redis-backed, overkill for sidecar) vs custom token-bucket. Attribution: per-IP vs per-session-token, both under reverse-proxy / Tailscale. Routes to gate first: `/api/system/shutdown`, `/api/system/restart`, `/api/soundcloud/auth-token`, future `/api/pairing/*` (Phase-2 mobile), heartbeat (if LAN-exposed). Limits per endpoint (e.g. 5/min for auth, 30/min for heartbeat). 429 + `Retry-After`. Loopback + paired-mobile whitelist to avoid self-lockout.
+Zero inbound rate-limit on FastAPI sidecar (verified: `grep -i 'rate.{0,3}limit|throttl|slowapi'` in `app/` returns only `RateLimitError` from outbound SC API helper in `app/soundcloud_api.py:142` — unrelated). Phase-1 auth draftplan defers in-app rate-limit to Phase 2 (`draftplan_security-api-auth-hardening.md:345` Decisions table). Design choice: slowapi (in-process, pinned dep) vs custom token-bucket (~50 LOC, no dep). Attribution: per-IP + per-Bearer. First-gate routes: `POST /api/system/shutdown` (`app/main.py:2071`), `POST /api/system/restart` (`:2080`), `POST /api/soundcloud/auth-token` (`:3048`), Phase-2 `/api/pairing/*` at add-time, heartbeat (`:937`) once LAN-bound. 429 + `Retry-After`. Loopback whitelist (sentinel) prevents self-lockout.
 
 ## Goals / Non-goals
 
 **Goals**
-- Cap-per-token AND cap-per-IP for unauth-able endpoints (heartbeat, pairing, healthcheck)
-- Cap-per-token (Bearer) for authenticated mutation routes; cap-per-IP for the rest
-- Whitelist loopback + paired-mobile from caps OR apply markedly higher caps
-- Standardised 429 response: `Retry-After` header + JSON body `{ "error": "rate_limited", "retry_after_s": N }`
-- Per-route burst-allowance config table (steady-rate + burst-cap) co-located with route decorators
+- Cap per-IP on unauth routes (no Bearer present → IP-only key).
+- Cap per-(IP|Bearer-hash) concat on `require_session` mutation routes (rotation/revoke kills the Bearer-keyed bucket).
+- Loopback IPs (`127.0.0.1`, `::1`) short-circuit to sentinel `__whitelist__` (always-allow, no bucket allocated). Paired-mobile (Phase-2) keyed per-Bearer only — mobile IP roams across Wi-Fi.
+- 429 response: `Retry-After: N` header + JSON `{"error": "rate_limited", "retry_after_s": N}`.
+- Per-route `(steady, burst, key_mode)` triple declared at decorator site — no central config table.
 
 **Non-goals**
-- Not a DDoS mitigation — volumetric / SYN-flood / amplification is the network/firewall layer's job (Tailscale, Cloudflare, ISP)
-- Not per-user accounting / billing / quota reporting — single-human product
-- Not cross-process rate-limit state — single-instance FastAPI sidecar, no Redis, no multi-worker
-- Not a WAF — no payload inspection, no signature matching
+- Not DDoS mitigation. Volumetric / SYN-flood / amplification = network layer (Tailscale, Cloudflare, ISP firewall).
+- Not per-user quota / billing — single-human product.
+- Not cross-process state — single uvicorn worker, no Redis.
+- Not a WAF — no payload inspection.
+- Not WebSocket rate-limit — no `@app.websocket` routes in `app/` (grep verified).
 
 ## Constraints
 
-External facts bounding solution (rate limits, data shape, perf budget, legal, capacity). Cite source.
+External facts bounding solution. Cite source.
 
-- **FastAPI / Starlette has no built-in rate-limit.** Middleware or decorator-based add-on required.
-- **slowapi** (https://slowapi.readthedocs.io) — most common option; in-memory backend works for single-instance app; Redis optional; decorator-based; battle-tested.
-- **fastapi-limiter** — requires Redis; heavy dep for a desktop sidecar that ships as a bundled Python process. Out of scope.
-- **Custom token-bucket** — ~50 LOC for a thread-safe `dict[key, bucket]` + decorator; aligns with project's no-extra-deps tendency (Phase-1 auth-hardening also opted out of new deps).
-- **Reverse-proxy header trust** — *speculative for v1*: today the sidecar is loopback-only (`app/main.py:4063` → `uvicorn.run(app, host="127.0.0.1", port=8000)`), so `X-Forwarded-For` is irrelevant. Constraint only activates if Phase-2 mobile-companion deployment ships behind Tailscale / Cloudflare Tunnel / nginx (OQ 1 in `draftplan_security-api-auth-hardening.md` — still un-answered). For v1 design: parser written but `TRUST_PROXY_HEADERS=0` default; flag flips in Phase-2 ship.
-- **Phase-1 auth doesn't ship LAN bind by default** (sidecar binds `127.0.0.1:8000` per `app/main.py:4063`). Rate-limit becomes *critical* only in Phase-2 mobile-companion (paired-device + `0.0.0.0` bind); for Phase-1 standalone, rate-limit is defense-in-depth against a same-host malicious process / runaway frontend bug (e.g. retry-storm on auth failure).
-- **Memory budget** — desktop sidecar; in-memory bucket store is fine (entries TTL'd; expect < 10k unique keys per session; loopback-only Phase-1 reduces to ~3 keys: `127.0.0.1`, `::1`, session-token).
-- **Single-instance assumption** — no horizontal scale; no shared state needed across processes. `ProcessPoolExecutor(max_workers=1)` in `app/anlz_safe.py` is for rbox-quarantine, not request handling — main FastAPI process is single, all rate-limit state can live in `app/main.py` process memory.
-- **Middleware stack compatibility** (`app/main.py:217-232`) — CORS middleware registered first; exception handlers at 238 + 261; static mounts at 270 + 275. A rate-limit middleware/exception-handler inserts cleanly between CORS and mounts; slowapi's `Limiter` + `SlowAPIMiddleware` follows the same Starlette-middleware pattern as CORSMiddleware. **No conflict expected.** Static mounts (`/exports`, `/api/artwork`) bypass any decorator-based limiter — covered only by middleware variant.
+- **FastAPI / Starlette: no built-in rate-limit.** Middleware or decorator required.
+- **slowapi** (https://slowapi.readthedocs.io) — in-memory default backend; Redis optional; decorator-based; Starlette-native middleware.
+- **fastapi-limiter** — requires Redis. Out of scope (no Redis in sidecar bundle).
+- **Custom token-bucket** — ~50 LOC + 80 LOC tests. Matches Phase-1 no-new-dep stance per `draftplan_security-api-auth-hardening.md:345` Decisions table.
+- **Sidecar bind = `127.0.0.1:8000`** (`app/main.py:4063` → `uvicorn.run(app, host="127.0.0.1", port=8000)`). `X-Forwarded-For` parsing not wired for Phase-2; constructor arg `trust_proxy_headers: bool = False` reserved (OQ 6 PARKED — Phase-2 decides on `0.0.0.0` bind, see `draftplan_security-api-auth-hardening.md:67` OQ 1 still open).
+- **Phase-1 threat = same-host process / retry-storm bug.** Phase-2 threat = LAN attacker post mobile-companion bind-widening.
+- **Memory budget** — Phase-1 loopback-only: zero buckets allocated (all traffic hits whitelist sentinel; sentinel short-circuits without touching `_buckets`). Phase-2 LAN: <10k unique keys/session, TTL'd at 600s, bounded.
+- **Single uvicorn worker.** No multi-process, no shared state. `ProcessPoolExecutor(max_workers=1)` in `app/anlz_safe.py` quarantines rbox parsing only — main FastAPI process is single, bucket store lives in module-singleton dict.
+- **Middleware stack** (`app/main.py:217` CORS → `:238/261` exception handlers → `:270/275` static mounts). Rate-limit middleware/exception-handler slots between CORS and mounts. Static mounts (`/exports`, `/api/artwork`) bypass decorator variant — covered only via middleware-mode wrap (deferred; first three gated routes are non-static).
 
 ## Open Questions
 
-Numbered. Each resolvable (yes/no or X vs Y), not philosophy.
+Numbered. Each resolvable (yes/no, X vs Y). RESOLVED = answered. PARKED = deferred to named gate.
 
-1. In-memory custom token-bucket (Option B) vs slowapi pinned dep (Option A)? → resolvable by `evaluated_` once OQ 2/3/5 are answered.
-2. Attribution: per-IP only, per-token only, or both? → preferred: **both** (per-IP for unauth routes — heartbeat, healthcheck, future pairing-init; per-token for auth routes — everything behind `require_session`). Resolvable yes/no on the both-combo.
-3. Burst-allowance numbers — derive from concrete workload, not from gut feel:
-   - **High-priority gated routes** (auth-sensitive or destructive): `5/min` steady, `10/min` burst. Defensible because (a) `shutdown`/`restart` are once-per-session human actions, (b) `/api/soundcloud/auth-token` is a credential-overwrite a human triggers ~once per OAuth flow, (c) future `/api/pairing/*` brute-force budget at 5/min still allows >5 min wall-time to enumerate even a 4-digit pairing code.
-   - **Medium-priority** (heartbeat-if-LAN, healthcheck): `60/min` steady (1/sec — matches the frontend's heartbeat poll interval `frontend/src/main.jsx` window).
-   - **Default for everything-else gated**: `120/min` steady, `300/min` burst (covers UI batch-rating, mass-tag-edit).
-4. Whitelist behavior for loopback (`127.0.0.1`, `::1`): **exempt entirely** (skip limiter). Justification: Phase-1 deployment IS loopback-only; making it pay the lookup cost is pointless and makes test setup harder. Resolvable yes/no.
-5. 429 response: `Retry-After` only (Phase-1) OR add `X-RateLimit-Limit` / `X-RateLimit-Remaining` / `X-RateLimit-Reset` headers? Preferred: `Retry-After` only for v1 (matches what the frontend toast pipeline can render today); add the X-RateLimit-* triple in Phase-2 once a dedicated rate-limit UI surface exists. Resolvable yes/no.
-6. `X-Forwarded-For` trust: postponed to Phase-2 (Phase-1 is loopback). Build the key-func with a `trust_proxy_headers: bool = False` constructor arg so the toggle is a one-line config change later. Resolvable yes/no.
-7. Paired-mobile attribution (Phase-2 dependency): treat as per-token via Bearer-bucket (cleaner: pairing revokes a token → its bucket is GC'd). Whitelisting paired-IPs is brittle (mobile IP changes with Wi-Fi roam). Resolvable A vs B.
-8. Bucket persistence: in-memory only (reset on sidecar restart). Persisting to `session_state.db` would survive `/api/system/restart` but adds a write-on-every-request — not worth it for a single-user product. Resolvable yes/no.
+1. **RESOLVED — Option B (custom token-bucket).** No new dep; matches Phase-1 stance; ~50 LOC mirrors `_format_tokens` precedent at `app/main.py:2391-2493`. Slowapi fallback only if Option-B hits a wall.
+2. **RESOLVED — `key_mode="both"` (IP + Bearer concat).** Unauth routes: IP-only (no Bearer present). Auth routes: `"ip|bearer-hash"`. Logout/rotate revokes Bearer → its bucket key changes → fresh budget for new token.
+3. **RESOLVED — three tiers, declared at decorator site.** HIGH (`steady=5/min, burst=10`): shutdown/restart/auth-token/Phase-2 pairing-init. MEDIUM (`steady=60/min, burst=120`): heartbeat-when-LAN, healthcheck. DEFAULT (`steady=120/min, burst=300`): every other `require_session` mutation. Justification: shutdown/restart once per session; auth-token once per OAuth flow; pairing-init at 5/min lets 4-digit code take >2000 min wall-clock; medium = 1/sec heartbeat poll headroom; default covers mass-rating batches (≤300 rows tested in `tests/test_database.py`).
+4. **RESOLVED — loopback whitelist via sentinel.** `make_key()` returns `"__whitelist__"` for `127.0.0.1`/`::1`; `BucketStore.take("__whitelist__", …)` short-circuits `return (True, 0.0)` without touching the dict. Zero lookup cost, no test-setup friction.
+5. **RESOLVED — `Retry-After` only for v1.** Frontend toast pipeline (`frontend/src/api/api.js` interceptor) already renders `Retry-After`. `X-RateLimit-*` triple deferred until a dedicated rate-limit UI surface ships (Phase-2 candidate).
+6. **PARKED — `trust_proxy_headers` flag for Phase-2.** Constructor accepts `trust_proxy_headers: bool = False`; default False (Phase-1 loopback). Phase-2 `0.0.0.0` bind (gated on `draftplan_security-api-auth-hardening.md:67` OQ 1) flips it.
+7. **RESOLVED — per-Bearer attribution for paired mobile.** Mobile Wi-Fi roams → IP-whitelist brittle. Pairing revoke kills Bearer → bucket key dies → no orphan budget leak.
+8. **RESOLVED — in-memory only.** No `session_state.db` persistence. Write-per-request cost > recovery value for single-user product. Sidecar restart = clean slate (matches `SHUTDOWN_TOKEN` lifecycle at `app/main.py:125`).
 
 ## Findings / Investigation
 
@@ -82,21 +81,53 @@ Dated subsections, append-only. ≤80 words each. Never edit past entries — su
 - Custom impl: ~50 LOC for thread-safe `dict[key, (tokens, last_refill)]` + `@rate_limit(rate, burst)` decorator + `RLock`.
 
 ### 2026-05-15 — concrete route inventory (verified)
-- **High-priority bucket (gate-day-one)** — `5/min` steady, `10/min` burst:
+- **High-priority bucket (gate-day-one)** — `steady=5/min, burst=10`:
   - `POST /api/system/shutdown` — `app/main.py:2071`
   - `POST /api/system/restart` — `app/main.py:2080`
   - `POST /api/soundcloud/auth-token` — `app/main.py:3048` (keyring credential overwrite)
-  - `POST /api/pairing/*` — **does not exist yet** (`grep '/api/pair' app/main.py` → 0 hits). Reserved for Phase-2 mobile pairing; gate at route-add time.
-- **Medium-priority bucket** — `60/min` steady, `120/min` burst:
-  - `POST /api/system/heartbeat` — `app/main.py:937` (only relevant if LAN-exposed; Phase-1 loopback-only makes it moot — apply when `0.0.0.0` bind ships in Phase-2).
-- **Low-priority bucket** (everything else gated by `require_session`) — default `120/min` steady, `300/min` burst. Covers ~146 routes per `docs/backend-index.md`. Most are POST mutations the user triggers via UI clicks; default ceiling handles batch operations (mass-rating, mass-tag).
-- **Pattern precedent in repo**: `app/main.py:2391-2493` — `_format_tokens` is a TTL'd `dict[str, dict]` guarded by `threading.Lock` with `_purge_expired_tokens()` lazy-evict-on-access. Same exact concurrency shape needed for the token-bucket (TTL'd map + RLock + lazy purge). Custom Option B literally extends this proven pattern; ~50 LOC defensible because: `class TokenBucket(steady, burst)` w/ `take() -> bool` + `refill_to_now()` = ~25 LOC; `dict[str, TokenBucket]` + `RLock` + `_purge_stale(ttl=600)` = ~10 LOC; `@rate_limit(...)` decorator wrapper using `Request` injection = ~15 LOC. Total ~50 LOC + ~80 LOC tests.
-- **Middleware insertion site**: `app/main.py:217` (after `CORSMiddleware`, before exception handlers at 238/261, before mounts at 270/275). Slowapi pattern: `app.state.limiter = limiter; app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler); app.add_middleware(SlowAPIMiddleware)`. Cleanly slots into existing stack.
-- **No `@app.websocket` routes today** — WebSocket rate-limit is N/A for v1.
+  - `POST /api/pairing/*` — does not exist (`grep '/api/pair' app/main.py` → 0). Reserved for Phase-2 mobile pairing; gate at route-add time.
+- **Medium-priority bucket** — `steady=60/min, burst=120`:
+  - `POST /api/system/heartbeat` — `app/main.py:937` (only relevant LAN-exposed; Phase-1 loopback makes it moot — apply when Phase-2 `0.0.0.0` bind ships).
+- **Default bucket** (every `require_session` mutation) — `steady=120/min, burst=300`. Covers ~146 routes per `docs/backend-index.md`. Default handles mass-rating / mass-tag batch UI flows.
+- **Pattern precedent**: `app/main.py:2391-2493` `_format_tokens` = TTL'd `dict[str, dict]` + `threading.Lock` + lazy `_purge_expired_tokens()`. Identical concurrency shape. Custom Option B literally extends this proven pattern.
+- **Middleware insertion site**: `app/main.py:217` (after `CORSMiddleware`, before exception handlers `:238/261`, before mounts `:270/275`).
+- **No `@app.websocket` routes** (`grep '@app\.websocket' app/` → 0). WebSocket rate-limit N/A for v1.
+- **No existing in-app rate-limit code**. `RateLimitError` in `app/soundcloud_api.py:142` is *outbound* SC API throttle handling, not inbound limiter — unrelated.
+
+### 2026-05-15 — TokenBucket API shape + bucket-key + whitelist (concrete prose)
+
+**`class TokenBucket`** — prose-form signatures (≤25 LOC):
+- `__init__(self, steady_per_min: float, burst: int)` — stores `steady_per_sec = steady_per_min / 60.0`, `capacity = burst`, `tokens: float = float(burst)`, `last_refill: float = time.monotonic()`.
+- `take(self) -> tuple[bool, float]` — internally calls `_refill_to(time.monotonic())`; if `tokens >= 1.0`: decrement, return `(True, 0.0)`; else compute `retry_after_s = (1.0 - tokens) / steady_per_sec`, return `(False, retry_after_s)`.
+- `_refill_to(self, now: float) -> None` — `elapsed = now - last_refill`; `tokens = min(capacity, tokens + elapsed * steady_per_sec)`; `last_refill = now`. Pure-CPU; no lock (caller — `BucketStore` — holds RLock).
+
+**`class BucketStore`** — TTL'd map (~10 LOC):
+- `_buckets: dict[str, TokenBucket] = {}`, `_lock: threading.RLock`, `_last_purge: float`.
+- `take(self, key: str, *, steady: float, burst: int) -> tuple[bool, float]` — whitelist short-circuit (`if key == "__whitelist__": return (True, 0.0)`); else `with _lock:` get-or-create `_buckets[key]`, call `bucket.take()`. Every Nth call (or `now - _last_purge > 60s`), lazy-evict entries whose `last_refill < now - 600s` and `tokens >= capacity` (fully-refilled = inactive, safe to drop).
+- Module singleton `_store: BucketStore`.
+
+**`def make_key(request: Request, *, mode: Literal["ip","bearer","both"]) -> str`** (bucket-key derivation, ~15 LOC):
+- `client_ip = request.client.host if request.client else "unknown"`.
+- **Whitelist sentinel**: `if client_ip in {"127.0.0.1", "::1"}: return "__whitelist__"`. (Phase-2: replace with `_WHITELIST_IPS` frozenset incl. paired-device IPs from `paired_devices` table — TODO.)
+- For `mode="ip"`: return `f"ip:{client_ip}"`.
+- For `mode="bearer"` and `mode="both"`: parse `Authorization` header; if `header.startswith("Bearer ")`, `bearer_hash = hashlib.sha256(header[7:].encode()).hexdigest()[:16]`; else `bearer_hash = "none"`. (Hash avoids logging raw tokens; 16 hex chars = 64 bits, collision-safe for <10k keys.)
+- For `mode="bearer"`: return `f"b:{bearer_hash}"`.
+- For `mode="both"`: return `f"ip:{client_ip}|b:{bearer_hash}"`.
+
+**`@rate_limit(steady: float, burst: int, key_mode: str = "both")`** decorator (~15 LOC):
+- Wraps async handler. Extracts `Request` from kwargs (FastAPI auto-injection if param typed `Request`). Calls `make_key(request, mode=key_mode)` → `_store.take(key, steady=steady, burst=burst)`. On `(False, retry_after_s)`: raise `HTTPException(429, headers={"Retry-After": str(max(1, int(retry_after_s)))}, detail={"error": "rate_limited", "retry_after_s": int(retry_after_s)})`. On `(True, _)`: pass-through to handler.
+
+**Whitelist policy** (final): sentinel `"__whitelist__"` returned from `make_key` for any IP in `_WHITELIST_IPS = frozenset({"127.0.0.1", "::1"})`. Phase-2 mobile pairing adds paired-device IPs OR (preferred per OQ 7) keeps the IP whitelist unchanged and lets paired mobiles fall through to per-Bearer attribution. Decision frozen: whitelist is for **loopback only**; mobiles go through Bearer-keyed limit.
 
 ## Options Considered
 
-Required by `evaluated_`. Per option: sketch ≤3 bullets, pros, cons, S/M/L/XL, risk.
+### Comparison matrix
+
+| Option | New dep | LOC (impl + tests) | Maintenance debt | Correctness-risk | Effort | Whitelist control | `X-RateLimit-*` ext |
+|---|---|---|---|---|---|---|---|
+| **A — slowapi** | +1 (pin in `requirements.txt`) | ~10 impl, lib-tested | CVE-watch + lib upgrades | low (battle-tested) | S | indirect (key-func) | needs upstream PR or fork |
+| **B — custom token-bucket** | 0 | ~50 impl + ~80 tests | extends `_format_tokens` shape (`app/main.py:2391-2493`) | medium (refill math) | S | direct (sentinel) | trivial (own response) |
+| **C — reverse-proxy (nginx/Tailscale)** | 0 in-app | ~0 (docs only) | shifted to user / ops | high (default ships unprotected) | XS | N/A (proxy config) | proxy-emitted |
 
 ### Option A — slowapi (pinned dep)
 - Sketch:
@@ -109,19 +140,12 @@ Required by `evaluated_`. Per option: sketch ≤3 bullets, pros, cons, S/M/L/XL,
 - Risk: low (stable library, in-memory backend is the default)
 
 ### Option B — Custom in-process token-bucket
-- Sketch (concrete API surface, ~50 LOC + ~80 LOC tests):
-  - `app/rate_limit.py`:
-    - `class TokenBucket:` — `__init__(self, steady_per_min: float, burst: int)`; `take(self) -> bool` (returns True if a token was consumed, False if rate-limited); `retry_after_s(self) -> float`; internal `_refill_to(now)` with monotonic time.
-    - `class BucketStore:` — `dict[str, TokenBucket]` + `threading.RLock` + `_last_purge: float`; `take(self, key: str, *, steady: float, burst: int) -> tuple[bool, float]` (bool=allowed, float=retry_after); `reset(self, key: str) -> None`; lazy `_purge_stale(ttl=600s)` on every Nth call.
-    - `_store: BucketStore = BucketStore()` module singleton.
-    - `def make_key(request: Request, *, mode: str) -> str` — `mode in {"ip", "token", "both"}`; reads `request.client.host` and `Authorization: Bearer …` header; concatenates with `|` for `both`. Loopback short-circuit returns sentinel `"__whitelist__"`.
-    - `@rate_limit(steady=5.0, burst=10, key_mode="both")` decorator using FastAPI's `Request` injection; raises `HTTPException(429, headers={"Retry-After": str(int(retry_after_s))}, detail={"error": "rate_limited", "retry_after_s": int(retry_after_s)})`.
-  - Whitelist set (`{"127.0.0.1", "::1"}` + Phase-2 paired-device IPs) — checked in `make_key`, returns sentinel that `BucketStore.take` always allows.
-  - Pattern alignment: `app/main.py:2391-2493` `_format_tokens` already does TTL'd-dict + `threading.Lock` + lazy-purge — same shape, well-understood in this codebase.
-- Pros: no new dep (matches Phase-1 lean stance per `draftplan_security-api-auth-hardening.md` Decisions table); full control over key-func / whitelist / response shape; easy to wire `X-RateLimit-*` headers (Phase-2) without forking slowapi; concurrency model identical to `_format_tokens` (already battle-tested in this app).
-- Cons: maintenance burden; less battle-tested than slowapi; must hand-roll `Retry-After` math and bucket-refill correctness; test coverage entirely on us.
+- Sketch: full API shape in Findings 2026-05-15 "TokenBucket API shape" subsection (TokenBucket / BucketStore / make_key / @rate_limit). `_store: BucketStore = BucketStore()` module singleton. Whitelist set `frozenset({"127.0.0.1", "::1"})` checked in `make_key`, returns sentinel `"__whitelist__"` that `BucketStore.take` short-circuits.
+- Pattern alignment: `app/main.py:2391-2493` `_format_tokens` = TTL'd-dict + `threading.Lock` + lazy-purge. Same shape, battle-tested in-repo.
+- Pros: no new dep (matches Phase-1 lean stance per `draftplan_security-api-auth-hardening.md:345` Decisions); full control over key-func / whitelist / response shape; `X-RateLimit-*` triple is a 3-line response-mutation in our decorator vs upstream slowapi PR; concurrency identical to `_format_tokens`.
+- Cons: maintenance burden; less battle-tested than slowapi; hand-roll `Retry-After` math + refill correctness; test coverage entirely ours.
 - Effort: S (50 LOC impl + 80 LOC tests).
-- Risk: medium — concurrency bugs in the refill math are subtle; mitigated by `tests/test_rate_limit.py` (cases: take-until-empty, refill-after-wait, burst-allows-then-throttles, whitelist-bypass, concurrent-take from 4 threads, TTL purge).
+- Risk: medium — refill-math concurrency bugs are subtle; mitigated by `tests/test_rate_limit.py` 7 cases listed in Implementation Plan §Step-by-step #2.
 
 ### Option C — Reverse-proxy layer (nginx / Tailscale / Cloudflare)
 - Sketch:
@@ -135,37 +159,64 @@ Required by `evaluated_`. Per option: sketch ≤3 bullets, pros, cons, S/M/L/XL,
 
 ## Recommendation
 
-Required by `evaluated_`. ≤80 words. Which option + what blocks commit.
+**Option B (custom token-bucket) for v1.** No new dep (matches Phase-1 stance, `draftplan_security-api-auth-hardening.md:345`). ~50 LOC mirrors `_format_tokens` shape (`app/main.py:2391-2493`). Full control over `Retry-After` + future `X-RateLimit-*` triple. Fall back to Option A only if Option B hits a wall (sliding-window fairness, multi-key composites).
 
-**Option B (custom token-bucket) for v1.** Matches Phase-1 no-new-dep stance per `draftplan_security-api-auth-hardening.md` Decisions; ~50 LOC mirrors existing `_format_tokens` pattern at `app/main.py:2391-2493`; auditable; full control over `Retry-After` + future `X-RateLimit-*` shape. Fall back to **Option A (slowapi)** only if behavior gaps emerge (sliding-window fairness, multi-key composite buckets we can't get right).
+**Decorator usage on first three gated routes** (pseudocode-prose; lives in `app/main.py` post-decorator-stack):
 
-**Concrete first step (gate condition for `exploring_` → `evaluated_`):**
-1. Land Phase-1 auth-hardening first (rate-limit is Phase-2 per the auth-hardening Decisions table — touching the same routes; sequence matters to avoid conflict at the `Depends(...)` decorator stack).
-2. Promote this doc to `exploring_` once Phase-1 auth ships in `archived/implemented_security-api-auth-hardening_*`.
-3. First three routes to gate (smallest blast radius, biggest abuse-payoff): `POST /api/system/shutdown` (`:2071`), `POST /api/system/restart` (`:2080`), `POST /api/soundcloud/auth-token` (`:3048`). Settings: `steady=5/min, burst=10, key_mode="both"`, loopback-whitelist on.
-4. Open Questions blocking `evaluated_`: OQ 2 (attribution: confirm "both"), OQ 4 (whitelist: confirm "loopback exempt entirely"), OQ 5 (headers: confirm "Retry-After only for v1"). All three are user-decisions, not research questions.
+```
+# app/rate_limit.py exports @rate_limit decorator + _store singleton
+
+@app.post("/api/system/shutdown")                 # app/main.py:2071
+@rate_limit(steady=5.0, burst=10, key_mode="both")
+async def shutdown(req: Request, token: str = ""): ...
+
+@app.post("/api/system/restart")                  # app/main.py:2080
+@rate_limit(steady=5.0, burst=10, key_mode="both")
+async def restart(req: Request, token: str = ""): ...
+
+@app.post("/api/soundcloud/auth-token")           # app/main.py:3048
+@rate_limit(steady=5.0, burst=10, key_mode="both")
+async def sc_auth_token(req: Request, payload: AuthTokenReq): ...
+```
+
+Decorator order: `@app.post(...)` outermost, `@rate_limit(...)` directly under, then any `Depends(require_session)` via `dependencies=[…]` in `@app.post`.
+
+**Gate to `evaluated_`**: Phase-1 auth-hardening must ship (currently at `implement/draftplan_security-api-auth-hardening.md`). Promote once auth lands in `archived/implemented_security-api-auth-hardening_*`. All Open Questions resolved or PARKED above — no user-decisions blocking promotion.
 
 ---
 
 ## Implementation Plan
 
-Required from `implement/draftplan_`. Concrete enough that someone else executes without re-deriving.
+Seeded at `exploring_`. Fleshed out at `implement/draftplan_`.
 
 ### Scope
-- **In:** …
-- **Out:** …
+- **In:** `app/rate_limit.py` (TokenBucket + BucketStore + make_key + @rate_limit decorator); decorator applied to first 3 routes (`shutdown`, `restart`, `sc_auth_token`); `tests/test_rate_limit.py`.
+- **Out:** middleware-mode wrap of static mounts (`/exports`, `/api/artwork`); `X-Forwarded-For` trust (Phase-2 PARKED OQ 6); `X-RateLimit-*` triple (Phase-2 PARKED OQ 5); heartbeat gate (waits for Phase-2 LAN bind); persistence to `session_state.db` (rejected OQ 8).
 
 ### Step-by-step
-1. …
+1. Write `app/rate_limit.py` per Findings 2026-05-15 "TokenBucket API shape" subsection. Module singleton `_store: BucketStore`. Public surface: `@rate_limit(steady, burst, key_mode)` + `_store` (for test reset).
+2. Write `tests/test_rate_limit.py` first (TDD): `test_take_until_empty`, `test_refill_after_wait` (monkeypatched `time.monotonic`), `test_burst_allows_then_throttles`, `test_whitelist_bypass` (loopback IP → sentinel), `test_concurrent_take` (4 `threading.Thread` workers, exactly `burst` `(True, …)` returns), `test_ttl_purge` (set `last_refill` back 700s, trigger N+1 call, assert key evicted from `_buckets`), `test_auth_before_ratelimit` (unauth + over-limit → 401, not 429).
+3. Apply decorator to 3 routes per Recommendation pseudocode. Add `req: Request` param if missing.
+4. Manual smoke: `curl -X POST http://127.0.0.1:8000/api/system/shutdown` 11 times in quick succession → first 10 pass auth-check then proceed to handler (subject to existing Bearer gate), 11th returns 429 + `Retry-After`.
+5. `pytest tests/test_rate_limit.py -v` + `ruff check app/rate_limit.py tests/test_rate_limit.py` + `mypy app/rate_limit.py`.
+6. Doc-syncer pass: add row to `docs/FILE_MAP.md` (`app/rate_limit.py`); `python scripts/regen_maps.py`; update `docs/backend-index.md` if route signatures changed.
 
 ### Files touched
-- …
+- `app/rate_limit.py` (new, ~50 LOC).
+- `app/main.py` (3 decorator additions on lines `:2071`, `:2080`, `:3048` — plus `from app.rate_limit import rate_limit` import).
+- `tests/test_rate_limit.py` (new, ~80 LOC).
+- `docs/FILE_MAP.md`, `docs/MAP.md`, `docs/MAP_L2.md` (doc-syncer).
 
 ### Testing
-- …
+- Unit: 7 cases above on `TokenBucket` + `BucketStore` + `make_key` + decorator (see Step-by-step #2).
+- Integration: in-process FastAPI `TestClient` hits gated route 11x rapidly; asserts 11th = 429 with `Retry-After` header and JSON body `{"error": "rate_limited", "retry_after_s": int}`.
+- Concurrent: 4-thread `take()` race over a 10-burst bucket asserts exactly 10 `(True, …)` returns.
 
 ### Risks & rollback
-- …
+- **Refill-math bug** → buckets never refill or over-refill. Mitigated by `refill-after-wait` test + monkeypatched clock.
+- **Decorator + `Depends(require_session)` ordering** — `Depends` resolves in FastAPI's request-pipeline *before* the handler function runs; `@rate_limit` wraps the handler, so its body executes after auth has already 401'd a missing/invalid Bearer. Net effect: 401 fires before 429 on unauth+over-limit. Mitigated by integration test (`tests/test_rate_limit.py::test_auth_before_ratelimit`).
+- **Whitelist bypass on Phase-2 LAN bind** → loopback sentinel still active means Tauri remains unlimited even on LAN exposure. Acceptable: Tauri = trusted local. Document in `docs/SECURITY.md` Phase-2 update.
+- **Rollback**: remove 3 decorator lines + `app/rate_limit.py` import. No DB migrations, no on-disk state. Revertable via single `git revert`.
 
 ## Review
 

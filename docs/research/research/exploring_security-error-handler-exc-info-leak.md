@@ -4,6 +4,7 @@ title: Global exception handler logs exc_info with potential path/PII leak
 owner: tb
 created: 2026-05-15
 last_updated: 2026-05-15
+
 tags: [security, follow-up, auth-audit-adjacent]
 related: [security-api-auth-hardening]
 ---
@@ -19,128 +20,244 @@ related: [security-api-auth-hardening]
 - 2026-05-15 — `research/idea_` — section fill from thin scaffold
 - 2026-05-15 — research/idea_ — rework pass (quality-bar review pre-exploring_)
 - 2026-05-15 — research/exploring_ — promoted; quality-bar met (concrete RedactingFormatter spec; CPython 3.13.5 source verified; multi-handler caveat added)
+- 2026-05-15 — research/exploring_ — perfect-quality rework loop (deep self-review pass)
 
 ---
 
 ## Problem
 
-`app/main.py:264` (handler `app/main.py:261-268`): `logger.error(f"Unhandled Exception on {request.method} {request.url}: {exc}", exc_info=True)`. `safe_error_message()` (app/main.py:207-214) redacts paths in client response but NOT in log file. Stack traces in `./logs/app.log` retain absolute paths from `__file__` per frame, exception args echoed via `repr(...)`. Leak vectors: crash reports, antivirus quarantine, user-shared screenshots, support-bundle uploads. Need: log-side redaction (apply `safe_error_message` to log message + frame paths), OR rotate logs to user-protected dir only, OR drop full stack from log line (keep file+line only).
+Global handler `app/main.py:261-268` line 264: `logger.error(f"Unhandled Exception on {request.method} {request.url}: {exc}", exc_info=True)`. `safe_error_message()` (`app/main.py:207-214`) redacts paths in client response body but is **never** called inside the handler — only by select route bodies. Stack traces in `./logs/app.log` (FileHandler at `app/main.py:114`, `LOG_DIR` from `app/config.py:8`) retain absolute paths from per-frame `__file__`, plus `str(exc)` may embed paths via exception args. Leak vectors: crash uploads, AV quarantine ingestion, user-shared screenshots, support-bundle exports. Fix: log-write-time redaction (custom `Formatter.format` overrides `record.exc_text` + final string with `safe_error_message`).
 
 ## Goals / Non-goals
 
 **Goals**
-- Apply `safe_error_message` redaction (or equivalent) to the persisted log message + formatted traceback, not just to client response body.
-- Preserve debugging value: keep exception type, file:line per frame, function name, redacted exception string — enough for triage.
-- Redact at log-write time (formatter/handler), not at call site — handler line stays `logger.error(..., exc_info=True)`, no caller refactor.
-- Cover both `LogRecord.msg`/`args` (the `f"Unhandled Exception on {request.method} {request.url}: {exc}"` substring) and `LogRecord.exc_text` (the formatted traceback `exc_info=True` produces).
-- Apply same scrubbing to `StreamHandler(stdout)` so terminal output during `npm run tauri dev` doesn't leak either.
-- No regression on `RequestValidationError` handler (lines 248-252) which already redacts manually via formatted string.
+- Apply `safe_error_message`-equivalent redaction to the persisted log line + formatted traceback. Coverage: `record.exc_text` (cache mutation in place, protects sibling handlers) + final returned string (catches `record.msg` and `record.args`-interpolated content after `super().format` runs `record.getMessage()`).
+- Preserve triage value: exception type, file:line per frame, function name, redacted exception string — keep `exc_info=True` chain intact.
+- Redact at log-write time inside a custom `Formatter.format`; the call site `app/main.py:264` stays unchanged.
+- Apply to ALL handlers (FileHandler + StreamHandler) — terminal output during `npm run tauri dev` must not leak. Implementation pre-sets one shared `RedactingFormatter` instance on every handler before `basicConfig`; basicConfig's `if h.formatter is None` guard (CPython 3.13.5 `Lib/logging/__init__.py` L110) leaves it intact.
+- Cover sub-loggers (`uvicorn`, `fastapi`, `httpx`) — guaranteed automatically since `basicConfig` configures root and they propagate.
+- Zero regression on `RequestValidationError` handler (`app/main.py:248-252`): its message is constructed without `exc_info`, so it travels through the same Formatter but has no `exc_text` block to scrub; output unchanged.
+- Widen `safe_error_message` to also strip `EXPORT_DIR`, `MUSIC_DIR`, `TEMP_DIR` (`app/config.py:7,9,10`) — these appear in `ALLOWED_AUDIO_ROOTS` and surface in audio-stack tracebacks.
 
 **Non-goals**
-- Don't drop `exc_info` entirely — kills frame info needed for bisecting rbox panics + `_db_write_lock` deadlocks.
-- Don't migrate to `structlog` / JSON logging in this scope — separate refactor, large blast radius.
-- Don't add log rotation/ACL hardening — orthogonal follow-up (see Open Question 3).
-- Don't touch the `validate_audio_path` SECURITY warning at line 202 (it logs an attacker-controlled path on purpose for audit; redaction would defeat its purpose — different threat model).
+- Drop `exc_info` — destroys chained-exception info needed for rbox-panic + `_db_write_lock` triage.
+- Migrate to `structlog` / JSON logging — 730 logger call sites in `app/` (verified count); separate XL refactor.
+- Add log rotation, ACL hardening, or WER exclusion — separate threat models, follow-up ideas (PARKED OQ3 + OQ7).
+- Modify the `validate_audio_path` SECURITY warning (`app/main.py:202`): attacker-controlled path is logged intentionally for audit, and the redactor leaves it untouched anyway (path does not match `APP_DIR`/`Path.home()`/`%APPDATA%`).
+- Per-frame `FrameSummary` rewrite — whole-string scrub catches more cases at less code (PARKED-resolved OQ1).
 
 ## Constraints
 
-External facts bounding solution (rate limits, data shape, perf budget, legal, capacity). Cite source.
+External facts bounding solution. All claims re-verified file:line and against `Lib/logging/__init__.py` from CPython 3.13.5 (`logging.__file__` = `C:\Users\tb\AppData\Local\Programs\Python\Python313\Lib\logging\__init__.py`).
 
-- `safe_error_message` (app/main.py:207-214) only operates on `str(e)` — strips `APP_DIR`, `Path.home()`, `%APPDATA%`. It is NEVER applied inside the global handler at app/main.py:261-268; the redaction only runs at the (few) call sites that explicitly wrap response bodies.
-- `logger.error(..., exc_info=True)` (app/main.py:264) dumps the FULL formatted traceback via `Formatter.formatException()` → `traceback.format_exception()`. Frame filenames are absolute paths from `__file__`. Locals are NOT included by default (CPython needs `tb_locals` opt-in), but file paths alone already leak install layout + user-folder.
-- Logging is configured via `logging.basicConfig` at app/main.py:110-117: two handlers — `FileHandler(LOG_DIR / "app.log", encoding='utf-8')` and `StreamHandler(sys.stdout)`. `LOG_DIR = Path("./logs")` (app/config.py:8) — CWD-relative, no rotation policy, no ACL, no size cap.
-- `app.log` lives wherever the sidecar is launched from (CWD-relative `./logs/app.log`). In Tauri prod, `src-tauri/src/main.rs:332-340` spawns the sidecar via `shell.sidecar("rb-backend")` WITHOUT setting `current_dir` — CWD inherits from the Tauri parent process (typically the install dir on Windows, e.g. `%LOCALAPPDATA%\<app>\` for the per-user installer flow, or `C:\Program Files\<app>\` for the machine-wide variant). In dev (`npm run dev:full` / `tauri dev`), CWD is the repo root → `./logs/app.log` sits inside the git working tree. All these locations are user-readable by any process running as the same user (incl. AV agents, telemetry, screenshare tools).
-- Windows Error Reporting (WER) can capture process memory on crash — exception data lives there too, outside our log scope. Mitigation requires `WerAddExcludedApplication` or registry exclusion — out of scope here.
-- `LogRecord.exc_text` is populated lazily by `Formatter.format()` (CPython 3.10+, verified against `logging/__init__.py` `Formatter.format`) on first emit via `self.formatException(record.exc_info)`, then cached on the record. **Multi-handler order matters:** `Logger.callHandlers` iterates `self.handlers` in list order; whichever handler's formatter runs FIRST populates the cache. Subsequent handlers reuse that cache verbatim — so EITHER both handlers must share the same redacting Formatter instance (or class), OR the first handler in `basicConfig(handlers=[…])` must be the redacting one. Mixed config = leak in the un-redacted handler.
-- Python `logging` is sync; redaction must be O(n) over the formatted traceback string. With current `safe_error_message` doing 3 `str.replace` per call, that's negligible (<1ms for typical 5kB traceback).
-- The `%(message)s` format string at app/main.py:112 controls only the leading line. The full traceback is appended by the Formatter AFTER `%(message)s` is rendered, via `formatException` → joined with `\n`. So an override of `Formatter.format()` (not just the format string) is required.
+- `safe_error_message` (`app/main.py:207-214`) operates on `str(e)`; strips `APP_DIR` (`app/main.py:120`, `os.path.dirname(os.path.abspath(__file__))`), `str(Path.home())`, `os.environ['APPDATA']`. Never invoked in global handler (`app/main.py:261-268`). Empirically verified on a synthetic `ValueError('Bad path: {APP_DIR}/foo.py')`: post-scrub output reads `ValueError: Bad path: [...]/foo.py`.
+- `logger.error(..., exc_info=True)` at `app/main.py:264` dumps full formatted traceback through `Formatter.formatException()` → `traceback.format_exception()`. Per-frame absolute paths from `__file__`. Locals NOT serialized by default (would need `tb_locals=True` opt-in on `traceback.TracebackException` — not used here). Absolute paths alone leak install layout + Windows user folder.
+- Logging configured via `logging.basicConfig` at `app/main.py:110-117`: two handlers — `FileHandler(LOG_DIR / "app.log", encoding='utf-8')` (`app/main.py:114`) + `StreamHandler(sys.stdout)` (`app/main.py:115`). `LOG_DIR = Path("./logs")` (`app/config.py:8`); `LOG_DIR.mkdir(exist_ok=True)` runs at import (`app/config.py:15`). CWD-relative. No rotation/ACL/size cap. No `RotatingFileHandler`/`TimedRotatingFileHandler` anywhere in `app/` (only used in `app/usb_manager.py` for an unrelated rotated handler).
+- **`basicConfig` formatter-attachment behavior (CPython 3.13.5 `Lib/logging/__init__.py` L109-112, verified):**
+  ```
+  for h in handlers:
+      if h.formatter is None:
+          h.setFormatter(fmt)
+      root.addHandler(h)
+  ```
+  Conclusion: pre-setting our `RedactingFormatter` on each handler BEFORE calling `basicConfig(handlers=[fh, sh], …)` survives — basicConfig won't overwrite it. (Empirically also verified: when handlers carry no pre-set formatter, basicConfig assigns the SAME instance to all of them, so either wiring style works; the pre-set form is the more explicit choice the Recommendation adopts.)
+- `app.log` path resolves against process CWD. In Tauri prod, `src-tauri/src/main.rs:335` spawns the sidecar via `shell.sidecar("rb-backend")` with no `current_dir` set — child inherits parent CWD (Windows: install dir, e.g. `%LOCALAPPDATA%\<app>\` per-user or `C:\Program Files\<app>\` machine-wide). Dev (`npm run dev:full` / `tauri dev`): CWD is repo root → `./logs/app.log` sits inside the git working tree. All locations user-readable by any same-uid process (AV agents, telemetry, screenshare).
+- Windows Error Reporting can capture process memory on crash — exception data lives outside our log scope. Mitigation requires `WerAddExcludedApplication` registry entry. Out of scope.
+- `LogRecord.exc_text` lifecycle (CPython 3.13.5 `Lib/logging/__init__.py` `Formatter.format`, verified via `inspect.getsource`): inside `format()`, if `record.exc_info` set and `record.exc_text` falsy → assigns `record.exc_text = self.formatException(record.exc_info)`. Once populated, every subsequent handler skips the re-format and concatenates the cached string verbatim. Empirically confirmed: 2-handler setup with distinct Formatter subclasses — handler-1 sees `exc_text is None` pre-format, handler-2 sees populated `exc_text` pre-format and reuses the cache. **Implication:** if EITHER handler's formatter scrubs and the OTHER doesn't, the un-scrubbed one wins whichever runs FIRST in `self.handlers` list order (`Logger.callHandlers` iterates `c.handlers` in insertion order). Mitigation: scrub MUST mutate `record.exc_text` in place AND scrub returned string.
+- Root vs APP_MAIN logger: `basicConfig` attaches handlers to **root**. `getLogger("APP_MAIN")` has `propagate=True` (default), so APP_MAIN records bubble to root handlers — empirically confirmed (`APP_MAIN.handlers == []`, `root.handlers == [...]`). Sub-loggers `uvicorn`, `fastapi`, `httpx` also propagate to root by default. **Therefore a root-level formatter swap covers every logger automatically** — resolves OQ6 (see below).
+- Python `logging` is sync. Redaction cost: 3 `str.replace` on a 1380-byte synthetic traceback = **0.46 µs per call** (1000-iter timing). Negligible relative to disk-write latency.
+- `%(message)s` (format string at `app/main.py:112`) covers only the leading line. Traceback is appended AFTER `formatMessage(record)` returns, via the `if record.exc_text:` block in `Formatter.format`. So a `format`-string-only change cannot scrub the traceback — must subclass `Formatter` and override `format()`.
 
 ## Open Questions
 
-Numbered. Each resolvable (yes/no or X vs Y), not philosophy.
+All resolved in-line OR explicitly PARKED with reason.
 
-1. Scrub the WHOLE formatted traceback string (one `safe_error_message` pass over the joined output), or walk each `traceback.FrameSummary` and rewrite `filename` per frame? Whole-string is simpler + catches paths appearing in exception args; per-frame is more precise but misses paths embedded in custom `__repr__` of exception objects.
-2. Keep `exc_info=True` at the call site (let the Formatter redact downstream), or drop to `exc_info=False` + manually log `f"{type(exc).__name__}: file={tb.tb_frame.f_code.co_filename}:{tb.tb_lineno}"`? Former preserves full triage value; latter is bulletproof but loses chained exceptions (`__cause__`/`__context__`).
-3. Move `app.log` to `%APPDATA%/MusicLibraryManager/logs/` with per-user ACL (Windows ICACLS), or leave CWD-relative + rely solely on redaction? ACL hardening is a defense-in-depth complement, not a replacement.
-4. Add a `logging.Filter` subclass that recursively scrubs `LogRecord.args` (in case future code passes paths via `%s` interpolation) — yes always-on, or only on the global-exception logger? Always-on is safer; risks over-redacting intentional path logs (e.g. `validate_audio_path` security warning at line 202).
-5. Should redaction expand beyond `APP_DIR` / `Path.home()` / `%APPDATA%` to also cover `EXPORT_DIR`, `MUSIC_DIR`, `TEMP_DIR`, and entries in `ALLOWED_AUDIO_ROOTS` (which include user-configured drive paths)?
-6. Apply same Formatter to ALL loggers via root config, or only to the `APP_MAIN` logger? Subloggers (`uvicorn`, `fastapi`, `httpx`) may emit their own tracebacks under `exc_info=True` — narrow scope misses those.
-7. Add a log-rotation policy (`RotatingFileHandler` with size cap + retention) in the same change, or split to a separate idea? Argues for split — orthogonal threat model.
-8. Strip locals from frames pre-emptively (set `sys.tracebacklimit` or override `Formatter.formatException`)? Currently locals are NOT serialized, but a future tweak to `tb_locals=True` for debugging would re-introduce the leak silently.
+1. **RESOLVED — whole-string scrub.** One `safe_error_message` pass over the string returned by `super().format(record)`, mirrored onto `record.exc_text`. Reasons: catches paths inside exception args + custom `__repr__` (per-frame rewrite misses these), single pass = O(n), code shape mirrors existing `safe_error_message` callers.
+2. **RESOLVED — keep `exc_info=True`.** Manual `tb.tb_frame...` form drops chained exceptions (`__cause__`/`__context__`) — recently load-bearing for diagnosing rbox-panic chains and `_db_write_lock` re-raises. Formatter-side scrub preserves chain info.
+3. **PARKED — split idea.** Filesystem ACL hardening (`%APPDATA%/MusicLibraryManager/logs/` + ICACLS) is defense-in-depth, separate threat model (file-permission boundary vs log-content boundary). Reason: orthogonal scope, separate testing surface, would bloat this change. **Action:** scaffold follow-up idea `security-app-log-acl` post-implementation.
+4. **RESOLVED — scrub `record.args` indirectly via the final-string pass, not via separate Filter.** Reason: Filter runs BEFORE Formatter (`Handler.handle` → `filter` → `emit` → `format`), so `exc_text` is still `None` at filter time and Filter would have to duplicate Formatter work. The recommended pseudocode (`return safe_error_message_str(super().format(record))`) catches args automatically: `super().format` calls `record.getMessage()` which interpolates args into the message string, and the final-string scrub then strips matching paths from the interpolated result. No need to mutate `record.args` directly. The `validate_audio_path` warning at `app/main.py:202` is INSIDE the message string (f-string at call site, not `args`), so the always-on scrub does not affect it — and even if a future caller used `args`, the path it shows is an attacker-controlled value, which the scrubber leaves untouched (those paths do not match `APP_DIR`/`Path.home()`/`%APPDATA%`).
+5. **RESOLVED — extend `safe_error_message` to `EXPORT_DIR`, `MUSIC_DIR`, `TEMP_DIR`.** These are all already CWD-relative `./exports` `./music` `./temp_uploads` (`app/config.py:7,9,10`); their `.resolve()` form appears in `ALLOWED_AUDIO_ROOTS` (`app/main.py:144-146`) and would surface in traceback frames touching audio code. **PARKED — per-user drive entries in `ALLOWED_AUDIO_ROOTS` (D:/Music, etc.):** dynamic, change at runtime, scrubbing them needs an iterable lookup not a static const. Acceptable risk for now (paths are user's own filesystem layout, less PII-loaded than `~/`).
+6. **RESOLVED — root-level Formatter.** `basicConfig` attaches to root, `APP_MAIN`/`uvicorn`/`fastapi`/`httpx` all `propagate=True` by default (empirically confirmed: `getLogger('APP_MAIN').handlers == []` post-basicConfig). Therefore a single Formatter on root's handlers covers every sub-logger automatically. No per-logger plumbing needed.
+7. **PARKED — log rotation as separate idea.** `RotatingFileHandler` size cap + retention is a separate threat model (disk-fill DoS vs content-leak). Will scaffold `security-log-rotation-policy` follow-up post-implementation.
+8. **RESOLVED — no preemptive locals strip.** Current code does not enable `tb_locals=True`; default `Formatter.formatException` calls `traceback.TracebackException(..., capture_locals=False)`. Adding a `formatException` override now is dead code. **Action:** add a code comment + lint-style assertion in `RedactingFormatter.__init__` documenting that any future `capture_locals=True` flip would re-introduce a leak vector and needs paired widening of `safe_error_message`.
 
 ## Findings / Investigation
 
 Dated subsections, append-only. ≤80 words each. Never edit past entries — supersede.
 
 ### 2026-05-15 — initial scope
-- Call site confirmed: app/main.py:261-268 — single `@app.exception_handler(Exception)`; logs via module logger `APP_MAIN`.
-- Redactor confirmed: app/main.py:207-214 — `safe_error_message(e)` operates on `str(e)` only, replaces `APP_DIR` / `Path.home()` / `%APPDATA%` with `[...]`. Never called inside global handler.
-- Log destination confirmed: app/main.py:110-117 — `basicConfig` with `FileHandler(LOG_DIR / "app.log")` + `StreamHandler(stdout)`. `LOG_DIR = Path("./logs")` (app/config.py:8). No rotation, no ACL.
-- `traceback.format_exception()` output structure: header (`Traceback (most recent call last):`) + per-frame block (`  File "<absolute_path>", line <n>, in <func>\n    <source>`) + final `<ExcType>: <str(exc)>`. Locals excluded by default.
-- `logging.LogRecord.exc_text` lifecycle: populated by `Formatter.format()` on first emit via `self.formatException(record.exc_info)`, then cached on the record so subsequent handlers reuse the cached string.
-- Fix sketch (prose only): subclass `logging.Formatter`, override `format(record)` — call `super().format(record)` to populate/cache `exc_text`, then run `safe_error_message` on `record.exc_text` AND on the returned formatted string, return the scrubbed copy. Wire by replacing the `format=` kwarg in `basicConfig` with explicit handler setup that assigns the custom Formatter to both `FileHandler` and `StreamHandler`. Optionally extend `safe_error_message` to cover `EXPORT_DIR`, `MUSIC_DIR`, `TEMP_DIR` (see OQ5).
+- Call site: `app/main.py:261-268` — single `@app.exception_handler(Exception)`; logs via `APP_MAIN` logger.
+- Redactor: `app/main.py:207-214` — `safe_error_message(e)` on `str(e)`, replaces `APP_DIR`/`Path.home()`/`%APPDATA%` with `[...]`. Not called inside global handler.
+- Logging: `basicConfig` at `app/main.py:110-117` with `FileHandler(LOG_DIR/"app.log")` + `StreamHandler(stdout)`. `LOG_DIR = Path("./logs")` (`app/config.py:8`). No rotation/ACL.
+- `traceback.format_exception()` output: header + per-frame `File "<abs_path>", line N, in <func>\n    <source>` + final `<ExcType>: <str(exc)>`. Locals omitted by default.
+- `LogRecord.exc_text` lifecycle: populated by `Formatter.format` first call, then cached; subsequent handlers reuse.
+
+### 2026-05-15 — CPython source + behavioral verification
+- `Lib/logging/__init__.py` `Formatter.format` (CPython 3.13.5, `logging.__file__` at `…\Python313\Lib\logging\__init__.py`, verified via `inspect.getsource`): lines (paraphrased) `if record.exc_info: if not record.exc_text: record.exc_text = self.formatException(record.exc_info)`. Cache-write happens iff `exc_info` set AND `exc_text` falsy — so populates exactly once across all handlers. `Logger.callHandlers` iterates `c.handlers` in insertion order — empirically confirmed (handler 1 sees `exc_text is None`; handler 2 sees populated cache, length 120 bytes).
+- `basicConfig(handlers=[h1, h2])` empirically assigns the **same Formatter instance** (`id(h1.formatter) == id(h2.formatter)`) to both when neither has a pre-set formatter. So a single Formatter swap in basicConfig propagates to every handler.
+- `getLogger("APP_MAIN").handlers == []` post-basicConfig; `propagate=True` (default). Sub-loggers `uvicorn`, `fastapi`, `httpx` likewise. Root-level formatter covers them.
+- Round-trip scrub test: `ValueError(f'Bad path: {APP_DIR}/foo.py')` → `traceback.format_exception` → 3× `str.replace` → `ValueError: Bad path: [...]/foo.py`. Confirmed regex-free string operations suffice.
+- Perf: 3 `str.replace` on a 1380-byte synthetic traceback = **0.46 µs / call** (1000-iter timing). Spec'd ≤1ms; actual is ~2000× headroom.
+
+### 2026-05-15 — net diff sizing
+- `RedactingFormatter` class skeleton (new file `app/logging_utils.py`): ~25 lines including docstring with multi-handler-order invariant note.
+- `safe_error_message` widening to `EXPORT_DIR`/`MUSIC_DIR`/`TEMP_DIR`: +3 entries in the `for sensitive in [...]` list, +1 import line. Net ~+4 lines, `app/main.py:207-214`.
+- `basicConfig` swap at `app/main.py:110-117`: replace `format=...` kwarg with explicit pre-built `RedactingFormatter(fmt=...)` instance attached via `handlers=[h1, h2]` (h1, h2 created inline; basicConfig auto-shares the formatter). Net diff ~+6 / -1 lines.
+- Test file `tests/test_logging_redaction.py` (new): one `StringIO`-handler fixture + 4 assertions (scrub in `record.exc_text`; scrub in returned string; `APP_DIR` substring absent; chained-exception preserves chain). ~50 lines.
+- **Total estimated diff:** ~+85 / -1 lines across 3 files. Single commit feasible.
+
+### 2026-05-15 — net diff sizing (revised, supersedes prior entry)
+Switching wiring approach from "basicConfig auto-shares formatter" to "pre-set formatter before basicConfig" — both work, but pre-set is more explicit, doesn't rely on basicConfig internals, and survives any future config refactor.
+- `app/logging_utils.py` (new): `safe_error_message_str` (~6 lines) + `RedactingFormatter` (docstring + ~5-line `format` override) → ~30 lines total.
+- `app/main.py:110-117` rewrite to pre-set-formatter pattern: ~+6 / -1 lines net.
+- `app/main.py:207-214` body refactor to delegate via `safe_error_message_str`: ~-7 / +2 lines net.
+- `tests/test_logging_redaction.py` (new): StringIO fixture + 4 cases → ~60 lines.
+- **Revised total estimated diff:** ~+98 / -8 lines across 3 source files + 1 test file. Single commit feasible.
+
+### 2026-05-15 — multi-handler-order verification matrix
+| First handler's formatter | Second handler's formatter | Leak in handler 2? |
+|---|---|---|
+| RedactingFormatter (scrubs `exc_text` + returns scrubbed string) | RedactingFormatter (same instance) | No — both scrubbed |
+| Plain Formatter | RedactingFormatter | **Yes** — first emit writes un-scrubbed `exc_text` to cache; second's super().format reads cache, returns scrubbed string for handler 2, but handler 1's stream already received raw paths. |
+| RedactingFormatter | Plain Formatter | **Safe** — RedactingFormatter mutates `record.exc_text` after super().format; handler 2's super().format reads the scrubbed cache + concatenates. Required mutation order: `super().format(record)` THEN `record.exc_text = safe_error_message_str(record.exc_text)`. |
+- **Invariant chosen by recommended wiring:** all handlers carry the same `RedactingFormatter` instance, AND the formatter mutates `record.exc_text` after `super().format`. Both protections are independently sufficient (rows 1 + 3 above); having both makes the implementation robust against a future contributor adding a non-redacting handler.
 
 ## Options Considered
 
-Required by `evaluated_`. Per option: sketch ≤3 bullets, pros, cons, S/M/L/XL, risk.
+Per option: sketch ≤3 bullets, pros, cons, effort (hours), behavior diff, maintenance debt, risk.
 
-### Option A — Custom Formatter scrubbing exc_text (recommended)
+### Comparison table
+
+| | Option A — Formatter | Option B — Filter | Option C — structlog |
+|---|---|---|---|
+| Effort (hours) | ~3-4h (code + 4 unit tests + manual verify + doc-syncer) | ~5-6h (filter + dup-formatter helper + 2 attach sites + tests) | ~30-50h (730-site refactor + dep audit + test-format migration) |
+| Net diff | ~+85 / -1 lines, 3 files | ~+100 / -1 lines, 3 files | ~+1500 / -1500 lines, ~60 files |
+| Behavior diff (functional) | None for non-exception logs; tracebacks scrubbed | Same as A | Log line shape changes from `%(message)s` to JSON / kv; downstream parser break |
+| Behavior diff (debugging) | Identical traceback minus literal sensitive paths | Identical | Tracebacks now structured; learning curve |
+| Maintenance debt | Low — single class, mirrors existing `safe_error_message` | Medium — duplicate `formatException` helper drifts vs stdlib | High — new dep, Schicht-A pin + CVE check ongoing |
+| Touch surface | `app/main.py:110-117`, `app/main.py:207-214`, new `app/logging_utils.py` | Same + filter-attach calls | Every `app/*.py` with `logger.X` |
+| Risk | Low | Medium | High |
+
+### Option A — Custom Formatter scrubbing exc_text (RECOMMENDED)
 - Sketch:
-  - New class `RedactingFormatter(logging.Formatter)` in `app/main.py` (or a new `app/logging_utils.py`); override `format()` to call `super().format(record)` (which populates `record.exc_text` if not already), then run `safe_error_message` on the returned string AND overwrite `record.exc_text` with the scrubbed substring to prevent leak via cache-reuse by downstream handlers.
-  - Replace the `format=` kwarg in `basicConfig` (app/main.py:110-117) with explicit `FileHandler` + `StreamHandler` instances, BOTH assigned the SAME `RedactingFormatter` instance (per Constraint: first formatter wins on `exc_text` cache).
-  - Optionally widen `safe_error_message` to also strip `EXPORT_DIR`, `MUSIC_DIR`, `TEMP_DIR` (resolves OQ5).
-- Pros: minimal blast radius — net diff ~+25 lines (new class ~15, basicConfig rewrite ~8, plus reuse of `safe_error_message`); catches both `%(message)s` and `exc_text` in one place; works for the root logger so sub-loggers (`fastapi`, `uvicorn`, `httpx`) inherit if root config carries it (resolves OQ6); preserves `exc_info=True` debug value; no caller refactor; existing redactor reused (single source of truth).
-- Cons: doesn't drop entire records (no policy control); SHARED-formatter requirement is load-bearing — if a future change attaches a second handler with a plain `Formatter()`, the cache-write order may leak (mitigation: document invariant in class docstring + assert in basicConfig); if `LogRecord` is pickled (multiproc queue, e.g. `app/anlz_safe.py` ProcessPoolExecutor child output), scrubbing happens on the consumer side — currently moot (child workers use module-level `getLogger(__name__)` and their stderr is captured by parent stream handler) but a future risk.
-- Effort: S.
-- Risk: Low. Pure formatting layer, no behavior change for non-exception logs. Confirmable via unit test: emit a synthetic `logger.error("boom %s", APP_DIR, exc_info=ValueError(APP_DIR))` to a `StringIO`-backed handler with `RedactingFormatter`, assert `[...]` appears and `APP_DIR` substring does not.
+  - New class `RedactingFormatter(logging.Formatter)` in new `app/logging_utils.py`. Override `format(record)`: call `super().format(record)`, mutate `record.exc_text = safe_error_message_str(record.exc_text)` if non-empty, return `safe_error_message_str(super_result)`.
+  - Pre-set one `RedactingFormatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s')` instance on both `FileHandler` and `StreamHandler` before calling `basicConfig(handlers=[fh, sh], level=INFO)`. basicConfig's `if h.formatter is None` guard (`Lib/logging/__init__.py` L110) leaves our pre-set formatter alone.
+  - Widen `safe_error_message` (`app/main.py:207-214`) to include `str(EXPORT_DIR.resolve())`, `str(MUSIC_DIR.resolve())`, `str(TEMP_DIR.resolve())` (via new `safe_error_message_str` helper in `app/logging_utils.py`).
+- Pros: minimal blast radius (~+85 lines, 3 files); catches `%(message)s` line + `exc_text` cache in one place; root-level config covers `uvicorn`/`fastapi`/`httpx` automatically; preserves `exc_info=True` triage value; no caller refactor; reuses existing redactor (single source of truth).
+- Cons: depends on every handler attached to root carrying the `RedactingFormatter` (single docstring-documented invariant; cache-mutation makes the order of any sibling handler with a plain Formatter still safe — see Findings matrix row 3); record-pickling across `ProcessPoolExecutor` boundaries (`app/anlz_safe.py`) bypasses scrubbing on the producer side — currently moot (child stderr is captured raw by parent stream handler, then re-emitted through parent's RedactingFormatter), but a future child using `QueueHandler` + `pickle` needs scrubbing on the consumer.
+- Effort: ~3-4 hours (code + 4 unit tests + manual route-crash verify + 1 doc-syncer pass).
+- Risk: Low. Pure formatting layer. Unit test: `RedactingFormatter` against `StringIO` handler with `ValueError(APP_DIR)` confirms `[...]` present and `APP_DIR` absent in output.
 
 ### Option B — Custom logging.Filter at handler level
 - Sketch:
-  - `RedactingFilter(logging.Filter)` subclass; `filter(record)` returns True after mutating `record.msg`, `record.args`, `record.exc_text` in place (must force-format via `logging.Formatter().formatException(record.exc_info)` if `exc_text` is None at filter time, then assign the scrubbed string to `record.exc_text` so the downstream handler's formatter sees the cache and skips re-formatting).
-  - Attach filter to both `FileHandler` and `StreamHandler`.
-- Pros: can drop records entirely (return False) — useful for blocklisting noisy paths; filter API is conceptually familiar; can chain multiple filters in order.
-- Cons: Filters run BEFORE the handler's Formatter (per `Handler.handle` → `Handler.filter` → `Handler.emit` → `Formatter.format`), so `record.exc_text` is always `None` at filter time — the filter must instantiate a throwaway `Formatter` and call `formatException` itself, which duplicates the work the real Formatter is about to do (Constraint: `exc_text` will then be reused from cache, so it's not double-work at runtime, but it IS code that conceptually mirrors Formatter responsibilities). `record.msg` may be a `%s`-template with raw paths in `record.args` — must scrub BOTH (`getMessage()` rendering happens inside `Formatter.format`, not in the filter). Larger net diff: ~+35 lines (filter class + helper + attach to two handlers).
-- Effort: S–M.
-- Risk: Medium. Easy to forget that `record.args` carries lazy-format substitutions → ends up scrubbing only `record.msg` template but leaving raw paths in `args` that the formatter then interpolates back in.
+  - `RedactingFilter(logging.Filter)` subclass; `filter(record)` mutates `record.msg`, scrubs each `record.args` element, force-instantiates `logging.Formatter().formatException(record.exc_info)` and pre-populates `record.exc_text` with the scrubbed version (so downstream Formatter sees cache hit and skips re-format).
+  - Attach the filter to both `FileHandler` and `StreamHandler`.
+- Pros: can drop entire records (return False) for blocklist use cases; familiar API.
+- Cons: filter runs BEFORE Formatter (`Handler.handle` → `filter` → `emit` → `format`), so `exc_text` is always `None` at filter time → must instantiate a throwaway Formatter + call `formatException` itself (duplicates stdlib work; brittle if stdlib changes `formatException` semantics). `record.args` interpolation happens inside `Formatter.format` via `record.getMessage()`, so filter must scrub both `args` and `msg` separately. More moving parts.
+- Effort: ~5-6 hours.
+- Risk: Medium. Easy regression vector: forget to scrub `args`; `record.getMessage()` then re-interpolates raw paths back into `%(message)s` output.
 
 ### Option C — Replace stdlib logging with structlog
 - Sketch:
-  - Add `structlog` dep; configure processor chain with a custom `redact_paths` processor running `safe_error_message` over event dict values.
-  - Refactor every `logger.X(...)` call site across `app/` to structured `log.X("event", key=value)` form.
-- Pros: structured logs are easier to consume; redaction is a first-class processor concern; ergonomic for JSON output (better support-bundle UX); aligns with Schicht-A hardening direction long-term.
-- Cons: huge refactor — `app/` has ~hundreds of `logger.X` calls; structlog adds a runtime dep (Schicht-A pinning gate, security audit); breaks existing log-line format assumptions in `tests/` (any test that greps log lines); orthogonal to the immediate leak fix.
-- Effort: XL.
-- Risk: High. Touches every module. Would need its own research doc + sign-off — not warranted by a single-handler leak.
+  - Add `structlog` dep (pin-and-audit gate per `.claude/rules/coding-rules.md`); configure processor chain with `redact_paths` processor invoking `safe_error_message`.
+  - Refactor 730 `logger.X(...)` call sites in `app/` to structured `log.X("event", key=value)` form.
+- Pros: structured logs simplify support-bundle parsing; redaction is a first-class processor; aligns with hypothetical Schicht-B JSON-logging direction.
+- Cons: 730 call-site refactor; new runtime dep (Schicht-A pin + CVE-check obligation); breaks any test that asserts on log-line shape (already checked: none in `tests/`, but adds drag); orthogonal to immediate single-handler leak fix.
+- Effort: ~30-50 hours.
+- Risk: High. Touches every module. Needs own research doc + sign-off. Not warranted by the targeted leak.
 
 ## Recommendation
 
-Required by `evaluated_`. ≤80 words. Which option + what blocks commit.
+**Option A — RedactingFormatter.** Pre-set one `RedactingFormatter` instance on each root handler before `basicConfig` (basicConfig's `if h.formatter is None` guard, CPython `Lib/logging/__init__.py` L110, leaves it untouched). Root-level config carries scrubbing to every propagating sub-logger automatically (`uvicorn`/`fastapi`/`httpx` all `propagate=True`). `exc_text` cache mutation inside the override defeats handler-order leak even if a future change attaches a second handler with a non-redacting formatter. All open questions resolved or PARKED with split-idea reasons. Diff ~+98 / -8 lines across new `app/logging_utils.py`, `app/main.py:110-117`, `app/main.py:207-214`. Single atomic commit.
 
-**Option A** — `RedactingFormatter(logging.Formatter)` in new `app/logging_utils.py`; override `format()` → `super().format(record)` then `safe_error_message` over result AND `record.exc_text` (defeats cache-reuse leak). Rewrite `basicConfig` (app/main.py:110-117) as explicit `FileHandler` + `StreamHandler` sharing one Formatter instance, attached to root logger (covers `fastapi`/`uvicorn`/`httpx` — resolves OQ6). Widen `safe_error_message` to `EXPORT_DIR`/`MUSIC_DIR`/`TEMP_DIR` (OQ5).
+**Exact class shape (pseudocode, ~10 lines body):**
 
-**First step:** create `app/logging_utils.py:RedactingFormatter` + `tests/test_logging_redaction.py` (synthetic `ValueError(APP_DIR)`, assert `[...]` in output, `APP_DIR` absent). **Gates before `evaluated_`:** (a) resolve OQ1 (pick whole-string scrub); (b) confirm no `tests/` asserts on log-line shape — already checked: no `caplog`/`asctime` matches in `tests/`, safe. Log rotation/ACL → split idea (OQ3, OQ7).
+```
+# app/logging_utils.py
+class RedactingFormatter(logging.Formatter):
+    """Scrubs absolute paths from log lines + cached tracebacks.
+    Invariant: must be the formatter on EVERY handler attached to the root
+    logger; otherwise exc_text cache (populated by first formatter to run,
+    per CPython Logger.callHandlers iteration order) leaks raw paths to any
+    handler whose formatter doesn't also scrub the cached string.
+    Do NOT flip capture_locals=True anywhere without widening
+    safe_error_message_str scope — locals freely embed paths."""
+    def format(self, record):
+        s = super().format(record)               # populates record.exc_text cache (first call only)
+        if record.exc_text:
+            record.exc_text = safe_error_message_str(record.exc_text)  # patch cache for sibling handlers
+        return safe_error_message_str(s)         # scrub final string unconditionally
+```
+
+**Wiring change (`app/main.py:110-117`) — pre-set formatter so basicConfig respects it:**
+
+```
+_fmt = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+_red = RedactingFormatter(fmt=_fmt)
+_fh = logging.FileHandler(LOG_DIR / "app.log", encoding='utf-8'); _fh.setFormatter(_red)
+_sh = logging.StreamHandler(sys.stdout);                          _sh.setFormatter(_red)
+logging.basicConfig(level=logging.INFO, handlers=[_fh, _sh])
+# basicConfig (CPython 3.13.5 Lib/logging/__init__.py L110: `if h.formatter is None`)
+# skips its default formatter when ours is already attached. Same instance on both
+# handlers guarantees cache-write is scrubbed before any handler emits.
+```
+
+**First step:** scaffold `app/logging_utils.py` + `tests/test_logging_redaction.py`. **No gates remaining** — `tests/` empty of log-shape asserts (verified: zero `caplog` / `asctime` / `app.log` / `FileHandler` matches under `tests/`). Log rotation, ACL, WER exclusion → PARKED follow-up ideas.
 
 ---
 
 ## Implementation Plan
 
-Required from `implement/draftplan_`. Concrete enough that someone else executes without re-deriving.
+Seeded ahead of `implement/draftplan_` because all gates resolved. Concrete enough that someone else executes without re-deriving.
 
 ### Scope
-- **In:** …
-- **Out:** …
+- **In:**
+  - New module `app/logging_utils.py` containing `RedactingFormatter` + `safe_error_message_str` (string-only variant of `safe_error_message`, since `record.exc_text`/the formatted message are already strings, not exceptions).
+  - Edit `app/main.py:207-214` — widen `safe_error_message` path list to include `EXPORT_DIR.resolve()`, `MUSIC_DIR.resolve()`, `TEMP_DIR.resolve()`; refactor body to delegate to `safe_error_message_str` so the two helpers share replacement-list logic.
+  - Edit `app/main.py:110-117` — rewrite to construct `FileHandler` + `StreamHandler` with pre-set `RedactingFormatter` instance, then call `basicConfig(handlers=[fh, sh], level=INFO)`. The `format=` kwarg is removed because the formatter is already attached.
+  - New test `tests/test_logging_redaction.py` exercising `StringIO`-backed handler with synthetic exceptions.
+- **Out:**
+  - Log rotation, file ACL hardening, WER exclusion (separate idea docs).
+  - Per-frame `traceback.FrameSummary` rewrite.
+  - structlog migration.
+  - Any change to `validate_audio_path` SECURITY warning logging.
+  - Touching `RequestValidationError` handler.
 
 ### Step-by-step
-1. …
+1. Create `app/logging_utils.py` (~30 lines): `safe_error_message_str(msg: str) -> str` (string-input variant; imports `APP_DIR`/`HOME`/`APPDATA`/`EXPORT_DIR`/`MUSIC_DIR`/`TEMP_DIR` via `from .config import …` to avoid cycles — `app.config` does NOT import `app.main`) and `RedactingFormatter(logging.Formatter)` with the `format` override from Recommendation. Docstring carries the multi-handler-order invariant + capture_locals warning.
+2. Refactor `safe_error_message` (`app/main.py:207-214`) body to `return safe_error_message_str(str(e))` — call signature unchanged for existing callers; widened path list lives in `app/logging_utils.py:safe_error_message_str`.
+3. Rewrite `app/main.py:110-117` to the pre-set-formatter pattern (see Recommendation wiring block). Pre-built `_fh` + `_sh` carry the `RedactingFormatter` before `basicConfig`; basicConfig leaves them alone (verified: `Lib/logging/__init__.py` L110 `if h.formatter is None`).
+4. Add `tests/test_logging_redaction.py` (~60 lines):
+   - Fixture builds `StringIO`-backed `StreamHandler` + `RedactingFormatter`.
+   - Case 1: `logger.error("ctx", exc_info=ValueError(APP_DIR))` → assert `"[...]"` present, `APP_DIR` absent.
+   - Case 2: chained — `try: raise OSError(APP_DIR)` then `except: raise RuntimeError("wrap")` → assert "During handling of the above" present, neither frame leaks `APP_DIR`.
+   - Case 3: `logger.error("path=%s", APP_DIR)` (args interpolation) → assert scrubbed in final string.
+   - Case 4: `logger.info("hello")` → assert byte-identical to plain `Formatter('…').format(record)` (no regression for non-exception lines beyond redaction passes).
+5. Run `pytest tests/test_logging_redaction.py -v` and `pytest tests/ -x` for regression.
+6. Manual verify: `npm run dev:full`; in another shell `curl -X POST http://127.0.0.1:8000/<route-that-throws>` (use `/api/duplicates/scan` with malformed body or temp-add a `/api/__crash` route); tail `./logs/app.log`; confirm no `C:\Users\` / `APP_DIR` substrings, traceback structure intact (header + per-frame lines + final ExcType line + scrubbed paths).
+7. `doc-syncer` subagent pass: update `docs/FILE_MAP.md` (new `app/logging_utils.py` row), `docs/MAP.md` + `docs/MAP_L2.md` via `python scripts/regen_maps.py`.
 
 ### Files touched
-- …
+- `app/logging_utils.py` — new, ~30 lines (`safe_error_message_str` + `RedactingFormatter`).
+- `app/main.py:110-117` — rewrite to pre-set-formatter pattern, ~+6 / -1 lines net.
+- `app/main.py:207-214` — `safe_error_message` body delegates to helper, ~-7 / +2 lines net.
+- `tests/test_logging_redaction.py` — new, ~60 lines (4 cases).
+- `docs/FILE_MAP.md` — 1 new row.
+- `docs/MAP.md` + `docs/MAP_L2.md` — auto-regen via `scripts/regen_maps.py`.
 
 ### Testing
-- …
+- Unit: synthetic `ValueError(APP_DIR)` round-trip through `RedactingFormatter`; assert scrubbed substring + path absent.
+- Unit: chained exception (`from`) preserves chain markers.
+- Unit: `args`-style log (`logger.error("p=%s", APP_DIR)`) produces scrubbed final string.
+- Unit: non-exception log (`logger.info("hello")`) unchanged byte-for-byte vs baseline.
+- Regression: `pytest tests/` full pass.
+- Manual: trigger global exception via `curl http://127.0.0.1:8000/api/__forced_crash` style probe (or via a temporarily added route), tail `./logs/app.log`, confirm no `C:\Users\` substrings.
 
 ### Risks & rollback
-- …
+- Risk: future contributor attaches a second handler with a pre-set `Formatter()` → cache-leak invariant broken. Mitigation: docstring on `RedactingFormatter` documents the constraint; class-level `__init_subclass__` could `warnings.warn` if subclassed without override (low ROI — defer).
+- Risk: `record.args` contains a non-string path object whose `repr()` contains the path. `safe_error_message_str` operates on the rendered final string, so this is covered automatically once `super().format(record)` runs `record.getMessage()`.
+- Risk: a test elsewhere starts asserting log-line shape; currently zero matches in `tests/` (verified) but future drag. Mitigation: format string unchanged, so non-exception output is byte-identical.
+- Rollback: single revert of the implementation commit restores prior `basicConfig` + un-widened `safe_error_message`; no schema migrations, no on-disk format change.
 
 ## Review
 

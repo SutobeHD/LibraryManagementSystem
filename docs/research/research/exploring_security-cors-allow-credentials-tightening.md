@@ -19,20 +19,21 @@ related: [security-api-auth-hardening]
 - 2026-05-15 — `research/idea_` — section fill from thin scaffold
 - 2026-05-15 — research/idea_ — rework pass (quality-bar review pre-exploring_)
 - 2026-05-15 — research/exploring_ — promoted; quality-bar met (frontend axios audit enumerated 164 calls / 41 files; sentinel cookie confirmed dead-code 0 reads)
+- 2026-05-15 — research/exploring_ — perfect-quality rework loop (deep self-review pass)
 
 ---
 
 ## Problem
 
-`app/main.py:217-232` configures CORS with `allow_credentials=True, allow_methods=["*"], allow_headers=["*"]` (wildcards on lines 230-231). Wildcards tolerable today: no cookie-based auth — bearer-in-`X-Session-Token` header sidesteps CSRF. BUT: SC sentinel at `app/main.py:3087-3094` already sets a cookie via `Set-Cookie`. If anyone later adds session-cookie auth (mobile-pairing Phase-2, browser-only fallback), this CORS config becomes a live CSRF risk. Need: explicit `allow_methods` list (GET/POST/PUT/PATCH/DELETE/OPTIONS), explicit `allow_headers` list incl. `Content-Type` + `X-Session-Token` (+ `Authorization` reserved), codify "no cookie-auth ever" as repo invariant.
+`app/main.py:217-232` ships CORS with `allow_credentials=True, allow_methods=["*"], allow_headers=["*"]` (lines 229-231). Wildcards safe today — auth is bearer-in-`X-Session-Token`, no cookie-auth. BUT `app/main.py:3087-3094` sets `Set-Cookie sc_token` (sentinel only, dead code — Q6) AND `withCredentials=true` at `frontend/src/api/api.js:17` round-trips it. Future cookie-auth (mobile-pairing Phase-2, browser fallback) flips this into a live CSRF surface. Fix: explicit `allow_methods` (6 verbs), explicit `allow_headers` (3 entries), permanent rule banning auth-cookies.
 
 ## Goals / Non-goals
 
 **Goals**
-- Replace `allow_methods=["*"]` at `app/main.py:230` with explicit list (GET/POST/PUT/PATCH/DELETE/OPTIONS) — drops wildcard surface, fits only verbs actually used (verified: GET=69, POST=87, PUT=1, PATCH=4, DELETE=3; HEAD/OPTIONS not app-emitted). **Testable**: `grep -c "api\.(get\|post\|put\|patch\|delete)" frontend/src/` matches each verb in the explicit list.
-- Replace `allow_headers=["*"]` at `app/main.py:231` with explicit list (`Content-Type`, `X-Session-Token`, `Authorization`) — `Authorization` reserved for future bearer scheme, `X-Session-Token` is the only custom header currently set (api.js:87). **Testable**: a request with an un-listed custom header from the frontend's actual call sites must 200; one with a fabricated `X-Foo: bar` may be optionally checked to fail preflight.
-- Codify "no session cookies — bearer-in-header is the only authenticated transport" as a permanent rule in `.claude/rules/coding-rules.md` (Backend section). Future cookie-auth PRs auto-rejected. **Testable**: rule line exists; PR-check grep would block new `response.set_cookie(` introducing an auth secret.
-- Keep behaviour byte-identical for Tauri + Vite-dev today (verb/header enumeration in Findings confirms zero-regression set). **Testable**: `tests/test_api_routes_smoke.py` green pre- and post-change; manual e2e on SoundCloudView login flow + system-shutdown flow.
+- Replace `allow_methods=["*"]` at `app/main.py:230` with `["GET","POST","PUT","PATCH","DELETE","OPTIONS"]`. Covers all verbs (verified counts: GET=69, POST=87, PUT=1, PATCH=4, DELETE=3; HEAD/OPTIONS not app-emitted). **Testable**: `tests/test_api_routes_smoke.py` green; one curl per verb returns non-405.
+- Replace `allow_headers=["*"]` at `app/main.py:231` with `["Content-Type","X-Session-Token","Authorization"]`. `X-Session-Token` = only custom header set anywhere (`frontend/src/api/api.js:87`); `Authorization` reserved for future bearer; `Content-Type` explicit because axios JSON (`application/json`) is NOT CORS-safelisted (safelist limited to `text/plain`, `application/x-www-form-urlencoded`, `multipart/form-data`) → triggers preflight. **Testable**: preflight with `Access-Control-Request-Headers: x-fabricated` returns no matching `Access-Control-Allow-Headers`.
+- Add rule line in `.claude/rules/coding-rules.md` (Backend section): "Bearer-in-header is the only authenticated transport; no `response.set_cookie(...)` carrying an auth secret." **Testable**: line exists; future PR grep blocks new `set_cookie` introducing a credential.
+- Tauri (`tauri://localhost`, `https://tauri.localhost`) + Vite-dev (`localhost:5173`) keep working byte-identically. **Testable**: `tests/test_api_routes_smoke.py` green; `e2e-tester` verifies SoundCloud login + system-shutdown flows.
 
 **Non-goals**
 - Do NOT shrink `allow_origins` list at `app/main.py:219-228` — Tauri (`tauri://localhost`, `https://tauri.localhost`) and dev (`localhost:1420`, `localhost:5173`, `127.0.0.1` variants, `localhost:8000`) all need to stay.
@@ -46,7 +47,7 @@ External facts bounding solution (rate limits, data shape, perf budget, legal, c
 - `allow_origins` explicit list at `app/main.py:219-228` — keep verbatim. 4 dev origins (`localhost`/`127.0.0.1` × `1420`/`5173`), 2 self-origins (`localhost:8000`/`127.0.0.1:8000`), 2 Tauri schemes (`tauri://localhost`, `https://tauri.localhost`).
 - `allow_credentials=True` at `app/main.py:229` — needed today ONLY for the SC sentinel cookie roundtrip (`response.set_cookie(key="sc_token", …)` at `app/main.py:3087`) AND for `axios.create({withCredentials: true})` at `frontend/src/api/api.js:17`. **Resolved in rework (Q6)**: neither frontend nor backend ever reads the cookie — it's write-only-then-discarded. Removing it does NOT break `sc:auth-expired` detection (100% 401-driven, see `frontend/src/api/api.js:115-136`, `frontend/src/components/SoundCloudView.jsx:52-62`). Stale docstring at `app/soundcloud_api.py:3` falsely claims backend reads the cookie — actual reads are from `keyring.get_password(...)`. **Option A keeps `credentials=True` for safety; Option B drops it.**
 - `allow_methods=["*"]` at `app/main.py:230` — minimum useful explicit set covering actual usage: `GET, POST, PUT, PATCH, DELETE, OPTIONS`. **Derived from enumeration** in Findings (`api.<verb>(` grep of `frontend/src/`): 69 GET, 87 POST, 1 PUT (`SoundCloudSyncView.jsx:594`), 4 PATCH (`BatchEditBar.jsx:30`, `TrackTable.jsx:270,293,486`), 3 DELETE (`PlaylistBrowser.jsx:390`, `settings/SettingsUsb.jsx:72`, `UsbView.jsx:157`). `OPTIONS` mandatory for preflight (browser-emitted). `HEAD` not used.
-- `allow_headers=["*"]` at `app/main.py:231` — minimum useful explicit set: `Content-Type` (axios JSON default; CORS-safelisted but explicit listing avoids preflight ambiguity for non-safelisted JSON), `X-Session-Token` (the ONLY custom header set anywhere — `frontend/src/api/api.js:87`), `Authorization` (reserved for future bearer scheme, no current usage). **Derived from enumeration**: zero `headers: {…}` blocks in `frontend/src/`; only `config.headers[…] =` site is `api.js:87`. `X-Requested-With` (proposed in earlier draft) is NOT set anywhere in code — drop unless we add it explicitly. (TODO: confirm `Accept` not needed beyond CORS-safelisted default.)
+- `allow_headers=["*"]` at `app/main.py:231` — explicit set: `Content-Type` (axios JSON default; CORS-safelist applies only to `text/plain|application/x-www-form-urlencoded|multipart/form-data`, so `application/json` triggers preflight and needs explicit listing), `X-Session-Token` (only custom header — `frontend/src/api/api.js:87`), `Authorization` (reserved). **Derived from enumeration table below**: zero `headers: {…}` blocks, zero `axios.defaults.headers`, zero `X-*` literals outside `api.js:87`. `Accept` stays implicit (CORS-safelisted always). `X-Requested-With` not set — dropped from proposal.
 - CORS spec forbids `allow_credentials=True` combined with `allow_origins=["*"]`, but does NOT forbid `allow_credentials=True` with explicit origin list — current config is compliant, tightening preserves compliance.
 - Tightening to explicit lists MUST NOT break Tauri (`tauri://localhost` already in allowlist) or browser-dev (Vite proxy at port 5173 → 8000) today — verified by frontend verb/header enumeration above.
 
@@ -56,7 +57,7 @@ Numbered. Each resolvable (yes/no or X vs Y), not philosophy.
 
 1. Drop `allow_credentials=True` entirely if all auth is bearer-only? — **Resolved: YES, in Option B.** Frontend has zero `document.cookie` reads (verified). Backend has zero `request.cookies.get("sc_token")` reads (verified — see Q6). `withCredentials=true` only round-trips a value no one consumes.
 2. Cookie `sc_token` at `app/main.py:3087-3094` — does it need `Set-Cookie` at all? — **Resolved: NO.** Frontend never reads it (HttpOnly + 0 `document.cookie` sites); backend never reads it (Q6). The sentinel is write-only-then-discarded — pure dead code. Delete in Option B; no localStorage replacement needed.
-3. Include `Accept` / `Origin` / `Cookie` in explicit `allow_headers`? — **Resolved: NO.** `Accept`/`Accept-Language`/`Content-Language`/`Content-Type` are CORS-safelisted (always allowed without explicit listing); `Origin` is browser-set; `Cookie` is governed by `allow_credentials`. Keep list minimal: `Content-Type, X-Session-Token, Authorization`.
+3. Include `Accept` / `Origin` / `Cookie` in explicit `allow_headers`? — **Resolved: NO.** `Accept`/`Accept-Language`/`Content-Language` are CORS-safelisted (always allowed without explicit listing); `Content-Type` IS listed because `application/json` is non-safelisted (safelist limited to text/plain, form-urlencoded, multipart/form-data); `Origin` is browser-set; `Cookie` is governed by `allow_credentials`. Final list: `Content-Type, X-Session-Token, Authorization`.
 4. Should `X-Session-Token` get a deprecation note now? — **Resolved: NO.** `app/main.py` system-shutdown endpoints still gate on it; until those move to `Authorization: Bearer`, keep allowed without deprecation. Re-evaluate when shutdown flow migrates.
 5. Should `OPTIONS` preflight responses be cached (`Access-Control-Max-Age`)? — Starlette default is no header (~5s browser default). Setting `max_age=600` cuts preflight noise. **Resolved: defer.** Cosmetic, orthogonal to security tightening; do as a follow-up if dev complains.
 6. **NEW (resolved 2026-05-15)** — Does any backend route read the `sc_token` cookie value? — **NO.** Grep of `app/` for `cookies.get` / `request.cookies` / `Cookie(` / `sc_token` returned: (a) `main.py:67` defines `KEYRING_SC_TOKEN = "sc_token"` — a keyring identifier, unrelated to the HTTP cookie; (b) `main.py:3087` sets the cookie; (c) `soundcloud_api.py:3` docstring claims "Uses the auth_token (stored as HttpOnly cookie sc_token)" but the file actually reads from the OS keyring — **stale comment, separate cleanup ticket**. Zero `request.cookies.get("sc_token")` call sites. Cookie is write-only-then-discarded. **Implication**: Option B is now a ~4-line change: remove `response.set_cookie(...)` at `app/main.py:3087-3094`, remove `withCredentials: true` at `frontend/src/api/api.js:17`, set `allow_credentials=False` at `app/main.py:229`, and fix the stale docstring in `app/soundcloud_api.py:3`.
@@ -80,16 +81,53 @@ Dated subsections, append-only. ≤80 words each. Never edit past entries — su
 - **Backend cookie reads:** `grep cookies.get|request.cookies|Cookie( app/` = ZERO matches reading `sc_token`. Stale docstring at `app/soundcloud_api.py:3` claims "Uses the auth_token (stored as HttpOnly cookie sc_token)" but the file reads from `keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)`. Cookie has no consumer on backend either. **Implication: sentinel is dead code; Option B is now load-bearing.**
 - **Line-number citations fixed:** prior doc said CORS block `:222-224` / `:219-228` / `:229-231`; actual block is `app/main.py:217-232` (origins list 219-228, `allow_credentials=True` line 229, `allow_methods` line 230, `allow_headers` line 231). SC sentinel was double-cited as `:3036-3043` (wrong — that's DELETE history endpoint) and `:3087-3094` (correct).
 
+### 2026-05-15 — perfect-quality rework (exhaustive header + Set-Cookie + test audit)
+
+**Custom-header enumeration (canonical, derives `allow_headers`):**
+
+| Pattern grepped | Matches in `frontend/src/` | File:line | Header value |
+|---|---|---|---|
+| `headers:\s*\{` (axios config block) | 0 | — | — |
+| `axios.defaults.headers` / `defaults.headers` | 0 | — | — |
+| `config.headers[` (interceptor mutation) | 1 | `api/api.js:87` | `X-Session-Token` |
+| `X-[A-Z][a-zA-Z-]+` (literal X-* header) | 1 | `api/api.js:87` | `X-Session-Token` |
+| `Authorization` (literal) | 0 | — | — |
+| `Content-Type` (override) | 0 | — | — (axios default `application/json`) |
+| `withCredentials` | 1 | `api/api.js:17` | `true` |
+
+→ Final `allow_headers = ["Content-Type", "X-Session-Token", "Authorization"]`. `Content-Type` needed because axios sends `application/json` (non-safelisted → preflight). `X-Session-Token` is the lone custom site. `Authorization` reserved.
+
+**Set-Cookie enumeration (backend):** `grep response.set_cookie|set_cookie( app/` = 1 site: `app/main.py:3087` (sentinel block 3087-3094). Zero other writers. Confirms sentinel is the only cookie surface — dropping it makes the codebase cookie-free.
+
+**Test audit (`tests/`):** Zero `OPTIONS`/`preflight`/`allow_methods`/`allow_headers`/`allow_credentials`/`CORS` references. No test asserts preflight behaviour → tightening risks no test regression. Verification stays in `tests/test_api_routes_smoke.py` (route reachability) + manual `e2e-tester` (preflight in real browser).
+
+**Stale docstring (re-verified):** `app/soundcloud_api.py:3` reads `"Uses the auth_token (stored as HttpOnly cookie \"sc_token\") for authenticated requests."` — false. File reads from `keyring.get_password(...)` via `app/main.py:KEYRING_SC_TOKEN`. Fix in Option B alongside cookie removal.
+
 ## Options Considered
 
 Required by `evaluated_`. Per option: sketch ≤3 bullets, pros, cons, S/M/L/XL, risk.
+
+**Comparison table:**
+
+| | Option A (tighten lists) | Option B (drop credentials + sentinel) | Option C (status quo + rule) |
+|---|---|---|---|
+| LoC delta | +2 changed / 0 added | -8 deleted / +2 changed | +3 added |
+| Files touched | 1 (`app/main.py`) | 3 (`app/main.py`, `frontend/src/api/api.js`, `app/soundcloud_api.py`) | 1 (`.claude/rules/coding-rules.md`) |
+| Wildcard removed | yes (methods+headers) | yes (methods+headers) | no |
+| `allow_credentials` | `True` (kept) | `False` | `True` (kept) |
+| Sentinel cookie | kept (dead code) | removed | kept (dead code) |
+| Stale docstring fixed | no | yes | no |
+| CSRF surface | structurally none (no cookie-auth), wildcard surface gone | structurally none + cookie semantics gone | wildcard surface remains |
+| Effort | S | S+ | XS |
+| Risk | very low (preflight 4xx if new header added) | low (need e2e on SC login) | none to runtime |
+| Behaviour change for user | none | none (sentinel never read) | none |
 
 ### Option A — Minimal tightening (explicit methods + headers, keep allow_credentials)
 - Sketch:
   - `app/main.py:230` → `allow_methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"]`.
   - `app/main.py:231` → `allow_headers=["Content-Type","X-Session-Token","Authorization"]` (dropped `X-Requested-With` — not set anywhere).
   - Keep `allow_credentials=True` and `allow_origins` list unchanged. Add explanatory comment block referencing this doc.
-- Concrete impl-cost: 2 lines changed in 1 file (`app/main.py:230-231`). No frontend change. No test change. **2 files affected including the explanatory comment.**
+- Concrete impl-cost: 2 lines changed in 1 file (`app/main.py:230-231`). No frontend change. No test change. **1 file affected.**
 - Pros: Zero behaviour change for Tauri + dev. Drops wildcard attack surface (any future header injection or rare-verb abuse is structurally blocked). Auditable: explicit list reviewable in PR.
 - Cons: Cosmetic-only security improvement while `allow_credentials=True` stays. Doesn't remove the now-known dead sentinel cookie. Doesn't address the underlying "cookies + CORS credentials" risk.
 - Effort: S (one-file edit, no test changes — `tests/test_api_routes_smoke.py` should stay green).
@@ -122,7 +160,20 @@ Required by `evaluated_`. Per option: sketch ≤3 bullets, pros, cons, S/M/L/XL,
 
 Required by `evaluated_`. ≤80 words. Which option + what blocks commit.
 
-**Do Option A + Option C now, queue Option B as the immediate follow-up.** Concrete next step: land Option A as a 2-line PR (`app/main.py:230-231` explicit lists) + a `coding-rules.md` rule paragraph (Option C). **Gate conditions**: (1) `tests/test_api_routes_smoke.py` green; (2) `e2e-tester` verifies SoundCloud login + system-shutdown flows. After A+C ship, open Option B (dead-sentinel removal — confirmed scope after Q6 resolution, ~10 LoC across 3 files, no `localStorage` needed).
+**Do Option A + Option C now; queue Option B as immediate follow-up.** Option A = 2 lines at `app/main.py:230-231`; Option C = 3-line paragraph in `.claude/rules/coding-rules.md`. **Gate**: `tests/test_api_routes_smoke.py` green + `e2e-tester` verifies SC login + system-shutdown. After A+C ship, Option B drops the dead sentinel (~10 LoC across 3 files, no `localStorage` needed).
+
+**Pseudocode — post-Option-A `CORSMiddleware` call (`app/main.py:217-232`):**
+
+```python
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[...],  # UNCHANGED — 8 entries: localhost/127.0.0.1 × 1420/5173/8000 + tauri://localhost + https://tauri.localhost
+    allow_credentials=True,                                              # kept in A; flipped to False in B
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],  # was ["*"]
+    allow_headers=["Content-Type", "X-Session-Token", "Authorization"],  # was ["*"]
+    # max_age omitted — Starlette default; revisit per Q5
+)
+```
 
 ---
 
@@ -131,20 +182,32 @@ Required by `evaluated_`. ≤80 words. Which option + what blocks commit.
 Required from `implement/draftplan_`. Concrete enough that someone else executes without re-deriving.
 
 ### Scope
-- **In:** …
-- **Out:** …
+- **In (Phase 1 = A+C):** swap `["*"]` → explicit lists at `app/main.py:230-231`; add 3-line "no auth-cookies" rule in `.claude/rules/coding-rules.md` (Backend/Secrets section).
+- **In (Phase 2 = B, separate PR):** delete `set_cookie` block at `app/main.py:3087-3094`; drop unused `response: Response` param at `app/main.py:3049`; flip `allow_credentials=True` → `False` at `app/main.py:229`; flip `withCredentials: true` → `false` at `frontend/src/api/api.js:17`; fix stale docstring at `app/soundcloud_api.py:3`.
+- **Out:** `allow_origins` list (unchanged); CSRF tokens; `Access-Control-Max-Age` tuning (Q5 deferred); migration of `X-Session-Token` → `Authorization: Bearer` (Q4 deferred).
 
 ### Step-by-step
-1. …
+1. **Phase 1 — Option A (2-line edit, 1 file).** Edit `app/main.py:230-231`, replace wildcards per pseudocode. No frontend change.
+2. **Phase 1 — Option C (3-line edit, 1 file).** Append rule paragraph to `.claude/rules/coding-rules.md` Backend section.
+3. Run `tests/test_api_routes_smoke.py` + `pytest tests/ -k cors` (expect 0 matches → smoke alone is the gate).
+4. Spawn `e2e-tester`: SC login flow, system-shutdown flow, batch-edit (PATCH), playlist-delete (DELETE), SC settings save (PUT). Capture preflight headers from devtools.
+5. Commit Phase 1 atomically: `fix(backend): tighten CORS allow_methods/headers to explicit lists` (+ rule in same commit since they're load-bearing pair).
+6. **Phase 2 — Option B (separate PR, after Phase 1 in main).** Apply file edits per Scope. Re-grep `tests/` for `cookies.get|sc_token|request.cookies` (expect 0). Re-run e2e battery from step 4.
 
 ### Files touched
-- …
+- **Phase 1:** `app/main.py` (lines 230-231), `.claude/rules/coding-rules.md` (Backend section append).
+- **Phase 2:** `app/main.py` (lines 229, 3049, 3087-3094), `frontend/src/api/api.js` (line 17), `app/soundcloud_api.py` (line 3).
 
 ### Testing
-- …
+- `tests/test_api_routes_smoke.py` — must stay green both phases.
+- Manual curl (Phase 1): `curl -X OPTIONS http://localhost:8000/api/system/health -H "Origin: http://localhost:5173" -H "Access-Control-Request-Method: GET" -H "Access-Control-Request-Headers: X-Session-Token" -i` → 200 + `Access-Control-Allow-Headers: Content-Type, X-Session-Token, Authorization`.
+- Negative curl (Phase 1): same with `Access-Control-Request-Headers: X-Fabricated` → response omits `X-Fabricated` from `Access-Control-Allow-Headers`.
+- `e2e-tester` battery — SC login, system-shutdown, batch-edit, playlist-delete, SC settings save.
 
 ### Risks & rollback
-- …
+- **R1 (Phase 1):** undiscovered custom header in a third-party lib (sentry, devtools). Mitigation: e2e console scan. Rollback: revert single commit (`git revert <sha>`), single-file diff.
+- **R2 (Phase 2):** future contributor expected `withCredentials`. Mitigation: rule (Phase 1 step 2) flags the regression in review. Rollback: revert Phase 2 PR; Phase 1 stays.
+- **R3:** SC sentinel was load-bearing for an out-of-tree consumer (browser ext, telemetry). Mitigation: Q6 grep already 0 hits in repo; deploy Phase 2 behind a release-note line. Rollback: revert Phase 2.
 
 ## Review
 
@@ -189,6 +252,6 @@ Required by `archived/*`.
 
 ## Links
 
-- Code: <file:line or PR>
-- External docs: <url>
-- Related research: <slugs>
+- Code: `app/main.py:217-232` (CORS middleware), `app/main.py:3087-3094` (sentinel cookie), `app/main.py:3049` (response param), `frontend/src/api/api.js:17` (withCredentials), `frontend/src/api/api.js:87` (X-Session-Token), `app/soundcloud_api.py:3` (stale docstring).
+- External docs: [MDN — CORS-safelisted request header](https://developer.mozilla.org/en-US/docs/Glossary/CORS-safelisted_request_header) (defines why `Content-Type: application/json` needs explicit listing); [Starlette CORSMiddleware](https://www.starlette.io/middleware/#corsmiddleware).
+- Related research: `security-api-auth-hardening` (`docs/research/research/` — bearer-auth migration context).
