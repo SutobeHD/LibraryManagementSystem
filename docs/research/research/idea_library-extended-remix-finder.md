@@ -5,7 +5,7 @@ owner: tb
 created: 2026-05-15
 last_updated: 2026-05-15
 tags: [remix, extended-mix, soundcloud, beatport, discovery, dj-workflow]
-related: [analysis-remix-detector, library-quality-upgrade-finder]
+related: [analysis-remix-detector, library-quality-upgrade-finder, external-track-match-unified-module]
 ---
 
 # Find Extended / Club / Long versions of every track in library
@@ -20,6 +20,7 @@ related: [analysis-remix-detector, library-quality-upgrade-finder]
 - 2026-05-15 — `research/idea_` — created from template
 - 2026-05-15 — research/idea_ — section fill (research dive)
 - 2026-05-15 — research/idea_ — UX + source-priority refinement after Problem framing
+- 2026-05-15 — research/idea_ — exploring_-ready rework loop (deep self-review pass)
 
 ---
 
@@ -31,12 +32,12 @@ DJs frequently end up with the **Radio Edit** (2:30–3:30) of a track from stre
 
 ## Goals / Non-goals
 
-**Goals**
-- For each library track, surface a list of *candidate Extended / Club / Long versions* that exist on external platforms (SoundCloud, Beatport, Bandcamp, YouTube, Discogs) but are NOT yet in the local library.
-- Score each candidate with a confidence band (high/med/low) based on artist match + title-stem match + duration band + provenance.
-- One-click "Add to library" action per candidate (kicks the existing SoundCloud download path for SC; copy-link-to-clipboard for paid platforms like Beatport).
-- Cache external query results so a 30k-track library doesn't re-hit every API every run.
-- Reuse `SoundCloudSyncEngine._fuzzy_match_with_score` (threshold 0.65) for title/artist matching rather than re-inventing it.
+**Goals** (each with success metric)
+- Surface candidate Extended/Club/Long versions per library track from external sources (SC, Beatport, Bandcamp, YouTube, Discogs) not in local lib. **Metric: precision >= 0.85 on a 200-track hand-labelled gold set; recall >= 0.60 on tracks where Discogs lists an Extended.**
+- Confidence band (high/med/low) per candidate from artist + title-stem + duration band + provenance. **Metric: high-band precision >= 0.95 (almost no false-positives in green badges).**
+- One-click "Add to library" per candidate (SC download path for SC; copy-link for paid platforms). **Metric: M1 covers >= 1 actionable source (SC).**
+- Cache external queries — 30k library re-scan completes in <= 10 min if no library changes since last scan (negative-cache hit). **Metric: cache hit rate >= 0.90 on second consecutive scan.**
+- Reuse `SoundCloudSyncEngine._fuzzy_match_with_score` (`app/soundcloud_api.py:566`, threshold 0.65) — extracted to shared module per sister-doc `external-track-match-unified-module`. **Metric: zero forks; single import path.**
 
 **Non-goals** (deliberately out of scope)
 - Detecting *remixes* of a track (different artist remixing same title) — that is `idea_analysis-remix-detector`'s job.
@@ -49,37 +50,48 @@ DJs frequently end up with the **Radio Edit** (2:30–3:30) of a track from stre
 
 > External facts that bound the solution space — API rate limits, existing data shape, performance budgets, legal/licensing, team capacity. Cite source where possible.
 
-- **SoundCloud API:** already wired (`app/soundcloud_api.py`, OAuth client-credentials). Search endpoint exists, fuzzy matcher in `SoundCloudSyncEngine` (threshold 0.65). Rate-limit informal (~15k req/day per client_id from observation); back off on 429.
-- **Beatport:** no public REST API for free use. Options: HTML scrape of `beatport.com/search?q=...` (fragile, ToS grey zone) or rely on user-provided links. Beatport's track JSON exposes `mix_name` field with values like "Extended Mix" / "Original Mix" / "Radio Edit" — the canonical taxonomy comes from here.
-- **Bandcamp:** no official search API; `bandcamp.com/search?q=...` HTML scrape works but is rate-limited via Cloudflare. Often lossless WAV/FLAC available for purchase.
-- **YouTube:** YouTube Data API v3 quota = 10k units/day default; `search.list` costs 100 units → ~100 searches/day per key. Insufficient for a 30k library scan; needs caching + on-demand triggers.
-- **Discogs:** REST API, 60 req/min authenticated, free. Release tracklists expose duration + version labels reliably ("Extended Mix (7:32)" etc.). Good ground-truth source for "does an Extended exist at all?"
-- **Library size:** target 5k–30k tracks. Linear scan even at 1 req/sec/source = hours per source. Must be incremental (delta scan since last run) and cache-heavy.
-- **Title pattern ambiguity:** "Original Mix" on Beatport usually means "the canonical, un-remixed version" (often ~6–7 min, *is* the extended). On SoundCloud "Original Mix" frequently means the radio cut. Source-aware parsing required.
-- **Duration heuristic bands:** radio ≤ 3:30, club 5:00–7:30, extended 5:30–9:00. Bands overlap — duration alone is never sufficient.
-- **DB schema:** library tracks stored in Rekordbox `master.db` (read via `pyrekordbox`). All writes go through `app/main.py:_db_write_lock`. Candidate suggestions stay out of `master.db` — store in a sidecar SQLite (`extended_candidates.db`) so we don't pollute Rekordbox.
-- **Existing engine:** `SoundCloudSyncEngine` (`app/soundcloud_api.py:550`) already does library-wide fuzzy matching against SC search results. Extending it for "find extended variants" is cheaper than a new engine.
+- **SoundCloud API:** OAuth wired (`app/soundcloud_api.py:_sc_get` at line 167). **Search endpoint NOT yet implemented** — current `SoundCloudClient` only resolves known IDs / fetches user playlists. `/tracks?q=...` (v1 API, `SC_API_BASE` at line 131) needs adding; shape returns `[{id, title, user.username, duration, permalink_url, ...}]` (same shape used by `get_full_playlist_tracks`). 429 backoff already implemented in `_sc_get` (Retry-After header, exponential retry, max 3). No documented hard rate limit; informal ~15k req/day per client_id observed.
+- **SoundCloud fuzzy matcher:** `_fuzzy_match_with_score` (`app/soundcloud_api.py:566`). **Uses `difflib.SequenceMatcher` (stdlib), NOT rapidfuzz** — threshold 0.65 hardcoded at line 583. Reconciles SC playlist tracks → local lib; here we invert: SC search results → local-lib-derived query.
+- **Beatport:** no public REST API for free use. Options: HTML scrape `beatport.com/search?q=...` (fragile, ToS grey) or user-provided links. Beatport track JSON exposes `mix_name` (`Extended Mix`/`Original Mix`/`Radio Edit`) — canonical taxonomy source. **Defer to M3.**
+- **Bandcamp:** no official search API; `bandcamp.com/search?q=...` HTML scrape works but Cloudflare-rate-limited. Lossless WAV/FLAC often purchasable. **Defer to M3.**
+- **YouTube:** YouTube Data API v3 quota = 10k units/day default; `search.list` costs 100 units → ~100 searches/day per key. **Per-track-trigger only; never batch.** **Defer to M3 behind feature flag.**
+- **Discogs:** REST API, **60 req/min authenticated** (token in `Authorization: Discogs token=<token>`), free. User-Agent string required. Release tracklist exposes `duration` + version labels reliably (`Extended Mix (7:32)`). Ground-truth gate for "does an Extended exist at all?". 60/min × 60 min = 3600/hr → 30k-track delta scan ~ 8.3 hr sequential, batchable via release-page caching (one release covers many tracks).
+- **Library size:** target 5k–30k tracks. Linear scan even at 1 req/s/source = hours per source. Must be incremental (delta-scan since last run) + cache-heavy.
+- **Title pattern ambiguity:** "Original Mix" on Beatport = canonical un-remixed (often 6–7 min, *is* extended). On SoundCloud "Original Mix" often = radio cut. **Source-aware parsing required.**
+- **Duration heuristic bands:** radio ≤ 3:30, club 5:00–7:30, extended 5:30–9:00. Bands overlap — duration alone never sufficient.
+- **DB schema:** library tracks in Rekordbox `master.db` (read via `pyrekordbox`). All writes go through `_db_write_lock` at **`app/database.py:22`** (RLock). This feature is read-only against `master.db` → no lock acquisition needed. Candidate suggestions in sidecar SQLite (`app/data/track_suggestions.db` — unified with sister-docs per their recommendation; `kind='extended'` column).
+- **rbox quarantine:** rbox 0.1.5/0.1.7 panics via `Option::unwrap()` — `SafeAnlzParser` (`app/anlz_safe.py`) isolates via `ProcessPoolExecutor(max_workers=1)`. This feature does NOT call rbox directly (title-based matching only) → no quarantine needed.
+- **`ALLOWED_AUDIO_ROOTS` (`app/main.py:138-189`):** applies when user accepts a candidate and the existing SC download path writes audio. Validation via `Path.is_relative_to(resolved_root)`. External URL fetches bypass this.
+- **Httpx requirement:** new adapter HTTP calls in async paths must use `httpx.AsyncClient` + timeout + retry (coding-rules — no `requests.get` in async). Sync adapters may reuse the `_sc_get` pattern.
+- **Reuse target:** matcher logic lives in `app/external_track_match.py` per sister-doc `external-track-match-unified-module` (Option C function-only + adapter registry). This doc consumes; does not fork.
 
 ## Open Questions
 
 > Numbered. Each one should be resolvable (yes/no, or "X vs Y"), not open-ended philosophy.
 
-1. **Which sources for v1?** SoundCloud-only (free, wired) vs SoundCloud + Discogs (free, adds ground-truth) vs all five. Recommendation: SC + Discogs for v1, Beatport/Bandcamp/YouTube as opt-in v2 plugins.
-2. **Where do suggestions live?** Sidecar SQLite (`app/data/extended_candidates.db`) vs an in-memory cache vs a JSON-per-track file. Sidecar SQLite is the only one that survives restart and scales to 30k × N sources.
-3. **What's the trigger model?** Continuous background scan on idle vs explicit user "Scan library for extended versions" button vs per-track "Find extended version" on right-click. Probably all three, but v1 = button + per-track.
-4. **Confidence threshold to surface?** Show only `high` by default, `med` behind a toggle, `low` hidden? Or all bands with visual scoring?
-5. **Caching TTL?** 30 days for negative results (no extended found), 90 days for positive matches, force re-scan never? Or weighted by source freshness (SC = 7d, Discogs = 180d, etc.)?
-6. **De-dup across sources:** if the same Extended Mix appears on SC and Beatport, collapse into one candidate with multiple provenance links, or surface separately?
-7. **What counts as "already in library"?** Currently-loaded `master.db` only, or also "in pending download queue from SC sync"? Need to avoid suggesting a track the user just queued.
-8. **YouTube spam filter heuristic?** Block channels with `<X>` subs, block titles with "[FULL VERSION]" / "FREE DOWNLOAD" / "1 HOUR", block sped-up indicators ("nightcore", "+10%", "sped up")? Static deny-list vs ML classifier vs user-curated blocklist?
-9. **Match key for "same track":** `(artist_normalised, title_stem_normalised)` where title-stem = title minus the parenthesised version tag? Or use ISRC where available (rare on SC, often on Beatport/Discogs)?
-10. **UX surface:** new "Suggestions" tab vs inline badges on the track list vs a dedicated review modal? Affects implementation scope significantly.
+1. **Sources for M1?** **RESOLVED** — SC-only at M1 (Option A behind plugin API per Recommendation). Discogs joins at M2 as gate. Beatport/Bandcamp/YouTube = M3 behind feature flags.
+2. **Suggestion storage?** **RESOLVED** — sidecar SQLite at `app/data/track_suggestions.db` unified with sister-docs (`kind` column: `extended`/`upgrade`/`remix`). In-memory + JSON-per-track rejected (no restart survival, no scale to 30k × N sources).
+3. **Trigger model?** **RESOLVED** — M1 = explicit button + right-click. M2 = adds opt-in idle delta-scan for tracks imported last 24 h (setting-gated). M3 = continuous on idle only if user opts in.
+4. **Confidence-band UX policy?** **RESOLVED** — high = green badge always surfaced. Medium = Audit-view default visible, badge optional behind toggle. Low = hidden by default, reachable via "Show low-confidence" toggle + always-on right-click. Numeric score on hover.
+5. **Caching TTL?** **RESOLVED** — source-specific. SC negative = 7 d, SC positive = 30 d. Discogs negative = 90 d, positive = 365 d (canonical data, slow-changing). Force-rescan button per track. Rationale: Discogs catalogue is curated; SC users add/delete uploads frequently.
+6. **Cross-source dedup?** **RESOLVED** — collapse on `(artist_norm, title_stem_norm, duration_band)`. UI row shows multi-source provenance pills (SC + Discogs + Beatport). Chromaprint cluster dedup only if fingerprint already in shared cache (don't fetch audio just to dedup; gated on `external-track-match-unified-module` M2 fingerprint pipeline).
+7. **"Already in library" definition?** **RESOLVED** — exclude if matches (a) any `master.db` content row OR (b) any track in pending SC download queue (`app/soundcloud_*` queue) OR (c) any candidate already accepted into `track_suggestions.db` with `accepted_at IS NOT NULL`.
+8. **YouTube spam filter?** **PARKED** — only relevant when M3 ships YouTube plugin. Layered filter (verified-artist + chromaprint + popularity + keyword deny-list) sketched in Findings 2026-05-15 UX. Re-open at M3 draftplan.
+9. **Match key for "same track"?** **RESOLVED** — primary `(artist_norm, title_stem_norm)`. ISRC override when both sides have it (high precision). Title-stem via shared extractor from `external-track-match-unified-module`. Duration as third signal in score, not key.
+10. **UX surface?** **RESOLVED** — M1 = per-track badge in Library row + standalone "Library Audit" view (shared with sister-docs `remix-detector` + `quality-upgrade-finder` — single IA panel, NOT three competing). M2 = right-click "Find extended version" + Ranking-view sidebar.
+
+**Newly opened (this rework):**
+11. **SC search-endpoint addition** — wrap `/tracks?q=<artist> <title-stem> extended` in `SoundCloudClient.search_tracks()` (`app/soundcloud_api.py`) or build entirely inside `external-track-match-unified-module` SC adapter? **PARKED** — depends on whether sister-module M1 ships before this feature's M1. Decide at draftplan.
+12. **Query-construction strategy** — single query per track (`<artist> <title-stem> extended`) vs three-fanned (`extended`, `club`, `long`) per track? Three-fanned triples API cost, single misses Club/Long that don't include "extended" token. **RESOLVED** — single query with broad keyword set (`<artist> <title-stem>`) + score filter post-fetch on version-tag. Cheaper, broader recall.
+13. **Gold-set source for Goals metric** — need labelled 200-track set spanning genres (trance/house/pop/hip-hop) where extended-exists status is hand-verified. **PARKED** — owner deferred to draftplan; tag-mining `tests/fixtures/` may yield seed.
 
 ## Findings / Investigation
 
 > Required from `exploring_` onward. Append dated subsections as you learn. Never edit past entries — supersede with a new one.
 
 ### 2026-05-15 — initial audit
+
+> Note: see superseding entry **2026-05-15 — verification rework** below for corrections to matcher library + lock location + SC search-endpoint status. The asset-survey text below is preserved for audit.
 
 **Existing assets in repo**
 - `app/soundcloud_api.py` — `SoundCloudClient` (OAuth, search, stream-url, download), `SoundCloudSyncEngine` (library-wide reconciliation). Fuzzy matcher: `_fuzzy_match_with_score(sc_title, sc_artist, local_tracks)` at line 566, threshold constant 0.65 (rapidfuzz token-set ratio + artist gate). This is reusable as-is for "is candidate the same edit as library track?" — invert the loop: instead of "for each SC track, find local match", do "for each local track, find SC candidates above threshold AND with extended markers".
@@ -171,6 +183,46 @@ Layered filter: (1) uploader-vs-official-artist match via Discogs artist URLs / 
 **Cross-doc coordination**
 `remix-detector` + `quality-upgrade-finder` + this doc all share `SoundCloudSyncEngine._fuzzy_match_with_score` (0.65), title-stem extractor, version-tag taxonomy, and (planned) chromaprint pipeline. Suggest unified `app/external_track_match.py` owning fuzzy + version-parse + fingerprint helpers, consumed by all three. Design suggestion only — implementation belongs in whichever sister-doc lands first or a shared refactor doc.
 
+### 2026-05-15 — verification rework + spam/source-priority deepening
+
+**Code-truth corrections** (verified vs `app/soundcloud_api.py` + `app/database.py`):
+- `_db_write_lock` lives at **`app/database.py:22`**, NOT `app/main.py`. Earlier draft was wrong; constraints corrected. This feature is read-only against `master.db` (only writes its sidecar) → lock not acquired.
+- Fuzzy matcher uses **`difflib.SequenceMatcher`** (`app/soundcloud_api.py:16`, line 582), NOT rapidfuzz. Token-set behaviour weaker than rapidfuzz `token_set_ratio`; threshold 0.65 calibrated against SequenceMatcher. Sister-doc `external-track-match-unified-module` may migrate to rapidfuzz on extraction — if so, threshold needs recalibration on the gold set (`Goals` metric anchor).
+- **SoundCloud `search()` endpoint NOT yet implemented** in `SoundCloudClient`. Need to add `search_tracks(q, limit)` wrapping `GET {SC_API_BASE}/tracks?q=<...>` + `client_id` + OAuth header via existing `_sc_get` helper. Response shape mirrors `get_full_playlist_tracks` (id, title, user.username, duration, permalink_url, …). Listed as OQ #11.
+- `_sc_get` already has 429 backoff (Retry-After header parse, exponential, max 3 retries). Inherit transparently.
+
+**Discogs API surface — verified for ground-truth gate**:
+- Endpoint: `GET https://api.discogs.com/database/search?artist=<X>&track=<Y>&type=release&per_page=25`.
+- Auth: `Authorization: Discogs token=<personal_token>` (free, no OAuth flow) OR consumer key/secret for higher trust tier. User-Agent header REQUIRED (`<AppName>/<Version> +<URL>`).
+- Rate: **60 req/min authenticated** (1 / sec). Unauthenticated = 25 req/min — too tight; require token.
+- Per-release follow-up: `GET https://api.discogs.com/releases/<id>` returns `tracklist[]` with `position`, `title`, `duration` ("7:32"). Single release covers up to ~20 tracks → batch-friendly.
+- Pagination: `?per_page=25&page=N`. Stop at first release with matching `track.title` + Extended-indicator in tracklist.
+- Negative-cache: empty search result OR no extended-tagged track in any matched release → cache 90 d.
+
+**Source-priority refinement** (re-stated with M-mapping):
+- **M1**: SoundCloud only. Surface link badges; existing SC download path handles "Add to library".
+- **M2**: + Discogs as gate. Discogs query first → if no extended exists anywhere → cache negative + skip SC. Otherwise SC search runs. Discogs link surfaced as "Reference (not downloadable)" pill.
+- **M3**: + Beatport/Bandcamp (link-only, paid). YouTube last, feature-flagged. Spam filter (OQ #8) lives here.
+
+**Spam-filter primer** (parking until M3 but spec-shape settled):
+- **Tier 1 deny-list keywords** (case-insensitive substring in title): `nightcore`, `sped up`, `slowed`, `reverb`, `1 hour`, `1hour`, `[FULL VERSION]`, `FREE DOWNLOAD`, `[FREE]`, `LEAK`, `+pitch`, `-pitch`, `bass boosted`. Hard reject.
+- **Tier 2 uploader gating**: SC verified-artist flag OR uploader name matches official-artist Discogs page OR YouTube channel in user-curated allowlist. Below: cap at low-band.
+- **Tier 3 audio gate** (M2-fingerprint dependent): chromaprint similarity vs library Radio Edit must be > threshold (same harmonic profile; rejects nightcore/sped-up). If fingerprint unavailable → cap candidate at medium-band.
+- **Tier 4 popularity floor** (per-platform): SC plays >= 1k OR YouTube views >= 10k for low-band; >= 100k for medium. Adjustable in settings.
+- User-curated blocklist: `app/data/spam_blocklist.json` (channel/uploader IDs). Trumps all tiers.
+
+**Latest UX entry-point ordering** (M1 → M3, by discovery cost):
+- **M1 entry-points**: (a) per-row green badge in Library view ("EXT" pill, click → candidate modal) for high-confidence. (b) Standalone "Library Audit" tab (shared with sister-docs) — single panel listing all surfaced suggestions across `extended` + `upgrade` + `remix` kinds, filterable by kind. (c) Bulk "Scan library" button inside Audit view.
+- **M2 entry-points**: + (d) right-click "Find extended version" on any track (on-demand, single track, ~2 s). (e) Ranking-view sidebar when a Radio-Edit is opened (contextual).
+- **M3 entry-points**: + (f) Settings panel for per-source enable/disable + YouTube spam thresholds.
+- NEVER auto-at-import. NEVER auto-download. User explicit per candidate.
+
+**Performance recheck with Discogs gate** (verified math):
+- 30k tracks × 1 Discogs req each = 30k req. At 60/min = 500 min = 8.3 hr cold scan.
+- With release-page caching: assuming ~50 % of library shares releases (compilations, EPs) → effective ~15k req → 4.2 hr.
+- Discogs gate reduces SC fan-out by ~60 % (estimate based on Discogs catalogue coverage for electronic). Net 30k × 0.4 × 1 SC req = 12k req. At 4 concurrent → 50 min wall-clock.
+- **Net cold-scan budget**: ~5 hr. Incremental delta-scan (only new/changed tracks since last run): minutes. **Metric-feasible** for the cache-hit goal.
+
 ## Options Considered
 
 > Required by `evaluated_`. For each viable approach: sketch (2-4 lines), pros, cons, effort (S/M/L/XL), risk.
@@ -207,27 +259,58 @@ Layered filter: (1) uploader-vs-official-artist match via Discogs artist URLs / 
 
 > Required by `evaluated_`. Which option, what we wait on before committing.
 
-**Option B (Discogs-gated SoundCloud finder) for v1**, with Option C plugins (Beatport, Bandcamp, YouTube) deferred to v2 behind feature flags.
+**Phased Option A → Option B → Option C**, behind plugin architecture from day one. Sister-doc `external-track-match-unified-module` Option C (function-only flat module + adapter registry) supplies fuzzy + version-parse from M1; chromaprint from M2.
 
-Rationale: Option A ships fastest but burns SC quota on tracks that have no Extended anywhere. Option B's Discogs gate is the cheapest win in precision-per-request — Discogs is free, canonical, and ~60 req/min is plenty for incremental scans. The plugin architecture pays dividends when v2 adds paid platforms.
+Rationale: Pure Option A ships fastest but locks UX into single-source assumptions. Pure Option B forces Discogs dep into M1. Plugin-shaped Option A lets M2 slot Discogs in without UI rework — Option B's gate-precision win is paid for only when Discogs lands. Option C plugins live behind feature flags throughout.
 
-**Milestone split (see Findings 2026-05-15 UX section):**
-- **M1 = Option A surface + plugin-shaped backend.** SC-only path wrapped behind the Option-B plugin interface so Discogs slots in without UI rework. UX = badge + "Extended Audit" view. Scan is **explicit / opt-in only** (button or right-click); never auto at import.
-- **M2 = Option B Discogs gate + medium-tier UX + right-click + Ranking sidebar.** Trigger model adds opt-in **idle delta-scan for newly-imported tracks** (last 24h, behind a setting).
-- **M3 = Option C paid/spammy sources behind feature flags.** Only if M1+M2 metrics show recall gap.
+### M1 — SC-only finder (Option A shape, plugin API)
+**Deliverables**
+- `app/external_track_match.py` consumed (per sister-doc): `extract_title_stem`, `parse_version_tag`, `fuzzy_match`. `Candidate` dataclass imported.
+- `app/extended_finder.py` — orchestrator with `SourcePlugin` interface (`name`, `search(track) -> list[Candidate]`, `quota_remaining()`).
+- `app/extended_finder/plugins/soundcloud.py` — wraps new `SoundCloudClient.search_tracks(q)` (NEW endpoint, see OQ #11). Scores candidates via version-tag + duration.
+- Sidecar SQLite `app/data/track_suggestions.db` (unified, `kind='extended'`). Schema: `queries(track_id, source, query_hash, queried_at, result_status)`, `candidates(id, track_id, kind, source, source_id, title, artist, duration_s, version_tag, url, score, band, discovered_at, dismissed_at, accepted_at)`.
+- FastAPI routes: `POST /api/extended/scan` (bulk, async job), `GET /api/extended/candidates?track_id=…`, `POST /api/extended/dismiss`, `POST /api/extended/accept` (kicks SC download).
+- Frontend: per-row "EXT" badge in Library view + standalone "Library Audit" tab (kind filter; shared IA with sister-docs).
+- Trigger: explicit button + right-click only. NEVER auto-at-import.
 
-Before promoting to `evaluated_` / `draftplan_`, resolve:
-- Open question #1 (sources for v1) — likely "yes" to SC + Discogs (see Findings above: M1 = SC, M2 = +Discogs).
-- Open question #2 (storage) — likely sidecar SQLite at `app/data/extended_candidates.db`.
-- Open question #3 (trigger model) — see Findings above: M1 = explicit only, M2 = opt-in idle delta-scan, never auto-at-import.
-- Open question #4 (confidence threshold UX) — see Findings above: high = badge, medium = Audit-view toggle, low = hidden behind toggle. Mockup still needed.
-- Open question #6 (cross-source dedup) — see Findings above: collapse on `(artist, title_stem, duration_band)`, show source pills.
-- Open question #8 (YouTube spam filter) — see Findings above: layered filter (verified-artist + chromaprint + popularity + keyword deny-list); not relevant until M3.
-- Open question #10 (UX surface) — see Findings above: M1 badge + Audit view; sister doc `idea_analysis-remix-detector` surfaces in the same Audit view (rename to "Library Audit" if it covers multiple suggestion kinds). Coordinate the IA so all three sister features share one panel rather than three competing ones.
+**Gates to ship**
+- Gold-set evaluation: precision >= 0.85 on 200-track hand-labelled set (OQ #13 must close in draftplan).
+- High-band precision >= 0.95 (no false-positive green badges).
+- Cache hit rate >= 0.90 on second consecutive scan.
+- `test-runner` green on `tests/test_extended_finder*.py`.
+- `e2e-tester` confirms Library badge + Audit view + accept-flow round-trip.
 
-Cross-cutting with sister docs:
-- `idea_analysis-remix-detector` shares the version-tag taxonomy + title-stem extractor — those should land in a shared `app/track_version_parser.py` module, not duplicated.
-- `idea_library-quality-upgrade-finder` shares the candidate-storage schema (sidecar SQLite) and the Suggestions tab UX. Strongly consider unifying the sidecar DB as `app/data/track_suggestions.db` with a `kind` column (`extended` | `upgrade` | `remix`) rather than three databases.
+### M2 — + Discogs gate + chromaprint (Option B shape)
+**Deliverables**
+- `app/extended_finder/plugins/discogs.py` — hand-rolled httpx (no SDK dep). Auth via `DISCOGS_TOKEN` env var; User-Agent string; 60/min throttle.
+- Two-stage workflow: Discogs ground-truth gate → if extended exists, SC search. Else cache negative 90 d.
+- `external-track-match-unified-module` M2 chromaprint pipeline consumed: same-edit detection upgrades scores; nightcore-rejection.
+- UX: medium-band candidates default-visible in Audit view + right-click "Find extended version" + Ranking-view sidebar.
+- Trigger model: + opt-in idle delta-scan (last 24h imports, setting-gated, default OFF).
+
+**Gates to ship**
+- Recall >= 0.60 on tracks where Discogs lists an Extended (Goals metric).
+- Discogs gate reduces SC fan-out by >= 50 % on a 1k-track validation set.
+- Chromaprint same-edit precision >= 0.95 (no wrong-version surfaced as match).
+- `test-runner` green on Discogs adapter mock fixture suite.
+
+### M3 — Paid + spammy sources (Option C shape, flagged)
+**Deliverables**
+- `app/extended_finder/plugins/beatport.py` (HTML scrape; link-out only; surface "Buy" CTA).
+- `app/extended_finder/plugins/bandcamp.py` (HTML scrape; link-out only).
+- `app/extended_finder/plugins/youtube.py` (Data API v3; per-track-trigger only, never batch). Spam filter Tiers 1–4 active.
+- `app/data/spam_blocklist.json` user-curated blocklist.
+- Settings UI: per-source enable/disable + spam thresholds + YouTube quota guard.
+
+**Gates to ship**
+- Only if M1+M2 metrics show recall gap > 0.20 vs gold set.
+- YouTube spam filter precision >= 0.90 on a 100-spam-track adversarial test set.
+
+### Cross-cutting (binds all milestones)
+- Title-stem extractor + version-tag taxonomy in `external-track-match-unified-module`. NO fork.
+- Sidecar `track_suggestions.db` unified with `quality-upgrade-finder` + `remix-detector`. Single schema, `kind` column.
+- "Library Audit" frontend tab shared across the three sister-features. One IA panel, not three competing.
+- Pre-promotion to `evaluated_`: confirm gold-set source (OQ #13), SC search-endpoint owner (OQ #11), sister-module `external-track-match-unified-module` lands at least M1 first.
 
 ---
 

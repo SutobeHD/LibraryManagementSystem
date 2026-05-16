@@ -4,6 +4,7 @@ title: Similar-tracks recommender for a given seed track
 owner: tb
 created: 2026-05-15
 last_updated: 2026-05-15
+
 tags: []
 related: [recommender-rules-baseline, recommender-taste-llm-audio]
 ---
@@ -20,6 +21,7 @@ related: [recommender-rules-baseline, recommender-taste-llm-audio]
 - 2026-05-15 — `research/idea_` — created from template
 - 2026-05-15 — research/idea_ — section fill (research dive)
 - 2026-05-15 — research/idea_ — shared-vector pipeline coordination with Teil-2
+- 2026-05-15 — research/idea_ — exploring_-ready rework loop (deep self-review pass)
 
 ---
 
@@ -38,13 +40,13 @@ Where the local ranking baseline can be **shared** (feature vectors, audio embed
 
 ## Goals / Non-goals
 
-**Goals**
-- Given any seed track in the local library, return a ranked list of similar-sounding / similar-feeling tracks **from the same local library**.
-- Pure offline: zero network, zero SoundCloud, zero cloud inference. Works with the laptop disconnected.
-- Explainable: each result ships a `reasons` list (e.g. "MFCC cosine 0.91", "shared MyTag: dark, peak-time", "key 8A", "energy 0.62 ≈ seed").
-- Fast: ≤ 100 ms over a 50k-track library on a developer laptop (matches the Teil-1 budget).
-- Reuse, don't duplicate: consume feature vectors / embeddings that already exist (or that Teil-2's local pipeline produces) — do not run a parallel analysis pipeline.
-- Filters at query time: exclude same-artist, same-playlist, BPM/key/duration window, exclude recently-played.
+**Goals** (each ships with a measurable acceptance metric)
+- Seed → ranked top-N similar local tracks. **Metric**: top-10 includes ≥ 3 tracks judged "musically similar" by tb on a 20-seed eval set (subjective, captured as `eval/similar_tracks_2026-05.jsonl`).
+- Pure offline. **Metric**: `pytest -k similar` passes with network disabled (firewall rule or `--disable-network` plugin); zero `httpx`/`requests` imports in the new module.
+- Explainable. **Metric**: every result row carries `reasons: list[str]` with ≥ 2 entries, derived from per-feature subscores ≥ 0.05.
+- Latency budget. **Metric**: P95 latency ≤ 100 ms for top-20 query over 50k vectors on dev laptop (i7-12700H, 32 GB), measured via `pytest-benchmark` in `tests/test_similar_perf.py`.
+- Reuse, don't duplicate. **Metric**: zero new librosa/numpy feature extraction calls inside the recommender module — vectors are read from `track_vectors.db` only. New extraction code lives in a single `app/track_vector_builder.py`.
+- Filters at query time. **Metric**: query API accepts `exclude_same_artist`, `exclude_same_playlist`, `bpm_window`, `key_strict`, `duration_window_pct`, `exclude_recently_played` (last gated on Teil-1 `plays` table); each filter has a unit test asserting candidate exclusion.
 
 **Non-goals** (deliberately out of scope)
 - Any online candidate source (SoundCloud, Spotify, last.fm, web embedding APIs). The two existing recommender docs own that surface.
@@ -58,29 +60,33 @@ Where the local ranking baseline can be **shared** (feature vectors, audio embed
 
 > External facts that bound the solution space — API rate limits, existing data shape, performance budgets, legal/licensing, team capacity. Cite source where possible.
 
-- **Available track features today** (per Teil-2 codebase audit): `app/analysis_engine.py` already produces BPM, musical key, LUFS, spectral centroid/rolloff/flatness/bandwidth, MFCC mean+std (13 coefficients), chroma mean (12 pitch classes), tempo variability. `app/audio_analyzer.py` is the async `ProcessPoolExecutor` wrapper around it. No re-decoding needed.
-- **MyTag membership** is exposed via `app/live_database.py` (flat tags, multi-per-track — see Teil-1 audit). Usable as a categorical similarity signal.
-- **Static metadata signals** from Rekordbox: `Rating`, `Color`, `PlayCount`, `Genre` — all read-only at import; usable for tie-breaking but not as primary similarity.
-- **No play-history table exists yet** (Teil-2 constraint). This doc cannot depend on play recency; if Teil 1 lands the `plays` table, "recently played" filtering becomes available — until then, treat as future-optional.
-- **Local-first hard rule** (per `README.md` + Teil-2 constraints): no network calls in the request path. Embedding extraction, if any, runs offline at analysis time.
-- **Rekordbox `master.db` is schema-frozen**: any new per-track payload (embedding vector, similarity cache) lives in a sidecar SQLite or flat file keyed by track ID.
-- **Performance budget**: ≤ 100 ms for top-N over 50k tracks on a dev laptop. Rules out per-query re-extraction; vectors must be precomputed.
-- **No new heavy deps for v1**: stay within the existing Python stack. PyTorch / FAISS / sqlite-vss are Teil-2 questions — this doc can run on numpy + sklearn `NearestNeighbors` or a brute cosine if Teil 2 hasn't shipped vectors yet.
+- **Actually-persisted track features today** (re-verified `app/analysis_engine.py:2160-2200`): `bpm`, `bpm_raw`, `key`, `camelot`, `openkey`, `key_id`, `key_confidence`, `lufs`, `replay_gain`, `peak`, `stereo`, `mood` (= `brightness`, `warmth`, `texture` (ZCR), `spectral_centroid`, `spectral_rolloff`), `genre_hint`, `grid_confidence`. Total useful-for-similarity scalars: ~10. **NOT persisted today**: `spectral_bandwidth`, `spectral_flatness`, MFCC track-level mean+std (MFCC is computed per-phrase at `analysis_engine.py:1132` with `n_mfcc=13`, never aggregated to track level), chroma track-level mean (chroma is internal to key detection at `analysis_engine.py:352-384`, never persisted), `tempo_variability`. Earlier Findings (and Teil-2 doc lines 114-118) overstated the available signal — see correction Finding #3 below.
+- **Implication**: a richer ~40-46-dim vector requires NEW extraction code in `analysis_engine.py` (or a separate `app/track_vector_builder.py` consuming the cached audio decode). Cost is one extra pass over each track at analysis time (~0.5-1 s per track on top of existing librosa pipeline).
+- **MyTag membership** via `app/live_database.py:283-1130` (flat tags, multi-per-track). Usable as categorical similarity signal.
+- **Static metadata signals** from Rekordbox: `Rating`, `Color`, `PlayCount`, `Genre` — read-only at import; tie-breakers, not primary similarity.
+- **No play-history table exists yet** (verified: `Grep plays|play_history` in `app/` returns only docstrings + log files, no SQLAlchemy model). Teil-1 owns landing it; until then "recently played" filter parks.
+- **Local-first hard rule** (`README.md` + Teil-2 constraints): zero network in request path. Vector extraction runs offline at analysis time. Goal-metric enforces via firewall test.
+- **Rekordbox `master.db` schema-frozen**: per-track payload (vector, cache) lives in sidecar SQLite `app_data/track_vectors.db`. NEVER add columns to `master.db`.
+- **`_db_write_lock` not needed** for the new sidecar SQLite (separate file, not Rekordbox). If the builder ever reads from `master.db` to enumerate track IDs, that read is lock-free (read-only); writes are to the sidecar only.
+- **Performance budget**: P95 ≤ 100 ms top-20 over 50k vectors. Rules out per-query re-extraction. ~46-dim float32 × 50k = ~9 MB; brute cosine in numpy is ≤ 50 ms cold per Teil-2 finding line 105.
+- **No new heavy deps for v1**: numpy + sklearn (already in `requirements.txt`) only. FAISS / sqlite-vss / PyTorch parked to M3+ if scale demands.
+- **Fuzzy matcher shared surface**: `_fuzzy_match_with_score` lives at `app/soundcloud_api.py:566`, threshold `0.65` at line 583. Cross-doc coordination via `idea_external-track-match-unified-module.md` — this doc does NOT extract a local copy; if the recommender needs title-based dedup later, it consumes the unified module once shipped. M1 sidesteps fuzzy match entirely (track IDs are exact).
 
 ## Open Questions
 
 > Numbered. Each one should be resolvable (yes/no, or "X vs Y"), not open-ended philosophy.
 
-1. **Shared vector pipeline with Teil 2** — does this doc *consume* whatever vector representation Teil-2 lands on (Option A handcrafted or Option B CLAP/MERT), or build its own minimal vector from `analysis_engine.py` outputs and ship before Teil 2 decides? Answer determines whether this can ship standalone.
-2. **Similarity metric** — cosine over a single concatenated vector vs. weighted sum of per-feature distances (MFCC cosine + chroma cosine + |Δ BPM| Gaussian + |Δ LUFS|) vs. learned metric (skip for v1)?
-3. **Mode switch vs. strict separation** — should the UI offer a toggle that re-ranks Teil-1 "mixes well" results by this doc's "sounds like" score (combined mode), or are the two features kept fully separate (separate context-menu entries)?
-4. **UX entry points** — context-menu on a track row → "Find similar in library", a persistent sidebar panel that updates on selection, or both? Sidebar adds state-management cost.
-5. **Default filters** — should same-artist be excluded by default (forces discovery) or included (user may want more by the same artist)? Same for same-playlist.
-6. **BPM / key constraints as filters or as score components?** Strict filters mean fast SQL prefilter before vector search. Score components mean smoother ranking but full-library scan.
-7. **Result count + diversity** — top 20 by raw score, or apply MMR-style diversity reranking to avoid 20 near-duplicates from the same album?
-8. **Caching** — cache "similar(seed_id)" results keyed by seed_id + filter hash? Invalidation on library change is non-trivial; may not be worth it if queries are ≤ 100 ms.
-9. **Cold-start for newly-imported tracks** — if a track has no analysis vector yet, should it be silently skipped from candidates, or trigger on-demand analysis?
-10. **Where does the vector store live** — sidecar SQLite table next to `master.db`, flat `.npy` per track, or in-memory loaded on sidecar boot? Tied to OQ-1 (shared with Teil 2 means same storage).
+1. **Shared vector pipeline with Teil 2** — **RESOLVED** (Finding 2026-05-15 #2): ship Option A handcrafted, share schema (`track_id`, `vector_blob`, `fps_id`, `computed_at`) so Teil-2 swap-in is a `compute_track_vector()` impl change.
+2. **Similarity metric** — **PARTIALLY RESOLVED**: M1 default = weighted-sum (cosine on continuous bloc + per-feature components for BPM Gaussian + key Camelot distance + categorical bonuses). Exposes "vibe vs. harmonic" slider. **PARK** the pure-cosine-single-vector alternative for M2 benchmark once eval set exists.
+3. **Mode switch vs. strict separation** — **GATE FOR `evaluated_`**: needs explicit user pick. Default proposal: strict separation in M1 (separate context-menu entries — "Find similar in library" vs. Teil-1's "What mixes well next"). Combined-mode toggle = M3.
+4. **UX entry points** — **GATE FOR `evaluated_`**: needs user pick. Default proposal: context-menu only in M1 (low state-mgmt cost); sidebar = M2 if M1 is well-received.
+5. **Default filters** — **PARTIALLY RESOLVED** (Finding #2): exclude-same-artist default ON, exclude-same-playlist default ON, BPM ±6% (Pioneer CDJ pitch range), duration window ±50% (avoid 0:45 ambient matching 6:00 techno). All toggleable per query. Confirm with user before `evaluated_`.
+6. **BPM / key constraints as filters or as score components?** — **RESOLVED** (Finding #2): hybrid — both apply. Hard prefilter via BPM window + (optional) Camelot strict mode for cheap pruning, then weighted Gaussian-on-BPM + Camelot-distance as score components on the remaining set. Best of both.
+7. **Result count + diversity** — **GATE FOR `evaluated_`**: default top-20. MMR-style diversity rerank = M2 (only if eval set shows ≥ 3 duplicate-album results in top-20 cluster). **PARKED to M2** with explicit re-evaluation trigger.
+8. **Caching** — **PARKED**: M1 doesn't cache. Justification — brute cosine over 50k × 46-dim < 50 ms; invalidation on library mutation (add/delete/re-analyse) is non-trivial. Re-evaluate at M3 only if eval data shows P95 > 80 ms.
+9. **Cold-start for newly-imported tracks** — **RESOLVED**: silently exclude from candidate pool. Reason: triggering on-demand analysis from a query path breaks the ≤100 ms budget and the local-first guarantee (analysis decodes audio = slow). Surface "X tracks unanalysed" hint in the response payload so UI can prompt user to run analysis.
+10. **Where does the vector store live** — **RESOLVED** (Finding 2026-05-15 #2): sidecar SQLite `app_data/track_vectors.db`, table `track_vectors(track_id PK, vector_blob, fps_id, computed_at)`. Justification: atomic write, indexed lookup, schema-evolution-friendly. Beats flat `.npy` (no atomicity, no transactional bulk-update) and in-memory-only (cold-start latency on 50k tracks ~2 s).
+11. **NEW: vector extraction cost** — **PARTIALLY RESOLVED** (Finding #3): the ~46-dim vector requires NEW extraction code (spectral_bandwidth, spectral_flatness, MFCC mean+std, chroma mean track-aggregated, tempo_variability are NOT persisted today). Two paths: (a) add to `analysis_engine.py` main pass — costs ~0.5-1 s/track at analysis, but vectors land "for free" in every future imported track; (b) separate `app/track_vector_builder.py` that consumes raw audio + cached analysis output — backfill-friendly but double-decodes audio. **GATE FOR `evaluated_`**: path-(a) recommended; needs user sign-off because it touches the hot analysis pipeline.
 
 ## Findings / Investigation
 
@@ -131,16 +137,46 @@ Confirmed signal sources for a **local-only** seed-based similarity ranker exist
 - **OQ10** — answered: sidecar SQLite `app_data/track_vectors.db`, single table keyed by track_id with `fps_id` for cache-invalidation. Beats flat `.npy` (no atomicity) and in-memory-only (cold-start latency on 50k tracks).
 - **OQ2** + **OQ6** remain open but reframed as UX choices, not architecture — weighted-sum + filter-first is the M1 default.
 
+### 2026-05-15 — signal-source re-verification + vector-spec correction
+
+**Finding #2's ~46-dim vector spec was wrong** about which features are persisted today. Re-verified `app/analysis_engine.py` end-to-end (return dict at lines 2160-2200, fallback at 2219-2239):
+
+**Actually persisted at track level:** `bpm` (1), `bpm_raw` (1), `key`/`camelot`/`openkey`/`key_id` (1 useful — Camelot-numeric), `key_confidence` (1), `lufs` (1), `replay_gain` (1), `peak` (1), `mood.brightness` (1), `mood.warmth` (1), `mood.texture` (ZCR, 1), `mood.spectral_centroid` (1), `mood.spectral_rolloff` (1), `genre_hint` (categorical), `grid_confidence` (1). **Stereo** is a sub-dict (mid/side energy, correlation) if present — adds ~3 scalars.
+
+Total **scalar dims persisted today: ~12-15**, not 46.
+
+**NOT persisted today** (Finding #2 wrongly claimed they were):
+- `spectral_bandwidth`, `spectral_flatness` — librosa functions exist, but `analysis_engine.py` never calls them.
+- **MFCC mean+std (13 coeff, 26 dims)** — `librosa.feature.mfcc` IS called at `analysis_engine.py:1132` but ONLY per-phrase inside `detect_phrases`, used for phrase-boundary detection (`mfcc_distances` line 1155-1159). Per-phrase MFCCs are not aggregated to track level and not in the return dict.
+- **Chroma mean (12 bins)** — `librosa.feature.chroma_{cqt,cens,stft}` called at lines 357-373 ONLY inside `_detect_key`, averaged into `master_chroma` (line 384) and consumed by Krumhansl correlation. Not returned to caller.
+- **`tempo_variability`** — no such field. `bpm_raw` is the closest (single scalar, raw vs. snapped).
+
+**Source of error:** Teil-2 doc lines 114-118 (and 71) overstated by listing librosa-available features as if they were already-extracted features. Cross-doc audit lesson: "could be extracted" ≠ "is extracted".
+
+**Impact on Option C / M1:** the ~46-dim vector requires NEW extraction code adding `spectral_bandwidth`, `spectral_flatness`, MFCC mean+std (26 dims), chroma mean (12 dims), and a `tempo_variability` (= `np.std(beat_intervals)` from existing `beat_result["beats"]`) field. Code goes into `_detect_mood` extension OR a new `_extract_similarity_features` function in `analysis_engine.py`, called once in the main `analyze_audio_full` pass. Cost: ~0.3-0.5 s extra per track at analysis time (librosa MFCC + chroma over full track on already-decoded `y`).
+
+**Backfill required:** every already-analysed track in the user's library needs a re-pass for the new fields. Two strategies:
+- (a) lazy backfill on first similarity query (per-track on-demand, expensive — breaks 100 ms budget).
+- (b) one-shot batch backfill job exposed via `POST /api/track-vectors/backfill` (recommended for M1) — runs `audio_analyzer.ProcessPoolExecutor` over all tracks missing a vector, ~1-2 hours for 50k tracks on a dev laptop.
+
+**Cross-doc fuzzy-match coordination** — this doc previously had no fuzzy-match surface, but a name-conflict deduper could become useful at M3 (e.g. "this seed has 3 duplicates in library, treat as one"). When that lands, it consumes `app/external_track_match.py` from `idea_external-track-match-unified-module.md` (greenfield module, in flight); does NOT extract a private fork. M1 sidesteps fuzzy match entirely — vector store is keyed by exact Rekordbox `track_id`, no title resolution needed.
+
+**Teil-1 coordination check** — `exploring_recommender-rules-baseline.md` (Teil-1) is in `exploring_` state, all 10 OQs still open (Findings line 167-178). Teil-1's blocker is product/UX (weights, BPM tolerance, key model). It is NOT blocking this doc — local-mode vector ranking is orthogonal to Teil-1's harmonic-mixing surface. Teil-2 (`exploring_recommender-taste-llm-audio.md`) A-vs-B benchmark blocker also does NOT block this doc (Finding #2 path 2 confirmed).
+
+**Open Questions newly answerable:**
+- **OQ11 (new)** — partially resolved: extraction-cost path-(a) preferred, gate on user sign-off.
+- **OQ9** (cold-start) — now strongly justified: backfill job is the answer, not query-path on-demand analysis.
+
 ## Options Considered
 
 > Required by `evaluated_`. For each viable approach: sketch (2-4 lines), pros, cons, effort (S/M/L/XL), risk.
 
 ### Option A — Handcrafted vector + brute cosine over local library
-- **Sketch**: Build a ~40-dim vector per track from existing `analysis_engine.py` outputs (MFCC mean+std, chroma mean, BPM, LUFS, spectral stats). Precompute on import, store in sidecar SQLite. Query = cosine vs. all rows, top-N. Reasons = per-feature subscore breakdown.
-- **Pros**: Zero new deps. Ships independent of Teil 2. Fast (<50 ms over 50k). Explainable.
-- **Cons**: MFCCs miss high-level semantics (vocal vs. instrumental). Quality ceiling lower than learned embeddings.
+- **Sketch**: Build a ~46-dim vector per track. Reuses existing librosa calls already in `analysis_engine.py` (chroma at lines 357-373, MFCC at line 1132) but lifts them to track-level aggregation + adds `spectral_bandwidth`/`spectral_flatness`/`tempo_variability`. Precompute on import + backfill route, store in sidecar SQLite. Query = cosine vs. all rows, top-N. Reasons = per-feature subscore breakdown.
+- **Pros**: Zero new deps. Ships independent of Teil 2. Fast (<50 ms over 50k). Explainable. Existing analysis cache (`app/analysis_cache.py`) handles fps_id invalidation pattern already.
+- **Cons**: MFCCs miss high-level semantics (vocal vs. instrumental). Quality ceiling lower than learned embeddings. Requires new extraction code (~46-dim ≠ already-persisted ~12-15 dim, see Finding #3) + 1-2 h backfill for 50k library.
 - **Effort**: M
-- **Risk**: Low — worst case "feature-space close but vibe-wrong"; still useful.
+- **Risk**: Low — worst case "feature-space close but vibe-wrong"; still useful. Backfill time is the operational risk.
 
 ### Option B — Consume Teil-2's learned embedding (CLAP / MERT) once it lands
 - **Sketch**: Wait for Teil-2 to pick an embedding model, reuse its per-track vector + storage. This doc adds only the query-side: cosine top-N over local tracks, filters, reasons.
@@ -149,10 +185,10 @@ Confirmed signal sources for a **local-only** seed-based similarity ranker exist
 - **Effort**: S (query side only) but blocked
 - **Risk**: Medium — slippage risk inherited from Teil 2.
 
-### Option C — Hybrid: handcrafted + categorical (MyTag / genre / key) weighted score
-- **Sketch**: Option A's cosine plus discrete bonuses for shared MyTag, same Genre, same Camelot key, |Δ BPM| Gaussian. Weights configurable per query.
-- **Pros**: Explainable reasons map directly to feature names. Captures DJ-meaningful overlaps MFCCs alone miss. Still no new deps.
-- **Cons**: Weight tuning hell (same OQ as Teil 1). Two-system feel.
+### Option C — Hybrid: handcrafted + categorical (MyTag / genre / key) weighted score [RECOMMENDED for M1]
+- **Sketch**: Option A's cosine on the continuous bloc (~46-dim) plus discrete bonuses for shared MyTag (overlap / max-set-size), same Genre (1.0/0.0), Camelot distance table (same=1.0, ±1/rel=0.7, ±2=0.3, else=0 — reuses Teil-1 table), Gaussian on |Δ BPM|, |Δ LUFS| linear decay. Weights configurable per query. Defaults: cosine 0.45, MFCC-cosine sub-component 0.20 (extracted from the cosine bloc for reasons-list), chroma-cosine 0.10, BPM-Gaussian 0.10, key-Camelot 0.08, MyTag 0.04, genre 0.03.
+- **Pros**: Explainable reasons map directly to feature names. Categorical bonuses catch DJ-meaningful overlaps MFCCs alone miss. Still no new deps. Camelot table reused from Teil-1 — single source of truth.
+- **Cons**: Weight tuning hell (same OQ as Teil 1; partially mitigated by exposing weights in query string). Two-system feel.
 - **Effort**: M
 - **Risk**: Low.
 
@@ -167,18 +203,60 @@ Confirmed signal sources for a **local-only** seed-based similarity ranker exist
 
 > Required by `evaluated_`. Which option, what we wait on before committing.
 
-**Commit for M1: Option C (handcrafted ~46-dim vector + categorical weighting)**, persisted in sidecar SQLite `app_data/track_vectors.db` with `(track_id, vector_blob, fps_id, computed_at)` shape — schema chosen to be Option-B-compatible so a Teil-2 swap to CLAP / MERT later changes only `compute_track_vector()` impl + `vector_blob` size, **not** storage layout, query API, filters, reasons-list shape, or UX. Migration path to Option B is therefore a one-function change inside the extractor, not a cross-cutting refactor.
+**Commit to Option C** (handcrafted ~46-dim vector + categorical weighting), phased across three milestones. Storage `app_data/track_vectors.db` with `(track_id PK, vector_blob, fps_id, computed_at)` shape — schema chosen Option-B-compatible so a Teil-2 swap to CLAP/MERT later changes only `compute_track_vector()` impl + `vector_blob` size, **not** storage layout, query API, filters, reasons-list shape, or UX.
 
-Rationale:
-- Ships standalone, no dependency on Teil-2 decisions still in flight (Teil-2 itself blocks on Teil-1's `plays` table).
-- Uses primitives already produced by `analysis_engine.py` — no new analysis pass, no new deps.
-- Categorical bonuses (MyTag overlap, shared genre, key proximity) catch DJ-meaningful similarity that pure MFCC cosine misses, and feed the reasons list naturally.
-- Brute cosine over ≤ 50k vectors meets the 100 ms budget — FAISS / ANN can be deferred until library scale demands it.
-- When Teil 2 commits to a learned embedding, the vector source swaps but the query API, filters, reasons-list shape, and UX stay identical.
+### M1 — minimum-viable recommender (ships standalone)
 
-**Cross-cutting concern (explicit):** if `recommender-taste-llm-audio` later picks Option B, this doc upgrades by changing `compute_track_vector()` impl; storage table, query API, filters, and UX stay stable. No coordinated re-deploy.
+**Deliverables:**
+- New `app/track_vector_builder.py` — extracts the missing fields (`spectral_bandwidth`, `spectral_flatness`, MFCC mean+std, chroma mean track-aggregated, `tempo_variability`) into a 46-dim float32 numpy array. Single function `compute_track_vector(y, sr, existing_analysis) -> np.ndarray`.
+- Hook into `app/analysis_engine.py:analyze_audio_full` so every new analysis writes a vector. Backfill route `POST /api/track-vectors/backfill` for the existing library (X-Session-Token gated).
+- New `app/recommender_similar.py` — query function `find_similar(seed_id, *, limit, filters, weights) -> list[Result]`. Loads vectors lazy-mmap from `track_vectors.db`. Brute cosine over filtered candidate set.
+- New routes in `app/main.py`: `GET /api/similar/local?seed_track_id=...&limit=20&exclude_same_artist=true&bpm_window=0.06&key_strict=false`. Auth-gated per the auth-hardening draftplan.
+- Frontend: context-menu entry "Find similar in library" on track row → side-panel results with reasons chips. State-mgmt scoped to the panel (no app-wide store).
+- Test artifacts: `tests/test_recommender_similar.py` (unit + filter coverage), `tests/test_similar_perf.py` (`pytest-benchmark`, P95 ≤ 100 ms over a 50k synthetic fixture), `eval/similar_tracks_2026-05.jsonl` (20-seed eval set, manually scored top-10 for the metric in Goals).
 
-**Gate before promoting to `evaluated_`**: resolve OQ 3 (mode switch vs. strict separation from Teil 1), OQ 4 (UX entry-point pick: context-menu, sidebar, or both), OQ 5 (default filter posture), and OQ 7 (MMR diversity rerank). OQ 1 + OQ 10 are now answered by the 2026-05-15 shared-pipeline finding above.
+**Gates to enter M1 (= promote `evaluated_` → `accepted_`):**
+- User signs off on extraction path-(a) (hot pipeline change) — OQ11.
+- User picks UX surface: context-menu only vs. context-menu + sidebar — OQ4. Default proposal context-menu only.
+- User picks separation vs. combined mode with Teil-1 — OQ3. Default proposal strict separation.
+- User confirms default filter posture — OQ5. Default proposal: same-artist/same-playlist excluded by default.
+
+**Exit criteria for M1 (= promote `inprogress_` → `implemented_`):**
+- Goal metric hit: ≥ 3/10 musically-similar on the eval set.
+- P95 ≤ 100 ms over 50k synthetic.
+- Backfill job completes for a 5k-track real library in < 15 min.
+- Zero new heavy deps (numpy + sklearn only).
+
+### M2 — quality + UX refinement (only if M1 lands cleanly)
+
+**Triggers** (any one fires M2 scoping):
+- Eval-set scoring shows ≥ 3 duplicate-album results in top-20 cluster → MMR diversity rerank (OQ7).
+- User feedback "I want this updating live as I select tracks" → persistent sidebar panel (OQ4 escalation).
+- Pure-cosine vs. weighted-sum benchmark on real-data eval set (OQ2 second pass).
+
+**Deliverables (conditional):** MMR diversity rerank, sidebar panel with selection-listener, weighted-sum vs. cosine A/B in eval harness, tunable per-feature weight UI.
+
+### M3 — scale + Teil-2 convergence (parked unless triggered)
+
+**Triggers** (any one fires M3 scoping):
+- Library scale > 200k tracks → FAISS / sklearn `NearestNeighbors` index (OQ8 caching also reconsidered here).
+- Teil-2 lands CLAP / MERT → swap `compute_track_vector()` implementation, keep schema, expose `embedding_kind` column for migration.
+- Cross-doc fuzzy match needed (e.g. dedup near-identical seeds) → consume `app/external_track_match.py` from `idea_external-track-match-unified-module.md`.
+- Teil-1 `plays` table lands → wire `exclude_recently_played` filter.
+
+**Deliverables (conditional):** ANN index, embedding swap, fuzzy-dedup integration, recently-played filter.
+
+### Cross-cutting concern (explicit)
+
+If `recommender-taste-llm-audio` later picks Option B, this doc upgrades by changing `compute_track_vector()` impl; storage table, query API, filters, and UX stay stable. No coordinated re-deploy.
+
+### Open Question status summary (for `exploring_` → `evaluated_` gate)
+
+- **Resolved**: OQ1, OQ6, OQ9, OQ10.
+- **Partially resolved (defaults proposed)**: OQ2, OQ5, OQ11.
+- **Gates before `evaluated_`** (need user sign-off): OQ3, OQ4, OQ5 (confirm default), OQ11 (confirm path-a).
+- **Parked to M2**: OQ7 (with re-eval trigger), OQ2 second-pass.
+- **Parked to M3**: OQ8 (caching), Teil-1 `plays` table wiring.
 
 ---
 
