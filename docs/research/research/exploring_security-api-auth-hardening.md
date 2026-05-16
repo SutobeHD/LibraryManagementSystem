@@ -21,6 +21,7 @@ priority: 1
 - 2026-05-15 — `research/idea_` — created from template (declared **Hauptpriorität** by user)
 - 2026-05-15 — research/idea_ — full audit + options (priority-1 research dive)
 - 2026-05-15 — research/exploring_ — promoted; 5 hot-fixes shipped (commit e3a5ae8); Phase-1 draftplan next
+- 2026-05-15 — research/exploring_ — Phase-1 draftplan written by route-architect
 
 ---
 
@@ -335,22 +336,114 @@ Open against this recommendation: Open Questions 2 (env-var vs IPC handshake —
 
 > Required from `implement/draftplan_` onward. Concrete enough that someone else could execute it without re-deriving the design.
 
+### Preconditions (already shipped — not part of this plan)
+
+The following 5 hot-fixes landed in commit `e3a5ae8` and are assumed in-place. Phase 1 builds on top:
+
+1. `/api/system/heartbeat` token leak gated to loopback callers only (still leaks on `127.0.0.1` — Phase 1 removes the leak entirely).
+2. Duplicate heartbeat handler (lines 2022-2026) removed.
+3. `validate_audio_path` switched from `str.startswith` to `Path.is_relative_to(resolved_root)`.
+4. `/api/debug/load_xml` gated behind `LMS_ENABLE_DEBUG_ROUTES` env flag.
+5. `/api/file/write` sandboxed to `ALLOWED_AUDIO_ROOTS` + extension allowlist.
+
 ### Scope
-- **In:** …
-- **Out (deliberately):** …
+
+- **In (Phase 1 — Option E first half):**
+  - Tauri-injected boot-token via env var (`LMS_AUTH_TOKEN`); sidecar reads at boot; Tauri exposes to frontend via IPC.
+  - `app/auth.py` new module — boot-token loader + `require_session` FastAPI dependency (`Authorization: Bearer …` primary, `X-Session-Token` accepted for backwards-compat in Phase 1 only).
+  - `Depends(require_session)` attached to **all** POST / PUT / PATCH / DELETE routes and the three lifecycle endpoints (`shutdown`, `restart`, `init-token`). Read routes stay open (loopback-gated; matches Recommendation note that Phase 1 hardens standalone first).
+  - `secrets.compare_digest` for token comparison (constant-time).
+  - Heartbeat: drop `token` field from response entirely; becomes an unauth'd `{"status":"alive"}` healthcheck.
+  - `/api/soundcloud/auth-token` (line 2997) — keyring overwrite — explicitly gated.
+  - Frontend `api.js` refactored: source of `_sessionToken` becomes Tauri IPC (`invoke('get_session_token')`) in Tauri context, or a `.lms-dev-token` file (read once at boot, served by vite dev-middleware or shipped as a Vite env var) in browser-dev context. Heartbeat-scraping logic in `main.jsx:549-552` removed.
+  - **Optional bonus if cheap:** `slowapi` rate-limit middleware on `/api/system/*` and the SC auth-token route (5 req/min/IP).
+
+- **Out (deliberately deferred to Phase 2):**
+  - Paired-device tokens, QR pairing UX, `paired_devices` SQLite table.
+  - Per-device revoke UI.
+  - One-shot capability-token generalisation (extending the `_format_tokens` pattern to shutdown/restart/library-new/usb-eject/usb-reset).
+  - Read-route gating (loopback-only continues to carry that load in Phase 1).
+  - IP-allowlist middleware / `0.0.0.0` opt-in CIDR.
+  - Removal of `X-Session-Token` backwards-compat header (kept in Phase 1 to avoid a flag-day rollout; removed early in Phase 2 once paired devices land).
+  - mTLS, HTTPS termination in uvicorn.
 
 ### Step-by-step
-1. …
-2. …
+
+1. **Add `app/auth.py`** — module exports: (a) `SESSION_TOKEN: str` loaded at import-time from `os.environ["LMS_AUTH_TOKEN"]` with a fallback `secrets.token_urlsafe(32)` if unset (logged at WARN, dev-only path) and written to `.lms-dev-token` in repo root with mode 0o600; (b) `require_session(authorization: str | None = Header(None), x_session_token: str | None = Header(None)) -> None` raising `HTTPException(401)` if neither header present or `secrets.compare_digest` fails against `SESSION_TOKEN`. Never log the token value, not even at DEBUG.
+2. **Wire env-var into Tauri sidecar spawn** — in `src-tauri/src/lib.rs` (or wherever the `Command::new(...)` for the Python sidecar lives; `src-tauri/src/main.rs:123-128` per the Findings), generate a `secrets`-equivalent random 32-byte URL-safe string via `rand` crate at Tauri-app startup, store in a `Mutex<String>` in Tauri state, and pass to the spawned sidecar via `.env("LMS_AUTH_TOKEN", &token)`.
+3. **Add Tauri IPC command `get_session_token`** in `src-tauri/src/lib.rs` (returns the stored token to the frontend on demand). Register in the `invoke_handler` macro. Document with `///` + `# Errors` per `coding-rules.md`.
+4. **Audit-table → classification rule** — apply by HTTP method, not by path, to minimise per-route edits:
+   - **All `POST`/`PUT`/`PATCH`/`DELETE` decorators in `app/main.py`** receive `dependencies=[Depends(require_session)]` (or per-handler `Depends`), **with these explicit exceptions left open in Phase 1:** `POST /api/system/heartbeat` (becomes the healthcheck) and `POST /api/system/init-token` (must be reachable to bootstrap a token, though Phase 1 makes it largely vestigial since Tauri injects the token directly).
+   - **All `GET` routes** stay open (loopback-gated). Includes `/api/stream`, `/api/audio/waveform`, `/api/library/tracks`, all `/api/track/{tid}` reads, `/api/usb/devices`, `/api/soundcloud/me`, `/api/projects`, etc.
+   - **Domain summary (in/out for the gate in Phase 1):**
+     | Domain | Phase-1 rule |
+     |---|---|
+     | track / mytags / playlist / playlists-smart / playlists-folder | all POST/PATCH/DELETE → gated |
+     | library (sync, load, unload, new, scan-folder, import-paths, smart-playlists, clean-titles, mode, folder-watcher add/remove, analyze-batch) | all POST → gated |
+     | file ops (`/api/file/reveal`, `/api/file/write`, `/api/xml/clean`) | all POST → gated (write already path-sandboxed via hotfix) |
+     | system (`shutdown`, `restart`, `select_db`) | all POST → gated; `heartbeat` stays open; `init-token` stays open |
+     | soundcloud (`download`, `download-playlist`, `auth-token`, `sync`, `sync-all`, `merge`, `history` DELETE, `settings` PUT) | all writes → gated. **Explicit:** `auth-token` line 2997 added. |
+     | usb (`sync`, `sync/all`, `profiles` POST, `profiles/prune`, `profiles/{id}` DELETE, `eject`, `reset`, `initialize`, `history`, `mysettings`, `rename`, `settings` POST, `playcount/resolve`) | all writes → gated. `format/preview` + `format/confirm` keep `_format_tokens` (capability) **in addition to** `require_session`. |
+     | analysis (`/api/audio/analyze`, `/api/track/{tid}/analyze`, `/api/track/{tid}/analyze-full`, `/api/library/analyze-batch`) | all POST → gated; status GETs stay open |
+     | duplicates (`tools/duplicates/merge`, `merge-all`, `duplicates/scan`, `duplicates/merge`) | all POST → gated |
+     | phrase (`phrase/generate`, `phrase/commit`) | all POST → gated |
+     | projects (`projects/save`, `artist/soundcloud`) | all POST → gated |
+     | audio-edit (`audio/slice`, `audio/render`, `audio/import`) | all POST → gated |
+     | rekordbox (`rekordbox/export`, `rekordbox/import`) | all POST → gated |
+     | import-tasks (`import/tasks/clear`) | POST → gated |
+     | settings (`POST /api/settings`) | gated |
+     | debug | already env-flagged via hotfix; also add `Depends(require_session)` for defense-in-depth |
+5. **Implementation tactic for the bulk decorator add** — prefer per-route explicit `dependencies=[Depends(require_session)]` (greppable, mypy-clean) over a global middleware with a denylist (fragile, future routes inherit wrong default). Aim ≤ 1 line added per route; group by cluster in the diff for reviewability.
+6. **Heartbeat finishing touches** — `/api/system/heartbeat` returns `{"status":"alive","version":APP_VERSION}` only. Drop the `token` field, drop the loopback-only conditional (no secret to gate). Stays unauth'd by design (used by Tauri to detect sidecar boot).
+7. **`POST /api/system/init-token`** — keep the endpoint for now (browser-dev escape hatch) but make it idempotent: returns `SESSION_TOKEN` only when called from `127.0.0.1` AND `LMS_AUTH_TOKEN` env was unset at boot (dev-mode). In Tauri-spawned production runs, env is always set → endpoint returns 410 Gone.
+8. **`secrets.compare_digest`** — use in `require_session` for both `Authorization: Bearer` and `X-Session-Token` paths. Also retrofit the legacy `SHUTDOWN_TOKEN` query-param compares at `main.py:2031,2040` (those routes are about to gain `require_session` anyway, so the query-string scheme can be removed — confirm with user before deletion).
+9. **`app/backend_entry.py`** — confirm the spawned-by-Tauri entrypoint inherits env vars from its parent (no `env_clear` / no `subprocess` re-spawn that strips env). If it does strip, add an explicit pass-through. No code expected — just a verification step.
+10. **Frontend — `frontend/src/api/api.js`** — replace the `_sessionToken` setter chain so the value comes from `await invoke('get_session_token')` in Tauri context, or `fetch('/.lms-dev-token')` (served by vite static middleware) in browser-dev. Attach as `Authorization: Bearer ${token}` (primary) AND keep `X-Session-Token: ${token}` for one release for backwards-compat. Wrap the bootstrap in a top-level promise so all axios calls await it before firing.
+11. **Frontend — `frontend/src/main.jsx`** — delete the heartbeat-token-capture block (lines 549-552 per Findings). Heartbeat is now strictly an alive-check.
+12. **Frontend — dev-token plumbing** — write `.lms-dev-token` to repo root in `app/auth.py` *only* when `LMS_AUTH_TOKEN` env unset (dev path). Add `.lms-dev-token` to `.gitignore`. Configure vite to serve it from repo root via `publicDir` or a small dev-middleware in `frontend/vite.config.js` (read once at vite startup, expose as static endpoint).
+13. **(Optional, ship if ≤ 1 hour)** — install `slowapi==0.1.9` (pin in `requirements.txt`), wire as middleware in `app/main.py`, decorate `/api/system/shutdown`, `/api/system/restart`, `/api/system/init-token`, `/api/soundcloud/auth-token` with `@limiter.limit("5/minute")`. If installation triggers any version-pin conflicts, defer to Phase 2.
+14. **Tests — `tests/test_auth.py` (NEW)** — pytest + `fastapi.testclient.TestClient`. Cases: (a) gated route w/o header → 401; (b) gated route w/ wrong token → 401 + constant-time check; (c) gated route w/ correct `Authorization: Bearer` → 2xx; (d) gated route w/ correct `X-Session-Token` (back-compat) → 2xx; (e) open route w/o header → 2xx; (f) heartbeat returns no `token` key; (g) `init-token` returns 410 when `LMS_AUTH_TOKEN` env set; (h) SC `auth-token` route now 401 without header.
+15. **Self-correction loop** — after edits: `ruff check app/ tests/`, `mypy app/auth.py app/main.py`, `pytest tests/test_auth.py -v`, `pytest tests/` (full suite — many existing tests will need a token fixture; add `auth_token` autouse fixture in `tests/conftest.py` that sets `LMS_AUTH_TOKEN` env and patches the axios-equivalent header into TestClient). `cargo check --manifest-path src-tauri/Cargo.toml` for the Rust side.
 
 ### Files touched (expected)
-- …
+
+- **`app/auth.py`** *(NEW, ~80 lines)* — `SESSION_TOKEN` constant + boot-time env-var loader (fallback writes `.lms-dev-token`) + `require_session` Header dependency + module-level logger (never logs the token).
+- **`app/main.py`** — add `from app.auth import require_session`; add `dependencies=[Depends(require_session)]` to every POST/PUT/PATCH/DELETE decorator except the explicit Phase-1 exceptions; delete the `token` field from both heartbeat responses; replace `SHUTDOWN_TOKEN` `==` compares with `secrets.compare_digest`; mark `init-token` as 410-when-env-set; add `Depends(require_session)` explicitly to `/api/soundcloud/auth-token` (line 2997). Optional: register `slowapi` limiter.
+- **`app/backend_entry.py`** — verify env-var inheritance from Tauri parent; no code change expected unless inheritance is broken.
+- **`src-tauri/src/lib.rs`** (or wherever sidecar `Command` is built — `src-tauri/src/main.rs:123-128` per Findings) — generate 32-byte URL-safe token at Tauri startup, store in `tauri::State<Mutex<String>>`, pass `.env("LMS_AUTH_TOKEN", &token)` to the sidecar `Command`, register `get_session_token` `#[tauri::command]` returning the stored value. Needs `rand` crate in `src-tauri/Cargo.toml` (already a transitive dep — verify before adding).
+- **`src-tauri/Cargo.toml`** — add `rand = "0.8"` to `[dependencies]` only if not already present.
+- **`frontend/src/api/api.js`** — replace `_sessionToken` source chain: Tauri path → `await invoke('get_session_token')`; browser-dev path → fetch `/.lms-dev-token`. Attach as `Authorization: Bearer ${token}` (new) + `X-Session-Token: ${token}` (legacy, one release). Wrap bootstrap in top-level promise so requests await it.
+- **`frontend/src/main.jsx`** — drop the heartbeat-token-capture block (lines 549-552).
+- **`frontend/vite.config.js`** — add a small dev-middleware (or `publicDir` entry) to serve `.lms-dev-token` from repo root in dev mode only.
+- **`.gitignore`** — add `.lms-dev-token`.
+- **`requirements.txt`** — add `slowapi==0.1.9` *(only if step 13 ships in Phase 1)*.
+- **`tests/test_auth.py`** *(NEW, ~150 lines)* — see step 14 for cases.
+- **`tests/conftest.py`** — add `auth_token` autouse fixture (sets env var + injects header into TestClient).
+- **`docs/backend-index.md`** — annotate gated routes with "🔒 require_session" marker (or equivalent text column).
+- **`docs/architecture.md`** — add an "Auth" section under data-flows: where the token is born (Tauri), how it reaches Python (env var), how it reaches React (IPC), how it flows on every request (header).
+- **`docs/FILE_MAP.md`** — row for `app/auth.py`; updated row for `src-tauri/src/lib.rs`; updated row for `frontend/src/api/api.js`.
+- **`CHANGELOG.md`** — `Added: bearer-token auth on all mutation endpoints (Phase 1 of API auth-hardening).`
+- **`docs/research/research/exploring_security-api-auth-hardening.md`** *(this doc)* — `Implementation Log` populated during `inprogress_`.
 
 ### Testing approach
-- …
+
+- **Unit (pytest `tests/test_auth.py`):** all 8 cases from step 14. Use `fastapi.testclient.TestClient` against the actual `app` instance. Patch `os.environ["LMS_AUTH_TOKEN"]` via monkeypatch + reimport `app.auth` to control the boot token per-test.
+- **Regression suite:** run full `pytest tests/` after the conftest autouse fixture lands. Expect failures on every existing test that hits a now-gated route → fix by relying on the autouse fixture's auto-injected header. Audit count of failures matches expected gated routes (sanity check the bulk-decorator pass didn't over- or under-apply).
+- **Manual Tauri smoke:** `npm run tauri dev`, verify sidecar boots, frontend can call `POST /api/track/{tid}` with a valid Rating change, heartbeat returns `{"status":"alive"}` (no `token` key in network tab).
+- **Manual browser-dev smoke:** `npm run dev:full`, verify `.lms-dev-token` is created in repo root, frontend reads it, axios calls carry the bearer.
+- **Negative manual:** `curl -X POST http://127.0.0.1:8000/api/track/123 -d '{"Rating":0}'` → expect `{"detail":"unauthorized"}` 401.
+- **Rust:** `cargo test --manifest-path src-tauri/Cargo.toml` — add a unit test for the `get_session_token` command if the test scaffold supports it; otherwise smoke via manual run.
+- **Delegate to `test-runner` subagent** post-edit; delegate UI smoke to `e2e-tester`.
 
 ### Risks & rollback
-- …
+
+- **Frontend can't get the token (Tauri IPC mis-registered, or `.lms-dev-token` not served in dev) → all writes 401 → app effectively read-only.** Mitigation: rollback is a single `git revert <commit>` + sidecar restart. Token-fetch failure surfaces as a startup-time toast (`api.js` bootstrap promise rejection); user sees it immediately.
+- **An existing test hits a route we miss-classified.** Mitigation: full `pytest tests/` is part of the merge gate; CI catches this.
+- **`LMS_AUTH_TOKEN` env-var leak via process-list / `ps aux` / Windows process explorer.** Low risk on single-user desktop; documented in `docs/SECURITY.md` as accepted. Phase 2 (paired tokens in SQLite) supersedes.
+- **Backwards-compat `X-Session-Token` header creates dual-path complexity in `require_session`.** Plan removes it early in Phase 2; tracked in `docs/research/_INDEX.md`.
+- **`slowapi` (step 13) introduces a new dep + middleware order issue.** Mitigation: ship behind a `LMS_ENABLE_RATE_LIMIT` env flag; if it misbehaves, leave off in prod.
+- **Token in env-var inherited by child processes** (e.g. FFmpeg subprocess) — minor leak. Mitigation: explicitly `env={**os.environ, "LMS_AUTH_TOKEN": ""}` in any `subprocess.run` call in `app/main.py`. Add as a small follow-up if not landed in Phase 1.
+- **Hard rollback path:** the entire phase ships behind a single feature-flag commit. `git revert <merge-sha>` restores prior behaviour; no DB migrations to undo; frontend tolerates both auth-on and auth-off backends because the header attachment is unconditional.
 
 ## Review
 
