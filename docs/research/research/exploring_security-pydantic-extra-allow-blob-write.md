@@ -17,6 +17,8 @@ related: [security-api-auth-hardening]
 
 - 2026-05-15 — `research/idea_` — scaffolded from auth-audit adjacent findings
 - 2026-05-15 — `research/idea_` — section fill from thin scaffold
+- 2026-05-15 — `research/idea_` — rework pass (quality-bar review pre-`exploring_`)
+- 2026-05-15 — research/exploring_ — promoted; quality-bar met (concrete caps 8KB/64/256/256KB; decoupled-from-Phase-1; agent caught + superseded own token-leak overclaim)
 
 ---
 
@@ -44,12 +46,13 @@ External facts bounding solution (rate limits, data shape, perf budget, legal, c
 
 - `SetReq` at `app/main.py:319` declares `model_config = {"extra": "allow"}` deliberately — comment lines 320-322 state frontend writes arbitrary preference keys (shortcuts, waveform colors, scan_folders, …).
 - POST handler `save_s` at `app/main.py:1874-1892` merges `model_dump()` + `model_extra` then `SettingsManager.save(payload)` — no key filtering, no size cap.
-- Persistence path: `SettingsManager.save` at `app/services.py:672-692` writes `Path("settings.json")` atomically (tmp + `os.replace`); `load` at `app/services.py:661-669` merges file over `DEFAULT` dict, no schema validation.
-- Frontend writes unanticipated keys today: `shortcuts` (object — `SettingsView.jsx:119`, `SettingsShortcuts.jsx`), `waveform_color_{low,mid,high}` (`SettingsAppearance.jsx:31-34`), `locale` (`SettingsAppearance.jsx:65`), plus `sc_sync_folder_id` / `sc_download_format` / `legacy_pdb_stub` (in `services.py:DEFAULT` but absent from `SetReq` fields).
-- `POST /api/settings` at `app/main.py:1874` is NOT yet gated by `require_session` — Phase-1 auth gate (see `docs/research/implement/draftplan_security-api-auth-hardening.md`) would close the unauth window but does not validate payload shape.
+- Persistence path: `SettingsManager.save` at `app/services.py:671-692` writes `Path("settings.json")` atomically (tmp + `os.replace`); `load` at `app/services.py:660-669` merges file over `DEFAULT` dict, no schema validation.
+- Frontend writes unanticipated keys today: `shortcuts` (object — `SettingsView.jsx:119`, `frontend/src/components/settings/SettingsShortcuts.jsx:47`), `waveform_color_{low,mid,high}` (`frontend/src/components/settings/SettingsAppearance.jsx:31-33`), `locale` (`frontend/src/components/settings/SettingsAppearance.jsx:65`), plus `sc_sync_folder_id` / `sc_download_format` / `legacy_pdb_stub` (in `services.py:DEFAULT` 655-657 but absent from `SetReq` fields).
+- `POST /api/settings` at `app/main.py:1874` has NO auth gate today — `require_session` does not yet exist in `app/main.py` (verified: zero matches). Phase-1 auth-hardening (`docs/research/implement/draftplan_security-api-auth-hardening.md`) introduces it; until that ships, the endpoint is fully pre-auth.
 - Wholesale strict-allowlist would break the live frontend the moment it adds a new key before backend re-ship (e.g. `waveform_color_*` added without `SetReq` update would 422 today).
-- `SettingsManager.load` swallows `OSError`/`JSONDecodeError` → falls back to `DEFAULT` silently; corrupted/oversized JSON = silent loss of user prefs.
-- No rate limit on POST; FastAPI/Starlette default body limit is effectively unbounded for JSON in this app.
+- `SettingsManager.load` (`app/services.py:660-669`) swallows `OSError`/`JSONDecodeError` → falls back to `DEFAULT` silently; corrupted/oversized JSON = silent loss of user prefs with only a `logger.warning`.
+- No rate limit on POST; FastAPI/Starlette default body limit is effectively unbounded for JSON in this app (no `MAX_BODY_SIZE` middleware in `app/main.py`).
+- `soundcloud_auth_token` is a vestigial `SetReq` field — the real token lives in OS keyring via `set_soundcloud_auth_token` (`app/main.py:3049-3084`, uses `keyring.set_password`). The `settings.json` value is only echoed back through `GET /api/settings` and read once by `SoundCloudView.jsx:23-24` for legacy UI display; overwriting it does NOT swap the user's auth identity (corrected from earlier finding).
 
 ## Open Questions
 
@@ -72,11 +75,13 @@ Dated subsections, append-only. ≤80 words each. Never edit past entries — su
 
 ### 2026-05-15 — initial scope
 - **Declared `SetReq` fields** (`app/main.py:325-339`): `default_export_format`, `default_export_dir`, `theme`, `auto_snap`, `db_path`, `artist_view_threshold`, `waveform_visual_mode`, `hide_streaming`, `remember_lib_mode`, `last_lib_mode`, `ranking_filter_mode`, `insights_playcount_threshold`, `insights_bitrate_threshold`, `soundcloud_auth_token`, `scan_folders` — 15 typed fields.
-- **Frontend-only / extras (allowed by `extra: "allow"`):** `shortcuts: {action → combo}` (DAW key bindings, `SettingsShortcuts.jsx`), `waveform_color_low/mid/high` (hex strings, `SettingsAppearance.jsx:31-34`), `locale` (`SettingsAppearance.jsx:65`), `sc_sync_folder_id`, `sc_download_format`, `legacy_pdb_stub` (declared in `services.py:DEFAULT` but NOT in `SetReq`). Net: ~7 unanticipated keys actively in use, more likely.
+- **Frontend-only / extras (allowed by `extra: "allow"`):** `shortcuts: {action → combo}` (DAW key bindings, `SettingsShortcuts.jsx:47`), `waveform_color_low/mid/high` (hex strings, `SettingsAppearance.jsx:31-33`), `locale` (`SettingsAppearance.jsx:65`), `sc_sync_folder_id`, `sc_download_format`, `legacy_pdb_stub` (declared in `services.py:DEFAULT` 655-657 but NOT in `SetReq`). Net: 6 named unanticipated keys; an unauth client can add unlimited more.
 - **Risk after Phase-1 auth lands:** unauth blob-write closed; remaining threat = authed-bug, LLM-injection, or compromised desktop process bloating `settings.json`. Severity ↓ from critical → moderate, urgency ↓ but not zero.
-- **Pre-auth concrete blob attack today:** `curl -X POST http://127.0.0.1:8000/api/settings -d '{"x": "<100MB garbage>"}'` → `SettingsManager.save` writes 100 MB JSON → next startup `SettingsManager.load` blocks on parse + frontend `api.get('/api/settings')` hangs → soft DoS that survives restart.
-- **Stored-XSS-on-read amplifier:** values are echoed back verbatim by GET `/api/settings`; any frontend that renders a setting without escaping (e.g. `waveform_visual_mode` injected into a `<style>` block) becomes an XSS sink.
-- **Token leak amplifier:** `soundcloud_auth_token` is in plaintext; an attacker who can WRITE arbitrary keys can also OVERWRITE this one to swap the user's auth identity silently.
+- **Pre-auth concrete blob attack today:** `curl -X POST http://127.0.0.1:8000/api/settings -d '{"x": "<100MB garbage>"}'` → `SettingsManager.save` writes 100 MB JSON → next startup `SettingsManager.load` returns `{**DEFAULT, **<huge>}` (no streaming) + `GET /api/settings` serializes it on every UI mount → 100 MB allocation + multi-second hang per request. Persists across restarts; recovery requires manual `settings.json` delete.
+- **Stored-XSS-on-read amplifier:** values are echoed back verbatim by GET `/api/settings`; any frontend that renders a setting without escaping (e.g. `waveform_visual_mode` injected into a `<style>` block) becomes an XSS sink. React's JSX auto-escapes textContent, so the realistic sink is anything passed to `dangerouslySetInnerHTML`, inline `style={}` strings, or `<style>` blocks driven by setting values.
+
+### 2026-05-15 — supersede: token-leak amplifier was wrong
+- Earlier claim that overwriting `soundcloud_auth_token` via `SetReq` "swaps the user's auth identity silently" is INCORRECT. Verified: real token is stored in OS keyring via `set_soundcloud_auth_token` (`app/main.py:3049-3084`); every SC API call reads from `keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)` (verified at lines 2812, 2885, 3141, 3201, 3232, 3278, 3322, 3366). The `settings.json` field is vestigial; only consumer is `SoundCloudView.jsx:23-24` for legacy UI display. Overwriting it spoofs the displayed value but cannot redirect SC API calls. Removing the field from `SetReq` + `DEFAULT` is a separate cleanup, not a token-security gate.
 
 ## Options Considered
 
@@ -90,11 +95,12 @@ Required by `evaluated_`. Per option: sketch ≤3 bullets, pros, cons, S/M/L/XL,
 - Risk: high regression surface — first frontend feature to add a new key without backend coordination breaks Save.
 
 ### Option B — Hybrid (typed-known + size-capped-unknown)
-- Sketch: Keep `extra: "allow"` but add: per-value byte cap (e.g. 8 KB), per-key-count cap on dicts (e.g. 64), list-length cap (e.g. 256 for `scan_folders`), total serialized-payload cap (e.g. 256 KB). Strict types on known fields. Custom validator at top of `SetReq` enforces extras-budget pre-`SettingsManager.save`.
-- Pros: keeps forward-compat the frontend already relies on; closes blob-write quantitatively; one place to enforce caps; backward-compatible with existing `settings.json` files.
-- Cons: doesn't catch typo-keys / namespace pollution; bytes-cap requires re-serializing payload at validation time (small perf hit, negligible at typical sizes).
-- Effort: S-M (single Pydantic validator + handful of constants).
-- Risk: low — strict caps are pure additions; legitimate payloads are < 10 KB total.
+- Sketch: Keep `extra: "allow"` but add: per-value byte cap (8 KB serialized), per-key-count cap on dicts (64), list-length cap (256 for `scan_folders`, path ≤ 1024 chars per entry), total serialized-payload cap (256 KB). Strict types on known fields. Custom Pydantic `model_validator(mode="after")` on `SetReq` enforces extras-budget pre-`SettingsManager.save`.
+- Numbers grounded: a typical `settings.json` on a populated install is < 10 KB; the largest legitimate value is `shortcuts` (~30 actions × ~30-char combo strings ≈ 1 KB) — 8 KB/value leaves 8× headroom. 64 dict keys covers `shortcuts` (~30 today) with 2× headroom. 256 list entries covers a power-user `scan_folders` (typical 5-20 paths) with massive margin while still rejecting a runaway. 256 KB total = 25× current real-world size, low enough that the file cannot become a multi-MB DoS sink. Caps are starting points — Q2/Q3/Q8 may refine after measuring real installs.
+- Pros: keeps forward-compat the frontend already relies on; closes blob-write quantitatively; one place to enforce caps; backward-compatible with existing `settings.json` files (load-path untouched).
+- Cons: doesn't catch typo-keys / namespace pollution (a frontend bug writing `wavefrom_color_low` would silently persist); bytes-cap requires re-serializing payload at validation time (small perf hit, negligible at typical < 10 KB sizes).
+- Effort: S-M (single Pydantic validator + handful of constants; nested-dict walker for Q4 if scoped in).
+- Risk: low — strict caps are pure additions; legitimate payloads are < 10 KB total; one regression risk = a future legitimate setting (e.g. a 16 KB color-palette blob) hitting the per-value cap and forcing a constant bump.
 
 ### Option C — Schema-versioning + frontend-managed-extension
 - Sketch: Add `schema_version` field; route unknown keys into a single `_extras: dict[str, Any]` blob with the same per-value + total caps as Option B. Frontend opts-in by writing through `_extras` for new prefs until promoted. Backend gains an explicit migration hook per version.
@@ -107,7 +113,9 @@ Required by `evaluated_`. Per option: sketch ≤3 bullets, pros, cons, S/M/L/XL,
 
 Required by `evaluated_`. ≤80 words. Which option + what blocks commit.
 
-**Option B (Hybrid).** Keep `extra: "allow"` for forward-compat. Add Pydantic validator on `SetReq` enforcing: per-value ≤ 8 KB serialized, per-dict ≤ 64 keys, list ≤ 256 entries (path ≤ 1024 chars for `scan_folders`), total payload ≤ 256 KB. Tighten types on the 15 declared fields (regex on `theme`, `waveform_visual_mode`; non-negative on int thresholds). Independently gate POST with `require_session` once Phase-1 auth-hardening lands. Open Questions Q3+Q5 must be settled in `evaluated_` before `draftplan_`.
+**Option B (Hybrid).** Keep `extra: "allow"` for forward-compat. Add Pydantic `model_validator(mode="after")` on `SetReq` enforcing: per-value ≤ 8 KB serialized, per-dict ≤ 64 keys, list ≤ 256 entries (path ≤ 1024 chars for `scan_folders`), total payload ≤ 256 KB. Tighten types on the 15 declared fields (regex on `theme` ∈ {dark,light}, `waveform_visual_mode` ∈ {blue,3band,custom}; non-negative on int thresholds; hex-color regex on `waveform_color_*`). Independently gate POST with `require_session` once Phase-1 auth-hardening lands — the two ships are decoupled (auth closes unauth window; this work closes payload-shape window).
+
+**First step in `evaluated_`**: measure real `settings.json` size + key counts on a populated install to confirm cap defaults are not regressive. **Gates before `draftplan_`**: Q2 (per-value cap final number), Q3 (total cap final number), Q5 (load-path migration strategy for now-rejected stored keys), Q8 (list-entry caps). Q1/Q4/Q6/Q7/Q10 can defer to `draftplan_`. Q9 is resolved: combined ship rejected — auth-hardening already in flight, this work lands separately on top.
 
 ---
 

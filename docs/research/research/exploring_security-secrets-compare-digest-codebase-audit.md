@@ -17,6 +17,8 @@ related: [security-api-auth-hardening]
 
 - 2026-05-15 — `research/idea_` — scaffolded from auth-audit adjacent findings
 - 2026-05-15 — `research/idea_` — section fill + codebase audit
+- 2026-05-15 — research/idea_ — rework pass + audit re-verification (quality-bar review pre-exploring_)
+- 2026-05-15 — research/exploring_ — promoted; quality-bar met (audit table byte-verified; ruff-plugin misclaim corrected; compare_digest behavior live-verified)
 
 ---
 
@@ -38,7 +40,7 @@ related: [security-api-auth-hardening]
 - Refactor checksum/fingerprint compares (MD5/SHA1 on audio/cache content — not auth tokens)
 - Replace dict `.get(token)` lookups (Python dict hash-collision is a separate question; address in Phase-2 if `_format_tokens` ever scales)
 - Move SoundCloud OAuth token storage (already in OS keyring — out of scope)
-- Custom ruff plugin (Option C) — defer unless drift recurs
+- Mechanical lint backstop (Option C — pre-commit grep or semgrep) — defer unless drift recurs; ruff custom plugin is NOT viable (no plugin API)
 
 ## Constraints
 
@@ -59,7 +61,7 @@ External facts bounding solution (rate limits, data shape, perf budget, legal, c
 Numbered. Each resolvable (yes/no or X vs Y), not philosophy.
 
 1. **Shared helper module vs inline?** Option B (`app/security_compare.py::safe_compare(token: str, expected: str) -> bool`) handles `isinstance` + length + ASCII + encode-to-bytes + `secrets.compare_digest` in one call. Inline at each site (currently only Phase-1's `require_session`) duplicates the boilerplate. **Lean: Option B** — even with only 2-3 sites today, the helper gives one audit-point + one test-target.
-2. **Lint rule (ruff custom plugin or pre-commit grep)?** Ruff doesn't ship a `forbid-token-equality` rule. Pre-commit `pygrep-hooks` can match `\btoken\s*==` / `\bsecret\s*==` and fail commit. Cost: ~15 lines in `.pre-commit-config.yaml`. **Lean: defer** — manual review checklist in `coding-rules.md` is cheaper and the helper-import pattern is self-policing (anyone writing a new compare grabs the helper).
+2. **Lint rule (pre-commit grep or semgrep)?** Ruff has **no third-party plugin API** (verified ruff 0.15.12 `--help`: no plugin/extension flag; only built-in Rust-implemented rules). Options for mechanical enforcement are: (a) pre-commit `pygrep-hooks` matching `\btoken\s*==` / `\bsecret\s*==` — ~15 lines in `.pre-commit-config.yaml`; (b) `semgrep` rule (real AST-based pattern, fewer false positives, but adds a new dev-dep). **Lean: defer** — manual review checklist in `coding-rules.md` is cheaper and the helper-import pattern is self-policing (anyone writing a new compare grabs the helper).
 3. **Audit cadence: one-shot now + CI lint, or recurring quarterly?** One-shot if Phase-1 lands the helper + the codebase stays small (~141 routes, 1 contributor). Recurring if route count grows or contributor pool widens. **Lean: one-shot now** — re-audit only when a new route under `app/` is added by something other than `route-architect` agent (which can be taught to grep for the helper).
 4. **Helper signature: `safe_compare(token, expected)` or `safe_compare_token(presented, expected)`?** Argument order matters for readability (left = untrusted, right = trusted). **Lean: `safe_compare(presented: str, expected: str) -> bool`** — order + naming makes the trust direction explicit.
 5. **What about `hmac.compare_digest` vs `secrets.compare_digest`?** Identical primitive. **Lean: `secrets.compare_digest`** — modern stdlib idiom, doesn't pull `hmac` for compare-only use.
@@ -133,14 +135,15 @@ Required by `evaluated_`. Per option: sketch ≤3 bullets, pros, cons, S/M/L/XL,
 - Effort: S (helper + tests = ~70 LOC; refactor `require_session` = 3-line change).
 - Risk: Low — pure additive.
 
-### Option C — Custom ruff rule / pre-commit grep
+### Option C — pre-commit grep or semgrep rule
 - Sketch:
   - `.pre-commit-config.yaml` adds `pygrep-hooks` entry matching `\b(token|secret|password)\s*(==|!=)\s*` in `app/**/*.py`
-  - OR custom ruff plugin (more work, requires Rust toolchain for ruff plugin dev)
+  - OR `semgrep` rule (AST-based pattern, less false-positive prone than regex; adds semgrep as a new dev-dep)
+  - Note: ruff custom plugins are NOT viable — ruff has no third-party plugin API (built-in Rust rules only)
   - Fail-fast on any new `token ==` in CI before merge
 - Pros: Mechanical enforcement, no human-review reliance. Backstop for Option A/B drift.
-- Cons: False-positives common (`if some_var_name_with_token == "literal"` triggers); needs allowlist. Doesn't help with the deeper bug (forgetting length-check). Adds CI step.
-- Effort: M (10-15 LOC config + allowlist refinement over time).
+- Cons: Regex variant false-positives common (`if some_var_name_with_token == "literal"` triggers); needs allowlist. Doesn't help with the deeper bug (forgetting length-check). Adds CI step. Semgrep adds a new dev-dep.
+- Effort: M (10-15 LOC config + allowlist refinement over time for pygrep; ~30 LOC + dep for semgrep).
 - Risk: Medium — noise risk if rule too broad; bypass risk if rule too narrow.
 
 ## Recommendation
@@ -148,6 +151,8 @@ Required by `evaluated_`. Per option: sketch ≤3 bullets, pros, cons, S/M/L/XL,
 Required by `evaluated_`. ≤80 words. Which option + what blocks commit.
 
 **Option B + manual checklist** — land Phase-1 first (introduces inline `secrets.compare_digest` in `require_session`), then this follow-up extracts the pattern into `app/security_compare.py::safe_compare`, refactors `require_session` to use it, adds unit tests, adds a one-line entry to `coding-rules.md` under "Backend concurrency" or new "Auth" section. **Option C as backstop**: if drift recurs after 6 months (i.e. a new `token ==` lands in a PR), add the pygrep-hook then. **Blocks commit until**: Phase-1 lands; helper file exists; `require_session` refactored; tests green; coding-rules.md entry added.
+
+**Concrete first step (post-Phase-1):** create `app/security_compare.py` with `safe_compare(presented: str, expected: str) -> bool` (≤20 LOC: isinstance check → reject non-str → length-check → ASCII-check → encode-to-bytes → `secrets.compare_digest`). Then create `tests/test_security_compare.py` (7 cases per Option B sketch). Then 3-line refactor in `app/auth.py::require_session` to call `safe_compare(...)` instead of inline `secrets.compare_digest(...)`. Total: 1 new file + 1 new test file + 3-line edit in 1 file.
 
 ---
 
