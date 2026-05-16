@@ -1,17 +1,88 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-mod soundcloud_client;
 mod audio;
+mod soundcloud_client;
 
-use tauri_plugin_shell::ShellExt;
-use tauri_plugin_shell::process::CommandEvent;
+use audio::commands::{
+    get_3band_waveform, list_audio_devices, load_audio, start_project_export, AudioCommandState,
+};
+use audio::engine::AudioController;
+use audio::fingerprint::{fingerprint_batch, fingerprint_track};
 use serde::Deserialize;
 use soundcloud_client::Track;
-use tauri::{Emitter, Manager};
-use audio::commands::{load_audio, get_3band_waveform, start_project_export, list_audio_devices, AudioCommandState};
-use audio::fingerprint::{fingerprint_track, fingerprint_batch};
-use audio::engine::AudioController;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use tauri::{Emitter, Manager, State};
+use tauri_plugin_shell::process::CommandEvent;
+use tauri_plugin_shell::ShellExt;
+
+/// Shared boot-time session token captured from the Python sidecar's stdout.
+///
+/// The sidecar prints ``LMS_TOKEN=<value>`` as its very first line at boot
+/// (see ``app/auth.py``). Both the dev-mode (``spawn_child``) and prod-mode
+/// (``shell.sidecar``) stdout readers watch for that prefix, store the value
+/// here, and **drop the line from log forwarding** so it never lands in
+/// Tauri's log file. The frontend reads the value via the ``get_session_token``
+/// IPC command and attaches it as ``Authorization: Bearer <value>`` on every
+/// HTTP call to the sidecar.
+///
+/// Wrapped in ``Arc<Mutex<String>>`` (not bare ``Mutex<String>``) so the
+/// reader threads -- spawned with ``std::thread::spawn`` (dev) and
+/// ``tauri::async_runtime::spawn`` (prod) -- can each hold their own clone
+/// for the lifetime of the sidecar process. Empty string == not-yet-captured;
+/// ``get_session_token`` returns ``Err("token-not-ready")`` while empty.
+struct SessionToken(Arc<Mutex<String>>);
+
+/// Return the captured Python-sidecar session token to the frontend.
+///
+/// The frontend's ``api.js`` bootstrap polls this on app boot before firing
+/// any axios call. Returns the URL-safe base64 string (no quoting / padding
+/// concerns) or a token-not-ready error if the sidecar hasn't yet printed
+/// its ``LMS_TOKEN=`` banner line.
+///
+/// # Errors
+/// - ``"token-not-ready"`` if the stdout reader has not yet captured the
+///   banner line. Callers MUST retry (the sidecar normally prints within
+///   the first ~50 ms of import time, but cold-start can push that out
+///   under heavy disk IO).
+/// - ``"state-lock-poisoned"`` if a prior holder of the Mutex panicked.
+///   Not recoverable -- the user must restart the app.
+#[tauri::command]
+fn get_session_token(state: State<SessionToken>) -> Result<String, String> {
+    let guard = state
+        .0
+        .lock()
+        .map_err(|_| "state-lock-poisoned".to_string())?;
+    if guard.is_empty() {
+        Err("token-not-ready".to_string())
+    } else {
+        Ok(guard.clone())
+    }
+}
+
+/// Inspect one stdout line for the ``LMS_TOKEN=`` boot banner.
+///
+/// Returns ``true`` when the line carries the token (caller MUST drop it
+/// from log forwarding so the value never reaches ``log::info!``).
+/// Returns ``false`` for every other line, including subsequent ones --
+/// the banner is printed exactly once at sidecar boot and we never
+/// overwrite a captured value.
+fn try_capture_token(line: &str, token: &Arc<Mutex<String>>) -> bool {
+    let Some(value) = line.strip_prefix("LMS_TOKEN=") else {
+        return false;
+    };
+    // .lock() poisoning is non-recoverable; we just skip the capture in that
+    // case -- the frontend will keep getting "token-not-ready" until the
+    // process restarts, which surfaces the problem to the user.
+    if let Ok(mut guard) = token.lock() {
+        // Only capture the FIRST banner we see -- prevents a malicious or
+        // mis-written downstream line of the same prefix from clobbering
+        // the real boot token.
+        if guard.is_empty() {
+            *guard = value.trim().to_string();
+        }
+    }
+    true
+}
 
 #[cfg(debug_assertions)]
 struct DevChildren {
@@ -38,7 +109,9 @@ fn find_repo_root() -> Option<std::path::PathBuf> {
             if p.join("app").join("main.py").exists() {
                 return Some(p);
             }
-            if !p.pop() { break; }
+            if !p.pop() {
+                break;
+            }
         }
     }
     None
@@ -62,9 +135,14 @@ fn spawn_child(
     program: &str,
     args: &[&str],
     cwd: &std::path::Path,
+    // None => not a sidecar we expect to print LMS_TOKEN= (e.g. vite).
+    // Some(token) => watch the first line that starts with LMS_TOKEN= and
+    // capture the value into the shared state, dropping that one line
+    // from log::info! forwarding so the token never lands in Tauri's log.
+    token_capture: Option<Arc<Mutex<String>>>,
 ) -> Option<std::process::Child> {
-    use std::process::{Command, Stdio};
     use std::io::{BufRead, BufReader};
+    use std::process::{Command, Stdio};
 
     let mut cmd = Command::new(program);
     cmd.args(args)
@@ -82,8 +160,17 @@ fn spawn_child(
         Ok(mut child) => {
             if let Some(stdout) = child.stdout.take() {
                 let lbl = label;
+                let capture = token_capture.clone();
                 std::thread::spawn(move || {
                     for line in BufReader::new(stdout).lines().flatten() {
+                        // Token-capture path: if this is the LMS_TOKEN=
+                        // banner line, swallow it (do NOT log::info!) so
+                        // the token value can't reach the Tauri log file.
+                        if let Some(ref tok) = capture {
+                            if try_capture_token(&line, tok) {
+                                continue;
+                            }
+                        }
                         log::info!("[{}] {}", lbl, line);
                     }
                 });
@@ -106,7 +193,7 @@ fn spawn_child(
 }
 
 #[cfg(debug_assertions)]
-fn spawn_dev_backend(app: &tauri::AppHandle) {
+fn spawn_dev_backend(app: &tauri::AppHandle, token: Arc<Mutex<String>>) {
     use tauri::Manager;
 
     let root = match find_repo_root() {
@@ -124,11 +211,20 @@ fn spawn_dev_backend(app: &tauri::AppHandle) {
     if is_port_busy(8000) {
         log::info!("[backend] Port 8000 in use — skipping spawn.");
     } else {
-        log::info!("[backend] Spawning python -m app.main from {}", root.display());
-        backend = spawn_child("backend", "python", &["-m", "app.main"], &root);
+        log::info!(
+            "[backend] Spawning python -m app.main from {}",
+            root.display()
+        );
+        backend = spawn_child(
+            "backend",
+            "python",
+            &["-m", "app.main"],
+            &root,
+            Some(token.clone()),
+        );
     }
 
-    // Vite dev server (port 5173)
+    // Vite dev server (port 5173) -- never emits LMS_TOKEN=, no capture needed.
     if is_port_busy(5173) {
         log::info!("[vite] Port 5173 in use — skipping spawn.");
     } else {
@@ -138,11 +234,17 @@ fn spawn_dev_backend(app: &tauri::AppHandle) {
             // npm on Windows is a .cmd shim → run via cmd.exe
             #[cfg(target_os = "windows")]
             {
-                vite = spawn_child("vite", "cmd.exe", &["/c", "npm", "run", "dev"], &frontend);
+                vite = spawn_child(
+                    "vite",
+                    "cmd.exe",
+                    &["/c", "npm", "run", "dev"],
+                    &frontend,
+                    None,
+                );
             }
             #[cfg(not(target_os = "windows"))]
             {
-                vite = spawn_child("vite", "npm", &["run", "dev"], &frontend);
+                vite = spawn_child("vite", "npm", &["run", "dev"], &frontend, None);
             }
         } else {
             log::warn!("[vite] frontend/package.json missing — skipping.");
@@ -188,32 +290,41 @@ async fn ensure_oauth_token(
     progress_event: &str,
 ) -> Result<String, String> {
     // Step 1: Generate auth URL with PKCE
-    let (auth_url, code_verifier) = soundcloud_client::get_auth_url()
-        .map_err(|e| format!("Configuration error: {}", e))?;
+    let (auth_url, code_verifier) =
+        soundcloud_client::get_auth_url().map_err(|e| format!("Configuration error: {}", e))?;
     log::info!("[SoundCloud] Opening browser for login...");
 
     // Emit event: auth started
-    let _ = app.emit(progress_event, serde_json::json!({
-        "stage": "auth", "message": "Opening browser for login..."
-    }));
+    let _ = app.emit(
+        progress_event,
+        serde_json::json!({
+            "stage": "auth", "message": "Opening browser for login..."
+        }),
+    );
 
     if let Err(e) = open::that(&auth_url) {
         return Err(format!("Could not open browser: {}", e));
     }
 
     // Step 2: Wait for OAuth callback
-    let _ = app.emit(progress_event, serde_json::json!({
-        "stage": "auth", "message": "Waiting for authorization..."
-    }));
+    let _ = app.emit(
+        progress_event,
+        serde_json::json!({
+            "stage": "auth", "message": "Waiting for authorization..."
+        }),
+    );
     let code = tokio::task::spawn_blocking(soundcloud_client::wait_for_callback)
         .await
         .map_err(|e| format!("Task join error: {}", e))?
         .map_err(|e| format!("Callback error: {}", e))?;
 
     // Step 3: Exchange code for access token
-    let _ = app.emit(progress_event, serde_json::json!({
-        "stage": "auth", "message": "Exchanging code for token..."
-    }));
+    let _ = app.emit(
+        progress_event,
+        serde_json::json!({
+            "stage": "auth", "message": "Exchanging code for token..."
+        }),
+    );
     let token = soundcloud_client::exchange_code_for_token(&code, &code_verifier)
         .await
         .map_err(|e| format!("Token exchange failed: {}", e))?;
@@ -235,9 +346,12 @@ async fn login_to_soundcloud(app: tauri::AppHandle) -> Result<String, String> {
     let token = ensure_oauth_token(&app, "sc-login-progress").await?;
 
     log::info!("[SoundCloud] ✓ Authorization successful.");
-    let _ = app.emit("sc-login-progress", serde_json::json!({
-        "stage": "done", "message": "Authorization successful."
-    }));
+    let _ = app.emit(
+        "sc-login-progress",
+        serde_json::json!({
+            "stage": "done", "message": "Authorization successful."
+        }),
+    );
 
     Ok(token)
 }
@@ -265,7 +379,11 @@ struct ExportTrack {
 /// - "Playlist creation failed (...)" if SoundCloud rejects the create
 /// - "No tracks were found on SoundCloud" if every search came back empty
 #[tauri::command]
-async fn export_to_soundcloud(app: tauri::AppHandle, playlist_name: String, tracks: Vec<ExportTrack>) -> Result<String, String> {
+async fn export_to_soundcloud(
+    app: tauri::AppHandle,
+    playlist_name: String,
+    tracks: Vec<ExportTrack>,
+) -> Result<String, String> {
     let sc_tracks: Vec<Track> = tracks
         .into_iter()
         .map(|t| Track {
@@ -279,18 +397,23 @@ async fn export_to_soundcloud(app: tauri::AppHandle, playlist_name: String, trac
     log::info!("[SoundCloud] ✓ Access token received.");
 
     // Step 4: Search tracks and create playlist
-    let result = soundcloud_client::search_and_create_playlist(&token, &playlist_name, sc_tracks, Some(app))
-        .await
-        .map_err(|e| format!("Playlist creation failed: {}", e))?;
+    let result =
+        soundcloud_client::search_and_create_playlist(&token, &playlist_name, sc_tracks, Some(app))
+            .await
+            .map_err(|e| format!("Playlist creation failed: {}", e))?;
 
     if result.failed_tracks.is_empty() {
-        Ok(format!("Playlist '{}' exported to SoundCloud! (All {} tracks)", playlist_name, result.success_count))
+        Ok(format!(
+            "Playlist '{}' exported to SoundCloud! (All {} tracks)",
+            playlist_name, result.success_count
+        ))
     } else {
         // Return a detailed report of failures
         let failed_list = result.failed_tracks.join("\n- ");
-        Ok(format!("Exported {} tracks.\n\nFailed to find {} tracks:\n- {}", 
-            result.success_count, 
-            result.failed_tracks.len(), 
+        Ok(format!(
+            "Exported {} tracks.\n\nFailed to find {} tracks:\n- {}",
+            result.success_count,
+            result.failed_tracks.len(),
             failed_list
         ))
     }
@@ -309,36 +432,49 @@ fn main() {
     // Robust .env loading: search in current and parent dirs
     match dotenvy::dotenv() {
         Ok(path) => log::info!("[LibraryManagementSystem] Found .env at: {:?}", path),
-        Err(_) => log::info!("[LibraryManagementSystem] No .env file found. Using system environment variables."),
+        Err(_) => log::info!(
+            "[LibraryManagementSystem] No .env file found. Using system environment variables."
+        ),
     }
-    
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .manage(AudioCommandState(Mutex::new(AudioController::default())))
+        .manage(SessionToken(Arc::new(Mutex::new(String::new()))))
         .invoke_handler(tauri::generate_handler![
-            close_splashscreen, 
-            login_to_soundcloud, 
+            close_splashscreen,
+            login_to_soundcloud,
             export_to_soundcloud,
             load_audio,
             get_3band_waveform,
             list_audio_devices,
             start_project_export,
             fingerprint_track,
-            fingerprint_batch
+            fingerprint_batch,
+            get_session_token
         ])
         .setup(|app| {
+            // Both spawn paths feed into the same shared SessionToken state
+            // registered above. We pull a clone of the Arc out of the
+            // managed state so the per-spawn-thread closures own their own
+            // handle for the lifetime of the sidecar process.
+            let token_state: State<SessionToken> = app.state::<SessionToken>();
+            let token_handle: Arc<Mutex<String>> = token_state.0.clone();
+
             #[cfg(not(debug_assertions))]
             {
                 let shell = app.shell();
-                let sidecar_command = shell.sidecar("rb-backend")
+                let sidecar_command = shell
+                    .sidecar("rb-backend")
                     .map_err(|e| format!("failed to create sidecar command: {}", e))?;
 
                 let (mut rx, child) = sidecar_command
                     .spawn()
                     .map_err(|e| format!("failed to spawn sidecar: {}", e))?;
 
+                let token_for_loop = token_handle.clone();
                 tauri::async_runtime::spawn(async move {
                     // Keep the child alive in this scope
                     let _child = child;
@@ -347,10 +483,21 @@ fn main() {
                             Some(event) => {
                                 match event {
                                     CommandEvent::Stdout(line) => {
-                                        log::info!("backend: {}", String::from_utf8_lossy(&line).trim());
+                                        let text = String::from_utf8_lossy(&line);
+                                        let trimmed = text.trim();
+                                        // Detect-and-drop the LMS_TOKEN= banner BEFORE
+                                        // forwarding the line to log::info!, so the
+                                        // token value can't reach Tauri's log file.
+                                        if try_capture_token(trimmed, &token_for_loop) {
+                                            continue;
+                                        }
+                                        log::info!("backend: {}", trimmed);
                                     }
                                     CommandEvent::Stderr(line) => {
-                                        log::warn!("backend-error: {}", String::from_utf8_lossy(&line).trim());
+                                        log::warn!(
+                                            "backend-error: {}",
+                                            String::from_utf8_lossy(&line).trim()
+                                        );
                                     }
                                     CommandEvent::Error(err) => {
                                         log::error!("backend-critical: {}", err);
@@ -363,10 +510,10 @@ fn main() {
                     }
                 });
             }
-            
+
             #[cfg(debug_assertions)]
             {
-                spawn_dev_backend(&app.handle());
+                spawn_dev_backend(&app.handle(), token_handle);
             }
 
             Ok(())
