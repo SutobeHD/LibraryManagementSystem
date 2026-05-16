@@ -19,6 +19,7 @@ related: []
 
 - 2026-05-15 — `research/idea_` — created from template
 - 2026-05-15 — research/idea_ — section fill (research dive)
+- 2026-05-15 — research/idea_ — concrete API economics + match-key precision research
 
 ---
 
@@ -82,6 +83,26 @@ Classify each track as **Underground vs Mainstream** by estimating cross-platfor
 
 Codebase already has partial scaffolding for the matching half of the problem. `app/soundcloud_api.py` holds an authenticated V2 client (`get_sc_client_id` at line 36, dynamic-scrape fallback at line 69+) plus a fuzzy track matcher (`SoundCloudSyncEngine._fuzzy_match_with_score` at line 566, SequenceMatcher, threshold `0.65`). The same payload that `sync_playlist` consumes carries `playback_count` natively in the SoundCloud V2 response but the file does not currently read it — adding popularity is a pure read, no new auth. ISRC is stored end-to-end (tags → DB → USB export: `app/audio_tags.py:319`, `app/services.py:1111`, `app/usb_pdb.py:497`) which makes it the strongest cross-platform match key when present, but SoundCloud-sourced tracks largely lack ISRC (`app/soundcloud_downloader.py:723-727` shows the plumbing is acknowledged-incomplete). `master.db` is Rekordbox-managed and write-serialised by `app/main.py:_db_write_lock`; popularity therefore wants a sidecar SQLite (precedent: `app/anlz_sidecar.py` for per-track artefacts; no per-library sidecar DB exists yet). Spotify `popularity` is 0–100 already-normalised, Last.fm exposes raw playcount+listeners, YouTube exposes raw view counts; magnitudes span 4–6 orders of magnitude, so log + percentile-within-genre is the realistic normalisation path. No existing research doc touches this topic (checked `docs/research/_INDEX.md` is the canonical index).
 
+### 2026-05-15 — concrete API economics + match-key precision research
+
+Per-provider cost, match precision, demographic bias. Q3/Q5/Q7/Q10 become directly answerable — see follow-ups inline.
+
+**Spotify Web API — `popularity`.** `GET /v1/tracks/{id}` returns `popularity: 0–100` (already log-normalised, proprietary recency-weighted — a 2020 hit may score lower than a current sleeper). Batch `GET /v1/tracks?ids=...` accepts up to 50 IDs/call. Auth: Client Credentials (no user OAuth); env vars `SPOTIFY_CLIENT_ID` + `SPOTIFY_CLIENT_SECRET`; ~60min token refresh. Rate limit ~180 req/min, bursty + `Retry-After`. Match: `GET /v1/search?q=isrc:USAB12345678&type=track` is exact (near-complete ISRC coverage for commercial releases). Without ISRC: `q=artist:"X" track:"Y"` + fuzzy-rank.
+
+**SoundCloud V2 — `playback_count`.** Already authenticated via `app/soundcloud_api.py:36`. Track JSON also carries `favoritings_count`, `comment_count`, `reposts_count`. No ISRC in SC search — fuzzy on title+artist via existing `_fuzzy_match_with_score`. SC catalogue is bedroom-producer-heavy: SC `playback_count` is THE key underground signal (where Spotify shows 5/100, SC may show 50k plays). V2 rate limit undocumented; observed-safe at 0.3s spacing (`app/soundcloud_api.py:169-234`).
+
+**YouTube Data API v3 — `viewCount`.** `videos.list?part=statistics&id=...` costs 1 unit; `search.list?q=...` costs 100. Quota 10 000 units/day. Hard ceiling: 100 cold lookups/day (search) or 10 000 warm (videos.list with known IDs). Auth: API key. No ISRC. Search results polluted (covers, fan uploads, lyric videos); low confidence without uploader-vs-canonical-artist gate.
+
+**Last.fm — `track.getInfo`.** Returns `playcount` (total scrobbles) + `listeners` (unique). Auth: API key only. Documented 5 req/sec — generous. MBID-based when available (highest precision; MB-fetched cheaply); else artist+title fuzzy. Demographic skew: older / Western / indie-heavy.
+
+**MusicBrainz / Discogs.** No play counts but excellent canonical-ID / ISRC linkage. Use as match-key resolvers: library track → MBID → MB-linked services. MB 1 req/s; Discogs 60 req/min (auth).
+
+**Normalisation math.** Counts span 4–6 orders of magnitude. (1) per-platform `log10(1 + count)`. (2) per-platform percentile-rank within library (SC=10k is low percentile in bedroom-techno collection, high in Top-40 — context matters). Aggregate weighting genre-aware: house/techno → SC > Beatport > Spotify > YouTube > Last.fm; pop → Spotify > YouTube > Last.fm > SC. Banding (0–1 composite): underground <0.25, niche 0.25–0.55, rising 0.55–0.75, mainstream >0.75. User-tunable.
+
+**Caching + cadence.** Sidecar SQLite row per (track_id, platform) with raw_count, fetched_at, score. TTL: SC daily, Spotify/YouTube/Last.fm weekly. Cold scan of 30k library: Spotify ≈3h (30k/180/min), SC ≈2.5h (0.3s spacing), YT NOT FEASIBLE without ISRC (30k×100 units = 30 days of quota). Mitigation: YT-lookup only tracks where Spotify+SC+LastFM is inconclusive (rising band).
+
+**Open Questions touched:** Q3 (MVP set) — Spotify+SC+Last.fm; YouTube fails economics. Q5 (cadence) — TTL sidecar refresh wins over per-import or full-rescan. Q7 (threshold) — ISRC > MBID > fuzzy@0.80 (tighten from 0.65; cross-platform false positives costlier than within-SC). Q10 (caching) — mandatory; cold rescan is hours-scale.
+
 ## Options Considered
 
 > Required by `evaluated_`. For each viable approach: sketch (2-4 lines), pros, cons, effort (S/M/L/XL), risk.
@@ -118,8 +139,13 @@ Codebase already has partial scaffolding for the matching half of the problem. `
 
 Start with **Option A** as the MVP (one-week effort, validates storage + UX), then expand to **Option B** once the sidecar-DB shape and UI affordances are settled. Defer Option C until ISRC/MBID coverage in the library is measured (open question 7 informs this). Option D's banding rules can be layered on top of either A or B's continuous score — they aren't mutually exclusive.
 
+**Phasing (per 2026-05-15 Findings above):**
+- **Phase 1:** Spotify + SoundCloud + Last.fm with ISRC-driven match (Spotify `q=isrc:`; Last.fm via MBID-from-ISRC), fuzzy@0.80 fallback. All three are cost-feasible for a 30k cold scan in hours, and cover bedroom-producer / Western-indie / commercial-pop axes.
+- **Phase 2:** Beatport popularity-rank (opt-in, ToS-grey scrape) and MusicBrainz-relations to widen MBID coverage upstream of Last.fm.
+- **Phase 3:** YouTube `videos.list` only on tracks still `rising` after Phases 1–2. Downgraded from MVP because `search.list` at 100 units/call makes cold ISRC-less scans infeasible (~30 days of quota for 30k tracks).
+
 Gates that must be answered before promotion to `evaluated_`:
-- Open questions 1, 3, 5, 7 (score shape, MVP platform set, refresh cadence, match-key priority).
+- Open questions 1, 3, 5, 7 (score shape, MVP platform set, refresh cadence, match-key priority) — Q3/Q5/Q7 partially answered in Findings.
 - Concrete sidecar-DB location decision (alongside existing app data, distinct from `master.db`).
 - Confirmation that Spotify client-credentials use is acceptable under their ToS for a desktop app distributed as a Tauri binary (commercial / non-commercial distinction).
 

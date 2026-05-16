@@ -19,6 +19,7 @@ related: [recommender-rules-baseline, recommender-taste-llm-audio]
 
 - 2026-05-15 — `research/idea_` — created from template
 - 2026-05-15 — research/idea_ — section fill (research dive)
+- 2026-05-15 — research/idea_ — shared-vector pipeline coordination with Teil-2
 
 ---
 
@@ -103,6 +104,33 @@ Confirmed signal sources for a **local-only** seed-based similarity ranker exist
 
 **Performance feasibility:** 50k × 40-dim float32 = ~8 MB. Brute cosine in numpy is sub-50 ms cold. `sklearn.NearestNeighbors` or FAISS only become attractive at ≥ 500k tracks. ≤ 100 ms budget is easily achievable.
 
+### 2026-05-15 — shared-vector pipeline design vs Teil-2 coordination
+
+**Teil-2's position.** Four options: A (handcrafted ~40-dim + cosine), B (CLAP / OpenL3 / MERT 512-768-d + FAISS), C (LLM-in-loop, no audio), D (hybrid). Recommendation deliberately non-committal: *"Land Teil 1 first; prototype A; benchmark B; defer LLM."* The A-vs-B decision is **blocked on benchmark data** that doesn't exist yet (extraction time, PyTorch bundling cost).
+
+**Implication.** If similar-tracks ships before Teil-2 decides, it must commit to one vector shape. Two paths: (1) ship A now, let Teil-2 inherit same storage; (2) block on Teil-2's benchmark. Path 2 is open-ended — Teil-2 is itself gated on Teil-1 shipping the `plays` table.
+
+**Option-A handcrafted vector — concrete spec for sharing.** Source signals already produced by `app/analysis_engine.py`: BPM (1), key in Krumhansl / Camelot-numeric (1-2), LUFS (1), spectral centroid + rolloff + flatness + bandwidth (4), MFCC mean+std for 13 coefficients (26), chroma mean over 12 pitch classes (12). Total ~46 dims. Storage: sidecar SQLite `app_data/track_vectors.db` (deliberately **not** `master.db` — schema-frozen). Row shape: `(track_id, vector_blob, fps_id, computed_at)`. `fps_id` = analysis-engine version-fingerprint for cache-invalidation when the extractor changes. Metric: cosine on the full vector vs. per-feature weighted sum — cosine simpler; weighted exposes a "vibe vs. harmonic" tuning slider. Default weights: MFCC 0.35, chroma 0.25, BPM-Gaussian 0.15, key-Camelot 0.10, LUFS + spectral 0.15.
+
+**Option-B shareability.** CLAP / MERT: 512-768-d ~4 KB/track vs. A's ~180 bytes → 50k library = 200 MB vs. 9 MB. Extraction: 1-2 s/track CPU, 0.1-0.3 s GPU (cold-scan 50k = ~14 h CPU, ~1.5 h GPU). PyTorch dep: ~200 MB installer bloat + PyInstaller / Tauri sidecar cold-start issues (Teil-2 flags, lines 81-82). Shareability trivial: same table, only `vector_blob` shape differs.
+
+**Decision matrix:**
+
+| Path | Pro | Con | Recommend |
+|------|-----|-----|-----------|
+| Wait for Teil-2 | Single pipeline ever | Blocked (Teil-2 gated on Teil-1) | NO |
+| Ship A now, swap to B later | Unblocks now; shared schema → swap-in compatible | Two extractor impls briefly | **YES, M1** |
+| Ship A; never adopt B | Lightest infra | Misses Spotify-class quality | M1 default; revisit at Teil-2 benchmark |
+
+**UX entry-points concrete** (refining Goals): context-menu "Find similar in library" → side-panel with top-20 + reasons; optional always-on Ranking-view sidebar that updates on selection (costs state-management); API entry `GET /api/similar/local?seed_track_id=...&limit=20&exclude_same_artist=true&bpm_window=0.06`. All gated by Phase-1 auth per the auth-hardening draftplan.
+
+**Filters concrete:** same-artist exclude (default ON), same-playlist exclude (default ON), BPM tolerance ±6% (Pioneer CDJ pitch range), key strict/relaxed Camelot toggle, duration window (avoid 0:45 ambient matching 6:00 techno), exclude-recently-played (activates once Teil-1 ships `plays`).
+
+**Open Questions newly answerable:**
+- **OQ1** — answered: ship Option A standalone; share storage shape with whatever Teil-2 picks later. Swap is a `compute_track_vector()` impl change; no schema migration, no UX change.
+- **OQ10** — answered: sidecar SQLite `app_data/track_vectors.db`, single table keyed by track_id with `fps_id` for cache-invalidation. Beats flat `.npy` (no atomicity) and in-memory-only (cold-start latency on 50k tracks).
+- **OQ2** + **OQ6** remain open but reframed as UX choices, not architecture — weighted-sum + filter-first is the M1 default.
+
 ## Options Considered
 
 > Required by `evaluated_`. For each viable approach: sketch (2-4 lines), pros, cons, effort (S/M/L/XL), risk.
@@ -139,16 +167,18 @@ Confirmed signal sources for a **local-only** seed-based similarity ranker exist
 
 > Required by `evaluated_`. Which option, what we wait on before committing.
 
-**Leaning: Option C (handcrafted vector + categorical weighting) for v1**, with a migration path to Option B when Teil 2 lands.
+**Commit for M1: Option C (handcrafted ~46-dim vector + categorical weighting)**, persisted in sidecar SQLite `app_data/track_vectors.db` with `(track_id, vector_blob, fps_id, computed_at)` shape — schema chosen to be Option-B-compatible so a Teil-2 swap to CLAP / MERT later changes only `compute_track_vector()` impl + `vector_blob` size, **not** storage layout, query API, filters, reasons-list shape, or UX. Migration path to Option B is therefore a one-function change inside the extractor, not a cross-cutting refactor.
 
 Rationale:
-- Ships standalone, no dependency on Teil-2 decisions still in flight.
+- Ships standalone, no dependency on Teil-2 decisions still in flight (Teil-2 itself blocks on Teil-1's `plays` table).
 - Uses primitives already produced by `analysis_engine.py` — no new analysis pass, no new deps.
 - Categorical bonuses (MyTag overlap, shared genre, key proximity) catch DJ-meaningful similarity that pure MFCC cosine misses, and feed the reasons list naturally.
 - Brute cosine over ≤ 50k vectors meets the 100 ms budget — FAISS / ANN can be deferred until library scale demands it.
 - When Teil 2 commits to a learned embedding, the vector source swaps but the query API, filters, reasons-list shape, and UX stay identical.
 
-**Gate before promoting to `evaluated_`**: resolve OQ 1 (share with Teil 2 vs. ship standalone), OQ 3 (mode switch vs. strict separation from Teil 1), OQ 4 (UX entry point), and OQ 6 (BPM/key as filters vs. score components).
+**Cross-cutting concern (explicit):** if `recommender-taste-llm-audio` later picks Option B, this doc upgrades by changing `compute_track_vector()` impl; storage table, query API, filters, and UX stay stable. No coordinated re-deploy.
+
+**Gate before promoting to `evaluated_`**: resolve OQ 3 (mode switch vs. strict separation from Teil 1), OQ 4 (UX entry-point pick: context-menu, sidebar, or both), OQ 5 (default filter posture), and OQ 7 (MMR diversity rerank). OQ 1 + OQ 10 are now answered by the 2026-05-15 shared-pipeline finding above.
 
 ---
 

@@ -19,6 +19,7 @@ related: []
 
 - 2026-05-15 — `research/idea_` — created from template
 - 2026-05-15 — `research/idea_` — section fill (research dive)
+- 2026-05-15 — `research/idea_` — tech-choice deep-dive + QR-pairing UX sketch
 
 ---
 
@@ -121,6 +122,34 @@ Mobile must reproduce: source picker (4 modes), queue progress, per-track stars 
 
 **Auth gap is the blocker.** A LAN-exposed FastAPI on 8000 with anonymous track-write access lets anyone on the Wi-Fi 5-star-rate the whole library. Must add a `Depends(verify_session_token)` to ranking writes (at minimum) before any mobile work ships.
 
+### 2026-05-15 — tech-choice deep-dive + QR-pairing UX sketch (post auth-Phase-1)
+
+Grounds Phase-2 dependencies now that `docs/research/implement/draftplan_security-api-auth-hardening.md` exists. Phase-1 lands Bearer-only `require_session` on every mutation route; Phase-2 adds paired-device tokens in a sidecar-local SQLite — **hard-prereq for mobile**. Auth surfaces mobile relies on: `Authorization: Bearer <device_token>` per call, against a `paired_devices` table, plus `POST /api/pairing/{start,complete}` and a revoke endpoint.
+
+**PWA vs Capacitor vs React Native**
+
+| Aspect | PWA | Capacitor | React Native |
+|---|---|---|---|
+| Code-share with `frontend/` | full (same React) | full | partial (no DOM) |
+| App-store distribution | install-banner only (Chrome) / no (iOS Safari) | yes | yes |
+| iOS limitations | `beforeinstallprompt` unsupported, background tasks limited, web-push only on 16.4+ | full native | full native |
+| mDNS LAN discovery | NO (web sandbox) | YES via plugin | YES |
+| Camera for QR-scan | YES (`getUserMedia`; `qr-scanner` polyfill where `BarcodeDetector` missing) | YES native | YES native |
+| Bundle / install | minimal | +~5 MB shell | +~15-25 MB |
+| Dev complexity | lowest | low | medium |
+| OTA updates | trivial (web reload) | Capacitor Live Update | app-store re-release |
+| Verdict | **M1 pick** | M2 if mDNS / push must-have | overkill for metadata-only |
+
+**iOS PWA impact on Ranking**: Add-to-Homescreen works (iOS 12.2+; icon/splash/standalone OK). `beforeinstallprompt` unsupported → one-time manual instructions on first iOS-Safari visit (UA-detect). Background tasks irrelevant (Ranking is foreground-only). Camera via `getUserMedia` since iOS 11; `qr-scanner` polyfill covers missing `BarcodeDetector`. Web-push works on iOS 16.4+ installed PWAs (nice-to-have). **Viable for Ranking-only.**
+
+**QR-pairing UX**: Desktop adds a "Pair Mobile Device" Settings view showing auto-detected LAN IP (dropdown if multiple bind interfaces), port 8000, one-shot pairing token (6-digit human + URL-safe long, from the `_format_tokens` helper Phase-2 generalises), and a QR encoding `lmsapp://pair?host=192.168.1.42&port=8000&token=<one-shot>`. Refresh every 60 s; Cancel revokes pending pairing. Mobile first-visit shows "Scan pairing QR from desktop"; camera prompt; scan → `POST /api/pairing/complete` → receive `device_token` + `device_id` → store in `localStorage` + service-worker IndexedDB → subsequent calls Bearer-attach. Server revoke → mobile 401 → "Re-pair" screen. mDNS auto-find via `_libmgr._tcp.local` would skip host-entry but is Capacitor-only (PWA sandbox blocks it).
+
+**Off-LAN access**: **Tailscale Funnel** (free personal, `<machine>.<tailnet>.ts.net` HTTPS, zero NAT pain) is canonical — recommend in README, **do NOT embed any tunnel client**; the app only provides the Bearer-token over whichever pipe. Alternatives: **Cloudflare Tunnel** (`*.trycloudflare.com`, rate-limited, ephemeral URLs unless paid) and **ngrok** (free tier limited). PWA `installable` HTTPS gate (OQ11) is satisfied once any tunnel is in play.
+
+**Concurrent-edit policy**: Single-DJ Non-goal → last-write-wins fine. Defer ETag / `updated_at` stale-write detection.
+
+**Open Questions now answerable**: OQ2 **PWA for M1** (Capacitor layerable). OQ3 **Tailscale documented; never embedded**. OQ4 **QR one-shot → long-lived device-token Bearer**; mDNS deferred to M2-Capacitor. OQ5 aligns with auth Phase-2 (long-lived per-device + revoke, no default expiry). OQ10 **acceptable for v1**; manual AddToHomescreen covers `beforeinstallprompt` gap. OQ11 resolved by Tailscale's free HTTPS.
+
 ## Options Considered
 
 > Required by `evaluated_`. For each viable approach: sketch (2-4 lines), pros, cons, effort (S/M/L/XL), risk.
@@ -161,9 +190,13 @@ Mobile must reproduce: source picker (4 modes), queue progress, per-track stars 
 
 > Required by `evaluated_`. Which option, what we wait on before committing.
 
-**Lean: Option A (mobile PWA on the existing Vite/React stack).** Smallest delta, reuses React primitives, no app-store cycle, works on iOS + Android + any tablet browser. Capacitor (Option B) is a strict superset and can be layered later if push / native install ever becomes a hard requirement — no rewrite cost.
+**Commit: Option A (PWA on the existing Vite/React stack) for M1.** Lowest friction, full React-component share with `RankingView.jsx`, no app-store cycle, works on iOS + Android + any tablet browser. M2 reconsiders **Capacitor** only if mDNS-discovery or native push become must-haves — strict superset, no rewrite cost. React Native is overkill for the metadata-only Ranking surface and is rejected.
 
-**Hard prerequisite, regardless of option:** wire `X-Session-Token` into ranking-write routes (`POST /api/track/{id}`, `POST /api/track/{id}/mytags`, `POST /api/mytags`) via a FastAPI dependency, then make CORS allowlist env-driven so LAN / tunnel origins can be added without code changes. Without this, the mobile path is a LAN-wide write-anyone-can-edit hole. This belongs in a sibling research topic (`idea_session-token-rollout`) before mobile work proceeds.
+**Pairing UX = QR with one-shot pairing token → long-lived device-token Bearer**, as sketched in the second Findings subsection. Re-uses the `_format_tokens` helper that auth Phase-2 generalises, plus a new `paired_devices` row in the sidecar-local SQLite. mDNS auto-discovery deferred to M2-Capacitor.
+
+**Off-LAN canonical recipe = Tailscale Funnel** (documented in README; not embedded in the app). Tailscale's free HTTPS also resolves the PWA `installable` HTTPS gate (OQ11) without self-signed certs on LAN. Cloudflare Tunnel / ngrok stay as user-pick alternatives.
+
+**Hard prerequisite, regardless of option:** auth-hardening **Phase-1** (`require_session` Bearer on all mutation routes) AND **Phase-2** (paired-device tokens + QR pairing UI + revoke) from `docs/research/implement/draftplan_security-api-auth-hardening.md` must both ship before any mobile code lands. Phase-1 alone is insufficient — Tauri's boot-token is single-host and cannot be safely handed to a phone. Additionally make the CORS allowlist env-driven (`MOBILE_ALLOWED_ORIGINS`) so LAN / tunnel hostnames can be added without code changes.
 
 **Waiting on:**
 1. User confirms hard-online (no offline queue in v1) — Open Question 1.
