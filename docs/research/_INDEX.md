@@ -23,7 +23,6 @@ If this index drifts from the file system, the file system wins — re-derive wi
 ### exploring
 - [exploring_recommender-rules-baseline.md](research/exploring_recommender-rules-baseline.md) — Teil 1: BPM/Key/Genre/MyTag/Energy ranking + Camelot harmonic mixing; local + SoundCloud modes (2026-05-11)
 - [exploring_recommender-taste-llm-audio.md](research/exploring_recommender-taste-llm-audio.md) — Teil 2: LLM/embedding-based recommender that learns taste from listening behaviour + audio features (2026-05-11)
-- [exploring_security-api-auth-hardening.md](research/exploring_security-api-auth-hardening.md) — **PRIORITY-1** API auth/authz hardening — promoted from idea after audit + 5 hot-fixes; Phase-1 draftplan next (2026-05-15)
 
 ### evaluated
 _(none)_
@@ -36,7 +35,7 @@ _(none)_
 ## implement/
 
 ### draftplan
-_(none)_
+- [draftplan_security-api-auth-hardening.md](implement/draftplan_security-api-auth-hardening.md) — **PRIORITY-1** Phase 1 auth: stdout+file token handoff, require_session on all mutation routes, Bearer-only, init-token deleted, SHUTDOWN_TOKEN query-scheme deleted. Ready for review_. (2026-05-15)
 
 ### review
 _(none)_
