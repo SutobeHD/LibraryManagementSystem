@@ -44,6 +44,11 @@ essentia==2.1b6.dev1110
 tqdm==4.66.1
 keyring==25.7.0
 python-dotenv==1.2.2
+# Cross-platform user-data-dir resolution for the session-token file
+# (`app/auth.py` writes `%APPDATA%/MusicLibraryManager/.session-token` on
+# Windows, `~/Library/Application Support/MusicLibraryManager/` on macOS,
+# and `~/.local/share/MusicLibraryManager/` on Linux).
+platformdirs==4.2.2
 
 # --- Audio I/O ---
 soundfile==0.13.1
