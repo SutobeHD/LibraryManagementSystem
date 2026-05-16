@@ -26,6 +26,8 @@ related: [analysis-remix-detector, library-quality-upgrade-finder]
 
 > Required from `idea_` onward. Keep under 100 words. What are we solving? Why does it matter? What happens if we don't?
 
+DJs frequently end up with the **Radio Edit** (2:30–3:30) of a track from streaming/casual sources when what they actually need for mixing on the CDJs is the **Extended Mix / Club Mix / Long Version** (5:00–7:30) with the long intro/outro that gives 16–32 bars of clean kick/groove for blending. Today the library has no way to surface "your `Track X (Radio Edit)` has an Extended Mix on Beatport/SoundCloud/Bandcamp you don't own yet." DJs work around this manually (search per track at gig-prep time) or simply mix short versions, which produces ugly transitions. This doc designs the **cross-source scanner** that surfaces ranked replacement/companion suggestions per library track, with user-confirmed add. Sister-doc `analysis-remix-detector` handles the within-library variant grouping; this doc handles the not-yet-in-library discovery.
+
 ## Goals / Non-goals
 
 **Goals**

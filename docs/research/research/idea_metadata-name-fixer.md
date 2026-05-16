@@ -26,6 +26,8 @@ related: []
 
 > Required from `idea_` onward. Keep under 100 words. What are we solving? Why does it matter? What happens if we don't?
 
+Real-world DJ libraries (especially anything sourced from SoundCloud, YouTube, or DMs) carry **malformed artist/title metadata** — artist accidentally inside the title parens, `feat. X` glued to the wrong field, `Title - Artist` reversed, `01 - Title` track-number prefixes, mismatched casing, smart-quote vs ASCII drift, HTML entities, embedded label/year markers, double-encoded remix attributions. Cumulative effect: search misses, sort-by-artist groups split, USB-export to Pioneer hardware shows confusing labels **at the gig**. Manual fixing across 10k–50k tracks is infeasible. This doc designs the automation — deterministic patterns + canonical-source lookup + LLM-assisted edge-cases — with hard safety boundaries (dry-run, per-track preview, undo log, file-snapshot) since it **writes to user metadata** with maximal blast radius.
+
 ## Goals / Non-goals
 
 **Goals**

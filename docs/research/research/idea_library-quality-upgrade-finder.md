@@ -26,6 +26,8 @@ related: [library-extended-remix-finder]
 
 > Required from `idea_` onward. Keep under 100 words. What are we solving? Why does it matter? What happens if we don't?
 
+Library audio quality is **uneven** — years of accumulating sources mean MP3-128/256 sits next to FLAC/WAV, and some "FLAC" files are actually **transcoded from MP3** (detectable by a 16-19 kHz spectral cliff vs lossless extending to Nyquist 22.05 kHz). On CDJ-3000 club systems and on good headphones during prep the quality difference is audible. Today the user has no per-track quality signal and no way to learn "this radio rip has a lossless purchase available at Bandcamp." This doc designs the **per-track quality auditor** (container + true bitrate + sample rate + bit depth + spectral cutoff) AND the **external-source scanner** for higher-quality replacements. Critical constraint: replacement must preserve hard-earned Rekordbox metadata (cue points, beatgrid, MyTag, rating, color, play count) — a single wrong replacement = data loss, so blast radius dominates the design.
+
 ## Goals / Non-goals
 
 **Goals**

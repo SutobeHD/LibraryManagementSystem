@@ -26,6 +26,8 @@ related: [library-extended-remix-finder, metadata-name-fixer]
 
 > Required from `idea_` onward. Keep under 100 words. What are we solving? Why does it matter? What happens if we don't?
 
+DJ libraries accumulate many tracks that are **variants of the same original** — Radio Edit, Extended Mix, "Some Artist Remix", VIP, Bootleg, Dub, Acapella, Instrumental, Club Mix. Today these sit as independent library rows with **no relationship signal**, making it hard to (a) know whether a usable version is already present, (b) pick the right variant for a set context, (c) dedupe or group intelligently in the Library/Ranking UI. This doc designs the detector that **classifies each track's variant type** and **links related variants** — both within the local library and against external metadata sources where the canonical original may not be local yet.
+
 ## Goals / Non-goals
 
 **Goals**
