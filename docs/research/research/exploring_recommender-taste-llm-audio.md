@@ -3,9 +3,9 @@ slug: recommender-taste-llm-audio
 title: Taste-aware audio recommender (Teil 2 of the recommender split)
 owner: unassigned
 created: 2026-05-11
-last_updated: 2026-05-11
+last_updated: 2026-05-15
 tags: [recommender, ml, audio-analysis, soundcloud, embeddings, llm]
-related: [recommender-rules-baseline]
+related: [recommender-rules-baseline, recommender-similar-tracks]
 ---
 
 # Taste-aware audio recommender (Teil 2)
@@ -16,6 +16,7 @@ related: [recommender-rules-baseline]
 
 - 2026-05-11 — `research/idea_` — created as Teil 2 of recommender split (gated by Teil 1 landing first)
 - 2026-05-11 — `research/exploring_` — options A-D outlined; pending audio-embedding benchmark and Teil 1 baseline
+- 2026-05-15 — research/exploring_ — scope clarification re: new local-only sibling doc
 
 ## Problem
 
@@ -108,6 +109,22 @@ Don't decide yet. Concrete next steps that don't commit to a path:
 _Not yet decided. Status: `exploring`._
 
 ## Log
+
+### 2026-05-15 — scope clarification + sibling doc landed
+
+A new sibling doc — [idea_recommender-similar-tracks.md](idea_recommender-similar-tracks.md) — was created as the **local-only** seed-driven similar-tracks counterpart. This Teil 2 doc remains the broader taste-aware / embedding-based recommender covering **both local and SoundCloud modes**, with personalisation from play history. The local-only "find similar in my library" UX surface now lives in the sibling doc; the embedding extraction pipeline (Option A handcrafted, Option B CLAP/MERT) is the shared primitive both docs can consume.
+
+**Open Question re-check:**
+1. Embedding source — unresolved; sibling doc can ship on Option A independently.
+2. Taste representation — unresolved; not affected by sibling.
+3. LLM in loop — unresolved.
+4. Storage — unresolved; sibling doc raises same question (its OQ-10), favours shared store.
+5. Cold-start — unresolved; sibling sidesteps (seed-driven, not user-driven).
+6. Negative signals — unresolved; still blocked on `plays` table.
+7. SC candidate set — unresolved; sibling explicitly excludes SC.
+8. Privacy — unresolved.
+
+**Recent commits since 2026-05-11** touching `app/live_database.py`: `bd8c0f7` typed `restore_backup` return + structured logging, `cc171ee` dropped legacy session backups + `BACKUP_DIR`, `13b2197` type-hinted `LiveRekordboxDB` public API, `fbb4aad` typed bare excepts. No changes to `analysis_engine.py` or `audio_analyzer.py`. None alter signal sources for this doc.
 
 ### 2026-05-11 — initial drafting
 - Created during the recommender-split discussion. Teil 1 (dumb, rules-based) is being implemented now.

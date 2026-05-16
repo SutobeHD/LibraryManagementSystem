@@ -3,9 +3,9 @@ slug: recommender-rules-baseline
 title: Deterministic rules-based track recommender (Teil 1 — baseline / Mixxx-style "next track")
 owner: unassigned
 created: 2026-05-11
-last_updated: 2026-05-11
+last_updated: 2026-05-15
 tags: [recommender, soundcloud, mixing, harmonic, baseline]
-related: [recommender-taste-llm-audio]
+related: [recommender-taste-llm-audio, recommender-similar-tracks]
 ---
 
 # Deterministic rules-based track recommender (Teil 1)
@@ -16,6 +16,7 @@ related: [recommender-taste-llm-audio]
 
 - 2026-05-11 — `research/idea_` — created as Teil 1 of recommender split
 - 2026-05-11 — `research/exploring_` — codebase audit captured, options A-D documented, recommendation drafted
+- 2026-05-15 — research/exploring_ — scope clarification re: new local-only sibling doc
 
 ## Problem
 
@@ -156,6 +157,25 @@ Implementation gate: pin down open questions 2, 3, 4, 6 and confirm frontend sco
   - `live_database.py:283-1130` exposes MyTag CRUD — flat tags, multi-tag per track.
 - Captured the four "stellschrauben" raised during initial design (frontend scope, default weights, BPM tolerance shape, key model) as open questions 1-4.
 - Added open question 10 (logging recommendation events) — cheap to add up front, valuable when Teil 2 lands and needs comparison data.
+
+## Findings
+
+### 2026-05-15 — scope clarification + sibling doc landed
+
+A new sibling doc, [idea_recommender-similar-tracks.md](idea_recommender-similar-tracks.md), was carved out as the **local-only** similar-tracks feature ("what else in my library sounds like this?"). It owns the offline seed-based similarity ranker with its own UX, API, and ranking choices. This Teil 1 doc retains its local mode but the emphasis is the SoundCloud / online "next track" / harmonic-mixing surface — the local mode here is the harmonic "mixes well after this?" answer, not the "sounds like this" answer.
+
+Open-question recheck (all still open; no recent commits to `app/soundcloud_api.py`, `app/analysis_engine.py`, `app/main.py` routes, or `app/live_database.py` between 2026-05-11 and 2026-05-15 substantively shift the design — recent activity (e.g. `cc171ee`, `8fe5036`, `bd8c0f7`) is backup-engine removal and `live_database` typing/logging hardening, orthogonal to recommender scope):
+
+1. Frontend scope — still open.
+2. Default weights — still open.
+3. BPM tolerance default — still open.
+4. Key compatibility model — still open.
+5. Half/double-time matching — still open.
+6. SC candidate sources — still open.
+7. Filtering already-in-library — still open.
+8. Settings persistence — still open.
+9. Result limit + pagination — still open.
+10. Recording recommendation events — still open.
 
 ## Links
 
