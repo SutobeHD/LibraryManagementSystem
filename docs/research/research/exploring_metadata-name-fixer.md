@@ -21,6 +21,7 @@ related: []
 - 2026-05-15 — `research/idea_` — section fill (research dive)
 - 2026-05-15 — research/idea_ — option refinement after Problem framing
 - 2026-05-15 — research/idea_ — exploring_-ready rework loop (deep self-review pass)
+- 2026-05-15 — research/exploring_ — promoted; quality bar met (6/10 OQ resolved + 4 PARKED; Option E added; M0/M1/M2 with Deliverables + Gate blocks)
 
 ---
 

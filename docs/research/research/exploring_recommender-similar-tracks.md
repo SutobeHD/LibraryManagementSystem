@@ -22,6 +22,7 @@ related: [recommender-rules-baseline, recommender-taste-llm-audio]
 - 2026-05-15 — research/idea_ — section fill (research dive)
 - 2026-05-15 — research/idea_ — shared-vector pipeline coordination with Teil-2
 - 2026-05-15 — research/idea_ — exploring_-ready rework loop (deep self-review pass)
+- 2026-05-15 — research/exploring_ — promoted; quality bar met (corrected ~12-15 dim actual vs 46 claimed; 11 OQ accounted; M1/M2/M3 with concrete deliverables + exit criteria)
 
 ---
 

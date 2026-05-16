@@ -21,6 +21,7 @@ related: [analysis-remix-detector, library-quality-upgrade-finder, external-trac
 - 2026-05-15 — research/idea_ — section fill (research dive)
 - 2026-05-15 — research/idea_ — UX + source-priority refinement after Problem framing
 - 2026-05-15 — research/idea_ — exploring_-ready rework loop (deep self-review pass)
+- 2026-05-15 — research/exploring_ — promoted; quality bar met (10/13 OQ resolved + 3 PARKED; corrected matcher/lock/SC-search facts; M1/M2/M3 with unified-Audit-IA)
 
 ---
 

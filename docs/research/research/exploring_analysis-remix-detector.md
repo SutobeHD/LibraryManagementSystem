@@ -21,6 +21,7 @@ related: [library-extended-remix-finder, library-quality-upgrade-finder, externa
 - 2026-05-15 — research/idea_ — section fill (research dive)
 - 2026-05-15 — research/idea_ — option refinement after Problem framing
 - 2026-05-15 — research/idea_ — exploring_-ready rework loop (deep self-review pass)
+- 2026-05-15 — research/exploring_ — promoted; quality bar met (discovered existing src-tauri/src/audio/fingerprint.rs; corrected rapidfuzz→SequenceMatcher; M1/M2/M3 with 200-track fixture)
 
 ---
 

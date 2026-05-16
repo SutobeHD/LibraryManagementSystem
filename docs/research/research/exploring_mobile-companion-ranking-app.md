@@ -21,6 +21,7 @@ related: []
 - 2026-05-15 — `research/idea_` — section fill (research dive)
 - 2026-05-15 — `research/idea_` — tech-choice deep-dive + QR-pairing UX sketch
 - 2026-05-15 — `research/idea_` — exploring_-ready rework loop (deep self-review pass)
+- 2026-05-15 — research/exploring_ — promoted; quality bar met (9/14 OQ resolved + 1 PARKED + 4 OPEN; corrected route count 12→17; Option E added; Pre-M1/M1.0/M1.1/M1.2/M1.3/M2 phased matrix; security Phase-1+2 hard prereq)
 
 ---
 

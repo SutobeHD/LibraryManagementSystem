@@ -17,6 +17,7 @@ related: [analysis-remix-detector, library-extended-remix-finder, library-qualit
 
 - 2026-05-15 — `research/idea_` — scaffolded + initial design fill (cross-cutting from 3 sister docs)
 - 2026-05-15 — research/idea_ — exploring_-ready rework loop (deep self-review pass)
+- 2026-05-15 — research/exploring_ — promoted; quality bar met (caught load-bearing rapidfuzz cross-doc error AND flagged sister-docs for fixup; 8/11 OQ resolved-M1; 5 dated Findings with module-API design specifics)
 
 ---
 

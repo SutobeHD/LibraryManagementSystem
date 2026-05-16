@@ -19,6 +19,7 @@ related: [library-extended-remix-finder, analysis-remix-detector, external-track
 - 2026-05-15 — research/idea_ — section fill (research dive)
 - 2026-05-15 — research/idea_ — transcode + safety refinement after Problem framing
 - 2026-05-15 — research/idea_ — exploring_-ready rework loop (deep self-review pass)
+- 2026-05-15 — research/exploring_ — promoted; quality bar met (6 OQ resolved + 5 PARKED; corrected _db_write_lock location bug; extended safety rules 5→7; Phase 1/2/3 with measurable exit gates)
 
 ---
 

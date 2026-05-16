@@ -21,6 +21,7 @@ related: [external-track-match-unified-module]
 - 2026-05-15 — research/idea_ — section fill (research dive)
 - 2026-05-15 — research/idea_ — concrete API economics + match-key precision research
 - 2026-05-15 — research/idea_ — exploring_-ready rework loop (deep self-review pass)
+- 2026-05-15 — research/exploring_ — promoted; quality bar met (Spotify cold-scan 3h→3.3min via batch endpoint; 8/12 OQ resolved; Findings #2 supersede; M1-M4 phased rollout)
 
 ---
 
