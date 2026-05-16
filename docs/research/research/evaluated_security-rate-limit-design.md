@@ -20,6 +20,7 @@ related: [security-api-auth-hardening]
 - 2026-05-15 — research/idea_ — rework pass (quality-bar review pre-exploring_)
 - 2026-05-15 — research/exploring_ — promoted; quality-bar met (route inventory verified, 50 LOC defended via _format_tokens precedent, slowapi-vs-custom differentiated)
 - 2026-05-15 — research/exploring_ — perfect-quality rework loop (deep self-review pass)
+- 2026-05-15 — research/evaluated_ — promoted; Option B (~50 LOC custom token-bucket) + @rate_limit decorator pseudocode for first 3 routes + 6-step Impl Plan; OQ6 PARKED (Phase-2 gate)
 
 ---
 

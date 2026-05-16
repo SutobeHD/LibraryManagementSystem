@@ -25,15 +25,14 @@ _(none)_
 - [exploring_library-quality-upgrade-finder.md](research/exploring_library-quality-upgrade-finder.md) — Quality auditor + transcode detection + replacement with 7-rule safety; Phase 1/2/3 (2026-05-15)
 - [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); QR-pairing + Tailscale Funnel docs; security Phase-1+2 hard prereq (2026-05-15)
 - [exploring_external-track-match-unified-module.md](research/exploring_external-track-match-unified-module.md) — Cross-cutting module (fuzzy + chromaprint + adapter-registry) shared by 3 sister features; M1/M2/M3 (2026-05-15)
-- [exploring_security-pydantic-extra-allow-blob-write.md](research/exploring_security-pydantic-extra-allow-blob-write.md) — Pydantic SetReq extra:allow blob-write primitive — schema allowlist + per-value/total caps; reviewer-confirmed quality (2026-05-15)
-- [exploring_security-error-handler-exc-info-leak.md](research/exploring_security-error-handler-exc-info-leak.md) — Global exception handler exc_info leak to ./logs/app.log — RedactingFormatter; reviewer-confirmed quality (2026-05-15)
-- [exploring_security-api-file-reveal-sandbox.md](research/exploring_security-api-file-reveal-sandbox.md) — /api/file/reveal arbitrary-path sandbox via reuse of validate_audio_path; single-caller verified; reviewer-confirmed quality (2026-05-15)
-- [exploring_security-cors-allow-credentials-tightening.md](research/exploring_security-cors-allow-credentials-tightening.md) — CORS wildcards → explicit lists + permanent no-cookie-auth rule; sentinel cookie confirmed dead-code; reviewer-confirmed quality (2026-05-15)
-- [exploring_security-rate-limit-design.md](research/exploring_security-rate-limit-design.md) — Custom token-bucket rate-limit (50 LOC mirroring _format_tokens precedent); Phase-2 sequencing; reviewer-confirmed quality (2026-05-15)
-- [exploring_security-secrets-compare-digest-codebase-audit.md](research/exploring_security-secrets-compare-digest-codebase-audit.md) — secrets.compare_digest helper + codebase audit (Phase-1 covers all current sites); reviewer-confirmed quality (2026-05-15)
 
 ### evaluated
-_(none)_
+- [evaluated_security-pydantic-extra-allow-blob-write.md](research/evaluated_security-pydantic-extra-allow-blob-write.md) — Pydantic SetReq blob-write — Option B caps (8KB/64/256/256KB); Q11 (final caps) PARKED for review_ (2026-05-15)
+- [evaluated_security-error-handler-exc-info-leak.md](research/evaluated_security-error-handler-exc-info-leak.md) — RedactingFormatter for exc_info; measured 0.46µs / 730 logger sites; 2 follow-ups split out (2026-05-15)
+- [evaluated_security-api-file-reveal-sandbox.md](research/evaluated_security-api-file-reveal-sandbox.md) — /api/file/reveal Option A: ≤10 LOC validate_audio_path injection; Q1-Q3 RESOLVED (2026-05-15)
+- [evaluated_security-cors-allow-credentials-tightening.md](research/evaluated_security-cors-allow-credentials-tightening.md) — CORS explicit lists 2-line PR + dead-cookie removal Phase B; Q5 PARKED cosmetic (2026-05-15)
+- [evaluated_security-rate-limit-design.md](research/evaluated_security-rate-limit-design.md) — Custom token-bucket ~50 LOC + @rate_limit on 3 routes; OQ6 PARKED Phase-2 (2026-05-15)
+- [evaluated_security-secrets-compare-digest-codebase-audit.md](research/evaluated_security-secrets-compare-digest-codebase-audit.md) — safe_compare helper + 3-line require_session refactor; Option C lint backstop PARKED (2026-05-15)
 
 ### parked
 _(none)_

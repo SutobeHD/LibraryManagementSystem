@@ -20,6 +20,7 @@ related: [security-api-auth-hardening]
 - 2026-05-15 — research/idea_ — rework pass (quality-bar review pre-exploring_)
 - 2026-05-15 — research/exploring_ — promoted; quality-bar met (frontend axios audit enumerated 164 calls / 41 files; sentinel cookie confirmed dead-code 0 reads)
 - 2026-05-15 — research/exploring_ — perfect-quality rework loop (deep self-review pass)
+- 2026-05-15 — research/evaluated_ — promoted; CORSMiddleware 5-line pseudocode + 2-phase Impl Plan (Phase A 2-line PR / Phase B sentinel removal); Q5 PARKED (cosmetic)
 
 ---
 

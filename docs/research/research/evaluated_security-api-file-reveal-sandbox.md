@@ -20,6 +20,7 @@ related: [security-api-auth-hardening]
 - 2026-05-15 — research/idea_ — rework pass (quality-bar review pre-exploring_)
 - 2026-05-15 — research/exploring_ — promoted; quality-bar met (Q1 caller-audit-resolved; Tauri-plugin reality checked → C demoted, A recommended)
 - 2026-05-15 — research/exploring_ — perfect-quality rework loop (deep self-review pass)
+- 2026-05-15 — research/evaluated_ — promoted; Option A pseudocode (≤10 LOC patch) + 7-step Impl Plan; Q1-Q3 RESOLVED; Q4/Q5 PARKED
 
 ---
 

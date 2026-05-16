@@ -20,6 +20,7 @@ related: [security-api-auth-hardening]
 - 2026-05-15 — `research/idea_` — rework pass (quality-bar review pre-`exploring_`)
 - 2026-05-15 — research/exploring_ — promoted; quality-bar met (concrete caps 8KB/64/256/256KB; decoupled-from-Phase-1; agent caught + superseded own token-leak overclaim)
 - 2026-05-15 — research/exploring_ — perfect-quality rework loop (deep self-review pass)
+- 2026-05-15 — research/evaluated_ — promoted; Option B with concrete caps + 5-step pseudocode-prose + 8-step Impl Plan; Q11 (cap-number final sign-off) PARKED for review_
 
 ---
 

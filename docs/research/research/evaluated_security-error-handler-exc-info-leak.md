@@ -21,6 +21,7 @@ related: [security-api-auth-hardening]
 - 2026-05-15 — research/idea_ — rework pass (quality-bar review pre-exploring_)
 - 2026-05-15 — research/exploring_ — promoted; quality-bar met (concrete RedactingFormatter spec; CPython 3.13.5 source verified; multi-handler caveat added)
 - 2026-05-15 — research/exploring_ — perfect-quality rework loop (deep self-review pass)
+- 2026-05-15 — research/evaluated_ — promoted; RedactingFormatter pseudocode + measured 0.46µs + 730 logger sites enumerated; 2 PARKED items split to own follow-ups
 
 ---
 
