@@ -135,6 +135,22 @@ Defined in `.claude/commands/`:
 
 ---
 
+## AI autonomy & remote routines — streamlining bias
+
+This repo runs three remote routines (claude.ai/code) that advance the research pipeline autonomously while user is afk:
+
+- **`research-exploring-push`** (daily 04:00 + 16:00 Berlin) — processes 1 marked AI task per run in any `exploring_` or `evaluated_` doc.
+- **`research-triage-report`** (daily 07:00 Berlin) — read-only pipeline health audit + open-AI-task count → GitHub Issue.
+- **`research-draftplan-scout`** (daily 12:00 Berlin) — generates `implement/draftplan_<slug>.md` from fully-resolved `evaluated_` docs that requested it.
+
+Routines act **only** on docs opted in with two gates: frontmatter `ai_tasks: true` + items in `## AI Tasks` section. Full rules: `.claude/rules/research-pipeline.md` ("AI Tasks marker") + `docs/research/README.md` ("AI Routines & Tasks marker"). Routing table per item-prefix in `docs/research/_TEMPLATE.md`.
+
+**Streamlining default ON.** Spotted a manual ritual (state moves, doc syncs, multi-step bookkeeping)? Automate it — slash-command, hook, routine, marker — and show the diff. See `.claude/rules/agentic-mode.md` "Streamlining bias".
+
+Manage routines: https://claude.ai/code/routines or via `/schedule` skill.
+
+---
+
 ## Subagents — DEFAULT ON
 
 Spawn the agent when its trigger fires. Inline-doing the agent's work floods main context. Full decision tree + cost calibration + anti-patterns in `.claude/rules/working-style.md` (Subagent delegation section).

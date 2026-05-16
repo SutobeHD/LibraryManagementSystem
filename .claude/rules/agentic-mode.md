@@ -11,6 +11,11 @@ Broad permission to act locally. `.claude/settings.json` allowlist reflects this
 - `git fetch`, `git pull --ff-only`.
 - `git checkout -b`, `git switch -c` (new branches).
 - `gh pr/issue view`, `gh pr list`, `gh run list` — read-only GitHub queries.
+- **Process AI Tasks** in research docs flagged `ai_tasks: true` — pick unchecked items from `## AI Tasks`, execute, tick `- [x]`, commit. See `research-pipeline.md` "AI Tasks marker" section.
+
+## Streamlining bias — default ON
+
+Repo culture is **maximum AI autonomy + minimum manual steps**. When you spot a recurring manual ritual (state moves, doc syncs, lifecycle bookkeeping, multi-step PR flow), propose automating it — slash-command, hook, routine, or marker-driven worker. Don't ask "may I automate this?" — show the diff and let the user decline. Defaults favor scripted over hand-typed, marker-driven over per-prompt instruction, idempotent re-runs over one-shot artisan work.
 
 ## Confirm first
 

@@ -30,6 +30,42 @@ Research docs are **persistent files**, not user output. Apply Caveman+ per `wor
 
 If you carry guidance blockquotes from old docs (e.g. `> Required from X onward...`), strip them — `_TEMPLATE.md` no longer ships them.
 
+## AI Tasks marker — opt-in routine workload
+
+Three remote routines (`research-exploring-push`, `research-triage-report`, `research-draftplan-scout`) advance docs autonomously. They process **only** docs that opt in via marker. Two-gate system:
+
+**Gate 1 — Frontmatter flag:**
+```yaml
+ai_tasks: true
+```
+Without `true`, routine skips the doc entirely.
+
+**Gate 2 — `## AI Tasks` section:**
+```markdown
+## AI Tasks
+- [ ] resolve Q3: AcoustID rate limit
+- [ ] grep `_db_write_lock` users in app/
+- [ ] generate draftplan
+```
+Routine picks the first unchecked item whose prefix it owns (see `_TEMPLATE.md` AI Tasks HTML comment for the routing table). Done → ticks `- [x]` + `— done YYYY-MM-DD`, appends Lifecycle line, opens PR.
+
+**When to use:**
+- Doc has work the routine can do mechanically (grep, web lookup, well-scoped question with external answer, structural promotion with clear preconditions, draftplan from a fully-resolved evaluated_ doc).
+- You're OK with the change landing as a PR while you sleep / are in uni.
+
+**When NOT to use:**
+- Decision needs your taste/judgment (Option A vs B trade-off, architecture-shaping choices).
+- Task touches code, not just docs — routines are docs-only.
+- You're mid-edit on the doc — set flag back to `false` to pause.
+
+**Promotions allowed via marker:**
+- `exploring_` → `evaluated_` (when all Open Qs resolved + Recommendation written)
+- `evaluated_` → DraftPlan creation (when Recommendation has concrete picks)
+
+**Still gated by you (no marker allows):**
+- `review_` → `accepted_`
+- `inprogress_` → `implemented_`
+
 ## Graduation: `implemented_` lands
 
 Archive as `implemented_` = rename + doc-syncer hits. **Before** the move:

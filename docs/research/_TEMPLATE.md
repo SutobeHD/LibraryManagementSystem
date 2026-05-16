@@ -6,6 +6,7 @@ created: YYYY-MM-DD
 last_updated: YYYY-MM-DD
 tags: []
 related: []
+ai_tasks: false  # set true to opt-in AI routines — see ## AI Tasks below
 ---
 
 # <same as title>
@@ -16,6 +17,26 @@ related: []
 ## Lifecycle
 
 - YYYY-MM-DD — `research/idea_` — created
+
+## AI Tasks
+
+<!--
+Opt-in queue for remote AI routines. Activate by setting `ai_tasks: true` in frontmatter.
+Each item: 1 concrete sub-task. Routine processes 1/run, ticks done, commits via PR.
+
+Item-prefix routes to a routine:
+  resolve Q<N>: <text>          → research-exploring-push (resolves that Open Question)
+  investigate: <topic>          → research-exploring-push (web+code, appends to Findings)
+  grep <pattern> in <area>      → research-exploring-push (codebase lookup, appends to Findings)
+  web: <query>                  → research-exploring-push (WebSearch, appends to Findings)
+  promote to <state>            → research-exploring-push (git mv to next state, with preconditions)
+  generate draftplan            → research-draftplan-scout (only on evaluated_ docs, creates implement/draftplan_<slug>.md)
+
+Routine MUST tick items it processed: `- [x] <original text> — done YYYY-MM-DD`.
+When archived: keep section as audit trail.
+-->
+
+- [ ] <task description>
 
 ---
 

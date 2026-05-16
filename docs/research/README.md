@@ -92,6 +92,56 @@ Trivial topics: `idea_` → `accepted_` in one sitting if framing+drafting+sign-
 
 ---
 
+## AI Routines & Tasks marker
+
+Three remote routines work the pipeline autonomously while you sleep / are in uni. They only touch docs you've explicitly opted in.
+
+### Marker (two gates)
+
+**Gate 1 — Frontmatter:**
+```yaml
+ai_tasks: true
+```
+
+**Gate 2 — `## AI Tasks` section** (auto-included by `_TEMPLATE.md`):
+```markdown
+## AI Tasks
+- [ ] resolve Q3: AcoustID rate limit
+- [ ] grep `_db_write_lock` users in app/
+- [ ] generate draftplan
+```
+
+Routine picks the first unchecked item it owns by **item prefix**:
+
+| Prefix | Routine | Action |
+|---|---|---|
+| `resolve Q<N>:` | research-exploring-push | Web+code lookup, appends finding to that Open Question |
+| `investigate:` | research-exploring-push | Web+code research, appends to `## Findings / Investigation` |
+| `grep <pat> in <area>` | research-exploring-push | Codebase grep, summarised into Findings |
+| `web: <query>` | research-exploring-push | WebSearch, summarised into Findings |
+| `promote to <state>` | research-exploring-push | `git mv` to next state if preconditions met |
+| `generate draftplan` | research-draftplan-scout | Creates `implement/draftplan_<slug>.md` from a fully-resolved `evaluated_` doc |
+
+After processing: routine ticks `- [x] <original text> — done YYYY-MM-DD`, appends Lifecycle line, opens PR.
+
+### Routines
+
+| Name | Cron UTC | Berlin | Scope |
+|---|---|---|---|
+| `research-exploring-push` | `0 2,14 * * *` | 04:00 + 16:00 | 1 marked task in any `ai_tasks: true` doc per run |
+| `research-triage-report` | `0 5 * * *` | 07:00 | Read-only audit + counts open AI tasks per doc → GitHub Issue |
+| `research-draftplan-scout` | `0 10 * * *` | 12:00 | 1 `generate draftplan` task in `evaluated_` docs per run |
+
+Manage at https://claude.ai/code/routines.
+
+### Hard rules
+
+- Marker is **opt-in per doc** — routines skip everything without `ai_tasks: true`.
+- Routines are **docs-only** — never touch `app/`, `frontend/`, `src-tauri/`, `tests/`.
+- Promotions to `review_`/`accepted_`/`inprogress_`/`implemented_` are **never** automatable via marker — user sign-off only.
+- PR on branch `routine/<purpose>-<slug-or-date>`, never direct main.
+- Routine can also be told `promote to evaluated_` as an explicit task — preconditions checked before `git mv`.
+
 ## Graduation: `implemented_` lands
 
 Rename + doc updates. **Before** the `git mv` → `archived/implemented_`:
