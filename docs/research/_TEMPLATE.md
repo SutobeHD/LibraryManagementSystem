@@ -1,21 +1,19 @@
 ---
 slug: <area>-<topic>
-title: <one-line title — what is being researched / built?>
-owner: <name or "unassigned">
+title: <one-line>
+owner: <name|unassigned>
 created: YYYY-MM-DD
 last_updated: YYYY-MM-DD
 tags: []
 related: []
 ---
 
-# <Same as title>
+# <same as title>
 
-> **State**: derived from filename + folder. Do not store state in frontmatter.
-> Start the file as `docs/research/research/idea_<slug>.md`. Rename + move on each transition (see `../README.md`).
+> **Caveman style.** Fragments, bullets. Drop articles/filler/hedges. No prose paragraphs. Respect per-section caps below.
+> State = folder + filename prefix (not frontmatter). Lifecycle = audit trail. See `../README.md`.
 
 ## Lifecycle
-
-> Append-only audit trail. One line per `git mv`. Newest at the bottom.
 
 - YYYY-MM-DD — `research/idea_` — created
 
@@ -23,44 +21,44 @@ related: []
 
 ## Problem
 
-> Required from `idea_` onward. Keep under 100 words. What are we solving? Why does it matter? What happens if we don't?
+≤60 words. What / why / cost-of-not-doing.
 
 ## Goals / Non-goals
 
 **Goals**
 - …
 
-**Non-goals** (deliberately out of scope)
+**Non-goals**
 - …
 
 ## Constraints
 
-> External facts that bound the solution space — API rate limits, existing data shape, performance budgets, legal/licensing, team capacity. Cite source where possible.
+External facts bounding solution (rate limits, data shape, perf budget, legal, capacity). Cite source.
 
 - …
 
 ## Open Questions
 
-> Numbered. Each one should be resolvable (yes/no, or "X vs Y"), not open-ended philosophy.
+Numbered. Each resolvable (yes/no or X vs Y), not philosophy.
 
 1. …
 
 ## Findings / Investigation
 
-> Required from `exploring_` onward. Append dated subsections as you learn. Never edit past entries — supersede with a new one.
+Dated subsections, append-only. ≤80 words each. Never edit past entries — supersede.
 
-### YYYY-MM-DD — <short label>
-…
+### YYYY-MM-DD — <label>
+- …
 
 ## Options Considered
 
-> Required by `evaluated_`. For each viable approach: sketch (2-4 lines), pros, cons, effort (S/M/L/XL), risk.
+Required by `evaluated_`. Per option: sketch ≤3 bullets, pros, cons, S/M/L/XL, risk.
 
 ### Option A — <name>
 - Sketch:
 - Pros:
 - Cons:
-- Effort: S/M/L/XL
+- Effort:
 - Risk:
 
 ### Option B — <name>
@@ -72,26 +70,25 @@ related: []
 
 ## Recommendation
 
-> Required by `evaluated_`. Which option, what we wait on before committing.
+Required by `evaluated_`. ≤80 words. Which option + what blocks commit.
 
 ---
 
 ## Implementation Plan
 
-> Required from `implement/draftplan_` onward. Concrete enough that someone else could execute it without re-deriving the design.
+Required from `implement/draftplan_`. Concrete enough that someone else executes without re-deriving.
 
 ### Scope
 - **In:** …
-- **Out (deliberately):** …
+- **Out:** …
 
 ### Step-by-step
 1. …
-2. …
 
-### Files touched (expected)
+### Files touched
 - …
 
-### Testing approach
+### Testing
 - …
 
 ### Risks & rollback
@@ -99,20 +96,20 @@ related: []
 
 ## Review
 
-> Filled by reviewer at `review_`. If any box is unchecked or rework reasons are listed, the doc moves to `rework_`.
+Filled at `review_`. Unchecked box or rework reason → `rework_`.
 
 - [ ] Plan addresses all goals
-- [ ] Open questions answered or explicitly deferred
+- [ ] Open questions answered or deferred
 - [ ] Risk mitigations defined
 - [ ] Rollback path clear
 - [ ] Affected docs identified (`architecture.md`, `FILE_MAP.md`, indexes, `CHANGELOG.md`)
 
-**Rework reasons** (only if applicable):
+**Rework reasons:**
 - …
 
 ## Implementation Log
 
-> Filled during `inprogress_`. What got built, what surprised us, what changed from the plan. Dated entries.
+Filled during `inprogress_`. Dated entries. What built / surprised / changed-from-plan.
 
 ### YYYY-MM-DD
 - …
@@ -121,16 +118,16 @@ related: []
 
 ## Decision / Outcome
 
-> Required by `archived/*`. Final state of the topic.
+Required by `archived/*`.
 
-**Result**: `implemented` | `superseded` | `abandoned`
+**Result**: implemented | superseded | abandoned
 **Why**: …
-**Rejected alternatives** (one line each):
+**Rejected alternatives:**
 - …
 
 **Code references**: PR #…, commits …, files …
 
-**Docs updated** (required for `implemented_` graduation):
+**Docs updated** (required for `implemented_`):
 - [ ] `docs/architecture.md`
 - [ ] `docs/FILE_MAP.md`
 - [ ] `docs/backend-index.md` (if backend changed)

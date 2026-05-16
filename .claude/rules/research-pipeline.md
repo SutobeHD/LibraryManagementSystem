@@ -1,53 +1,42 @@
 # Research-first rule for features
 
-**If the user asks for a feature that touches ≥ 2 modules or has multiple plausible approaches, start in `docs/research/`.** Don't dive into code first.
+**Feature touches ≥ 2 modules or has multiple plausible approaches → start in `docs/research/`.** Don't dive into code first.
 
 ## Workflow
 
-1. **Check `docs/research/_INDEX.md`** — is there already an in-flight doc for this area? If yes, read it end-to-end before suggesting anything. Findings and tried-options live there.
-2. **If no existing doc:** run `/research-new <slug>` to scaffold `docs/research/research/idea_<slug>.md` from the template, fill the Problem / Options / Constraints sections.
-3. **Move through stages explicitly:** `idea_` → `exploring_` → `evaluated_` → (sign-off) → `implement/draftplan_` → `review_` → `accepted_` → `inprogress_` → `archived/implemented_<date>`. State change = `git mv` + Lifecycle line + `_INDEX.md` update.
-4. **Skip the pipeline for:** one-off bug fixes, single-file refactors, plain questions, doc edits.
+1. Check `docs/research/_INDEX.md` — in-flight doc for this area? Read end-to-end before suggesting anything.
+2. No existing doc → `/research-new <slug>` scaffolds `docs/research/research/idea_<slug>.md` from `_TEMPLATE.md`.
+3. Move stages explicitly: `idea_` → `exploring_` → `evaluated_` → (sign-off) → `implement/draftplan_` → `review_` → `accepted_` → `inprogress_` → `archived/implemented_<date>`. State change = `git mv` + Lifecycle line + `_INDEX.md` update.
+4. **Skip pipeline for:** one-off bug fixes, single-file refactors, plain questions, doc edits.
 
-**You may NOT promote states unilaterally.** `review_` → `accepted_` and `inprogress_` → `implemented_` require explicit user sign-off. Re-read `docs/research/README.md` for the rules.
+**You may NOT promote states unilaterally.** `review_` → `accepted_` and `inprogress_` → `implemented_` need explicit user sign-off.
 
-## Stages and prefixes (cheat-sheet)
+Full stage/prefix cheat-sheet + transitions: `docs/research/README.md`.
 
-### research/ — gather and evaluate
+## Writing style for research docs — Caveman+
 
-| Prefix | Meaning |
-|---|---|
-| `idea_` | Topic exists, problem framed, no investigation yet |
-| `exploring_` | Active research: findings, constraints, options being captured |
-| `evaluated_` | Investigation done, recommendation written, ready to plan |
-| `parked_` | Paused intentionally; no current owner |
+Research docs are **persistent files**, not user output. Apply Caveman+ per `working-style.md`:
 
-### implement/ — plan, review, build
+- Bullets > prose. Fragments OK. Drop articles/filler/hedges.
+- Respect per-section word caps in `_TEMPLATE.md` (Problem ≤60 words, Findings entries ≤80 words, Recommendation ≤80 words).
+- No "we considered", "it appears that", "in order to", "it should be noted", "after investigation". Direct subject + verb + object.
+- No section meta-prose ("This section captures..."). The heading carries the meaning.
 
-| Prefix | Meaning |
-|---|---|
-| `draftplan_` | Plan is being written |
-| `review_` | Plan ready, waiting for sign-off |
-| `rework_` | Review found gaps; goes back for revision |
-| `accepted_` | Plan signed off; code not started yet |
-| `inprogress_` | Code is being written |
-| `blocked_` | Implementation paused (external dep, library bug) |
+**Bad** (real example, 38 words for one fact):
+> After investigation, it appears that the AcoustID free tier has a rate limit of 3 requests per second which would require us to consider batching strategies for the bulk lookup endpoint.
 
-### archived/ — historical record (terminal)
+**Good** (8 words, same info):
+> AcoustID 3 req/s. Bulk endpoint preferred. Batch by 100.
 
-| Prefix | Meaning |
-|---|---|
-| `implemented_<slug>_<YYYY-MM-DD>` | Shipped. `architecture.md` / `FILE_MAP.md` / index docs updated. |
-| `superseded_<slug>_<YYYY-MM-DD>` | Replaced by a different approach. Successor linked in `## Decision / Outcome`. |
-| `abandoned_<slug>_<YYYY-MM-DD>` | Dropped on purpose. Reason mandatory in `## Decision / Outcome`. |
+If you carry guidance blockquotes from old docs (e.g. `> Required from X onward...`), strip them — `_TEMPLATE.md` no longer ships them.
 
-## Graduation: when `implemented_` lands
+## Graduation: `implemented_` lands
 
-Archiving as `implemented_` is more than a rename. **Before** the move:
+Archive as `implemented_` = rename + doc-syncer hits. **Before** the move:
 
-1. Update `docs/architecture.md` — data flows reflect the shipped behavior
-2. Update `docs/FILE_MAP.md` (or run `/regen-maps`) — new files have one-line entries
-3. Update relevant `docs/{backend,frontend,rust}-index.md` — new endpoints / symbols
-4. Update `CHANGELOG.md` if the change is user-visible (run `/changelog-bump`)
+1. `docs/architecture.md` — data flows reflect shipped behavior
+2. `docs/FILE_MAP.md` (or `/regen-maps`) — new files
+3. `docs/{backend,frontend,rust}-index.md` — new endpoints / symbols
+4. `CHANGELOG.md` if user-visible (`/changelog-bump`)
 
-The `## Decision / Outcome` section in the doc has a checkbox list for these so the audit trail is explicit.
+`## Decision / Outcome` checkbox list in the doc enforces the audit trail.

@@ -135,45 +135,19 @@ Defined in `.claude/commands/`:
 
 ---
 
-## Subagents — DEFAULT ON, not optional
+## Subagents — DEFAULT ON
 
-Spawn an agent when its trigger fires. **Don't do the agent's work inline** — that's what the agent exists for, and inline-doing it floods the main context with tool output you'll have to re-read later.
+Spawn the agent when its trigger fires. Inline-doing the agent's work floods main context. Full decision tree + cost calibration + anti-patterns in `.claude/rules/working-style.md` (Subagent delegation section).
 
-| Agent | Must spawn when… | Replaces what inline work |
-|-------|------------------|---------------------------|
-| `doc-syncer` | Non-trivial multi-file change, file rename/move, new module, or research-pipeline `git mv` | Manually editing FILE_MAP.md + index docs |
-| `route-architect` | **Before** editing `app/main.py` for any new/changed FastAPI route | Drafting the route inline; researching the cluster + conventions yourself |
-| `audio-stack-reviewer` | Any edit to `app/{analysis,anlz,audio,usb_pdb,phrase_generator}_*.py` or `src-tauri/src/audio/**` | Running cargo check + clippy + ruff + mypy yourself and copy-pasting output |
-| `test-runner` | Any non-trivial code change, before commit/push | Running `pytest`/`cargo test`/`node` yourself and reading raw output |
-| `e2e-tester` | Any UI-affecting change (frontend OR backend route the UI calls) | Starting `npm run dev:full` and manually navigating |
-
-### Generic agents (also underused)
-
-| Agent | Must spawn when… |
-|-------|------------------|
-| `Explore` | You're about to run 3+ sequential Read/Grep calls to "find where X lives" |
-| `general-purpose` | Open-ended question or multi-step research that touches > 2 files |
-| `Plan` | Designing implementation strategy for a feature with > 1 plausible approach |
-| `claude-code-guide` | Question about Claude Code config / hooks / MCP / Anthropic SDK |
-
-**Cost calibration:** ~5 inline tool calls on the same sub-task ≈ the cost of one subagent spawn. Default to spawning earlier, not later. Full delegation guide in `.claude/rules/working-style.md` (Subagent delegation section).
+Quick reminder of triggers: `doc-syncer` (multi-file/rename), `route-architect` (before `app/main.py` route edit), `audio-stack-reviewer` (audio/anlz/usb_pdb edits), `test-runner` (pre-commit/push), `e2e-tester` (UI changes), `Explore` (broad search > 2 locations), `general-purpose` / `Plan` / `claude-code-guide` for research/architecture/Claude-Code questions.
 
 ---
 
-## Git identity — verify before first commit in a fresh clone
+## Git identity — verify in fresh clone
 
 ```bash
 git config user.email   # must be: 46030159+SutobeHD@users.noreply.github.com
 git config user.name    # must be: SutobeHD
 ```
 
-If not, set them per-repo (no `--global`). Full reasoning + rewrite recipe for already-committed-but-not-yet-pushed commits in `.claude/rules/commit-and-git.md`.
-
----
-
-## When in doubt
-
-1. Check `docs/MAP.md` (or `FILE_MAP.md`) for the file.
-2. Check `docs/research/_INDEX.md` for in-flight plans.
-3. Check `CHANGELOG.md` + `git log -- <file>` for recent context.
-4. For deeper rules, consult `.claude/rules/troubleshooting.md`.
+Set per-repo (no `--global`) if not. Reasoning + rewrite recipe in `.claude/rules/commit-and-git.md`.
