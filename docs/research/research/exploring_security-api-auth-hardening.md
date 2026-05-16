@@ -20,6 +20,7 @@ priority: 1
 
 - 2026-05-15 — `research/idea_` — created from template (declared **Hauptpriorität** by user)
 - 2026-05-15 — research/idea_ — full audit + options (priority-1 research dive)
+- 2026-05-15 — research/exploring_ — promoted; 5 hot-fixes shipped (commit e3a5ae8); Phase-1 draftplan next
 
 ---
 
