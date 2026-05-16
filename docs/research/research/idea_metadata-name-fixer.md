@@ -19,6 +19,7 @@ related: []
 
 - 2026-05-15 — `research/idea_` — created from template
 - 2026-05-15 — `research/idea_` — section fill (research dive)
+- 2026-05-15 — research/idea_ — option refinement after Problem framing
 
 ---
 
@@ -113,6 +114,38 @@ Real-world DJ libraries (especially anything sourced from SoundCloud, YouTube, o
 - **LLM-assisted.** Local LLM via Ollama / OpenAI API for ambiguous cases. Cost + latency + non-determinism. Hard to audit. Probably acceptable behind a "review every suggestion" UI; unacceptable for batch-apply.
 - **Hybrid (recommended below).** Regex first pass with confidence score; route low-confidence (<0.85) to external MusicBrainz lookup (ISRC if available, else fuzzy title+artist); fall back to "leave alone, surface in UI".
 
+### 2026-05-15 — pattern catalogue + safety design after Problem framing
+
+**Real-world pattern audit** (concrete before/after):
+
+| # | Class | Before | After |
+|---|-------|--------|-------|
+| 1 | Artist-in-title parens | `Artist:"" Title:"Strobe (Deadmau5)"` | `Artist:"Deadmau5" Title:"Strobe"` |
+| 2 | `feat.` wrong field | `Artist:"Avicii feat. Ne-Yo" Title:"Levels"` | policy A: keep / policy B: `Artist:"Avicii" Title:"Levels (feat. Ne-Yo)"` |
+| 3 | Reversed Title-Artist (SC convention) | `Artist:"One More Time" Title:"Daft Punk"` | `Artist:"Daft Punk" Title:"One More Time"` |
+| 4 | Track-num prefix | `Title:"01 - Intro"` | `Title:"Intro"` |
+| 5 | HTML entities | `Title:"Rock &amp; Roll"` | `Title:"Rock & Roll"` |
+| 6 | Smart-quotes | `Title:"Don’t Stop"` (U+2019) | `Title:"Don't Stop"` (U+0027) |
+| 7 | Double-encoded remix | `Artist:"Daft Punk" Title:"Daft Punk - One More Time (Daft Punk Remix)"` | `Artist:"Daft Punk" Title:"One More Time (Daft Punk Remix)"` |
+| 8 | Label+catalog marker | `Title:"Strobe [MAU5001]"` | `Title:"Strobe"` + `label:"mau5trap" catno:"MAU5001"` |
+
+**Source-of-truth decision matrix.** Decision: **Rekordbox `DjmdContent` row is the editable copy**; ID3 tag is write-through, filename is read-only context. DB drives CDJ export and Rekordbox UI; tag drift is recoverable from DB but not vice-versa.
+
+| Field | Authority | On conflict |
+|-------|-----------|-------------|
+| title / artist / album | DB | DB wins; tag rewritten |
+| isrc | tag (canonical) | tag wins; DB filled if blank |
+| filename | read-only | never mutated phase 1 |
+
+**Safety architecture (4 layers).**
+
+1. **Always dry-run preview** — detector emits proposed-changes set; nothing mutates until explicit Apply.
+2. **Per-track confirm by default** — UI groups by rule, checkbox per track. Mass-apply needs an extra "I reviewed N tracks" gate.
+3. **Snapshot-before-mutate** — backup-engine removed in `8fe5036`, so fixer captures (a) original ID3 block (raw, sidecar file) and (b) original `DjmdContent` row (JSON) into the undo log before any write.
+4. **Append-only undo log** — sidecar SQLite at app-data dir (NOT `master.db`; avoids `_db_write_lock` contention). One row per field-mutation: `run_id, ts, track_id, rule_id, field, before, after, applied`. Revert = replay-in-reverse.
+
+**MusicBrainz / Discogs match-cost.** Same constraint as remix-detector: MB 1 req/s → 30k tracks ≈ 8h wall-clock. Mitigation: persistent cache keyed on `sha1(normalise(title)||"\x00"||normalise(artist)||"\x00"||normalise(album))` → canonical answer + ETag. Survives sessions, cuts repeat runs to delta-only. ISRC lookups (when tag has one) bypass fuzzy and are O(1) once cached.
+
 ## Options Considered
 
 > Required by `evaluated_`. For each viable approach: sketch (2-4 lines), pros, cons, effort (S/M/L/XL), risk.
@@ -147,15 +180,15 @@ Real-world DJ libraries (especially anything sourced from SoundCloud, YouTube, o
 
 ## Recommendation
 
-Stage: ship **Option D first** (detector + report, no mutation) → validate the rule catalogue against real user library → then layer **Option A** (rules engine + dry-run + audit log + revert) → finally add **Option B** (MusicBrainz enrichment) behind an opt-in toggle for hard cases.
+Three milestones, each shippable independently:
 
-Before any mutation phase (A/B) can land, three prerequisites are non-negotiable:
+- **M0 — Option D (detector + report only).** Ship the 8-class catalogue from the 2026-05-15 Findings as a read-only audit pass. Validates the rule set against the real user library before any mutation path exists. Zero blast radius.
+- **M1 — Option A (regex rules + dry-run + per-track confirm + undo log).** Leads with the deterministic patterns 1, 4, 5, 6, 7, 8 (high-precision classes). Mutates the DB row first (DB = authority per matrix above), tag write-through second, both inside a single undo-log transaction. Snapshot helper (Open Q8) is the gating dependency.
+- **M2 — Option B (MusicBrainz enrichment).** Adds ISRC-driven lookups + fuzzy fallback for the ambiguous classes (#3 reversed; mojibake; casing). Persistent cache (see Findings) makes repeat runs cheap.
 
-1. Decide and document the **source-of-truth precedence policy** (Open Q1) and the **mutation scope** (Open Q2).
-2. Ship a minimal `master.db` + per-file ID3 snapshot helper to replace the removed backup engine (Open Q8) — even just a timestamped folder copy guarded by `_db_write_lock`.
-3. Audit-log format frozen (Open Q6) and a revert path proven on a test library of 100+ tracks before touching real data.
+**LLM placement (Option C).** Not a primary mutation source. Lives in a single opt-in slot inside the M1 UI: for tracks the regex flagged but couldn't fix confidently, an "Ask LLM for suggestion" button surfaces a proposal that still flows through the same per-track confirm + undo log. Never batch.
 
-Reject Option C as a primary path. It may re-enter later as a hint provider in the UI, but not as a mutation source.
+Mutation-phase prerequisites still mandatory (Open Q1 precedence, Q2 scope, Q6 log format, Q8 snapshot). See Findings above — Q1/Q6/Q8 are now answerable.
 
 ---
 

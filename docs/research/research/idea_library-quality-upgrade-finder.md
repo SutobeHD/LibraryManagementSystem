@@ -19,6 +19,7 @@ related: [library-extended-remix-finder]
 
 - 2026-05-15 — `research/idea_` — created from template
 - 2026-05-15 — research/idea_ — section fill (research dive)
+- 2026-05-15 — research/idea_ — transcode + safety refinement after Problem framing
 
 ---
 
@@ -128,6 +129,40 @@ Library audio quality is **uneven** — years of accumulating sources mean MP3-1
 - Shared infrastructure: external-source adapters, fuzzy matcher, quality scorer, fingerprint check.
 - Diverges on intent: this doc wants same-edit; sister wants explicitly different edits/remixes/extended cuts. The fingerprint + duration gate is the same code, just inverted polarity.
 
+### 2026-05-15 — transcode-detection robustness + replacement safety after Problem framing
+
+**Transcode-detection false-positive cases.** The 21 kHz cliff heuristic mis-flags three legit-lossless classes:
+- (a) **Bandlimited masters**: vinyl rips (RIAA + cart roll-off), classical with no HF programme content, spoken-word stems.
+- (b) **48 kHz → 44.1 kHz downsampled lossless**: Nyquist shifts; clean anti-alias filter cliff at 20-21 kHz looks lossy-ish.
+- (c) **Intentionally lowpass-filtered productions**: some D&B/dubstep aesthetics deliberately roll off HF.
+
+Mitigation: second-pass **noise-floor-shape** analysis (lossy encoders produce a sharper transition band and quantisation-noise floor below cutoff than natural rolloff); per-track **user override** ("this IS lossless") that pins the verdict.
+
+**Replacement-safety hard rules** (refuse-by-default if any fails):
+1. Duration delta **< 1 s** or refuse — different edit silently shifts every cue downstream.
+2. **Chromaprint match required** whenever cue points or beatgrid exist (verifies same audio content, not just same title/artist).
+3. Sample rate must match within Rekordbox-supported range, or trigger explicit **re-analyse warning**.
+4. **Snapshot before replace** into `<library-root>/.upgrade-snapshots/<YYYY-MM-DD>/` (backup engine removed in `8fe5036`).
+5. **User-explicit confirmation per track**. No batch auto-replace, ever.
+
+**Quality-source priority matrix** (feasibility × legality, ordered):
+- (a) Local "HQ folder" — friction-free, no rate limit, lossless. **MVP source.**
+- (b) Bandcamp purchase — lossless, user auth + manual download for now.
+- (c) Beatport — lossless WAV/AIFF, auth + manual download.
+- (d) Qobuz hi-res — subscription required.
+- (e) SoundCloud Go+ — HQ stream but DRM-encrypted, not extractable. Surface as "available there" only.
+
+**UX scope**: both — standalone **"Quality Audit" view** for full-library awareness AND **per-row "upgrade available" badge** in Library view for in-context discovery. Click-through from badge enters same replacement flow.
+
+**Coordination with sister-docs** `extended-remix-finder` + `remix-detector`: all three share the fuzzy matcher (`SoundCloudSyncEngine._fuzzy_match_with_score`, 0.65 threshold) and need chromaprint. Recommend unified `app/external_track_match.py` module (match + fingerprint + adapter registry) consumed by all three. Avoids parallel partial implementations.
+
+**Open-Question movement** — see Findings above:
+- Q 1 (cutoff threshold): **composite** signal (cutoff + noise-floor + override), not single hard threshold.
+- Q 2 (duration tolerance): **1 s** hard refusal line (rule 1).
+- Q 3 (fingerprint): **chromaprint** (rule 2) — extra dep worth cross-encoding robustness vs mel-correlation.
+- Q 4 (snapshot location): **consolidated** `.upgrade-snapshots/<date>/` under library root (rule 4).
+- Q 8 (UI surface): **both** audit-view + per-row badge.
+
 ## Options Considered
 
 > Required by `evaluated_`. For each viable approach: sketch (2-4 lines), pros, cons, effort (S/M/L/XL), risk.
@@ -168,12 +203,19 @@ Library audio quality is **uneven** — years of accumulating sources mean MP3-1
 
 > Required by `evaluated_`. Which option, what we wait on before committing.
 
-Lean **Option D**. Ship the quality-audit + transcode-fraud detector first as a read-only feature (immediately useful and reused by the sister remix-finder), then add the local-HQ-folder replacement flow with snapshot+swap+metadata-migration once the scoring infra is battle-tested. External paid-store adapters land last and incrementally.
+Lean **Option D**, phase scopes refined by 2026-05-15 safety analysis:
+
+- **Phase 1 (audit-only)**: quality scorer (ffprobe + librosa cutoff + noise-floor) + transcode verdict with user override + UI badges + standalone Quality-Audit view. No replace, no external sources. Exercises spectral infra that sister-docs consume.
+- **Phase 2 (local-HQ-folder replace)**: snapshot+swap+metadata-migration with the five safety rules. External source = local HQ folder only.
+- **Phase 3 (external adapters)**: SoundCloud first (existing infra), then Bandcamp/Beatport/Qobuz as surface-link-only (manual download). DRM sources flagged, not extractable.
+
+Cross-cutting: extract `app/external_track_match.py` in Phase 1 (fuzzy + chromaprint + adapter registry) so sister-docs don't fork it.
 
 Blockers to resolve before `evaluated_`:
-- Open Q 2 (duration tolerance) and Q 3 (fingerprint method) — these define the safety gate.
-- Open Q 4 (snapshot location) — needs UX call.
-- Confirmation that we won't reintroduce a backup engine; ad-hoc per-replace snapshot is the agreed path.
+- Open Q 5 (re-analyse policy) — not blocking Phase 1.
+- Open Q 6 (scoring weights — strict-ordering vs composite) — needed before Phase 1 ships badges.
+- Open Q 7 (paid-store adapter scope) — Phase 3, not blocking earlier phases.
+- Confirmation no backup-engine revival; ad-hoc `.upgrade-snapshots/` is the agreed path.
 
 ---
 

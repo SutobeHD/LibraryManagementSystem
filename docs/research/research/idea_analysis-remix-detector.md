@@ -19,6 +19,7 @@ related: [library-extended-remix-finder, metadata-name-fixer]
 
 - 2026-05-15 — `research/idea_` — created from template
 - 2026-05-15 — research/idea_ — section fill (research dive)
+- 2026-05-15 — research/idea_ — option refinement after Problem framing
 
 ---
 
@@ -85,6 +86,36 @@ DJ libraries accumulate many tracks that are **variants of the same original** �
 
 **Confidence tiers.** Title-pattern + same normalised root title = 0.5–0.7. Add same artist on root = 0.75. Add fingerprint-cluster match = 0.9. Add MB `remix of` edge = 0.95.
 
+### 2026-05-15 — option-refinement after Problem framing
+
+**Use-case prioritisation.** The Problem implies four flows, not all need external sources:
+- (a) *"Do I already have an Extended of this Radio Edit?"* — within-library, title-pass. M1.
+- (b) *"This Bootleg — find canonical original"* — within first, external fallback. M1 within, M2 external.
+- (c) *"Group all 4 versions of Track X in the UI"* — within-library grouping by `(normalised_root, primary_artist)`. M1.
+- (d) *"Warn me when I import a 5th version I might not need"* — at-import classification hook (read-only badge, non-blocking). M1.
+
+Flows (a), (c), (d) are 100% local — justifying M1 before fingerprinting.
+
+**Title-pattern catalogue — concrete regex shapes** (anchored at title tail, case-insensitive):
+- Pure variant: `\((Original|Extended|Radio|Club|Dub|Instrumental|Acapella|VIP)(\s+(Mix|Edit|Version|Cut))?\)$`
+- Year-edit: `\((19|20)\d{2}\s+(Edit|Remaster(ed)?|Version)\)$`
+- Remixer-bearing: `\(([^()]+?)\s+(Remix|Bootleg|Edit|Rework|Flip|Refix|Mashup|Dub)\)$`
+- Compound: `\(([^()]+?)\s+(Extended|Club|Dub|Instrumental)\s+(Remix|Mix)\)$`
+- Bracket variant: `\[([^\[\]]+?)\s+(Remix|VIP|Mix|Edit)\]$`
+- Nested: `\(\(([^()]+)\)\s+([^()]+)\)$`
+- Semicolon-segmented: `\(([^;()]+);\s*([^()]+)\)$`
+- Trailing-dash (no parens): `\s[-–—]\s(Extended|Radio|Club|Dub|Instrumental|Acapella|VIP|Original)(\s+(Mix|Edit|Version))?$`
+- Multi-suffix: `\(([^()]+)\)\s*\(([^()]+)\)$`
+- Featuring (NOT variant — strip pre-classification): `\s+(feat\.?|ft\.?|featuring|with)\s+`
+- Collab markers (preserve in artist field): `\s+(&|vs\.?|x)\s+` (`x` ambiguous — require whitespace+capital)
+- Language variants: `\((Remix|Mix)\s+(von|de|por|di|by)\s+([^()]+)\)$` (DE/ES/PT/IT/EN)
+
+**External-source dependency-impact.** `fpcalc` is not currently bundled (`backend.spec` no reference). Three options: (1) bundle ~3 MB per-platform binaries under `app/bin/fpcalc/`; (2) PATH-detect, degrade to title-only if missing; (3) separate optional installer. (2) is lowest-risk M2 entry. MusicBrainz 1 req/s × 50k cold scan = ~14 h sequential — batch via AcoustID `lookup?meta=recordings+releasegroups` (MB IDs in one call), persist indefinitely. Cache key = `(fpcalc_fingerprint, duration_rounded)`.
+
+**Output-data-model.** `master.db` is Rekordbox-managed — custom tables risk schema-validation rejection. Preferred: sidecar `app_data/variants.db` with `track_variants(track_id, variant_type, parent_track_id, confidence, source, computed_at)` keyed on the same `track_id`. Decouples relation lifecycle from Rekordbox writes, no `_db_write_lock` contention. UI grouping JOINs across both DBs (confirm pattern against `app/database.py`). Resolves OQ1; OQ6 (mashup multi-parent) maps to multiple rows sharing `track_id` with distinct `parent_track_id`.
+
+OQ4 (normalisation order) **resolvable per regex catalogue**: strip `feat./ft./featuring/with` first, extract tail parenthetical, normalise root casing/accents — collab markers (`&`, `vs.`, `x`) stay in root as part of canonical artist credit. OQ7 (AcoustID without MBID) **resolvable per cache-key design**: accept bare fingerprint cluster as `source=acoustid-cluster` low-confidence (0.6) relation, upgrade to 0.95 if MBID later attaches.
+
 ## Options Considered
 
 ### Option A — Title-only, in-process
@@ -121,7 +152,15 @@ DJ libraries accumulate many tracks that are **variants of the same original** �
 
 ## Recommendation
 
-Pursue **Option C (hybrid layered)**, scoped as two milestones: M1 ships Option A (title-only classifier + variant labels + naive grouping) — usable immediately, no new deps. M2 adds the fingerprint + AcoustID/MB enrichment as a background job that upgrades existing relations. Before committing to M2, resolve OQ1 (storage), OQ2 (canonical picker rule), OQ4 (normalisation order), and decide on the `fpcalc` bundling vs PATH-detect question. Sister-doc `idea_library-extended-remix-finder` should consume this module's variant labels rather than re-deriving them.
+Pursue **Option C (hybrid layered)**, scoped as two milestones.
+
+**M1 (MVP, title-only, ships standalone):** regex-catalogue classifier + tail-parenthetical parser + `feat.`-stripper, emitting `variant_label`, `normalised_root`, `remixer` per track. Within-library grouping by `(normalised_root, primary_artist)`. Persisted in sidecar `app_data/variants.db` (per the Output-data-model finding) — no `master.db` writes, no `_db_write_lock` contention. At-import classification hook (read-only badge in the analysis pipeline) covers use-cases (a), (c), (d). No new binary deps, no network.
+
+**M2 (enrichment, opt-in):** `fpcalc` PATH-detect (bundling deferred to M3), AcoustID batch lookup with `meta=recordings+releasegroups`, MB `remix of` / `edited version` ingestion. Upgrades M1 relations in-place. Covers use-case (b) external fallback. Background job, never blocks analysis pipeline.
+
+**Confidence thresholds.** Auto-group in UI at `>= 0.75` (title + same primary artist). Surface as suggestion-only at `0.5–0.74` (title-only without artist match). Hide below `0.5`. M2 fingerprint matches enter at `0.9`, MB-relation-confirmed at `0.95` — both above the auto-group floor.
+
+Before committing to M2 binary-bundling, decide on the `fpcalc` packaging question (PATH-detect for M2, bundle in M3). Sister-doc `idea_library-extended-remix-finder` should consume this module's variant labels rather than re-deriving them.
 
 ---
 

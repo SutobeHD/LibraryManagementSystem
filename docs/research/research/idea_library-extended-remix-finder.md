@@ -19,6 +19,7 @@ related: [analysis-remix-detector, library-quality-upgrade-finder]
 
 - 2026-05-15 — `research/idea_` — created from template
 - 2026-05-15 — research/idea_ — section fill (research dive)
+- 2026-05-15 — research/idea_ — UX + source-priority refinement after Problem framing
 
 ---
 
@@ -147,6 +148,29 @@ Extending `SoundCloudSyncEngine` with a `find_extended_candidates(track)` method
 **Performance ballpark**
 30k tracks × 2 sources × 0.5s avg latency = 30k seconds ≈ 8 hours wall-clock single-threaded. Parallelism per-source (SC max 4 concurrent, Discogs max 1/sec) brings to ~2 hours. Caching + delta scans (only new/changed tracks since last full scan) makes incremental runs minutes.
 
+### 2026-05-15 — UX + source-prioritisation after Problem framing
+
+**UX entry-points (cheapest → richest)**
+- **Per-track badge in Library view** — small "EXT?" pill on rows with high-confidence candidate. Cheap: reuses existing track-list. Cost: extra column query + async badge-fetch per viewport row.
+- **Per-track right-click "Find extended version"** — on-demand, single track, ~2s. Good for one-off triage; bad for library-wide audit.
+- **Standalone "Extended Audit" view** — dedicated panel listing every suggestion, sortable by confidence/date/source. Full scan kicked from here; UX cost: new route + view component.
+- **Sidebar in Ranking view** — when user opens a Radio-Edit, show "Extended candidates" inline. Highest contextual relevance, lowest discoverability for tracks not currently being ranked.
+- Recommend M1 = badge + Audit view (covers passive + active). Right-click + Ranking sidebar wait for M2.
+
+**Source priority + dedup**
+Surface all candidates per track, sorted: lossless paid (Beatport / Bandcamp) > Discogs link-only (canonical reference) > SoundCloud (free download) > YouTube (last resort). Quality marker badge per row. Dedup key = `(normalised_artist, title_stem, duration_band)` — same logical version across sources collapses into one row with multi-source provenance pills. Chromaprint dedup only if fingerprint already computed (don't fetch audio just to dedup).
+
+**Confidence-tier policy**
+- **High (green badge)** — artist exact + title-stem exact + duration ≥ 5:30 + version-tag matches Extended/Club/Long/12". Always surfaced.
+- **Medium (yellow, details on click)** — one signal missing (e.g. duration met but version-tag is "Original Mix"). In Audit view; badge optional behind toggle.
+- **Low (hidden by default)** — only fuzzy match, no version-tag. Reachable via "Show low-confidence" toggle + always on right-click search.
+
+**Avoiding YouTube/spam re-uploads**
+Layered filter: (1) uploader-vs-official-artist match via Discogs artist URLs / SC verified-artist flag, (2) chromaprint match against library Radio Edit (shared with `remix-detector` pipeline — extended must share harmonic profile, not be transposed nightcore), (3) play-count / follower threshold per platform, (4) deny-list keywords (`nightcore`, `sped up`, `slowed`, `1 hour`, `FREE DOWNLOAD`, `FULL VERSION`).
+
+**Cross-doc coordination**
+`remix-detector` + `quality-upgrade-finder` + this doc all share `SoundCloudSyncEngine._fuzzy_match_with_score` (0.65), title-stem extractor, version-tag taxonomy, and (planned) chromaprint pipeline. Suggest unified `app/external_track_match.py` owning fuzzy + version-parse + fingerprint helpers, consumed by all three. Design suggestion only — implementation belongs in whichever sister-doc lands first or a shared refactor doc.
+
 ## Options Considered
 
 > Required by `evaluated_`. For each viable approach: sketch (2-4 lines), pros, cons, effort (S/M/L/XL), risk.
@@ -187,11 +211,19 @@ Extending `SoundCloudSyncEngine` with a `find_extended_candidates(track)` method
 
 Rationale: Option A ships fastest but burns SC quota on tracks that have no Extended anywhere. Option B's Discogs gate is the cheapest win in precision-per-request — Discogs is free, canonical, and ~60 req/min is plenty for incremental scans. The plugin architecture pays dividends when v2 adds paid platforms.
 
+**Milestone split (see Findings 2026-05-15 UX section):**
+- **M1 = Option A surface + plugin-shaped backend.** SC-only path wrapped behind the Option-B plugin interface so Discogs slots in without UI rework. UX = badge + "Extended Audit" view. Scan is **explicit / opt-in only** (button or right-click); never auto at import.
+- **M2 = Option B Discogs gate + medium-tier UX + right-click + Ranking sidebar.** Trigger model adds opt-in **idle delta-scan for newly-imported tracks** (last 24h, behind a setting).
+- **M3 = Option C paid/spammy sources behind feature flags.** Only if M1+M2 metrics show recall gap.
+
 Before promoting to `evaluated_` / `draftplan_`, resolve:
-- Open question #1 (sources for v1) — likely "yes" to SC + Discogs.
+- Open question #1 (sources for v1) — likely "yes" to SC + Discogs (see Findings above: M1 = SC, M2 = +Discogs).
 - Open question #2 (storage) — likely sidecar SQLite at `app/data/extended_candidates.db`.
-- Open question #4 (confidence threshold UX) — needs a frontend mockup pass.
-- Open question #10 (UX surface) — sister doc `idea_analysis-remix-detector` will surface in the same Suggestions tab; coordinate the IA so both features share one panel rather than two competing ones.
+- Open question #3 (trigger model) — see Findings above: M1 = explicit only, M2 = opt-in idle delta-scan, never auto-at-import.
+- Open question #4 (confidence threshold UX) — see Findings above: high = badge, medium = Audit-view toggle, low = hidden behind toggle. Mockup still needed.
+- Open question #6 (cross-source dedup) — see Findings above: collapse on `(artist, title_stem, duration_band)`, show source pills.
+- Open question #8 (YouTube spam filter) — see Findings above: layered filter (verified-artist + chromaprint + popularity + keyword deny-list); not relevant until M3.
+- Open question #10 (UX surface) — see Findings above: M1 badge + Audit view; sister doc `idea_analysis-remix-detector` surfaces in the same Audit view (rename to "Library Audit" if it covers multiple suggestion kinds). Coordinate the IA so all three sister features share one panel rather than three competing ones.
 
 Cross-cutting with sister docs:
 - `idea_analysis-remix-detector` shares the version-tag taxonomy + title-stem extractor — those should land in a shared `app/track_version_parser.py` module, not duplicated.
