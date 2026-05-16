@@ -1,14 +1,14 @@
 # When you hit something weird
 
-1. **Check `docs/MAP.md` or `docs/FILE_MAP.md`** row for that file — likely a non-obvious invariant is documented.
-2. **Check `CHANGELOG.md`** for recent rework in that area.
-3. **Check `git log -- <file>`** for recent commits — particularly any `fix(` or `refactor(` against the file.
-4. **Check `docs/research/_INDEX.md`** — there might be an in-flight research/implementation doc that captures the active design.
-5. **If a parser/writer/exporter behaves oddly**, suspect rbox version quirks — check `app/anlz_safe.py` and `app/usb_one_library.py` for the known patterns. The byte-layout invariants for Pioneer USB export live in `app/usb_pdb.py` comments — verified against an F: drive snapshot.
-6. **If the desktop app misbehaves**, check that the Python sidecar booted: `curl http://127.0.0.1:8000/api/system/health`. Tauri-side: check `npm run tauri dev` terminal for Rust panics or sidecar boot errors.
-7. **If frontend can't reach backend**, verify the CORS whitelist in `app/main.py` and the axios `baseURL` in `frontend/src/api/api.js`. The port 8000 is hardcoded.
-8. **If `SafeAnlzParser` panics repeatedly**, the per-run budget (`MAX_PANICS_PER_RUN=32`) may be exhausted — check `app/anlz_safe.py`. The bisecting blacklist (`_bad_ids`) is in-memory only; restart of the sidecar resets it.
-9. **If a write to `master.db` fails or hangs**, suspect missing `_db_write_lock` acquisition or Rekordbox having the DB open. Close Rekordbox first.
-10. **If USB sync produces silently-corrupted sticks**, the PDB byte layout in `app/usb_pdb.py` is the most likely culprit — run `pytest tests/test_pdb_structure.py` to verify against the reference fixture.
-11. **If a test you didn't expect to fail starts failing**, especially `tests/test_pdb_structure.py` or `tests/test_onelibrary_wal_flush.py` — your last change probably broke a byte-level or SQLite-WAL invariant. Don't update the fixture without understanding why.
-12. **If a Tauri command returns `{ error }` instead of data**, check `src-tauri/src/audio/commands.rs` for the matching handler — they all return `Result<T, String>` and the frontend logs the raw error in dev console.
+1. **`docs/MAP.md` / `docs/FILE_MAP.md`** row for the file — non-obvious invariant likely documented.
+2. **`CHANGELOG.md`** for recent rework in that area.
+3. **`git log -- <file>`** for recent `fix(` / `refactor(` commits.
+4. **`docs/research/_INDEX.md`** — in-flight research/implementation doc may capture active design.
+5. **Parser/writer/exporter odd** → rbox version quirks. Check `app/anlz_safe.py` + `app/usb_one_library.py`. USB byte-layout invariants in `app/usb_pdb.py` comments (verified vs F: drive snapshot).
+6. **Desktop app misbehaves** → check Python sidecar booted: `curl http://127.0.0.1:8000/api/system/health`. Tauri: `npm run tauri dev` terminal for Rust panics / sidecar errors.
+7. **Frontend can't reach backend** → CORS whitelist in `app/main.py` + axios `baseURL` in `frontend/src/api/api.js`. Port 8000 hardcoded.
+8. **`SafeAnlzParser` panics repeatedly** → per-run budget `MAX_PANICS_PER_RUN=32` may be exhausted (`app/anlz_safe.py`). Bisecting blacklist `_bad_ids` is in-memory; sidecar restart resets.
+9. **`master.db` write fails/hangs** → missing `_db_write_lock` acquisition, or Rekordbox holds DB. Close Rekordbox first.
+10. **USB sync silently corrupts sticks** → PDB byte layout in `app/usb_pdb.py` most likely culprit. Run `pytest tests/test_pdb_structure.py` vs reference fixture.
+11. **Unexpected test failure**, esp. `test_pdb_structure.py` or `test_onelibrary_wal_flush.py` → your change probably broke a byte-level or SQLite-WAL invariant. Don't update fixture without understanding why.
+12. **Tauri command returns `{ error }` not data** → `src-tauri/src/audio/commands.rs` handler. All return `Result<T, String>`; frontend logs raw error in dev console.
