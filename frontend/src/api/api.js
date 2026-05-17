@@ -1,4 +1,12 @@
 import axios from 'axios';
+import toast from 'react-hot-toast';
+
+import {
+    getSessionToken,
+    setBootstrapFailed,
+    setBootstrapPromise,
+    setSessionToken,
+} from '../store/authStore';
 
 // ─── EC2: Runtime detection of Tauri context ───────────────────────────────────
 // Tauri injects window.__TAURI_INTERNALS__ before the page loads.
@@ -17,10 +25,103 @@ const api = axios.create({
     withCredentials: true,    // Send HttpOnly cookies (sc_token sentinel)
 });
 
-// ─── SECURITY: Session token management (for backend shutdown/restart) ─────────
-let _sessionToken = '';
-export function setSessionToken(token) { _sessionToken = token; }
-export function getSessionToken()      { return _sessionToken; }
+// Re-export the auth-store helpers under the legacy api.js names so
+// existing callers keep working without an import-path migration.
+export { getSessionToken, setSessionToken };
+
+// ─── SECURITY: Bootstrap the session token ────────────────────────────────────
+// Phase 1 of the API auth-hardening flow (see
+// docs/research/implement/draftplan_security-api-auth-hardening.md):
+//   - Tauri context  → ``invoke('get_session_token')`` with a retry loop
+//     for the stdout-reader race window. After 5 s with no token we
+//     surface a "Starting backend..." toast so the user knows we're
+//     still waiting; total budget 30 s (60 attempts × 500 ms).
+//   - Browser-dev    → ``fetch('/dev-token')`` which the vite
+//     dev-middleware serves from %APPDATA%/MusicLibraryManager/.session-token.
+// Both paths set ``_sessionToken`` (via the auth store). Failure flips
+// ``_authBootstrapFailed`` so mutation UI can disable itself; we ALSO
+// surface a non-dismissable toast.
+
+const TAURI_BOOTSTRAP_INTERVAL_MS = 500;
+const TAURI_BOOTSTRAP_MAX_ATTEMPTS = 60;          // 60 × 500 ms = 30 s
+const TAURI_BOOTSTRAP_LONG_WAIT_MS = 5_000;       // toast after 5 s
+
+async function _bootstrapFromTauri() {
+    const { invoke } = await import('@tauri-apps/api/core');
+    let longWaitToast = null;
+    const longWaitTimer = setTimeout(() => {
+        longWaitToast = toast.loading('Starting backend...');
+    }, TAURI_BOOTSTRAP_LONG_WAIT_MS);
+
+    try {
+        for (let attempt = 0; attempt < TAURI_BOOTSTRAP_MAX_ATTEMPTS; attempt++) {
+            try {
+                const token = await invoke('get_session_token');
+                if (token && typeof token === 'string') {
+                    setSessionToken(token);
+                    return token;
+                }
+            } catch (err) {
+                // ``Err("token-not-ready")`` is expected during the
+                // first ~50 ms while the Rust supervisor is still
+                // tailing the sidecar's stdout for the LMS_TOKEN= line.
+                if (err && String(err).indexOf('token-not-ready') === -1) {
+                    console.error('[API] get_session_token IPC error:', err);
+                }
+            }
+            await new Promise((resolve) => setTimeout(resolve, TAURI_BOOTSTRAP_INTERVAL_MS));
+        }
+        throw new Error('Tauri IPC get_session_token: 30 s timeout');
+    } finally {
+        clearTimeout(longWaitTimer);
+        if (longWaitToast) toast.dismiss(longWaitToast);
+    }
+}
+
+async function _bootstrapFromDevMiddleware() {
+    const resp = await fetch('/dev-token', { credentials: 'omit' });
+    if (!resp.ok) {
+        throw new Error(`/dev-token HTTP ${resp.status}`);
+    }
+    const token = (await resp.text()).trim();
+    if (!token) {
+        throw new Error('/dev-token returned an empty body');
+    }
+    setSessionToken(token);
+    return token;
+}
+
+async function _bootstrap() {
+    try {
+        if (isTauri) {
+            return await _bootstrapFromTauri();
+        }
+        return await _bootstrapFromDevMiddleware();
+    } catch (err) {
+        console.error('[API] Authentication bootstrap failed:', err);
+        setBootstrapFailed(true);
+        toast.error(
+            'Authentication bootstrap failed. Restart the app.',
+            { duration: Infinity, id: 'auth-bootstrap-failed' }
+        );
+        throw err;
+    }
+}
+
+// Top-level promise so callers can ``await ready()`` if they want to
+// gate first-use on a known-good token. Axios calls do this implicitly
+// in the request interceptor below.
+const _bootstrapPromise = _bootstrap().catch((err) => {
+    // Swallow at top level so the promise doesn't pop an unhandled
+    // rejection warning; the interceptor still awaits and propagates.
+    return Promise.reject(err);
+});
+setBootstrapPromise(_bootstrapPromise);
+
+/** Await this from anywhere if you need the bootstrap to be done. */
+export function ready() {
+    return _bootstrapPromise;
+}
 
 // ─── EC15: Token-refresh state ────────────────────────────────────────────────
 // Prevents an infinite refresh loop if the refresh request itself fails.
@@ -81,10 +182,21 @@ async function _refreshScToken() {
 
 // ─── REQUEST INTERCEPTOR ──────────────────────────────────────────────────────
 api.interceptors.request.use(
-    (config) => {
-        // Attach shutdown session token when present (for /api/system/* calls)
-        if (_sessionToken) {
-            config.headers['X-Session-Token'] = _sessionToken;
+    async (config) => {
+        // Block on the bootstrap promise the first time through so any
+        // call that fires before the IPC handshake / dev-token fetch
+        // resolves still carries the Bearer header. After the first
+        // await this is a microtask away from instant.
+        try {
+            await _bootstrapPromise;
+        } catch (_err) {
+            // Bootstrap failed → let the request go without auth so the
+            // backend's 401 path fires consistently; the toast from
+            // _bootstrap() already alerted the user.
+        }
+        const token = getSessionToken();
+        if (token) {
+            config.headers['Authorization'] = `Bearer ${token}`;
         }
         return config;
     },
