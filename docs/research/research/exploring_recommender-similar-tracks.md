@@ -3,10 +3,10 @@ slug: recommender-similar-tracks
 title: Similar-tracks recommender for a given seed track
 owner: tb
 created: 2026-05-15
-last_updated: 2026-05-15
+last_updated: 2026-05-17
 
-tags: []
-related: [recommender-rules-baseline, recommender-taste-llm-audio]
+tags: [recommender, local-only, audio-vectors, similarity]
+related: [recommender-rules-baseline, recommender-taste-llm-audio, security-api-auth-hardening, external-track-match-unified-module]
 ---
 
 # Similar-tracks recommender for a given seed track
@@ -23,6 +23,7 @@ related: [recommender-rules-baseline, recommender-taste-llm-audio]
 - 2026-05-15 — research/idea_ — shared-vector pipeline coordination with Teil-2
 - 2026-05-15 — research/idea_ — exploring_-ready rework loop (deep self-review pass)
 - 2026-05-15 — research/exploring_ — promoted; quality bar met (corrected ~12-15 dim actual vs 46 claimed; 11 OQ accounted; M1/M2/M3 with concrete deliverables + exit criteria)
+- 2026-05-17 — research/exploring_ — evaluated_-ready deepening pass: corrected sklearn-not-in-requirements; specified Bearer auth via `Depends(require_session)` per draftplan; reconciled path-(a)+(b) duality in OQ11; tightened external-track-match cross-doc scope (matching-not-ranking); added OQ12 sklearn-dep status
 
 ---
 
@@ -70,8 +71,9 @@ Where the local ranking baseline can be **shared** (feature vectors, audio embed
 - **Rekordbox `master.db` schema-frozen**: per-track payload (vector, cache) lives in sidecar SQLite `app_data/track_vectors.db`. NEVER add columns to `master.db`.
 - **`_db_write_lock` not needed** for the new sidecar SQLite (separate file, not Rekordbox). If the builder ever reads from `master.db` to enumerate track IDs, that read is lock-free (read-only); writes are to the sidecar only.
 - **Performance budget**: P95 ≤ 100 ms top-20 over 50k vectors. Rules out per-query re-extraction. ~46-dim float32 × 50k = ~9 MB; brute cosine in numpy is ≤ 50 ms cold per Teil-2 finding line 105.
-- **No new heavy deps for v1**: numpy + sklearn (already in `requirements.txt`) only. FAISS / sqlite-vss / PyTorch parked to M3+ if scale demands.
-- **Fuzzy matcher shared surface**: `_fuzzy_match_with_score` lives at `app/soundcloud_api.py:566`, threshold `0.65` at line 583. Cross-doc coordination via `idea_external-track-match-unified-module.md` — this doc does NOT extract a local copy; if the recommender needs title-based dedup later, it consumes the unified module once shipped. M1 sidesteps fuzzy match entirely (track IDs are exact).
+- **No new heavy deps for v1**: numpy already in `requirements.txt:32` (`numpy==1.26.4`). **sklearn is NOT in `requirements.txt`** (re-verified 2026-05-17 — only numpy/scipy/numba/librosa for numerical stack). M1 uses brute numpy cosine only; sklearn `NearestNeighbors` adoption = explicit Schicht-A pinning decision deferred to M2/M3 when scale crosses ~200k tracks. FAISS / sqlite-vss / PyTorch parked to M3+. See new OQ12.
+- **Auth-gating concrete shape**: `GET /api/similar/local` + `POST /api/track-vectors/backfill` both routed through the auth-hardening draftplan's Bearer dependency. `draftplan_security-api-auth-hardening.md` picks **Bearer-only** (no X-Session-Token compat; current `X-Session-Token` header has zero backend validator — see that doc Findings 2026-05-15 line 82). Concrete FastAPI shape: `Depends(require_session)` (function name TBD by draftplan implementation; query routes = read-gate, backfill = write-gate). Frontend = Tauri stdout+file token handoff (no env var).
+- **External-track-match cross-doc scope**: `exploring_external-track-match-unified-module.md` owns **matching + fingerprint + adapter-registry** ONLY — NOT ranking infrastructure. It returns transient `Candidate` objects (`source, source_id, title, artist, duration_s, version_tag, url, raw`); ranking/scoring is sister-feature concern. This doc owns its own ranking/cosine + reasons stack independently; no overlap. Fuzzy matcher reuse only relevant at M3+ for in-library dedup (e.g. "seed has 3 near-duplicates, treat as one") — M1 sidesteps entirely (vector store keyed by exact Rekordbox `track_id`).
 
 ## Open Questions
 
@@ -87,7 +89,8 @@ Where the local ranking baseline can be **shared** (feature vectors, audio embed
 8. **Caching** — **PARKED**: M1 doesn't cache. Justification — brute cosine over 50k × 46-dim < 50 ms; invalidation on library mutation (add/delete/re-analyse) is non-trivial. Re-evaluate at M3 only if eval data shows P95 > 80 ms.
 9. **Cold-start for newly-imported tracks** — **RESOLVED**: silently exclude from candidate pool. Reason: triggering on-demand analysis from a query path breaks the ≤100 ms budget and the local-first guarantee (analysis decodes audio = slow). Surface "X tracks unanalysed" hint in the response payload so UI can prompt user to run analysis.
 10. **Where does the vector store live** — **RESOLVED** (Finding 2026-05-15 #2): sidecar SQLite `app_data/track_vectors.db`, table `track_vectors(track_id PK, vector_blob, fps_id, computed_at)`. Justification: atomic write, indexed lookup, schema-evolution-friendly. Beats flat `.npy` (no atomicity, no transactional bulk-update) and in-memory-only (cold-start latency on 50k tracks ~2 s).
-11. **NEW: vector extraction cost** — **PARTIALLY RESOLVED** (Finding #3): the ~46-dim vector requires NEW extraction code (spectral_bandwidth, spectral_flatness, MFCC mean+std, chroma mean track-aggregated, tempo_variability are NOT persisted today). Two paths: (a) add to `analysis_engine.py` main pass — costs ~0.5-1 s/track at analysis, but vectors land "for free" in every future imported track; (b) separate `app/track_vector_builder.py` that consumes raw audio + cached analysis output — backfill-friendly but double-decodes audio. **GATE FOR `evaluated_`**: path-(a) recommended; needs user sign-off because it touches the hot analysis pipeline.
+11. **NEW: vector extraction cost** — **PARTIALLY RESOLVED** (Finding #3 + Finding #4): both paths needed simultaneously, not either/or. Path-(a) = hook `_extract_similarity_features()` into `analyze_audio_full` so new analyses ship vectors free (~0.3-0.5 s/track extra). Path-(b) = `POST /api/track-vectors/backfill` job runs `track_vector_builder.compute_track_vector()` over already-analysed tracks (consumes cached `analysis_cache.py` decoded `y`, no double-decode — see Finding #4). Both write to the same `track_vectors.db`. **GATE FOR `evaluated_`**: user sign-off on path-(a) hot-pipeline change (path-(b) is purely additive — sidecar SQLite, new route, no main.py hot path risk).
+12. **NEW: sklearn-as-new-dep status** — **DECISION-NEEDED at M2 trigger**: M1 ships numpy-cosine-only (numpy already pinned). sklearn `NearestNeighbors` (`BallTree`/`KDTree`) becomes attractive at ~200k tracks where brute cosine crosses 100 ms budget. Adding sklearn = ~30 MB transitive (scipy already in, joblib new) + Schicht-A CVE-pin. Alternative: hand-rolled numpy `argpartition`-based top-N stays dep-free even at 500k. **Default**: stay numpy-only through M2; reconsider sklearn only if profiling shows brute-cosine bottleneck.
 
 ## Findings / Investigation
 
@@ -168,6 +171,28 @@ Total **scalar dims persisted today: ~12-15**, not 46.
 - **OQ11 (new)** — partially resolved: extraction-cost path-(a) preferred, gate on user sign-off.
 - **OQ9** (cold-start) — now strongly justified: backfill job is the answer, not query-path on-demand analysis.
 
+### 2026-05-17 — deeper exploration: dep / auth / cross-doc re-audit
+
+**Dep claim correction (sklearn).** Constraints originally claimed "numpy + sklearn (already in `requirements.txt`) only". Re-verified `requirements.txt` (47 lines): numeric stack is `numpy==1.26.4`, `scipy==1.11.4`, `numba==0.58.1`, `librosa==0.10.1`. **No sklearn pin.** M1 budget shrinks accordingly: brute numpy cosine + `np.argpartition` for top-N. sklearn `NearestNeighbors` would be ~30 MB transitive (joblib added too) — Schicht-A pinning + CVE-check decision deferred to M2 trigger (see new OQ12). Updated Constraints + Recommendation exit-criteria accordingly.
+
+**Auth wiring concrete (was vague).** Recommendation line 215 previously said "Auth-gated per the auth-hardening draftplan" without specifying mechanism. Re-read `docs/research/implement/draftplan_security-api-auth-hardening.md` (Lifecycle line 25): user signed off on **Bearer-only**, no env-var, no X-Session-Token compat, init-token endpoint deleted. Findings line 82 also reconfirms zero `X-Session-Token` validator in `app/` today (frontend ships header, backend ignores). Concrete API surface for this doc's two routes:
+- `GET /api/similar/local?seed_track_id=...` → read-gate via `Depends(require_session)` (Bearer; function name will be set by draftplan implementation — track here as `require_session`).
+- `POST /api/track-vectors/backfill` → same gate; can grow to a stricter write-gate if draftplan splits read/write.
+
+Token handoff = Tauri stdout+file (per draftplan Findings/Recommendation pick). M1 plumbing for this doc is a one-line `Depends(...)` per route — no module-level work. Updated Constraints accordingly; removed "X-Session-Token gated" from Recommendation M1.
+
+**Cross-doc external-track-match scope tightened.** Original Finding #3 line 163 mentioned consumption of `external_track_match.py` at M3 for "name-conflict deduper". Re-read `exploring_external-track-match-unified-module.md` Goals (line 32-37): module scope = fuzzy-match + version-tag taxonomy + title-stem extractor + fingerprint API + adapter registry. Returns transient `Candidate` dataclasses; explicitly **no ranking/scoring infrastructure** (Non-goals line 41: "Per-feature UX / data-model / persistence (sister-doc concerns)" + line 45: "Owning candidate-storage sidecar SQLite schema (each sister-doc owns its own table; this module returns transient `Candidate` objects only)"). M3 consumption = read-only stem-extractor + fuzzy-match utility for in-library dedup ONLY; no ranking-stack overlap. Constraint clarified in updated Constraints block.
+
+**Path-(a)/(b) duality reconciliation.** Finding #3 line 161 called path-(b) "recommended for M1"; Recommendation M1 line 213 hooks into `analyze_audio_full` (= path-(a)) + adds backfill route (= path-(b)). Both, simultaneously. Path-(a) handles future imports automatically; path-(b) handles the existing library. No either/or. OQ11 updated to reflect both-needed; user sign-off scope narrowed to path-(a) only (hot-pipeline touch); path-(b) is purely additive (new sidecar SQLite + new route).
+
+**`analysis_cache.py` integration check.** `app/analysis_cache.py` already provides fps_id-based cache invalidation pattern (Constraints already cite). For backfill: re-running `audio_analyzer.analyze_async` over a cached track returns the cached `result` dict in milliseconds (decoded `y` not re-fetched). So the backfill job's per-track cost is dominated by the new `_extract_similarity_features` librosa pass on cached `y`, not by file I/O / decode. 50k library backfill at ~0.4 s/track ≈ 5-6 h single-process; `audio_analyzer.ProcessPoolExecutor` (configurable workers) brings to ~1-2 h on 4-core dev laptop. Updated Recommendation exit-criteria accordingly (5k tracks < 15 min target stays achievable; 50k full backfill < 2 h with 4 workers).
+
+**Teil-1 / Teil-2 re-check.** Re-read `exploring_recommender-taste-llm-audio.md` (Teil-2) Findings + OQ status: still 8/8 OQs open, no embedding decision. Sibling doc landed correctly notes this doc can ship Option-A independently (line 118). No change in upstream status — this doc's independence claim stands.
+
+**Open Questions newly answerable:**
+- **OQ11** — bumped from "path-(a) preferred" to "both-paths required; user sign-off only on path-(a)" — narrower gate.
+- **OQ12 (new)** — sklearn-as-new-dep status documented; default = stay numpy-only.
+
 ## Options Considered
 
 > Required by `evaluated_`. For each viable approach: sketch (2-4 lines), pros, cons, effort (S/M/L/XL), risk.
@@ -193,12 +218,12 @@ Total **scalar dims persisted today: ~12-15**, not 46.
 - **Effort**: M
 - **Risk**: Low.
 
-### Option D — Approximate-NN index (FAISS / sklearn) over Option A or B vectors
-- **Sketch**: Build a FAISS `IndexFlatIP` or `IVF` from precomputed vectors. Persist to disk; reload on sidecar boot.
-- **Pros**: Scales beyond 50k. Sub-ms queries.
-- **Cons**: Premature at current library scale — brute cosine is already ≤ 50 ms. FAISS adds a heavy dep + bundling pain (PyInstaller / Tauri sidecar).
+### Option D — Approximate-NN index (FAISS / sklearn `NearestNeighbors`) over Option A or B vectors
+- **Sketch**: Build a FAISS `IndexFlatIP` or `IVF` (~50-200 MB binary dep) OR sklearn `NearestNeighbors` (BallTree / KDTree; ~30 MB transitive incl. joblib) from precomputed vectors. Persist to disk; reload on sidecar boot.
+- **Pros**: Scales beyond ~200k. Sub-ms queries.
+- **Cons**: **Both add a new Schicht-A-pinned dep** — neither numpy-only. sklearn not in `requirements.txt` today (re-verified 2026-05-17); FAISS adds installer bloat + PyInstaller/Tauri sidecar bundling pain (per Teil-2 doc lines 81-82). Premature at current library scale — brute cosine + `np.argpartition` is already ≤ 50 ms on 50k.
 - **Effort**: L
-- **Risk**: Medium — installer + bundling.
+- **Risk**: Medium — installer + bundling + Schicht-A CVE-pin per dep.
 
 ## Recommendation
 
@@ -209,11 +234,12 @@ Total **scalar dims persisted today: ~12-15**, not 46.
 ### M1 — minimum-viable recommender (ships standalone)
 
 **Deliverables:**
-- New `app/track_vector_builder.py` — extracts the missing fields (`spectral_bandwidth`, `spectral_flatness`, MFCC mean+std, chroma mean track-aggregated, `tempo_variability`) into a 46-dim float32 numpy array. Single function `compute_track_vector(y, sr, existing_analysis) -> np.ndarray`.
-- Hook into `app/analysis_engine.py:analyze_audio_full` so every new analysis writes a vector. Backfill route `POST /api/track-vectors/backfill` for the existing library (X-Session-Token gated).
-- New `app/recommender_similar.py` — query function `find_similar(seed_id, *, limit, filters, weights) -> list[Result]`. Loads vectors lazy-mmap from `track_vectors.db`. Brute cosine over filtered candidate set.
-- New routes in `app/main.py`: `GET /api/similar/local?seed_track_id=...&limit=20&exclude_same_artist=true&bpm_window=0.06&key_strict=false`. Auth-gated per the auth-hardening draftplan.
-- Frontend: context-menu entry "Find similar in library" on track row → side-panel results with reasons chips. State-mgmt scoped to the panel (no app-wide store).
+- New `app/track_vector_builder.py` — extracts the missing fields (`spectral_bandwidth`, `spectral_flatness`, MFCC mean+std, chroma mean track-aggregated, `tempo_variability`) into a 46-dim float32 numpy array. Single function `compute_track_vector(y, sr, existing_analysis) -> np.ndarray`. Path-(a) **and** path-(b) both consume this — path-(a) calls it inside `analyze_audio_full`, path-(b) calls it inside backfill worker over cached `y`.
+- Hook into `app/analysis_engine.py:analyze_audio_full` so every new analysis writes a vector (path-(a), one-line `_extract_similarity_features()` call before return dict at line 2152, vector row written to `track_vectors.db` post-cache write).
+- Backfill route `POST /api/track-vectors/backfill` for the existing library — Bearer-gated via `Depends(require_session)` (auth-hardening draftplan; function name TBD). Uses `audio_analyzer.ProcessPoolExecutor` (configurable workers) over `analysis_cache`-hit tracks. 50k tracks ≈ 1-2 h on 4-core dev laptop.
+- New `app/recommender_similar.py` — query function `find_similar(seed_id, *, limit, filters, weights) -> list[Result]`. Loads vectors lazy-mmap from `track_vectors.db`. Brute numpy cosine + `np.argpartition` for top-N over filtered candidate set. **No sklearn import** (numpy-only per OQ12 default).
+- New routes in `app/main.py`: `GET /api/similar/local?seed_track_id=...&limit=20&exclude_same_artist=true&bpm_window=0.06&key_strict=false`. Bearer-gated via `Depends(require_session)` (read-gate; same shape as backfill or stricter per draftplan split).
+- Frontend: context-menu entry "Find similar in library" on track row → side-panel results with reasons chips. State-mgmt scoped to the panel (no app-wide store). Bearer header attached by `frontend/src/api/api.js` (post-auth-hardening — replaces current `X-Session-Token` plumbing).
 - Test artifacts: `tests/test_recommender_similar.py` (unit + filter coverage), `tests/test_similar_perf.py` (`pytest-benchmark`, P95 ≤ 100 ms over a 50k synthetic fixture), `eval/similar_tracks_2026-05.jsonl` (20-seed eval set, manually scored top-10 for the metric in Goals).
 
 **Gates to enter M1 (= promote `evaluated_` → `accepted_`):**
@@ -224,9 +250,10 @@ Total **scalar dims persisted today: ~12-15**, not 46.
 
 **Exit criteria for M1 (= promote `inprogress_` → `implemented_`):**
 - Goal metric hit: ≥ 3/10 musically-similar on the eval set.
-- P95 ≤ 100 ms over 50k synthetic.
-- Backfill job completes for a 5k-track real library in < 15 min.
-- Zero new heavy deps (numpy + sklearn only).
+- P95 ≤ 100 ms over 50k synthetic (numpy brute cosine + `np.argpartition`).
+- Backfill job completes for a 5k-track real library in < 15 min (path-(b), `ProcessPoolExecutor` over `analysis_cache`-hit tracks).
+- **Zero new Python deps in M1** — numpy already pinned (`requirements.txt:32`); no sklearn, no FAISS, no PyTorch. Auth-gating reuses `Depends(require_session)` from auth-hardening draftplan implementation (no new module here).
+- Auth-hardening draftplan landed first OR concurrent — `require_session` dependency must exist before this doc's routes ship.
 
 ### M2 — quality + UX refinement (only if M1 lands cleanly)
 
@@ -242,7 +269,7 @@ Total **scalar dims persisted today: ~12-15**, not 46.
 **Triggers** (any one fires M3 scoping):
 - Library scale > 200k tracks → FAISS / sklearn `NearestNeighbors` index (OQ8 caching also reconsidered here).
 - Teil-2 lands CLAP / MERT → swap `compute_track_vector()` implementation, keep schema, expose `embedding_kind` column for migration.
-- Cross-doc fuzzy match needed (e.g. dedup near-identical seeds) → consume `app/external_track_match.py` from `idea_external-track-match-unified-module.md`.
+- Cross-doc fuzzy match needed (e.g. dedup near-identical seeds in candidate pool) → import `extract_title_stem()` + `fuzzy_match()` pure functions from `app/external_track_match.py` (`exploring_external-track-match-unified-module.md`); that module ships **no ranking infrastructure** — this doc keeps full ownership of similarity scoring + reasons-list.
 - Teil-1 `plays` table lands → wire `exclude_recently_played` filter.
 
 **Deliverables (conditional):** ANN index, embedding swap, fuzzy-dedup integration, recently-played filter.
@@ -254,10 +281,14 @@ If `recommender-taste-llm-audio` later picks Option B, this doc upgrades by chan
 ### Open Question status summary (for `exploring_` → `evaluated_` gate)
 
 - **Resolved**: OQ1, OQ6, OQ9, OQ10.
-- **Partially resolved (defaults proposed)**: OQ2, OQ5, OQ11.
-- **Gates before `evaluated_`** (need user sign-off): OQ3, OQ4, OQ5 (confirm default), OQ11 (confirm path-a).
-- **Parked to M2**: OQ7 (with re-eval trigger), OQ2 second-pass.
-- **Parked to M3**: OQ8 (caching), Teil-1 `plays` table wiring.
+- **Partially resolved (defaults proposed)**: OQ2, OQ5, OQ11, OQ12.
+- **Gates before `evaluated_`** (need user sign-off, listed once each):
+  - **OQ3** — strict separation (default) vs combined mode with Teil-1.
+  - **OQ4** — context-menu only (default) vs context-menu + sidebar.
+  - **OQ5** — confirm default filter posture (same-artist + same-playlist excluded; BPM ±6%; duration ±50%).
+  - **OQ11** — confirm path-(a) hot-pipeline change (path-(b) backfill is purely additive, no gate).
+- **Parked to M2**: OQ7 diversity-rerank (with re-eval trigger), OQ2 cosine-vs-weighted-sum second-pass, OQ12 sklearn-as-new-dep (numpy-only stays default).
+- **Parked to M3**: OQ8 (caching), Teil-1 `plays` table wiring, fuzzy-dedup via `external_track_match.py` (stem-extractor + fuzzy-match utility consumption only — that module owns no ranking).
 
 ---
 

@@ -3,7 +3,7 @@ slug: library-quality-upgrade-finder
 title: Find higher-quality replacement files for tracks already in library
 owner: tb
 created: 2026-05-15
-last_updated: 2026-05-15
+last_updated: 2026-05-17
 tags: [quality, upgrade, spectral, replacement, rekordbox-metadata]
 related: [library-extended-remix-finder, analysis-remix-detector, external-track-match-unified-module]
 ---
@@ -20,6 +20,7 @@ related: [library-extended-remix-finder, analysis-remix-detector, external-track
 - 2026-05-15 — research/idea_ — transcode + safety refinement after Problem framing
 - 2026-05-15 — research/idea_ — exploring_-ready rework loop (deep self-review pass)
 - 2026-05-15 — research/exploring_ — promoted; quality bar met (6 OQ resolved + 5 PARKED; corrected _db_write_lock location bug; extended safety rules 5→7; Phase 1/2/3 with measurable exit gates)
+- 2026-05-17 — research/exploring_ — deeper exploration toward evaluated_ readiness (fixed db_lock() helper-name + line-number bug; verified librosa.spectral_centroid/rolloff precedent in analysis_engine.py; added Q12 auth-hardening dependency for /api/quality/* gating; added Phase-1 first deliverable + measurable acceptance bar)
 
 ---
 
@@ -30,8 +31,9 @@ Library mixes lossless (FLAC/WAV) with MP3-128/256; some "FLAC" are MP3-transcod
 ## Goals / Non-goals
 
 **Goals** (each testable, metric in parens)
+- **Phase-1a first deliverable**: single-track `POST /api/quality/probe` returning raw fields. (Metric: 5-track fixture `tests/test_quality_engine.py` — genuine FLAC, MP3-128, MP3-320, FLAC-from-MP3, missing-ffprobe — all return correct container + `cutoff_hz ± 200 Hz` vs hand-measured reference.)
 - Per-track quality score: container + true bitrate + sample rate + bit depth + spectral cutoff. (Metric: row in `track_quality` table for ≥ 99 % of scannable files within run; ffprobe-parse-error tracked.)
-- Transcode-detection on lossless containers. (Metric: precision ≥ 0.95 on a 50-track labelled fixture mixing genuine lossless + known MP3→FLAC transcodes + bandlimited-master edge-cases.)
+- Transcode-detection on lossless containers (Phase-1b). (Metric: precision ≥ 0.95 on a **50-track labelled fixture** [distinct from the 5-track probe fixture above] mixing genuine lossless + known MP3→FLAC transcodes + bandlimited-master edge-cases.)
 - External-source candidate search. (Metric: for a labelled 100-track set with known upgrade exists/doesn't-exist split, recall ≥ 0.70 for "exists" subset, false-positive rate ≤ 0.05 for "doesn't exist" subset.)
 - Ranked replacement suggestions in UI; per-track explicit user confirm. (Metric: zero replace-without-confirm code path; UI test asserts.)
 - On accept: snapshot → swap → migrate Rekordbox cue/beatgrid/MyTag/rating/color/play count intact when same edit. (Metric: post-swap diff of `master.db` content row preserves all six fields byte-for-byte; cue-point delta ≤ 5 ms after format-padding offset correction.)
@@ -50,15 +52,17 @@ Library mixes lossless (FLAC/WAV) with MP3-128/256; some "FLAC" are MP3-transcod
 External facts bounding the solution. Each cited + re-verified 2026-05-15.
 
 - **Blast radius maximal**. Overwrite = loss of cue / beatgrid / MyTag investment. `docs/SECURITY.md` treats user audio as user-data root (never agent-writable autonomously). This feature crosses that line only under per-track user consent.
-- **`master.db` writes must hold `_db_write_lock`** — RLock at `app/database.py:22` (verified 2026-05-15, **not** `app/main.py:138` as Findings #1 said). Helper `with db_write_lock():` exposed at `app/database.py:39`. Decorator `@serialise_db_write` at `:44`. Any rbox metadata-migration write path MUST acquire it. rbox 0.1.7 quirks → use `app/usb_one_library.py` patterns; rbox parsing only via `SafeAnlzParser` (`app/anlz_safe.py`, ProcessPoolExecutor `max_workers=1`).
+- **`master.db` writes must hold `_db_write_lock`** — RLock at `app/database.py:22` (verified 2026-05-17, **not** `app/main.py:138` as Findings #1 said). Helper `with db_lock():` ctx-manager at `app/database.py:26` (NOT `db_write_lock()` as exploring_-rework round said). Decorator `_serialised` (private) at `app/database.py:43` applied to every mutating method on `RekordboxDB` (NOT public `@serialise_db_write`). Any rbox metadata-migration write path MUST acquire it — either implicit (`RekordboxDB` mutator method, auto-wrapped) or explicit (`with db_lock(): ...` for multi-step transactions). rbox 0.1.7 quirks → use `app/usb_one_library.py` patterns; rbox parsing only via `SafeAnlzParser` (`app/anlz_safe.py`, ProcessPoolExecutor `max_workers=1`).
 - **`ALLOWED_AUDIO_ROOTS` sandboxing** — list declared `app/main.py:138`; `validate_audio_path` at `app/main.py:168`; canonical check at `app/main.py:617` (`if not any(resolved.is_relative_to(root) for root in ALLOWED_AUDIO_ROOTS)`). Downloads + snapshots MUST land inside a configured root before any swap.
 - **Rekordbox metadata semantics**. Cue points + beatgrid anchors = time offsets (ms / sample-indexed) in `master.db` + `.ANLZ` sidecars. Survive a file swap only if new file has same edit boundary (intro start, length, silence padding). Beatgrid `first_beat_position` is sample-anchored — 50 ms shift desyncs every cue downstream. Format-encoder padding (10-30 ms typical) requires post-swap auto-align pass.
 - **Spectral analysis cost re-verified 2026-05-15**. librosa 0.10.1 pinned in `requirements.txt:34`. Default STFT `n_fft=2048, hop_length=512` is FFT-vectorised numpy → throughput ~ 150-300× realtime on a modern i7 core. 6-min track ≈ 1.2-2.4 s wall, matches original 1-3 s estimate. 10k-track audit single-threaded ≈ 4-7 h; with 4 workers ≈ 1-2 h. **Pi4 calibration NOT in scope** (project targets desktop/laptop; sidecar runs in Tauri on user machine). Must run in bounded worker pool + resumable via `(file_path, mtime, size)` skip key.
-- **ffprobe + ffmpeg = PATH-only, NOT bundled**. Verified `FFMPEG_BIN = "ffmpeg"` at `app/config.py:6`; consumer at `app/services.py:178` derives `ffprobe` via `FFMPEG_BIN.replace("ffmpeg", "ffprobe")`. `CLAUDE.md` confirms "External | FFmpeg in PATH | system". `backend.spec` grep for `ffprobe|chromaprint` → no hits (2026-05-15). Quality-audit must follow same PATH contract; degrade gracefully on missing ffprobe (skip-with-warning row in `track_quality`). Bundling = Schicht-A dep-pinning decision per-platform, M2+ topic.
+- **ffprobe + ffmpeg = PATH-only, NOT bundled**. Verified `FFMPEG_BIN = "ffmpeg"` at `app/config.py:6`; consumer at `app/services.py:178` derives `ffprobe` via `FFMPEG_BIN.replace("ffmpeg", "ffprobe")` w/ explicit `timeout=10` (precedent for subprocess discipline). `CLAUDE.md` confirms "External | FFmpeg in PATH | system". `backend.spec` grep for `ffprobe|chromaprint` → no hits (2026-05-17). Quality-audit must follow same PATH contract; degrade gracefully on missing ffprobe (skip-with-warning row in `track_quality`). Bundling = Schicht-A dep-pinning decision per-platform, M2+ topic.
 - **External-source legal/auth**. SoundCloud HQ/lossless requires Go+ uploader settings; Bandcamp/Beatport/Qobuz require user purchases — no scraping of paid content. Local "HQ folder" = friction-free, MVP source.
 - **Match key + fingerprint** delegated to `idea_external-track-match-unified-module` (M1 PATH-detect fpcalc, function-only API, single shared `Candidate` dataclass). Threshold 0.65 baseline (`app/soundcloud_api.py:583`). ISRC override when ID3/Vorbis tag present.
 - **No backup engine** (removed commits `cc171ee` + `8fe5036`). Snapshot = scoped local file copy → `<library-root>/.upgrade-snapshots/<YYYY-MM-DD>/`. Inside `ALLOWED_AUDIO_ROOTS[0]` so sandbox check passes.
-- **Sidecar SQLite for `track_quality`**, NOT `master.db` (don't pollute rbox-managed tables). Sister-doc `library-extended-remix-finder` proposes unified `app/data/track_suggestions.db` with `kind` column — coordinate; quality scoring belongs in its own `track_quality` table though (different cardinality: 1 row per file, vs N candidates per track).
+- **Sidecar SQLite for `track_quality`**, NOT `master.db` (don't pollute rbox-managed tables). Sister-doc `library-extended-remix-finder` proposes unified `app/data/track_suggestions.db` with `kind` column — coordinate; quality scoring belongs in its own `track_quality` table though (different cardinality: 1 row per file, vs N candidates per track). Sidecar-DB precedent: `app/anlz_sidecar.py` (not a DB but a sidecar-artefact pattern — per-track files keyed by sha1 of resolved path under `<music_dir>/.lms_anlz/<sha>/`). Quality sidecar belongs in `app/data/` not next to each track.
+- **librosa spectral helpers already wired** — `librosa.feature.spectral_centroid` + `spectral_rolloff` already imported + used at `app/analysis_engine.py:1675-1677` (energy descriptor pipeline). Quality-cutoff path can either (a) share that pipeline's audio-load and add a cutoff helper, or (b) keep separate (different sample-rate handling — quality needs native SR, analysis path may resample to 22050 Hz for BPM). **Bias = separate path** (`app/quality_engine.py`), to keep blast-radius isolated + avoid coupling quality re-scans to expensive BPM/key analysis. Confirm at draftplan after benchmarking.
+- **Auth gating** — `app/main.py` has **no working auth today**: `X-Session-Token` header is shipped by frontend (`frontend/src/api/api.js:86-88`) but backend has no validator (verified via sister-doc `implement/draftplan_security-api-auth-hardening.md` Findings 2026-05-15 — zero greps for header/Depends/HTTPBearer/Security in `app/`). CLAUDE.md "System endpoints behind `X-Session-Token`" is **aspirational, not implemented**. Phase-1 quality routes (`POST /api/quality/scan`, `GET /api/quality/track/{tid}`, `GET /api/quality/report`) are read+write so they sit in the auth-hardening scope. **Decision required**: either land before auth-hardening Phase-1 (then retrofit gates) or wait for shared `Depends(require_session)` to exist. See new Q12.
 
 ## Open Questions
 
@@ -75,6 +79,7 @@ Numbered. Each resolvable (yes/no or X vs Y), not philosophy. Status tag per ite
 9. **NEW — `track_quality` schema location** — own table in unified `app/data/track_suggestions.db` (sister-doc proposed) vs dedicated `app/data/track_quality.db`. **PARKED to draftplan**. Bias: own DB. `track_quality` is 1 row per file (cardinality matches file count); `track_suggestions` is N rows per track (different access pattern + retention TTL).
 10. **NEW — concurrency model for full-library audit** — `concurrent.futures.ProcessPoolExecutor` vs `ThreadPoolExecutor` vs async-via-asyncio. **PARKED to draftplan**. librosa = GIL-bound numpy → ProcessPool likely; ffprobe = subprocess → either works. Pi4 NOT in scope per Constraints.
 11. **NEW — interaction with `analysis_engine.py`** — does quality-audit invoke full `analysis_engine` or only the new lightweight quality path? **PARKED**. Bias: separate. Quality path = ffprobe + STFT-cutoff-only, ~1-3 s/track. Full `analysis_engine` (BPM, key, cues, hot-cues, beatgrid) = ~ 15-30 s/track. Replace flow may invoke full re-analyse on sample-rate change (open Q 5).
+12. **NEW — auth dependency for `/api/quality/*` routes** — land Phase-1 routes (a) before auth-hardening Phase-1 (ship `none` gate, retrofit `Depends(require_session)` later), (b) after auth-hardening Phase-1 ships `Depends(require_session)` (block on it), or (c) define the auth surface here + adopt whatever shared Depends ships. **PARKED with strong bias = (b)**. Rationale: Phase-1 audit is read+write (scan-status write to sidecar SQLite, no `master.db` writes). Without auth, LAN-exposed sidecar leaks library composition (codec/bitrate/spectral verdict per track = fingerprint of user's library). **Do NOT reuse `SHUTDOWN_TOKEN`** — that token is destructive-lifecycle-scoped; widening its surface to quality routes increases blast radius if leaked (caller can also shut down sidecar). If interim is required: mint a separate `QUALITY_READ_TOKEN` (same `secrets.token_urlsafe(32)` pattern, header check via temporary `Depends(_check_quality_token)`), throw it away when auth-hardening Phase-1 lands. Coordinate w/ `draftplan_security-api-auth-hardening.md`. Final answer at evaluated_ once auth-hardening doc reaches `accepted_`.
 
 ## Findings / Investigation
 
@@ -211,6 +216,42 @@ Mitigation: noise-floor-shape second pass (lossy → sharper transition + quanti
 - Q9, Q10, Q11 added (PARKED to draftplan).
 - All 11 open questions either RESOLVED, PARKED with stated bias, or PARKED to draftplan with explicit blocker — meets ≥50% resolution criterion for exploring_.
 
+### 2026-05-17 — evaluated_-ready deepening: helper-name fix + librosa-precedent verification + auth-hardening dependency + concrete Phase-1 first deliverable
+
+**Constraint corrections vs exploring_-rework round (Findings #3).**
+- `db_write_lock()` helper name **wrong**. Actual public ctx-manager is `db_lock()` at `app/database.py:26-40` (`@contextmanager` decorated). Doc-stringed for "multi-step transactions across `RekordboxDB` mutators". Individual mutator methods auto-wrap via the **private** `_serialised` decorator at `:43-53` (NOT public `@serialise_db_write`). Verified via `Read app/database.py:1-55` 2026-05-17. Constraints + Recommendation updated to use real names.
+- `validate_audio_path` confirmed at `app/main.py:168-203` w/ `Path.is_relative_to` at `:191` (NOT `str.startswith` — sister auth-hardening doc Findings 2026-05-15 line about `.startswith` is **stale**; that was fixed). Has known escape hatch at `:199-201` accepting any path in `db.tracks` exact-match (TODO comment at `:197` flags revisit). Quality-engine's audio reads MUST go through `validate_audio_path`, snapshot writes through the separate `/api/file/write` validator at `app/main.py:610-625`. Both are intact.
+
+**librosa-precedent verification.**
+- `librosa.feature.spectral_centroid` + `spectral_rolloff` already imported + called at `app/analysis_engine.py:1675-1677` (energy descriptor block). Default `n_fft=2048, hop_length=512`. Quality-cutoff path = same library, different statistic (highest bin > -60 dBFS median, not centroid/rolloff). Code-reuse opportunity: share the `librosa.load` boilerplate (mono downmix, native sample-rate) via a small helper in `app/quality_engine.py`; do NOT reuse the analysis-engine load (it resamples to 22050 Hz for BPM, destroys high-frequency content needed for cutoff detection).
+- Implication: `app/quality_engine.py` = small (~300-500 lines), depends only on `librosa`, `numpy`, `subprocess` (ffprobe), `sqlite3`. No coupling to `analysis_engine`, `database.py`, rbox, or `SafeAnlzParser`. Read-only on user audio; write-only on `app/data/track_quality.db`.
+
+**Auth-hardening dependency — newly surfaced.**
+- Sister-doc `implement/draftplan_security-api-auth-hardening.md` Findings 2026-05-15: **zero auth gates in `app/main.py` work today**. `X-Session-Token` is phantom (frontend ships, backend ignores). `SHUTDOWN_TOKEN` query-param protects 2 routes (`shutdown` / `restart`) but leaks via `/api/system/heartbeat`.
+- Phase-1 quality routes are read+write (sidecar SQLite). `none` gate = (a) LAN-exposed = leaks library composition, (b) same-host malware = same. Acceptable for loopback-only-loopback case (current default), unacceptable when mobile-companion ships (`bind 0.0.0.0`).
+- Decision: see Q12. Strong bias = (b) wait for shared `Depends(require_session)` from auth-hardening Phase-1. Do NOT reuse `SHUTDOWN_TOKEN` for quality routes (destructive-scoped — widens blast radius). If interim required, mint dedicated `QUALITY_READ_TOKEN` (throw-away when auth-hardening Phase-1 lands).
+
+**Phase-1 first deliverable (newly concrete).**
+- Smallest shippable unit = **read-only quality scan for one track** (single endpoint, no UI, no sidecar SQLite yet, no audit view).
+- Endpoint: `POST /api/quality/probe` (NOT `/scan` — that's the bulk endpoint) body `{path: str}` → returns `QualityProbeResult` `{path, container, codec, declared_bitrate, sample_rate, bit_depth, duration_ms, cutoff_hz, transition_steepness, noise_floor_below, verdict}`.
+- Implementation surface: `app/quality_engine.py` (new) + 1 route in `app/main.py` + 1 Pydantic model. **No** sidecar SQLite, **no** UI, **no** transcode-verdict heuristic yet (just compute raw fields, verdict = `null`).
+- Path validation: `validate_audio_path(path)` reused as-is — same threat model as `/api/audio/waveform` (`app/main.py:544`).
+- Acceptance bar: `pytest tests/test_quality_engine.py` w/ 5-track fixture (genuine FLAC, MP3-128, MP3-320, FLAC-from-MP3-transcode, missing-ffprobe edge case) — all 5 return correct `container` + `cutoff_hz ± 200 Hz` vs hand-measured reference. Endpoint reachable via curl + frontend axios.
+- Why this first: smallest possible blast-radius (read-only, no DB writes, no UI, no batch); validates the pipeline on real audio; gates everything downstream (transcode verdict needs cutoff_hz that this returns).
+
+**Composite scoring weights — pre-decided value re-verified.**
+- Weights `container 0.40 / sample_rate 0.20 / bit_depth 0.15 / spectral_cutoff 0.25` sum = 1.00 (verified). Cutoff weight (0.25) > bit-depth weight (0.15) intentional: cutoff is the load-bearing transcode-fraud signal; bit-depth differentiates only hi-res tier within already-lossless. Container weight (0.40) reflects "lossless container is strongest single signal" but cutoff sub-weight (0.25) prevents a transcoded-FLAC scoring as high as genuine FLAC. Fixture calibration at draftplan can tune within ± 0.10 of these values; if cutoff weight needs to exceed 0.35 to discriminate, that's a sign the verdict-rule (Findings #3) is doing the work and the composite is over-engineered → revert to verdict-only.
+
+**Sister-doc consistency re-check 2026-05-17.**
+- `exploring_external-track-match-unified-module.md` Constraints §6 (corrected `_db_write_lock` location) — **still correct**, points to `app/database.py:22`. Its helper-name claim (none) doesn't conflict with this doc's now-corrected `db_lock()` reference.
+- `library-extended-remix-finder` proposal for unified `app/data/track_suggestions.db` w/ `kind` column — Open Q 9 here still leans "own DB" (`app/data/track_quality.db`); difference in cardinality (1 per file vs N per track) + retention policy (quality = forever; suggestions = TTL).
+- `draftplan_security-api-auth-hardening.md` adds NEW dependency this round (Q12). Coordinate-or-block decision deferred to evaluated_.
+
+**Open-Question movement this round.**
+- Q12 added (auth-hardening dependency; PARKED-with-strong-bias-c).
+- No Q resolved this round; Q5/6/9/10/11/12 = 6 PARKED-with-bias, Q1/2/3/4/7/8 = 6 RESOLVED. 12 total, 6 RESOLVED (50%), 6 PARKED-with-bias (50%) — meets exploring_ bar.
+- For evaluated_ promote: Q12 needs owner decision (option a/b/c); Q9 needs owner ack on own-DB vs unified-DB; Q5/6 calibration deferred to draftplan as documented.
+
 ## Options Considered
 
 Required by `evaluated_`. Sketch ≤3 bullets, pros, cons, effort (S/M/L/XL), risk.
@@ -257,12 +298,18 @@ Required by `evaluated_`. Sketch ≤3 bullets, pros, cons, effort (S/M/L/XL), ri
 
 ## Recommendation
 
-**Option D**, phase deliverables + exit gates pinned:
+**Option D**, phase deliverables + exit gates pinned. Phase 1 broken into **two slices** to make first deliverable concrete:
 
-**Phase 1 — Audit-only** (deliverable shippable standalone)
-- Deliverables: `track_quality` sidecar SQLite schema + ffprobe wrapper + librosa cutoff + noise-floor pipeline + transcode verdict + per-track user override + UI badges + standalone Quality-Audit view + Audit-progress + resumable scan.
+**Phase 1a — Single-track probe** (smallest shippable; gates Phase 1b)
+- Deliverable: `app/quality_engine.py` (~300-500 lines) + `POST /api/quality/probe` (1 route, body `{path: str}`, returns raw fields incl. `cutoff_hz`) + Pydantic model + `tests/test_quality_engine.py` w/ 5-track fixture.
+- Out of scope: no sidecar SQLite, no UI, no transcode verdict (just raw numbers), no batch.
+- **Exit gate to Phase 1b:** all 5 fixture tracks return correct container + `cutoff_hz ± 200 Hz` vs hand-measured reference; missing-ffprobe edge returns `verdict="unknown_no_ffprobe"`; endpoint reachable via curl + frontend axios; `validate_audio_path` rejects out-of-sandbox paths (security test).
+
+**Phase 1b — Full audit** (deliverable shippable standalone after Phase 1a)
+- Deliverables: `track_quality` sidecar SQLite schema (`app/data/track_quality.db`, separate from sister-doc's `track_suggestions.db`) + bulk endpoint `POST /api/quality/scan` w/ resumable `(abs_path, mtime_ns, size_bytes, codec_pipeline_version)` skip key + transcode verdict (Findings #3 formula) + noise-floor pipeline + per-track user override (`POST /api/quality/override/{tid}`) + UI badges + standalone Quality-Audit view + Audit-progress endpoint.
 - Cross-cutting deliverable: ensure shared `app/external_track_match.py` ships in parallel (lives in sister-doc `external-track-match-unified-module`'s scope; Phase 1 here depends on that module's M1 only for `Candidate` dataclass + adapter registry shape — does NOT yet consume fuzzy/chromaprint).
-- **Exit gate to Phase 2:** Phase 1 audit dogfooded on owner's 5-30k library; verdict precision ≥ 0.95 on labelled 50-track fixture; zero crash/hang reports across 2 weeks; performance ≤ 2 h on owner's library w/ 4-worker pool.
+- **Auth gate decision required before merge:** see Q12 (option a/b/c). Strong bias = (b) wait for shared `Depends(require_session)` from auth-hardening Phase-1. Do NOT reuse `SHUTDOWN_TOKEN` (destructive-scoped). If interim required, mint dedicated `QUALITY_READ_TOKEN` (throw-away when auth lands).
+- **Exit gate to Phase 2:** Phase 1 audit dogfooded on owner's 5-30k library; verdict precision ≥ 0.95 on labelled 50-track fixture; zero crash/hang reports across 2 weeks; performance ≤ 2 h on owner's library w/ 4-worker pool; sidecar SQLite survives Tauri restart cycle.
 
 **Phase 2 — Local-HQ-folder replace** (close-the-loop)
 - Deliverables: local "HQ folder" scanner reuses Phase 1 pipeline + safety rules 1-7 (duration <1s / chromaprint / sample-rate / snapshot / per-track-confirm / Rekordbox-closed / atomic-swap) + `.upgrade-snapshots/<date>/` + "Restore from snapshot" UI + post-swap auto-align cue-offset pass + replace-suggestion modal (per safety-rule 5 spec).
@@ -279,11 +326,13 @@ Required by `evaluated_`. Sketch ≤3 bullets, pros, cons, effort (S/M/L/XL), ri
 
 **Blockers before `evaluated_` (none block exploring_):**
 - Open Q5 (re-analyse policy) — blocks Phase 2 draftplan only.
-- Open Q6 (composite scoring weights final calibration) — blocks Phase 1 draftplan; needs labelled fixture.
+- Open Q6 (composite scoring weights final calibration) — blocks Phase 1b draftplan; needs labelled fixture.
 - Open Q7 — RESOLVED.
 - Open Q9/10/11 — blocks draftplan, not exploring_.
+- Open Q12 (auth-hardening dependency) — needs owner decision: (a) ship Phase-1 ungated, retrofit later; (b) wait for auth-hardening Phase-1 shared `Depends`; (c) adopt-when-ready interim `SHUTDOWN_TOKEN`. **Bias = (c)**.
 - Confirm: no backup-engine revival; `.upgrade-snapshots/` is the path. **Stated; needs owner ack at evaluated_.**
 - Confirm: shared `app/external_track_match.py` lands first (sister-doc M1). Without it, this doc's Phase 2 cannot safely ship rule 2 (chromaprint).
+- Confirm: own `app/data/track_quality.db` vs unified with `track_suggestions.db` (Q9). **Bias = own DB.**
 
 ---
 
@@ -350,6 +399,6 @@ Required by `archived/*`.
 
 ## Links
 
-- Code (existing, verified 2026-05-15): `app/database.py:22` (`_db_write_lock` RLock), `app/database.py:39` (`db_write_lock()` ctx), `app/main.py:138` (`ALLOWED_AUDIO_ROOTS`), `app/main.py:168` (`validate_audio_path`), `app/main.py:617` (sandbox check), `app/config.py:6` (`FFMPEG_BIN`), `app/services.py:178` (ffprobe derivation), `app/anlz_safe.py` (SafeAnlzParser quarantine), `app/analysis_engine.py` (librosa pipeline), `requirements.txt:34` (`librosa==0.10.1`)
+- Code (existing, verified 2026-05-17): `app/database.py:22` (`_db_write_lock` RLock), `app/database.py:26` (`db_lock()` ctx-manager), `app/database.py:43` (`_serialised` private decorator), `app/main.py:138` (`ALLOWED_AUDIO_ROOTS`), `app/main.py:168-203` (`validate_audio_path`, uses `Path.is_relative_to` at `:191`, exact-match escape hatch at `:199-201`), `app/main.py:610-625` (`/api/file/write` sandbox check, `is_relative_to`), `app/config.py:6` (`FFMPEG_BIN`), `app/services.py:178` (ffprobe derivation, `timeout=10` precedent), `app/anlz_safe.py` (SafeAnlzParser quarantine), `app/anlz_sidecar.py` (sidecar-artefact pattern precedent), `app/analysis_engine.py:1675-1677` (`librosa.feature.spectral_centroid` + `spectral_rolloff` precedent), `requirements.txt:34` (`librosa==0.10.1`), `app/main.py:125` (`SHUTDOWN_TOKEN`), `app/main.py:2031` (interim query-param gate precedent)
 - External docs: <chromaprint / fpcalc upstream docs — fill at exploring_>; ffprobe `format=duration` / `bit_rate` field reference; Rekordbox supported sample rates
-- Related research: `library-extended-remix-finder`, `analysis-remix-detector`, `external-track-match-unified-module`
+- Related research: `library-extended-remix-finder`, `analysis-remix-detector`, `external-track-match-unified-module`, `implement/draftplan_security-api-auth-hardening` (Q12 dependency)

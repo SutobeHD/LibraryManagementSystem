@@ -3,7 +3,7 @@ slug: external-track-match-unified-module
 title: Unified track-matching + fingerprint + adapter-registry module shared across remix-detector / extended-remix-finder / quality-upgrade-finder
 owner: tb
 created: 2026-05-15
-last_updated: 2026-05-15
+last_updated: 2026-05-17
 tags: [architecture, shared-module, fuzzy-match, chromaprint, adapter-registry, cross-cutting]
 related: [analysis-remix-detector, library-extended-remix-finder, library-quality-upgrade-finder]
 ---
@@ -18,6 +18,7 @@ related: [analysis-remix-detector, library-extended-remix-finder, library-qualit
 - 2026-05-15 — `research/idea_` — scaffolded + initial design fill (cross-cutting from 3 sister docs)
 - 2026-05-15 — research/idea_ — exploring_-ready rework loop (deep self-review pass)
 - 2026-05-15 — research/exploring_ — promoted; quality bar met (caught load-bearing rapidfuzz cross-doc error AND flagged sister-docs for fixup; 8/11 OQ resolved-M1; 5 dated Findings with module-API design specifics)
+- 2026-05-17 — research/exploring_ — evaluated_-ready rework loop (re-verified `SequenceMatcher` + `fingerprint.rs` + `backend.spec`; cross-doc taxonomy alignment pass across 4 sister-docs; added Rust-FP-via-IPC option for M1; added canonical `VersionTag.label` enum + classifier-input table; added pre-evaluated_ checklist with sign-off blockers)
 
 ---
 
@@ -83,6 +84,8 @@ Status legend: **RESOLVED-M1** = answered for M1, locked. **DEFERRED** = M2/M3 d
 9. **Per-source fuzzy threshold tuning** — universal `0.65` (current SC value) vs per-source override (SC=0.65 dirty user titles, Discogs=0.80 canonical, YouTube=0.55 spam-loose, AcoustID=0.70). **DECISION-NEEDED** (M2). SC is dirty (user-uploaded); Discogs/Beatport `mix_name` is canonical-clean; YouTube titles lie. Per-source override is the right shape. M1 exposes `threshold` parameter (default 0.65) so caller picks at call-site; per-source constants table lands in module when 2nd adapter (Discogs) ships in M2, calibrated against a small per-source labelled fixture. Sub-question for extended-remix-finder's first calibration pass: does threshold also depend on source-of-truth confidence (Discogs ground-truth vs SC discovery use-case)?
 10. **Adapter return-type stability** — concrete `Candidate` dataclass (importable, type-safe, sister features depend on it) vs `dict[str, Any]` (looser coupling). **RESOLVED-M1: `Candidate` frozen dataclass.** Fields: `source: str, source_id: str, title: str, artist: str, duration_s: float | None, version_tag: VersionTag | None, url: str | None, raw: dict`. `raw` escape-hatch holds source-specific payload (SC `permalink`, Discogs `release_id`, etc.). All adapters return `list[Candidate]`.
 11. **Async vs sync API for adapters** — pure-sync (matcher does not need async, but adapter HTTP calls do) vs all-async (adapters are `async def search(...)`, matcher stays sync). **OPEN, deferred to draftplan.** Adapters are HTTP-bound = async wins; matcher is CPU-bound = sync is fine. Likely shape: `async def search(...) -> list[Candidate]` for adapters; sync `fuzzy_match`, `extract_title_stem`, `parse_version_tag`. Sister-features bridge via `asyncio.run()` or `await`.
+12. **Rust-FP as secondary fingerprint source for sidecar paths** — expose Rust `fingerprint_track` via a new FastAPI route the frontend kicks (round-trip IPC) OR keep Rust-FP only for Tauri-direct-IPC consumers (e.g. quality-upgrade replace-modal called from frontend before backend swap). **RESOLVED-M1: Tauri-direct-IPC only for M1**, no FastAPI wrapping. Frontend `invoke('fingerprint_track')` → frontend forwards `Vec<u32>` to backend route that needs it (e.g. `POST /api/upgrade/confirm-replace`). Backend module exposes `accept_rust_fingerprint(track_id, fp: list[int])` setter; never calls Rust directly. Avoids inverse-IPC anti-pattern + keeps sidecar deployable headless (non-Tauri test contexts). See Findings 2026-05-17 "Rust-FP-via-IPC".
+13. **`fpcalc` fingerprint reciprocal-call from Rust** — should `fingerprint.rs` ALSO be able to invoke `fpcalc` (Rust-side `Command::new("fpcalc")`) so AcoustID lookups can happen entirely Rust-side? **DEFERRED (M3-territory).** Would duplicate the Python `fingerprint()` wrapper; adds Rust dep on AcoustID HTTP. Defer until Rust audio path has its own reason to query AcoustID (none today). Sister-doc remix-detector's M3 (Python `app/fingerprint_acoustid.py` + AcoustID HTTP from sidecar) covers the use-case.
 
 ## Findings / Investigation
 
@@ -142,6 +145,74 @@ Frozen, immutable, hashable where reasonable:
 - `Candidate(source, source_id, title, artist, duration_s, version_tag, url, raw: dict)`. Returned from all `SourcePlugin.search`. `raw` escape-hatch holds source-specific payload (SC `permalink`, Discogs `release_id`).
 - `Fingerprint(fpcalc_hash, duration_s)` + `FingerprintUnavailable` sentinel union (`BinaryMissing | Timeout | DecodeError`).
 - `AdapterError` hierarchy: `AdapterNotRegistered`, `AdapterTransportError`, `AdapterQuotaExceeded`, `AdapterParseError`.
+
+### 2026-05-17 — Rust-FP-via-IPC: alternate fingerprint source for M1?
+
+Discovered by sister-doc `analysis-remix-detector` 2026-05-15: `src-tauri/src/audio/fingerprint.rs` (399 LOC) already ships a Chromaprint-style in-house fingerprint (Goertzel 32-band Mel × 128 ms windows → `Vec<u32>` hash words, Hamming similarity 0–1). Re-verified 2026-05-17. Tauri commands `fingerprint_track(path) -> Vec<u32>` and `fingerprint_batch(paths) -> HashMap<String, Vec<u32>>`. Decode via Symphonia (MP3/FLAC/WAV/AIFF/ALAC/M4A). 5-min cap, 11025 Hz, no network.
+
+**Could it replace `fpcalc` as M1 source?**
+
+- **NO for external lookup.** Algorithm is in-house — bit-incompatible with AcoustID (different hash shape, different SR, different windowing). Cannot query AcoustID with `Vec<u32>` from `fingerprint.rs`. Sister-doc remix-detector explicitly confirms this with two-tier plan.
+- **YES for local-cluster pairwise compare.** `hamming_similarity(a, b) -> Option<f32>` answers "are these two local files the same recording?" — sufficient for quality-upgrade-finder safety-rule 2 (chromaprint-match ≥ 0.95 for replace-eligibility), sister-doc remix-detector M2 cluster pass.
+- **Cost of IPC for the module:** Python `httpx` → FastAPI is wrong direction; Rust fingerprint is in Tauri main, not Python sidecar. Two routes available:
+  - (a) **Tauri-context only:** UI side calls `invoke('fingerprint_track', {path})`, hands result to backend via a new route. Latency = decode + fingerprint + JSON marshall + HTTP. Acceptable for batch jobs, awkward for module-level "fingerprint this file" call.
+  - (b) **Sidecar can't call Tauri.** Python sidecar is a subprocess of Tauri; no inverse IPC. If quality-upgrade replace path runs in sidecar (FastAPI route), it cannot reach Rust fingerprint without round-tripping through frontend.
+- **Decision for M1 module API:** keep `fpcalc` PATH-detect as the **module-level** fingerprint source (called from sidecar Python code). Add **separate optional secondary source** `rust_fingerprint_via_ipc(path) -> RustFingerprint | RustFingerprintUnavailable` callable only when invoked from a route the frontend kicks. Two distinct return types (one for AcoustID-lookup, one for local-pairwise) prevent semantic confusion. Document the asymmetry in module README.
+- **Sister-doc implications:** remix-detector M2 ("Rust-FP local cluster") already plans this — fits. Quality-upgrade safety-rule 2 has wiggle room: can accept `RustFingerprint`-similarity ≥ 0.95 as substitute when `fpcalc` missing AND when the candidate is also a local file (HQ-folder scenario). Update quality-upgrade Constraints in next round.
+
+### 2026-05-17 — canonical `VersionTag.label` enum across 4 sister-docs
+
+Cross-doc audit 2026-05-17 of all 4 docs (this + 3 sisters):
+
+| Doc | Enum values listed | Order | Differs? |
+|---|---|---|---|
+| this (Goals line 33) | `original \| extended \| radio \| club \| dub \| instrumental \| acapella \| vip \| remix \| bootleg \| edit \| mashup` | 12 values | — |
+| `analysis-remix-detector` Goals line 37 | `original \| extended \| radio \| club \| dub \| instrumental \| acapella \| remix \| edit \| bootleg \| vip \| mashup` | 12 values, `remix/edit/bootleg/vip` reordered | members identical, order differs |
+| `library-extended-remix-finder` | no enum; lists **classifier-input tokens** as bands | classifier inputs, not labels | not a label conflict |
+| `library-quality-upgrade-finder` | no enum; consumes shared module | — | not a label conflict |
+
+**Members align across both label-defining docs.** Ordering harmless (set semantics, not list semantics). **Canonical proposal for `VersionTag.label`:**
+
+```
+Literal["original", "extended", "radio", "club", "dub",
+        "instrumental", "acapella", "vip", "remix", "bootleg",
+        "edit", "mashup"]
+```
+
+Ordering rule = stem-prefix first (original, extended, radio, club, dub, instrumental, acapella) then derivative-type (vip, remix, bootleg, edit, mashup). Mnemonic: "stem family before derivation family".
+
+**Extended-finder classifier-input tokens (NOT labels)** — collapse-to-canonical mapping:
+
+| Title token (case-insensitive) | Maps to `label` | Modifier captured |
+|---|---|---|
+| `extended mix`, `extended version`, `extended`, `long version`, `full version`, `12" mix`, `12" version` | `extended` | one of `("Extended","Long","Full","12\"")` |
+| `club mix`, `club version` | `club` | `("Club",)` |
+| `radio edit`, `radio mix`, `short edit`, `clean edit`, `intro edit`, `single edit` | `radio` | one of `("Radio","Short","Clean","Intro","Single")` |
+| `dub mix`, `dub` | `dub` | `("Dub",)` |
+| `instrumental`, `instrumental mix` | `instrumental` | `("Instrumental",)` |
+| `acapella`, `a cappella`, `vocal mix` | `acapella` if instrumentless else `original` w/ `("Vocal",)` | source-aware |
+| `original mix` (Beatport) | `original` | `("Original",)` |
+| `original mix` (SoundCloud) | `radio` | `("Original",)` (source-aware override) |
+| `vip`, `vip mix` | `vip` | `("VIP",)` |
+| `(<artist>) remix`, `(<artist>) extended remix` | `remix` | remixer name + `("Remix",)` or `("Extended","Remix")` |
+| `(<artist>) bootleg`, `(<artist>) flip`, `(<artist>) refix`, `(<artist>) rework` | `bootleg` | remixer + `("Bootleg"|"Flip"|"Refix"|"Rework",)` |
+| `(<artist>) edit`, `(<year>) edit`, `(<year>) remaster(ed)` | `edit` | remixer-or-year + `("Edit"|"Remaster",)` |
+| `(<artist>) mashup`, `vs.`-pair in title | `mashup` | remixer + `("Mashup",)` |
+
+Source-aware bit (Beatport `original mix` = canonical extended cut; SoundCloud `original mix` = radio cut) lives in the **adapter's `parse_version(raw)` method** (per `SourcePlugin` Protocol Findings 2026-05-15), not the title-only parser. Title-only `parse_version_tag(title)` returns label without source context — adapter overrides per-source.
+
+**Sign-off slot:** cross-doc fixup in next round will (a) re-order remix-detector Goals enum to match canonical for diff-grep readability, (b) add classifier-input table as Findings citation in extended-finder, (c) note in quality-upgrade Constraints that the enum lives here.
+
+### 2026-05-17 — verification round: load-bearing facts still hold
+
+Re-verified 2026-05-17 (each `Grep`/`Read` against current main):
+
+- **`SoundCloudSyncEngine._fuzzy_match_with_score`** at `app/soundcloud_api.py:566` — still uses `SequenceMatcher(None, sc_combined, local_combined).ratio()` on line 582. Threshold `0.65` hardcoded on line 583. Exact-norm-title shortcut on line 579-580 returns `(tid, 1.0)`. Module-extraction target unchanged. Sister-doc rapidfuzz misreferences still need fixup.
+- **`backend.spec` `fpcalc|chromaprint|acoustid|pyacoustid` grep**: zero hits. Bundling decision still pending. PATH-detect M1 plan holds.
+- **`src-tauri/src/audio/fingerprint.rs`**: 399 LOC, ships Tauri commands `fingerprint_track` + `fingerprint_batch`. In-house Chromaprint-style. Confirms two-tier fingerprint plan (Rust local-cluster; `fpcalc` external-lookup) — see Findings 2026-05-17 "Rust-FP-via-IPC".
+- **`_db_write_lock`** at `app/database.py:22` (verified by sister-doc quality-upgrade-finder 2026-05-15). Module read-only — no acquisition.
+
+No verification has fallen out. All Constraints assertions remain true on main.
 
 ### 2026-05-15 — module-API: scope boundary + dep footprint
 
@@ -246,9 +317,26 @@ Fires when ALL true:
 - [x] Findings include module-API design specifics (signature-level prose, not real code).
 - [x] Options 4 differentiated sketches with effort + risk.
 - [x] Recommendation phased M1/M2/M3 with deliverables + gates.
-- [ ] Sister-doc owners signed off on `VersionTag` taxonomy shape (cross-doc fixup; do at exploring_).
-- [ ] Sister-doc owners signed off on `Candidate` dataclass shape (cross-doc fixup; do at exploring_).
-- [ ] Cross-doc rapidfuzz-vs-SequenceMatcher fix landed in all 3 sister-docs (Constraints section in each).
+
+### Pre-promote-to-`evaluated_` checklist (added 2026-05-17)
+
+- [x] Re-verify load-bearing facts on main (`SequenceMatcher`, `backend.spec`, `fingerprint.rs`, `_db_write_lock`). See Findings 2026-05-17 "verification round".
+- [x] Coordinate `VersionTag.label` canonical enum across 4 sister-docs. See Findings 2026-05-17 "canonical enum" — member-set aligned, ordering proposed.
+- [x] Document classifier-input → canonical-label collapse table (extended-finder's `extended mix`/`long version`/`12" mix` tokens all map to `extended`). See Findings 2026-05-17.
+- [x] Rust-FP-via-IPC question answered (OQ12 RESOLVED-M1 Tauri-direct-IPC only).
+- [x] Rust-side AcoustID lookup deferred (OQ13 DEFERRED M3).
+- [x] Updated OQ tally: **13/13** (10 RESOLVED-M1, 2 DEFERRED, 1 OPEN-for-draftplan).
+- [ ] **Sister-doc cross-doc fixups landed** (blocker for `evaluated_` promote):
+  - [ ] `analysis-remix-detector`: re-order Goals enum to canonical order `(original, extended, radio, club, dub, instrumental, acapella, vip, remix, bootleg, edit, mashup)` for diff-grep alignment (members identical, low-risk edit).
+  - [ ] `library-extended-remix-finder`: add cross-ref to this doc's classifier-input table in Constraints — `extended mix`/`long version`/`12" mix` collapse to `extended` label, not separate values.
+  - [ ] `library-quality-upgrade-finder`: add note in Constraints that the canonical `VersionTag.label` lives here; quality-upgrade is read-only consumer.
+  - [ ] `analysis-remix-detector` Constraints (line 66): correct sister-doc reference (still says "M1 consumes the unified-module pure-function wrapper") — point at this doc's Recommendation section, not generic.
+  - [ ] All three sister-docs: confirm `Candidate` dataclass shape — already agreed in Findings 2026-05-15 "module-API: concrete dataclasses" but not explicitly signed-off in sister-doc text.
+- [ ] **Quality-upgrade Constraints update** (blocker for `evaluated_`):
+  - [ ] Note that Rust-FP-via-IPC can substitute `fpcalc` for safety-rule 2 when candidate is also a local file (HQ-folder scenario) — per Findings 2026-05-17 "Rust-FP-via-IPC" final bullet. Keeps replace-flow usable when `fpcalc` missing AND both files are local.
+- [ ] Owner sign-off on Option C vs Option D split (M1 = flat file; subpackage migration gated). Already captured in Recommendation but never explicitly ack'd.
+
+**Promote `exploring_` → `evaluated_`** only after sister-doc fixups land (PRs touching the 3 sister-docs only — this doc's design content is `evaluated_`-grade already). Owner ack on Recommendation completes promotion. NO code change required before `accepted_`.
 
 ---
 

@@ -6,6 +6,7 @@ created: 2026-05-15
 last_updated: 2026-05-15
 tags: [analysis, popularity, sidecar-db, multi-source, fuzzy-match]
 related: [external-track-match-unified-module]
+ai_tasks: false  # set true to opt-in AI routines — see ## AI Tasks below
 ---
 
 # Underground vs Mainstream classifier / certifier for tracks
@@ -22,6 +23,29 @@ related: [external-track-match-unified-module]
 - 2026-05-15 — research/idea_ — concrete API economics + match-key precision research
 - 2026-05-15 — research/idea_ — exploring_-ready rework loop (deep self-review pass)
 - 2026-05-15 — research/exploring_ — promoted; quality bar met (Spotify cold-scan 3h→3.3min via batch endpoint; 8/12 OQ resolved; Findings #2 supersede; M1-M4 phased rollout)
+- 2026-05-15 — research/exploring_ — deeper exploration pass (toward evaluated_ readiness)
+
+## AI Tasks
+
+<!--
+Opt-in queue for remote AI routines. Activate by setting `ai_tasks: true` in frontmatter.
+Each item: 1 concrete sub-task. Routine processes 1/run, ticks done, commits via PR.
+
+Item-prefix routes to a routine:
+  resolve Q<N>: <text>          → research-exploring-push (resolves that Open Question)
+  investigate: <topic>          → research-exploring-push (web+code, appends to Findings)
+  grep <pattern> in <area>      → research-exploring-push (codebase lookup, appends to Findings)
+  web: <query>                  → research-exploring-push (WebSearch, appends to Findings)
+  promote to <state>            → research-exploring-push (git mv to next state, with preconditions)
+  generate draftplan            → research-draftplan-scout (only on evaluated_ docs)
+
+Routine MUST tick items it processed: `- [x] <original text> — done YYYY-MM-DD`.
+When archived: keep section as audit trail.
+-->
+
+- [ ] grep `SELECT.*Genre` in app/database.py to confirm Genre-coverage measurement path for Q2/Q12 audit
+- [ ] web: Spotify Web API Client Credentials commercial-use ToS clause (Q11 PARKED → legal-track answer)
+- [ ] investigate: ListenBrainz API rate limits + scrobble-data shape for M3 4th-source candidate
 
 ---
 
@@ -68,7 +92,8 @@ Classify each track as **Underground vs Mainstream** by estimating cross-platfor
 - **Last.fm API** — API key only (no OAuth). `track.getInfo` returns `playcount` (total scrobbles) + `listeners` (unique). Documented limit 5 req/s. Counts demographically skewed to Western indie / classic rock / early-2010s Pitchcore.
 - **MusicBrainz / Discogs** — no playcounts but canonical ID / ISRC linkage. MB rate limit 1 req/s; Discogs 60 req/min authenticated. Useful as match-key resolvers only.
 - **Beatport** — no public popularity API; chart-position scraping is fragile + ToS-grey. Excluded from MVP.
-- **`ALLOWED_AUDIO_ROOTS` sandboxing** — `app/main.py:138-198` (resolved roots + `Path.is_relative_to` check at line 192 + 617). Popularity enrichment does NOT open audio files — pure HTTP — so sandbox does not gate this feature. Score lookups by `track_id`/ISRC/title+artist, not by file path.
+- **`ALLOWED_AUDIO_ROOTS` sandboxing** — `app/main.py:138-204` (`validate_audio_path` body; `Path.is_relative_to` check at line 191). Popularity enrichment does NOT open audio files — pure HTTP — so sandbox does not gate this feature. Score lookups by `track_id`/ISRC/title+artist, not by file path.
+- **Genre source for normalisation** — `app/database.py:114` (`"Genre": node.get("Genre")` — read from Rekordbox XML `Genre` attribute per track). Genre histogram computed at `app/database.py:229` (`if t.get("Genre"): genre_counts[t["Genre"]] += 1`). Live SQLite DB path mirrors via `LiveRekordboxDB` (imported at `app/database.py:14`). Genre tags inherit Rekordbox population semantics — depend on user's import discipline + source-format ID3 (`TCON` frame) coverage. Empty/null `Genre` collapses Q2-genre-aware path to library-wide ECDF fallback (per Goals G4 default).
 - **Analysis pipeline isolation** — `app/analysis_engine.py` is offline DSP (librosa/madmom/essentia), no network. Popularity = orthogonal phase, runs after analysis completes or on demand. No `_db_write_lock` contention with analysis batches.
 - **httpx pattern required** — `coding-rules.md` forbids `requests.get` in `async def`. Popularity adapters MUST use `httpx.AsyncClient` + timeout + retry (`tenacity` or hand-rolled exponential backoff, see SC pattern at `app/soundcloud_api.py:220-232`).
 - **Schicht-A dep pinning** — every new dep in `requirements.txt` as `==X.Y.Z`. Hand-rolled httpx adapters preferred over per-source SDKs (smaller surface, easier pin / CVE check). Approx new pins: `spotipy` or hand-roll (prefer hand-roll), `pylast` or hand-roll (prefer hand-roll).
@@ -78,7 +103,7 @@ Classify each track as **Underground vs Mainstream** by estimating cross-platfor
 > Numbered. Each one should be resolvable (yes/no, or "X vs Y"), not open-ended philosophy.
 
 1. **Score shape** — continuous 0–1 OR discrete bands OR both? **RESOLVED:** both — store continuous (`mainstream_score: float`) + derived band (`mainstream_band: enum`). Continuous wins for sort/filter; band wins for badge UX + cross-platform aggregation tolerance. Cheap to derive band on read.
-2. **Genre-relative vs global normalisation** — depends on genre-tag coverage. **PARKED until library audit**: needs `SELECT COUNT(*) WHERE Genre IS NULL OR Genre = ''` on real `master.db`. Hypothesis: SC-imported tracks ≥ 80% have genre (SC propagates), Bandcamp ≥ 60%, raw drag-drop ≤ 30%. Decision deferred to draftplan after measurement.
+2. **Genre-relative vs global normalisation** — depends on genre-tag coverage. **PARKED-with-plan (Findings #5)**: audit query specified (`app/database.py:114` source → histogram per Findings #5 snippet). Coverage-threshold decision rules locked: `<0.50` → library-wide only; `0.50-0.80` → hybrid; `≥0.80` → genre-aware default. Cluster eligibility `≥ 100` hard / `≥ 50` soft (user-tunable). Pre-ECDF normalisation (lowercase + strip parenthetical + collapse whitespace) MUST run before clustering to avoid free-form-input fragmentation. Measurement deferred to M1 side-deliverable; logic ready.
 3. **MVP platform set** — **RESOLVED (Findings #2):** Spotify + SoundCloud + Last.fm. YouTube deferred to Phase 3 (quota math: 30k × 100 units search = 30 days). Last.fm IN (5 req/s + free + MBID match path).
 4. **Trust weighting** — equal mean OR genre-aware? **RESOLVED (partial):** start equal-mean for MVP simplicity; user-tunable weights in `settings.json` once enough listening proves a default per-genre profile (e.g. SC>>Spotify for techno). Defaults shipped: `{spotify: 1.0, soundcloud: 1.0, lastfm: 1.0}`. Genre profiles = Phase 2 enhancement.
 5. **Refresh cadence** — per-import vs scheduled vs lazy? **RESOLVED (Findings #2):** TTL sidecar (SC=24h, Spotify=7d, LastFM=7d) refreshed by scheduled background sweep + lazy fallback (`fetched_at IS NULL OR > TTL` triggers fetch on detail-panel open). Per-import = first-time scoring of newly added track only.
@@ -87,8 +112,8 @@ Classify each track as **Underground vs Mainstream** by estimating cross-platfor
 8. **UI display** — badge, color, both, sortable column? **PARKED until UX exploration**: UI affordance decision belongs in a frontend exploration loop, not idea_. Backend ships score + band + raw per-platform; frontend chooses surface (badge / color-coded row / column / facet filter) iteratively.
 9. **Per-platform raw counts to user** — transparency vs simplicity? **RESOLVED:** ship both. Aggregated score on main row; expandable "popularity breakdown" panel showing per-platform raw + normalised. Transparency lets users sanity-check matches (`Spotify: 88, SC: 12k, LastFM: 0.5k` — does this match the track they expect?) and report bad matches.
 10. **Cache responses** — sidecar with `fetched_at` vs always fresh? **RESOLVED (Findings #2):** caching mandatory — cold rescan is hours-scale. SQLite sidecar row per (track_id, platform) with `raw_count`, `normalised`, `fetched_at`, `match_method`, `match_confidence`. Re-fetch on TTL expiry only.
-11. **Spotify ToS for desktop distribution** — does Client Credentials use in a Tauri-bundled binary qualify as "commercial use" requiring extended terms? **PARKED — legal-track**: needs ToS read by owner before Phase 1 ships. Fallback: ship feature gated by user-supplied keys (env vars), not bundled creds, sidesteps distribution-credential question.
-12. **Genre-cluster size threshold for genre-relative percentile** — `≥ 100 tracks` heuristic from Goals; needs validation. **PARKED until library audit (sibling of Q2)**: small clusters give noisy percentiles. Decision in draftplan after measuring real genre histogram.
+11. **Spotify ToS for desktop distribution** — does Client Credentials use in a Tauri-bundled binary qualify as "commercial use" requiring extended terms? **RESOLVED (via fallback)**: ship Spotify integration gated by user-supplied keys (env vars `SPOTIFY_CLIENT_ID` + `SPOTIFY_CLIENT_SECRET` in `.env`), NOT bundled creds. Sidesteps the distribution-credential ToS question entirely — each user runs under their own Spotify-developer-dashboard registration. Owner-read of ToS becomes informational-only, not blocking. UX cost: user must obtain Spotify dev creds (5min one-time setup); mitigation: in-app onboarding link + clear "popularity gated by your Spotify keys" badge. Bundled-creds re-evaluation deferred to post-M2 if user friction proves high.
+12. **Genre-cluster size threshold for genre-relative percentile** — `≥ 100 tracks` heuristic from Goals; needs validation. **PARKED-with-plan (sibling of Q2, Findings #5)**: hard threshold `100` defended (1% ECDF quantile resolution → bands well-separated); soft fallback `50` (2% resolution still acceptable); `< 20` (5% resolution) rejected — single track flips band assignment. User-tunable down to 30 via `settings.json` `popularity.min_genre_cluster`. Measurement validates real histogram; logic ready.
 
 ## Findings / Investigation
 
@@ -169,6 +194,64 @@ confidence = "high"   if len(available_platforms) >= 2
 
 **Open Questions touched (this entry):** Q1 (score shape) — both stored. Q6 (zero-platform) — `unknown` not pessimistic. Q9 (raw counts to user) — both. Q11 (Spotify ToS) — PARKED legal-track. Q12 (cluster-size) — PARKED until audit.
 
+### 2026-05-15 — code-prefetch verification + sibling-doc cross-check
+
+**Zero Spotify/Last.fm code in repo today.** Verified via `Grep -i "spotify|lastfm|last_fm|last\.fm" app/` → only stray refs:
+- `app/analysis_engine.py:1635` — LUFS comment "(Spotify), -16 (Apple) or -18 (EBU R128 broadcast)" (loudness-target context, not API).
+- `app/database.py:765` — pseudo-path filter `p.startswith('spotify:')` (streaming-service URI exclusion from local-file logic).
+- `app/usb_manager.py:1291/1294/1296/1484` — USB-export skip list for `(soundcloud, spotify, tidal, beatport, http, https)` pseudo-tracks.
+No Spotify client code, no Last.fm adapter. M1 → M2 path is greenfield for both adapters. No prior auth scaffolding to inherit; clean `httpx.AsyncClient` builds OK.
+
+**Sibling-doc M1 alignment confirmed.** Re-read `docs/research/research/exploring_external-track-match-unified-module.md`:
+- M1 public surface (lines 113-118): `fuzzy_match_with_score(query_title, query_artist, candidates, *, threshold=0.65) → (best_id_or_None, rounded_score)` — exact signature popularity needs.
+- M1 lifts `_fuzzy_match_with_score` + `_normalize_title` from `SoundCloudSyncEngine` to module-level pure functions (line 202).
+- M1 ships `extract_title_stem`, `parse_version_tag`, `Candidate` dataclass, `SourcePlugin` Protocol, registry mutators (lines 130-145).
+- M1 OQ9 (line 83): per-source threshold tuning is M2-deferred but `threshold` parameter exposed at call-site from M1 — popularity can pass `threshold=0.80` from day one.
+- M1 zero new deps (line 156): `difflib.SequenceMatcher` stays. Popularity inherits same dep posture for fuzzy.
+
+**Import strategy locked.** Once sibling M1 ships, popularity imports `from app.external_track_match import fuzzy_match_with_score, extract_title_stem` instead of touching `app/soundcloud_api.py` directly. Pre-sibling-M1 fallback (popularity ships first): import `SoundCloudSyncEngine._fuzzy_match_with_score` as instance-method delegate via thin wrapper, swap at sibling-M1 ship. Either ordering = mechanical refactor, not architecture change. M1 entry condition in popularity Recommendation already captures this (line 219).
+
+**Retry pattern citation correction.** Prior Constraints cited `app/soundcloud_api.py:220-232` for httpx-retry pattern. Re-verified: the cited range is the 429-handler block (lines 219-226); the full retry envelope is `_sc_get` body at `app/soundcloud_api.py:167-232` (max_retries loop, exponential backoff, `Retry-After` parsing, 401/403/404 classification). Popularity adapter should mirror the full envelope shape, not just the 429-handler.
+
+**Open Questions touched (this entry):** none directly; all are infrastructure/coordination notes.
+
+### 2026-05-15 — genre-coverage gating for normalisation (Q2/Q12 unblock path)
+
+**Q2/Q12 are co-PARKED on the same measurement.** Both depend on per-genre track-count histogram. Audit query path concrete:
+
+```python
+# In M1 side-deliverable audit (runs once, output to log + sidecar):
+from app.database import db
+genre_counts = {}
+null_count = 0
+for t in db.tracks.values():
+    g = t.get("Genre") or ""
+    if g.strip():
+        genre_counts[g] = genre_counts.get(g, 0) + 1
+    else:
+        null_count += 1
+total = len(db.tracks)
+coverage = (total - null_count) / total if total else 0
+clusters_ge_100 = {g: c for g, c in genre_counts.items() if c >= 100}
+```
+
+Output captured: `(total, coverage_ratio, num_genres, distinct_clusters_ge_100, top_20_genre_histogram)`. Decision rules:
+- `coverage < 0.50` → Q2 falls back permanently to library-wide ECDF (genre-aware path unreliable when half the library is uncategorised). User-facing log line: "popularity: genre coverage <50%, using library-wide normalisation only".
+- `0.50 ≤ coverage < 0.80` → hybrid: genre-aware for tracks with genre tag AND in a `≥100` cluster; library-wide for the rest. Document `mainstream_score_source = "genre_ecdf" | "library_ecdf"` in sidecar for transparency.
+- `coverage ≥ 0.80` → genre-aware default, library-wide only as null-fallback.
+
+**Cluster-size threshold (Q12) sensitivity.** `≥ 100` heuristic conservative for ECDF percentile stability. ECDF noise at small N: 1/N quantile resolution; at N=100 → 1% resolution → bands (0.25/0.55/0.75) well-separated. At N=50 → 2% resolution → still acceptable. At N=20 → 5% resolution → risk that a single track flips band assignment. Soft threshold: `cluster_size ≥ 50` as fallback to widen genre-aware applicability when `coverage` is borderline. Hard threshold in tracker config (`settings.json`): `popularity.min_genre_cluster: 100` (user-tunable down to 30 if their library is genre-diverse).
+
+**Genre normalisation fragility.** Rekordbox's `Genre` field is a single string (e.g. `"Tech House"` not `["Tech House", "Minimal"]`). User free-form input → fragmented clusters (`"Techno"` vs `"techno"` vs `"Techno (Peak Time)"` vs `"Peak Time / Driving"`). Pre-ECDF normalisation MUST: (1) lowercase + strip parenthetical (regex `\([^)]*\)$`), (2) collapse whitespace, (3) optional: alias-map for top-30 known synonyms (`"deep house"` ↔ `"deephouse"`; out-of-scope for M1, deferred to M3 alongside genre-aware weighting). Without normalisation, "Techno" / "Techno " / "techno" cluster separately → fragments stay below 100 threshold → genre-aware path silently degrades to library-wide.
+
+**Decision flow for popularity-engine startup:**
+1. On first scan, run audit → emit `popularity_audit.json` next to `popularity.sqlite`.
+2. If `coverage < 0.50` → set `genre_aware_enabled = false` in runtime config; log warning.
+3. Else → set per-cluster eligibility: cluster ∈ eligible iff `size ≥ min_genre_cluster` AND post-normalisation cluster (not raw).
+4. Re-run audit on every full rescan (cheap, ~30k dict ops).
+
+**Open Questions touched (this entry):** Q2 (genre-relative vs global) — UNBLOCKED with concrete coverage-based decision rules; PARKED-with-plan. Q12 (cluster-size threshold) — `≥ 100` defended + `≥ 50` soft fallback + user-tunable; PARKED-with-plan.
+
 ## Options Considered
 
 > Required by `evaluated_`. For each viable approach: sketch (2-4 lines), pros, cons, effort (S/M/L/XL), risk.
@@ -216,7 +299,7 @@ confidence = "high"   if len(available_platforms) >= 2
 
 ### M2 — Multi-source aggregate (Option B)
 - **Deliverable**: Add Spotify (`q=isrc:` batch lookup, 50 IDs/call) + Last.fm (`track.getInfo` via MBID/fuzzy@0.80). Aggregate score formula from Findings #3 (log + ECDF + mean). Banding (Option D heuristic layered). Per-platform raw counts surfaced in detail panel (Q9). UI: expandable popularity breakdown.
-- **Entry**: M1 EXITED. Q2 + Q12 RESOLVED via M1's library-audit side-deliverable (genre histogram measured; global-vs-per-genre threshold chosen). Q11 RESOLVED — owner has read Spotify ToS OR user-supplied-key fallback wired. `external_track_match_unified_module` either shipped Option C M1 (fuzzy + ISRC/MBID exposed as functions, popularity imports them) OR popularity ships own copies + refactor scheduled at unified-module ship.
+- **Entry**: M1 EXITED. Q2 + Q12 confirmed (M1's audit emitted `popularity_audit.json`; runtime config branched per coverage ratio per Findings #5 decision flow). Q11 RESOLVED — user-supplied-key fallback wired per resolution; in-app onboarding link present. `external_track_match_unified_module` either shipped M1 (popularity imports `fuzzy_match_with_score` per Findings #4) OR popularity ships local thin wrapper around `SoundCloudSyncEngine._fuzzy_match_with_score` + refactor scheduled at sibling-M1 ship.
 - **Exit**: First full scan completed; coverage metric measured (`≥ 50% of library has 2+ platform coverage` — if below, re-tune fuzzy thresholds or match-key order before declaring exit); cold full scan completes in ≤ 6h on residential broadband (G7 metric); per-platform raw counts displayed in UI detail panel without exposing API errors as visible noise.
 - **Effort**: L (2-3 weeks).
 - **Rollback**: feature-flag in `settings.json` — `{"popularity_platforms": ["soundcloud"]}` collapses M2 to M1 without code revert. Spotify/LastFM rows in sidecar remain (harmless data).
@@ -235,10 +318,11 @@ confidence = "high"   if len(available_platforms) >= 2
 - **Effort**: M.
 
 **Gates before promotion `exploring_` → `evaluated_`:**
-- M1 entry conditions met (Q1/Q3/Q6 RESOLVED; ToS path chosen for Q11).
-- Library audit started (informs Q2 + Q12 PARKED items).
-- Cross-doc coordination point with `external_track_match_unified_module` reflected in M1 design (either: (a) wait for unified module M1, then import; or (b) own fuzzy locally, refactor at unified-module ship).
-- Concrete sidecar SQLite location: alongside `app_data.json` (per `app/sidecar.py:7` pattern), named `popularity.sqlite`.
+- M1 entry conditions met (Q1/Q3/Q6 RESOLVED; Q11 ToS-path chosen: user-supplied-keys fallback ships from day one to sidestep distribution-credential question).
+- Library audit logic specified (Q2 + Q12 PARKED-with-plan per Findings #5 — concrete query + coverage-threshold decision rules + cluster-size soft/hard thresholds).
+- Cross-doc coordination point with `external_track_match_unified_module` locked (Findings #4: M1 surface is exact match for popularity's needs; pre-sibling-M1 fallback = thin wrapper around `SoundCloudSyncEngine._fuzzy_match_with_score`, swap at sibling-M1 ship — mechanical, not architectural).
+- Concrete sidecar SQLite location: under `Path.home() / ".cache" / "rb_editor_pro" / "popularity"` (mirrors `app/analysis_cache.py:44` precedent — XDG-cache convention; survives reinstall; user can wipe without losing settings), named `popularity.sqlite` + sibling `popularity_audit.json` for genre-coverage measurement output.
+- Owner confirms Q8 (UI surface) belongs in separate frontend exploration — backend ships score + band + per-platform raw, frontend chooses surface independently. PARKED status preserved.
 
 ---
 

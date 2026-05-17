@@ -3,7 +3,7 @@ slug: mobile-companion-ranking-app
 title: Mobile companion app — soft client focused on Ranking mode, requires main app running on server/PC
 owner: tb
 created: 2026-05-15
-last_updated: 2026-05-15
+last_updated: 2026-05-17
 tags: [mobile, companion, pwa, ranking, network, auth]
 related: []
 ---
@@ -22,6 +22,7 @@ related: []
 - 2026-05-15 — `research/idea_` — tech-choice deep-dive + QR-pairing UX sketch
 - 2026-05-15 — `research/idea_` — exploring_-ready rework loop (deep self-review pass)
 - 2026-05-15 — research/exploring_ — promoted; quality bar met (9/14 OQ resolved + 1 PARKED + 4 OPEN; corrected route count 12→17; Option E added; Pre-M1/M1.0/M1.1/M1.2/M1.3/M2 phased matrix; security Phase-1+2 hard prereq)
+- 2026-05-17 — research/exploring_ — deeper-exploration rework toward evaluated_ readiness (auth Phase-1 Steps 0-3 partial-landing reflected in Constraints; Tailscale Funnel concrete ports 443/8443/10000 + tailnet-DNS-only HTTPS-only constraints added; iOS 26 default-Web-App + Safari 18.4 Declarative Web Push surfaced; OQ15 added re: iOS 26 onboarding simplification; OQ12 lean reaffirmed against env-var pattern already proven by Phase-1 `LMS_TOKEN=`)
 
 ---
 
@@ -58,17 +59,21 @@ A **soft / thin mobile version** of the desktop app, **mainly focused on Ranking
 
 - **CORS allowlist is localhost-only** (`app/main.py:216-232`, post-hotfix shift): `http://localhost:1420`, `127.0.0.1:1420`, `localhost:5173`, `127.0.0.1:5173`, `localhost:8000`, `127.0.0.1:8000`, `tauri://localhost`, `https://tauri.localhost`. `allow_credentials=True`, `allow_methods=["*"]`, `allow_headers=["*"]`. **Any mobile origin (`http://192.168.x.y:5173`, `https://<tailscale-name>.ts.net`, `https://<slug>.trycloudflare.com`) is rejected.** Must extend allowlist env-driven (`MOBILE_ALLOWED_ORIGINS` env list, comma-split) or proxy via tunnel hostname. **CORS ≠ auth** — non-browser callers (curl, native mobile, Python) bypass CORS entirely; per `draftplan_security-api-auth-hardening.md` Findings §2 the comment on line 216 (`# --- SECURITY: CORS locked to localhost only ---`) is misleading and the threat model relies on the loopback bind + bearer-token gate, not CORS.
 - **Frontend axios baseURL is hardcoded** to `http://127.0.0.1:8000` in non-browser-preview mode (`frontend/src/api/api.js:10`), with `VITE_API_BASE_URL` as override. Mobile build needs the host's LAN IP or tunnel hostname injected at runtime (mobile can't know LAN IP at compile time). Re-use the same env hook.
-- **Auth gate is in-flight, not landed.** `docs/research/implement/draftplan_security-api-auth-hardening.md` Phase-1 introduces `require_session` (Bearer) on every `POST`/`PUT`/`PATCH`/`DELETE` route — that includes the three mutation routes the mobile flow needs (`POST /api/track/{tid}` line 900, `POST /api/track/{tid}/mytags` line 883, `POST /api/mytags` line 853). Reads stay open in Phase 1, loopback-gated. **Phase-2 paired-device tokens (per-device bearer in `Authorization: Bearer …`, sidecar-local SQLite `paired_devices` table, `POST /api/pairing/{start,complete}` + `DELETE /api/pairing/{device_id}` revoke) are the hard-prereq for mobile** — Phase-1 alone is insufficient because the Tauri boot-token is single-host and cannot be safely handed to a phone. Verified: grep across `app/` returns 0 hits for `paired_devices` / `/api/pairing/` — endpoints don't exist yet.
+- **Auth gate — Phase-1 backend partially LANDED (2026-05-17), enforcement still pending.** Re-verified vs commits `c4b3472..46b9aef`:
+  - **Landed:** `app/auth.py` (Bearer-parsing `require_session` dep + `SESSION_TOKEN` self-gen at import + `LMS_TOKEN=<value>` stdout banner + `%APPDATA%/MusicLibraryManager/.session-token` write); Rust sidecar stdout-reader capture+scrub in BOTH dev (`spawn_child`) and prod (`shell.sidecar` `CommandEvent::Stdout`) paths in `src-tauri/src/main.rs`; `get_session_token` IPC; `tests/conftest.py` autouse `auth_token` fixture + `@pytest.mark.no_auth` opt-out; `tests/test_auth.py` cases (a)-(n); `platformdirs==4.2.2` in `requirements.txt`.
+  - **NOT yet landed** (Phase-1 Step 4+): bulk `dependencies=[Depends(require_session)]` decoration on POST/PUT/PATCH/DELETE routes in `app/main.py`. Grep `require_session|app\.auth` against `app/main.py` → 0 hits today. Three mobile-relevant mutations (`POST /api/track/{tid}` line 900, `POST /api/track/{tid}/mytags` line 883, `POST /api/mytags` line 853) are STILL unauth'd. Frontend Steps 10-12 (`api.js` axios bearer-attach, `main.jsx` heartbeat-token-block delete, `vite.config.js` `/dev-token` dev-middleware) also pending.
+  - **Phase-2 paired-device tokens** (per-device Bearer in `Authorization: Bearer …`, sidecar-local SQLite `paired_devices` table, `POST /api/pairing/{start,complete}` + `DELETE /api/pairing/{device_id}` revoke) remain the hard-prereq for mobile — Phase-1's `SESSION_TOKEN` is single-host and CANNOT be handed to a phone. Verified again 2026-05-17: grep across `app/` for `paired_devices` / `/api/pairing/` → 0 hits.
+  - **Net mobile blocker today** = Phase-1 Step 4+ landing (closes anonymous-write hole on LAN before any paired-device flow makes sense) + Phase-2 ship.
 - **`ALLOWED_AUDIO_ROOTS` sandbox** (`app/main.py:138-205` post-hotfix) bounds filesystem reads to whitelisted roots via `Path.is_relative_to` (hotfix migrated from `str.startswith`). Doesn't apply to ranking writes (DB-only), but any future artwork / waveform PNG endpoint exposed to mobile must go through `validate_audio_path`.
 - **Concurrency:** all `master.db` writes must go through `_db_write_lock` (RLock, `app/database.py:22` per security-doc Constraints — not `app/main.py` as older `coding-rules.md` snippet claims). Mobile-induced `POST /api/track/{tid}` already takes that path — no new locking work, but each concurrent client adds contention; multi-client behaviour parked under OQ8.
 - **rbox version quirks:** mobile must not trigger `OneLibrary.create_content()` (broken in rbox 0.1.7, see `app/usb_one_library.py`). Out of scope by design (no library mgmt), pinned in Non-goals.
 - **Existing Ranking API surface = 13 reads + 3 writes = 16 routes total** (re-verified by grep against current `app/main.py`, post-hotfix line shifts):
-  - Reads (13): `GET /api/playlists/tree` (976), `GET /api/artists` (751), `GET /api/labels` (735), `GET /api/albums` (738), `GET /api/playlist/{pid}/tracks` (1613), `GET /api/artist/{aid}/tracks` (1634), `GET /api/label/{aid}/tracks` (1650), `GET /api/album/{aid}/tracks` (1666), `GET /api/genres` (669), `GET /api/settings` (1868), `GET /api/track/{tid}` (766), `GET /api/track/{tid}/mytags` (878), `GET /api/mytags` (848).
+  - Reads (13): `GET /api/playlists/tree` (976), `GET /api/artists` (751), `GET /api/labels` (735), `GET /api/albums` (738), `GET /api/playlist/{pid}/tracks` (1613), `GET /api/artist/{aid}/tracks` (757 — dead-duplicate at 1634 silently shadowed by FastAPI), `GET /api/label/{aid}/tracks` (760 — dead-duplicate at 1650), `GET /api/album/{aid}/tracks` (763 — dead-duplicate at 1666), `GET /api/genres` (669), `GET /api/settings` (1868), `GET /api/track/{tid}` (766), `GET /api/track/{tid}/mytags` (878), `GET /api/mytags` (848). Duplicate registration cleanup task surfaced separately (does not block mobile).
   - Writes (3 — all gated Phase 1 by `require_session` Bearer): `POST /api/mytags` (853), `POST /api/track/{tid}` (900), `POST /api/track/{tid}/mytags` (883).
   - Plus `GET /api/library/status` for live-vs-XML mode (read, open). Total touched surface = 17 routes.
   - Zero backend additions for v1 except the Phase-2 pairing surface (`POST /api/pairing/start`, `POST /api/pairing/complete`, `DELETE /api/pairing/{device_id}`) and the optional `GET /api/track/{tid}/cover-thumb` at M1.3 (OQ7).
 - **Live-vs-XML mode parity:** MyTag write path requires `appMode === 'live'` (`master.db`). XML mode silently no-ops (`RankingView.jsx:81, 138-144, 197-205`). Mobile reads `GET /api/library/status` (`libraryStatus.mode`) and disables the MyTag block in XML mode.
-- **iOS PWA platform limits** (re-verified 2026 baseline): `beforeinstallprompt` unsupported on iOS Safari; Add-to-Homescreen works since iOS 12.2; web-push requires iOS 16.4+ AND installed-PWA state; `getUserMedia` works since iOS 11; `BarcodeDetector` API absent — pull in `qr-scanner` polyfill (~30 KB gz).
+- **iOS PWA platform limits** (re-verified 2026-05-17 baseline): `beforeinstallprompt` unsupported on iOS Safari (also unsupported in Chrome / Edge for iOS — same WebKit engine constraint); Add-to-Homescreen works since iOS 12.2 via Share menu; **iOS 26 now defaults every Home-Screen-added site to open as a web app** (standalone display) → reduces onboarding friction vs prior iOS where standalone required explicit `display: standalone` + accepted opt-in; Safari 18.4 added Declarative Web Push + Screen Wake Lock (Wake Lock relevant only for future "keep screen on while ranking" feature, not v1); web-push still requires installed-PWA state + APNs; `getUserMedia` works since iOS 11; `BarcodeDetector` API absent on iOS Safari (also unreliable on Firefox / older Chromium) — pull in `jsQR` (~12 KB gz) or `qr-scanner` (~30 KB gz with worker) polyfill, dynamic-imported on the pairing screen only.
 - **Team capacity:** solo dev. Parallel mobile codebase + sync (React Native, Flutter, native) is L/XL effort and rejected in Recommendation.
 
 ## Open Questions
@@ -79,7 +84,7 @@ Status legend: **RESOLVED** (locked, no rework expected) · **PARKED** (deferred
 
 1. **OQ1 — Hard-online only?** **RESOLVED.** Hard-online. User steer ("should only work if app runs on a server or pc") + Goals G2 (thin-client) lock it. Offline queue / local cache explicitly Non-goal; tracked as a separate future topic if demanded.
 2. **OQ2 — PWA vs Capacitor vs React Native?** **RESOLVED.** PWA for M1 (Findings #2 matrix); Capacitor stays as M2 strict-superset upgrade if mDNS / native push become must-haves; React Native rejected (parallel codebase, no DOM reuse, L effort).
-3. **OQ3 — Off-LAN strategy?** **RESOLVED.** **Tailscale Funnel** = canonical, documented in README; **not embedded**. Cloudflare Tunnel + ngrok stay as user-pick alternatives, no code support.
+3. **OQ3 — Off-LAN strategy?** **RESOLVED.** **Tailscale Funnel** = canonical, documented in README; **not embedded**. Concrete constraints (re-verified 2026-05-17): Funnel listens **only** on ports 443 / 8443 / 10000 (NOT 8000) → user runs `tailscale funnel 8000` which proxies a `https://<machine>.<tailnet>.ts.net` URL to the loopback `:8000` sidecar; tailnet-domain-only (no custom domain on free); TLS-only (HTTP rejected). Bandwidth limit "undisclosed but unobtrusive" per public Tailscale docs — accepted risk (mobile metadata writes are tiny: ~200 bytes per Save & Next; no audio bytes). Cloudflare Tunnel (`*.trycloudflare.com` ephemeral) + ngrok stay as user-pick alternatives, no code support.
 4. **OQ4 — Pairing UX?** **RESOLVED.** Desktop renders QR encoding `lmsapp://pair?host=<lan-ip>&port=8000&token=<one-shot>`; mobile scans → `POST /api/pairing/complete` → long-lived per-device Bearer. Manual URL + 6-digit code fallback for camera-less devices. mDNS auto-discovery deferred to M2-Capacitor (web sandbox blocks `_libmgr._tcp.local`).
 5. **OQ5 — Token lifetime?** **RESOLVED.** Long-lived per-device Bearer, no default expiry, server-side revoke via `DELETE /api/pairing/{device_id}`. Aligns with security-doc Phase-2 model. Lost-phone mitigation = revoke from desktop Settings.
 6. **OQ6 — Separate `:8001` port or unified `:8000` with auth gating?** **RESOLVED.** Unified `:8000` with `require_session` Bearer (per security Phase 1+2). Reasons: (a) Phase-1 already gates every mutation; second port doubles uvicorn surface for zero security gain, (b) reverse-proxy / Tailscale Funnel only knows one upstream, (c) read routes stay open under loopback assumption — mobile read-only access still flows over the LAN-exposed `:8000` once the bind widens or tunnel is in play.
@@ -88,9 +93,10 @@ Status legend: **RESOLVED** (locked, no rework expected) · **PARKED** (deferred
 9. **OQ9 — Swipe gestures library?** **RESOLVED.** Use `@use-gesture/react` (~11 KB gz, MIT, actively maintained 2025-2026). Hand-rolled touch-event handling is fragile across iOS / Android Chrome / Samsung Internet quirks; Framer Motion is overkill (~50 KB gz). Bundle stays under 4 G first-paint budget (≤ 200 KB gz total).
 10. **OQ10 — iOS PWA limits acceptable?** **RESOLVED.** Acceptable for v1. Manual Add-to-Homescreen instructions on first iOS-Safari visit (UA-detect). Background tasks irrelevant (Ranking is foreground-only). Web-push deferred until iOS 16.4+ install adoption + actual push use-case emerges.
 11. **OQ11 — HTTPS / `installable` PWA criteria?** **RESOLVED.** Ship as mobile-friendly web page in v1; PWA install-banner activates once Tailscale Funnel HTTPS hostname is in use. On raw `http://192.168.x.y` LAN IP, install banner is disabled by browser policy — accepted, banner is nice-to-have not blocker.
-12. **OQ12 (NEW) — CORS allowlist extension shape?** **OPEN — must resolve before `exploring_` → `evaluated_`.** Three sketches: (a) env-driven `MOBILE_ALLOWED_ORIGINS=https://foo.ts.net,https://192.168.1.42` list, restart to apply; (b) runtime-mutable list in `settings.json` + admin endpoint to add/remove; (c) wildcard pattern (`https://*.ts.net`) with strict regex. Lean (a) — simplest, no new admin surface; matches security-doc style.
+12. **OQ12 (NEW) — CORS allowlist extension shape?** **OPEN — must resolve before `exploring_` → `evaluated_`.** Three sketches: (a) env-driven `MOBILE_ALLOWED_ORIGINS=https://foo.ts.net,https://192.168.1.42` list, restart to apply; (b) runtime-mutable list in `settings.json` + admin endpoint to add/remove; (c) wildcard pattern (`https://*.ts.net`) with strict regex. **Strong lean (a)** — matches the now-landed `LMS_TOKEN=` stdout-banner Phase-1 pattern (restart-to-apply, no admin endpoint surface, no runtime mutability), simplest possible parser (`os.environ.get(...).split(",")` with strip + reject empties), grep-discoverable, mypy-trivial. (b) doubles the admin attack surface for zero security gain; (c) wildcard regex is a common CORS bypass footgun (e.g. `https://evil.ts.net` matches `https://*.ts.net`). Sub-question: should also accept `*` for the LAN-IP case where the user knowingly opens up dev — leaning NO, force-list explicit origins per security-doc style.
 13. **OQ13 (NEW) — Bundle-size budget hard ceiling?** **OPEN — must resolve before draftplan.** Proposal: ≤ 200 KB gz first-paint (HTML + JS + CSS critical path), ≤ 500 KB gz total mobile bundle. Drives gesture-lib choice (OQ9), polyfill scope, code-splitting strategy (lazy-load source-picker tree until user opens it).
 14. **OQ14 (NEW) — Pairing-QR refresh / TTL?** **OPEN — must resolve before draftplan.** Sketch: one-shot pairing-token TTL 60 s (matches `_format_tokens` helper that security Phase-2 generalises); QR auto-rotates every 60 s on the desktop "Pair Mobile Device" panel; explicit Cancel button revokes pending pairing. Need user confirmation TTL is OK (vs. 5 min default for less DJ-table-friction).
+15. **OQ15 (NEW) — iOS 26 default-Web-App onboarding simplification?** **OPEN — should resolve before draftplan.** iOS 26 now defaults every Home-Screen-added site to open as a web app (standalone display). Question: does this let us drop the iOS-Safari UA-detect manual instructions screen entirely (now just "tap Share → Add to Home Screen, done — opens fullscreen automatically")? Sub-question: keep UA-detect branch for iOS ≤ 25 users until adoption percentage justifies removing it. Lean: keep UA-detect but auto-hide instructions text once `navigator.userAgent` reports iOS ≥ 26.
 
 ## Findings / Investigation
 
@@ -119,9 +125,9 @@ Mobile must reproduce: source picker (4 modes), queue progress, per-track stars 
 | GET | `/api/labels` | Source list | 735 | open |
 | GET | `/api/albums` | Source list | 738 | open |
 | GET | `/api/playlist/{pid}/tracks` | Queue for playlist | 1613 | open |
-| GET | `/api/artist/{aid}/tracks` | Queue for artist | 1634 | open |
-| GET | `/api/label/{aid}/tracks` | Queue for label | 1650 | open |
-| GET | `/api/album/{aid}/tracks` | Queue for album | 1666 | open |
+| GET | `/api/artist/{aid}/tracks` | Queue for artist | 757 (1634 dead-dupe) | open |
+| GET | `/api/label/{aid}/tracks` | Queue for label | 760 (1650 dead-dupe) | open |
+| GET | `/api/album/{aid}/tracks` | Queue for album | 763 (1666 dead-dupe) | open |
 | GET | `/api/genres` | Genre autocomplete | 669 | open |
 | GET | `/api/settings` | `ranking_filter_mode` etc. | 1868 | open |
 | GET | `/api/track/{tid}` | Per-track refresh | 766 | open |
@@ -184,7 +190,7 @@ Triggered by the deep self-review pass. Verifies prior Findings against current 
 
 | Phase | Deliverable | Hard gate before next phase |
 |---|---|---|
-| **Pre-M1** (blocking) | Security Phase-1 + Phase-2 shipped + merged | `tests/test_auth.py` green; paired-device CRUD live; `DELETE /api/pairing/{device_id}` revoke verified manually |
+| **Pre-M1** (blocking) | Security Phase-1 Step 4+ (bulk `require_session` decorator pass + frontend Step 10-12 bearer-attach) + Phase-2 (paired-device tokens) shipped + merged. Steps 0-3 already in `app/auth.py` + Tauri sidecar + `tests/conftest.py` + `tests/test_auth.py` (commits `6021acf..46b9aef`) | `tests/test_auth.py` green (already passes today); paired-device CRUD live; `DELETE /api/pairing/{device_id}` revoke verified manually; manual: `curl POST /api/track/{tid}` without Bearer → 401 |
 | **M1.0** (PWA scaffold) | `frontend/src/mobile/main.jsx` + `/m` Vite entry + manifest + minimal service worker; renders empty source-picker stub | Lighthouse PWA score ≥ 80; `npm run build` ships ≤ 200 KB gz first-paint |
 | **M1.1** (pair + bearer) | QR-scan screen, `POST /api/pairing/complete` flow, localStorage token, axios bearer interceptor | Manual: phone scans QR, persists token, hits gated `POST /api/track/{tid}` → 2xx |
 | **M1.2** (ranking parity) | Source-picker → queue → edit surface (stars / colors / chips / comment / genre / MyTag) + Save & Next swipe | G1 manual-checklist 12/12 green; G7 axios-interceptor p95 ≤ 350 ms on LAN |
@@ -194,6 +200,36 @@ Triggered by the deep self-review pass. Verifies prior Findings against current 
 **Concurrent-write contention probe** (defers OQ8 but quantifies). `_db_write_lock` is a `threading.RLock`; serial writes on a single uvicorn worker = mobile + desktop writes queue, no race. Worst case: mobile + desktop both Save & Next at the same instant → second writer waits ≤ 150 ms (one SQLite commit). Acceptable. No need for ETag / `updated_at`.
 
 **What the doc still doesn't pin down (PARKED for `exploring_` → `evaluated_`)**: OQ7 cover-thumbnail endpoint shape + cache headers (new `/api/track/{tid}/cover-thumb`); OQ12 env-driven `MOBILE_ALLOWED_ORIGINS` format; OQ13 firm 200 KB / 500 KB bundle ceiling sign-off; OQ14 60 s pairing-QR TTL sign-off.
+
+### 2026-05-17 — deeper exploration: auth-Phase-1 partial landing + Tailscale Funnel facts + iOS 26 + duplicate-route discovery
+
+**Auth Phase-1 reality check (commits `6021acf..46b9aef`)**
+
+Phase-1 backend Steps 0-3 LANDED but the bulk-decorator pass (Step 4) is still ahead. Verified via grep — `app/main.py` has 0 `require_session` references and 0 `app.auth` imports. `tests/conftest.py` (lines 17-22) explicitly notes: *"until Step 4 of the auth-hardening plan lands ... this fixture has no observable effect on the existing test suite — every existing test hits routes that ignore the Authorization header."*
+
+Implications for mobile:
+- The pattern for moving a secret from sidecar to client is now PROVEN — `LMS_TOKEN=<value>` stdout-banner + Rust capture-and-scrub + `get_session_token` IPC. Phase-2's `device_token` for paired devices can follow the same shape (just persisted to the SQLite `paired_devices` table instead of in-process `Mutex<String>`).
+- The autouse `auth_token` fixture in `tests/conftest.py` means **mobile-route tests we write later automatically get Bearer headers** — no per-test boilerplate.
+- Mobile-side `Authorization: Bearer …` attach pattern can copy `frontend/src/api/api.js` once Step 10 lands; until then, mobile bearer-attach is blocked.
+
+**Tailscale Funnel concrete facts** (re-verified 2026-05-17 public docs):
+- Listens **only on ports 443 / 8443 / 10000** — `:8000` direct exposure is impossible. User runs `tailscale funnel 8000` which spins up the HTTPS proxy on one of those ports and reverse-proxies to loopback `:8000`. PWA install-banner satisfied by Funnel's HTTPS termination at `https://<machine>.<tailnet>.ts.net`.
+- Domain MUST be tailnet-scoped (`<tailnet-name>.ts.net`) — no custom domain on free tier.
+- TLS-only; HTTP traffic rejected at the edge.
+- Bandwidth limit undisclosed in public docs; community reports "not hit even on 4K video stream" → mobile metadata writes (~200 bytes per Save & Next) are utterly trivial. No mitigation needed.
+- **README docs pattern**: a single ~10-line "Off-LAN access" recipe block in README — `tailscale funnel 8000` + tailnet-DNS-only caveat + ports-443/8443/10000 note. No code support, no embed.
+
+**iOS PWA 2026 platform shifts (relevant to OQ10 + new OQ15)**:
+- **iOS 26 (2025 release):** every Home-Screen-added site defaults to opening as a standalone web app — onboarding simplifies from "tap Share → Add to Home Screen → confirm display-as-standalone prompt" to just "tap Share → Add to Home Screen". UA-detect branch retained until iOS ≤ 25 adoption drops.
+- **Safari 18.4:** Declarative Web Push (uses APNs under the hood; still requires installed-PWA state) + Screen Wake Lock. Wake Lock useful **post-v1** for "keep screen on while ranking on the couch"; not in M1 scope.
+- `beforeinstallprompt` still unsupported in any iOS browser (WebKit constraint — affects Chrome iOS / Edge iOS / Firefox iOS too).
+- QR-scan polyfill choice: `jsQR` (~12 KB gz, MIT, single-file) is lighter than `qr-scanner` (~30 KB gz with worker thread). At 200 KB bundle ceiling, `jsQR` saves ~18 KB — relevant if other deps grow. `qr-scanner` advantage = built-in camera-overlay UI + multi-format detect; `jsQR` is decode-only (we supply the camera-frame pipeline). For M1.1 lean `jsQR` + ~30 LoC of `getUserMedia` + `requestAnimationFrame` frame-grab loop.
+
+**Duplicate-route discovery in `app/main.py`** (incidental finding, surfaced for Recommendation):
+- `/api/artist/{aid}/tracks`, `/api/label/{aid}/tracks`, `/api/album/{aid}/tracks` are each registered **TWICE** — once at lines 757-764 (one-line `db.get_tracks_by_X` proxies, no transformation) and again at lines 1634-1685 (with `ArtistName` synthesis + `filename` URL-encoding). FastAPI registers the first occurrence and ignores the second silently. Mobile uses the same URLs → identical behaviour to desktop, **no immediate breakage**. But: cleanup task surfaced in [OUT-OF-SCOPE TASKS] — should be deduped in a separate refactor commit before mobile-side draftplan to avoid mobile QA confusion.
+- Verdict: doc cites lines 757/760/763/766 for these endpoints (already-corrected in Constraints), which match the routes FastAPI actually serves. Findings #1 table previously cited lines 1634/1650/1666 — those are the dead second definitions. **Correction needed in Findings #1 table below.**
+
+**Bundle-size sketch refinement** (OQ13). Swapping `qr-scanner` → `jsQR` shaves ~18 KB gz: 115 → ~97 KB gz first-paint, 145 → ~127 KB gz with QR. Comfortable headroom under 200 KB gz ceiling even with future a11y / i18n adds.
 
 ## Options Considered
 
@@ -250,15 +286,15 @@ Triggered by the deep self-review pass. Verifies prior Findings against current 
 **Off-LAN canonical recipe = Tailscale Funnel** (documented in README; never embedded). Tailscale's free HTTPS also satisfies PWA `installable` (OQ11) without self-signed LAN certs. Cloudflare Tunnel / ngrok stay as user-pick alternatives.
 
 **Hard prerequisites** (must land before any mobile-side code ships):
-1. `draftplan_security-api-auth-hardening.md` **Phase-1** — `require_session` Bearer on every `POST`/`PUT`/`PATCH`/`DELETE`. Closes the anonymous-write hole on LAN.
-2. Same doc **Phase-2** — paired-device tokens (`paired_devices` SQLite table, `POST /api/pairing/{start,complete}`, `DELETE /api/pairing/{device_id}` revoke). Tauri boot-token is single-host and CANNOT be handed to a phone.
-3. CORS allowlist env-driven (`MOBILE_ALLOWED_ORIGINS`, comma-split) per OQ12; landed alongside or as part of Phase-2 frontend wiring.
+1. `draftplan_security-api-auth-hardening.md` **Phase-1** — `require_session` Bearer on every `POST`/`PUT`/`PATCH`/`DELETE`. Closes the anonymous-write hole on LAN. **Status 2026-05-17:** Steps 0-3 LANDED (auth module + Tauri stdout-capture + conftest + test_auth — commits `6021acf..46b9aef`); Steps 4-12 (bulk decorator + frontend bearer-attach + dev-token middleware) PENDING.
+2. Same doc **Phase-2** — paired-device tokens (`paired_devices` SQLite table, `POST /api/pairing/{start,complete}`, `DELETE /api/pairing/{device_id}` revoke). Tauri boot-token is single-host and CANNOT be handed to a phone. **Status 2026-05-17:** 0 hits in `app/` — entire phase ahead.
+3. CORS allowlist env-driven (`MOBILE_ALLOWED_ORIGINS`, comma-split) per OQ12; landed alongside or as part of Phase-2 frontend wiring. Pattern matches the Phase-1 `LMS_TOKEN=` env-driven approach already proven.
 
 **Phased delivery + gates** (mirrors Findings #3 matrix):
 
 | Phase | Deliverable | Hard gate to next phase |
 |---|---|---|
-| **Pre-M1** | Security Phase-1 + Phase-2 merged + `MOBILE_ALLOWED_ORIGINS` env wired | `tests/test_auth.py` green; manual revoke verified; CORS env-extension test passes |
+| **Pre-M1** | Security Phase-1 Step 4+ (bulk `require_session` decorator + frontend Step 10-12) + Phase-2 (paired-device tokens) merged + `MOBILE_ALLOWED_ORIGINS` env wired. Steps 0-3 already landed (commits `6021acf..46b9aef`) | `tests/test_auth.py` green (passes today); manual revoke verified; CORS env-extension test passes; `curl POST /api/track/{tid}` no-Bearer → 401 |
 | **M1.0** | `frontend/src/mobile/main.jsx` + `/m` Vite entry + `manifest.webmanifest` + app-shell-only service worker; renders empty source-picker stub | Lighthouse PWA ≥ 80; `npm run build` first-paint ≤ 200 KB gz |
 | **M1.1** | QR scan + `POST /api/pairing/complete` + localStorage device-token + axios bearer interceptor | Manual: phone scans QR, persists token, gated `POST /api/track/{tid}` returns 2xx; lost-token "Re-pair" screen reachable |
 | **M1.2** | Source-picker → queue → edit surface (stars / colors / chips / comment / genre / MyTag) + Save & Next swipe via `@use-gesture/react` | G1 manual-checklist 12/12 green; G7 axios-interceptor p95 ≤ 350 ms LAN; G6 Lighthouse mobile-a11y ≥ 90 |
