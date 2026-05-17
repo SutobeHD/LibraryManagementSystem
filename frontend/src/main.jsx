@@ -32,7 +32,7 @@ const DuplicateView = lazy(() => import('./components/DuplicateView'));
 const UtilitiesView = lazy(() => import('./components/UtilitiesView'));
 const InsightsView  = lazy(() => import('./components/InsightsView'));
 
-import api, { setSessionToken, getSessionToken } from './api/api'
+import api from './api/api'
 
 // Error Boundary Configuration
 class ErrorBoundary extends Component {
@@ -68,8 +68,9 @@ const Sidebar = ({ activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnlo
   const handleExit = async () => {
     if (await confirmModal({ title: "Exit Application?", confirmLabel: "Exit" })) {
       try {
-        const token = getSessionToken();
-        await api.post('/api/system/shutdown', null, { params: { token } });
+        // Phase-1 auth: shutdown is gated via require_session Bearer
+        // (auto-attached by api.js interceptor). No query-string token.
+        await api.post('/api/system/shutdown');
       }
       catch (e) {
         // Best-effort shutdown ping — backend might already be down by the
@@ -543,14 +544,14 @@ const App = () => {
   }, []);
 
   useEffect(() => {
-    // SPEED: Heartbeat at 5s instead of 2s — sufficient for keepalive
+    // SPEED: Heartbeat at 5s instead of 2s — sufficient for keepalive.
+    // Phase-1 auth-hardening: heartbeat is now a pure alive-only ping
+    // ({"status":"alive"}). Session-token bootstrap moved to
+    // frontend/src/api/api.js (Tauri IPC / dev-middleware fetch); this
+    // effect just keeps the sidecar's last_heartbeat fresh.
     const hbInterval = setInterval(async () => {
       try {
-        const res = await api.post('/api/system/heartbeat');
-        // SECURITY: Capture session token from heartbeat response
-        if (res.data?.token) {
-          setSessionToken(res.data.token);
-        }
+        await api.post('/api/system/heartbeat');
       } catch (e) { /* backend offline */ }
     }, HEARTBEAT_INTERVAL_MS);
 
