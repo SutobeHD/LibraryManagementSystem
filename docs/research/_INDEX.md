@@ -31,8 +31,6 @@ _(none)_
 - [evaluated_security-error-handler-exc-info-leak.md](research/evaluated_security-error-handler-exc-info-leak.md) — RedactingFormatter for exc_info; measured 0.46µs / 730 logger sites; 2 follow-ups split out (2026-05-15)
 - [evaluated_security-api-file-reveal-sandbox.md](research/evaluated_security-api-file-reveal-sandbox.md) — /api/file/reveal Option A: ≤10 LOC validate_audio_path injection; Q1-Q3 RESOLVED (2026-05-15)
 - [evaluated_security-cors-allow-credentials-tightening.md](research/evaluated_security-cors-allow-credentials-tightening.md) — CORS explicit lists 2-line PR + dead-cookie removal Phase B; Q5 PARKED cosmetic (2026-05-15)
-- [evaluated_security-rate-limit-design.md](research/evaluated_security-rate-limit-design.md) — Custom token-bucket ~50 LOC + @rate_limit on 3 routes; OQ6 PARKED Phase-2 (2026-05-15)
-- [evaluated_security-secrets-compare-digest-codebase-audit.md](research/evaluated_security-secrets-compare-digest-codebase-audit.md) — safe_compare helper + 3-line require_session refactor; Option C lint backstop PARKED (2026-05-15)
 
 ### parked
 _(none)_
@@ -42,7 +40,7 @@ _(none)_
 ## implement/
 
 ### draftplan
-- [draftplan_security-api-auth-hardening.md](implement/draftplan_security-api-auth-hardening.md) — **PRIORITY-1** Phase 1 auth: stdout+file token handoff, require_session on all mutation routes, Bearer-only, init-token deleted, SHUTDOWN_TOKEN query-scheme deleted. Ready for review_. (2026-05-15)
+_(none)_
 
 ### review
 _(none)_
@@ -64,7 +62,9 @@ _(none)_
 ## archived/
 
 ### implemented
-_(none yet)_
+- [implemented_security-api-auth-hardening_2026-05-17.md](archived/implemented_security-api-auth-hardening_2026-05-17.md) — **PRIORITY-1** Phase-1 Bearer auth (84/85 mutation routes gated; SHUTDOWN_TOKEN deleted; Tauri stdout+file token handoff; 219+ tests pass). Phase 2 (paired-device tokens + QR pairing) carved out as future doc. (2026-05-17)
+- [implemented_security-secrets-compare-digest-codebase-audit_2026-05-17.md](archived/implemented_security-secrets-compare-digest-codebase-audit_2026-05-17.md) — safe_compare helper + require_session refactor; 5 fragility cases covered (commit 8498937, 52+ tests). (2026-05-17)
+- [implemented_security-rate-limit-design_2026-05-17.md](archived/implemented_security-rate-limit-design_2026-05-17.md) — Custom token-bucket (180 LoC) + @rate_limit on shutdown/restart/sc-auth-token (steady=5/min, burst=10, key_mode=both); 253+ tests pass. (2026-05-17)
 
 ### superseded
 _(none)_

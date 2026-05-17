@@ -21,6 +21,7 @@ related: [security-api-auth-hardening]
 - 2026-05-15 — research/exploring_ — promoted; quality-bar met (route inventory verified, 50 LOC defended via _format_tokens precedent, slowapi-vs-custom differentiated)
 - 2026-05-15 — research/exploring_ — perfect-quality rework loop (deep self-review pass)
 - 2026-05-15 — research/evaluated_ — promoted; Option B (~50 LOC custom token-bucket) + @rate_limit decorator pseudocode for first 3 routes + 6-step Impl Plan; OQ6 PARKED (Phase-2 gate)
+- 2026-05-17 — archived/implemented_2026-05-17 — SHIPPED (commits 830c056 + 49ddc63 + e78fb24): app/rate_limit.py (180 LoC TokenBucket+BucketStore+@rate_limit) + tests/test_rate_limit.py (7 cases) + @rate_limit decorator on shutdown/restart/sc-auth-token (steady=5/min, burst=10, key_mode=both). 253+ tests pass. OQ6 (X-Forwarded-For trust) still Phase-2-deferred.
 
 ---
 

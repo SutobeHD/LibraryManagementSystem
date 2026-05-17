@@ -21,6 +21,7 @@ related: [security-api-auth-hardening]
 - 2026-05-15 — research/exploring_ — promoted; quality-bar met (audit table byte-verified; ruff-plugin misclaim corrected; compare_digest behavior live-verified)
 - 2026-05-15 — research/exploring_ — perfect-quality rework loop (deep self-review pass + audit re-verify)
 - 2026-05-15 — research/evaluated_ — promoted; Option B safe_compare pseudocode + 3-line require_session refactor + 8-step Impl Plan; Option C lint backstop PARKED (6-month drift trigger)
+- 2026-05-17 — archived/implemented_2026-05-17 — SHIPPED (commit 8498937): app/security_compare.py (57 LoC) + tests/test_security_compare.py (132 LoC, 7+ cases) + app/auth.py require_session refactor. 52+ tests pass. Phase-1 = covered.
 
 ---
 

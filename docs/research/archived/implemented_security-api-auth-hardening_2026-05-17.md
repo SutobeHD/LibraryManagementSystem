@@ -25,6 +25,7 @@ priority: 1
 - 2026-05-15 — implement/draftplan_ — promoted; 6 open questions resolved by user sign-off; plan revised (stdout+file token handoff, no env-var; no slowapi P1; Bearer-only, no X-Session-Token compat; init-token deleted)
 - 2026-05-15 — implement/draftplan_ — review feedback applied (10 must-fix + ~12 should-fix items)
 - 2026-05-17 — implement/draftplan_ — Phase-1 implementation complete (commits 6021acf..f90f5f8 + 8498937 safe_compare) + doc-sync (62eb9c0 + this)
+- 2026-05-17 — archived/implemented_2026-05-17 — Phase-1 SHIPPED + verified (84/85 mutation routes gated; SHUTDOWN_TOKEN deleted; Bearer-only on frontend; 219+ tests pass; full doc-sync complete). Phase 2 (paired-device tokens + QR pairing) carved out as separate future doc when mobile-companion lands.
 
 ---
 
