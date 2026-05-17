@@ -137,11 +137,6 @@ class TestCaseE_InitTokenAbsent:
 
 
 class TestCaseF_SoundCloudAuthTokenGated:
-    @pytest.mark.skip(
-        reason="Step 4 (deferred): bulk Depends decoration on mutation "
-        "routes. Today the SC auth-token route is still open. The "
-        "follow-up turn drops this skip."
-    )
     def test_sc_auth_token_without_bearer_is_401(self) -> None:
         r = _request(
             real_app,

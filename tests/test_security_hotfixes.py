@@ -32,6 +32,7 @@ def _post(
     json: dict | None = None,
     *,
     client: tuple[str, int] = ("127.0.0.1", 12345),
+    headers: dict[str, str] | None = None,
 ) -> httpx.Response:
     """Synchronous POST against the ASGI app with a controllable client tuple.
 
@@ -46,7 +47,7 @@ def _post(
         async with httpx.AsyncClient(
             transport=transport, base_url="http://testserver"
         ) as ac:
-            return await ac.post(url, json=json)
+            return await ac.post(url, json=json, headers=headers)
 
     return asyncio.run(_go())
 
@@ -175,23 +176,25 @@ class TestValidateAudioPathSandbox:
 
 
 class TestDebugLoadXmlGate:
-    def test_disabled_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_disabled_by_default(
+        self, monkeypatch: pytest.MonkeyPatch, auth_token: dict[str, str]
+    ) -> None:
         monkeypatch.delenv("LMS_ENABLE_DEBUG_ROUTES", raising=False)
-        r = _post("/api/debug/load_xml")
+        r = _post("/api/debug/load_xml", headers=auth_token)
         assert r.status_code == 404
 
     def test_disabled_when_flag_not_one(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, auth_token: dict[str, str]
     ) -> None:
         monkeypatch.setenv("LMS_ENABLE_DEBUG_ROUTES", "0")
-        r = _post("/api/debug/load_xml")
+        r = _post("/api/debug/load_xml", headers=auth_token)
         assert r.status_code == 404
 
     def test_enabled_when_flag_one(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, auth_token: dict[str, str]
     ) -> None:
         monkeypatch.setenv("LMS_ENABLE_DEBUG_ROUTES", "1")
-        r = _post("/api/debug/load_xml")
+        r = _post("/api/debug/load_xml", headers=auth_token)
         # Contract under test: the env-flag gate is REMOVED, so the route is
         # no longer a hard 404. What happens past the gate is downstream
         # behaviour we don't pin here — in the current build `db` is the
@@ -211,32 +214,35 @@ class TestDebugLoadXmlGate:
 
 class TestFileWriteSandbox:
     def test_write_inside_root_with_allowed_extension(
-        self, sandbox_root: Path
+        self, sandbox_root: Path, auth_token: dict[str, str]
     ) -> None:
         target = sandbox_root / "project.rbep"
         payload = {"path": str(target), "content": "hello"}
-        r = _post("/api/file/write", json=payload)
+        r = _post("/api/file/write", json=payload, headers=auth_token)
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["status"] == "success"
         assert Path(body["path"]).read_text(encoding="utf-8") == "hello"
 
-    def test_write_outside_roots_forbidden(self, tmp_path: Path) -> None:
+    def test_write_outside_roots_forbidden(
+        self, tmp_path: Path, auth_token: dict[str, str]
+    ) -> None:
         # tmp_path is NOT in ALLOWED_AUDIO_ROOTS for this test.
         target = tmp_path / "escape.rbep"
         payload = {"path": str(target), "content": "pwn"}
-        r = _post("/api/file/write", json=payload)
+        r = _post("/api/file/write", json=payload, headers=auth_token)
         assert r.status_code == 403
         assert not target.exists()
 
     @pytest.mark.parametrize("ext", [".exe", ".py", ".dll", ".bat", ".ps1"])
     def test_write_forbidden_extension_rejected(
-        self, sandbox_root: Path, ext: str
+        self, sandbox_root: Path, ext: str, auth_token: dict[str, str]
     ) -> None:
         target = sandbox_root / f"payload{ext}"
         r = _post(
             "/api/file/write",
             json={"path": str(target), "content": "evil"},
+            headers=auth_token,
         )
         assert r.status_code == 400
         assert not target.exists()
@@ -246,12 +252,13 @@ class TestFileWriteSandbox:
         [".rbep", ".json", ".txt", ".cue", ".m3u", ".m3u8"],
     )
     def test_all_allow_listed_extensions_accepted(
-        self, sandbox_root: Path, ext: str
+        self, sandbox_root: Path, ext: str, auth_token: dict[str, str]
     ) -> None:
         target = sandbox_root / f"file{ext}"
         r = _post(
             "/api/file/write",
             json={"path": str(target), "content": "ok"},
+            headers=auth_token,
         )
         assert r.status_code == 200, r.text
         assert target.read_text(encoding="utf-8") == "ok"

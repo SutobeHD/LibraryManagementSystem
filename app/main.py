@@ -15,6 +15,7 @@ import uvicorn
 from fastapi import (
     BackgroundTasks,
     Body,
+    Depends,
     FastAPI,
     File,
     Form,
@@ -27,6 +28,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+from app.auth import require_session
 
 # EC9: Load .env file so SOUNDCLOUD_CLIENT_ID etc. are available as env-vars.
 # python-dotenv is a soft dependency; if missing we fall back to os.environ silently.
@@ -562,7 +565,7 @@ class FileRevealReq(BaseModel):
     path: str
 
 
-@app.post("/api/file/reveal")
+@app.post("/api/file/reveal", dependencies=[Depends(require_session)])
 def file_reveal(r: FileRevealReq):
     """Open the OS file explorer pointing at the given file/folder path."""
     try:
@@ -587,7 +590,7 @@ def file_reveal(r: FileRevealReq):
 _FILE_WRITE_EXTENSIONS = {".rbep", ".json", ".txt", ".cue", ".m3u", ".m3u8"}
 
 
-@app.post("/api/file/write")
+@app.post("/api/file/write", dependencies=[Depends(require_session)])
 async def file_write(r: FileWriteReq):
     """Writes text content to a file (used for .rbep project saving).
 
@@ -635,7 +638,7 @@ async def file_write(r: FileWriteReq):
         logger.error(f"File write error: {e}")
         raise HTTPException(500, safe_error_message(e))
 
-@app.post("/api/xml/clean")
+@app.post("/api/xml/clean", dependencies=[Depends(require_session)])
 async def clean_xml(
     file: UploadFile = File(...),
     artist_folder: str = Form("_AUTO_ARTISTS"),
@@ -738,7 +741,7 @@ def get_labels(): return db.get_all_labels()
 @app.get("/api/albums")
 def get_albums(): return db.get_all_albums()
 
-@app.post("/api/metadata/merge")
+@app.post("/api/metadata/merge", dependencies=[Depends(require_session)])
 def merge_metadata(r: MergeReq):
     try:
         from .services import MetadataManager
@@ -778,7 +781,7 @@ def get_cues(tid: str): return db.get_track_cues(tid)
 @app.get("/api/track/{tid}/beatgrid")
 def get_beatgrid(tid: str): return db.get_track_beatgrid(tid)
 
-@app.post("/api/track/{tid}/analyze")
+@app.post("/api/track/{tid}/analyze", dependencies=[Depends(require_session)])
 async def analyze_track(tid: str):
     """Analyzes a track to detect BPM and beat grid if missing from XML"""
     track = db.get_track_details(tid)
@@ -850,7 +853,7 @@ def list_mytags():
     return _require_live_db().list_mytags()
 
 
-@app.post("/api/mytags")
+@app.post("/api/mytags", dependencies=[Depends(require_session)])
 def create_mytag(r: MyTagCreateReq):
     name = (r.name or "").strip()
     if not name:
@@ -864,7 +867,7 @@ def create_mytag(r: MyTagCreateReq):
         raise HTTPException(500, f"Could not create MyTag: {exc}")
 
 
-@app.delete("/api/mytags/{tag_id}")
+@app.delete("/api/mytags/{tag_id}", dependencies=[Depends(require_session)])
 def delete_mytag(tag_id: str):
     try:
         _require_live_db().delete_mytag(tag_id)
@@ -880,7 +883,7 @@ def get_track_mytags(tid: str):
     return _require_live_db().get_track_mytags(tid)
 
 
-@app.post("/api/track/{tid}/mytags")
+@app.post("/api/track/{tid}/mytags", dependencies=[Depends(require_session)])
 def set_track_mytags(tid: str, r: TrackMyTagsReq):
     try:
         result = _require_live_db().set_track_mytags(tid, r.tag_ids)
@@ -891,13 +894,13 @@ def set_track_mytags(tid: str, r: TrackMyTagsReq):
         raise HTTPException(500, f"Could not update MyTags: {exc}")
 
 
-@app.post("/api/track/cues/save")
+@app.post("/api/track/cues/save", dependencies=[Depends(require_session)])
 def save_cues(r: CueReq): return {"status": "success" if db.save_track_cues(r.track_id, r.cues) else "error"}
 
-@app.post("/api/track/grid/save")
+@app.post("/api/track/grid/save", dependencies=[Depends(require_session)])
 def save_grid(r: GridReq): return {"status": "success" if db.save_track_beatgrid(r.track_id, r.beat_grid) else "error"}
 
-@app.post("/api/track/{tid}")
+@app.post("/api/track/{tid}", dependencies=[Depends(require_session)])
 def update_track(tid: str, r: TrackUpdateReq):
     updates = {k: v for k, v in r.model_dump().items() if v is not None}
     if not updates: return {"status": "no_change"}
@@ -931,7 +934,7 @@ def update_track(tid: str, r: TrackUpdateReq):
         logger.error(f"Update failed for {tid}: {e}")
         raise HTTPException(500, f"Update failed: {e!s}")
 
-@app.patch("/api/tracks/batch")
+@app.patch("/api/tracks/batch", dependencies=[Depends(require_session)])
 def batch_up(r: BatchReq): return {"status": "success" if db.update_tracks_metadata(r.track_ids, r.updates) else "error"}
 
 @app.post("/api/system/heartbeat")
@@ -951,15 +954,15 @@ def system_heartbeat(request: Request):
         payload["token"] = SHUTDOWN_TOKEN
     return payload
 
-@app.post("/api/track/delete")
+@app.post("/api/track/delete", dependencies=[Depends(require_session)])
 def del_trk(r: DeleteTrackReq): return {"status": "success" if db.delete_track(r.track_id) else "error"}
 
-@app.post("/api/tracks/move")
+@app.post("/api/tracks/move", dependencies=[Depends(require_session)])
 def move_t(r: MoveReq):
     # This might need adjustment for XML mode if we edit XML
     return {"moved": 0, "errors": ["Not supported in XML-only mode yet"]}
 
-@app.post("/api/tools/rename")
+@app.post("/api/tools/rename", dependencies=[Depends(require_session)])
 def ren_t(r: RenameReq):
     """Bulk smart-rename audio files on disk using a token pattern.
 
@@ -984,24 +987,24 @@ def get_tree():
     logger.info(f"Fetched playlist tree. Root nodes: {len(tree)}")
     return tree
 
-@app.post("/api/playlists/create")
+@app.post("/api/playlists/create", dependencies=[Depends(require_session)])
 def create_pl(r: CreatePlReq):
     pid = db.create_playlist(r.name, r.parent_id, r.type == "0", r.track_ids)
     return {"status": "success", "id": pid}
 
-@app.post("/api/playlists/rename")
+@app.post("/api/playlists/rename", dependencies=[Depends(require_session)])
 def rename_pl(r: RenamePlReq): return {"status": "success" if db.rename_playlist(r.pid, r.name) else "error"}
 
-@app.post("/api/playlists/move")
+@app.post("/api/playlists/move", dependencies=[Depends(require_session)])
 def move_pl(r: MovePlReq): return {"status": "success" if db.move_playlist(r.pid, r.parent_id, r.target_id, r.position) else "error"}
 
-@app.post("/api/playlists/delete")
+@app.post("/api/playlists/delete", dependencies=[Depends(require_session)])
 def delete_pl(r: DeletePlReq): return {"status": "success" if db.delete_playlist(r.pid) else "error"}
 
-@app.post("/api/playlists/add-track")
+@app.post("/api/playlists/add-track", dependencies=[Depends(require_session)])
 def add_trk_pl(r: TrackPlReq): return {"status": "success" if db.add_track_to_playlist(r.pid, r.track_id) else "error"}
 
-@app.post("/api/playlists/remove-track")
+@app.post("/api/playlists/remove-track", dependencies=[Depends(require_session)])
 def remove_track_pl(r: PlRemoveTrackReq):
     try:
         db.remove_track_from_playlist(r.pid, r.track_id)
@@ -1010,14 +1013,14 @@ def remove_track_pl(r: PlRemoveTrackReq):
         logger.error(f"Failed to remove track {r.track_id} from PL {r.pid}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/api/track/{tid}")
+@app.delete("/api/track/{tid}", dependencies=[Depends(require_session)])
 def delete_track(tid: str):
     logger.info(f"API Request: Delete track {tid}")
     if db.delete_track(tid):
         return {"status": "success", "tid": tid}
     raise HTTPException(status_code=404, detail="Track not found or could not be deleted")
 
-@app.post("/api/playlists/reorder")
+@app.post("/api/playlists/reorder", dependencies=[Depends(require_session)])
 def reorder_pl_track(r: PlReorderReq):
     try:
         if db.reorder_playlist_track(r.pid, r.track_id, r.target_index):
@@ -1044,7 +1047,7 @@ class SmartPlaylistUpdateReq(BaseModel):
     criteria: dict
 
 
-@app.post("/api/playlists/smart/create")
+@app.post("/api/playlists/smart/create", dependencies=[Depends(require_session)])
 def create_smart_pl(r: SmartPlaylistCreateReq):
     try:
         node = db.create_smart_playlist(r.name, r.criteria, r.parent_id)
@@ -1058,7 +1061,7 @@ def create_smart_pl(r: SmartPlaylistCreateReq):
         raise HTTPException(500, safe_error_message(e))
 
 
-@app.post("/api/playlists/smart/update")
+@app.post("/api/playlists/smart/update", dependencies=[Depends(require_session)])
 def update_smart_pl(r: SmartPlaylistUpdateReq):
     try:
         ok = db.update_smart_playlist(r.pid, r.criteria)
@@ -1081,7 +1084,7 @@ class UsbHistoryReq(BaseModel):
     drive: str  # e.g. "E:\\"
 
 
-@app.post("/api/usb/history")
+@app.post("/api/usb/history", dependencies=[Depends(require_session)])
 def read_usb_history(r: UsbHistoryReq):
     """
     Read CDJ-written history (history_entries / history_contents) from a USB stick
@@ -1121,7 +1124,7 @@ def read_usb_history(r: UsbHistoryReq):
         raise HTTPException(500, safe_error_message(e))
 
 
-@app.post("/api/playlists/folder/create")
+@app.post("/api/playlists/folder/create", dependencies=[Depends(require_session)])
 def create_folder_pl(r: CreatePlReq):
     """Convenience: create a folder (Type=0). Equivalent to /create with type='0'."""
     try:
@@ -1146,7 +1149,7 @@ class BatchCommentReq(BaseModel):
     find: str | None = ""
     replace: str | None = ""
 
-@app.post("/api/tools/batch-comment")
+@app.post("/api/tools/batch-comment", dependencies=[Depends(require_session)])
 async def batch_comment(r: BatchCommentReq):
     try:
         import os
@@ -1206,7 +1209,7 @@ async def batch_comment(r: BatchCommentReq):
         logger.error(f"Batch comment error: {e}")
         raise HTTPException(500, safe_error_message(e))
 
-@app.post("/api/library/clean-titles")
+@app.post("/api/library/clean-titles", dependencies=[Depends(require_session)])
 def clean_titles(r: CleanTitlesReq):
     return LibraryTools.clean_track_titles(r.track_ids)
 
@@ -1221,7 +1224,7 @@ def get_lib_status():
         "loading_current_item": getattr(db.active_db, "loading_status", "Idle") if db.active_db else "Idle"
     }
 
-@app.post("/api/library/mode")
+@app.post("/api/library/mode", dependencies=[Depends(require_session)])
 def set_lib_mode(r: DBModeReq):
     logger.info(f"Setting library mode to: {r.mode}")
     success = db.set_mode(r.mode)
@@ -1236,7 +1239,7 @@ def set_lib_mode(r: DBModeReq):
         logger.info(f"Library reloaded in {r.mode} mode. Tracks: {len(db.tracks)}")
     return {"status": "success" if success else "error", "mode": db.mode}
 
-@app.post("/api/library/sync")
+@app.post("/api/library/sync", dependencies=[Depends(require_session)])
 def sync_lib():
     """Persist the in-memory library.
 
@@ -1252,7 +1255,7 @@ def sync_lib():
 class LoadLibReq(BaseModel):
     path: str | None = None
 
-@app.post("/api/library/load")
+@app.post("/api/library/load", dependencies=[Depends(require_session)])
 def load_lib(r: LoadLibReq = Body(default=None)):
     requested_path = r.path if r else None
     try:
@@ -1272,14 +1275,14 @@ def load_lib(r: LoadLibReq = Body(default=None)):
         logger.error(f"Failed to load library: {e}\n{traceback.format_exc()}")
         return {"status": "error", "message": safe_error_message(e)}
 
-@app.post("/api/library/unload")
+@app.post("/api/library/unload", dependencies=[Depends(require_session)])
 def unload_lib():
     success = db.unload_library()
     return {"status": "success", "message": "Library unloaded."}
 
 # --- REKORDBOX SYNC ENDPOINTS ---
 
-@app.post("/api/rekordbox/export")
+@app.post("/api/rekordbox/export", dependencies=[Depends(require_session)])
 async def rbx_export(r: RbxSyncReq):
     """Exports specified tracks to a Rekordbox XML file."""
     try:
@@ -1294,7 +1297,7 @@ async def rbx_export(r: RbxSyncReq):
         logger.error(f"Rekordbox export failed: {e}")
         raise HTTPException(500, safe_error_message(e))
 
-@app.post("/api/rekordbox/import")
+@app.post("/api/rekordbox/import", dependencies=[Depends(require_session)])
 async def rbx_import(r: RbxImportReq):
     """Imports tracks and metadata from a Rekordbox XML file."""
     try:
@@ -1312,7 +1315,7 @@ async def rbx_import(r: RbxImportReq):
         raise HTTPException(500, safe_error_message(e))
 
 
-@app.post("/api/library/smart-playlists")
+@app.post("/api/library/smart-playlists", dependencies=[Depends(require_session)])
 def gen_smart(r: SmartPlReq):
     status = LibraryTools.generate_smart_playlists(r.artist_threshold, r.label_threshold)
     return {"status": "success" if status else "error"}
@@ -1333,7 +1336,7 @@ class ImportPathsReq(BaseModel):
     playlist_name: str | None = None
 
 
-@app.post("/api/library/scan-folder")
+@app.post("/api/library/scan-folder", dependencies=[Depends(require_session)])
 async def scan_folder(r: PathRequest):
     """
     Trigger an import scan of a specific directory.
@@ -1373,7 +1376,7 @@ async def scan_folder(r: PathRequest):
     return {"status": "ok", "data": {"message": f"Scanning {path_str} in background…"}}
 
 
-@app.post("/api/library/import-paths")
+@app.post("/api/library/import-paths", dependencies=[Depends(require_session)])
 async def import_paths(r: ImportPathsReq):
     """
     Import a mixed list of absolute filesystem paths (files OR directories).
@@ -1545,7 +1548,7 @@ def get_import_tasks():
     return import_tracker.get_all()
 
 
-@app.post("/api/import/tasks/clear")
+@app.post("/api/import/tasks/clear", dependencies=[Depends(require_session)])
 def clear_import_tasks():
     """Drop all completed/failed/skipped tasks from the tracker."""
     from . import import_tracker
@@ -1692,7 +1695,7 @@ def list_projects():
         })
     return projects
 
-@app.post("/api/projects/save")
+@app.post("/api/projects/save", dependencies=[Depends(require_session)])
 def save_project(r: ProjectReq):
     try:
         ProjectManager.save_project(r.name, r.data)
@@ -1709,7 +1712,7 @@ def load_project_endpoint(name: str):
         logger.error(f"Project load error: {e}")
         raise HTTPException(500, safe_error_message(e))
 
-@app.post("/api/artist/soundcloud")
+@app.post("/api/artist/soundcloud", dependencies=[Depends(require_session)])
 def set_sc(r: ScReq):
     # storage.set_artist_link(r.artist_name, r.link)
     return {"status": "saved"}
@@ -1719,7 +1722,7 @@ class SliceReq(BaseModel):
     start: float
     end: float
 
-@app.post("/api/audio/slice")
+@app.post("/api/audio/slice", dependencies=[Depends(require_session)])
 async def slice_endpoint(r: SliceReq):
     try:
         # SECURITY: Validate source path
@@ -1733,7 +1736,7 @@ async def slice_endpoint(r: SliceReq):
         logger.error(f"Slice endpoint error: {e}")
         raise HTTPException(500, safe_error_message(e))
 
-@app.post("/api/audio/render")
+@app.post("/api/audio/render", dependencies=[Depends(require_session)])
 async def render(r: ExportRequest):
     try:
         # SECURITY: Validate source path
@@ -1780,7 +1783,7 @@ def _run_import_analysis(dest: Path, track_task_id: str) -> None:
         except AttributeError: pass
 
 
-@app.post("/api/audio/import")
+@app.post("/api/audio/import", dependencies=[Depends(require_session)])
 def import_audio(files: list[UploadFile] = File(...), wait: bool = False):
     """Batch audio upload + analysis + library insertion.
 
@@ -1871,7 +1874,7 @@ def get_s():
     s['active_db_path'] = "XML Mode"
     return s
 
-@app.post("/api/settings")
+@app.post("/api/settings", dependencies=[Depends(require_session)])
 def save_s(s: SetReq):
     # Merge declared fields + any extras the frontend passes through.
     payload = s.model_dump()
@@ -1945,7 +1948,7 @@ def folder_watcher_status():
     return watcher.status()
 
 
-@app.post("/api/library/folder-watcher/add")
+@app.post("/api/library/folder-watcher/add", dependencies=[Depends(require_session)])
 def folder_watcher_add(r: PathRequest):
     path = r.path.strip()
     if not path:
@@ -1968,7 +1971,7 @@ def folder_watcher_add(r: PathRequest):
     return {"status": "ok" if ok else "error", "folders": folders}
 
 
-@app.post("/api/library/folder-watcher/remove")
+@app.post("/api/library/folder-watcher/remove", dependencies=[Depends(require_session)])
 def folder_watcher_remove(r: PathRequest):
     path = r.path.strip()
     if not path:
@@ -2093,14 +2096,14 @@ async def restart(token: str = ""):
     return {"message": "Restarting backend..."}
 
 
-@app.post("/api/system/select_db")
+@app.post("/api/system/select_db", dependencies=[Depends(require_session)])
 def select_db_dialog():
     return {"path": "XML Mode"}
 
 class NewLibReq(BaseModel):
     path: str | None = None
 
-@app.post("/api/library/new")
+@app.post("/api/library/new", dependencies=[Depends(require_session)])
 def create_new_lib(r: NewLibReq = Body(default=None)):
     path = r.path if r else None
     try:
@@ -2115,7 +2118,7 @@ def create_new_lib(r: NewLibReq = Body(default=None)):
         logger.error(f"Failed to create new library: {e}")
         return {"status": "error", "message": safe_error_message(e)}
 
-@app.post("/api/debug/load_xml")
+@app.post("/api/debug/load_xml", dependencies=[Depends(require_session)])
 def debug_load_xml():
     """Debug-only: force-load a hardcoded rekordbox.xml.
 
@@ -2178,13 +2181,13 @@ def usb_get_profiles():
     """List all registered USB profiles (connected + disconnected)."""
     return UsbProfileManager.get_profiles()
 
-@app.post("/api/usb/profiles")
+@app.post("/api/usb/profiles", dependencies=[Depends(require_session)])
 def usb_save_profile(r: UsbProfileReq):
     """Create or update a USB device profile."""
     profile = UsbProfileManager.save_profile(r.model_dump())
     return {"status": "success", "profile": profile}
 
-@app.delete("/api/usb/profiles/{device_id}")
+@app.delete("/api/usb/profiles/{device_id}", dependencies=[Depends(require_session)])
 def usb_delete_profile(device_id: str):
     """Delete a USB device profile."""
     if UsbProfileManager.delete_profile(device_id):
@@ -2244,7 +2247,7 @@ def _get_or_create_profile(device_id: str) -> dict:
         "filesystem": dev.get("filesystem", ""),
     })
 
-@app.post("/api/usb/sync")
+@app.post("/api/usb/sync", dependencies=[Depends(require_session)])
 def usb_sync(r: UsbSyncReq):
     """Sync a specific USB device — works in both Live and XML modes."""
     profile = _get_or_create_profile(r.device_id)
@@ -2276,7 +2279,7 @@ def usb_sync(r: UsbSyncReq):
     last = results[-1] if results else {"stage": "error", "message": "No events"}
     return {"status": "success" if last.get("stage") == "complete" else "error", "result": last}
 
-@app.post("/api/usb/profiles/prune")
+@app.post("/api/usb/profiles/prune", dependencies=[Depends(require_session)])
 def usb_prune_profiles():
     """Force-collapse duplicate USB profiles for the same physical stick.
 
@@ -2289,7 +2292,7 @@ def usb_prune_profiles():
     removed = UsbProfileManager.prune_duplicates()
     return {"status": "ok", "removed": removed}
 
-@app.post("/api/usb/sync/all")
+@app.post("/api/usb/sync/all", dependencies=[Depends(require_session)])
 def usb_sync_all():
     """Sync all connected USB devices per their profiles."""
     if not db.active_db:
@@ -2301,12 +2304,12 @@ def usb_sync_all():
     last = results[-1] if results else {"stage": "complete", "message": "Nothing to sync"}
     return {"status": "success", "result": last, "events": results}
 
-@app.post("/api/usb/eject")
+@app.post("/api/usb/eject", dependencies=[Depends(require_session)])
 def usb_eject(r: UsbEjectReq):
     """Safely eject a USB drive."""
     return UsbActions.eject(r.drive)
 
-@app.post("/api/usb/reset")
+@app.post("/api/usb/reset", dependencies=[Depends(require_session)])
 def usb_reset(r: UsbResetReq):
     """Reset a USB device (wipe PIONEER folder)."""
     profile = UsbProfileManager.get_profile(r.device_id)
@@ -2317,7 +2320,7 @@ def usb_reset(r: UsbResetReq):
 class UsbInitReq(BaseModel):
     drive: str
 
-@app.post("/api/usb/initialize")
+@app.post("/api/usb/initialize", dependencies=[Depends(require_session)])
 def usb_initialize(r: UsbInitReq):
     """Initialize a new Rekordbox library on a USB drive."""
     if UsbDetector.initialize_usb(r.drive):
@@ -2362,7 +2365,7 @@ def usb_mysettings_read(device_id: str):
     }
 
 
-@app.post("/api/usb/mysettings")
+@app.post("/api/usb/mysettings", dependencies=[Depends(require_session)])
 def usb_mysettings_write(r: UsbMySettingsReq):
     """Persist user-edited MYSETTING values to <USB>/PIONEER/."""
     from . import usb_mysettings
@@ -2404,7 +2407,7 @@ class UsbFormatPreviewReq(BaseModel):
     drive: str
 
 
-@app.post("/api/usb/format/preview")
+@app.post("/api/usb/format/preview", dependencies=[Depends(require_session)])
 def usb_format_preview(r: UsbFormatPreviewReq):
     """
     Step 1 of the format protocol. Returns drive metadata the UI must display
@@ -2469,7 +2472,7 @@ class UsbFormatConfirmReq(BaseModel):
     typed_confirmation: str = ""        # must match the preview's confirm_phrase
 
 
-@app.post("/api/usb/format/confirm")
+@app.post("/api/usb/format/confirm", dependencies=[Depends(require_session)])
 def usb_format_confirm(r: UsbFormatConfirmReq):
     """Step 2: actually format the drive after both confirmations check out."""
     _purge_expired_tokens()
@@ -2505,7 +2508,7 @@ class UsbRenameReq(BaseModel):
     drive: str
     new_label: str
 
-@app.post("/api/usb/rename")
+@app.post("/api/usb/rename", dependencies=[Depends(require_session)])
 def usb_rename(req: UsbRenameReq):
     """Rename a USB device."""
     res = UsbActions.set_label(req.drive, req.new_label)
@@ -2525,7 +2528,7 @@ class UsbSettingsReq(BaseModel):
     model_config = {"extra": "allow"}
 
 
-@app.post("/api/usb/settings")
+@app.post("/api/usb/settings", dependencies=[Depends(require_session)])
 def usb_save_settings(r: UsbSettingsReq):
     """Save USB global settings."""
     UsbProfileManager.save_settings(r.model_dump())
@@ -2533,7 +2536,7 @@ def usb_save_settings(r: UsbSettingsReq):
 
 # ─── Enhanced Duplicate Scanner ───────────────────────────────────────────────
 
-@app.post("/api/tools/duplicates/merge")
+@app.post("/api/tools/duplicates/merge", dependencies=[Depends(require_session)])
 def merge_duplicates(r: DupMergeReq):
     """Merge duplicate tracks: keep one, transfer playlist memberships, delete others."""
     try:
@@ -2569,7 +2572,7 @@ def merge_duplicates(r: DupMergeReq):
         logger.error(f"Merge failed: {e}")
         raise HTTPException(500, str(e))
 
-@app.post("/api/tools/duplicates/merge-all")
+@app.post("/api/tools/duplicates/merge-all", dependencies=[Depends(require_session)])
 def merge_all_duplicates():
     """Auto-merge all duplicate groups using best-metadata heuristic."""
     try:
@@ -2627,7 +2630,7 @@ def rbep_get(name: str):
 
 # ─── Audio Analysis API ──────────────────────────────────────────────────────────
 
-@app.post("/api/audio/analyze")
+@app.post("/api/audio/analyze", dependencies=[Depends(require_session)])
 def analyze_audio(req: AudioImportReq):
     """Submit an audio file for high-accuracy background analysis."""
     if not LIBROSA_AVAILABLE:
@@ -2653,7 +2656,7 @@ def get_analysis_status(task_id: str):
 # into the Rekordbox live database (master.db + ANLZ binary files),
 # replacing the need for Rekordbox's built-in analysis.
 
-@app.post("/api/track/{tid}/analyze-full")
+@app.post("/api/track/{tid}/analyze-full", dependencies=[Depends(require_session)])
 async def analyze_track_full(tid: str, req: AnalyzeFullReq = AnalyzeFullReq()):
     """
     Analyze a track with our engine and write BPM, key, waveforms, beatgrid
@@ -2683,7 +2686,7 @@ async def analyze_track_full(tid: str, req: AnalyzeFullReq = AnalyzeFullReq()):
         raise HTTPException(500, safe_error_message(e))
 
 
-@app.post("/api/library/analyze-batch")
+@app.post("/api/library/analyze-batch", dependencies=[Depends(require_session)])
 async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
     """
     Batch-analyze tracks and write results to Rekordbox DB + ANLZ.
@@ -2788,7 +2791,7 @@ class ScDownloadRequest(BaseModel):
     sc_playlist_title: str | None = None # for auto-playlist sort
 
 
-@app.post("/api/soundcloud/download")
+@app.post("/api/soundcloud/download", dependencies=[Depends(require_session)])
 async def soundcloud_download(data: ScDownloadRequest, request: Request):
     """
     Start a SoundCloud track download.
@@ -2879,7 +2882,7 @@ class ScDownloadPlaylistReq(BaseModel):
     force: bool = False  # if True: wipe registry entries for these tracks → re-download
 
 
-@app.post("/api/soundcloud/download-playlist")
+@app.post("/api/soundcloud/download-playlist", dependencies=[Depends(require_session)])
 async def soundcloud_download_playlist(r: ScDownloadPlaylistReq):
     """Enqueue download for every track in a SoundCloud playlist."""
     auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
@@ -3027,7 +3030,7 @@ async def check_already_downloaded(sc_track_id: str):
     return {"status": "ok", "data": {"sc_track_id": sc_track_id, "already_downloaded": already}}
 
 
-@app.delete("/api/soundcloud/history/{sc_track_id}")
+@app.delete("/api/soundcloud/history/{sc_track_id}", dependencies=[Depends(require_session)])
 async def delete_history_entry(sc_track_id: str):
     """
     Remove a registry entry to allow re-download (e.g. for failed entries).
@@ -3045,7 +3048,7 @@ class ScAuthTokenReq(BaseModel):
     token: str
 
 
-@app.post("/api/soundcloud/auth-token")
+@app.post("/api/soundcloud/auth-token", dependencies=[Depends(require_session)])
 async def set_soundcloud_auth_token(r: ScAuthTokenReq, response: Response):
     """
     EC7/EC13: Persist the SC OAuth token in the OS keyring (not in cookies or JSON).
@@ -3116,7 +3119,7 @@ async def get_sc_settings():
         "available_folders": folders,
     }
 
-@app.put("/api/soundcloud/settings")
+@app.put("/api/soundcloud/settings", dependencies=[Depends(require_session)])
 async def update_sc_settings(r: ScSettingsReq):
     """Persist SC sync target folder to settings.json."""
     s = SettingsManager.load()
@@ -3222,7 +3225,7 @@ class ScSyncReq(BaseModel):
     playlist_ids: list[int] = []
     include_likes: bool = False
 
-@app.post("/api/soundcloud/sync")
+@app.post("/api/soundcloud/sync", dependencies=[Depends(require_session)])
 async def sync_soundcloud_playlists(r: ScSyncReq, request: Request):
     """Sync selected SoundCloud playlists. Uses asyncio.Lock to prevent race conditions."""
     # Criterion 10: Race condition guard
@@ -3268,7 +3271,7 @@ class ScPreviewReq(BaseModel):
     playlist_id: int
     is_likes: bool = False
 
-@app.post("/api/soundcloud/preview-matches")
+@app.post("/api/soundcloud/preview-matches", dependencies=[Depends(require_session)])
 async def preview_soundcloud_matches(r: ScPreviewReq, request: Request):
     """
     Dry-run: returns per-track fuzzy match details for a given SC playlist.
@@ -3313,7 +3316,7 @@ async def preview_soundcloud_matches(r: ScPreviewReq, request: Request):
         logger.error(f"[SC] preview-matches failed: {e}", exc_info=True)
         raise HTTPException(500, safe_error_message(e))
 
-@app.post("/api/soundcloud/sync-all")
+@app.post("/api/soundcloud/sync-all", dependencies=[Depends(require_session)])
 async def sync_all_soundcloud(request: Request):
     """Sync ALL SoundCloud playlists + likes. Uses asyncio.Lock to prevent race conditions."""
     if _sync_lock.locked():
@@ -3352,7 +3355,7 @@ class ScMergeReq(BaseModel):
     merged_name: str
     delete_originals: bool = False  # Originals deleted ONLY after full verification
 
-@app.post("/api/soundcloud/merge")
+@app.post("/api/soundcloud/merge", dependencies=[Depends(require_session)])
 async def merge_soundcloud_playlists(r: ScMergeReq, request: Request):
     """
     Merge multiple SoundCloud playlists into one local playlist.
@@ -3551,7 +3554,7 @@ async def usb_playcount_diff(usb_root: str, usb_xml_path: str):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@app.post("/api/usb/playcount/resolve")
+@app.post("/api/usb/playcount/resolve", dependencies=[Depends(require_session)])
 async def usb_playcount_resolve(body: PlayCountResolveRequest):
     """
     Commit resolved play counts to the PC database and the USB XML.
@@ -3611,7 +3614,7 @@ class PhraseCommitRequest(BaseModel):
     cues: list[dict[str, Any]]
 
 
-@app.post("/api/phrase/generate")
+@app.post("/api/phrase/generate", dependencies=[Depends(require_session)])
 async def phrase_generate(body: PhraseGenerateRequest):
     """
     Generate phrase-aligned cue points for a track.
@@ -3680,7 +3683,7 @@ async def phrase_generate(body: PhraseGenerateRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@app.post("/api/phrase/commit")
+@app.post("/api/phrase/commit", dependencies=[Depends(require_session)])
 async def phrase_commit(body: PhraseCommitRequest):
     """
     Write generated cue points to the Rekordbox database as hot cues.
@@ -3916,7 +3919,7 @@ async def _run_duplicate_scan(job_id: str, track_paths: list[str]) -> None:
         _dup_jobs[job_id]["error"] = str(exc)
 
 
-@app.post("/api/duplicates/scan")
+@app.post("/api/duplicates/scan", dependencies=[Depends(require_session)])
 async def duplicates_scan(body: DuplicateScanRequest, background_tasks: BackgroundTasks):
     """
     Start a background duplicate scan across the provided track paths.
@@ -3969,7 +3972,7 @@ async def duplicates_results(job_id: str):
     return {"status": "ok", "data": job}
 
 
-@app.post("/api/duplicates/merge")
+@app.post("/api/duplicates/merge", dependencies=[Depends(require_session)])
 async def duplicates_merge(body: DuplicateMergeRequest):
     """
     Merge duplicate tracks: keep one master, remove duplicates from the library.
