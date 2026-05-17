@@ -116,12 +116,6 @@ class TestCaseC_HappyPath:
 
 
 class TestCaseD_HeartbeatTokenLeak:
-    @pytest.mark.skip(
-        reason="Step 6 (deferred): heartbeat-token-leak removal -- "
-        "today heartbeat still returns the SHUTDOWN_TOKEN to loopback "
-        "callers per the post-hotfix gate. Phase-1 follow-up turn "
-        "drops the token field entirely."
-    )
     def test_heartbeat_response_has_no_token_field(self) -> None:
         r = _request(real_app, "POST", "/api/system/heartbeat")
         assert r.status_code == 200
@@ -148,19 +142,10 @@ class TestCaseF_SoundCloudAuthTokenGated:
 
 
 class TestCaseG_LegacyShutdownTokenRemoved:
-    @pytest.mark.skip(
-        reason="Step 8 (deferred): SHUTDOWN_TOKEN query-string scheme "
-        "deletion. Today shutdown/restart still verify a ?token= "
-        "query-param against the module constant. The follow-up turn "
-        "drops the scheme entirely and gates these via require_session."
-    )
     def test_shutdown_without_bearer_is_401(self) -> None:
         r = _request(real_app, "POST", "/api/system/shutdown")
         assert r.status_code == 401
 
-    @pytest.mark.skip(
-        reason="Step 8 (deferred) -- see test_shutdown_without_bearer_is_401."
-    )
     def test_restart_without_bearer_is_401(self) -> None:
         r = _request(real_app, "POST", "/api/system/restart")
         assert r.status_code == 401

@@ -33,7 +33,7 @@ Subagents underused. Spawn by default for non-trivial work; keeps main context c
 |---|---|
 | Multi-file change in `app/`, `frontend/src/`, `src-tauri/src/`, `tests/`, `scripts/`, `docs/research/{research,implement,archived}/` (non-trivial) | `doc-syncer` (post-edit, pre-commit) |
 | Edit in `app/{analysis,anlz,audio,usb_pdb,phrase_generator}_*.py` or `src-tauri/src/audio/**` | `audio-stack-reviewer` (runs cargo + ruff + mypy actively) |
-| New/changed FastAPI route (esp. `master.db` writers, `X-Session-Token`-gated, new Pydantic models) | `route-architect` (start **before** touching `app/main.py`) |
+| New/changed FastAPI route (esp. `master.db` writers, `require_session`-gated mutations, new Pydantic models) | `route-architect` (start **before** touching `app/main.py`) |
 | Non-doc-only code change before commit/push | `test-runner` |
 | Frontend change OR backend route the UI calls | `e2e-tester` (before declaring "done") |
 | Broad search > 2 likely locations | `Explore` |

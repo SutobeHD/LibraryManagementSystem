@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import multiprocessing as _mp
 import os
 import secrets
 import shutil
@@ -123,18 +124,6 @@ logger = logging.getLogger("APP_MAIN")
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = FastAPI(title="Music Library Manager")
-
-# --- SECURITY: Internal shutdown token (generated per session) ---
-SHUTDOWN_TOKEN = secrets.token_urlsafe(32)
-
-# Don't spam the log when this module is re-imported by a Windows subprocess
-# (ProcessPoolExecutor in app.anlz_safe spawns child workers — on Windows that
-# always means re-running every top-level statement here). The token only
-# matters in the parent FastAPI process.
-import multiprocessing as _mp
-
-if _mp.current_process().name == "MainProcess":
-    logger.info("Session security token generated.")
 
 # --- SECURITY: Allowed audio directories for streaming/processing ---
 # Users can only stream/process audio from these root directories.
@@ -938,21 +927,18 @@ def update_track(tid: str, r: TrackUpdateReq):
 def batch_up(r: BatchReq): return {"status": "success" if db.update_tracks_metadata(r.track_ids, r.updates) else "error"}
 
 @app.post("/api/system/heartbeat")
-def system_heartbeat(request: Request):
+def system_heartbeat():
     """Lightweight keep-alive ping.
 
-    SECURITY: SHUTDOWN_TOKEN was previously returned to *any* caller, leaking
-    the only privileged credential to LAN/remote clients (and same-host malware
-    via loopback). Gated to same-host callers now; the broader auth rework
-    lives in docs/research/research/idea_security-api-auth-hardening.md.
+    Stays unauth'd by design — Tauri / dev-frontend use this to detect
+    sidecar boot before the auth handshake completes. The legacy
+    ``SHUTDOWN_TOKEN`` leak that lived here was removed when Bearer-token
+    auth landed (see ``app/auth.py`` + the
+    ``security-api-auth-hardening`` plan).
     """
     global last_heartbeat
     last_heartbeat = time.time()
-    payload: dict[str, Any] = {"status": "alive"}
-    client_host = request.client.host if request.client else ""
-    if client_host in ("127.0.0.1", "::1", "localhost"):
-        payload["token"] = SHUTDOWN_TOKEN
-    return payload
+    return {"status": "alive"}
 
 @app.post("/api/track/delete", dependencies=[Depends(require_session)])
 def del_trk(r: DeleteTrackReq): return {"status": "success" if db.delete_track(r.track_id) else "error"}
@@ -2071,20 +2057,15 @@ async def shutdown_watcher_event():
     except Exception as exc:
         logger.warning("FolderWatcher shutdown error: %s", exc)
 
-@app.post("/api/system/shutdown")
-async def shutdown(token: str = ""):
-    """SECURITY: Requires session token to trigger shutdown."""
-    if token != SHUTDOWN_TOKEN:
-        logger.warning("SECURITY: Unauthorized shutdown attempt!")
-        raise HTTPException(status_code=403, detail="Invalid shutdown token")
+@app.post("/api/system/shutdown", dependencies=[Depends(require_session)])
+async def shutdown():
+    """Trigger sidecar shutdown. Gated by ``require_session`` Bearer."""
     threading.Thread(target=_graceful_shutdown, daemon=True).start()
     return {"message": "Shutting down..."}
 
-@app.post("/api/system/restart")
-async def restart(token: str = ""):
-    """SECURITY: Requires session token to trigger restart."""
-    if token != SHUTDOWN_TOKEN:
-        raise HTTPException(status_code=403, detail="Invalid restart token")
+@app.post("/api/system/restart", dependencies=[Depends(require_session)])
+async def restart():
+    """Trigger sidecar restart. Gated by ``require_session`` Bearer."""
     def restart_proc():
         logger.info("Restarting backend...")
         time.sleep(0.5)

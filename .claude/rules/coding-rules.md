@@ -12,7 +12,7 @@ Load-bearing constraints, not style preferences. Violating them breaks the proje
 
 - `.env` never committed. `.env.example` is the only template. Required: `SOUNDCLOUD_CLIENT_ID`, `SOUNDCLOUD_CLIENT_SECRET`.
 - `ALLOWED_AUDIO_ROOTS` sandboxes filesystem. Never bypass via `os.path.normpath` tricks. Use `Path.is_relative_to(resolved_root)` — canonical pattern in `app/main.py:validate_audio_path`.
-- System endpoints behind `X-Session-Token` (one-shot via `POST /api/system/init-token`). Never leak in logs/heartbeats — not at INFO, not at DEBUG, not even redacted.
+- All mutating endpoints (POST/PUT/PATCH/DELETE) behind `Depends(require_session)` (`app/auth.py`). Bearer token in `Authorization: Bearer <SESSION_TOKEN>`. Token born in sidecar at boot, printed as first stdout line `LMS_TOKEN=<value>`, captured + scrubbed by Tauri Rust supervisor, also persisted to `%APPDATA%/MusicLibraryManager/.session-token` for browser-dev fallback. Never log the token — not at INFO, not at DEBUG, not even redacted.
 
 ## Stack boundaries
 

@@ -20,7 +20,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app.main import ALLOWED_AUDIO_ROOTS, SHUTDOWN_TOKEN, app, validate_audio_path
+from app.main import ALLOWED_AUDIO_ROOTS, app, validate_audio_path
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -87,29 +87,28 @@ class TestNoDuplicateHeartbeatRoute:
 
 
 # ---------------------------------------------------------------------------
-# Finding 2: SHUTDOWN_TOKEN gated to loopback
+# Finding 2: heartbeat never returns a session token
+# (Was: SHUTDOWN_TOKEN gated to loopback. Phase-1 of api-auth-hardening
+# replaces SHUTDOWN_TOKEN with require_session Bearer; heartbeat stays an
+# unauth'd alive-only ping. See tests/test_auth.py::TestCaseD for the
+# canonical no-token assertion against the real app.)
 # ---------------------------------------------------------------------------
 
 
-class TestHeartbeatTokenGate:
-    def test_loopback_caller_receives_token(self) -> None:
-        r = _post("/api/system/heartbeat", client=("127.0.0.1", 5555))
-        assert r.status_code == 200
-        body = r.json()
-        assert body["status"] == "alive"
-        assert body.get("token") == SHUTDOWN_TOKEN
-
-    def test_ipv6_loopback_receives_token(self) -> None:
-        r = _post("/api/system/heartbeat", client=("::1", 5555))
-        assert r.status_code == 200
-        assert r.json().get("token") == SHUTDOWN_TOKEN
-
+class TestHeartbeatNoTokenLeak:
     @pytest.mark.parametrize(
-        "remote_ip",
-        ["192.168.1.42", "10.0.0.5", "172.16.0.1", "8.8.8.8"],
+        "client_tuple",
+        [
+            ("127.0.0.1", 5555),
+            ("::1", 5555),
+            ("192.168.1.42", 5555),
+            ("8.8.8.8", 5555),
+        ],
     )
-    def test_non_loopback_caller_does_not_receive_token(self, remote_ip: str) -> None:
-        r = _post("/api/system/heartbeat", client=(remote_ip, 5555))
+    def test_heartbeat_never_returns_token_field(
+        self, client_tuple: tuple[str, int]
+    ) -> None:
+        r = _post("/api/system/heartbeat", client=client_tuple)
         assert r.status_code == 200
         body = r.json()
         assert body == {"status": "alive"}
