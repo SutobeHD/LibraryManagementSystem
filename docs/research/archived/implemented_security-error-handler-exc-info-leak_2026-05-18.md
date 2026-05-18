@@ -22,6 +22,7 @@ related: [security-api-auth-hardening]
 - 2026-05-15 — research/exploring_ — promoted; quality-bar met (concrete RedactingFormatter spec; CPython 3.13.5 source verified; multi-handler caveat added)
 - 2026-05-15 — research/exploring_ — perfect-quality rework loop (deep self-review pass)
 - 2026-05-15 — research/evaluated_ — promoted; RedactingFormatter pseudocode + measured 0.46µs + 730 logger sites enumerated; 2 PARKED items split to own follow-ups
+- 2026-05-18 — archived/implemented_2026-05-18 — SHIPPED (commit a03cfe1 + concurrent 159a8f8 main.py basicConfig rewrite + revert a368eb2 of premature 17084cb): app/logging_utils.py (~76 LoC) RedactingFormatter + safe_error_message_str (widened path list inc. EXPORT_DIR/MUSIC_DIR/TEMP_DIR); tests/test_logging_redaction.py (4 cases). 285+ tests pass.
 
 ---
 

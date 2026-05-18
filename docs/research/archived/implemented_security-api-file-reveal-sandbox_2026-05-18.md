@@ -21,6 +21,7 @@ related: [security-api-auth-hardening]
 - 2026-05-15 — research/exploring_ — promoted; quality-bar met (Q1 caller-audit-resolved; Tauri-plugin reality checked → C demoted, A recommended)
 - 2026-05-15 — research/exploring_ — perfect-quality rework loop (deep self-review pass)
 - 2026-05-15 — research/evaluated_ — promoted; Option A pseudocode (≤10 LOC patch) + 7-step Impl Plan; Q1-Q3 RESOLVED; Q4/Q5 PARKED
+- 2026-05-18 — archived/implemented_2026-05-18 — SHIPPED (commit f464c97): app/main.py file_reveal handler delete 3-line Path/exists/404 block + insert validate_audio_path call (net +8/-4); tests/test_main_security.py NEW (245 LoC, 7 cases: outside-roots/non-audio/missing/dir/win32/darwin/linux). 285+ tests pass.
 
 ---
 

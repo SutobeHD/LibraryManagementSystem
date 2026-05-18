@@ -21,6 +21,7 @@ related: [security-api-auth-hardening]
 - 2026-05-15 — research/exploring_ — promoted; quality-bar met (frontend axios audit enumerated 164 calls / 41 files; sentinel cookie confirmed dead-code 0 reads)
 - 2026-05-15 — research/exploring_ — perfect-quality rework loop (deep self-review pass)
 - 2026-05-15 — research/evaluated_ — promoted; CORSMiddleware 5-line pseudocode + 2-phase Impl Plan (Phase A 2-line PR / Phase B sentinel removal); Q5 PARKED (cosmetic)
+- 2026-05-18 — archived/implemented_2026-05-18 — Phase A SHIPPED (commit e3c698f): app/main.py:223-224 wildcards → ["GET","POST","PUT","PATCH","DELETE","OPTIONS"] + ["Content-Type","X-Session-Token","Authorization"]; .claude/rules/coding-rules.md bearer-only rule appended. 253+ tests pass. Phase B (sentinel cookie removal + allow_credentials=False + withCredentials=false + stale-docstring fix) DEFERRED to follow-up PR per doc Recommendation.
 
 ---
 

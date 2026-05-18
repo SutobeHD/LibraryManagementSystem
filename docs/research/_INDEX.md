@@ -26,11 +26,7 @@ _(none)_
 - [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); QR-pairing + Tailscale Funnel docs; security Phase-1+2 hard prereq (2026-05-15)
 - [exploring_external-track-match-unified-module.md](research/exploring_external-track-match-unified-module.md) — Cross-cutting module (fuzzy + chromaprint + adapter-registry) shared by 3 sister features; M1/M2/M3 (2026-05-15)
 
-### evaluated
-- [evaluated_security-pydantic-extra-allow-blob-write.md](research/evaluated_security-pydantic-extra-allow-blob-write.md) — Pydantic SetReq blob-write — Option B caps (8KB/64/256/256KB); Q11 (final caps) PARKED for review_ (2026-05-15)
-- [evaluated_security-error-handler-exc-info-leak.md](research/evaluated_security-error-handler-exc-info-leak.md) — RedactingFormatter for exc_info; measured 0.46µs / 730 logger sites; 2 follow-ups split out (2026-05-15)
-- [evaluated_security-api-file-reveal-sandbox.md](research/evaluated_security-api-file-reveal-sandbox.md) — /api/file/reveal Option A: ≤10 LOC validate_audio_path injection; Q1-Q3 RESOLVED (2026-05-15)
-- [evaluated_security-cors-allow-credentials-tightening.md](research/evaluated_security-cors-allow-credentials-tightening.md) — CORS explicit lists 2-line PR + dead-cookie removal Phase B; Q5 PARKED cosmetic (2026-05-15)
+_(none)_
 
 ### parked
 _(none)_
@@ -65,6 +61,10 @@ _(none)_
 - [implemented_security-api-auth-hardening_2026-05-17.md](archived/implemented_security-api-auth-hardening_2026-05-17.md) — **PRIORITY-1** Phase-1 Bearer auth (84/85 mutation routes gated; SHUTDOWN_TOKEN deleted; Tauri stdout+file token handoff; 219+ tests pass). Phase 2 (paired-device tokens + QR pairing) carved out as future doc. (2026-05-17)
 - [implemented_security-secrets-compare-digest-codebase-audit_2026-05-17.md](archived/implemented_security-secrets-compare-digest-codebase-audit_2026-05-17.md) — safe_compare helper + require_session refactor; 5 fragility cases covered (commit 8498937, 52+ tests). (2026-05-17)
 - [implemented_security-rate-limit-design_2026-05-17.md](archived/implemented_security-rate-limit-design_2026-05-17.md) — Custom token-bucket (180 LoC) + @rate_limit on shutdown/restart/sc-auth-token (steady=5/min, burst=10, key_mode=both); 253+ tests pass. (2026-05-17)
+- [implemented_security-pydantic-extra-allow-blob-write_2026-05-18.md](archived/implemented_security-pydantic-extra-allow-blob-write_2026-05-18.md) — SetReq caps (8KB/64/256/256KB) + @model_validator + SettingsManager._sanitize_loaded; 21 new tests; 285+ pass (2026-05-18)
+- [implemented_security-error-handler-exc-info-leak_2026-05-18.md](archived/implemented_security-error-handler-exc-info-leak_2026-05-18.md) — RedactingFormatter + safe_error_message_str helpers; widened path list (EXPORT_DIR/MUSIC_DIR/TEMP_DIR); 4 redaction tests; 285+ pass (2026-05-18)
+- [implemented_security-api-file-reveal-sandbox_2026-05-18.md](archived/implemented_security-api-file-reveal-sandbox_2026-05-18.md) — /api/file/reveal sandboxed via validate_audio_path; 7 platform+sandbox tests; 285+ pass (2026-05-18)
+- [implemented_security-cors-allow-credentials-tightening_2026-05-18.md](archived/implemented_security-cors-allow-credentials-tightening_2026-05-18.md) — CORS wildcards→explicit lists (Phase A) + bearer-only rule in coding-rules.md; Phase B (cookie removal) deferred; 253+ pass (2026-05-18)
 
 ### superseded
 _(none)_
