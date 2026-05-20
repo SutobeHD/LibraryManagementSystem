@@ -50,8 +50,8 @@ class AnalysisSettings:
     # -- BPM detection / output range -------------------------------------
     bpm_detect_min: float = 60.0       # what madmom DBN / librosa may find
     bpm_detect_max: float = 210.0
-    bpm_output_min: float = 80.0       # Pioneer-style display sweet spot
-    bpm_output_max: float = 180.0
+    bpm_output_min: float = 60.0       # octave-fold floor (covers reggae/hip-hop/halftime)
+    bpm_output_max: float = 200.0      # octave-fold ceiling (covers uptempo/hard genres)
 
     # -- Octave-disambiguation thresholds ---------------------------------
     onset_density_high_ratio: float = 5.5   # > → halve-time misread, double
@@ -72,8 +72,8 @@ class AnalysisSettings:
     auto_memory_cues: bool = True
 
     # -- Cue limits -------------------------------------------------------
-    cue_max_hot: int = 8               # Rekordbox hot cue slots A..H
-    cue_max_memory: int = 16
+    cue_max_hot: int = 16              # Rekordbox 6/7 + CDJ-3000 slots A..P
+    cue_max_memory: int = 40           # memory_min_bar_spacing is the practical limiter
     memory_min_bar_spacing: int = 16
 
     # -- Phrase detection -------------------------------------------------
@@ -90,6 +90,9 @@ class AnalysisSettings:
     # -- Sample-rate handling ---------------------------------------------
     waveform_sr_cap: int = 96000       # downsample masters above this for waveforms
     analysis_sr: int = 44100           # beat / key / phrase analysis SR
+
+    # -- Analysis duration caps -------------------------------------------
+    speed_mode_duration_cap_s: float = 120.0   # "speed" mode reads only this many seconds
 
     # ---------------------------------------------------------------------
     @classmethod

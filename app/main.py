@@ -76,6 +76,7 @@ from .audio_analyzer import LIBROSA_AVAILABLE, AudioAnalyzer
 from .config import EXPORT_DIR, LOG_DIR, MUSIC_DIR, TEMP_DIR
 from .database import db
 from .phrase_generator import (
+    MAX_HOT_CUES,
     commit_cues_to_db,
     detect_first_downbeat,
     extract_beats_from_db,
@@ -3789,7 +3790,7 @@ async def phrase_commit(body: PhraseCommitRequest):
     """
     Write generated cue points to the Rekordbox database as hot cues.
 
-    Up to 8 phrase-start cues are mapped to hot cue slots A–H.
+    Up to 16 phrase-start cues are mapped to hot cue slots A–P.
 
     Request body: {track_id, cues}
     Returns: {status, data: {written: int}}
@@ -3813,7 +3814,7 @@ async def phrase_commit(body: PhraseCommitRequest):
         )
 
         written = len([c for c in body.cues if c.get("type") == "phrase_start"])
-        written = min(written, 8)  # Max hot cues
+        written = min(written, MAX_HOT_CUES)
         logger.info("[PHRASE] committed %d hot cues for track_id=%d", written, body.track_id)
         return {"status": "ok", "data": {"written": written}}
 

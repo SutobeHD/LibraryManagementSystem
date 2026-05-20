@@ -15,8 +15,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Maximum number of hot cues Rekordbox supports per track.
-_MAX_HOT_CUES = 8
+# Maximum number of hot cues Rekordbox 6/7 + CDJ-3000 support per track
+# (banks A..H and I..P). Older CDJs read only the first 8.
+MAX_HOT_CUES = 16
 
 # Colors (Rekordbox color IDs) assigned to phrase/bar markers.
 _COLOR_PHRASE_START = 0xFF8C00   # amber / orange — phrase boundary
@@ -306,8 +307,8 @@ def commit_cues_to_db(
     """
     Write generated cue points into the Rekordbox master.db as hot cues.
 
-    Only phrase_start cues up to _MAX_HOT_CUES (8) are written as hot cues
-    (A–H).  All cues are also stored in the .rbep overlay system via the
+    Only phrase_start cues up to MAX_HOT_CUES (16) are written as hot cues
+    (A–P).  All cues are also stored in the .rbep overlay system via the
     existing RbepSerializer pattern so they appear in the DAW timeline.
 
     The actual DB write uses rbox if available; otherwise raises RuntimeError
@@ -338,9 +339,9 @@ def commit_cues_to_db(
         len(cues), track_id, db,
     )
 
-    # Select only phrase_start cues for hot cues (up to 8)
+    # Select only phrase_start cues for hot cues (up to MAX_HOT_CUES)
     hot_cue_candidates = [c for c in cues if c.get("type") == "phrase_start"]
-    hot_cues = hot_cue_candidates[:_MAX_HOT_CUES]
+    hot_cues = hot_cue_candidates[:MAX_HOT_CUES]
 
     try:
         import rbox  # type: ignore
@@ -348,7 +349,7 @@ def commit_cues_to_db(
         master_db = rbox.MasterDb(str(db))
 
         # rbox hot cue structure: list of dicts with keys:
-        #   index (0-7), position_ms, name, color
+        #   index (0-15), position_ms, name, color
         rbox_cues = []
         for i, cue in enumerate(hot_cues):
             pos_ms = cue.get("position_ms")

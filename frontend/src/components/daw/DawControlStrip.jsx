@@ -302,8 +302,8 @@ const DawControlStrip = React.memo(({
                 </TBtn>
             </div>
 
-            {/* ── HOT CUES (A-H) ── */}
-            <div className="flex items-center gap-0.5 px-2 border-r border-white/5">
+            {/* ── HOT CUES (A-P) ── */}
+            <div className="flex flex-wrap items-center gap-0.5 px-2 border-r border-white/5">
                 {hotCues.map((cue, i) => (
                     <button
                         key={i}

@@ -15,6 +15,8 @@ import os
 from concurrent.futures import Future, ProcessPoolExecutor
 from typing import Any
 
+from .analysis_settings import get_settings
+
 logger = logging.getLogger(__name__)
 
 # Check if analysis libraries are available
@@ -33,6 +35,15 @@ try:
 except ImportError:
     _ENGINE_AVAILABLE = False
     logger.warning("analysis_engine not available. Using legacy analyzer.")
+
+
+def _speed_mode_cap(mode: str) -> float | None:
+    """Return the analysis duration cap for `mode`, logging when one applies."""
+    if mode != "speed":
+        return None
+    cap = get_settings().speed_mode_duration_cap_s
+    logger.info("speed mode: analysis capped at %.0fs", cap)
+    return cap
 
 
 class AudioAnalyzer:
@@ -68,7 +79,7 @@ class AudioAnalyzer:
 
         if _ENGINE_AVAILABLE:
             # Use the production engine
-            duration_cap = 120.0 if mode == "speed" else None
+            duration_cap = _speed_mode_cap(mode)
             future = executor.submit(run_full_analysis, file_path, duration_cap)
         else:
             # Legacy fallback
@@ -98,7 +109,7 @@ class AudioAnalyzer:
     def analyze_sync(cls, file_path: str, mode: str = "accuracy") -> dict[str, Any]:
         """Synchronous analysis. Blocks until done."""
         if _ENGINE_AVAILABLE:
-            duration_cap = 120.0 if mode == "speed" else None
+            duration_cap = _speed_mode_cap(mode)
             result = run_full_analysis(file_path, duration_cap)
             return cls._normalize_result(result)
         return cls._run_legacy_analysis(file_path, mode)
@@ -163,6 +174,10 @@ class AudioAnalyzer:
             duration = None
             if file_size_mb > 200:
                 duration = 600.0
+                logger.warning(
+                    "legacy analysis: %.0f MB file — capping analysis at %.0fs",
+                    file_size_mb, duration,
+                )
 
             y, sr = librosa.load(file_path, sr=44100, duration=duration, mono=True)
 

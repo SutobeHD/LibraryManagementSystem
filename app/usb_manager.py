@@ -1110,8 +1110,8 @@ class UsbSyncEngine:
         Rekordbox treat tracks as missing on insert.
         """
         contents_dir = self.usb_root / "Contents"
-        artist_clean = self._clean_filename(artist)[:40].strip() or "UnknownArtist"
-        title_clean = self._clean_filename(title)[:40].strip() or "UnknownTitle"
+        artist_clean = self._clean_filename(artist)[:80].strip() or "UnknownArtist"
+        title_clean = self._clean_filename(title)[:80].strip() or "UnknownTitle"
         file_clean = self._clean_filename(filename)
 
         dest = contents_dir / artist_clean / title_clean / file_clean

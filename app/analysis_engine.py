@@ -420,7 +420,7 @@ _OUTPUT_MAX_BPM = _S.bpm_output_max
 def _octave_correct(bpm: float) -> float:
     """
     Pioneer-style octave correction. Pushes BPM into the configured display
-    range (default 80-180). A track detected at 65 BPM becomes 130; a track
+    range (default 60-200). A track detected at 55 BPM becomes 110; a track
     at 220 BPM becomes 110.
 
     Uses live settings so test overrides take effect immediately.
@@ -1092,7 +1092,7 @@ def detect_phrases(
     Adaptive song-structure detection (Energy + MFCC timbre changes).
 
     Strategy:
-        1. Slice track into 8-bar windows (aligned to BPM grid).
+        1. Slice track into phrase-length windows (aligned to BPM grid).
         2. Per-window features: RMS energy, MFCC mean (timbre signature).
         3. Adaptive thresholds via per-track energy percentiles (NOT hardcoded).
         4. Drop detection: high MFCC distance + large energy jump.
@@ -1104,7 +1104,7 @@ def detect_phrases(
     try:
         beat_duration = 60.0 / bpm
         bar_duration = beat_duration * 4
-        phrase_bars = 8
+        phrase_bars = _S.phrase_bars
         phrase_duration = bar_duration * phrase_bars
 
         if phrase_duration <= 0:

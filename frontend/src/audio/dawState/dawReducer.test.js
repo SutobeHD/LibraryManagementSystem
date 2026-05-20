@@ -45,7 +45,7 @@ test('createInitialState returns the expected shape', () => {
 
     // Collections start empty / default
     assert.deepEqual(s.regions, []);
-    assert.equal(s.hotCues.length, 8);
+    assert.equal(s.hotCues.length, 16);
     assert.ok(s.hotCues.every(c => c === null), 'hotCues should be all null');
     assert.deepEqual(s.memoryCues, []);
     assert.deepEqual(s.loops, []);
