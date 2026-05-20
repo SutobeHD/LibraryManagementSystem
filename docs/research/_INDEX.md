@@ -21,7 +21,7 @@ If this index drifts from the file system, the file system wins — re-derive wi
 _(none)_
 
 ### ideagate ⛔ GATE A
-_(none)_
+- [ideagate_waveform-overhaul.md](research/ideagate_waveform-overhaul.md) — Waveform Overhaul: more display types + multi-band (3→6+) rendering + fixed color palettes, always presets; inspired by deadmau5 DJ software (2026-05-20)
 
 ### exploring
 - [exploring_recommender-rules-baseline.md](research/exploring_recommender-rules-baseline.md) — Teil 1: BPM/Key/Genre/MyTag/Energy ranking + Camelot harmonic mixing; local + SoundCloud modes (2026-05-11)
