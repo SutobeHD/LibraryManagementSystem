@@ -10,6 +10,7 @@ use audio::engine::AudioController;
 use audio::fingerprint::{fingerprint_batch, fingerprint_track};
 use serde::Deserialize;
 use soundcloud_client::Track;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_shell::process::CommandEvent;
@@ -32,31 +33,86 @@ use tauri_plugin_shell::ShellExt;
 /// ``get_session_token`` returns ``Err("token-not-ready")`` while empty.
 struct SessionToken(Arc<Mutex<String>>);
 
-/// Return the captured Python-sidecar session token to the frontend.
+/// Resolve the absolute path of the sidecar's ``.session-token`` file.
+///
+/// MUST mirror ``app/auth.py::_token_file_path`` which uses
+/// ``platformdirs.user_data_dir("MusicLibraryManager", roaming=False)``:
+/// - Windows: ``%LOCALAPPDATA%\MusicLibraryManager\.session-token``
+///   (``roaming=False`` => Local, NOT ``%APPDATA%`` Roaming).
+/// - macOS:   ``~/Library/Application Support/MusicLibraryManager/.session-token``
+/// - Linux:   ``$XDG_DATA_HOME`` (or ``~/.local/share``) ``/MusicLibraryManager/.session-token``
+fn session_token_file_path() -> Option<PathBuf> {
+    let app = "MusicLibraryManager";
+    let file = ".session-token";
+    #[cfg(target_os = "windows")]
+    {
+        let base = std::env::var_os("LOCALAPPDATA")?;
+        Some(PathBuf::from(base).join(app).join(file))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var_os("HOME")?;
+        Some(
+            PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join(app)
+                .join(file),
+        )
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let base = std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share"))
+            })?;
+        Some(base.join(app).join(file))
+    }
+}
+
+/// Return the Python-sidecar session token to the frontend.
 ///
 /// The frontend's ``api.js`` bootstrap polls this on app boot before firing
 /// any axios call. Returns the URL-safe base64 string (no quoting / padding
-/// concerns) or a token-not-ready error if the sidecar hasn't yet printed
-/// its ``LMS_TOKEN=`` banner line.
+/// concerns) or a token-not-ready error.
+///
+/// Two sources, in order:
+/// 1. **stdout capture** — when Tauri itself spawned the sidecar (`spawn_child`
+///    / `shell.sidecar`), the reader thread captured the ``LMS_TOKEN=`` banner.
+/// 2. **file fallback** — when ``beforeDevCommand`` (``npm run dev:full``)
+///    spawned the backend, Tauri never owns its stdout (port-busy => spawn
+///    skipped), so the in-memory token stays empty. The sidecar ALSO writes
+///    the token to ``.session-token`` at boot regardless of who spawned it;
+///    read it from there.
 ///
 /// # Errors
-/// - ``"token-not-ready"`` if the stdout reader has not yet captured the
-///   banner line. Callers MUST retry (the sidecar normally prints within
-///   the first ~50 ms of import time, but cold-start can push that out
-///   under heavy disk IO).
+/// - ``"token-not-ready"`` if neither source has the token yet. Callers MUST
+///   retry — the sidecar normally prints + writes within ~50 ms of import,
+///   but cold-start can push that out under heavy disk IO.
 /// - ``"state-lock-poisoned"`` if a prior holder of the Mutex panicked.
-///   Not recoverable -- the user must restart the app.
 #[tauri::command]
 fn get_session_token(state: State<SessionToken>) -> Result<String, String> {
-    let guard = state
-        .0
-        .lock()
-        .map_err(|_| "state-lock-poisoned".to_string())?;
-    if guard.is_empty() {
-        Err("token-not-ready".to_string())
-    } else {
-        Ok(guard.clone())
+    // Source 1: stdout-captured token (Tauri-spawned sidecar).
+    {
+        let guard = state
+            .0
+            .lock()
+            .map_err(|_| "state-lock-poisoned".to_string())?;
+        if !guard.is_empty() {
+            return Ok(guard.clone());
+        }
     }
+    // Source 2: file fallback (externally-spawned sidecar — dev:full path).
+    if let Some(path) = session_token_file_path() {
+        if let Ok(contents) = std::fs::read_to_string(&path) {
+            let tok = contents.trim();
+            if !tok.is_empty() {
+                return Ok(tok.to_string());
+            }
+        }
+    }
+    Err("token-not-ready".to_string())
 }
 
 /// Inspect one stdout line for the ``LMS_TOKEN=`` boot banner.

@@ -23,7 +23,10 @@ import { defineConfig } from 'vite'
 function _sessionTokenPath() {
   const appName = 'MusicLibraryManager'
   if (platform() === 'win32') {
-    const base = process.env.APPDATA || join(homedir(), 'AppData', 'Roaming')
+    // MUST match app/auth.py::_token_file_path — platformdirs.user_data_dir
+    // with roaming=False resolves to %LOCALAPPDATA% (Local), NOT %APPDATA%
+    // (Roaming). Using APPDATA here silently 404s the dev-token endpoint.
+    const base = process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local')
     return join(base, appName, '.session-token')
   }
   if (platform() === 'darwin') {
