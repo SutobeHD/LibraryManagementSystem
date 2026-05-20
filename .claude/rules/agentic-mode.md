@@ -11,7 +11,7 @@ Broad permission to act locally. `.claude/settings.json` allowlist reflects this
 - `git fetch`, `git pull --ff-only`.
 - `git checkout -b`, `git switch -c` (new branches).
 - `gh pr/issue view`, `gh pr list`, `gh run list` — read-only GitHub queries.
-- **Process AI Tasks** in research docs flagged `ai_tasks: true` — pick unchecked items from `## AI Tasks`, execute, tick `- [x]`, commit. See `research-pipeline.md` "AI Tasks marker" section.
+- **Advance research-pipeline docs in a work-state** (draft / explore / plan / implement) — follow the stage logic in `docs/research/routines/`. Stop at every `*gate_` — those are user-only. Run `/pipeline` to see state.
 
 ## Streamlining bias — default ON
 
@@ -32,4 +32,4 @@ Repo culture is **maximum AI autonomy + minimum manual steps**. When you spot a 
 - Edit user data: `**/music/`, `**/exports/`, `**/backups/`, USB drives, `master.db`, `*.DAT`, `*.ANLZ` outside `app/templates/`.
 - `--no-verify` / bypass signing / skip security audits. `--no-verify` is in deny list.
 - Commit `.env`, `*.db`, audio files, build artefacts (gitignored).
-- Promote research-pipeline states unilaterally — see `research-pipeline.md`.
+- Pass a research-pipeline user gate (`ideagate_` / `midgate_` / `plangate_`) or merge a routine PR — those are GATE A/B/C/D, user-only. See `research-pipeline.md` "The 4 gates".
