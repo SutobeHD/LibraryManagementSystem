@@ -1,4 +1,4 @@
-import React, { useState, Component, useEffect, useCallback, Suspense, lazy } from 'react'
+import React, { useState, useMemo, Component, useEffect, useCallback, Suspense, lazy } from 'react'
 import { invoke } from '@tauri-apps/api/core'; // Tauri Invoke
 import ReactDOM from 'react-dom/client'
 import { Music, Cloud, Download, Scissors, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2, Sparkles, Copy, Layers, FilePlus, FolderOpen, ArrowLeft, Sliders } from 'lucide-react'
@@ -64,7 +64,113 @@ class ErrorBoundary extends Component {
   }
 }
 
-const Sidebar = ({ activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnloadLibrary }) => {
+/**
+ * Workspace groups — Blender-style. The top WorkspaceBar switches between
+ * these; the sidebar then lists the active workspace's views. The XML
+ * Automator only appears while a library is loaded in XML mode.
+ */
+const buildWorkspaces = (libraryStatus) => [
+  {
+    id: 'library',
+    label: 'Library',
+    items: [
+      { tab: 'library', label: 'Library', icon: Music },
+      { tab: 'import', label: 'Audio Import', icon: Upload },
+      { tab: 'ranking', label: 'Ranking Mode', icon: Zap },
+      { tab: 'insights', label: 'Insights', icon: BarChart3 },
+    ],
+  },
+  {
+    id: 'editor',
+    label: 'Editor',
+    items: [
+      { tab: 'editor', label: 'Waveform Editor', icon: Scissors },
+      ...(libraryStatus?.mode === 'xml'
+        ? [{ tab: 'xml', label: 'XML Automator', icon: FileCode }]
+        : []),
+    ],
+  },
+  {
+    id: 'sync',
+    label: 'Sync',
+    items: [
+      { tab: 'usb', label: 'USB Export', icon: HardDrive },
+      { tab: 'usb-settings', label: 'USB Settings', icon: Sliders },
+      { tab: 'soundcloud', label: 'SoundCloud', icon: Cloud },
+      { tab: 'sc-sync', label: 'SCloudLibrary', icon: Download },
+      { tab: 'downloads', label: 'Downloads', icon: Download },
+    ],
+  },
+  {
+    id: 'utilities',
+    label: 'Utilities',
+    items: [{ tab: 'utilities', label: 'Utilities', icon: Wrench }],
+  },
+  {
+    id: 'lab',
+    label: 'Lab',
+    items: [{ tab: 'design', label: 'Design Lab', icon: Sparkles }],
+  },
+]
+
+/** tab id → workspace id (XML resolves to the editor workspace). */
+const TAB_WORKSPACE = {
+  library: 'library', import: 'library', ranking: 'library', insights: 'library',
+  editor: 'editor', xml: 'editor',
+  usb: 'sync', 'usb-settings': 'sync', soundcloud: 'sync', 'sc-sync': 'sync', downloads: 'sync',
+  utilities: 'utilities',
+  design: 'lab',
+}
+
+/** Blender-style workspace tab strip — top of the app, carries the brand. */
+const WorkspaceBar = ({ workspaces, activeWorkspace, onPick }) => (
+  <div className="flex items-stretch h-9 bg-mx-shell border-b border-line-subtle shrink-0 select-none relative z-20">
+    <div className="flex items-center gap-2 px-3.5 border-r border-line-subtle shrink-0">
+      <div className="flex items-end gap-[2px]">
+        {[8, 12, 16, 11, 7].map((h, i) => (
+          <div key={i} className="bg-amber2 rounded-[1px]" style={{ width: 2.5, height: h }} />
+        ))}
+      </div>
+      <span className="text-[12px] font-bold tracking-wide text-ink-primary">LMS</span>
+    </div>
+    {workspaces.map((ws) => {
+      const active = ws.id === activeWorkspace
+      return (
+        <button
+          key={ws.id}
+          onClick={() => onPick(ws)}
+          className={`px-4 text-[10.5px] font-semibold uppercase tracking-[0.08em] border-r border-line-subtle transition-colors ${
+            active
+              ? 'bg-mx-panel text-amber2'
+              : 'text-ink-secondary hover:text-ink-primary hover:bg-mx-hover'
+          }`}
+          style={active ? { boxShadow: 'inset 0 -2px 0 var(--amber)' } : undefined}
+        >
+          {ws.label}
+        </button>
+      )
+    })}
+  </div>
+)
+
+/** Compact Rekordbox-style sidebar row — 28px tall, amber active border-left. */
+const RbNavRow = ({ icon: Icon, label, active, danger, onClick }) => (
+  <div
+    onClick={onClick}
+    className={`flex items-center gap-2 h-7 px-3 cursor-pointer select-none text-[12px] border-l-2 transition-colors ${
+      active
+        ? 'border-amber2 bg-mx-selected text-ink-primary font-medium'
+        : `border-transparent hover:bg-mx-hover ${
+            danger ? 'text-bad/80 hover:text-bad' : 'text-ink-secondary hover:text-ink-primary'
+          }`
+    }`}
+  >
+    <Icon size={14} className={active ? 'text-amber2 shrink-0' : 'shrink-0 opacity-70'} />
+    <span className="truncate">{label}</span>
+  </div>
+)
+
+const Sidebar = ({ workspace, activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnloadLibrary }) => {
   const handleExit = async () => {
     if (await confirmModal({ title: "Exit Application?", confirmLabel: "Exit" })) {
       try {
@@ -83,138 +189,89 @@ const Sidebar = ({ activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnlo
   };
 
   return (
-    <>
-      {/* Sidebar — Melodex design system: 220px, near-black, amber active border-left */}
-      <div
-        className="h-screen flex flex-col relative z-20 shrink-0 bg-mx-shell border-r border-line-subtle"
-        style={{ width: 220 }}
-      >
-        {/* Logo: 5 amber bars (audio meter) + wordmark */}
-        <div className="px-4 py-3 border-b border-line-subtle flex items-center gap-2">
-          <div className="flex items-end gap-[2px]">
-            {[14, 18, 22, 16, 10].map((h, i) => (
-              <div
-                key={i}
-                className="bg-amber2 rounded-[1.5px]"
-                style={{ width: 3, height: h }}
-              />
-            ))}
-          </div>
-          <span className="text-[15px] font-bold tracking-tight text-ink-primary">Library Manager</span>
-        </div>
-
-        {/* Library Status Indicator */}
-        <div className="px-3 pt-3">
-          <div
-            className={`px-3 py-2 rounded-mx-sm border flex items-center justify-between ${
-              libraryStatus?.loaded
-                ? 'bg-ok/5 border-ok/30'
-                : 'bg-bad/5 border-bad/25'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <div
-                className={`w-1.5 h-1.5 rounded-full ${
-                  libraryStatus?.loaded
-                    ? 'bg-ok shadow-[0_0_6px_#3DD68C]'
-                    : 'bg-bad shadow-[0_0_6px_#E85C4A]'
+    <div
+      className="h-full flex flex-col relative z-20 shrink-0 bg-mx-shell border-r border-line-subtle"
+      style={{ width: 220 }}
+    >
+      {/* Library Status Indicator */}
+      <div className="px-2.5 pt-2.5">
+        <div
+          className={`px-3 py-2 rounded-mx-sm border flex items-center justify-between ${
+            libraryStatus?.loaded
+              ? 'bg-ok/5 border-ok/30'
+              : 'bg-bad/5 border-bad/25'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <div
+              className={`w-1.5 h-1.5 rounded-full ${
+                libraryStatus?.loaded
+                  ? 'bg-ok shadow-[0_0_6px_#3DD68C]'
+                  : 'bg-bad shadow-[0_0_6px_#E85C4A]'
+              }`}
+            ></div>
+            <div className="flex flex-col leading-tight">
+              <span
+                className={`text-[10px] font-semibold uppercase tracking-wider ${
+                  libraryStatus?.loaded ? 'text-ok' : 'text-bad'
                 }`}
-              ></div>
-              <div className="flex flex-col leading-tight">
-                <span
-                  className={`text-[10px] font-semibold uppercase tracking-wider ${
-                    libraryStatus?.loaded ? 'text-ok' : 'text-bad'
-                  }`}
-                >
-                  {libraryStatus?.loaded ? 'Active' : 'No Library'}
+              >
+                {libraryStatus?.loaded ? 'Active' : 'No Library'}
+              </span>
+              {libraryStatus?.loaded && (
+                <span className="text-[10px] font-mono text-ink-muted mt-0.5">
+                  {libraryStatus.tracks?.toLocaleString?.() ?? libraryStatus.tracks} tracks
                 </span>
-                {libraryStatus?.loaded && (
-                  <span className="text-[10px] font-mono text-ink-muted mt-0.5">
-                    {libraryStatus.tracks?.toLocaleString?.() ?? libraryStatus.tracks} tracks
-                  </span>
-                )}
-              </div>
+              )}
             </div>
-            {!libraryStatus?.loaded ? (
-              <button
-                onClick={onLoadLibrary}
-                className="p-1.5 bg-amber2 hover:bg-amber2-hover text-mx-deepest rounded-mx-sm transition-colors"
-                title="Load default library"
-              >
-                <Zap size={11} />
-              </button>
-            ) : (
-              <button
-                onClick={onUnloadLibrary}
-                className="p-1.5 bg-mx-card hover:bg-bad/15 text-ink-muted hover:text-bad rounded-mx-sm transition-colors border border-line-subtle"
-                title="Unload library"
-              >
-                <X size={11} />
-              </button>
-            )}
           </div>
-        </div>
-
-        {/* Navigation — grouped, scrollable */}
-        <nav className="flex-1 mt-3 overflow-y-auto pb-2">
-          <NavGroup label="Library">
-            <NavBtn icon={<Music size={14} />} label="Library" active={activeTab === 'library'} onClick={() => setActiveTab('library')} />
-            <NavBtn icon={<Upload size={14} />} label="Audio Import" active={activeTab === 'import'} onClick={() => setActiveTab('import')} />
-            <NavBtn icon={<Zap size={14} />} label="Ranking Mode" active={activeTab === 'ranking'} onClick={() => setActiveTab('ranking')} />
-            <NavBtn icon={<BarChart3 size={14} />} label="Insights" active={activeTab === 'insights'} onClick={() => setActiveTab('insights')} />
-          </NavGroup>
-
-          <NavGroup label="Editor">
-            <NavBtn icon={<Scissors size={14} />} label="Waveform Editor" active={activeTab === 'editor'} onClick={() => setActiveTab('editor')} />
-            {libraryStatus?.mode === 'xml' && (
-              <NavBtn icon={<FileCode size={14} />} label="XML Automator" active={activeTab === 'xml'} onClick={() => setActiveTab('xml')} />
-            )}
-          </NavGroup>
-
-          <NavGroup label="Sync">
-            <NavBtn icon={<HardDrive size={14} />} label="USB Export" active={activeTab === 'usb'} onClick={() => setActiveTab('usb')} />
-            <NavBtn icon={<Sliders size={14} />} label="USB Settings" active={activeTab === 'usb-settings'} onClick={() => setActiveTab('usb-settings')} />
-            <NavBtn icon={<Cloud size={14} />} label="SoundCloud" active={activeTab === 'soundcloud'} onClick={() => setActiveTab('soundcloud')} />
-            <NavBtn icon={<Download size={14} />} label="SCloudLibrary" active={activeTab === 'sc-sync'} onClick={() => setActiveTab('sc-sync')} />
-            <NavBtn icon={<Download size={14} />} label="Downloads" active={activeTab === 'downloads'} onClick={() => setActiveTab('downloads')} />
-          </NavGroup>
-
-          <NavGroup label="Utilities">
-            <NavBtn icon={<Wrench size={14} />} label="Utilities" active={activeTab === 'utilities'} onClick={() => setActiveTab('utilities')} />
-          </NavGroup>
-
-          <NavGroup label="Lab">
-            <NavBtn icon={<Sparkles size={14} />} label="Design Lab" active={activeTab === 'design'} onClick={() => setActiveTab('design')} />
-          </NavGroup>
-        </nav>
-
-        {/* Footer */}
-        <div className="border-t border-line-subtle py-2">
-          <NavBtn icon={<Settings size={14} />} label="Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
-          <div onClick={handleExit} className="nav-item" style={{ color: 'var(--bad)' }}>
-            <AlertTriangle size={14} />
-            <span>Exit</span>
-          </div>
+          {!libraryStatus?.loaded ? (
+            <button
+              onClick={onLoadLibrary}
+              className="p-1.5 bg-amber2 hover:bg-amber2-hover text-mx-deepest rounded-mx-sm transition-colors"
+              title="Load default library"
+            >
+              <Zap size={11} />
+            </button>
+          ) : (
+            <button
+              onClick={onUnloadLibrary}
+              className="p-1.5 bg-mx-card hover:bg-bad/15 text-ink-muted hover:text-bad rounded-mx-sm transition-colors border border-line-subtle"
+              title="Unload library"
+            >
+              <X size={11} />
+            </button>
+          )}
         </div>
       </div>
-    </>
+
+      {/* Active workspace — section label + compact nav rows */}
+      <div className="mx-caption px-3 pt-3.5 pb-1.5">{workspace.label}</div>
+      <nav className="flex-1 overflow-y-auto pb-2">
+        {workspace.items.map((it) => (
+          <RbNavRow
+            key={it.tab}
+            icon={it.icon}
+            label={it.label}
+            active={activeTab === it.tab}
+            onClick={() => setActiveTab(it.tab)}
+          />
+        ))}
+      </nav>
+
+      {/* Footer */}
+      <div className="border-t border-line-subtle py-1">
+        <RbNavRow
+          icon={Settings}
+          label="Settings"
+          active={activeTab === 'settings'}
+          onClick={() => setActiveTab('settings')}
+        />
+        <RbNavRow icon={AlertTriangle} label="Exit" danger onClick={handleExit} />
+      </div>
+    </div>
   )
 }
-
-/** Group label for sidebar sections — matches Melodex `.t-caption` style. */
-const NavGroup = ({ label, children }) => (
-  <div className="pt-3">
-    <div className="mx-caption px-4 pb-1.5">{label}</div>
-    {children}
-  </div>
-)
-
-const NavBtn = ({ icon, label, active, onClick }) => (
-  <div onClick={onClick} className={`nav-item ${active ? 'active' : ''}`}>
-    {icon}
-    <span>{label}</span>
-  </div>
-)
 
 // Subtle dot-grid backdrop — sharp, low-contrast, no blur. Sits behind the
 // content so the screen feels like an extension of the app shell rather than
@@ -386,6 +443,7 @@ const ViewLoader = () => (
 const App = () => {
   const [appMode, setAppMode] = useState('choice')
   const [activeTab, setActiveTab] = useState('library')
+  const [activeWorkspace, setActiveWorkspace] = useState('library')
   const [activeTrack, setActiveTrack] = useState(null)
   const [playerTrack, setPlayerTrack] = useState(null)
   const [libraryStatus, setLibraryStatus] = useState({ loaded: false, mode: 'live', tracks: 0, playlists: 0 })
@@ -589,8 +647,24 @@ const App = () => {
   const handleTrackEdit = useCallback((track) => { setActiveTrack(track); setActiveTab('editor'); }, []);
   const handlePlayTrack = useCallback((track) => { setPlayerTrack(track); }, []);
 
+  const workspaces = useMemo(() => buildWorkspaces(libraryStatus), [libraryStatus]);
+  const currentWorkspace = workspaces.find((w) => w.id === activeWorkspace) || workspaces[0];
+
+  // Keep the workspace tab in sync when the view changes from elsewhere
+  // (e.g. "edit track" jumps straight to the editor). Tabs with no workspace
+  // — Settings — leave the current workspace untouched.
+  useEffect(() => {
+    const ws = TAB_WORKSPACE[activeTab];
+    if (ws) setActiveWorkspace(ws);
+  }, [activeTab]);
+
+  const handleWorkspacePick = useCallback((ws) => {
+    setActiveWorkspace(ws.id);
+    if (ws.items[0]) setActiveTab(ws.items[0].tab);
+  }, []);
+
   return (
-    <div className="flex h-screen w-screen bg-mx-deepest text-ink-primary overflow-hidden font-sans">
+    <div className="flex flex-col h-screen w-screen bg-mx-deepest text-ink-primary overflow-hidden font-sans">
       {appMode === 'choice' && <SelectionView onSelect={handleModeSelect} />}
       {appMode === 'xml-submode' && (
         <XmlSubmodeView
@@ -644,7 +718,15 @@ const App = () => {
         </div>
       )}
 
+      <WorkspaceBar
+        workspaces={workspaces}
+        activeWorkspace={activeWorkspace}
+        onPick={handleWorkspacePick}
+      />
+
+      <div className="flex flex-1 min-h-0">
       <Sidebar
+        workspace={currentWorkspace}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         libraryStatus={libraryStatus}
@@ -727,13 +809,13 @@ const App = () => {
           </Suspense>
         </div>
       </main>
+      </div>
 
       {/* Hide Player in Editor and Ranking modes */}
       {!['editor', 'ranking'].includes(activeTab) && (
         <Player
           track={playerTrack}
           onClose={() => setPlayerTrack(null)}
-          onMaximize={() => { setActiveTrack(playerTrack); setActiveTab('editor'); }}
         />
       )}
 
