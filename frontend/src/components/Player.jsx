@@ -1,18 +1,110 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Volume2, Maximize2, X } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, X } from 'lucide-react';
 import api from '../api/api';
 import { log } from '../utils/log';
+import { waveAmps, drawSeededWave, hashSeed } from './shared/seededWaveform';
 
-const Player = ({ track, onClose, onMaximize }) => {
+/** Three staggered equalizer bars — shown next to the title while playing. */
+const PlayingBars = () => (
+    <span className="flex items-end gap-[1.5px] h-3 shrink-0">
+        {[5, 11, 4].map((h, i) => (
+            <span
+                key={i}
+                className="w-[2.5px] rounded-[1px] bg-ok"
+                style={{
+                    height: h,
+                    transformOrigin: 'bottom',
+                    animation: `barBounce 0.9s ${i * 0.15}s ease-in-out infinite alternate`,
+                }}
+            />
+        ))}
+    </span>
+);
+
+/** Amber mirror-bar waveform scrubber — resizes with its container, click + drag to seek. */
+const SeededWaveform = ({ seed, playhead, onSeek }) => {
+    const canvasRef = useRef(null);
+    const draggingRef = useRef(false);
+    const playheadRef = useRef(playhead);
+    const amps = waveAmps(typeof seed === 'number' ? seed : hashSeed(seed));
+    playheadRef.current = playhead;
+
+    useEffect(() => {
+        if (canvasRef.current) drawSeededWave(canvasRef.current, amps, playhead, 28);
+    }, [amps, playhead]);
+
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        const parent = canvas?.parentElement;
+        if (!parent) return undefined;
+        const ro = new ResizeObserver(() =>
+            drawSeededWave(canvas, amps, playheadRef.current, 28),
+        );
+        ro.observe(parent);
+        return () => ro.disconnect();
+    }, [amps]);
+
+    const seekFromEvent = (e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        onSeek(Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)));
+    };
+    const onPointerDown = (e) => {
+        draggingRef.current = true;
+        try {
+            e.currentTarget.setPointerCapture(e.pointerId);
+        } catch {
+            /* setPointerCapture unsupported — click-seek still works */
+        }
+        seekFromEvent(e);
+    };
+    const onPointerMove = (e) => {
+        if (draggingRef.current) seekFromEvent(e);
+    };
+    const onPointerUp = (e) => {
+        draggingRef.current = false;
+        try {
+            e.currentTarget.releasePointerCapture(e.pointerId);
+        } catch {
+            /* no capture to release */
+        }
+    };
+
+    return (
+        <div
+            className="bg-mx-deepest rounded-mx-xs overflow-hidden cursor-pointer"
+            style={{ height: 28 }}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+        >
+            <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: 28 }} />
+        </div>
+    );
+};
+
+const Player = ({ track, onClose }) => {
     const [playing, setPlaying] = useState(false);
     const [volume, setVolumeState] = useState(() => {
         const saved = localStorage.getItem('rb_volume');
         return saved !== null ? parseFloat(saved) : 1.0;
     });
-    const setVolume = (v) => { setVolumeState(v); localStorage.setItem('rb_volume', String(v)); };
+    const setVolume = (v) => {
+        setVolumeState(v);
+        localStorage.setItem('rb_volume', String(v));
+    };
     const [progress, setProgress] = useState(0);
     const [duration, setDuration] = useState(0);
     const audioRef = useRef(null);
+
+    const isStreaming = (t) => {
+        const path = t?.path || t?.Path || '';
+        return (
+            path.startsWith('soundcloud:') ||
+            path.startsWith('spotify:') ||
+            path.startsWith('tidal:') ||
+            path.startsWith('beatport:')
+        );
+    };
 
     useEffect(() => {
         if (track) {
@@ -21,14 +113,11 @@ const Player = ({ track, onClose, onMaximize }) => {
         }
     }, [track]);
 
-    const isStreaming = (t) => {
-        const path = t.path || t.Path || '';
-        return path.startsWith('soundcloud:') || path.startsWith('spotify:') || path.startsWith('tidal:') || path.startsWith('beatport:');
-    };
-
     useEffect(() => {
         if (audioRef.current && !isStreaming(track)) {
-            playing ? audioRef.current.play().catch(e => log.warn("Play error", e)) : audioRef.current.pause();
+            playing
+                ? audioRef.current.play().catch((e) => log.warn('Play error', e))
+                : audioRef.current.pause();
         }
     }, [playing, track]);
 
@@ -60,21 +149,22 @@ const Player = ({ track, onClose, onMaximize }) => {
         if (!audioRef.current) return;
         const d = audioRef.current.duration;
         // Fallback: track metadata duration (HTML5 audio sometimes reports Infinity for chunked streams)
-        const safeDuration = Number.isFinite(d) && d > 0
-            ? d
-            : (parseFloat(track?.TotalTime) || duration || 0);
+        const safeDuration =
+            Number.isFinite(d) && d > 0
+                ? d
+                : parseFloat(track?.TotalTime) || duration || 0;
         if (!safeDuration) return;
         const target = Math.max(0, Math.min(1, ratio)) * safeDuration;
         try {
             audioRef.current.currentTime = target;
             setProgress(target);
         } catch (e) {
-            console.warn("Seek failed:", e);
+            log.warn('Seek failed', e);
         }
     };
 
     const formatTime = (t) => {
-        if (!t) return "0:00";
+        if (!t) return '0:00';
         const m = Math.floor(t / 60);
         const s = Math.floor(t % 60);
         return `${m}:${s.toString().padStart(2, '0')}`;
@@ -83,6 +173,9 @@ const Player = ({ track, onClose, onMaximize }) => {
     if (!track) return null;
 
     const streaming = isStreaming(track);
+    const playhead = duration > 0 ? Math.min(1, progress / duration) : 0;
+    const waveSeed =
+        track.id ?? track.TrackID ?? track.Path ?? track.path ?? track.Title ?? 'track';
 
     return (
         <div
@@ -124,7 +217,10 @@ const Player = ({ track, onClose, onMaximize }) => {
                     )}
                 </div>
                 <div className="flex flex-col overflow-hidden min-w-0">
-                    <span className="text-[13px] font-medium text-ink-primary truncate">{track.Title || 'Unknown Title'}</span>
+                    <span className="text-[13px] font-medium text-ink-primary truncate flex items-center gap-1.5">
+                        <span className="truncate">{track.Title || 'Unknown Title'}</span>
+                        {playing && !streaming && <PlayingBars />}
+                    </span>
                     <span className="text-[11px] text-ink-muted truncate mt-0.5">
                         {streaming
                             ? <span className="text-amber2">Streaming restricted</span>
@@ -156,16 +252,16 @@ const Player = ({ track, onClose, onMaximize }) => {
                 ><SkipForward size={16} /></button>
             </div>
 
-            {/* Progress */}
+            {/* Waveform scrubber */}
             <div className="flex-1 flex flex-col gap-1.5 min-w-0">
                 {streaming ? (
                     <div className="text-center mx-caption" style={{ color: 'var(--ink-placeholder)' }}>
-                        Direct streaming for Cloud/Subscription tracks not supported
+                        Direct streaming for cloud/subscription tracks not supported
                     </div>
                 ) : (
                     <>
                         <div className="flex items-center justify-between">
-                            <span className="font-mono text-[10px]" style={{ color: 'var(--amber)' }}>{formatTime(progress)}</span>
+                            <span className="font-mono text-[10px] font-semibold" style={{ color: 'var(--amber)' }}>{formatTime(progress)}</span>
                             {(track.BPM || track.Key) && (
                                 <span className="mx-chip mx-chip-amber font-mono">
                                     {track.BPM && `${Math.round(track.BPM)} BPM`}{track.BPM && track.Key && ' · '}{track.Key}
@@ -173,39 +269,7 @@ const Player = ({ track, onClose, onMaximize }) => {
                             )}
                             <span className="font-mono text-[10px] text-ink-muted">{formatTime(duration)}</span>
                         </div>
-                        <div
-                            className="py-2 -my-2 cursor-pointer relative group"
-                            onClick={(e) => {
-                                if (streaming) return;
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                seekTo((e.clientX - rect.left) / rect.width);
-                            }}
-                            onMouseDown={(e) => {
-                                if (streaming) return;
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                const onMove = (ev) => seekTo((ev.clientX - rect.left) / rect.width);
-                                const onUp = () => {
-                                    document.removeEventListener('mousemove', onMove);
-                                    document.removeEventListener('mouseup', onUp);
-                                };
-                                document.addEventListener('mousemove', onMove);
-                                document.addEventListener('mouseup', onUp);
-                            }}
-                        ><div
-                            className="h-[3px] rounded-full relative pointer-events-none"
-                            style={{ background: 'var(--line-subtle)' }}
-                        >
-                            <div
-                                className="absolute inset-y-0 left-0 bg-amber2 rounded-full"
-                                style={{ width: `${duration ? (progress / duration) * 100 : 0}%` }}
-                            >
-                                <div
-                                    className="absolute right-0 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-amber2 opacity-0 group-hover:opacity-100 transition-opacity"
-                                    style={{ boxShadow: '0 0 6px var(--amber-glow)' }}
-                                />
-                            </div>
-                        </div>
-                        </div>
+                        <SeededWaveform seed={waveSeed} playhead={playhead} onSeek={seekTo} />
                     </>
                 )}
             </div>
