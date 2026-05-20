@@ -6,39 +6,31 @@ created: YYYY-MM-DD
 last_updated: YYYY-MM-DD
 tags: []
 related: []
-ai_tasks: false  # set true to opt-in AI routines — see ## AI Tasks below
 ---
 
 # <same as title>
 
 > **Caveman style.** Fragments, bullets. Drop articles/filler/hedges. No prose paragraphs. Respect per-section caps below.
 > State = folder + filename prefix (not frontmatter). Lifecycle = audit trail. See `../README.md`.
+> Routines advance this doc by state. 4 user gates: A `ideagate_`, B `midgate_`, C `plangate_`, D PR-merge.
 
 ## Lifecycle
 
 - YYYY-MM-DD — `research/idea_` — created
 
-## AI Tasks
+## Original Idea (verbatim — never edit)
 
 <!--
-Opt-in queue for remote AI routines. Activate by setting `ai_tasks: true` in frontmatter.
-Each item: 1 concrete sub-task. Routine processes 1/run, ticks done, commits via PR.
-
-Item-prefix routes to a routine:
-  resolve Q<N>: <text>          → research-exploring-push (resolves that Open Question)
-  investigate: <topic>          → research-exploring-push (web+code, appends to Findings)
-  grep <pattern> in <area>      → research-exploring-push (codebase lookup, appends to Findings)
-  web: <query>                  → research-exploring-push (WebSearch, appends to Findings)
-  promote to <state>            → research-exploring-push (git mv to next state, with preconditions)
-  generate draftplan            → research-draftplan-scout (only on evaluated_ docs, creates implement/draftplan_<slug>.md)
-
-Routine MUST tick items it processed: `- [x] <original text> — done YYYY-MM-DD`.
-When archived: keep section as audit trail.
+Written ONCE by the user. 1–3 sentences, raw. NEVER edited after — not by routines, not by the user.
+Every verifier (Stage 1 idea-check, Stage 2 research-check, Stage 3 plan-review) checks its work
+against this block. It is the anchor against scope-creep and misreading.
 -->
 
-- [ ] <task description>
+…
 
 ---
+
+> ↓ Stage 1 — `drafting_`. `research-draft` fills Problem → Research Plan. Agent 2 fills Idea Verification.
 
 ## Problem
 
@@ -60,15 +52,58 @@ External facts bounding solution (rate limits, data shape, perf budget, legal, c
 
 ## Open Questions
 
-Numbered. Each resolvable (yes/no or X vs Y), not philosophy.
+Numbered. Each resolvable (yes/no or X vs Y), not philosophy. Each becomes a parallel research agent in Stage 2.
 
 1. …
+
+## Research Plan
+
+Required by `ideagate_` (GATE A). ≤80 words. Which aspects Stage 2 researches in parallel — one bullet per agent. User confirms this list at GATE A.
+
+- Agent 1: …
+- Agent 2: …
+
+## Idea Verification
+
+Stage 1 Agent 2. Dated entries, append-only. PASS / FAIL + ≤40-word reason (checked vs `## Original Idea`).
+
+### YYYY-MM-DD — <PASS|FAIL>
+- …
+
+---
+
+> ⛔ GATE A — user `/gate-pass` (→ `exploring_`) or `/gate-reject` (→ `drafting_`).
+> ↓ Stage 2 — `exploring_`. `research-explore` runs parallel agents, fills Findings.
 
 ## Findings / Investigation
 
 Dated subsections, append-only. ≤80 words each. Never edit past entries — supersede.
 
 ### YYYY-MM-DD — <label>
+- …
+
+## Mid-Research Checkpoint
+
+GATE B. `research-explore` fills Status after wave 1. User fills Verdict via `/gate-pass` or `/gate-reject`.
+
+### Status — YYYY-MM-DD (routine)
+- Covered: …
+- Still open: …
+- Direction: …
+
+### Verdict — YYYY-MM-DD (user)
+- _(empty until GATE B)_
+
+---
+
+> ⛔ GATE B — user `/gate-pass` (→ `exploring_` wave 2) or `/gate-reject` (→ `exploring_` + feedback).
+> ↓ Stage 2 wave 2 — `research-explore` deepens research, runs the research verifier.
+
+## Research Verification
+
+Stage 2 wave-2 verifier over the whole research body. ≤80 words. PASS → `evaluated_`; gaps → more Findings.
+
+### YYYY-MM-DD — <PASS|GAPS>
 - …
 
 ## Options Considered
@@ -95,6 +130,8 @@ Required by `evaluated_`. ≤80 words. Which option + what blocks commit.
 
 ---
 
+> ↓ Stage 3 — `implement/draftplan_`. `research-plan` fills Implementation Plan + Task Queue. Agent B fills Review.
+
 ## Implementation Plan
 
 Required from `implement/draftplan_`. Concrete enough that someone else executes without re-deriving.
@@ -115,18 +152,44 @@ Required from `implement/draftplan_`. Concrete enough that someone else executes
 ### Risks & rollback
 - …
 
+## Task Queue
+
+<!--
+Small, individually-committable implementation tasks. Written by research-plan (Stage 3),
+approved by the user at GATE C. research-implement works ONE task per branch:
+routine/<slug>-task-<N>. 1 task = 1 feature = 1 PR. Tick - [x] when the PR is merged.
+Keep tasks small — a task too big to review in one PR must be split.
+-->
+
+- [ ] <task — small, single-purpose, independently testable>
+
 ## Review
 
-Filled at `review_`. Unchecked box or rework reason → `rework_`.
+Filled at `review_` by `research-plan` Agent B. Unchecked box or rework reason → `rework_`.
 
 - [ ] Plan addresses all goals
+- [ ] Plan matches `## Original Idea` — no scope-creep
 - [ ] Open questions answered or deferred
+- [ ] Task Queue items are small + independently committable
 - [ ] Risk mitigations defined
 - [ ] Rollback path clear
 - [ ] Affected docs identified (`architecture.md`, `FILE_MAP.md`, indexes, `CHANGELOG.md`)
 
 **Rework reasons:**
 - …
+
+---
+
+> ⛔ GATE C — user `/gate-pass` (→ `accepted_`) or `/gate-reject` (→ `rework_`).
+> ↓ Stage 4 — `inprogress_`. `research-implement` builds each Task Queue item on a `routine/*` branch.
+
+## PR Log
+
+Stage 4. One row per task PR. `research-implement` appends; user notes the merge (GATE D).
+
+| Task | Branch | PR | CI | Review | Merged |
+|---|---|---|---|---|---|
+| … | `routine/<slug>-task-N` | #… | pass/fail | pass/fail | YYYY-MM-DD |
 
 ## Implementation Log
 

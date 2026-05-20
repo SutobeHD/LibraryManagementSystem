@@ -128,6 +128,9 @@ Defined in `.claude/commands/`:
 | `/regen-maps` | Regenerate `docs/MAP.md` + `docs/MAP_L2.md` from AST |
 | `/route-add` | Guided FastAPI route scaffold |
 | `/research-new` | Scaffold new research topic |
+| `/pipeline` | Show research pipeline state + open gates |
+| `/gate-pass` | Pass a research gate (A/B/C) — advance the doc |
+| `/gate-reject` | Reject a research gate — send the doc back |
 | `/commit` | Stage + atomic commit with Conventional-Commits message |
 | `/pr-new` | Create branch + push + open PR |
 | `/changelog-bump` | Append unreleased commits to CHANGELOG.md |
@@ -137,13 +140,17 @@ Defined in `.claude/commands/`:
 
 ## AI autonomy & remote routines — streamlining bias
 
-This repo runs three remote routines (claude.ai/code) that advance the research pipeline autonomously while user is afk:
+This repo runs a **multi-agent research pipeline**: 5 remote routines (claude.ai/code) advance `docs/research/` docs autonomously while the user is afk. Routines trigger on a doc's **state** (folder + filename prefix) — no manual marker. Each routine spawns sub-agents; verification agents gate every stage; the user keeps 4 sign-off gates (A/B/C/D).
 
-- **`research-exploring-push`** (daily 04:00 + 16:00 Berlin) — processes 1 marked AI task per run in any `exploring_` or `evaluated_` doc.
-- **`research-triage-report`** (daily 07:00 Berlin) — read-only pipeline health audit + open-AI-task count → GitHub Issue.
-- **`research-draftplan-scout`** (daily 12:00 Berlin) — generates `implement/draftplan_<slug>.md` from fully-resolved `evaluated_` docs that requested it.
+| Routine | Cron (Berlin) | Reads state | Does |
+|---|---|---|---|
+| `research-draft` | 05:00 | `drafting_` | works idea up + verifies vs original idea → `ideagate_` (GATE A) |
+| `research-explore` | 06:00 + 14:00 | `exploring_` | parallel research agents → `midgate_` (GATE B) / `evaluated_` |
+| `research-plan` | 13:00 | `evaluated_`, `rework_` | implementation plan + Task Queue → `plangate_` (GATE C) |
+| `research-implement` | 03:00 + 15:00 | `accepted_`, `inprogress_` | builds Task Queue items on `routine/*` branches → PRs (GATE D) |
+| `research-triage` | 07:30 | all (read-only) | Pipeline Digest GitHub Issue: open gates, ready PRs, blockers |
 
-Routines act **only** on docs opted in with two gates: frontmatter `ai_tasks: true` + items in `## AI Tasks` section. Full rules: `.claude/rules/research-pipeline.md` ("AI Tasks marker") + `docs/research/README.md` ("AI Routines & Tasks marker"). Routing table per item-prefix in `docs/research/_TEMPLATE.md`.
+`research-implement` may write code — bounded to `inprogress_` docs, `routine/*` branches, GATE-C-approved Task Queue items. It never merges/rebases to `main`. Full rules: `.claude/rules/research-pipeline.md` + `docs/research/README.md`. Routine prompts versioned in `docs/research/routines/`.
 
 **Streamlining default ON.** Spotted a manual ritual (state moves, doc syncs, multi-step bookkeeping)? Automate it — slash-command, hook, routine, marker — and show the diff. See `.claude/rules/agentic-mode.md` "Streamlining bias".
 

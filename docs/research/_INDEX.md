@@ -5,7 +5,9 @@ Live dashboard. Each entry mirrors a file under `docs/research/{research,impleme
 Format per line:
 `<state>_<slug>.md — one-line hook (YYYY-MM-DD)`
 
-If this index drifts from the file system, the file system wins — re-derive with `ls docs/research/*/`.
+Gate states (`ideagate_`, `midgate_`, `plangate_`) wait on the user — see "The 4 Gates" in `README.md`.
+
+If this index drifts from the file system, the file system wins — re-derive with `ls docs/research/*/` or `python scripts/pipeline_status.py`.
 
 ---
 
@@ -14,6 +16,12 @@ If this index drifts from the file system, the file system wins — re-derive wi
 ### idea
 - [idea_db-write-lock-retrofit.md](research/idea_db-write-lock-retrofit.md) — Retrofit `_db_write_lock` on 85 unprotected `master.db` write routes; `@_serialised` decorator defined but 0 applications; rbox 0.1.7 concurrent-write panic risk (2026-05-19)
 - [idea_security-mobile-paired-tokens-phase2.md](research/idea_security-mobile-paired-tokens-phase2.md) — Phase-2 paired-device tokens + QR-pairing flow; hard prereq for mobile-companion; sidecar-local SQLite, `require_session` accepts boot+device tokens (2026-05-19)
+
+### drafting
+_(none)_
+
+### ideagate ⛔ GATE A
+_(none)_
 
 ### exploring
 - [exploring_recommender-rules-baseline.md](research/exploring_recommender-rules-baseline.md) — Teil 1: BPM/Key/Genre/MyTag/Energy ranking + Camelot harmonic mixing; local + SoundCloud modes (2026-05-11)
@@ -27,6 +35,10 @@ If this index drifts from the file system, the file system wins — re-derive wi
 - [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); QR-pairing + Tailscale Funnel docs; security Phase-1+2 hard prereq (2026-05-15)
 - [exploring_external-track-match-unified-module.md](research/exploring_external-track-match-unified-module.md) — Cross-cutting module (fuzzy + chromaprint + adapter-registry) shared by 3 sister features; M1/M2/M3 (2026-05-15)
 
+### midgate ⛔ GATE B
+_(none)_
+
+### evaluated
 _(none)_
 
 ### parked
@@ -40,6 +52,9 @@ _(none)_
 _(none)_
 
 ### review
+_(none)_
+
+### plangate ⛔ GATE C
 _(none)_
 
 ### rework
@@ -81,3 +96,5 @@ When a doc changes state:
 1. After `git mv` (or `mv` for new files), move its line to the new section
 2. Update the date at the end of the line
 3. If the file moved across stages (e.g. `research/` → `implement/`), also update the markdown link path
+
+Work-state → work-state moves are done by routines. Gate-state → work-state moves are done by the user (`/gate-pass`, `/gate-reject`). `/pipeline` shows the live state without reading this file.
