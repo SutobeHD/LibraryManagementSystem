@@ -13,7 +13,7 @@ Start a new research topic. Slug + optional title: $ARGUMENTS
    - Must be unique across `docs/research/{research,implement,archived}/*.md`. Check with `ls docs/research/research/ docs/research/implement/ docs/research/archived/`. If slug already exists, **stop and ask** the user to pick another.
 
 2. **Verify pipeline rules:**
-   - Re-read `docs/research/README.md` once if you haven't this session, especially the **stages and prefixes** and **For AI assistants** sections.
+   - Re-read `docs/research/README.md` once if you haven't this session, especially the **Stages and prefixes** and **The 4 Gates** sections.
 
 3. **Scaffold the file:**
    - Source: `docs/research/_TEMPLATE.md`
@@ -27,7 +27,7 @@ Start a new research topic. Slug + optional title: $ARGUMENTS
      - `last_updated: <today's date YYYY-MM-DD>`
      - `tags: []` (leave empty, user fills)
      - `related: []` (leave empty)
-   - Body sections from template stay as-is (placeholders for Problem / Options / Constraints / Findings / Lifecycle).
+   - Body sections from template stay as-is. The user fills only `## Original Idea` (1–3 sentences); the routines fill the rest.
 
 4. **Append first Lifecycle line** to the doc:
    ```
@@ -45,11 +45,11 @@ Start a new research topic. Slug + optional title: $ARGUMENTS
 6. **Report (3 lines max):**
    - Path created: `docs/research/research/idea_<slug>.md`
    - `_INDEX.md` updated: 1 line added under `### idea`
-   - Next step suggestion: "Fill the Problem / Options sections, then `git mv` to `exploring_<slug>.md` when active research begins."
+   - Next step suggestion: "Write the raw idea into `## Original Idea`, then `git mv` to `drafting_<slug>.md` — the research-draft routine works it up from there."
 
 ## Don'ts
 
 - Don't auto-commit. The user reviews the scaffolded file first.
-- Don't promote state (idea → exploring etc.) — that's an explicit user action.
+- Don't promote state (idea → drafting etc.) — that's an explicit user action.
 - Don't invent the slug if it's missing — ask.
 - Don't write code-level details into the scaffolded research doc — that lives in the eventual implementation. The research doc captures **why** and **options**, not **how-to**.

@@ -36,6 +36,7 @@ Render a discovery view of all repo-local Claude Code capabilities.
    - `.claude/hooks/format-on-edit.py` — PostToolUse auto-format
    - `.pre-commit-config.yaml` — pre-commit hooks (manual install: `pre-commit install`)
    - `scripts/regen_maps.py` — auto-gen MAP.md + MAP_L2.md
+   - `scripts/pipeline_status.py` — research pipeline state (slash: /pipeline)
 
 5. **Output format — three sections, tables, no fluff:**
 
@@ -63,6 +64,7 @@ Render a discovery view of all repo-local Claude Code capabilities.
 - .claude/hooks/format-on-edit.py — PostToolUse auto-format on Edit/Write
 - .pre-commit-config.yaml — pre-commit hooks (install: `pip install pre-commit && pre-commit install`)
 - scripts/regen_maps.py — regenerate docs/MAP.md + MAP_L2.md (slash: /regen-maps)
+- scripts/pipeline_status.py — research pipeline state + open gates (slash: /pipeline)
 ```
 
 Keep it terse. The point is fast discovery, not exhaustive docs.
