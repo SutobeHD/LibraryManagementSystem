@@ -8,7 +8,7 @@ import React from 'react';
 import {
     HardDrive, Usb, AlertTriangle, Loader2, Clock,
 } from 'lucide-react';
-import { FS_COMPAT, normalizeFs, worstCdjStatus, formatDate } from './UsbControls';
+import { FS_COMPAT, normalizeFs, worstCdjStatus, formatDate, formatBytes } from './UsbControls';
 
 const UsbDeviceList = ({
     devices,
@@ -48,6 +48,12 @@ const UsbDeviceList = ({
                 const fsKey = normalizeFs(device.filesystem);
                 const compat = FS_COMPAT[fsKey] || FS_COMPAT.UNKNOWN;
                 const worst = worstCdjStatus(compat);
+                const totalSpace = device.total_space || 0;
+                const usedSpace = totalSpace > 0 ? totalSpace - (device.free_space || 0) : 0;
+                const usedPct = totalSpace > 0
+                    ? Math.max(0, Math.min(100, (usedSpace / totalSpace) * 100))
+                    : 0;
+                const usedColor = usedPct > 95 ? 'var(--bad)' : usedPct > 80 ? 'var(--amber)' : '#2DD4BF';
                 return (
                     <button
                         key={device.device_id}
@@ -86,6 +92,20 @@ const UsbDeviceList = ({
                                 <Loader2 size={12} className="animate-spin text-amber2 shrink-0" />
                             )}
                         </div>
+                        {totalSpace > 0 && (
+                            <div className="mt-2 ml-5">
+                                <div className="h-1 rounded-full overflow-hidden bg-mx-input border border-line-subtle">
+                                    <div
+                                        className="h-full rounded-full transition-all"
+                                        style={{ width: `${usedPct}%`, background: usedColor }}
+                                    />
+                                </div>
+                                <div className="flex justify-between mt-1 text-[9px] font-mono text-ink-placeholder">
+                                    <span>{formatBytes(usedSpace)} used</span>
+                                    <span>{formatBytes(totalSpace)}</span>
+                                </div>
+                            </div>
+                        )}
                         {device.last_sync && (
                             <div className="mt-1.5 ml-5 text-[10px] text-ink-placeholder font-mono flex items-center gap-1">
                                 <Clock size={9} /> {formatDate(device.last_sync)}
