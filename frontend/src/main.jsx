@@ -31,6 +31,7 @@ const PhraseGeneratorView = lazy(() => import('./components/PhraseGeneratorView'
 const DuplicateView = lazy(() => import('./components/DuplicateView'));
 const UtilitiesView = lazy(() => import('./components/UtilitiesView'));
 const InsightsView  = lazy(() => import('./components/InsightsView'));
+const StudioView    = lazy(() => import('./components/studio/StudioView'));
 
 import api from './api/api'
 
@@ -85,6 +86,7 @@ const buildWorkspaces = (libraryStatus) => [
     label: 'Editor',
     items: [
       { tab: 'editor', label: 'Waveform Editor', icon: Scissors },
+      { tab: 'studio', label: 'Studio', icon: Activity },
       ...(libraryStatus?.mode === 'xml'
         ? [{ tab: 'xml', label: 'XML Automator', icon: FileCode }]
         : []),
@@ -116,7 +118,7 @@ const buildWorkspaces = (libraryStatus) => [
 /** tab id → workspace id (XML resolves to the editor workspace). */
 const TAB_WORKSPACE = {
   library: 'library', import: 'library', ranking: 'library', insights: 'library',
-  editor: 'editor', xml: 'editor',
+  editor: 'editor', studio: 'editor', xml: 'editor',
   usb: 'sync', 'usb-settings': 'sync', soundcloud: 'sync', 'sc-sync': 'sync', downloads: 'sync',
   utilities: 'utilities',
   design: 'lab',
@@ -792,6 +794,7 @@ const App = () => {
               </ErrorBoundary>
             </div>
 
+            {activeTab === 'studio' && <ErrorBoundary key="eb-studio"><StudioView /></ErrorBoundary>}
             {activeTab === 'usb' && <ErrorBoundary key="eb-usb"><UsbView /></ErrorBoundary>}
             {activeTab === 'usb-settings' && <ErrorBoundary key="eb-usb-settings"><UsbSettingsView /></ErrorBoundary>}
             {activeTab === 'design' && <ErrorBoundary key="eb-design"><DesignView /></ErrorBoundary>}
@@ -811,8 +814,8 @@ const App = () => {
       </main>
       </div>
 
-      {/* Hide Player in Editor and Ranking modes */}
-      {!['editor', 'ranking'].includes(activeTab) && (
+      {/* Hide Player in Editor, Studio and Ranking modes */}
+      {!['editor', 'ranking', 'studio'].includes(activeTab) && (
         <Player
           track={playerTrack}
           onClose={() => setPlayerTrack(null)}
