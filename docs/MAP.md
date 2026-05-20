@@ -24,6 +24,7 @@
 | `app/anlz_writer.py` | LibraryManagementSystem -- ANLZ Binary File Writer |
 | `app/audio_analyzer.py` | LibraryManagementSystem -- Audio Analyzer (Unified Wrapper) |
 | `app/audio_tags.py` | audio_tags — write metadata back to the source audio file. |
+| `app/auth.py` | Bearer-token authentication for the FastAPI sidecar. |
 | `app/batch_worker.py` | Setup logging |
 | `app/config.py` | *(no module docstring)* |
 | `app/database.py` | *(no module docstring)* |
@@ -32,12 +33,15 @@
 | `app/import_tracker.py` | Per-file import-progress tracker — gives the frontend a live transparent |
 | `app/library_source.py` | LibrarySource — uniform abstraction over Live (master.db) and XML modes. |
 | `app/live_database.py` | *(no module docstring)* |
+| `app/logging_utils.py` | Log redaction helpers — scrub absolute paths from log lines + tracebacks. |
 | `app/main.py` | *(no module docstring)* |
 | `app/phrase_generator.py` | phrase_generator.py — Phrase & Auto-Cue Generator |
 | `app/playcount_sync.py` | playcount_sync.py — USB Play-Count Sync Engine |
+| `app/rate_limit.py` | In-process token-bucket rate limiter for the FastAPI sidecar. |
 | `app/rbep_parser.py` | RBEP Parser — Parses Rekordbox Editor Project (.rbep) files. |
 | `app/rekordbox_bridge.py` | *(no module docstring)* |
 | `app/rekordbox_export.py` | *(no module docstring)* |
+| `app/security_compare.py` | Constant-time equality helper for tokens, secrets, HMAC outputs. |
 | `app/services.py` | *(no module docstring)* |
 | `app/sidecar.py` | *(no module docstring)* |
 | `app/smart_playlist_engine.py` | Smart-Playlist evaluator. |
@@ -80,6 +84,9 @@
 | `frontend/src/components/editor/useEditorPersistence.js` | useEditorPersistence - .rbep project save / list / load Talks to backend endpoints: - POST /api/projects/save… |
 | `frontend/src/components/editor/useEditorPlayback.js` | useEditorPlayback - Audio loading + playback engine + render/export Owns: - audioContextRef, sourceBufferRef,… |
 | `frontend/src/components/editor/useEditorRegions.js` | useEditorRegions - Region/palette/marker/zoom/snap/grid handlers. |
+| `frontend/src/components/shared/seededWaveform.js` | seededWaveform — deterministic pseudo-waveform generator + painter. |
+| `frontend/src/components/studio/studioData.js` | Studio view — sample catalogue, theme + shared helpers. |
+| `frontend/src/components/studio/studioWaveform.js` | Studio waveform — section-shaped amplitude generation + canvas painters. |
 | `frontend/src/components/waveform/computeBeats.js` | Builds the beat array used for grid rendering + snap-to-grid. |
 | `frontend/src/components/waveform/persistence.js` | localStorage auto-save (cuts + cues, keyed by track.id) |
 | `frontend/src/components/waveform/previewBuffer.js` | --- Shared decode context (reused, not recreated per insert) --- |
@@ -89,6 +96,7 @@
 | `frontend/src/components/waveform/useWaveformInteractions.js` | Imperative editing + hotkey wiring extracted from WaveformEditor. |
 | `frontend/src/components/waveform/useWaveSurfer.js` | Owns the master WaveSurfer + Overview lifecycle: |
 | `frontend/src/config/constants.js` | Frontend-wide constants. |
+| `frontend/src/store/authStore.js` | Tiny module-level auth state shared across the frontend. |
 | `frontend/src/utils/AudioBandAnalyzer.js` | AudioBandAnalyzer Splits an AudioBuffer into 3 frequency bands (Rekordbox-style): - Low: < 400 Hz (Bass / Kic… |
 | `frontend/src/utils/log.js` | Dev-only logging utility. |
 | `frontend/src/components/BatchEditBar.jsx` | *(no module docstring)* |
@@ -119,7 +127,7 @@
 | `frontend/src/components/MatchInspectorModal.jsx` | *(no module docstring)* |
 | `frontend/src/components/MetadataView.jsx` | Default to 'playlists' — removed separate 'tracks' tab since Collection is now inside PlaylistBrowser |
 | `frontend/src/components/PhraseGeneratorView.jsx` | PhraseGeneratorView — Phrase & Auto-Cue Generator Generates hot cue points at every N-bar phrase boundary for… |
-| `frontend/src/components/Player.jsx` | *(no module docstring)* |
+| `frontend/src/components/Player.jsx` | Three staggered equalizer bars — shown next to the title while playing. |
 | `frontend/src/components/PlaylistBrowser.jsx` | *(no module docstring)* |
 | `frontend/src/components/PromptModal.jsx` | Module-level subscriber registry so a single mounted <PromptModalRoot /> |
 | `frontend/src/components/RankingView.jsx` | Backend returns 'Children' (uppercase) |
@@ -139,6 +147,7 @@
 | `frontend/src/components/SoundCloudProgressModal.jsx` | Listen to progress events from Rust |
 | `frontend/src/components/SoundCloudSyncView.jsx` | *(no module docstring)* |
 | `frontend/src/components/SoundCloudView.jsx` | EC11: Ref-based guard prevents multiple simultaneous login requests |
+| `frontend/src/components/studio/StudioView.jsx` | StudioView — efficiency-focused DJ editor screen (Melodex design handoff). |
 | `frontend/src/components/ToastContext.jsx` | *(no module docstring)* |
 | `frontend/src/components/ToolsView.jsx` | Mirror of LibraryTools.smart_rename's token substitution + sanitisation, |
 | `frontend/src/components/TrackTable.jsx` | Camelot |
@@ -183,11 +192,19 @@
 | File | Purpose |
 |------|---------|
 | `tests/__init__.py` | *(no module docstring)* |
+| `tests/conftest.py` | Pytest fixtures shared across the suite. |
 | `tests/test_analysis.py` | Regression tests for the analysis pipeline. |
+| `tests/test_auth.py` | Tests for ``app/auth.py`` -- Bearer-token session authentication. |
 | `tests/test_database.py` | Tests for `app/database.py`. |
+| `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
+| `tests/test_main_security.py` | Regression tests for ``POST /api/file/reveal`` sandbox. |
 | `tests/test_onelibrary_wal_flush.py` | End-to-end regression test for OneLibraryUsbWriter — runs the FULL |
 | `tests/test_pdb_structure.py` | PDB writer structural test against F: drive Pioneer reference. |
+| `tests/test_rate_limit.py` | Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter. |
+| `tests/test_security_compare.py` | Tests for ``app/security_compare.py::safe_compare``. |
+| `tests/test_security_hotfixes.py` | Regression tests for the 5 security hotfixes in commit e3a5ae8. |
 | `tests/test_services.py` | Tests for `app/services.py`. |
+| `tests/test_settings_caps.py` | Tests for `SetReq` payload caps + `SettingsManager.load` sanitizer. |
 | `tests/test_soundcloud_api.py` | Tests for `app/soundcloud_api.py`. |
 | `tests/test_usb_manager.py` | Tests for `app/usb_manager.py`. |
 
@@ -195,6 +212,7 @@
 
 | File | Purpose |
 |------|---------|
+| `scripts/pipeline_status.py` | Show the research pipeline state at a glance. |
 | `scripts/regen_maps.py` | Auto-generate tiered code maps from the actual source tree. |
 | `scripts/screenshot.py` | *(no module docstring)* |
 | `scripts/test_xml_sync.py` | Add app to path |

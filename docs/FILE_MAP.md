@@ -94,7 +94,7 @@
 | `frontend/src/components/PlaylistBrowser.jsx` | Rekordbox playlist tree navigation, calls `GET /api/playlists/tree` |
 | `frontend/src/components/MetadataView.jsx` | Track metadata editor: title, artist, album, genre, comments, calls `POST /api/track/{tid}` |
 | `frontend/src/components/TrackTable.jsx` | Reusable sortable track table with Camelot wheel colors, BPM/key display, multi-select |
-| `frontend/src/components/Player.jsx` | Compact audio player with play/pause, volume, progress, stream via `GET /api/stream` |
+| `frontend/src/components/Player.jsx` | Compact audio player with play/pause, volume, amber mirror-waveform scrubber (click + drag seek), stream via `GET /api/stream` |
 | `frontend/src/components/SoundCloudView.jsx` | SC track search and preview interface |
 | `frontend/src/components/SoundCloudSyncView.jsx` | SC sync: match SC tracks to library, trigger download, preview matches |
 | `frontend/src/components/SoundCloudProgressModal.jsx` | Download progress overlay with per-track status |
@@ -112,6 +112,14 @@
 | `frontend/src/components/PhraseGeneratorView.jsx` | **NEW** Phrase & Auto-Cue Generator: track selector, phrase length picker (8/16/32), generate preview list (amber phrase / grey bar markers), two-step Generate → Commit flow |
 | `frontend/src/components/DuplicateView.jsx` | **NEW** Acoustic Duplicate Finder: scan library, group by fingerprint similarity, left group list + right card detail panel, master selection, merge play counts, POST /api/duplicates/merge |
 
+### Studio Editor (`studio/`)
+
+| File | Purpose |
+|------|---------|
+| `frontend/src/components/studio/StudioView.jsx` | Studio efficiency editor — section-colored master waveform, minimap, 16 hot-cue pads, beat-nav + loop controls, dense inline-waveform track table. Lazy `studio` route; presentational, sample data. |
+| `frontend/src/components/studio/studioData.js` | Studio sample data + `STUDIO_THEME`, `SECTIONS`/`SECTION_COLORS`, `HOT_CUES`, helpers (`keyColor`, `fmt`, `hexA`, `shade`, `sectionAt`). |
+| `frontend/src/components/studio/studioWaveform.js` | `studioAmps` section-shaped envelopes + `drawMasterWave`/`drawMiniWave`/`drawRowWave` canvas painters. |
+
 ### Shared UI Components
 
 | File | Purpose |
@@ -119,6 +127,7 @@
 | `frontend/src/components/ToastContext.jsx` | Toast notification provider — `useToast()` → `toast.success/error/info()` — never use `alert()` |
 | `frontend/src/components/BatchEditBar.jsx` | Batch editing toolbar for multi-track operations (operates on selection) |
 | `frontend/src/components/RenameModal.jsx` | Modal dialog for renaming items, props: `isOpen`, `onConfirm`, `currentName` |
+| `frontend/src/components/shared/seededWaveform.js` | Deterministic pseudo-waveform generator + painter — seed → song-shaped RMS+peak envelope → mirrored amber bar canvas. Used by `Player`. |
 
 ### DAW Editor (`daw/`)
 

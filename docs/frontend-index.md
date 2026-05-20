@@ -1,7 +1,7 @@
 # frontend/src INDEX
 
 > Component and module map for the React frontend. Update this when adding/removing/renaming files.
-> Last updated: 2026-05-12
+> Last updated: 2026-05-20
 
 ---
 
@@ -9,7 +9,7 @@
 
 | File | Purpose |
 |------|---------|
-| `main.jsx` | App root — sidebar, mode picker (Live/XML/standalone/import/defined-path), error boundary, lazy-loaded tab router (Suspense), heartbeat + library-status polling, session-token injection. |
+| `main.jsx` | App root — Blender-style workspace tab bar + per-workspace Rekordbox-style sidebar, mode picker (Live/XML/standalone/import/defined-path), error boundary, lazy-loaded tab router (Suspense), heartbeat + library-status polling, session-token injection. |
 | `utils/log.js` | Dev-only logger; `log.debug` / `log.info` no-op in production via Vite's `import.meta.env.DEV` guard. `log.warn` / `log.error` always pass through. |
 | `config/constants.js` | Frontend-wide tunables: `HEARTBEAT_INTERVAL_MS`, `LIBRARY_STATUS_INTERVAL_MS`, `RENDER_API_TIMEOUT_MS`, `BLOB_URL_REVOKE_DELAY_MS`, `TOAST_DURATION_LONG_MS`. |
 
@@ -92,7 +92,7 @@ Non-lazy components used by feature views.
 | `components/BatchEditBar.jsx` | Batch editing toolbar — rating, colour label, mass save. Rendered by `MetadataView`/`PlaylistBrowser` when tracks are selected. |
 | `components/ImportProgressBanner.jsx` | Sticky bottom-of-screen progress banner — aggregates `/api/import/tasks` + `/api/soundcloud/tasks` every 1.5s, shows aggregate % + current track + stage. Click → opens Downloads tab. Auto-hides when no active tasks. |
 | `components/MatchInspectorModal.jsx` | SoundCloud sync match inspector — per-track match score, status icon (matched/unmatched/dead), confidence bar. Used inside `SoundCloudSyncView`. |
-| `components/Player.jsx` | Compact mini player at screen bottom — play/pause, volume (persisted in `localStorage`), seek bar, streaming via `GET /api/stream`. Maximisable to DAW. |
+| `components/Player.jsx` | Compact mini player at screen bottom — play/pause, volume (persisted in `localStorage`), amber mirror-waveform scrubber (click + drag seek), streaming via `GET /api/stream`. |
 | `components/PlaylistBrowser.jsx` | Rekordbox playlist tree — expand/collapse, drag-reorder, smart-playlist editing, context menu, rename, "Move to" picker. Used inside `MetadataView`. |
 | `components/SmartPlaylistEditor.jsx` | Rule-based smart playlist editor — field/operator/value rows, AND/OR combinator, live preview. Modal dialog. |
 | `components/SoundCloudProgressModal.jsx` | OAuth + download progress overlay used by SC views — stage label, current track, percentage, cancel button. |
@@ -100,6 +100,7 @@ Non-lazy components used by feature views.
 | `components/LibraryView.jsx` | Minimal track-browser wrapper around `TrackTable` (legacy; superseded as the default `library` route by `MetadataView`). |
 | `components/ToolsView.jsx` | Legacy batch-tools hub (duplicates, rename, batch comments). Functionality moved to `UtilitiesView`; kept for direct imports. |
 | `components/shared/WaveformMiniCanvas.jsx` | **Reusable canvas waveform renderer** — CDJ-style 3-band colours (Low=Red, Mid=Green, High=Blue, screen blend), mono fallback, optional playhead line + viewport-window highlight. DPR + ResizeObserver-aware. Used by `WaveformOverview`. |
+| `components/shared/seededWaveform.js` | **Deterministic pseudo-waveform** — seed → song-shaped RMS+peak envelope → mirrored amber bar canvas (`drawSeededWave`). Used by `Player` where decoded audio peaks are unavailable. |
 
 ---
 
@@ -124,12 +125,24 @@ Non-lazy components used by feature views.
 | File | Purpose |
 |------|---------|
 | `components/usb/UsbControls.jsx` | **Shared helpers + compatibility tables** — `FS_COMPAT`, `FS_NOTES`, `CDJ_TARGETS`, `USB_TYPES`, plus `normalizeFs` / `worstCdjStatus` / `formatBytes` / `formatDate`, plus visual primitives (`StatusIcon`, `Toggle`, `PillBtn`, `PillTab`, `Row`, `SpaceBar`) and playlist helpers (`PlaylistTreeNode`, `UsbLibraryTree`, `getDescendantIds`). |
-| `components/usb/UsbDeviceList.jsx` | Left-rail list of registered + connected USB drives. Selection state owned by container. |
+| `components/usb/UsbDeviceList.jsx` | Left-rail list of registered + connected USB drives — each card shows a disk-usage bar. Selection state owned by container. |
 | `components/usb/UsbSyncPanel.jsx` | Main right-pane: header, compat matrix (PC + CDJ-3000/NXS2/NXS/older), Non-Rekordbox empty state, storage bar, sync source toggle, ecosystem picker, sync controls + progress, settings card, drive actions, danger zone (delete profile, reset, format wizard), stats footer. |
 | `components/usb/UsbProfileEditor.jsx` | Playlist picker (checkbox tree from PC playlist tree) + USB-library viewer (newer `library_one` / legacy `library_legacy` formats). Owns its expanded-node + selected-playlist + search state. |
 | `components/usb/UsbFormatWizard.jsx` | Destructive FAT32 / exFAT re-format modal — two-step backend protocol (`POST /api/usb/format/preview` → `POST /api/usb/format/confirm`). Confirm phrase + checkbox required. |
 | `components/usb/MetadataSyncPanel.jsx` | Collapsible per-device metadata sync controls (smart vs. manual, PC ↔ USB main source, per-category toggles: play counts, ratings, tags, color labels, hot cues, memory cues, beat grids). UI-only for now. |
 | `components/usb/PlayCountSync.jsx` | Collapsible play-count diff panel — auto-resolved summary + per-track strategy dropdown (`take_max`/`take_pc`/`take_usb`/`sum`), triple-confirm commit. |
+
+---
+
+## Studio Sub-Components (`components/studio/`)
+
+> The Studio is a self-contained efficiency-editor view, lazy-loaded as the `studio` route (Editor workspace).
+
+| File | Purpose |
+|------|---------|
+| `components/studio/StudioView.jsx` | **Studio efficiency editor** — section-colored master waveform (beat markers + loop region), overview minimap, 16 hot-cue pads, beat-nav + loop controls, dense inline-waveform track table, status footer. Presentational; ships with the design's sample catalogue. |
+| `components/studio/studioData.js` | Studio sample data + `STUDIO_THEME` (Blender warm-gray palette), `SECTIONS` / `SECTION_COLORS`, `HOT_CUES`, `STUDIO_TRACKS`, `STUDIO_PLAYLISTS`, plus `keyColor` / `fmt` / `hexA` / `shade` / `sectionAt` helpers. |
+| `components/studio/studioWaveform.js` | Section-shaped amplitude generation (`studioAmps`) + canvas painters `drawMasterWave` / `drawMiniWave` / `drawRowWave`. |
 
 ---
 
