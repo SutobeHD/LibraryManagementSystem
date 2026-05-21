@@ -129,6 +129,7 @@ Defined in `.claude/commands/`:
 | `/route-add` | Guided FastAPI route scaffold |
 | `/research-new` | Scaffold new research topic |
 | `/pipeline` | Show research pipeline state + open gates |
+| `/dashboard` | Start the local research-pipeline web dashboard |
 | `/gate-pass` | Pass a research gate (A/B/C) — advance the doc |
 | `/gate-reject` | Reject a research gate — send the doc back |
 | `/commit` | Stage + atomic commit with Conventional-Commits message |

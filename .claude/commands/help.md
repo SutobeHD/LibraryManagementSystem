@@ -37,6 +37,7 @@ Render a discovery view of all repo-local Claude Code capabilities.
    - `.pre-commit-config.yaml` — pre-commit hooks (manual install: `pre-commit install`)
    - `scripts/regen_maps.py` — auto-gen MAP.md + MAP_L2.md
    - `scripts/pipeline_status.py` — research pipeline state (slash: /pipeline)
+   - `scripts/pipeline_dashboard.py` — local web dashboard (slash: /dashboard)
 
 5. **Output format — three sections, tables, no fluff:**
 
@@ -65,6 +66,7 @@ Render a discovery view of all repo-local Claude Code capabilities.
 - .pre-commit-config.yaml — pre-commit hooks (install: `pip install pre-commit && pre-commit install`)
 - scripts/regen_maps.py — regenerate docs/MAP.md + MAP_L2.md (slash: /regen-maps)
 - scripts/pipeline_status.py — research pipeline state + open gates (slash: /pipeline)
+- scripts/pipeline_dashboard.py — local web dashboard for the pipeline (slash: /dashboard)
 ```
 
 Keep it terse. The point is fast discovery, not exhaustive docs.
