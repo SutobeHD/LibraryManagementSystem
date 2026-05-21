@@ -32,6 +32,9 @@
 | `app/downloader/__init__.py` | Unified multi-source downloader package. |
 | `app/downloader/match_adapter.py` | Thin matching adapter over the shared ``app.external_track_match`` module. |
 | `app/downloader/models.py` | Shared Pydantic v2 data models for the unified multi-source downloader. |
+| `app/downloader/providers/__init__.py` | Concrete :class:`~app.downloader.SourceProvider` implementations. |
+| `app/downloader/providers/soundcloud.py` | SoundCloud :class:`~app.downloader.SourceProvider`. |
+| `app/downloader/providers/spotiflac.py` | SpotiFLAC-backed multi-service provider (crash-isolated). |
 | `app/downloader/quality.py` | Quality-tier classification + lossless-first candidate picking. |
 | `app/external_track_match.py` | Shared track-matching, version-tag taxonomy, fingerprint and adapter-registry module. |
 | `app/folder_watcher.py` | FolderWatcher — auto-import audio files from user-configured folders. |
@@ -212,6 +215,7 @@
 | `tests/test_soundcloud_api.py` | Tests for `app/soundcloud_api.py`. |
 | `tests/test_unified_downloader_match.py` | Tests for ``app/downloader/match_adapter.py`` — the 100%-match gate. |
 | `tests/test_unified_downloader_models.py` | Tests for ``app/downloader/models.py`` — the unified-downloader data models. |
+| `tests/test_unified_downloader_providers.py` | Tests for ``app/downloader/providers/`` — the Phase-1 provider layer. |
 | `tests/test_unified_downloader_quality.py` | Tests for ``app/downloader/quality.py`` — tier classification + policy picking. |
 | `tests/test_usb_manager.py` | Tests for `app/usb_manager.py`. |
 

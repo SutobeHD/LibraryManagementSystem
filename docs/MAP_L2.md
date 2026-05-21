@@ -275,6 +275,30 @@ Shared Pydantic v2 data models for the unified multi-source downloader.
 - `FetchResponse` — Output of the fetch flow: a job handle to poll.
 - `JobStatus` — Polled state of an in-flight (or finished) download job.
 
+### `app/downloader/providers/__init__.py`
+
+Concrete :class:`~app.downloader.SourceProvider` implementations.
+
+### `app/downloader/providers/soundcloud.py`
+
+SoundCloud :class:`~app.downloader.SourceProvider`.
+
+- `SoundCloudProvider` — :class:`~app.downloader.SourceProvider` backed by the existing SC code.
+- `  SoundCloudProvider.platform()` — Always ``"soundcloud"``.
+- `  SoundCloudProvider.resolve_url()` — Resolve a SoundCloud permalink URL to a single :class:`TrackMatch`.
+- `  SoundCloudProvider.search()` — Free-form search via the SoundCloud v2 ``/search/tracks`` endpoint.
+- `  SoundCloudProvider.fetch()` — Download the audio for a chosen SoundCloud :class:`TrackMatch`.
+
+### `app/downloader/providers/spotiflac.py`
+
+SpotiFLAC-backed multi-service provider (crash-isolated).
+
+- `SpotiFlacProvider` — :class:`~app.downloader.SourceProvider` over the SpotiFLAC library.
+- `  SpotiFlacProvider.platform()` — The SpotiFLAC service this instance targets.
+- `  SpotiFlacProvider.resolve_url()` — Resolve a Spotify track URL to per-service :class:`TrackMatch` claims.
+- `  SpotiFlacProvider.search()` — Free-form search — unsupported by SpotiFLAC, always ``[]``.
+- `  SpotiFlacProvider.fetch()` — Download the audio for a chosen :class:`TrackMatch`.
+
 ### `app/downloader/quality.py`
 
 Quality-tier classification + lossless-first candidate picking.
@@ -2009,6 +2033,42 @@ Tests for ``app/downloader/models.py`` — the unified-downloader data models.
 - `test_source_provider_partial_impl_still_abstract()` — A subclass missing an abstract method is still not instantiable.
 - `test_source_provider_complete_impl_instantiable()` — A subclass implementing all four abstract members instantiates + works.
 - `test_literal_aliases_are_importable()` — Platform / AudioFormat literal aliases are importable from the module.
+
+### `tests/test_unified_downloader_providers.py`
+
+Tests for ``app/downloader/providers/`` — the Phase-1 provider layer.
+
+- `test_spotiflac_provider_is_a_source_provider()` — SpotiFlacProvider satisfies the SourceProvider ABC (all abstracts impl).
+- `test_spotiflac_provider_rejects_unserved_platform()` — Constructing for a non-SpotiFLAC platform fails fast.
+- `test_spotiflac_provider_defaults_to_tidal()` — The default platform is tidal.
+- `test_ppe_happy_path_runs_worker()` — A well-behaved worker round-trips through the executor.
+- `test_ppe_recovers_from_worker_crash_via_restart()` — A worker crash raises BrokenExecutor → restart → bounded retry.
+- `test_ppe_restart_replaces_the_executor_object()` — _restart_executor swaps in a fresh, usable ProcessPoolExecutor.
+- `test_ppe_aborts_when_panic_budget_exhausted()` — At the panic ceiling, a submit fails fast without spawning a worker.
+- `test_ppe_propagates_normal_worker_exception()` — A picklable in-worker exception propagates unchanged (no retry/restart).
+- `test_parse_spotify_url_offline_roundtrip()` — The real SpotiFLAC offline URL parser identifies a track URL.
+- `test_resolve_url_builds_per_service_claims()` — resolve_url turns the worker's metadata into one claim per served service.
+- `test_resolve_url_returns_empty_on_bad_url()` — A non-Spotify URL (worker raises ValueError) yields an empty list.
+- `test_resolve_url_returns_empty_on_panic_budget()` — A crash past the panic budget (RuntimeError) yields an empty list.
+- `test_spotiflac_search_is_a_noop()` — SpotiFLAC has no free-form search — search() always returns [].
+- `test_spotiflac_fetch_rejects_wrong_platform()` — fetch() refuses a claim whose platform it does not serve.
+- `test_spotiflac_fetch_rejects_claim_without_spotify_origin()` — fetch() needs the #spotify= fragment to drive the pivoted download.
+- `test_spotiflac_fetch_drives_worker_with_spotify_origin()` — fetch() extracts the Spotify origin and forwards it to the worker.
+- `test_extract_spotify_origin()` — The #spotify= fragment extractor handles present + absent cases.
+- `test_soundcloud_provider_is_a_source_provider()` — SoundCloudProvider satisfies the SourceProvider ABC.
+- `test_sc_resolve_url_builds_claim_for_downloadable_track()` — A downloadable SC track is claimed as CD-lossless (optimistic).
+- `test_sc_resolve_url_claims_non_downloadable_as_lossy()` — A non-downloadable SC track is claimed as the lossy stream ceiling.
+- `test_sc_resolve_url_returns_empty_for_non_track()` — A URL resolving to a non-track (None) yields an empty list.
+- `test_sc_resolve_url_swallows_auth_error()` — An AuthExpiredError degrades to an empty list (dead source, not abort).
+- `test_sc_search_returns_claims()` — search() maps a v2 /search/tracks collection into TrackMatch claims.
+- `test_sc_search_returns_empty_on_failure()` — A transport failure inside search() degrades to an empty list.
+- `test_sc_search_respects_limit()` — search() truncates the result set to ``limit`` claims.
+- `test_sc_fetch_rejects_wrong_platform()` — fetch() refuses a non-SoundCloud claim.
+- `test_sc_fetch_official_download_path()` — fetch() uses the official /download URL for a downloadable track and
+- `test_sc_fetch_transcoding_fallback_path()` — A non-downloadable track falls through to the transcoding stream.
+- `test_sc_fetch_raises_when_no_stream()` — fetch() raises RuntimeError when no stream source can be resolved.
+- `test_sc_fetch_raises_when_url_not_a_track()` — fetch() raises ValueError when the claim URL resolves to no track.
+- `test_quality_claim_helper()` — _quality_claim returns lossless for downloadable, lossy otherwise.
 
 ### `tests/test_unified_downloader_quality.py`
 
