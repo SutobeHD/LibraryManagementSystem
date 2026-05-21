@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>12 · The ANLZ Binary Format — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 12 · The Backend</div>
+          <h1>The ANLZ Binary Format</h1>
+          <p class="ch-lead">For a CDJ to show a track's waveform, beatgrid, and cues,
+            it reads a set of per-track binary analysis files. This chapter documents
+            the ANLZ format and the writer that produces it byte-for-byte.</p>
+        </header>
+
+        <h2>12.1 What ANLZ Files Are</h2>
+        <p>When Rekordbox analyses a track, it does not store the waveform and
+        beatgrid inside the audio file or only in its database. It writes a small set
+        of companion <strong>ANLZ files</strong> — "analysis" files — one set per
+        track. A CDJ-3000 reads these directly off the USB stick to draw the coloured
+        waveform, place the beat markers, and show the cue flags.</p>
+
+        <p>To export a stick a CDJ can actually use, the application must write these
+        files itself, in exactly the format Rekordbox produces. That is the job of
+        <code>app/anlz_writer.py</code>.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>File</th><th>Carries</th></tr></thead>
+          <tbody>
+            <tr><td><code>ANLZ0000.DAT</code></td><td>The core file — path, beatgrid, the basic mono waveforms.</td></tr>
+            <tr><td><code>ANLZ0000.EXT</code></td><td>The extended file — high-resolution and colour waveforms.</td></tr>
+            <tr><td><code>ANLZ0000.2EX</code></td><td>The second extended file — the 3-band waveforms and a colour-waveform variant.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>12.2 The Container Structure</h2>
+        <p>An ANLZ file is a simple, self-describing container. It opens with a header
+        bearing the magic bytes <code>PMAI</code>, then a sequence of length-prefixed
+        <strong>tags</strong>. Each tag is a four-character identifier followed by its
+        size and its payload. All multi-byte integers are <strong>big-endian</strong>,
+        and every tag the writer produces is validated against
+        <code>pyrekordbox</code>.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  subgraph DAT["ANLZ0000.DAT"]
+    H1["Header — PMAI magic"]
+    H1 --> T1["PPTH — file path"]
+    T1 --> T2["PVBR — variable bitrate data"]
+    T2 --> T3["PQTZ — beatgrid"]
+    T3 --> T4["PWAV — mono preview"]
+    T4 --> T5["PWV2 — tiny preview"]
+    T5 --> T6["PCOB x2 — cue lists"]
+  end
+          </div>
+          <figcaption><span class="fig-num">Figure 12.1</span> — The <code>.DAT</code>
+          file: a <code>PMAI</code> header followed by a sequence of tags.</figcaption>
+        </div>
+
+        <h2>12.3 The Tag Catalogue</h2>
+        <p>Each of the three files carries a specific set of tags. The writer's three
+        builder functions assemble them:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Builder</th><th>File</th><th>Tags it writes</th></tr></thead>
+          <tbody>
+            <tr><td><code>build_dat()</code></td><td><code>.DAT</code></td><td>PPTH + PVBR + PQTZ + PWAV + PWV2 + PCOB &times;2</td></tr>
+            <tr><td><code>build_ext()</code></td><td><code>.EXT</code></td><td>PPTH + PWV3 + PCOB &times;2 + PCO2 &times;2 + PWV5 + PWV4</td></tr>
+            <tr><td><code>build_2ex()</code></td><td><code>.2EX</code></td><td>PPTH + PWV7 + PWV6 + PWVC</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>What each tag means:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Tag</th><th>Content</th></tr></thead>
+          <tbody>
+            <tr><td><code>PPTH</code></td><td>The track's file path.</td></tr>
+            <tr><td><code>PVBR</code></td><td>Variable-bitrate seek data.</td></tr>
+            <tr><td><code>PQTZ</code></td><td>The beatgrid — one of the most important tags.</td></tr>
+            <tr><td><code>PWAV</code> / <code>PWV2</code></td><td>The mono preview waveforms (400-point and tiny).</td></tr>
+            <tr><td><code>PWV3</code></td><td>The high-resolution mono detail waveform.</td></tr>
+            <tr><td><code>PWV4</code> / <code>PWV5</code></td><td>The colour preview and colour detail waveforms.</td></tr>
+            <tr><td><code>PWV6</code> / <code>PWV7</code></td><td>The 3-band (low/mid/high) preview and detail waveforms.</td></tr>
+            <tr><td><code>PWVC</code></td><td>A colour-waveform companion entry.</td></tr>
+            <tr><td><code>PCOB</code> / <code>PCO2</code></td><td>The cue-point lists — hot cues and memory cues.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>12.4 The Beatgrid Tag — PQTZ</h2>
+        <p>The beatgrid deserves a closer look because it is the tag a DJ feels most
+        directly. <code>PQTZ</code> is a list of entries, each describing one beat:</p>
+
+        <div class="callout spec">
+          <span class="ico">◈</span>
+          <div class="body">
+            <span class="ct">PQTZ entry layout</span>
+            <p>Each beat entry is three fields, all big-endian:
+            <code>beat_number</code> (a 16-bit integer, 1–4 within the bar),
+            <code>tempo&times;100</code> (a 16-bit integer — the BPM multiplied by 100
+            so it can be stored as a whole number), and <code>time_ms</code> (a
+            32-bit integer — the beat's position in milliseconds).</p>
+          </div>
+        </div>
+
+        <p>Storing the tempo as <code>BPM&times;100</code> is a classic binary-format
+        trick: it preserves two decimal places of precision (128.50&nbsp;BPM becomes
+        the integer <code>12850</code>) without needing a floating-point field. Get
+        this scaling wrong and every beat marker on every CDJ drifts.</p>
+
+        <h2>12.5 The Format Subtleties</h2>
+        <p>The ANLZ format is full of small, unforgiving details. A handful that the
+        writer must get exactly right:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Tag</th><th>The detail</th></tr></thead>
+          <tbody>
+            <tr><td><code>PCOB</code></td><td>A 24-byte header containing an <code>0xFFFFFFFF</code> sentinel value.</td></tr>
+            <tr><td><code>PCO2</code></td><td>Its <code>list_type</code> field is a 32-bit integer — not 16-bit, a tempting mistake.</td></tr>
+            <tr><td><code>PWV5</code></td><td>A header field at offset +20 must hold the exact constant <code>0x00960305</code>.</td></tr>
+            <tr><td><code>PWV6</code></td><td>A 20-byte header, with a 32-bit <code>entry_size</code> of 3 before the entry count.</td></tr>
+            <tr><td><code>PWV7</code></td><td>A 24-byte header, a 32-bit <code>entry_size</code> of 3, and each data entry is the triple <code>[low, mid, high]</code>.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="callout warn">
+          <span class="ico">▲</span>
+          <div class="body">
+            <span class="ct">There is no error message</span>
+            <p>When an ANLZ file is wrong, a CDJ does not report a parse error. It
+            simply shows no waveform, or a flat beatgrid, or it silently ignores the
+            file. The only way to know the format is right is to validate it — which
+            is why every tag the writer emits is checked against
+            <code>pyrekordbox</code>, and why the constants above are spelled out
+            explicitly in the code with comments.</p>
+          </div>
+        </div>
+
+        <h2>12.6 The Writer's Public API</h2>
+        <p><code>anlz_writer.py</code> exposes a small, clean surface:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Function</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><code>write_anlz_files(anlz_dir, track_path, analysis_result)</code></td><td>The main entry point — writes all three files from a <code>run_full_analysis()</code> result and returns their paths.</td></tr>
+            <tr><td><code>build_dat()</code></td><td>Assemble the <code>.DAT</code> byte buffer.</td></tr>
+            <tr><td><code>build_ext()</code></td><td>Assemble the <code>.EXT</code> byte buffer.</td></tr>
+            <tr><td><code>build_2ex()</code></td><td>Assemble the <code>.2EX</code> byte buffer.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>The input to <code>write_anlz_files()</code> is exactly the dictionary that
+        Chapter 11's <code>run_full_analysis()</code> produces — the analysis engine
+        and the ANLZ writer are designed as two halves of one pipeline.</p>
+
+        <h2>12.7 Where ANLZ Files Live</h2>
+        <p>ANLZ files exist in two places, and a shared helper keeps the locations
+        deterministic.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  AN["Analysis result"] --> SC["anlz_sidecar<br/>writes locally"]
+  SC --> LOCAL["&lt;music&gt;/.lms_anlz/&lt;hash&gt;/<br/>ANLZ0000.DAT / .EXT / .2EX"]
+  LOCAL --> USB["USB sync copies to"]
+  USB --> STICK["PIONEER/USBANLZ/&lt;bucket&gt;/&lt;hash&gt;/<br/>on the stick"]
+          </div>
+          <figcaption><span class="fig-num">Figure 12.2</span> — ANLZ files are
+          written next to the audio first, then copied onto the stick during USB
+          sync.</figcaption>
+        </div>
+
+        <p><code>app/anlz_sidecar.py</code> is the shared helper. Every track-import
+        path — SoundCloud download, drag-drop import, the folder watcher — calls it,
+        so the resulting <code>.DAT</code>/<code>.EXT</code>/<code>.2EX</code> files
+        always land in a deterministic location next to the audio:
+        <code>&lt;music&gt;/.lms_anlz/&lt;sha-of-path&gt;/</code>. When a USB sync
+        runs, the OneLibrary writer copies them straight to
+        <code>PIONEER/USBANLZ/&lt;bucket&gt;/&lt;hash&gt;/</code> on the stick. The
+        bucketing keeps any one directory from holding too many entries.</p>
+
+        <h2>12.8 ANLZ in the Bigger Picture</h2>
+        <p>ANLZ files are one of two binary formats the application reverse-engineers.
+        They describe a <em>single track's</em> analysis. The other format — the PDB
+        database of Chapter 13 — describes the <em>whole library's</em> structure.
+        Together they make a stick a CDJ reads:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Format</th><th>Scope</th><th>Chapter</th></tr></thead>
+          <tbody>
+            <tr><td>ANLZ (<code>.DAT</code>/<code>.EXT</code>/<code>.2EX</code>)</td><td>Per track — waveform, beatgrid, cues.</td><td>This chapter</td></tr>
+            <tr><td>PDB (<code>export.pdb</code> / OneLibrary)</td><td>Whole library — tracks, playlists, artists, the tree.</td><td>Chapter 13</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>ANLZ files are the per-track binary analysis companions a CDJ reads to
+            draw waveforms and place beat and cue markers. Each track gets three —
+            <code>.DAT</code>, <code>.EXT</code>, <code>.2EX</code> — built from a
+            <code>PMAI</code> header and a sequence of big-endian tags (PPTH, PQTZ,
+            the PWAV/PWV family, PCOB/PCO2). The format is unforgiving — a wrong
+            constant produces no error, just a broken display — so every tag is
+            validated, and a shared sidecar helper keeps the files in a deterministic
+            location ready for USB export.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

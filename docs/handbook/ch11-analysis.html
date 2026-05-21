@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>11 · The Audio Analysis Engine — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 11 · The Backend</div>
+          <h1>The Audio Analysis Engine</h1>
+          <p class="ch-lead">Analysis is what turns a plain audio file into a
+            DJ-usable track. The engine extracts tempo, musical key, the beatgrid,
+            phrase structure, automatic cues, and seven waveform representations —
+            all in background worker processes.</p>
+        </header>
+
+        <h2>11.1 What Analysis Produces</h2>
+        <p>When the analysis engine finishes with a track, it has produced everything
+        a CDJ needs to display and mix that track intelligently:</p>
+
+        <div class="cards">
+          <div class="card"><div class="big">BPM</div><div class="lbl">Tempo, beats per minute</div></div>
+          <div class="card"><div class="big">Key</div><div class="lbl">Musical key, in Camelot notation</div></div>
+          <div class="card"><div class="big">Grid</div><div class="lbl">Beat positions + per-segment tempo</div></div>
+          <div class="card"><div class="big">Cues</div><div class="lbl">Phrase markers + auto hot-cues</div></div>
+          <div class="card"><div class="big">Wave</div><div class="lbl">Seven waveform representations</div></div>
+          <div class="card"><div class="big">LUFS</div><div class="lbl">Integrated loudness</div></div>
+        </div>
+
+        <p>This output then flows two ways: into the library database, and into the
+        ANLZ binary files (Chapter 12) that get written to a USB stick.</p>
+
+        <h2>11.2 The Engine and Its Entry Points</h2>
+        <p>The engine is <code>app/analysis_engine.py</code>, exposing the
+        <code>AnalysisEngine</code> class plus a top-level <code>run_full_analysis()</code>
+        function. A second module, <code>app/audio_analyzer.py</code>, wraps it for
+        HTTP task tracking.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Entry point</th><th>Behaviour</th></tr></thead>
+          <tbody>
+            <tr><td><code>AnalysisEngine.submit(task_id, path)</code></td><td>Queue a track for analysis in the background pool; returns immediately.</td></tr>
+            <tr><td><code>AnalysisEngine.get_status(task_id)</code></td><td>Poll a task — returns status plus BPM, key, confidence, beatgrid when done.</td></tr>
+            <tr><td><code>AnalysisEngine.analyze_sync(path)</code></td><td>Synchronous analysis — blocks; used only for scripting.</td></tr>
+            <tr><td><code>run_full_analysis(path)</code></td><td>The top-level function — one call returns everything needed to write ANLZ files.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>Every heavy call runs inside a <code>ProcessPoolExecutor</code>. DSP is
+        CPU-bound, and Python's global interpreter lock means a thread pool would not
+        actually parallelise it — separate processes do. This is also why a single
+        analysis takes 2–8 seconds but the API stays responsive throughout.</p>
+
+        <h2>11.3 The DSP Pipeline</h2>
+        <p>A full analysis is a pipeline. Each stage consumes the decoded audio and
+        contributes part of the result.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  IN["Audio file"] --> DEC["Decode + resample<br/>to mono float samples"]
+  DEC --> BPM["Beat tracking<br/>madmom RNN → librosa fallback"]
+  DEC --> KEY["Key detection<br/>essentia → K-S / Temperley fallback"]
+  DEC --> LUF["Loudness<br/>pyloudnorm — EBU R128"]
+  BPM --> GRID["Beatgrid<br/>beat positions + tempo segments"]
+  GRID --> PHR["Phrase + auto-cue<br/>phrase_generator"]
+  DEC --> WAVE["3-band crossover<br/>Butterworth 200 Hz / 2500 Hz"]
+  WAVE --> WOUT["Seven waveform variants<br/>PWAV ... PWV7"]
+  GRID --> RES["Analysis result"]
+  KEY --> RES
+  LUF --> RES
+  PHR --> RES
+  WOUT --> RES
+          </div>
+          <figcaption><span class="fig-num">Figure 11.1</span> — The full-analysis
+          pipeline. Beat, key, loudness, and waveform stages run from the same
+          decoded signal.</figcaption>
+        </div>
+
+        <h2>11.4 Tempo — Beat Tracking</h2>
+        <p>BPM detection is a two-tier affair. The primary tracker is
+        <strong>madmom</strong>, which uses a recurrent neural network trained to
+        find beats — markedly more accurate than spectral-flux methods, especially on
+        electronic music with a strong but syncopated kick. If madmom is unavailable
+        at import time, the engine falls back to <strong>librosa</strong>'s
+        <code>beat.beat_track()</code>.</p>
+
+        <p>The output is not a single number. It is a <strong>beatgrid</strong> — a
+        list of beat positions in time, plus the tempo of each segment, so a track
+        that drifts or changes tempo is represented honestly rather than flattened to
+        one average BPM.</p>
+
+        <h2>11.5 Key — Harmonic Analysis</h2>
+        <p>Musical key detection is likewise two-tier. The primary detector is
+        <strong>essentia</strong>'s key extractor; the fallback is an ensemble of the
+        <strong>Krumhansl-Schmuckler</strong> and <strong>Temperley</strong>
+        pitch-class-profile algorithms.</p>
+
+        <p>The key is reported in <strong>Camelot notation</strong> — the wheel-based
+        system DJs use for harmonic mixing, where, for example, <code>8B</code> is C
+        major and <code>8A</code> is A minor. Tracks whose Camelot codes are adjacent
+        on the wheel mix together harmonically, which is why the UI colour-codes the
+        key column by Camelot position.</p>
+
+        <div class="callout note">
+          <span class="ico">◆</span>
+          <div class="body">
+            <span class="ct">Why Camelot?</span>
+            <p>The Camelot wheel maps the 24 musical keys onto a clock face so that
+            "what mixes with what" becomes a matter of stepping around the dial.
+            Representing key this way makes the harmonic-mixing recommender on the
+            roadmap (Chapter 25) a straightforward distance calculation.</p>
+          </div>
+        </div>
+
+        <h2>11.6 Waveforms — Seven Representations</h2>
+        <p>A waveform is not one thing. A CDJ shows an overview waveform and a zoomed
+        detail waveform, in mono and in colour, and the analysis engine produces all
+        of them. The 3-band colour comes from a <strong>Butterworth crossover</strong>
+        — a filter that splits the signal into low, mid, and high bands at 200&nbsp;Hz
+        and 2500&nbsp;Hz.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Variant</th><th>What it is</th></tr></thead>
+          <tbody>
+            <tr><td><code>PWAV</code></td><td>A 400-point mono preview waveform.</td></tr>
+            <tr><td><code>PWV2</code></td><td>A 100-point tiny preview.</td></tr>
+            <tr><td><code>PWV3</code></td><td>A high-resolution mono detail waveform (150 frames per second).</td></tr>
+            <tr><td><code>PWV4</code></td><td>A 1200&times;6 colour preview waveform.</td></tr>
+            <tr><td><code>PWV5</code></td><td>A 16-bit colour detail waveform.</td></tr>
+            <tr><td><code>PWV6</code></td><td>A 1200-point 3-band (low/mid/high) colour preview.</td></tr>
+            <tr><td><code>PWV7</code></td><td>An N-point 3-band detail waveform (150 frames per second).</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>These names are not arbitrary — they are the tag identifiers of the
+        Rekordbox ANLZ binary format. The analysis engine produces the data; the ANLZ
+        writer of Chapter 12 packs it into the exact bytes Rekordbox expects.</p>
+
+        <h2>11.7 Phrases and Automatic Cues</h2>
+        <p><code>app/phrase_generator.py</code> turns a beatgrid into musical
+        structure. Dance music is built in phrases — typically 8, 16, or 32 bars —
+        and marking those boundaries lets a DJ blend cleanly.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  BG["Beatgrid<br/>from the DB"] --> DD["Detect first downbeat<br/>librosa energy analysis"]
+  DD --> PG["Generate phrase cues<br/>phrase + bar markers"]
+  PG --> CC["Commit cues<br/>hot cues A-H via pyrekordbox"]
+          </div>
+          <figcaption><span class="fig-num">Figure 11.2</span> — Phrase generation.
+          The first downbeat anchors the grid; phrase and bar markers follow; hot
+          cues A–H are written.</figcaption>
+        </div>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Function</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><code>extract_beats_from_db()</code></td><td>Read the stored beatgrid for a track.</td></tr>
+            <tr><td><code>detect_first_downbeat()</code></td><td>Find the first strong downbeat via a librosa energy analysis — the phrase anchor.</td></tr>
+            <tr><td><code>generate_phrase_cues()</code></td><td>Produce phrase-start and bar-start cue markers at the chosen phrase length.</td></tr>
+            <tr><td><code>commit_cues_to_db()</code></td><td>Write the resulting hot cues (A–H) into the database.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>The Phrase Generator view in the UI exposes this as a two-step
+        Generate &rarr; Commit flow, so a DJ previews the proposed cues before they
+        are written.</p>
+
+        <h2>11.8 From Analysis to Database — the Orchestrator</h2>
+        <p><code>app/analysis_db_writer.py</code> defines <code>AnalysisDBWriter</code>,
+        which ties the whole thing together: analyse a track, write its ANLZ files,
+        and update <code>master.db</code> — all in one pipeline.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+sequenceDiagram
+  participant API as analyze-full route
+  participant DW as AnalysisDBWriter
+  participant AE as AnalysisEngine
+  participant AW as ANLZ writer
+  participant DB as master.db
+  API->>DW: analyze_and_save(track_id, force)
+  DW->>AE: run_full_analysis(path)
+  AE-->>DW: bpm, key, beatgrid, waveforms, cues
+  DW->>AW: write DAT / EXT / 2EX files
+  DW->>DB: update bpm, key, analysed flag
+  DW-->>API: result
+          </div>
+          <figcaption><span class="fig-num">Figure 11.3</span> — The analyze-full
+          orchestration. One call produces analysis, ANLZ files, and a database
+          update.</figcaption>
+        </div>
+
+        <p>It also offers <code>analyze_batch()</code> — a generator that yields a
+        progress dict per track — and <code>get_unanalyzed_tracks()</code>, which
+        finds tracks with a BPM of zero or missing ANLZ files. The batch path is what
+        the <code>/api/library/analyze-batch</code> route streams to the UI as NDJSON.</p>
+
+        <h2>11.9 Quality Presets and Caching</h2>
+        <p>The user can trade speed against accuracy through three analysis quality
+        presets:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Preset</th><th>Analyzers</th><th>Use when</th></tr></thead>
+          <tbody>
+            <tr><td>Fast</td><td>librosa only</td><td>A large batch where rough numbers are fine.</td></tr>
+            <tr><td>Standard</td><td>madmom beat tracking</td><td>The everyday default — accurate and reasonably quick.</td></tr>
+            <tr><td>Thorough</td><td>The full ensemble</td><td>A small set of tracks that must be exactly right.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>And, as Chapter 10 described, every result is cached. The analysis cache is
+        keyed on the file's modification time, size, and the analyzer version — so
+        re-analysing an unchanged library is nearly free, and changing the analyzer
+        invalidates every stale entry automatically.</p>
+
+        <h2>11.10 The Native Counterpart</h2>
+        <p>The Python engine described here is the high-accuracy, offline reference
+        path. The Rust layer (Chapter 19) carries its own, lighter analysis — a
+        RustFFT waveform computation and a Krumhansl-Schmuckler key detector — so the
+        native side can draw a waveform and estimate a key without a round-trip to
+        the Python backend. Python remains the accuracy reference; Rust is the
+        low-latency convenience path. The boundary rule of Chapter 4 holds: realtime
+        waveform rendering is Rust, the authoritative offline analysis is Python.</p>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>The analysis engine extracts BPM (madmom, librosa fallback), key
+            (essentia, K-S/Temperley fallback), a full beatgrid, loudness, phrase and
+            auto-cue markers, and seven waveform variants — all in
+            <code>ProcessPoolExecutor</code> workers so the API never blocks. The
+            <code>AnalysisDBWriter</code> orchestrator chains analysis to ANLZ files
+            to a database update. Three quality presets and an aggressive cache let
+            the engine scale from a single track to a whole library.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

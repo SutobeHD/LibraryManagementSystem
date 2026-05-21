@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>13 · Pioneer USB Export — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 13 · The Backend</div>
+          <h1>Pioneer USB Export</h1>
+          <p class="ch-lead">Writing a USB stick that a CDJ-3000 reads natively is
+            the capability that makes this a real Rekordbox competitor. It is also
+            the most exacting code in the project — two reverse-engineered database
+            formats, verified byte-for-byte against a real Pioneer drive.</p>
+        </header>
+
+        <h2>13.1 The Stakes</h2>
+        <p>Every other feature in the application has a forgiving failure mode. Get a
+        waveform colour slightly wrong and the user sees a slightly-off waveform. Get
+        the USB export wrong and the CDJ shows a single dialog — "Device library is
+        corrupted" — and refuses to load anything. There is no partial success and no
+        diagnostic. The stick either works completely or not at all.</p>
+
+        <p>That is why this subsystem is held to a unique standard: its byte layout is
+        verified <strong>byte-for-byte against a real Pioneer-exported USB drive</strong>,
+        and a regression test guards every structural invariant.</p>
+
+        <h2>13.2 The Anatomy of a CDJ-Ready Stick</h2>
+        <p>A USB stick a CDJ can play has a specific directory structure under a
+        <code>PIONEER/</code> folder. The sync engine writes all of it.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  ROOT["USB stick root"]
+  ROOT --> P["PIONEER/"]
+  ROOT --> C["Contents/&lt;Artist&gt;/&lt;Album&gt;/<br/>the audio files"]
+  P --> RB["rekordbox/exportLibrary.db<br/>the OneLibrary database"]
+  P --> PDB["export.pdb + exportExt.pdb<br/>the legacy DeviceLibrary"]
+  P --> AN["USBANLZ/&lt;bucket&gt;/&lt;hash&gt;/<br/>per-track ANLZ files"]
+  P --> ART["Artwork/&lt;bucket&gt;/<br/>cover art, small + medium"]
+  P --> MY["MYSETTING.DAT / MYSETTING2.DAT<br/>DJMMYSETTING.DAT"]
+          </div>
+          <figcaption><span class="fig-num">Figure 13.1</span> — The layout of a
+          CDJ-ready stick. Two database formats, plus analysis, artwork, audio, and
+          hardware settings.</figcaption>
+        </div>
+
+        <h2>13.3 Two Database Formats</h2>
+        <p>The stick carries the library in <em>two</em> formats, because Pioneer
+        hardware spans two generations of database design.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Format</th><th>File(s)</th><th>Read by</th></tr></thead>
+          <tbody>
+            <tr><td>OneLibrary</td><td><code>rekordbox/exportLibrary.db</code></td><td>Rekordbox 6/7 — lets the desktop software auto-detect the stick.</td></tr>
+            <tr><td>Legacy DeviceLibrary (PDB)</td><td><code>export.pdb</code>, <code>exportExt.pdb</code></td><td>Older CDJ firmware that predates the OneLibrary format.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>Each format has its own writer module. They are among the hardest files in
+        the codebase, for different reasons.</p>
+
+        <h2>13.4 The OneLibrary Writer — Working Around a Broken Library</h2>
+        <p><code>app/usb_one_library.py</code> writes <code>exportLibrary.db</code>.
+        The obvious approach would be to call <code>pyrekordbox</code>'s
+        <code>OneLibrary.create()</code> and populate it. That approach does not
+        work: in version 0.1.7, <code>create_content()</code> raises "Unexpected null
+        for non-null column" on <em>every</em> call, and there is no Python-level
+        constructor for a new content row.</p>
+
+        <p>The solution is a <strong>template-based</strong> approach:</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  TPL["app/templates/<br/>exportLibrary_template.db<br/>16 placeholder rows"]
+  TPL -->|"copy onto the stick"| STICK["exportLibrary.db<br/>on the USB"]
+  STICK -->|"update_content()<br/>mutate placeholders"| FILLED["Populated with<br/>real track data"]
+          </div>
+          <figcaption><span class="fig-num">Figure 13.2</span> — The template
+          workaround. A pre-built database with placeholder rows is copied onto the
+          stick and mutated, bypassing the broken creation path.</figcaption>
+        </div>
+
+        <p>A bundled, anonymised template database — derived from a real
+        Rekordbox-exported stick — ships with placeholder content rows. The writer
+        copies it onto the USB stick and uses <code>update_content()</code> (which
+        <em>does</em> work) to populate the placeholders with real track data. The
+        other creation calls — for images, artists, albums, genres, keys, labels,
+        playlists — work normally and are used as-is.</p>
+
+        <div class="callout warn">
+          <span class="ico">▲</span>
+          <div class="body">
+            <span class="ct">Two consequences of the template approach</span>
+            <p>First, the template's placeholder count is a hard ceiling on track
+            count — a larger template raises the cap. Second, after writing, the
+            <code>pyrekordbox</code> 0.1.7 handle exposes no <code>close()</code> or
+            <code>commit()</code>, so the writer deliberately drops the handle,
+            forces garbage collection, and reopens the database to flush the SQLite
+            write-ahead log — otherwise up to 400&nbsp;KB of unmerged WAL frames are
+            left on the stick. A dedicated test,
+            <code>test_onelibrary_wal_flush.py</code>, verifies the WAL is empty
+            afterwards.</p>
+          </div>
+        </div>
+
+        <h2>13.5 The PDB Writer — A Format Built From Scratch</h2>
+        <p><code>app/usb_pdb.py</code> writes the legacy <code>export.pdb</code> and
+        <code>exportExt.pdb</code> files. There is no library that does this — the
+        module implements the format from scratch, following the community
+        "Crate Digger" reverse-engineering of Pioneer's DeviceSQL database.</p>
+
+        <h3>The page structure</h3>
+        <p>A PDB file is a flat sequence of <strong>4&nbsp;KiB pages</strong>. A file
+        header points to a directory of 20 tables; each table is a chain of pages;
+        each data page holds rows.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  HDR["File header<br/>points to the table directory"]
+  HDR --> DIR["20-table directory<br/>tracks, artists, albums, genres,<br/>keys, colours, playlists, ..."]
+  DIR --> PG["4 KiB pages per table"]
+  subgraph Page["One 4 KiB data page"]
+    PH["Page header<br/>row count, flags, accounting"]
+    ROWS["Row data — grows from the top"]
+    IDX["Row index — grows from the bottom<br/>reverse order, bit-packed"]
+  end
+  PG --> Page
+          </div>
+          <figcaption><span class="fig-num">Figure 13.3</span> — The PDB page
+          layout. Rows grow down from the header; a reverse-order row index grows up
+          from the page end.</figcaption>
+        </div>
+
+        <p>Within a page, row data grows downward from the header while a bit-packed
+        row index grows upward from the end of the page — a classic
+        space-efficient slotted-page design. The module also implements a
+        <strong>DeviceSQL string encoder</strong>: short ASCII strings and long
+        strings (encoded UTF-16-LE) use different on-disk forms.</p>
+
+        <h3>The row encoders</h3>
+        <p>Each of the 20 tables has its own row encoder, and each was verified
+        byte-identical to samples lifted from a real Pioneer F:-drive:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Table</th><th>Row content</th></tr></thead>
+          <tbody>
+            <tr><td>Tracks (<code>djmdContent</code>)</td><td>A fixed 0x88-byte header plus 21 string offsets.</td></tr>
+            <tr><td>Artists / Albums</td><td>"Far-name" rows with compact structured headers.</td></tr>
+            <tr><td>Genres / Labels / Keys / Colours</td><td>Small rows — an ID plus a DeviceSQL string.</td></tr>
+            <tr><td>Playlist tree / Playlist entries</td><td>The folder-and-playlist structure and its membership.</td></tr>
+            <tr><td>Artwork</td><td>An ID plus the DeviceSQL artwork path.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h3>The anti-corruption invariants</h3>
+        <p>The comments in <code>usb_pdb.py</code> enumerate ten distinct fixes, each
+        discovered by comparing the writer's output to a real Pioneer drive
+        byte-by-byte. A representative sample of the invariants that, if violated,
+        produce the dreaded "corrupted" dialog:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Invariant</th><th>Why it matters</th></tr></thead>
+          <tbody>
+            <tr><td>Data-page flag <code>0x34</code></td><td>Track data pages use flag <code>0x34</code> (not <code>0x24</code>). The wrong flag corrupts the F:-drive parity.</td></tr>
+            <tr><td>Per-table blank pages</td><td>Each of the 20 tables needs its own dedicated all-zero blank page. Sharing one global blank flags the library corrupted.</td></tr>
+            <tr><td>Chain terminator</td><td>The terminating <code>next_page</code> is patched from 0 to the table's own blank page — so the CDJ does not follow the chain into the file header.</td></tr>
+            <tr><td>The <code>free_size</code> formula</td><td>Page free-space accounting uses the <em>effective</em> footer size, not the physical block size — Rekordbox checks the arithmetic.</td></tr>
+            <tr><td>Empty tables</td><td>An empty table is a single index page where first equals last.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="callout spec">
+          <span class="ico">◈</span>
+          <div class="body">
+            <span class="ct">"Read the file before changing it"</span>
+            <p>The project's coding rules single this file out: every magic number is
+            explained in a comment, the layout is byte-verified, and
+            <code>tests/test_pdb_structure.py</code> guards every structural
+            invariant. A failing PDB test means the change is wrong — not that the
+            test needs updating. The PDB writer handles libraries up to roughly 500
+            tracks; larger libraries fall through to the legacy XML path.</p>
+          </div>
+        </div>
+
+        <h2>13.6 The Sync Engine</h2>
+        <p><code>app/usb_manager.py</code> ties it all together with three classes.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Class</th><th>Responsibility</th></tr></thead>
+          <tbody>
+            <tr><td><code>UsbDetector</code></td><td>Scan drives, identify genuine removable USB sticks, and initialise new ones.</td></tr>
+            <tr><td><code>UsbProfileManager</code></td><td>Persistent CRUD for sync profiles — which playlists go to which stick — and global USB settings.</td></tr>
+            <tr><td><code>UsbSyncEngine</code></td><td>The actual sync — diff calculation, collection and playlist sync, metadata sync.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="figure">
+          <div class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant SE as UsbSyncEngine
+  participant USB as USB Stick
+  U->>SE: start sync (drive, playlists)
+  SE->>USB: acquire .rbep_sync_lock
+  SE->>SE: calculate incremental diff
+  SE->>USB: write exportLibrary.db (OneLibrary)
+  SE->>USB: write export.pdb / exportExt.pdb
+  SE->>USB: copy audio, ANLZ, artwork
+  SE->>USB: seed MYSETTING files
+  SE->>USB: release the lock
+  SE-->>U: stream { stage, message, progress }
+          </div>
+          <figcaption><span class="fig-num">Figure 13.4</span> — A sync run. The
+          engine yields progress events; a lock file prevents a second sync from
+          running concurrently.</figcaption>
+        </div>
+
+        <p>The sync engine is built defensively, because real USB sticks misbehave:</p>
+        <ul>
+          <li><strong>A lock file</strong> (<code>.rbep_sync_lock</code>) prevents two
+          syncs from corrupting one stick.</li>
+          <li><strong>An incremental diff</strong> means only changed tracks are
+          copied — a re-sync of a large library is fast.</li>
+          <li><strong>Filename safety</strong> — <code>_clean_filename()</code> strips
+          trailing dots and spaces and rejects Windows reserved names (CON, PRN,
+          NUL...), because Windows silently drops trailing dots at directory-creation
+          time and later writes then fail.</li>
+          <li><strong>XML safety</strong> — <code>_xml_safe()</code> strips ASCII
+          control characters from metadata so the exported XML stays parseable.</li>
+          <li><strong>Copy-error classification</strong> — only a real disconnect (the
+          drive root vanishing) aborts the batch; a single bad filename is logged and
+          skipped, so one bad track does not kill a 3,000-track sync.</li>
+        </ul>
+
+        <h2>13.7 Artwork and Hardware Settings</h2>
+        <h3>Bucketed artwork</h3>
+        <p><code>app/usb_artwork.py</code> extracts embedded cover art — ID3 APIC,
+        FLAC Picture, MP4 covr atoms, or a <code>cover.jpg</code> sidecar — and
+        resizes it via Pillow to two JPEGs: a small (~80&times;80) and a medium
+        (~500&times;500). They are written to a bucketed
+        <code>PIONEER/Artwork/&lt;bucket&gt;/</code> path so legacy CDJs see the same
+        cover art as Rekordbox 7.</p>
+
+        <h3>Hardware settings</h3>
+        <p><code>app/usb_mysettings.py</code> writes the CDJ and DJM hardware-settings
+        files — <code>MYSETTING.DAT</code>, <code>MYSETTING2.DAT</code>,
+        <code>DJMMYSETTING.DAT</code> — covering 42 editable fields across the player,
+        the extended player, and the mixer. It exposes a JSON schema so the UI can
+        build the right dropdowns without hardcoding any enum tables, and the settings
+        are auto-seeded with sensible defaults on every sync.</p>
+
+        <h2>13.8 Play-Count Synchronisation</h2>
+        <p>A DJ plays the stick at a gig; the CDJ increments play counts on the stick;
+        the PC library is now out of date. <code>app/playcount_sync.py</code>
+        reconciles the two with a <strong>three-way diff</strong>.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  PC["PC play counts"] --> DIFF{"Three-way diff<br/>vs last-sync snapshot"}
+  USB["USB play counts"] --> DIFF
+  SNAP["Last-sync snapshot"] --> DIFF
+  DIFF --> AUTO["Auto-resolved<br/>only one side changed"]
+  DIFF --> CONF["Conflicts<br/>both sides changed"]
+  CONF --> RES["User picks a strategy<br/>take max / take PC / take USB / sum"]
+          </div>
+          <figcaption><span class="fig-num">Figure 13.5</span> — Play-count sync.
+          Comparing both sides against a last-sync snapshot tells genuine conflicts
+          apart from one-sided changes.</figcaption>
+        </div>
+
+        <p>Where only one side changed, the engine resolves it automatically. Where
+        both changed, it surfaces a conflict and lets the user choose a strategy. The
+        result is committed back to both the PC database and the USB XML.</p>
+
+        <h2>13.9 Why the Stick Can Carry Both Formats Safely</h2>
+        <p>A subtlety worth noting: writing both the OneLibrary database and the
+        legacy PDB onto one stick can itself trigger the "corrupted" dialog on
+        Rekordbox 7 if the still-imperfect PDB is present. The sync engine therefore
+        treats the legacy PDB writer as <strong>opt-in</strong> — a profile setting
+        controls it, and when it is off, any stale <code>export.pdb</code> already on
+        the stick is deleted. The OneLibrary path is the safe default; the PDB path
+        is there for older hardware that needs it.</p>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>USB export writes a stick a CDJ reads natively, in two
+            reverse-engineered database formats. The OneLibrary writer works around a
+            broken <code>pyrekordbox</code> creation path with a bundled template and
+            a deliberate WAL flush. The PDB writer implements the DeviceSQL format
+            from scratch — 4&nbsp;KiB slotted pages, a 20-table directory, ten
+            byte-verified anti-corruption invariants. The sync engine adds a lock
+            file, an incremental diff, and hard-won filename and copy-error
+            defences. Artwork, hardware settings, and three-way play-count sync round
+            out a stick that just works in the booth.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

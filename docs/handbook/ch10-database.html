@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>10 · The Database Layer — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 10 · The Backend</div>
+          <h1>The Database Layer</h1>
+          <p class="ch-lead">The library can live in an XML file or in a Rekordbox
+            SQLite database, and a uniform abstraction hides which. This chapter also
+            covers the concurrency lock that keeps writes safe and the subprocess
+            quarantine that keeps a buggy library from crashing the backend.</p>
+        </header>
+
+        <h2>10.1 The Storage Picture</h2>
+        <p>"The database" is really several stores. The user's library is one of two
+        forms; alongside it sit a handful of small SQLite databases for
+        deduplication, caching, and supplementary data.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  subgraph Library["The library — one of two modes"]
+    XML[("Rekordbox XML<br/>parsed to an in-memory cache")]
+    LIVE[("master.db<br/>Rekordbox SQLite, via pyrekordbox")]
+  end
+  subgraph Aux["Auxiliary stores"]
+    REG[("download_registry.db<br/>SoundCloud dedup + history")]
+    CACHE[("analysis cache<br/>gzipped per-file results")]
+    SIDE[("app_data.json<br/>sidecar key-value store")]
+  end
+  WRAP["LibrarySource — uniform abstraction"]
+  WRAP --> XML
+  WRAP --> LIVE
+          </div>
+          <figcaption><span class="fig-num">Figure 10.1</span> — The storage
+          landscape. The library is XML or SQLite; the auxiliary stores support
+          deduplication and caching.</figcaption>
+        </div>
+
+        <h2>10.2 The Two Library Modes</h2>
+        <p>The application can manage the collection in either of two modes. The
+        choice is the user's, made at the four-card mode picker on startup.</p>
+
+        <h3>Standalone XML mode — <code>RekordboxXMLDB</code></h3>
+        <p><code>app/database.py</code> defines <code>RekordboxXMLDB</code>, the
+        default mode. It parses a Rekordbox-compatible XML document into an
+        <strong>in-memory dictionary cache</strong>. Reads are then served from RAM —
+        a 10,000-track library loads in roughly 200&nbsp;ms and every subsequent read
+        is a sub-five-millisecond cache hit. Writes mutate the cache; an explicit
+        <code>save_xml()</code> persists the cache back to the file.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>load_xml(path)</code></td><td>Parse the XML into the in-memory cache.</td></tr>
+            <tr><td><code>get_tracks()</code> / <code>get_playlists()</code></td><td>Read tracks and playlists from the cache.</td></tr>
+            <tr><td><code>get_track_details(tid)</code></td><td>A single track by ID.</td></tr>
+            <tr><td><code>add_track()</code> / <code>delete_track()</code></td><td>Mutate the cache.</td></tr>
+            <tr><td><code>save_track_cues()</code> / <code>save_track_beatgrid()</code></td><td>Persist cues and the beatgrid for a track.</td></tr>
+            <tr><td><code>update_tracks_metadata()</code></td><td>Batch metadata update.</td></tr>
+            <tr><td><code>save_xml()</code></td><td>Write the cache back to the XML file.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h3>Live mode — <code>LiveRekordboxDB</code></h3>
+        <p><code>app/live_database.py</code> defines <code>LiveRekordboxDB</code>,
+        which reads and writes a real Rekordbox <code>master.db</code> SQLite database
+        through the <code>pyrekordbox</code> library. It is thread-safe and takes an
+        automatic backup before a write. Crucially, it opens a <strong>per-thread
+        database handle</strong> — each FastAPI request thread gets its own
+        <code>rbox.MasterDb</code> object — which makes the write lock of the next
+        section essential rather than optional.</p>
+
+        <div class="callout warn">
+          <span class="ico">▲</span>
+          <div class="body">
+            <span class="ct">Live mode requires Rekordbox to be closed</span>
+            <p>SQLite does not tolerate two processes writing one database file.
+            <code>LiveRekordboxDB</code> writes refuse to proceed if Rekordbox itself
+            has the file open — the backend checks via <code>SystemGuard</code> and
+            returns the <code>REKORDBOX_RUNNING</code> error code.</p>
+          </div>
+        </div>
+
+        <h2>10.3 The Uniform Abstraction</h2>
+        <p>No feature in the codebase should contain an
+        <code>if xml_mode … else live_mode …</code> branch. Two layers ensure that:</p>
+
+        <ul>
+          <li>A <strong>wrapper</strong> routes every create/read/update/delete
+          operation to whichever mode is active, so the route handlers call one API
+          regardless of mode.</li>
+          <li><code>app/library_source.py</code> defines <code>LibrarySource</code>,
+          a uniform read abstraction over both modes used specifically by the USB
+          sync engine — it can read tracks, playlists, and cues without caring where
+          they come from.</li>
+        </ul>
+
+        <p>This is why the changelog can claim "full feature parity" between
+        Standalone XML and Live mode: parity is structural, not the result of
+        duplicating each feature twice.</p>
+
+        <h2>10.4 The Concurrency Model</h2>
+        <p>FastAPI serves requests on a thread pool. With Live mode opening a handle
+        per thread, two threads can issue two writes to one SQLite file at the same
+        instant — and <code>pyrekordbox</code> 0.1.7 crashes the entire Python
+        process when that happens. The backend's defence is a single re-entrant
+        lock.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  T1["Request thread A"] --> L{"_db_write_lock<br/>(threading.RLock)"}
+  T2["Request thread B"] --> L
+  T3["Request thread C"] --> L
+  L -->|"one at a time"| W["master.db write"]
+          </div>
+          <figcaption><span class="fig-num">Figure 10.2</span> — <code>_db_write_lock</code>
+          serialises every database writer. Concurrent threads queue; only one
+          write touches the file at a time.</figcaption>
+        </div>
+
+        <p>The lock is applied automatically. At import time, a loop in
+        <code>database.py</code> walks the mutating methods of the
+        <code>RekordboxDB</code> class and wraps each one in a
+        <code>@_serialised</code> decorator that acquires <code>_db_write_lock</code>
+        before the method body runs. Because the lock is <strong>re-entrant</strong>,
+        a wrapped method calling another wrapped method does not deadlock. Routes that
+        need several mutations to be atomic together use an exposed
+        <code>db_lock()</code> context manager rather than relying on
+        method-by-method acquisition.</p>
+
+        <div class="callout spec">
+          <span class="ico">◈</span>
+          <div class="body">
+            <span class="ct">A known coverage gap — on the roadmap</span>
+            <p>An empirical audit (the <code>db-write-lock-retrofit</code> research
+            doc, Chapter 25) found the auto-wrap is a hand-maintained method-name
+            list that can silently drift, and that the <code>MyTags</code> routes
+            write through <code>LiveRekordboxDB</code> directly, bypassing the
+            wrapped facade — three unprotected write paths. The proposed fix replaces
+            the name list with a prefix-matched class decorator applied to both
+            classes, plus a CI test that fails if any mutator is left unwrapped.</p>
+          </div>
+        </div>
+
+        <h2>10.5 The ANLZ Subprocess Quarantine</h2>
+        <p>The second great reliability problem with <code>pyrekordbox</code> is more
+        severe than concurrency. The library has a known bug — an
+        <code>unwrap()</code> on a <code>None</code> value, deep inside its Rust code
+        — that <strong>aborts the whole Python process</strong> when it meets a
+        malformed analysis row. On Windows the backend simply vanishes with exit code
+        <code>0xC0000409</code>. A single bad track in a user's library could kill the
+        application.</p>
+
+        <p>The answer is <code>app/anlz_safe.py</code> and its
+        <code>SafeAnlzParser</code> — a fortress of defences around every
+        <code>pyrekordbox</code> ANLZ call.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  CALL["Backend needs beatgrids"]
+  CALL --> HDR{"Header valid?<br/>PMAI magic, size ≥ 28 B"}
+  HDR -->|"no"| SKIP["Skip — blacklist the id"]
+  HDR -->|"yes"| POOL["ProcessPoolExecutor<br/>max_workers = 1"]
+  POOL --> WORK["Worker subprocess<br/>runs the pyrekordbox call"]
+  WORK -->|"ok"| RESULT["Beatgrid data"]
+  WORK -->|"panic / crash"| BISECT["Bisect the chunk<br/>to find the bad id"]
+  BISECT --> BLACK["Blacklist offending id<br/>respawn worker"]
+  BLACK --> POOL
+          </div>
+          <figcaption><span class="fig-num">Figure 10.3</span> — The
+          <code>SafeAnlzParser</code> defences. A crash kills only the worker; a
+          bisecting search isolates the one bad track.</figcaption>
+        </div>
+
+        <p>The layered defences:</p>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Defence</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td>Header validation</td><td><code>_validate_anlz_header()</code> checks for the <code>PMAI</code> magic bytes and a minimum 28-byte size, rejecting truncated or non-ANLZ files before <code>pyrekordbox</code> ever sees them.</td></tr>
+            <tr><td>Subprocess isolation</td><td>A <code>ProcessPoolExecutor</code> with <strong>one</strong> worker runs every <code>pyrekordbox</code> call. A panic kills only that worker; the parent respawns it.</td></tr>
+            <tr><td>Batch &amp; bisect</td><td>Beatgrids load in chunks of 500 tracks. When a worker crashes, the chunk is bisected — roughly log&#8322;N respawns — to identify the single offending track ID.</td></tr>
+            <tr><td>Blacklist cache</td><td>Any track ID that panics, times out, or fails the header check is added to <code>_bad_ids</code> and skipped for the rest of the session.</td></tr>
+            <tr><td>Chunk timeout</td><td>A 60-second per-chunk timeout kills a hung worker — a hang is dropped without bisecting, since bisecting a hang would only hang again.</td></tr>
+            <tr><td>Panic budget</td><td>A hard ceiling of 32 subprocess restarts per run protects against a pathological database where every other row panics.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>The result: the UI sees its tracks immediately, beatgrids fill in within
+        seconds on a background daemon thread, and no malformed analysis file
+        anywhere in a user's library can take the backend down. This is the
+        "defensive isolation" principle of Chapter 1 in its purest form.</p>
+
+        <div class="callout note">
+          <span class="ico">◆</span>
+          <div class="body">
+            <span class="ct">Background, not blocking</span>
+            <p>Beatgrid loading is dispatched to a daemon thread <em>after</em> the
+            library reports itself loaded. A slow or crashing
+            <code>pyrekordbox</code> call therefore can never block library
+            startup — the tracks appear, and the beatgrids catch up.</p>
+          </div>
+        </div>
+
+        <h2>10.6 The Download Registry</h2>
+        <p><code>app/download_registry.py</code> is a dedicated SQLite database — at
+        <code>download_registry.db</code> — that backs the SoundCloud feature with
+        deduplication and a history log.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+erDiagram
+  DOWNLOAD {
+    int sc_track_id PK
+    string sha256
+    string status
+    string device_id
+    string file_path
+    datetime downloaded_at
+  }
+  ANALYSIS_HISTORY {
+    int id PK
+    int sc_track_id FK
+    float bpm
+    string key
+    string status
+    datetime analyzed_at
+  }
+  DOWNLOAD ||--o{ ANALYSIS_HISTORY : "logged for"
+          </div>
+          <figcaption><span class="fig-num">Figure 10.4</span> — The download
+          registry. Deduplication works two ways — by SoundCloud track ID and by
+          SHA-256 content hash.</figcaption>
+        </div>
+
+        <p>The registry deduplicates on two axes: an O(1) lookup by SoundCloud track
+        ID, and a content-hash lookup by SHA-256 for files that arrived by a
+        different route. It also records a stable per-machine device ID — stored in a
+        <code>.rb_device_id</code> file, not hardware-tied — so a multi-device DJ can
+        see which machine downloaded what. Chapter 20 covers how the SoundCloud
+        downloader uses it.</p>
+
+        <h2>10.7 The Analysis Cache</h2>
+        <p><code>app/analysis_cache.py</code> is a persistent cache that avoids
+        re-running expensive analysis on a file that has not changed. Its validity
+        check is a triple — file modification time, file size, and the analyzer
+        version — and only if all three match is a cached result reused.</p>
+
+        <div class="kv">
+          <div class="kv-row"><div class="k">Index</div><div class="v"><code>index.json</code> — maps file path to {mtime, size, cache id, version}</div></div>
+          <div class="kv-row"><div class="k">Per-file result</div><div class="v"><code>&lt;cache_id&gt;.json.gz</code> — the gzipped analysis result</div></div>
+          <div class="kv-row"><div class="k">Invalidation</div><div class="v">Any change to the analyzer's output schema bumps a version constant, invalidating every stale entry</div></div>
+        </div>
+
+        <p>Content hashing is available as an opt-in (<code>USE_CONTENT_HASH</code>)
+        for "paranoid setups", but it is off by default because hashing a large file
+        is slow — the mtime/size/version triple is fast and sufficient for the common
+        case.</p>
+
+        <h2>10.8 The Stores, Summarised</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Store</th><th>Form</th><th>Holds</th></tr></thead>
+          <tbody>
+            <tr><td>Rekordbox XML</td><td>XML file + RAM cache</td><td>The library, in Standalone mode.</td></tr>
+            <tr><td><code>master.db</code></td><td>Rekordbox SQLite</td><td>The library, in Live mode.</td></tr>
+            <tr><td><code>download_registry.db</code></td><td>SQLite</td><td>SoundCloud download dedup + analysis history.</td></tr>
+            <tr><td>Analysis cache</td><td>JSON index + gzipped blobs</td><td>Cached analysis results, keyed on file fingerprint.</td></tr>
+            <tr><td><code>app_data.json</code></td><td>JSON</td><td>Supplementary sidecar data (artist links, custom fields).</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>The library lives in one of two modes — an in-memory-cached XML file
+            or a Rekordbox <code>master.db</code> — behind a uniform abstraction so
+            no feature branches on mode. A re-entrant <code>_db_write_lock</code>
+            serialises every writer, because <code>pyrekordbox</code> crashes on
+            concurrent writes; a single-worker subprocess with header validation,
+            bisecting, blacklisting, and a panic budget quarantines the library's
+            process-aborting parsing bug. Auxiliary SQLite stores handle download
+            deduplication and analysis caching.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

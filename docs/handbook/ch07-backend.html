@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>07 · Backend Overview — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 07 · The Backend</div>
+          <h1>Backend Overview (FastAPI)</h1>
+          <p class="ch-lead">The backend is a Python FastAPI application — roughly
+            forty modules and 4,000 lines of route definitions — that runs as a
+            loopback-only sidecar. This chapter establishes the shape, the
+            conventions, and the request lifecycle before the deep dives that
+            follow.</p>
+        </header>
+
+        <h2>7.1 What the Backend Is</h2>
+        <p>The backend is the application's centre of gravity. It owns the library,
+        the database connections, the analysis pipeline, the USB writers, the
+        SoundCloud integration, and every byte of disk I/O. The frontend has no
+        direct access to the filesystem or the database — it asks the backend, over
+        HTTP, for everything.</p>
+
+        <p>Physically, the backend is the <code>app/</code> Python package: about
+        forty modules, with <code>app/main.py</code> as the entry point that wires
+        them all into a single FastAPI application. In development it runs as
+        <code>python -m app.main</code>; in production it is a PyInstaller-built
+        executable named <code>rb-backend</code>. Either way it serves
+        <code>127.0.0.1:8000</code> and nothing else.</p>
+
+        <div class="kv">
+          <div class="kv-row"><div class="k">Framework</div><div class="v">FastAPI 0.109.0 on Uvicorn 0.27.0</div></div>
+          <div class="kv-row"><div class="k">Bind address</div><div class="v">127.0.0.1:8000 — loopback only, never 0.0.0.0</div></div>
+          <div class="kv-row"><div class="k">Entry point</div><div class="v">app/main.py — ~4,000 lines, all 146 routes</div></div>
+          <div class="kv-row"><div class="k">Package size</div><div class="v">~40 modules, ~26k lines of Python (with tests)</div></div>
+          <div class="kv-row"><div class="k">Process model</div><div class="v">One main process + a ProcessPoolExecutor for analysis + an isolated ANLZ subprocess</div></div>
+        </div>
+
+        <h2>7.2 The Module Landscape</h2>
+        <p>The forty modules are not a flat heap. They group into functional clusters,
+        each cluster the subject of a later chapter.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  MAIN["main.py — routes, CORS,<br/>error handlers, the write lock"]
+  MAIN --> WEB["Web support<br/>auth · rate_limit · security_compare<br/>logging_utils · config"]
+  MAIN --> SVC["Services<br/>services.py · audio_tags · sidecar"]
+  MAIN --> DB["Database layer<br/>database · live_database<br/>library_source · anlz_safe"]
+  MAIN --> AN["Analysis<br/>analysis_engine · audio_analyzer<br/>analysis_db_writer · analysis_cache<br/>phrase_generator · anlz_writer · anlz_sidecar"]
+  MAIN --> USB["USB export<br/>usb_manager · usb_one_library<br/>usb_pdb · usb_artwork · usb_mysettings<br/>playcount_sync"]
+  MAIN --> SC["SoundCloud<br/>soundcloud_api · soundcloud_downloader<br/>download_registry"]
+  MAIN --> IMP["Import<br/>folder_watcher · import_tracker"]
+  MAIN --> RB["Rekordbox interop<br/>rekordbox_export · rekordbox_bridge<br/>xml_generator · rbep_parser · batch_worker"]
+          </div>
+          <figcaption><span class="fig-num">Figure 7.1</span> — The backend module
+          landscape. <code>main.py</code> is the hub; everything else is a focused
+          module in one of eight clusters.</figcaption>
+        </div>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Cluster</th><th>Covered in</th></tr></thead>
+          <tbody>
+            <tr><td>Web support — the request machinery</td><td>This chapter + Chapter 21</td></tr>
+            <tr><td>Services — business logic</td><td>Chapter 9</td></tr>
+            <tr><td>Database layer</td><td>Chapter 10</td></tr>
+            <tr><td>Analysis &amp; ANLZ</td><td>Chapters 11 &amp; 12</td></tr>
+            <tr><td>USB export</td><td>Chapter 13</td></tr>
+            <tr><td>SoundCloud</td><td>Chapter 20</td></tr>
+            <tr><td>Import</td><td>Chapter 9</td></tr>
+            <tr><td>Rekordbox interop</td><td>Chapters 9 &amp; 12</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>7.3 The Request Lifecycle</h2>
+        <p>Every request that reaches the backend travels the same path. Understanding
+        it once explains the behaviour of all 146 routes.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+sequenceDiagram
+  participant C as Client (frontend)
+  participant CORS as CORS Middleware
+  participant RL as Rate Limiter
+  participant AUTH as require_session
+  participant H as Route Handler
+  participant E as Error Handler
+  C->>CORS: HTTP request
+  CORS->>CORS: origin allowed? else reject
+  CORS->>RL: (HIGH-tier routes only)
+  RL->>RL: token-bucket check, else 429
+  RL->>AUTH: (mutation routes only)
+  AUTH->>AUTH: Bearer token valid? else 401
+  AUTH->>H: dispatch to handler
+  H->>H: Pydantic validates the body
+  alt success
+    H-->>C: { status: "ok", data: ... }
+  else exception raised
+    H->>E: exception bubbles up
+    E-->>C: { status: "error", message, code }
+  end
+          </div>
+          <figcaption><span class="fig-num">Figure 7.2</span> — The request
+          lifecycle. CORS, then (where applicable) the rate limiter, then the auth
+          gate, then the handler — with a global error handler catching anything
+          that escapes.</figcaption>
+        </div>
+
+        <p>Three of those stages — CORS, the rate limiter, and the auth gate — are
+        security machinery and are fully documented in Chapter 21. The remaining two
+        — validation and the response envelope — are conventions worth establishing
+        now.</p>
+
+        <h2>7.4 Typed Requests with Pydantic v2</h2>
+        <p>Every endpoint that accepts a request body declares a Pydantic v2 model
+        for it. This was not always true — the Slopcode-Cleanup found sixteen
+        endpoints accepting an untyped <code>dict</code> — and it is now a hard rule.
+        A typed model gives FastAPI automatic validation, automatic 422 responses on
+        bad input, and a single place to document the shape.</p>
+
+        <p>The settings endpoint is the most carefully modelled. Its <code>SetReq</code>
+        model does not merely validate types; it enforces strict size caps — 8&nbsp;KB
+        per value, 64 dictionary keys, 256 list items, 256&nbsp;KB total — because the
+        endpoint writes to a persistent store and an unbounded write would be a
+        denial-of-service primitive (Chapter 21).</p>
+
+        <h2>7.5 The Response Envelope</h2>
+        <p>Every endpoint returns one of two shapes, so the frontend can handle
+        success and failure uniformly:</p>
+
+        <pre><code># Success
+{ "status": "ok", "data": ... }
+
+# Error
+{ "status": "error", "message": "Human-readable description", "code": "ERROR_CODE" }</code></pre>
+
+        <p>The <code>code</code> field is a stable, machine-readable error identifier.
+        The defined codes:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Code</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>REKORDBOX_RUNNING</code></td><td>A write was refused because Rekordbox has the database open.</td></tr>
+            <tr><td><code>PATH_SANDBOX_VIOLATION</code></td><td>A file path fell outside the allowed roots.</td></tr>
+            <tr><td><code>AUTH_EXPIRED</code></td><td>The SoundCloud OAuth token has expired.</td></tr>
+            <tr><td><code>RATE_LIMITED</code></td><td>The SoundCloud API returned 429.</td></tr>
+            <tr><td><code>FILE_NOT_FOUND</code></td><td>An audio file is missing from disk.</td></tr>
+            <tr><td><code>ANALYSIS_PENDING</code></td><td>An analysis task is still running.</td></tr>
+            <tr><td><code>ANALYSIS_FAILED</code></td><td>An analysis task failed.</td></tr>
+            <tr><td><code>USB_LOCKED</code></td><td>Another USB sync is already in progress.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>7.6 The Filesystem Sandbox</h2>
+        <p>The single most important safety function in the backend is
+        <code>validate_audio_path()</code>. Many endpoints take a file path from the
+        client — to stream audio, to import a file, to reveal a location in the OS
+        file manager. An unchecked path is a path-traversal vulnerability.</p>
+
+        <p><code>validate_audio_path()</code> resolves the requested path and checks
+        it against <code>ALLOWED_AUDIO_ROOTS</code> using
+        <code>Path.is_relative_to(resolved_root)</code> — not a string
+        <code>startswith</code>, which is defeatable with <code>..</code> tricks and
+        symlinks. A path outside the sandbox raises a <code>ValueError</code> and the
+        request is refused with <code>PATH_SANDBOX_VIOLATION</code>.</p>
+
+        <div class="callout warn">
+          <span class="ico">▲</span>
+          <div class="body">
+            <span class="ct">The sandbox is a coding rule, not an option</span>
+            <p>The project's rules forbid bypassing the sandbox with
+            <code>os.path.normpath</code> tricks. Any new endpoint that touches a
+            client-supplied path must route it through
+            <code>validate_audio_path()</code>. The 2026-05-18 security work fixed a
+            <code>/api/file/reveal</code> endpoint that had skipped this — see
+            Chapter 21.</p>
+          </div>
+        </div>
+
+        <h2>7.7 The Database Write Lock</h2>
+        <p>FastAPI serves requests on a thread pool, so two requests can run at once.
+        The Rekordbox <code>master.db</code> cannot tolerate that — the underlying
+        library crashes on concurrent writes. The backend's answer is
+        <code>_db_write_lock</code>, a module-level re-entrant lock in
+        <code>app/main.py</code>.</p>
+
+        <p>Every method that writes the Rekordbox database acquires this lock. The
+        database module even applies it automatically: at import time a decorator
+        pass wraps every mutating method of the <code>RekordboxDB</code> class so the
+        lock is taken without the caller having to remember. Routes that need to
+        perform several mutations atomically use an exposed <code>db_lock()</code>
+        context manager. The lock is re-entrant, so a wrapped method calling another
+        wrapped method does not deadlock. Chapter 10 covers the full concurrency
+        story, including a known coverage gap that is on the roadmap.</p>
+
+        <h2>7.8 Error-Handling Conventions</h2>
+        <p>The Slopcode-Cleanup left the backend with a strict set of error-handling
+        rules, all of which are still enforced:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Rule</th><th>Rationale</th></tr></thead>
+          <tbody>
+            <tr><td>No bare <code>except:</code> or <code>except: pass</code></td><td>Every catch names its exception type and logs it. The audit found 40+ bare excepts; all were typed.</td></tr>
+            <tr><td>No synchronous <code>requests.get()</code> inside <code>async def</code></td><td>A blocking call freezes the event loop. Async paths use an async HTTP client with a timeout.</td></tr>
+            <tr><td>Every subprocess call has a <code>timeout=</code></td><td>A hung FFmpeg or PowerShell process must never hang the backend. FFmpeg defaults to 30&nbsp;s.</td></tr>
+            <tr><td>No raw f-string SQL</td><td>SQL is parameterised or goes through the ORM. Where concatenation is unavoidable, an explicit table allowlist guards it.</td></tr>
+            <tr><td>Type hints required on new code</td><td><code>mypy</code> must pass before commit.</td></tr>
+            <tr><td><code>pathlib</code> over <code>os.path.join</code></td><td>Consistent, safe path handling throughout.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>Logging follows from the same era: structured log lines with key=value
+        context, and a <code>RedactingFormatter</code> that strips absolute
+        filesystem paths from every log line and traceback before it is written —
+        so a crash report or a shared log file cannot leak a user's directory
+        structure.</p>
+
+        <h2>7.9 Configuration</h2>
+        <p>Path and environment configuration lives in <code>app/config.py</code> as
+        a set of constants:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Constant</th><th>Default / source</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>REKORDBOX_ROOT</code></td><td><code>%APPDATA%/Pioneer/rekordbox</code></td><td>Where the Rekordbox database lives.</td></tr>
+            <tr><td><code>DB_FILENAME</code></td><td><code>master.db</code></td><td>The Rekordbox SQLite filename.</td></tr>
+            <tr><td><code>FFMPEG_BIN</code></td><td><code>ffmpeg</code></td><td>The FFmpeg binary — expected on PATH.</td></tr>
+            <tr><td><code>EXPORT_DIR</code></td><td><code>./exports</code></td><td>Where rendered audio exports go.</td></tr>
+            <tr><td><code>MUSIC_DIR</code></td><td><code>./music</code></td><td>The default music-library root.</td></tr>
+            <tr><td><code>LOG_DIR</code> / <code>TEMP_DIR</code></td><td><code>./logs</code> / <code>./temp_uploads</code></td><td>Log files and temporary processing space.</td></tr>
+            <tr><td><code>DB_KEY</code></td><td>env <code>REKORDBOX_DB_KEY</code></td><td>The Rekordbox SQLite encryption key.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>Analysis parameters have their own configuration module,
+        <code>analysis_settings.py</code>, whose defaults match Rekordbox conventions
+        and can be overridden with <code>RB_ANALYSIS_</code>-prefixed environment
+        variables. Secrets — chiefly the SoundCloud client credentials — come from a
+        <code>.env</code> file that is never committed; <code>.env.example</code> is
+        the only template in the repository.</p>
+
+        <h2>7.10 The Startup Sequence</h2>
+        <p>When the backend process starts, before it serves a single request, it:</p>
+        <ol>
+          <li>Generates the session token and emits the <code>LMS_TOKEN=</code>
+          banner (Chapter 21).</li>
+          <li>Initialises the download registry database schema.</li>
+          <li>Configures CORS for the allowed localhost origins.</li>
+          <li>Installs the global exception handlers.</li>
+          <li>Binds Uvicorn to <code>127.0.0.1:8000</code>.</li>
+        </ol>
+        <p>The library itself is <em>not</em> loaded at startup — it is loaded on
+        demand when the user picks a mode, so the backend is responsive immediately
+        and the heavy parse happens only when needed.</p>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>The backend is a ~40-module FastAPI application with
+            <code>app/main.py</code> as the hub for 146 routes. Every request passes
+            CORS, optionally the rate limiter, optionally the auth gate, then the
+            handler — with a global error handler producing a uniform
+            <code>{status, data}</code> or <code>{status, message, code}</code>
+            envelope. Three pieces of machinery underpin everything: the
+            <code>validate_audio_path()</code> sandbox, the <code>_db_write_lock</code>,
+            and a strict set of error-handling conventions from the cleanup era. The
+            next chapter catalogues all 146 routes.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

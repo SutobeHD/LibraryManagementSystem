@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>08 · Complete API Reference — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 08 · The Backend</div>
+          <h1>Complete API Reference</h1>
+          <p class="ch-lead">All 146 REST routes the backend exposes, grouped by
+            feature. This is the definitive map of the contract between the frontend
+            and the Python sidecar.</p>
+        </header>
+
+        <h2>8.1 Reading This Reference</h2>
+        <p>Routes are grouped into fifteen feature sections. Each table shows the HTTP
+        method, the path, an authentication marker, and a description. Two markers
+        appear:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Marker</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill auth">AUTH</span></td><td>Requires <code>Authorization: Bearer &lt;token&gt;</code>. A missing or wrong token returns 401. Applied to every mutation route.</td></tr>
+            <tr><td><span class="pill auth">RL</span></td><td>Additionally rate-limited by a token-bucket — excess requests return 429 with a <code>Retry-After</code> header.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>Unmarked routes are open — they are read-only, or the single heartbeat
+        exception. The methods are colour-coded: <span class="pill get">GET</span>
+        <span class="pill post">POST</span> <span class="pill put">PUT</span>
+        <span class="pill patch">PATCH</span> <span class="pill del">DELETE</span>.</p>
+
+        <div class="callout note">
+          <span class="ico">◆</span>
+          <div class="body">
+            <span class="ct">The authentication model in one line</span>
+            <p>84 of the 85 mutation routes (every POST / PUT / PATCH / DELETE)
+            carry the auth gate. The sole exception is
+            <code>POST /api/system/heartbeat</code>, a body-less liveness probe.
+            Read-only GET routes are loopback-gated only. Chapter 21 explains why.</p>
+          </div>
+        </div>
+
+        <h2>8.2 Library</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/library/tracks</code></td><td></td><td>All tracks with full metadata.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/playlist/{pid}/tracks</code></td><td></td><td>Tracks in a specific playlist.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/track/{tid}</code></td><td></td><td>A single track's full detail.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/track/{tid}/cues</code></td><td></td><td>Hot cues and memory cues for a track.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/track/{tid}/beatgrid</code></td><td></td><td>Beatgrid data for a track.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/track/{tid}</code></td><td><span class="pill auth">AUTH</span></td><td>Update track metadata fields.</td></tr>
+            <tr><td><span class="pill del">DEL</span></td><td><code>/api/track/{tid}</code></td><td><span class="pill auth">AUTH</span></td><td>Delete a track.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/track/delete</code></td><td><span class="pill auth">AUTH</span></td><td>Delete a track by body parameter.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/track/cues/save</code></td><td><span class="pill auth">AUTH</span></td><td>Save cue points for a track.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/track/grid/save</code></td><td><span class="pill auth">AUTH</span></td><td>Save the beatgrid for a track.</td></tr>
+            <tr><td><span class="pill patch">PATCH</span></td><td><code>/api/tracks/batch</code></td><td><span class="pill auth">AUTH</span></td><td>Batch-update metadata on multiple tracks.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/tracks/move</code></td><td><span class="pill auth">AUTH</span></td><td>Move tracks between playlists.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/artists</code></td><td></td><td>All artists, normalised.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/artist/{aid}/tracks</code></td><td></td><td>Tracks by a given artist.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/genres</code></td><td></td><td>All genres.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/labels</code></td><td></td><td>All labels.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/albums</code></td><td></td><td>All albums.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/label/{aid}/tracks</code></td><td></td><td>Tracks by a given label.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/album/{aid}/tracks</code></td><td></td><td>Tracks on a given album.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/artwork</code></td><td></td><td>Serve the artwork image for a track.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>8.3 Playlists</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/playlists/tree</code></td><td></td><td>The full playlist tree (nested folders and playlists).</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/playlists/create</code></td><td><span class="pill auth">AUTH</span></td><td>Create a new playlist.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/playlists/rename</code></td><td><span class="pill auth">AUTH</span></td><td>Rename a playlist.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/playlists/move</code></td><td><span class="pill auth">AUTH</span></td><td>Move a playlist within the tree.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/playlists/delete</code></td><td><span class="pill auth">AUTH</span></td><td>Delete a playlist.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/playlists/add-track</code></td><td><span class="pill auth">AUTH</span></td><td>Add a track to a playlist.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/playlists/remove-track</code></td><td><span class="pill auth">AUTH</span></td><td>Remove a track from a playlist.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/playlists/reorder</code></td><td><span class="pill auth">AUTH</span></td><td>Reorder tracks within a playlist.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/playlists/smart/create</code></td><td><span class="pill auth">AUTH</span></td><td>Create a smart playlist with rules.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/playlists/smart/update</code></td><td><span class="pill auth">AUTH</span></td><td>Update a smart playlist's rules.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/playlists/smart/{pid}/evaluate</code></td><td></td><td>Re-evaluate a smart playlist against the library.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/playlists/folder/create</code></td><td><span class="pill auth">AUTH</span></td><td>Create a folder node in the playlist tree.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>8.4 Audio</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/stream</code></td><td></td><td>Stream an audio file with range-request support, sandboxed.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/audio/stream</code></td><td></td><td>Alias for the stream endpoint.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/audio/waveform</code></td><td></td><td>Multiband waveform data; <code>pps</code> controls points-per-second.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/audio/analyze</code></td><td><span class="pill auth">AUTH</span></td><td>Start async BPM/key analysis; returns a <code>task_id</code>.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/audio/analyze/{task_id}</code></td><td></td><td>Poll an analysis result.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/audio/slice</code></td><td><span class="pill auth">AUTH</span></td><td>Slice an audio file at beat positions.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/audio/render</code></td><td><span class="pill auth">AUTH</span></td><td>Render audio via FFmpeg — format conversion and export.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/audio/import</code></td><td><span class="pill auth">AUTH</span></td><td>Import a local audio file into the library.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/track/{tid}/analyze</code></td><td><span class="pill auth">AUTH</span></td><td>Full analysis pipeline on a single track.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/track/{tid}/analyze-full</code></td><td><span class="pill auth">AUTH</span></td><td>Analyse, write ANLZ files, and update <code>master.db</code> in one call.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/library/analyze-batch</code></td><td><span class="pill auth">AUTH</span></td><td>Batch-analyse tracks with NDJSON streaming progress.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/library/analyze-status</code></td><td></td><td>Analysis-engine capabilities and the count of unanalysed tracks.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>8.5 Projects (DAW / RBEP)</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/projects</code></td><td></td><td>List <code>.rbep</code> project files.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/projects/save</code></td><td><span class="pill auth">AUTH</span></td><td>Save a non-destructive edit project to <code>.rbep</code>.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/projects/{name}</code></td><td></td><td>Load and parse a specific project.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/projects/rbep/list</code></td><td></td><td>List available <code>.rbep</code> files.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/projects/rbep/{name}</code></td><td></td><td>Get the parsed content of a project.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>8.6 Library Management</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/library/status</code></td><td></td><td>Library load state, mode, and path.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/library/mode</code></td><td><span class="pill auth">AUTH</span></td><td>Switch between XML and Live mode.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/library/load</code></td><td><span class="pill auth">AUTH</span></td><td>Load a Rekordbox XML file into memory.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/library/unload</code></td><td><span class="pill auth">AUTH</span></td><td>Unload the current library.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/library/new</code></td><td><span class="pill auth">AUTH</span></td><td>Create a new empty library.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/library/sync</code></td><td><span class="pill auth">AUTH</span></td><td>Persist the current state.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/library/smart-playlists</code></td><td><span class="pill auth">AUTH</span></td><td>Generate smart playlists from rules.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/library/scan-folder</code></td><td><span class="pill auth">AUTH</span></td><td>Background-scan a directory and auto-import audio.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/library/import-paths</code></td><td><span class="pill auth">AUTH</span></td><td>Bulk-import a list of explicit file paths.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/library/clean-titles</code></td><td><span class="pill auth">AUTH</span></td><td>Clean track title strings.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/library/folder-watcher/status</code></td><td></td><td>Report the active folder-watcher state.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/library/folder-watcher/add</code></td><td><span class="pill auth">AUTH</span></td><td>Register a folder for auto-watch and auto-import.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/library/folder-watcher/remove</code></td><td><span class="pill auth">AUTH</span></td><td>Stop watching a folder.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/import/tasks</code></td><td></td><td>List pending and completed import tasks.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/import/tasks/clear</code></td><td><span class="pill auth">AUTH</span></td><td>Clear completed import tasks.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/debug/load_xml</code></td><td><span class="pill auth">AUTH</span></td><td>Debug endpoint — reload XML from disk.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>8.7 Rekordbox XML</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/xml/clean</code></td><td><span class="pill auth">AUTH</span></td><td>Clean a Rekordbox XML file.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/rekordbox/export</code></td><td><span class="pill auth">AUTH</span></td><td>Export selected tracks to Rekordbox-compatible XML.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/rekordbox/import</code></td><td><span class="pill auth">AUTH</span></td><td>Import tracks from a Rekordbox XML export.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/file/write</code></td><td><span class="pill auth">AUTH</span></td><td>Write raw XML content to a file, sandboxed.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/file/reveal</code></td><td><span class="pill auth">AUTH</span></td><td>Open the OS file manager at a sandboxed path.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>8.8 Insights</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/insights/low_quality</code></td><td></td><td>Tracks below a bitrate/quality threshold.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/insights/no_artwork</code></td><td></td><td>Tracks missing embedded artwork.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/insights/lost</code></td><td></td><td>Tracks whose file paths no longer exist on disk.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/insights/bpm_distribution</code></td><td></td><td>BPM histogram data for the analytics dashboard.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>8.9 Tools</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/tools/duplicates</code></td><td></td><td>Find duplicate tracks by title and artist.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/tools/duplicates/merge</code></td><td><span class="pill auth">AUTH</span></td><td>Merge a set of duplicate tracks.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/tools/duplicates/merge-all</code></td><td><span class="pill auth">AUTH</span></td><td>Auto-merge all detected duplicates.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/tools/rename</code></td><td><span class="pill auth">AUTH</span></td><td>Rename tracks (Live mode only).</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/tools/batch-comment</code></td><td><span class="pill auth">AUTH</span></td><td>Batch-update comments on multiple tracks.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/metadata/merge</code></td><td><span class="pill auth">AUTH</span></td><td>Merge metadata from one track into another.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/duplicates/scan</code></td><td><span class="pill auth">AUTH</span></td><td>Start a background acoustic-fingerprint scan; returns a <code>job_id</code>.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/duplicates/results</code></td><td></td><td>Poll the duplicate-scan status and results.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/duplicates/merge</code></td><td><span class="pill auth">AUTH</span></td><td>Merge duplicate tracks found by the acoustic scan.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>8.10 SoundCloud</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/soundcloud/playlists</code></td><td></td><td>Fetch SoundCloud playlists for the authenticated user.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/soundcloud/me</code></td><td></td><td>Get the authenticated SoundCloud profile.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/soundcloud/auth-token</code></td><td><span class="pill auth">AUTH</span> <span class="pill auth">RL</span></td><td>Store the SoundCloud OAuth token. Rate-limited.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/soundcloud/settings</code></td><td></td><td>Get SoundCloud-specific settings.</td></tr>
+            <tr><td><span class="pill put">PUT</span></td><td><code>/api/soundcloud/settings</code></td><td><span class="pill auth">AUTH</span></td><td>Update SoundCloud settings.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/soundcloud/preview-matches</code></td><td><span class="pill auth">AUTH</span></td><td>Preview library matches for SoundCloud tracks (dry run).</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/soundcloud/sync</code></td><td><span class="pill auth">AUTH</span></td><td>Run a SoundCloud playlist sync.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/soundcloud/sync-all</code></td><td><span class="pill auth">AUTH</span></td><td>Sync all SoundCloud playlists at once.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/soundcloud/merge</code></td><td><span class="pill auth">AUTH</span></td><td>Merge a SoundCloud playlist into a local playlist.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/soundcloud/download</code></td><td><span class="pill auth">AUTH</span></td><td>Start a legal download; returns a <code>task_id</code>.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/soundcloud/download-playlist</code></td><td><span class="pill auth">AUTH</span></td><td>Bulk-download every track in a SoundCloud playlist.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/soundcloud/tasks</code></td><td></td><td>List all active download tasks.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/soundcloud/task/{task_id}</code></td><td></td><td>Poll a download task's status.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/soundcloud/history</code></td><td></td><td>Paginated analysis-history log.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/soundcloud/history/stats</code></td><td></td><td>Aggregate history statistics.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/soundcloud/check/{sc_track_id}</code></td><td></td><td>O(1) deduplication check.</td></tr>
+            <tr><td><span class="pill del">DEL</span></td><td><code>/api/soundcloud/history/{sc_track_id}</code></td><td><span class="pill auth">AUTH</span></td><td>Remove a registry entry to allow re-download.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/artist/soundcloud</code></td><td><span class="pill auth">AUTH</span></td><td>Associate an artist with a SoundCloud profile.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>8.11 USB Sync</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/usb/devices</code></td><td></td><td>Scan drives for Rekordbox USB libraries.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/usb/profiles</code></td><td></td><td>List all sync profiles.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/usb/profiles</code></td><td><span class="pill auth">AUTH</span></td><td>Save or update a sync profile.</td></tr>
+            <tr><td><span class="pill del">DEL</span></td><td><code>/api/usb/profiles/{device_id}</code></td><td><span class="pill auth">AUTH</span></td><td>Delete a sync profile.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/usb/profiles/prune</code></td><td><span class="pill auth">AUTH</span></td><td>Drop profiles for devices no longer present.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/usb/{device_id}/contents</code></td><td></td><td>List tracks and playlists on a USB device.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/usb/diff/{device_id}</code></td><td></td><td>Calculate what a sync would change.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/usb/sync</code></td><td><span class="pill auth">AUTH</span></td><td>Run a USB sync for specific playlists.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/usb/sync/all</code></td><td><span class="pill auth">AUTH</span></td><td>Sync the entire local library to USB.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/usb/eject</code></td><td><span class="pill auth">AUTH</span></td><td>Eject a USB device.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/usb/reset</code></td><td><span class="pill auth">AUTH</span></td><td>Reset a USB library to factory state.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/usb/initialize</code></td><td><span class="pill auth">AUTH</span></td><td>Initialise a drive as a Rekordbox USB.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/usb/rename</code></td><td><span class="pill auth">AUTH</span></td><td>Rename a USB device profile.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/usb/settings</code></td><td></td><td>Get USB sync global settings.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/usb/settings</code></td><td><span class="pill auth">AUTH</span></td><td>Update USB sync global settings.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/usb/history</code></td><td><span class="pill auth">AUTH</span></td><td>Append a sync-history entry.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/usb/mysettings/schema</code></td><td></td><td>Hardware-settings field schema.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/usb/mysettings/{device_id}</code></td><td></td><td>Read CDJ/DJM settings from a USB device.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/usb/mysettings</code></td><td><span class="pill auth">AUTH</span></td><td>Write CDJ/DJM settings to a USB device.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/usb/format/preview</code></td><td><span class="pill auth">AUTH</span></td><td>Dry-run preview of a USB format operation.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/usb/format/confirm</code></td><td><span class="pill auth">AUTH</span></td><td>Execute a USB format operation.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/usb/playcount/diff</code></td><td></td><td>Diff PC versus USB play counts.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/usb/playcount/resolve</code></td><td><span class="pill auth">AUTH</span></td><td>Commit resolved play counts.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>8.12 Phrase &amp; Auto-Cue</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/phrase/generate</code></td><td><span class="pill auth">AUTH</span></td><td>Generate phrase cues from a beatgrid.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/phrase/commit</code></td><td><span class="pill auth">AUTH</span></td><td>Write hot cues to the Rekordbox database.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>8.13 MyTags</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/mytags</code></td><td></td><td>List all tag definitions.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/mytags</code></td><td><span class="pill auth">AUTH</span></td><td>Create a new tag definition.</td></tr>
+            <tr><td><span class="pill del">DEL</span></td><td><code>/api/mytags/{tag_id}</code></td><td><span class="pill auth">AUTH</span></td><td>Delete a tag definition and cascade-unlink it.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/track/{tid}/mytags</code></td><td></td><td>Tags applied to a single track.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/track/{tid}/mytags</code></td><td><span class="pill auth">AUTH</span></td><td>Replace the tag set on a track.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>8.14 System</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/settings</code></td><td></td><td>Load user settings.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/settings</code></td><td><span class="pill auth">AUTH</span></td><td>Save user settings, with strict size caps.</td></tr>
+            <tr><td><span class="pill get">GET</span></td><td><code>/api/system/health</code></td><td></td><td>Backend health probe.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/system/heartbeat</code></td><td></td><td>Keep-alive ping — the one unauthenticated mutation route.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/system/shutdown</code></td><td><span class="pill auth">AUTH</span> <span class="pill auth">RL</span></td><td>Graceful server shutdown. Rate-limited.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/system/restart</code></td><td><span class="pill auth">AUTH</span> <span class="pill auth">RL</span></td><td>Restart the backend process. Rate-limited.</td></tr>
+            <tr><td><span class="pill post">POST</span></td><td><code>/api/system/select_db</code></td><td><span class="pill auth">AUTH</span></td><td>Open a file dialog to select the Rekordbox database.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>8.15 The API by the Numbers</h2>
+        <div class="cards">
+          <div class="card"><div class="big">146</div><div class="lbl">Total routes</div></div>
+          <div class="card"><div class="big">84</div><div class="lbl">Auth-gated mutations</div></div>
+          <div class="card"><div class="big">3</div><div class="lbl">Rate-limited routes</div></div>
+          <div class="card"><div class="big">15</div><div class="lbl">Feature groups</div></div>
+        </div>
+
+        <p>The shape of the surface tells a story: the USB and SoundCloud groups are
+        the largest, reflecting the two headline workflows; the read-heavy library
+        and playlist groups expose the collection; and a thin system group manages
+        the process lifecycle. Adding a route follows a guided scaffold that applies
+        the auth, lock, and Pydantic-model conventions automatically — described in
+        Chapter 26.</p>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>The backend exposes 146 REST routes across fifteen feature groups.
+            Every mutation route but one carries Bearer-token authentication; the
+            three highest-risk routes add token-bucket rate limiting. Every route
+            returns the uniform <code>{status, data}</code> or
+            <code>{status, message, code}</code> envelope. This catalogue is the
+            contract every frontend feature is built against.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

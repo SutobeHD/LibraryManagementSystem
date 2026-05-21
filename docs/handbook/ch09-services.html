@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>09 · Business Logic &amp; Services — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 09 · The Backend</div>
+          <h1>Business Logic &amp; Services</h1>
+          <p class="ch-lead">Between the thin route handlers and the database sits the
+            business-logic layer — a set of focused service classes, an import
+            pipeline, a smart-playlist evaluator, and the Rekordbox interoperability
+            modules.</p>
+        </header>
+
+        <h2>9.1 The Role of the Service Layer</h2>
+        <p>A well-built FastAPI application keeps its route handlers thin. A handler
+        validates input, calls into business logic, and shapes the response — it does
+        not <em>contain</em> the business logic. In this backend that logic lives in
+        a service layer, and the centrepiece is <code>app/services.py</code>.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  R["Route handler<br/>main.py — thin"]
+  R --> S["Service classes<br/>services.py"]
+  R --> I["Import pipeline<br/>folder_watcher · import_tracker"]
+  R --> SP["Smart-playlist engine"]
+  S --> DB["Database layer"]
+  S --> FF["FFmpeg / filesystem"]
+  S --> TAG["audio_tags — mutagen"]
+          </div>
+          <figcaption><span class="fig-num">Figure 9.1</span> — The service layer
+          sits between the routes and the resources. Handlers stay thin; services do
+          the work.</figcaption>
+        </div>
+
+        <h2>9.2 The Service Classes</h2>
+        <p><code>app/services.py</code> defines ten business-logic classes. Each is
+        instantiated once at import time and groups a coherent set of operations.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Class</th><th>Responsibility</th><th>Representative methods</th></tr></thead>
+          <tbody>
+            <tr><td><code>XMLProcessor</code></td><td>Clean and transform Rekordbox XML — strip tags, normalise, create derived playlists.</td><td><code>clean_xml()</code>, <code>create_artist_playlists()</code>, <code>create_label_playlists()</code></td></tr>
+            <tr><td><code>SystemGuard</code></td><td>Guard against unsafe operations — chiefly, refuse writes while Rekordbox is open.</td><td><code>is_rekordbox_running()</code></td></tr>
+            <tr><td><code>AudioEngine</code></td><td>The FFmpeg wrapper — format conversion, render export, slicing at beat positions.</td><td><code>convert()</code>, <code>render()</code>, <code>slice()</code></td></tr>
+            <tr><td><code>FileManager</code></td><td>File I/O primitives — copy, delete, compress.</td><td><code>copy()</code>, <code>delete()</code>, <code>compress()</code></td></tr>
+            <tr><td><code>LibraryTools</code></td><td>Metadata extraction and batch metadata operations.</td><td><code>extract_metadata()</code>, <code>batch_update()</code></td></tr>
+            <tr><td><code>SettingsManager</code></td><td>User-preference persistence to a JSON file, with a load-path sanitiser.</td><td><code>load()</code>, <code>save()</code></td></tr>
+            <tr><td><code>MetadataManager</code></td><td>Read and write embedded audio tags.</td><td><code>read()</code>, <code>write()</code></td></tr>
+            <tr><td><code>BeatAnalyzer</code></td><td>BPM/key analysis wrapper — delegates to the analysis engine.</td><td><code>analyze()</code></td></tr>
+            <tr><td><code>ImportManager</code></td><td>Import tracks from the filesystem or a URL into the library.</td><td><code>import_file()</code>, <code>import_url()</code></td></tr>
+            <tr><td><code>ProjectManager</code></td><td><code>.rbep</code> non-destructive edit project CRUD.</td><td><code>save()</code>, <code>load()</code>, <code>list()</code>, <code>delete()</code></td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>Two of these deserve a closer look because they embody coding rules from
+        Chapter 7.</p>
+
+        <h3>AudioEngine — every subprocess has a timeout</h3>
+        <p><code>AudioEngine</code> shells out to FFmpeg for conversion, render, and
+        slicing. Every one of those calls carries an explicit <code>timeout=</code>
+        and logs the command before it starts and the return code and elapsed time
+        after — a direct outcome of the Slopcode-Cleanup, which found subprocess
+        calls with no timeout at all. A hung encoder can no longer hang the backend.</p>
+
+        <h3>ImportManager — honest metadata</h3>
+        <p><code>ImportManager</code> reads native tags via the <code>audio_tags</code>
+        module first, and only if those are absent falls back to splitting the
+        filename on <code>Artist - Title</code>. An earlier version hardcoded
+        placeholder strings like "New Import" — the cleanup replaced that with the
+        honest read-then-fall-back behaviour.</p>
+
+        <h2>9.3 Reading and Writing Tags</h2>
+        <p><code>app/audio_tags.py</code> is the module that talks to the bytes
+        inside audio files, built on the <code>mutagen</code> library. It is mode- and
+        format-agnostic:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Function</th><th>Behaviour</th></tr></thead>
+          <tbody>
+            <tr><td><code>read_tags(path)</code></td><td>Returns a dict — title, artist, album, genre, year, comment, BPM, key, ISRC — by probing format-specific keys, then falling back to filename parsing.</td></tr>
+            <tr><td><code>write_tags(path, updates, artwork)</code></td><td>Mirrors metadata edits back into the file, handling ID3, FLAC, MP4, Vorbis, AIFF, and WAV containers.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>This module is what keeps the library's metadata and the files on disk in
+        agreement — when a user edits a track's genre in the UI, the change can be
+        written through to the file's actual tags.</p>
+
+        <h2>9.4 The Import Pipeline</h2>
+        <p>Local-file import is more than a single function call — it is a pipeline
+        with visible stages, built from two cooperating modules.</p>
+
+        <h3>The folder watcher</h3>
+        <p><code>app/folder_watcher.py</code> implements <code>FolderWatcher</code>,
+        which auto-imports audio from user-configured folders. For each watched
+        folder it does two things:</p>
+        <ol>
+          <li>An <strong>initial recursive scan</strong>, which catches files added
+          while the application was closed.</li>
+          <li>A <strong>watchdog observer</strong>, which fires on file creation or
+          a move into the folder.</li>
+        </ol>
+        <p>New files are <strong>debounced</strong> — the watcher waits for
+        filesystem events on a path to settle before importing, so a file still being
+        written is never analysed half-complete. Imports are then handed to
+        <code>ImportManager</code> on a small worker pool, and path-based
+        deduplication stops repeated events from re-importing the same file.</p>
+
+        <h3>The import tracker</h3>
+        <p><code>app/import_tracker.py</code> is a thread-safe singleton that gives
+        the frontend a live, transparent view of the import pipeline. Every file
+        moves through five tracked stages:</p>
+
+        <div class="figure">
+          <div class="mermaid">
+stateDiagram-v2
+  [*] --> Queued
+  Queued --> Analyzing: worker picks it up
+  Analyzing --> Importing: BPM / key / beats / cues done
+  Importing --> ANLZ: in library, artwork attached
+  ANLZ --> Completed: DAT / EXT / 2EX written
+  Completed --> [*]
+          </div>
+          <figcaption><span class="fig-num">Figure 9.2</span> — The import-tracker
+          state machine. These stages are deliberately mirrored by the SoundCloud
+          download manager so one UI can show both.</figcaption>
+        </div>
+
+        <p>This is what powers the Import Manager view and the sticky progress banner
+        from Chapter 3 — the user can watch every track move from Queued to
+        Completed.</p>
+
+        <h2>9.5 The Smart-Playlist Engine</h2>
+        <p><code>app/smart_playlist_engine.py</code> evaluates rule-based playlists.
+        It is deliberately <strong>mode-agnostic</strong> — it works on any list of
+        track dictionaries, so the same evaluator serves both XML and Live mode.</p>
+
+        <p>Its criteria format is a simplified, Rekordbox-XML-compatible structure:</p>
+
+        <pre><code>{
+  "LogicalOperator": "all" | "any",
+  "AutomaticUpdate": "1" | "0",
+  "conditions": [
+    {
+      "Field": "&lt;field-id&gt;",
+      "Operator": "&lt;op&gt;",
+      "ValueLeft": "...",
+      "ValueRight": "..." | null,
+      "ValueUnit": "..."
+    }
+  ]
+}</code></pre>
+
+        <p>The field IDs follow the Rekordbox specification subset — Title, Genre,
+        Rating, BPM, key, date-added, and others. The <code>LogicalOperator</code>
+        chooses whether a track must satisfy <em>all</em> conditions or <em>any</em>.
+        A <code>_coerce()</code> helper normalises a value to the type a given field
+        expects before comparison, so a numeric BPM rule and a string genre rule are
+        both handled correctly.</p>
+
+        <div class="callout note">
+          <span class="ico">◆</span>
+          <div class="body">
+            <span class="ct">Why mode-agnostic matters</span>
+            <p>Because the engine operates on plain track dicts, a smart playlist
+            defined in Standalone XML mode behaves identically if the user later
+            switches to Live mode. The rule logic never needs to know where the
+            tracks came from — a recurring theme of the whole backend.</p>
+          </div>
+        </div>
+
+        <h2>9.6 Rekordbox Interoperability</h2>
+        <p>A cluster of modules exists purely to speak Rekordbox's own formats —
+        importing from and exporting to the files Rekordbox itself produces.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Module</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><code>rekordbox_export.py</code></td><td>Converts analysis-engine results into Rekordbox XML <code>TRACK</code> elements, with <code>TEMPO</code> nodes for the beatgrid and <code>POSITION_MARK</code> nodes for cues.</td></tr>
+            <tr><td><code>rekordbox_bridge.py</code></td><td>The high-level bridge — export a selection of tracks to XML, or import tracks from a Rekordbox XML export.</td></tr>
+            <tr><td><code>xml_generator.py</code></td><td>The <code>RekordboxXML</code> class — generates a valid <code>DJ_PLAYLISTS</code> XML document from Python track data, with dynamic and static beatgrids and cue points.</td></tr>
+            <tr><td><code>rbep_parser.py</code></td><td>Parses and serialises <code>.rbep</code> project files — volume envelopes, BPM maps, hot cues, memory cues, beatgrids.</td></tr>
+            <tr><td><code>batch_worker.py</code></td><td>A command-line tool for batch comment/tag updates directly against <code>master.db</code>.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h3>The .rbep project format</h3>
+        <p>The <code>.rbep</code> file — Rekordbox Editor Project — is the
+        non-destructive editor's overlay format. The parser is
+        <strong>real-format aware</strong>: it understands that a
+        <code>&lt;filepath&gt;</code> sits directly under <code>&lt;song&gt;</code>,
+        that an <code>&lt;edit&gt;</code> sits directly under <code>&lt;track&gt;</code>,
+        and that <code>&lt;position&gt;</code> data is a list, not a single object.
+        It exposes the editor's timeline duration through <code>positions[]</code>
+        and <code>editEndBeats</code>. Chapter 16 covers how the DAW produces and
+        consumes these files.</p>
+
+        <h2>9.7 The Sidecar Storage</h2>
+        <p>Not all data belongs in the library database. <code>app/sidecar.py</code>
+        provides <code>SidecarStorage</code>, which persists supplementary data — such
+        as an artist's SoundCloud links and other custom fields — in an
+        <code>app_data.json</code> sidecar file. It is a deliberately simple
+        key-value store that keeps the main database clean of data that is not part
+        of the Rekordbox schema.</p>
+
+        <h2>9.8 Analysis Settings</h2>
+        <p><code>app/analysis_settings.py</code> centralises every tunable parameter
+        of the analysis pipeline — BPM output ranges, frame sizes, thresholds. The
+        defaults match Rekordbox conventions, and every value can be overridden with
+        an environment variable prefixed <code>RB_ANALYSIS_</code> — for example
+        <code>RB_ANALYSIS_BPM_OUTPUT_MIN=70</code>. The settings are held in a frozen
+        dataclass, so the analysis engine reads a consistent, validated configuration
+        rather than scattering magic numbers through its code.</p>
+
+        <h2>9.9 How the Layers Cooperate</h2>
+        <p>A concrete example ties the chapter together — importing one local file:</p>
+
+        <div class="figure">
+          <div class="mermaid">
+sequenceDiagram
+  participant H as Route handler
+  participant IM as ImportManager
+  participant TAG as audio_tags
+  participant AN as Analysis engine
+  participant IT as import_tracker
+  participant DB as Database layer
+  H->>IM: import_file(path)
+  IM->>IT: register — stage Queued
+  IM->>TAG: read_tags(path)
+  TAG-->>IM: title, artist, genre, ...
+  IM->>IT: stage Analyzing
+  IM->>AN: run full analysis
+  AN-->>IM: bpm, key, beatgrid, cues
+  IM->>IT: stage Importing
+  IM->>DB: add_track(track_data)
+  IM->>IT: stage Completed
+  IM-->>H: the new track
+          </div>
+          <figcaption><span class="fig-num">Figure 9.3</span> — One import, end to
+          end. The handler stays thin; <code>ImportManager</code> orchestrates the
+          tag reader, the analysis engine, the tracker, and the database.</figcaption>
+        </div>
+
+        <p>This is the pattern the whole backend follows: a thin handler, a service
+        that orchestrates, focused modules that each do one thing well, and a
+        tracker that keeps the user informed. The next chapter goes one layer deeper
+        — into the database that <code>add_track</code> writes to.</p>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>The service layer keeps route handlers thin.
+            <code>services.py</code> holds ten business-logic classes; the import
+            pipeline pairs a debounced folder watcher with a five-stage tracker; the
+            smart-playlist engine evaluates Rekordbox-compatible rules on mode-agnostic
+            track dicts; and a cluster of interop modules speaks Rekordbox's own XML
+            and <code>.rbep</code> formats. Every subprocess carries a timeout, every
+            import is transparent, and no logic leaks into the routes.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>
