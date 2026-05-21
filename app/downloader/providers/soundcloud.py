@@ -99,10 +99,10 @@ class SoundCloudProvider(SourceProvider):
         A dead source must not abort a multi-provider resolve, so transport
         failures are swallowed into an empty list rather than raised.
         """
-        from app.soundcloud_api import AuthExpiredError, SoundCloudPlaylistAPI
+        from app.soundcloud_api import AuthExpiredError
 
         def _resolve() -> dict[str, Any] | None:
-            return SoundCloudPlaylistAPI.resolve_track_from_url(url, self._auth_token)
+            return _resolve_with_anon_fallback(url, self._auth_token)
 
         try:
             track = await to_thread.run_sync(_resolve)
@@ -126,14 +126,14 @@ class SoundCloudProvider(SourceProvider):
         """
         from app.soundcloud_api import AuthExpiredError, _sc_get, get_sc_client_id
 
-        def _search() -> list[dict[str, Any]]:
+        def _search(token: str | None) -> list[dict[str, Any]]:
             headers: dict[str, str] = {
                 "Accept": "application/json",
                 "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"),
             }
             params: dict[str, Any] = {"q": query, "limit": limit}
-            if self._auth_token:
-                headers["Authorization"] = f"OAuth {self._auth_token}"
+            if token:
+                headers["Authorization"] = f"OAuth {token}"
             else:
                 params["client_id"] = get_sc_client_id()
             resp = _sc_get(
@@ -146,8 +146,19 @@ class SoundCloudProvider(SourceProvider):
             collection = data.get("collection", []) if isinstance(data, dict) else []
             return [t for t in collection if isinstance(t, dict)]
 
+        def _search_anon_fallback() -> list[dict[str, Any]]:
+            # An expired/invalid OAuth token degrades to anonymous client_id
+            # mode — the unified downloader searches public content.
+            try:
+                return _search(self._auth_token)
+            except AuthExpiredError:
+                if self._auth_token is None:
+                    raise
+                logger.info("[sc-provider] search: token rejected — retrying anonymously")
+                return _search(None)
+
         try:
-            raw_hits = await to_thread.run_sync(_search)
+            raw_hits = await to_thread.run_sync(_search_anon_fallback)
         except AuthExpiredError as exc:
             logger.info("[sc-provider] search(%r) auth failed: %s", query, exc)
             return []
@@ -195,7 +206,6 @@ class SoundCloudProvider(SourceProvider):
 
     def _fetch_blocking(self, match: TrackMatch, dest_dir: Path) -> Path:
         """Synchronous body of :meth:`fetch` (offloaded to a thread)."""
-        from app.soundcloud_api import SoundCloudPlaylistAPI
         from app.soundcloud_downloader import (
             _download_hls_to_temp,
             _resolve_official_download_url,
@@ -204,7 +214,7 @@ class SoundCloudProvider(SourceProvider):
             _stream_file_to_temp,
         )
 
-        track = SoundCloudPlaylistAPI.resolve_track_from_url(match.url, self._auth_token)
+        track = _resolve_with_anon_fallback(match.url, self._auth_token)
         if not track or not track.get("id"):
             raise ValueError(f"SoundCloud URL did not resolve to a track: {match.url}")
         sc_track_id = str(track["id"])
@@ -321,6 +331,26 @@ def _quality_claim(
     if downloadable:
         return ("flac", 16, 44100, None, QualityTier.CD_LOSSLESS)
     return ("aac", None, 48000, 256, QualityTier.HIGH_LOSSY)
+
+
+def _resolve_with_anon_fallback(url: str, auth_token: str | None) -> dict[str, Any] | None:
+    """``resolve_track_from_url`` with a graceful anonymous retry.
+
+    The unified downloader fetches *public* content, so an expired or invalid
+    OAuth token must degrade to anonymous ``client_id`` mode (public tracks
+    only) rather than fail the whole resolve/fetch — the same graceful path
+    the absent-token case already takes. Re-raises when there was no token to
+    fall back from (a genuine anonymous failure has nowhere left to go).
+    """
+    from app.soundcloud_api import AuthExpiredError, SoundCloudPlaylistAPI
+
+    try:
+        return SoundCloudPlaylistAPI.resolve_track_from_url(url, auth_token)
+    except AuthExpiredError:
+        if auth_token is None:
+            raise
+        logger.info("[sc-provider] OAuth token rejected — retrying resolve anonymously")
+        return SoundCloudPlaylistAPI.resolve_track_from_url(url, None)
 
 
 __all__ = ["SoundCloudProvider"]

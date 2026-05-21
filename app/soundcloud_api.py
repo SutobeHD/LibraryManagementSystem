@@ -140,6 +140,11 @@ def get_sc_client_id() -> str:
 # All endpoints use:  Authorization: OAuth <access_token>  +  ?client_id=<SC_CLIENT_ID>
 SC_API_BASE = "https://api.soundcloud.com"
 
+# The web-player ("v2") API. The developer API above requires an OAuth token
+# and answers client_id-only requests with 403; api-v2 accepts client_id, so
+# anonymous resolution of a public track is routed here instead.
+SC_V2_API_BASE = "https://api-v2.soundcloud.com"
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Custom Exceptions
 # ──────────────────────────────────────────────────────────────────────────────
@@ -376,13 +381,20 @@ class SoundCloudPlaylistAPI:
         """
         headers = SoundCloudPlaylistAPI._get_headers(auth_token)
         params: dict = {"url": permalink_url}
-        if not auth_token:
+        # The developer API (api.soundcloud.com) needs an OAuth token and
+        # rejects client_id-only requests with 403; the web-player API
+        # (api-v2.soundcloud.com) accepts client_id. Route anonymous resolves
+        # of public tracks to v2, keep the authenticated path on the dev API.
+        if auth_token:
+            resolve_endpoint = f"{SC_API_BASE}/resolve"
+        else:
+            resolve_endpoint = f"{SC_V2_API_BASE}/resolve"
             params["client_id"] = get_sc_client_id()
 
         logger.info("[SC] Resolving URL: %s", permalink_url)
         try:
             resp = _sc_get(
-                f"{SC_API_BASE}/resolve",
+                resolve_endpoint,
                 headers=headers,
                 params=params,
                 timeout=10,
