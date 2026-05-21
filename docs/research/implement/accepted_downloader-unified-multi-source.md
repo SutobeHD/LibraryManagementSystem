@@ -27,6 +27,7 @@ related: []
 - 2026-05-13 — `implement/accepted_` — **owner sign-off granted.** Plan accepted; ready for `inprogress_` once the no-implementation constraint is lifted for the build itself. D3 feasibility already proven (PASS) — Phase 1 `spotiflac.py` design is unblocked.
 - 2026-05-13 — content update — Implementation Detail section expanded: Pydantic v2 data models, DB schema migration SQL, 3 API contracts, settings schema additions, per-phase detailed specifications (P0-P7), D5 genre starter list (~55 entries), frontend component tree, test fixture skeletons. Doc now actionable end-to-end without further design work.
 - 2026-05-13 — content update — Quality policy hardening (owner reviewed Spek spectrograms, flagged SoundCloud `.m4a`): lossless-first hard rule made an explicit named invariant; new `lossless_only` + `warn_on_lossy_pick` settings; lossy picks always UI-flagged; `quality.py` gained `is_lossless()` + `pick_with_policy()`. Reinforced: no fake-lossless re-containering of AAC.
+- 2026-05-21 — content update — Integrated with parallel research after a 57-commit `main` rebase: matching delegated to `external_track_match` (dropped `match.py`/`match_rules.py`, added thin `match_adapter.py`); routes gated with `require_session` (OQ-A obsolete — `SHUTDOWN_TOKEN` deleted, auth shipped); `quality_engine.probe()` reused for post-download lossless verification; spun-off `idea_api-route-auth-model` archived `superseded_`. See Findings § "Integration with parallel research (post-rebase)".
 
 ---
 
@@ -557,6 +558,28 @@ The `.m4a` is what the existing SC downloader's HLS-AAC fallback path produces f
 4. **`.m4a` stays `.m4a`** when AAC is genuinely the only option (no fake-lossless re-containering). The fix for not wanting m4a is sourcing lossless — not disguising AAC inside a `.wav`/`.aiff` wrapper.
 5. **Format is quality-neutral within a tier** — FLAC / ALAC / WAV are all Tier 0/1 and equal; MP3 / AAC are both lossy and ranked purely by bitrate. We do not prefer MP3 over AAC or vice versa — that would be meaningless noise.
 
+### 2026-05-21 — Integration with parallel research (post-rebase)
+
+This plan was developed in isolation (2026-05-13). `origin/main` then advanced 57 commits: a full security-auth-hardening initiative shipped, the research-pipeline model was reworked (gate states), and 10 parallel `exploring_` docs landed — two overlap this plan. Owner decision (2026-05-21): **integrate, don't duplicate.** Forward-looking specs below (Files-touched, Steps, API contracts, orchestrator) were corrected in-place to match.
+
+**(I1) Matching delegated to `external_track_match`.** `exploring_external-track-match-unified-module.md` (owner: tb) builds a cross-cutting `app/external_track_match.py` — fuzzy matcher + version-tag taxonomy + title-stem extractor + fingerprint + adapter-registry — explicitly to prevent forked fuzzy matchers. Our `app/downloader/match.py` + `app/downloader/match_rules.py` would be a 4th fork. **Both dropped.** The downloader imports instead:
+- `normalize_title()`, `extract_title_stem()`, `parse_version_tag()` — replace our normalisation pipeline
+- `fuzzy_match_with_score(query_title, query_artist, candidates, *, threshold=0.65) -> (best_id|None, score)` — `difflib.SequenceMatcher`-based (NOT rapidfuzz)
+- `Candidate` dataclass (`source, source_id, title, artist, duration_s, version_tag, url, raw`) + `VersionTag` (12-label enum)
+- `SourcePlugin` Protocol (`async search()`, `parse_version()`, `quota_remaining()`, `name`) + `ADAPTER_REGISTRY`
+
+Dependency direction: `external_track_match` M1 ships the core module + a SoundCloud adapter + a mock adapter only. Tidal/Qobuz/Amazon/Spotify/YouTube adapters are out of its scope — the downloader builds those, shaped to its `SourcePlugin` Protocol, and is **downstream** of `external_track_match` M1 (that module must land first). Our D1 "title-variance algorithm" below is retained as the *behaviour spec* to verify `fuzzy_match_with_score` against — not to re-implement.
+
+Candidate-type note: `external_track_match.Candidate` has no quality/bitrate field. The downloader keeps its richer `TrackMatch` (quality tier, bit-depth, format) and maps to/from `Candidate` at the boundary (quality data rides in `Candidate.raw`).
+
+**(I2) Route auth — OQ-A is obsolete.** `SHUTDOWN_TOKEN` was deleted; `app/auth.py` now provides `require_session`, a per-route FastAPI dependency gating 84/85 mutation routes. OQ-A ("no route gate, consistent with SC routes") no longer holds — SC routes ARE gated now. **Every `/api/downloads/unified/*` route uses `dependencies=[Depends(require_session)]`** (`from app.auth import require_session`, see `main.py:33`). Unauthenticated → HTTP 401. Every `X-Session-Token` / `SHUTDOWN_TOKEN` reference in this plan is stale and corrected below. The spun-off `idea_api-route-auth-model` is archived `superseded_`.
+
+**(I3) Quality verification reuse.** `exploring_library-quality-upgrade-finder.md` (owner: tb) builds `app/quality_engine.py` with `probe(path) -> QualityProbeResult` (container, codec, bitrate, sample-rate, bit-depth, spectral `cutoff_hz`, transcode `verdict`). The downloader **reuses `quality_engine.probe()` post-download** to verify the file's *true* quality — directly enforcing the lossless-first hard rule by catching fake-lossless `.m4a` (a `.flac` claim with a ~20 kHz spectral cliff is rejected). `quality_engine.py` is not yet built → soft dependency: the downloader degrades to claimed-quality-only if `probe()` is unavailable.
+
+**(I4) Boundary with `quality-upgrade-finder`.** No collision: that feature *replaces* files already in the library (cue/beatgrid migration); this downloader *fetches new* tracks. It defers paid stores to surface-links only — it does not download from Tidal/Qobuz/Amazon. Distinct features sharing two modules (`external_track_match`, `quality_engine`).
+
+**(I5) Pipeline model.** This doc predates the reworked pipeline (gate states `ideagate_`/`midgate_`/`plangate_`). State `accepted_` survived 1:1 — no state change. The body still uses the old template; full template migration is out of scope (tolerated for an in-flight doc).
+
 ## Options Considered
 
 > Required by `evaluated_`. Sketched now as starting points; deepen in `exploring_`.
@@ -711,12 +734,12 @@ Still open (carried into next round):
 7. `app/downloader/providers/soundcloud.py` — wrap existing `soundcloud_downloader.py` acquisition logic + add V2 `/search/tracks` for search mode.
 
 **Phase 2 — Matching + quality**
-8. `app/downloader/match_rules.py` — maintained regex lists (remix/version/featuring tags, separators).
-9. `app/downloader/match.py` — title-variance algorithm (D1): duration hard-gate + normalisation pipeline + 5 identity tests + Sørensen-Dice ≥ 0.92 fallback.
-10. `app/downloader/quality.py` — 5-tier quality ranking + best-pick (Q3-c: bit-depth → sample-rate → file-size).
+8. **(dropped — see I1)** no `match_rules.py` / `match.py`. Matching delegated to `app/external_track_match.py` (`normalize_title`, `extract_title_stem`, `parse_version_tag`, `fuzzy_match_with_score`). Hard dependency: `external_track_match` M1 must land first.
+9. `app/downloader/match_adapter.py` (new, thin) — maps the downloader's `TrackMatch` ↔ `external_track_match.Candidate` (quality data rides in `Candidate.raw`), calls `fuzzy_match_with_score()`. The D1 algorithm below is the *behaviour spec* this is verified against — the D1 test-set gate (≥ 95% / ≥ 90%) now exercises `external_track_match` through the adapter, not a private matcher.
+10. `app/downloader/quality.py` — 5-tier quality ranking + best-pick (Q3-c: bit-depth → sample-rate → file-size). Independent of `external_track_match` (which has no quality field).
 
 **Phase 3 — Resolver + Search**
-11. `app/downloader/resolver.py` — phase-1 parallel probe across enabled providers (bounded concurrency from D8 setting), returns `Candidate[]` filtered through `match.py`.
+11. `app/downloader/resolver.py` — phase-1 parallel probe across enabled providers (bounded concurrency from D8 setting), returns `TrackMatch[]` filtered via `match_adapter` → `external_track_match.fuzzy_match_with_score()` (I1).
 12. `app/downloader/search.py` — free-form search → parallel platform search → SpotiFLAC `LinkResolver` cross-platform pivot → ISRC-dedupe → candidate grid.
 
 **Phase 4 — Post-download pipeline**
@@ -728,7 +751,7 @@ Still open (carried into next round):
 
 **Phase 5 — Orchestration + API**
 18. Orchestrator in `app/downloader/__init__.py` — wire the 9-step post-download pipeline from the Recommendation. Writes into `master.db` (library auto-import, genre canonical table) go through `db_lock()` from `app/database.py`; writes into `download_registry.db` use that module's own WAL connection (corrected per pre-review).
-19. `app/main.py` routes: `POST /api/downloads/unified/{resolve,search,fetch}`. **No route-level token gate** (OQ-A resolved — matches existing `/api/soundcloud/download` pattern). Use `route-architect` agent before touching `main.py`.
+19. `app/main.py` routes: `POST /api/downloads/unified/{resolve,search,fetch}` — each gated with `dependencies=[Depends(require_session)]` (`from app.auth import require_session`; I2). Unauthenticated → 401. Use `route-architect` agent before touching `main.py`.
 
 **Phase 6 — Frontend**
 20. `frontend/src/components/Download/*` — search-bar input mode, candidate-grid with platform-icons + quality-badges, picked-source highlight, novel-genre confirmation dialog. Routes through `frontend/src/api/api.js` axios instance.
@@ -745,14 +768,14 @@ Still open (carried into next round):
 - `app/downloader/providers/spotiflac.py` (new) — wrap SpotiFLAC inside `ProcessPoolExecutor(max_workers=1)` worker (D3); import `QobuzProvider` / `TidalProvider` / `AmazonProvider` / `AppleMusicProvider` / `DeezerProvider` individually for per-service probing; import `SpotifyMetadataClient` for search; import `LinkResolver` for Songlink pivot
 - ~~`app/downloader/providers/songlink.py`~~ — **dropped**, use SpotiFLAC's bundled `core/link_resolver.py:LinkResolver`
 - `app/downloader/quality.py` (new) — quality-ranking (5 tiers, see Findings) + best-quality picker (file-size + bit-depth + sample-rate, Q3-c rule)
-- `app/downloader/match.py` (new) — title-variance match algorithm (D1, hard duration gate + 5 identity tests + Sørensen-Dice ≥ 0.92 fallback)
-- `app/downloader/match_rules.py` (new) — maintained regex list of remix/version/featuring tags for normalisation
+- ~~`app/downloader/match.py`~~ + ~~`app/downloader/match_rules.py`~~ — **dropped (I1)** — matching delegated to `app/external_track_match.py` (parallel `exploring_` module)
+- `app/downloader/match_adapter.py` (new, thin) — maps `TrackMatch` ↔ `external_track_match.Candidate`; calls `fuzzy_match_with_score()` / `parse_version_tag()` / `extract_title_stem()`
 - ~~`app/downloader/tagging.py`~~ — **dropped**, extend existing `app/audio_tags.py` with `serialise_provenance()` + `read_provenance()` helpers (see Reuse-A); orchestrator calls existing `write_tags(file_path, {"comment": serialised, "isrc": isrc, "genre": normalised, "year": year}, artwork_bytes)`
 - `app/downloader/aiff.py` (new, but **refactor of existing code** — see pre-review) — extract `soundcloud_downloader.py:745:_convert_to_aiff`, fix its hardcoded `pcm_s16le` to bit-depth-aware `pcm_s16le`/`pcm_s24le` via `ffprobe`, add `-map_metadata 0`. Existing SC pipeline re-points at this single converter.
 - `app/downloader/genre_sync.py` (new) — incoming-genre → library-canonical normaliser (lookup-table + Sørensen-Dice ≥ 0.90 + confirm-on-novelty dialog); ship curated ~50 short DJ-genre default list
 - `app/downloader/concurrency.py` (new) — first-run benchmark (D8): SC V2 `/resolve` baseline, 4 unique URLs, pre-warm + parallel-vs-sequential, 7-day cache, "Re-benchmark" button hook
 - `app/downloader/migration.py` (new) — first-launch `MUSIC_DIR/SoundCloud/<artist>/` → `MUSIC_DIR/<artist>/` migration (D7); idempotent
-- `app/main.py` — new routes: `POST /api/downloads/unified/resolve`, `POST /api/downloads/unified/search`, `POST /api/downloads/unified/fetch`, all behind `X-Session-Token`
+- `app/main.py` — new routes: `POST /api/downloads/unified/{resolve,search,fetch}`, each gated `dependencies=[Depends(require_session)]` (I2 — `X-Session-Token` never existed; `require_session` from `app/auth.py` is the shipped auth)
 - `app/download_registry.py` — add columns: `isrc TEXT`, `source TEXT`, `provenance_urls TEXT` (JSON), `picked_quality_tier INTEGER`
 - `app/soundcloud_api.py` — **extend** `_normalize_track` output dict with `"isrc": (raw.get("publisher_metadata") or {}).get("isrc") or raw.get("isrc")` (Q9 opportunistic backfill)
 - `app/audio_tags.py` — **extend** (corrected scope per pre-review): (1) `serialise_provenance()` + `read_provenance()` helpers (Q13 format); (2) **write-side ISRC** — add `isrc` to `_FIELD_ALIASES` + wire `TSRC` (ID3), `isrc` (Vorbis), `----:com.apple.iTunes:ISRC` (MP4) into all six `_write_*` handlers. Gap is documented at `soundcloud_downloader.py:723-727`.
@@ -764,6 +787,7 @@ Still open (carried into next round):
 - `tests/test_unified_downloader_quality.py` (new) — quality-ranker fixtures
 - `tests/test_unified_downloader_e2e.py` (new) — end-to-end fixtures (mocked providers)
 - `docs/architecture.md`, `docs/FILE_MAP.md`, `docs/backend-index.md`, `docs/frontend-index.md`, `CHANGELOG.md` — update at graduation
+- **Cross-module dependencies (NOT built by this plan — I1/I3)**: `app/external_track_match.py` (from `exploring_external-track-match-unified-module` — **hard dep**, M1 must land first) + `app/quality_engine.py` (from `exploring_library-quality-upgrade-finder` — **soft dep**, post-download quality verification; downloader degrades to claimed-quality-only if absent)
 
 ### Testing approach
 
@@ -981,7 +1005,7 @@ Idempotency: `ALTER TABLE ADD COLUMN` on SQLite fails if the column already exis
 
 ### API contracts (Phase 5 step 19)
 
-All three routes mount under `POST /api/downloads/unified/*`, JSON in + JSON out, no route-level auth gate (OQ-A). Sync wrappers around the async resolver/downloader.
+All three routes mount under `POST /api/downloads/unified/*`, JSON in + JSON out, **each gated with `dependencies=[Depends(require_session)]`** (I2 — `app/auth.py`; `X-Session-Token` never existed). Unauthenticated → HTTP 401. Sync wrappers around the async resolver/downloader.
 
 **`POST /api/downloads/unified/resolve`** — single-URL or single-identifier resolution.
 
@@ -1289,115 +1313,48 @@ One-liner per Q9. After the existing fields:
 
 ### Phase 2 — Matching + Quality (detailed)
 
-**P2.8 — `app/downloader/match_rules.py`**
+**P2.8 + P2.9 — matching delegated to `app/external_track_match.py` (I1)**
+
+The `match_rules.py` + `match.py` modules originally specced here are **dropped** — `exploring_external-track-match-unified-module.md` builds the matcher as a shared module (normalisation, remix-tag taxonomy, `difflib.SequenceMatcher`-based fuzzy matcher). The downloader builds only a thin adapter:
 
 ```python
-import re
-
-# Remix/version tags to strip during normalisation. Maintained list — append on miss.
-REMIX_TAGS = [
-    r"\(\s*original\s+mix\s*\)",
-    r"\[\s*original\s+mix\s*\]",
-    r"\(\s*extended\s+mix\s*\)",
-    r"\[\s*extended\s+mix\s*\]",
-    r"\(\s*radio\s+edit\s*\)",
-    r"\(\s*club\s+mix\s*\)",
-    r"\(\s*acoustic\s*\)",
-    r"\(\s*live\s*\)",
-    r"\(\s*instrumental\s*\)",
-    r"-\s*extended\s+mix",
-    r"-\s*extended",
-    r"-\s*radio\s+edit",
-    r"-\s*remastered(?:\s+\d{4})?",
-    r"\(\s*remastered(?:\s+\d{4})?\s*\)",
-    r"\(\s*\d{4}\s+remaster(?:ed)?\s*\)",
-    r"\[\s*bonus\s+track\s*\]",
-]
-REMIX_TAGS_RE = re.compile("|".join(REMIX_TAGS), re.IGNORECASE)
-
-FEAT_TAGS_RE = re.compile(
-    r"[\(\[]\s*(?:feat\.?|ft\.?|featuring)\s+[^\)\]]+[\)\]]",
-    re.IGNORECASE,
+# app/downloader/match_adapter.py
+from external_track_match import (
+    fuzzy_match_with_score, parse_version_tag,
+    Candidate as XtmCandidate,
 )
+from .models import TrackMatch, MatchResult
 
-SEPARATORS_RE = re.compile(r"[-–—/_|]")  # any of these → single space
-NON_ALNUM_RE  = re.compile(r"[^a-z0-9 ']")
+def _to_xtm(m: TrackMatch) -> XtmCandidate:
+    """Map a downloader TrackMatch → external_track_match Candidate.
+    Quality data has no field in XtmCandidate — park it in `raw`."""
+    return XtmCandidate(
+        source=m.platform, source_id=m.url, title=m.title, artist=m.artist,
+        duration_s=m.duration_s, version_tag=parse_version_tag(m.title),
+        url=m.url, raw={"track_match": m},   # full TrackMatch recoverable
+    )
 
-ARTIST_SPLITTERS_RE = re.compile(
-    r"\s*(?:,|&|feat\.?|ft\.?|featuring|vs\.?|x)\s+",
-    re.IGNORECASE,
-)
+def match(needle: TrackMatch, candidates: list[TrackMatch]) -> list[tuple[TrackMatch, MatchResult]]:
+    """100%-match gate. ISRC fast-path + duration hard-gate stay HERE
+    (external_track_match is title/artist-only — knows neither)."""
+    out: list[tuple[TrackMatch, MatchResult]] = []
+    for cand in candidates:
+        if needle.isrc and cand.isrc and needle.isrc == cand.isrc:
+            out.append((cand, MatchResult(is_match=True, confidence=1.0, rule_fired="isrc_equality")))
+            continue
+        if abs(needle.duration_s - cand.duration_s) > 2:          # D1 duration invariant
+            out.append((cand, MatchResult(is_match=False, confidence=0.0, rule_fired="duration_gate_failed")))
+            continue
+        best_id, score = fuzzy_match_with_score(
+            needle.title, needle.artist, [_to_xtm(cand)], threshold=0.65,
+        )
+        is_match = best_id is not None and score >= 0.92          # D1's 100%-match bar
+        out.append((cand, MatchResult(is_match=is_match, confidence=score,
+                                      rule_fired=f"xtm_fuzzy_{score:.2f}")))
+    return out
 ```
 
-**P2.9 — `app/downloader/match.py`**
-
-Algorithm in `match_track(needle, candidate) -> MatchResult` exactly per D1:
-
-```python
-import unicodedata
-from difflib import SequenceMatcher
-from .match_rules import REMIX_TAGS_RE, FEAT_TAGS_RE, SEPARATORS_RE, NON_ALNUM_RE, ARTIST_SPLITTERS_RE
-from .models import MatchResult, TrackMatch
-
-def _normalise(s: str) -> str:
-    s = unicodedata.normalize("NFKD", s)
-    s = "".join(c for c in s if not unicodedata.combining(c))
-    s = s.lower()
-    s = REMIX_TAGS_RE.sub(" ", s)
-    s = FEAT_TAGS_RE.sub(" ", s)
-    s = SEPARATORS_RE.sub(" ", s)
-    s = NON_ALNUM_RE.sub(" ", s)
-    return " ".join(s.split())
-
-def _artists_set(s: str) -> frozenset[str]:
-    parts = [p for p in ARTIST_SPLITTERS_RE.split(s) if p.strip()]
-    return frozenset(_normalise(p) for p in parts)
-
-def _sorensen_dice(a: str, b: str) -> float:
-    bigrams = lambda s: {s[i:i+2] for i in range(len(s) - 1)}
-    A, B = bigrams(a), bigrams(b)
-    if not A or not B:
-        return 0.0
-    return 2 * len(A & B) / (len(A) + len(B))
-
-def match_track(needle: TrackMatch, candidate: TrackMatch) -> MatchResult:
-    # 0. ISRC fast-path (when both have it)
-    if needle.isrc and candidate.isrc and needle.isrc == candidate.isrc:
-        return MatchResult(is_match=True, confidence=1.0, rule_fired="isrc_equality")
-
-    # 1. Hard duration gate
-    if abs(needle.duration_s - candidate.duration_s) > 2:
-        return MatchResult(is_match=False, confidence=0.0, rule_fired="duration_gate_failed")
-
-    # 2. Five identity tests on normalised strings
-    nt, na = _normalise(needle.title),      _normalise(needle.artist)
-    ct, ca = _normalise(candidate.title),   _normalise(candidate.artist)
-    nas, cas = _artists_set(needle.artist), _artists_set(candidate.artist)
-
-    # T1: title equal + artist-set-overlap >= 1
-    if nt == ct and (nas & cas):
-        return MatchResult(is_match=True, confidence=1.0, rule_fired="duration_gate+title_eq+artist_overlap")
-    # T2: combined "title artist" equality
-    if f"{nt} {na}" == f"{ct} {ca}":
-        return MatchResult(is_match=True, confidence=1.0, rule_fired="duration_gate+combined_eq")
-    # T3: combined "artist title" equality
-    if f"{na} {nt}" == f"{ca} {ct}":
-        return MatchResult(is_match=True, confidence=1.0, rule_fired="duration_gate+swapped_combined_eq")
-    # T4: full title-artist swap
-    if nt == ca and na == ct:
-        return MatchResult(is_match=True, confidence=1.0, rule_fired="duration_gate+full_swap")
-    # T5: containment (handles "Title" vs "Title (Original Mix)")
-    nt_words, ct_words = set(nt.split()), set(ct.split())
-    if nt_words and ct_words and (nt_words <= ct_words or ct_words <= nt_words):
-        if nas & cas:
-            return MatchResult(is_match=True, confidence=1.0, rule_fired="duration_gate+containment+artist_overlap")
-
-    # 3. Sørensen-Dice fallback
-    score = _sorensen_dice(f"{nt} {na}", f"{ct} {ca}")
-    if score >= 0.92:
-        return MatchResult(is_match=True, confidence=score, rule_fired=f"duration_gate+sorensen_{score:.2f}")
-    return MatchResult(is_match=False, confidence=score, rule_fired=f"sorensen_below_threshold_{score:.2f}")
-```
+**Why the adapter, not a direct call:** the duration hard-gate and the ISRC fast-path are D1 invariants that `external_track_match.fuzzy_match_with_score` (title/artist-only) does not enforce — they live in the adapter. `extract_title_stem` / `parse_version_tag` from `external_track_match` replace our entire normalisation + remix-tag regex design. The **D1 algorithm spec** (§ "Designs derived from decisions" → D1) is retained as the *acceptance spec*: the D1 test-set (≥ 95% precision / ≥ 90% recall) runs against this adapter. If `external_track_match`'s matcher misses the bar on real owner data, raise it with that module's owner — **do not fork a private matcher** (the exact anti-pattern that module exists to prevent).
 
 **P2.10 — `app/downloader/quality.py`**
 
@@ -1458,7 +1415,7 @@ def pick_with_policy(candidates: list[TrackMatch], *, lossless_only: bool) -> tu
 
 **P3.11 — `app/downloader/resolver.py`**
 
-Single-input → fan-out probe across enabled providers, gather TrackMatches, run them through `match.py`, return Candidates ranked by quality.
+Single-input → fan-out probe across enabled providers, gather TrackMatches, run them through `match_adapter.match()` (delegates to `external_track_match` — I1), return Candidates ranked by quality.
 
 ```python
 import asyncio, uuid
@@ -1769,7 +1726,7 @@ Spawn `route-architect` agent before writing. Three routes mounted under `/api/d
 - `POST /search`  — calls `await search.search(SearchRequest(...))`
 - `POST /fetch`   — enqueues `execute_fetch(...)` on the existing job queue, returns `{job_id, started_at}`
 
-No `X-Session-Token` (OQ-A). No `_db_write_lock` at the route level — only `master.db` writers (auto-import path inside `execute_fetch` step 9) acquire `db_lock()` from `app/database.py`.
+Routes gated with `dependencies=[Depends(require_session)]` (I2 — `app/auth.py`). No `_db_write_lock` at the route level — only `master.db` writers (auto-import path inside `execute_fetch` step 9) acquire `db_lock()` from `app/database.py`.
 
 ### Phase 6 — Frontend (detailed)
 

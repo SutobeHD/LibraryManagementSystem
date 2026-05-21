@@ -49,7 +49,7 @@ _(none)_
 ## implement/
 
 ### draftplan
-- [draftplan_downloader-unified-multi-source.md](implement/draftplan_downloader-unified-multi-source.md) — Unified downloader: plan filled + Plan-agent pre-review done (6 repo-errors corrected in-place). Blocked on owner decisions OQ-A (route auth) + OQ-B (D3 timing) before review_ → signoff (2026-05-13)
+_(none)_
 
 ### review
 _(none)_
@@ -61,7 +61,7 @@ _(none)_
 _(none)_
 
 ### accepted
-_(none)_
+- [accepted_downloader-unified-multi-source.md](implement/accepted_downloader-unified-multi-source.md) — Unified multi-source downloader: owner sign-off granted; integrated with parallel research (matching delegated to `external_track_match`, auth via `require_session`, `quality_engine` reuse). Ready for `inprogress_` (2026-05-21)
 
 ### inprogress
 _(none)_
