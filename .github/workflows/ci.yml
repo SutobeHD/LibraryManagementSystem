@@ -33,7 +33,8 @@ jobs:
           # Heavy native deps (madmom, essentia, rbox) get `ignore_missing_imports`
           # in mypy + a per-file skip in pytest, so CI doesn't need them.
           pip install fastapi uvicorn pydantic httpx requests psutil keyring \
-                      python-dotenv numpy scipy mutagen soundfile platformdirs
+                      python-dotenv numpy scipy mutagen soundfile platformdirs \
+                      watchdog
 
       - name: Lint with ruff
         run: ruff check app/ tests/ || true   # 385 errors remain (mostly style); promoted to strict once cleanup follow-up lands
