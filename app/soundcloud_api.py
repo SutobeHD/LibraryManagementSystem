@@ -14,10 +14,11 @@ import logging
 import os
 import re
 import time
-from difflib import SequenceMatcher
 from functools import lru_cache
 
 import requests
+
+from app import external_track_match as etm
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ def get_sc_client_id() -> str:
         "Accept-Language": "en-US,en;q=0.9,de;q=0.8",
         "DNT": "1",
         "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1"
+        "Upgrade-Insecure-Requests": "1",
     }
 
     try:
@@ -73,7 +74,9 @@ def get_sc_client_id() -> str:
         # Fast timeout (5s) to avoid stalling the backend if SC is hanging or proxying via Cloudflare challenge
         resp = requests.get("https://soundcloud.com", headers=stealth_headers, timeout=5.0)
 
-        logger.info(f"[SC Scraper] Main page status: {resp.status_code}, HTML length: {len(resp.text)} bytes")
+        logger.info(
+            f"[SC Scraper] Main page status: {resp.status_code}, HTML length: {len(resp.text)} bytes"
+        )
         resp.raise_for_status()
 
         # Find script tags: <script crossorigin src="https://a-v2.sndcdn.com/assets/49-8c9df1fb.js">
@@ -93,7 +96,9 @@ def get_sc_client_id() -> str:
                 js_resp = requests.get(url, headers=stealth_headers, timeout=5.0)
                 logger.debug(f"[SC Scraper] Scanning script: {url} (Status: {js_resp.status_code})")
             except Exception as e_script:
-                logger.warning(f"[SC Scraper] Skipped script {url} due to network error: {e_script}")
+                logger.warning(
+                    f"[SC Scraper] Skipped script {url} due to network error: {e_script}"
+                )
                 continue
 
             if js_resp.status_code == 200:
@@ -102,7 +107,9 @@ def get_sc_client_id() -> str:
                     new_id = match.group(1)
                     _DYNAMIC_CLIENT_ID = new_id
                     _DYNAMIC_CLIENT_ID_EXPIRES = now + 3600  # cache 1 hour
-                    logger.info(f"[SC Scraper] SUCCESS! Fetched dynamic client_id: {_DYNAMIC_CLIENT_ID}")
+                    logger.info(
+                        f"[SC Scraper] SUCCESS! Fetched dynamic client_id: {_DYNAMIC_CLIENT_ID}"
+                    )
                     return _DYNAMIC_CLIENT_ID
                 else:
                     logger.debug(f"[SC Scraper] No client_id found in script: {url}")
@@ -110,7 +117,9 @@ def get_sc_client_id() -> str:
         logger.warning("[SC Scraper] Regex found no client_id in any JS bundles.")
 
     except requests.exceptions.HTTPError as he:
-        logger.error(f"[SC Scraper] Blocked by SC (Status {he.response.status_code}). Likely Cloudflare Challenge.")
+        logger.error(
+            f"[SC Scraper] Blocked by SC (Status {he.response.status_code}). Likely Cloudflare Challenge."
+        )
     except requests.exceptions.Timeout:
         logger.error("[SC Scraper] Timeout after 5 seconds while reaching soundcloud.com")
     except Exception as e:
@@ -135,19 +144,23 @@ SC_API_BASE = "https://api.soundcloud.com"
 # Custom Exceptions
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class AuthExpiredError(Exception):
     """Raised when the SoundCloud OAuth token is invalid or has expired."""
+
     pass
 
 
 class RateLimitError(Exception):
     """Raised when the API rate limit is exceeded and retries are exhausted."""
+
     pass
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Rate-Limited HTTP helper
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def _get_proxy() -> dict | None:
     """
@@ -157,6 +170,7 @@ def _get_proxy() -> dict | None:
     """
     try:
         from .services import SettingsManager
+
         proxy_url = (SettingsManager.load() or {}).get("http_proxy", "").strip()
         if proxy_url:
             return {"http": proxy_url, "https": proxy_url}
@@ -165,7 +179,9 @@ def _get_proxy() -> dict | None:
     return None
 
 
-def _sc_get(url: str, headers: dict, params: dict = None, max_retries: int = 3, timeout: int = 15) -> requests.Response:
+def _sc_get(
+    url: str, headers: dict, params: dict = None, max_retries: int = 3, timeout: int = 15
+) -> requests.Response:
     """
     Perform a GET request against the SoundCloud API with automatic 429 backoff.
 
@@ -183,7 +199,9 @@ def _sc_get(url: str, headers: dict, params: dict = None, max_retries: int = 3, 
     for attempt in range(max_retries + 1):
         try:
             logger.debug(f"[SC] GET Request to {url} (params: {params})")
-            resp = requests.get(url, headers=headers, params=params, timeout=timeout, proxies=_get_proxy())
+            resp = requests.get(
+                url, headers=headers, params=params, timeout=timeout, proxies=_get_proxy()
+            )
             logger.info(f"[SC] Response {resp.status_code} from {url}")
         except requests.RequestException as exc:
             logger.warning(f"[SC] Network error on attempt {attempt + 1}: {exc}")
@@ -200,26 +218,33 @@ def _sc_get(url: str, headers: dict, params: dict = None, max_retries: int = 3, 
                 # logger.debug(f"[SC] JSON Response snippet: {str(resp_json)[:200]}...")
                 return resp
             except ValueError as json_err:
-                logger.error(f"[SC] Malformed JSON from {url}: {json_err}. Raw body snippet: {resp.text[:200]}")
-                raise ValueError(f"SoundCloud returned non-JSON (status 200). Raw: {resp.text[:120]}")
+                logger.error(
+                    f"[SC] Malformed JSON from {url}: {json_err}. Raw body snippet: {resp.text[:200]}"
+                )
+                raise ValueError(
+                    f"SoundCloud returned non-JSON (status 200). Raw: {resp.text[:120]}"
+                )
 
         if resp.status_code in (401, 403):
-            logger.error(f"[SC] Auth error {resp.status_code}: token invalid or expired. Body: {resp.text[:200]}")
-            raise AuthExpiredError(f"SoundCloud auth token is invalid or expired (HTTP {resp.status_code}).")
+            logger.error(
+                f"[SC] Auth error {resp.status_code}: token invalid or expired. Body: {resp.text[:200]}"
+            )
+            raise AuthExpiredError(
+                f"SoundCloud auth token is invalid or expired (HTTP {resp.status_code})."
+            )
 
         # ROOT CAUSE FIX: SoundCloud returns 404 when client_id is wrong...
         if resp.status_code == 404:
-            logger.error(
-                f"[SC] 404 Not Found from SoundCloud for {url}. "
-                f"Body: {resp.text[:200]}"
-            )
+            logger.error(f"[SC] 404 Not Found from SoundCloud for {url}. Body: {resp.text[:200]}")
             raise AuthExpiredError(
                 f"SoundCloud returned 404 for {url}. Token or client_id may be invalid."
             )
 
         if resp.status_code == 429:
             retry_after = int(resp.headers.get("Retry-After", delay * 2))
-            logger.warning(f"[SC] 429 Too Many Requests. Retrying in {retry_after}s (attempt {attempt + 1}/{max_retries}).")
+            logger.warning(
+                f"[SC] 429 Too Many Requests. Retrying in {retry_after}s (attempt {attempt + 1}/{max_retries})."
+            )
             if attempt >= max_retries:
                 raise RateLimitError("SoundCloud rate limit exceeded. Please try again later.")
             time.sleep(retry_after)
@@ -237,6 +262,7 @@ def _sc_get(url: str, headers: dict, params: dict = None, max_retries: int = 3, 
 # SoundCloud Playlist API
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class SoundCloudPlaylistAPI:
     """Fetches playlist and track data from SoundCloud."""
 
@@ -244,7 +270,7 @@ class SoundCloudPlaylistAPI:
     def _get_headers(auth_token: str | None = None) -> dict:
         headers = {
             "Accept": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         }
         if auth_token:
             headers["Authorization"] = f"OAuth {auth_token}"
@@ -258,7 +284,7 @@ class SoundCloudPlaylistAPI:
             f"{SC_API_BASE}/me",
             headers=SoundCloudPlaylistAPI._get_headers(auth_token),
             params={} if auth_token else {"client_id": get_sc_client_id()},
-            timeout=10
+            timeout=10,
         )
         data = resp.json()
         user_id = data.get("id")
@@ -281,17 +307,17 @@ class SoundCloudPlaylistAPI:
             f"{SC_API_BASE}/me",
             headers=SoundCloudPlaylistAPI._get_headers(auth_token),
             params={} if auth_token else {"client_id": get_sc_client_id()},
-            timeout=10
+            timeout=10,
         )
         data = resp.json()
         return {
-            "id":              data.get("id"),
-            "username":        data.get("username") or data.get("permalink") or "Unknown",
-            "full_name":       data.get("full_name") or "",
-            "avatar_url":      data.get("avatar_url"),   # may be None — frontend handles fallback
-            "permalink_url":   data.get("permalink_url") or "",
+            "id": data.get("id"),
+            "username": data.get("username") or data.get("permalink") or "Unknown",
+            "full_name": data.get("full_name") or "",
+            "avatar_url": data.get("avatar_url"),  # may be None — frontend handles fallback
+            "permalink_url": data.get("permalink_url") or "",
             "followers_count": data.get("followers_count", 0),
-            "track_count":     data.get("track_count", 0),
+            "track_count": data.get("track_count", 0),
         }
 
     @staticmethod
@@ -361,7 +387,9 @@ class SoundCloudPlaylistAPI:
             # /resolve returns the resource directly; check it's a track
             kind = data.get("kind", "")
             if kind != "track":
-                logger.warning("[SC] resolve_track_from_url: kind=%s (not a track) for %s", kind, permalink_url)
+                logger.warning(
+                    "[SC] resolve_track_from_url: kind=%s (not a track) for %s", kind, permalink_url
+                )
                 return None
 
             return SoundCloudPlaylistAPI._normalize_track(data)
@@ -405,10 +433,14 @@ class SoundCloudPlaylistAPI:
                 collection = data.get("collection", [])
                 url = data.get("next_href")  # full URL with embedded params
                 params = {}  # next_href already includes query params
-                logger.info(f"[SC] Fetched {len(collection)} playlists from current page. Next page: {url}")
+                logger.info(
+                    f"[SC] Fetched {len(collection)} playlists from current page. Next page: {url}"
+                )
 
             if not isinstance(collection, list):
-                logger.warning(f"[SC] get_playlists: unexpected collection format (type: {type(collection)}), stopping pagination.")
+                logger.warning(
+                    f"[SC] get_playlists: unexpected collection format (type: {type(collection)}), stopping pagination."
+                )
                 break
 
             for pl in collection:
@@ -417,20 +449,24 @@ class SoundCloudPlaylistAPI:
                 tracks_raw = pl.get("tracks", [])
                 # No hard limit — frontend handles scrolling
                 track_preview = [
-                    t for t in (SoundCloudPlaylistAPI._normalize_track(tr) for tr in tracks_raw)
+                    t
+                    for t in (SoundCloudPlaylistAPI._normalize_track(tr) for tr in tracks_raw)
                     if t is not None
                 ]
-                playlists.append({
-                    "id": pl.get("id"),
-                    "title": pl.get("title", "Untitled"),
-                    "track_count": pl.get("track_count", len(tracks_raw)),
-                    "duration": pl.get("duration", 0),
-                    "artwork_url": pl.get("artwork_url") or (tracks_raw[0].get("artwork_url") if tracks_raw else None),
-                    "permalink_url": pl.get("permalink_url", ""),
-                    "created_at": pl.get("created_at", ""),
-                    "is_public": pl.get("sharing", "public") != "private",
-                    "tracks": track_preview,
-                })
+                playlists.append(
+                    {
+                        "id": pl.get("id"),
+                        "title": pl.get("title", "Untitled"),
+                        "track_count": pl.get("track_count", len(tracks_raw)),
+                        "duration": pl.get("duration", 0),
+                        "artwork_url": pl.get("artwork_url")
+                        or (tracks_raw[0].get("artwork_url") if tracks_raw else None),
+                        "permalink_url": pl.get("permalink_url", ""),
+                        "created_at": pl.get("created_at", ""),
+                        "is_public": pl.get("sharing", "public") != "private",
+                        "tracks": track_preview,
+                    }
+                )
 
             time.sleep(0.3)  # polite rate-limit spacing
 
@@ -476,7 +512,9 @@ class SoundCloudPlaylistAPI:
                 if len(tracks) >= max_tracks:
                     break
                 # Likes endpoint wraps the track in {"track": {...}} or is direct track
-                raw_track = item.get("track") if isinstance(item, dict) and "track" in item else item
+                raw_track = (
+                    item.get("track") if isinstance(item, dict) and "track" in item else item
+                )
                 normalized = SoundCloudPlaylistAPI._normalize_track(raw_track)
                 if normalized:
                     tracks.append(normalized)
@@ -513,10 +551,7 @@ class SoundCloudPlaylistAPI:
             if not auth_token:
                 params["client_id"] = get_sc_client_id()
             resp = _sc_get(
-                f"{SC_API_BASE}/playlists/{playlist_id}",
-                headers=headers,
-                params=params,
-                timeout=20
+                f"{SC_API_BASE}/playlists/{playlist_id}", headers=headers, params=params, timeout=20
             )
         except AuthExpiredError:
             raise
@@ -540,13 +575,16 @@ class SoundCloudPlaylistAPI:
             if normalized:
                 result.append(normalized)
 
-        logger.info(f"[SC] get_full_playlist_tracks({playlist_id}): {len(result)} valid tracks (filtered from {len(raw_tracks)}).")
+        logger.info(
+            f"[SC] get_full_playlist_tracks({playlist_id}): {len(result)} valid tracks (filtered from {len(raw_tracks)})."
+        )
         return result
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SoundCloud Sync Engine
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class SoundCloudSyncEngine:
     """Syncs SoundCloud playlists → local Rekordbox collection playlists."""
@@ -557,7 +595,13 @@ class SoundCloudSyncEngine:
         self.db = db_manager
 
     def _normalize_title(self, title: str) -> str:
-        return re.sub(r'[^\w\s]', '', title.lower().strip())
+        """Thin delegate to ``external_track_match.normalize_title``.
+
+        The matcher logic was lifted into the shared ``external_track_match``
+        module (M1 of the unified-module plan). This wrapper is kept so existing
+        call sites inside this file keep working unchanged.
+        """
+        return etm.normalize_title(title)
 
     def _fuzzy_match_track(self, sc_title: str, sc_artist: str, local_tracks: dict) -> str | None:
         """Find the best matching local track. Returns the local track ID or None."""
@@ -565,27 +609,12 @@ class SoundCloudSyncEngine:
         return tid
 
     def _fuzzy_match_with_score(self, sc_title: str, sc_artist: str, local_tracks: dict):
-        """Find the best match and return (local_track_id, score). Score 0..1."""
-        sc_combined = f"{sc_artist} - {sc_title}".lower()
-        sc_norm_title = self._normalize_title(sc_title)
-        best_match = None
-        best_ratio = 0.0
+        """Thin delegate to ``external_track_match.fuzzy_match_with_score``.
 
-        for tid, track in local_tracks.items():
-            local_title = (track.get("Title") or "").lower()
-            local_artist = (track.get("Artist") or "").lower()
-            local_combined = f"{local_artist} - {local_title}"
-
-            # Exact normalized title match wins immediately
-            if sc_norm_title and sc_norm_title == self._normalize_title(local_title):
-                return tid, 1.0
-
-            ratio = SequenceMatcher(None, sc_combined, local_combined).ratio()
-            if ratio > best_ratio and ratio >= 0.65:
-                best_ratio = ratio
-                best_match = tid
-
-        return best_match, round(best_ratio, 3)
+        Returns ``(local_track_id, score)`` with score 0..1 — same shape and
+        behaviour as before the matcher was extracted into the shared module.
+        """
+        return etm.fuzzy_match_with_score(sc_title, sc_artist, local_tracks)
 
     def find_or_create_playlist(self, sc_playlist_title: str) -> str | None:
         """Find existing synced playlist or create a new one. Returns playlist ID string.
@@ -593,12 +622,13 @@ class SoundCloudSyncEngine:
         that local Rekordbox folder instead of ROOT.
         """
         from .services import SettingsManager
+
         sync_name = f"{self.SYNC_PREFIX}{sc_playlist_title}"
         for pl in self.db.playlists:
             if pl.get("Name") == sync_name:
                 return str(pl.get("ID"))
         try:
-            if hasattr(self.db, 'create_playlist'):
+            if hasattr(self.db, "create_playlist"):
                 # Determine target parent folder from settings
                 target_folder_id = SettingsManager.load().get("sc_sync_folder_id") or "ROOT"
                 logger.info(f"[SC] Creating playlist '{sync_name}' in folder id={target_folder_id}")
@@ -632,7 +662,7 @@ class SoundCloudSyncEngine:
             "already_synced": 0,
             "added": 0,
             "dead_tracks": 0,
-            "errors": []
+            "errors": [],
         }
 
         # Fetch full track list
@@ -658,7 +688,7 @@ class SoundCloudSyncEngine:
         except Exception:
             pass
 
-        local_tracks = self.db.tracks if hasattr(self.db, 'tracks') else {}
+        local_tracks = self.db.tracks if hasattr(self.db, "tracks") else {}
 
         for sc_track in sc_tracks:
             sc_title = sc_track.get("title", "")
@@ -675,10 +705,10 @@ class SoundCloudSyncEngine:
                     result["already_synced"] += 1
                 else:
                     try:
-                        if hasattr(self.db, 'add_track_to_playlist'):
+                        if hasattr(self.db, "add_track_to_playlist"):
                             self.db.add_track_to_playlist(pid, matched_tid)
                             result["added"] += 1
-                        elif hasattr(self.db.active_db, 'add_track_to_playlist'):
+                        elif hasattr(self.db.active_db, "add_track_to_playlist"):
                             self.db.active_db.add_track_to_playlist(pid, matched_tid)
                             result["added"] += 1
                     except Exception as exc:
@@ -710,7 +740,7 @@ class SoundCloudSyncEngine:
         else:
             sc_tracks = SoundCloudPlaylistAPI.get_full_playlist_tracks(sc_id, auth_token)
 
-        local_tracks = self.db.tracks if hasattr(self.db, 'tracks') else {}
+        local_tracks = self.db.tracks if hasattr(self.db, "tracks") else {}
         preview = []
 
         for sc_track in sc_tracks:
@@ -718,32 +748,47 @@ class SoundCloudSyncEngine:
             sc_artist = sc_track.get("artist", "")
 
             if not sc_title:
-                preview.append({"sc_title": "", "sc_artist": sc_artist,
-                                 "sc_url": sc_track.get("permalink_url", ""),
-                                 "local_id": None, "local_title": None, "local_artist": None,
-                                 "score": 0.0, "status": "dead"})
+                preview.append(
+                    {
+                        "sc_title": "",
+                        "sc_artist": sc_artist,
+                        "sc_url": sc_track.get("permalink_url", ""),
+                        "local_id": None,
+                        "local_title": None,
+                        "local_artist": None,
+                        "score": 0.0,
+                        "status": "dead",
+                    }
+                )
                 continue
 
             tid, score = self._fuzzy_match_with_score(sc_title, sc_artist, local_tracks)
             if tid:
                 local = local_tracks[tid]
-                preview.append({
-                    "sc_title": sc_title,
-                    "sc_artist": sc_artist,
-                    "sc_url": sc_track.get("permalink_url", ""),
-                    "local_id": tid,
-                    "local_title": local.get("Title", ""),
-                    "local_artist": local.get("Artist", ""),
-                    "score": score,
-                    "status": "matched",
-                })
+                preview.append(
+                    {
+                        "sc_title": sc_title,
+                        "sc_artist": sc_artist,
+                        "sc_url": sc_track.get("permalink_url", ""),
+                        "local_id": tid,
+                        "local_title": local.get("Title", ""),
+                        "local_artist": local.get("Artist", ""),
+                        "score": score,
+                        "status": "matched",
+                    }
+                )
             else:
-                preview.append({
-                    "sc_title": sc_title,
-                    "sc_artist": sc_artist,
-                    "sc_url": sc_track.get("permalink_url", ""),
-                    "local_id": None, "local_title": None, "local_artist": None,
-                    "score": 0.0, "status": "unmatched",
-                })
+                preview.append(
+                    {
+                        "sc_title": sc_title,
+                        "sc_artist": sc_artist,
+                        "sc_url": sc_track.get("permalink_url", ""),
+                        "local_id": None,
+                        "local_title": None,
+                        "local_artist": None,
+                        "score": 0.0,
+                        "status": "unmatched",
+                    }
+                )
 
         return preview
