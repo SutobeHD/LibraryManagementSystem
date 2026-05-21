@@ -245,7 +245,7 @@ def _provider_for_platform(platform: str) -> object:
             or YouTube claim — no fetch path exists for those yet).
     """
     if platform == "soundcloud":
-        return SoundCloudProvider()
+        return SoundCloudProvider.from_keyring()
     try:
         return SpotiFlacProvider(platform)  # type: ignore[arg-type]
     except ValueError as exc:

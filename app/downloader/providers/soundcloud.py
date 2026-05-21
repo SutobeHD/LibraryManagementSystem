@@ -62,6 +62,27 @@ class SoundCloudProvider(SourceProvider):
         """Bind the provider, optionally to a SoundCloud OAuth token."""
         self._auth_token = auth_token
 
+    @classmethod
+    def from_keyring(cls) -> SoundCloudProvider:
+        """Construct the provider wired to the keyring-stored OAuth token.
+
+        Reads the per-account SoundCloud token the rest of the app stores in
+        the OS keyring under service ``library_management_system`` / key
+        ``sc_token`` — the same pair ``app/main.py``'s SoundCloud routes use,
+        so the unified downloader can reach the private / Go+ tracks the
+        account has access to. An absent token (or an unavailable keyring
+        backend, e.g. a stripped-down test env) degrades to anonymous
+        ``client_id`` mode — public tracks only — rather than failing.
+        """
+        token: str | None = None
+        try:
+            import keyring
+
+            token = keyring.get_password("library_management_system", "sc_token")
+        except Exception as exc:
+            logger.debug("[sc-provider] keyring OAuth token unavailable: %s", exc)
+        return cls(auth_token=token)
+
     @property
     def platform(self) -> Platform:
         """Always ``"soundcloud"``."""

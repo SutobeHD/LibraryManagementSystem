@@ -136,10 +136,12 @@ def _make_spotiflac(platform: Platform) -> SpotiFlacProvider:
 #: Default platform → provider factory map. Each SpotiFLAC-served paid service
 #: gets its own ``SpotiFlacProvider`` instance (bound to that platform) so the
 #: orchestrator can hold one provider per platform; SoundCloud has its own.
-#: ``spotify`` / ``youtube`` have no Phase-1 provider yet — they are absent so
-#: an enabled-but-unbuilt platform is silently skipped, never crashes.
+#: ``SoundCloudProvider.from_keyring`` wires the provider to the account OAuth
+#: token so private / Go+ tracks resolve. ``spotify`` / ``youtube`` have no
+#: Phase-1 provider yet — they are absent so an enabled-but-unbuilt platform is
+#: silently skipped, never crashes.
 _PLATFORM_PROVIDERS: dict[str, object] = {
-    "soundcloud": SoundCloudProvider,
+    "soundcloud": SoundCloudProvider.from_keyring,
     "tidal": lambda: _make_spotiflac("tidal"),
     "qobuz": lambda: _make_spotiflac("qobuz"),
     "amazon": lambda: _make_spotiflac("amazon"),
