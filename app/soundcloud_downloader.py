@@ -72,13 +72,15 @@ from .config import FFMPEG_BIN, MUSIC_DIR
 logger = logging.getLogger(__name__)
 
 # Allowed audio extensions from official SC downloads
-_ALLOWED_EXTS = frozenset({".mp3", ".wav", ".flac", ".aiff", ".aif", ".ogg", ".opus", ".m4a", ".aac"})
+_ALLOWED_EXTS = frozenset(
+    {".mp3", ".wav", ".flac", ".aiff", ".aif", ".ogg", ".opus", ".m4a", ".aac"}
+)
 
 # Maximum per-component filename length (Windows MAX_PATH-safe)
 _MAX_NAME_LEN = 80
 
 # Network timeouts
-_API_TIMEOUT = 15       # seconds — URL resolution / redirect
+_API_TIMEOUT = 15  # seconds — URL resolution / redirect
 _DOWNLOAD_TIMEOUT = 180  # seconds — actual file download (large files up to ~500 MB)
 
 # v2 API — needed for `media.transcodings[]`. The public v1 (api.soundcloud.com)
@@ -115,7 +117,8 @@ _CT_MAP: dict[str, str] = {
 # file CON.mp3 / NUL.txt etc. fails or opens the device handle. Match the
 # stem (before optional dot+ext) case-insensitively.
 _WIN_RESERVED_RE = re.compile(
-    r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)", re.IGNORECASE,
+    r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)",
+    re.IGNORECASE,
 )
 
 
@@ -132,7 +135,7 @@ def _sanitize_name(name: str) -> str:
         return "Unknown"
     # Replace illegal chars (Windows: < > : " / \ | ? * and control chars)
     safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name)
-    safe = re.sub(r'\s+', " ", safe).strip(" ._")
+    safe = re.sub(r"\s+", " ", safe).strip(" ._")
     if len(safe) > _MAX_NAME_LEN:
         safe = safe[:_MAX_NAME_LEN].rstrip(" ._")
     if _WIN_RESERVED_RE.match(safe):
@@ -168,7 +171,9 @@ def _build_save_path(artist: str, title: str, ext: str) -> Path:
         truncated_stem = stem[:new_stem_len].rstrip(" ._") or "track"
         logger.warning(
             "[SC-DL] Path > %d chars, truncating stem %r -> %r",
-            MAX_TOTAL, stem, truncated_stem,
+            MAX_TOTAL,
+            stem,
+            truncated_stem,
         )
         candidate = artist_dir / f"{truncated_stem}{ext}"
         counter = 1
@@ -191,6 +196,7 @@ def _guess_extension(content_type: str, url: str) -> str:
 
 
 # ── Network helpers ────────────────────────────────────────────────────────────
+
 
 def _resolve_official_download_url(
     sc_track_id: str,
@@ -229,9 +235,9 @@ def _resolve_official_download_url(
             url,
             headers=headers,
             params=params,
-            allow_redirects=True,   # follow the 302 chain to the CDN
+            allow_redirects=True,  # follow the 302 chain to the CDN
             timeout=_API_TIMEOUT,
-            stream=True,            # avoid buffering the body here
+            stream=True,  # avoid buffering the body here
         ) as resp:
             resp.raise_for_status()
             logger.info("[SC-DL] Resolved to: %s", resp.url[:120])
@@ -241,11 +247,15 @@ def _resolve_official_download_url(
         code = exc.response.status_code if exc.response is not None else "?"
         logger.error(
             "[SC-DL] HTTP %s resolving download URL for sc_id=%s: %s",
-            code, sc_track_id, exc,
+            code,
+            sc_track_id,
+            exc,
         )
         return None
     except requests.RequestException as exc:
-        logger.error("[SC-DL] Network error resolving download URL (sc_id=%s): %s", sc_track_id, exc)
+        logger.error(
+            "[SC-DL] Network error resolving download URL (sc_id=%s): %s", sc_track_id, exc
+        )
         return None
 
 
@@ -267,11 +277,14 @@ def _normalize_track_id(raw) -> str | None:
     if not s or s.lower() == "none":
         return None
     # Already clean (purely digits, optional underscore prefix for XML mode)
-    if s.isdigit() or (s.startswith("pl_") is False and "_" not in s and " " not in s and "(" not in s):
+    if s.isdigit() or (
+        s.startswith("pl_") is False and "_" not in s and " " not in s and "(" not in s
+    ):
         return s
     # Try to literal-eval in case it's a real tuple repr
     try:
         import ast
+
         v = ast.literal_eval(s)
         if isinstance(v, tuple) and v:
             return _normalize_track_id(v[0])
@@ -279,6 +292,7 @@ def _normalize_track_id(raw) -> str | None:
         pass
     # Fallback: regex out the first long digit run (tids are 13+ digits)
     import re
+
     m = re.search(r"\d{6,}", s)
     return m.group(0) if m else None
 
@@ -330,28 +344,35 @@ def _resolve_stream_via_transcodings(
         try:
             resp = requests.get(
                 f"{_V2_API_BASE}/tracks/{sc_track_id}",
-                headers=attempt_headers, params=params, timeout=_API_TIMEOUT,
+                headers=attempt_headers,
+                params=params,
+                timeout=_API_TIMEOUT,
             )
             if resp.status_code in (401, 403):
                 logger.info(
                     "[SC-DL] v2 metadata HTTP %s on attempt=%s for sc_id=%s",
-                    resp.status_code, attempt_label, sc_track_id,
+                    resp.status_code,
+                    attempt_label,
+                    sc_track_id,
                 )
                 continue  # try next variant
             resp.raise_for_status()
             track_data = resp.json()
-            used_auth = (attempt_label == "auth")
+            used_auth = attempt_label == "auth"
             break
         except requests.RequestException as exc:
             logger.warning(
                 "[SC-DL] v2 metadata fetch error attempt=%s sc_id=%s: %s",
-                attempt_label, sc_track_id, exc,
+                attempt_label,
+                sc_track_id,
+                exc,
             )
             continue
         except ValueError:
             logger.warning(
                 "[SC-DL] v2 metadata non-JSON attempt=%s sc_id=%s",
-                attempt_label, sc_track_id,
+                attempt_label,
+                sc_track_id,
             )
             continue
 
@@ -385,6 +406,7 @@ def _resolve_stream_via_transcodings(
     aggressive = False
     try:
         from .services import SettingsManager
+
         aggressive = bool(SettingsManager.load().get("sc_aggressive_mode", False))
     except Exception:
         pass
@@ -424,7 +446,9 @@ def _resolve_stream_via_transcodings(
     if not tc_url or protocol not in ("progressive", "hls"):
         logger.error(
             "[SC-DL] Unusable transcoding for sc_id=%s: protocol=%s url=%s",
-            sc_track_id, protocol, bool(tc_url),
+            sc_track_id,
+            protocol,
+            bool(tc_url),
         )
         return None
 
@@ -445,7 +469,9 @@ def _resolve_stream_via_transcodings(
             if resp.status_code in (401, 403):
                 logger.info(
                     "[SC-DL] Transcoding sign HTTP %s on %s for sc_id=%s",
-                    resp.status_code, s_label, sc_track_id,
+                    resp.status_code,
+                    s_label,
+                    sc_track_id,
                 )
                 continue
             resp.raise_for_status()
@@ -453,12 +479,17 @@ def _resolve_stream_via_transcodings(
             break
         except requests.RequestException as exc:
             logger.warning(
-                "[SC-DL] Transcoding sign error %s sc_id=%s: %s", s_label, sc_track_id, exc,
+                "[SC-DL] Transcoding sign error %s sc_id=%s: %s",
+                s_label,
+                sc_track_id,
+                exc,
             )
             continue
         except ValueError:
             logger.warning(
-                "[SC-DL] Transcoding sign non-JSON %s sc_id=%s", s_label, sc_track_id,
+                "[SC-DL] Transcoding sign non-JSON %s sc_id=%s",
+                s_label,
+                sc_track_id,
             )
             continue
 
@@ -476,7 +507,10 @@ def _resolve_stream_via_transcodings(
 
     logger.info(
         "[SC-DL] Resolved transcoding: sc_id=%s protocol=%s quality=%s mime=%s",
-        sc_track_id, protocol, quality, mime,
+        sc_track_id,
+        protocol,
+        quality,
+        mime,
     )
     return {
         "url": cdn_url,
@@ -503,8 +537,11 @@ def _download_hls_to_temp(
     """
     # Pick container by codec hint — AAC streams need .m4a + aac_adtstoasc BSF,
     # MP3 streams can stay .mp3. Default to .m4a (SC HLS is almost always AAC).
-    is_mp3 = "mpeg" in mime_type.lower() and "mp4" not in mime_type.lower() \
-             and "aac" not in mime_type.lower()
+    is_mp3 = (
+        "mpeg" in mime_type.lower()
+        and "mp4" not in mime_type.lower()
+        and "aac" not in mime_type.lower()
+    )
     ext = ".mp3" if is_mp3 else ".m4a"
 
     with tempfile.NamedTemporaryFile(prefix="rbpro_sc_", suffix=ext, delete=False) as tf:
@@ -512,8 +549,11 @@ def _download_hls_to_temp(
 
     cmd = [
         FFMPEG_BIN,
-        "-hide_banner", "-loglevel", "error",
-        "-user_agent", _UA,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-user_agent",
+        _UA,
     ]
     if auth_token:
         # ffmpeg accepts per-request headers for HLS segment fetches
@@ -528,13 +568,15 @@ def _download_hls_to_temp(
         logger.info("[SC-DL] HLS mux via ffmpeg → %s", out_path.name)
         result = subprocess.run(
             cmd,
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
             timeout=_DOWNLOAD_TIMEOUT * 2,
         )
         if result.returncode != 0:
             logger.error(
                 "[SC-DL] ffmpeg failed (code %d): %s",
-                result.returncode, (result.stderr or "")[:500],
+                result.returncode,
+                (result.stderr or "")[:500],
             )
             out_path.unlink(missing_ok=True)
             return None
@@ -590,9 +632,7 @@ def _stream_file_to_temp(
         content_type = resp.headers.get("Content-Type", "")
         ext = _guess_extension(content_type, download_url)
 
-        with tempfile.NamedTemporaryFile(
-            prefix="rbpro_sc_", suffix=ext, delete=False
-        ) as tf:
+        with tempfile.NamedTemporaryFile(prefix="rbpro_sc_", suffix=ext, delete=False) as tf:
             tmp_path = Path(tf.name)
             total = 0
             for chunk in resp.iter_content(chunk_size=65_536):
@@ -609,6 +649,7 @@ def _stream_file_to_temp(
 
 
 # ── Metadata + post-processing helpers ─────────────────────────────────────────
+
 
 def _fetch_sc_metadata(
     sc_track_id: str,
@@ -639,7 +680,9 @@ def _fetch_sc_metadata(
         try:
             resp = requests.get(
                 f"{_V2_API_BASE}/tracks/{sc_track_id}",
-                headers=headers, params=params, timeout=_API_TIMEOUT,
+                headers=headers,
+                params=params,
+                timeout=_API_TIMEOUT,
             )
             if resp.status_code in (401, 403):
                 continue
@@ -698,11 +741,7 @@ def _apply_sc_metadata(
     user = sc_meta.get("user") or {}
     pub = sc_meta.get("publisher_metadata") or {}
 
-    artist = (
-        pub.get("artist")
-        or user.get("username")
-        or "Unknown Artist"
-    )
+    artist = pub.get("artist") or user.get("username") or "Unknown Artist"
     title = pub.get("release_title") or sc_meta.get("title") or file_path.stem
     album = pub.get("album_title") or sc_playlist_title or ""
 
@@ -733,7 +772,11 @@ def _apply_sc_metadata(
         if ok:
             logger.info(
                 "[SC-DL] Tags written: %s — title=%r artist=%r genre=%r year=%s art=%s",
-                file_path.name, title, artist, updates["Genre"], year,
+                file_path.name,
+                title,
+                artist,
+                updates["Genre"],
+                year,
                 len(artwork_bytes) if artwork_bytes else 0,
             )
         return ok
@@ -743,67 +786,35 @@ def _apply_sc_metadata(
 
 
 def _convert_to_aiff(src_path: Path) -> Path | None:
-    """Convert any audio file to AIFF (PCM s16le) via ffmpeg.
+    """Convert a lossless audio file to AIFF via the unified bit-depth-aware converter.
 
-    AIFF stores uncompressed PCM, identical to WAV — no further quality loss
-    beyond whatever was in the source. Returns the new path on success, or
-    None on any failure (caller should keep the original file).
+    Thin wrapper over :func:`app.downloader.aiff.convert_to_aiff` so the SC
+    pipeline and the unified downloader share one converter. The unified
+    function preserves source bit depth (24-bit stays 24-bit — the old
+    hardcoded ``pcm_s16le`` here silently downgraded hi-res sources) and
+    leaves genuinely-lossy sources untouched.
+
+    ``convert_to_aiff`` returns the *original* path for lossy/AAC sources
+    (a valid "keep" outcome); the SC caller only swaps its extension to
+    ``.aiff`` when the returned path actually ends in ``.aiff``.
     """
-    if src_path.suffix.lower() in (".aiff", ".aif"):
-        return src_path  # already AIFF
+    from .downloader.aiff import convert_to_aiff
 
-    aiff_path = src_path.with_suffix(".aiff")
-    cmd = [
-        FFMPEG_BIN,
-        "-hide_banner", "-loglevel", "error",
-        "-i", str(src_path),
-        "-c:a", "pcm_s16le",
-        "-vn",  # drop embedded artwork — re-applied via mutagen afterwards
-        "-y", str(aiff_path),
-    ]
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True,
-            timeout=_DOWNLOAD_TIMEOUT,
-        )
-        if result.returncode != 0 or not aiff_path.exists() or aiff_path.stat().st_size < 1024:
-            logger.error(
-                "[SC-DL] AIFF conversion failed (code=%s): %s",
-                result.returncode, (result.stderr or "")[:300],
-            )
-            aiff_path.unlink(missing_ok=True)
-            return None
-
-        # Conversion succeeded — remove the original to free the slot
-        try:
-            src_path.unlink()
-        except OSError as exc:
-            logger.debug("[SC-DL] could not remove pre-AIFF source %s: %s", src_path, exc)
-
-        logger.info(
-            "[SC-DL] Converted to AIFF: %s (%d bytes)",
-            aiff_path.name, aiff_path.stat().st_size,
-        )
-        return aiff_path
-    except subprocess.TimeoutExpired:
-        logger.error("[SC-DL] ffmpeg AIFF conversion timed out")
-        aiff_path.unlink(missing_ok=True)
-        return None
-    except OSError as exc:
-        logger.error("[SC-DL] ffmpeg unavailable for AIFF conversion: %s", exc)
-        return None
+    return convert_to_aiff(src_path)
 
 
 def _aiff_requested() -> bool:
     """Cheap settings probe — defaults to False on any error."""
     try:
         from .services import SettingsManager
+
         return SettingsManager.load().get("sc_download_format", "auto") == "aiff"
     except Exception:
         return False
 
 
 # ── Downloader ─────────────────────────────────────────────────────────────────
+
 
 class SoundCloudDownloader:
     """
@@ -868,8 +879,12 @@ class SoundCloudDownloader:
 
         # ── Gate: Deduplication — skip download but STILL link to playlist ────
         if registry.is_already_downloaded(sc_track_id):
-            logger.info("[SC-DL] Skipped download sc_id=%s '%s' — already in registry. "
-                        "Linking to playlist if applicable.", sc_track_id, title)
+            logger.info(
+                "[SC-DL] Skipped download sc_id=%s '%s' — already in registry. "
+                "Linking to playlist if applicable.",
+                sc_track_id,
+                title,
+            )
             existing = registry.get_record(sc_track_id) or {}
             raw_id = existing.get("local_track_id")
             local_track_id = _normalize_track_id(raw_id)
@@ -883,8 +898,12 @@ class SoundCloudDownloader:
                         confidence=existing.get("confidence"),
                         local_track_id=local_track_id,
                     )
-                    logger.info("[SC-DL] Registry self-heal sc_id=%s: %r → %s",
-                                sc_track_id, str(raw_id)[:40], local_track_id)
+                    logger.info(
+                        "[SC-DL] Registry self-heal sc_id=%s: %r → %s",
+                        sc_track_id,
+                        str(raw_id)[:40],
+                        local_track_id,
+                    )
                 except Exception as exc:
                     logger.debug("[SC-DL] registry self-heal skipped: %s", exc)
             sorted_into_pl = False
@@ -894,78 +913,109 @@ class SoundCloudDownloader:
                     sorted_into_pl = True
                 except Exception as exc:
                     logger.warning("[SC-DL] Playlist link on skip failed: %s", exc)
-            self._set_task(task_id, {
-                "id": task_id, "sc_track_id": sc_track_id,
-                "title": title, "artist": artist,
-                "playlist_title": sc_playlist_title or "",
-                "status": "Linked" if sorted_into_pl else "Skipped",
-                "progress": 100,
-                "duplicate": True, "error": None,
-                "start_time": time.time(),
-                "stage_history": [
-                    {"stage": "Skipped", "ts": time.time()},
-                    *([{"stage": "Sorting", "ts": time.time()}] if sorted_into_pl else []),
-                    *([{"stage": "Completed", "ts": time.time()}] if sorted_into_pl else []),
-                ],
-                "local_track_id": local_track_id,
-                "bpm": existing.get("bpm"),
-                "key": existing.get("key_str"),
-                "file_path": existing.get("file_path"),
-            })
+            self._set_task(
+                task_id,
+                {
+                    "id": task_id,
+                    "sc_track_id": sc_track_id,
+                    "title": title,
+                    "artist": artist,
+                    "playlist_title": sc_playlist_title or "",
+                    "status": "Linked" if sorted_into_pl else "Skipped",
+                    "progress": 100,
+                    "duplicate": True,
+                    "error": None,
+                    "start_time": time.time(),
+                    "stage_history": [
+                        {"stage": "Skipped", "ts": time.time()},
+                        *([{"stage": "Sorting", "ts": time.time()}] if sorted_into_pl else []),
+                        *([{"stage": "Completed", "ts": time.time()}] if sorted_into_pl else []),
+                    ],
+                    "local_track_id": local_track_id,
+                    "bpm": existing.get("bpm"),
+                    "key": existing.get("key_str"),
+                    "file_path": existing.get("file_path"),
+                },
+            )
             if on_complete:
                 on_complete(task_id, True, None)
             return task_id
 
         # Register as 'downloading' immediately to block parallel duplicates
         registry.register_download(
-            sc_track_id=sc_track_id, title=title, artist=artist,
-            duration_ms=duration_ms, sc_permalink_url=sc_permalink_url,
-            sc_playlist_title=sc_playlist_title, status="downloading",
+            sc_track_id=sc_track_id,
+            title=title,
+            artist=artist,
+            duration_ms=duration_ms,
+            sc_permalink_url=sc_permalink_url,
+            sc_playlist_title=sc_playlist_title,
+            status="downloading",
         )
 
-        self._set_task(task_id, {
-            "id": task_id, "sc_track_id": sc_track_id,
-            "title": title, "artist": artist,
-            "playlist_title": sc_playlist_title or "",
-            "status": "Starting", "progress": 0,
-            "error": None, "start_time": time.time(),
-            "stage_history": [{"stage": "Starting", "ts": time.time()}],
-            "local_track_id": None, "bpm": None, "key": None,
-            "file_path": None,
-        })
+        self._set_task(
+            task_id,
+            {
+                "id": task_id,
+                "sc_track_id": sc_track_id,
+                "title": title,
+                "artist": artist,
+                "playlist_title": sc_playlist_title or "",
+                "status": "Starting",
+                "progress": 0,
+                "error": None,
+                "start_time": time.time(),
+                "stage_history": [{"stage": "Starting", "ts": time.time()}],
+                "local_track_id": None,
+                "bpm": None,
+                "key": None,
+                "file_path": None,
+            },
+        )
 
         def _run() -> None:
             try:
                 self._do_download(
-                    task_id=task_id, sc_track_id=sc_track_id,
+                    task_id=task_id,
+                    sc_track_id=sc_track_id,
                     sc_permalink_url=sc_permalink_url,
-                    title=title, artist=artist, duration_ms=duration_ms,
+                    title=title,
+                    artist=artist,
+                    duration_ms=duration_ms,
                     downloadable=downloadable,
-                    auth_token=auth_token, sc_playlist_title=sc_playlist_title,
+                    auth_token=auth_token,
+                    sc_playlist_title=sc_playlist_title,
                     on_complete=on_complete,
                 )
             except Exception as exc:
                 logger.error(
                     "[SC-DL] Unhandled error in download thread (task=%s): %s",
-                    task_id, exc, exc_info=True,
+                    task_id,
+                    exc,
+                    exc_info=True,
                 )
                 self._update_task(task_id, status="Error", error=str(exc))
                 registry.mark_failed(sc_track_id, str(exc))
                 if on_complete:
                     on_complete(task_id, False, None)
 
-        thread = threading.Thread(
-            target=_run, daemon=True, name=f"sc-dl-{sc_track_id}"
-        )
+        thread = threading.Thread(target=_run, daemon=True, name=f"sc-dl-{sc_track_id}")
         thread.start()
         return task_id
 
     # ── Core download logic ────────────────────────────────────────────────────
 
     def _do_download(
-        self, *, task_id: str, sc_track_id: str, sc_permalink_url: str,
-        title: str, artist: str, duration_ms: int, downloadable: bool,
-        auth_token: str | None, sc_playlist_title: str | None,
+        self,
+        *,
+        task_id: str,
+        sc_track_id: str,
+        sc_permalink_url: str,
+        title: str,
+        artist: str,
+        duration_ms: int,
+        downloadable: bool,
+        auth_token: str | None,
+        sc_playlist_title: str | None,
         on_complete: Callable | None,
     ) -> None:
         """Full download + hash + registry pipeline. Runs in a background thread."""
@@ -980,19 +1030,26 @@ class SoundCloudDownloader:
             self._update_task(task_id, status="Resolving", progress=5)
             logger.info(
                 "[SC-DL] Starting: sc_id=%s title='%s' downloadable=%s",
-                sc_track_id, title, downloadable,
+                sc_track_id,
+                title,
+                downloadable,
             )
 
             source: dict | None = None
             if downloadable:
                 official_url = _resolve_official_download_url(sc_track_id, auth_token)
                 if official_url:
-                    source = {"url": official_url, "protocol": "progressive",
-                              "mime_type": "", "quality": "original"}
+                    source = {
+                        "url": official_url,
+                        "protocol": "progressive",
+                        "mime_type": "",
+                        "quality": "original",
+                    }
                 else:
                     logger.info(
                         "[SC-DL] Official /download endpoint failed for sc_id=%s; "
-                        "falling back to transcodings[]", sc_track_id,
+                        "falling back to transcodings[]",
+                        sc_track_id,
                     )
 
             if source is None:
@@ -1016,7 +1073,9 @@ class SoundCloudDownloader:
 
             if protocol == "hls":
                 tmp_path = _download_hls_to_temp(
-                    source["url"], auth_token, source.get("mime_type", ""),
+                    source["url"],
+                    auth_token,
+                    source.get("mime_type", ""),
                 )
             else:
                 # progressive — including the official /download redirect
@@ -1040,16 +1099,22 @@ class SoundCloudDownloader:
             logger.info("[SC-DL] Saved: %s", final_path)
 
             # Step 3a — Optional AIFF conversion (lossless PCM via ffmpeg) ─────
-            # The source codec is whatever SC served (MP3/AAC/WAV/FLAC). PCM AIFF
-            # neither gains nor loses quality vs. the source — it just lifts the
-            # file into a DJ-friendly uncompressed container. Hash + tags are
-            # applied to the AIFF artifact, not the discarded source.
+            # The source codec is whatever SC served (MP3/AAC/WAV/FLAC). The
+            # unified converter swaps lossless sources into a DJ-friendly
+            # uncompressed AIFF container (bit depth preserved) and leaves
+            # genuinely-lossy sources untouched — no fake-lossless re-encode.
+            # Hash + tags are applied to whatever artifact survives.
             if _aiff_requested():
                 self._update_task(task_id, status="Converting", progress=82)
                 aiff_path = _convert_to_aiff(final_path)
-                if aiff_path:
+                if aiff_path is not None:
                     final_path = aiff_path
-                    ext = ".aiff"
+                    ext = final_path.suffix.lower()
+                    if ext != ".aiff":
+                        logger.info(
+                            "[SC-DL] Source is lossy — kept original format: %s",
+                            final_path.name,
+                        )
                 else:
                     logger.warning(
                         "[SC-DL] AIFF conversion failed, keeping source format: %s",
@@ -1068,7 +1133,9 @@ class SoundCloudDownloader:
                 try:
                     _apply_sc_metadata(final_path, sc_meta, sc_playlist_title)
                 except Exception as exc:
-                    logger.warning("[SC-DL] Tag application failed for %s: %s", final_path.name, exc)
+                    logger.warning(
+                        "[SC-DL] Tag application failed for %s: %s", final_path.name, exc
+                    )
             else:
                 logger.info("[SC-DL] No v2 metadata for tag-writing on sc_id=%s", sc_track_id)
 
@@ -1086,19 +1153,21 @@ class SoundCloudDownloader:
                     logger.warning(
                         "[SC-DL] Content duplicate: sc_id=%s matches existing sc_id=%s. "
                         "Removing duplicate file.",
-                        sc_track_id, existing["sc_track_id"],
+                        sc_track_id,
+                        existing["sc_track_id"],
                     )
                     final_path.unlink(missing_ok=True)
                     registry.mark_failed(
-                        sc_track_id,
-                        f"Duplicate content (matches sc_id={existing['sc_track_id']})"
+                        sc_track_id, f"Duplicate content (matches sc_id={existing['sc_track_id']})"
                     )
                     self._update_task(
-                        task_id, status="Duplicate", progress=100,
+                        task_id,
+                        status="Duplicate",
+                        progress=100,
                         error=(
                             f"Dieser Track ist bereits vorhanden als "
                             f"'{existing.get('title', '?')}' von '{existing.get('artist', '?')}'."
-                        )
+                        ),
                     )
                     if on_complete:
                         on_complete(task_id, False, None)
@@ -1106,11 +1175,16 @@ class SoundCloudDownloader:
 
             # Step 5 — Register as downloaded ──────────────────────────────────
             registry.register_download(
-                sc_track_id=sc_track_id, title=title, artist=artist,
-                duration_ms=duration_ms, sc_permalink_url=sc_permalink_url,
+                sc_track_id=sc_track_id,
+                title=title,
+                artist=artist,
+                duration_ms=duration_ms,
+                sc_permalink_url=sc_permalink_url,
                 sc_playlist_title=sc_playlist_title,
-                file_path=final_path, file_format=ext.lstrip("."),
-                file_size_bytes=file_size, sha256_hash=sha256,
+                file_path=final_path,
+                file_format=ext.lstrip("."),
+                file_size_bytes=file_size,
+                sha256_hash=sha256,
                 status="downloaded",
             )
 
@@ -1122,12 +1196,16 @@ class SoundCloudDownloader:
 
             # Step 6 — Trigger background analysis (must not raise) ────────────
             self._update_task(task_id, status="Analyzing", progress=88)
-            self._trigger_analysis_async(sc_track_id, final_path, sc_playlist_title, task_id=task_id)
+            self._trigger_analysis_async(
+                sc_track_id, final_path, sc_playlist_title, task_id=task_id
+            )
 
         except Exception as exc:
             logger.error(
                 "[SC-DL] Unexpected error in _do_download (sc_id=%s): %s",
-                sc_track_id, exc, exc_info=True,
+                sc_track_id,
+                exc,
+                exc_info=True,
             )
             # Clean up temp file if the move hadn't happened yet
             if tmp_path and tmp_path.exists():
@@ -1154,18 +1232,22 @@ class SoundCloudDownloader:
         Spawn a daemon thread to run BPM/key analysis and auto-import.
         Errors here must NOT bubble up — the download itself already succeeded.
         """
+
         def _analyze() -> None:
             local_track_id: str | None = None
             try:
                 # Mark as analyzing in registry
                 registry.register_download(
-                    sc_track_id=sc_track_id, title="", artist="",
+                    sc_track_id=sc_track_id,
+                    title="",
+                    artist="",
                     status="analyzing",
                 )
                 if task_id:
                     self._update_task(task_id, status="Analyzing", progress=90)
 
                 from .analysis_engine import run_full_analysis
+
                 logger.info("[SC-DL] Analyzing (full pipeline): %s", file_path.name)
                 result = run_full_analysis(str(file_path))
                 bpm = result.get("bpm")
@@ -1176,8 +1258,14 @@ class SoundCloudDownloader:
                 # importer can persist beatgrid + cues + waveform without
                 # re-running analysis.
                 if task_id:
-                    self._update_task(task_id, status="Importing", progress=93,
-                                      bpm=bpm, key=key, file_path=str(file_path))
+                    self._update_task(
+                        task_id,
+                        status="Importing",
+                        progress=93,
+                        bpm=bpm,
+                        key=key,
+                        file_path=str(file_path),
+                    )
                 local_track_id = self._auto_import(file_path, analysis_result=result)
                 if task_id and local_track_id:
                     self._update_task(task_id, local_track_id=local_track_id)
@@ -1191,13 +1279,18 @@ class SoundCloudDownloader:
                     logger.warning("[SC-DL] ANLZ generation failed for %s: %s", file_path.name, exc)
 
                 registry.update_analysis(
-                    sc_track_id=sc_track_id, bpm=bpm,
-                    key_str=key, confidence=conf,
+                    sc_track_id=sc_track_id,
+                    bpm=bpm,
+                    key_str=key,
+                    confidence=conf,
                     local_track_id=local_track_id,
                 )
                 logger.info(
                     "[SC-DL] Analysis done: sc_id=%s bpm=%.1f key=%s local_id=%s",
-                    sc_track_id, bpm or 0, key or "?", local_track_id,
+                    sc_track_id,
+                    bpm or 0,
+                    key or "?",
+                    local_track_id,
                 )
 
                 # Auto-sort into SC playlist after import
@@ -1212,14 +1305,16 @@ class SoundCloudDownloader:
             except Exception as exc:
                 logger.error(
                     "[SC-DL] Background analysis failed for sc_id=%s: %s",
-                    sc_track_id, exc, exc_info=True,
+                    sc_track_id,
+                    exc,
+                    exc_info=True,
                 )
                 if task_id:
-                    self._update_task(task_id, status="Analysis Failed", progress=100, error=str(exc))
+                    self._update_task(
+                        task_id, status="Analysis Failed", progress=100, error=str(exc)
+                    )
 
-        thread = threading.Thread(
-            target=_analyze, daemon=True, name=f"sc-analyze-{sc_track_id}"
-        )
+        thread = threading.Thread(target=_analyze, daemon=True, name=f"sc-analyze-{sc_track_id}")
         thread.start()
 
     def _auto_import(self, file_path: Path, analysis_result: dict | None = None) -> str | None:
@@ -1230,6 +1325,7 @@ class SoundCloudDownloader:
         """
         try:
             from .services import ImportManager
+
             result = ImportManager.process_import(file_path, analysis_result=analysis_result)
             # process_import returns (tid, analysis) tuple — unpack
             if isinstance(result, tuple) and len(result) >= 1:
@@ -1252,6 +1348,7 @@ class SoundCloudDownloader:
         single place to look.
         """
         from .anlz_sidecar import write_companion_anlz as _write
+
         target = _write(file_path, result)
         if target:
             logger.info("[SC-DL] ANLZ written → %s", target)
@@ -1268,25 +1365,21 @@ class SoundCloudDownloader:
             engine = SoundCloudSyncEngine(db)
             pid = engine.find_or_create_playlist(sc_playlist_title)
             if not pid:
-                logger.warning(
-                    "[SC-DL] Could not find/create playlist for '%s'", sc_playlist_title
-                )
+                logger.warning("[SC-DL] Could not find/create playlist for '%s'", sc_playlist_title)
                 return
 
             add_fn = (
                 db.add_track_to_playlist
                 if hasattr(db, "add_track_to_playlist")
-                else (
-                    db.active_db.add_track_to_playlist
-                    if hasattr(db, "active_db")
-                    else None
-                )
+                else (db.active_db.add_track_to_playlist if hasattr(db, "active_db") else None)
             )
             if add_fn:
                 add_fn(pid, local_track_id)
                 logger.info(
                     "[SC-DL] Auto-sorted track %s into 'SC_%s' (pid=%s)",
-                    local_track_id, sc_playlist_title, pid,
+                    local_track_id,
+                    sc_playlist_title,
+                    pid,
                 )
             else:
                 logger.warning("[SC-DL] DB has no add_track_to_playlist method.")
@@ -1294,7 +1387,8 @@ class SoundCloudDownloader:
         except Exception as exc:
             logger.error(
                 "[SC-DL] auto_add_to_playlist failed (playlist='%s'): %s",
-                sc_playlist_title, exc,
+                sc_playlist_title,
+                exc,
             )
 
     # ── State helpers ──────────────────────────────────────────────────────────
@@ -1312,9 +1406,12 @@ class SoundCloudDownloader:
                     cur = self.tasks[task_id]
                     last = cur.get("stage_history", [])[-1:] or [{}]
                     if last[0].get("stage") != new_stage:
-                        cur.setdefault("stage_history", []).append({
-                            "stage": new_stage, "ts": time.time(),
-                        })
+                        cur.setdefault("stage_history", []).append(
+                            {
+                                "stage": new_stage,
+                                "ts": time.time(),
+                            }
+                        )
                 self.tasks[task_id].update(kwargs)
 
     def get_task_status(self, task_id: str) -> dict | None:

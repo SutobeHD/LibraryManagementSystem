@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import mutagen
 
@@ -30,15 +30,31 @@ logger = logging.getLogger("AUDIO_TAGS")
 # Map app-level field names → format-agnostic keys we know how to write.
 # The "rating" channel is special (POPM in ID3, "rating" Vorbis tag).
 _FIELD_ALIASES = {
-    "Title": "title", "Name": "title", "title": "title",
-    "Artist": "artist", "ArtistName": "artist", "artist": "artist",
-    "Album": "album", "album": "album",
-    "Genre": "genre", "genre": "genre",
-    "Comment": "comment", "Comments": "comment", "comment": "comment",
-    "Rating": "rating", "rating": "rating",  # 0-5 stars in our DB
-    "Year": "year", "year": "year",
-    "Bpm": "bpm", "BPM": "bpm", "bpm": "bpm",
-    "Key": "key", "key": "key",
+    "Title": "title",
+    "Name": "title",
+    "title": "title",
+    "Artist": "artist",
+    "ArtistName": "artist",
+    "artist": "artist",
+    "Album": "album",
+    "album": "album",
+    "Genre": "genre",
+    "genre": "genre",
+    "Comment": "comment",
+    "Comments": "comment",
+    "comment": "comment",
+    "Rating": "rating",
+    "rating": "rating",  # 0-5 stars in our DB
+    "Year": "year",
+    "year": "year",
+    "Bpm": "bpm",
+    "BPM": "bpm",
+    "bpm": "bpm",
+    "Key": "key",
+    "key": "key",
+    "ISRC": "isrc",
+    "Isrc": "isrc",
+    "isrc": "isrc",
 }
 
 
@@ -75,28 +91,49 @@ def _write_mp3(path: Path, fields: dict[str, Any], artwork: bytes | None) -> boo
         TIT2,
         TKEY,
         TPE1,
+        TSRC,
         TYER,
         ID3NoHeaderError,
     )
+
     try:
         try:
             tags = ID3(str(path))
         except ID3NoHeaderError:
             tags = ID3()
 
-        if "title" in fields:    tags.delall("TIT2"); tags.add(TIT2(encoding=3, text=str(fields["title"])))
-        if "artist" in fields:   tags.delall("TPE1"); tags.add(TPE1(encoding=3, text=str(fields["artist"])))
-        if "album" in fields:    tags.delall("TALB"); tags.add(TALB(encoding=3, text=str(fields["album"])))
-        if "genre" in fields:    tags.delall("TCON"); tags.add(TCON(encoding=3, text=str(fields["genre"])))
-        if "year" in fields:     tags.delall("TYER"); tags.add(TYER(encoding=3, text=str(fields["year"])))
-        if "bpm" in fields:      tags.delall("TBPM"); tags.add(TBPM(encoding=3, text=str(fields["bpm"])))
-        if "key" in fields:      tags.delall("TKEY"); tags.add(TKEY(encoding=3, text=str(fields["key"])))
+        if "title" in fields:
+            tags.delall("TIT2")
+            tags.add(TIT2(encoding=3, text=str(fields["title"])))
+        if "artist" in fields:
+            tags.delall("TPE1")
+            tags.add(TPE1(encoding=3, text=str(fields["artist"])))
+        if "album" in fields:
+            tags.delall("TALB")
+            tags.add(TALB(encoding=3, text=str(fields["album"])))
+        if "genre" in fields:
+            tags.delall("TCON")
+            tags.add(TCON(encoding=3, text=str(fields["genre"])))
+        if "year" in fields:
+            tags.delall("TYER")
+            tags.add(TYER(encoding=3, text=str(fields["year"])))
+        if "bpm" in fields:
+            tags.delall("TBPM")
+            tags.add(TBPM(encoding=3, text=str(fields["bpm"])))
+        if "key" in fields:
+            tags.delall("TKEY")
+            tags.add(TKEY(encoding=3, text=str(fields["key"])))
+        if "isrc" in fields:
+            tags.delall("TSRC")
+            tags.add(TSRC(encoding=3, text=str(fields["isrc"])))
         if "comment" in fields:
             tags.delall("COMM")
             tags.add(COMM(encoding=3, lang="eng", desc="", text=str(fields["comment"])))
         if "rating" in fields:
             tags.delall("POPM")
-            tags.add(POPM(email="rating@rb-editor", rating=_rating_to_popm(fields["rating"]), count=0))
+            tags.add(
+                POPM(email="rating@rb-editor", rating=_rating_to_popm(fields["rating"]), count=0)
+            )
         if artwork:
             tags.delall("APIC")
             tags.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="Cover", data=artwork))
@@ -110,12 +147,19 @@ def _write_mp3(path: Path, fields: dict[str, Any], artwork: bytes | None) -> boo
 
 def _write_flac(path: Path, fields: dict[str, Any], artwork: bytes | None) -> bool:
     from mutagen.flac import FLAC, Picture
+
     try:
         f = FLAC(str(path))
         for src, dst in (
-            ("title", "title"), ("artist", "artist"), ("album", "album"),
-            ("genre", "genre"), ("year", "date"), ("bpm", "bpm"),
-            ("key", "initialkey"), ("comment", "comment"),
+            ("title", "title"),
+            ("artist", "artist"),
+            ("album", "album"),
+            ("genre", "genre"),
+            ("year", "date"),
+            ("bpm", "bpm"),
+            ("key", "initialkey"),
+            ("isrc", "isrc"),
+            ("comment", "comment"),
         ):
             if src in fields:
                 f[dst] = str(fields[src])
@@ -142,12 +186,17 @@ def _write_flac(path: Path, fields: dict[str, Any], artwork: bytes | None) -> bo
 
 
 def _write_mp4(path: Path, fields: dict[str, Any], artwork: bytes | None) -> bool:
-    from mutagen.mp4 import MP4, MP4Cover
+    from mutagen.mp4 import MP4, MP4Cover, MP4FreeForm
+
     try:
         m = MP4(str(path))
         atom_map = {
-            "title": "\xa9nam", "artist": "\xa9ART", "album": "\xa9alb",
-            "genre": "\xa9gen", "year": "\xa9day", "comment": "\xa9cmt",
+            "title": "\xa9nam",
+            "artist": "\xa9ART",
+            "album": "\xa9alb",
+            "genre": "\xa9gen",
+            "year": "\xa9day",
+            "comment": "\xa9cmt",
         }
         for src, atom in atom_map.items():
             if src in fields:
@@ -157,6 +206,10 @@ def _write_mp4(path: Path, fields: dict[str, Any], artwork: bytes | None) -> boo
                 m["tmpo"] = [int(round(float(fields["bpm"])))]
             except (TypeError, ValueError):
                 pass
+        if "isrc" in fields:
+            # MP4 has no standard ISRC atom — use the iTunes freeform key
+            # that read_tags()'s _READ_KEYS["isrc"] already probes.
+            m["----:com.apple.iTunes:ISRC"] = [MP4FreeForm(str(fields["isrc"]).encode("utf-8"))]
         if "rating" in fields:
             # MP4 uses 0-100 in iTunes "rate" atom (custom freeform).
             try:
@@ -182,9 +235,15 @@ def _write_ogg(path: Path, fields: dict[str, Any], artwork: bytes | None) -> boo
             from mutagen.oggvorbis import OggVorbis as Ogg
         f = Ogg(str(path))
         for src, dst in (
-            ("title", "title"), ("artist", "artist"), ("album", "album"),
-            ("genre", "genre"), ("year", "date"), ("bpm", "bpm"),
-            ("key", "initialkey"), ("comment", "comment"),
+            ("title", "title"),
+            ("artist", "artist"),
+            ("album", "album"),
+            ("genre", "genre"),
+            ("year", "date"),
+            ("bpm", "bpm"),
+            ("key", "initialkey"),
+            ("isrc", "isrc"),
+            ("comment", "comment"),
         ):
             if src in fields:
                 f[dst] = str(fields[src])
@@ -216,22 +275,43 @@ def _write_aiff_wav(path: Path, fields: dict[str, Any], artwork: bytes | None) -
             TIT2,
             TKEY,
             TPE1,
+            TSRC,
             TYER,
         )
+
         tags = c.tags
-        if "title" in fields:    tags.delall("TIT2"); tags.add(TIT2(encoding=3, text=str(fields["title"])))
-        if "artist" in fields:   tags.delall("TPE1"); tags.add(TPE1(encoding=3, text=str(fields["artist"])))
-        if "album" in fields:    tags.delall("TALB"); tags.add(TALB(encoding=3, text=str(fields["album"])))
-        if "genre" in fields:    tags.delall("TCON"); tags.add(TCON(encoding=3, text=str(fields["genre"])))
-        if "year" in fields:     tags.delall("TYER"); tags.add(TYER(encoding=3, text=str(fields["year"])))
-        if "bpm" in fields:      tags.delall("TBPM"); tags.add(TBPM(encoding=3, text=str(fields["bpm"])))
-        if "key" in fields:      tags.delall("TKEY"); tags.add(TKEY(encoding=3, text=str(fields["key"])))
+        if "title" in fields:
+            tags.delall("TIT2")
+            tags.add(TIT2(encoding=3, text=str(fields["title"])))
+        if "artist" in fields:
+            tags.delall("TPE1")
+            tags.add(TPE1(encoding=3, text=str(fields["artist"])))
+        if "album" in fields:
+            tags.delall("TALB")
+            tags.add(TALB(encoding=3, text=str(fields["album"])))
+        if "genre" in fields:
+            tags.delall("TCON")
+            tags.add(TCON(encoding=3, text=str(fields["genre"])))
+        if "year" in fields:
+            tags.delall("TYER")
+            tags.add(TYER(encoding=3, text=str(fields["year"])))
+        if "bpm" in fields:
+            tags.delall("TBPM")
+            tags.add(TBPM(encoding=3, text=str(fields["bpm"])))
+        if "key" in fields:
+            tags.delall("TKEY")
+            tags.add(TKEY(encoding=3, text=str(fields["key"])))
+        if "isrc" in fields:
+            tags.delall("TSRC")
+            tags.add(TSRC(encoding=3, text=str(fields["isrc"])))
         if "comment" in fields:
             tags.delall("COMM")
             tags.add(COMM(encoding=3, lang="eng", desc="", text=str(fields["comment"])))
         if "rating" in fields:
             tags.delall("POPM")
-            tags.add(POPM(email="rating@rb-editor", rating=_rating_to_popm(fields["rating"]), count=0))
+            tags.add(
+                POPM(email="rating@rb-editor", rating=_rating_to_popm(fields["rating"]), count=0)
+            )
         if artwork:
             tags.delall("APIC")
             tags.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="Cover", data=artwork))
@@ -243,11 +323,17 @@ def _write_aiff_wav(path: Path, fields: dict[str, Any], artwork: bytes | None) -
 
 
 _DISPATCH = {
-    ".mp3":  _write_mp3,
+    ".mp3": _write_mp3,
     ".flac": _write_flac,
-    ".m4a":  _write_mp4, ".mp4": _write_mp4, ".aac": _write_mp4, ".alac": _write_mp4,
-    ".ogg":  _write_ogg, ".opus": _write_ogg,
-    ".aiff": _write_aiff_wav, ".aif": _write_aiff_wav, ".wav": _write_aiff_wav,
+    ".m4a": _write_mp4,
+    ".mp4": _write_mp4,
+    ".aac": _write_mp4,
+    ".alac": _write_mp4,
+    ".ogg": _write_ogg,
+    ".opus": _write_ogg,
+    ".aiff": _write_aiff_wav,
+    ".aif": _write_aiff_wav,
+    ".wav": _write_aiff_wav,
 }
 
 
@@ -307,16 +393,16 @@ def load_artwork(image_path: str | Path) -> bytes | None:
 # strategy is "try each known key, take the first hit". The lists below are the
 # canonical-first / legacy-last fallback chains.
 _READ_KEYS = {
-    "title":   ["TIT2", "title", "\xa9nam", "Title", "TITLE"],
-    "artist":  ["TPE1", "artist", "\xa9ART", "Artist", "ARTIST", "TPE2"],
-    "album":   ["TALB", "album", "\xa9alb", "Album", "ALBUM"],
+    "title": ["TIT2", "title", "\xa9nam", "Title", "TITLE"],
+    "artist": ["TPE1", "artist", "\xa9ART", "Artist", "ARTIST", "TPE2"],
+    "album": ["TALB", "album", "\xa9alb", "Album", "ALBUM"],
     "albumartist": ["TPE2", "albumartist", "aART", "AlbumArtist"],
-    "genre":   ["TCON", "genre", "\xa9gen", "Genre", "GENRE"],
-    "year":    ["TDRC", "TYER", "date", "\xa9day", "Year", "YEAR", "DATE"],
+    "genre": ["TCON", "genre", "\xa9gen", "Genre", "GENRE"],
+    "year": ["TDRC", "TYER", "date", "\xa9day", "Year", "YEAR", "DATE"],
     "comment": ["COMM::eng", "COMM", "comment", "\xa9cmt", "Comment", "COMMENT"],
-    "bpm":     ["TBPM", "bpm", "tmpo", "BPM"],
-    "key":     ["TKEY", "initialkey", "----:com.apple.iTunes:initialkey", "Key", "INITIALKEY"],
-    "isrc":    ["TSRC", "isrc", "----:com.apple.iTunes:ISRC", "ISRC"],
+    "bpm": ["TBPM", "bpm", "tmpo", "BPM"],
+    "key": ["TKEY", "initialkey", "----:com.apple.iTunes:initialkey", "Key", "INITIALKEY"],
+    "isrc": ["TSRC", "isrc", "----:com.apple.iTunes:ISRC", "ISRC"],
 }
 
 
@@ -346,6 +432,7 @@ def _parse_filename(stem: str) -> dict[str, str]:
     `{"artist": "...", "title": "..."}` or `{"title": stem}` if no separator.
     """
     import re
+
     parts = re.split(r"\s+[-–—]\s+", stem, maxsplit=1)
     if len(parts) == 2 and parts[0].strip() and parts[1].strip():
         return {"artist": parts[0].strip(), "title": parts[1].strip()}
@@ -398,3 +485,80 @@ def read_tags(path: str | Path) -> dict[str, str]:
         out["year"] = out["year"][:4]
 
     return out
+
+
+# ── Provenance serialisation (unified downloader — D6 / Q13) ───────────────────
+# The downloader records, per file, the full descending-quality candidate URL
+# list in the COMMENT tag. The leading URL is — by invariant — the source the
+# file was actually downloaded from (Q13c: no separator marker, the head IS the
+# picked source). These helpers round-trip that format.
+
+if TYPE_CHECKING:  # pragma: no cover — typing only, avoids an import cycle
+    from collections.abc import Sequence
+
+    from .downloader.models import Platform, TrackMatch
+
+#: Hostname → platform. Probed substring-wise against a URL; first hit wins.
+_PROVENANCE_HOST_MAP: dict[str, str] = {
+    "open.spotify.com": "spotify",
+    "spotify.com": "spotify",
+    "soundcloud.com": "soundcloud",
+    "on.soundcloud.com": "soundcloud",
+    "m.soundcloud.com": "soundcloud",
+    "tidal.com": "tidal",
+    "listen.tidal.com": "tidal",
+    "qobuz.com": "qobuz",
+    "www.qobuz.com": "qobuz",
+    "play.qobuz.com": "qobuz",
+    "music.amazon.com": "amazon",
+    "music.amazon.de": "amazon",
+    "music.apple.com": "apple_music",
+    "deezer.com": "deezer",
+    "www.deezer.com": "deezer",
+    "youtube.com": "youtube",
+    "youtu.be": "youtube",
+    "music.youtube.com": "youtube",
+}
+
+
+def _infer_platform(url: str) -> Platform:
+    """Best-effort platform guess from a URL's hostname.
+
+    Unknown hosts fall back to ``"soundcloud"`` — the safe default for legacy
+    compatibility, since pre-unified files only ever stored SC permalinks.
+    """
+    for host, platform in _PROVENANCE_HOST_MAP.items():
+        if host in url:
+            return platform  # type: ignore[return-value]
+    return "soundcloud"  # type: ignore[return-value]
+
+
+def serialise_provenance(candidates: Sequence[TrackMatch], picked: TrackMatch) -> str:
+    """Serialise candidate URLs for the COMMENT tag — picked first, then by quality.
+
+    The picked source leads (it is the highest-quality 100%-match by
+    construction); the remaining candidates follow in descending quality
+    order via :meth:`TrackMatch.quality_sort_key`. Result is a comma-joined
+    URL string. By invariant the first URL is the one the file came from.
+
+    Deduplicates by URL so a candidate that is also ``picked`` is not
+    emitted twice.
+    """
+    ordered = [picked]
+    seen = {picked.url}
+    for c in sorted(candidates, key=lambda m: m.quality_sort_key()):
+        if c.url not in seen:
+            ordered.append(c)
+            seen.add(c.url)
+    return ", ".join(c.url for c in ordered)
+
+
+def read_provenance(comment_str: str) -> list[tuple[Platform, str, bool]]:
+    """Parse a COMMENT provenance string back into ``(platform, url, was_picked)``.
+
+    Splits on commas, keeps only ``http``-prefixed tokens, and flags the
+    first entry as the picked source (``was_picked=True``). Tolerant of an
+    empty / ``None`` input — returns an empty list.
+    """
+    urls = [u.strip() for u in (comment_str or "").split(",") if u.strip().startswith("http")]
+    return [(_infer_platform(u), u, i == 0) for i, u in enumerate(urls)]
