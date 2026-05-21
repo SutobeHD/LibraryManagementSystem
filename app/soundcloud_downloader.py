@@ -57,7 +57,6 @@ POST-DOWNLOAD PIPELINE
 import logging
 import re
 import shutil
-import subprocess
 import tempfile
 import threading
 import time
@@ -67,7 +66,7 @@ from pathlib import Path
 import requests
 
 from . import download_registry as registry
-from .config import FFMPEG_BIN, MUSIC_DIR
+from .config import MUSIC_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -297,6 +296,33 @@ def _normalize_track_id(raw) -> str | None:
     return m.group(0) if m else None
 
 
+#: SoundCloud transcoding presets name their bitrate inconsistently —
+#: ``aac_160k`` carries it explicitly, ``mp3_1_0`` / ``abr_sq`` do not. These
+#: are the documented bitrates for the preset families that omit a ``<N>k``.
+_PRESET_FALLBACK_KBPS: dict[str, int] = {
+    "mp3": 128,  # SC standard-quality MP3
+    "abr": 128,  # adaptive standard quality
+    "opus": 72,  # SC low-bitrate Opus
+}
+
+
+def _preset_bitrate_kbps(preset: str) -> int:
+    """Best-effort kbps for a SoundCloud transcoding ``preset`` string.
+
+    An explicit ``<N>k`` token wins (``aac_160k`` -> 160); otherwise the
+    codec-family fallback applies (``mp3_1_0`` -> 128). An unrecognised preset
+    returns 0 so any recognised transcoding always out-ranks it.
+    """
+    p = (preset or "").lower()
+    m = re.search(r"(\d+)k", p)
+    if m:
+        return int(m.group(1))
+    for family, kbps in _PRESET_FALLBACK_KBPS.items():
+        if p.startswith(family):
+            return kbps
+    return 0
+
+
 def _resolve_stream_via_transcodings(
     sc_track_id: str,
     auth_token: str | None,
@@ -428,13 +454,19 @@ def _resolve_stream_via_transcodings(
         )
         return None
 
-    # Rank: prefer hq (Go+) > sq, then progressive > hls (simpler muxing).
-    # SC only returns `hq` when the authenticated account is Go+ — we honor
-    # whatever SC chose to expose; we never probe for paid quality.
+    # Rank: the owner rule is "always the best available quality". Order by
+    # the Go+ `hq` flag, then the real bitrate parsed from the preset, then
+    # codec (AAC out-ranks MP3 at an equal bitrate), and only then protocol —
+    # progressive is simpler to mux but must never beat a higher-bitrate HLS
+    # transcoding. SC only returns `hq` for a Go+ account; we honor whatever
+    # SC chose to expose and never probe for paid quality.
     def _rank(t: dict) -> tuple:
-        quality = 1 if t.get("quality") == "hq" else 0
+        preset = (t.get("preset") or "").lower()
+        is_hq = 1 if t.get("quality") == "hq" else 0
+        bitrate = _preset_bitrate_kbps(preset)
+        codec = 2 if preset.startswith("aac") else 1 if preset.startswith(("mp3", "abr")) else 0
         proto = 1 if (t.get("format") or {}).get("protocol") == "progressive" else 0
-        return (quality, proto)
+        return (is_hq, bitrate, codec, proto)
 
     best = sorted(full_transcodings, key=_rank, reverse=True)[0]
     fmt = best.get("format") or {}
@@ -526,76 +558,96 @@ def _download_hls_to_temp(
     mime_type: str,
 ) -> Path | None:
     """
-    Download an HLS playlist via ffmpeg and copy-mux into a single audio file.
+    Download an HLS stream by fetching its segments directly over HTTP.
 
-    We use ffmpeg `-c copy` so there is NO re-encoding — the existing AAC or
-    MP3 segments are just repackaged into a standard container. This keeps us
-    away from any transcoding/re-encoding that could be read as content
-    alteration, and preserves the exact audio bytes SC served.
+    SoundCloud's modern HLS transcodings are fragmented MP4 (CMAF): an
+    ``#EXT-X-MAP`` initialisation segment followed by fMP4 fragments. Such a
+    stream is assembled by concatenating ``[init] + [every media segment]`` —
+    the byte-exact result is a valid ``.m4a``, no remux or re-encode. Legacy
+    MPEG-TS / raw-AAC HLS (no ``EXT-X-MAP``) is handled by a plain segment
+    concat into a ``.ts`` / ``.aac`` container.
+
+    Done in pure Python on purpose: the project ships a minimal audio-only
+    ffmpeg built with ``--disable-network`` (no HTTP/HLS protocol, no remote
+    demuxer), so ffmpeg cannot fetch a remote playlist at all. There is still
+    NO transcoding here — the original AAC/MP3 bytes SC served are preserved.
 
     Returns the temp file path on success, or None on failure.
     """
-    # Pick container by codec hint — AAC streams need .m4a + aac_adtstoasc BSF,
-    # MP3 streams can stay .mp3. Default to .m4a (SC HLS is almost always AAC).
-    is_mp3 = (
-        "mpeg" in mime_type.lower()
-        and "mp4" not in mime_type.lower()
-        and "aac" not in mime_type.lower()
-    )
-    ext = ".mp3" if is_mp3 else ".m4a"
+    headers: dict[str, str] = {"User-Agent": _UA}
+    if auth_token:
+        headers["Authorization"] = f"OAuth {auth_token}"
+
+    # 1 — fetch the media playlist ─────────────────────────────────────────────
+    try:
+        pl_resp = requests.get(m3u8_url, headers=headers, timeout=_API_TIMEOUT)
+        pl_resp.raise_for_status()
+        playlist = pl_resp.text
+    except requests.RequestException as exc:
+        logger.error("[SC-DL] HLS playlist fetch failed: %s", exc)
+        return None
+
+    # 2 — parse: the EXT-X-MAP init URI (fMP4) + the media segment URIs ─────────
+    init_uri: str | None = None
+    segment_uris: list[str] = []
+    for raw in playlist.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("#EXT-X-MAP:"):
+            m = re.search(r'URI="([^"]+)"', line)
+            if m:
+                init_uri = m.group(1)
+        elif not line.startswith("#"):
+            segment_uris.append(line)
+
+    if not segment_uris:
+        logger.error("[SC-DL] HLS playlist exposed no media segments")
+        return None
+
+    # An EXT-X-MAP init segment means fragmented MP4 (CMAF) -> .m4a; without
+    # one the segments are self-contained (MPEG-TS / ADTS-AAC).
+    is_fmp4 = init_uri is not None
+    if is_fmp4:
+        ext = ".m4a"
+    elif "mpeg" in mime_type.lower() and "mp4" not in mime_type.lower():
+        ext = ".mp3"
+    else:
+        ext = ".aac"
 
     with tempfile.NamedTemporaryFile(prefix="rbpro_sc_", suffix=ext, delete=False) as tf:
         out_path = Path(tf.name)
 
-    cmd = [
-        FFMPEG_BIN,
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-user_agent",
-        _UA,
-    ]
-    if auth_token:
-        # ffmpeg accepts per-request headers for HLS segment fetches
-        cmd += ["-headers", f"Authorization: OAuth {auth_token}\r\n"]
-    cmd += ["-i", m3u8_url, "-c", "copy"]
-    if not is_mp3:
-        # AAC-in-ADTS → MP4 container requires this bitstream filter
-        cmd += ["-bsf:a", "aac_adtstoasc"]
-    cmd += ["-y", str(out_path)]
-
+    # 3 — download init + every segment, concatenate in playlist order ─────────
+    fetch_list = ([init_uri] if init_uri else []) + segment_uris
     try:
-        logger.info("[SC-DL] HLS mux via ffmpeg → %s", out_path.name)
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=_DOWNLOAD_TIMEOUT * 2,
+        logger.info(
+            "[SC-DL] HLS fetch: %d segment(s)%s",
+            len(segment_uris),
+            " + init" if init_uri else "",
         )
-        if result.returncode != 0:
-            logger.error(
-                "[SC-DL] ffmpeg failed (code %d): %s",
-                result.returncode,
-                (result.stderr or "")[:500],
-            )
+        total = 0
+        with out_path.open("wb") as out:
+            for seg_url in fetch_list:
+                seg = requests.get(seg_url, headers=headers, timeout=_DOWNLOAD_TIMEOUT)
+                seg.raise_for_status()
+                out.write(seg.content)
+                total += len(seg.content)
+
+        if total < 1024:
+            logger.error("[SC-DL] HLS assembled file too small (%d bytes) — aborting", total)
             out_path.unlink(missing_ok=True)
             return None
 
-        size = out_path.stat().st_size
-        if size < 1024:
-            logger.error("[SC-DL] ffmpeg output too small (%d bytes) — aborting", size)
-            out_path.unlink(missing_ok=True)
-            return None
-
-        logger.info("[SC-DL] HLS muxed %d bytes → %s", size, out_path.name)
+        logger.info("[SC-DL] HLS assembled %d bytes → %s", total, out_path.name)
         return out_path
 
-    except subprocess.TimeoutExpired:
-        logger.error("[SC-DL] ffmpeg timed out after %ds", _DOWNLOAD_TIMEOUT * 2)
+    except requests.RequestException as exc:
+        logger.error("[SC-DL] HLS segment download failed: %s", exc)
         out_path.unlink(missing_ok=True)
         return None
     except OSError as exc:
-        logger.error("[SC-DL] ffmpeg not available or failed: %s", exc)
+        logger.error("[SC-DL] HLS temp-file write failed: %s", exc)
         out_path.unlink(missing_ok=True)
         return None
 
