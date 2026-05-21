@@ -28,13 +28,17 @@ jobs:
       - name: Install build deps
         run: |
           python -m pip install --upgrade pip
-          pip install ruff mypy pytest
-          # Install only what's safely pip-resolvable on Linux runners.
-          # Heavy native deps (madmom, essentia, rbox) get `ignore_missing_imports`
-          # in mypy + a per-file skip in pytest, so CI doesn't need them.
-          pip install fastapi uvicorn pydantic python-multipart httpx requests psutil keyring \
-                      python-dotenv numpy scipy mutagen soundfile platformdirs \
-                      watchdog
+          pip install ruff mypy httpx
+          # Backend deps come straight from requirements.txt, minus the heavy
+          # native deps (madmom, essentia, pyrekordbox) that aren't
+          # pip-resolvable on Linux runners — those get `ignore_missing_imports`
+          # in mypy + per-file skips in pytest. Deriving the list from
+          # requirements.txt keeps CI in sync automatically; the old
+          # hand-maintained list silently drifted (platformdirs / watchdog /
+          # python-multipart gaps).
+          grep -vE '^\s*(#|$)' requirements.txt \
+            | grep -vE '^(madmom|essentia|pyrekordbox)==' \
+            | pip install -r /dev/stdin
 
       - name: Lint with ruff
         run: ruff check app/ tests/ || true   # 385 errors remain (mostly style); promoted to strict once cleanup follow-up lands
