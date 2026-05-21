@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>25 · The Future Roadmap — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 25 · Forward &amp; Reference</div>
+          <h1>The Future Roadmap</h1>
+          <p class="ch-lead">Twelve features are in the research pipeline — recommender
+            engines, a mobile companion, external track matching, metadata repair, and
+            concurrency hardening. Each is a live, researched document, not a wishlist
+            item.</p>
+        </header>
+
+        <h2>25.1 How to Read This Roadmap</h2>
+        <p>The roadmap is not speculative. Every feature here is a document moving
+        through the pipeline of Chapter 24 — ten are in the <code>exploring_</code>
+        state, deep in parallel research with measured benchmarks and milestone
+        breakdowns; two are earlier-stage <code>idea_</code> documents that have
+        nonetheless already been empirically audited. The twelve cluster into five
+        themes.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+mindmap
+  root((Roadmap<br/>12 features))
+    Infrastructure
+      DB write-lock retrofit
+      Paired-device tokens
+    Track matching
+      Unified match module
+      Remix detector
+      Extended-remix finder
+      Quality-upgrade finder
+    Recommenders
+      Rules baseline
+      Similar tracks
+      Taste-aware engine
+    Metadata
+      Name fixer
+    Mobile
+      PWA companion
+          </div>
+          <figcaption><span class="fig-num">Figure 25.1</span> — The twelve roadmap
+          features in five themes.</figcaption>
+        </div>
+
+        <h2>25.2 The Dependency Graph</h2>
+        <p>The features are not independent. Two pieces of infrastructure gate
+        everything else, and one shared module feeds an entire cluster.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  PT["Paired-device tokens<br/>(idea)"] --> MOB["Mobile companion"]
+  UM["Unified track-match module"] --> RD["Remix detector"]
+  UM --> ERF["Extended-remix finder"]
+  UM --> QUF["Quality-upgrade finder"]
+  RB["Recommender — rules baseline"] --> TA["Recommender — taste-aware"]
+  ST["Recommender — similar tracks"] --> TA
+          </div>
+          <figcaption><span class="fig-num">Figure 25.2</span> — The roadmap
+          dependency graph. Paired tokens gate the mobile work; the unified module
+          gates the matching cluster; the taste recommender depends on its two
+          siblings.</figcaption>
+        </div>
+
+        <h2>25.3 Theme 1 — Infrastructure Hardening</h2>
+        <p>Two foundational features unblock the rest of the roadmap.</p>
+
+        <h3>The database write-lock retrofit</h3>
+        <p>An empirical audit (Chapter 10 mentioned it) found that the
+        <code>_db_write_lock</code> auto-wrap is a hand-maintained method-name list
+        that can silently drift — one mutator is already missing — and, more
+        seriously, that the MyTags routes write through <code>LiveRekordboxDB</code>
+        directly, bypassing the wrapped facade entirely. That is three unprotected
+        concurrent write paths into a database that crashes on concurrent writes. The
+        recommended fix replaces the drifting name list with a prefix-matched class
+        decorator applied to both database classes, plus a CI test that fails if any
+        mutator is left unwrapped.</p>
+
+        <h3>Paired-device tokens — security Phase 2</h3>
+        <p>Phase 1 (Chapter 21) ships a single boot-time session token. That cannot
+        be handed to a phone, scoped per device, or revoked. Phase 2 introduces
+        <strong>per-device 256-bit tokens</strong> with a QR-pairing flow, stored as
+        SHA-256 hashes in a new sidecar-local <code>auth.db</code> that never touches
+        <code>master.db</code>. The design adds just three routes — pairing start,
+        pairing complete, and revoke — and keeps <code>require_session</code>'s
+        signature unchanged so all 84 existing route decorations stay byte-identical.</p>
+
+        <div class="callout warn">
+          <span class="ico">▲</span>
+          <div class="body">
+            <span class="ct">A hard blocker</span>
+            <p>Paired-device tokens are a hard prerequisite for the mobile companion —
+            with zero lines of code written today, the entire mobile feature is
+            blocked behind this one. It is the single highest-leverage item on the
+            roadmap.</p>
+          </div>
+        </div>
+
+        <h2>25.4 Theme 2 — External Track Matching</h2>
+        <p>Four features all need the same primitives — a fuzzy matcher, a version-tag
+        parser, a fingerprint wrapper, an adapter registry. Rather than fork them
+        three times, the cluster begins with one shared module.</p>
+
+        <h3>The unified track-match module</h3>
+        <p>A new flat module, <code>app/external_track_match.py</code>, lifts the
+        fuzzy matcher out of the SoundCloud sync engine into reusable pure functions,
+        adds a canonical twelve-value version-tag vocabulary
+        (<code>original</code>, <code>extended</code>, <code>radio</code>,
+        <code>club</code>, <code>remix</code>, <code>bootleg</code>, <code>edit</code>,
+        <code>mashup</code> and more), and defines a source-adapter protocol. The
+        SoundCloud engine becomes its first adapter; later milestones add a Discogs
+        adapter and a bundled Chromaprint binary.</p>
+
+        <h3>The remix detector</h3>
+        <p>DJ libraries accumulate many variants of one work — a Radio Edit, an
+        Extended Mix, a VIP, a bootleg — as unrelated rows. The remix detector
+        classifies each track's variant type and links related variants, with a
+        target of ≥95% classification precision. It builds in three milestones: a
+        title-only classifier first (no network, no binary dependencies), then local
+        clustering using the Rust fingerprint engine of Chapter 19, then an opt-in
+        Chromaprint + AcoustID + MusicBrainz path.</p>
+
+        <h3>The extended-remix finder</h3>
+        <p>A DJ often owns the Radio Edit (2–3 minutes) when they need the Extended
+        Mix (5–8 minutes) with the long intro for clean blending. This feature scans
+        the library and surfaces, per track, an Extended version available on
+        SoundCloud or elsewhere that the user does not yet own — with a Discogs
+        ground-truth gate to avoid fruitless searches and a four-tier spam filter for
+        the noisier sources.</p>
+
+        <h3>The quality-upgrade finder</h3>
+        <p>Libraries mix true lossless with MP3s — and some "FLAC" files are
+        MP3-transcodes betrayed by a spectral cliff below the Nyquist frequency. This
+        feature scores every track's quality (container, true bitrate, sample rate,
+        bit depth, spectral cutoff) and detects transcodes with a target ≥95%
+        precision. Its defining concern is blast radius — replacing a file must
+        migrate every cue, beatgrid, tag, rating, and play count intact, so it ships
+        in cautious phases beginning with a read-only probe.</p>
+
+        <h2>25.5 Theme 3 — The Recommender Trilogy</h2>
+        <p>The recommender is deliberately split into three documents, each a distinct
+        engine, building on the last.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  R1["1 · Rules baseline<br/>BPM · key · genre · energy<br/>Camelot harmonic mixing"]
+  R2["2 · Similar tracks<br/>~46-dim handcrafted vector<br/>cosine similarity, offline"]
+  R3["3 · Taste-aware<br/>learns from listening behaviour<br/>+ audio embeddings"]
+  R1 --> R3
+  R2 --> R3
+          </div>
+          <figcaption><span class="fig-num">Figure 25.3</span> — The recommender
+          trilogy. A deterministic baseline and a similarity engine both feed the
+          taste-aware engine.</figcaption>
+        </div>
+
+        <h3>The rules baseline</h3>
+        <p>A deterministic "what mixes well after this?" recommender — a harmonic-mixing
+        assistant. It scores candidates on a continuous weighted blend of key, BPM,
+        genre, MyTag overlap, and energy, using only data the library already has.
+        BPM uses a Gaussian tuned to the CDJ-3000's ±6% pitch range; key uses a
+        Camelot-wheel distance table. It also serves as the cold-start fallback and
+        the baseline the taste-aware engine must beat.</p>
+
+        <h3>The similar-tracks recommender</h3>
+        <p>A purely offline "I like this — what else of mine sounds like it?" engine.
+        It builds a roughly 46-dimensional handcrafted feature vector per track — BPM,
+        key, loudness, four spectral descriptors, MFCC statistics, a chroma mean —
+        stored in a sidecar database, and ranks by cosine similarity. A brute-force
+        numpy comparison handles a 50,000-track library in tens of milliseconds; an
+        approximate-nearest-neighbour index is reserved for libraries beyond 200,000.</p>
+
+        <h3>The taste-aware engine</h3>
+        <p>The most ambitious of the three: a recommender that learns a user's taste
+        from observed behaviour — plays, skips, likes, tag patterns — and compares
+        candidates with a learned audio embedding that captures timbre and production
+        style beyond BPM and key. It starts with a centroid-based taste vector and
+        benchmarks heavier music-embedding models (CLAP, MERT, OpenL3) against strict
+        gates on extraction time and installer size, with an optional LLM explanation
+        layer. It depends on its two sibling recommenders shipping first.</p>
+
+        <h2>25.6 Theme 4 — Metadata Repair</h2>
+        <p>Real-world libraries carry malformed metadata — the artist buried in the
+        title's parentheses, <code>feat.</code> in the wrong field, reversed
+        title/artist pairs, track-number prefixes, HTML entities, mojibake. The
+        <strong>name fixer</strong> catalogues fourteen malformation classes,
+        detects them with ≥90% recall, and applies deterministic high-precision
+        transforms with a dry-run preview and a full audit log enabling revert. It is
+        a maximal-blast-radius feature — it writes user metadata — so it ships
+        detector-first, then the apply path, then optional MusicBrainz enrichment.</p>
+
+        <h2>25.7 Theme 5 — The Mobile Companion</h2>
+        <p>A thin mobile client, focused on Ranking mode — rating and tagging tracks
+        from the couch or on the road. It is explicitly <em>not</em> standalone: all
+        library state, audio, and database writes stay on the desktop app, and the
+        phone is a remote UI that reaches it over the LAN or a Tailscale tunnel.</p>
+
+        <p>The chosen shape is a Progressive Web App on the existing Vite/React stack,
+        targeting at least 60% component reuse of the existing Ranking view and a
+        sub-200-KB first-paint bundle. It is gated entirely behind the paired-device
+        token work of Theme 1 — which is why that infrastructure item leads the
+        roadmap.</p>
+
+        <h2>25.8 The Roadmap at a Glance</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Feature</th><th>Theme</th><th>State</th></tr></thead>
+          <tbody>
+            <tr><td>DB write-lock retrofit</td><td>Infrastructure</td><td>idea</td></tr>
+            <tr><td>Paired-device tokens</td><td>Infrastructure</td><td>idea</td></tr>
+            <tr><td>Unified track-match module</td><td>Track matching</td><td>exploring</td></tr>
+            <tr><td>Remix detector</td><td>Track matching</td><td>exploring</td></tr>
+            <tr><td>Extended-remix finder</td><td>Track matching</td><td>exploring</td></tr>
+            <tr><td>Quality-upgrade finder</td><td>Track matching</td><td>exploring</td></tr>
+            <tr><td>Recommender — rules baseline</td><td>Recommenders</td><td>exploring</td></tr>
+            <tr><td>Recommender — similar tracks</td><td>Recommenders</td><td>exploring</td></tr>
+            <tr><td>Recommender — taste-aware</td><td>Recommenders</td><td>exploring</td></tr>
+            <tr><td>Metadata name fixer</td><td>Metadata</td><td>exploring</td></tr>
+            <tr><td>Mobile companion (PWA)</td><td>Mobile</td><td>exploring</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="callout note">
+          <span class="ico">◆</span>
+          <div class="body">
+            <span class="ct">The live dashboard</span>
+            <p>This roadmap is a snapshot. The authoritative, live state of every
+            feature is <code>docs/research/_INDEX.md</code> — the pipeline dashboard
+            — or the output of the <code>/pipeline</code> command. Because the
+            pipeline advances documents autonomously between gates, the states above
+            move on their own.</p>
+          </div>
+        </div>
+
+        <h2>25.9 Beyond the Pipeline</h2>
+        <p>A few items sit outside the formal pipeline as acknowledged post-MVP work
+        in the changelog: manual hot-cue editing (auto-cues work today) and creating a
+        <code>master.db</code> from scratch with no Rekordbox install present. The
+        Design Lab view (Chapter 15) also gestures at longer-horizon ideas — stem
+        separation, a set planner, a streaming hub — as UI mock-ups, deliberately not
+        yet committed to the pipeline.</p>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>Twelve researched features are in flight across five themes: two
+            infrastructure items (a write-lock retrofit and the paired-device tokens
+            that gate everything mobile), a four-feature track-matching cluster built
+            on one shared module, a three-stage recommender trilogy, a metadata name
+            fixer, and a PWA mobile companion. Each is a live pipeline document with
+            measured benchmarks and milestone plans — and the authoritative status is
+            always the pipeline dashboard, not this snapshot.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

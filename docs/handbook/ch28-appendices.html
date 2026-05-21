@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>28 · Appendices &amp; Reference — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 28 · Forward &amp; Reference</div>
+          <h1>Appendices &amp; Reference</h1>
+          <p class="ch-lead">Quick-reference material — the project at a glance, the
+            file map, the configuration keys, the commands and agents, and the
+            documentation set this handbook belongs to.</p>
+        </header>
+
+        <h2>28.1 The Project at a Glance</h2>
+        <div class="cards">
+          <div class="card"><div class="big">3</div><div class="lbl">Language stacks</div></div>
+          <div class="card"><div class="big">~56k</div><div class="lbl">Lines of code</div></div>
+          <div class="card"><div class="big">316</div><div class="lbl">Tracked files</div></div>
+          <div class="card"><div class="big">146</div><div class="lbl">API routes</div></div>
+          <div class="card"><div class="big">~40</div><div class="lbl">Python modules</div></div>
+          <div class="card"><div class="big">111</div><div class="lbl">Frontend files</div></div>
+          <div class="card"><div class="big">10</div><div class="lbl">Rust files</div></div>
+          <div class="card"><div class="big">200+</div><div class="lbl">Tests</div></div>
+        </div>
+
+        <div class="kv">
+          <div class="kv-row"><div class="k">Name</div><div class="v">Music Library Manager (package: <code>library-management-system</code>)</div></div>
+          <div class="kv-row"><div class="k">Version</div><div class="v">1.0.0-beta — first public beta 2026-05-07</div></div>
+          <div class="kv-row"><div class="k">Licence</div><div class="v">MIT</div></div>
+          <div class="kv-row"><div class="k">Platform</div><div class="v">Windows desktop (Tauri 2)</div></div>
+          <div class="kv-row"><div class="k">Lines of code</div><div class="v">~26k Python · ~27k JavaScript · ~3k Rust</div></div>
+        </div>
+
+        <h2>28.2 Appendix A — The File Map</h2>
+        <h3>Backend — <code>app/</code></h3>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>File</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>main.py</code></td><td>All 146 API routes, CORS, error handlers, the write lock.</td></tr>
+            <tr><td><code>auth.py</code> · <code>security_compare.py</code> · <code>rate_limit.py</code></td><td>The security layer — Bearer auth, constant-time compare, rate limiting.</td></tr>
+            <tr><td><code>config.py</code> · <code>analysis_settings.py</code> · <code>logging_utils.py</code></td><td>Configuration and log redaction.</td></tr>
+            <tr><td><code>services.py</code> · <code>audio_tags.py</code> · <code>sidecar.py</code></td><td>Business logic and tag I/O.</td></tr>
+            <tr><td><code>database.py</code> · <code>live_database.py</code> · <code>library_source.py</code> · <code>anlz_safe.py</code></td><td>The database layer and the ANLZ subprocess quarantine.</td></tr>
+            <tr><td><code>analysis_engine.py</code> · <code>audio_analyzer.py</code> · <code>analysis_db_writer.py</code> · <code>analysis_cache.py</code></td><td>The analysis engine and its orchestration.</td></tr>
+            <tr><td><code>anlz_writer.py</code> · <code>anlz_sidecar.py</code> · <code>phrase_generator.py</code></td><td>ANLZ file writing and phrase/cue generation.</td></tr>
+            <tr><td><code>usb_manager.py</code> · <code>usb_one_library.py</code> · <code>usb_pdb.py</code> · <code>usb_artwork.py</code> · <code>usb_mysettings.py</code> · <code>playcount_sync.py</code></td><td>The USB-export subsystem.</td></tr>
+            <tr><td><code>soundcloud_api.py</code> · <code>soundcloud_downloader.py</code> · <code>download_registry.py</code></td><td>SoundCloud integration.</td></tr>
+            <tr><td><code>folder_watcher.py</code> · <code>import_tracker.py</code></td><td>The local-import pipeline.</td></tr>
+            <tr><td><code>rekordbox_export.py</code> · <code>rekordbox_bridge.py</code> · <code>xml_generator.py</code> · <code>rbep_parser.py</code> · <code>smart_playlist_engine.py</code> · <code>batch_worker.py</code></td><td>Rekordbox interoperability.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h3>Frontend — <code>frontend/src/</code></h3>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Path</th><th>Holds</th></tr></thead>
+          <tbody>
+            <tr><td><code>main.jsx</code></td><td>The app root — sidebar, mode picker, lazy router.</td></tr>
+            <tr><td><code>api/</code> · <code>store/</code></td><td>The axios client and the auth store.</td></tr>
+            <tr><td><code>audio/</code></td><td>The DAW state machine and the composed reducer.</td></tr>
+            <tr><td><code>components/</code></td><td>Feature views and shared components.</td></tr>
+            <tr><td><code>components/daw/</code> · <code>editor/</code> · <code>waveform/</code></td><td>The DAW, the non-destructive editor, the waveform editor.</td></tr>
+            <tr><td><code>components/settings/</code> · <code>usb/</code></td><td>The settings tabs and the USB panels.</td></tr>
+            <tr><td><code>utils/</code> · <code>config/</code></td><td>The logger, the band analyzer, the constants.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h3>Native — <code>src-tauri/src/</code></h3>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>File</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>main.rs</code></td><td>App init, the supervisor, the OAuth and token commands.</td></tr>
+            <tr><td><code>soundcloud_client.rs</code></td><td>The OAuth 2.1 + PKCE flow.</td></tr>
+            <tr><td><code>audio/engine.rs</code> · <code>playback.rs</code></td><td>Decoding and CPAL playback.</td></tr>
+            <tr><td><code>audio/analysis.rs</code> · <code>fingerprint.rs</code></td><td>FFT waveform, key detection, acoustic fingerprinting.</td></tr>
+            <tr><td><code>audio/commands.rs</code> · <code>export.rs</code> · <code>metadata.rs</code></td><td>The audio IPC commands, offline render, tag I/O.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>28.3 Appendix B — Configuration Reference</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Key</th><th>Default / source</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>REKORDBOX_ROOT</code></td><td><code>%APPDATA%/Pioneer/rekordbox</code></td><td>The Rekordbox database directory.</td></tr>
+            <tr><td><code>DB_FILENAME</code></td><td><code>master.db</code></td><td>The Rekordbox database file.</td></tr>
+            <tr><td><code>FFMPEG_BIN</code></td><td><code>ffmpeg</code></td><td>The FFmpeg binary — expected on PATH.</td></tr>
+            <tr><td><code>EXPORT_DIR</code> · <code>MUSIC_DIR</code></td><td><code>./exports</code> · <code>./music</code></td><td>Export output and the default library root.</td></tr>
+            <tr><td><code>LOG_DIR</code> · <code>TEMP_DIR</code></td><td><code>./logs</code> · <code>./temp_uploads</code></td><td>Logs and temporary processing space.</td></tr>
+            <tr><td><code>DB_KEY</code></td><td>env <code>REKORDBOX_DB_KEY</code></td><td>The Rekordbox SQLite encryption key.</td></tr>
+            <tr><td><code>SOUNDCLOUD_CLIENT_ID</code> / <code>_SECRET</code></td><td><code>.env</code></td><td>The SoundCloud OAuth credentials.</td></tr>
+            <tr><td><code>RB_ANALYSIS_*</code></td><td>environment</td><td>Overrides for any analysis-pipeline tunable.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>28.4 Appendix C — Error Codes</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Code</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>REKORDBOX_RUNNING</code></td><td>A write was refused — Rekordbox has the database open.</td></tr>
+            <tr><td><code>PATH_SANDBOX_VIOLATION</code></td><td>A path fell outside the allowed roots.</td></tr>
+            <tr><td><code>AUTH_EXPIRED</code></td><td>The SoundCloud OAuth token expired.</td></tr>
+            <tr><td><code>RATE_LIMITED</code></td><td>The SoundCloud API returned 429.</td></tr>
+            <tr><td><code>FILE_NOT_FOUND</code></td><td>An audio file is missing from disk.</td></tr>
+            <tr><td><code>ANALYSIS_PENDING</code> / <code>ANALYSIS_FAILED</code></td><td>An analysis task is running / failed.</td></tr>
+            <tr><td><code>USB_LOCKED</code></td><td>Another USB sync is already in progress.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>28.5 Appendix D — Commands &amp; Agents</h2>
+        <h3>Slash-commands</h3>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Command</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>/dev-full</code> · <code>/tauri-dev</code> · <code>/tauri-build</code></td><td>Start the dev servers, the desktop app, or a production build.</td></tr>
+            <tr><td><code>/test-py</code> · <code>/full-check</code> · <code>/audit</code></td><td>Run tests, all quality gates, or the security audit.</td></tr>
+            <tr><td><code>/sync-check</code> · <code>/sync-docs</code> · <code>/regen-maps</code></td><td>Check git drift, sync the index docs, regenerate the maps.</td></tr>
+            <tr><td><code>/route-add</code> · <code>/research-new</code></td><td>Scaffold a FastAPI route or a research topic.</td></tr>
+            <tr><td><code>/pipeline</code> · <code>/gate-pass</code> · <code>/gate-reject</code></td><td>Inspect and advance the research pipeline.</td></tr>
+            <tr><td><code>/commit</code> · <code>/pr-new</code> · <code>/changelog-bump</code></td><td>Commit, open a PR, update the changelog.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h3>Development subagents</h3>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Agent</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><code>doc-syncer</code></td><td>Keeps the navigation docs in sync after multi-file changes.</td></tr>
+            <tr><td><code>route-architect</code></td><td>Designs FastAPI routes with all conventions applied.</td></tr>
+            <tr><td><code>audio-stack-reviewer</code></td><td>Reviews audio-stack edits with the full toolchain.</td></tr>
+            <tr><td><code>test-runner</code></td><td>Runs and classifies test failures.</td></tr>
+            <tr><td><code>e2e-tester</code></td><td>Drives the real UI and captures evidence.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>28.6 Appendix E — The Documentation Set</h2>
+        <p>This handbook is the most complete document in a wider set. The others
+        remain authoritative for their specific purposes:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Document</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td>This handbook (<code>docs/handbook/</code>)</td><td>The comprehensive, narrative reference — 28 chapters.</td></tr>
+            <tr><td><code>docs/MAP.md</code> / <code>MAP_L2.md</code></td><td>Auto-generated file and symbol maps.</td></tr>
+            <tr><td><code>docs/FILE_MAP.md</code></td><td>The curated file map with per-file invariants.</td></tr>
+            <tr><td><code>docs/architecture.md</code></td><td>The concise architecture and data-flow reference.</td></tr>
+            <tr><td><code>docs/backend-index.md</code> / <code>frontend-index.md</code> / <code>rust-index.md</code></td><td>The detailed per-stack symbol indexes.</td></tr>
+            <tr><td><code>docs/SECURITY.md</code></td><td>The security threat model and accepted risks.</td></tr>
+            <tr><td><code>docs/research/_INDEX.md</code></td><td>The live research-pipeline dashboard.</td></tr>
+            <tr><td><code>CHANGELOG.md</code></td><td>What shipped, and when.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>28.7 Chapter Index</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Part</th><th>Chapters</th></tr></thead>
+          <tbody>
+            <tr><td>I · Orientation</td><td>1 Introduction · 2 History · 3 Feature Catalog</td></tr>
+            <tr><td>II · Architecture</td><td>4 System Architecture · 5 Technology Stack · 6 Data Flows</td></tr>
+            <tr><td>III · The Backend</td><td>7 Overview · 8 API Reference · 9 Services · 10 Database · 11 Analysis · 12 ANLZ · 13 USB Export</td></tr>
+            <tr><td>IV · The Frontend</td><td>14 Architecture · 15 Components · 16 The DAW · 17 Waveform &amp; State</td></tr>
+            <tr><td>V · Native &amp; Integrations</td><td>18 Rust/Tauri · 19 Native Audio · 20 SoundCloud</td></tr>
+            <tr><td>VI · Quality &amp; Operations</td><td>21 Security · 22 Build &amp; Deploy · 23 Testing · 24 R&amp;D Pipeline</td></tr>
+            <tr><td>VII · Forward &amp; Reference</td><td>25 Roadmap · 26 Developer Guide · 27 Glossary · 28 Appendices</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>28.8 Closing Note</h2>
+        <p>Music Library Manager set out to prove a thesis: that a DJ should not have
+        to pay a subscription, surrender their library to a proprietary format, or
+        depend on a cloud, simply to put music on a USB stick and play a gig. The
+        twenty-eight chapters of this handbook describe what that thesis looks like
+        when it is built — three language stacks placed where each is strongest, two
+        reverse-engineered binary formats verified byte-for-byte, a security model
+        built in a focused campaign, and a self-developing research pipeline carrying
+        a dozen more features toward release.</p>
+
+        <p>It is a beta, and it is honest about that. But it is a beta with a
+        documented history, a tested core, a hardened surface, and a clear road
+        ahead — local-first, open, and owned by the DJ who runs it.</p>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">End of the handbook</span>
+            <p>You have reached the end of the 28-chapter handbook. For the live
+            state of anything that moves — the pipeline, the changelog, the git
+            history — consult the documents of Appendix E. This handbook is the map;
+            the repository is the territory.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook · End</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

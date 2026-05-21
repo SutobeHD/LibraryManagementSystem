@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>22 · Build, Packaging &amp; Deployment — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 22 · Quality &amp; Operations</div>
+          <h1>Build, Packaging &amp; Deployment</h1>
+          <p class="ch-lead">Turning three language stacks into one double-clickable
+            desktop installer — the PyInstaller sidecar bundle, the Tauri build, the
+            Windows installers, and the CI workflows that gate every commit.</p>
+        </header>
+
+        <h2>22.1 The Packaging Problem</h2>
+        <p>The application is three stacks in three languages. The end user must not
+        see any of that. They download one installer, run it, and get one icon. The
+        build pipeline's job is to collapse Python, JavaScript, and Rust into that
+        single artefact — and, critically, to do it <em>without requiring the user to
+        install Python</em>.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  subgraph Sources["Three source stacks"]
+    PY["app/ — Python backend"]
+    FE["frontend/ — React + Vite"]
+    RS["src-tauri/ — Rust + Tauri"]
+  end
+  PY -->|"PyInstaller (backend.spec)"| EXE["rb-backend executable<br/>self-contained, no Python needed"]
+  FE -->|"vite build"| DIST["frontend/dist — static bundle"]
+  EXE --> TB["tauri build"]
+  DIST --> TB
+  RS --> TB
+  TB --> INST["Windows installer<br/>.msi + .exe (NSIS)"]
+          </div>
+          <figcaption><span class="fig-num">Figure 22.1</span> — The build pipeline.
+          Three stacks converge into one installer.</figcaption>
+        </div>
+
+        <h2>22.2 Bundling the Python Sidecar</h2>
+        <p>The single hardest packaging task is the Python backend. It cannot ship as
+        loose <code>.py</code> files — that would require the user to have the right
+        Python and every dependency. Instead, <strong>PyInstaller</strong> compiles
+        the entire backend, the interpreter, and every library into one self-contained
+        executable named <code>rb-backend</code>.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>File</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><code>backend_entry.py</code></td><td>The entry point PyInstaller compiles — it boots the FastAPI app exactly as <code>python -m app.main</code> would.</td></tr>
+            <tr><td><code>backend.spec</code></td><td>The PyInstaller specification — what to include, hidden imports, data files, the output name.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>The result is a binary the Tauri shell can spawn as a sidecar (Chapter 4).
+        From the user's perspective there is no Python — there is just an application
+        that happens to have a fast analysis engine inside it.</p>
+
+        <div class="callout warn">
+          <span class="ico">▲</span>
+          <div class="body">
+            <span class="ct">Why bundling the analysis stack is hard</span>
+            <p>The backend depends on librosa, madmom, essentia, numpy, scipy, and
+            numba — heavy scientific libraries with native extensions and non-obvious
+            data files. Getting PyInstaller to find all of them is exactly what
+            <code>backend.spec</code> exists to encode. This is the cost of choosing
+            Python for the DSP layer — paid once, in the spec file.</p>
+          </div>
+        </div>
+
+        <h2>22.3 Building the Frontend</h2>
+        <p>The frontend build is the simplest of the three. <code>npm run build</code>
+        runs Vite, which bundles, minifies, and tree-shakes the React application into
+        a static <code>frontend/dist</code> directory. In a production Tauri build,
+        the WebView loads this static bundle — not the Vite dev server. This is why a
+        React-only change still requires a rebuild before it shows up in a Tauri
+        WebDriver test.</p>
+
+        <h2>22.4 The Tauri Build</h2>
+        <p><code>npm run tauri build</code> is the final assembly step. It compiles
+        the Rust code in release mode, embeds the static frontend bundle, embeds the
+        <code>rb-backend</code> sidecar as a bundled binary, and produces the
+        platform installer. On Windows that means a <code>.msi</code> and an NSIS
+        <code>.exe</code>.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  CARGO["cargo build --release<br/>the Rust shell + audio engine"]
+  CARGO --> BUNDLE["Tauri bundler"]
+  DIST2["frontend/dist"] --> BUNDLE
+  SIDECAR["rb-backend executable"] --> BUNDLE
+  CONF["tauri.conf.json<br/>identifier, window, splash"] --> BUNDLE
+  BUNDLE --> MSI[".msi installer"]
+  BUNDLE --> NSIS[".exe NSIS installer"]
+          </div>
+          <figcaption><span class="fig-num">Figure 22.2</span> — The Tauri build
+          step assembles the Rust binary, the frontend, and the sidecar into the
+          installers.</figcaption>
+        </div>
+
+        <h2>22.5 The Build &amp; Dev Commands</h2>
+        <p>The root <code>package.json</code> defines the commands that drive every
+        build and dev workflow:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Command</th><th>Does</th></tr></thead>
+          <tbody>
+            <tr><td><code>npm run dev:full</code></td><td>Starts the backend (port 8000) and the Vite frontend (port 5173) concurrently — browser development.</td></tr>
+            <tr><td><code>npm run tauri dev</code></td><td>Launches the full desktop app with hot-reload — the Rust shell, the sidecar, the React frontend.</td></tr>
+            <tr><td><code>npm run build</code></td><td>Builds the production frontend bundle.</td></tr>
+            <tr><td><code>npm run tauri build</code></td><td>Builds the full desktop binary and installers.</td></tr>
+            <tr><td><code>npm run cleanup</code></td><td>Kills any process holding port 8000 or 5173 — a clean slate before a dev run.</td></tr>
+            <tr><td><code>npm run audit</code> / <code>lint:lockfile</code></td><td>The supply-chain security checks of Chapter 21.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>22.6 Producing a Release</h2>
+        <p>A release is produced by <code>scripts/local-release.ps1</code>, which
+        drives the Windows build and packaging. Two deliberate facts about the
+        release shape:</p>
+
+        <ul>
+          <li><strong>No code-signing.</strong> The installers are not code-signed, so
+          Windows SmartScreen shows a warning on first run. The changelog states this
+          openly — it is an expected, documented behaviour for an open,
+          no-subscription project, not a defect.</li>
+          <li><strong>SHA256SUMS published.</strong> Every release publishes the
+          SHA-256 checksums of its artefacts, so a user can verify the download's
+          integrity even without a code signature.</li>
+        </ul>
+
+        <h2>22.7 Continuous Integration</h2>
+        <p>Every push and every pull request runs the <code>ci.yml</code> GitHub
+        Actions workflow, which gates all three stacks in parallel.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  PUSH["git push / pull request"]
+  PUSH --> J1["python-lint-test<br/>ruff + pytest"]
+  PUSH --> J2["rust-lint-test<br/>cargo clippy + cargo test"]
+  PUSH --> J3["frontend-lint<br/>eslint"]
+  PUSH --> J4["regen_maps --check<br/>doc-drift guard"]
+  J1 --> GATE{"all green?"}
+  J2 --> GATE
+  J3 --> GATE
+  J4 --> GATE
+  GATE -->|"yes"| OK["mergeable"]
+  GATE -->|"no"| BLOCK["blocked"]
+          </div>
+          <figcaption><span class="fig-num">Figure 22.3</span> — The CI workflow.
+          Three language toolchains plus a documentation-drift check, all blocking.</figcaption>
+        </div>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>CI job</th><th>Runs</th></tr></thead>
+          <tbody>
+            <tr><td><code>python-lint-test</code></td><td><code>ruff</code> lint plus the <code>pytest</code> suite.</td></tr>
+            <tr><td><code>rust-lint-test</code></td><td><code>cargo clippy -D warnings</code> plus <code>cargo test</code>.</td></tr>
+            <tr><td><code>frontend-lint</code></td><td>ESLint over the frontend source.</td></tr>
+            <tr><td>Map-drift check</td><td><code>regen_maps.py --check</code> fails CI if the auto-generated navigation docs have drifted from the code.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>A second workflow, <code>release.yml</code>, handles release builds. There
+        is also a pre-commit hook configuration (<code>.pre-commit-config.yaml</code>)
+        that a developer installs once per machine; it runs the formatters, the type
+        checker, and a set of guards — including one that fails the commit if a
+        <code>.env</code> file or a <code>master.db</code> is staged.</p>
+
+        <h2>22.8 The Auto-Format Hook</h2>
+        <p>Beyond CI, an editor-level hook keeps the codebase clean as it is written.
+        A <code>PostToolUse</code> hook runs the right formatter after any file edit —
+        <code>ruff format</code> for Python, <code>cargo fmt</code> for Rust,
+        Prettier for the frontend — so formatting is never a manual chore and never a
+        review comment.</p>
+
+        <h2>22.9 Deployment Shape</h2>
+        <p>"Deployment" for this project is unusual: there is no server to deploy to.
+        The application is installed, not deployed. The full picture:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Aspect</th><th>This project</th></tr></thead>
+          <tbody>
+            <tr><td>Target</td><td>The user's own Windows desktop.</td></tr>
+            <tr><td>Artefact</td><td>A <code>.msi</code> or NSIS <code>.exe</code> installer.</td></tr>
+            <tr><td>Runtime prerequisites</td><td>FFmpeg on the PATH. Nothing else — Python is bundled.</td></tr>
+            <tr><td>Updates</td><td>Re-run a new installer.</td></tr>
+            <tr><td>Server component</td><td>None. The "backend" is a local sidecar process.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="callout note">
+          <span class="ico">◆</span>
+          <div class="body">
+            <span class="ct">The Docker files are vestigial</span>
+            <p>The repository still contains <code>docker-compose.yml</code> and two
+            Dockerfiles. The Slopcode-Cleanup audit flagged them as dead — the
+            project is a desktop application, not a containerised service — and
+            marked them for removal. They are a historical artefact, not a deployment
+            path.</p>
+          </div>
+        </div>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>The build pipeline collapses three language stacks into one installer:
+            PyInstaller bundles the Python backend into a self-contained
+            <code>rb-backend</code> executable, Vite builds the frontend to a static
+            bundle, and <code>tauri build</code> assembles both with the release Rust
+            binary into a Windows <code>.msi</code> and NSIS <code>.exe</code>. The
+            user installs one artefact and needs only FFmpeg. A four-job CI workflow
+            gates all three stacks plus a doc-drift check on every push, and an
+            auto-format hook keeps the tree clean as it is written.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

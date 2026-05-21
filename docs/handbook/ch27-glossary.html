@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>27 · Glossary of Terms — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 27 · Forward &amp; Reference</div>
+          <h1>Glossary of Terms</h1>
+          <p class="ch-lead">The vocabulary of the handbook in one place — DJ and
+            music terms, the Pioneer format names, and the project-specific
+            terminology.</p>
+        </header>
+
+        <h2>27.1 DJ &amp; Music Terms</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><strong>BPM</strong></td><td>Beats per minute — a track's tempo. The single most important number for matching two tracks to mix.</td></tr>
+            <tr><td><strong>Beatgrid</strong></td><td>A map of where every beat falls in a track, with the tempo of each segment — what lets hardware sync two tracks.</td></tr>
+            <tr><td><strong>Key</strong></td><td>The musical key of a track. Two tracks in compatible keys mix harmonically.</td></tr>
+            <tr><td><strong>Camelot wheel</strong></td><td>A system that maps the 24 musical keys onto a clock face (1A–12A, 1B–12B) so harmonic compatibility becomes a matter of adjacency. <code>8B</code> is C major; <code>8A</code> is A minor.</td></tr>
+            <tr><td><strong>Harmonic mixing</strong></td><td>Choosing the next track so its key is compatible with the current one — adjacent on the Camelot wheel.</td></tr>
+            <tr><td><strong>Cue point</strong></td><td>A saved position in a track the DJ can jump to instantly.</td></tr>
+            <tr><td><strong>Hot cue</strong></td><td>A cue point bound to a trigger pad — eight of them (A–H), each colour-coded.</td></tr>
+            <tr><td><strong>Memory cue</strong></td><td>A saved marker for reference — typically the start of a phrase or a drop — that the DJ navigates to but does not trigger as a pad.</td></tr>
+            <tr><td><strong>Loop</strong></td><td>A section of a track set to repeat.</td></tr>
+            <tr><td><strong>Phrase</strong></td><td>A musical section, usually 8, 16, or 32 bars. Blending on phrase boundaries sounds clean.</td></tr>
+            <tr><td><strong>Downbeat</strong></td><td>The first, strongest beat of a bar — the anchor for the phrase grid.</td></tr>
+            <tr><td><strong>Extended mix</strong></td><td>A longer version of a track (typically 5–8 minutes) with long intros and outros for blending. Contrast the Radio Edit.</td></tr>
+            <tr><td><strong>Transcode</strong></td><td>A lossy file re-encoded into a lossless container — a "FLAC" that is really an MP3 inside, betrayed by a spectral cliff.</td></tr>
+            <tr><td><strong>Waveform</strong></td><td>The visual shape of a track's amplitude over time. A 3-band waveform colours bass, mids, and highs separately.</td></tr>
+            <tr><td><strong>LUFS</strong></td><td>Loudness Units Full Scale — the standard (ITU-R BS.1770 / EBU R128) measure of perceived loudness.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>27.2 Hardware &amp; Ecosystem</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><strong>CDJ</strong></td><td>Pioneer's professional DJ media player — the standard club deck. The CDJ-3000 is the current flagship.</td></tr>
+            <tr><td><strong>XDJ</strong></td><td>Pioneer's all-in-one DJ systems — players and a mixer in one unit.</td></tr>
+            <tr><td><strong>DJM</strong></td><td>Pioneer's professional DJ mixer line.</td></tr>
+            <tr><td><strong>Rekordbox</strong></td><td>Pioneer's own library-management software — the application's primary competitor.</td></tr>
+            <tr><td><strong>Serato</strong></td><td>Another major commercial DJ library and performance application — a second competitor.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>27.3 Pioneer File Formats</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><strong>master.db</strong></td><td>The SQLite database Rekordbox uses for its library — what Live mode reads and writes.</td></tr>
+            <tr><td><strong>ANLZ</strong></td><td>Per-track binary analysis files (<code>.DAT</code>, <code>.EXT</code>, <code>.2EX</code>) holding the waveform, beatgrid, and cues. See Chapter 12.</td></tr>
+            <tr><td><strong>PDB</strong></td><td>The legacy DeviceLibrary database format (<code>export.pdb</code>) older CDJ firmware reads from a USB stick. See Chapter 13.</td></tr>
+            <tr><td><strong>OneLibrary</strong></td><td>The newer USB database format (<code>exportLibrary.db</code>) that Rekordbox 6/7 auto-detects.</td></tr>
+            <tr><td><strong>DeviceSQL</strong></td><td>Pioneer's bespoke on-disk database engine, the basis of the PDB format.</td></tr>
+            <tr><td><strong>PMAI</strong></td><td>The four magic bytes that begin every ANLZ file.</td></tr>
+            <tr><td><strong>PQTZ</strong></td><td>The ANLZ tag carrying the beatgrid.</td></tr>
+            <tr><td><strong>PWAV / PWV2–PWV7</strong></td><td>The family of ANLZ tags carrying the seven waveform representations.</td></tr>
+            <tr><td><strong>USBANLZ</strong></td><td>The directory on a USB stick where ANLZ files are stored, bucketed by hash.</td></tr>
+            <tr><td><strong>MYSETTING.DAT</strong></td><td>The CDJ/DJM hardware-settings files written to a stick.</td></tr>
+            <tr><td><strong>.rbep</strong></td><td>Rekordbox Editor Project — the overlay file format the non-destructive editor saves edits to.</td></tr>
+            <tr><td><strong>Crate Digger</strong></td><td>The community reverse-engineering effort whose documentation the PDB writer follows.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>27.4 Architecture &amp; Technical Terms</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Sidecar</strong></td><td>The Python backend, run as a child process the Rust shell spawns and supervises. See Chapter 4.</td></tr>
+            <tr><td><strong>Tauri</strong></td><td>The Rust framework that builds the desktop window and hosts the WebView.</td></tr>
+            <tr><td><strong>IPC</strong></td><td>Inter-Process Communication — here, Tauri's <code>invoke()</code>/event bridge between the frontend and the Rust core.</td></tr>
+            <tr><td><strong>WebView</strong></td><td>The OS-provided browser engine (WebView2 on Windows) in which the React frontend renders.</td></tr>
+            <tr><td><strong>FastAPI / Uvicorn</strong></td><td>The Python web framework and the ASGI server that run the backend.</td></tr>
+            <tr><td><strong>CPAL</strong></td><td>The Rust crate providing cross-platform audio output.</td></tr>
+            <tr><td><strong>Symphonia</strong></td><td>The pure-Rust audio-decoding crate.</td></tr>
+            <tr><td><strong>RustFFT</strong></td><td>The Rust crate computing the FFT for waveform analysis.</td></tr>
+            <tr><td><strong>FFT</strong></td><td>Fast Fourier Transform — converts a signal from the time domain to the frequency domain.</td></tr>
+            <tr><td><strong>pyrekordbox / rbox</strong></td><td>The Python library for reading and writing Rekordbox data — imported in code as <code>rbox</code>.</td></tr>
+            <tr><td><strong>ProcessPoolExecutor</strong></td><td>The Python mechanism that runs heavy analysis in separate worker processes.</td></tr>
+            <tr><td><strong>WAL</strong></td><td>Write-Ahead Log — a SQLite journal mode; the OneLibrary writer flushes it deliberately.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>27.5 Security Terms</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Bearer token</strong></td><td>The session secret sent in the <code>Authorization</code> header to authenticate every mutation request.</td></tr>
+            <tr><td><strong>require_session</strong></td><td>The FastAPI dependency that verifies the Bearer token on a route.</td></tr>
+            <tr><td><strong>PKCE</strong></td><td>Proof Key for Code Exchange — the OAuth extension that secures the SoundCloud login without a stored secret.</td></tr>
+            <tr><td><strong>Constant-time compare</strong></td><td>A comparison that always takes the same time regardless of the inputs, defeating timing attacks. The <code>safe_compare</code> helper.</td></tr>
+            <tr><td><strong>CORS</strong></td><td>Cross-Origin Resource Sharing — the browser policy restricting which origins may call the API.</td></tr>
+            <tr><td><strong>Token bucket</strong></td><td>The algorithm behind the rate limiter — a bucket that refills at a steady rate and empties per request.</td></tr>
+            <tr><td><strong>Sandbox</strong></td><td>The <code>validate_audio_path</code> restriction confining file access to allowed roots.</td></tr>
+            <tr><td><strong>Schicht A</strong></td><td>The project's supply-chain hardening policy — exact pinning, disabled install scripts, signature checks.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>27.6 Project-Specific Terms</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Standalone (XML) mode</strong></td><td>The library mode using the application's own XML file — no Rekordbox install needed.</td></tr>
+            <tr><td><strong>Live mode</strong></td><td>The library mode operating directly on an existing Rekordbox <code>master.db</code>.</td></tr>
+            <tr><td><strong>Melodex</strong></td><td>The frontend's amber design system.</td></tr>
+            <tr><td><strong>The research pipeline</strong></td><td>The multi-agent feature-lifecycle system of Chapter 24.</td></tr>
+            <tr><td><strong>Routine</strong></td><td>A scheduled autonomous session that advances research-pipeline documents.</td></tr>
+            <tr><td><strong>Gate (A / B / C / D)</strong></td><td>A user sign-off checkpoint in the pipeline.</td></tr>
+            <tr><td><strong>SafeAnlzParser</strong></td><td>The subprocess-isolated wrapper that quarantines the crashing <code>pyrekordbox</code> ANLZ parser.</td></tr>
+            <tr><td><strong>Slopcode-Cleanup</strong></td><td>The six-phase code-quality remediation mission of May 2026.</td></tr>
+            <tr><td><strong>rb-backend</strong></td><td>The name of the PyInstaller-built backend executable bundled in a release.</td></tr>
+            <tr><td><strong>God-component</strong></td><td>An over-large component (the cleanup split seven of them) — a term for technical debt, not a design.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>27.7 Pipeline State Prefixes</h2>
+        <p>The research-pipeline document states (Chapter 24), as filename prefixes:</p>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Prefix</th><th>State</th></tr></thead>
+          <tbody>
+            <tr><td><code>idea_</code></td><td>A raw idea, awaiting drafting.</td></tr>
+            <tr><td><code>drafting_</code></td><td>Being worked into a researchable document.</td></tr>
+            <tr><td><code>ideagate_</code></td><td>Awaiting GATE A.</td></tr>
+            <tr><td><code>exploring_</code></td><td>Under active parallel research.</td></tr>
+            <tr><td><code>midgate_</code></td><td>Awaiting GATE B.</td></tr>
+            <tr><td><code>evaluated_</code></td><td>Research verified, recommendation written.</td></tr>
+            <tr><td><code>draftplan_</code> / <code>review_</code></td><td>The implementation plan being written / reviewed.</td></tr>
+            <tr><td><code>plangate_</code></td><td>Awaiting GATE C.</td></tr>
+            <tr><td><code>accepted_</code> / <code>inprogress_</code></td><td>Plan approved / code being built.</td></tr>
+            <tr><td><code>implemented_</code></td><td>Shipped and archived.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>The handbook's vocabulary spans four worlds: the DJ's craft (BPM,
+            beatgrid, Camelot, cues, phrases), Pioneer's hardware and file formats
+            (CDJ, master.db, ANLZ, PDB, OneLibrary), the technical architecture
+            (sidecar, Tauri, IPC, CPAL, FastAPI), and the project's own terms
+            (Standalone vs Live mode, the research pipeline, Melodex, the
+            Slopcode-Cleanup). Keep this chapter at hand while reading the rest.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

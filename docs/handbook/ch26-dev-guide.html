@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>26 · Developer Guide — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 26 · Forward &amp; Reference</div>
+          <h1>Developer Guide</h1>
+          <p class="ch-lead">Everything a new contributor needs — setting up the
+            three stacks, the navigation docs, the coding rules, the commit
+            conventions, and the workflow for adding a route or a component.</p>
+        </header>
+
+        <h2>26.1 Setting Up</h2>
+        <p>A working development environment needs the three language toolchains plus
+        FFmpeg on the PATH.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Prerequisite</th><th>For</th></tr></thead>
+          <tbody>
+            <tr><td>Python 3.10+</td><td>The backend and its analysis stack.</td></tr>
+            <tr><td>Node.js</td><td>The frontend (Vite, React).</td></tr>
+            <tr><td>The Rust toolchain</td><td>The Tauri shell and the native audio engine.</td></tr>
+            <tr><td>FFmpeg</td><td>Audio conversion — must be on the system PATH.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>The dependency installs follow the deterministic, supply-chain-safe
+        commands of Chapter 21 — <code>npm ci</code>, never <code>npm install</code>;
+        <code>pip install -r requirements.txt</code>; <code>cargo build</code> from
+        the committed <code>Cargo.lock</code>.</p>
+
+        <div class="callout warn">
+          <span class="ico">▲</span>
+          <div class="body">
+            <span class="ct">First, set the git identity</span>
+            <p>In a fresh clone, verify the per-repository git identity before the
+            first commit. The project requires the GitHub no-reply email — the name
+            <code>SutobeHD</code> and the matching <code>@users.noreply.github.com</code>
+            address. GitHub's "block command-line pushes that expose my email" setting
+            rejects pushes otherwise. Set it per-repo, never globally.</p>
+          </div>
+        </div>
+
+        <h2>26.2 Running the Application</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Goal</th><th>Command</th></tr></thead>
+          <tbody>
+            <tr><td>Backend + frontend in the browser</td><td><code>npm run dev:full</code></td></tr>
+            <tr><td>The full desktop app</td><td><code>npm run tauri dev</code></td></tr>
+            <tr><td>Just the backend</td><td><code>python -m app.main</code></td></tr>
+            <tr><td>Production frontend build</td><td><code>npm run build</code></td></tr>
+            <tr><td>Desktop installers</td><td><code>npm run tauri build</code></td></tr>
+            <tr><td>Free ports 8000 / 5173</td><td><code>npm run cleanup</code></td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>26.3 Finding Your Way Around</h2>
+        <p>The repository ships a graduated set of navigation documents — start cheap,
+        go deeper only as needed.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  L1["docs/MAP.md — L1<br/>every file, one-line purpose"]
+  L1 --> L2["docs/MAP_L2.md — L2<br/>L1 plus public classes &amp; functions"]
+  L2 --> L3["docs/backend-index.md · frontend-index.md · rust-index.md — L3<br/>routes, components, commands in detail"]
+  L3 --> FM["docs/FILE_MAP.md<br/>curated map with per-file invariants"]
+  FM --> ARCH["docs/architecture.md<br/>system diagrams &amp; data flows"]
+          </div>
+          <figcaption><span class="fig-num">Figure 26.1</span> — The navigation
+          documents, cheapest to richest. The L1/L2 maps are auto-generated.</figcaption>
+        </div>
+
+        <p>The L1 and L2 maps are regenerated deterministically from the source by
+        <code>scripts/regen_maps.py</code>; CI fails if they drift. The
+        <code>FILE_MAP.md</code> is hand-curated and carries the narrative
+        invariants — it is the place to learn <em>why</em> a file is the way it is
+        before changing it. This handbook is the most complete of all these documents
+        and complements rather than replaces them.</p>
+
+        <h2>26.4 The Coding Rules</h2>
+        <p>The project's rules live in <code>.claude/rules/</code> and are
+        non-negotiable — they are load-bearing constraints, not style preferences.
+        The essentials, by stack:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Stack</th><th>Core rules</th></tr></thead>
+          <tbody>
+            <tr><td>Python</td><td>Pydantic v2 (<code>.model_dump()</code>); no bare <code>except</code>; no <code>requests</code> in <code>async</code>; every subprocess has a timeout; no raw f-string SQL; type hints on new code; <code>pathlib</code> over <code>os.path</code>.</td></tr>
+            <tr><td>Rust</td><td>No <code>.unwrap()</code> in fallible paths; no <code>println!</code>; typed <code>thiserror</code> errors; no naked <code>unsafe impl Send + Sync</code>; every command documented; clippy-clean.</td></tr>
+            <tr><td>Frontend</td><td>No <code>alert/confirm/prompt</code>; no raw <code>fetch()</code>; no stray <code>console.log</code>; no empty <code>catch {}</code>; no magic numbers.</td></tr>
+            <tr><td>All</td><td>Exact-pinned dependencies; no <code>--no-verify</code>; comments explain <em>why</em>, never <em>what</em>.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>26.5 The Self-Correction Loop</h2>
+        <p>After every code edit, before the work is called done, the project's rules
+        prescribe a five-step loop (introduced in Chapter 23): lint and format the
+        changed file; run the tests that cover it; verify any UI change in a real
+        browser; sync the navigation docs; summarise. A step that fails is fixed at
+        the root — never bypassed.</p>
+
+        <h2>26.6 Adding a Route</h2>
+        <p>Adding a FastAPI route is a guided process, because a route must apply
+        several conventions at once — authentication, the write lock, a Pydantic
+        model, typed errors, path validation.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  P["Plan the route<br/>route-architect agent"]
+  P --> M["Define a Pydantic v2 model"]
+  M --> A["Add Depends(require_session)<br/>for any mutation"]
+  A --> L["Acquire _db_write_lock<br/>for any master.db write"]
+  L --> V["validate_audio_path<br/>for any client path"]
+  V --> D["Update backend-index.md + tests"]
+          </div>
+          <figcaption><span class="fig-num">Figure 26.2</span> — The route-adding
+          checklist. The <code>/route-add</code> command and the
+          <code>route-architect</code> agent scaffold it.</figcaption>
+        </div>
+
+        <p>The <code>/route-add</code> slash-command and the
+        <code>route-architect</code> subagent exist precisely to apply this checklist
+        automatically — they produce ready-to-paste route code with the conventions
+        already in place, plus a list of the downstream updates (the backend index,
+        the file map, the tests, the frontend client).</p>
+
+        <h2>26.7 Adding a Component</h2>
+        <p>A new React component must: handle its loading and error states explicitly
+        (the mandatory contract of Chapter 15); fetch only through the shared
+        <code>axios</code> client; use the shared logger, not bare
+        <code>console</code>; and, if it is a view, be registered in the lazy-load
+        tab router in <code>main.jsx</code>. A UI change is not done until the
+        <code>e2e-tester</code> agent has driven it in a real browser — a type-check
+        passing is not the same as a feature working.</p>
+
+        <h2>26.8 Committing</h2>
+        <p>The project commits intensely and atomically — one logical change per
+        commit, committed as soon as the tree is green. Messages follow Conventional
+        Commits:</p>
+
+        <pre><code>&lt;type&gt;(&lt;scope&gt;): &lt;imperative summary, under 70 chars&gt;
+
+&lt;optional body — the why, not the what&gt;</code></pre>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Element</th><th>Values</th></tr></thead>
+          <tbody>
+            <tr><td>Types</td><td><code>feat</code>, <code>fix</code>, <code>refactor</code>, <code>docs</code>, <code>test</code>, <code>chore</code>, <code>perf</code>, <code>build</code>, <code>ci</code>, <code>revert</code></td></tr>
+            <tr><td>Scopes</td><td><code>backend</code>, <code>frontend</code>, <code>tauri</code>, <code>audio</code>, <code>usb</code>, <code>pdb</code>, <code>anlz</code>, <code>analysis</code>, <code>db</code>, <code>docs</code>, <code>deps</code></td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>History is kept revertable: every commit lands as a normal commit, every
+        push is a fast-forward, and a mistake is undone with <code>git revert</code>,
+        not a history rewrite. Force-pushing, amending a pushed commit, and
+        <code>--no-verify</code> are forbidden.</p>
+
+        <h2>26.9 The Research-First Rule</h2>
+        <p>Not every change goes straight to code. The rule: a feature that touches
+        two or more modules, or has more than one plausible approach, starts as a
+        research document in the pipeline of Chapter 24 — not in an editor. One-off
+        bug fixes, single-file refactors, plain questions, and doc edits skip the
+        pipeline. When in doubt, check <code>docs/research/_INDEX.md</code> first:
+        there may already be an in-flight document for the area, and contradicting it
+        is not allowed.</p>
+
+        <h2>26.10 The Autonomy Model</h2>
+        <p>The repository is configured for highly autonomous agentic development.
+        The boundary is drawn by reversibility: local, reversible actions — editing
+        files, running tests, building, committing — are done freely; actions that
+        are destructive, irreversible, or change shared state — force-pushing,
+        dropping data, deleting branches, creating PRs, installing new dependencies —
+        require explicit confirmation. The <code>.claude/settings.json</code>
+        allowlist encodes exactly this split.</p>
+
+        <div class="callout note">
+          <span class="ico">◆</span>
+          <div class="body">
+            <span class="ct">Streamlining bias</span>
+            <p>The repository culture favours automating recurring manual rituals.
+            Spotted a multi-step bookkeeping chore? The expectation is to automate it
+            — a slash-command, a hook, a routine — and show the change, rather than
+            keep doing it by hand. The slash-commands and the pipeline routines of
+            Chapter 24 are the accumulated result of this bias.</p>
+          </div>
+        </div>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>A contributor needs the three toolchains plus FFmpeg, the correct
+            per-repo git identity, and the navigation docs (the L1/L2 maps, the index
+            docs, the file map, this handbook). The coding rules are load-bearing and
+            stack-specific; a five-step self-correction loop runs after every edit.
+            Routes and components follow guided checklists; commits are atomic and
+            Conventional; history stays revertable. Multi-module features start in the
+            research pipeline, and the autonomy model is drawn along the line of
+            reversibility.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

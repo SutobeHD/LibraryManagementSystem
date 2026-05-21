@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>23 · Testing &amp; Quality Assurance — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 23 · Quality &amp; Operations</div>
+          <h1>Testing &amp; Quality Assurance</h1>
+          <p class="ch-lead">Over 200 Python tests, byte-fidelity guards on the
+            Pioneer formats, Rust and frontend test suites, two end-to-end channels,
+            and a four-language linting gate — the safety net under every change.</p>
+        </header>
+
+        <h2>23.1 The Testing Philosophy</h2>
+        <p>Before the Slopcode-Cleanup, the project had three tests for fifty
+        modules. Phase 6 of that mission set out to fix it, and the result is a
+        layered safety net. The philosophy is straightforward: anything that is hard
+        to get right and catastrophic to get wrong gets a test that fails loudly. The
+        byte-exact Pioneer formats and the security gates are tested most heavily,
+        precisely because their failure modes are silent.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  T["The testing pyramid"]
+  T --> U["Unit &amp; integration tests<br/>pytest — 200+ · cargo test · frontend"]
+  T --> F["Fidelity tests<br/>byte-exact PDB / WAL guards"]
+  T --> E["End-to-end tests<br/>Web Preview · Tauri WebDriver"]
+  T --> L["Static gates<br/>ruff · mypy · clippy · eslint"]
+          </div>
+          <figcaption><span class="fig-num">Figure 23.1</span> — Four layers of
+          quality assurance, all enforced by CI.</figcaption>
+        </div>
+
+        <h2>23.2 The Python Test Suite</h2>
+        <p>The <code>pytest</code> suite has grown past 200 tests. A representative
+        slice of the files and what they protect:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Test file</th><th>Guards</th></tr></thead>
+          <tbody>
+            <tr><td><code>test_database.py</code></td><td>Track and playlist CRUD in the database layer.</td></tr>
+            <tr><td><code>test_pdb_structure.py</code></td><td>Every structural invariant of the PDB binary format.</td></tr>
+            <tr><td><code>test_onelibrary_wal_flush.py</code></td><td>That the OneLibrary WAL is fully flushed after a write.</td></tr>
+            <tr><td><code>test_usb_manager.py</code></td><td>The USB sync engine — mock filesystem, profile load/save.</td></tr>
+            <tr><td><code>test_analysis.py</code></td><td>The analysis engine.</td></tr>
+            <tr><td><code>test_soundcloud_api.py</code></td><td>The SoundCloud client — mocked HTTP, 429 retry.</td></tr>
+            <tr><td><code>test_services.py</code></td><td>The business-logic service classes.</td></tr>
+            <tr><td><code>test_auth.py</code></td><td>20 cases over the Bearer-parsing edge-case matrix.</td></tr>
+            <tr><td><code>test_security_compare.py</code></td><td>17 cases over the <code>safe_compare</code> fragility matrix.</td></tr>
+            <tr><td><code>test_rate_limit.py</code></td><td>7 cases over the token-bucket limiter.</td></tr>
+            <tr><td><code>test_settings_caps.py</code></td><td>The settings size caps.</td></tr>
+            <tr><td><code>test_logging_redaction.py</code></td><td>That the log redactor strips absolute paths.</td></tr>
+            <tr><td><code>test_main_security.py</code></td><td>The file-reveal path-traversal fix.</td></tr>
+            <tr><td><code>test_security_hotfixes.py</code></td><td>Boundary coverage for the security hardening wave.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h3>The shared auth fixture</h3>
+        <p><code>tests/conftest.py</code> carries the suite's most important piece of
+        shared machinery: an autouse <code>auth_token</code> fixture. Because every
+        mutation route now requires a Bearer token, the fixture monkeypatches the
+        session token to a known constant and hands tests a ready-made
+        <code>Authorization</code> header — so a gated-route test stays short. Tests
+        that need to exercise the genuine 401 path opt out with a
+        <code>@pytest.mark.no_auth</code> marker.</p>
+
+        <h2>23.3 Byte-Fidelity Tests</h2>
+        <p>Two test files are unlike the rest. They do not check behaviour — they
+        check <em>bytes</em>.</p>
+
+        <div class="callout spec">
+          <span class="ico">◈</span>
+          <div class="body">
+            <span class="ct">test_pdb_structure.py — the format guardian</span>
+            <p>This file asserts every structural invariant of the PDB writer of
+            Chapter 13 — page flags, the per-table blank pages, the chain
+            terminator, the <code>free_size</code> arithmetic. The project's
+            troubleshooting rule is blunt: if this test fails, the change is wrong —
+            not the test. The reference fixture is a real Pioneer drive's bytes, and
+            it is not updated without understanding exactly why.</p>
+          </div>
+        </div>
+
+        <p><code>test_onelibrary_wal_flush.py</code> is the companion: it verifies
+        that after an OneLibrary write the SQLite write-ahead log is zero bytes —
+        catching the WAL-flush bug Chapter 13 described. These two tests are why the
+        USB export can be trusted between releases.</p>
+
+        <h2>23.4 Rust and Frontend Tests</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Stack</th><th>How tests run</th><th>What they cover</th></tr></thead>
+          <tbody>
+            <tr><td>Rust</td><td><code>cargo test</code> — inline <code>#[cfg(test)]</code> modules</td><td>The FFT band mapping, key detection edge cases, the export region-validation guards.</td></tr>
+            <tr><td>Frontend</td><td><code>node --experimental-vm-modules</code></td><td>The DAW reducer transitions — <code>dawReducer.test.js</code> exercises the composed reducer.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>The DAW reducer is the natural target for frontend unit testing because it
+        is a pure function — given a state and an action, it returns a new state,
+        with no DOM and no side effects. That purity (Chapter 17) makes it trivially
+        testable, and the test file exercises the region, transport, selection, cue,
+        and history transitions.</p>
+
+        <h2>23.5 End-to-End Testing — Two Channels</h2>
+        <p>Unit tests prove a function is correct. They do not prove a <em>feature</em>
+        works — that a click does the right thing in a real browser. For that the
+        project has two end-to-end channels, and a feature change picks the right one.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  Q{"Needs a native dialog,<br/>OAuth callback, or<br/>the audio engine?"}
+  Q -->|"no"| A["Channel A — Web Preview<br/>Vite + FastAPI in a headless browser<br/>fast, no build step"]
+  Q -->|"yes"| B["Channel B — Tauri WebDriver<br/>the real WebView2 window<br/>full native APIs, needs a build"]
+          </div>
+          <figcaption><span class="fig-num">Figure 23.2</span> — The e2e channel
+          picker.</figcaption>
+        </div>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Channel</th><th>Drives</th><th>Best for</th></tr></thead>
+          <tbody>
+            <tr><td>A — Web Preview</td><td>The Vite dev server in a headless browser.</td><td>UI, state, axios calls, FastAPI integration — the default, no build needed.</td></tr>
+            <tr><td>B — Tauri WebDriver</td><td>The real Tauri WebView2 window via <code>tauri-driver</code> and <code>msedgedriver</code>.</td><td>Native dialogs, OAuth, the filesystem, the audio engine.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>Channel A is cheap and fast because it skips the build entirely; its
+        limitation is that <code>window.__TAURI__</code> is undefined, so anything
+        calling <code>invoke()</code> takes a fallback path. Channel B is the real
+        thing — the bundled application driven by Selenium — but it requires a build
+        and the right WebView2 driver version. The <code>tests/e2e/</code> directory
+        holds a Mocha + Selenium smoke test that boots the built application and
+        confirms the mode picker renders.</p>
+
+        <h2>23.6 The Static Gates</h2>
+        <p>Below the tests sits a layer of static analysis — four toolchains, each
+        blocking in CI:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Stack</th><th>Tools</th><th>Enforces</th></tr></thead>
+          <tbody>
+            <tr><td>Python</td><td><code>ruff</code>, <code>mypy</code></td><td>Lint rules, formatting, and type correctness on new code.</td></tr>
+            <tr><td>Rust</td><td><code>cargo clippy -D warnings</code>, <code>cargo fmt</code></td><td>Every clippy warning treated as an error.</td></tr>
+            <tr><td>Frontend</td><td>ESLint, Prettier</td><td>The frontend rulebook of Chapter 14.</td></tr>
+            <tr><td>Docs</td><td><code>regen_maps.py --check</code></td><td>That the auto-generated navigation docs match the code.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>23.7 The Self-Correction Loop</h2>
+        <p>Testing is not only a CI gate — it is a development discipline. The
+        project's coding rules define a <strong>self-correction loop</strong> that
+        runs after every code edit, before the work is called done:</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  E["Edit code"] --> L["1 · Lint &amp; format<br/>the changed file"]
+  L --> T["2 · Run the tests<br/>covering the change"]
+  T --> U["3 · Verify UI changes<br/>in a browser"]
+  U --> D["4 · Sync the docs"]
+  D --> S["5 · Summarise"]
+  T -.->|"failure"| FIX["Fix the root cause"]
+  FIX --> L
+          </div>
+          <figcaption><span class="fig-num">Figure 23.3</span> — The post-edit
+          self-correction loop. A failure is fixed at the root, never bypassed.</figcaption>
+        </div>
+
+        <p>The loop is supported by specialised review agents — a test-runner that
+        parses and classifies failures, an e2e-tester that drives the real UI, an
+        audio-stack reviewer that runs the full audio toolchain. They are the subject
+        of Chapter 24's wider story about how the project develops itself.</p>
+
+        <h2>23.8 Quality by the Numbers</h2>
+        <div class="cards">
+          <div class="card"><div class="big">200+</div><div class="lbl">Python tests</div></div>
+          <div class="card"><div class="big">4</div><div class="lbl">Language toolchains gated by CI</div></div>
+          <div class="card"><div class="big">2</div><div class="lbl">End-to-end channels</div></div>
+          <div class="card"><div class="big">2</div><div class="lbl">Byte-fidelity guard tests</div></div>
+        </div>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>Quality assurance is four layers: a 200-plus-test <code>pytest</code>
+            suite with a shared auth fixture, two byte-fidelity tests that guard the
+            Pioneer formats against silent corruption, Rust and frontend unit tests
+            (the pure DAW reducer is the natural target), and two end-to-end channels
+            — fast Web Preview and full Tauri WebDriver. Four static toolchains gate
+            every push, and a post-edit self-correction loop turns testing into a
+            development habit rather than an afterthought.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

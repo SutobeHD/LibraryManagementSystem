@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>24 · The R&amp;D Pipeline — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 24 · Quality &amp; Operations</div>
+          <h1>The R&amp;D Pipeline</h1>
+          <p class="ch-lead">The project develops itself. A multi-agent research
+            pipeline — five autonomous routines, four user sign-off gates — advances
+            every feature from raw idea to merged code, and it is itself part of the
+            codebase.</p>
+        </header>
+
+        <h2>24.1 An Unusual Chapter</h2>
+        <p>Most handbooks document a product. This chapter documents a
+        <em>process</em> — but a process so thoroughly encoded in the repository, in
+        versioned files and slash-commands and agent definitions, that it is as much
+        a part of the system as any module. The pipeline is how Chapter 25's roadmap
+        gets built.</p>
+
+        <p>The idea is simple to state. Every feature is a Markdown document. That
+        document moves through a fixed sequence of states. Autonomous routines do the
+        work of advancing it; the user keeps a small number of deliberate sign-off
+        gates. The state is encoded in the document's folder and filename prefix — the
+        file system is the single source of truth.</p>
+
+        <h2>24.2 The State Chain</h2>
+        <p>A feature document lives in one of three folders —
+        <code>research/</code>, <code>implement/</code>, <code>archived/</code> — and
+        carries a prefix that names its state.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  I["idea_<br/>raw idea, user writes 1-3 sentences"]
+  I --> D["drafting_<br/>worked into a researchable doc"]
+  D --> GA{"ideagate_ — GATE A"}
+  GA --> E["exploring_<br/>parallel research agents"]
+  E --> GB{"midgate_ — GATE B"}
+  GB --> V["evaluated_<br/>research verified, recommendation written"]
+  V --> DP["draftplan_<br/>implementation plan + task queue"]
+  DP --> R["review_<br/>plan-verification agent"]
+  R --> GC{"plangate_ — GATE C"}
+  GC --> AC["accepted_<br/>task queue active"]
+  AC --> IP["inprogress_<br/>routine writes code on branches"]
+  IP --> GD{"open PR — GATE D"}
+  GD --> IM["archived/implemented_<br/>shipped"]
+          </div>
+          <figcaption><span class="fig-num">Figure 24.1</span> — The full pipeline
+          state chain. The four diamonds are user gates; everything else advances
+          autonomously.</figcaption>
+        </div>
+
+        <p>There are two kinds of state. A <strong>work state</strong> is one a
+        routine actively works — and the routine itself performs the
+        <code>git mv</code> to the next state when it is done. A <strong>gate
+        state</strong> (the <code>*gate_</code> prefixes) is a pause: the work stops
+        and waits for the user.</p>
+
+        <h2>24.3 The Four Gates</h2>
+        <p>Between the autonomous stretches sit four deliberate human checkpoints.
+        Only the user advances a gate.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Gate</th><th>State</th><th>The user confirms</th></tr></thead>
+          <tbody>
+            <tr><td><strong>A</strong></td><td><code>ideagate_</code></td><td>The worked-up idea matches intent, and the research plan is right.</td></tr>
+            <tr><td><strong>B</strong></td><td><code>midgate_</code></td><td>The research is heading the right direction (a mid-research checkpoint).</td></tr>
+            <tr><td><strong>C</strong></td><td><code>plangate_</code></td><td>The implementation plan and its task queue are approved.</td></tr>
+            <tr><td><strong>D</strong></td><td>an open PR</td><td>The branch is reviewed and CI is green — order the merge to <code>main</code>.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>Gates A, B, and C are advanced with slash-commands — <code>/gate-pass</code>
+        or <code>/gate-reject</code>. Gate D is a normal pull-request review. The
+        iron rule: <strong>a routine never advances a gate, and never merges or
+        rebases to <code>main</code></strong>.</p>
+
+        <h2>24.4 The Five Routines</h2>
+        <p>The work between gates is done by five routines — scheduled
+        <code>claude.ai/code</code> sessions, each triggered by a cron timer, each
+        reading one work state and spawning its own sub-agents.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Routine</th><th>Schedule</th><th>Reads</th><th>Does</th></tr></thead>
+          <tbody>
+            <tr><td><code>research-draft</code></td><td>05:00</td><td><code>drafting_</code></td><td>Works a raw idea into a researchable document; a verifier checks it against the original idea. Advances to GATE A.</td></tr>
+            <tr><td><code>research-explore</code></td><td>06:00 + 14:00</td><td><code>exploring_</code></td><td>Runs parallel research agents — one per open question — in two waves. Advances through GATE B to <code>evaluated_</code>.</td></tr>
+            <tr><td><code>research-plan</code></td><td>13:00</td><td><code>evaluated_</code>, <code>rework_</code></td><td>Writes an implementation plan and a task queue; a reviewer agent checks it. Advances to GATE C.</td></tr>
+            <tr><td><code>research-implement</code></td><td>03:00 + 15:00</td><td><code>accepted_</code>, <code>inprogress_</code></td><td>Builds one approved task per run on a <code>routine/*</code> branch and opens a PR.</td></tr>
+            <tr><td><code>research-triage</code></td><td>07:30</td><td>all (read-only)</td><td>Maintains a single "Pipeline Digest" GitHub issue — open gates, ready PRs, blockers.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  CRON["Cron timer fires"] --> ROUTINE["A routine session starts"]
+  ROUTINE --> CHECK{"Any doc in<br/>the target state?"}
+  CHECK -->|"no"| EXIT["Early exit"]
+  CHECK -->|"yes"| SPAWN["Spawn sub-agents<br/>parallel where independent"]
+  SPAWN --> VERIFY["Verification agent gates the work"]
+  VERIFY --> MV["git mv to the next state"]
+          </div>
+          <figcaption><span class="fig-num">Figure 24.2</span> — How a routine runs.
+          It early-exits if there is nothing in its state, otherwise spawns agents
+          and a verifier.</figcaption>
+        </div>
+
+        <h2>24.5 Routines Write Code — Within Bounds</h2>
+        <p>One routine, <code>research-implement</code>, writes actual application
+        code. This is powerful, so it is tightly bounded:</p>
+
+        <ul>
+          <li>Only on a document in the <code>inprogress_</code> state.</li>
+          <li>Only on <code>routine/&lt;slug&gt;-task-&lt;N&gt;</code> branches —
+          <strong>never <code>main</code></strong>.</li>
+          <li>Only on task-queue items that were approved at GATE C — no
+          freelancing.</li>
+          <li>One task is one small PR; CI and a review agent gate it; the user
+          merges at GATE D.</li>
+        </ul>
+
+        <p>The other routines — draft, explore, plan, triage — touch only the
+        research documents. No routine modifies <code>app/</code>,
+        <code>frontend/</code>, or <code>src-tauri/</code> outside an approved task
+        queue.</p>
+
+        <h2>24.6 Multi-Agent Mechanics</h2>
+        <p>A routine is a Claude Code session with the ability to spawn sub-agents.
+        "Multiple agents" means the routine fans work out to focused, parallel
+        sub-agents and then collects the results.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  R["research-explore routine"]
+  R --> A1["Research agent · Open Question 1"]
+  R --> A2["Research agent · Open Question 2"]
+  R --> A3["Research agent · Open Question 3"]
+  A1 --> C["Findings collected into the doc"]
+  A2 --> C
+  A3 --> C
+  C --> VER["Verification agent<br/>checks findings vs the original idea"]
+          </div>
+          <figcaption><span class="fig-num">Figure 24.3</span> — The explore routine
+          spawns one research agent per open question, then a verifier.</figcaption>
+        </div>
+
+        <p>A principle threads through every stage: <strong>idea fidelity</strong>.
+        The <code>## Original Idea</code> section, written once by the user, is never
+        edited — and every verification agent checks the work against it, so the
+        pipeline cannot drift away from what the user actually asked for.</p>
+
+        <h2>24.7 The Development Subagents</h2>
+        <p>Beyond the pipeline routines, the repository defines a set of specialised
+        development subagents — used during ordinary work, not only by the routines.
+        They are part of the project's "subagents default on" culture.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Subagent</th><th>Triggered when</th></tr></thead>
+          <tbody>
+            <tr><td><code>doc-syncer</code></td><td>A multi-file change or a file rename — keeps the navigation docs in sync.</td></tr>
+            <tr><td><code>route-architect</code></td><td>Before adding or changing a FastAPI route — applies the auth, lock, and model conventions.</td></tr>
+            <tr><td><code>audio-stack-reviewer</code></td><td>After any edit to the Python DSP or Rust audio code — runs the full audio toolchain.</td></tr>
+            <tr><td><code>test-runner</code></td><td>Before any commit — runs the tests and classifies failures.</td></tr>
+            <tr><td><code>e2e-tester</code></td><td>After a UI change — drives the real app and captures screenshots and console logs.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>24.8 The Supporting Machinery</h2>
+        <p>The pipeline is operated through slash-commands and underpinned by a set
+        of in-repository rule files.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Artefact</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><code>docs/research/_INDEX.md</code></td><td>The live dashboard — every document mirrored to its current state.</td></tr>
+            <tr><td><code>docs/research/_TEMPLATE.md</code></td><td>The starting template for a new topic.</td></tr>
+            <tr><td><code>docs/research/routines/</code></td><td>The five versioned routine prompts.</td></tr>
+            <tr><td><code>/pipeline</code>, <code>/gate-pass</code>, <code>/gate-reject</code></td><td>Slash-commands to inspect and advance the pipeline.</td></tr>
+            <tr><td><code>scripts/pipeline_status.py</code></td><td>Re-derives the live state directly from the file system.</td></tr>
+            <tr><td><code>CLAUDE.md</code> + <code>.claude/rules/</code></td><td>The operating manual that governs all autonomous work.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>24.9 Why This Matters to the Handbook</h2>
+        <p>This chapter is not a digression. The twelve features in Chapter 25's
+        roadmap are not a wishlist — they are twelve live documents currently moving
+        through the pipeline described here. Ten are in the <code>exploring_</code>
+        state, deep in parallel research; two are at the <code>idea_</code> stage.
+        The seven security features of Chapter 21 went through an earlier form of the
+        same process and are now archived as <code>implemented_</code>. The pipeline
+        is the engine; the roadmap is what it is currently producing.</p>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>The project develops itself through a multi-agent research pipeline.
+            Every feature is a Markdown document whose state is its folder and
+            filename prefix; it advances along a fixed chain from <code>idea_</code>
+            to <code>implemented_</code>. Five cron-scheduled routines do the work —
+            drafting, exploring, planning, implementing, triaging — each spawning
+            parallel sub-agents and gated by verifiers. The user keeps four
+            deliberate sign-off gates, and no routine ever merges to <code>main</code>.
+            The pipeline is the machinery that builds the roadmap of the next
+            chapter.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

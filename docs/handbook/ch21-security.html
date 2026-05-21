@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>21 · Security Architecture — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 21 · Quality &amp; Operations</div>
+          <h1>Security Architecture</h1>
+          <p class="ch-lead">A loopback-only desktop application still has a real
+            attack surface. This chapter documents the defence-in-depth model — Bearer
+            authentication, a filesystem sandbox, rate limiting, log redaction, and
+            supply-chain hardening — built in a focused four-day campaign.</p>
+        </header>
+
+        <h2>21.1 Why a Local App Needs Security</h2>
+        <p>It is tempting to think a desktop application bound to <code>127.0.0.1</code>
+        needs no security at all. The project rejects that thinking. The backend is a
+        real HTTP server, and a real HTTP server on a shared machine has real
+        threats: same-machine malware can POST to it, a malicious local web page can
+        try to pivot through it, and the moment anyone exposes the port to a LAN — for
+        a mobile companion, a headless install, or by accident — the surface widens
+        dramatically.</p>
+
+        <p>So the project treats security as a first-class concern. Chapter 2
+        described the four-day hardening wave of May 2026; this chapter documents the
+        architecture that wave produced.</p>
+
+        <h2>21.2 Defence in Depth — the Request's Gauntlet</h2>
+        <p>Every request that reaches a mutation route passes through a sequence of
+        independent checks. Each is a wall; an attacker must clear all of them.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  REQ["Incoming request"]
+  REQ --> W1["Wall 1 — Loopback bind<br/>server listens on 127.0.0.1 only"]
+  W1 --> W2["Wall 2 — CORS<br/>origin must be allowlisted"]
+  W2 --> W3["Wall 3 — Rate limit<br/>token bucket on HIGH-tier routes"]
+  W3 --> W4["Wall 4 — Bearer auth<br/>require_session, constant-time compare"]
+  W4 --> W5["Wall 5 — Input validation<br/>Pydantic models + size caps"]
+  W5 --> W6["Wall 6 — Path sandbox<br/>validate_audio_path"]
+  W6 --> HANDLER["Route handler"]
+          </div>
+          <figcaption><span class="fig-num">Figure 21.1</span> — The six walls a
+          mutation request must clear before any code runs.</figcaption>
+        </div>
+
+        <h2>21.3 The Threat Model</h2>
+        <p>The security work is anchored in an explicit threat model that considers
+        three deployment shapes — because the same code may run in any of them.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Deployment</th><th>Principal threats</th><th>Primary defence</th></tr></thead>
+          <tbody>
+            <tr><td><strong>(a) Standalone loopback</strong> — the default</td><td>Same-machine malware POSTing to mutation routes; a malicious local page pivoting through the API; CSRF from a random web page.</td><td>The Bearer gate (the attacker must steal the token); CORS; no ambient cookie.</td></tr>
+            <tr><td><strong>(b) LAN-exposed</strong> — mobile companion, headless install, accidental firewall hole</td><td>A LAN attacker mutating the library, formatting a USB stick, or overwriting the SoundCloud token; mass-scanner discovery.</td><td>The Bearer gate — the attacker has no token unless they breach the host.</td></tr>
+            <tr><td><strong>(c) Remote tunnel</strong> — Tailscale, Cloudflare Tunnel</td><td>A tunnel ACL misconfiguration leaving the inner API naked; replay of shutdown/restart.</td><td>The Bearer gate as a second wall; the token bound to a header, not a query string.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>21.4 Bearer-Token Authentication</h2>
+        <p>The centrepiece of the model is Bearer-token authentication on every
+        mutation route — 84 of the 85 POST/PUT/PATCH/DELETE endpoints. The token is
+        born, handed off, and verified through a precise mechanism.</p>
+
+        <h3>The token's life</h3>
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  BOOT["Sidecar boot — app/auth.py"]
+  BOOT --> GEN["SESSION_TOKEN = secrets.token_urlsafe(32)"]
+  GEN --> EMIT["Emit 'LMS_TOKEN=...' on stdout — once"]
+  GEN --> FILE["Persist to user-data dir<br/>.session-token, chmod 0600 on POSIX"]
+  EMIT --> CAP1["Tauri: Rust supervisor captures + scrubs"]
+  FILE --> CAP2["Browser dev: Vite middleware → GET /dev-token"]
+  CAP1 --> FE["Frontend obtains the token"]
+  CAP2 --> FE
+  FE --> HDR["Authorization: Bearer on every request"]
+          </div>
+          <figcaption><span class="fig-num">Figure 21.2</span> — The token lifecycle.
+          Minted in the sidecar, handed off two ways, attached to every request.</figcaption>
+        </div>
+
+        <p>At boot, <code>app/auth.py</code> generates a 32-byte URL-safe random token.
+        It emits the token once on standard output as <code>LMS_TOKEN=&lt;value&gt;</code>
+        and persists it to a file in the cross-platform user-data directory. In a
+        Tauri build, the Rust supervisor captures the stdout banner and scrubs it from
+        the logs (Chapter 18); in browser-development mode, the Vite dev server reads
+        the file and re-exposes it at <code>GET /dev-token</code>. Either way the
+        frontend obtains the token and attaches it to every request as an
+        <code>Authorization: Bearer</code> header.</p>
+
+        <h3>The verification</h3>
+        <p>On the server, <code>require_session()</code> is a FastAPI dependency
+        declared on every mutation route. It parses the <code>Authorization</code>
+        header, validates the scheme, strips and length-checks the token, and compares
+        it against <code>SESSION_TOKEN</code>. Any failure — missing header, wrong
+        scheme, length mismatch, value mismatch — raises a 401.</p>
+
+        <div class="callout spec">
+          <span class="ico">◈</span>
+          <div class="body">
+            <span class="ct">Constant-time comparison</span>
+            <p>The comparison uses <code>safe_compare()</code> from
+            <code>app/security_compare.py</code> — a hardened wrapper around
+            <code>secrets.compare_digest</code>. A naive <code>==</code> on a secret
+            leaks information through <em>how long it takes to fail</em>: it returns
+            faster when the first character is wrong. A constant-time compare always
+            takes the same time. <code>safe_compare</code> additionally returns
+            <code>False</code> — never raising — for five fragility cases the audit
+            identified: non-string inputs, non-ASCII strings on either side, mixed
+            string/bytes, and length mismatch.</p>
+          </div>
+        </div>
+
+        <p>The one intentional exception is <code>POST /api/system/heartbeat</code> —
+        a body-less liveness probe that returns only <code>{"status":"alive"}</code>
+        and leaks no token. Read-only GET routes are loopback-gated only in this phase;
+        making them require authentication too is explicitly deferred to a future
+        phase.</p>
+
+        <div class="callout warn">
+          <span class="ico">▲</span>
+          <div class="body">
+            <span class="ct">Never log the token</span>
+            <p>A permanent, codified rule: the token must never be logged — not at
+            INFO, not at DEBUG, not redacted. <code>app/auth.py</code> enforces this
+            and the coding rules require all future code to honour it. Any logging
+            middleware added later must scrub <code>Authorization</code> and
+            <code>Cookie</code> headers before emitting.</p>
+          </div>
+        </div>
+
+        <h2>21.5 Rate Limiting</h2>
+        <p>The three highest-risk routes — <code>shutdown</code>, <code>restart</code>,
+        and <code>soundcloud/auth-token</code> — carry a second gate: a rate limiter
+        in <code>app/rate_limit.py</code>, a custom 180-line token-bucket
+        implementation chosen over adding a third-party dependency.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Element</th><th>Behaviour</th></tr></thead>
+          <tbody>
+            <tr><td><code>TokenBucket</code></td><td>A single-key bucket with monotonic-clock refill — <code>take()</code> returns whether the request is allowed and a retry-after.</td></tr>
+            <tr><td><code>BucketStore</code></td><td>A process-wide, lock-guarded, TTL'd dictionary of buckets, lazily purged.</td></tr>
+            <tr><td><code>make_key()</code></td><td>Derives a bucket key — per-IP, per-bearer (hashed, never the raw token), or both. Loopback IPs short-circuit to a whitelist sentinel.</td></tr>
+            <tr><td><code>@rate_limit</code></td><td>The decorator — on a miss it raises 429 with a <code>Retry-After</code> header.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>The decorator order matters: <code>require_session</code> runs <em>before</em>
+        the rate-limit body, so a request with no Bearer token returns 401 without
+        consuming a token from the bucket — verified by a dedicated test.</p>
+
+        <h2>21.6 CORS</h2>
+        <p>Cross-Origin Resource Sharing is locked down. The allowed origins are an
+        explicit list — <code>localhost</code>, <code>127.0.0.1</code>, and
+        <code>tauri://localhost</code> — never a wildcard. The allowed methods and
+        headers are explicit lists too. And as of the Phase B tightening,
+        <code>allow_credentials</code> is <code>False</code> and the dead
+        SoundCloud sentinel cookie was deleted: the Bearer-in-header is the <em>only</em>
+        authenticated transport, and there is no ambient cookie for a CSRF attack to
+        ride. A coding rule forbids any future PR from introducing cookie-based auth.</p>
+
+        <h2>21.7 The Filesystem Sandbox</h2>
+        <p>Many routes accept a file path from the client. <code>validate_audio_path()</code>
+        is the gate: it resolves the path and checks it against
+        <code>ALLOWED_AUDIO_ROOTS</code> with <code>Path.is_relative_to()</code> — not
+        a string prefix check, which <code>..</code> and symlinks defeat. A path
+        outside the sandbox is refused.</p>
+
+        <div class="callout note">
+          <span class="ico">◆</span>
+          <div class="body">
+            <span class="ct">The file-reveal fix</span>
+            <p>The May-18 hardening found a real hole: <code>POST /api/file/reveal</code>
+            passed a user-controlled path straight to the OS file manager with only an
+            existence check — an authenticated caller could make the file manager
+            navigate to anywhere on disk, including the token file or SSH keys. The
+            fix routed the path through <code>validate_audio_path()</code> before the
+            platform branch, and added a seven-case security test.</p>
+          </div>
+        </div>
+
+        <h2>21.8 Input-Size Caps</h2>
+        <p>The settings endpoint writes to a persistent store, which makes it a
+        potential denial-of-service primitive — a buggy or compromised client could
+        bloat <code>settings.json</code> until the disk fills and the UI hangs. The
+        fix gave the <code>SetReq</code> Pydantic model strict caps: 8&nbsp;KB per
+        value, 64 dictionary keys, a 64-character key limit, 256 list items, and
+        256&nbsp;KB total. A cap violation returns 422 and logs a warning that records
+        the sizes but never the offending value.</p>
+
+        <h2>21.9 Log Redaction</h2>
+        <p>The May-18 work also closed a quieter leak: the global exception handler
+        logged stack traces containing absolute filesystem paths to <code>app.log</code>
+        — paths that then travelled into crash reports, antivirus ingestion, shared
+        screenshots, and support bundles. <code>app/logging_utils.py</code> introduced
+        a <code>RedactingFormatter</code> that strips absolute paths — under the
+        export, music, and temp directories — from every log line and traceback at
+        write time, across all handlers.</p>
+
+        <h2>21.10 Supply-Chain Hardening — "Schicht A"</h2>
+        <p>Beyond runtime defences, the project hardens its <em>dependencies</em>. The
+        "Schicht A" policy treats the supply chain as an attack surface.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Threat</th><th>Defence</th></tr></thead>
+          <tbody>
+            <tr><td>Postinstall malware</td><td><code>ignore-scripts=true</code> in <code>.npmrc</code> — disables npm install scripts, blocking the most common supply-chain vector.</td></tr>
+            <tr><td>Caret-version silent drift</td><td><code>save-exact=true</code> plus exact pinning everywhere — no version moves without a review.</td></tr>
+            <tr><td>Lockfile manipulation</td><td><code>lockfile-lint</code> — every package must come from the npm registry over HTTPS.</td></tr>
+            <tr><td>Maintainer-account compromise</td><td><code>npm audit signatures</code> — Sigstore provenance verification.</td></tr>
+            <tr><td>Slopsquatting (AI-suggested non-existent packages)</td><td>A manual package-verification workflow before any dependency is added.</td></tr>
+            <tr><td>Known CVEs</td><td><code>npm audit</code>, <code>pip-audit</code>, <code>cargo audit</code>, and weekly Dependabot checks.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>The policy is honest about what it does <em>not</em> cover: an XZ-style
+        backdoor in an upstream source, a targeted attack on this specific project,
+        and bugs in the project's own code (a separate concern, handled by review and
+        the linters). One accepted risk is documented in detail — a ReDoS in
+        <code>picomatch</code>, a build-time-only transitive dependency with zero
+        production impact, with Dependabot watching for the upstream patch.</p>
+
+        <h2>21.11 The Seven Shipped Features</h2>
+        <p>The hardening wave shipped seven distinct, individually-researched
+        features. Each has an archived research document recording the problem and the
+        outcome.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Feature</th><th>Shipped</th><th>Outcome</th></tr></thead>
+          <tbody>
+            <tr><td>API auth hardening</td><td>05-17</td><td>Bearer auth on 84 routes; the legacy <code>SHUTDOWN_TOKEN</code> deleted. 219+ tests pass.</td></tr>
+            <tr><td>Constant-time compare</td><td>05-17</td><td>The shared <code>safe_compare</code> helper; five fragility cases covered. 52+ tests.</td></tr>
+            <tr><td>Rate-limit design</td><td>05-17</td><td>A 180-line token-bucket limiter on three routes. 253+ tests.</td></tr>
+            <tr><td>File-reveal sandbox</td><td>05-18</td><td>The path-traversal hole closed; a new security test file. 285+ tests.</td></tr>
+            <tr><td>Error-handler leak</td><td>05-18</td><td>The <code>RedactingFormatter</code> stops path leakage to the log.</td></tr>
+            <tr><td>Pydantic blob-write</td><td>05-18</td><td>Settings size caps; an unbounded write primitive removed. 21 new tests.</td></tr>
+            <tr><td>CORS tightening</td><td>05-18/19</td><td>Wildcards replaced with explicit lists; credentials turned off.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>21.12 Accepted Risks and Future Work</h2>
+        <p>The model is explicit about its current limits. Among the accepted Phase-1
+        risks: on Windows, the POSIX <code>chmod 0600</code> on the token file is a
+        no-op, so any local user with read access to the user-data directory can lift
+        the token; the token sits in process memory for the supervisor's lifetime;
+        and the token rotates only on a sidecar restart, with no per-device revoke.</p>
+
+        <p>The roadmap (Chapter 25) addresses the most significant of these: a
+        <strong>Phase-2 paired-device token</strong> system — per-device 256-bit
+        tokens, a QR-pairing flow, a sidecar-local <code>auth.db</code>, and a revoke
+        UI — which is also the hard prerequisite for the mobile companion. The coding
+        rules already codify the permanent constraints any future code must honour:
+        scrub auth headers in any logging middleware, authenticate WebSocket routes
+        inside the handler, and never log the token.</p>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>Security is defence in depth: a loopback bind, locked-down CORS, a
+            token-bucket rate limiter, Bearer-token authentication with constant-time
+            comparison on 84 mutation routes, Pydantic input-size caps, a
+            <code>Path.is_relative_to</code> filesystem sandbox, and log redaction.
+            The supply chain is hardened under the "Schicht A" policy with exact
+            pinning, disabled install scripts, and signature verification. Seven
+            features were shipped in a four-day campaign, each researched and tested;
+            the model's documented limits are addressed by the Phase-2 paired-token
+            work on the roadmap.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>
