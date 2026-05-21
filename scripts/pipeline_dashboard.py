@@ -90,10 +90,13 @@ code { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:12p
   padding:1px 5px; border-radius:4px; white-space:nowrap; }
 .state-count { font-size:26px; font-weight:680; margin:3px 0 4px; }
 .state-card.empty .state-count { color:#7d8590; }
-.state-docs { list-style:none; margin:0; padding:0; }
-.state-docs li { font-size:11.5px; color:#adbac7; padding:2px 0;
-  border-top:1px solid #21262d; word-break:break-word; }
-.state-docs li.none { color:#484f58; border:0; }
+.state-docs { list-style:none; margin:8px 0 0; padding:0;
+  display:flex; flex-direction:column; gap:5px; }
+.state-docs li { font-size:11px; color:#c9d1d9; line-height:1.4;
+  background:#0d1117; border:1px solid #30363d; border-radius:5px;
+  padding:5px 8px; word-break:break-word; }
+.state-docs li.none { color:#484f58; background:none; border:0;
+  padding:2px 0; font-style:italic; }
 .pr-card,.blocker-item { display:flex; gap:10px; align-items:center; flex-wrap:wrap;
   background:#161b22; border:1px solid #30363d; border-radius:8px;
   padding:9px 13px; margin-bottom:7px; }
