@@ -111,9 +111,9 @@ def test_settings_defaults():
     from app.analysis_settings import get_settings
     s = get_settings()
     assert s.bpm_detect_min == 60.0
-    assert s.bpm_output_max == 180.0
+    assert s.bpm_output_max == 200.0
     assert s.color_gamma == 0.65
-    assert s.cue_max_hot == 8
+    assert s.cue_max_hot == 16
 
 
 def test_settings_env_override(monkeypatch):
@@ -217,7 +217,7 @@ def test_replay_gain_quiet():
 # Hot cues
 # ---------------------------------------------------------------------------
 
-def test_hot_cues_max_8():
+def test_hot_cues_max_16():
     from app.analysis_engine import generate_hot_cues
     phrases = [
         {"label": "Drop", "start_ms": i * 4000, "end_ms": (i + 1) * 4000,
@@ -227,7 +227,7 @@ def test_hot_cues_max_8():
     beats = [{"beat_number": (j % 4) + 1, "tempo": 12800, "time_ms": j * 500}
              for j in range(200)]
     cues = generate_hot_cues(phrases, beats, 80.0)
-    assert len(cues) <= 8
+    assert len(cues) <= 16
     assert cues[0]["name"] == "Start"
 
 

@@ -56,7 +56,7 @@ export function createInitialState(overrides = {}) {
         selectionRange: null,  // { start, end } in seconds
 
         // Cue Points & Loops
-        hotCues: Array(8).fill(null),  // [A-H], each: { name, time, red, green, blue } or null
+        hotCues: Array(16).fill(null),  // [A-P], each: { name, time, red, green, blue } or null
         memoryCues: [],                // [{ name, time, red, green, blue }]
         loops: [],                     // [{ name, startTime, endTime, active, red, green, blue }]
         activeLoopIndex: -1,           // Index of the active loop in loops array
@@ -244,6 +244,14 @@ export const HOT_CUE_COLORS = [
     { red: 255, green: 100, blue: 0, label: 'Orange' },     // F
     { red: 255, green: 220, blue: 0, label: 'Yellow' },     // G
     { red: 255, green: 0, blue: 0, label: 'Red' },          // H
+    { red: 26, green: 188, blue: 156, label: 'Teal' }, // I
+    { red: 232, green: 67, blue: 147, label: 'Magenta' }, // J
+    { red: 9, green: 132, blue: 227, label: 'Sky' }, // K
+    { red: 108, green: 92, blue: 231, label: 'Indigo' }, // L
+    { red: 250, green: 177, blue: 160, label: 'Peach' }, // M
+    { red: 85, green: 239, blue: 196, label: 'Mint' }, // N
+    { red: 255, green: 234, blue: 167, label: 'Sand' }, // O
+    { red: 214, green: 48, blue: 49, label: 'Crimson' }, // P
 ];
 
 /**
@@ -304,14 +312,14 @@ export function stateToCuePoints(hotCues, memoryCues, loops) {
  * Helper: Convert POSITION_MARK cue points from .rbep to DAW state format
  */
 export function cuePointsToState(cuePoints = []) {
-    const hotCues = Array(8).fill(null);
+    const hotCues = Array(16).fill(null);
     const memoryCues = [];
     const loops = [];
 
     for (const cp of cuePoints) {
         if (cp.type === 0) {
             // Cue point
-            if (cp.num >= 0 && cp.num < 8) {
+            if (cp.num >= 0 && cp.num < 16) {
                 // Hot cue
                 hotCues[cp.num] = {
                     name: cp.name,

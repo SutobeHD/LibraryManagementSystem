@@ -32,6 +32,11 @@ logger = logging.getLogger(__name__)
 PMAI_MAGIC = b'PMAI'
 PMAI_HEADER_LEN = 28   # Fixed file header size
 
+# Hard ceiling on hot cues per track. Rekordbox 6/7 + CDJ-3000 support 16
+# (banks A..H and I..P). Older CDJs (NXS2 and earlier) read only the first 8
+# and silently ignore the rest.
+REKORDBOX_MAX_HOT_CUES = 16
+
 
 # ---------------------------------------------------------------------------
 # Low-level tag builders (all return bytes)
@@ -179,7 +184,7 @@ def _build_pcpt_entry(cue: dict[str, Any]) -> bytes:
     """
     hot_cue = cue.get("number", 0)
     is_hot = cue.get("type", "hot_cue") == "hot_cue"
-    # Rekordbox cue numbering: 0 = memory, 1..8 = hot A..H
+    # Rekordbox cue numbering: 0 = memory, 1..16 = hot A..P
     cue_num = (hot_cue + 1) if is_hot else 0
 
     is_loop = cue.get("loop_len_ms", 0) > 0
@@ -193,7 +198,7 @@ def _build_pcpt_entry(cue: dict[str, Any]) -> bytes:
         0x38,           # total_length
     )
     buf += struct.pack('>III',
-        cue_num,        # hot_cue (0=memory, 1..8=hot)
+        cue_num,        # hot_cue (0=memory, 1..16=hot)
         4 if is_hot else 0,   # status: 4=active hot cue, 0=loaded memory
         0x00100000,     # observed flags
     )
@@ -219,8 +224,10 @@ def _build_pcob(cue_type: int, cues: list[dict[str, Any]] | None = None) -> byte
     """
     cues = cues or []
     if cue_type == 1:
-        # Hot cue list — only hot_cue entries (Rekordbox: max 8)
-        entries = [c for c in cues if c.get("type", "hot_cue") == "hot_cue"][:8]
+        # Hot cue list — only hot_cue entries (Rekordbox/CDJ-3000: max 16)
+        entries = [c for c in cues if c.get("type", "hot_cue") == "hot_cue"][
+            :REKORDBOX_MAX_HOT_CUES
+        ]
     else:
         # Memory cue list
         entries = [c for c in cues if c.get("type", "hot_cue") == "memory_cue"]
@@ -287,7 +294,9 @@ def _build_pco2(cue_type: int, cues: list[dict[str, Any]] | None = None) -> byte
     """
     cues = cues or []
     if cue_type == 1:
-        entries = [c for c in cues if c.get("type", "hot_cue") == "hot_cue"][:8]
+        entries = [c for c in cues if c.get("type", "hot_cue") == "hot_cue"][
+            :REKORDBOX_MAX_HOT_CUES
+        ]
     else:
         entries = [c for c in cues if c.get("type", "hot_cue") == "memory_cue"]
 

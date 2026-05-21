@@ -1,7 +1,7 @@
 /**
  * cuesReducer — hot cues, memory cues, and loops.
  *
- * Owns hotCues[8] (slots A-H, nullable), memoryCues[] (sorted by
+ * Owns hotCues[16] (slots A-P, nullable), memoryCues[] (sorted by
  * time), loops[] (with startTime/endTime/active/colour), and
  * activeLoopIndex (-1 = none active).
  */
@@ -19,7 +19,7 @@ export function cuesReducer(state, action) {
 
         // ── Cue Points ───────────────────────
         case 'SET_HOT_CUE': {
-            const { index, cue } = action.payload;  // index: 0-7
+            const { index, cue } = action.payload;  // index: 0-15
             const newHotCues = [...state.hotCues];
             newHotCues[index] = cue;
             return {

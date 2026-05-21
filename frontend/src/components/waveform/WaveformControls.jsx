@@ -6,7 +6,7 @@ import {
     RotateCcw, RotateCw, Clipboard, ListPlus, Save, Infinity, X, Target, Zap, Layers,
     Volume2, VolumeX,
 } from 'lucide-react';
-import { HOT_CUE_COLORS } from './useWaveformInteractions';
+import { HOT_CUE_COLORS, MAX_HOT_CUES } from './useWaveformInteractions';
 
 // Top toolbars — header, project select, hot-cue strip, transport, volume, viz toggle,
 // grid shift, drop detection, metadata bar. Plus the render-progress overlay.
@@ -101,9 +101,9 @@ export default function WaveformControls({
                     </select>
                 </div>
                 <div className="flex items-center gap-4">
-                    {/* Rekordbox-style hot-cue strip: always shows all 8 slots */}
-                    <div className="flex items-center gap-1 mr-2 bg-black/40 px-1.5 py-1 rounded border border-white/5">
-                        {[1, 2, 3, 4, 5, 6, 7, 8].map(num => {
+                    {/* Rekordbox-style hot-cue strip: always shows all 16 slots (A..P) */}
+                    <div className="flex flex-wrap items-center gap-1 mr-2 bg-black/40 px-1.5 py-1 rounded border border-white/5">
+                        {Array.from({ length: MAX_HOT_CUES }, (_, i) => i + 1).map(num => {
                             const cue = hotCues.find(c => c.HotCueNum === num);
                             const letter = String.fromCharCode(64 + num);
                             const color = HOT_CUE_COLORS[num - 1];
@@ -323,7 +323,7 @@ export function WaveformBottomPanels({
                         <Target size={12} className="text-orange-400" /> Hot Cues
                     </div>
                     <div className="grid grid-cols-4 gap-2 flex-1 overflow-y-auto pr-1">
-                        {[1, 2, 3, 4, 5, 6, 7, 8].map(num => {
+                        {Array.from({ length: MAX_HOT_CUES }, (_, i) => i + 1).map(num => {
                             const cue = hotCues.find(c => c.HotCueNum === num);
                             return (
                                 <button

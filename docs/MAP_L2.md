@@ -122,6 +122,12 @@ audio_tags — write metadata back to the source audio file.
 - `load_artwork()` — Read an artwork file from disk into bytes, or None on any failure.
 - `read_tags()` — Read metadata tags from any supported audio file.
 
+### `app/auth.py`
+
+Bearer-token authentication for the FastAPI sidecar.
+
+- `require_session()` — Authenticate one HTTP request against the boot-time session token.
+
 ### `app/batch_worker.py`
 
 Setup logging
@@ -315,6 +321,14 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `  LiveRekordboxDB.remove_track_from_playlist()`
 - `  LiveRekordboxDB.reorder_playlist_track()` — Reorders a track in a playlist.
 
+### `app/logging_utils.py`
+
+Log redaction helpers — scrub absolute paths from log lines + tracebacks.
+
+- `safe_error_message_str()` — Strip absolute paths from a rendered log/error string.
+- `RedactingFormatter` — `logging.Formatter` that scrubs paths from message + cached traceback.
+- `  RedactingFormatter.format()`
+
 ### `app/main.py`
 
 *(no module docstring)*
@@ -364,7 +378,7 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `stream_audio()` — Streams audio file with HTTP Range support — required for browser seeking.
 - `get_multiband_waveform()` — Returns 3-band waveform data for professional visualization.
 - `FileRevealReq`
-- `file_reveal()` — Open the OS file explorer pointing at the given file/folder path.
+- `file_reveal()` — Open the OS file explorer pointing at the given audio file path.
 - `file_write()` — Writes text content to a file (used for .rbep project saving).
 - `clean_xml()`
 - `get_genres()`
@@ -395,7 +409,7 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `save_grid()`
 - `update_track()`
 - `batch_up()`
-- `system_heartbeat()`
+- `system_heartbeat()` — Lightweight keep-alive ping.
 - `del_trk()`
 - `move_t()`
 - `ren_t()` — Bulk smart-rename audio files on disk using a token pattern.
@@ -456,13 +470,12 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `folder_watcher_remove()`
 - `startup_event()`
 - `shutdown_watcher_event()`
-- `heartbeat()`
-- `shutdown()` — SECURITY: Requires session token to trigger shutdown.
-- `restart()` — SECURITY: Requires session token to trigger restart.
+- `shutdown()` — Trigger sidecar shutdown.
+- `restart()` — Trigger sidecar restart.
 - `select_db_dialog()`
 - `NewLibReq`
 - `create_new_lib()`
-- `debug_load_xml()`
+- `debug_load_xml()` — Debug-only: force-load a hardcoded rekordbox.xml.
 - `UsbProfileReq`
 - `UsbSyncReq`
 - `UsbEjectReq`
@@ -560,6 +573,17 @@ playcount_sync.py — USB Play-Count Sync Engine
 - `resolve_playcounts()` — Commit resolved play counts to both the PC Rekordbox DB and the USB XML.
 - `read_usb_xml_playcounts()` — Parse a Rekordbox-format XML file on the USB drive and return play-count data.
 
+### `app/rate_limit.py`
+
+In-process token-bucket rate limiter for the FastAPI sidecar.
+
+- `TokenBucket` — Single-key token bucket with monotonic-clock refill.
+- `  TokenBucket.take()` — Spend one token; return ``(allowed, retry_after_s)``.
+- `BucketStore` — Process-wide TTL'd map of bucket-key to :class:`TokenBucket`.
+- `  BucketStore.take()` — Spend one token for ``key`` (creating the bucket on first hit).
+- `make_key()` — Derive the bucket-key for ``request`` under ``mode``.
+- `rate_limit()` — Decorate an async FastAPI handler with a per-key token-bucket gate.
+
 ### `app/rbep_parser.py`
 
 RBEP Parser — Parses Rekordbox Editor Project (.rbep) files.
@@ -585,6 +609,12 @@ RBEP Parser — Parses Rekordbox Editor Project (.rbep) files.
 - `format_tempo_int_to_str()` — Format Rekordbox integer tempo (BPM*100) to string with 2 decimal places.
 - `analysis_to_xml_track()` — Convert an AnalysisEngine result into a Rekordbox XML <TRACK> element.
 - `create_rekordbox_xml()` — Wrap track elements in the root DJ_PLAYLISTS Rekordbox XML structure and save.
+
+### `app/security_compare.py`
+
+Constant-time equality helper for tokens, secrets, HMAC outputs.
+
+- `safe_compare()` — Constant-time equality for tokens/secrets/HMAC outputs.
 
 ### `app/services.py`
 
@@ -786,8 +816,6 @@ USB export.pdb writer — legacy CDJ DeviceLibrary format.
 
 ─── EC2: Runtime detection of Tauri context ───────────────────────────────────
 
-- `setSessionToken()`
-- `getSessionToken()`
 - `cancellableGet()` — ─── AbortController helpers ────────────────────────────────────────────────── export function crea…
 
 ### `frontend/src/audio/AudioRegion.js`
@@ -820,6 +848,52 @@ DawEngine — Web Audio API Playback Engine Manages AudioContext lifecycle, audi
 - `isPlaying()` — Check if currently playing.
 - `renderTimeline()` — ─── OFFLINE RENDERING (EXPORT) ──────────────────────────────────────────────── Render the timeline…
 - `audioBufferToWav()` — Convert an AudioBuffer to a 16-bit PCM WAV ArrayBuffer.
+
+### `frontend/src/audio/DawState.js`
+
+DawState — Central state management for the DJ Edit DAW.
+
+- `dawReducer()` — DAW state reducer.
+
+### `frontend/src/audio/RbepSerializer.js`
+
+RbepSerializer — .rbep XML Parser/Serializer Handles the critical Beat ↔ Seconds conversion for Rekordbox Edit Project files.
+
+- `buildTempoMap()` — RbepSerializer — .rbep XML Parser/Serializer Handles the critical Beat ↔ Seconds conversion for Rek…
+- `beatsToSeconds()` — Convert a beat index to seconds using a tempo map.
+- `secondsToBeats()` — Convert seconds to a beat index using a tempo map.
+- `parseRbep()` — ─── .rbep XML PARSER ────────────────────────────────────────────────────────── Parse a .rbep XML s…
+- `serializeRbep()` — ─── .rbep XML SERIALIZER ────────────────────────────────────────────────────── Serialize a runtime…
+- `loadRbepFile()` — ─── PROJECT FILE I/O ────────────────────────────────────────────────────────── Load a .rbep file f…
+- `saveRbepFile()` — Save a project to a .rbep file.
+
+### `frontend/src/audio/TimelineState.js`
+
+TimelineState - State management for the non-destructive audio editor Manages all timeline state including regions, playback, selection, pa…
+
+- `createTimelineState()` — Create initial timeline state @param {Object} options - Initial configuration @returns {TimelineSta…
+- `getSnapUnit()` — Calculate the beat duration based on BPM and division @param {number} bpm - Beats per minute @param…
+- `snapToGrid()` — Snap a time value to the nearest grid position @param {TimelineState} state - Current timeline stat…
+- `loadAudioSource()` — Load audio source into timeline and create initial region @param {TimelineState} state - Current st…
+- `addRegion()` — Add a region to the timeline @param {TimelineState} state @param {AudioRegion} region @returns {Tim…
+- `removeRegion()` — Remove a region from the timeline @param {TimelineState} state @param {string} regionId @returns {T…
+- `updateRegion()` — Update a region in the timeline @param {TimelineState} state @param {string} regionId @param {Parti…
+- `setSelection()` — Set selection range @param {TimelineState} state @param {number|null} start @param {number|null} en…
+- `selectRegions()` — Select regions by ID @param {TimelineState} state @param {string[]} regionIds @param {boolean} [add…
+- `clearSelection()` — Clear all selections @param {TimelineState} state @returns {TimelineState}
+- `setPaletteSlot()` — Add region to palette slot @param {TimelineState} state @param {number} slotIndex @param {AudioRegi…
+- `findEmptyPaletteSlot()` — Find first empty palette slot @param {TimelineState} state @returns {number} - Slot index or -1 if …
+- `setPlayhead()` — Set playhead position @param {TimelineState} state @param {number} position @returns {TimelineState}
+- `toggleSnap()` — Toggle snap to grid @param {TimelineState} state @returns {TimelineState}
+- `setSnapDivision()` — Set snap division @param {TimelineState} state @param {string} division @returns {TimelineState}
+- `setZoom()` — Set zoom level @param {TimelineState} state @param {number} zoom - Pixels per second @returns {Time…
+- `shiftGrid()` — Shift the entire beat grid by an offset @param {TimelineState} state @param {number} offsetSeconds …
+- `adjustBPM()` — Adjust BPM (stretch/contract grid) @param {TimelineState} state @param {number} newBpm @returns {Ti…
+- `pushHistory()` — Push to history for undo @param {TimelineState} state @param {Object} action @returns {TimelineStat…
+- `undo()` — Undo last action @param {TimelineState} state @returns {TimelineState}
+- `redo()` — Redo undone action @param {TimelineState} state @returns {TimelineState}
+- `getTimelineDuration()` — Get timeline duration (end of last region) @param {TimelineState} state @returns {number}
+- `getSortedRegions()` — Get sorted regions @param {TimelineState} state @returns {AudioRegion[]}
 
 ### `frontend/src/audio/dawState/cues.js`
 
@@ -868,52 +942,6 @@ selectionReducer — region selection set and time-range selection.
 transportReducer — playhead, BPM, zoom/scroll, snap-grid, edit-mode, project metadata, and audio-source actions.
 
 - `transportReducer()` — transportReducer — playhead, BPM, zoom/scroll, snap-grid, edit-mode, project metadata, and audio-so…
-
-### `frontend/src/audio/DawState.js`
-
-DawState — Central state management for the DJ Edit DAW.
-
-- `dawReducer()` — DAW state reducer.
-
-### `frontend/src/audio/RbepSerializer.js`
-
-RbepSerializer — .rbep XML Parser/Serializer Handles the critical Beat ↔ Seconds conversion for Rekordbox Edit Project files.
-
-- `buildTempoMap()` — RbepSerializer — .rbep XML Parser/Serializer Handles the critical Beat ↔ Seconds conversion for Rek…
-- `beatsToSeconds()` — Convert a beat index to seconds using a tempo map.
-- `secondsToBeats()` — Convert seconds to a beat index using a tempo map.
-- `parseRbep()` — ─── .rbep XML PARSER ────────────────────────────────────────────────────────── Parse a .rbep XML s…
-- `serializeRbep()` — ─── .rbep XML SERIALIZER ────────────────────────────────────────────────────── Serialize a runtime…
-- `loadRbepFile()` — ─── PROJECT FILE I/O ────────────────────────────────────────────────────────── Load a .rbep file f…
-- `saveRbepFile()` — Save a project to a .rbep file.
-
-### `frontend/src/audio/TimelineState.js`
-
-TimelineState - State management for the non-destructive audio editor Manages all timeline state including regions, playback, selection, pa…
-
-- `createTimelineState()` — Create initial timeline state @param {Object} options - Initial configuration @returns {TimelineSta…
-- `getSnapUnit()` — Calculate the beat duration based on BPM and division @param {number} bpm - Beats per minute @param…
-- `snapToGrid()` — Snap a time value to the nearest grid position @param {TimelineState} state - Current timeline stat…
-- `loadAudioSource()` — Load audio source into timeline and create initial region @param {TimelineState} state - Current st…
-- `addRegion()` — Add a region to the timeline @param {TimelineState} state @param {AudioRegion} region @returns {Tim…
-- `removeRegion()` — Remove a region from the timeline @param {TimelineState} state @param {string} regionId @returns {T…
-- `updateRegion()` — Update a region in the timeline @param {TimelineState} state @param {string} regionId @param {Parti…
-- `setSelection()` — Set selection range @param {TimelineState} state @param {number|null} start @param {number|null} en…
-- `selectRegions()` — Select regions by ID @param {TimelineState} state @param {string[]} regionIds @param {boolean} [add…
-- `clearSelection()` — Clear all selections @param {TimelineState} state @returns {TimelineState}
-- `setPaletteSlot()` — Add region to palette slot @param {TimelineState} state @param {number} slotIndex @param {AudioRegi…
-- `findEmptyPaletteSlot()` — Find first empty palette slot @param {TimelineState} state @returns {number} - Slot index or -1 if …
-- `setPlayhead()` — Set playhead position @param {TimelineState} state @param {number} position @returns {TimelineState}
-- `toggleSnap()` — Toggle snap to grid @param {TimelineState} state @returns {TimelineState}
-- `setSnapDivision()` — Set snap division @param {TimelineState} state @param {string} division @returns {TimelineState}
-- `setZoom()` — Set zoom level @param {TimelineState} state @param {number} zoom - Pixels per second @returns {Time…
-- `shiftGrid()` — Shift the entire beat grid by an offset @param {TimelineState} state @param {number} offsetSeconds …
-- `adjustBPM()` — Adjust BPM (stretch/contract grid) @param {TimelineState} state @param {number} newBpm @returns {Ti…
-- `pushHistory()` — Push to history for undo @param {TimelineState} state @param {Object} action @returns {TimelineStat…
-- `undo()` — Undo last action @param {TimelineState} state @returns {TimelineState}
-- `redo()` — Redo undone action @param {TimelineState} state @returns {TimelineState}
-- `getTimelineDuration()` — Get timeline duration (end of last region) @param {TimelineState} state @returns {number}
-- `getSortedRegions()` — Get sorted regions @param {TimelineState} state @returns {AudioRegion[]}
 
 ### `frontend/src/components/daw/timeline/useTimelineEvents.js`
 
@@ -1027,17 +1055,17 @@ Debounced non-destructive preview rebuild — whenever cuts change, splice the A
 
 - `useVisualPreview()` — Debounced non-destructive preview rebuild — whenever cuts change, splice the AudioBuffer and reload…
 
-### `frontend/src/components/waveform/useWaveformInteractions.js`
-
-Imperative editing + hotkey wiring extracted from WaveformEditor.
-
-- `useWaveformInteractions()` — Imperative editing + hotkey wiring extracted from WaveformEditor.
-
 ### `frontend/src/components/waveform/useWaveSurfer.js`
 
 Owns the master WaveSurfer + Overview lifecycle:
 
 - `useWaveSurfer()` — Owns the master WaveSurfer + Overview lifecycle: - mount-once init (registers regions/timeline plug…
+
+### `frontend/src/components/waveform/useWaveformInteractions.js`
+
+Rekordbox 6/7 + CDJ-3000 support 16 hot cues (banks A..H and I..P).
+
+- `useWaveformInteractions()` — Imperative editing + hotkey wiring extracted from WaveformEditor.
 
 ### `frontend/src/config/constants.js`
 
@@ -1050,6 +1078,17 @@ Frontend-wide constants.
 - `TOAST_DURATION_LONG_MS()` — Duration for long-form error toasts that the user needs time to read (full failure paths in DAW / e…
 - `AUDIO_IMPORT_TIMEOUT_MS()` — Axios timeout for the synchronous audio-import endpoint (/api/audio/import → full analysis pipeline…
 - `IMPORT_TASK_POLL_INTERVAL_MS()` — Poll cadence for /api/import/tasks while one or more uploaded files are still being analysed in the…
+
+### `frontend/src/store/authStore.js`
+
+Tiny module-level auth state shared across the frontend.
+
+- `setSessionToken()`
+- `getSessionToken()`
+- `setBootstrapFailed()`
+- `isAuthBootstrapFailed()`
+- `setBootstrapPromise()` — Stash the bootstrap promise from ``api.js`` so anything that wants to await the initial token-fetch…
+- `getBootstrapPromise()`
 
 ### `frontend/src/utils/AudioBandAnalyzer.js`
 
@@ -1072,44 +1111,6 @@ Module-level subscriber registry so a single mounted <ConfirmModalRoot />
 - `confirmModal()` — Promise-based replacement for window.confirm().
 - `ConfirmModalRoot()` — Singleton portal host.
 
-### `frontend/src/components/daw/DawBrowser.jsx`
-
-DawBrowser — Left panel file/library browser for the DJ Edit DAW Lists tracks from the library and recent .rbep projects.
-
-### `frontend/src/components/daw/DawControlStrip.jsx`
-
-DawControlStrip — Unified control bar below the timeline Layout: [Transport] | [Edit Tools] | [Hot Cues + Loop Controls] Merges functionali…
-
-### `frontend/src/components/daw/DawLayout.jsx`
-
-DawLayout — Slot-style layout shell for the DJ Edit DAW.
-
-- `DawLayout()`
-
-### `frontend/src/components/daw/DawScrollbar.jsx`
-
-DawScrollbar — Horizontal scrollbar synchronized with the timeline Critical: avoids the feedback loop where programmatically setting `scrol…
-
-### `frontend/src/components/daw/DawTimeline.jsx`
-
-DawTimeline — Layered Canvas Timeline with Path2D Smooth Waveform Architecture: 3 conceptual layers rendered to one canvas via OffscreenCan…
-
-### `frontend/src/components/daw/DawToolbar.jsx`
-
-DawToolbar — Top toolbar for the DJ Edit DAW Displays: Project name, save/open/export buttons, editing tools, undo/redo.
-
-### `frontend/src/components/daw/DjEditDaw.jsx`
-
-DjEditDaw — Root container for the DJ Edit DAW.
-
-### `frontend/src/components/daw/ExportModal.jsx`
-
-ExportModal — Project Export UI Features: - Reads the user's default export folder from /api/settings (Settings → Export tab) - Output fold…
-
-### `frontend/src/components/daw/WaveformOverview.jsx`
-
-WaveformOverview — Full-track mini-map with draggable viewport window Renders a downsampled mono/3-band waveform of the entire track via Wa…
-
 ### `frontend/src/components/DesignView.jsx`
 
 *(no module docstring)*
@@ -1121,34 +1122,6 @@ Stage pipeline (in execution order) — covers BOTH SC-DL and local-import
 ### `frontend/src/components/DuplicateView.jsx`
 
 DuplicateView — Acoustic Duplicate Finder & Merge UI Left panel: list of duplicate groups with similarity badge.
-
-### `frontend/src/components/editor/EditorBrowser.jsx`
-
-Ensure we have an array
-
-### `frontend/src/components/editor/EditorToolbar.jsx`
-
-EditorToolbar - Top toolbar + edit toolbar for NonDestructiveEditor.
-
-### `frontend/src/components/editor/EnvelopeOverlay.jsx`
-
-EnvelopeOverlay - Interactive envelope editor for audio regions Provides draggable nodes for: - Fade-in duration (left edge) - Fade-out dur…
-
-### `frontend/src/components/editor/NonDestructiveEditor.jsx`
-
-NonDestructiveEditor - Main component for the non-destructive audio editor Slim container: owns TimelineState + composes child components a…
-
-### `frontend/src/components/editor/Palette.jsx`
-
-Palette - Drag & Drop clipboard for audio regions A side panel with slots for storing region copies.
-
-### `frontend/src/components/editor/RegionBlock.jsx`
-
-RegionBlock - Visual representation of an audio region on the timeline Displays the waveform, envelope overlay, and handles for resize/move
-
-### `frontend/src/components/editor/TimelineCanvas.jsx`
-
-TimelineCanvas - Main editing canvas for the non-destructive audio editor Features: - Zoomable timeline with beat grid overlay - Region blo…
 
 ### `frontend/src/components/ImportProgressBanner.jsx`
 
@@ -1201,6 +1174,131 @@ Backend returns 'Children' (uppercase)
 
 *(no module docstring)*
 
+### `frontend/src/components/SettingsView.jsx`
+
+SettingsView — Tabbed preferences panel (container).
+
+### `frontend/src/components/SmartPlaylistEditor.jsx`
+
+*(no module docstring)*
+
+### `frontend/src/components/SoundCloudProgressModal.jsx`
+
+Listen to progress events from Rust
+
+- `SoundCloudProgressModal()`
+
+### `frontend/src/components/SoundCloudSyncView.jsx`
+
+*(no module docstring)*
+
+### `frontend/src/components/SoundCloudView.jsx`
+
+EC11: Ref-based guard prevents multiple simultaneous login requests
+
+### `frontend/src/components/ToastContext.jsx`
+
+*(no module docstring)*
+
+- `useToast()`
+- `ToastProvider()`
+
+### `frontend/src/components/ToolsView.jsx`
+
+Mirror of LibraryTools.smart_rename's token substitution + sanitisation,
+
+### `frontend/src/components/TrackTable.jsx`
+
+Camelot
+
+### `frontend/src/components/UsbSettingsView.jsx`
+
+UsbSettingsView — edit MYSETTING.DAT / MYSETTING2.DAT / DJMMYSETTING.DAT Per-stick CDJ + DJM hardware settings (auto-cue level, jog mode, f…
+
+- `UsbSettingsView()`
+
+### `frontend/src/components/UsbView.jsx`
+
+UsbView — Melodex-styled USB device manager (container).
+
+### `frontend/src/components/UtilitiesView.jsx`
+
+UtilitiesView — Library-Verwaltungs-Tools Zwei Sub-Tabs: • Tools — Phrase Cues, Duplicate Finder, XML Cleaner, Format Converter • Library H…
+
+### `frontend/src/components/WaveformEditor.jsx`
+
+*(no module docstring)*
+
+### `frontend/src/components/XmlCleanView.jsx`
+
+Using existing endpoint but improved backend logic
+
+### `frontend/src/components/daw/DawBrowser.jsx`
+
+DawBrowser — Left panel file/library browser for the DJ Edit DAW Lists tracks from the library and recent .rbep projects.
+
+### `frontend/src/components/daw/DawControlStrip.jsx`
+
+DawControlStrip — Unified control bar below the timeline Layout: [Transport] | [Edit Tools] | [Hot Cues + Loop Controls] Merges functionali…
+
+### `frontend/src/components/daw/DawLayout.jsx`
+
+DawLayout — Slot-style layout shell for the DJ Edit DAW.
+
+- `DawLayout()`
+
+### `frontend/src/components/daw/DawScrollbar.jsx`
+
+DawScrollbar — Horizontal scrollbar synchronized with the timeline Critical: avoids the feedback loop where programmatically setting `scrol…
+
+### `frontend/src/components/daw/DawTimeline.jsx`
+
+DawTimeline — Layered Canvas Timeline with Path2D Smooth Waveform Architecture: 3 conceptual layers rendered to one canvas via OffscreenCan…
+
+### `frontend/src/components/daw/DawToolbar.jsx`
+
+DawToolbar — Top toolbar for the DJ Edit DAW Displays: Project name, save/open/export buttons, editing tools, undo/redo.
+
+### `frontend/src/components/daw/DjEditDaw.jsx`
+
+DjEditDaw — Root container for the DJ Edit DAW.
+
+### `frontend/src/components/daw/ExportModal.jsx`
+
+ExportModal — Project Export UI Features: - Reads the user's default export folder from /api/settings (Settings → Export tab) - Output fold…
+
+### `frontend/src/components/daw/WaveformOverview.jsx`
+
+WaveformOverview — Full-track mini-map with draggable viewport window Renders a downsampled mono/3-band waveform of the entire track via Wa…
+
+### `frontend/src/components/editor/EditorBrowser.jsx`
+
+Ensure we have an array
+
+### `frontend/src/components/editor/EditorToolbar.jsx`
+
+EditorToolbar - Top toolbar + edit toolbar for NonDestructiveEditor.
+
+### `frontend/src/components/editor/EnvelopeOverlay.jsx`
+
+EnvelopeOverlay - Interactive envelope editor for audio regions Provides draggable nodes for: - Fade-in duration (left edge) - Fade-out dur…
+
+### `frontend/src/components/editor/NonDestructiveEditor.jsx`
+
+NonDestructiveEditor - Main component for the non-destructive audio editor Slim container: owns TimelineState + composes child components a…
+
+### `frontend/src/components/editor/Palette.jsx`
+
+Palette - Drag & Drop clipboard for audio regions A side panel with slots for storing region copies.
+
+### `frontend/src/components/editor/RegionBlock.jsx`
+
+RegionBlock - Visual representation of an audio region on the timeline Displays the waveform, envelope overlay, and handles for resize/move
+
+### `frontend/src/components/editor/TimelineCanvas.jsx`
+
+TimelineCanvas - Main editing canvas for the non-destructive audio editor Features: - Zoomable timeline with beat grid overlay - Region blo…
+
 ### `frontend/src/components/settings/SettingsAnalysis.jsx`
 
 SettingsAnalysis — Quality preset, ranking filter, library insight thresholds.
@@ -1240,46 +1338,9 @@ SettingsShortcuts — Configurable DAW keyboard shortcut bindings.
 
 SettingsUsb — Per-stick USB profile CRUD (label, type, audio format).
 
-### `frontend/src/components/SettingsView.jsx`
-
-SettingsView — Tabbed preferences panel (container).
-
 ### `frontend/src/components/shared/WaveformMiniCanvas.jsx`
 
 WaveformMiniCanvas — Reusable lightweight canvas waveform renderer Shared across WaveformOverview (DAW mini-map), track row previews, and a…
-
-### `frontend/src/components/SmartPlaylistEditor.jsx`
-
-*(no module docstring)*
-
-### `frontend/src/components/SoundCloudProgressModal.jsx`
-
-Listen to progress events from Rust
-
-- `SoundCloudProgressModal()`
-
-### `frontend/src/components/SoundCloudSyncView.jsx`
-
-*(no module docstring)*
-
-### `frontend/src/components/SoundCloudView.jsx`
-
-EC11: Ref-based guard prevents multiple simultaneous login requests
-
-### `frontend/src/components/ToastContext.jsx`
-
-*(no module docstring)*
-
-- `useToast()`
-- `ToastProvider()`
-
-### `frontend/src/components/ToolsView.jsx`
-
-Mirror of LibraryTools.smart_rename's token substitution + sanitisation,
-
-### `frontend/src/components/TrackTable.jsx`
-
-Camelot
 
 ### `frontend/src/components/usb/MetadataSyncPanel.jsx`
 
@@ -1315,20 +1376,6 @@ UsbSyncPanel — the right-hand main pane.
 - `UsbSyncControlsTail()` — The "bottom half" of the right pane: sync controls (preview + run), settings + drive actions + dang…
 - `UsbSettingsTail()` — The trailing settings + actions block.
 - `UsbStatsFooter()` — Last line of the right pane: a tiny font-mono diagnostic strip.
-
-### `frontend/src/components/UsbSettingsView.jsx`
-
-UsbSettingsView — edit MYSETTING.DAT / MYSETTING2.DAT / DJMMYSETTING.DAT Per-stick CDJ + DJM hardware settings (auto-cue level, jog mode, f…
-
-- `UsbSettingsView()`
-
-### `frontend/src/components/UsbView.jsx`
-
-UsbView — Melodex-styled USB device manager (container).
-
-### `frontend/src/components/UtilitiesView.jsx`
-
-UtilitiesView — Library-Verwaltungs-Tools Zwei Sub-Tabs: • Tools — Phrase Cues, Duplicate Finder, XML Cleaner, Format Converter • Library H…
 
 ### `frontend/src/components/waveform/ConfirmModal.jsx`
 
@@ -1372,14 +1419,6 @@ Stripped-down view used by RankingView (simpleMode=true) — only overview + mai
 Floating zoom controls overlay — sits absolutely positioned over the detail container.
 
 - `WaveformZoom()` — Floating zoom controls overlay — sits absolutely positioned over the detail container.
-
-### `frontend/src/components/WaveformEditor.jsx`
-
-*(no module docstring)*
-
-### `frontend/src/components/XmlCleanView.jsx`
-
-Using existing endpoint but improved backend logic
 
 ### `frontend/src/main.jsx`
 
@@ -1478,6 +1517,13 @@ soundcloud_client.rs
 
 *(no module docstring)*
 
+### `tests/conftest.py`
+
+Pytest fixtures shared across the suite.
+
+- `auth_token()` — Pin ``app.auth.SESSION_TOKEN`` to ``TEST_SESSION_TOKEN`` for the test.
+- `pytest_configure()` — Register the ``no_auth`` marker so ``--strict-markers`` is happy.
+
 ### `tests/test_analysis.py`
 
 Regression tests for the analysis pipeline.
@@ -1494,7 +1540,7 @@ Regression tests for the analysis pipeline.
 - `test_replay_gain_silent()`
 - `test_replay_gain_loud()`
 - `test_replay_gain_quiet()`
-- `test_hot_cues_max_8()`
+- `test_hot_cues_max_16()`
 - `test_hot_cues_color_assignment()`
 - `test_pcpt_entry_size()`
 - `test_pssi_beat_anchoring()`
@@ -1506,6 +1552,45 @@ Regression tests for the analysis pipeline.
 - `test_cue_toggles_via_settings()` — Setting RB_ANALYSIS_AUTO_HOT_CUES=0 disables hot cues globally.
 - `test_cue_toggles_kwarg_overrides_settings()` — Per-call kwarg overrides the global setting.
 - `test_e2e_anlz_write_roundtrip()`
+
+### `tests/test_auth.py`
+
+Tests for ``app/auth.py`` -- Bearer-token session authentication.
+
+- `TestCaseA_NoHeader`
+- `  TestCaseA_NoHeader.test_post_without_authorization_is_401()`
+- `TestCaseB_WrongToken`
+- `  TestCaseB_WrongToken.test_post_with_wrong_bearer_is_401()`
+- `  TestCaseB_WrongToken.test_post_with_wrong_length_is_401()`
+- `TestCaseC_HappyPath`
+- `  TestCaseC_HappyPath.test_post_with_correct_bearer_is_2xx()`
+- `TestCaseD_HeartbeatTokenLeak`
+- `  TestCaseD_HeartbeatTokenLeak.test_heartbeat_response_has_no_token_field()`
+- `TestCaseE_InitTokenAbsent`
+- `  TestCaseE_InitTokenAbsent.test_post_init_token_is_404()`
+- `TestCaseF_SoundCloudAuthTokenGated`
+- `  TestCaseF_SoundCloudAuthTokenGated.test_sc_auth_token_without_bearer_is_401()`
+- `TestCaseG_LegacyShutdownTokenRemoved`
+- `  TestCaseG_LegacyShutdownTokenRemoved.test_shutdown_without_bearer_is_401()`
+- `  TestCaseG_LegacyShutdownTokenRemoved.test_restart_without_bearer_is_401()`
+- `TestCaseH_BearerWhitespace`
+- `  TestCaseH_BearerWhitespace.test_trailing_whitespace_in_credentials_is_accepted()`
+- `  TestCaseH_BearerWhitespace.test_leading_whitespace_between_scheme_and_token()`
+- `TestCaseI_SchemeCaseInsensitive`
+- `  TestCaseI_SchemeCaseInsensitive.test_scheme_case_insensitive()`
+- `TestCaseJ_EmptyAuthorizationHeader`
+- `  TestCaseJ_EmptyAuthorizationHeader.test_empty_header_value_is_401()`
+- `  TestCaseJ_EmptyAuthorizationHeader.test_whitespace_only_header_is_401()`
+- `  TestCaseJ_EmptyAuthorizationHeader.test_scheme_only_no_credentials_is_401()`
+- `TestCaseK_ControlCharsRejected`
+- `  TestCaseK_ControlCharsRejected.test_vtab_in_token_is_401()`
+- `  TestCaseK_ControlCharsRejected.test_del_char_in_token_is_401()`
+- `TestCaseL_WrongScheme`
+- `  TestCaseL_WrongScheme.test_non_bearer_scheme_is_401()`
+- `TestCaseM_OptionsPreflight`
+- `  TestCaseM_OptionsPreflight.test_options_preflight_short_circuits_before_auth()`
+- `TestCaseN_UngatedAcceptsAuthHeader`
+- `  TestCaseN_UngatedAcceptsAuthHeader.test_heartbeat_with_bearer_header_still_2xx()`
 
 ### `tests/test_database.py`
 
@@ -1535,6 +1620,30 @@ Tests for `app/database.py`.
 - `  TestFilterTracks.test_unknown_scheme_preserved()` — Only the four explicit prefixes are filtered.
 - `  TestFilterTracks.test_unknown_input_type_passed_through()` — If the caller hands a non-dict / non-list we just return it.
 
+### `tests/test_logging_redaction.py`
+
+Unit tests for `app.logging_utils.RedactingFormatter`.
+
+- `stream_logger()` — Yield a freshly configured logger + the StringIO its handler writes to.
+- `test_exc_info_traceback_scrubbed()`
+- `test_chained_exception_preserves_chain_marker()`
+- `test_args_interpolation_scrubbed()`
+- `test_non_exception_log_format_unchanged()` — A path-free `logger.info("hello")` must be byte-identical via
+
+### `tests/test_main_security.py`
+
+Regression tests for ``POST /api/file/reveal`` sandbox.
+
+- `sandbox_root()` — Add a temp dir to ``ALLOWED_AUDIO_ROOTS`` for one test, then remove it.
+- `no_run()` — Replace ``subprocess.run`` with a recorder that never spawns a process.
+- `TestFileRevealSandboxRejects`
+- `  TestFileRevealSandboxRejects.test_outside_roots_path_is_forbidden()`
+- `  TestFileRevealSandboxRejects.test_non_audio_extension_is_rejected()`
+- `  TestFileRevealSandboxRejects.test_missing_file_in_root_is_404()`
+- `  TestFileRevealSandboxRejects.test_directory_path_is_rejected()`
+- `TestFileRevealSandboxAccepts`
+- `  TestFileRevealSandboxAccepts.test_valid_audio_calls_subprocess_with_platform_argv()`
+
 ### `tests/test_onelibrary_wal_flush.py`
 
 End-to-end regression test for OneLibraryUsbWriter — runs the FULL
@@ -1554,6 +1663,71 @@ PDB writer structural test against F: drive Pioneer reference.
 
 - `make_synthetic_input()` — Mimic the data shape that OneLibraryUsbWriter._write_pdb_from_db
 - `main()`
+
+### `tests/test_rate_limit.py`
+
+Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter.
+
+- `test_take_until_empty()`
+- `test_refill_after_wait()`
+- `test_burst_allows_then_throttles()`
+- `test_whitelist_bypass()`
+- `test_concurrent_take()`
+- `test_ttl_purge()`
+- `test_auth_before_ratelimit()` — Unauth + over-limit MUST surface as 401, not 429.
+
+### `tests/test_security_compare.py`
+
+Tests for ``app/security_compare.py::safe_compare``.
+
+- `TestCase1_Equal`
+- `  TestCase1_Equal.test_equal_str()`
+- `  TestCase1_Equal.test_equal_bytes()`
+- `TestCase2_UnequalSameLength`
+- `  TestCase2_UnequalSameLength.test_unequal_same_length_str()`
+- `  TestCase2_UnequalSameLength.test_unequal_same_length_bytes()`
+- `TestCase3_LengthMismatch`
+- `  TestCase3_LengthMismatch.test_length_mismatch_str()`
+- `  TestCase3_LengthMismatch.test_length_mismatch_bytes()`
+- `TestCase4_EmptyVsNonEmpty`
+- `  TestCase4_EmptyVsNonEmpty.test_empty_presented_str()`
+- `  TestCase4_EmptyVsNonEmpty.test_empty_expected_bytes()`
+- `  TestCase4_EmptyVsNonEmpty.test_both_empty()`
+- `TestCase5_NonAsciiStr`
+- `  TestCase5_NonAsciiStr.test_non_ascii_presented()`
+- `  TestCase5_NonAsciiStr.test_non_ascii_expected()`
+- `  TestCase5_NonAsciiStr.test_non_ascii_both()`
+- `TestCase6_MixedStrBytes`
+- `  TestCase6_MixedStrBytes.test_str_vs_bytes()`
+- `  TestCase6_MixedStrBytes.test_bytes_vs_str_unequal()`
+- `TestCase7_NonStrOrBytesInput`
+- `  TestCase7_NonStrOrBytesInput.test_non_str_or_bytes_presented()`
+- `  TestCase7_NonStrOrBytesInput.test_non_str_or_bytes_expected()`
+- `  TestCase7_NonStrOrBytesInput.test_both_none()`
+
+### `tests/test_security_hotfixes.py`
+
+Regression tests for the 5 security hotfixes in commit e3a5ae8.
+
+- `sandbox_root()` — Add a temp dir to ALLOWED_AUDIO_ROOTS for one test, then remove it.
+- `TestNoDuplicateHeartbeatRoute`
+- `  TestNoDuplicateHeartbeatRoute.test_only_one_heartbeat_route_registered()`
+- `TestHeartbeatNoTokenLeak`
+- `  TestHeartbeatNoTokenLeak.test_heartbeat_never_returns_token_field()`
+- `TestValidateAudioPathSandbox`
+- `  TestValidateAudioPathSandbox.test_valid_audio_file_inside_root_accepted()`
+- `  TestValidateAudioPathSandbox.test_sibling_root_with_shared_prefix_is_rejected()` — Regression: the str.startswith bug accepted '<root>_evil' as inside '<root>'.
+- `  TestValidateAudioPathSandbox.test_path_outside_roots_rejected()`
+- `  TestValidateAudioPathSandbox.test_non_audio_extension_rejected()`
+- `TestDebugLoadXmlGate`
+- `  TestDebugLoadXmlGate.test_disabled_by_default()`
+- `  TestDebugLoadXmlGate.test_disabled_when_flag_not_one()`
+- `  TestDebugLoadXmlGate.test_enabled_when_flag_one()`
+- `TestFileWriteSandbox`
+- `  TestFileWriteSandbox.test_write_inside_root_with_allowed_extension()`
+- `  TestFileWriteSandbox.test_write_outside_roots_forbidden()`
+- `  TestFileWriteSandbox.test_write_forbidden_extension_rejected()`
+- `  TestFileWriteSandbox.test_all_allow_listed_extensions_accepted()`
 
 ### `tests/test_services.py`
 
@@ -1587,6 +1761,42 @@ Tests for `app/services.py`.
 - `  TestSettingsAtomicSave.test_save_writes_complete_json()`
 - `  TestSettingsAtomicSave.test_save_leaves_no_tmp_files()`
 - `  TestSettingsAtomicSave.test_save_overwrites_existing_file()`
+
+### `tests/test_settings_caps.py`
+
+Tests for `SetReq` payload caps + `SettingsManager.load` sanitizer.
+
+- `TestSetReqHappyPath` — Realistic payloads must keep working.
+- `  TestSetReqHappyPath.test_minimal_empty_payload_ok()`
+- `  TestSetReqHappyPath.test_typical_populated_payload_ok()`
+- `  TestSetReqHappyPath.test_extras_passthrough_ok()`
+- `TestSetReqValueBytesCap`
+- `  TestSetReqValueBytesCap.test_extras_value_over_cap_rejected()`
+- `  TestSetReqValueBytesCap.test_extras_value_at_cap_ok()`
+- `TestSetReqDictKeysCap`
+- `  TestSetReqDictKeysCap.test_extras_dict_over_keys_rejected()`
+- `TestSetReqKeyLenCap`
+- `  TestSetReqKeyLenCap.test_extras_long_key_rejected()`
+- `TestSetReqListItemsCap`
+- `  TestSetReqListItemsCap.test_scan_folders_over_cap_rejected()`
+- `  TestSetReqListItemsCap.test_extras_list_over_cap_rejected()`
+- `TestSetReqPathLenCap`
+- `  TestSetReqPathLenCap.test_scan_folders_long_path_rejected()`
+- `TestSetReqTotalBytesCap`
+- `  TestSetReqTotalBytesCap.test_payload_over_total_rejected()`
+- `TestSetReqStrictMode`
+- `  TestSetReqStrictMode.test_string_true_rejected_for_bool()`
+- `  TestSetReqStrictMode.test_string_int_rejected_for_int_field()`
+- `  TestSetReqStrictMode.test_negative_int_rejected()`
+- `  TestSetReqStrictMode.test_unknown_waveform_visual_mode_rejected()`
+- `  TestSetReqStrictMode.test_bad_hex_color_rejected()`
+- `TestSetReqLoggingRedaction`
+- `  TestSetReqLoggingRedaction.test_warning_logged_with_key_and_reason_not_value()`
+- `TestSettingsManagerLoadSanitizer` — `load` strips now-rejected keys silently + logs `info`.
+- `  TestSettingsManagerLoadSanitizer.test_oversize_key_dropped_on_load()`
+- `  TestSettingsManagerLoadSanitizer.test_oversize_value_dropped_on_load()`
+- `  TestSettingsManagerLoadSanitizer.test_oversize_list_dropped_on_load()`
+- `  TestSettingsManagerLoadSanitizer.test_load_legacy_clean_file_unchanged()`
 
 ### `tests/test_soundcloud_api.py`
 
@@ -1644,6 +1854,19 @@ Tests for `app/usb_manager.py`.
 
 
 ## scripts/ — Dev/Build Utilities
+
+### `scripts/pipeline_status.py`
+
+Show the research pipeline state at a glance.
+
+- `Doc`
+- `  Doc.age_days()`
+- `scan()` — Walk the three stage folders, parse each <state>_<slug>.md doc.
+- `fetch_routine_prs()` — Open PRs from routine/* branches.
+- `open_gates()`
+- `print_gates()`
+- `print_report()`
+- `main()`
 
 ### `scripts/regen_maps.py`
 

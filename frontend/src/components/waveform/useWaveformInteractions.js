@@ -7,9 +7,14 @@ const ZOOM_MIN = 50;
 const ZOOM_MAX = 800;
 const ZOOM_STEP = 50;
 
+// Rekordbox 6/7 + CDJ-3000 support 16 hot cues (banks A..H and I..P).
+const MAX_HOT_CUES = 16;
+
 const HOT_CUE_COLORS = [
     '#2ecc71', '#e67e22', '#f1c40f', '#3498db',
     '#fd79a8', '#00d2d3', '#a29bfe', '#ff7675',
+    '#1abc9c', '#e84393', '#0984e3', '#6c5ce7',
+    '#fab1a0', '#55efc4', '#ffeaa7', '#d63031',
 ];
 
 // Imperative editing + hotkey wiring extracted from WaveformEditor.
@@ -496,4 +501,4 @@ export default function useWaveformInteractions({
     };
 }
 
-export { HOT_CUE_COLORS, ZOOM_MIN, ZOOM_MAX, ZOOM_STEP };
+export { HOT_CUE_COLORS, MAX_HOT_CUES, ZOOM_MIN, ZOOM_MAX, ZOOM_STEP };
