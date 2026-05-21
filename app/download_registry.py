@@ -360,6 +360,94 @@ def mark_failed(sc_track_id: str, error: str) -> None:
         logger.error("[Registry] mark_failed query failed: %s", exc)
 
 
+def record_unified_download(
+    *,
+    sha256_hash: str,
+    title: str,
+    artist: str,
+    file_path: Path | str,
+    isrc: str | None = None,
+    source: str | None = None,
+    provenance_urls: str | None = None,
+    picked_quality_tier: int | None = None,
+    file_format: str | None = None,
+    file_size_bytes: int | None = None,
+    duration_ms: int = 0,
+    permalink_url: str = "",
+    status: str = "downloaded",
+) -> bool:
+    """Record one unified multi-source downloader result.
+
+    The unified downloader is platform-agnostic and has no SoundCloud track id,
+    so the content ``sha256_hash`` doubles as the row's ``sc_track_id`` key —
+    it is a stable, non-null, unique-per-file identifier that keeps the
+    ``UNIQUE(sc_track_id)`` constraint and the dedup index meaningful. The
+    UPSERT therefore makes a re-download of identical bytes idempotent.
+
+    Writes go through the registry's own WAL-mode connection — this DB is the
+    separate ``download_registry.db`` file, never the Rekordbox ``master.db``,
+    so it does **not** acquire ``app.database.db_lock`` (see the unified-
+    downloader plan, Phase 0 step P0.3).
+
+    Returns ``True`` on success, ``False`` on any SQLite error.
+    """
+    if not sha256_hash:
+        logger.error("[Registry] record_unified_download: empty sha256_hash")
+        return False
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        with _conn() as db:
+            db.execute(
+                """
+                INSERT INTO download_history
+                    (sc_track_id, title, artist, duration_ms, sc_permalink_url,
+                     file_path, file_format, file_size_bytes, sha256_hash,
+                     downloaded_at, status, device_id,
+                     isrc, source, provenance_urls, picked_quality_tier)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(sc_track_id) DO UPDATE SET
+                    title               = excluded.title,
+                    artist              = excluded.artist,
+                    file_path           = COALESCE(excluded.file_path,       file_path),
+                    file_format         = COALESCE(excluded.file_format,     file_format),
+                    file_size_bytes     = COALESCE(excluded.file_size_bytes, file_size_bytes),
+                    status              = excluded.status,
+                    isrc                = COALESCE(excluded.isrc,                isrc),
+                    source              = COALESCE(excluded.source,              source),
+                    provenance_urls     = COALESCE(excluded.provenance_urls,     provenance_urls),
+                    picked_quality_tier = COALESCE(excluded.picked_quality_tier, picked_quality_tier)
+                """,
+                (
+                    sha256_hash,
+                    title,
+                    artist,
+                    duration_ms,
+                    permalink_url,
+                    str(file_path),
+                    file_format,
+                    file_size_bytes,
+                    sha256_hash,
+                    now,
+                    status,
+                    _device_id(),
+                    isrc,
+                    source,
+                    provenance_urls,
+                    picked_quality_tier,
+                ),
+            )
+        logger.info(
+            "[Registry] Unified download recorded: source=%s isrc=%s tier=%s",
+            source,
+            isrc,
+            picked_quality_tier,
+        )
+        return True
+    except sqlite3.Error as exc:
+        logger.error("[Registry] record_unified_download failed: %s", exc)
+        return False
+
+
 def delete_entry(sc_track_id: str) -> bool:
     """
     Remove a registry entry (e.g. to allow re-download of a failed track).

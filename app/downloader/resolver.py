@@ -369,13 +369,22 @@ async def resolve(req: ResolveRequest) -> ResolveResponse:
         auto_pick_index,
     )
 
-    return ResolveResponse(
+    response = ResolveResponse(
         request_id=str(uuid.uuid4()),
         needle=needle,
         candidates=candidates,
         auto_pick_index=auto_pick_index,
         near_misses=near_misses[:5],
     )
+
+    # Register the result with the orchestrator's request cache so a later
+    # POST /fetch can resolve this request_id + candidate_index back to the
+    # chosen Candidate. Imported lazily — the orchestrator imports neither this
+    # module nor search.py, so this one-way edge stays cycle-free.
+    from .orchestrator import remember_resolve
+
+    remember_resolve(response)
+    return response
 
 
 __all__ = ["resolve"]

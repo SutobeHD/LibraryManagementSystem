@@ -224,7 +224,15 @@ async def search(req: SearchRequest) -> SearchResponse:
         len(hits),
     )
 
-    return SearchResponse(request_id=str(uuid.uuid4()), hits=hits)
+    response = SearchResponse(request_id=str(uuid.uuid4()), hits=hits)
+
+    # Register with the orchestrator's request cache so a later POST /fetch can
+    # resolve this request_id + candidate_index back to a hit. Lazy import —
+    # the orchestrator imports neither this module nor resolver.py.
+    from .orchestrator import remember_search
+
+    remember_search(response)
+    return response
 
 
 __all__ = ["search"]
