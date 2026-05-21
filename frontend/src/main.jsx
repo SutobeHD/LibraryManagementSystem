@@ -66,9 +66,9 @@ class ErrorBoundary extends Component {
 }
 
 /**
- * Workspace groups — Blender-style. The top WorkspaceBar switches between
- * these; the sidebar then lists the active workspace's views. The XML
- * Automator only appears while a library is loaded in XML mode.
+ * Workspace groups — Blender-style. The unified TopBar switches between
+ * these and lists the active workspace's views. The XML Automator only
+ * appears while a library is loaded in XML mode.
  */
 const buildWorkspaces = (libraryStatus) => [
   {
@@ -124,153 +124,156 @@ const TAB_WORKSPACE = {
   design: 'lab',
 }
 
-/** Blender-style workspace tab strip — top of the app, carries the brand. */
-const WorkspaceBar = ({ workspaces, activeWorkspace, onPick }) => (
-  <div className="flex items-stretch h-9 bg-mx-shell border-b border-line-subtle shrink-0 select-none relative z-20">
-    <div className="flex items-center gap-2 px-3.5 border-r border-line-subtle shrink-0">
-      <div className="flex items-end gap-[2px]">
-        {[8, 12, 16, 11, 7].map((h, i) => (
-          <div key={i} className="bg-amber2 rounded-[1px]" style={{ width: 2.5, height: h }} />
-        ))}
-      </div>
-      <span className="text-[12px] font-bold tracking-wide text-ink-primary">LMS</span>
-    </div>
-    {workspaces.map((ws) => {
-      const active = ws.id === activeWorkspace
-      return (
-        <button
-          key={ws.id}
-          onClick={() => onPick(ws)}
-          className={`px-4 text-[10.5px] font-semibold uppercase tracking-[0.08em] border-r border-line-subtle transition-colors ${
-            active
-              ? 'bg-mx-panel text-amber2'
-              : 'text-ink-secondary hover:text-ink-primary hover:bg-mx-hover'
-          }`}
-          style={active ? { boxShadow: 'inset 0 -2px 0 var(--amber)' } : undefined}
-        >
-          {ws.label}
-        </button>
-      )
-    })}
-  </div>
-)
-
-/** Compact Rekordbox-style sidebar row — 28px tall, amber active border-left. */
-const RbNavRow = ({ icon: Icon, label, active, danger, onClick }) => (
-  <div
-    onClick={onClick}
-    className={`flex items-center gap-2 h-7 px-3 cursor-pointer select-none text-[12px] border-l-2 transition-colors ${
-      active
-        ? 'border-amber2 bg-mx-selected text-ink-primary font-medium'
-        : `border-transparent hover:bg-mx-hover ${
-            danger ? 'text-bad/80 hover:text-bad' : 'text-ink-secondary hover:text-ink-primary'
-          }`
-    }`}
-  >
-    <Icon size={14} className={active ? 'text-amber2 shrink-0' : 'shrink-0 opacity-70'} />
-    <span className="truncate">{label}</span>
-  </div>
-)
-
-const Sidebar = ({ workspace, activeTab, setActiveTab, libraryStatus, onLoadLibrary, onUnloadLibrary }) => {
+/**
+ * TopBar — single unified app bar. Carries the brand, the Blender-style
+ * workspace tabs, the active workspace's view tabs, the library-status
+ * indicator and the Settings / Exit actions. Replaces the old split
+ * WorkspaceBar + left Sidebar.
+ */
+const TopBar = ({
+  workspaces,
+  activeWorkspace,
+  currentWorkspace,
+  activeTab,
+  onPickWorkspace,
+  setActiveTab,
+  libraryStatus,
+  onLoadLibrary,
+  onUnloadLibrary,
+}) => {
   const handleExit = async () => {
-    if (await confirmModal({ title: "Exit Application?", confirmLabel: "Exit" })) {
+    if (await confirmModal({ title: 'Exit Application?', confirmLabel: 'Exit' })) {
       try {
         // Phase-1 auth: shutdown is gated via require_session Bearer
         // (auto-attached by api.js interceptor). No query-string token.
         await api.post('/api/system/shutdown');
-      }
-      catch (e) {
+      } catch (e) {
         // Best-effort shutdown ping — backend might already be down by the
         // time we get here (Tauri runtime closes before this resolves).
         log.debug('shutdown ping failed', e);
       }
       window.close();
-      document.body.innerHTML = "<div style='color:white;display:flex;justify-content:center;height:100vh;align-items:center;background:#0f172a;font-family:sans-serif'>Application Closed</div>";
+      document.body.innerHTML =
+        "<div style='color:white;display:flex;justify-content:center;height:100vh;align-items:center;background:#0f172a;font-family:sans-serif'>Application Closed</div>";
     }
   };
 
   return (
-    <div
-      className="h-full flex flex-col relative z-20 shrink-0 bg-mx-shell border-r border-line-subtle"
-      style={{ width: 220 }}
-    >
-      {/* Library Status Indicator */}
-      <div className="px-2.5 pt-2.5">
-        <div
-          className={`px-3 py-2 rounded-mx-sm border flex items-center justify-between ${
-            libraryStatus?.loaded
-              ? 'bg-ok/5 border-ok/30'
-              : 'bg-bad/5 border-bad/25'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <div
-              className={`w-1.5 h-1.5 rounded-full ${
-                libraryStatus?.loaded
-                  ? 'bg-ok shadow-[0_0_6px_#3DD68C]'
-                  : 'bg-bad shadow-[0_0_6px_#E85C4A]'
+    <div className="flex items-stretch h-10 bg-mx-shell border-b border-line-subtle shrink-0 select-none relative z-20">
+      {/* Brand */}
+      <div className="flex items-center gap-2 px-3.5 border-r border-line-subtle shrink-0">
+        <div className="flex items-end gap-[2px]">
+          {[8, 12, 16, 11, 7].map((h, i) => (
+            <div key={i} className="bg-amber2 rounded-[1px]" style={{ width: 2.5, height: h }} />
+          ))}
+        </div>
+        <span className="text-[12px] font-bold tracking-wide text-ink-primary">LMS</span>
+      </div>
+
+      {/* Workspace tabs */}
+      {workspaces.map((ws) => {
+        const active = ws.id === activeWorkspace
+        return (
+          <button
+            key={ws.id}
+            onClick={() => onPickWorkspace(ws)}
+            className={`px-3.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] border-r border-line-subtle transition-colors shrink-0 ${
+              active
+                ? 'bg-mx-panel text-amber2'
+                : 'text-ink-secondary hover:text-ink-primary hover:bg-mx-hover'
+            }`}
+            style={active ? { boxShadow: 'inset 0 -2px 0 var(--amber)' } : undefined}
+          >
+            {ws.label}
+          </button>
+        )
+      })}
+
+      {/* View tabs for the active workspace */}
+      <div className="flex items-stretch min-w-0 overflow-x-auto">
+        {currentWorkspace.items.map((it) => {
+          const Icon = it.icon
+          const active = activeTab === it.tab
+          return (
+            <button
+              key={it.tab}
+              onClick={() => setActiveTab(it.tab)}
+              className={`flex items-center gap-1.5 px-3 text-[11px] whitespace-nowrap border-r border-line-subtle transition-colors ${
+                active
+                  ? 'bg-mx-selected text-ink-primary font-medium'
+                  : 'text-ink-secondary hover:text-ink-primary hover:bg-mx-hover'
               }`}
-            ></div>
-            <div className="flex flex-col leading-tight">
-              <span
-                className={`text-[10px] font-semibold uppercase tracking-wider ${
-                  libraryStatus?.loaded ? 'text-ok' : 'text-bad'
-                }`}
-              >
-                {libraryStatus?.loaded ? 'Active' : 'No Library'}
-              </span>
-              {libraryStatus?.loaded && (
-                <span className="text-[10px] font-mono text-ink-muted mt-0.5">
-                  {libraryStatus.tracks?.toLocaleString?.() ?? libraryStatus.tracks} tracks
-                </span>
-              )}
-            </div>
-          </div>
-          {!libraryStatus?.loaded ? (
-            <button
-              onClick={onLoadLibrary}
-              className="p-1.5 bg-amber2 hover:bg-amber2-hover text-mx-deepest rounded-mx-sm transition-colors"
-              title="Load default library"
             >
-              <Zap size={11} />
+              <Icon size={13} className={active ? 'text-amber2' : 'opacity-70'} />
+              {it.label}
             </button>
-          ) : (
-            <button
-              onClick={onUnloadLibrary}
-              className="p-1.5 bg-mx-card hover:bg-bad/15 text-ink-muted hover:text-bad rounded-mx-sm transition-colors border border-line-subtle"
-              title="Unload library"
-            >
-              <X size={11} />
-            </button>
+          )
+        })}
+      </div>
+
+      <div className="flex-1 min-w-[12px]" />
+
+      {/* Library status */}
+      <div className="flex items-center gap-2 px-3 border-l border-line-subtle shrink-0">
+        <div
+          className={`w-1.5 h-1.5 rounded-full ${
+            libraryStatus?.loaded
+              ? 'bg-ok shadow-[0_0_6px_#3DD68C]'
+              : 'bg-bad shadow-[0_0_6px_#E85C4A]'
+          }`}
+        ></div>
+        <div className="flex flex-col leading-none gap-[3px]">
+          <span
+            className={`text-[9px] font-semibold uppercase tracking-wider ${
+              libraryStatus?.loaded ? 'text-ok' : 'text-bad'
+            }`}
+          >
+            {libraryStatus?.loaded ? 'Active' : 'No Library'}
+          </span>
+          {libraryStatus?.loaded && (
+            <span className="text-[9px] font-mono text-ink-muted">
+              {libraryStatus.tracks?.toLocaleString?.() ?? libraryStatus.tracks} tracks
+            </span>
           )}
         </div>
+        {!libraryStatus?.loaded ? (
+          <button
+            onClick={onLoadLibrary}
+            className="p-1 bg-amber2 hover:bg-amber2-hover text-mx-deepest rounded-mx-sm transition-colors"
+            title="Load default library"
+          >
+            <Zap size={11} />
+          </button>
+        ) : (
+          <button
+            onClick={onUnloadLibrary}
+            className="p-1 bg-mx-card hover:bg-bad/15 text-ink-muted hover:text-bad rounded-mx-sm transition-colors border border-line-subtle"
+            title="Unload library"
+          >
+            <X size={11} />
+          </button>
+        )}
       </div>
 
-      {/* Active workspace — section label + compact nav rows */}
-      <div className="mx-caption px-3 pt-3.5 pb-1.5">{workspace.label}</div>
-      <nav className="flex-1 overflow-y-auto pb-2">
-        {workspace.items.map((it) => (
-          <RbNavRow
-            key={it.tab}
-            icon={it.icon}
-            label={it.label}
-            active={activeTab === it.tab}
-            onClick={() => setActiveTab(it.tab)}
-          />
-        ))}
-      </nav>
-
-      {/* Footer */}
-      <div className="border-t border-line-subtle py-1">
-        <RbNavRow
-          icon={Settings}
-          label="Settings"
-          active={activeTab === 'settings'}
-          onClick={() => setActiveTab('settings')}
-        />
-        <RbNavRow icon={AlertTriangle} label="Exit" danger onClick={handleExit} />
-      </div>
+      {/* Settings + Exit */}
+      <button
+        onClick={() => setActiveTab('settings')}
+        title="Settings"
+        className={`flex items-center px-3 border-l border-line-subtle transition-colors shrink-0 ${
+          activeTab === 'settings'
+            ? 'bg-mx-selected text-amber2'
+            : 'text-ink-secondary hover:text-ink-primary hover:bg-mx-hover'
+        }`}
+      >
+        <Settings size={15} />
+      </button>
+      <button
+        onClick={handleExit}
+        title="Exit"
+        className="flex items-center px-3 border-l border-line-subtle text-ink-muted hover:text-bad hover:bg-mx-hover transition-colors shrink-0"
+      >
+        <AlertTriangle size={15} />
+      </button>
     </div>
   )
 }
@@ -720,23 +723,19 @@ const App = () => {
         </div>
       )}
 
-      <WorkspaceBar
+      <TopBar
         workspaces={workspaces}
         activeWorkspace={activeWorkspace}
-        onPick={handleWorkspacePick}
-      />
-
-      <div className="flex flex-1 min-h-0">
-      <Sidebar
-        workspace={currentWorkspace}
+        currentWorkspace={currentWorkspace}
         activeTab={activeTab}
+        onPickWorkspace={handleWorkspacePick}
         setActiveTab={setActiveTab}
         libraryStatus={libraryStatus}
         onLoadLibrary={handleLoadLibrary}
         onUnloadLibrary={handleUnloadLibrary}
       />
 
-      <main className="flex-1 h-full overflow-hidden relative z-10 bg-mx-deepest">
+      <main className="flex-1 min-h-0 overflow-hidden relative z-10 bg-mx-deepest">
         <div className={`h-full w-full relative ${playerTrack ? 'pb-20' : ''}`}>
           <Suspense fallback={<ViewLoader />}>
             {/* STABILITY: Each view wrapped in its own ErrorBoundary */}
@@ -812,7 +811,6 @@ const App = () => {
           </Suspense>
         </div>
       </main>
-      </div>
 
       {/* Hide Player in Editor, Studio and Ranking modes */}
       {!['editor', 'ranking', 'studio'].includes(activeTab) && (

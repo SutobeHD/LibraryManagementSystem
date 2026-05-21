@@ -182,7 +182,7 @@ const Player = ({ track, onClose }) => {
             className="flex items-center px-5 fixed bottom-0 right-0 z-50 animate-slide-up shadow-mx-lg gap-4"
             style={{
                 height: 72,
-                left: 220,
+                left: 0,
                 background: 'var(--mx-panel)',
                 borderTop: '1px solid var(--line-subtle)',
             }}
