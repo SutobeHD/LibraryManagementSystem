@@ -763,7 +763,7 @@ const App = () => {
               </ErrorBoundary>
             </div>
 
-            <div className={activeTab === 'editor' ? 'h-full' : 'hidden'}>
+            <div className={activeTab === 'editor' ? 'studio-skin h-full' : 'hidden'}>
               <ErrorBoundary key="eb-editor">
                 <DjEditDaw track={activeTrack} />
               </ErrorBoundary>

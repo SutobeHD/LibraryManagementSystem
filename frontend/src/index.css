@@ -467,3 +467,40 @@
 .toolbar-btn.danger:hover { color: var(--bad); }
 
 .toolbar-divider { width: 1px; height: 24px; background: var(--line-subtle); }
+
+/* ─────────────────────────────────────────────────────────────
+   Studio skin — scoped warm-gray "Blender" palette for the editor.
+   Wrap the editor in `.studio-skin`: it both redefines the --mx-*
+   custom properties (for var()-based styles) and repaints the
+   Tailwind bg-mx-* utilities (literal hex) to the Studio greys.
+   Higher specificity than the bare utilities — no !important needed.
+   ───────────────────────────────────────────────────────────── */
+.studio-skin {
+  --mx-deepest:  #1c1d20;
+  --mx-shell:    #2a2c30;
+  --mx-panel:    #3a3c42;
+  --mx-surface:  #34363c;
+  --mx-card:     #2f3137;
+  --mx-hover:    #45474d;
+  --mx-selected: #3a3c42;
+  --mx-input:    #26272b;
+}
+.studio-skin .bg-mx-deepest     { background-color: #1c1d20; }
+.studio-skin .bg-mx-deepest\/30 { background-color: rgb(28 29 32 / 0.3); }
+.studio-skin .bg-mx-deepest\/50 { background-color: rgb(28 29 32 / 0.5); }
+.studio-skin .bg-mx-deepest\/80 { background-color: rgb(28 29 32 / 0.8); }
+.studio-skin .bg-mx-shell       { background-color: #2a2c30; }
+.studio-skin .bg-mx-shell\/30   { background-color: rgb(42 44 48 / 0.3); }
+.studio-skin .bg-mx-shell\/50   { background-color: rgb(42 44 48 / 0.5); }
+.studio-skin .bg-mx-shell\/60   { background-color: rgb(42 44 48 / 0.6); }
+.studio-skin .bg-mx-shell\/80   { background-color: rgb(42 44 48 / 0.8); }
+.studio-skin .bg-mx-panel       { background-color: #3a3c42; }
+.studio-skin .bg-mx-surface     { background-color: #34363c; }
+.studio-skin .bg-mx-card        { background-color: #2f3137; }
+.studio-skin .bg-mx-card\/40    { background-color: rgb(47 49 55 / 0.4); }
+.studio-skin .bg-mx-card\/50    { background-color: rgb(47 49 55 / 0.5); }
+.studio-skin .bg-mx-card\/60    { background-color: rgb(47 49 55 / 0.6); }
+.studio-skin .bg-mx-hover       { background-color: #45474d; }
+.studio-skin .bg-mx-hover\/60   { background-color: rgb(69 71 77 / 0.6); }
+.studio-skin .bg-mx-selected    { background-color: #3a3c42; }
+.studio-skin .bg-mx-input       { background-color: #26272b; }
