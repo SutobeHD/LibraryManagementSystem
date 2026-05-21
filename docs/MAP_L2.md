@@ -236,6 +236,7 @@ Download Registry — SQLite-based deduplication & analysis history log.
 - `register_download()` — Insert or update a download record.
 - `update_analysis()` — Store DSP analysis results and mark the record as 'analyzed'.
 - `mark_failed()` — Mark a download as permanently failed.
+- `record_unified_download()` — Record one unified multi-source downloader result.
 - `delete_entry()` — Remove a registry entry (e.g.
 - `get_history()` — Paginated history log, newest-first.
 - `get_stats()` — Aggregate statistics for the history dashboard widget.
@@ -313,6 +314,16 @@ Shared Pydantic v2 data models for the unified multi-source downloader.
 - `FetchRequest` — Input for ``POST /api/downloads/unified/fetch`` — commit a candidate.
 - `FetchResponse` — Output of the fetch flow: a job handle to poll.
 - `JobStatus` — Polled state of an in-flight (or finished) download job.
+
+### `app/downloader/orchestrator.py`
+
+Phase-5 orchestrator — request cache, job registry, post-download pipeline.
+
+- `remember_resolve()` — Register a :class:`ResolveResponse` so a later ``/fetch`` can find it.
+- `remember_search()` — Register a :class:`SearchResponse` so a later ``/fetch`` can find it.
+- `get_job()` — Return the current :class:`JobStatus` for ``job_id``, or ``None``.
+- `enqueue_fetch()` — Commit a chosen candidate to download — spawn a background fetch job.
+- `execute_fetch()` — Run the 9-step post-download pipeline for one job (runs on a daemon thread).
 
 ### `app/downloader/providers/__init__.py`
 
@@ -674,6 +685,10 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `soundcloud_download_playlist()` — Enqueue download for every track in a SoundCloud playlist.
 - `get_soundcloud_tasks()` — Poll all active download tasks.
 - `get_soundcloud_task_status()` — Get status for a specific download task.
+- `unified_downloads_resolve()` — Resolve one identifier into ranked, match-gated candidates.
+- `unified_downloads_search()` — Free-form query into ISRC-deduped, quality-ranked hit clusters.
+- `unified_downloads_fetch()` — Commit a chosen candidate to download — enqueues a background job.
+- `unified_downloads_job_status()` — Poll the state of an in-flight (or finished) unified download job.
 - `get_download_history()` — Paginated analysis history log for all downloaded tracks.
 - `get_download_stats()` — Aggregate statistics: total downloads, analyzed, failed, device count, date range.
 - `check_already_downloaded()` — Fast O(1) deduplication check.
@@ -1813,6 +1828,27 @@ Schema-migration tests for the unified multi-source downloader (Phase 0, P0.3).
 - `test_legacy_row_survives_migration()` — A row in the pre-migration column set stays readable; new columns read NULL.
 - `test_new_columns_are_writable()` — The four new columns accept values (round-trip).
 
+### `tests/test_downloads_unified.py`
+
+Route tests for the unified multi-source downloader API.
+
+- `test_resolve_requires_auth()` — POST /resolve without a Bearer header is 401.
+- `test_search_requires_auth()` — POST /search without a Bearer header is 401.
+- `test_fetch_requires_auth()` — POST /fetch without a Bearer header is 401.
+- `test_jobs_poll_requires_auth()` — GET /jobs/{id} without a Bearer header is 401.
+- `test_resolve_empty_identifier_is_400()` — A whitespace-only identifier is rejected with 400.
+- `test_search_empty_query_is_400()` — A whitespace-only query is rejected with 400.
+- `test_fetch_negative_candidate_index_is_400()` — A negative candidate_index is rejected with 400.
+- `test_fetch_empty_request_id_is_400()` — A blank request_id is rejected with 400.
+- `test_resolve_happy_path()` — A valid identifier returns the resolver's ResolveResponse as JSON.
+- `test_search_happy_path()` — A valid query returns the search SearchResponse as JSON.
+- `test_fetch_happy_path()` — A valid fetch returns the job handle from enqueue_fetch.
+- `test_fetch_keyerror_maps_to_400()` — enqueue_fetch raising KeyError → 400 (unknown request_id / bad index).
+- `test_fetch_runtimeerror_maps_to_503()` — enqueue_fetch raising RuntimeError → 503 (downloader disabled).
+- `test_resolve_transport_failure_maps_to_502()` — A provider httpx transport error surfaces as 502.
+- `test_jobs_poll_happy_path()` — GET /jobs/{id} returns the JobStatus for a known job.
+- `test_jobs_poll_unknown_id_is_404()` — GET /jobs/{id} for an unknown job id is 404.
+
 ### `tests/test_external_track_match.py`
 
 Tests for ``app/external_track_match.py`` — the shared track-matching module.
@@ -2173,6 +2209,22 @@ Tests for ``app/downloader/models.py`` — the unified-downloader data models.
 - `test_source_provider_partial_impl_still_abstract()` — A subclass missing an abstract method is still not instantiable.
 - `test_source_provider_complete_impl_instantiable()` — A subclass implementing all four abstract members instantiates + works.
 - `test_literal_aliases_are_importable()` — Platform / AudioFormat literal aliases are importable from the module.
+
+### `tests/test_unified_downloader_orchestrator.py`
+
+Tests for ``app/downloader/orchestrator.py`` — the Phase-5 fetch pipeline.
+
+- `test_remember_resolve_then_enqueue_finds_candidate()` — A resolve result is cached so enqueue_fetch can resolve request_id+index.
+- `test_remember_search_wraps_hits_as_candidates()` — A search result's hits become fetch-ready candidates in the cache.
+- `test_enqueue_unknown_request_id_raises_keyerror()` — An unknown request_id is a KeyError (route maps it to 400).
+- `test_enqueue_index_out_of_range_raises_keyerror()` — A candidate_index past the end of the list is a KeyError.
+- `test_enqueue_when_downloader_disabled_raises_runtimeerror()` — The unified_downloader.enabled kill-switch makes enqueue raise RuntimeError.
+- `test_pipeline_happy_path_lands_file_and_records()` — All 9 steps run: file lands in MUSIC_DIR/<artist>/, registry row written.
+- `test_pipeline_writes_provenance_into_comment()` — Step 5/6 — provenance string is handed to write_tags in the COMMENT slot.
+- `test_pipeline_dedup_hit_short_circuits()` — Step 2 — a SHA-256 already in the registry returns the existing path, no convert.
+- `test_pipeline_failing_fetch_marks_job_failed()` — Step 1 fails — the job ends 'failed' with the error, no exception escapes.
+- `test_pipeline_failing_tag_write_step_marks_job_failed()` — A failure deeper in the pipeline (step 6) still ends the job 'failed'.
+- `test_get_job_unknown_returns_none()` — get_job for an id that was never enqueued is None (route maps to 404).
 
 ### `tests/test_unified_downloader_providers.py`
 

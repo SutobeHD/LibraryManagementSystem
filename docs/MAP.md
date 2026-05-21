@@ -37,6 +37,7 @@
 | `app/downloader/match_adapter.py` | Thin matching adapter over the shared ``app.external_track_match`` module. |
 | `app/downloader/migration.py` | One-shot folder migration: per-source layout -> unified layout (D7). |
 | `app/downloader/models.py` | Shared Pydantic v2 data models for the unified multi-source downloader. |
+| `app/downloader/orchestrator.py` | Phase-5 orchestrator — request cache, job registry, post-download pipeline. |
 | `app/downloader/providers/__init__.py` | Concrete :class:`~app.downloader.SourceProvider` implementations. |
 | `app/downloader/providers/soundcloud.py` | SoundCloud :class:`~app.downloader.SourceProvider`. |
 | `app/downloader/providers/spotiflac.py` | SpotiFLAC-backed multi-service provider (crash-isolated). |
@@ -210,6 +211,7 @@
 | `tests/test_auth.py` | Tests for ``app/auth.py`` -- Bearer-token session authentication. |
 | `tests/test_database.py` | Tests for `app/database.py`. |
 | `tests/test_download_registry_schema.py` | Schema-migration tests for the unified multi-source downloader (Phase 0, P0.3). |
+| `tests/test_downloads_unified.py` | Route tests for the unified multi-source downloader API. |
 | `tests/test_external_track_match.py` | Tests for ``app/external_track_match.py`` — the shared track-matching module. |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
 | `tests/test_main_security.py` | Regression tests for ``POST /api/file/reveal`` sandbox. |
@@ -227,6 +229,7 @@
 | `tests/test_unified_downloader_match.py` | Tests for ``app/downloader/match_adapter.py`` — the 100%-match gate. |
 | `tests/test_unified_downloader_migration.py` | Tests for ``app/downloader/migration.py`` — per-source → unified folder move. |
 | `tests/test_unified_downloader_models.py` | Tests for ``app/downloader/models.py`` — the unified-downloader data models. |
+| `tests/test_unified_downloader_orchestrator.py` | Tests for ``app/downloader/orchestrator.py`` — the Phase-5 fetch pipeline. |
 | `tests/test_unified_downloader_providers.py` | Tests for ``app/downloader/providers/`` — the Phase-1 provider layer. |
 | `tests/test_unified_downloader_quality.py` | Tests for ``app/downloader/quality.py`` — tier classification + policy picking. |
 | `tests/test_unified_downloader_resolver.py` | Tests for ``app/downloader/resolver.py`` — the Phase-3 resolve layer (P3.11). |
