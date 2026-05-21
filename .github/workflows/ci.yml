@@ -32,7 +32,7 @@ jobs:
           # Install only what's safely pip-resolvable on Linux runners.
           # Heavy native deps (madmom, essentia, rbox) get `ignore_missing_imports`
           # in mypy + a per-file skip in pytest, so CI doesn't need them.
-          pip install fastapi uvicorn pydantic httpx requests psutil keyring \
+          pip install fastapi uvicorn pydantic python-multipart httpx requests psutil keyring \
                       python-dotenv numpy scipy mutagen soundfile platformdirs \
                       watchdog
 
