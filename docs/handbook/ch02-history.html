@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>02 · Project History &amp; Evolution — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 02 · Orientation</div>
+          <h1>Project History &amp; Evolution</h1>
+          <p class="ch-lead">The application now documented as "Music Library Manager"
+            began life under a different name, survived a four-name identity crisis,
+            absorbed a sweeping code-quality cleanup, and then a focused security
+            hardening wave — before settling into a self-sustaining, multi-agent
+            development pipeline.</p>
+        </header>
+
+        <h2>2.1 Reading the History</h2>
+        <p>This project's history is unusually well documented because the team
+        treats process artefacts as first-class files in the repository. The
+        evolution can be reconstructed precisely from five sources, all still
+        present in the codebase:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Artefact</th><th>What it records</th></tr></thead>
+          <tbody>
+            <tr><td><code>docs/NAMING_MAP.md</code></td><td>The v0.0.2 rename refactor — every occurrence of the old name and its replacement.</td></tr>
+            <tr><td><code>CHANGELOG.md</code></td><td>The v1.0.0-beta release and the current unreleased line.</td></tr>
+            <tr><td><code>docs/HANDOVER.md</code></td><td>The "Slopcode-Cleanup" mission briefing — a six-phase quality remediation plan.</td></tr>
+            <tr><td><code>docs/research/archived/</code></td><td>Seven completed security research documents with shipped-on dates.</td></tr>
+            <tr><td>The git commit log</td><td>The fine-grained record of the security and pipeline eras.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="callout note">
+          <span class="ico">◆</span>
+          <div class="body">
+            <span class="ct">A note on the git window</span>
+            <p>The visible git history is a focused window of 50 commits spanning
+            2026-05-16 to 2026-05-20 — the security-hardening and pipeline eras. The
+            earlier eras (naming, beta release, cleanup) predate that window and are
+            reconstructed here from the process artefacts above, which the team kept
+            in-tree precisely so that history would never be lost.</p>
+          </div>
+        </div>
+
+        <h2>2.2 The Timeline at a Glance</h2>
+        <div class="figure">
+          <div class="mermaid">
+timeline
+  title The Evolution of Music Library Manager
+  Era 0 - Origin : Built as "RB Editor Pro" : Tauri + React + FastAPI desktop app : Rekordbox XML, audio editor, SoundCloud, USB
+  Era 1 - Identity : 2026-05-05 : v0.0.2 rename refactor : NAMING_MAP.md authored : Four conflicting names reconciled
+  Era 2 - Beta : 2026-05-07 : v1.0.0-beta released : Two end-to-end workflows shippable : Windows MSI + NSIS installers
+  Era 3 - Cleanup : 2026-05-11 : Slopcode-Cleanup mission : Six-phase quality remediation : Tooling, tests, CI established
+  Era 4 - Hardening : 2026-05-16 to 05-19 : Seven security features shipped : Bearer auth, rate limit, sandboxing
+  Era 5 - Pipeline : 2026-05-20 : Multi-agent research pipeline : Five autonomous routines : Four user sign-off gates
+          </div>
+          <figcaption><span class="fig-num">Figure 2.1</span> — Six eras. Each is
+          unpacked in the sections that follow.</figcaption>
+        </div>
+
+        <h2>2.3 Era 0 — Origin: "RB Editor Pro"</h2>
+        <p>The application was originally named <strong>RB Editor Pro</strong> — "RB"
+        for Rekordbox. From the very beginning it was a three-stack desktop
+        application: a Tauri 2 shell wrapping a React frontend and a Python FastAPI
+        backend. Even in this earliest recoverable state the project already had its
+        defining features in place, as the HANDOVER document records:</p>
+
+        <ul>
+          <li>Rekordbox XML library handling.</li>
+          <li>A non-destructive audio editor.</li>
+          <li>SoundCloud synchronisation built on an OAuth PKCE flow.</li>
+          <li>USB synchronisation to CDJ hardware.</li>
+          <li>FFT-based waveform rendering.</li>
+        </ul>
+
+        <p>The repository lived locally at a Windows path ending in
+        <code>RB_Editor_Pro</code>, and the project was tracked on GitHub. This was
+        a working product — but it carried the scars of fast, exploratory
+        development, which the next three eras systematically removed.</p>
+
+        <h2>2.4 Era 1 — The Identity Crisis and the Rename</h2>
+        <p>By early May 2026 the project had a genuine problem: it answered to
+        <strong>four different names</strong> depending on where you looked.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Location</th><th>Name it used</th></tr></thead>
+          <tbody>
+            <tr><td>Local filesystem path</td><td><code>RB_Editor_Pro</code></td></tr>
+            <tr><td>Root <code>package.json</code></td><td><code>music-library-manager</code></td></tr>
+            <tr><td>The GitHub repository</td><td><code>LibraryManagementSystem</code></td></tr>
+            <tr><td><code>Cargo.toml</code></td><td><code>library-management-system</code></td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>This is more than cosmetic. A name appears in load-bearing places: the
+        Tauri bundle identifier (wrong value breaks the installer), and the OS
+        keyring service name used to store SoundCloud OAuth tokens (wrong value
+        breaks login silently). To untangle it without breaking anything, the team
+        produced <code>docs/NAMING_MAP.md</code> on 2026-05-05 — an exhaustive,
+        line-numbered inventory of every name occurrence, classified by criticality.</p>
+
+        <div class="callout warn">
+          <span class="ico">▲</span>
+          <div class="body">
+            <span class="ct">The critical occurrences</span>
+            <p>Nine keyring calls in <code>app/main.py</code> used the service name
+            <code>"rb_editor_pro"</code> — and the map flagged that any existing
+            user's stored tokens would become unreachable after the rename, calling
+            for an optional migration helper. The Tauri bundle identifier
+            <code>com.rbeditor.pro</code> was likewise marked as installer-breaking.</p>
+          </div>
+        </div>
+
+        <p>The refactor standardised on <strong>library-management-system</strong>
+        (kebab-case for manifests, snake_case where a manifest required it) and was
+        recorded as the work of <strong>Alpha v0.0.2</strong>. The naming map was
+        deliberately retained in the repository afterwards — not as dead weight, but
+        as an audit trail and as a recipe for any future rename. It even ends with a
+        step-by-step procedure for the next time the project changes its name.</p>
+
+        <h2>2.5 Era 2 — The v1.0.0-beta Release</h2>
+        <p>On <strong>2026-05-07</strong> the project shipped its first public beta,
+        <strong>v1.0.0-beta</strong>. The changelog frames it precisely: a
+        "standalone DJ-library manager that competes with Rekordbox/Serato while
+        staying open and local-first." The beta's defining achievement was that both
+        headline workflows from Chapter 1 were now fully supported end to end.</p>
+
+        <h3>What the beta could do</h3>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Area</th><th>Beta capability</th></tr></thead>
+          <tbody>
+            <tr><td>Workflow A</td><td>SoundCloud OAuth, playlist and likes browser, per-playlist download with an anonymous fallback, full auto-analysis, auto-import, auto-playlist, USB sync.</td></tr>
+            <tr><td>Workflow B</td><td>Drag-drop and folder-picker import; the folder name becomes the playlist; the identical analysis and ANLZ pipeline.</td></tr>
+            <tr><td>Library</td><td>Standalone XML mode with full feature parity to Live mode; a wrapper routing every CRUD operation to the active mode.</td></tr>
+            <tr><td>USB export</td><td><code>exportLibrary.db</code> via the OneLibrary writer, per-track ANLZ files, audio and artwork copy.</td></tr>
+            <tr><td>UI</td><td>The four-card library-mode picker, the seven-stage Import Manager, the sticky progress banner, inline rating and colour tags, tokenised search.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>The changelog is also honest about the beta's limits: USB sync depended on
+        <code>pyrekordbox</code>, manual hot-cue editing was post-MVP, and creating a
+        <code>master.db</code> from scratch without a Rekordbox install was not yet
+        possible. The beta also documented an "Aggressive Download Mode" — a hidden
+        setting, revealed by tapping a dot five times, intended only for tracks a
+        user has a personal right to.</p>
+
+        <h2>2.6 Era 3 — The Slopcode-Cleanup Mission</h2>
+        <p>A beta that <em>works</em> is not the same as a beta that is
+        <em>maintainable</em>. Around 2026-05-11 the team commissioned a sweeping,
+        systematic quality remediation, briefed in <code>docs/HANDOVER.md</code> as
+        the <strong>Slopcode-Cleanup</strong>. The handover document is itself a
+        notable artefact: a complete mission briefing written for a fresh AI
+        instance with no prior context, including hard constraints, definitions of
+        done, and an escalation protocol.</p>
+
+        <p>The cleanup was structured as six sequential phases, to be completed and
+        committed one at a time:</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TD
+  P1["Phase 1 · Security Hardening<br/>SQL f-strings, bare excepts,<br/>subprocess timeouts, locks"]
+  P2["Phase 2 · Rust Correctness<br/>unsafe Send/Sync, fake key,<br/>FFT bug, typed errors"]
+  P3["Phase 3 · Backend Hardening<br/>Pydantic v2, type hints,<br/>async HTTP, pathlib"]
+  P4["Phase 4 · Frontend Cleanup<br/>toast over alert, log util,<br/>split seven god-components"]
+  P5["Phase 5 · Repo Hygiene<br/>naming, dead files, ruff,<br/>eslint, CI workflow"]
+  P6["Phase 6 · Verification &amp; Tests<br/>pytest suite, e2e, smoke"]
+  P1 --> P2 --> P3 --> P4 --> P5 --> P6
+          </div>
+          <figcaption><span class="fig-num">Figure 2.2</span> — The six phases of
+          the Slopcode-Cleanup, executed strictly in order.</figcaption>
+        </div>
+
+        <h3>What the cleanup found and fixed</h3>
+        <p>The handover's audit appendix is a frank inventory of the technical debt
+        a fast beta accumulates. A representative sample:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Layer</th><th>Debt the audit catalogued</th></tr></thead>
+          <tbody>
+            <tr><td>Backend</td><td>40+ bare <code>except:</code> clauses, three raw SQL f-strings, ten synchronous HTTP calls inside async functions, three subprocesses with no timeout, a 207-line exception handler, ~87 missing type hints across three modules.</td></tr>
+            <tr><td>Rust</td><td>An <code>unsafe impl Send + Sync</code>, a <code>detect_key()</code> that returned a hardcoded fake value, an FFT band bug treating bin indices as Hz, ~50 <code>println!</code> calls, undocumented commands.</td></tr>
+            <tr><td>Frontend</td><td>24 <code>alert/confirm/prompt</code> calls, 34 stray <code>console.log</code> statements, five raw <code>fetch()</code> calls, and seven "god components" — the largest, <code>WaveformEditor.jsx</code>, was 2,223 lines.</td></tr>
+            <tr><td>Repository</td><td>The four-name chaos, dead Docker files, 33+ debug scripts tracked in <code>app/</code>, a drifting <code>requirements.txt</code>, and no linters, formatters, or CI at all.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>The cleanup's lasting legacy is visible all over the codebase today. The
+        seven god-components were split into the focused sub-component directories
+        documented in Chapters 15–17. The Python tooling (<code>ruff</code>,
+        <code>black</code>, <code>mypy</code>), the frontend tooling (ESLint,
+        Prettier), and the <code>ci.yml</code> workflow that gates every push all
+        date from Phase 5. The structured logging, the typed exceptions, and the
+        concurrency locks documented in Chapters 7–10 were all installed here. This
+        era is the reason the rest of this handbook can describe a clean, layered,
+        rule-bound codebase rather than a beta-grade one.</p>
+
+        <h2>2.7 Era 4 — The Security Hardening Wave</h2>
+        <p>Between <strong>2026-05-16 and 2026-05-19</strong> the project executed a
+        focused security campaign. It began as a single audit of the FastAPI route
+        surface and fanned out into seven distinct, individually-researched and
+        individually-shipped security features. Each one has an archived research
+        document recording the problem, the options considered, and the outcome.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Shipped</th><th>Feature</th><th>What it closed</th></tr></thead>
+          <tbody>
+            <tr><td>05-17</td><td>API auth hardening</td><td>The parent feature. Bearer-token auth on 84 of 85 mutation routes; the legacy <code>SHUTDOWN_TOKEN</code> deleted.</td></tr>
+            <tr><td>05-17</td><td>Constant-time compare</td><td>A shared <code>safe_compare</code> helper replacing timing-attack-prone <code>==</code> on secrets.</td></tr>
+            <tr><td>05-17</td><td>Rate-limit design</td><td>A custom 180-line token-bucket limiter on the three highest-risk routes.</td></tr>
+            <tr><td>05-18</td><td>File-reveal sandbox</td><td>A path-traversal hole where <code>/api/file/reveal</code> could open any location on disk.</td></tr>
+            <tr><td>05-18</td><td>Error-handler leak</td><td>Stack traces with absolute paths persisted to the log file.</td></tr>
+            <tr><td>05-18</td><td>Pydantic blob-write</td><td>An unbounded stored-blob write primitive in the settings endpoint.</td></tr>
+            <tr><td>05-19</td><td>CORS tightening</td><td>Wildcard CORS and a latent CSRF surface; <code>allow_credentials</code> turned off.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>This wave is significant enough — and the resulting architecture
+        load-bearing enough — that all of Chapter 21 is devoted to the security
+        model it produced. What matters for the history is the <em>method</em>: each
+        fix was treated as a research topic with a written rationale, not a hurried
+        patch. That method became permanent in the next era.</p>
+
+        <h2>2.8 Era 5 — The Multi-Agent R&amp;D Pipeline</h2>
+        <p>On <strong>2026-05-20</strong> the project formalised the way it does
+        development. The security wave had proven that "research the problem, write
+        down the options, then implement" produced better results than diving
+        straight into code. The team turned that practice into infrastructure: a
+        <strong>multi-agent research-and-implementation pipeline</strong>.</p>
+
+        <p>Every feature now lives as a Markdown document that moves through a fixed
+        sequence of states, its current state encoded in its folder and filename
+        prefix. Five autonomous routines, running on a cron schedule, advance those
+        documents — drafting, researching, planning, and even writing code — while
+        the user keeps four deliberate sign-off gates.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  I["idea_"] --> D["drafting_"]
+  D --> GA{"GATE A"}
+  GA --> E["exploring_"]
+  E --> GB{"GATE B"}
+  GB --> V["evaluated_"]
+  V --> DP["draftplan_"]
+  DP --> R["review_"]
+  R --> GC{"GATE C"}
+  GC --> AC["accepted_"]
+  AC --> IP["inprogress_"]
+  IP --> GD{"GATE D"}
+  GD --> IM["implemented_"]
+          </div>
+          <figcaption><span class="fig-num">Figure 2.3</span> — The research
+          pipeline state chain. Diamonds are user gates; the rest are advanced
+          autonomously. Chapter 24 documents the full mechanism.</figcaption>
+        </div>
+
+        <p>The git log of this era reflects the transition directly: commits adding
+        the five versioned routine prompts, the pipeline status script, the gate
+        slash-commands, and the documents that retarget the project's own operating
+        rules to the new model. The pipeline is not a side project — it is now the
+        primary way the roadmap in Chapter 25 gets built.</p>
+
+        <h2>2.9 Where the Project Stands Today</h2>
+        <p>As of this handbook's compilation the project is a mature, hardened
+        v1.0.0-beta with:</p>
+
+        <div class="cards">
+          <div class="card"><div class="big">7</div><div class="lbl">Security features shipped and archived</div></div>
+          <div class="card"><div class="big">12</div><div class="lbl">Features in the research pipeline</div></div>
+          <div class="card"><div class="big">5</div><div class="lbl">Autonomous development routines</div></div>
+          <div class="card"><div class="big">200+</div><div class="lbl">Tests in the suite</div></div>
+        </div>
+
+        <p>The "Unreleased" section of the changelog currently carries the Phase-1
+        Bearer-authentication work, meaning the next tagged release will fold the
+        security wave into a versioned build. The twelve pipeline documents — four
+        on external track matching, three on recommenders, two on
+        security/concurrency infrastructure, one on metadata repair, one on a mobile
+        companion — are the subject of Chapter 25.</p>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>The project evolved through six eras: an origin as "RB Editor Pro", a
+            v0.0.2 rename that reconciled four conflicting names, the v1.0.0-beta
+            release of 2026-05-07, a six-phase Slopcode-Cleanup that installed the
+            tooling and discipline the codebase runs on today, a four-day security
+            hardening wave that shipped seven features, and finally a multi-agent
+            research pipeline that turned "research before code" into permanent
+            infrastructure. The team's habit of keeping process artefacts in-tree is
+            why this history can be told at all.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

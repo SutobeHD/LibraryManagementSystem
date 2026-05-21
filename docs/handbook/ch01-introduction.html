@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>01 · Introduction &amp; Vision — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 01 · Orientation</div>
+          <h1>Introduction &amp; Vision</h1>
+          <p class="ch-lead">Music Library Manager is a standalone desktop application
+            that gives DJs full, local ownership of their music library — and the
+            ability to export USB sticks that Pioneer CDJ hardware reads natively,
+            without paying rent to anybody's cloud.</p>
+        </header>
+
+        <h2>1.1 What This Product Is</h2>
+        <p>Music Library Manager is a <strong>desktop DJ-library manager</strong>. It
+        organises a DJ's collection of audio files — tagging, rating, grouping into
+        playlists, analysing tempo and musical key, drawing waveforms, placing cue
+        points — and then writes that collection out to a USB stick in the exact
+        binary format that Pioneer's industry-standard CDJ-3000 players (and other
+        modern CDJ/XDJ hardware) expect.</p>
+
+        <p>In the language of the DJ industry, it is a direct competitor to
+        <strong>Rekordbox</strong> (Pioneer's own library software) and
+        <strong>Serato DJ</strong>. The difference is one of philosophy. Those
+        products are commercial, increasingly subscription-driven, and they hold a
+        DJ's metadata inside a proprietary database whose format the vendor controls.
+        Music Library Manager is built on the opposite premise: the library is
+        <em>yours</em>, it lives on <em>your</em> disk, it works <em>offline</em>,
+        and the format used to talk to the hardware is reverse-engineered, documented,
+        and open.</p>
+
+        <div class="callout note">
+          <span class="ico">◆</span>
+          <div class="body">
+            <span class="ct">One-sentence definition</span>
+            <p>A local-first, no-subscription desktop application that imports music
+            from local folders or SoundCloud, analyses it to professional DJ
+            standards, and exports CDJ-ready USB sticks — a fully open alternative
+            to Rekordbox and Serato.</p>
+          </div>
+        </div>
+
+        <h2>1.2 The Problem It Solves</h2>
+        <p>To understand why this application exists, you need to understand the
+        workflow of a working DJ and the friction baked into the incumbent tools.</p>
+
+        <h3>The DJ's pipeline</h3>
+        <p>A DJ does not simply "have music". A DJ maintains a <em>library</em> — a
+        curated, analysed, annotated collection — and continuously moves slices of it
+        onto the hardware they will actually perform with. That pipeline has four
+        stages:</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  A["Acquire<br/>buy / download / record"] --> B["Curate &amp; Analyse<br/>tag, rate, BPM, key, cues"]
+  B --> C["Organise<br/>playlists, crates, folders"]
+  C --> D["Export<br/>USB stick for the CDJ"]
+  D --> E["Perform<br/>the club / festival"]
+  E -.->|"play counts,<br/>new ideas"| A
+          </div>
+          <figcaption><span class="fig-num">Figure 1.1</span> — The DJ library
+          lifecycle. Music Library Manager owns stages 2 through 4 and closes the
+          loop back to stage 1.</figcaption>
+        </div>
+
+        <h3>Where the incumbents create friction</h3>
+        <p>The commercial tools handle this pipeline, but they impose costs that have
+        nothing to do with the music:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Friction point</th><th>How the incumbents impose it</th><th>How this project removes it</th></tr></thead>
+          <tbody>
+            <tr><td>Subscription rent</td><td>Core export and cloud features increasingly sit behind a monthly fee.</td><td>One-time local install. No account, no fee, ever.</td></tr>
+            <tr><td>Cloud dependency</td><td>Library sync, and sometimes activation, require an internet connection and a vendor account.</td><td>Fully offline. The application never phones home.</td></tr>
+            <tr><td>Format lock-in</td><td>The library database is a proprietary, undocumented format. Migrating away is painful by design.</td><td>Standalone XML library, plus reverse-engineered, documented Pioneer formats.</td></tr>
+            <tr><td>Hardware gatekeeping</td><td>USB export to CDJ hardware is a premium-tier feature.</td><td>USB export is a first-class, free capability.</td></tr>
+            <tr><td>Acquisition silos</td><td>Pulling tracks from streaming sources into a usable library is deliberately awkward.</td><td>SoundCloud integration is built directly into the import pipeline.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>The core insight of the project is that the genuinely hard part — the
+        reverse-engineered binary format that a CDJ-3000 reads off a USB stick — is a
+        <em>solved</em> problem. The Pioneer database (<code>export.pdb</code>) and
+        the per-track analysis files (<code>ANLZ0000.DAT</code> and friends) have
+        been studied by the open-source community for years. Once you can write those
+        bytes correctly, there is no technical reason a DJ should have to pay a
+        subscription to put music on a stick.</p>
+
+        <h2>1.3 The Vision</h2>
+        <p>The project is guided by four principles. They are not marketing slogans;
+        they are constraints that shape every architectural decision in the chapters
+        that follow.</p>
+
+        <div class="cards">
+          <div class="card">
+            <div class="big">①</div>
+            <div class="lbl">Local-first</div>
+            <div class="desc">All data lives on the user's disk. The application
+            functions completely with the network cable unplugged.</div>
+          </div>
+          <div class="card">
+            <div class="big">②</div>
+            <div class="lbl">No subscription</div>
+            <div class="desc">No account, no licence server, no tiered features.
+            The software is installed once and owned outright.</div>
+          </div>
+          <div class="card">
+            <div class="big">③</div>
+            <div class="lbl">Open formats</div>
+            <div class="desc">The library can be exported to plain XML; the Pioneer
+            binary formats are documented byte-for-byte.</div>
+          </div>
+          <div class="card">
+            <div class="big">④</div>
+            <div class="lbl">Hardware-native</div>
+            <div class="desc">Output is verified against real Pioneer-exported
+            sticks so a CDJ-3000 reads it without complaint.</div>
+          </div>
+        </div>
+
+        <p>"Local-first" deserves emphasis because it is unusual in 2026. Most
+        software of this complexity assumes a backend in the cloud. Music Library
+        Manager has a backend — a Python web server — but that server runs
+        <em>on the user's own machine</em>, bound to the loopback interface, started
+        and stopped by the desktop application itself. There is no remote component.
+        The "cloud" is a folder on a local disk. This single decision drives the
+        entire architecture, the security model, and the build pipeline.</p>
+
+        <h2>1.4 Who It Is For</h2>
+        <p>The application is built for the working and aspiring DJ who plays on
+        Pioneer hardware. Within that, three personas describe the audience well:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Persona</th><th>Need</th><th>What the app gives them</th></tr></thead>
+          <tbody>
+            <tr><td><strong>The club DJ</strong></td><td>Reliable, fast USB exports between gigs; cue points and beatgrids that survive the trip to the booth.</td><td>One-click USB sync, byte-verified PDB output, ANLZ files with auto-placed cues.</td></tr>
+            <tr><td><strong>The crate digger</strong></td><td>Pull a constant stream of new tracks from SoundCloud into a properly analysed library.</td><td>SoundCloud OAuth, playlist browsing, the legal downloader, and the full auto-analysis pipeline.</td></tr>
+            <tr><td><strong>The library curator</strong></td><td>Keep a large collection clean — no duplicates, consistent tags, no broken file paths.</td><td>The acoustic duplicate finder, the metadata name-fixer, library-health insights, batch tools.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>It is also, frankly, a tool for the DJ who resents the direction the
+        commercial software has taken and wants an exit. The standalone XML library
+        mode exists precisely so that a user can run the application with no
+        Rekordbox install present at all.</p>
+
+        <h2>1.5 The Two Headline Workflows</h2>
+        <p>Everything the application does ultimately serves one of two end-to-end
+        journeys. Both end with a USB stick that is ready for the club.</p>
+
+        <h3>Workflow A — SoundCloud to the club</h3>
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  SC["SoundCloud<br/>playlist / likes"] --> DL["Legal download<br/>official API"]
+  DL --> AN["Full analysis<br/>BPM · Key · Beatgrid<br/>Phrases · Auto-cues · Waveform"]
+  AN --> IM["Auto-import<br/>into library"]
+  IM --> PL["Auto-playlist<br/>SC_&lt;name&gt;"]
+  PL --> USB["USB sync<br/>CDJ-3000 ready"]
+          </div>
+          <figcaption><span class="fig-num">Figure 1.2</span> — Workflow A. A
+          SoundCloud playlist becomes a CDJ-ready stick with no manual analysis
+          step.</figcaption>
+        </div>
+
+        <h3>Workflow B — Local files to the club</h3>
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  F["Local files<br/>drag-drop / folder pick"] --> BN["Folder name<br/>becomes the playlist"]
+  BN --> AN2["Full analysis<br/>same pipeline as Workflow A"]
+  AN2 --> IM2["Library import<br/>duplicates kept together"]
+  IM2 --> USB2["USB sync<br/>CDJ-3000 ready"]
+          </div>
+          <figcaption><span class="fig-num">Figure 1.3</span> — Workflow B. Local
+          files travel the identical analysis and export path.</figcaption>
+        </div>
+
+        <p>The deliberate symmetry of these two workflows is an architectural
+        statement: a track's <em>origin</em> should not change how it is treated once
+        it is in the library. Whether a file arrived from SoundCloud or from a folder
+        on disk, it goes through the same analysis engine, gets the same ANLZ files,
+        and exports through the same USB writer. Chapter 6 traces both flows in full
+        detail.</p>
+
+        <h2>1.6 Two Library Modes</h2>
+        <p>The application can manage a DJ's collection in either of two modes, and a
+        single abstraction layer hides the difference from every feature above it.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Mode</th><th>Backing store</th><th>When to use it</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Standalone XML</strong></td><td>The application's own Rekordbox-compatible XML file, parsed into an in-memory cache.</td><td>The default. No Rekordbox install needed — the application is fully self-sufficient.</td></tr>
+            <tr><td><strong>Live</strong></td><td>An existing Rekordbox <code>master.db</code> SQLite database, read and written through the <code>pyrekordbox</code> library.</td><td>For DJs who already run Rekordbox and want this app to operate on the same collection.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>A wrapper object routes every create/read/update/delete operation to
+        whichever mode is active, so no feature in the codebase contains an
+        <code>if xml_mode … else live_mode …</code> branch. The library layer is the
+        subject of Chapter 10.</p>
+
+        <h2>1.7 Design Philosophy</h2>
+        <p>Beyond the four product principles, the codebase itself is shaped by a set
+        of engineering convictions that recur throughout this handbook:</p>
+
+        <ul>
+          <li><strong>Right tool, right layer.</strong> Real-time audio is Rust.
+          Offline DSP and orchestration are Python. The user interface is React.
+          The boundaries are deliberate and Chapter 4 explains why each layer earns
+          its place.</li>
+          <li><strong>Non-destructive by default.</strong> Editing cue points,
+          beatgrids, or volume envelopes never rewrites the source audio file. Edits
+          live in overlay project files. The original recording is sacred.</li>
+          <li><strong>Byte-exact interoperability.</strong> The Pioneer USB formats
+          are not approximated. They are verified byte-for-byte against a real
+          Pioneer-exported drive, because a single wrong flag silently corrupts a
+          stick (Chapters 12 and 13).</li>
+          <li><strong>Defensive isolation.</strong> A third-party library with a
+          known crashing bug is quarantined in a subprocess so it can never take down
+          the whole backend (Chapter 10).</li>
+          <li><strong>Security as a first-class concern.</strong> Even though the
+          server is loopback-only, every mutating endpoint is authenticated, every
+          file path is sandboxed, and the supply chain is hardened (Chapter 21).</li>
+        </ul>
+
+        <h2>1.8 A First Look at the Capabilities</h2>
+        <p>The full, exhaustive feature catalogue is Chapter 3. As an orientation,
+        here is the breadth of what the application does, grouped into its major
+        functional areas:</p>
+
+        <div class="figure">
+          <div class="mermaid">
+mindmap
+  root((Music Library<br/>Manager))
+    Library
+      Standalone XML mode
+      Live Rekordbox mode
+      Playlists and folders
+      Smart playlists
+      Tokenised search
+    Acquisition
+      SoundCloud OAuth
+      Legal downloader
+      Local-file import
+      Folder watcher
+    Analysis
+      BPM detection
+      Key detection
+      Beatgrid
+      Phrase and auto-cue
+      Waveform generation
+    Editing
+      Non-destructive DAW
+      Waveform editor
+      Cue and loop editing
+      Batch metadata tools
+    Export
+      USB sync to CDJ
+      ANLZ file writing
+      Rekordbox XML export
+      Hardware settings
+    Health
+      Duplicate finder
+      Library insights
+      Quality auditing
+          </div>
+          <figcaption><span class="fig-num">Figure 1.4</span> — The capability map.
+          Six functional areas, each unpacked in its own chapter later in this
+          handbook.</figcaption>
+        </div>
+
+        <h2>1.9 How This Handbook Is Organised</h2>
+        <p>The 28 chapters are grouped into seven parts:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Part</th><th>Chapters</th><th>Covers</th></tr></thead>
+          <tbody>
+            <tr><td>I — Orientation</td><td>1–3</td><td>Vision, history, and the complete feature catalogue.</td></tr>
+            <tr><td>II — Architecture</td><td>4–6</td><td>The three-tier model, the technology stack, and traced data flows.</td></tr>
+            <tr><td>III — The Backend</td><td>7–13</td><td>FastAPI, the API surface, services, the database, analysis, ANLZ, USB export.</td></tr>
+            <tr><td>IV — The Frontend</td><td>14–17</td><td>React architecture, components, the DAW, the waveform system.</td></tr>
+            <tr><td>V — Native &amp; Integrations</td><td>18–20</td><td>The Rust/Tauri layer, the native audio engine, SoundCloud.</td></tr>
+            <tr><td>VI — Quality &amp; Operations</td><td>21–24</td><td>Security, build and deploy, testing, the R&amp;D pipeline.</td></tr>
+            <tr><td>VII — Forward &amp; Reference</td><td>25–28</td><td>Roadmap, developer guide, glossary, appendices.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>The next chapter steps back in time and traces how a project that began
+        life as "RB Editor Pro" became the hardened, multi-stack application
+        documented here.</p>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>Music Library Manager is a local-first, subscription-free desktop DJ
+            tool that competes with Rekordbox and Serato by owning the curate →
+            analyse → organise → export pipeline and writing CDJ-native USB sticks.
+            It is built on four principles — local-first, no subscription, open
+            formats, hardware-native — and serves club DJs, crate diggers, and
+            library curators through two symmetric workflows and two interchangeable
+            library modes.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

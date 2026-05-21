@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Music Library Manager — Comprehensive Handbook</title>
+  <meta name="description" content="The complete technical handbook for Music Library Manager — a standalone desktop DJ-library manager.">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title">Cover &amp; Contents</span></div>
+      <div class="cover">
+
+        <div class="cover-hero">
+          <span class="cover-badge">Comprehensive Technical Handbook · Edition 2026</span>
+          <h1>Music Library Manager</h1>
+          <p class="tagline">The complete documentation of a standalone desktop DJ-library
+            manager — a local-first, open competitor to Rekordbox and Serato.</p>
+          <p class="meta">Version 1.0.0-beta &nbsp;·&nbsp; 28 chapters &nbsp;·&nbsp; ~200 pages &nbsp;·&nbsp; Compiled 2026-05-21</p>
+        </div>
+
+        <div class="cover-stats">
+          <div class="card"><div class="big">3</div><div class="lbl">Language stacks<br>Python · JS · Rust</div></div>
+          <div class="card"><div class="big">~56k</div><div class="lbl">Lines of code</div></div>
+          <div class="card"><div class="big">146</div><div class="lbl">REST API routes</div></div>
+          <div class="card"><div class="big">316</div><div class="lbl">Tracked files</div></div>
+          <div class="card"><div class="big">100+</div><div class="lbl">React components</div></div>
+          <div class="card"><div class="big">28</div><div class="lbl">Handbook chapters</div></div>
+        </div>
+
+        <p style="font-size:16.5px;color:var(--fg-muted);max-width:760px;margin:0 auto 10px;text-align:center;">
+          This handbook documents every layer of the application — the Python
+          analysis backend, the React user interface, the Rust native-audio core,
+          the Pioneer USB-export binary formats, the security model, the build
+          pipeline, and the road ahead. It is written to be read cover-to-cover
+          or used as a reference. Every chapter is richly illustrated with
+          diagrams.
+        </p>
+
+        <div class="callout note" style="max-width:760px;margin:26px auto 0;">
+          <span class="ico">◆</span>
+          <div class="body">
+            <span class="ct">How to read this handbook</span>
+            <p>Use the sidebar to jump between chapters. Diagrams render live in
+            your browser. Newcomers should read Part I and Part II first;
+            implementers can jump straight to the backend, frontend, or native
+            chapters; reviewers will want Part VI on quality and security.</p>
+          </div>
+        </div>
+
+        <!-- ===== PART I ===== -->
+        <div class="toc-section-title">Part I · Orientation</div>
+        <div class="toc-grid">
+          <a class="toc-card" href="ch01-introduction.html">
+            <span class="num">01</span>
+            <span class="tc-body"><span class="tc-title">Introduction &amp; Vision</span>
+            <span class="tc-desc">What the product is, who it serves, and why it exists.</span></span></a>
+          <a class="toc-card" href="ch02-history.html">
+            <span class="num">02</span>
+            <span class="tc-body"><span class="tc-title">Project History &amp; Evolution</span>
+            <span class="tc-desc">From RB Editor Pro to a hardened beta — the full timeline.</span></span></a>
+          <a class="toc-card" href="ch03-features.html">
+            <span class="num">03</span>
+            <span class="tc-body"><span class="tc-title">The Complete Feature Catalog</span>
+            <span class="tc-desc">Every capability, grouped, mapped, and illustrated.</span></span></a>
+        </div>
+
+        <!-- ===== PART II ===== -->
+        <div class="toc-section-title">Part II · Architecture</div>
+        <div class="toc-grid">
+          <a class="toc-card" href="ch04-architecture.html">
+            <span class="num">04</span>
+            <span class="tc-body"><span class="tc-title">System Architecture</span>
+            <span class="tc-desc">The three-tier desktop model and process topology.</span></span></a>
+          <a class="toc-card" href="ch05-tech-stack.html">
+            <span class="num">05</span>
+            <span class="tc-body"><span class="tc-title">The Technology Stack</span>
+            <span class="tc-desc">Every framework and library, and the reason for each.</span></span></a>
+          <a class="toc-card" href="ch06-data-flows.html">
+            <span class="num">06</span>
+            <span class="tc-body"><span class="tc-title">Data Flows End-to-End</span>
+            <span class="tc-desc">Eight traced journeys through the running system.</span></span></a>
+        </div>
+
+        <!-- ===== PART III ===== -->
+        <div class="toc-section-title">Part III · The Backend</div>
+        <div class="toc-grid">
+          <a class="toc-card" href="ch07-backend.html">
+            <span class="num">07</span>
+            <span class="tc-body"><span class="tc-title">Backend Overview (FastAPI)</span>
+            <span class="tc-desc">The sidecar process, request lifecycle, conventions.</span></span></a>
+          <a class="toc-card" href="ch08-api-reference.html">
+            <span class="num">08</span>
+            <span class="tc-body"><span class="tc-title">Complete API Reference</span>
+            <span class="tc-desc">All 146 routes, grouped by feature, fully tabled.</span></span></a>
+          <a class="toc-card" href="ch09-services.html">
+            <span class="num">09</span>
+            <span class="tc-body"><span class="tc-title">Business Logic &amp; Services</span>
+            <span class="tc-desc">The service classes that do the real work.</span></span></a>
+          <a class="toc-card" href="ch10-database.html">
+            <span class="num">10</span>
+            <span class="tc-body"><span class="tc-title">The Database Layer</span>
+            <span class="tc-desc">XML mode, Live mode, registries, and schemas.</span></span></a>
+          <a class="toc-card" href="ch11-analysis.html">
+            <span class="num">11</span>
+            <span class="tc-body"><span class="tc-title">The Audio Analysis Engine</span>
+            <span class="tc-desc">BPM, key, beatgrid, phrases — the DSP pipeline.</span></span></a>
+          <a class="toc-card" href="ch12-anlz.html">
+            <span class="num">12</span>
+            <span class="tc-body"><span class="tc-title">The ANLZ Binary Format</span>
+            <span class="tc-desc">Writing Rekordbox-compatible .DAT / .EXT / .2EX files.</span></span></a>
+          <a class="toc-card" href="ch13-usb-export.html">
+            <span class="num">13</span>
+            <span class="tc-body"><span class="tc-title">Pioneer USB Export</span>
+            <span class="tc-desc">The PDB format and byte-verified CDJ-ready sticks.</span></span></a>
+        </div>
+
+        <!-- ===== PART IV ===== -->
+        <div class="toc-section-title">Part IV · The Frontend</div>
+        <div class="toc-grid">
+          <a class="toc-card" href="ch14-frontend.html">
+            <span class="num">14</span>
+            <span class="tc-body"><span class="tc-title">Frontend Architecture</span>
+            <span class="tc-desc">React structure, routing, lazy loading, the API client.</span></span></a>
+          <a class="toc-card" href="ch15-components.html">
+            <span class="num">15</span>
+            <span class="tc-body"><span class="tc-title">Component Reference</span>
+            <span class="tc-desc">Every view and shared component, area by area.</span></span></a>
+          <a class="toc-card" href="ch16-daw.html">
+            <span class="num">16</span>
+            <span class="tc-body"><span class="tc-title">The DAW Editor</span>
+            <span class="tc-desc">The four-panel non-destructive editing workstation.</span></span></a>
+          <a class="toc-card" href="ch17-waveform.html">
+            <span class="num">17</span>
+            <span class="tc-body"><span class="tc-title">Waveform &amp; State Management</span>
+            <span class="tc-desc">Rendering, the reducer, undo/redo, the 3-band view.</span></span></a>
+        </div>
+
+        <!-- ===== PART V ===== -->
+        <div class="toc-section-title">Part V · Native &amp; Integrations</div>
+        <div class="toc-grid">
+          <a class="toc-card" href="ch18-rust-tauri.html">
+            <span class="num">18</span>
+            <span class="tc-body"><span class="tc-title">The Rust / Tauri Layer</span>
+            <span class="tc-desc">The desktop shell, IPC commands, and supervisor.</span></span></a>
+          <a class="toc-card" href="ch19-native-audio.html">
+            <span class="num">19</span>
+            <span class="tc-body"><span class="tc-title">The Native Audio Engine</span>
+            <span class="tc-desc">CPAL playback, Symphonia decoding, FFT, fingerprinting.</span></span></a>
+          <a class="toc-card" href="ch20-soundcloud.html">
+            <span class="num">20</span>
+            <span class="tc-body"><span class="tc-title">SoundCloud Integration</span>
+            <span class="tc-desc">OAuth PKCE, the API client, the legal downloader.</span></span></a>
+        </div>
+
+        <!-- ===== PART VI ===== -->
+        <div class="toc-section-title">Part VI · Quality &amp; Operations</div>
+        <div class="toc-grid">
+          <a class="toc-card" href="ch21-security.html">
+            <span class="num">21</span>
+            <span class="tc-body"><span class="tc-title">Security Architecture</span>
+            <span class="tc-desc">Auth, sandboxing, rate limits, supply-chain hardening.</span></span></a>
+          <a class="toc-card" href="ch22-build-deploy.html">
+            <span class="num">22</span>
+            <span class="tc-body"><span class="tc-title">Build, Packaging &amp; Deployment</span>
+            <span class="tc-desc">The sidecar bundle, installers, and CI workflows.</span></span></a>
+          <a class="toc-card" href="ch23-testing.html">
+            <span class="num">23</span>
+            <span class="tc-body"><span class="tc-title">Testing &amp; Quality Assurance</span>
+            <span class="tc-desc">The pytest suite, e2e channels, linting gates.</span></span></a>
+          <a class="toc-card" href="ch24-pipeline.html">
+            <span class="num">24</span>
+            <span class="tc-body"><span class="tc-title">The R&amp;D Pipeline</span>
+            <span class="tc-desc">A multi-agent research-to-implementation engine.</span></span></a>
+        </div>
+
+        <!-- ===== PART VII ===== -->
+        <div class="toc-section-title">Part VII · Forward &amp; Reference</div>
+        <div class="toc-grid">
+          <a class="toc-card" href="ch25-roadmap.html">
+            <span class="num">25</span>
+            <span class="tc-body"><span class="tc-title">The Future Roadmap</span>
+            <span class="tc-desc">Twelve features in flight — recommenders, mobile, more.</span></span></a>
+          <a class="toc-card" href="ch26-dev-guide.html">
+            <span class="num">26</span>
+            <span class="tc-body"><span class="tc-title">Developer Guide</span>
+            <span class="tc-desc">Setup, conventions, and the self-correction loop.</span></span></a>
+          <a class="toc-card" href="ch27-glossary.html">
+            <span class="num">27</span>
+            <span class="tc-body"><span class="tc-title">Glossary of Terms</span>
+            <span class="tc-desc">DJ vocabulary and project-specific terminology.</span></span></a>
+          <a class="toc-card" href="ch28-appendices.html">
+            <span class="num">28</span>
+            <span class="tc-body"><span class="tc-title">Appendices &amp; Reference</span>
+            <span class="tc-desc">Config keys, the file map, quick-reference tables.</span></span></a>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook · Edition 2026</div>
+      </div>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

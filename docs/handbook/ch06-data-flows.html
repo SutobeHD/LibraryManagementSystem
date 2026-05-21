@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>06 · Data Flows End-to-End — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 06 · Architecture</div>
+          <h1>Data Flows End-to-End</h1>
+          <p class="ch-lead">Eight journeys traced through the running system — from
+            a user click to the bytes on disk. If Chapter 4 is the map, this chapter
+            is the set of routes drawn on it.</p>
+        </header>
+
+        <h2>6.1 Why Trace Flows</h2>
+        <p>A component diagram tells you what the parts are. A data flow tells you how
+        they cooperate to get one job done. The eight flows in this chapter are the
+        ones that recur most in the rest of the handbook; seeing them whole now makes
+        the deep-dive chapters easier to read. Each flow is presented as a sequence
+        diagram followed by a short narration.</p>
+
+        <h2>6.2 Flow 1 — Loading the Library</h2>
+        <p>The first thing the application does after boot is show the user their
+        tracks.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant FE as Frontend
+  participant BE as Backend
+  participant DB as Library (XML / master.db)
+  U->>FE: opens the app
+  FE->>BE: GET /api/library/tracks
+  BE->>DB: read tracks (active mode)
+  DB-->>BE: raw track rows
+  BE->>BE: normalise to track dicts
+  BE-->>FE: [ {id, title, artist, bpm, key, path, ...} ]
+  FE->>FE: TrackTable renders the sortable list
+          </div>
+          <figcaption><span class="fig-num">Figure 6.1</span> — Library load. The
+          mode wrapper means the frontend never knows whether the data came from XML
+          or a SQLite database.</figcaption>
+        </div>
+
+        <p>The cost of this flow is paid once. In XML mode the file is parsed into an
+        in-memory dictionary cache on first load; every subsequent read is a
+        sub-five-millisecond cache hit. The frontend's <code>TrackTable</code>
+        component then renders the result with Camelot-coloured key cells. The
+        library layer behind <code>DB</code> is Chapter 10.</p>
+
+        <h2>6.3 Flow 2 — Native Audio Playback</h2>
+        <p>When the user clicks a track to play it, the request does <em>not</em> go
+        to the Python backend. It goes straight to the Rust audio engine over IPC,
+        because playback latency must be measured in milliseconds.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant FE as Frontend
+  participant RS as Rust Audio Core
+  participant SPK as Output Device
+  U->>FE: clicks a track
+  FE->>RS: invoke('load_audio', {path})
+  RS->>RS: validate path, memory-map the file
+  RS->>RS: Symphonia decoder selected by format
+  RS->>SPK: PlaybackEngine opens a CPAL stream
+  RS-->>FE: AudioInfo (duration, sample rate, channels)
+  RS->>SPK: audio thread feeds the ring buffer
+  RS-->>FE: progress events
+          </div>
+          <figcaption><span class="fig-num">Figure 6.2</span> — Native playback.
+          The file is memory-mapped (zero-copy) and decoded by Symphonia; CPAL drives
+          the output device. Total start latency is under 50&nbsp;ms.</figcaption>
+        </div>
+
+        <p>The native audio engine is Chapter 19. The key point here is the routing
+        decision: realtime concerns take the IPC channel to Rust, never the HTTP
+        channel to Python.</p>
+
+        <h2>6.4 Flow 3 — Waveform Computation</h2>
+        <p>Drawing a track's waveform is a heavy numerical job, so it too is handed to
+        Rust, which has the FFT crate and the speed.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+sequenceDiagram
+  participant FE as Frontend
+  participant RS as Rust Audio Core
+  FE->>RS: invoke('get_3band_waveform', {path})
+  RS->>RS: decode samples via Symphonia
+  RS->>RS: RustFFT over sliding frames
+  RS->>RS: split energy into low / mid / high bands
+  RS-->>FE: { low[], mid[], high[], peaks[] }
+  FE->>FE: TimelineCanvas paints the 3-band waveform
+          </div>
+          <figcaption><span class="fig-num">Figure 6.3</span> — 3-band waveform. The
+          frequency split (bass / mids / highs) is what gives the CDJ-style coloured
+          waveform.</figcaption>
+        </div>
+
+        <p>The three bands — roughly bass and kick, mids and snare, hi-hats and air —
+        are computed by converting Hz boundaries to FFT bins at the file's actual
+        sample rate. Chapter 19 explains why hardcoding bin indices was a bug worth
+        fixing.</p>
+
+        <h2>6.5 Flow 4 — Background BPM &amp; Key Analysis</h2>
+        <p>Full analysis — tempo, key, beatgrid — is too slow to block a request, so
+        it runs in a worker process and the frontend polls for the result.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+sequenceDiagram
+  participant FE as Frontend
+  participant BE as Backend
+  participant PP as Process Pool
+  FE->>BE: POST /api/audio/analyze {path}
+  BE->>PP: submit task to ProcessPoolExecutor
+  BE-->>FE: { task_id }
+  loop until done
+    FE->>BE: GET /api/audio/analyze/{task_id}
+    BE-->>FE: { status: "pending" }
+  end
+  PP->>PP: madmom beat tracking + essentia key
+  PP-->>BE: { bpm, key, confidence, beatgrid }
+  FE->>BE: GET /api/audio/analyze/{task_id}
+  BE-->>FE: { status: "done", bpm, key, ... }
+          </div>
+          <figcaption><span class="fig-num">Figure 6.4</span> — Background analysis.
+          The submit call returns instantly with a task ID; the heavy DSP runs in a
+          separate process.</figcaption>
+        </div>
+
+        <p>This submit-and-poll pattern recurs across the application — for SoundCloud
+        downloads, USB syncs, and duplicate scans. It keeps the API responsive no
+        matter how long the real work takes. The analysis engine is Chapter 11.</p>
+
+        <h2>6.6 Flow 5 — Non-Destructive Editing</h2>
+        <p>When the user edits cue points, the beatgrid, or a volume envelope in the
+        DAW, the source audio file is never touched. The edit lives in the frontend's
+        state until the user saves a project.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant ST as DAW State (reducer)
+  participant CV as Timeline Canvas
+  participant BE as Backend
+  participant F as .rbep project file
+  U->>ST: edits a cue / beatgrid / envelope
+  ST->>ST: dawReducer — pure state update
+  ST->>CV: canvas re-renders (no file write)
+  U->>BE: POST /api/projects/save
+  BE->>F: serialise overlay to .rbep
+  Note over F: the source audio file is never modified
+          </div>
+          <figcaption><span class="fig-num">Figure 6.5</span> — Non-destructive
+          editing. Edits are pure state; only an explicit save writes an overlay
+          project file.</figcaption>
+        </div>
+
+        <p>The <code>.rbep</code> file is an overlay — it records cues, beatgrids, and
+        envelopes by reference to the source file, never a copy of the audio. The DAW
+        and its reducer are Chapters 16 and 17.</p>
+
+        <h2>6.7 Flow 6 — SoundCloud Sync &amp; Download</h2>
+        <p>The SoundCloud flow is the longest in the application because it spans all
+        three active layers — the Rust OAuth flow, the Python API client, and the
+        React UI — and ends in a downloaded, analysed, imported track.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant FE as Frontend
+  participant RS as Rust Core
+  participant SC as SoundCloud
+  participant BE as Backend
+  U->>FE: "Connect SoundCloud"
+  FE->>RS: invoke('login_to_soundcloud')
+  RS->>SC: PKCE OAuth in the system browser
+  SC-->>RS: authorization code (local callback)
+  RS->>SC: exchange code for token
+  RS-->>FE: access token
+  FE->>BE: POST /api/soundcloud/auth-token
+  U->>FE: picks a playlist, clicks Download
+  FE->>BE: POST /api/soundcloud/download
+  BE->>SC: resolve stream (official API, then fallback)
+  BE->>BE: download, hash, dedup-check
+  BE->>BE: analyse, import, auto-playlist
+  BE-->>FE: task progress until complete
+          </div>
+          <figcaption><span class="fig-num">Figure 6.6</span> — The SoundCloud flow.
+          OAuth is handled natively by Rust; the download and the post-download
+          pipeline are handled by Python.</figcaption>
+        </div>
+
+        <p>The OAuth step is in Rust because it needs to open a real browser and run
+        a one-shot local HTTP server to catch the callback — host-process
+        capabilities the WebView does not have. Everything after the token is Python.
+        The whole integration is Chapter 20.</p>
+
+        <h2>6.8 Flow 7 — USB Sync</h2>
+        <p>The USB sync is where the application earns its name as a Rekordbox
+        competitor: it writes a stick a CDJ-3000 reads natively.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant FE as Frontend
+  participant BE as Backend
+  participant USB as USB Stick
+  U->>FE: selects a drive + playlists
+  FE->>BE: GET /api/usb/diff/{device_id}
+  BE-->>FE: what would change
+  U->>FE: confirms the sync
+  FE->>BE: POST /api/usb/sync
+  BE->>USB: acquire the sync lock file
+  BE->>USB: write exportLibrary.db (OneLibrary)
+  BE->>USB: write export.pdb / exportExt.pdb (legacy)
+  BE->>USB: copy audio + ANLZ + artwork
+  BE->>USB: seed hardware-settings files
+  BE-->>FE: streamed stage / progress events
+          </div>
+          <figcaption><span class="fig-num">Figure 6.7</span> — USB sync. A lock
+          file prevents concurrent syncs; an incremental diff means only changed
+          tracks are copied.</figcaption>
+        </div>
+
+        <p>This flow writes the most demanding data in the whole application — the
+        byte-exact Pioneer database formats. A single wrong flag silently corrupts
+        the stick. Chapters 12 and 13 document those formats with the care they
+        require.</p>
+
+        <h2>6.9 Flow 8 — The Authentication Bootstrap</h2>
+        <p>The final flow is invisible to the user but underpins every other one: how
+        the frontend obtains the token that authorises its requests.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+sequenceDiagram
+  participant P as Python Sidecar
+  participant T as Tauri Shell
+  participant FE as Frontend
+  participant API as FastAPI route
+  P->>P: SESSION_TOKEN = token_urlsafe(32)
+  P->>T: stdout "LMS_TOKEN=&lt;value&gt;"
+  T->>T: capture token, drop the line from logs
+  P->>P: also persist token to user-data file
+  FE->>T: invoke('get_session_token')
+  T-->>FE: the captured token
+  FE->>FE: axios interceptor stores it
+  FE->>API: every request carries Authorization: Bearer
+  API->>API: require_session compares constant-time
+  API-->>FE: 200, or 401 on any mismatch
+          </div>
+          <figcaption><span class="fig-num">Figure 6.8</span> — The auth bootstrap.
+          The token is born in the sidecar, captured by the shell, and attached to
+          every request by the frontend.</figcaption>
+        </div>
+
+        <p>In browser-development mode the token handoff differs slightly: the Vite
+        dev server reads the on-disk token file and re-exposes it at a
+        <code>/dev-token</code> endpoint, since there is no Rust shell to capture the
+        stdout banner. Either way, no request reaches a mutation route without a
+        valid Bearer token. Chapter 21 is the full security model.</p>
+
+        <h2>6.10 The Flows on One Map</h2>
+        <p>Stepping back, the eight flows divide cleanly by which channel and which
+        layer they exercise:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Flow</th><th>Primary channel</th><th>Heavy lifting in</th></tr></thead>
+          <tbody>
+            <tr><td>1 · Library load</td><td>HTTP</td><td>Python — database layer</td></tr>
+            <tr><td>2 · Playback</td><td>IPC</td><td>Rust — CPAL + Symphonia</td></tr>
+            <tr><td>3 · Waveform</td><td>IPC</td><td>Rust — RustFFT</td></tr>
+            <tr><td>4 · Analysis</td><td>HTTP</td><td>Python — process pool</td></tr>
+            <tr><td>5 · Editing</td><td>local / HTTP on save</td><td>React — the reducer</td></tr>
+            <tr><td>6 · SoundCloud</td><td>IPC then HTTP</td><td>Rust (OAuth) + Python (download)</td></tr>
+            <tr><td>7 · USB sync</td><td>HTTP</td><td>Python — the USB writers</td></tr>
+            <tr><td>8 · Auth bootstrap</td><td>stdout + IPC</td><td>Python (mint) + Rust (capture)</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>The recurring shape is now clear: the frontend orchestrates, the channel
+        is chosen by the need (latency and OS access push work to Rust; data and
+        orchestration go to Python), and anything slow is made asynchronous with a
+        task ID and polling.</p>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>Eight traced flows reveal the system's working rhythm: library load
+            and analysis go over HTTP to Python; playback and waveform go over IPC to
+            Rust; editing is pure frontend state until an explicit save; SoundCloud
+            spans Rust OAuth and Python download; USB sync writes byte-exact Pioneer
+            formats; and the auth bootstrap quietly secures everything else. Slow
+            work is always pushed to a background worker behind a polled task ID.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

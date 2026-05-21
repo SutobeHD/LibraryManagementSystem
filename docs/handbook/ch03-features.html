@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>03 · The Complete Feature Catalog — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 03 · Orientation</div>
+          <h1>The Complete Feature Catalog</h1>
+          <p class="ch-lead">Every capability the application ships, organised into
+            ten functional domains. This chapter is the exhaustive inventory; later
+            chapters explain how each capability is built.</p>
+        </header>
+
+        <h2>3.1 How the Catalog Is Organised</h2>
+        <p>The application is large. Counting only user-facing capabilities — not the
+        internal machinery — it ships well over a hundred distinct features. To keep
+        the catalogue navigable, every feature is filed under one of ten domains:</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  APP(["Music Library Manager"])
+  APP --> D1["1 · Library Management"]
+  APP --> D2["2 · Playlists &amp; Smart Playlists"]
+  APP --> D3["3 · SoundCloud Integration"]
+  APP --> D4["4 · Local Import"]
+  APP --> D5["5 · Audio Analysis"]
+  APP --> D6["6 · Editing &amp; the DAW"]
+  APP --> D7["7 · USB Export"]
+  APP --> D8["8 · Library Health &amp; Tools"]
+  APP --> D9["9 · Playback &amp; Search"]
+  APP --> D10["10 · Settings &amp; System"]
+          </div>
+          <figcaption><span class="fig-num">Figure 3.1</span> — The ten feature
+          domains. Each is catalogued in full below.</figcaption>
+        </div>
+
+        <p>Each domain section below lists its features in a table, and the most
+        significant domains are also illustrated with a diagram. Where a feature maps
+        to a later chapter, the table says so.</p>
+
+        <h2>3.2 Domain 1 — Library Management</h2>
+        <p>The library is the heart of the application: the curated, analysed
+        collection of tracks. It can be managed in either of two modes, and a single
+        wrapper hides the difference from every other feature.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Feature</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td>Standalone XML mode</td><td>The application's own Rekordbox-compatible XML library. No Rekordbox install required.</td></tr>
+            <tr><td>Live Rekordbox mode</td><td>Direct read/write of an existing Rekordbox <code>master.db</code> via the <code>pyrekordbox</code> library.</td></tr>
+            <tr><td>Four-card mode picker</td><td>On startup the user chooses: New Empty library, Standalone, Import an existing XML, or a Defined Path.</td></tr>
+            <tr><td>Mode-agnostic CRUD</td><td>A wrapper routes every create/read/update/delete to the active mode — no feature contains mode branching.</td></tr>
+            <tr><td>In-memory cache</td><td>The XML library is parsed once into a dict cache; subsequent reads are sub-five-millisecond.</td></tr>
+            <tr><td>Library lifecycle</td><td>Load, unload, create-new, and sync (persist) operations on the whole library.</td></tr>
+            <tr><td>Track metadata editing</td><td>Title, artist, album, genre, year, comment, rating, colour, BPM, key — edited inline or in a metadata panel.</td></tr>
+            <tr><td>Grouping browsers</td><td>Browse the collection by artist, genre, label, or album, each with its own track listing.</td></tr>
+            <tr><td>Artwork serving</td><td>Embedded cover art is extracted and served to the UI for every track.</td></tr>
+            <tr><td>Inline rating</td><td>Click-to-rate with a five-star control directly in the track table.</td></tr>
+            <tr><td>Pioneer colour tags</td><td>A nine-colour tag picker matching the CDJ colour palette.</td></tr>
+          </tbody>
+        </table>
+        </div>
+        <p>The library layer is documented in full in <strong>Chapter 10</strong>.</p>
+
+        <h2>3.3 Domain 2 — Playlists &amp; Smart Playlists</h2>
+        <p>Playlists are how a DJ slices the library into sets. The application
+        supports both ordinary playlists and rule-driven smart playlists, nested in a
+        folder tree.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Feature</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td>Playlist CRUD</td><td>Create, rename, delete, and duplicate playlists.</td></tr>
+            <tr><td>Folder tree</td><td>Playlists nest inside folders; the whole structure is a tree.</td></tr>
+            <tr><td>Drag reorder</td><td>Playlists and the tracks inside them can be dragged into a new order.</td></tr>
+            <tr><td>Move within tree</td><td>A "move to" picker relocates a playlist or folder anywhere in the tree.</td></tr>
+            <tr><td>Track membership</td><td>Add and remove tracks; reorder tracks within a playlist.</td></tr>
+            <tr><td>Smart playlists</td><td>Rule-based playlists with field/operator/value/unit conditions and an AND/OR combinator.</td></tr>
+            <tr><td>Smart-playlist editor</td><td>A modal with field rows, a live preview, and Rekordbox-XML-compatible criteria.</td></tr>
+            <tr><td>Smart-playlist re-evaluation</td><td>Smart playlists re-evaluate against the current library on demand.</td></tr>
+            <tr><td>Context menus</td><td>Right-click menus — seven actions on playlists, nine on tracks — built to work inside the Tauri WebView.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="callout note">
+          <span class="ico">◆</span>
+          <div class="body">
+            <span class="ct">Smart-playlist criteria</span>
+            <p>The smart-playlist engine accepts a Rekordbox-XML-compatible criteria
+            object — a logical operator (<code>all</code>/<code>any</code>) plus a
+            list of conditions, each naming a field (Title, Genre, Rating, BPM, key,
+            date-added and more), an operator, and one or two values. Chapter 9
+            covers the evaluator.</p>
+          </div>
+        </div>
+
+        <h2>3.4 Domain 3 — SoundCloud Integration</h2>
+        <p>SoundCloud is the application's built-in acquisition source. The
+        integration spans an OAuth login, a playlist browser, a legally-careful
+        downloader, and a synchronisation engine that matches SoundCloud tracks to
+        the local library.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  L["OAuth PKCE<br/>login"] --> B["Browse playlists<br/>&amp; likes"]
+  B --> M["Preview matches<br/>fuzzy to library"]
+  M --> S["Sync<br/>match &amp; mark"]
+  B --> DL["Download<br/>official API + fallback"]
+  DL --> H["History &amp; dedup<br/>registry"]
+  DL --> AP["Auto-playlist<br/>SC_&lt;name&gt;"]
+          </div>
+          <figcaption><span class="fig-num">Figure 3.2</span> — The SoundCloud
+          feature surface. Chapter 20 documents the implementation.</figcaption>
+        </div>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Feature</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td>OAuth 2.1 + PKCE login</td><td>A secure browser-based login handled by the Rust layer; no password ever touches the app.</td></tr>
+            <tr><td>Playlist &amp; likes browser</td><td>Browse the authenticated user's SoundCloud playlists and liked tracks.</td></tr>
+            <tr><td>Profile fetch</td><td>Display the authenticated SoundCloud user's profile.</td></tr>
+            <tr><td>Preview matches</td><td>A dry-run that fuzzy-matches SoundCloud tracks to existing library tracks with a confidence score.</td></tr>
+            <tr><td>Match inspector</td><td>A modal showing per-track match score and status (matched / unmatched / dead).</td></tr>
+            <tr><td>Sync</td><td>Run a playlist sync — match SoundCloud tracks to the library and mark them.</td></tr>
+            <tr><td>Sync all</td><td>Synchronise every SoundCloud playlist at once.</td></tr>
+            <tr><td>Merge into local</td><td>Merge a SoundCloud playlist into an existing local playlist.</td></tr>
+            <tr><td>Legal downloader</td><td>Two-stage acquisition: the official download endpoint when available, else the same signed streams the web player uses.</td></tr>
+            <tr><td>Playlist download</td><td>Bulk-download every track in a SoundCloud playlist.</td></tr>
+            <tr><td>Download registry</td><td>SQLite-backed deduplication by SoundCloud ID and by SHA-256 content hash.</td></tr>
+            <tr><td>History &amp; stats</td><td>A paginated analysis-history log with aggregate statistics and multi-device support.</td></tr>
+            <tr><td>Auto-playlist</td><td>Downloaded tracks are auto-sorted into a playlist named <code>SC_&lt;playlist&gt;</code>.</td></tr>
+            <tr><td>AIFF conversion</td><td>Optional post-download conversion to AIFF, controlled by a setting.</td></tr>
+            <tr><td>Aggressive Download Mode</td><td>A hidden setting for tracks the user has a personal right to — revealed by a five-tap gesture.</td></tr>
+            <tr><td>Artist association</td><td>Link a library artist to a SoundCloud profile.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>3.5 Domain 4 — Local Import</h2>
+        <p>The second acquisition path takes files already on disk. Its defining
+        characteristic is transparency: the user can watch every track move through
+        a seven-stage pipeline.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Feature</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td>Drag-and-drop import</td><td>Drop audio files or folders directly onto the import view.</td></tr>
+            <tr><td>Folder-picker import</td><td>Browse the filesystem and select a folder to import.</td></tr>
+            <tr><td>Folder-as-playlist</td><td>The imported folder's name becomes the playlist; every file — duplicates included — is bundled together.</td></tr>
+            <tr><td>Folder watcher</td><td>Watched folders auto-import new files: an initial recursive scan plus a live filesystem observer.</td></tr>
+            <tr><td>Debounced import</td><td>New files wait until writing settles before import, so half-written files are never analysed.</td></tr>
+            <tr><td>Bulk path import</td><td>Import an explicit list of file paths in one call.</td></tr>
+            <tr><td>Folder scan</td><td>A background scan of a directory that auto-imports any audio not yet in the library.</td></tr>
+            <tr><td>Import tracker</td><td>A thread-safe tracker exposing each file's live stage to the UI.</td></tr>
+            <tr><td>Import Manager view</td><td>A dedicated view showing every track's stage with per-stage timestamps.</td></tr>
+            <tr><td>Sticky progress banner</td><td>A bottom-of-screen banner, visible on every view, showing aggregate import progress.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  Q["Queued"] --> A["Analyzing"]
+  A --> I["Importing"]
+  I --> N["ANLZ"]
+  N --> C["Completed"]
+          </div>
+          <figcaption><span class="fig-num">Figure 3.3</span> — The local-import
+          stage pipeline, mirrored by the SoundCloud download manager so a unified
+          UI can show both.</figcaption>
+        </div>
+
+        <h2>3.6 Domain 5 — Audio Analysis</h2>
+        <p>Analysis is what turns a plain audio file into a DJ-usable track. The
+        engine extracts tempo, musical key, the beatgrid, phrase structure, automatic
+        cue points, and multi-resolution waveforms.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Feature</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td>BPM detection</td><td>Tempo estimation via a madmom recurrent-neural-network beat tracker, with a librosa fallback.</td></tr>
+            <tr><td>Key detection</td><td>Musical key via the essentia key extractor, with a Krumhansl-Schmuckler / Temperley ensemble fallback.</td></tr>
+            <tr><td>Beatgrid</td><td>A full beatgrid of beat positions and per-segment tempo.</td></tr>
+            <tr><td>Phrase detection</td><td>Phrase and bar markers derived from the beatgrid.</td></tr>
+            <tr><td>Auto hot-cues</td><td>Hot cues A–H placed automatically at musically meaningful positions.</td></tr>
+            <tr><td>Auto memory-cues</td><td>Memory cues placed automatically from the analysis.</td></tr>
+            <tr><td>Waveform generation</td><td>Seven waveform variants — mono previews, colour previews, and 3-band detail data.</td></tr>
+            <tr><td>Analysis cache</td><td>A persistent gzipped cache keyed on file mtime, size, and analyzer version — unchanged files are never re-analysed.</td></tr>
+            <tr><td>Single-track analysis</td><td>Analyse one track on demand, with a polling task ID.</td></tr>
+            <tr><td>Analyze-full</td><td>One call that analyses, writes ANLZ files, and updates <code>master.db</code>.</td></tr>
+            <tr><td>Batch analysis</td><td>Analyse many tracks with streaming NDJSON progress.</td></tr>
+            <tr><td>Quality presets</td><td>Fast (librosa), Standard (madmom), or Thorough (ensemble) analysis quality.</td></tr>
+            <tr><td>Tunable settings</td><td>Analysis parameters overridable via <code>RB_ANALYSIS_</code> environment variables.</td></tr>
+          </tbody>
+        </table>
+        </div>
+        <p>The analysis engine is the subject of <strong>Chapter 11</strong>; the
+        ANLZ files it feeds are <strong>Chapter 12</strong>.</p>
+
+        <h2>3.7 Domain 6 — Editing &amp; the DAW</h2>
+        <p>The application includes a genuine non-destructive editing workstation —
+        a four-panel DAW — plus a standalone waveform editor. Crucially, no edit ever
+        rewrites the source audio file.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Feature</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td>Four-panel DAW</td><td>The DJ Edit DAW: toolbar, timeline, browser, and control strip.</td></tr>
+            <tr><td>Non-destructive editor</td><td>A region-based editor for cuts, inserts, deletes, and pastes.</td></tr>
+            <tr><td>Waveform editor</td><td>A WaveSurfer-based editor with sample-accurate, FFmpeg-backed seeking.</td></tr>
+            <tr><td>Hot cues</td><td>Eight colour-coded hot cues (A–H), placeable and jumpable.</td></tr>
+            <tr><td>Memory cues</td><td>Time-sorted memory cues.</td></tr>
+            <tr><td>Loops</td><td>Loops with active state and colour.</td></tr>
+            <tr><td>Beatgrid editing</td><td>Interactive beatgrid adjustment on the timeline.</td></tr>
+            <tr><td>Volume envelopes</td><td>Draggable fade-in, fade-out, and gain nodes per region.</td></tr>
+            <tr><td>Undo / redo</td><td>Full-state-snapshot history.</td></tr>
+            <tr><td>Snap to grid</td><td>Edits snap to beat divisions.</td></tr>
+            <tr><td>Project files</td><td>Edits persist to <code>.rbep</code> overlay project files — the source audio is untouched.</td></tr>
+            <tr><td>Export</td><td>Render the edited timeline to WAV, MP3, or FLAC with optional normalisation.</td></tr>
+            <tr><td>Configurable shortcuts</td><td>Fourteen keyboard actions, each rebindable in settings.</td></tr>
+            <tr><td>3-band waveform</td><td>Low/mid/high frequency-band rendering, CDJ-style.</td></tr>
+          </tbody>
+        </table>
+        </div>
+        <p>The DAW is <strong>Chapter 16</strong>; the waveform system is
+        <strong>Chapter 17</strong>.</p>
+
+        <h2>3.8 Domain 7 — USB Export</h2>
+        <p>This is the domain that makes the application a real Rekordbox competitor:
+        writing a USB stick a CDJ-3000 reads natively. It is also the most
+        technically demanding domain, because the output formats are
+        reverse-engineered and byte-exact.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  subgraph Stick["USB stick — PIONEER/"]
+    OL["rekordbox/exportLibrary.db<br/>OneLibrary format"]
+    PDB["export.pdb + exportExt.pdb<br/>legacy DeviceLibrary"]
+    ANLZ["USBANLZ/.../ANLZ0000.DAT/.EXT/.2EX<br/>per-track analysis"]
+    ART["Artwork/...<br/>bucketed cover art"]
+    AUD["Contents/...<br/>audio files"]
+    MY["MYSETTING.DAT etc.<br/>hardware settings"]
+  end
+  SYNC["USB Sync Engine"] --> OL
+  SYNC --> PDB
+  SYNC --> ANLZ
+  SYNC --> ART
+  SYNC --> AUD
+  SYNC --> MY
+          </div>
+          <figcaption><span class="fig-num">Figure 3.4</span> — What the USB sync
+          engine writes onto a stick. Chapter 13 documents every format.</figcaption>
+        </div>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Feature</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td>USB detection</td><td>Scan connected drives, filtering to genuine removable USB sticks only.</td></tr>
+            <tr><td>OneLibrary export</td><td>Write <code>exportLibrary.db</code> so Rekordbox 6/7 auto-detects the stick.</td></tr>
+            <tr><td>Legacy PDB export</td><td>Write <code>export.pdb</code> and <code>exportExt.pdb</code> for older CDJ DeviceLibrary support.</td></tr>
+            <tr><td>ANLZ writing</td><td>Per-track <code>.DAT</code>/<code>.EXT</code>/<code>.2EX</code> analysis files.</td></tr>
+            <tr><td>Audio copy</td><td>Track files copied into a <code>Contents/&lt;Artist&gt;/&lt;Album&gt;</code> tree.</td></tr>
+            <tr><td>Artwork copy</td><td>Cover art resized to small and medium JPEGs in a bucketed Artwork directory.</td></tr>
+            <tr><td>Sync profiles</td><td>Per-stick profiles recording which playlists sync where.</td></tr>
+            <tr><td>Incremental diff</td><td>Only changed tracks are copied; a diff endpoint previews what a sync would do.</td></tr>
+            <tr><td>Playlist-filtered sync</td><td>Sync specific playlists or the whole library.</td></tr>
+            <tr><td>Lock-file concurrency</td><td>A lock file prevents two syncs running on one stick at once.</td></tr>
+            <tr><td>USB lifecycle</td><td>Initialize, reset, eject, and rename a USB device.</td></tr>
+            <tr><td>Format wizard</td><td>A guided, two-step FAT32/exFAT reformat with a confirmation phrase.</td></tr>
+            <tr><td>Hardware settings</td><td>Edit 42 CDJ and DJM fields written to <code>MYSETTING.DAT</code>, <code>MYSETTING2.DAT</code>, <code>DJMMYSETTING.DAT</code>.</td></tr>
+            <tr><td>Play-count sync</td><td>A three-way diff reconciling play counts between the PC and the stick.</td></tr>
+            <tr><td>Metadata sync</td><td>Per-category sync of ratings, tags, colours, cues, and beatgrids.</td></tr>
+            <tr><td>Compatibility matrix</td><td>A visual matrix of which CDJ generations support the chosen filesystem and format.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>3.9 Domain 8 — Library Health &amp; Tools</h2>
+        <p>A large library decays without maintenance. This domain keeps it clean:
+        finding duplicates, surfacing quality problems, and offering batch tools.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Feature</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td>Acoustic duplicate finder</td><td>A background scan that groups tracks by acoustic fingerprint similarity.</td></tr>
+            <tr><td>Duplicate merge</td><td>Merge a group of duplicates, choosing a master and combining play counts.</td></tr>
+            <tr><td>Metadata merge</td><td>Merge metadata from one track into another.</td></tr>
+            <tr><td>Track rename</td><td>Rename tracks (in Live mode).</td></tr>
+            <tr><td>Title cleaning</td><td>Strip tags and fix encoding in track titles.</td></tr>
+            <tr><td>Batch comments</td><td>Update comments across many tracks at once.</td></tr>
+            <tr><td>Batch edit bar</td><td>A toolbar for mass rating and colour-label changes on a selection.</td></tr>
+            <tr><td>Low-quality insight</td><td>List tracks below a bitrate/quality threshold.</td></tr>
+            <tr><td>No-artwork insight</td><td>List tracks missing embedded cover art.</td></tr>
+            <tr><td>Lost-track insight</td><td>List tracks whose file paths no longer exist on disk.</td></tr>
+            <tr><td>Analytics dashboard</td><td>A BPM histogram, a Camelot key wheel, a genre breakdown, and most-played tracks.</td></tr>
+            <tr><td>Ranking view</td><td>A focused view for rating and tagging tracks one at a time.</td></tr>
+            <tr><td>XML cleaner</td><td>Clean and validate a Rekordbox XML file — strip tags, fix encoding, repair dead references.</td></tr>
+            <tr><td>MyTags taxonomy</td><td>A per-track tag taxonomy orthogonal to genres.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>3.10 Domain 9 — Playback &amp; Search</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Feature</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td>Compact player</td><td>A mini player at the bottom of the screen: play/pause, volume, seek bar.</td></tr>
+            <tr><td>Native audio playback</td><td>Low-latency playback through the Rust CPAL audio engine.</td></tr>
+            <tr><td>Audio streaming</td><td>Range-request audio streaming from the backend, sandboxed to allowed roots.</td></tr>
+            <tr><td>Maximise to DAW</td><td>The mini player expands into the full DAW editor.</td></tr>
+            <tr><td>Tokenised search</td><td>Field-aware search: <code>bpm:120-130 key:Am genre:techno year:2024 rating:&gt;3</code>.</td></tr>
+            <tr><td>Filter &amp; sort</td><td>Sortable, filterable track tables throughout the app.</td></tr>
+            <tr><td>Camelot colouring</td><td>Tracks are colour-coded by Camelot wheel position for harmonic mixing at a glance.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>3.11 Domain 10 — Settings &amp; System</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Feature</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td>Eight-tab settings</td><td>Library, Backup, Export, Audio, Analysis, Appearance, Shortcuts, and Network preference tabs.</td></tr>
+            <tr><td>Audio device picker</td><td>Choose the CPAL output device for native playback.</td></tr>
+            <tr><td>Appearance</td><td>Customisable waveform band colours and a locale picker.</td></tr>
+            <tr><td>Shortcut capture</td><td>A key-capture control for rebinding the fourteen DAW shortcuts.</td></tr>
+            <tr><td>Network settings</td><td>HTTP proxy configuration and a backend restart control.</td></tr>
+            <tr><td>Design Lab</td><td>Ten feature mock-up pages plus twenty selectable tileable background themes.</td></tr>
+            <tr><td>Settings size caps</td><td>The settings store enforces strict per-value and total size limits.</td></tr>
+            <tr><td>Heartbeat</td><td>A liveness ping keeps the backend and frontend in sync.</td></tr>
+            <tr><td>Graceful shutdown / restart</td><td>The backend can be shut down or restarted from the UI.</td></tr>
+            <tr><td>Auto-spawn backend</td><td>A direct executable launch behaves like a full dev run — backend and frontend start automatically.</td></tr>
+            <tr><td>Toast notifications</td><td>A non-blocking toast system replaces every native alert dialog.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>3.12 Feature Maturity</h2>
+        <p>Not every feature is at the same stage. The catalogue above is shipped and
+        working; a parallel set of capabilities is in active research. A
+        bird's-eye view:</p>
+
+        <div class="figure">
+          <div class="mermaid">
+pie showData
+  title Feature status across the project
+  "Shipped &amp; stable (v1.0.0-beta)" : 110
+  "Shipped security hardening" : 7
+  "In research pipeline" : 12
+          </div>
+          <figcaption><span class="fig-num">Figure 3.5</span> — Roughly 110
+          user-facing features ship in the beta; seven security features were
+          hardened in May 2026; twelve more are in the research pipeline (Chapter
+          25).</figcaption>
+        </div>
+
+        <p>A handful of capabilities are explicitly post-MVP and acknowledged as
+        such in the changelog: manual hot-cue editing (auto-cues work today), and
+        creating a <code>master.db</code> from scratch with no Rekordbox install.
+        The twelve pipeline features — recommenders, a mobile companion, external
+        track matching, metadata repair — are catalogued with full technical detail
+        in Chapter 25.</p>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>The application ships well over a hundred user-facing features across
+            ten domains: library management, playlists, SoundCloud, local import,
+            audio analysis, editing and the DAW, USB export, library health, playback
+            and search, and settings and system. The USB-export and analysis domains
+            are the most technically demanding and earn their own deep-dive chapters
+            later. Twelve further features are in the research pipeline.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

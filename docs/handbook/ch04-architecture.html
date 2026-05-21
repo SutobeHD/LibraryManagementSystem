@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>04 · System Architecture — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 04 · Architecture</div>
+          <h1>System Architecture</h1>
+          <p class="ch-lead">Music Library Manager is a three-tier desktop
+            application. A Rust/Tauri shell hosts a React user interface and a native
+            audio engine, and supervises a bundled Python web server that runs
+            entirely on the user's own machine.</p>
+        </header>
+
+        <h2>4.1 The Shape of the System</h2>
+        <p>The application looks, to the user, like a single desktop program. Inside,
+        it is four cooperating parts written in three languages. The architecture is
+        best understood as a <strong>three-tier model wrapped in a desktop
+        shell</strong>:</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  subgraph Desktop["Tauri Desktop Window — the Rust shell"]
+    direction TB
+    subgraph Web["WebView2 — one rendered surface"]
+      FE["React Frontend<br/>Vite-served · port 5173 in dev"]
+    end
+    RUST["Rust Native Core<br/>audio engine · OAuth · supervisor"]
+    FE <-->|"Tauri IPC<br/>invoke() / events"| RUST
+  end
+  subgraph Side["Python Sidecar — child process"]
+    BE["FastAPI Backend<br/>Uvicorn · 127.0.0.1:8000"]
+  end
+  FE <-->|"HTTP REST<br/>loopback only"| BE
+  RUST -->|"spawns &amp; supervises"| BE
+  BE <-->|"reads / writes"| DISK[("Local disk<br/>library · audio · master.db")]
+  RUST -->|"CPAL"| SPK(["Audio output device"])
+          </div>
+          <figcaption><span class="fig-num">Figure 4.1</span> — The complete system.
+          Four parts, three languages, two communication channels, one local
+          machine.</figcaption>
+        </div>
+
+        <p>The four parts are:</p>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Part</th><th>Language</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td>The desktop shell</td><td>Rust (Tauri 2)</td><td>Creates the OS window, hosts the WebView, supervises the sidecar, owns native capabilities.</td></tr>
+            <tr><td>The frontend</td><td>JavaScript (React 18)</td><td>The entire user interface, rendered inside the WebView.</td></tr>
+            <tr><td>The native core</td><td>Rust</td><td>Low-latency audio playback, decoding, FFT, fingerprinting, and the OAuth flow.</td></tr>
+            <tr><td>The backend (sidecar)</td><td>Python (FastAPI)</td><td>The library, the analysis engine, all orchestration, all disk and database I/O.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>4.2 Why Three Languages</h2>
+        <p>Using three languages is a deliberate choice, not an accident of history.
+        Each layer is placed where its language is strongest, and the coding rules
+        forbid crossing those boundaries without a reason.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Concern</th><th>Lives in</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td>Real-time audio (playback callbacks)</td><td>Rust</td><td>A garbage-collected language cannot guarantee the microsecond-level determinism an audio callback needs. Rust has no GC and zero-cost abstractions.</td></tr>
+            <tr><td>Offline DSP (BPM, key, beatgrid)</td><td>Python</td><td>The mature analysis ecosystem — librosa, madmom, essentia, scipy, numpy — is Python. Re-implementing it would be reckless.</td></tr>
+            <tr><td>HTTP, orchestration, database</td><td>Python</td><td>FastAPI plus the <code>pyrekordbox</code> library make Python the natural home for the library and the API.</td></tr>
+            <tr><td>The user interface</td><td>React</td><td>A rich, interactive desktop UI is exactly what a component framework like React is built for.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="callout note">
+          <span class="ico">◆</span>
+          <div class="body">
+            <span class="ct">The boundary rule</span>
+            <p>The project's coding rules state it plainly: "No layer-crossing
+            without reason. No reimplementing Python in JS or vice versa." Realtime
+            audio is Rust; offline DSP is Python; UI is React. When a feature seems
+            to want code in two places, that is a signal to rethink the design, not
+            to duplicate logic.</p>
+          </div>
+        </div>
+
+        <h2>4.3 The Sidecar Pattern</h2>
+        <p>The single most distinctive architectural decision is that the Python
+        backend is a <strong>sidecar</strong> — a child process that the Rust shell
+        starts, supervises, and kills. The backend is a real web server, with real
+        REST endpoints, but it serves exactly one client (the local frontend) and
+        binds exclusively to the loopback interface <code>127.0.0.1</code>.</p>
+
+        <p>This pattern delivers several things at once:</p>
+        <ul>
+          <li><strong>Language freedom.</strong> The UI gets React; the analysis
+          engine gets Python's DSP libraries. Neither is compromised.</li>
+          <li><strong>A clean contract.</strong> The frontend and backend talk over
+          HTTP — a well-understood, debuggable, testable boundary.</li>
+          <li><strong>Process isolation.</strong> If the Python process misbehaves,
+          it can be restarted without touching the window or the audio engine.</li>
+          <li><strong>Lifecycle ownership.</strong> The Rust shell starts the
+          sidecar on launch and kills it on exit, so there are never orphan
+          processes.</li>
+        </ul>
+
+        <p>The backend is packaged for release as a standalone executable
+        (<code>rb-backend</code>) built with PyInstaller, so the end user never
+        installs Python. Chapter 22 covers that packaging in detail.</p>
+
+        <h2>4.4 Two Communication Channels</h2>
+        <p>The frontend is the hub. It talks to the other two active parts over two
+        distinct channels, and which channel it uses depends on what it needs.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  FE["React Frontend"]
+  FE -->|"HTTP REST · axios<br/>library, playlists, analysis,<br/>USB, SoundCloud, settings"| BE["Python Backend"]
+  FE -->|"Tauri IPC · invoke()<br/>audio playback, waveform,<br/>OAuth, file dialogs, devices"| RUST["Rust Native Core"]
+  RUST -->|"events<br/>export_progress, sc-login-progress"| FE
+          </div>
+          <figcaption><span class="fig-num">Figure 4.2</span> — The two channels.
+          HTTP for data and orchestration; IPC for native capabilities.</figcaption>
+        </div>
+
+        <h3>Channel 1 — HTTP REST to the backend</h3>
+        <p>Anything involving the library, the database, analysis, USB export, or
+        SoundCloud goes over HTTP to the FastAPI sidecar. The frontend uses a single
+        shared <code>axios</code> client (Chapter 14) that attaches an authentication
+        token to every request. There are 146 such routes, catalogued in Chapter 8.</p>
+
+        <h3>Channel 2 — Tauri IPC to the Rust core</h3>
+        <p>Anything that needs the operating system or low-latency audio goes over
+        Tauri's IPC bridge. The frontend calls <code>invoke('command_name', args)</code>
+        and receives a <code>Result</code> back; the Rust side can also push
+        <code>events</code> the frontend listens for. Native file dialogs, audio
+        device enumeration, waveform FFT, and the SoundCloud OAuth flow all travel
+        this channel. Chapter 18 documents every command.</p>
+
+        <div class="callout warn">
+          <span class="ico">▲</span>
+          <div class="body">
+            <span class="ct">Why not one channel?</span>
+            <p>It would be possible to route everything through HTTP. But native
+            file pickers, OS audio devices, and the OAuth browser callback genuinely
+            require host-process privileges the WebView does not have — and realtime
+            audio cannot tolerate an HTTP hop. The two-channel split puts each
+            request on the path with the right capabilities and the right latency.</p>
+          </div>
+        </div>
+
+        <h2>4.5 The Boot Sequence</h2>
+        <p>When the user double-clicks the application, a precise sequence unfolds.
+        Understanding it explains both the splash screen and the authentication
+        bootstrap.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+sequenceDiagram
+  participant OS as Operating System
+  participant T as Tauri Shell (Rust)
+  participant P as Python Sidecar
+  participant W as WebView (React)
+  OS->>T: launch executable
+  T->>T: create splashscreen window
+  T->>P: spawn sidecar process
+  P->>P: generate SESSION_TOKEN
+  P-->>T: stdout "LMS_TOKEN=..."
+  T->>T: capture token, scrub from logs
+  P->>P: Uvicorn binds 127.0.0.1:8000
+  T->>W: create main window, load frontend
+  W->>T: invoke('get_session_token')
+  T-->>W: the captured token
+  W->>P: GET /api/system/health (with Bearer)
+  P-->>W: 200 OK
+  W->>T: invoke('close_splashscreen')
+  T->>T: hide splash, show main window
+          </div>
+          <figcaption><span class="fig-num">Figure 4.3</span> — The launch sequence.
+          The session token is born in the sidecar and handed to the frontend before
+          the first real request.</figcaption>
+        </div>
+
+        <p>Two details of this sequence are load-bearing and recur throughout the
+        handbook:</p>
+        <ul>
+          <li>The Python sidecar <strong>generates its own session token</strong> at
+          boot and emits it as its very first line of standard output. The Rust
+          shell captures that line, stores the token, and removes it from the log
+          stream so it never lands in a log file. This is the foundation of the
+          authentication model (Chapter 21).</li>
+          <li>The <strong>splash screen</strong> exists precisely because the
+          sidecar takes a moment to start. The main window is not shown until the
+          frontend has confirmed the backend is alive.</li>
+        </ul>
+
+        <h2>4.6 Development Mode vs Production Mode</h2>
+        <p>The same architecture runs in two shapes. In development the pieces are
+        loose and hot-reloading; in production they are bundled into one installed
+        application.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Aspect</th><th>Development</th><th>Production</th></tr></thead>
+          <tbody>
+            <tr><td>Frontend</td><td>Vite dev server on port 5173, hot module reload.</td><td>Static <code>frontend/dist</code> bundled into the app.</td></tr>
+            <tr><td>Backend</td><td><code>python -m app.main</code> — the interpreter runs the source.</td><td>A PyInstaller-built <code>rb-backend</code> executable.</td></tr>
+            <tr><td>Token handoff</td><td>Vite middleware re-exposes the token file at <code>GET /dev-token</code>.</td><td>The Rust shell captures the token from the sidecar's stdout.</td></tr>
+            <tr><td>Launch</td><td><code>npm run dev:full</code> (browser) or <code>npm run tauri dev</code> (desktop).</td><td>The installed desktop binary.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>A subtle but useful property: even a directly-launched debug build behaves
+        like a full development run — if ports 8000 and 5173 are free, the debug
+        build auto-spawns both the Python backend and Vite. The application is also
+        runnable purely in a browser via <code>npm run dev:full</code>, which is how
+        much of the automated UI testing is done (Chapter 23).</p>
+
+        <h2>4.7 The Repository Layout</h2>
+        <p>The three stacks map directly onto three top-level directories, and the
+        supporting material onto a handful more.</p>
+
+        <pre><code>LibraryManagementSystem/
+├── app/                    Python FastAPI backend (~40 modules)
+│   ├── main.py             all 146 API routes
+│   ├── services.py         business-logic classes
+│   ├── database.py         XML-mode library
+│   ├── live_database.py    Live (master.db) library
+│   ├── analysis_engine.py  the DSP pipeline
+│   ├── anlz_writer.py      ANLZ binary writer
+│   ├── usb_*.py            the USB-export subsystem
+│   ├── soundcloud_*.py     SoundCloud integration
+│   └── templates/          the OneLibrary template DB
+│
+├── frontend/               React + Vite frontend
+│   └── src/
+│       ├── components/     views and shared components
+│       ├── audio/          DAW state machine
+│       ├── api/            the axios client
+│       └── store/          auth state
+│
+├── src-tauri/              Rust + Tauri desktop wrapper
+│   └── src/
+│       ├── main.rs         app init, OAuth, supervisor
+│       └── audio/          the native audio engine
+│
+├── tests/                  pytest suite + e2e
+├── scripts/                build and dev utilities
+├── docs/                   documentation, incl. this handbook
+└── .claude/                AI-agent configuration &amp; rules
+</code></pre>
+
+        <p>The mapping is intentionally one-to-one: a developer working on the API
+        never leaves <code>app/</code>; a developer on the UI never leaves
+        <code>frontend/</code>; a developer on the native engine never leaves
+        <code>src-tauri/</code>. The full file-by-file map is Appendix material in
+        Chapter 28.</p>
+
+        <h2>4.8 Concurrency &amp; State</h2>
+        <p>Three facts about how the system handles concurrent work shape the
+        backend chapters that follow:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Mechanism</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>_db_write_lock</code> (a re-entrant lock)</td><td>Serialises every writer of the Rekordbox <code>master.db</code> so concurrent FastAPI request threads cannot corrupt it.</td></tr>
+            <tr><td><code>ProcessPoolExecutor</code> for analysis</td><td>Heavy DSP runs in worker processes, keeping the API responsive.</td></tr>
+            <tr><td>Subprocess isolation for ANLZ parsing</td><td>A third-party library with a known crashing bug is quarantined in a single-worker subprocess so a crash kills only the worker.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>The first and third of these are direct consequences of integrating with
+        a real, imperfect third-party ecosystem. They are documented in depth in
+        Chapter 10.</p>
+
+        <h2>4.9 Performance Characteristics</h2>
+        <p>The architecture's performance budget, as the project measures it:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Operation</th><th>Mechanism</th><th>Latency</th></tr></thead>
+          <tbody>
+            <tr><td>Library load — 10k tracks</td><td>In-memory XML cache</td><td>~200&nbsp;ms first load, &lt;5&nbsp;ms cached</td></tr>
+            <tr><td>Waveform render</td><td>Rust FFT</td><td>~50&nbsp;ms for a 5-minute track</td></tr>
+            <tr><td>BPM analysis</td><td>Python process pool</td><td>2–8&nbsp;s per track, in the background</td></tr>
+            <tr><td>Audio playback start</td><td>Memory-mapped file + CPAL</td><td>&lt;50&nbsp;ms</td></tr>
+            <tr><td>USB sync — 1000 tracks</td><td>Incremental diff</td><td>Minutes — I/O bound</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>The pattern is consistent: anything a user waits on synchronously is fast
+        (cache hits, native FFT, memory-mapped playback), and anything genuinely slow
+        (analysis, USB I/O) is pushed to a background worker so the UI never blocks.</p>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>The system is a three-tier desktop application: a Rust/Tauri shell
+            hosts a React UI and a native audio engine, and supervises a bundled
+            Python FastAPI sidecar bound to loopback. The frontend talks to the
+            backend over HTTP and to the Rust core over Tauri IPC. Three languages
+            are used deliberately — Rust for realtime audio, Python for offline DSP
+            and orchestration, React for the UI — and the boundaries are enforced by
+            rule. The sidecar pattern, the boot sequence, and the concurrency locks
+            introduced here are unpacked in Part III.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

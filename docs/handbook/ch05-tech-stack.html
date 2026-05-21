@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>05 · The Technology Stack — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 05 · Architecture</div>
+          <h1>The Technology Stack</h1>
+          <p class="ch-lead">Every framework and library the application depends on,
+            the job it does, and why it was chosen — across the Python backend, the
+            React frontend, the Rust native core, and the external tools.</p>
+        </header>
+
+        <h2>5.1 The Stack at a Glance</h2>
+        <p>The application stacks four distinct technology layers, each documented in
+        its own section below.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  subgraph L1["Presentation — JavaScript"]
+    R["React 18 · Vite 7 · Tailwind 3<br/>axios · WaveSurfer.js · Lucide"]
+  end
+  subgraph L2["Desktop &amp; Native — Rust"]
+    T["Tauri 2 · CPAL · Symphonia<br/>RustFFT · lofty · reqwest"]
+  end
+  subgraph L3["Backend — Python"]
+    F["FastAPI · Uvicorn · Pydantic v2<br/>pyrekordbox · SQLAlchemy"]
+  end
+  subgraph L4["Analysis — Python DSP"]
+    D["librosa · madmom · essentia<br/>numpy · scipy · numba"]
+  end
+  L1 --> L2
+  L1 --> L3
+  L3 --> L4
+  EXT["FFmpeg — external, on PATH"]
+  L3 -.-> EXT
+  L2 -.-> EXT
+          </div>
+          <figcaption><span class="fig-num">Figure 5.1</span> — The four technology
+          layers plus the one external dependency.</figcaption>
+        </div>
+
+        <h2>5.2 Dependency Philosophy — "Schicht A"</h2>
+        <p>Before listing the dependencies, it is worth understanding how the project
+        <em>manages</em> them, because that policy — internally called
+        <strong>Schicht A</strong> ("Layer A") hardening — touches every version
+        number you will see in this chapter.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Ecosystem</th><th>Rule</th></tr></thead>
+          <tbody>
+            <tr><td>Python</td><td>Every dependency in <code>requirements.txt</code> is pinned with an exact <code>==</code> version. Never <code>&gt;=</code>, never <code>~=</code>. No bump without a CVE check and a passing test run.</td></tr>
+            <tr><td>Node</td><td>The lockfile is canonical. <code>npm ci</code> — never <code>npm install</code> — in CI. Install scripts are disabled.</td></tr>
+            <tr><td>Rust</td><td><code>Cargo.lock</code> is committed. No casual <code>cargo update</code>.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>The reasoning is supply-chain security: an exact pin means a malicious or
+        broken upstream release cannot silently enter a build. Chapter 21 covers the
+        full threat model. For this chapter, the takeaway is simple — every version
+        below is deliberate and frozen.</p>
+
+        <h2>5.3 The Python Backend Stack</h2>
+        <p>The backend's dependencies fall into three groups: the web layer, the
+        analysis layer, and the integration-and-utility layer.</p>
+
+        <h3>Web &amp; API layer</h3>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Package</th><th>Version</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><code>fastapi</code></td><td>0.109.0</td><td>The web framework — defines all 146 routes, request validation, dependency injection.</td></tr>
+            <tr><td><code>uvicorn</code></td><td>0.27.0</td><td>The ASGI server that runs FastAPI; binds to <code>127.0.0.1:8000</code>.</td></tr>
+            <tr><td><code>pydantic</code></td><td>2.5.3</td><td>Request/response models and validation. The project mandates Pydantic v2 (<code>.model_dump()</code>).</td></tr>
+            <tr><td><code>python-multipart</code></td><td>0.0.9</td><td>Multipart form parsing — needed for file-upload endpoints.</td></tr>
+            <tr><td><code>sqlalchemy</code></td><td>2.0.49</td><td>SQL toolkit for the registry and sidecar databases; parameterised queries only.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h3>Audio analysis layer</h3>
+        <p>This is the heaviest part of the stack and the reason the backend is
+        Python at all. No other ecosystem has this depth of audio DSP.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Package</th><th>Version</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><code>numpy</code></td><td>1.26.4</td><td>The numerical foundation under everything else — every signal is a numpy array.</td></tr>
+            <tr><td><code>scipy</code></td><td>1.11.4</td><td>Signal processing — the Butterworth crossover filters for 3-band waveforms live here.</td></tr>
+            <tr><td><code>numba</code></td><td>0.58.1</td><td>JIT compilation that accelerates the hot numerical loops in analysis.</td></tr>
+            <tr><td><code>librosa</code></td><td>0.10.1</td><td>The general-purpose music-analysis library — the fallback beat tracker and key estimator.</td></tr>
+            <tr><td><code>madmom</code></td><td>0.16.1</td><td>The primary beat tracker — a recurrent-neural-network model, more accurate than librosa's.</td></tr>
+            <tr><td><code>essentia</code></td><td>2.1b6</td><td>The primary key detector — a high-accuracy key extractor.</td></tr>
+            <tr><td><code>soundfile</code></td><td>0.13.1</td><td>Reading and writing audio files (libsndfile bindings).</td></tr>
+            <tr><td><code>lameenc</code></td><td>1.8.2</td><td>MP3 encoding for rendered exports.</td></tr>
+            <tr><td><code>pyloudnorm</code></td><td>0.1.1</td><td>Loudness measurement to the ITU-R BS.1770 / EBU R128 standard.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="callout note">
+          <span class="ico">◆</span>
+          <div class="body">
+            <span class="ct">Graceful degradation</span>
+            <p>madmom and essentia are the high-accuracy analyzers, but they are
+            optional at import time. If they are unavailable, the analysis engine
+            falls back to librosa. The pinned <code>requirements.txt</code> still
+            lists them so a clean install produces the best analysis stack — but the
+            application keeps working without them.</p>
+          </div>
+        </div>
+
+        <h3>Integration &amp; utility layer</h3>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Package</th><th>Version</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><code>pyrekordbox</code></td><td>0.1.7</td><td>Reads and writes the Rekordbox <code>master.db</code>, ANLZ files, and my-tags. Imported as <code>rbox</code>.</td></tr>
+            <tr><td><code>mutagen</code></td><td>1.47.0</td><td>Reading and writing embedded audio tags across ID3, FLAC, MP4, Vorbis, AIFF, WAV.</td></tr>
+            <tr><td><code>requests</code></td><td>2.33.1</td><td>HTTP client for synchronous external calls.</td></tr>
+            <tr><td><code>keyring</code></td><td>25.7.0</td><td>Stores SoundCloud OAuth tokens in the OS credential manager.</td></tr>
+            <tr><td><code>platformdirs</code></td><td>4.2.2</td><td>Cross-platform resolution of the user-data directory — the session-token file lives there.</td></tr>
+            <tr><td><code>watchdog</code></td><td>4.0.2</td><td>The filesystem observer behind the auto-import folder watcher.</td></tr>
+            <tr><td><code>psutil</code></td><td>5.9.8</td><td>Process and system inspection — checks whether Rekordbox is running before a write.</td></tr>
+            <tr><td><code>python-dotenv</code></td><td>1.2.2</td><td>Loads <code>.env</code> configuration.</td></tr>
+            <tr><td><code>tqdm</code></td><td>4.66.1</td><td>Progress bars for CLI tooling.</td></tr>
+            <tr><td><code>pytest</code></td><td>9.0.3</td><td>The test framework (Chapter 23).</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="callout warn">
+          <span class="ico">▲</span>
+          <div class="body">
+            <span class="ct">pyrekordbox is the load-bearing — and fragile — dependency</span>
+            <p>The whole Live mode and the USB export depend on
+            <code>pyrekordbox</code> 0.1.7. That version has known bugs: its
+            <code>create_content()</code> raises on every call, and earlier
+            versions crash the entire Python process on malformed analysis rows. The
+            project works around both — a template-based USB writer and a
+            subprocess-isolated parser — and Chapters 10 and 13 document the
+            workarounds in full.</p>
+          </div>
+        </div>
+
+        <h2>5.4 The Frontend Stack</h2>
+        <p>The frontend is a modern React single-page application, deliberately kept
+        in plain JavaScript (no TypeScript) with a <code>jsconfig.json</code> for
+        editor hints.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Package</th><th>Version</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td>React</td><td>18</td><td>The UI component framework.</td></tr>
+            <tr><td>Vite</td><td>7.x</td><td>The build tool and dev server — fast hot module reload.</td></tr>
+            <tr><td>Tailwind CSS</td><td>3</td><td>Utility-first styling; the "Melodex" amber design system is built on it.</td></tr>
+            <tr><td><code>axios</code></td><td>—</td><td>The HTTP client; wrapped in a single shared instance with auth and retry logic.</td></tr>
+            <tr><td>WaveSurfer.js</td><td>—</td><td>Waveform rendering in the standalone waveform editor.</td></tr>
+            <tr><td>Lucide React</td><td>—</td><td>The icon set.</td></tr>
+            <tr><td><code>@tauri-apps/api</code></td><td>2.11.0</td><td>The JavaScript side of the Tauri IPC bridge — <code>invoke()</code> and event listeners.</td></tr>
+            <tr><td><code>react-hot-toast</code></td><td>—</td><td>Underpins the toast-notification system that replaced native alerts.</td></tr>
+            <tr><td><code>react-hotkeys-hook</code></td><td>—</td><td>Keyboard-shortcut binding in the waveform editor.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>The build tooling is rounded out by ESLint and Prettier, configured during
+        the Slopcode-Cleanup era (Chapter 2), and PostCSS with Autoprefixer for
+        Tailwind.</p>
+
+        <h2>5.5 The Rust Native Stack</h2>
+        <p>The Rust layer is small (~2,900 lines) but every crate in it is chosen for
+        a specific, performance-critical job.</p>
+
+        <h3>Framework &amp; plugins</h3>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Crate</th><th>Version</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><code>tauri</code></td><td>2.10.2 (pinned)</td><td>The desktop framework — window management, the WebView, IPC.</td></tr>
+            <tr><td><code>tauri-plugin-shell</code></td><td>—</td><td>Spawns the Python sidecar and opens URLs in the system browser.</td></tr>
+            <tr><td><code>tauri-plugin-dialog</code></td><td>—</td><td>Native file and folder pickers.</td></tr>
+            <tr><td><code>tauri-plugin-fs</code></td><td>—</td><td>Native filesystem writes — used by the export modal.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h3>Audio engine crates</h3>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Crate</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><code>cpal</code></td><td>Cross-platform audio output — the device-agnostic playback stream.</td></tr>
+            <tr><td><code>symphonia</code></td><td>Pure-Rust audio decoding: MP3, FLAC, WAV, ALAC, ISO-MP4.</td></tr>
+            <tr><td><code>rustfft</code></td><td>The FFT behind 3-band waveform computation.</td></tr>
+            <tr><td><code>rubato</code></td><td>Sample-rate conversion (resampling).</td></tr>
+            <tr><td><code>ringbuf</code></td><td>A lock-free ring buffer feeding the audio callback thread.</td></tr>
+            <tr><td><code>memmap2</code></td><td>Memory-mapped file reading — zero-copy audio loading.</td></tr>
+            <tr><td><code>hound</code></td><td>WAV file reading and writing for offline render.</td></tr>
+            <tr><td><code>lofty</code></td><td>Audio metadata read/write — ID3, FLAC, ALAC, AIFF.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h3>Networking &amp; utility crates</h3>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Crate</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><code>reqwest</code> 0.12.28 (pinned)</td><td>HTTP client for the OAuth token exchange.</td></tr>
+            <tr><td><code>sha2</code> / <code>base64</code> / <code>rand</code></td><td>The cryptographic primitives for the OAuth PKCE challenge.</td></tr>
+            <tr><td><code>tokio</code></td><td>The async runtime.</td></tr>
+            <tr><td><code>serde</code> / <code>serde_json</code></td><td>Serialisation for IPC payloads.</td></tr>
+            <tr><td><code>log</code> 0.4 / <code>env_logger</code> 0.11</td><td>Structured logging — no <code>println!</code> outside tests.</td></tr>
+            <tr><td><code>open</code></td><td>Opens the OAuth URL in the system browser.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>5.6 The External Dependency — FFmpeg</h2>
+        <p>One dependency is not bundled or pinned: <strong>FFmpeg</strong>. It must
+        be present on the system <code>PATH</code>. FFmpeg handles format conversion,
+        sample-accurate audio slicing, render export, and the HLS-stream remux in the
+        SoundCloud downloader.</p>
+
+        <div class="callout note">
+          <span class="ico">◆</span>
+          <div class="body">
+            <span class="ct">Why FFmpeg is external</span>
+            <p>FFmpeg is a large, separately-licensed native binary. Treating it as
+            an external prerequisite keeps the installer small and the licensing
+            clean. Every subprocess call to FFmpeg in the codebase carries an
+            explicit timeout — a coding rule, since a hung encoder must never hang
+            the backend.</p>
+          </div>
+        </div>
+
+        <h2>5.7 The Tooling Stack</h2>
+        <p>Beyond runtime dependencies, the project runs a consistent set of quality
+        tools, all installed during the Slopcode-Cleanup era:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Stack</th><th>Tools</th></tr></thead>
+          <tbody>
+            <tr><td>Python</td><td><code>ruff</code> (lint + format), <code>black</code>, <code>mypy</code> (types), <code>pytest</code> (tests).</td></tr>
+            <tr><td>Frontend</td><td>ESLint, Prettier, configured per the <code>frontend/</code> config files.</td></tr>
+            <tr><td>Rust</td><td><code>cargo check</code>, <code>cargo fmt</code>, <code>cargo clippy -D warnings</code>, <code>cargo test</code>.</td></tr>
+            <tr><td>Supply chain</td><td><code>npm audit</code>, <code>lockfile-lint</code>, <code>cargo audit</code>, <code>pip-audit</code>, Dependabot.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>All four language toolchains are enforced green by the <code>ci.yml</code>
+        GitHub Actions workflow on every push and pull request. Chapter 23 covers the
+        testing and CI machinery; Chapter 26 covers using these tools day to day.</p>
+
+        <h2>5.8 The Stack, Summarised</h2>
+        <div class="cards">
+          <div class="card"><div class="big">~25</div><div class="lbl">Python packages, all exact-pinned</div></div>
+          <div class="card"><div class="big">~9</div><div class="lbl">Frontend runtime packages</div></div>
+          <div class="card"><div class="big">~20</div><div class="lbl">Rust crates</div></div>
+          <div class="card"><div class="big">1</div><div class="lbl">External tool — FFmpeg</div></div>
+        </div>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>The stack is four layers: a React/Vite/Tailwind frontend; a
+            Rust/Tauri native core built on CPAL, Symphonia and RustFFT; a
+            Python/FastAPI backend; and a Python DSP layer built on librosa, madmom
+            and essentia. FFmpeg is the one external prerequisite. Every dependency
+            is exact-version-pinned under the "Schicht A" supply-chain policy, and a
+            full four-language tooling suite gates every commit. The most powerful
+            dependency, <code>pyrekordbox</code>, is also the most fragile — and the
+            project's workarounds for it shape Chapters 10 and 13.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>
