@@ -8,7 +8,13 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-import rbox
+# rbox (pyrekordbox) is not pip-installable on the Linux CI runner. Soft-import
+# so app.main collection survives its absence; every rbox call sits inside a
+# method body, never at module scope.
+try:
+    import rbox
+except ImportError:
+    rbox = None
 
 from .anlz_safe import SafeAnlzParser
 
