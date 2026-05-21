@@ -121,6 +121,8 @@ audio_tags — write metadata back to the source audio file.
 - `write_tags()` — Mirror updates into the audio file's native tag format.
 - `load_artwork()` — Read an artwork file from disk into bytes, or None on any failure.
 - `read_tags()` — Read metadata tags from any supported audio file.
+- `serialise_provenance()` — Serialise candidate URLs for the COMMENT tag — picked first, then by quality.
+- `read_provenance()` — Parse a COMMENT provenance string back into ``(platform, url, was_picked)``.
 
 ### `app/auth.py`
 
@@ -249,11 +251,48 @@ Unified multi-source downloader package.
 - `  SourceProvider.search()` — Free-form search for a track.
 - `  SourceProvider.fetch()` — Phase-2 actual download of the audio for a chosen claim.
 
+### `app/downloader/_genre_starter.py`
+
+Curated DJ-genre starter list (D5).
+
+### `app/downloader/aiff.py`
+
+AIFF post-download conversion — bit-depth-aware (D4).
+
+- `detect_bit_depth()` — Return 24 if the source is 24-bit (or wider) lossless, else 16.
+- `convert_to_aiff()` — Convert a lossless source to a bit-depth-matched AIFF.
+
+### `app/downloader/concurrency.py`
+
+First-run concurrency benchmark (D8).
+
+- `BenchmarkResult` — Structured return of :func:`benchmark_concurrency` (also the persist input).
+- `Probe` — A single benchmark probe — resolve one URL, return its latency.
+- `HttpProbe` — Default :class:`Probe` — times a real SoundCloud V2 ``/resolve`` call.
+- `speedup_to_concurrency()` — Map a parallel-vs-sequential speedup ratio onto a concurrency value.
+- `benchmark_concurrency()` — Run the D8 benchmark and return a result dict (does not persist).
+- `persist_benchmark()` — Write a benchmark result into ``settings.json`` under ``unified_downloader``.
+- `ensure_concurrency_benchmark()` — Return the recommended concurrency, benchmarking on first run / staleness.
+
+### `app/downloader/genre_sync.py`
+
+Genre normalisation + canonical-vocabulary mapping (D5).
+
+- `normalise_genre()` — Lower-case, swap ``_`` / ``-`` for spaces, collapse whitespace.
+- `seed_starter_genres()` — Seed the canonical vocabulary from the D5 starter list (first-run).
+- `map_genre()` — Map a raw incoming genre string onto a canonical genre.
+
 ### `app/downloader/match_adapter.py`
 
 Thin matching adapter over the shared ``app.external_track_match`` module.
 
 - `match()` — Run the 100%-match gate over ``candidates`` against ``needle``.
+
+### `app/downloader/migration.py`
+
+One-shot folder migration: per-source layout -> unified layout (D7).
+
+- `migrate_per_source_to_unified()` — Move ``MUSIC_DIR/SoundCloud/<artist>/*`` into ``MUSIC_DIR/<artist>/*``.
 
 ### `app/downloader/models.py`
 
@@ -307,6 +346,18 @@ Quality-tier classification + lossless-first candidate picking.
 - `is_lossless()` — Return ``True`` when ``m`` classifies into a lossless tier (0 or 1).
 - `pick_best()` — Return the index of the best-quality candidate.
 - `pick_with_policy()` — Pick a candidate under the owner's lossless-first policy.
+
+### `app/downloader/resolver.py`
+
+Phase-3 resolver — single-identifier → ranked cross-platform candidates.
+
+- `resolve()` — Resolve a single identifier into ranked, match-gated candidates.
+
+### `app/downloader/search.py`
+
+Phase-3 search — free-form query → deduplicated cross-platform hit clusters.
+
+- `search()` — Run a free-form query across enabled platforms into deduped hit clusters.
 
 ### `app/external_track_match.py`
 
@@ -1663,6 +1714,26 @@ Regression tests for the analysis pipeline.
 - `test_cue_toggles_kwarg_overrides_settings()` — Per-call kwarg overrides the global setting.
 - `test_e2e_anlz_write_roundtrip()`
 
+### `tests/test_audio_tags_provenance.py`
+
+Tests for the unified-downloader extensions to ``app/audio_tags.py``.
+
+- `test_serialise_provenance_picked_leads()`
+- `test_serialise_provenance_orders_rest_by_quality()`
+- `test_serialise_provenance_dedups_picked()`
+- `test_read_provenance_round_trip()`
+- `test_read_provenance_infers_platforms()`
+- `test_read_provenance_unknown_host_defaults_soundcloud()`
+- `test_read_provenance_empty_input()`
+- `test_read_provenance_ignores_non_url_tokens()`
+- `test_serialise_read_full_round_trip()`
+- `test_isrc_write_read_mp3()`
+- `test_isrc_write_read_flac()`
+- `test_isrc_write_read_aiff()`
+- `test_isrc_write_read_wav()`
+- `test_isrc_write_read_m4a()`
+- `test_isrc_written_alongside_other_tags()` — ISRC must coexist with the standard metadata fields, not clobber them.
+
 ### `tests/test_auth.py`
 
 Tests for ``app/auth.py`` -- Bearer-token session authentication.
@@ -1982,6 +2053,63 @@ Tests for `app/soundcloud_api.py`.
 - `  TestFuzzyMatch.test_picks_highest_score_among_candidates()` — When several candidates pass the threshold, the best wins.
 - `  TestFuzzyMatch.test_match_with_score_returns_tuple()` — The underlying API used by the preview endpoint returns (id, score).
 
+### `tests/test_unified_downloader_aiff.py`
+
+Tests for ``app/downloader/aiff.py`` — bit-depth detection + AIFF conversion.
+
+- `test_detect_bit_depth_24_via_bits_per_raw_sample()`
+- `test_detect_bit_depth_24_via_sample_fmt_only()`
+- `test_detect_bit_depth_16_for_cd_rate()`
+- `test_detect_bit_depth_falls_back_to_16_on_probe_failure()`
+- `test_detect_bit_depth_16_on_garbage_json()`
+- `test_convert_aiff_passthrough_returns_source()`
+- `test_convert_lossy_mp3_returns_none()`
+- `test_convert_16bit_flac_uses_pcm_s16le()`
+- `test_convert_24bit_flac_uses_pcm_s24le()`
+- `test_convert_wav_swaps_container()`
+- `test_convert_aac_m4a_kept_not_recontainered()`
+- `test_convert_alac_m4a_is_converted()`
+- `test_convert_returns_none_on_ffmpeg_failure()`
+- `test_convert_returns_none_on_timeout()`
+
+### `tests/test_unified_downloader_concurrency.py`
+
+Tests for ``app/downloader/concurrency.py`` — first-run benchmark (D8).
+
+- `test_speedup_to_concurrency_thresholds()`
+- `test_benchmark_high_speedup_yields_8()`
+- `test_benchmark_medium_speedup_yields_6()`
+- `test_benchmark_low_speedup_yields_floor()`
+- `test_benchmark_zero_parallel_time_falls_back()`
+- `test_benchmark_probe_exception_falls_back()`
+- `test_benchmark_uses_all_urls()`
+- `test_ensure_benchmarks_when_no_cache()`
+- `test_ensure_uses_fresh_cache()`
+- `test_ensure_rebenchmarks_when_stale()`
+- `test_ensure_force_ignores_fresh_cache()`
+- `test_persist_benchmark_writes_settings()`
+
+### `tests/test_unified_downloader_genre_sync.py`
+
+Tests for ``app/downloader/genre_sync.py`` — genre normalisation + mapping.
+
+- `registry()` — Isolated registry DB with the genre tables created.
+- `test_normalise_genre()`
+- `test_seed_starter_genres_populates_table()`
+- `test_seed_starter_genres_is_idempotent()`
+- `test_seed_marks_rows_as_seeded()`
+- `test_map_genre_exact_canonical()`
+- `test_map_genre_empty_returns_none()`
+- `test_map_genre_caches_exact_decision()`
+- `test_map_genre_uses_cached_mapping_first()`
+- `test_map_genre_fuzzy_match()`
+- `test_map_genre_below_fuzzy_threshold_is_novel()`
+- `test_map_genre_novel_no_callback_returns_none()`
+- `test_map_genre_novel_callback_add_new()`
+- `test_map_genre_novel_callback_map_to_existing()`
+- `test_map_genre_novel_decision_is_cached()`
+- `test_map_genre_callback_skip_returns_none()`
+
 ### `tests/test_unified_downloader_match.py`
 
 Tests for ``app/downloader/match_adapter.py`` — the 100%-match gate.
@@ -2005,6 +2133,18 @@ Tests for ``app/downloader/match_adapter.py`` — the 100%-match gate.
 - `test_featuring_clause_minor_variance_matches()` — A 'feat.' vs 'ft.' spelling difference is small enough to still match.
 - `test_extra_featuring_clause_one_side()` — A featuring clause on only one side still leaves a high ratio.
 - `test_mixed_batch_each_candidate_judged_independently()` — A batch mixing ISRC / duration-fail / fuzzy candidates judges each on its own rule.
+
+### `tests/test_unified_downloader_migration.py`
+
+Tests for ``app/downloader/migration.py`` — per-source → unified folder move.
+
+- `music_dir()` — Isolated MUSIC_DIR + registry DB.
+- `test_migration_no_soundcloud_folder()`
+- `test_migration_moves_files_to_unified_layout()`
+- `test_migration_updates_db_path_and_source()`
+- `test_migration_handles_multiple_artists()`
+- `test_migration_second_run_is_noop()`
+- `test_migration_skips_destination_collision()`
 
 ### `tests/test_unified_downloader_models.py`
 
@@ -2106,6 +2246,54 @@ Tests for ``app/downloader/quality.py`` — tier classification + policy picking
 - `test_policy_strict_no_lossless_returns_none_true()` — lossless_only=True + no lossless candidate → (None, True).
 - `test_policy_strict_picks_best_lossless_among_several()` — lossless_only=True picks the highest-quality lossless candidate.
 - `test_policy_strict_ignores_lossy_even_if_higher_bitrate()` — lossless_only=True never picks lossy, even a 320 kbps one over a CD FLAC.
+
+### `tests/test_unified_downloader_resolver.py`
+
+Tests for ``app/downloader/resolver.py`` — the Phase-3 resolve layer (P3.11).
+
+- `test_synthetic_needle_from_artist_title()` — A free-form 'Artist - Title' string splits on the first dash.
+- `test_synthetic_needle_from_bare_isrc()` — A bare ISRC populates only the isrc field, upper-cased.
+- `test_synthetic_needle_title_only_fallback()` — A string with no dash becomes a title-only needle.
+- `test_synthetic_needle_multi_dash_splits_once()` — 'A - B - C' splits only on the first dash → artist 'A', title 'B - C'.
+- `test_resolve_identifies_needle_from_url()` — A URL identifier: the needle is the first provider's resolve result.
+- `test_resolve_unresolvable_url_falls_back_to_synthetic()` — A URL no provider can resolve degrades to a synthetic needle, no raise.
+- `test_resolve_isrc_match_produces_candidate()` — A claim with the needle's ISRC passes the 100%-gate (isrc_equality).
+- `test_resolve_ranks_lossless_first()` — Candidates are quality-sorted — hi-res FLAC outranks CD FLAC outranks lossy.
+- `test_resolve_auto_pick_index_zero_when_match()` — auto_pick_index is 0 whenever at least one 100%-match exists.
+- `test_resolve_auto_pick_none_when_no_match()` — No 100%-match → auto_pick_index is None.
+- `test_resolve_captures_near_misses()` — A sub-100% but >=threshold claim lands in near_misses, not candidates.
+- `test_resolve_near_miss_below_threshold_dropped()` — A claim below the near-miss threshold is dropped entirely.
+- `test_resolve_near_misses_sorted_and_capped()` — near_misses are confidence-descending and capped at 5.
+- `test_resolve_fans_out_to_all_enabled_providers()` — Every enabled provider is probed exactly once.
+- `test_resolve_skips_platform_without_provider()` — An enabled platform with no registered provider is silently skipped.
+- `test_resolve_dead_provider_does_not_abort()` — One provider raising must not abort the resolve — others still count.
+- `test_resolve_semaphore_bounds_concurrency()` — The fan-out never runs more probes at once than the concurrency budget.
+- `test_resolve_empty_when_no_providers()` — An enabled-platform list with zero registered providers yields nothing.
+- `test_enabled_platforms_falls_back_to_soundcloud()` — With no settings block the enabled set defaults to ['soundcloud'].
+- `test_enabled_platforms_reads_truthy_map()` — The {platform: bool} settings map flattens to the truthy platform list.
+- `test_max_concurrency_clamped()` — max_concurrency is clamped into [1, 32]; junk falls back to the default.
+- `test_near_miss_threshold_clamped()` — match_threshold_near_miss is clamped into [0.0, 1.0].
+
+### `tests/test_unified_downloader_search.py`
+
+Tests for ``app/downloader/search.py`` — the Phase-3 search layer (P3.12).
+
+- `test_cluster_key_uses_isrc_when_present()` — A claim with an ISRC clusters on the upper-cased ISRC.
+- `test_cluster_key_hash_fallback_without_isrc()` — Without an ISRC the key is a stable title/artist/duration hash.
+- `test_cluster_key_duration_bucket_tolerates_drift()` — Sub-bucket duration drift hashes into the same cluster key.
+- `test_cluster_key_distinct_titles_differ()` — Different titles hash to different cluster keys.
+- `test_search_fans_out_to_all_enabled_providers()` — Every enabled provider's search() is called once with the query.
+- `test_search_empty_when_no_providers()` — Zero registered providers → an empty hit list, no raise.
+- `test_search_dead_provider_does_not_abort()` — A provider raising in search() must not abort the whole fan-out.
+- `test_search_clusters_same_isrc_across_platforms()` — Two platforms returning the same ISRC collapse into one SearchHit.
+- `test_search_representative_is_best_quality()` — Within an ISRC cluster the representative is the lossless claim.
+- `test_search_distinct_isrcs_stay_separate()` — Two different ISRCs produce two separate hits.
+- `test_search_no_isrc_dedupes_by_title_artist_duration()` — Without ISRCs, identical title/artist/duration claims still cluster.
+- `test_search_cross_platform_urls_skips_empty_url()` — A clustered claim with an empty URL is omitted from cross_platform_urls.
+- `test_search_same_platform_in_cluster_keeps_best()` — When one platform appears twice in a cluster, the best-quality URL wins.
+- `test_search_hits_sorted_by_representative_quality()` — The hit list is ordered best-representative-first (lossless before lossy).
+- `test_search_retiers_claims_before_ranking()` — A provider's stale quality_tier is recomputed via classify() before ranking.
+- `test_search_semaphore_bounds_concurrency()` — The search fan-out never exceeds the concurrency budget.
 
 ### `tests/test_usb_manager.py`
 

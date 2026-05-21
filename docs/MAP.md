@@ -30,12 +30,19 @@
 | `app/database.py` | *(no module docstring)* |
 | `app/download_registry.py` | Download Registry — SQLite-based deduplication & analysis history log. |
 | `app/downloader/__init__.py` | Unified multi-source downloader package. |
+| `app/downloader/_genre_starter.py` | Curated DJ-genre starter list (D5). |
+| `app/downloader/aiff.py` | AIFF post-download conversion — bit-depth-aware (D4). |
+| `app/downloader/concurrency.py` | First-run concurrency benchmark (D8). |
+| `app/downloader/genre_sync.py` | Genre normalisation + canonical-vocabulary mapping (D5). |
 | `app/downloader/match_adapter.py` | Thin matching adapter over the shared ``app.external_track_match`` module. |
+| `app/downloader/migration.py` | One-shot folder migration: per-source layout -> unified layout (D7). |
 | `app/downloader/models.py` | Shared Pydantic v2 data models for the unified multi-source downloader. |
 | `app/downloader/providers/__init__.py` | Concrete :class:`~app.downloader.SourceProvider` implementations. |
 | `app/downloader/providers/soundcloud.py` | SoundCloud :class:`~app.downloader.SourceProvider`. |
 | `app/downloader/providers/spotiflac.py` | SpotiFLAC-backed multi-service provider (crash-isolated). |
 | `app/downloader/quality.py` | Quality-tier classification + lossless-first candidate picking. |
+| `app/downloader/resolver.py` | Phase-3 resolver — single-identifier → ranked cross-platform candidates. |
+| `app/downloader/search.py` | Phase-3 search — free-form query → deduplicated cross-platform hit clusters. |
 | `app/external_track_match.py` | Shared track-matching, version-tag taxonomy, fingerprint and adapter-registry module. |
 | `app/folder_watcher.py` | FolderWatcher — auto-import audio files from user-configured folders. |
 | `app/import_tracker.py` | Per-file import-progress tracker — gives the frontend a live transparent |
@@ -199,6 +206,7 @@
 | `tests/conftest.py` | Pytest fixtures shared across the suite. |
 | `tests/fixtures/mock_adapter.py` | A mock :class:`SourcePlugin` for the ``external_track_match`` test-suite. |
 | `tests/test_analysis.py` | Regression tests for the analysis pipeline. |
+| `tests/test_audio_tags_provenance.py` | Tests for the unified-downloader extensions to ``app/audio_tags.py``. |
 | `tests/test_auth.py` | Tests for ``app/auth.py`` -- Bearer-token session authentication. |
 | `tests/test_database.py` | Tests for `app/database.py`. |
 | `tests/test_download_registry_schema.py` | Schema-migration tests for the unified multi-source downloader (Phase 0, P0.3). |
@@ -213,10 +221,16 @@
 | `tests/test_services.py` | Tests for `app/services.py`. |
 | `tests/test_settings_caps.py` | Tests for `SetReq` payload caps + `SettingsManager.load` sanitizer. |
 | `tests/test_soundcloud_api.py` | Tests for `app/soundcloud_api.py`. |
+| `tests/test_unified_downloader_aiff.py` | Tests for ``app/downloader/aiff.py`` — bit-depth detection + AIFF conversion. |
+| `tests/test_unified_downloader_concurrency.py` | Tests for ``app/downloader/concurrency.py`` — first-run benchmark (D8). |
+| `tests/test_unified_downloader_genre_sync.py` | Tests for ``app/downloader/genre_sync.py`` — genre normalisation + mapping. |
 | `tests/test_unified_downloader_match.py` | Tests for ``app/downloader/match_adapter.py`` — the 100%-match gate. |
+| `tests/test_unified_downloader_migration.py` | Tests for ``app/downloader/migration.py`` — per-source → unified folder move. |
 | `tests/test_unified_downloader_models.py` | Tests for ``app/downloader/models.py`` — the unified-downloader data models. |
 | `tests/test_unified_downloader_providers.py` | Tests for ``app/downloader/providers/`` — the Phase-1 provider layer. |
 | `tests/test_unified_downloader_quality.py` | Tests for ``app/downloader/quality.py`` — tier classification + policy picking. |
+| `tests/test_unified_downloader_resolver.py` | Tests for ``app/downloader/resolver.py`` — the Phase-3 resolve layer (P3.11). |
+| `tests/test_unified_downloader_search.py` | Tests for ``app/downloader/search.py`` — the Phase-3 search layer (P3.12). |
 | `tests/test_usb_manager.py` | Tests for `app/usb_manager.py`. |
 
 ## scripts/ — Dev/Build Utilities
