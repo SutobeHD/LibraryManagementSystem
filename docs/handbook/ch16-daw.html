@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>16 · The DAW Editor — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 16 · The Frontend</div>
+          <h1>The DAW Editor</h1>
+          <p class="ch-lead">The DJ Edit DAW is a four-panel, non-destructive editing
+            workstation built entirely in the browser — a timeline, a waveform, cue
+            and beatgrid editing, and offline render export, all without ever
+            rewriting a source file.</p>
+        </header>
+
+        <h2>16.1 What the DAW Is For</h2>
+        <p>The DAW — "DJ Edit DAW" — is where a track gets <em>prepared</em>. A DJ
+        uses it to refine the beatgrid, place hot cues exactly where the breakdowns
+        and drops are, set loops, draw volume envelopes, and trim or rearrange
+        regions. The output is a polished, performance-ready track and a project file
+        that records every edit.</p>
+
+        <p>The defining principle, repeated from Chapter 1, is
+        <strong>non-destructive</strong>: nothing the DAW does ever modifies the
+        original audio file. Every edit is data — a cue position, an envelope node, a
+        region boundary — held in state and persisted to an overlay project file.</p>
+
+        <h2>16.2 The Four-Panel Layout</h2>
+        <p>The DAW presents four panels around a central timeline.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  subgraph DAW["DjEditDaw — the root orchestrator"]
+    TB["DawToolbar<br/>project name · save/open/export · undo/redo"]
+    OV["WaveformOverview<br/>full-track mini-map"]
+    TL["DawTimeline<br/>waveform · grid · cues · loops · playhead"]
+    SB["DawScrollbar"]
+    CS["DawControlStrip<br/>transport · edit tools · hot cues · loops"]
+    BR["DawBrowser<br/>library list · recent projects · palette"]
+  end
+  TB --- OV --- TL --- SB --- CS
+  BR --- TL
+          </div>
+          <figcaption><span class="fig-num">Figure 16.1</span> — The DAW layout.
+          <code>DawLayout</code> is a pure presentational shell; <code>DjEditDaw</code>
+          fills its slots.</figcaption>
+        </div>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Panel</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><code>DawToolbar</code></td><td>The top bar — inline-editable project name, save/open/export, split and ripple-delete, undo/redo, auto-cue, the BPM display.</td></tr>
+            <tr><td><code>WaveformOverview</code></td><td>A full-track mini-map with a draggable viewport window for fast navigation.</td></tr>
+            <tr><td><code>DawTimeline</code></td><td>The central canvas — the waveform, the beatgrid, regions, cues, loops, and the playhead.</td></tr>
+            <tr><td><code>DawScrollbar</code></td><td>A custom horizontal scrollbar synchronised with the timeline scroll position.</td></tr>
+            <tr><td><code>DawControlStrip</code></td><td>The unified control bar — transport, edit tools, the hot-cue strip, and loop controls.</td></tr>
+            <tr><td><code>DawBrowser</code></td><td>The left panel — a searchable library list, recent projects, and the clip palette.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>16.3 The Root Orchestrator</h2>
+        <p><code>DjEditDaw</code> is the root component, and it deliberately does
+        <em>not</em> contain the panels' logic. Its job is orchestration:</p>
+        <ul>
+          <li>It owns the DAW's editing state via a <code>useReducer</code> driving
+          the composed reducer (Chapter 17).</li>
+          <li>It drives the playhead animation and a dead-reckoning sync that keeps
+          the visual playhead aligned with the audio.</li>
+          <li>It wires the transport and editing handlers — split, ripple-delete,
+          play, stop, jump-to, export, auto-cue.</li>
+          <li>It delegates everything specialised to a set of hooks.</li>
+          <li>It renders a single <code>&lt;DawLayout&gt;</code>, a pure
+          presentational shell that simply places the panels.</li>
+        </ul>
+
+        <p>Separating the orchestrator from the layout shell from the panels is what
+        keeps a feature this large maintainable. <code>DjEditDaw</code> coordinates;
+        <code>DawLayout</code> arranges; each panel renders one thing.</p>
+
+        <h2>16.4 The DAW Hooks</h2>
+        <p>The behaviour that does not belong to any single panel is extracted into
+        custom hooks. This is the pattern the Slopcode-Cleanup used to break up the
+        original 972-line monolithic DAW.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Hook</th><th>Responsibility</th></tr></thead>
+          <tbody>
+            <tr><td><code>useDawProject</code></td><td>Project persistence — save, open, the file-input handling, and building a project object from state.</td></tr>
+            <tr><td><code>useDawShortcuts</code></td><td>Keyboard-shortcut binding — loads bindings from settings, resolves combos like <code>Ctrl+Shift+Z</code>, wires the key listeners.</td></tr>
+            <tr><td><code>useDawKeyhandlers</code></td><td>The pure key-event handler map — cut, copy, paste, delete, undo, redo, zoom, scrub, jump, plus slip-mode and hot-cue jumps.</td></tr>
+            <tr><td><code>useTrackLoader</code></td><td>Hydrates DAW state when the active track changes — decodes audio, builds the tempo map, creates the full-track region, generates the peaks.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h3>How a track loads into the DAW</h3>
+        <div class="figure">
+          <div class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant TL as useTrackLoader
+  participant RS as Rust 3-band waveform
+  participant ST as DAW reducer
+  U->>TL: selects a track
+  TL->>TL: decode audio buffer
+  TL->>TL: build the tempo map
+  TL->>RS: request /api/audio/3band waveform
+  alt native waveform available
+    RS-->>TL: low / mid / high peaks
+  else fallback
+    TL->>TL: client-side BiquadFilter LOD peaks
+  end
+  TL->>ST: HYDRATE — full-track region + peaks
+          </div>
+          <figcaption><span class="fig-num">Figure 16.2</span> — Track loading. The
+          loader prefers the backend's 3-band waveform and falls back to a
+          client-side computation.</figcaption>
+        </div>
+
+        <h2>16.5 The Timeline Internals</h2>
+        <p>The timeline is the most demanding part of the DAW — it must render a
+        waveform, a beatgrid, regions, cues, loops, and a 60-frame-per-second
+        playhead, all without stuttering. <code>DawTimeline</code> is a thin wrapper
+        over three focused hooks under <code>components/daw/timeline/</code>.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Hook</th><th>Responsibility</th></tr></thead>
+          <tbody>
+            <tr><td><code>useTimelineLayout</code></td><td>Sizing — a <code>ResizeObserver</code> subscription, device-pixel-ratio-aware canvas sizing, debounced resize handling.</td></tr>
+            <tr><td><code>useTimelineRender</code></td><td>Rendering — the requestAnimationFrame loop, an offscreen-canvas waveform-bitmap cache, and every draw function (grid, regions, cues, loops, playhead, ruler, phase meter).</td></tr>
+            <tr><td><code>useTimelineEvents</code></td><td>Interaction — cue-flag hit-testing, mouse handlers for placing and dragging cues and selecting regions, and the wheel handler for scroll and cursor-anchored zoom.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="callout note">
+          <span class="ico">◆</span>
+          <div class="body">
+            <span class="ct">The bitmap cache</span>
+            <p>Re-rasterising a full waveform every frame would be ruinously slow.
+            <code>useTimelineRender</code> draws the waveform once into an
+            <strong>offscreen canvas bitmap</strong> and blits that bitmap each
+            frame, repainting only the cheap live layers — grid, cues, the playhead —
+            on top. The bitmap is rebuilt only when an invalidation key changes. This
+            is what makes a 60&nbsp;fps playhead affordable.</p>
+          </div>
+        </div>
+
+        <p>The timeline can render the waveform in several styles — a 3-band coloured
+        view, a "liquid" view, a plain mono view, or a bass-emphasised view — chosen
+        by a state field, with a band-specific renderer for each.</p>
+
+        <h2>16.6 The Non-Destructive Editor</h2>
+        <p>Alongside the DAW sits a second, closely related editor under
+        <code>components/editor/</code> — the non-destructive region editor. Where
+        the DAW is oriented around <em>preparing</em> a track, this editor is oriented
+        around <em>arranging</em> regions: cutting, inserting, deleting, and pasting
+        slices of audio with volume envelopes.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Component / hook</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><code>NonDestructiveEditor</code></td><td>The slim container — owns the timeline state and composes the children and hooks.</td></tr>
+            <tr><td><code>EditorToolbar</code></td><td>The header and edit toolbars — track info, BPM/key/LUFS badges, transport, edit tools, zoom.</td></tr>
+            <tr><td><code>TimelineCanvas</code></td><td>The canvas renderer — waveform, beat grid, regions, and a smoothly animated playhead.</td></tr>
+            <tr><td><code>RegionBlock</code></td><td>A single region's UI — a waveform thumbnail with drag, resize, and edit handles.</td></tr>
+            <tr><td><code>EnvelopeOverlay</code></td><td>The interactive envelope editor — draggable fade-in, fade-out, and gain nodes.</td></tr>
+            <tr><td><code>EditorBrowser</code></td><td>A searchable library sidebar for loading source audio.</td></tr>
+            <tr><td><code>Palette</code></td><td>A drag-and-drop region clipboard — drag a region out to store it, drag it back to clone it.</td></tr>
+            <tr><td><code>useEditorPlayback</code></td><td>Audio loading, Web Audio playback, and the offline render hook.</td></tr>
+            <tr><td><code>useEditorPersistence</code></td><td><code>.rbep</code> project save, list, and load.</td></tr>
+            <tr><td><code>useEditorRegions</code></td><td>Region, palette, marker, zoom, and snap handlers.</td></tr>
+            <tr><td><code>useEditorKeyboard</code></td><td>Global keyboard shortcuts, ignoring input-focused targets.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>16.7 Non-Destructive Editing in Practice</h2>
+        <p>The non-destructive promise is implemented through the
+        <strong>region</strong> abstraction. A region is not a copy of audio — it is a
+        reference into a source file plus metadata: a start offset, an end offset, a
+        gain, and fade curves.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  SRC[("Source audio file<br/>never modified")]
+  SRC --> R1["Region A<br/>0:00-1:30, gain 1.0"]
+  SRC --> R2["Region B<br/>2:00-3:00, fade-in 4 s"]
+  SRC --> R3["Region C<br/>1:30-2:00, gain 0.8"]
+  R1 --> TL["The edited timeline"]
+  R3 --> TL
+  R2 --> TL
+          </div>
+          <figcaption><span class="fig-num">Figure 16.3</span> — Regions reference
+          the source. An edited arrangement is a list of regions; the source file is
+          untouched.</figcaption>
+        </div>
+
+        <p>An edit — splitting a region, rippling a deletion, pasting from the
+        palette — produces a new <em>list of regions</em>, never a new audio file.
+        The user hears the result because the playback engine schedules the regions
+        in order; the user sees it because the timeline draws them. Only two
+        operations produce a real audio file: an explicit project save (which writes
+        a <code>.rbep</code> overlay) and an explicit export.</p>
+
+        <h2>16.8 Export</h2>
+        <p>Both editors can render their timeline to a real audio file through the
+        <code>ExportModal</code>. The modal offers a folder picker (via the native
+        Tauri dialog), a format choice — WAV, MP3 320, or FLAC — and a normalisation
+        toggle.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Format</th><th>How it is rendered</th></tr></thead>
+          <tbody>
+            <tr><td>WAV</td><td>Rendered entirely in the browser — the Web Audio engine renders the timeline, and the result is written to disk via the native filesystem plugin.</td></tr>
+            <tr><td>MP3 / FLAC</td><td>Rendered by the backend — <code>POST /api/audio/render</code> runs FFmpeg, and the result is downloaded and written to disk.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>This split is itself a small example of the architecture's "right layer"
+        principle: a WAV render is straightforward PCM the browser can do alone, while
+        a compressed encode is best handed to FFmpeg in the backend. A browser
+        fallback writes via a blob download when the native filesystem plugin is not
+        available.</p>
+
+        <h2>16.9 Keyboard-Driven Editing</h2>
+        <p>Editing is fast because it is keyboard-driven. The DAW has fourteen
+        rebindable shortcut actions — cut, copy, paste, delete, undo, redo, zoom in
+        and out, scrub, jump to start and end, save, open — plus number keys 1–8 for
+        hot-cue jumps and a Shift-held slip mode. The bindings load from settings, so
+        a DJ can match the muscle memory of whatever they used before. The
+        non-destructive editor has its own shortcut set
+        (<code>m/l/f/o/s/c/1-8/Delete/q/g</code>) wired through
+        <code>useEditorKeyboard</code>, which correctly ignores keystrokes while an
+        input field is focused.</p>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>The DAW is a four-panel non-destructive workstation orchestrated by
+            <code>DjEditDaw</code>, which owns a reducer and delegates to hooks for
+            project persistence, shortcuts, key handling, and track loading. The
+            timeline achieves a 60&nbsp;fps playhead through an offscreen-bitmap
+            waveform cache. A companion non-destructive region editor arranges audio
+            by reference — a region points into a source file and is never a copy —
+            so the original recording is never touched. Both editors render to WAV,
+            MP3, or FLAC through a shared export modal, and both are heavily
+            keyboard-driven.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

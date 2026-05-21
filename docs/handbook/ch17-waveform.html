@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>17 · Waveform &amp; State Management — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 17 · The Frontend</div>
+          <h1>Waveform &amp; State Management</h1>
+          <p class="ch-lead">Two pieces of frontend machinery deserve their own
+            chapter: the composed reducer that holds all DAW editing state with
+            undo/redo, and the WaveSurfer-based waveform editor with its 3-band
+            visualisation.</p>
+        </header>
+
+        <h2>17.1 The DAW State Machine</h2>
+        <p>The DAW of Chapter 16 has a great deal of state — regions, cues, loops, the
+        transport, the selection, the project metadata, the undo history. A coding
+        rule forbids scattering that state across components: <em>all DAW state is
+        managed in <code>audio/</code>; do not duplicate it in component-local
+        state.</em></p>
+
+        <p>The state lives in a single reducer, driven by a <code>useReducer</code>
+        call in <code>DjEditDaw</code>. But a single 1,000-line reducer function would
+        be as unmaintainable as a god-component — so the reducer is
+        <strong>composed</strong> from five focused sub-reducers.</p>
+
+        <h2>17.2 The Composed Reducer</h2>
+        <p><code>audio/DawState.js</code> is a barrel module. It composes five
+        sub-reducers from <code>audio/dawState/</code> into the public
+        <code>dawReducer</code> and re-exports the shared helpers. Its surface is
+        bit-for-bit identical to the pre-split monolith — the split was a pure
+        refactor.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  ACTION["dispatch(action)"]
+  ACTION --> DR["dawReducer<br/>(DawState.js barrel)"]
+  DR --> R1["regions.js<br/>create / split / move / delete / clipboard"]
+  DR --> R2["transport.js<br/>playhead · BPM · zoom · tools · meta"]
+  DR --> R3["selection.js<br/>selected region IDs · selection range"]
+  DR --> R4["cues.js<br/>hot cues · memory cues · loops"]
+  DR --> R5["history.js<br/>undo / redo / hydrate"]
+  R1 --> STATE["New immutable state"]
+  R2 --> STATE
+  R3 --> STATE
+  R4 --> STATE
+  R5 --> STATE
+          </div>
+          <figcaption><span class="fig-num">Figure 17.1</span> — The composed
+          reducer. One <code>dispatch</code>, five focused sub-reducers, one new
+          immutable state.</figcaption>
+        </div>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Sub-reducer</th><th>Owns</th></tr></thead>
+          <tbody>
+            <tr><td><code>regions.js</code></td><td>Region create, split, move, delete, resize; the clipboard (copy, paste-insert, duplicate); volume-envelope writes.</td></tr>
+            <tr><td><code>transport.js</code></td><td>The playhead, BPM, tempo maps, zoom and scroll, the snap grid, edit mode and tool, project and track metadata — the catch-all for non-region "shell" actions.</td></tr>
+            <tr><td><code>selection.js</code></td><td>The set of selected region IDs and the time-range selection — pure selection actions only.</td></tr>
+            <tr><td><code>cues.js</code></td><td>The eight hot cues, the time-sorted memory cues, and loops with their active state and colour.</td></tr>
+            <tr><td><code>history.js</code></td><td>Undo, redo, and the project-load hydrate.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>The shared <code>helpers.js</code> module provides the pure functions every
+        sub-reducer needs — the initial-state factory, snap-to-grid maths, region
+        normalisation, the hot-cue colour table, and the conversions between the
+        reducer's cue representation and the cue-point format the backend stores.</p>
+
+        <h2>17.3 Immutability and Undo/Redo</h2>
+        <p>The reducer is strictly immutable — every action returns a <em>new</em>
+        state object, never a mutation of the old one. That discipline is what makes
+        undo/redo simple.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  S0["State 0"] -->|"edit"| PUSH1["PUSH_UNDO<br/>snapshot State 0"]
+  PUSH1 --> S1["State 1"]
+  S1 -->|"edit"| PUSH2["PUSH_UNDO<br/>snapshot State 1"]
+  PUSH2 --> S2["State 2"]
+  S2 -->|"UNDO"| S1b["restore State 1"]
+  S1b -->|"REDO"| S2b["restore State 2"]
+          </div>
+          <figcaption><span class="fig-num">Figure 17.2</span> — Undo/redo by
+          full-state snapshot. Each edit pushes a deep copy of the prior state onto
+          an undo stack.</figcaption>
+        </div>
+
+        <p><code>history.js</code> implements undo/redo as <strong>full-state
+        snapshots</strong> — a deep clone of the entire state via a JSON round-trip.
+        This is simple and bullet-proof: there is no per-action inverse to get wrong,
+        no risk of a half-undone edit. A restore also clears the selection set, so the
+        user never undoes into a stale selection. The <code>HYDRATE</code> action
+        does the same job for project loading — it resets the whole state to a loaded
+        project.</p>
+
+        <div class="callout note">
+          <span class="ico">◆</span>
+          <div class="body">
+            <span class="ct">Why snapshots, not deltas?</span>
+            <p>A delta-based history (storing each action's inverse) is more
+            memory-efficient but far more error-prone — every action needs a
+            correct inverse, and one wrong inverse corrupts the timeline silently.
+            For an interactive editor where the state is modest in size, a snapshot
+            history trades a little memory for total correctness. It is the right
+            call for a tool a DJ trusts with their cue points.</p>
+          </div>
+        </div>
+
+        <h2>17.4 The Audio Engine Modules</h2>
+        <p>Around the reducer sit the modules in <code>audio/</code> that actually
+        produce and play sound:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Module</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><code>DawEngine.js</code></td><td>The Web Audio playback engine — <code>AudioContext</code> lifecycle, multi-source scheduling, region-based playback, tempo-aware seeking.</td></tr>
+            <tr><td><code>AudioRegion.js</code></td><td>The non-destructive region data model — a source reference plus gain, fades, and start/end offsets.</td></tr>
+            <tr><td><code>TimelineState.js</code></td><td>The non-destructive editor's timeline state — regions, markers, beat grid, playhead, selection, zoom.</td></tr>
+            <tr><td><code>RbepSerializer.js</code></td><td>The <code>.rbep</code> project parser and serialiser, with bidirectional beat&harr;seconds conversion via tempo maps.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p><code>RbepSerializer.js</code> is the frontend counterpart of the backend's
+        <code>rbep_parser.py</code> (Chapter 9). Both read and write the same
+        <code>.rbep</code> overlay format; the frontend serialiser additionally
+        handles the beat-to-seconds conversion the timeline needs, building a tempo
+        map so a cue stored in beats lands at the right second on screen.</p>
+
+        <h2>17.5 The Waveform Editor</h2>
+        <p>Separate from the DAW is the standalone <strong>waveform editor</strong> —
+        the component used inside the Ranking view for quick, per-track waveform work.
+        Its orchestrator is <code>WaveformEditor.jsx</code>, and it was, before the
+        Slopcode-Cleanup, the single largest file in the frontend at 2,223 lines. It
+        is now a slim orchestrator composing the hooks and sub-components under
+        <code>components/waveform/</code>.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Piece</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><code>WaveformCanvas</code></td><td>The canvas beatgrid renderer plus the WaveSurfer mount points.</td></tr>
+            <tr><td><code>WaveformControls</code></td><td>The toolbars — header, project select, hot-cue strip, transport, viz toggle, grid shift.</td></tr>
+            <tr><td><code>WaveformOverlays</code></td><td>Cue markers, the beat-selection region, cut/insert/delete regions, the loop region.</td></tr>
+            <tr><td><code>WaveformSimpleView</code></td><td>The stripped-down view used by the Ranking tab — overview, main waveform, 3-band layers, no toolbar.</td></tr>
+            <tr><td><code>WaveformZoom</code></td><td>A floating zoom-controls overlay.</td></tr>
+            <tr><td><code>WaveformErrorBoundary</code></td><td>An error boundary so a WaveSurfer or decode crash cannot white-screen the app, with a Retry button.</td></tr>
+            <tr><td><code>useWaveSurfer</code></td><td>The master WaveSurfer lifecycle hook — init, per-track load, playback and zoom sync.</td></tr>
+            <tr><td><code>useWaveformInteractions</code></td><td>The imperative editing and hotkey wiring — cuts, hot cues, loops, history, snap, zoom, save.</td></tr>
+            <tr><td><code>useMultibandLayers</code></td><td>Slave WaveSurfer instances for the low/mid/high bands, kept scroll- and time-aligned with the master.</td></tr>
+            <tr><td><code>useVisualPreview</code></td><td>Debounced non-destructive preview — when cuts change, it splices the buffer and reloads the waveform.</td></tr>
+            <tr><td><code>useEditPersistence</code></td><td><code>localStorage</code> auto-save and restore of per-track edits.</td></tr>
+            <tr><td><code>computeBeats</code> / <code>previewBuffer</code> / <code>persistence</code></td><td>Beat-array construction, a cached insert-slice preview buffer, and versioned <code>localStorage</code> helpers.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>17.6 The 3-Band Waveform</h2>
+        <p>The most distinctive visual in the application is the 3-band waveform — the
+        CDJ-style coloured waveform where bass, mids, and highs are drawn in different
+        colours. It exists in two implementations, one client-side and one native.</p>
+
+        <h3>Client-side — the band analyzer</h3>
+        <p><code>utils/AudioBandAnalyzer.js</code> splits a decoded
+        <code>AudioBuffer</code> into three frequency bands using an
+        <code>OfflineAudioContext</code>: a low-pass at 400&nbsp;Hz, a band-pass from
+        400 to 2000&nbsp;Hz, and a high-pass above 2000&nbsp;Hz. It also generates
+        multi-resolution peak arrays — several levels of detail — so the waveform can
+        be drawn crisply at any zoom level without re-processing.</p>
+
+        <h3>The layered render</h3>
+        <p>In the waveform editor, <code>useMultibandLayers</code> drives three
+        <em>slave</em> WaveSurfer instances — one per band — and a
+        requestAnimationFrame loop keeps their scroll and playback time locked to the
+        master instance.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  BUF["Decoded AudioBuffer"]
+  BUF --> LO["Low band<br/>&lt; 400 Hz · red"]
+  BUF --> MI["Mid band<br/>400-2000 Hz · green"]
+  BUF --> HI["High band<br/>&gt; 2000 Hz · blue"]
+  LO --> COMP["Layered render<br/>screen-blend composite"]
+  MI --> COMP
+  HI --> COMP
+  COMP --> OUT["The CDJ-style coloured waveform"]
+          </div>
+          <figcaption><span class="fig-num">Figure 17.3</span> — The 3-band
+          waveform. Three frequency bands are rendered as coloured layers and
+          composited.</figcaption>
+        </div>
+
+        <p>The native counterpart — the Rust <code>get_3band_waveform</code> command
+        of Chapter 19 — computes the same split far faster with an FFT. The DAW's
+        track loader prefers the native path and falls back to the client-side
+        band analyzer when it is unavailable. The result is the same: a waveform where
+        a DJ can see the kick, the snare, and the hi-hats at a glance.</p>
+
+        <h2>17.7 Non-Destructive Preview</h2>
+        <p>One detail ties the waveform editor back to the non-destructive principle.
+        When a user makes a cut, <code>useVisualPreview</code> does not modify the
+        source. Instead it <strong>splices a copy</strong> of the decoded
+        <code>AudioBuffer</code> in memory and reloads the waveform with the spliced
+        version — debounced, with a generation counter that discards stale results
+        if the user keeps editing. The user sees and hears the edit immediately; the
+        file on disk is untouched until an explicit save. <code>previewBuffer.js</code>
+        keeps an LRU cache of these spliced buffers so repeated previews are fast.</p>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>All DAW editing state lives in one immutable reducer, composed from
+            five focused sub-reducers (regions, transport, selection, cues, history).
+            Undo/redo is implemented as full-state snapshots — simple and
+            correct-by-construction. The standalone waveform editor, once the
+            frontend's largest file, is now a slim orchestrator over a dozen hooks and
+            sub-components built on WaveSurfer.js. Its signature 3-band waveform
+            splits the signal into bass, mids, and highs — client-side via an offline
+            audio context, or natively via the Rust FFT — and previews every cut
+            non-destructively on an in-memory buffer copy.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

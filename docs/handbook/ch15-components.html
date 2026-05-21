@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>15 · Component Reference — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 15 · The Frontend</div>
+          <h1>Component Reference</h1>
+          <p class="ch-lead">A guided tour of the React component library — the
+            feature views, the shared building blocks, the settings tabs, and the USB
+            panels. The DAW and the waveform system have chapters of their own.</p>
+        </header>
+
+        <h2>15.1 How Components Are Organised</h2>
+        <p>The components divide into four groups documented here, plus three families
+        — the DAW, the non-destructive editor, and the waveform editor — large enough
+        to warrant Chapters 16 and 17.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  C["components/"]
+  C --> V["Feature views<br/>lazy-loaded tabs"]
+  C --> S["Shared UI<br/>toast, modals, player, table"]
+  C --> SET["settings/<br/>nine preference tabs"]
+  C --> U["usb/<br/>seven USB panels"]
+  C -.-> DAW["daw/ · editor/ · waveform/<br/>see Chapters 16-17"]
+          </div>
+          <figcaption><span class="fig-num">Figure 15.1</span> — The component
+          families. This chapter covers the first four groups.</figcaption>
+        </div>
+
+        <h2>15.2 The Feature Views</h2>
+        <p>Each feature view is a lazy-loaded tab reached from the sidebar. They are
+        the top-level screens of the application.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Component</th><th>Tab</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>MetadataView</code></td><td>Library</td><td>The default library tab — the playlist tree plus the track table, with batch edit, rename, and drag-reorder.</td></tr>
+            <tr><td><code>RankingView</code></td><td>Ranking</td><td>A focused rating-and-tagging view with an embedded simple-mode waveform.</td></tr>
+            <tr><td><code>InsightsView</code></td><td>Insights</td><td>The analytics dashboard — BPM histogram, Camelot key wheel, genre breakdown, most-played.</td></tr>
+            <tr><td><code>ImportView</code></td><td>Import</td><td>The two-panel import wizard — a drop zone plus a settings panel.</td></tr>
+            <tr><td><code>XmlCleanView</code></td><td>XML</td><td>Drag-drop a Rekordbox XML file, scan it, and fix encoding and dead references.</td></tr>
+            <tr><td><code>UsbView</code></td><td>USB</td><td>The USB device-manager container — owns selection state and delegates panels.</td></tr>
+            <tr><td><code>UsbSettingsView</code></td><td>USB Settings</td><td>The CDJ/DJM hardware-settings editor.</td></tr>
+            <tr><td><code>SoundCloudView</code></td><td>SoundCloud</td><td>SoundCloud search and download, with the OAuth login indicator.</td></tr>
+            <tr><td><code>SoundCloudSyncView</code></td><td>SC Sync</td><td>Match SoundCloud tracks to the library and preview match confidence.</td></tr>
+            <tr><td><code>DownloadManagerView</code></td><td>Downloads</td><td>The full download manager — a per-task stage timeline for SC and local imports.</td></tr>
+            <tr><td><code>UtilitiesView</code></td><td>Utilities</td><td>A hub with Tools and Library-Health sub-tabs.</td></tr>
+            <tr><td><code>PhraseGeneratorView</code></td><td>(in Utilities)</td><td>The phrase &amp; auto-cue generator — pick a track, choose a phrase length, preview, commit.</td></tr>
+            <tr><td><code>DuplicateView</code></td><td>(in Utilities)</td><td>The acoustic duplicate finder and merge UI.</td></tr>
+            <tr><td><code>SettingsView</code></td><td>Settings</td><td>The tabbed preferences container.</td></tr>
+            <tr><td><code>DesignView</code></td><td>Design Lab</td><td>A gallery of feature mock-ups and selectable background themes.</td></tr>
+            <tr><td><code>WaveformEditor</code></td><td>(in Ranking)</td><td>The standalone waveform editor — see Chapter 17.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="callout note">
+          <span class="ico">◆</span>
+          <div class="body">
+            <span class="ct">Legacy components, kept on purpose</span>
+            <p>Two components — <code>LibraryView</code> and <code>ToolsView</code> —
+            still ship but are no longer mounted as tabs. <code>MetadataView</code>
+            superseded the first as the library route; <code>UtilitiesView</code>
+            superseded the second. They remain importable for reuse rather than being
+            deleted outright.</p>
+          </div>
+        </div>
+
+        <h2>15.3 The Shared UI Components</h2>
+        <p>Beneath the views sits a layer of shared, non-lazy components used
+        throughout the application.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Component</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>TrackTable</code></td><td>The reusable, sortable track table — Camelot-coloured keys, BPM display, multi-select, configurable columns, drag-reorder. Used by four different views.</td></tr>
+            <tr><td><code>PlaylistBrowser</code></td><td>The Rekordbox playlist tree — expand/collapse, drag-reorder, smart-playlist editing, context menu.</td></tr>
+            <tr><td><code>Player</code></td><td>The compact mini player at the bottom of the screen — play/pause, volume, seek; maximisable into the DAW.</td></tr>
+            <tr><td><code>ToastContext</code></td><td>The toast-notification provider — exposes <code>useToast()</code>. The replacement for <code>alert()</code>.</td></tr>
+            <tr><td><code>ConfirmModal</code></td><td>A promise-based replacement for <code>window.confirm()</code> — call it from anywhere, await a boolean.</td></tr>
+            <tr><td><code>PromptModal</code></td><td>A promise-based replacement for <code>window.prompt()</code>.</td></tr>
+            <tr><td><code>RenameModal</code></td><td>An inline rename dialog.</td></tr>
+            <tr><td><code>BatchEditBar</code></td><td>The batch-editing toolbar — rating, colour label, mass save — shown when tracks are selected.</td></tr>
+            <tr><td><code>ImportProgressBanner</code></td><td>The sticky bottom-of-screen banner aggregating import and download progress.</td></tr>
+            <tr><td><code>SmartPlaylistEditor</code></td><td>The rule-based smart-playlist editor modal, with a live preview.</td></tr>
+            <tr><td><code>MatchInspectorModal</code></td><td>The SoundCloud sync match inspector — per-track score and status.</td></tr>
+            <tr><td><code>SoundCloudProgressModal</code></td><td>The OAuth and download progress overlay.</td></tr>
+            <tr><td><code>shared/WaveformMiniCanvas</code></td><td>A reusable canvas waveform renderer — CDJ-style 3-band colours, used by the DAW overview.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>The three modal components — <code>ConfirmModal</code>,
+        <code>PromptModal</code>, <code>RenameModal</code> — are worth noting as a
+        pattern. Each is rendered once at the application root and exposes an
+        imperative, promise-returning function. This is how the cleanup era removed
+        every blocking native dialog while keeping calling code simple:
+        <code>await confirmModal({ … })</code> reads almost like the
+        <code>confirm()</code> it replaced.</p>
+
+        <h2>15.4 The Settings Tabs</h2>
+        <p><code>SettingsView</code> is a thin container that owns the merged settings
+        object and the active-tab pointer; each tab body is its own component under
+        <code>components/settings/</code>.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Tab component</th><th>Configures</th></tr></thead>
+          <tbody>
+            <tr><td><code>SettingsControls</code></td><td>Not a tab — the shared field primitives (<code>Toggle</code>, <code>Section</code>, <code>Field</code>, <code>Select</code>, <code>KeyCapture</code>) every other tab uses.</td></tr>
+            <tr><td><code>SettingsLibrary</code></td><td>The database mode, watched folders, and the library filter.</td></tr>
+            <tr><td><code>SettingsExport</code></td><td>The default export folder and format/bitrate/sample-rate defaults.</td></tr>
+            <tr><td><code>SettingsUsb</code></td><td>Per-stick USB profile CRUD.</td></tr>
+            <tr><td><code>SettingsAudio</code></td><td>The CPAL output-device picker (desktop only).</td></tr>
+            <tr><td><code>SettingsAnalysis</code></td><td>The analysis quality preset and the insight thresholds.</td></tr>
+            <tr><td><code>SettingsAppearance</code></td><td>Waveform band colours and the locale picker.</td></tr>
+            <tr><td><code>SettingsShortcuts</code></td><td>The fourteen rebindable DAW keyboard shortcuts.</td></tr>
+            <tr><td><code>SettingsNetwork</code></td><td>The HTTP proxy and the backend restart control — and a hidden expert toggle.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>This container-plus-tab-bodies shape is a direct product of the
+        Slopcode-Cleanup, which split a 1,179-line monolithic
+        <code>SettingsView</code> into one focused component per tab. The same split
+        produced the USB panels below.</p>
+
+        <h2>15.5 The USB Panels</h2>
+        <p><code>UsbView</code> is likewise a layout-only container; the real logic
+        lives in seven panels under <code>components/usb/</code>.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Panel</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>UsbControls</code></td><td>Shared helpers and compatibility tables — filesystem compatibility, CDJ targets, status icons, visual primitives.</td></tr>
+            <tr><td><code>UsbDeviceList</code></td><td>The left-rail list of registered and connected USB drives.</td></tr>
+            <tr><td><code>UsbSyncPanel</code></td><td>The main right pane — compatibility matrix, storage bar, sync source toggle, sync controls, the danger zone.</td></tr>
+            <tr><td><code>UsbProfileEditor</code></td><td>The playlist picker and the USB-library viewer.</td></tr>
+            <tr><td><code>UsbFormatWizard</code></td><td>The destructive FAT32/exFAT reformat modal — a two-step backend protocol with a confirmation phrase.</td></tr>
+            <tr><td><code>MetadataSyncPanel</code></td><td>Collapsible per-device metadata-sync controls, category by category.</td></tr>
+            <tr><td><code>PlayCountSync</code></td><td>The play-count diff panel — auto-resolved summary plus per-track strategy dropdowns.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>15.6 The Component Contract</h2>
+        <p>Every new component is held to a mandatory contract from the frontend
+        rulebook. A component that fetches data <em>must</em> have explicit loading
+        and error states:</p>
+
+        <pre><code>const [loading, setLoading] = useState(false);
+const [error, setError]     = useState(null);
+
+if (loading) return &lt;Spinner /&gt;;
+if (error)   return &lt;ErrorMessage message={error} /&gt;;</code></pre>
+
+        <p>And a new view must be registered in the lazy-load tab router in
+        <code>main.jsx</code>. Logging uses the shared dev-only logger
+        (<code>utils/log.js</code>), not bare <code>console</code> calls. These rules
+        are not suggestions — they are what keeps a 100-component application
+        coherent.</p>
+
+        <h2>15.7 A Note on the Cleanup's Legacy</h2>
+        <p>It is worth appreciating how much of this chapter's structure exists
+        <em>because</em> of the Slopcode-Cleanup. Before Phase 4 of that mission,
+        <code>UsbView</code> was 1,937 lines and <code>SettingsView</code> was 1,179.
+        Both are now thin containers delegating to focused sub-components — the
+        <code>settings/</code> and <code>usb/</code> directories are the visible
+        result. The same era split the waveform editor and the DAW, which Chapters 16
+        and 17 take up next.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  OLD["Before cleanup<br/>UsbView.jsx · 1937 lines<br/>SettingsView.jsx · 1179 lines"]
+  OLD --> NEW["After cleanup<br/>thin container + focused sub-components"]
+  NEW --> R1["usb/ — 7 panels"]
+  NEW --> R2["settings/ — 9 tab bodies"]
+          </div>
+          <figcaption><span class="fig-num">Figure 15.2</span> — The cleanup split
+          the god-components into the focused families documented above.</figcaption>
+        </div>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>The component library is four groups: sixteen lazy-loaded feature
+            views, a dozen shared building blocks (the reusable
+            <code>TrackTable</code>, the player, the promise-based modals that
+            replaced native dialogs), nine settings tabs, and seven USB panels. The
+            settings and USB families are thin-container-plus-sub-components splits
+            from the Slopcode-Cleanup. Every component honours a mandatory
+            loading/error contract.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>14 · Frontend Architecture — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 14 · The Frontend</div>
+          <h1>Frontend Architecture</h1>
+          <p class="ch-lead">The frontend is a React 18 single-page application of
+            over a hundred components — lazy-loaded, error-bounded, and talking to the
+            backend through a single hardened HTTP client.</p>
+        </header>
+
+        <h2>14.1 The Frontend in Outline</h2>
+        <p>Everything the user sees is React, rendered inside the Tauri WebView. The
+        frontend is roughly 27,000 lines of JavaScript across 111 source files —
+        deliberately plain JavaScript, not TypeScript, with a <code>jsconfig.json</code>
+        giving the editor type hints. Vite builds and serves it; Tailwind styles it.</p>
+
+        <div class="kv">
+          <div class="kv-row"><div class="k">Framework</div><div class="v">React 18 with hooks — no class components in app code</div></div>
+          <div class="kv-row"><div class="k">Build tool</div><div class="v">Vite 7 — hot module reload in dev, static bundle in production</div></div>
+          <div class="kv-row"><div class="k">Styling</div><div class="v">Tailwind CSS 3 — the "Melodex" amber design system</div></div>
+          <div class="kv-row"><div class="k">Entry point</div><div class="v">frontend/src/main.jsx</div></div>
+          <div class="kv-row"><div class="k">Size</div><div class="v">~27k lines across 111 files</div></div>
+        </div>
+
+        <h2>14.2 The Source Tree</h2>
+        <p>The frontend source is organised by role, not by feature — views, the audio
+        engine, the API layer, and shared state each have a home.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  SRC["frontend/src/"]
+  SRC --> MAIN["main.jsx — app root, router, sidebar"]
+  SRC --> API["api/ — the axios client"]
+  SRC --> STORE["store/ — auth state"]
+  SRC --> AUDIO["audio/ — the DAW state machine"]
+  SRC --> COMP["components/ — views + shared UI"]
+  COMP --> CDAW["daw/ — the DJ Edit DAW"]
+  COMP --> CED["editor/ — the non-destructive editor"]
+  COMP --> CWAVE["waveform/ — the waveform editor"]
+  COMP --> CSET["settings/ — settings tabs"]
+  COMP --> CUSB["usb/ — USB panels"]
+  SRC --> UTIL["utils/ — logger, band analyzer"]
+  SRC --> CONF["config/ — constants"]
+          </div>
+          <figcaption><span class="fig-num">Figure 14.1</span> — The frontend source
+          tree. Sub-directories under <code>components/</code> hold the families of
+          components the Slopcode-Cleanup split out of the old god-components.</figcaption>
+        </div>
+
+        <h2>14.3 The Application Root</h2>
+        <p><code>main.jsx</code> is the root. It is responsible for five things:</p>
+        <ul>
+          <li>The <strong>sidebar</strong> — a 220-pixel navigation rail grouping the
+          views into Library, Editor, Sync, Utilities, and Lab.</li>
+          <li>The <strong>mode picker</strong> — the startup screen where the user
+          chooses Live, Standalone, Import, or a Defined Path.</li>
+          <li>The <strong>tab router</strong> — a lazy-loaded router that swaps the
+          active view.</li>
+          <li>A top-level <strong>error boundary</strong> so one view's crash cannot
+          white-screen the whole application.</li>
+          <li><strong>Lifecycle polling</strong> — the heartbeat and library-status
+          checks — and the session-token bootstrap.</li>
+        </ul>
+
+        <h2>14.4 Lazy Loading and Error Isolation</h2>
+        <p>The application has many large views. Loading all of them upfront would
+        make startup slow. Instead, every feature view is <code>lazy()</code>-imported
+        and rendered inside a <code>&lt;Suspense&gt;</code> boundary with a per-tab
+        <code>ErrorBoundary</code>.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  ROUTER["Tab router (main.jsx)"]
+  ROUTER --> SUS["Suspense boundary"]
+  SUS --> EB["per-tab ErrorBoundary"]
+  EB --> LV["lazy() view<br/>loaded only when first opened"]
+  EB -.->|"on crash"| FALLBACK["Error fallback UI<br/>the rest of the app stays alive"]
+          </div>
+          <figcaption><span class="fig-num">Figure 14.2</span> — Every view is
+          lazy-loaded and error-bounded. A view is fetched only when the user opens
+          it, and a crash in one view is contained.</figcaption>
+        </div>
+
+        <p>The benefit is twofold: a fast first paint, because only the active view's
+        code is downloaded, and resilience, because a decode error in the waveform
+        editor or a render bug in the USB view degrades to a recoverable error panel
+        rather than a blank window.</p>
+
+        <h2>14.5 The API Client</h2>
+        <p>The single most important frontend module is <code>api/api.js</code> — the
+        shared <code>axios</code> instance. A coding rule states it plainly: <em>always
+        import from here, never use raw <code>fetch()</code></em>. The cleanup era
+        found and removed five raw <code>fetch()</code> calls; the client is now the
+        only HTTP path.</p>
+
+        <p>The client is far more than a base URL. It carries:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Capability</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td>Auth bootstrap</td><td>At module load, races two ways to obtain the session token, then resolves a promise every request waits on.</td></tr>
+            <tr><td>Bearer injection</td><td>A request interceptor attaches <code>Authorization: Bearer &lt;token&gt;</code> to every call.</td></tr>
+            <tr><td>401 refresh queue</td><td>On a 401, requests queue behind a single re-auth attempt rather than each retrying in parallel.</td></tr>
+            <tr><td>429 backoff</td><td>A rate-limited response triggers an exponential backoff retry.</td></tr>
+            <tr><td>Timeouts</td><td>A 10-second default, disabled (<code>timeout: 0</code>) for long-running calls such as USB sync.</td></tr>
+            <tr><td>Tauri detection</td><td>Detects whether it is running inside Tauri or a plain browser, and adapts the token path accordingly.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h3>The bootstrap race</h3>
+        <p>The frontend cannot make an authenticated request until it has the session
+        token, and where the token comes from depends on the runtime:</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  START["api.js loads"] --> Q{"Running in Tauri?"}
+  Q -->|"yes"| IPC["invoke('get_session_token')<br/>retry loop until ready"]
+  Q -->|"no — browser dev"| DEV["fetch('/dev-token')<br/>Vite middleware reads the token file"]
+  IPC --> SET["setSessionToken(token)"]
+  DEV --> SET
+  SET --> READY["bootstrap promise resolves<br/>queued requests proceed"]
+  IPC -.->|"both fail"| FAIL["authBootstrapFailed = true<br/>persistent toast, mutation UI disables"]
+  DEV -.->|"both fail"| FAIL
+          </div>
+          <figcaption><span class="fig-num">Figure 14.3</span> — The token bootstrap.
+          The first request through the interceptor blocks on this promise; later
+          ones do not.</figcaption>
+        </div>
+
+        <p>If both paths fail — a corrupted token file, an unregistered IPC handler, a
+        fresh dev clone with no sidecar — the client flips an
+        <code>authBootstrapFailed</code> flag and shows a persistent toast.
+        Mutation-capable UI is expected to disable itself when this flag is set, so
+        the user is not invited to fire writes that can only 401; read-only views stay
+        usable.</p>
+
+        <h2>14.6 Shared Auth State</h2>
+        <p><code>store/authStore.js</code> is a tiny module-level store — not a heavy
+        state library, just a handful of functions sharing the auth state across the
+        app: the current token, the bootstrap-failed flag, and the bootstrap promise
+        itself (stashed so a view awaiting the initial token does not re-trigger the
+        IPC handshake). It is a good example of the frontend's preference for the
+        smallest tool that does the job.</p>
+
+        <h2>14.7 State Management Philosophy</h2>
+        <p>The frontend has no global state framework. State is handled at the level
+        where it belongs:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Kind of state</th><th>Where it lives</th></tr></thead>
+          <tbody>
+            <tr><td>The DAW's editing state</td><td>A <code>useReducer</code> driving a composed reducer (Chapter 17). Component-local duplication of this is forbidden.</td></tr>
+            <tr><td>Auth token + flags</td><td>The tiny <code>authStore</code> module.</td></tr>
+            <tr><td>Cross-cutting notifications</td><td>A React context — the toast provider.</td></tr>
+            <tr><td>View-local UI state</td><td>Plain <code>useState</code> in the component.</td></tr>
+            <tr><td>Server data</td><td>Fetched on demand through the API client; not globally cached.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>14.8 The Melodex Design System</h2>
+        <p>The visual identity is a design system the project calls
+        <strong>Melodex</strong>, configured in <code>tailwind.config.js</code> and
+        <code>index.css</code>. Its signature is the amber accent —
+        <code>#E8A42A</code> — over a near-black surface palette.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Token family</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>mx-*</code></td><td>Surfaces — panels, cards, backgrounds.</td></tr>
+            <tr><td><code>ink-*</code></td><td>Text colours — from bright to dim.</td></tr>
+            <tr><td><code>line-*</code></td><td>Borders and dividers.</td></tr>
+            <tr><td><code>amber2.*</code></td><td>The accent palette.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>The typefaces are DM Sans for text and JetBrains Mono for code and numbers.
+        <code>index.css</code> defines a set of reusable primitives —
+        <code>.btn-primary</code>, <code>.btn-ghost</code>, <code>.input-glass</code>,
+        <code>.glass-panel</code>, <code>.mx-card</code>, <code>.mx-chip</code> — so
+        components compose a consistent look from shared building blocks. This very
+        handbook borrows the Melodex palette.</p>
+
+        <h2>14.9 Frontend Conventions</h2>
+        <p>The Slopcode-Cleanup left the frontend with a strict rulebook, still
+        enforced:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Rule</th><th>Replaces</th></tr></thead>
+          <tbody>
+            <tr><td>No <code>alert()</code>/<code>confirm()</code>/<code>prompt()</code></td><td>A toast system and promise-based <code>ConfirmModal</code> / <code>PromptModal</code>.</td></tr>
+            <tr><td>No raw <code>fetch()</code></td><td>The shared <code>axios</code> client, or <code>invoke()</code> for Tauri.</td></tr>
+            <tr><td>No stray <code>console.log</code></td><td><code>utils/log.js</code> — <code>log.debug</code>/<code>log.info</code> are silenced in production; <code>log.warn</code>/<code>log.error</code> always pass.</td></tr>
+            <tr><td>No empty <code>catch {}</code></td><td>Every catch logs and, where relevant, toasts.</td></tr>
+            <tr><td>No magic numbers</td><td><code>config/constants.js</code> — heartbeat intervals, timeouts, durations.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>Every data-fetching component is also required to handle loading and error
+        states explicitly — a <code>loading</code> spinner and an
+        <code>error</code> message are mandatory, not optional.</p>
+
+        <h2>14.10 The Component Families</h2>
+        <p>The 100-plus components fall into clear families, each documented in the
+        chapters ahead:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Family</th><th>Lives in</th><th>Covered in</th></tr></thead>
+          <tbody>
+            <tr><td>Feature views (lazy tabs)</td><td><code>components/*.jsx</code></td><td>Chapter 15</td></tr>
+            <tr><td>Shared UI components</td><td><code>components/*.jsx</code>, <code>components/shared/</code></td><td>Chapter 15</td></tr>
+            <tr><td>Settings tabs</td><td><code>components/settings/</code></td><td>Chapter 15</td></tr>
+            <tr><td>USB panels</td><td><code>components/usb/</code></td><td>Chapter 15</td></tr>
+            <tr><td>The DAW</td><td><code>components/daw/</code></td><td>Chapter 16</td></tr>
+            <tr><td>The non-destructive editor</td><td><code>components/editor/</code></td><td>Chapter 16</td></tr>
+            <tr><td>The waveform editor</td><td><code>components/waveform/</code></td><td>Chapter 17</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>The frontend is a 100-plus-component React 18 SPA, lazy-loaded and
+            error-bounded so it starts fast and fails gracefully. Every HTTP call
+            goes through one hardened <code>axios</code> client with an auth-token
+            bootstrap, a 401 refresh queue, and 429 backoff. State lives where it
+            belongs — a reducer for the DAW, a tiny store for auth, context for
+            toasts, local state for everything else. The Melodex amber design system
+            and a strict post-cleanup rulebook keep it consistent.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>
