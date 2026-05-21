@@ -66,8 +66,11 @@ watchdog==4.0.2
 # --- Multi-source download (Spotify metadata -> Tidal/Qobuz/Amazon FLAC) ---
 # Reverse-engineering-based. Runs quarantined in a ProcessPoolExecutor
 # worker (app/downloader/providers/spotiflac.py), the SafeAnlzParser
-# pattern. Owner-approved 2026-05-21; D3 feasibility verified.
-SpotiFLAC==0.5.0
+# pattern. Owner-approved 2026-05-21.
+# 2026-05-22: bumped to 0.6.0 (latest). All 5 providers re-tested —
+# every community mirror API was down (R5); lossless path non-functional
+# via SpotiFLAC until the upstream mirrors recover. Kept as the latest.
+SpotiFLAC==0.6.0
 
 # --- Test Framework ---
 pytest==9.0.3
