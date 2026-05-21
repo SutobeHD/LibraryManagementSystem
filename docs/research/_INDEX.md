@@ -54,10 +54,10 @@ _(none)_
 _(none)_
 
 ### plangate ⛔ GATE C
-- [plangate_db-write-lock-retrofit.md](implement/plangate_db-write-lock-retrofit.md) — Plan ready (GATE C): `@serialise_mutators` decorator on RekordboxDB/Live/XML closes `ensure_standalone_master_db` + `_require_live_db()` mytag-bypass gaps; 5-task queue + CI drift-test (2026-05-21)
+_(none)_
 
 ### rework
-_(none)_
+- [rework_db-write-lock-retrofit.md](implement/rework_db-write-lock-retrofit.md) — GATE C rejected: independent re-review found a 3rd unprotected `master.db` writer (`AnalysisDBWriter._update_db`); plan's "2 gap classes" completeness claim false; 6 rework reasons (2026-05-21)
 
 ### accepted
 _(none)_

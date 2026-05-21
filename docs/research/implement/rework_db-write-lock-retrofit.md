@@ -17,6 +17,7 @@ related: [security-api-auth-hardening]
 - 2026-05-21 — `research/idea_` → `implement/draftplan_` — planning started; GATE A/B skipped by user decision (idea explored to Recommendation, OQs all RESOLVED)
 - 2026-05-21 — `implement/draftplan_` → `implement/review_` — Implementation Plan + Task Queue written; independent Review PASS
 - 2026-05-21 — `implement/review_` → `implement/plangate_` — plan reviewed, awaiting GATE C
+- 2026-05-21 — `implement/plangate_` → `implement/rework_` — GATE C rejected by user: independent re-review found a 3rd unprotected master.db writer (AnalysisDBWriter); 6 rework reasons
 
 ---
 
@@ -253,6 +254,23 @@ Deps: Tasks 2/3/4 depend on Task 1. Task 4 sequences after Task 2 (both edit `da
 **Flag for GATE C** (not a rework reason): doc has no `## Original Idea` block — scaffolded 2026-05-19, predates that template section. The pipeline's anti-scope-creep anchor is absent. Recommend the user add a 1-3 sentence `## Original Idea` (verbatim, authored once) at GATE C so the Stage-4 `research-implement` review-agent has the anchor.
 
 **Rework reasons:** none.
+
+### 2026-05-21 — INDEPENDENT RE-REVIEW — REWORK (GATE C reject)
+
+User rejected GATE C. A fresh independent reviewer agent re-checked the plan vs current source — the PASS above was self-authored + self-reviewed (no Agent-A/B independence). It found a BLOCKER: the plan's "two gap classes, both closed" completeness claim is **false**.
+
+- [ ] Plan addresses all goals — **FAIL.** `AnalysisDBWriter._update_db` (`app/analysis_db_writer.py:223`) is a **third** unprotected `master.db` writer — `self.live_db.db.update_content(item)` (`:245`) + `update_content_key` (`:255`), raw `rbox.MasterDb` handle, zero lock (`grep _db_write_lock|db_lock|_serialised app/analysis_db_writer.py` → 0 hits). Reached via `POST /api/library/analyze-full` + `/analyze-batch` (`main.py:2783,2810`) in a thread-pool executor → genuinely concurrent with mytag/track-update threads. Worse live-race risk than `ensure_standalone_master_db`. Wrapping the 3 classes' *methods* does not cover it — it calls the raw rbox handle directly.
+
+**Rework reasons** — `research-plan` must address each:
+
+1. **BLOCKER — third writer missed; the coverage model is incomplete.** Bring `AnalysisDBWriter` into scope (wrap `_update_db`, or hold `db_lock()` across the `analyze-full`/`analyze-batch` route bodies) — or carve it out in `## Non-goals` with a stated reason. Deeper defect: the plan assumed method-wrapping 3 classes = total coverage. Any code grabbing the raw `rbox.MasterDb` / `active_db.db` handle bypasses every method wrapper.
+2. **Re-audit ALL raw-handle + multi-step writers.** Grep `app/` for `.db.update_`/`.db.insert_`/`.db.delete_`/`.db.add_`, `active_db.db`, `rbox.MasterDb`, raw `OneLibrary`. `POST /api/tools/duplicates/merge` (`main.py:2658`) binds `rbox = db.active_db.db` for a multi-mutation merge with no transaction lock spanning it — `db_lock()` (the 0-callsite multi-step helper) is exactly for this. Plan must enumerate every such site + state coverage.
+3. **Drift test must key on `(class, method)` tuples, not bare names.** Prefix `load_` matches both `RekordboxDB.load_library` (wrapped) and `RekordboxXMLDB.load_xml` (readonly-allowlisted) — opposite classifications. `tests/test_concurrency.py` wrap-sets + allowlist must be class-qualified.
+4. **`test_concurrent_writes` harness — specify the temp-DB seed + downgrade its status.** `rbox.OneLibrary.create()` is broken in rbox 0.1.7 (`coding-rules.md`) — seed the temp `master.db` from `app/templates/exportLibrary_template.db`. Linux CI lacks `rbox` → harness is Windows-only / opt-in; `## Testing` must state it is NOT a CI gate (only the 2 deterministic introspection tests gate CI).
+5. **`## Risks` — add two.** (a) `refresh_metadata` holds the write-lock across a full-library `_finalize_ui_metadata` iteration — accepted contention, sharper under the Phase-2 mobile load the plan cites as motivation. (b) The drift test pressures authors to wrap a prefixed *reader* — name "prefixed reader wrongly locked" as a residual risk, symmetric to the `_load_*` false-positive.
+6. **MINOR — Task 1 precondition.** State that `database.py`'s re-export must preserve lock *object identity* (`from .db_lock import _db_write_lock` — never re-create the `RLock`), else the lock silently splits.
+
+Mechanism (shared `db_lock.py` + `serialise_mutators` + `(class,method)` drift test) is **sound** — keep it. The defect is scope enumeration, not approach.
 
 ## Implementation Log
 
