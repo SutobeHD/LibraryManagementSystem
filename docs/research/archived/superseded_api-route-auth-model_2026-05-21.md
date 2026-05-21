@@ -3,9 +3,10 @@ slug: api-route-auth-model
 title: API route auth model — local FastAPI mutation routes have no route-level auth gate
 owner: unassigned
 created: 2026-05-13
-last_updated: 2026-05-13
+last_updated: 2026-05-21
 tags: [security, backend, api, auth]
 related: [downloader-unified-multi-source]
+superseded_by: security-api-auth-hardening
 ---
 
 # API route auth model — local FastAPI mutation routes have no route-level auth gate
@@ -17,6 +18,7 @@ related: [downloader-unified-multi-source]
 > Append-only audit trail. One line per `git mv`. Newest at the bottom.
 
 - 2026-05-13 — `research/idea_` — created (spun off from OQ-A in `implement/review_downloader-unified-multi-source.md`: the unified-downloader routes will ship with no route-level auth gate — consistent with existing SC routes — but the general gap deserves its own deliberate decision rather than drift)
+- 2026-05-21 — `archived/superseded_` — superseded by `archived/implemented_security-api-auth-hardening_2026-05-17.md`, which shipped exactly this topic (`app/auth.py` + `require_session` Bearer gate on 84/85 mutation routes). Topic closed before this idea was ever investigated.
 
 ---
 
@@ -53,7 +55,18 @@ Today's mitigation is implicit: the sidecar binds to `127.0.0.1` and CORS is whi
 
 _(none yet — idea stage)_
 
+## Decision / Outcome
+
+**Result**: `superseded`
+
+**Why**: Spun off 2026-05-13 from OQ-A of the unified-downloader plan to track the general "local mutation routes have no auth gate" question. Between 2026-05-13 and 2026-05-19 a parallel security-auth-hardening initiative shipped exactly this: `app/auth.py` with a per-session Bearer token (`SESSION_TOKEN`, `secrets.token_urlsafe(32)`), the `require_session` FastAPI dependency gating 84/85 mutation routes, Tauri stdout + `%APPDATA%` file token handoff. `SHUTDOWN_TOKEN` was deleted. Every Open Question in this doc is now answered by shipped code — the doc was never investigated because the topic closed first.
+
+**Superseded by**: `docs/research/archived/implemented_security-api-auth-hardening_2026-05-17.md`
+
+**Knock-on for the downloader plan**: OQ-A's original answer ("no route gate") is obsolete. The unified-downloader routes must gate with `dependencies=[Depends(require_session)]` like every other mutation route. The downloader plan (`accepted_downloader-unified-multi-source.md`) was updated accordingly in the same session.
+
 ## Links
 
-- Spun off from: `docs/research/implement/review_downloader-unified-multi-source.md` (OQ-A decision: that feature ships with no route gate; this doc tracks the general question)
-- Code: `app/main.py:126` (`SHUTDOWN_TOKEN`), `app/main.py` SoundCloud download routes (no gate today)
+- Spun off from: the unified-downloader plan (OQ-A)
+- Superseded by: `docs/research/archived/implemented_security-api-auth-hardening_2026-05-17.md`
+- Code shipped: `app/auth.py` (`require_session`, `SESSION_TOKEN`)
