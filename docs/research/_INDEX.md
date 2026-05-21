@@ -33,7 +33,6 @@ _(none)_
 - [exploring_library-extended-remix-finder.md](research/exploring_library-extended-remix-finder.md) — Find Extended/Club/Long versions; Discogs-gated SC search; M1/M2/M3 (2026-05-15)
 - [exploring_library-quality-upgrade-finder.md](research/exploring_library-quality-upgrade-finder.md) — Quality auditor + transcode detection + replacement with 7-rule safety; Phase 1/2/3 (2026-05-15)
 - [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); QR-pairing + Tailscale Funnel docs; security Phase-1+2 hard prereq (2026-05-15)
-- [exploring_external-track-match-unified-module.md](research/exploring_external-track-match-unified-module.md) — Cross-cutting module (fuzzy + chromaprint + adapter-registry) shared by 3 sister features; M1/M2/M3 (2026-05-15)
 
 ### midgate ⛔ GATE B
 _(none)_
@@ -61,6 +60,7 @@ _(none)_
 _(none)_
 
 ### accepted
+- [accepted_external-track-match-unified-module.md](implement/accepted_external-track-match-unified-module.md) — Cross-cutting matcher module (fuzzy + version-tag taxonomy + chromaprint + adapter-registry); owner bundled sign-off (GATE B+C); M1 ready to build (~400-500 LoC, zero new deps) (2026-05-21)
 - [accepted_downloader-unified-multi-source.md](implement/accepted_downloader-unified-multi-source.md) — Unified multi-source downloader: owner sign-off granted; integrated with parallel research (matching delegated to `external_track_match`, auth via `require_session`, `quality_engine` reuse). Ready for `inprogress_` (2026-05-21)
 
 ### inprogress

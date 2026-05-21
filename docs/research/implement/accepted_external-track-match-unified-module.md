@@ -21,6 +21,10 @@ related: [analysis-remix-detector, library-extended-remix-finder, library-qualit
 - 2026-05-17 — research/exploring_ — evaluated_-ready rework loop (re-verified `SequenceMatcher` + `fingerprint.rs` + `backend.spec`; cross-doc taxonomy alignment pass across 4 sister-docs; added Rust-FP-via-IPC option for M1; added canonical `VersionTag.label` enum + classifier-input table; added pre-evaluated_ checklist with sign-off blockers)
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
 - 2026-05-21 — research/exploring_ — cross-doc fixups landed across 3 sister-docs (remix-detector Goals-enum canonical-order alignment + stale matcher-reference correction; extended-finder classifier-input collapse cross-ref; quality-upgrade enum-ownership note + Rust-FP-via-IPC safety-rule-2 substitution; `Candidate` dataclass shape explicitly ack'd in all three); pre-`evaluated_` checklist boxes ticked except owner Option-C-vs-D sign-off
+- 2026-05-21 — research/evaluated_ — owner GATE B sign-off (bundled "go" — fast-tracked, prerequisite for the downloader-unified-multi-source `accepted_` plan that hard-depends on this module); Option C ack'd; OQ 13/13
+- 2026-05-21 — implement/draftplan_ — `## Implementation Plan` section filled (M1 scope / 8-step / files-touched / testing / risks) from the in-doc Recommendation + Findings
+- 2026-05-21 — implement/review_ — review checklist 5/5 ticked; no rework reasons
+- 2026-05-21 — implement/accepted_ — owner GATE C sign-off (bundled "go"); ready for `inprogress_` / M1 build. States evaluated_→draftplan_→review_ skipped-in-one-move per README "skipping states allowed" (doc was implementation-ready since 2026-05-17)
 
 ---
 
@@ -577,36 +581,53 @@ Fires when ALL true:
 
 ## Implementation Plan
 
-> Required from `implement/draftplan_` onward. Concrete enough that someone else executes without re-deriving.
+> Filled 2026-05-21 from M1 Recommendation + Findings (pseudocode, test signatures, git-diff prose already in-doc). Concrete enough to execute without re-deriving.
 
 ### Scope
-- **In:** …
-- **Out:** …
+- **In (M1):** lift `_fuzzy_match_with_score` + `_normalize_title` from `SoundCloudSyncEngine` → module-level pure functions in `app/external_track_match.py`. Add `extract_title_stem`, `parse_version_tag`; `VersionTag` / `Candidate` / `Fingerprint` frozen dataclasses; `SourcePlugin` Protocol + `ADAPTER_REGISTRY` + 3 mutators; `fingerprint()` PATH-detect `fpcalc` wrapper + `is_fingerprinting_available()`. SC engine → first real adapter (`SoundCloudAdapter`). Mock adapter in tests. Single flat file, ≤800 LOC.
+- **Out:** Discogs/Beatport/Bandcamp/Qobuz/YouTube adapters (M2+). `fpcalc` bundling (M3 — PATH-detect only M1). Rust-FP-via-IPC (M2). Subpackage `app/track_match/` split (gated). `rapidfuzz` swap (separate Schicht-A decision). Match-result caching (sister-feature sidecar concern).
 
 ### Step-by-step
-1. …
+1. `app/external_track_match.py` skeleton — per Findings 2026-05-17 "first ~30 LoC" pseudocode: `VersionLabel` Literal (canonical 12-member order), 3 frozen dataclasses, `FingerprintUnavailable` sentinel, `AdapterError` subclasses, `SourcePlugin` Protocol, `ADAPTER_REGISTRY` + `register_adapter`/`get_adapter`/`list_adapters`.
+2. Pure functions: `normalize_title` (lift verbatim from `soundcloud_api.py:559`), `extract_title_stem`, `parse_version_tag`, `fuzzy_match_with_score` (lift from `soundcloud_api.py:566-587` — keep `SequenceMatcher`, 0.65 threshold, `(best, round(score,3))` shape). `functools.lru_cache(4096)` on stem-extractor + version-parser.
+3. `fingerprint()` — `subprocess.run(["fpcalc", ...], timeout=10)`, PATH-detect; return `Fingerprint | FingerprintUnavailable`. `is_fingerprinting_available()` bool probe.
+4. `SoundCloudAdapter` — wraps existing SC search, implements `SourcePlugin`. Register at boot.
+5. Rewire `app/soundcloud_api.py`: `SoundCloudSyncEngine._fuzzy_match_with_score` + `_normalize_title` → thin delegates. Preserve call-sites (`:563`, `:726`) + the `from app.soundcloud_api import (...)` surface that `tests/test_soundcloud_api.py:17-22` depends on.
+6. `tests/test_external_track_match.py` + `tests/fixtures/external_track_match/titles_corpus.yaml` (≥200 title cases) — signatures per Findings 2026-05-17 "EXACT test signatures".
+7. `mypy app/external_track_match.py` clean; `ruff` + `ruff format` clean.
+8. `docs/FILE_MAP.md` entry + `python scripts/regen_maps.py`.
 
 ### Files touched
-- …
+- `app/external_track_match.py` — **new**, ~400-500 LOC.
+- `app/soundcloud_api.py` — `_fuzzy_match_with_score` + `_normalize_title` → thin delegates; public import surface unchanged.
+- `tests/test_external_track_match.py` — **new**.
+- `tests/fixtures/external_track_match/titles_corpus.yaml` — **new**, 200+ cases.
+- `tests/fixtures/mock_adapter.py` — **new**, mock `SourcePlugin`.
+- `docs/FILE_MAP.md` + `docs/MAP.md` — regen.
+- **Zero** `requirements.txt` change (M1 = stdlib + already-pinned deps).
 
 ### Testing
-- …
+- `pytest tests/test_external_track_match.py` — pure-fn units, taxonomy round-trip, PATH-detect mock, ≥95% label-recall on 200-title corpus, registry mutate/reset.
+- `pytest tests/test_soundcloud_*.py` — **regression gate**: SC sync behaviour unchanged after the delegate rewire.
+- `mypy app/external_track_match.py` clean.
 
 ### Risks & rollback
-- …
+- **Delegate rewire breaks SC sync** → regression gate (step 5 preserves call-site + import surface; tests catch drift). Rollback: revert the `soundcloud_api.py` delta, keep `external_track_match.py` standalone.
+- **`fpcalc` absent on dev/CI** → by design: PATH-detect returns `FingerprintUnavailable`, no hard failure. M1 ships fingerprint-optional.
+- **Atomic commit** — module + tests + delegate-rewire land as one revertable commit.
 
 ## Review
 
 Filled at `review_`. Unchecked box or rework reason → `rework_`.
 
-- [ ] Plan addresses all goals
-- [ ] Open questions answered or deferred
-- [ ] Risk mitigations defined
-- [ ] Rollback path clear
-- [ ] Affected docs identified (`architecture.md`, `FILE_MAP.md`, indexes, `CHANGELOG.md`)
+- [x] Plan addresses all goals — M1 Recommendation maps each Goal to a deliverable + gate
+- [x] Open questions answered or deferred — 13/13 (10 RESOLVED-M1, 2 DEFERRED M2/M3, 1 OPEN-for-draftplan: OQ11 async-vs-sync adapter shape — does not block M1's sync SC adapter)
+- [x] Risk mitigations defined — delegate-rewire regression gate; fpcalc PATH-detect graceful degrade
+- [x] Rollback path clear — revert `soundcloud_api.py` delta, module stays standalone; single atomic commit
+- [x] Affected docs identified — `FILE_MAP.md` + `MAP.md` (regen); no `architecture.md`/index change (internal module, no route surface in M1)
 
 **Rework reasons:**
-- …
+- _(none — bundled owner sign-off 2026-05-21)_
 
 ## Implementation Log
 
