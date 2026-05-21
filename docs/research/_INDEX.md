@@ -11,6 +11,17 @@ If this index drifts from the file system, the file system wins — re-derive wi
 
 ---
 
+## Related documentation
+
+The comprehensive project handbook (`docs/handbook/`, open `index.html`) renders this pipeline as narrative:
+
+- **Chapter 25 — The Future Roadmap** (`docs/handbook/ch25-roadmap.html`) groups every in-flight topic below into five themes with a dependency graph.
+- **Chapter 24 — The R&D Pipeline** (`docs/handbook/ch24-pipeline.html`) documents the state chain, the 4 gates, and the 5 routines.
+
+The handbook is a snapshot — this index stays the authoritative live state.
+
+---
+
 ## research/
 
 ### idea
