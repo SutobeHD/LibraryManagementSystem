@@ -239,6 +239,51 @@ Download Registry — SQLite-based deduplication & analysis history log.
 - `get_stats()` — Aggregate statistics for the history dashboard widget.
 - `compute_sha256()` — Stream-hash a file with SHA-256.
 
+### `app/downloader/__init__.py`
+
+Unified multi-source downloader package.
+
+- `SourceProvider` — Provider contract — one implementation per platform OR per coherent group.
+- `  SourceProvider.platform()` — The platform this provider serves (one of the :data:`Platform` literals).
+- `  SourceProvider.resolve_url()` — Phase-1 metadata-only probe of a platform URL.
+- `  SourceProvider.search()` — Free-form search for a track.
+- `  SourceProvider.fetch()` — Phase-2 actual download of the audio for a chosen claim.
+
+### `app/downloader/match_adapter.py`
+
+Thin matching adapter over the shared ``app.external_track_match`` module.
+
+- `match()` — Run the 100%-match gate over ``candidates`` against ``needle``.
+
+### `app/downloader/models.py`
+
+Shared Pydantic v2 data models for the unified multi-source downloader.
+
+- `QualityTier` — Coarse quality bucket.
+- `TrackMatch` — One source's claim about a track — pre-download metadata only.
+- `  TrackMatch.quality_sort_key()` — Quality picker key: tier, bit-depth, sample-rate, bitrate, filesize.
+- `MatchResult` — Output of the D1 title-variance match algorithm for one candidate.
+- `Candidate` — A track that passed the 100%-match gate — eligible for ranking + download.
+- `  Candidate.quality_sort_key()` — Delegate to the wrapped :class:`TrackMatch` quality key.
+- `ProvenanceRecord` — What gets persisted (DB column + COMMENT tag) per downloaded file.
+- `ResolveRequest` — Input for ``POST /api/downloads/unified/resolve``.
+- `ResolveResponse` — Output of the resolver: ranked candidates + an auto-pick hint.
+- `SearchRequest` — Input for ``POST /api/downloads/unified/search`` (free-form query).
+- `SearchHit` — One ISRC-deduped cluster from the auto-search flow.
+- `SearchResponse` — Output of the search flow: deduplicated, ranked hit clusters.
+- `FetchRequest` — Input for ``POST /api/downloads/unified/fetch`` — commit a candidate.
+- `FetchResponse` — Output of the fetch flow: a job handle to poll.
+- `JobStatus` — Polled state of an in-flight (or finished) download job.
+
+### `app/downloader/quality.py`
+
+Quality-tier classification + lossless-first candidate picking.
+
+- `classify()` — Classify a :class:`TrackMatch` into a :class:`QualityTier` from its claims.
+- `is_lossless()` — Return ``True`` when ``m`` classifies into a lossless tier (0 or 1).
+- `pick_best()` — Return the index of the best-quality candidate.
+- `pick_with_policy()` — Pick a candidate under the owner's lossless-first policy.
+
 ### `app/external_track_match.py`
 
 Shared track-matching, version-tag taxonomy, fingerprint and adapter-registry module.
@@ -1912,6 +1957,95 @@ Tests for `app/soundcloud_api.py`.
 - `  TestFuzzyMatch.test_empty_local_returns_none()`
 - `  TestFuzzyMatch.test_picks_highest_score_among_candidates()` — When several candidates pass the threshold, the best wins.
 - `  TestFuzzyMatch.test_match_with_score_returns_tuple()` — The underlying API used by the preview endpoint returns (id, score).
+
+### `tests/test_unified_downloader_match.py`
+
+Tests for ``app/downloader/match_adapter.py`` — the 100%-match gate.
+
+- `test_match_returns_pair_per_candidate_in_order()` — match() returns one (TrackMatch, MatchResult) per input, same order.
+- `test_match_empty_candidates_returns_empty()` — No candidates → empty result list.
+- `test_isrc_equality_is_certain_match()` — Equal ISRCs → is_match True, confidence 1.0, rule isrc_equality.
+- `test_isrc_fast_path_overrides_duration_gate()` — ISRC match wins even when durations differ by far more than 2 s.
+- `test_differing_isrc_does_not_trigger_fast_path()` — Different ISRCs do not short-circuit — the match falls through to fuzzy.
+- `test_one_sided_isrc_does_not_trigger_fast_path()` — ISRC on only one side cannot trigger the equality fast-path.
+- `test_duration_gate_fails_beyond_2s()` — A >2 s duration delta fails the gate regardless of an identical title.
+- `test_duration_gate_passes_at_exactly_2s()` — A delta of exactly 2 s is within the gate (strict > comparison).
+- `test_duration_gate_passes_within_2s()` — A sub-2 s delta passes the gate and reaches the fuzzy matcher.
+- `test_duration_gate_symmetric_for_longer_candidate()` — The gate is an absolute delta — a much longer candidate also fails.
+- `test_fuzzy_identical_title_artist_is_match()` — Identical title+artist within the duration gate → high-confidence match.
+- `test_fuzzy_unrelated_title_is_non_match()` — An unrelated title inside the duration gate fails the fuzzy bar.
+- `test_fuzzy_confidence_in_unit_interval()` — Delegated confidence always lands in [0.0, 1.0] (MatchResult bound).
+- `test_title_artist_swap_is_not_matched()` — A full title↔artist swap is NOT matched — a known matcher limitation.
+- `test_remix_tag_variance_below_bar()` — An '(Extended Mix)' suffix lowers the ratio under the 0.92 bar.
+- `test_identical_remix_tag_on_both_sides_matches()` — When both sides carry the same remix tag, the cut is the same → match.
+- `test_featuring_clause_minor_variance_matches()` — A 'feat.' vs 'ft.' spelling difference is small enough to still match.
+- `test_extra_featuring_clause_one_side()` — A featuring clause on only one side still leaves a high ratio.
+- `test_mixed_batch_each_candidate_judged_independently()` — A batch mixing ISRC / duration-fail / fuzzy candidates judges each on its own rule.
+
+### `tests/test_unified_downloader_models.py`
+
+Tests for ``app/downloader/models.py`` — the unified-downloader data models.
+
+- `test_quality_tier_is_ascending_good()` — Lower QualityTier int must mean higher quality (sort-key invariant).
+- `test_trackmatch_minimal_construction()` — A TrackMatch with only the required fields constructs; optionals default None.
+- `test_trackmatch_is_frozen()` — TrackMatch is frozen — attribute assignment raises ValidationError.
+- `test_trackmatch_rejects_unknown_platform()` — A platform outside the Literal set is rejected.
+- `test_trackmatch_rejects_unknown_format()` — An audio format outside the Literal set is rejected.
+- `test_trackmatch_model_dump_roundtrip()` — model_dump() → re-construct yields an equal model (Pydantic v2 API).
+- `test_trackmatch_quality_sort_key_shape_and_negation()` — quality_sort_key is a 5-tuple; higher-better fields are negated.
+- `test_quality_sort_key_lossless_beats_lossy()` — A lossless candidate must sort strictly before any lossy candidate.
+- `test_quality_sort_key_defaults_for_missing_fields()` — Missing bit-depth/sample-rate fall back to 16/44100 in the key.
+- `test_matchresult_confidence_bounds()` — confidence must lie within [0.0, 1.0].
+- `test_candidate_quality_sort_key_delegates_to_match()` — Candidate.quality_sort_key must equal the wrapped TrackMatch's key.
+- `test_provenance_record_construction()` — ProvenanceRecord holds the picked URL + descending-quality URL list.
+- `test_resolve_request_defaults_enabled_platforms_none()` — ResolveRequest leaves enabled_platforms None when omitted.
+- `test_resolve_response_near_misses_defaults_empty()` — ResolveResponse.near_misses defaults to an empty list.
+- `test_search_models_construct()` — SearchRequest / SearchHit / SearchResponse construct with valid data.
+- `test_search_hit_rejects_unknown_platform_key()` — cross_platform_urls keys are validated against the Platform Literal.
+- `test_fetch_models_construct()` — FetchRequest / FetchResponse construct with valid data.
+- `test_jobstatus_progress_bounds()` — progress_pct must lie within [0, 100].
+- `test_jobstatus_rejects_unknown_state()` — A state outside the Literal set is rejected.
+- `test_source_provider_is_abstract()` — SourceProvider cannot be instantiated directly — it is an ABC.
+- `test_source_provider_partial_impl_still_abstract()` — A subclass missing an abstract method is still not instantiable.
+- `test_source_provider_complete_impl_instantiable()` — A subclass implementing all four abstract members instantiates + works.
+- `test_literal_aliases_are_importable()` — Platform / AudioFormat literal aliases are importable from the module.
+
+### `tests/test_unified_downloader_quality.py`
+
+Tests for ``app/downloader/quality.py`` — tier classification + policy picking.
+
+- `test_classify_flac_24_96_is_hires()` — FLAC 24-bit / 96 kHz → HIRES_LOSSLESS.
+- `test_classify_flac_16_44_is_cd_lossless()` — FLAC 16-bit / 44.1 kHz → CD_LOSSLESS.
+- `test_classify_hires_via_bit_depth_alone()` — 24-bit at 44.1 kHz still counts as hi-res (depth OR rate triggers it).
+- `test_classify_hires_via_sample_rate_alone()` — 16-bit at 48 kHz still counts as hi-res (rate > 44100 triggers it).
+- `test_classify_wav_aiff_default_to_cd_lossless()` — WAV / AIFF with no depth/rate claims default to CD_LOSSLESS (16/44.1).
+- `test_all_lossless_formats_classify_lossless()` — Every lossless format lands in a lossless tier at CD-rate defaults.
+- `test_classify_mp3_320_is_high_lossy()` — MP3 at 320 kbps → HIGH_LOSSY (>= 256).
+- `test_classify_aac_257_is_high_lossy()` — The flagged SoundCloud .m4a / AAC 257 kbps → HIGH_LOSSY (>= 256).
+- `test_classify_lossy_256_boundary()` — Exactly 256 kbps → HIGH_LOSSY (>= 256, inclusive).
+- `test_classify_mp3_192_is_standard_lossy()` — MP3 at 192 kbps → STANDARD_LOSSY (128-256).
+- `test_classify_lossy_128_boundary()` — Exactly 128 kbps → STANDARD_LOSSY (>= 128, inclusive).
+- `test_classify_low_bitrate_is_last_resort()` — Below 128 kbps → LAST_RESORT.
+- `test_classify_lossy_missing_bitrate_is_last_resort()` — A lossy format with no bitrate claim (e.g.
+- `test_all_lossy_formats_classify_lossy()` — Every lossy format lands in a lossy tier, never a lossless one.
+- `test_classify_format_neutral_within_lossy_tier()` — MP3 and AAC at the same bitrate classify identically — format-neutral.
+- `test_is_lossless_true_for_flac_and_wav()` — is_lossless is True for lossless formats.
+- `test_is_lossless_false_for_mp3_and_m4a()` — is_lossless is False for lossy formats — including high-bitrate AAC.
+- `test_pick_best_empty_raises()` — pick_best on an empty list raises ValueError.
+- `test_pick_best_single_candidate()` — pick_best on a one-element list returns index 0.
+- `test_pick_best_lossless_beats_lossy_regardless_of_order()` — A lossless candidate is picked even when listed after a lossy one.
+- `test_pick_best_hires_beats_cd_lossless()` — Among lossless candidates, hi-res outranks CD-rate.
+- `test_pick_best_higher_bitrate_wins_within_lossy_tier()` — Within the same lossy tier, the higher claimed bitrate wins.
+- `test_pick_best_filesize_tiebreaks_equal_quality()` — With identical tier/depth/rate/bitrate, the larger filesize tiebreaks.
+- `test_pick_best_stable_on_full_ties()` — Two fully-identical-quality candidates → the first-listed wins (stable).
+- `test_pick_with_policy_empty_returns_none_false()` — Empty candidate list → (None, False): nothing picked, nothing lossy.
+- `test_policy_open_picks_lossless_not_flagged()` — lossless_only=False + lossless winner → picked, is_lossy_pick False.
+- `test_policy_open_picks_lossy_when_only_lossy_and_flags_it()` — lossless_only=False + only lossy candidates → best lossy picked, flagged.
+- `test_policy_open_single_lossy_candidate_flagged()` — lossless_only=False + one lossy candidate → index 0, flagged lossy.
+- `test_policy_strict_picks_lossless_when_present()` — lossless_only=True + a lossless candidate exists → that one, not flagged.
+- `test_policy_strict_no_lossless_returns_none_true()` — lossless_only=True + no lossless candidate → (None, True).
+- `test_policy_strict_picks_best_lossless_among_several()` — lossless_only=True picks the highest-quality lossless candidate.
+- `test_policy_strict_ignores_lossy_even_if_higher_bitrate()` — lossless_only=True never picks lossy, even a 320 kbps one over a CD FLAC.
 
 ### `tests/test_usb_manager.py`
 

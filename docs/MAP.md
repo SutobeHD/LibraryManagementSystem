@@ -29,6 +29,10 @@
 | `app/config.py` | *(no module docstring)* |
 | `app/database.py` | *(no module docstring)* |
 | `app/download_registry.py` | Download Registry — SQLite-based deduplication & analysis history log. |
+| `app/downloader/__init__.py` | Unified multi-source downloader package. |
+| `app/downloader/match_adapter.py` | Thin matching adapter over the shared ``app.external_track_match`` module. |
+| `app/downloader/models.py` | Shared Pydantic v2 data models for the unified multi-source downloader. |
+| `app/downloader/quality.py` | Quality-tier classification + lossless-first candidate picking. |
 | `app/external_track_match.py` | Shared track-matching, version-tag taxonomy, fingerprint and adapter-registry module. |
 | `app/folder_watcher.py` | FolderWatcher — auto-import audio files from user-configured folders. |
 | `app/import_tracker.py` | Per-file import-progress tracker — gives the frontend a live transparent |
@@ -206,6 +210,9 @@
 | `tests/test_services.py` | Tests for `app/services.py`. |
 | `tests/test_settings_caps.py` | Tests for `SetReq` payload caps + `SettingsManager.load` sanitizer. |
 | `tests/test_soundcloud_api.py` | Tests for `app/soundcloud_api.py`. |
+| `tests/test_unified_downloader_match.py` | Tests for ``app/downloader/match_adapter.py`` — the 100%-match gate. |
+| `tests/test_unified_downloader_models.py` | Tests for ``app/downloader/models.py`` — the unified-downloader data models. |
+| `tests/test_unified_downloader_quality.py` | Tests for ``app/downloader/quality.py`` — tier classification + policy picking. |
 | `tests/test_usb_manager.py` | Tests for `app/usb_manager.py`. |
 
 ## scripts/ — Dev/Build Utilities
