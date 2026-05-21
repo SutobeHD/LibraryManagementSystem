@@ -20,6 +20,7 @@ related: [analysis-remix-detector, library-extended-remix-finder, library-qualit
 - 2026-05-15 — research/exploring_ — promoted; quality bar met (caught load-bearing rapidfuzz cross-doc error AND flagged sister-docs for fixup; 8/11 OQ resolved-M1; 5 dated Findings with module-API design specifics)
 - 2026-05-17 — research/exploring_ — evaluated_-ready rework loop (re-verified `SequenceMatcher` + `fingerprint.rs` + `backend.spec`; cross-doc taxonomy alignment pass across 4 sister-docs; added Rust-FP-via-IPC option for M1; added canonical `VersionTag.label` enum + classifier-input table; added pre-evaluated_ checklist with sign-off blockers)
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
+- 2026-05-21 — research/exploring_ — cross-doc fixups landed across 3 sister-docs (remix-detector Goals-enum canonical-order alignment + stale matcher-reference correction; extended-finder classifier-input collapse cross-ref; quality-upgrade enum-ownership note + Rust-FP-via-IPC safety-rule-2 substitution; `Candidate` dataclass shape explicitly ack'd in all three); pre-`evaluated_` checklist boxes ticked except owner Option-C-vs-D sign-off
 
 ---
 
@@ -560,14 +561,14 @@ Fires when ALL true:
 - [x] Rust-FP-via-IPC question answered (OQ12 RESOLVED-M1 Tauri-direct-IPC only).
 - [x] Rust-side AcoustID lookup deferred (OQ13 DEFERRED M3).
 - [x] Updated OQ tally: **13/13** (10 RESOLVED-M1, 2 DEFERRED, 1 OPEN-for-draftplan).
-- [ ] **Sister-doc cross-doc fixups landed** (blocker for `evaluated_` promote):
-  - [ ] `analysis-remix-detector`: re-order Goals enum to canonical order `(original, extended, radio, club, dub, instrumental, acapella, vip, remix, bootleg, edit, mashup)` for diff-grep alignment (members identical, low-risk edit).
-  - [ ] `library-extended-remix-finder`: add cross-ref to this doc's classifier-input table in Constraints — `extended mix`/`long version`/`12" mix` collapse to `extended` label, not separate values.
-  - [ ] `library-quality-upgrade-finder`: add note in Constraints that the canonical `VersionTag.label` lives here; quality-upgrade is read-only consumer.
-  - [ ] `analysis-remix-detector` Constraints (line 66): correct sister-doc reference (still says "M1 consumes the unified-module pure-function wrapper") — point at this doc's Recommendation section, not generic.
-  - [ ] All three sister-docs: confirm `Candidate` dataclass shape — already agreed in Findings 2026-05-15 "module-API: concrete dataclasses" but not explicitly signed-off in sister-doc text.
-- [ ] **Quality-upgrade Constraints update** (blocker for `evaluated_`):
-  - [ ] Note that Rust-FP-via-IPC can substitute `fpcalc` for safety-rule 2 when candidate is also a local file (HQ-folder scenario) — per Findings 2026-05-17 "Rust-FP-via-IPC" final bullet. Keeps replace-flow usable when `fpcalc` missing AND both files are local.
+- [x] **Sister-doc cross-doc fixups landed** (blocker for `evaluated_` promote):
+  - [x] `analysis-remix-detector`: re-order Goals enum to canonical order `(original, extended, radio, club, dub, instrumental, acapella, vip, remix, bootleg, edit, mashup)` for diff-grep alignment (members identical, low-risk edit).
+  - [x] `library-extended-remix-finder`: add cross-ref to this doc's classifier-input table in Constraints — `extended mix`/`long version`/`12" mix` collapse to `extended` label, not separate values.
+  - [x] `library-quality-upgrade-finder`: add note in Constraints that the canonical `VersionTag.label` lives here; quality-upgrade is read-only consumer.
+  - [x] `analysis-remix-detector` Constraints (line 66): correct sister-doc reference (still says "M1 consumes the unified-module pure-function wrapper") — point at this doc's Recommendation section, not generic.
+  - [x] All three sister-docs: confirm `Candidate` dataclass shape — already agreed in Findings 2026-05-15 "module-API: concrete dataclasses" but not explicitly signed-off in sister-doc text.
+- [x] **Quality-upgrade Constraints update** (blocker for `evaluated_`):
+  - [x] Note that Rust-FP-via-IPC can substitute `fpcalc` for safety-rule 2 when candidate is also a local file (HQ-folder scenario) — per Findings 2026-05-17 "Rust-FP-via-IPC" final bullet. Keeps replace-flow usable when `fpcalc` missing AND both files are local.
 - [ ] Owner sign-off on Option C vs Option D split (M1 = flat file; subpackage migration gated). Already captured in Recommendation but never explicitly ack'd.
 
 **Promote `exploring_` → `evaluated_`** only after sister-doc fixups land (PRs touching the 3 sister-docs only — this doc's design content is `evaluated_`-grade already). Owner ack on Recommendation completes promotion. NO code change required before `accepted_`.
