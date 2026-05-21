@@ -26,6 +26,7 @@ related: []
 - 2026-05-13 — `implement/review_` — owner answered all 3 sign-off-blocking decisions: OQ-A (no route gate; gap logged as `idea_api-route-auth-model`), OQ-B (D3 ran → PASS), legal-posture (two-mode: ToS-friendly default + opt-in Settings "backdoor" toggle). Review checklist fully ticked. Plan ready for `accepted_` — awaiting explicit owner sign-off.
 - 2026-05-13 — `implement/accepted_` — **owner sign-off granted.** Plan accepted; ready for `inprogress_` once the no-implementation constraint is lifted for the build itself. D3 feasibility already proven (PASS) — Phase 1 `spotiflac.py` design is unblocked.
 - 2026-05-13 — content update — Implementation Detail section expanded: Pydantic v2 data models, DB schema migration SQL, 3 API contracts, settings schema additions, per-phase detailed specifications (P0-P7), D5 genre starter list (~55 entries), frontend component tree, test fixture skeletons. Doc now actionable end-to-end without further design work.
+- 2026-05-13 — content update — Quality policy hardening (owner reviewed Spek spectrograms, flagged SoundCloud `.m4a`): lossless-first hard rule made an explicit named invariant; new `lossless_only` + `warn_on_lossy_pick` settings; lossy picks always UI-flagged; `quality.py` gained `is_lossless()` + `pick_with_policy()`. Reinforced: no fake-lossless re-containering of AAC.
 
 ---
 
@@ -40,6 +41,7 @@ Today the project can only download from SoundCloud (`app/soundcloud_downloader.
 - Multi-source resolution **in parallel** (don't wait for source A before trying source B).
 - **100%-match gate** — only candidates that match the requested track are kept. Quality ranking happens *only* among 100%-matches; we never trade match-accuracy for quality.
 - **Deterministic quality ranker** with documented order (e.g. FLAC > ALAC > WAV > 320 kbps MP3 > 256 kbps AAC > 128 kbps MP3, source-tagged on ties).
+- **Lossless-first hard rule** (owner, 2026-05-13) — a lossless 100%-match ALWAYS beats any lossy candidate, unconditionally; the downloader never *silently* delivers a lossy `.m4a` / `.mp3`. A lossy pick is always UI-flagged. Optional `lossless_only` setting rejects lossy entirely. See Findings § "Quality policy hardening".
 - Integrate SpotiFLAC ([github.com/spotbye/SpotiFLAC](https://github.com/spotbye/SpotiFLAC), Python module: `pip install SpotiFLAC`) as the bridge to Tidal/Qobuz/Amazon/Apple-Music.
 - Keep the existing SoundCloud pipeline (`app/soundcloud_api.py` + `app/soundcloud_downloader.py`) as one provider among many — its `LEGAL BOUNDARIES` semantics (no `snipped:true`, respect 401/403, no DRM bypass) stay intact.
 - Two-layer dedup (track-ID + content hash) must continue to work across sources.
@@ -146,7 +148,7 @@ Today the project can only download from SoundCloud (`app/soundcloud_downloader.
 | 3 (Lossy standard) | SC progressive MP3 128, Spotify-OGG 320 (if ever exposed) | 128-320 kbps lossy |
 | 4 (Last resort) | YouTube MP3 (via SpotiFLAC) | source quality varies |
 
-Within a tier, source-priority is a settings concern (open question 3).
+Within a tier, source-priority is a settings concern (Q3-c: best file wins on ties). **The Tier 1 ↔ 2 boundary is the lossless/lossy line** — the lossless-first hard rule (Findings § "Quality policy hardening") means any Tier 0/1 candidate beats every Tier 2/3/4 candidate unconditionally, never overridden by latency or platform order. The `lossless_only` setting (default off) hard-rejects Tier ≥ 2 entirely; with it off, a lossy pick is still always UI-flagged so the owner never gets a silent `.m4a`.
 
 **Risk acknowledgement** (must surface in `evaluated_` / `accepted_`):
 - Current `soundcloud_downloader.py` has a written `LEGAL BOUNDARIES` block. Adding SpotiFLAC moves the project from "user accesses what they have rights to on SC" to "user receives lossless audio from paid streaming services they may not subscribe to". This is **the user's call to make**, but the doc must record the decision explicitly — not slip it in via feature-creep.
@@ -527,6 +529,33 @@ Owner lifted the no-implementation constraint for this one throwaway test (OQ-B)
 **Verdict: PASS.** Option-B + PPE-isolation architecture is feasible — no pickle-barrier issues, no breaking top-level-import side effects, offline parser round-trips cleanly. Phase 1's `spotiflac.py` is unblocked.
 
 **Carry-forward**: the D3 test only proved import/instantiation feasibility. The production `spotiflac.py` must still copy the *full* `anlz_safe.py` crash-recovery shape — `future.result(timeout=...)`, `BrokenExecutor` catch + worker restart, panic budget. That scaffolding is the whole point of the PPE choice and is not optional.
+
+### 2026-05-13 — Quality policy hardening (owner: avoid m4a, lossless-first)
+
+Owner inspected real download output in Spek (spectrogram analyzer) and flagged the SoundCloud `.m4a` path. Evidence:
+
+| File | Format | Spectrogram |
+|---|---|---|
+| Wavegroß.wav | PCM 24-bit / 96 kHz | True hi-res — content to ~40+ kHz |
+| Waveklein.wav | PCM 24-bit / 44.1 kHz | Lossless CD-rate — full to 22 kHz |
+| Soundcloud.m4a | AAC 257 kbps / 48 kHz | **Lossy** — hard cutoff ~20 kHz, smeared highs |
+
+The `.m4a` is what the existing SC downloader's HLS-AAC fallback path produces for non-`downloadable` tracks. Owner requirement: **the downloader must not deliver lossy `.m4a` when a lossless source exists, and quality must be maximised.**
+
+**Hard facts (must not be papered over):**
+
+- AAC 257 kbps *is* lossy. The ~20 kHz cutoff is intrinsic — those frequencies are gone, not recoverable by any post-processing.
+- Re-containering AAC → AIFF/WAV does **not** improve quality. It only inflates file size and produces a *misleading* "lossless-looking" file. The `no fake-lossless re-encode` rule (D4) is kept and reinforced.
+- For SoundCloud-exclusive tracks (bootlegs, edits, promos that exist *only* on SC and are not `downloadable`), AAC 256 / MP3 128 is the physical ceiling — no lossless exists anywhere. The downloader cannot manufacture quality SoundCloud doesn't have.
+- The genuine fix for "better quality" is multi-source resolution: when SC offers only AAC, fetch the same 100%-match track in FLAC from Tidal/Qobuz instead. This is the core purpose of the unified downloader — the m4a problem *is* the problem this feature exists to solve.
+
+**Policy decisions (folded into Goals, Quality-tier table, Settings schema, `quality.py`):**
+
+1. **Lossless-first hard rule** — among 100%-match candidates, a lossless source ALWAYS wins over any lossy source, regardless of platform order, latency, or which responded first. The `QualityTier` sort already encodes this (Tier 0/1 < Tier 2/3/4); this finding promotes it to an explicit, named invariant: *never deliver lossy when lossless exists for the same exact track.*
+2. **New setting `lossless_only`** (bool, default `false`). When `true`: a track with no lossless 100%-match is NOT downloaded — the UI surfaces "no lossless source found, best was AAC 256 (SoundCloud)" and the user explicitly accepts the lossy file or skips. When `false` (default): best-available is downloaded, but a lossy result is always flagged, never silent.
+3. **Lossy results are always UI-flagged** — the candidate card + the job-complete toast show a "LOSSY — no lossless source" badge whenever the picked candidate is Tier ≥ 2. The owner is never surprised by an `.m4a` after the fact.
+4. **`.m4a` stays `.m4a`** when AAC is genuinely the only option (no fake-lossless re-containering). The fix for not wanting m4a is sourcing lossless — not disguising AAC inside a `.wav`/`.aiff` wrapper.
+5. **Format is quality-neutral within a tier** — FLAC / ALAC / WAV are all Tier 0/1 and equal; MP3 / AAC are both lossy and ranked purely by bitrate. We do not prefer MP3 over AAC or vice versa — that would be meaningless noise.
 
 ## Options Considered
 
@@ -1026,6 +1055,8 @@ Merged into `settings.json` on first launch of the new code; defaults shown.
     "backdoor_disclaimer_acknowledged_at": null,
     "max_concurrency": 4,
     "downconvert_hires_to_16_44": false,
+    "lossless_only": false,
+    "warn_on_lossy_pick": true,
     "legacy_per_source_folders": false,
     "match_threshold_near_miss": 0.85,
     "songlink_api_key": null,
@@ -1387,13 +1418,40 @@ def classify(m: TrackMatch) -> QualityTier:
         return QualityTier.STANDARD_LOSSY
     return QualityTier.LAST_RESORT
 
+_LOSSLESS_TIERS = (QualityTier.HIRES_LOSSLESS, QualityTier.CD_LOSSLESS)
+
+def is_lossless(m: TrackMatch) -> bool:
+    return classify(m) in _LOSSLESS_TIERS
+
 def pick_best(candidates: list[TrackMatch]) -> int:
-    """Return the index of the best-quality candidate. Stable on ties (insertion order tiebreaks)."""
+    """Index of the best-quality candidate. Stable on ties (insertion order tiebreaks).
+    The quality_sort_key already enforces the lossless-first hard rule: every Tier 0/1
+    candidate sorts ahead of every Tier 2/3/4 candidate, unconditionally."""
     if not candidates:
         raise ValueError("no candidates")
-    indexed = list(enumerate(candidates))
-    indexed.sort(key=lambda iv: iv[1].quality_sort_key())
+    indexed = sorted(enumerate(candidates), key=lambda iv: iv[1].quality_sort_key())
     return indexed[0][0]
+
+def pick_with_policy(candidates: list[TrackMatch], *, lossless_only: bool) -> tuple[int | None, bool]:
+    """Apply the owner's lossless-first policy (Findings § 'Quality policy hardening').
+
+    Returns (picked_index, is_lossy_pick):
+      - lossless_only=True  + a lossless candidate exists → that one; is_lossy=False
+      - lossless_only=True  + none lossless              → (None, True)  caller surfaces
+        "no lossless source found" and lets the user accept the lossy file or skip
+      - lossless_only=False                              → best overall; is_lossy flag
+        set when the winner is Tier >= 2 so the UI can badge it
+    """
+    if not candidates:
+        return None, False
+    lossless = [i for i, c in enumerate(candidates) if is_lossless(c)]
+    if lossless_only:
+        if not lossless:
+            return None, True  # caller decides — never a silent lossy download
+        best = min(lossless, key=lambda i: candidates[i].quality_sort_key())
+        return best, False
+    best = pick_best(candidates)
+    return best, not is_lossless(candidates[best])
 ```
 
 ### Phase 3 — Resolver + Search (detailed)
