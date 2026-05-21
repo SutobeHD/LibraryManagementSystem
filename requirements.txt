@@ -63,5 +63,11 @@ pyloudnorm==0.1.1
 # --- Filesystem watcher (auto-import on folder change) ---
 watchdog==4.0.2
 
+# --- Multi-source download (Spotify metadata -> Tidal/Qobuz/Amazon FLAC) ---
+# Reverse-engineering-based. Runs quarantined in a ProcessPoolExecutor
+# worker (app/downloader/providers/spotiflac.py), the SafeAnlzParser
+# pattern. Owner-approved 2026-05-21; D3 feasibility verified.
+SpotiFLAC==0.5.0
+
 # --- Test Framework ---
 pytest==9.0.3

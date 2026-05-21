@@ -345,6 +345,10 @@ class SoundCloudPlaylistAPI:
         # download_url is present in the API response when downloadable=True.
         # It points to the official /tracks/{id}/download endpoint.
         # We include it here so callers don't need a second API round-trip.
+        #
+        # isrc lives under publisher_metadata.isrc on v2 track objects (and
+        # rarely as a bare top-level isrc). Surfacing it lets the unified
+        # downloader's matcher gate on ISRC equality (Q9).
         return {
             "id": track_id,
             "title": title,
@@ -354,6 +358,7 @@ class SoundCloudPlaylistAPI:
             "artwork_url": raw.get("artwork_url"),
             "downloadable": raw.get("downloadable", False),
             "download_url": raw.get("download_url"),  # None when not downloadable
+            "isrc": (raw.get("publisher_metadata") or {}).get("isrc") or raw.get("isrc"),
         }
 
     @staticmethod
