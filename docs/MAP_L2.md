@@ -122,6 +122,12 @@ audio_tags — write metadata back to the source audio file.
 - `load_artwork()` — Read an artwork file from disk into bytes, or None on any failure.
 - `read_tags()` — Read metadata tags from any supported audio file.
 
+### `app/auth.py`
+
+Bearer-token authentication for the FastAPI sidecar.
+
+- `require_session()` — Authenticate one HTTP request against the boot-time session token.
+
 ### `app/batch_worker.py`
 
 Setup logging
@@ -233,6 +239,38 @@ Download Registry — SQLite-based deduplication & analysis history log.
 - `get_stats()` — Aggregate statistics for the history dashboard widget.
 - `compute_sha256()` — Stream-hash a file with SHA-256.
 
+### `app/external_track_match.py`
+
+Shared track-matching, version-tag taxonomy, fingerprint and adapter-registry module.
+
+- `VersionTag` — A parsed version descriptor.
+- `Candidate` — A single match candidate returned from a ``SourcePlugin.search`` call.
+- `Fingerprint` — A successful ``fpcalc`` (Chromaprint) fingerprint result.
+- `FingerprintUnavailable` — Namespace of importable singleton sentinels for fingerprint failure.
+- `AdapterError` — Base class for every adapter-registry / adapter-transport failure.
+- `AdapterNotRegistered` — Raised by :func:`get_adapter` when the requested name is unknown.
+- `AdapterTransportError` — Raised by an adapter when an external HTTP call fails irrecoverably.
+- `AdapterQuotaExceeded` — Raised by an adapter when the source's rate / quota limit is hit.
+- `AdapterParseError` — Raised by an adapter when a source response cannot be parsed.
+- `SourcePlugin` — Duck-typed interface every external source adapter implements.
+- `  SourcePlugin.search()` — Search the source.
+- `  SourcePlugin.parse_version()` — Reverse-lookup a :class:`VersionTag` from the source's native metadata.
+- `  SourcePlugin.quota_remaining()` — Best-effort remaining-quota hint.
+- `register_adapter()` — Register (or replace) an adapter under ``name``.
+- `get_adapter()` — Return the adapter registered under ``name``.
+- `list_adapters()` — Return the names of every currently registered adapter.
+- `normalize_title()` — Lowercase, strip, accent-fold and drop non-word punctuation.
+- `extract_title_stem()` — Strip version suffixes and (optionally) feature clauses down to a stem.
+- `parse_version_tag()` — Parse a :class:`VersionTag` from a track title.
+- `fuzzy_match_with_score()` — Find the best matching candidate and return ``(best_id_or_None, score)``.
+- `is_fingerprinting_available()` — Return ``True`` when ``fpcalc`` is on PATH.
+- `fingerprint()` — Fingerprint a local audio file via ``fpcalc`` (Chromaprint).
+- `SoundCloudAdapter` — ``SourcePlugin`` adapter wrapping SoundCloud track search.
+- `  SoundCloudAdapter.search()` — Search SoundCloud for ``"<artist> <title>"``.
+- `  SoundCloudAdapter.parse_version()` — Parse a :class:`VersionTag` from a SoundCloud track's ``title``.
+- `  SoundCloudAdapter.quota_remaining()` — SoundCloud exposes no quota header — always ``None`` (unknown).
+- `register_soundcloud_adapter()` — Build a :class:`SoundCloudAdapter` and register it under ``"soundcloud"``.
+
 ### `app/folder_watcher.py`
 
 FolderWatcher — auto-import audio files from user-configured folders.
@@ -315,6 +353,14 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `  LiveRekordboxDB.remove_track_from_playlist()`
 - `  LiveRekordboxDB.reorder_playlist_track()` — Reorders a track in a playlist.
 
+### `app/logging_utils.py`
+
+Log redaction helpers — scrub absolute paths from log lines + tracebacks.
+
+- `safe_error_message_str()` — Strip absolute paths from a rendered log/error string.
+- `RedactingFormatter` — `logging.Formatter` that scrubs paths from message + cached traceback.
+- `  RedactingFormatter.format()`
+
 ### `app/main.py`
 
 *(no module docstring)*
@@ -364,7 +410,7 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `stream_audio()` — Streams audio file with HTTP Range support — required for browser seeking.
 - `get_multiband_waveform()` — Returns 3-band waveform data for professional visualization.
 - `FileRevealReq`
-- `file_reveal()` — Open the OS file explorer pointing at the given file/folder path.
+- `file_reveal()` — Open the OS file explorer pointing at the given audio file path.
 - `file_write()` — Writes text content to a file (used for .rbep project saving).
 - `clean_xml()`
 - `get_genres()`
@@ -395,7 +441,7 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `save_grid()`
 - `update_track()`
 - `batch_up()`
-- `system_heartbeat()`
+- `system_heartbeat()` — Lightweight keep-alive ping.
 - `del_trk()`
 - `move_t()`
 - `ren_t()` — Bulk smart-rename audio files on disk using a token pattern.
@@ -456,13 +502,12 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `folder_watcher_remove()`
 - `startup_event()`
 - `shutdown_watcher_event()`
-- `heartbeat()`
-- `shutdown()` — SECURITY: Requires session token to trigger shutdown.
-- `restart()` — SECURITY: Requires session token to trigger restart.
+- `shutdown()` — Trigger sidecar shutdown.
+- `restart()` — Trigger sidecar restart.
 - `select_db_dialog()`
 - `NewLibReq`
 - `create_new_lib()`
-- `debug_load_xml()`
+- `debug_load_xml()` — Debug-only: force-load a hardcoded rekordbox.xml.
 - `UsbProfileReq`
 - `UsbSyncReq`
 - `UsbEjectReq`
@@ -560,6 +605,17 @@ playcount_sync.py — USB Play-Count Sync Engine
 - `resolve_playcounts()` — Commit resolved play counts to both the PC Rekordbox DB and the USB XML.
 - `read_usb_xml_playcounts()` — Parse a Rekordbox-format XML file on the USB drive and return play-count data.
 
+### `app/rate_limit.py`
+
+In-process token-bucket rate limiter for the FastAPI sidecar.
+
+- `TokenBucket` — Single-key token bucket with monotonic-clock refill.
+- `  TokenBucket.take()` — Spend one token; return ``(allowed, retry_after_s)``.
+- `BucketStore` — Process-wide TTL'd map of bucket-key to :class:`TokenBucket`.
+- `  BucketStore.take()` — Spend one token for ``key`` (creating the bucket on first hit).
+- `make_key()` — Derive the bucket-key for ``request`` under ``mode``.
+- `rate_limit()` — Decorate an async FastAPI handler with a per-key token-bucket gate.
+
 ### `app/rbep_parser.py`
 
 RBEP Parser — Parses Rekordbox Editor Project (.rbep) files.
@@ -585,6 +641,12 @@ RBEP Parser — Parses Rekordbox Editor Project (.rbep) files.
 - `format_tempo_int_to_str()` — Format Rekordbox integer tempo (BPM*100) to string with 2 decimal places.
 - `analysis_to_xml_track()` — Convert an AnalysisEngine result into a Rekordbox XML <TRACK> element.
 - `create_rekordbox_xml()` — Wrap track elements in the root DJ_PLAYLISTS Rekordbox XML structure and save.
+
+### `app/security_compare.py`
+
+Constant-time equality helper for tokens, secrets, HMAC outputs.
+
+- `safe_compare()` — Constant-time equality for tokens/secrets/HMAC outputs.
 
 ### `app/services.py`
 
@@ -786,8 +848,6 @@ USB export.pdb writer — legacy CDJ DeviceLibrary format.
 
 ─── EC2: Runtime detection of Tauri context ───────────────────────────────────
 
-- `setSessionToken()`
-- `getSessionToken()`
 - `cancellableGet()` — ─── AbortController helpers ────────────────────────────────────────────────── export function crea…
 
 ### `frontend/src/audio/AudioRegion.js`
@@ -1050,6 +1110,17 @@ Frontend-wide constants.
 - `TOAST_DURATION_LONG_MS()` — Duration for long-form error toasts that the user needs time to read (full failure paths in DAW / e…
 - `AUDIO_IMPORT_TIMEOUT_MS()` — Axios timeout for the synchronous audio-import endpoint (/api/audio/import → full analysis pipeline…
 - `IMPORT_TASK_POLL_INTERVAL_MS()` — Poll cadence for /api/import/tasks while one or more uploaded files are still being analysed in the…
+
+### `frontend/src/store/authStore.js`
+
+Tiny module-level auth state shared across the frontend.
+
+- `setSessionToken()`
+- `getSessionToken()`
+- `setBootstrapFailed()`
+- `isAuthBootstrapFailed()`
+- `setBootstrapPromise()` — Stash the bootstrap promise from ``api.js`` so anything that wants to await the initial token-fetch…
+- `getBootstrapPromise()`
 
 ### `frontend/src/utils/AudioBandAnalyzer.js`
 
@@ -1478,6 +1549,22 @@ soundcloud_client.rs
 
 *(no module docstring)*
 
+### `tests/conftest.py`
+
+Pytest fixtures shared across the suite.
+
+- `auth_token()` — Pin ``app.auth.SESSION_TOKEN`` to ``TEST_SESSION_TOKEN`` for the test.
+- `pytest_configure()` — Register the ``no_auth`` marker so ``--strict-markers`` is happy.
+
+### `tests/fixtures/mock_adapter.py`
+
+A mock :class:`SourcePlugin` for the ``external_track_match`` test-suite.
+
+- `MockAdapter` — A deterministic, network-free ``SourcePlugin`` implementation.
+- `  MockAdapter.search()` — Return the canned candidate list (or one synthesised from the query).
+- `  MockAdapter.parse_version()` — Parse a version tag straight from ``raw['title']`` (no source override).
+- `  MockAdapter.quota_remaining()` — Return the configured quota hint.
+
 ### `tests/test_analysis.py`
 
 Regression tests for the analysis pipeline.
@@ -1507,6 +1594,45 @@ Regression tests for the analysis pipeline.
 - `test_cue_toggles_kwarg_overrides_settings()` — Per-call kwarg overrides the global setting.
 - `test_e2e_anlz_write_roundtrip()`
 
+### `tests/test_auth.py`
+
+Tests for ``app/auth.py`` -- Bearer-token session authentication.
+
+- `TestCaseA_NoHeader`
+- `  TestCaseA_NoHeader.test_post_without_authorization_is_401()`
+- `TestCaseB_WrongToken`
+- `  TestCaseB_WrongToken.test_post_with_wrong_bearer_is_401()`
+- `  TestCaseB_WrongToken.test_post_with_wrong_length_is_401()`
+- `TestCaseC_HappyPath`
+- `  TestCaseC_HappyPath.test_post_with_correct_bearer_is_2xx()`
+- `TestCaseD_HeartbeatTokenLeak`
+- `  TestCaseD_HeartbeatTokenLeak.test_heartbeat_response_has_no_token_field()`
+- `TestCaseE_InitTokenAbsent`
+- `  TestCaseE_InitTokenAbsent.test_post_init_token_is_404()`
+- `TestCaseF_SoundCloudAuthTokenGated`
+- `  TestCaseF_SoundCloudAuthTokenGated.test_sc_auth_token_without_bearer_is_401()`
+- `TestCaseG_LegacyShutdownTokenRemoved`
+- `  TestCaseG_LegacyShutdownTokenRemoved.test_shutdown_without_bearer_is_401()`
+- `  TestCaseG_LegacyShutdownTokenRemoved.test_restart_without_bearer_is_401()`
+- `TestCaseH_BearerWhitespace`
+- `  TestCaseH_BearerWhitespace.test_trailing_whitespace_in_credentials_is_accepted()`
+- `  TestCaseH_BearerWhitespace.test_leading_whitespace_between_scheme_and_token()`
+- `TestCaseI_SchemeCaseInsensitive`
+- `  TestCaseI_SchemeCaseInsensitive.test_scheme_case_insensitive()`
+- `TestCaseJ_EmptyAuthorizationHeader`
+- `  TestCaseJ_EmptyAuthorizationHeader.test_empty_header_value_is_401()`
+- `  TestCaseJ_EmptyAuthorizationHeader.test_whitespace_only_header_is_401()`
+- `  TestCaseJ_EmptyAuthorizationHeader.test_scheme_only_no_credentials_is_401()`
+- `TestCaseK_ControlCharsRejected`
+- `  TestCaseK_ControlCharsRejected.test_vtab_in_token_is_401()`
+- `  TestCaseK_ControlCharsRejected.test_del_char_in_token_is_401()`
+- `TestCaseL_WrongScheme`
+- `  TestCaseL_WrongScheme.test_non_bearer_scheme_is_401()`
+- `TestCaseM_OptionsPreflight`
+- `  TestCaseM_OptionsPreflight.test_options_preflight_short_circuits_before_auth()`
+- `TestCaseN_UngatedAcceptsAuthHeader`
+- `  TestCaseN_UngatedAcceptsAuthHeader.test_heartbeat_with_bearer_header_still_2xx()`
+
 ### `tests/test_database.py`
 
 Tests for `app/database.py`.
@@ -1535,6 +1661,82 @@ Tests for `app/database.py`.
 - `  TestFilterTracks.test_unknown_scheme_preserved()` — Only the four explicit prefixes are filtered.
 - `  TestFilterTracks.test_unknown_input_type_passed_through()` — If the caller hands a non-dict / non-list we just return it.
 
+### `tests/test_download_registry_schema.py`
+
+Schema-migration tests for the unified multi-source downloader (Phase 0, P0.3).
+
+- `temp_registry()` — Point the registry module at an isolated temp DB for the test.
+- `test_migration_adds_unified_downloader_columns()`
+- `test_migration_creates_genre_tables()`
+- `test_migration_creates_indexes()`
+- `test_init_registry_is_idempotent()` — Second call must not log an error — ALTER guarded by PRAGMA, CREATE IF NOT EXISTS.
+- `test_legacy_row_survives_migration()` — A row in the pre-migration column set stays readable; new columns read NULL.
+- `test_new_columns_are_writable()` — The four new columns accept values (round-trip).
+
+### `tests/test_external_track_match.py`
+
+Tests for ``app/external_track_match.py`` — the shared track-matching module.
+
+- `test_normalize_title_lowercases_and_strips_punct()` — normalize_title('Strobe!') == 'strobe' — mirrors _normalize_title in soundcloud_api.
+- `test_normalize_title_handles_accents()` — normalize_title('Pacífico') == 'pacifico' — NFD accent-fold (new vs stdlib behaviour).
+- `test_extract_title_stem_strips_paren_suffix()` — extract_title_stem('Strobe (Radio Edit)') == 'strobe'.
+- `test_extract_title_stem_strips_bracket_suffix()` — extract_title_stem('Strobe [Extended Mix]') == 'strobe'.
+- `test_extract_title_stem_strips_trailing_dash_variant()` — extract_title_stem('Strobe - Extended Mix') == 'strobe'.
+- `test_extract_title_stem_drops_feat_by_default()` — extract_title_stem('Song feat.
+- `test_extract_title_stem_round_trip_three_shapes()` — All four equivalent stems collapse to the same root.
+- `test_parse_version_tag_label_recall()` — >=95% label recall over the 200+ title corpus per the Goals metric.
+- `test_parse_version_tag_corpus_recall_threshold()` — Aggregate label recall over the whole corpus must be >=95%.
+- `test_parse_version_tag_captures_remixer()` — parse_version_tag('Strobe (Deadmau5 Remix)').remixer == 'Deadmau5'.
+- `test_parse_version_tag_captures_year_modifier()` — parse_version_tag('Strobe (2024 Edit)').modifiers contains '2024'.
+- `test_parse_version_tag_returns_none_on_no_suffix()` — parse_version_tag('Strobe') is None.
+- `test_parse_version_tag_canonical_label_set()` — Every parsed label is a member of the canonical 12-member set.
+- `test_fuzzy_match_with_score_equivalence_to_sc_baseline()` — The module-level matcher returns identical (tid, score) tuples as the SC engine.
+- `test_fuzzy_match_with_score_exact_norm_title_returns_one_point_zero()` — Exact normalised-title match short-circuits to (tid, 1.0).
+- `test_fuzzy_match_with_score_threshold_param_default_065()` — Default threshold is 0.65; an explicit stricter override is honoured.
+- `test_fuzzy_match_with_score_no_match_returns_none_zero()` — Empty candidates dict yields (None, 0.0).
+- `test_register_adapter_idempotent()` — Re-registering the same name replaces; no duplicate entry.
+- `test_get_adapter_raises_when_missing()` — get_adapter on an unknown name raises AdapterNotRegistered.
+- `test_list_adapters_returns_registered_names()` — list_adapters returns every registered name (order-independent).
+- `test_mock_adapter_satisfies_source_plugin_protocol()` — The mock adapter is a runtime-checkable SourcePlugin.
+- `test_soundcloud_adapter_satisfies_source_plugin_protocol()` — The real SoundCloudAdapter is a runtime-checkable SourcePlugin.
+- `test_mock_and_real_adapter_register_side_by_side()` — A mock and the real SC adapter coexist in the registry, dispatched alike.
+- `test_mock_adapter_search_returns_candidates()` — The mock adapter's async search yields Candidate objects.
+- `test_is_fingerprinting_available_true_when_fpcalc_on_path()` — shutil.which('fpcalc') -> a path makes is_fingerprinting_available() True.
+- `test_is_fingerprinting_available_false_when_fpcalc_missing()` — shutil.which('fpcalc') -> None makes is_fingerprinting_available() False.
+- `test_fingerprint_returns_unavailable_when_fpcalc_missing()` — fingerprint() degrades to the BINARY_MISSING sentinel when fpcalc is absent.
+- `test_fingerprint_validates_audio_path_sandbox()` — A path outside ALLOWED_AUDIO_ROOTS raises ValueError before any subprocess.
+- `test_fingerprint_respects_timeout_param()` — The subprocess invocation forwards the timeout kwarg (default 10.0).
+- `test_fingerprint_returns_fingerprint_dataclass_on_success()` — A well-formed fpcalc stdout yields a Fingerprint dataclass.
+- `test_fingerprint_returns_timeout_sentinel_on_subprocess_timeout()` — A subprocess timeout degrades to the TIMEOUT sentinel, never raises.
+- `test_fingerprint_returns_decode_error_on_nonzero_exit()` — A non-zero fpcalc exit degrades to the DECODE_ERROR sentinel.
+- `test_module_has_no_db_writer_imports()` — The module source contains no master.db writer / rbox coupling.
+- `test_dataclasses_are_frozen_and_hashable()` — VersionTag / Candidate / Fingerprint are frozen and hashable where expected.
+- `test_corpus_has_at_least_200_cases()` — The title corpus must carry >=200 records per the Goals metric.
+
+### `tests/test_logging_redaction.py`
+
+Unit tests for `app.logging_utils.RedactingFormatter`.
+
+- `stream_logger()` — Yield a freshly configured logger + the StringIO its handler writes to.
+- `test_exc_info_traceback_scrubbed()`
+- `test_chained_exception_preserves_chain_marker()`
+- `test_args_interpolation_scrubbed()`
+- `test_non_exception_log_format_unchanged()` — A path-free `logger.info("hello")` must be byte-identical via
+
+### `tests/test_main_security.py`
+
+Regression tests for ``POST /api/file/reveal`` sandbox.
+
+- `sandbox_root()` — Add a temp dir to ``ALLOWED_AUDIO_ROOTS`` for one test, then remove it.
+- `no_run()` — Replace ``subprocess.run`` with a recorder that never spawns a process.
+- `TestFileRevealSandboxRejects`
+- `  TestFileRevealSandboxRejects.test_outside_roots_path_is_forbidden()`
+- `  TestFileRevealSandboxRejects.test_non_audio_extension_is_rejected()`
+- `  TestFileRevealSandboxRejects.test_missing_file_in_root_is_404()`
+- `  TestFileRevealSandboxRejects.test_directory_path_is_rejected()`
+- `TestFileRevealSandboxAccepts`
+- `  TestFileRevealSandboxAccepts.test_valid_audio_calls_subprocess_with_platform_argv()`
+
 ### `tests/test_onelibrary_wal_flush.py`
 
 End-to-end regression test for OneLibraryUsbWriter — runs the FULL
@@ -1554,6 +1756,71 @@ PDB writer structural test against F: drive Pioneer reference.
 
 - `make_synthetic_input()` — Mimic the data shape that OneLibraryUsbWriter._write_pdb_from_db
 - `main()`
+
+### `tests/test_rate_limit.py`
+
+Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter.
+
+- `test_take_until_empty()`
+- `test_refill_after_wait()`
+- `test_burst_allows_then_throttles()`
+- `test_whitelist_bypass()`
+- `test_concurrent_take()`
+- `test_ttl_purge()`
+- `test_auth_before_ratelimit()` — Unauth + over-limit MUST surface as 401, not 429.
+
+### `tests/test_security_compare.py`
+
+Tests for ``app/security_compare.py::safe_compare``.
+
+- `TestCase1_Equal`
+- `  TestCase1_Equal.test_equal_str()`
+- `  TestCase1_Equal.test_equal_bytes()`
+- `TestCase2_UnequalSameLength`
+- `  TestCase2_UnequalSameLength.test_unequal_same_length_str()`
+- `  TestCase2_UnequalSameLength.test_unequal_same_length_bytes()`
+- `TestCase3_LengthMismatch`
+- `  TestCase3_LengthMismatch.test_length_mismatch_str()`
+- `  TestCase3_LengthMismatch.test_length_mismatch_bytes()`
+- `TestCase4_EmptyVsNonEmpty`
+- `  TestCase4_EmptyVsNonEmpty.test_empty_presented_str()`
+- `  TestCase4_EmptyVsNonEmpty.test_empty_expected_bytes()`
+- `  TestCase4_EmptyVsNonEmpty.test_both_empty()`
+- `TestCase5_NonAsciiStr`
+- `  TestCase5_NonAsciiStr.test_non_ascii_presented()`
+- `  TestCase5_NonAsciiStr.test_non_ascii_expected()`
+- `  TestCase5_NonAsciiStr.test_non_ascii_both()`
+- `TestCase6_MixedStrBytes`
+- `  TestCase6_MixedStrBytes.test_str_vs_bytes()`
+- `  TestCase6_MixedStrBytes.test_bytes_vs_str_unequal()`
+- `TestCase7_NonStrOrBytesInput`
+- `  TestCase7_NonStrOrBytesInput.test_non_str_or_bytes_presented()`
+- `  TestCase7_NonStrOrBytesInput.test_non_str_or_bytes_expected()`
+- `  TestCase7_NonStrOrBytesInput.test_both_none()`
+
+### `tests/test_security_hotfixes.py`
+
+Regression tests for the 5 security hotfixes in commit e3a5ae8.
+
+- `sandbox_root()` — Add a temp dir to ALLOWED_AUDIO_ROOTS for one test, then remove it.
+- `TestNoDuplicateHeartbeatRoute`
+- `  TestNoDuplicateHeartbeatRoute.test_only_one_heartbeat_route_registered()`
+- `TestHeartbeatNoTokenLeak`
+- `  TestHeartbeatNoTokenLeak.test_heartbeat_never_returns_token_field()`
+- `TestValidateAudioPathSandbox`
+- `  TestValidateAudioPathSandbox.test_valid_audio_file_inside_root_accepted()`
+- `  TestValidateAudioPathSandbox.test_sibling_root_with_shared_prefix_is_rejected()` — Regression: the str.startswith bug accepted '<root>_evil' as inside '<root>'.
+- `  TestValidateAudioPathSandbox.test_path_outside_roots_rejected()`
+- `  TestValidateAudioPathSandbox.test_non_audio_extension_rejected()`
+- `TestDebugLoadXmlGate`
+- `  TestDebugLoadXmlGate.test_disabled_by_default()`
+- `  TestDebugLoadXmlGate.test_disabled_when_flag_not_one()`
+- `  TestDebugLoadXmlGate.test_enabled_when_flag_one()`
+- `TestFileWriteSandbox`
+- `  TestFileWriteSandbox.test_write_inside_root_with_allowed_extension()`
+- `  TestFileWriteSandbox.test_write_outside_roots_forbidden()`
+- `  TestFileWriteSandbox.test_write_forbidden_extension_rejected()`
+- `  TestFileWriteSandbox.test_all_allow_listed_extensions_accepted()`
 
 ### `tests/test_services.py`
 
@@ -1587,6 +1854,42 @@ Tests for `app/services.py`.
 - `  TestSettingsAtomicSave.test_save_writes_complete_json()`
 - `  TestSettingsAtomicSave.test_save_leaves_no_tmp_files()`
 - `  TestSettingsAtomicSave.test_save_overwrites_existing_file()`
+
+### `tests/test_settings_caps.py`
+
+Tests for `SetReq` payload caps + `SettingsManager.load` sanitizer.
+
+- `TestSetReqHappyPath` — Realistic payloads must keep working.
+- `  TestSetReqHappyPath.test_minimal_empty_payload_ok()`
+- `  TestSetReqHappyPath.test_typical_populated_payload_ok()`
+- `  TestSetReqHappyPath.test_extras_passthrough_ok()`
+- `TestSetReqValueBytesCap`
+- `  TestSetReqValueBytesCap.test_extras_value_over_cap_rejected()`
+- `  TestSetReqValueBytesCap.test_extras_value_at_cap_ok()`
+- `TestSetReqDictKeysCap`
+- `  TestSetReqDictKeysCap.test_extras_dict_over_keys_rejected()`
+- `TestSetReqKeyLenCap`
+- `  TestSetReqKeyLenCap.test_extras_long_key_rejected()`
+- `TestSetReqListItemsCap`
+- `  TestSetReqListItemsCap.test_scan_folders_over_cap_rejected()`
+- `  TestSetReqListItemsCap.test_extras_list_over_cap_rejected()`
+- `TestSetReqPathLenCap`
+- `  TestSetReqPathLenCap.test_scan_folders_long_path_rejected()`
+- `TestSetReqTotalBytesCap`
+- `  TestSetReqTotalBytesCap.test_payload_over_total_rejected()`
+- `TestSetReqStrictMode`
+- `  TestSetReqStrictMode.test_string_true_rejected_for_bool()`
+- `  TestSetReqStrictMode.test_string_int_rejected_for_int_field()`
+- `  TestSetReqStrictMode.test_negative_int_rejected()`
+- `  TestSetReqStrictMode.test_unknown_waveform_visual_mode_rejected()`
+- `  TestSetReqStrictMode.test_bad_hex_color_rejected()`
+- `TestSetReqLoggingRedaction`
+- `  TestSetReqLoggingRedaction.test_warning_logged_with_key_and_reason_not_value()`
+- `TestSettingsManagerLoadSanitizer` — `load` strips now-rejected keys silently + logs `info`.
+- `  TestSettingsManagerLoadSanitizer.test_oversize_key_dropped_on_load()`
+- `  TestSettingsManagerLoadSanitizer.test_oversize_value_dropped_on_load()`
+- `  TestSettingsManagerLoadSanitizer.test_oversize_list_dropped_on_load()`
+- `  TestSettingsManagerLoadSanitizer.test_load_legacy_clean_file_unchanged()`
 
 ### `tests/test_soundcloud_api.py`
 
@@ -1644,6 +1947,26 @@ Tests for `app/usb_manager.py`.
 
 
 ## scripts/ — Dev/Build Utilities
+
+### `scripts/pipeline_dashboard.py`
+
+Local web dashboard for the research pipeline.
+
+- `render_html()`
+- `main()`
+
+### `scripts/pipeline_status.py`
+
+Show the research pipeline state at a glance.
+
+- `Doc`
+- `  Doc.age_days()`
+- `scan()` — Walk the three stage folders, parse each <state>_<slug>.md doc.
+- `fetch_routine_prs()` — Open PRs from routine/* branches.
+- `open_gates()`
+- `print_gates()`
+- `print_report()`
+- `main()`
 
 ### `scripts/regen_maps.py`
 

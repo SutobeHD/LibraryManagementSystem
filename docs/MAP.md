@@ -24,20 +24,25 @@
 | `app/anlz_writer.py` | LibraryManagementSystem -- ANLZ Binary File Writer |
 | `app/audio_analyzer.py` | LibraryManagementSystem -- Audio Analyzer (Unified Wrapper) |
 | `app/audio_tags.py` | audio_tags — write metadata back to the source audio file. |
+| `app/auth.py` | Bearer-token authentication for the FastAPI sidecar. |
 | `app/batch_worker.py` | Setup logging |
 | `app/config.py` | *(no module docstring)* |
 | `app/database.py` | *(no module docstring)* |
 | `app/download_registry.py` | Download Registry — SQLite-based deduplication & analysis history log. |
+| `app/external_track_match.py` | Shared track-matching, version-tag taxonomy, fingerprint and adapter-registry module. |
 | `app/folder_watcher.py` | FolderWatcher — auto-import audio files from user-configured folders. |
 | `app/import_tracker.py` | Per-file import-progress tracker — gives the frontend a live transparent |
 | `app/library_source.py` | LibrarySource — uniform abstraction over Live (master.db) and XML modes. |
 | `app/live_database.py` | *(no module docstring)* |
+| `app/logging_utils.py` | Log redaction helpers — scrub absolute paths from log lines + tracebacks. |
 | `app/main.py` | *(no module docstring)* |
 | `app/phrase_generator.py` | phrase_generator.py — Phrase & Auto-Cue Generator |
 | `app/playcount_sync.py` | playcount_sync.py — USB Play-Count Sync Engine |
+| `app/rate_limit.py` | In-process token-bucket rate limiter for the FastAPI sidecar. |
 | `app/rbep_parser.py` | RBEP Parser — Parses Rekordbox Editor Project (.rbep) files. |
 | `app/rekordbox_bridge.py` | *(no module docstring)* |
 | `app/rekordbox_export.py` | *(no module docstring)* |
+| `app/security_compare.py` | Constant-time equality helper for tokens, secrets, HMAC outputs. |
 | `app/services.py` | *(no module docstring)* |
 | `app/sidecar.py` | *(no module docstring)* |
 | `app/smart_playlist_engine.py` | Smart-Playlist evaluator. |
@@ -89,6 +94,7 @@
 | `frontend/src/components/waveform/useWaveformInteractions.js` | Imperative editing + hotkey wiring extracted from WaveformEditor. |
 | `frontend/src/components/waveform/useWaveSurfer.js` | Owns the master WaveSurfer + Overview lifecycle: |
 | `frontend/src/config/constants.js` | Frontend-wide constants. |
+| `frontend/src/store/authStore.js` | Tiny module-level auth state shared across the frontend. |
 | `frontend/src/utils/AudioBandAnalyzer.js` | AudioBandAnalyzer Splits an AudioBuffer into 3 frequency bands (Rekordbox-style): - Low: < 400 Hz (Bass / Kic… |
 | `frontend/src/utils/log.js` | Dev-only logging utility. |
 | `frontend/src/components/BatchEditBar.jsx` | *(no module docstring)* |
@@ -183,11 +189,22 @@
 | File | Purpose |
 |------|---------|
 | `tests/__init__.py` | *(no module docstring)* |
+| `tests/conftest.py` | Pytest fixtures shared across the suite. |
+| `tests/fixtures/mock_adapter.py` | A mock :class:`SourcePlugin` for the ``external_track_match`` test-suite. |
 | `tests/test_analysis.py` | Regression tests for the analysis pipeline. |
+| `tests/test_auth.py` | Tests for ``app/auth.py`` -- Bearer-token session authentication. |
 | `tests/test_database.py` | Tests for `app/database.py`. |
+| `tests/test_download_registry_schema.py` | Schema-migration tests for the unified multi-source downloader (Phase 0, P0.3). |
+| `tests/test_external_track_match.py` | Tests for ``app/external_track_match.py`` — the shared track-matching module. |
+| `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
+| `tests/test_main_security.py` | Regression tests for ``POST /api/file/reveal`` sandbox. |
 | `tests/test_onelibrary_wal_flush.py` | End-to-end regression test for OneLibraryUsbWriter — runs the FULL |
 | `tests/test_pdb_structure.py` | PDB writer structural test against F: drive Pioneer reference. |
+| `tests/test_rate_limit.py` | Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter. |
+| `tests/test_security_compare.py` | Tests for ``app/security_compare.py::safe_compare``. |
+| `tests/test_security_hotfixes.py` | Regression tests for the 5 security hotfixes in commit e3a5ae8. |
 | `tests/test_services.py` | Tests for `app/services.py`. |
+| `tests/test_settings_caps.py` | Tests for `SetReq` payload caps + `SettingsManager.load` sanitizer. |
 | `tests/test_soundcloud_api.py` | Tests for `app/soundcloud_api.py`. |
 | `tests/test_usb_manager.py` | Tests for `app/usb_manager.py`. |
 
@@ -195,6 +212,8 @@
 
 | File | Purpose |
 |------|---------|
+| `scripts/pipeline_dashboard.py` | Local web dashboard for the research pipeline. |
+| `scripts/pipeline_status.py` | Show the research pipeline state at a glance. |
 | `scripts/regen_maps.py` | Auto-generate tiered code maps from the actual source tree. |
 | `scripts/screenshot.py` | *(no module docstring)* |
 | `scripts/test_xml_sync.py` | Add app to path |
