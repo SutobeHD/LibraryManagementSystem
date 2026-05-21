@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>19 · The Native Audio Engine — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 19 · Native &amp; Integrations</div>
+          <h1>The Native Audio Engine</h1>
+          <p class="ch-lead">The <code>audio/</code> module is where Rust earns its
+            place in the stack — memory-mapped decoding, a lock-free playback
+            pipeline, FFT-based waveform analysis, key detection, and acoustic
+            fingerprinting.</p>
+        </header>
+
+        <h2>19.1 Why This Is Rust</h2>
+        <p>Audio playback has a hard real-time constraint. The operating system asks
+        the application for the next buffer of samples on a strict schedule, and if
+        the application is even slightly late — because a garbage collector paused, or
+        a lock was contended — the user hears a click, a pop, or a dropout. A
+        garbage-collected language cannot make the guarantee; Rust, with no GC and
+        precise control over memory and threads, can.</p>
+
+        <p>So the native audio engine lives in <code>src-tauri/src/audio/</code> —
+        seven Rust files covering decoding, playback, analysis, export, metadata, and
+        fingerprinting.</p>
+
+        <h2>19.2 The Engine Pipeline</h2>
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  FILE[("Audio file")] --> MM["engine.rs<br/>memory-map · memmap2"]
+  MM --> DEC["Symphonia decoder<br/>MP3 · FLAC · WAV · ALAC · MP4"]
+  DEC --> RING["Lock-free ring buffer<br/>ringbuf"]
+  RING --> CB["CPAL audio callback<br/>playback.rs"]
+  CB --> OUT(["Output device"])
+  DEC --> FFT["analysis.rs<br/>RustFFT · key detection"]
+  DEC --> FP["fingerprint.rs<br/>acoustic hash"]
+          </div>
+          <figcaption><span class="fig-num">Figure 19.1</span> — The native audio
+          pipeline. Decoded samples feed both the playback ring buffer and the
+          analysis paths.</figcaption>
+        </div>
+
+        <h2>19.3 Decoding — <code>engine.rs</code></h2>
+        <p><code>engine.rs</code> defines <code>AudioEngine</code> and
+        <code>AudioController</code>, responsible for getting audio off disk and into
+        decoded samples. It does two clever things:</p>
+
+        <ul>
+          <li><strong>Memory-mapped loading.</strong> Instead of reading the whole
+          file into a buffer, it memory-maps it with <code>memmap2</code> — the
+          operating system pages the file in on demand, and there is no upfront copy.
+          This is why playback can start in under 50 milliseconds even for a large
+          FLAC file.</li>
+          <li><strong>Format-agnostic decoding.</strong> It uses
+          <code>Symphonia</code>, a pure-Rust decoding library, behind a decoder
+          abstraction that handles MP3, FLAC, WAV, ALAC, and ISO-MP4 uniformly. The
+          decoder is selected from the file's container, and the channel count is
+          read from the decoder — never hardcoded.</li>
+        </ul>
+
+        <div class="callout note">
+          <span class="ico">◆</span>
+          <div class="body">
+            <span class="ct">No hardcoded stereo</span>
+            <p>A coding rule, fixed during the Slopcode-Cleanup, forbids assuming two
+            channels. The audio code reads the channel count from the decoder and
+            either fails fast on an unexpected layout or downmixes deliberately — a
+            mono file or a multichannel file is handled honestly rather than producing
+            garbled output.</p>
+          </div>
+        </div>
+
+        <h2>19.4 Playback — <code>playback.rs</code></h2>
+        <p><code>playback.rs</code> defines <code>PlaybackEngine</code>, which drives
+        the actual sound output through <code>CPAL</code> — a cross-platform library
+        that abstracts the operating system's audio device.</p>
+
+        <p>The challenge here is threading. CPAL runs the audio callback on its own
+        high-priority thread, and that callback <strong>must never block</strong> — no
+        locks, no allocation, no I/O. Yet the rest of the application needs to control
+        playback (play, pause, stop) and feed it samples. The engine solves this with
+        a clean separation:</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  subgraph App["Application threads"]
+    CTRL["Control — play / pause / stop"]
+    FEED["Sample feeder"]
+  end
+  subgraph Audio["The audio thread (high priority)"]
+    CB["CPAL callback<br/>never blocks"]
+  end
+  FEED -->|"ringbuf — lock-free push"| CB
+  CTRL -->|"Arc&lt;AtomicBool&gt; flags<br/>is_playing · shutdown"| CB
+  CB --> DEV(["Output device"])
+          </div>
+          <figcaption><span class="fig-num">Figure 19.2</span> — The playback thread
+          model. Samples cross via a lock-free ring buffer; control crosses via atomic
+          flags. The callback never waits on anything.</figcaption>
+        </div>
+
+        <p>Samples cross the thread boundary through a <code>ringbuf</code> lock-free
+        ring buffer — the feeder calls <code>try_push</code>, the callback calls
+        <code>try_pop</code>, and neither ever blocks. Control crosses through
+        <code>Arc&lt;AtomicBool&gt;</code> flags — <code>is_playing</code>,
+        <code>shutdown</code> — which the callback reads without locking.</p>
+
+        <div class="callout warn">
+          <span class="ico">▲</span>
+          <div class="body">
+            <span class="ct">The <code>unsafe impl Send + Sync</code> that was removed</span>
+            <p>A CPAL <code>Stream</code> is <code>!Send</code> on Windows by design.
+            An earlier version of the code papered over this with a naked
+            <code>unsafe impl Send + Sync for PlaybackEngine</code> — a genuine
+            soundness hazard. The Slopcode-Cleanup refactored it properly: the
+            <code>Stream</code> is now built, played, and dropped entirely
+            <em>inside</em> the dedicated audio thread, so it never crosses a thread
+            boundary. <code>PlaybackEngine</code> is <code>Send + Sync</code> through
+            the compiler's own derivation, with no <code>unsafe</code> at all. The
+            engine also recovers from a <code>DeviceNotAvailable</code> error by
+            emitting a frontend event rather than panicking.</p>
+          </div>
+        </div>
+
+        <h2>19.5 Analysis — <code>analysis.rs</code></h2>
+        <p><code>analysis.rs</code> is the native, low-latency analysis path. It does
+        not replace the Python engine of Chapter 11 — Python remains the accuracy
+        reference — but it lets the native side draw a waveform and estimate a key
+        without a round-trip to the backend.</p>
+
+        <h3>The 3-band waveform</h3>
+        <p><code>compute_waveform()</code> uses <code>RustFFT</code> to transform
+        sliding frames of the signal, then splits the energy into three frequency
+        bands. The boundaries are defined in <strong>Hz</strong>, not FFT bin
+        indices:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Band</th><th>Range</th><th>Hears</th></tr></thead>
+          <tbody>
+            <tr><td>Low</td><td>20&nbsp;Hz – 250&nbsp;Hz</td><td>Bass, the kick drum.</td></tr>
+            <tr><td>Mid</td><td>250&nbsp;Hz – 4&nbsp;kHz</td><td>Vocals, the snare, most melodic content.</td></tr>
+            <tr><td>High</td><td>4&nbsp;kHz – 20&nbsp;kHz</td><td>Hi-hats, cymbals, air and presence.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="callout spec">
+          <span class="ico">◈</span>
+          <div class="body">
+            <span class="ct">Hz, not bin indices — a real bug, fixed</span>
+            <p>An FFT produces "bins", and which bin corresponds to which frequency
+            depends on the sample rate. The original code hardcoded bin indices, so
+            the 3-band split was wrong for any file not at 44.1&nbsp;kHz. The fix
+            introduced <code>hz_to_bin(hz, frame_size, sample_rate)</code> — every
+            band boundary is now converted from Hz to a bin at the file's actual
+            sample rate. The rule is explicit: never hardcode bin indices.</p>
+          </div>
+        </div>
+
+        <h3>Key detection</h3>
+        <p><code>detect_key()</code> implements the <strong>Krumhansl-Schmuckler</strong>
+        algorithm. It computes a chromagram — the energy in each of the twelve
+        pitch classes — over Hann-windowed FFT frames, L2-normalises it, and
+        Pearson-correlates it against all 24 rotations of the standard
+        major and minor key profiles. The best-correlating rotation is the key,
+        returned in Camelot notation. An earlier version of this function simply
+        returned the hardcoded string <code>"8A"</code> for everything — the cleanup
+        replaced that fake value with the real algorithm.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  S["Samples"] --> W["Hann-windowed<br/>FFT frames"]
+  W --> CH["12-bin chromagram"]
+  CH --> N["L2-normalise"]
+  N --> COR["Pearson-correlate<br/>vs 24 key profiles"]
+  COR --> K["Best match → Camelot key"]
+          </div>
+          <figcaption><span class="fig-num">Figure 19.3</span> — Native key
+          detection by pitch-class-profile correlation.</figcaption>
+        </div>
+
+        <h2>19.6 Offline Render — <code>export.rs</code></h2>
+        <p><code>export.rs</code> handles offline audio synthesis — rendering a
+        project's timeline of regions, fades, and gains into a finished WAV via the
+        <code>hound</code> crate. It backs the WAV path of the DAW's export modal
+        (Chapter 16). The cleanup hardened it against two crashes: an invalid region
+        where the end precedes the start is now rejected, and a sample-count
+        calculation that could overflow is now bounds-checked.</p>
+
+        <h2>19.7 Metadata — <code>metadata.rs</code></h2>
+        <p><code>metadata.rs</code> reads and writes embedded audio tags through the
+        <code>lofty</code> crate — ID3 for MP3, FLAC tags, ALAC and AIFF metadata. It
+        is the native counterpart to the Python <code>audio_tags</code> module; the
+        native side uses it where it already has the file open for playback or
+        analysis.</p>
+
+        <h2>19.8 Acoustic Fingerprinting — <code>fingerprint.rs</code></h2>
+        <p><code>fingerprint.rs</code> is a Chromaprint-style acoustic fingerprinter,
+        the engine behind the duplicate finder. It reduces an audio file to a compact
+        sequence of hash words that can be compared even when two files differ in
+        format, bitrate, or volume.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  D["Decode via Symphonia<br/>→ mono f32 samples"]
+  D --> RS["Resample to 11025 Hz"]
+  RS --> FR["Sliding 128 ms frames<br/>50% overlap"]
+  FR --> MEL["32-band Mel spectrogram<br/>via Goertzel"]
+  MEL --> GRAD["Temporal gradient<br/>→ 1 bit per band per frame"]
+  GRAD --> WORDS["Pack into u32 hash words"]
+  WORDS --> SIM["hamming_similarity()<br/>→ 0.0 ... 1.0"]
+          </div>
+          <figcaption><span class="fig-num">Figure 19.4</span> — The fingerprint
+          algorithm. Each frame's band-energy gradient yields one bit per band; the
+          bits pack into <code>u32</code> words.</figcaption>
+        </div>
+
+        <p>The algorithm decodes the file to mono, resamples it to 11025&nbsp;Hz, runs
+        a 32-band Mel spectrogram over 128-millisecond half-overlapping frames, takes
+        the temporal gradient of each band's energy to get one bit per band per
+        frame, and packs those bits into <code>u32</code> hash words.
+        <code>hamming_similarity()</code> then compares two fingerprints by Hamming
+        distance, yielding a similarity from 0 to 1. Two commands expose it —
+        <code>fingerprint_track</code> for one file and <code>fingerprint_batch</code>
+        for many, the batch version emitting <code>fingerprint_progress</code>
+        events.</p>
+
+        <div class="callout note">
+          <span class="ico">◆</span>
+          <div class="body">
+            <span class="ct">A local fingerprint, not an external one</span>
+            <p>This fingerprint is designed for finding duplicates <em>within</em> a
+            user's own library — it is not bit-compatible with the AcoustID service.
+            The roadmap (Chapter 25) proposes a two-tier design that keeps this Rust
+            fingerprinter for local clustering and adds an external Chromaprint path
+            for online metadata lookup.</p>
+          </div>
+        </div>
+
+        <h2>19.9 The Shared State</h2>
+        <p>The audio commands of Chapter 18 operate on a shared
+        <code>AudioCommandState</code> — an <code>Arc&lt;Mutex&lt;AudioEngine&gt;&gt;</code>
+        and an <code>Arc&lt;Mutex&lt;PlaybackEngine&gt;&gt;</code> registered with
+        Tauri's <code>.manage()</code>. A command locks the engine it needs, does its
+        work, and maps any lock-poisoning or error to a <code>String</code> the
+        frontend can display — never a panic.</p>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>The native audio engine is Rust because audio playback has a hard
+            real-time deadline a garbage-collected language cannot meet. It
+            memory-maps files and decodes them with Symphonia; it plays them through
+            a CPAL callback fed by a lock-free ring buffer and steered by atomic
+            flags — with no <code>unsafe</code> after a deliberate refactor. It draws
+            sample-rate-correct 3-band waveforms with RustFFT, detects key by
+            pitch-class-profile correlation, renders offline exports, reads tags, and
+            fingerprints audio for the duplicate finder.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

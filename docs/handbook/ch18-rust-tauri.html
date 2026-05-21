@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>18 · The Rust / Tauri Layer — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 18 · Native &amp; Integrations</div>
+          <h1>The Rust / Tauri Layer</h1>
+          <p class="ch-lead">The Rust layer is the application's true host process. It
+            creates the window, supervises the Python sidecar, captures the session
+            token, and exposes a tight set of native capabilities to the frontend
+            over Tauri's IPC bridge.</p>
+        </header>
+
+        <h2>18.1 The Role of the Rust Layer</h2>
+        <p>When the user launches the application, the program that actually starts is
+        the Rust/Tauri binary. Everything else — the WebView, the Python sidecar — is
+        something the Rust process creates and owns. The Rust layer is small,
+        roughly 2,900 lines across ten files, but it is the load-bearing host.</p>
+
+        <p>It has four distinct jobs:</p>
+        <div class="cards">
+          <div class="card"><div class="big">①</div><div class="lbl">Host the window<br/>and the WebView</div></div>
+          <div class="card"><div class="big">②</div><div class="lbl">Supervise the<br/>Python sidecar</div></div>
+          <div class="card"><div class="big">③</div><div class="lbl">Run the native<br/>audio engine</div></div>
+          <div class="card"><div class="big">④</div><div class="lbl">Expose native<br/>capabilities via IPC</div></div>
+        </div>
+
+        <p>This chapter covers jobs one, two, and four. Job three — the native audio
+        engine — is large enough to be Chapter 19.</p>
+
+        <h2>18.2 The Module Layout</h2>
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  MAIN["main.rs<br/>app init · splashscreen · supervisor<br/>OAuth commands · token capture"]
+  MAIN --> SC["soundcloud_client.rs<br/>OAuth 2.1 + PKCE"]
+  MAIN --> AUDIO["audio/ — the native audio engine"]
+  AUDIO --> ENG["engine.rs — decoding"]
+  AUDIO --> PB["playback.rs — CPAL output"]
+  AUDIO --> AN["analysis.rs — FFT, key"]
+  AUDIO --> CMD["commands.rs — audio IPC"]
+  AUDIO --> EXP["export.rs — offline render"]
+  AUDIO --> MD["metadata.rs — tag I/O"]
+  AUDIO --> FP["fingerprint.rs — acoustic hash"]
+          </div>
+          <figcaption><span class="fig-num">Figure 18.1</span> — The Rust module
+          layout. <code>main.rs</code> is the entry point; the <code>audio/</code>
+          module is the engine of Chapter 19.</figcaption>
+        </div>
+
+        <h2>18.3 The Application Entry Point</h2>
+        <p><code>main.rs</code> is where the Tauri application is built and run. At
+        startup it:</p>
+        <ol>
+          <li>Initialises the logger (<code>env_logger</code> at info level).</li>
+          <li>Creates the splashscreen window.</li>
+          <li>Spawns the Python sidecar and starts the token-capture reader.</li>
+          <li>Registers the shared state objects with Tauri's
+          <code>.manage()</code> — the audio command state and the session-token
+          holder.</li>
+          <li>Registers the IPC command handlers.</li>
+          <li>Creates the main window and loads the frontend.</li>
+        </ol>
+
+        <p>It also installs a <code>RunEvent::Exit</code> handler that kills the
+        sidecar child process when the application closes — so there are never orphan
+        Python processes left behind.</p>
+
+        <h2>18.4 The IPC Bridge</h2>
+        <p>The frontend reaches the Rust layer through Tauri's IPC: the JavaScript
+        side calls <code>invoke('command_name', args)</code> and receives a
+        <code>Result</code>; the Rust side can also push <code>events</code> the
+        frontend subscribes to with <code>listen()</code>.</p>
+
+        <h3>The commands</h3>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Command</th><th>Returns</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>close_splashscreen</code></td><td><code>void</code></td><td>Hide the splash, show the main window.</td></tr>
+            <tr><td><code>get_session_token</code></td><td><code>String</code></td><td>Hand the captured auth token to the frontend (Chapter 21).</td></tr>
+            <tr><td><code>login_to_soundcloud</code></td><td><code>Result&lt;String&gt;</code></td><td>Run the full OAuth PKCE flow; return an access token.</td></tr>
+            <tr><td><code>export_to_soundcloud</code></td><td><code>Result&lt;String&gt;</code></td><td>Export a playlist to SoundCloud (requires prior auth).</td></tr>
+            <tr><td><code>list_audio_devices</code></td><td><code>Result&lt;Vec&lt;String&gt;&gt;</code></td><td>Enumerate CPAL output devices for the settings picker.</td></tr>
+            <tr><td><code>load_audio</code></td><td><code>Result&lt;AudioInfo&gt;</code></td><td>Load and prepare an audio file for playback (Chapter 19).</td></tr>
+            <tr><td><code>get_3band_waveform</code></td><td><code>Result&lt;WaveformData&gt;</code></td><td>Compute the 3-band FFT waveform (Chapter 19).</td></tr>
+            <tr><td><code>start_project_export</code></td><td><code>Result&lt;()&gt;</code></td><td>Start an async audio render, emitting progress events.</td></tr>
+            <tr><td><code>fingerprint_track</code> / <code>fingerprint_batch</code></td><td><code>Result&lt;...&gt;</code></td><td>Acoustic fingerprinting for duplicate detection (Chapter 19).</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h3>The events</h3>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Event</th><th>Payload</th><th>Emitted during</th></tr></thead>
+          <tbody>
+            <tr><td><code>export_progress</code></td><td><code>{ percent, message }</code></td><td>An audio export.</td></tr>
+            <tr><td><code>sc-login-progress</code></td><td><code>{ stage, message }</code></td><td>The SoundCloud OAuth flow.</td></tr>
+            <tr><td><code>fingerprint_progress</code></td><td><code>{ done, total, current_path }</code></td><td>A batch fingerprint run.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="callout note">
+          <span class="ico">◆</span>
+          <div class="body">
+            <span class="ct">Commands return results, events report progress</span>
+            <p>The two halves of the IPC bridge play different roles. A command is a
+            request-response call — the frontend awaits a <code>Result</code>. An
+            event is a one-way push — the Rust side emits progress as a long job runs.
+            A long operation like an export uses both: a command to start it, then a
+            stream of events to report it.</p>
+          </div>
+        </div>
+
+        <h2>18.5 The Sidecar Supervisor</h2>
+        <p>One of the Rust layer's most important jobs is supervising the Python
+        sidecar. It spawns the process, reads its output, and — crucially — captures
+        the session token from that output.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+sequenceDiagram
+  participant M as main.rs
+  participant P as Python sidecar
+  participant S as SessionToken state
+  participant L as Log channel
+  M->>P: spawn sidecar process
+  loop every stdout line
+    P-->>M: a line of output
+    alt line starts with "LMS_TOKEN="
+      M->>S: store the token (strip prefix)
+      Note over M,L: line is dropped — never logged
+    else any other line
+      M->>L: forward to the log channel
+    end
+  end
+          </div>
+          <figcaption><span class="fig-num">Figure 18.2</span> — The supervisor's
+          stdout reader. The token-bearing line is captured and dropped; everything
+          else is forwarded to the log.</figcaption>
+        </div>
+
+        <p>The Python sidecar emits its session token as its first line of standard
+        output, in the form <code>LMS_TOKEN=&lt;value&gt;</code>. The supervisor's
+        reader thread inspects every line: the first one matching that prefix is
+        stripped, the token stored in a shared <code>Mutex&lt;String&gt;</code>, and
+        the line <strong>dropped from the forwarded log stream</strong> so the token
+        never reaches a log file. Every other line is forwarded normally. The
+        frontend later retrieves the stored token via the
+        <code>get_session_token</code> command. This same capture logic runs on both
+        spawn paths — the production shell-sidecar spawn and the development child
+        spawn. Chapter 21 explains why this matters.</p>
+
+        <h2>18.6 The Splashscreen Lifecycle</h2>
+        <p>The splashscreen exists because the sidecar takes a moment to boot. The
+        Rust layer shows the splash first, and the main window is not revealed until
+        the frontend — having confirmed the backend is alive — calls
+        <code>close_splashscreen</code>. There is a brief, expected flash of the
+        splash window before the main window takes over; the e2e tests account for
+        it explicitly.</p>
+
+        <h2>18.7 The Capability Model</h2>
+        <p>Tauri 2 is permission-based: the WebView can do <em>nothing</em> native
+        unless a capability explicitly grants it. The grants live in
+        <code>capabilities/main.json</code>, and they are deliberately minimal.</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Capability</th><th>Why it is granted</th></tr></thead>
+          <tbody>
+            <tr><td><code>core:default</code></td><td>Standard window and event APIs.</td></tr>
+            <tr><td><code>shell:allow-spawn</code></td><td>Spawn the <code>rb-backend</code> sidecar — and <strong>only</strong> that. There is deliberately no <code>allow-execute</code>, which would permit arbitrary command execution.</td></tr>
+            <tr><td><code>dialog</code> (open / save)</td><td>Native file and folder pickers.</td></tr>
+            <tr><td><code>fs</code> (write / read / mkdir)</td><td>The native filesystem writes used by the export modal.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="callout warn">
+          <span class="ico">▲</span>
+          <div class="body">
+            <span class="ct">spawn, not execute</span>
+            <p>The distinction between <code>shell:allow-spawn</code> and
+            <code>shell:allow-execute</code> is a security decision. <code>spawn</code>
+            permits launching the one named sidecar; <code>execute</code> would permit
+            running arbitrary commands — a remote-code-execution surface. The
+            application grants only what it needs, and the comment in the JSON file
+            says so.</p>
+          </div>
+        </div>
+
+        <h2>18.8 Rust Coding Rules</h2>
+        <p>The Rust layer is held to a strict rulebook, much of it the product of
+        Phase 2 of the Slopcode-Cleanup:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Rule</th><th>Detail</th></tr></thead>
+          <tbody>
+            <tr><td>Every command returns <code>Result&lt;T, String&gt;</code></td><td>A command must never panic — a lock-poison or an error is mapped to a string the frontend can show.</td></tr>
+            <tr><td>No <code>.unwrap()</code> / <code>.expect()</code> in fallible paths</td><td>Errors propagate with <code>?</code> or typed enums; <code>expect()</code> is allowed only in <code>main()</code> setup with a clear message.</td></tr>
+            <tr><td>No <code>println!</code> / <code>eprintln!</code></td><td>Logging goes through the <code>log</code> facade — <code>log::info!</code>, <code>warn!</code>, <code>error!</code> — never the print macros, outside tests.</td></tr>
+            <tr><td>Typed errors over <code>Box&lt;dyn Error&gt;</code></td><td>Error types are <code>thiserror</code> enums — for example the SoundCloud client's <code>ScError</code>.</td></tr>
+            <tr><td>No naked <code>unsafe impl Send + Sync</code></td><td>Any <code>unsafe</code> needs a <code>// SAFETY:</code> justification — and the audio engine was refactored specifically to remove one.</td></tr>
+            <tr><td>Every command documented</td><td>Every <code>#[tauri::command]</code> carries a <code>///</code> doc comment with an <code># Errors</code> section.</td></tr>
+            <tr><td><code>cargo clippy -- -D warnings</code></td><td>Must be clean — every warning is an error. No <code>#[allow(...)]</code> without a documented reason.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>These rules are enforced by the <code>rust-lint-test</code> CI job, which
+        runs <code>clippy</code> and the Rust tests on every push (Chapter 23).</p>
+
+        <h2>18.9 The Configuration Files</h2>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>File</th><th>Defines</th></tr></thead>
+          <tbody>
+            <tr><td><code>tauri.conf.json</code></td><td>Window title and size, the splashscreen, the bundle identifier.</td></tr>
+            <tr><td><code>capabilities/main.json</code></td><td>The permission grants of section 18.7.</td></tr>
+            <tr><td><code>Cargo.toml</code></td><td>The crate dependencies — <code>tauri</code> and <code>reqwest</code> are exact-pinned.</td></tr>
+            <tr><td><code>build.rs</code></td><td>The Tauri build script — required, not to be modified.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>The Rust/Tauri layer is the application's host process: it creates the
+            window, spawns and supervises the Python sidecar, captures the session
+            token from the sidecar's stdout (and scrubs it from the logs), and exposes
+            a tight set of IPC commands and events to the frontend. Its capability
+            grants are minimal — <code>spawn</code> the one sidecar, never
+            <code>execute</code>. A strict rulebook — typed results, no panics, no
+            print macros, clippy-clean — keeps the native layer trustworthy.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>

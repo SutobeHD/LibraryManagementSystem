@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>20 · SoundCloud Integration — Music Library Manager Handbook</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div class="layout">
+    <aside id="sidebar"></aside>
+    <div id="main">
+      <div id="topbar"><button id="menu-toggle">☰</button><span class="tb-title"></span></div>
+      <article class="content">
+
+        <header class="ch-header">
+          <div class="ch-eyebrow">Chapter 20 · Native &amp; Integrations</div>
+          <h1>SoundCloud Integration</h1>
+          <p class="ch-lead">SoundCloud is the application's built-in acquisition
+            source. The integration spans all three layers — a Rust OAuth flow, a
+            Python API client, and a legally-careful Python downloader — and ends in
+            an analysed, imported track.</p>
+        </header>
+
+        <h2>20.1 A Three-Layer Integration</h2>
+        <p>No other feature exercises the whole stack the way SoundCloud does. Each
+        layer handles the part it is best suited for:</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  subgraph Rust["Rust — soundcloud_client.rs"]
+    OAUTH["OAuth 2.1 + PKCE<br/>browser login · callback server"]
+  end
+  subgraph PyAPI["Python — soundcloud_api.py"]
+    API["API client<br/>playlists · likes · matching"]
+  end
+  subgraph PyDL["Python — soundcloud_downloader.py"]
+    DL["Downloader<br/>two-stage · legal gates"]
+  end
+  REG["download_registry.py<br/>dedup + history"]
+  OAUTH --> API
+  API --> DL
+  DL --> REG
+          </div>
+          <figcaption><span class="fig-num">Figure 20.1</span> — The three layers of
+          the SoundCloud integration.</figcaption>
+        </div>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Layer</th><th>Handles</th><th>Why there</th></tr></thead>
+          <tbody>
+            <tr><td>Rust — <code>soundcloud_client.rs</code></td><td>The OAuth login flow.</td><td>OAuth needs to open a real browser and run a local callback server — host-process capabilities.</td></tr>
+            <tr><td>Python — <code>soundcloud_api.py</code></td><td>Playlist/likes browsing and library matching.</td><td>Orchestration and the library both live in Python.</td></tr>
+            <tr><td>Python — <code>soundcloud_downloader.py</code></td><td>The actual download and post-processing.</td><td>It feeds straight into the Python analysis and import pipeline.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2>20.2 The OAuth Flow</h2>
+        <p>Authentication uses <strong>OAuth 2.1 with PKCE</strong> — the modern,
+        secure flow that never exposes a long-lived secret and never asks the user to
+        type a password into the application. It is implemented in
+        <code>soundcloud_client.rs</code>.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+sequenceDiagram
+  participant FE as Frontend
+  participant RS as Rust client
+  participant BR as System browser
+  participant SC as SoundCloud
+  participant BE as Backend
+  FE->>RS: invoke('login_to_soundcloud')
+  RS->>RS: generate code_verifier + code_challenge
+  RS->>BR: open the authorisation URL
+  BR->>SC: user logs in and approves
+  SC->>RS: redirect with ?code=... to the local callback
+  RS->>SC: exchange code + verifier for a token
+  SC-->>RS: access token
+  RS-->>FE: the token string
+  FE->>BE: POST /api/soundcloud/auth-token
+          </div>
+          <figcaption><span class="fig-num">Figure 20.2</span> — The OAuth PKCE
+          flow. The token is minted in the browser and handed to the backend to
+          store.</figcaption>
+        </div>
+
+        <p>The flow has four steps in the Rust client:</p>
+        <ol>
+          <li><code>get_auth_url()</code> generates a random <code>code_verifier</code>
+          and derives a <code>code_challenge</code> from it (SHA-256, then
+          base64url). It returns the authorisation URL and the verifier.</li>
+          <li><code>open::that()</code> opens that URL in the system browser, where
+          the user logs in to SoundCloud directly.</li>
+          <li><code>wait_for_callback()</code> spins up a one-shot local HTTP server
+          on a random port and blocks until SoundCloud redirects back to it with the
+          authorisation code.</li>
+          <li><code>exchange_code_for_token()</code> POSTs the code and the verifier
+          to SoundCloud's token endpoint and receives the access token.</li>
+        </ol>
+
+        <p>The token is returned to the frontend as a plain string and forwarded to
+        the backend via <code>POST /api/soundcloud/auth-token</code> — one of only
+        three rate-limited routes in the whole API. The Rust client uses a typed
+        <code>ScError</code> enum for failures and emits <code>sc-login-progress</code>
+        events so the UI can show the stages.</p>
+
+        <div class="callout warn">
+          <span class="ico">▲</span>
+          <div class="body">
+            <span class="ct">Never log the token</span>
+            <p>The Rust client's rule is explicit: never log the token, only log
+            <code>token_received: true/false</code>. The backend then stores the
+            token in the OS keyring, not in a file — consistent with the secrets
+            policy of Chapter 21.</p>
+          </div>
+        </div>
+
+        <h2>20.3 The API Client</h2>
+        <p><code>soundcloud_api.py</code> talks to SoundCloud's unofficial v2 API. It
+        exposes <code>SoundCloudPlaylistAPI</code>, which fetches the authenticated
+        user's playlists and likes and resolves individual tracks.</p>
+
+        <p>Talking to an unofficial API is harder than talking to a documented one,
+        and the client handles three real-world complications:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Complication</th><th>How the client copes</th></tr></thead>
+          <tbody>
+            <tr><td>The <code>client_id</code> is not published</td><td>The client scrapes a valid <code>client_id</code> dynamically, with a Cloudflare fallback.</td></tr>
+            <tr><td>Rate limits (HTTP 429)</td><td>An exponential backoff retry, surfaced as a typed <code>RateLimitError</code> carrying a <code>retry_after</code>.</td></tr>
+            <tr><td>Large playlists are paginated</td><td>Full pagination — the client follows every page to assemble the complete list.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>It also defines two typed exceptions — <code>AuthExpiredError</code>,
+        which signals the frontend to re-run the OAuth flow, and
+        <code>RateLimitError</code> — so the route handlers can map them to the
+        <code>AUTH_EXPIRED</code> and <code>RATE_LIMITED</code> error codes of
+        Chapter 7.</p>
+
+        <h2>20.4 Matching SoundCloud Tracks to the Library</h2>
+        <p><code>SoundCloudSyncEngine</code> answers a question the user constantly
+        has: "which of these SoundCloud tracks do I already own?" It does so with
+        <strong>fuzzy matching</strong>.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart LR
+  SCT["SoundCloud track<br/>title + artist + duration"]
+  LIB["Local library tracks"]
+  SCT --> M["Fuzzy match<br/>Jaro-Winkler on title + artist"]
+  LIB --> M
+  M --> TIE["Duration tiebreaker"]
+  TIE --> RESULT["MatchResult<br/>+ confidence score"]
+          </div>
+          <figcaption><span class="fig-num">Figure 20.3</span> — Library matching.
+          Fuzzy string similarity plus a duration tiebreaker yields a confidence
+          score.</figcaption>
+        </div>
+
+        <p><code>match_to_library()</code> compares each SoundCloud track's title and
+        artist against the local library using Jaro-Winkler string similarity, breaks
+        ties with track duration, and produces a <code>MatchResult</code> with a
+        confidence score. The Preview Matches feature runs this as a dry run, and the
+        Match Inspector modal (Chapter 15) shows the user the per-track confidence
+        before anything is downloaded.</p>
+
+        <h2>20.5 The Downloader — Two-Stage Acquisition</h2>
+        <p><code>soundcloud_downloader.py</code> is the most legally careful module
+        in the codebase. Its design goal is to download exactly what the SoundCloud
+        web player itself can play — no more — and to do so through the same signed
+        streams.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  START["Download request"]
+  START --> S1{"downloadable = true?"}
+  S1 -->|"yes"| OFF["Stage 1 — official<br/>/tracks/{id}/download"]
+  S1 -->|"no"| S2["Stage 2 — fallback<br/>v2 media.transcodings[]"]
+  S2 --> T1{"transcoding type"}
+  T1 -->|"progressive"| PROG["Direct HTTP stream (MP3)"]
+  T1 -->|"hls"| HLS["HLS segments → ffmpeg -c copy mux"]
+  OFF --> DONE["Audio file in temp"]
+  PROG --> DONE
+  HLS --> DONE
+          </div>
+          <figcaption><span class="fig-num">Figure 20.4</span> — Two-stage
+          acquisition. The official endpoint first; the same signed streams the web
+          player uses as the fallback.</figcaption>
+        </div>
+
+        <h3>Stage 1 — the official download</h3>
+        <p>When a track's metadata reports <code>downloadable = true</code>, the
+        downloader uses SoundCloud's official <code>/tracks/{id}/download</code>
+        endpoint, which returns the creator's original upload. This is the preferred
+        path.</p>
+
+        <h3>Stage 2 — the transcodings fallback</h3>
+        <p>When the official download is not offered, the downloader falls back to the
+        v2 API's <code>media.transcodings[]</code> — the <em>same signed CDN
+        streams the SoundCloud web player itself plays</em>. A
+        <code>progressive</code> transcoding is a direct MP3 stream; an
+        <code>hls</code> transcoding is downloaded as segments and remuxed with FFmpeg
+        using <code>-c copy</code> — a repack only, with no re-encode.</p>
+
+        <h3>The legal gates</h3>
+        <p>The fallback path enforces a set of legal boundaries, all in
+        <code>_resolve_stream_via_transcodings()</code>:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Gate</th><th>Effect</th></tr></thead>
+          <tbody>
+            <tr><td>Skip <code>snipped: true</code> transcodings</td><td>A snipped stream is a 30-second paywall preview — never downloaded as if it were the track.</td></tr>
+            <tr><td>Honour 401 / 403</td><td>An access-denied response from the stream-signing endpoint stops the download.</td></tr>
+            <tr><td>Skip empty <code>transcodings[]</code></td><td>A private or removed track yields nothing.</td></tr>
+            <tr><td>Never probe paid quality</td><td>High-quality streams are used only when SoundCloud itself returns them — the downloader never probes for Go+ quality.</td></tr>
+            <tr><td>HLS uses <code>-c copy</code></td><td>A repack only — no re-encode, no DRM touched.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="callout warn">
+          <span class="ico">▲</span>
+          <div class="body">
+            <span class="ct">Aggressive Download Mode</span>
+            <p>A hidden setting — revealed only by tapping a muted dot five times —
+            bypasses the default snipped-preview gate. The changelog states its scope
+            plainly: it is intended only for tracks the user has a personal right to.
+            The default behaviour stays inside the same legal surface as the web
+            player.</p>
+          </div>
+        </div>
+
+        <h2>20.6 The Post-Download Pipeline</h2>
+        <p>A download is not finished when the bytes land. The downloader runs a
+        complete post-processing pipeline so a downloaded track arrives in the
+        library fully prepared.</p>
+
+        <div class="figure">
+          <div class="mermaid">
+flowchart TB
+  D1["Dedup gate<br/>already downloaded? reject"]
+  D1 --> D2["Register as 'downloading'<br/>blocks parallel duplicates"]
+  D2 --> D3["Resolve + download by protocol"]
+  D3 --> D4["Move to SoundCloud/&lt;Artist&gt;/&lt;Title&gt;"]
+  D4 --> D5["SHA-256 hash → content dedup"]
+  D5 --> D6["Optional AIFF conversion (ffmpeg)"]
+  D6 --> D7["Apply metadata + cover art"]
+  D7 --> D8["Register as 'downloaded'"]
+  D8 --> D9["Background: analyse → import → SC_ playlist"]
+          </div>
+          <figcaption><span class="fig-num">Figure 20.5</span> — The post-download
+          pipeline. The download ends, the preparation begins.</figcaption>
+        </div>
+
+        <p>The notable steps:</p>
+        <ul>
+          <li><strong>Two deduplication gates.</strong> Before downloading, an O(1)
+          check against the registry by SoundCloud track ID; after downloading, a
+          SHA-256 content-hash check that catches the same audio arriving by a
+          different route.</li>
+          <li><strong>A 'downloading' registry entry</strong> is written immediately,
+          so two parallel requests for the same track cannot both proceed.</li>
+          <li><strong>Optional AIFF conversion</strong> via FFmpeg, controlled by the
+          <code>sc_download_format</code> setting.</li>
+          <li><strong>Metadata application</strong> — title, artist, album, genre,
+          year, comment, and a resized cover image are written into the file's tags.</li>
+          <li><strong>A background pipeline</strong> then analyses the track, imports
+          it into the library, and auto-sorts it into a playlist named
+          <code>SC_&lt;playlist&gt;</code>.</li>
+        </ul>
+
+        <h2>20.7 The Download Registry</h2>
+        <p>The registry that backs deduplication was introduced in Chapter 10. From
+        the SoundCloud feature's point of view it provides four things: an O(1)
+        already-downloaded check, content-hash deduplication, a paginated history log
+        with aggregate statistics, and a stable per-machine device ID so a DJ with
+        several computers can see which machine downloaded what. The registry entry
+        also moves through statuses — <code>downloading</code> &rarr;
+        <code>downloaded</code>, or <code>failed</code> — which the Download Manager
+        view turns into a per-task stage timeline.</p>
+
+        <h2>20.8 The Complete Workflow</h2>
+        <p>Putting it together, the SoundCloud-to-library journey is:</p>
+
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Step</th><th>Layer</th><th>Result</th></tr></thead>
+          <tbody>
+            <tr><td>Connect</td><td>Rust OAuth</td><td>An access token, stored in the keyring.</td></tr>
+            <tr><td>Browse</td><td>Python API</td><td>The user's playlists and likes.</td></tr>
+            <tr><td>Preview matches</td><td>Python sync engine</td><td>A confidence-scored map of what is already owned.</td></tr>
+            <tr><td>Download</td><td>Python downloader</td><td>Audio files acquired through the legal two-stage path.</td></tr>
+            <tr><td>Prepare</td><td>Python pipeline</td><td>Analysed, tagged, imported, auto-playlisted tracks.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p>This is Workflow A from Chapter 1, complete — and from the downloaded
+        track onward, it is indistinguishable from a locally-imported one. Both
+        converge on the same analysis engine, the same ANLZ writer, and the same USB
+        export.</p>
+
+        <div class="callout tip">
+          <span class="ico">✦</span>
+          <div class="body">
+            <span class="ct">Chapter summary</span>
+            <p>SoundCloud integration spans three layers: a Rust OAuth 2.1 + PKCE
+            flow that never exposes a password, a Python API client that copes with
+            an unofficial API (dynamic client-id scraping, backoff, pagination) and
+            fuzzy-matches tracks to the library, and a legally careful downloader
+            that acquires audio in two stages — the official endpoint, then the same
+            signed streams the web player uses — behind explicit legal gates. A full
+            post-download pipeline analyses, tags, imports, and auto-playlists every
+            track, backed by a two-axis deduplication registry.</p>
+          </div>
+        </div>
+
+        <div class="ch-footer" id="ch-footer"></div>
+        <div class="page-tail">Music Library Manager — Comprehensive Handbook</div>
+      </article>
+    </div>
+  </div>
+  <button id="to-top">↑</button>
+  <script src="assets/handbook.js"></script>
+</body>
+</html>
