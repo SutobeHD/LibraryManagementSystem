@@ -14,7 +14,6 @@ If this index drifts from the file system, the file system wins — re-derive wi
 ## research/
 
 ### idea
-- [idea_db-write-lock-retrofit.md](research/idea_db-write-lock-retrofit.md) — Retrofit `_db_write_lock` on 85 unprotected `master.db` write routes; `@_serialised` decorator defined but 0 applications; rbox 0.1.7 concurrent-write panic risk (2026-05-19)
 - [idea_security-mobile-paired-tokens-phase2.md](research/idea_security-mobile-paired-tokens-phase2.md) — Phase-2 paired-device tokens + QR-pairing flow; hard prereq for mobile-companion; sidecar-local SQLite, `require_session` accepts boot+device tokens (2026-05-19)
 
 ### drafting
@@ -55,7 +54,7 @@ _(none)_
 _(none)_
 
 ### plangate ⛔ GATE C
-_(none)_
+- [plangate_db-write-lock-retrofit.md](implement/plangate_db-write-lock-retrofit.md) — Plan ready (GATE C): `@serialise_mutators` decorator on RekordboxDB/Live/XML closes `ensure_standalone_master_db` + `_require_live_db()` mytag-bypass gaps; 5-task queue + CI drift-test (2026-05-21)
 
 ### rework
 _(none)_

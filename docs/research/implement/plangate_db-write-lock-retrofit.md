@@ -3,10 +3,9 @@ slug: db-write-lock-retrofit
 title: Close _db_write_lock coverage gaps on master.db write methods
 owner: tb
 created: 2026-05-19
-last_updated: 2026-05-19
+last_updated: 2026-05-21
 tags: [backend, concurrency, rbox, security, follow-up]
 related: [security-api-auth-hardening]
-ai_tasks: false
 ---
 
 # Close _db_write_lock coverage gaps on master.db write methods
@@ -15,15 +14,9 @@ ai_tasks: false
 
 - 2026-05-19 — `research/idea_` — scaffolded from auth-hardening adjacent finding (metadata-name-fixer Constraints)
 - 2026-05-19 — `research/idea_` — deep exploration toward exploring_-ready (empirical audit)
-
-## AI Tasks
-
-<!--
-Opt-in queue for remote AI routines. Activate by setting `ai_tasks: true` in frontmatter.
-Each item: 1 concrete sub-task. Routine processes 1/run, ticks done, commits via PR.
--->
-
-- [ ] _(none yet — flag stays false until Open Questions firm up)_
+- 2026-05-21 — `research/idea_` → `implement/draftplan_` — planning started; GATE A/B skipped by user decision (idea explored to Recommendation, OQs all RESOLVED)
+- 2026-05-21 — `implement/draftplan_` → `implement/review_` — Implementation Plan + Task Queue written; independent Review PASS
+- 2026-05-21 — `implement/review_` → `implement/plangate_` — plan reviewed, awaiting GATE C
 
 ---
 
@@ -148,11 +141,118 @@ Fallback: if B's prefix-matching reads as too implicit in review, Option C is th
 
 ## Implementation Plan
 
-_(empty — fill at `implement/draftplan_`)_
+### Mechanism — Option B, refined
+
+Verification audit 2026-05-21 found raw Option B (prefix-matched runtime wrapping) unsafe: a `vars(cls)` prefix sweep catches `LiveRekordboxDB._load_beatgrids_from_anlz` — a background-thread `master.db` *reader* that must NOT enter the write lock. Refinement keeps Option B's win (one reusable decorator, N classes by one `@` line) but moves prefix-matching out of the runtime path:
+
+- `serialise_mutators(*names)` — class decorator, **explicit method-name list**. Wraps each named method with `_serialised`. No `vars(cls)` sweep → no false-positive runtime wrapping.
+- Prefix-matching → **CI drift test only** (`tests/test_concurrency.py`). A forgotten `update_*`/`create_*`/… → CI red. Prefix false-positive in a test = visible failure a human checks (safe); in runtime = a wrongly-locked loader (bug).
+
+Net: Option B ergonomics + the OQ5 introspection test as the *enforced* drift guard, minus the unsafe sweep. Resolves gate conditions 1 (enumeration below) + 3 (XML wrapped); condition 4 (B vs C) → B-refined, user signs at GATE C.
+
+### Scope
+
+**In**
+- New module `app/db_lock.py` — `_db_write_lock`, `db_lock()`, `_serialised`, new `serialise_mutators(*names)`. Breaks the `database.py`↔`live_database.py` import cycle (Option C's noted cross-module-import friction — solved once, centrally).
+- `RekordboxDB` (`database.py`) — `setattr` loop → `@serialise_mutators`; add `ensure_standalone_master_db` (closes Gap 1).
+- `LiveRekordboxDB` (`live_database.py`) — `@serialise_mutators` on 14 mutators (closes Gap 2 — the `_require_live_db()` facade-bypass).
+- `RekordboxXMLDB` (`database.py`) — `@serialise_mutators` on 16 mutators (XML-mode mytag bypass; gate cond. 3).
+- `tests/test_concurrency.py` — new.
+
+**Out**
+- `save_track_cues`/`save_track_beatgrid` broken routes (`main.py:1011,1014`) — `AttributeError`, separate bug, own task (chip filed by audit agent).
+- `LiveRekordboxDB.load` / `RekordboxXMLDB.load_xml` — read `master.db` / parse XML into memory, not writers. Excluded; deliberate scope edge — flagged for GATE C.
+- `LiveRekordboxDB` per-thread `rbox.MasterDb` → shared pool. PARKED (own topic).
+- No `main.py` / route / frontend change.
+
+### Wrap-sets — finalised (gate condition 1)
+
+Enumerated from current source 2026-05-21, cross-checked vs the existing `setattr` loop (21 names matched exactly).
+
+- **`RekordboxDB` — 22**: `set_mode`, `load_library`, `unload_library`, `create_new_library`, `refresh_metadata`, `add_track`, `delete_track`, `rename_playlist`, `move_playlist`, `delete_playlist`, `reorder_playlist_track`, `create_folder`, `create_smart_playlist`, `update_smart_playlist`, `create_playlist`, `add_track_to_playlist`, `remove_track_from_playlist`, `save`, `update_tracks_metadata`, `update_track_comment`, `update_track_path` (= the 21 loop names) **+ `ensure_standalone_master_db`** (Gap 1).
+- **`LiveRekordboxDB` — 14**: `add_track`, `delete_track`, `update_track_comment`, `update_track_metadata`, `create_mytag`, `delete_mytag`, `set_track_mytags`, `rename_playlist`, `move_playlist`, `delete_playlist`, `create_playlist`, `add_track_to_playlist`, `remove_track_from_playlist`, `reorder_playlist_track`.
+- **`RekordboxXMLDB` — 16**: `add_track`, `create_playlist`, `add_track_to_playlist`, `remove_track_from_playlist`, `reorder_playlist_track`, `rename_playlist`, `move_playlist`, `delete_playlist`, `create_folder`, `create_smart_playlist`, `update_smart_playlist`, `create_mytag`, `delete_mytag`, `set_track_mytags`, `delete_track`, `save_xml`.
+
+Excluded (verified non-writers): all `get_*`/`list_*`/`find_*`, `evaluate_smart_playlist` (returns list), properties, `_`-private (incl. every `_load_*`), `LiveRekordboxDB.load`, `RekordboxXMLDB.load_xml`.
+
+Drift-test prefix tuple: `add_ create_ delete_ remove_ update_ set_ move_ rename_ reorder_ refresh_ unload_ load_ ensure_ save`. One readonly-allowlist entry: `RekordboxXMLDB.load_xml` (matches `load_`, is a reader).
+
+### Step-by-step
+
+1. **`app/db_lock.py`** (new). Move `_db_write_lock` / `db_lock()` / `_serialised` out of `database.py`. Add:
+   ```python
+   def serialise_mutators(*method_names):
+       """Class decorator: wrap each named method with _serialised."""
+       def decorate(cls):
+           for name in method_names:
+               setattr(cls, name, _serialised(getattr(cls, name)))
+           return cls
+       return decorate
+   ```
+   `database.py` adds `from .db_lock import _db_write_lock, db_lock, _serialised` — existing import sites (incl. tests importing `db_lock` from `app.database`) unchanged. `db_lock.py` imports stdlib only → no cycle.
+2. **`RekordboxDB`** — delete `setattr` loop (`database.py:1076-1086`); `@serialise_mutators(<22 names>)` above `class RekordboxDB`. Closes Gap 1.
+3. **`LiveRekordboxDB`** — `from .db_lock import serialise_mutators`; `@serialise_mutators(<14 names>)` above `class LiveRekordboxDB`. Closes Gap 2.
+4. **`RekordboxXMLDB`** — `@serialise_mutators(<16 names>)` above `class RekordboxXMLDB`.
+5. **`tests/test_concurrency.py`** — 3 tests (see Testing).
+6. `pytest tests/ -v` + `ruff check app/ tests/` + `mypy app/`. `python scripts/regen_maps.py`. Fix `coding-rules.md` `_db_write_lock` path.
+
+Re-entrancy: facade `RekordboxDB.add_track` (wrapped) → `active_db.add_track` (now wrapped) → RLock re-acquired, same thread, safe. Pre-existing pattern (`update_tracks_metadata`→`save`). Decorator adds a redundant acquire on the facade path; the point is it also covers the direct `_require_live_db()` path.
+
+### Files touched
+- `app/db_lock.py` — NEW (~45 LoC).
+- `app/database.py` — primitives move out + re-import; `setattr` loop → `@serialise_mutators` on `RekordboxDB` + `RekordboxXMLDB`.
+- `app/live_database.py` — import + `@serialise_mutators` on `LiveRekordboxDB`.
+- `tests/test_concurrency.py` — NEW.
+- `docs/FILE_MAP.md` (new-module row), `docs/MAP.md` + `docs/MAP_L2.md` (regen). `.claude/rules/coding-rules.md` "Backend concurrency" cites `app/main.py:_db_write_lock` — stale (it is `database.py` today, `db_lock.py` after) — correct it.
+
+### Testing
+- **`test_mutator_coverage`** (CI gate, deterministic) — each of 3 classes: every wrap-set name resolves to a method with `__wrapped__` set (`_serialised` uses `functools.wraps` — confirmed).
+- **`test_no_unwrapped_mutator`** (CI gate, the drift guard) — each class: enumerate public methods (skip `_`-private, dunder, `property`); any whose name starts with a prefix-tuple entry must be in the wrap-set OR the readonly-allowlist. New prefixed mutator added unwrapped → CI red.
+- **`test_concurrent_writes`** (`@pytest.mark.slow`) — 8 threads call wrapped mutators on a temp `master.db`; assert 0 exceptions, 0 sqlite `database is locked`. Negative control: `_db_write_lock` monkeypatched to `nullcontext()` → harness must fail (proves the lock load-bearing).
+- Regression: full `pytest tests/` green; read paths unchanged.
+
+### Risks & rollback
+- **Wrap-set drifts** (mutator added, list forgotten) → `test_no_unwrapped_mutator` fails CI. Residual: a non-prefix-named mutator (`purge_orphans`) escapes — accepted (doc Option-B failure-mode); rare, one obvious edit.
+- **Readonly-allowlist hides a real mutator** — allowlist is 1 entry (`load_xml`); each entry carries a one-line justification, PR-reviewed.
+- **Import cycle** `database.py`↔`live_database.py` — `db_lock.py` imports stdlib only; both import it freely.
+- **Double-wrap deadlock** facade→delegate — non-risk: `RLock` reentrant, pre-existing.
+- **`@pytest.mark.slow` harness flaky** — the two deterministic tests are the CI gates; harness is opt-in evidence, not a gate.
+- **Rollback** — 5 tasks = 5 PRs/commits; `git revert` per task, reverse order. `db_lock.py` re-export keeps `database.py`'s public surface stable → reverting a later task can't break an earlier import site.
+
+## Task Queue
+
+- [ ] **Task 1 — `app/db_lock.py`: extract lock primitives + add `serialise_mutators`.** New module holds `_db_write_lock`, `db_lock()`, `_serialised`, `serialise_mutators(*names)`. `database.py` re-imports the first three. No class re-wrapped, `setattr` loop untouched, zero behavior change. Gate: `pytest tests/` green. Smallest, lowest-risk — merge first.
+- [ ] **Task 2 — `RekordboxDB`: `setattr` loop → `@serialise_mutators`, close Gap 1.** Delete loop (`database.py:1076-1086`); `@serialise_mutators(<22 names>)` incl. `ensure_standalone_master_db`. `database.py` only. Gate: `pytest tests/` green; `ensure_standalone_master_db.__wrapped__` present.
+- [ ] **Task 3 — `LiveRekordboxDB`: `@serialise_mutators` on 14 mutators (close Gap 2).** Closes the `_require_live_db()` facade-bypass — `create_mytag`/`delete_mytag`/`set_track_mytags` + all other Live mutators. `live_database.py` only.
+- [ ] **Task 4 — `RekordboxXMLDB`: `@serialise_mutators` on 16 mutators.** XML-mode mytag bypass. `database.py`.
+- [ ] **Task 5 — `tests/test_concurrency.py` + doc sync.** `test_mutator_coverage` + `test_no_unwrapped_mutator` (CI gates) + `test_concurrent_writes` (`@pytest.mark.slow`, negative control). `docs/FILE_MAP.md` row, `python scripts/regen_maps.py`, fix `coding-rules.md` `_db_write_lock` reference.
+
+Deps: Tasks 2/3/4 depend on Task 1. Task 4 sequences after Task 2 (both edit `database.py` — avoids a rebase). Task 5 last (asserts wrap-sets from 2-4). 1 task = 1 `routine/db-write-lock-retrofit-task-N` branch = 1 PR.
 
 ## Review
 
-_(empty — fill at `review_`)_
+### 2026-05-21 — PASS
+
+- [x] Plan addresses all goals
+  - 4 goals → 4 test-backed metrics: wrap-sets cover all 3 classes; `test_no_unwrapped_mutator` = drift gate; reads untouched + regression suite; `test_concurrent_writes` + negative control.
+- [x] Plan matches `## Original Idea` — no scope-creep
+  - Doc predates the `## Original Idea` template section — anchored against `## Problem` + `## Recommendation` instead. Plan = Gap 1 + Gap 2 + Recommendation's Option B (refined for the verified `_load_*` safety issue) + the XML decision the doc itself deferred to draftplan. Broken-route bug + connection-pool explicitly OUT. See GATE C flag.
+- [x] Open questions answered or deferred
+  - All 6 OQs RESOLVED in-doc. Gate conditions 1-3 resolved by the plan; condition 4 (B vs C) = the GATE C sign-off itself.
+- [x] Task Queue items are small + independently committable
+  - 5 tasks, each ≤1 production file + own `routine/*` branch + PR; T1 = zero-behavior-change foundation; deps + sequencing stated.
+- [x] Risk mitigations defined
+  - 6 risks each mitigated; residual (non-prefix-named mutator) named + accepted.
+- [x] Rollback path clear
+  - Per-task `git revert` reverse-order; `db_lock.py` re-export keeps `database.py`'s public surface stable across partial reverts.
+- [x] Affected docs identified
+  - `FILE_MAP.md`, `MAP.md`/`MAP_L2.md` regen, `coding-rules.md` stale-ref fix — in Files touched + Task 5. No `architecture.md` change (no new data flow); no `CHANGELOG.md` (no user-visible behavior change).
+
+**Verdict: PASS** — executable, scoped, tested, reversible.
+
+**Flag for GATE C** (not a rework reason): doc has no `## Original Idea` block — scaffolded 2026-05-19, predates that template section. The pipeline's anti-scope-creep anchor is absent. Recommend the user add a 1-3 sentence `## Original Idea` (verbatim, authored once) at GATE C so the Stage-4 `research-implement` review-agent has the anchor.
+
+**Rework reasons:** none.
 
 ## Implementation Log
 
