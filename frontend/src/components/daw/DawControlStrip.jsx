@@ -179,13 +179,14 @@ const DawControlStrip = React.memo(({
                 </TBtn>
                 <button
                     onClick={isPlaying ? onStop : onPlay}
-                    className={`p-2 rounded-lg transition-all ${isPlaying
-                        ? 'bg-amber2/20 text-amber2 hover:bg-amber2/30'
-                        : 'bg-white/5 text-white hover:bg-white/10'
+                    className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${isPlaying
+                        ? 'bg-amber2 text-mx-deepest'
+                        : 'bg-mx-hover text-white hover:bg-mx-card border border-white/10'
                         }`}
+                    style={isPlaying ? { boxShadow: '0 0 12px var(--amber-glow)' } : undefined}
                     title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
                 >
-                    {isPlaying ? <Pause size={16} /> : <Play size={16} />}
+                    {isPlaying ? <Pause size={15} /> : <Play size={15} fill="currentColor" />}
                 </button>
                 <TBtn onClick={onStop} title="Stop">
                     <Square size={14} />
@@ -382,13 +383,13 @@ const TBtn = React.memo(({ onClick, children, disabled, active, danger, title })
     <button
         onClick={onClick}
         disabled={disabled}
-        className={`p-1.5 rounded-lg transition-colors text-xs ${disabled
-            ? 'text-ink-placeholder cursor-not-allowed opacity-50'
+        className={`h-7 w-7 flex items-center justify-center rounded-sm border transition-colors ${disabled
+            ? 'text-ink-placeholder cursor-not-allowed opacity-40 border-white/5'
             : active
-                ? 'text-amber-400 bg-amber-500/10'
+                ? 'bg-amber2/15 border-amber2/50 text-amber2'
                 : danger
-                    ? 'text-ink-secondary hover:text-red-400 hover:bg-red-500/10'
-                    : 'text-ink-secondary hover:text-white hover:bg-white/5'
+                    ? 'bg-mx-card border-white/10 text-ink-secondary hover:text-bad hover:border-bad/40'
+                    : 'bg-mx-card border-white/10 text-ink-secondary hover:text-white hover:border-white/20'
             }`}
         title={title}
     >

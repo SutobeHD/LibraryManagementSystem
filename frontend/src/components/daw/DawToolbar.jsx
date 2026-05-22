@@ -71,15 +71,15 @@ const DawToolbar = React.memo(({ state, dispatch, onSave, onOpen, onExport, onSp
                 )}
             </div>
 
-            {/* Global Info */}
-            <div className="flex items-center gap-4 mr-6">
-                <div className="flex flex-col">
-                    <span className="text-[10px] text-ink-muted uppercase tracking-widest font-bold">BPM</span>
-                    <span className="text-xs text-amber2 font-mono font-bold leading-none">{bpm?.toFixed(1) || '---'}</span>
+            {/* Global Info — Studio stat chips */}
+            <div className="flex items-center gap-1.5 mr-4">
+                <div className="flex flex-col items-center px-2.5 py-0.5 bg-mx-card border border-white/10 rounded-sm">
+                    <span className="text-[8px] text-ink-muted uppercase tracking-[0.12em] font-bold">BPM</span>
+                    <span className="text-[13px] text-amber2 font-mono font-bold leading-none">{bpm?.toFixed(1) || '---'}</span>
                 </div>
-                <div className="flex flex-col">
-                    <span className="text-[10px] text-ink-muted uppercase tracking-widest font-bold">Quantize</span>
-                    <span className={`text-xs font-bold leading-none ${snapEnabled ? 'text-amber2' : 'text-ink-placeholder'}`}>
+                <div className="flex flex-col items-center px-2.5 py-0.5 bg-mx-card border border-white/10 rounded-sm">
+                    <span className="text-[8px] text-ink-muted uppercase tracking-[0.12em] font-bold">Quant</span>
+                    <span className={`text-[13px] font-mono font-bold leading-none ${snapEnabled ? 'text-amber2' : 'text-ink-placeholder'}`}>
                         {snapEnabled ? 'ON' : 'OFF'}
                     </span>
                 </div>
@@ -140,13 +140,13 @@ const ToolBtn = React.memo(({ icon, label, onClick, disabled, accent, danger }) 
     <button
         onClick={onClick}
         disabled={disabled}
-        className={`p-2 rounded-lg transition-all text-xs ${disabled
-            ? 'text-ink-placeholder cursor-not-allowed opacity-50'
+        className={`h-7 w-7 flex items-center justify-center rounded-sm border transition-all ${disabled
+            ? 'text-ink-placeholder cursor-not-allowed opacity-40 border-white/5'
             : danger
-                ? 'text-ink-secondary hover:text-red-400 hover:bg-red-500/10'
+                ? 'bg-mx-card border-white/10 text-ink-secondary hover:text-bad hover:border-bad/40'
                 : accent
-                    ? 'text-amber2 hover:bg-amber2/15'
-                    : 'text-ink-secondary hover:text-white hover:bg-white/5'
+                    ? 'bg-amber2/15 border-amber2/40 text-amber2'
+                    : 'bg-mx-card border-white/10 text-ink-secondary hover:text-white hover:border-white/20'
             }`}
         title={label}
     >
