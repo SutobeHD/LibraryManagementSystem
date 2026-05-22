@@ -112,14 +112,6 @@
 | `frontend/src/components/PhraseGeneratorView.jsx` | **NEW** Phrase & Auto-Cue Generator: track selector, phrase length picker (8/16/32), generate preview list (amber phrase / grey bar markers), two-step Generate → Commit flow |
 | `frontend/src/components/DuplicateView.jsx` | **NEW** Acoustic Duplicate Finder: scan library, group by fingerprint similarity, left group list + right card detail panel, master selection, merge play counts, POST /api/duplicates/merge |
 
-### Studio Editor (`studio/`)
-
-| File | Purpose |
-|------|---------|
-| `frontend/src/components/studio/StudioView.jsx` | Studio efficiency editor — section-colored master waveform, minimap, 16 hot-cue pads, beat-nav + loop controls, dense inline-waveform track table. Lazy `studio` route; presentational, sample data. |
-| `frontend/src/components/studio/studioData.js` | Studio sample data + `STUDIO_THEME`, `SECTIONS`/`SECTION_COLORS`, `HOT_CUES`, helpers (`keyColor`, `fmt`, `hexA`, `shade`, `sectionAt`). |
-| `frontend/src/components/studio/studioWaveform.js` | `studioAmps` section-shaped envelopes + `drawMasterWave`/`drawMiniWave`/`drawRowWave` canvas painters. |
-
 ### Shared UI Components
 
 | File | Purpose |

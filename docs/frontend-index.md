@@ -9,7 +9,7 @@
 
 | File | Purpose |
 |------|---------|
-| `main.jsx` | App root — Blender-style workspace tab bar + per-workspace Rekordbox-style sidebar, mode picker (Live/XML/standalone/import/defined-path), error boundary, lazy-loaded tab router (Suspense), heartbeat + library-status polling, session-token injection. |
+| `main.jsx` | App root — single unified top bar (Blender-style workspace tabs + active-workspace view tabs + library status + Settings/Exit), mode picker (Live/XML/standalone/import/defined-path), error boundary, lazy-loaded tab router (Suspense), heartbeat + library-status polling, session-token injection. |
 | `utils/log.js` | Dev-only logger; `log.debug` / `log.info` no-op in production via Vite's `import.meta.env.DEV` guard. `log.warn` / `log.error` always pass through. |
 | `config/constants.js` | Frontend-wide tunables: `HEARTBEAT_INTERVAL_MS`, `LIBRARY_STATUS_INTERVAL_MS`, `RENDER_API_TIMEOUT_MS`, `BLOB_URL_REVOKE_DELAY_MS`, `TOAST_DURATION_LONG_MS`. |
 
@@ -131,18 +131,6 @@ Non-lazy components used by feature views.
 | `components/usb/UsbFormatWizard.jsx` | Destructive FAT32 / exFAT re-format modal — two-step backend protocol (`POST /api/usb/format/preview` → `POST /api/usb/format/confirm`). Confirm phrase + checkbox required. |
 | `components/usb/MetadataSyncPanel.jsx` | Collapsible per-device metadata sync controls (smart vs. manual, PC ↔ USB main source, per-category toggles: play counts, ratings, tags, color labels, hot cues, memory cues, beat grids). UI-only for now. |
 | `components/usb/PlayCountSync.jsx` | Collapsible play-count diff panel — auto-resolved summary + per-track strategy dropdown (`take_max`/`take_pc`/`take_usb`/`sum`), triple-confirm commit. |
-
----
-
-## Studio Sub-Components (`components/studio/`)
-
-> The Studio is a self-contained efficiency-editor view, lazy-loaded as the `studio` route (Editor workspace).
-
-| File | Purpose |
-|------|---------|
-| `components/studio/StudioView.jsx` | **Studio efficiency editor** — section-colored master waveform (beat markers + loop region), overview minimap, 16 hot-cue pads, beat-nav + loop controls, dense inline-waveform track table, status footer. Presentational; ships with the design's sample catalogue. |
-| `components/studio/studioData.js` | Studio sample data + `STUDIO_THEME` (Blender warm-gray palette), `SECTIONS` / `SECTION_COLORS`, `HOT_CUES`, `STUDIO_TRACKS`, `STUDIO_PLAYLISTS`, plus `keyColor` / `fmt` / `hexA` / `shade` / `sectionAt` helpers. |
-| `components/studio/studioWaveform.js` | Section-shaped amplitude generation (`studioAmps`) + canvas painters `drawMasterWave` / `drawMiniWave` / `drawRowWave`. |
 
 ---
 

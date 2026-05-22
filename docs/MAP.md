@@ -85,8 +85,6 @@
 | `frontend/src/components/editor/useEditorPlayback.js` | useEditorPlayback - Audio loading + playback engine + render/export Owns: - audioContextRef, sourceBufferRef,… |
 | `frontend/src/components/editor/useEditorRegions.js` | useEditorRegions - Region/palette/marker/zoom/snap/grid handlers. |
 | `frontend/src/components/shared/seededWaveform.js` | seededWaveform — deterministic pseudo-waveform generator + painter. |
-| `frontend/src/components/studio/studioData.js` | Studio view — sample catalogue, theme + shared helpers. |
-| `frontend/src/components/studio/studioWaveform.js` | Studio waveform — section-shaped amplitude generation + canvas painters. |
 | `frontend/src/components/waveform/computeBeats.js` | Builds the beat array used for grid rendering + snap-to-grid. |
 | `frontend/src/components/waveform/persistence.js` | localStorage auto-save (cuts + cues, keyed by track.id) |
 | `frontend/src/components/waveform/previewBuffer.js` | --- Shared decode context (reused, not recreated per insert) --- |
@@ -147,7 +145,6 @@
 | `frontend/src/components/SoundCloudProgressModal.jsx` | Listen to progress events from Rust |
 | `frontend/src/components/SoundCloudSyncView.jsx` | *(no module docstring)* |
 | `frontend/src/components/SoundCloudView.jsx` | EC11: Ref-based guard prevents multiple simultaneous login requests |
-| `frontend/src/components/studio/StudioView.jsx` | StudioView — efficiency-focused DJ editor screen (Melodex design handoff). |
 | `frontend/src/components/ToastContext.jsx` | *(no module docstring)* |
 | `frontend/src/components/ToolsView.jsx` | Mirror of LibraryTools.smart_rename's token substitution + sanitisation, |
 | `frontend/src/components/TrackTable.jsx` | Camelot |

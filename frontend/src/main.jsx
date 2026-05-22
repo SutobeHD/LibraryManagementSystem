@@ -1,7 +1,7 @@
 import React, { useState, useMemo, Component, useEffect, useCallback, Suspense, lazy } from 'react'
 import { invoke } from '@tauri-apps/api/core'; // Tauri Invoke
 import ReactDOM from 'react-dom/client'
-import { Music, Cloud, Download, Scissors, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2, Sparkles, Copy, Layers, FilePlus, FolderOpen, ArrowLeft, Sliders } from 'lucide-react'
+import { Music, Cloud, Download, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2, Sparkles, Copy, Layers, FilePlus, FolderOpen, ArrowLeft, Sliders } from 'lucide-react'
 import './index.css'
 import { ToastProvider } from './components/ToastContext'
 import { Toaster } from 'react-hot-toast'
@@ -31,7 +31,6 @@ const PhraseGeneratorView = lazy(() => import('./components/PhraseGeneratorView'
 const DuplicateView = lazy(() => import('./components/DuplicateView'));
 const UtilitiesView = lazy(() => import('./components/UtilitiesView'));
 const InsightsView  = lazy(() => import('./components/InsightsView'));
-const StudioView    = lazy(() => import('./components/studio/StudioView'));
 
 import api from './api/api'
 
@@ -85,8 +84,7 @@ const buildWorkspaces = (libraryStatus) => [
     id: 'editor',
     label: 'Editor',
     items: [
-      { tab: 'editor', label: 'Waveform Editor', icon: Scissors },
-      { tab: 'studio', label: 'Studio', icon: Activity },
+      { tab: 'editor', label: 'Studio', icon: Activity },
       ...(libraryStatus?.mode === 'xml'
         ? [{ tab: 'xml', label: 'XML Automator', icon: FileCode }]
         : []),
@@ -118,7 +116,7 @@ const buildWorkspaces = (libraryStatus) => [
 /** tab id → workspace id (XML resolves to the editor workspace). */
 const TAB_WORKSPACE = {
   library: 'library', import: 'library', ranking: 'library', insights: 'library',
-  editor: 'editor', studio: 'editor', xml: 'editor',
+  editor: 'editor', xml: 'editor',
   usb: 'sync', 'usb-settings': 'sync', soundcloud: 'sync', 'sc-sync': 'sync', downloads: 'sync',
   utilities: 'utilities',
   design: 'lab',
@@ -793,7 +791,6 @@ const App = () => {
               </ErrorBoundary>
             </div>
 
-            {activeTab === 'studio' && <ErrorBoundary key="eb-studio"><StudioView /></ErrorBoundary>}
             {activeTab === 'usb' && <ErrorBoundary key="eb-usb"><UsbView /></ErrorBoundary>}
             {activeTab === 'usb-settings' && <ErrorBoundary key="eb-usb-settings"><UsbSettingsView /></ErrorBoundary>}
             {activeTab === 'design' && <ErrorBoundary key="eb-design"><DesignView /></ErrorBoundary>}
@@ -812,8 +809,8 @@ const App = () => {
         </div>
       </main>
 
-      {/* Hide Player in Editor, Studio and Ranking modes */}
-      {!['editor', 'ranking', 'studio'].includes(activeTab) && (
+      {/* Hide Player in Editor and Ranking modes */}
+      {!['editor', 'ranking'].includes(activeTab) && (
         <Player
           track={playerTrack}
           onClose={() => setPlayerTrack(null)}

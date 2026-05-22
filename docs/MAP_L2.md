@@ -1023,28 +1023,6 @@ seededWaveform — deterministic pseudo-waveform generator + painter.
 - `waveAmps()` — export function hashSeed(input) { const str = String(input ??
 - `drawSeededWave()` — Paint a seeded waveform onto `canvas`, sized to its parent's width.
 
-### `frontend/src/components/studio/studioData.js`
-
-Studio view — sample catalogue, theme + shared helpers.
-
-- `STUDIO_THEME()` — Studio view — sample catalogue, theme + shared helpers.
-- `SECTION_COLORS()` — Waveform region colors — intro / verse / break / build / drop / outro.
-- `SECTIONS()`
-- `TOTAL_BARS()`
-- `HOT_CUES()` — 16 hot-cue pads — six set, ten empty.
-- `STUDIO_TRACKS()`
-- `STUDIO_PLAYLISTS()`
-- `keyColor()`
-- `fmt()`
-- `shade()` — export function hexA(hex, a) { const h = hex.replace('#', ''); const r = parseInt(h.slice(0, 2), 16…
-
-### `frontend/src/components/studio/studioWaveform.js`
-
-Studio waveform — section-shaped amplitude generation + canvas painters.
-
-- `drawMasterWave()` — export function studioAmps(seed, n = 720) { const key = `${seed}_${n}`; if (ampCache[key]) return a…
-- `drawRowWave()` — export function drawMiniWave(canvas, seed, playhead, height, dense = true) { if (!canvas?.parentEle…
-
 ### `frontend/src/components/waveform/computeBeats.js`
 
 Builds the beat array used for grid rendering + snap-to-grid.
@@ -1333,12 +1311,6 @@ Listen to progress events from Rust
 ### `frontend/src/components/SoundCloudView.jsx`
 
 EC11: Ref-based guard prevents multiple simultaneous login requests
-
-### `frontend/src/components/studio/StudioView.jsx`
-
-StudioView — efficiency-focused DJ editor screen (Melodex design handoff).
-
-- `StudioView()` — ═══ STUDIO VIEW ═════════════════════════════════════════════════════════════
 
 ### `frontend/src/components/ToastContext.jsx`
 

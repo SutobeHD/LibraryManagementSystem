@@ -302,23 +302,41 @@ const DawControlStrip = React.memo(({
                 </TBtn>
             </div>
 
-            {/* ── HOT CUES (A-H) ── */}
-            <div className="flex items-center gap-0.5 px-2 border-r border-white/5">
-                {hotCues.map((cue, i) => (
-                    <button
-                        key={i}
-                        onClick={() => handleHotCueClick(i)}
-                        onContextMenu={(e) => { e.preventDefault(); if (cue) handleDeleteHotCue(i, e); }}
-                        className={`relative w-7 h-7 rounded text-[10px] font-bold transition-all ${cue
-                            ? 'text-slate-900 shadow-sm hover:brightness-110'
-                            : 'bg-mx-card/60 text-ink-placeholder hover:bg-mx-hover/60 border border-white/5'
-                            }`}
-                        style={cue ? { backgroundColor: `rgb(${cue.red},${cue.green},${cue.blue})` } : undefined}
-                        title={cue ? `${cue.name} — ${formatTime(cue.time)} (Right-click to delete)` : `Set Hot Cue ${String.fromCharCode(65 + i)}`}
-                    >
-                        {String.fromCharCode(65 + i)}
-                    </button>
-                ))}
+            {/* ── HOT CUES (A-H) — Studio-style pads ── */}
+            <div className="flex items-center gap-1 px-2.5 border-r border-white/5">
+                {hotCues.map((cue, i) => {
+                    const letter = String.fromCharCode(65 + i);
+                    if (!cue) {
+                        return (
+                            <button
+                                key={i}
+                                onClick={() => handleHotCueClick(i)}
+                                className="w-9 h-8 rounded-sm flex items-center justify-center text-[9px] font-bold font-mono text-ink-placeholder bg-mx-card/60 border border-dashed border-white/10 hover:bg-mx-hover/60 transition-all"
+                                title={`Set Hot Cue ${letter}`}
+                            >
+                                {letter}
+                            </button>
+                        );
+                    }
+                    return (
+                        <button
+                            key={i}
+                            onClick={() => handleHotCueClick(i)}
+                            onContextMenu={(e) => { e.preventDefault(); handleDeleteHotCue(i, e); }}
+                            className="w-9 h-8 rounded-sm flex flex-col items-center justify-center font-mono leading-none transition-all hover:brightness-110"
+                            style={{
+                                background: `rgb(${cue.red} ${cue.green} ${cue.blue} / 0.18)`,
+                                border: `1px solid rgb(${cue.red} ${cue.green} ${cue.blue} / 0.55)`,
+                                color: `rgb(${cue.red},${cue.green},${cue.blue})`,
+                                boxShadow: `inset 0 -2px 0 rgb(${cue.red} ${cue.green} ${cue.blue} / 0.4)`,
+                            }}
+                            title={`${cue.name} — ${formatTime(cue.time)} (Right-click to delete)`}
+                        >
+                            <span className="text-[8px] font-bold opacity-80">{letter}</span>
+                            <span className="text-[9px] font-bold">{formatTime(cue.time)}</span>
+                        </button>
+                    );
+                })}
             </div>
 
             {/* ── LOOP CONTROLS ── */}
