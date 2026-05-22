@@ -171,205 +171,208 @@ const DawControlStrip = React.memo(({
 
 
     return (
-        <div className="bg-mx-shell/80 border-t border-white/5 flex items-center shrink-0 backdrop-blur-xl overflow-hidden">
-            {/* ── TRANSPORT ── */}
-            <div className="flex items-center gap-0.5 px-3 py-1.5 border-r border-white/5">
-                <TBtn onClick={handleGoToStart} title="Go to Start">
-                    <SkipBack size={14} />
-                </TBtn>
-                <button
-                    onClick={isPlaying ? onStop : onPlay}
-                    className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${isPlaying
-                        ? 'bg-amber2 text-mx-deepest'
-                        : 'bg-mx-hover text-white hover:bg-mx-card border border-white/10'
-                        }`}
-                    style={isPlaying ? { boxShadow: '0 0 12px var(--amber-glow)' } : undefined}
-                    title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
-                >
-                    {isPlaying ? <Pause size={15} /> : <Play size={15} fill="currentColor" />}
-                </button>
-                <TBtn onClick={onStop} title="Stop">
-                    <Square size={14} />
-                </TBtn>
-                <TBtn onClick={handleLoopToggle} active={loopEnabled} title="Loop">
-                    <Repeat size={14} />
-                </TBtn>
-            </div>
+        <div className="bg-mx-shell/80 border-t border-white/5 flex flex-col shrink-0 overflow-hidden">
 
-            {/* ── TIME ── */}
-            <div className="flex items-center gap-3 px-3 border-r border-white/5">
-                <div
-                    className="flex flex-col items-center min-w-[80px] cursor-pointer select-none group"
-                    onClick={toggleTimeMode}
-                    title="Click to toggle Elapsed / Remaining"
-                >
-                    <span className={`text-sm font-mono font-bold tracking-tight leading-none transition-colors ${timeMode === 'remaining' ? 'text-amber2-hover' : 'text-white'}`}>
-                        {timeMode === 'remaining' ? formatRemaining(playhead) : formatTime(playhead)}
-                    </span>
-                    <span className="text-[8px] text-ink-muted font-mono uppercase tracking-wider group-hover:text-ink-secondary transition-colors">
-                        {timeMode === 'remaining' ? 'Remaining' : `Bar ${posInfo.bar} · Beat ${posInfo.beat}`}
-                    </span>
+            {/* ── ROW 1 — transport · time chips · hot-cue pad grid ── */}
+            <div className="flex items-center gap-3 px-3 py-2 border-b border-white/5">
+                {/* Transport */}
+                <div className="flex items-center gap-1.5 shrink-0">
+                    <TBtn onClick={handleGoToStart} title="Go to Start">
+                        <SkipBack size={14} />
+                    </TBtn>
+                    <button
+                        onClick={isPlaying ? onStop : onPlay}
+                        className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isPlaying
+                            ? 'bg-amber2 text-mx-deepest'
+                            : 'bg-mx-hover text-white hover:bg-mx-card border border-white/10'
+                            }`}
+                        style={isPlaying ? { boxShadow: '0 0 12px var(--amber-glow)' } : undefined}
+                        title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+                    >
+                        {isPlaying ? <Pause size={16} /> : <Play size={16} fill="currentColor" />}
+                    </button>
+                    <TBtn onClick={onStop} title="Stop">
+                        <Square size={14} />
+                    </TBtn>
+                    <TBtn onClick={handleLoopToggle} active={loopEnabled} title="Loop">
+                        <Repeat size={14} />
+                    </TBtn>
                 </div>
-                <div className="flex flex-col items-center">
-                    <div className="flex items-center gap-1">
-                        <button onClick={() => handleAdjustBpm(-0.1)} className="text-[10px] text-ink-placeholder hover:text-white"><Minus size={10} /></button>
-                        <span className="text-xs font-mono font-bold text-amber2 leading-none">
-                            {bpm?.toFixed(1) || '---'}
+
+                {/* Time + BPM — Studio stat chips */}
+                <div className="flex items-stretch gap-1.5 shrink-0">
+                    <div
+                        onClick={toggleTimeMode}
+                        title="Click to toggle Elapsed / Remaining"
+                        className="flex flex-col items-center justify-center px-3 py-1 bg-mx-card border border-white/10 rounded-sm cursor-pointer select-none min-w-[92px]"
+                    >
+                        <span className={`text-[13px] font-mono font-bold leading-none ${timeMode === 'remaining' ? 'text-amber2-hover' : 'text-white'}`}>
+                            {timeMode === 'remaining' ? formatRemaining(playhead) : formatTime(playhead)}
                         </span>
-                        <button onClick={() => handleAdjustBpm(0.1)} className="text-[10px] text-ink-placeholder hover:text-white"><Plus size={10} /></button>
+                        <span className="text-[8px] text-ink-muted font-mono uppercase tracking-wider mt-1">
+                            {timeMode === 'remaining' ? 'Remaining' : `Bar ${posInfo.bar} · Beat ${posInfo.beat}`}
+                        </span>
                     </div>
-                    <span className="text-[8px] text-ink-muted uppercase tracking-wider">BPM</span>
+                    <div className="flex flex-col items-center justify-center px-2 py-1 bg-mx-card border border-white/10 rounded-sm">
+                        <div className="flex items-center gap-1">
+                            <button onClick={() => handleAdjustBpm(-0.1)} className="text-ink-placeholder hover:text-white"><Minus size={9} /></button>
+                            <span className="text-[13px] font-mono font-bold text-amber2 leading-none">{bpm?.toFixed(1) || '---'}</span>
+                            <button onClick={() => handleAdjustBpm(0.1)} className="text-ink-placeholder hover:text-white"><Plus size={9} /></button>
+                        </div>
+                        <span className="text-[8px] text-ink-muted uppercase tracking-wider mt-1">BPM</span>
+                    </div>
                 </div>
-            </div>
 
-            {/* ── GRID EDIT ── */}
-            <div className="flex items-center gap-0.5 px-3 border-r border-white/5">
-                <TBtn onClick={() => handleShiftGrid(-0.01)} title="Shift Grid Left">
-                    <ChevronsLeft size={14} />
-                </TBtn>
-                <span className="text-[8px] text-ink-muted font-bold uppercase w-8 text-center leading-tight">Grid<br />Shift</span>
-                <TBtn onClick={() => handleShiftGrid(0.01)} title="Shift Grid Right">
-                    <ChevronsRight size={14} />
-                </TBtn>
-            </div>
-
-            {/* ── EDIT TOOLS ── */}
-            <div className="flex items-center gap-0.5 px-3 border-r border-white/5">
-                <TBtn onClick={onSplit} title="Split (Ctrl+E)">
-                    <Scissors size={14} />
-                </TBtn>
-                <TBtn onClick={onRippleDelete} disabled={!hasSelection} danger title="Delete (Del)">
-                    <Trash2 size={14} />
-                </TBtn>
-                <div className="w-px h-4 bg-white/10 mx-1" />
-                <TBtn onClick={handleUndo} disabled={!canUndo} title="Undo (Ctrl+Z)">
-                    <Undo2 size={14} />
-                </TBtn>
-                <TBtn onClick={handleRedo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)">
-                    <Redo2 size={14} />
-                </TBtn>
-                <div className="w-px h-4 bg-white/10 mx-1" />
-                <TBtn onClick={() => dispatch({ type: 'COPY_SELECTION' })} disabled={!hasSelection} title="Copy (Ctrl+C)">
-                    <Copy size={14} />
-                </TBtn>
-                <TBtn onClick={() => dispatch({ type: 'PASTE_INSERT' })} disabled={state.clipboard?.length === 0} title="Paste Insert (Ctrl+V)">
-                    <Clipboard size={14} />
-                </TBtn>
-                <TBtn onClick={() => dispatch({ type: 'DUPLICATE_SELECTION' })} disabled={!hasSelection} title="Duplicate (Ctrl+D)">
-                    <Files size={14} />
-                </TBtn>
-            </div>
-
-            {/* ── SNAP + ZOOM ── */}
-            <div className="flex items-center gap-1.5 px-3 border-r border-white/5">
-                <button
-                    onClick={handleSnapToggle}
-                    className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all ${snapEnabled
-                        ? 'bg-amber2/15 text-amber2 border border-amber2/30'
-                        : 'bg-white/5 text-ink-muted border border-white/5'
-                        }`}
-                    title="Toggle Snap"
-                >
-                    <Magnet size={10} />
-                    Q
-                </button>
-                <select
-                    value={snapDivision}
-                    onChange={handleDivisionChange}
-                    className="bg-mx-card border border-white/10 text-[10px] text-ink-primary rounded px-1.5 py-1 appearance-none cursor-pointer focus:outline-none"
-                >
-                    <option value="1/1">Bar</option>
-                    <option value="1/2">1/2</option>
-                    <option value="1/4">Beat</option>
-                    <option value="1/8">1/8</option>
-                    <option value="1/16">1/16</option>
-                </select>
-                <div className="w-px h-4 bg-white/10 mx-0.5" />
-                <Grid3X3 size={12} className="text-ink-muted" />
-                <input
-                    type="range" min="10" max="2000" value={zoom}
-                    onChange={handleZoomChange}
-                    className="w-16 h-1 bg-mx-hover rounded-full appearance-none cursor-pointer accent-amber2"
-                />
-                <span className="text-[9px] text-ink-muted font-mono w-6">{Math.round(zoom)}</span>
-
-                <div className="w-px h-4 bg-white/10 mx-0.5" />
-                <TBtn
-                    onClick={handleWaveformCycle}
-                    title={`Waveform: ${waveformStyle === '3band' ? '3-Band (Rekordbox)' : waveformStyle === 'bass' ? 'Bass Only' : 'Mono'}`}
-                    active={waveformStyle !== '3band'}
-                >
-                    {waveformStyle === '3band' ? <BarChart3 size={13} /> : waveformStyle === 'bass' ? <Waves size={13} /> : <Activity size={13} />}
-                </TBtn>
-            </div>
-
-            {/* ── HOT CUES (A-H) — Studio-style pads ── */}
-            <div className="flex items-center gap-1 px-2.5 border-r border-white/5">
-                {hotCues.map((cue, i) => {
-                    const letter = String.fromCharCode(65 + i);
-                    if (!cue) {
+                {/* Hot-cue pad grid — fills the row, equal-width pads */}
+                <div className="flex items-stretch gap-1 flex-1 min-w-0">
+                    {hotCues.map((cue, i) => {
+                        const letter = String.fromCharCode(65 + i);
+                        if (!cue) {
+                            return (
+                                <button
+                                    key={i}
+                                    onClick={() => handleHotCueClick(i)}
+                                    className="flex-1 h-9 rounded-sm flex items-center justify-center text-[10px] font-bold font-mono text-ink-placeholder bg-mx-card/60 border border-dashed border-white/10 hover:bg-mx-hover/60 transition-all"
+                                    title={`Set Hot Cue ${letter}`}
+                                >
+                                    {letter}
+                                </button>
+                            );
+                        }
                         return (
                             <button
                                 key={i}
                                 onClick={() => handleHotCueClick(i)}
-                                className="w-9 h-8 rounded-sm flex items-center justify-center text-[9px] font-bold font-mono text-ink-placeholder bg-mx-card/60 border border-dashed border-white/10 hover:bg-mx-hover/60 transition-all"
-                                title={`Set Hot Cue ${letter}`}
+                                onContextMenu={(e) => { e.preventDefault(); handleDeleteHotCue(i, e); }}
+                                className="flex-1 h-9 rounded-sm flex flex-col items-center justify-center font-mono leading-none transition-all hover:brightness-110"
+                                style={{
+                                    background: `rgb(${cue.red} ${cue.green} ${cue.blue} / 0.18)`,
+                                    border: `1px solid rgb(${cue.red} ${cue.green} ${cue.blue} / 0.55)`,
+                                    color: `rgb(${cue.red},${cue.green},${cue.blue})`,
+                                    boxShadow: `inset 0 -2px 0 rgb(${cue.red} ${cue.green} ${cue.blue} / 0.4)`,
+                                }}
+                                title={`${cue.name} — ${formatTime(cue.time)} (Right-click to delete)`}
                             >
-                                {letter}
+                                <span className="text-[8px] font-bold opacity-80">{letter}</span>
+                                <span className="text-[10px] font-bold">{formatTime(cue.time)}</span>
                             </button>
                         );
-                    }
-                    return (
-                        <button
-                            key={i}
-                            onClick={() => handleHotCueClick(i)}
-                            onContextMenu={(e) => { e.preventDefault(); handleDeleteHotCue(i, e); }}
-                            className="w-9 h-8 rounded-sm flex flex-col items-center justify-center font-mono leading-none transition-all hover:brightness-110"
-                            style={{
-                                background: `rgb(${cue.red} ${cue.green} ${cue.blue} / 0.18)`,
-                                border: `1px solid rgb(${cue.red} ${cue.green} ${cue.blue} / 0.55)`,
-                                color: `rgb(${cue.red},${cue.green},${cue.blue})`,
-                                boxShadow: `inset 0 -2px 0 rgb(${cue.red} ${cue.green} ${cue.blue} / 0.4)`,
-                            }}
-                            title={`${cue.name} — ${formatTime(cue.time)} (Right-click to delete)`}
-                        >
-                            <span className="text-[8px] font-bold opacity-80">{letter}</span>
-                            <span className="text-[9px] font-bold">{formatTime(cue.time)}</span>
-                        </button>
-                    );
-                })}
+                    })}
+                </div>
             </div>
 
-            {/* ── LOOP CONTROLS ── */}
-            <div className="flex items-center gap-0.5 px-2 border-r border-white/5">
-                <TBtn onClick={handleLoopIn} title="Loop In">
-                    <ArrowDownToLine size={13} />
-                </TBtn>
-                <TBtn onClick={handleLoopOut} title="Loop Out">
-                    <ArrowUpFromLine size={13} />
-                </TBtn>
-                {loops.length > 0 && activeLoopIndex >= 0 && (
-                    <TBtn onClick={() => dispatch({ type: 'REMOVE_LOOP', payload: activeLoopIndex })} danger title="Delete Loop">
-                        <X size={13} />
+            {/* ── ROW 2 — beat grid · edit tools · snap/zoom · loop · export ── */}
+            <div className="flex items-center gap-2 px-3 py-1.5">
+                {/* Grid shift */}
+                <div className="flex items-center gap-0.5">
+                    <TBtn onClick={() => handleShiftGrid(-0.01)} title="Shift Grid Left">
+                        <ChevronsLeft size={14} />
                     </TBtn>
-                )}
-            </div>
+                    <span className="text-[8px] text-ink-muted font-bold uppercase tracking-wider px-1 text-center leading-tight">Grid<br />Shift</span>
+                    <TBtn onClick={() => handleShiftGrid(0.01)} title="Shift Grid Right">
+                        <ChevronsRight size={14} />
+                    </TBtn>
+                </div>
 
-            {/* ── RIGHT ACTIONS ── */}
-            <div className="ml-auto flex items-center gap-0.5 px-3">
-                {/* Adaptive Zoom-to-Playhead */}
+                <div className="w-px h-5 bg-white/10" />
+
+                {/* Edit tools */}
+                <div className="flex items-center gap-0.5">
+                    <TBtn onClick={onSplit} title="Split (Ctrl+E)">
+                        <Scissors size={14} />
+                    </TBtn>
+                    <TBtn onClick={onRippleDelete} disabled={!hasSelection} danger title="Delete (Del)">
+                        <Trash2 size={14} />
+                    </TBtn>
+                    <TBtn onClick={handleUndo} disabled={!canUndo} title="Undo (Ctrl+Z)">
+                        <Undo2 size={14} />
+                    </TBtn>
+                    <TBtn onClick={handleRedo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)">
+                        <Redo2 size={14} />
+                    </TBtn>
+                    <TBtn onClick={() => dispatch({ type: 'COPY_SELECTION' })} disabled={!hasSelection} title="Copy (Ctrl+C)">
+                        <Copy size={14} />
+                    </TBtn>
+                    <TBtn onClick={() => dispatch({ type: 'PASTE_INSERT' })} disabled={state.clipboard?.length === 0} title="Paste Insert (Ctrl+V)">
+                        <Clipboard size={14} />
+                    </TBtn>
+                    <TBtn onClick={() => dispatch({ type: 'DUPLICATE_SELECTION' })} disabled={!hasSelection} title="Duplicate (Ctrl+D)">
+                        <Files size={14} />
+                    </TBtn>
+                </div>
+
+                <div className="w-px h-5 bg-white/10" />
+
+                {/* Snap + zoom */}
+                <div className="flex items-center gap-1.5">
+                    <button
+                        onClick={handleSnapToggle}
+                        className={`flex items-center gap-1 h-7 px-2 rounded-sm border text-[10px] font-bold uppercase tracking-wider transition-all ${snapEnabled
+                            ? 'bg-amber2/15 text-amber2 border-amber2/40'
+                            : 'bg-mx-card text-ink-muted border-white/10'
+                            }`}
+                        title="Toggle Snap"
+                    >
+                        <Magnet size={10} />
+                        Q
+                    </button>
+                    <select
+                        value={snapDivision}
+                        onChange={handleDivisionChange}
+                        className="h-7 bg-mx-card border border-white/10 text-[10px] text-ink-primary rounded-sm px-1.5 appearance-none cursor-pointer focus:outline-none"
+                    >
+                        <option value="1/1">Bar</option>
+                        <option value="1/2">1/2</option>
+                        <option value="1/4">Beat</option>
+                        <option value="1/8">1/8</option>
+                        <option value="1/16">1/16</option>
+                    </select>
+                    <Grid3X3 size={12} className="text-ink-muted" />
+                    <input
+                        type="range" min="10" max="2000" value={zoom}
+                        onChange={handleZoomChange}
+                        className="w-20 h-1 bg-mx-hover rounded-full appearance-none cursor-pointer accent-amber2"
+                    />
+                    <span className="text-[9px] text-ink-muted font-mono w-7">{Math.round(zoom)}</span>
+                    <TBtn
+                        onClick={handleWaveformCycle}
+                        title={`Waveform: ${waveformStyle === '3band' ? '3-Band (Rekordbox)' : waveformStyle === 'bass' ? 'Bass Only' : 'Mono'}`}
+                        active={waveformStyle !== '3band'}
+                    >
+                        {waveformStyle === '3band' ? <BarChart3 size={13} /> : waveformStyle === 'bass' ? <Waves size={13} /> : <Activity size={13} />}
+                    </TBtn>
+                </div>
+
+                <div className="w-px h-5 bg-white/10" />
+
+                {/* Loop */}
+                <div className="flex items-center gap-0.5">
+                    <TBtn onClick={handleLoopIn} title="Loop In">
+                        <ArrowDownToLine size={13} />
+                    </TBtn>
+                    <TBtn onClick={handleLoopOut} title="Loop Out">
+                        <ArrowUpFromLine size={13} />
+                    </TBtn>
+                    {loops.length > 0 && activeLoopIndex >= 0 && (
+                        <TBtn onClick={() => dispatch({ type: 'REMOVE_LOOP', payload: activeLoopIndex })} danger title="Delete Loop">
+                            <X size={13} />
+                        </TBtn>
+                    )}
+                </div>
+
+                <div className="flex-1" />
+
+                {/* Right — zoom-to-playhead + export */}
                 <TBtn onClick={handleZoomToPlayhead} title="Center view on playhead">
                     <Crosshair size={13} />
                 </TBtn>
-                {/* Export */}
                 {onExport && (
                     <button
                         onClick={onExport}
                         title="Export Project"
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold text-white transition-all hover:opacity-90 ml-1"
-                        style={{ background: 'linear-gradient(135deg,rgba(99,102,241,0.8),rgba(139,92,246,0.6))', border: '1px solid rgba(99,102,241,0.4)' }}
+                        className="flex items-center gap-1.5 h-7 px-3 rounded-sm bg-amber2/15 border border-amber2/40 text-amber2 text-[10px] font-bold font-mono uppercase tracking-wider transition-all hover:bg-amber2/25"
                     >
-                        <Download size={10} />
+                        <Download size={11} />
                         Export
                     </button>
                 )}
