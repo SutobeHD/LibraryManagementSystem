@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
 )
@@ -37,6 +38,31 @@ func emit(r result) {
 	fmt.Fprintln(os.Stdout, string(b))
 }
 
+// withRetry runs a download with bounded retry + quadratic backoff. The
+// SpotiFLAC mirror APIs throttle hard under load (HTTP 429 / 503) — a few
+// spaced retries turn a transient throttle into a success without hammering.
+func withRetry(attempts int, fn func() (string, error)) (string, error) {
+	if attempts < 1 {
+		attempts = 1
+	}
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			delay := time.Duration(5*i*i) * time.Second // 5s, 20s, 45s, ...
+			fmt.Fprintf(os.Stderr,
+				"[spotiflac-cli] attempt %d/%d failed (%v) — retrying in %v\n",
+				i, attempts, lastErr, delay)
+			time.Sleep(delay)
+		}
+		path, err := fn()
+		if err == nil {
+			return path, nil
+		}
+		lastErr = err
+	}
+	return "", lastErr
+}
+
 func main() {
 	os.Exit(run())
 }
@@ -50,6 +76,7 @@ func run() (code int) {
 	title := flag.String("title", "", "track title (for filename + tags)")
 	artist := flag.String("artist", "", "track artist (for filename + tags)")
 	album := flag.String("album", "", "album name (for tags)")
+	retries := flag.Int("retries", 3, "download attempts before giving up (throttle backoff)")
 	flag.Parse()
 
 	if *service == "" || *spotifyID == "" {
@@ -80,8 +107,8 @@ func run() (code int) {
 	const fnFormat = "title-artist"
 	const sep = ", "
 
-	var filename string
-	var err error
+	// Build the per-service download closure (retried by withRetry below).
+	var dl func() (string, error)
 
 	switch *service {
 	case "amazon":
@@ -89,10 +116,12 @@ func run() (code int) {
 		if q == "" {
 			q = "LOSSLESS"
 		}
-		filename, err = backend.NewAmazonDownloader().DownloadBySpotifyID(
-			*spotifyID, *outDir, q, fnFormat, "", "", false, 0,
-			*title, *artist, *album, "", "", "", 0, 0, 0, false, 0,
-			"", "", "", sep, "", spotifyURL, false, false, false)
+		dl = func() (string, error) {
+			return backend.NewAmazonDownloader().DownloadBySpotifyID(
+				*spotifyID, *outDir, q, fnFormat, "", "", false, 0,
+				*title, *artist, *album, "", "", "", 0, 0, 0, false, 0,
+				"", "", "", sep, "", spotifyURL, false, false, false)
+		}
 
 	case "tidal":
 		if !strings.HasPrefix(strings.TrimSpace(*tidalAPI), "https://") {
@@ -104,10 +133,12 @@ func run() (code int) {
 		if q == "" {
 			q = "HI_RES_LOSSLESS" // best Tidal tier; backend falls back to LOSSLESS
 		}
-		filename, err = backend.NewTidalDownloader(*tidalAPI).Download(
-			*spotifyID, *outDir, q, fnFormat, false, 0,
-			*title, *artist, *album, "", "", false, "", false, 0, 0, 0, 0,
-			"", "", "", sep, "", spotifyURL, true, false, false, false)
+		dl = func() (string, error) {
+			return backend.NewTidalDownloader(*tidalAPI).Download(
+				*spotifyID, *outDir, q, fnFormat, false, 0,
+				*title, *artist, *album, "", "", false, "", false, 0, 0, 0, 0,
+				"", "", "", sep, "", spotifyURL, true, false, false, false)
+		}
 
 	case "qobuz":
 		isrc, ierr := backend.NewSongLinkClient().GetISRCDirect(*spotifyID)
@@ -116,20 +147,24 @@ func run() (code int) {
 				Error: fmt.Sprintf("qobuz: could not resolve ISRC: %v", ierr)})
 			return 1
 		}
+		isrc = strings.TrimSpace(isrc)
 		q := *quality
 		if q == "" {
 			q = "27" // Hi-Res 24-bit; backend falls back 27 -> 7 -> 6
 		}
-		filename, err = backend.NewQobuzDownloader().DownloadTrackWithISRC(
-			strings.TrimSpace(isrc), *outDir, q, fnFormat, false, 0,
-			*title, *artist, *album, "", "", false, "", false, 0, 0, 0, 0,
-			"", "", "", sep, spotifyURL, true, false, false, false)
+		dl = func() (string, error) {
+			return backend.NewQobuzDownloader().DownloadTrackWithISRC(
+				isrc, *outDir, q, fnFormat, false, 0,
+				*title, *artist, *album, "", "", false, "", false, 0, 0, 0, 0,
+				"", "", "", sep, spotifyURL, true, false, false, false)
+		}
 
 	default:
 		emit(result{Success: false, Service: *service, Error: "unknown service: " + *service})
 		return 2
 	}
 
+	filename, err := withRetry(*retries, dl)
 	if err != nil {
 		emit(result{Success: false, Service: *service, Error: err.Error()})
 		return 1
