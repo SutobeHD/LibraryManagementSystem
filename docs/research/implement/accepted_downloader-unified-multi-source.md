@@ -1839,6 +1839,85 @@ Seeded into `canonical_genres` on first run with `seeded=1`. Short, CDJ-display-
 
 > Filled during `inprogress_`.
 
+### 2026-05-22 — Phases 0–5 built + SoundCloud pivot fixes (4 commits)
+
+- **Phase 0** (Foundation): `download_registry.py` migration — added 4 columns
+  (`isrc`/`source`/`provenance_urls`/`picked_quality_tier`) + `canonical_genres`
+  + `genre_mappings` tables. Idempotent (CREATE TABLE IF NOT EXISTS, guarded
+  ALTER). Tests green.
+- **`external_track_match` M1** (parallel module, owner tb): built standalone
+  (~918 LoC) — `VersionTag`/`Candidate`/`Fingerprint` dataclasses, fuzzy
+  matcher (`difflib.SequenceMatcher`, 0.65 threshold), adapter registry,
+  `SoundCloudAdapter`. Downloader's `match_adapter.py` delegates here.
+- **Phases 1–5**: provider layer + matching + quality + resolver + search
+  + post-download pipeline + orchestrator + 4 FastAPI routes (POST
+  `/api/downloads/unified/{resolve,search,fetch}` + GET `.../jobs/{id}`,
+  all `require_session`-gated).
+- **SoundCloud pivot fixes** discovered + landed during owner Tiësto-track
+  e2e test (5 commits, all on this branch): (1) `from_keyring()` wiring on
+  `SoundCloudProvider` — resolver + orchestrator both built it without the
+  OAuth token; (2) anonymous resolve routed to `api-v2.soundcloud.com`
+  (developer API requires OAuth, returns 403 on `client_id`-only);
+  (3) `SoundCloudProvider._resolve_with_anon_fallback` — expired token
+  degrades to anonymous instead of failing the whole resolve/fetch;
+  (4) bitrate-aware transcoding ranking in `_resolve_stream_via_transcodings`
+  (old `_rank` preferred `progressive` protocol → MP3 128k beat AAC 160k
+  HLS); (5) `_download_hls_to_temp` rewritten to pure-Python segment fetch
+  (the project's bundled minimal ffmpeg is `--disable-network`; HLS via
+  ffmpeg cannot work). End-to-end verified: Tiësto Schranz rework downloads
+  as AAC 160k m4a (SoundCloud's true ceiling for that non-downloadable
+  track), provenance written, pipeline runs clean.
+
+### 2026-05-22 — SpotiFLAC pivot: pip package abandoned, switched to v7 CLI
+
+**Major deviation from the original Plan.** The plan pinned the PyPI
+`SpotiFLAC==0.5.0` package + a `ProcessPoolExecutor` worker for crash
+isolation (P1.5 / D3 feasibility). That entire integration path was
+discarded because the pip package is the abandoned 0.x predecessor of the
+real SpotiFLAC: a) all 5 declared providers fail (Tidal / Qobuz / Amazon /
+Deezer / Apple — verified 0/5, every community mirror API is 403/404/429/
+500/503/host-down per the R5 risk that materialised); b) the maintained
+real SpotiFLAC (`github.com/spotbye/SpotiFLAC` v7.1.7) is a Go/Wails
+desktop app, not a Python library.
+
+**New architecture** (commits `deab894`, `57c6abb`, `c377c95`, `ce99e6c`):
+- `spotiflac-cli/` — new top-level Go module. Vendored the v7 `backend/`
+  package under `spotiflac-cli/spotiflac-src/` (MIT, 40 .go files, wired
+  via a local `replace` directive). Custom `main.go` is a headless CLI
+  around `backend.NewAmazonDownloader` / `NewTidalDownloader` / `NewQobuzDownloader`
+  with init of the v7 history / ISRC-cache / provider-priority DBs (lives
+  under `~/.spotiflac/`). Emits a single JSON line on stdout.
+- `app/downloader/providers/spotiflac.py` — rewritten as a subprocess
+  wrapper around `spotiflac-cli`. `resolve_url` uses the public Songlink/
+  Odesli HTTP API for cross-platform URLs + title/artist/cover; `fetch`
+  invokes the CLI binary via `asyncio.create_subprocess_exec`. The
+  ProcessPoolExecutor crash machinery is gone — the CLI subprocess itself
+  is the crash boundary now.
+- `_PLATFORM_TO_SERVICE` trimmed to the v7 real three (tidal / qobuz /
+  amazon). Deezer + Apple Music are out — pip-0.x falsely advertised them;
+  v7 has no download provider for either.
+- `requirements.txt` — `SpotiFLAC` pip dep removed. NO Python dependency
+  on SpotiFLAC remains.
+
+**End-to-end verification (2026-05-22):**
+- Direct CLI: real Spotify track (Daft Punk – Get Lucky) → `spotiflac-cli
+  --service qobuz` → **24-bit / 88.2 kHz Hi-Res FLAC, 127 MB**, tags
+  embedded. Verified via ffprobe.
+- Unified-downloader (Python) → CLI subprocess flow: resolver builds 3
+  Hi-Res candidates (qobuz/tidal/amazon); orchestrator dispatches; CLI
+  runs end-to-end. The actual byte-download hit transient HTTP 429 rate
+  limits on the Qobuz mirrors during the test session (upstream, not our
+  bug — direct CLI run earlier in the same session succeeded). Our
+  integration plumbing verified clean.
+
+**Known follow-ups (out of scope of this doc's current iteration):**
+- Odesli does not expose track duration — claims carry `duration_s=0.0`.
+  A future CLI `--mode metadata` subcommand can close that gap.
+- The Tidal CLI path needs a user-configured `customTidalApi` instance
+  (v7 deliberately ships no public Tidal endpoints).
+- Spotiflac-cli binary is built locally (`go build`); CI / Tauri bundle
+  integration is a follow-up.
+
 ---
 
 ## Decision / Outcome
