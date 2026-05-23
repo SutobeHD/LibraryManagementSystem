@@ -63,14 +63,13 @@ pyloudnorm==0.1.1
 # --- Filesystem watcher (auto-import on folder change) ---
 watchdog==4.0.2
 
-# --- Multi-source download (Spotify metadata -> Tidal/Qobuz/Amazon FLAC) ---
-# Reverse-engineering-based. Runs quarantined in a ProcessPoolExecutor
-# worker (app/downloader/providers/spotiflac.py), the SafeAnlzParser
-# pattern. Owner-approved 2026-05-21.
-# 2026-05-22: bumped to 0.6.0 (latest). All 5 providers re-tested —
-# every community mirror API was down (R5); lossless path non-functional
-# via SpotiFLAC until the upstream mirrors recover. Kept as the latest.
-SpotiFLAC==0.6.0
+# --- Multi-source download — engine is the in-tree spotiflac-cli Go binary ---
+# The dead PyPI "SpotiFLAC" 0.x package was DROPPED 2026-05-22 (abandoned
+# predecessor of the real Wails app; mirror APIs all down). The real download
+# path is now a subprocess call to spotiflac-cli, which wraps the SpotiFLAC v7
+# backend (vendored under spotiflac-cli/spotiflac-src/). See the Python
+# provider at app/downloader/providers/spotiflac.py and the Go CLI at
+# spotiflac-cli/main.go. NO Python dependency on SpotiFLAC remains.
 
 # --- Test Framework ---
 pytest==9.0.3

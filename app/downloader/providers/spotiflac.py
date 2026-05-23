@@ -1,58 +1,58 @@
-"""SpotiFLAC-backed multi-service provider (crash-isolated).
+"""SpotiFLAC-backed multi-service provider (subprocess wrapper around v7 CLI).
 
-Wraps the third-party ``SpotiFLAC`` reverse-engineering library. SpotiFLAC
-hits a rotating set of community mirror APIs and does opaque crypto / manifest
-parsing; like the ``rbox`` crate behind :mod:`app.anlz_safe`, it is *not*
-trusted to keep a long-lived process alive. Every call therefore runs inside a
-``ProcessPoolExecutor(max_workers=1)`` worker that the parent can kill and
-respawn.
+Replaces the abandoned ``SpotiFLAC`` pip-0.x package with a subprocess call to
+the in-tree ``spotiflac-cli`` Go binary, which wraps the real SpotiFLAC v7
+download engine (``github.com/spotbye/SpotiFLAC``, vendored under
+``spotiflac-cli/spotiflac-src/``).
 
-This module copies the full :mod:`app.anlz_safe` crash-recovery shape:
+Architecture
+------------
+* ``resolve_url`` — calls the public Songlink / Odesli HTTP API directly to
+  get cross-platform URLs for a Spotify track plus basic metadata (title /
+  artist / cover). Builds one :class:`TrackMatch` claim per SpotiFLAC-served
+  paid service Odesli linked. The real v7 backend serves **only three**
+  download providers — Tidal, Qobuz and Amazon Music. The dead pip-0.x
+  package falsely claimed Deezer and Apple Music; they are intentionally
+  dropped here.
 
-* a single restart-able module-level executor singleton,
-* a per-run panic budget (:data:`_MAX_PANICS_PER_RUN`),
-* ``future.result(timeout=...)`` with a hard per-call timeout,
-* ``BrokenExecutor`` catch + worker restart + single bounded retry.
+* ``search`` — unsupported by SpotiFLAC; always returns an empty list.
 
-All ``SpotiFLAC`` imports are **lazy, inside the worker functions** — the
-parent process never pulls SpotiFLAC (or its ``cryptography`` / ``mutagen``
-dependency graph) into its address space, keeping the crash blast radius
-inside the worker.
+* ``fetch`` — runs ``spotiflac-cli.exe --service <svc> --spotify-id <id>
+  --title --artist --album --out <dest>`` as a subprocess and parses the
+  JSON result line. The CLI binary itself owns crash isolation (a panic in
+  the Go backend kills the subprocess, not the Python sidecar); there is no
+  ``ProcessPoolExecutor`` here any more.
 
-Real-API note (vs. the plan's P1.5 sketch)
-------------------------------------------
-The plan assumed each ``SpotiFLAC`` service provider exposes a metadata-only
-``probe(url)`` and a ``download(url, dest_dir)``. The installed
-``SpotiFLAC==0.5.0`` exposes **neither**: a provider's only public method is
-``download_track(metadata: TrackMetadata, output_dir, *, quality, ...)``,
-which both resolves Spotify→service *and* pulls audio bytes in one opaque
-call. There is no way to "probe quality without downloading". Phase-1
-resolution therefore returns *claimed* quality synthesised from each service's
-publicly-known format ceiling (see :data:`_SERVICE_CEILING`); the true quality
-is only known after :meth:`SpotiFlacProvider.fetch` runs ``quality_engine``
-post-download (downstream, Phase 3). This is a deliberate, documented
-deviation — see the module's research doc.
+Quality claims
+--------------
+Each per-service claim carries the service's publicly-known *optimistic*
+quality ceiling (:data:`_SERVICE_CEILING`). Real per-track quality is
+verified post-download by ``quality_engine`` (downstream).
+
+Known limitation — duration
+---------------------------
+The Songlink / Odesli response does not expose track duration. Claims carry
+``duration_s = 0.0`` as a placeholder; if the matcher's duration gate is
+strict, this can suppress otherwise-valid cross-platform matches. A future
+enhancement is to extend the CLI with a ``--mode metadata`` subcommand that
+returns the full Spotify-side metadata block. See the research doc.
 
 See ``docs/research/implement/accepted_downloader-unified-multi-source.md``
-§ "P1.5".
+§ P1.5 for the original integration plan and the deviation note on the dead
+pip-0.x package.
 """
 
 from __future__ import annotations
 
-import contextlib
+import asyncio
+import json
 import logging
-from collections.abc import Callable
-from concurrent.futures import (
-    BrokenExecutor,
-    Future,
-    ProcessPoolExecutor,
-)
-from concurrent.futures import (
-    TimeoutError as FuturesTimeout,
-)
+import os
+import re
 from pathlib import Path
 from typing import Any
 
+import requests
 from anyio import to_thread
 
 from .. import SourceProvider
@@ -60,271 +60,221 @@ from ..models import AudioFormat, Platform, QualityTier, TrackMatch
 
 logger = logging.getLogger(__name__)
 
-# ``SourceProvider`` is referenced as the base class of ``SpotiFlacProvider``
-# below; the import above must not be pruned as unused.
-
 # ──────────────────────────────────────────────────────────────────────────────
-# Tunables — mirror app/anlz_safe.py
+# Tunables
 # ──────────────────────────────────────────────────────────────────────────────
 
-#: Hard ceiling on worker restarts caused by crashes within a single process
-#: lifetime. After this the provider stops retrying and fails fast — protects
-#: against a degenerate state where every SpotiFLAC call aborts the worker.
-_MAX_PANICS_PER_RUN = 16
-
-#: How long a single worker call may run before the worker is killed. SpotiFLAC
-#: fans out across mirror APIs with its own ~8 s per-API timeouts; a metadata
-#: resolve finishes well under 30 s. ``coding-rules.md`` requires an explicit
-#: timeout on every subprocess-bound call.
+#: How long a single Odesli lookup may take. Songlink rate-limits anonymous
+#: requests (~10 RPM); a short timeout lets the resolver move on without
+#: stalling sibling providers.
 _RESOLVE_TIMEOUT_S = 30.0
 
-#: Downloads pull real audio bytes (lossless FLAC can be 30-80 MB) — a far
-#: more generous ceiling than the metadata probe.
+#: How long a single CLI download invocation may take. Hi-Res FLAC can run
+#: 30-80 MB plus the backend's per-mirror retries; 5 min covers a normal
+#: Hi-Res download with headroom.
 _FETCH_TIMEOUT_S = 300.0
 
-#: Platforms SpotiFLAC can serve, in the downloader's :data:`Platform`
-#: vocabulary → SpotiFLAC's own ``PROVIDER_REGISTRY`` service key.
+#: Platforms the ``spotiflac-cli`` binary can fetch, in the downloader's
+#: :data:`Platform` vocabulary -> SpotiFLAC v7 service key. The real v7
+#: backend only has these three; Deezer and Apple Music are deliberately
+#: out (contrary to what the dead pip-0.x package claimed).
 _PLATFORM_TO_SERVICE: dict[Platform, str] = {
     "tidal": "tidal",
     "qobuz": "qobuz",
     "amazon": "amazon",
-    "apple_music": "apple",
-    "deezer": "deezer",
 }
 
-#: Odesli (``LinkResolver.resolve_all``) keys its result dict with these
-#: platform names — map them back to the downloader's :data:`Platform` literals.
+#: Odesli platform-key -> downloader :data:`Platform`. Non-v7-served keys
+#: (soundcloud / spotify / youtube) are deliberately absent so resolve only
+#: surfaces claims for what fetch can actually deliver.
 _ODESLI_KEY_TO_PLATFORM: dict[str, Platform] = {
     "tidal": "tidal",
     "qobuz": "qobuz",
     "amazonMusic": "amazon",
-    "appleMusic": "apple_music",
-    "deezer": "deezer",
-    "soundcloud": "soundcloud",
-    "spotify": "spotify",
-    "youtube": "youtube",
 }
 
-#: Publicly-known *best-case* delivery ceiling per service. Phase-1 cannot
-#: probe the real per-track quality (see the module docstring) — these claims
-#: are the optimistic upper bound; ``quality_engine.probe()`` corrects them
-#: post-download. ``(format, bit_depth, sample_rate_hz, bitrate_kbps, tier)``.
+#: Publicly-known optimistic delivery ceiling per service. Verified post-
+#: download by ``quality_engine``; these claims are the upper bound.
+#: ``(format, bit_depth, sample_rate_hz, bitrate_kbps, tier)``.
 _SERVICE_CEILING: dict[
     Platform, tuple[AudioFormat, int | None, int | None, int | None, QualityTier]
 ] = {
-    "qobuz": ("flac", 24, 96000, None, QualityTier.HIRES_LOSSLESS),
+    "qobuz": ("flac", 24, 192000, None, QualityTier.HIRES_LOSSLESS),
     "tidal": ("flac", 24, 96000, None, QualityTier.HIRES_LOSSLESS),
     "amazon": ("flac", 24, 96000, None, QualityTier.HIRES_LOSSLESS),
-    "apple_music": ("alac", 24, 96000, None, QualityTier.HIRES_LOSSLESS),
-    "deezer": ("flac", 16, 44100, None, QualityTier.CD_LOSSLESS),
 }
 
+#: Songlink / Odesli endpoint — public, no auth, ~10 RPM unauthenticated.
+_ODESLI_URL = "https://api.song.link/v1-alpha.1/links"
+
+#: Spotify open-page track-ID pattern (22-char base62 segment after ``track/``).
+_SPOTIFY_TRACK_RE = re.compile(r"open\.spotify\.com/track/([A-Za-z0-9]+)")
+
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Restart-able worker pool (module-level singleton — the anlz_safe shape)
+# CLI binary location
 # ──────────────────────────────────────────────────────────────────────────────
 
-_EXECUTOR: ProcessPoolExecutor | None = None
-_PANIC_COUNT: int = 0
 
+def _locate_cli() -> Path:
+    """Find the ``spotiflac-cli`` binary in the repo.
 
-def _get_executor() -> ProcessPoolExecutor:
-    """Return the live worker pool, spawning it on first use."""
-    global _EXECUTOR
-    if _EXECUTOR is None:
-        _EXECUTOR = ProcessPoolExecutor(max_workers=1)
-        logger.debug("[spotiflac] spawned worker process")
-    return _EXECUTOR
-
-
-def _restart_executor() -> None:
-    """Tear down a (probably broken) worker pool and spawn a fresh one.
-
-    Increments the panic counter. Idempotent w.r.t. a missing executor.
-    """
-    global _EXECUTOR, _PANIC_COUNT
-    if _EXECUTOR is not None:
-        try:
-            _EXECUTOR.shutdown(wait=False, cancel_futures=True)
-        except Exception as exc:
-            logger.debug("[spotiflac] executor shutdown error: %s", exc)
-        _EXECUTOR = None
-    _PANIC_COUNT += 1
-    _EXECUTOR = ProcessPoolExecutor(max_workers=1)
-    logger.warning("[spotiflac] PPE restarted (panic %d/%d)", _PANIC_COUNT, _MAX_PANICS_PER_RUN)
-
-
-def _reset_state_for_tests() -> None:
-    """Tear down the worker pool and zero the panic counter.
-
-    Test-only helper — production code never resets the budget mid-run.
-    """
-    global _EXECUTOR, _PANIC_COUNT
-    if _EXECUTOR is not None:
-        with contextlib.suppress(Exception):
-            _EXECUTOR.shutdown(wait=False, cancel_futures=True)
-        _EXECUTOR = None
-    _PANIC_COUNT = 0
-
-
-def _await_future(future: Future[Any], timeout_s: float) -> Any:
-    """Block on ``future`` with a hard timeout.
-
-    A module-level helper (not an inline closure) so it does not capture a
-    loop variable — keeps :func:`_submit_with_recovery` free of the
-    capture-late-binding footgun.
-    """
-    return future.result(timeout=timeout_s)
-
-
-async def _submit_with_recovery(func: Callable[..., Any], *args: Any, timeout_s: float) -> Any:
-    """Submit ``func`` to the worker pool with crash recovery.
-
-    On a ``BrokenExecutor`` (worker aborted — a SpotiFLAC crash) or a
-    ``FuturesTimeout`` (worker hung) the pool is restarted and the call is
-    retried exactly once. A second failure, or exhausting the panic budget,
-    raises ``RuntimeError``.
-
-    The blocking ``future.result(...)`` is offloaded to a thread via
-    :func:`anyio.to_thread.run_sync` so the calling coroutine never blocks
-    the event loop.
+    Default layout: ``<repo-root>/spotiflac-cli/spotiflac-cli{.exe}``. An
+    override path may be set via the ``SPOTIFLAC_CLI`` env var (useful for
+    tests and for packaging the binary into the Tauri bundle later).
 
     Raises:
-        RuntimeError: panic budget exhausted, or the retry also failed.
-        Exception: any non-recoverable error raised inside the worker
-            (``ValueError`` for a bad URL, SpotiFLAC errors, …) — propagated
-            unchanged on the first attempt.
+        RuntimeError: the binary is not present (needs ``go build`` in
+            ``spotiflac-cli/``).
     """
-    last_exc: BaseException | None = None
-    for attempt in range(2):
-        if _PANIC_COUNT >= _MAX_PANICS_PER_RUN:
-            raise RuntimeError(
-                f"SpotiFLAC PPE exceeded panic budget ({_MAX_PANICS_PER_RUN})"
-            ) from last_exc
+    override = os.environ.get("SPOTIFLAC_CLI", "").strip()
+    if override:
+        p = Path(override)
+        if p.is_file():
+            return p
+        raise RuntimeError(f"SPOTIFLAC_CLI={override!r} is not a file")
 
-        executor = _get_executor()
-        future = executor.submit(func, *args)
-        try:
-            return await to_thread.run_sync(_await_future, future, timeout_s)
-        except (BrokenExecutor, FuturesTimeout) as exc:
-            last_exc = exc
-            logger.warning(
-                "[spotiflac] worker call %s failed (%s) — attempt %d/2",
-                getattr(func, "__name__", repr(func)),
-                type(exc).__name__,
-                attempt + 1,
-            )
-            _restart_executor()
-            if attempt == 1:
-                raise RuntimeError(f"SpotiFLAC worker call failed after restart: {exc}") from exc
-
-    # Unreachable — the loop either returns or raises.
-    raise RuntimeError("SpotiFLAC worker call exhausted retries")  # pragma: no cover
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Worker functions — top-level (picklable), SpotiFLAC imported lazily inside
-# ──────────────────────────────────────────────────────────────────────────────
-#
-# These run in the ProcessPoolExecutor subprocess. They MUST stay importable
-# without SpotiFLAC present (the import happens inside the body), so the parent
-# never loads SpotiFLAC just to reference them — exactly the anlz_safe rule.
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-def _worker_resolve_spotify_url(url: str) -> dict[str, Any]:
-    """Worker: resolve a Spotify track URL to metadata + cross-platform links.
-
-    Uses ``SpotifyMetadataClient.get_track`` for the canonical metadata and the
-    Odesli-backed ``LinkResolver.resolve_all`` for sibling URLs on the paid
-    services. Returns a plain pickle-safe dict; the parent maps it to
-    :class:`TrackMatch` claims.
-
-    Raises:
-        ValueError: ``url`` is not a Spotify *track* URL.
-    """
-    from SpotiFLAC.core.http import HttpClient
-    from SpotiFLAC.core.link_resolver import LinkResolver
-    from SpotiFLAC.providers.spotify_metadata import (
-        SpotifyMetadataClient,
-        parse_spotify_url,
+    # app/downloader/providers/spotiflac.py -> repo root is parents[3].
+    repo_root = Path(__file__).resolve().parents[3]
+    for name in ("spotiflac-cli.exe", "spotiflac-cli"):
+        candidate = repo_root / "spotiflac-cli" / name
+        if candidate.is_file():
+            return candidate
+    raise RuntimeError(
+        f"spotiflac-cli binary not found under {repo_root / 'spotiflac-cli'}; "
+        "build it with `cd spotiflac-cli && go build -o spotiflac-cli.exe .`."
     )
 
-    parsed = parse_spotify_url(url)
-    if not parsed or parsed.get("type") != "track":
-        raise ValueError(f"not a Spotify track URL: {url!r}")
 
-    track = SpotifyMetadataClient().get_track(parsed["id"])
+# ──────────────────────────────────────────────────────────────────────────────
+# Odesli cross-link lookup (resolve side)
+# ──────────────────────────────────────────────────────────────────────────────
 
-    cross_urls: dict[str, str] = {}
+
+def _extract_spotify_id(url: str) -> str | None:
+    """Pull the 22-char Spotify track ID out of an ``open.spotify.com`` URL.
+
+    Tolerant of tracking params (``?si=...``), www-prefix and the ``intl-*``
+    locale fragment Spotify sometimes inserts.
+    """
+    m = _SPOTIFY_TRACK_RE.search(url)
+    return m.group(1) if m else None
+
+
+def _odesli_lookup_sync(spotify_id: str) -> dict[str, Any] | None:
+    """Blocking Songlink call — run in a worker thread via :func:`to_thread.run_sync`.
+
+    Returns the parsed JSON dict on HTTP 200, ``None`` on any failure (network,
+    non-200, non-JSON). A dead Odesli must not break the rest of resolve.
+    """
     try:
-        resolved = LinkResolver(HttpClient("link_resolver")).resolve_all(parsed["id"])
-        cross_urls = {k: v for k, v in (resolved or {}).items() if v}
-    except Exception as exc:
-        logging.getLogger("SpotiFLAC").debug("link resolve failed: %s", exc)
-
-    return {
-        "spotify_id": parsed["id"],
-        "spotify_url": track.external_url or url,
-        "title": track.title,
-        "artist": track.artists,
-        "album": track.album,
-        "duration_s": track.duration_seconds,
-        "isrc": track.isrc or None,
-        "year": int(track.year) if track.year.isdigit() else None,
-        "cover_url": track.cover_url or None,
-        "cross_urls": cross_urls,
-    }
-
-
-def _worker_fetch(platform: str, spotify_url: str, isrc: str | None, dest_dir: str) -> str:
-    """Worker: download a track from one SpotiFLAC service.
-
-    SpotiFLAC's provider ``download_track`` is Spotify-pivoted — it takes a
-    ``TrackMetadata`` (built from the Spotify URL) and internally resolves the
-    chosen service. We pass the Spotify URL through ``SpotifyMetadataClient``
-    to build that metadata, then call the single-service provider directly.
-
-    Returns the final on-disk path.
-
-    Raises:
-        ValueError: ``platform`` is not a SpotiFLAC-served service.
-        RuntimeError: SpotiFLAC reported a failed download.
-    """
-    from SpotiFLAC.providers import PROVIDER_REGISTRY
-    from SpotiFLAC.providers.spotify_metadata import (
-        SpotifyMetadataClient,
-        parse_spotify_url,
-    )
-
-    service = {
-        "tidal": "tidal",
-        "qobuz": "qobuz",
-        "amazon": "amazon",
-        "apple_music": "apple",
-        "deezer": "deezer",
-    }.get(platform)
-    if service is None:
-        raise ValueError(f"platform {platform!r} is not served by SpotiFLAC")
-
-    provider_cls = PROVIDER_REGISTRY.get(service)
-    if provider_cls is None:
-        raise ValueError(f"SpotiFLAC has no provider for service {service!r}")
-
-    parsed = parse_spotify_url(spotify_url)
-    if not parsed or parsed.get("type") != "track":
-        raise ValueError(f"not a Spotify track URL: {spotify_url!r}")
-
-    metadata = SpotifyMetadataClient().get_track(parsed["id"])
-    if isrc and not metadata.isrc:
-        metadata = metadata.model_copy(update={"isrc": isrc})
-
-    result = provider_cls().download_track(metadata, dest_dir)
-    if not result.success or not result.file_path:
-        raise RuntimeError(
-            f"SpotiFLAC {service} download failed: {result.error or 'unknown error'}"
+        resp = requests.get(
+            _ODESLI_URL,
+            params={"id": spotify_id, "platform": "spotify", "userCountry": "US"},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=_RESOLVE_TIMEOUT_S,
         )
-    return result.file_path
+    except requests.RequestException as exc:
+        logger.info("[spotiflac] Odesli network error for %s: %s", spotify_id, exc)
+        return None
+    if resp.status_code != 200:
+        logger.info("[spotiflac] Odesli HTTP %s for %s", resp.status_code, spotify_id)
+        return None
+    try:
+        return resp.json()
+    except ValueError:
+        logger.info("[spotiflac] Odesli non-JSON for %s", spotify_id)
+        return None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CLI subprocess (fetch side)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _parse_cli_result(stdout_bytes: bytes) -> dict[str, Any]:
+    """Pick the JSON result line off the CLI's stdout.
+
+    The CLI logs progress / diagnostics above and prints a single JSON line
+    last; the final non-empty line starting with ``{`` is that JSON.
+    """
+    text = stdout_bytes.decode("utf-8", errors="replace").strip()
+    last = next(
+        (ln for ln in reversed(text.splitlines()) if ln.strip().startswith("{")),
+        None,
+    )
+    if not last:
+        return {
+            "success": False,
+            "error": (f"spotiflac-cli produced no JSON result on stdout: {text[-200:]!r}"),
+        }
+    try:
+        return json.loads(last)
+    except json.JSONDecodeError as exc:
+        return {
+            "success": False,
+            "error": f"spotiflac-cli JSON parse failed ({exc}): {last!r}",
+        }
+
+
+async def _run_cli_download(
+    *,
+    cli: Path,
+    service: str,
+    spotify_id: str,
+    out_dir: Path,
+    title: str,
+    artist: str,
+    album: str,
+    tidal_api: str = "",
+) -> dict[str, Any]:
+    """Async subprocess invocation of ``spotiflac-cli`` for one download.
+
+    Returns the parsed JSON ``{success, service, file?, error?}``. Never
+    raises — the result dict carries the outcome.
+    """
+    args: list[str] = [
+        str(cli),
+        "--service",
+        service,
+        "--spotify-id",
+        spotify_id,
+        "--out",
+        str(out_dir),
+    ]
+    if title:
+        args += ["--title", title]
+    if artist:
+        args += ["--artist", artist]
+    if album:
+        args += ["--album", album]
+    if tidal_api:
+        args += ["--tidal-api", tidal_api]
+
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_FETCH_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return {
+            "success": False,
+            "service": service,
+            "error": f"spotiflac-cli timed out after {_FETCH_TIMEOUT_S:.0f}s",
+        }
+
+    if stderr:
+        # CLI logs progress + diagnostics on stderr — forward to our logger so
+        # nothing is lost when a download fails.
+        logger.debug(
+            "[spotiflac-cli stderr] %s",
+            stderr.decode("utf-8", errors="replace")[:2000],
+        )
+    return _parse_cli_result(stdout)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -333,17 +283,13 @@ def _worker_fetch(platform: str, spotify_url: str, isrc: str | None, dest_dir: s
 
 
 class SpotiFlacProvider(SourceProvider):
-    """:class:`~app.downloader.SourceProvider` over the SpotiFLAC library.
+    """:class:`~app.downloader.SourceProvider` over the in-tree ``spotiflac-cli``.
 
-    One instance covers all five SpotiFLAC-served paid services. It is
-    constructed with a single :data:`Platform` so the orchestrator can hold one
-    provider per platform and rank them uniformly — the ``platform`` property
-    reports that target; ``resolve_url`` still surfaces *every* sibling service
-    URL Odesli finds, so a Tidal-targeted instance can also yield the Qobuz
-    claim for the same track.
-
-    Note: SpotiFLAC has no free-form search — :meth:`search` always returns an
-    empty list (it can only resolve a known Spotify URL).
+    One instance covers a single SpotiFLAC-served paid service so the
+    orchestrator can hold one provider per platform and rank them uniformly.
+    The ``platform`` property reports the bound target; ``resolve_url`` still
+    surfaces *every* SpotiFLAC-served sibling-service URL Odesli finds, so any
+    instance can yield all three claims for the same track.
     """
 
     def __init__(self, platform: Platform = "tidal") -> None:
@@ -367,80 +313,115 @@ class SpotiFlacProvider(SourceProvider):
     async def resolve_url(self, url: str) -> list[TrackMatch]:
         """Resolve a Spotify track URL to per-service :class:`TrackMatch` claims.
 
-        Returns one claim per SpotiFLAC-served service that Odesli found a
-        sibling URL for (Tidal / Qobuz / Amazon / Apple Music / Deezer). Each
-        claim's quality is the service's *optimistic* ceiling (see the module
-        docstring) — true quality is verified post-download.
+        Routes through the public Songlink / Odesli API for cross-platform
+        URLs and basic metadata. Returns one claim per SpotiFLAC-served
+        service (Tidal / Qobuz / Amazon) Odesli linked. Quality is the
+        service's optimistic ceiling — ``quality_engine`` verifies it
+        post-download.
 
-        Returns an empty list when ``url`` is not a Spotify track URL or the
-        resolve crashed past the panic budget; never raises for those cases —
-        a dead source must not abort a multi-provider resolve.
+        Returns an empty list when ``url`` is not a Spotify track URL or
+        Odesli failed; never raises — a dead provider must not abort a
+        multi-provider resolve.
         """
-        try:
-            meta = await _submit_with_recovery(
-                _worker_resolve_spotify_url, url, timeout_s=_RESOLVE_TIMEOUT_S
-            )
-        except (ValueError, RuntimeError) as exc:
-            logger.info("[spotiflac] resolve_url(%s) yielded nothing: %s", url, exc)
+        spotify_id = _extract_spotify_id(url)
+        if not spotify_id:
+            return []
+        data = await to_thread.run_sync(_odesli_lookup_sync, spotify_id)
+        if not data:
             return []
 
-        cross_urls: dict[str, str] = meta.get("cross_urls", {})
+        # Pull title / artist / cover from the Spotify entity Odesli echoed back.
+        title = ""
+        artist = ""
+        cover_url: str | None = None
+        for ent in (data.get("entitiesByUniqueId") or {}).values():
+            if isinstance(ent, dict) and ent.get("apiProvider") == "spotify":
+                title = ent.get("title", "") or ""
+                artist = ent.get("artistName", "") or ""
+                cover_url = ent.get("thumbnailUrl") or None
+                break
+
+        # Canonicalise the Spotify URL via Odesli's echo when available — strips
+        # tracking params, normalises locale prefix.
+        spotify_url = url
+        sp_link = (data.get("linksByPlatform") or {}).get("spotify") or {}
+        if isinstance(sp_link, dict) and sp_link.get("url"):
+            spotify_url = sp_link["url"]
+
+        meta = {
+            "title": title,
+            "artist": artist,
+            "cover_url": cover_url,
+            "spotify_url": spotify_url,
+        }
+
         matches: list[TrackMatch] = []
-        for odesli_key, svc_url in cross_urls.items():
+        for odesli_key, link in (data.get("linksByPlatform") or {}).items():
+            if not isinstance(link, dict):
+                continue
             platform = _ODESLI_KEY_TO_PLATFORM.get(odesli_key)
             if platform is None or platform not in _SERVICE_CEILING:
                 continue  # not a SpotiFLAC-served paid service
+            svc_url = link.get("url") or ""
             matches.append(self._build_claim(platform, svc_url, meta))
 
         logger.debug("[spotiflac] resolve_url(%s) -> %d service claim(s)", url, len(matches))
         return matches
 
     async def search(self, query: str, limit: int = 5) -> list[TrackMatch]:
-        """Free-form search — unsupported by SpotiFLAC, always ``[]``.
+        """Free-form search — unsupported, always ``[]``.
 
         SpotiFLAC can only act on a known Spotify URL. Per the
-        :class:`~app.downloader.SourceProvider` contract a provider that cannot
-        search legitimately returns an empty list; the orchestrator routes
-        free-form queries to providers that can (e.g. SoundCloud).
+        :class:`~app.downloader.SourceProvider` contract a provider that
+        cannot search legitimately returns an empty list.
         """
-        logger.debug("[spotiflac] search() is a no-op (SpotiFLAC has no search)")
         return []
 
     async def fetch(self, match: TrackMatch, dest_dir: Path) -> Path:
         """Download the audio for a chosen :class:`TrackMatch`.
 
-        ``match.url`` is a service URL with the originating Spotify URL appended
-        as a ``#spotify=`` fragment (see :meth:`_build_claim`). SpotiFLAC's
-        download is Spotify-pivoted — it resolves Spotify→service internally —
-        so :meth:`fetch` recovers that Spotify origin from the fragment and
-        hands it to the worker.
+        Runs ``spotiflac-cli`` as a subprocess, parses its JSON result. The
+        Spotify origin URL is recovered from the ``#spotify=`` fragment
+        :meth:`_build_claim` stamped on the claim URL — :class:`TrackMatch`
+        has no escape-hatch field and is frozen.
 
         Raises:
-            RuntimeError: the download failed or the worker crashed.
-            ValueError: ``match`` is not a SpotiFLAC-served claim.
+            ValueError: ``match`` is not a SpotiFLAC-served claim or carries
+                no Spotify origin.
+            RuntimeError: the CLI failed (network, mirror down, JSON parse).
         """
         if match.platform not in _PLATFORM_TO_SERVICE:
             raise ValueError(f"SpotiFlacProvider.fetch cannot serve platform {match.platform!r}")
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        # The claim's Spotify origin is encoded in the synthetic URL fragment
-        # written by _build_claim ("<service-url>#spotify=<spotify-url>").
         spotify_url = _extract_spotify_origin(match.url)
         if not spotify_url:
             raise ValueError(
                 f"claim for {match.platform} has no Spotify origin — "
-                "cannot drive SpotiFLAC's Spotify-pivoted download"
+                "cannot drive spotiflac-cli's Spotify-pivoted download"
             )
+        spotify_id = _extract_spotify_id(spotify_url) or ""
+        if not spotify_id:
+            raise ValueError(f"could not parse Spotify track ID from {spotify_url!r}")
 
-        result = await _submit_with_recovery(
-            _worker_fetch,
-            match.platform,
-            spotify_url,
-            match.isrc,
-            str(dest_dir),
-            timeout_s=_FETCH_TIMEOUT_S,
+        cli = _locate_cli()
+        service = _PLATFORM_TO_SERVICE[match.platform]
+
+        result = await _run_cli_download(
+            cli=cli,
+            service=service,
+            spotify_id=spotify_id,
+            out_dir=dest_dir,
+            title=match.title or "",
+            artist=match.artist or "",
+            album=match.album or "",
         )
-        return Path(result)
+        if not result.get("success"):
+            raise RuntimeError(f"spotiflac-cli {service}: {result.get('error', 'unknown error')}")
+        file_path = result.get("file") or ""
+        if not file_path:
+            raise RuntimeError(f"spotiflac-cli {service}: success reported but no file path")
+        return Path(file_path)
 
     # ──────────────────────────────────────────────────────────────────────
     # Internals
@@ -449,12 +430,14 @@ class SpotiFlacProvider(SourceProvider):
     def _build_claim(
         self, platform: Platform, service_url: str, meta: dict[str, Any]
     ) -> TrackMatch:
-        """Build one per-service :class:`TrackMatch` from the worker's metadata.
+        """Build one per-service :class:`TrackMatch` from the Odesli metadata.
 
-        Quality fields are the service's optimistic ceiling (see
-        :data:`_SERVICE_CEILING`). The Spotify origin URL is appended to the
-        claim URL as a ``#spotify=`` fragment so :meth:`fetch` can recover it —
-        :class:`TrackMatch` has no escape-hatch field and is frozen.
+        Quality fields are the service's optimistic ceiling
+        (:data:`_SERVICE_CEILING`). The Spotify origin URL is appended to the
+        claim URL as a ``#spotify=`` fragment so :meth:`fetch` can recover it.
+
+        Duration is ``0.0`` — Odesli does not expose track duration; see the
+        module docstring's "Known limitation" note.
         """
         fmt, bit_depth, sample_rate, bitrate, tier = _SERVICE_CEILING[platform]
         origin = meta.get("spotify_url", "")
@@ -462,12 +445,9 @@ class SpotiFlacProvider(SourceProvider):
         return TrackMatch(
             platform=platform,
             url=claim_url,
-            title=meta["title"],
-            artist=meta["artist"],
-            duration_s=meta["duration_s"],
-            isrc=meta.get("isrc"),
-            album=meta.get("album"),
-            year=meta.get("year"),
+            title=meta.get("title") or "Unknown",
+            artist=meta.get("artist") or "Unknown",
+            duration_s=0.0,
             cover_url=meta.get("cover_url"),
             claimed_format=fmt,
             claimed_bit_depth=bit_depth,
@@ -481,7 +461,7 @@ def _extract_spotify_origin(claim_url: str) -> str | None:
     """Pull the ``#spotify=`` origin fragment back out of a claim URL.
 
     :meth:`SpotiFlacProvider._build_claim` appends ``#spotify=<url>`` to every
-    claim so :meth:`SpotiFlacProvider.fetch` can drive SpotiFLAC's
+    claim so :meth:`SpotiFlacProvider.fetch` can drive the CLI's
     Spotify-pivoted download. Returns ``None`` when the fragment is absent.
     """
     marker = "#spotify="

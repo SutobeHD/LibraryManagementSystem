@@ -145,8 +145,10 @@ _PLATFORM_PROVIDERS: dict[str, object] = {
     "tidal": lambda: _make_spotiflac("tidal"),
     "qobuz": lambda: _make_spotiflac("qobuz"),
     "amazon": lambda: _make_spotiflac("amazon"),
-    "apple_music": lambda: _make_spotiflac("apple_music"),
-    "deezer": lambda: _make_spotiflac("deezer"),
+    # apple_music + deezer are NOT served by the real SpotiFLAC v7 backend —
+    # the dead pip-0.x package falsely claimed them. They are deliberately
+    # absent: an enabled-but-unserved platform is silently skipped by
+    # _providers_for(), never crashing.
 }
 
 

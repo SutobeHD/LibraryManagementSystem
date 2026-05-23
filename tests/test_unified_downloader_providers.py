@@ -2,13 +2,14 @@
 
 Two provider implementations are covered:
 
-* :class:`app.downloader.providers.spotiflac.SpotiFlacProvider` — focus is the
-  ``ProcessPoolExecutor`` crash-recovery machinery (panic budget, worker
-  restart, bounded retry) exercised with a deliberately process-killing worker
-  function, plus ``resolve_url`` / ``search`` against a mocked SpotiFLAC and
-  the genuinely-offline ``parse_spotify_url``.
-* :class:`app.downloader.providers.soundcloud.SoundCloudProvider` — the SC API
-  is mocked; no provider test ever touches the network or downloads bytes.
+* :class:`app.downloader.providers.spotiflac.SpotiFlacProvider` — focus is
+  the Odesli-based ``resolve_url`` (HTTP mocked at ``_odesli_lookup_sync``)
+  and the ``spotiflac-cli`` subprocess invocation in ``fetch`` (mocked at
+  ``_run_cli_download``). The dead pip-0.x ``SpotiFLAC`` package +
+  ``ProcessPoolExecutor`` crash machinery are gone — the CLI binary itself
+  owns crash isolation now.
+* :class:`app.downloader.providers.soundcloud.SoundCloudProvider` — the SC
+  API is mocked; no provider test ever touches the network or downloads bytes.
 
 See ``docs/research/implement/accepted_downloader-unified-multi-source.md``
 § "P1.5 / P1.7".
@@ -17,7 +18,6 @@ See ``docs/research/implement/accepted_downloader-unified-multi-source.md``
 from __future__ import annotations
 
 import asyncio
-import os
 from pathlib import Path
 from typing import Any
 
@@ -29,44 +29,6 @@ from app.downloader.providers import soundcloud as sc_mod
 from app.downloader.providers import spotiflac as sf_mod
 from app.downloader.providers.soundcloud import SoundCloudProvider
 from app.downloader.providers.spotiflac import SpotiFlacProvider
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Top-level worker functions for the PPE recovery tests.
-# Must be module-level so ProcessPoolExecutor can pickle them.
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-def _worker_ok(value: int) -> int:
-    """A well-behaved worker — doubles its input."""
-    return value * 2
-
-
-def _worker_hard_crash(value: int) -> int:
-    """A worker that kills its own process — triggers ``BrokenExecutor``.
-
-    ``os._exit`` skips all cleanup and aborts the interpreter, exactly the
-    failure shape a native-code crash inside SpotiFLAC would produce.
-    """
-    os._exit(1)
-
-
-def _worker_value_error(value: int) -> int:
-    """A worker that raises a normal, picklable exception."""
-    raise ValueError("worker rejected the input")
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Fixtures
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-@pytest.fixture(autouse=True)
-def _reset_spotiflac_ppe():
-    """Reset the SpotiFLAC PPE singleton + panic budget around every test."""
-    sf_mod._reset_state_for_tests()
-    yield
-    sf_mod._reset_state_for_tests()
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SpotiFlacProvider — ABC conformance + construction
@@ -91,150 +53,102 @@ def test_spotiflac_provider_defaults_to_tidal() -> None:
     assert SpotiFlacProvider().platform == "tidal"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# SpotiFlacProvider — PPE crash-recovery machinery
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-def test_ppe_happy_path_runs_worker() -> None:
-    """A well-behaved worker round-trips through the executor."""
-    result = asyncio.run(sf_mod._submit_with_recovery(_worker_ok, 21, timeout_s=30.0))
-    assert result == 42
-
-
-def test_ppe_recovers_from_worker_crash_via_restart() -> None:
-    """A worker crash raises BrokenExecutor → restart → bounded retry.
-
-    Both attempts crash, so the call ultimately raises RuntimeError — but the
-    panic counter must have been bumped (restart fired) on the way.
-    """
-    assert sf_mod._PANIC_COUNT == 0
-    with pytest.raises(RuntimeError, match="failed after restart"):
-        asyncio.run(sf_mod._submit_with_recovery(_worker_hard_crash, 1, timeout_s=30.0))
-    # One restart per failed attempt: first crash + retry crash = 2 restarts.
-    assert sf_mod._PANIC_COUNT == 2
-
-
-def test_ppe_restart_replaces_the_executor_object() -> None:
-    """_restart_executor swaps in a fresh, usable ProcessPoolExecutor."""
-    first = sf_mod._get_executor()
-    sf_mod._restart_executor()
-    second = sf_mod._get_executor()
-    assert first is not second
-    assert sf_mod._PANIC_COUNT == 1
-    # The fresh pool still works.
-    assert asyncio.run(sf_mod._submit_with_recovery(_worker_ok, 5, timeout_s=30.0)) == 10
-
-
-def test_ppe_aborts_when_panic_budget_exhausted() -> None:
-    """At the panic ceiling, a submit fails fast without spawning a worker."""
-    sf_mod._PANIC_COUNT = sf_mod._MAX_PANICS_PER_RUN
-    with pytest.raises(RuntimeError, match="exceeded panic budget"):
-        asyncio.run(sf_mod._submit_with_recovery(_worker_ok, 1, timeout_s=30.0))
-
-
-def test_ppe_propagates_normal_worker_exception() -> None:
-    """A picklable in-worker exception propagates unchanged (no retry/restart)."""
-    with pytest.raises(ValueError, match="worker rejected the input"):
-        asyncio.run(sf_mod._submit_with_recovery(_worker_value_error, 1, timeout_s=30.0))
-    # A normal exception is not a crash — the budget must be untouched.
-    assert sf_mod._PANIC_COUNT == 0
+def test_spotiflac_provider_drops_apple_and_deezer() -> None:
+    """v7 has no Apple Music or Deezer download providers — construction fails."""
+    with pytest.raises(ValueError, match="cannot serve platform"):
+        SpotiFlacProvider("apple_music")
+    with pytest.raises(ValueError, match="cannot serve platform"):
+        SpotiFlacProvider("deezer")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SpotiFlacProvider — parse_spotify_url is genuinely offline (D3 carry-forward)
+# SpotiFlacProvider — _extract_spotify_id (offline, no network)
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def test_parse_spotify_url_offline_roundtrip() -> None:
-    """The real SpotiFLAC offline URL parser identifies a track URL.
+def test_extract_spotify_id_recognises_track_url() -> None:
+    """The 22-char ID falls out of an ``open.spotify.com/track/<id>`` URL."""
+    assert (
+        sf_mod._extract_spotify_id("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT")
+        == "4cOdK2wGLETKBW3PvgPWqT"
+    )
 
-    No network, no mock — this is the D3-feasibility offline parser used by the
-    real worker. Confirms the installed library still behaves as the plan
-    assumed.
-    """
-    from SpotiFLAC.providers.spotify_metadata import parse_spotify_url
 
-    parsed = parse_spotify_url("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT")
-    assert parsed == {"type": "track", "id": "4cOdK2wGLETKBW3PvgPWqT"}
+def test_extract_spotify_id_returns_none_for_non_track() -> None:
+    """A non-Spotify-track URL parses to ``None`` without raising."""
+    assert sf_mod._extract_spotify_id("https://soundcloud.com/x/y") is None
+    assert sf_mod._extract_spotify_id("not a url at all") is None
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SpotiFlacProvider — resolve_url / search with SpotiFLAC mocked
+# SpotiFlacProvider — resolve_url (Odesli HTTP mocked) + search
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-_FAKE_RESOLVE_META: dict[str, Any] = {
-    "spotify_id": "abc123",
-    "spotify_url": "https://open.spotify.com/track/abc123",
-    "title": "Strobe",
-    "artist": "deadmau5",
-    "album": "For Lack of a Better Name",
-    "duration_s": 636.0,
-    "isrc": "USUS11000301",
-    "year": 2009,
-    "cover_url": "https://img/cover.jpg",
-    "cross_urls": {
-        "tidal": "https://tidal.com/track/111",
-        "qobuz": "https://qobuz.com/track/222",
-        "youtube": "https://youtube.com/watch?v=zzz",  # not SpotiFLAC-served
+_FAKE_ODESLI: dict[str, Any] = {
+    "entityUniqueId": "SPOTIFY_SONG::abc123",
+    "userCountry": "US",
+    "entitiesByUniqueId": {
+        "SPOTIFY_SONG::abc123": {
+            "id": "abc123",
+            "type": "song",
+            "title": "Strobe",
+            "artistName": "deadmau5",
+            "thumbnailUrl": "https://img/cover.jpg",
+            "apiProvider": "spotify",
+            "platforms": ["spotify"],
+        }
+    },
+    "linksByPlatform": {
+        "spotify": {"url": "https://open.spotify.com/track/abc123"},
+        "tidal": {"url": "https://tidal.com/track/111"},
+        "qobuz": {"url": "https://qobuz.com/track/222"},
+        "amazonMusic": {"url": "https://music.amazon.com/tracks/A123"},
+        # Non-v7-served keys must be filtered out by resolve_url.
+        "youtube": {"url": "https://youtube.com/watch?v=zzz"},
+        "soundcloud": {"url": "https://soundcloud.com/x/y"},
     },
 }
 
 
 def test_resolve_url_builds_per_service_claims(monkeypatch: pytest.MonkeyPatch) -> None:
-    """resolve_url turns the worker's metadata into one claim per served service.
+    """resolve_url turns the Odesli response into one claim per v7-served service.
 
-    The YouTube cross-URL is dropped (not a SpotiFLAC-served paid service); the
-    Tidal + Qobuz ones become lossless claims carrying the Spotify-origin
-    fragment.
+    Non-v7 cross-URLs (YouTube / SoundCloud) are dropped; the three served
+    platforms (Tidal / Qobuz / Amazon) become Hi-Res claims carrying the
+    Spotify-origin fragment.
     """
+    monkeypatch.setattr(sf_mod, "_odesli_lookup_sync", lambda _id: dict(_FAKE_ODESLI))
 
-    async def _fake_submit(func: Any, *args: Any, timeout_s: float) -> Any:
-        return dict(_FAKE_RESOLVE_META)
-
-    monkeypatch.setattr(sf_mod, "_submit_with_recovery", _fake_submit)
-
-    provider = SpotiFlacProvider("tidal")
-    matches = asyncio.run(provider.resolve_url("https://open.spotify.com/track/abc123"))
+    matches = asyncio.run(
+        SpotiFlacProvider("tidal").resolve_url("https://open.spotify.com/track/abc123")
+    )
 
     platforms = {m.platform for m in matches}
-    assert platforms == {"tidal", "qobuz"}  # youtube dropped
+    assert platforms == {"tidal", "qobuz", "amazon"}  # youtube + soundcloud dropped
     for m in matches:
         assert m.title == "Strobe"
         assert m.artist == "deadmau5"
-        assert m.isrc == "USUS11000301"
+        assert m.cover_url == "https://img/cover.jpg"
         assert m.quality_tier == QualityTier.HIRES_LOSSLESS
         # The Spotify origin must ride along for fetch() to recover.
         assert "#spotify=https://open.spotify.com/track/abc123" in m.url
 
 
-def test_resolve_url_returns_empty_on_bad_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A non-Spotify URL (worker raises ValueError) yields an empty list."""
-
-    async def _raise(func: Any, *args: Any, timeout_s: float) -> Any:
-        raise ValueError("not a Spotify track URL")
-
-    monkeypatch.setattr(sf_mod, "_submit_with_recovery", _raise)
-
-    matches = asyncio.run(SpotiFlacProvider("tidal").resolve_url("https://x/y"))
+def test_resolve_url_returns_empty_on_non_spotify_url() -> None:
+    """A non-Spotify URL yields an empty list (no Odesli call needed)."""
+    matches = asyncio.run(SpotiFlacProvider("tidal").resolve_url("https://soundcloud.com/x/y"))
     assert matches == []
 
 
-def test_resolve_url_returns_empty_on_panic_budget(
+def test_resolve_url_returns_empty_when_odesli_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A crash past the panic budget (RuntimeError) yields an empty list.
-
-    A dead source must never abort a multi-provider resolve.
-    """
-
-    async def _raise(func: Any, *args: Any, timeout_s: float) -> Any:
-        raise RuntimeError("SpotiFLAC PPE exceeded panic budget (16)")
-
-    monkeypatch.setattr(sf_mod, "_submit_with_recovery", _raise)
-
-    matches = asyncio.run(SpotiFlacProvider("tidal").resolve_url("https://x/y"))
+    """An Odesli failure (``None``) yields an empty list — dead source, not abort."""
+    monkeypatch.setattr(sf_mod, "_odesli_lookup_sync", lambda _id: None)
+    matches = asyncio.run(
+        SpotiFlacProvider("tidal").resolve_url("https://open.spotify.com/track/abc123")
+    )
     assert matches == []
 
 
@@ -276,26 +190,28 @@ def test_spotiflac_fetch_rejects_claim_without_spotify_origin(tmp_path: Path) ->
         asyncio.run(SpotiFlacProvider("tidal").fetch(claim, tmp_path))
 
 
-def test_spotiflac_fetch_drives_worker_with_spotify_origin(
+def test_spotiflac_fetch_drives_cli_with_spotify_origin(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """fetch() extracts the Spotify origin and forwards it to the worker."""
+    """fetch() extracts the Spotify origin and forwards it to the CLI."""
     captured: dict[str, Any] = {}
 
-    async def _fake_submit(func: Any, *args: Any, timeout_s: float) -> Any:
-        captured["func"] = func
-        captured["args"] = args
+    async def _fake_run_cli_download(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
         out = tmp_path / "Strobe.flac"
         out.write_bytes(b"flac-bytes")
-        return str(out)
+        return {"success": True, "service": kwargs["service"], "file": str(out)}
 
-    monkeypatch.setattr(sf_mod, "_submit_with_recovery", _fake_submit)
+    monkeypatch.setattr(sf_mod, "_run_cli_download", _fake_run_cli_download)
+    # Bypass the locate-binary check — no built binary required for this unit test.
+    monkeypatch.setattr(sf_mod, "_locate_cli", lambda: tmp_path / "fake-spotiflac-cli")
 
     claim = TrackMatch(
         platform="tidal",
         url="https://tidal.com/track/111#spotify=https://open.spotify.com/track/abc",
         title="Strobe",
         artist="deadmau5",
+        album="For Lack of a Better Name",
         duration_s=636.0,
         isrc="USUS11000301",
         claimed_format="flac",
@@ -306,10 +222,37 @@ def test_spotiflac_fetch_drives_worker_with_spotify_origin(
     result = asyncio.run(SpotiFlacProvider("tidal").fetch(claim, tmp_path))
 
     assert result == tmp_path / "Strobe.flac"
-    # args: (platform, spotify_url, isrc, dest_dir)
-    assert captured["args"][0] == "tidal"
-    assert captured["args"][1] == "https://open.spotify.com/track/abc"
-    assert captured["args"][2] == "USUS11000301"
+    assert captured["service"] == "tidal"
+    assert captured["spotify_id"] == "abc"
+    assert captured["title"] == "Strobe"
+    assert captured["artist"] == "deadmau5"
+    assert captured["album"] == "For Lack of a Better Name"
+
+
+def test_spotiflac_fetch_raises_on_cli_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """fetch() raises RuntimeError when the CLI reports failure."""
+
+    async def _fake_run_cli_download(**kwargs: Any) -> dict[str, Any]:
+        return {"success": False, "service": kwargs["service"], "error": "mirror 503"}
+
+    monkeypatch.setattr(sf_mod, "_run_cli_download", _fake_run_cli_download)
+    monkeypatch.setattr(sf_mod, "_locate_cli", lambda: tmp_path / "fake-spotiflac-cli")
+
+    claim = TrackMatch(
+        platform="qobuz",
+        url="https://qobuz.com/track/x#spotify=https://open.spotify.com/track/xyz",
+        title="t",
+        artist="a",
+        duration_s=1.0,
+        claimed_format="flac",
+        claimed_bit_depth=24,
+        claimed_sample_rate_hz=96000,
+        quality_tier=QualityTier.HIRES_LOSSLESS,
+    )
+    with pytest.raises(RuntimeError, match="mirror 503"):
+        asyncio.run(SpotiFlacProvider("qobuz").fetch(claim, tmp_path))
 
 
 def test_extract_spotify_origin() -> None:
