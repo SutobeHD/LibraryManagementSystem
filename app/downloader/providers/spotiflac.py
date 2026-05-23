@@ -84,13 +84,15 @@ _PLATFORM_TO_SERVICE: dict[Platform, str] = {
     "amazon": "amazon",
 }
 
-#: Odesli platform-key -> downloader :data:`Platform`. Non-v7-served keys
-#: (soundcloud / spotify / youtube) are deliberately absent so resolve only
-#: surfaces claims for what fetch can actually deliver.
-_ODESLI_KEY_TO_PLATFORM: dict[str, Platform] = {
+#: v7-served :data:`Platform` -> Odesli ``linksByPlatform`` key. Used to
+#: surface Odesli's sibling URL when available; resolve_url claims **all
+#: three** v7 services for any Spotify URL regardless, because each CLI
+#: download path pivots from the Spotify ID alone (Qobuz via ISRC,
+#: Tidal/Amazon via Spotify metadata). Odesli URLs are display-only.
+_V7_TO_ODESLI_KEY: dict[Platform, str] = {
     "tidal": "tidal",
     "qobuz": "qobuz",
-    "amazonMusic": "amazon",
+    "amazon": "amazonMusic",
 }
 
 #: Publicly-known optimistic delivery ceiling per service. Verified post-
@@ -170,7 +172,10 @@ def _odesli_lookup_sync(spotify_id: str) -> dict[str, Any] | None:
     try:
         resp = requests.get(
             _ODESLI_URL,
-            params={"id": spotify_id, "platform": "spotify", "userCountry": "US"},
+            params={
+                "url": f"https://open.spotify.com/track/{spotify_id}",
+                "userCountry": "US",
+            },
             headers={"User-Agent": "Mozilla/5.0"},
             timeout=_RESOLVE_TIMEOUT_S,
         )
@@ -355,15 +360,15 @@ class SpotiFlacProvider(SourceProvider):
             "spotify_url": spotify_url,
         }
 
+        # Each CLI download path pivots from the Spotify ID alone — Odesli's
+        # sibling URLs are display-only. So claim all three v7-served services
+        # regardless of whether Odesli surfaced their URL.
+        links = data.get("linksByPlatform") or {}
         matches: list[TrackMatch] = []
-        for odesli_key, link in (data.get("linksByPlatform") or {}).items():
-            if not isinstance(link, dict):
-                continue
-            platform = _ODESLI_KEY_TO_PLATFORM.get(odesli_key)
-            if platform is None or platform not in _SERVICE_CEILING:
-                continue  # not a SpotiFLAC-served paid service
-            svc_url = link.get("url") or ""
-            matches.append(self._build_claim(platform, svc_url, meta))
+        for platform, odesli_key in _V7_TO_ODESLI_KEY.items():
+            link = links.get(odesli_key)
+            svc_url = link.get("url") if isinstance(link, dict) else None
+            matches.append(self._build_claim(platform, svc_url or meta["spotify_url"], meta))
 
         logger.debug("[spotiflac] resolve_url(%s) -> %d service claim(s)", url, len(matches))
         return matches
