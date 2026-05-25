@@ -1,14 +1,14 @@
 ---
-slug: quality-settings-lossless-tagging
-title: Quality settings + unique lossless-track tagging
+slug: download-gate-assistant
+title: In-app download-gate assistant (Hypeddit etc.)
 owner: tb
 created: 2026-05-22
-last_updated: 2026-05-22
-tags: []
-related: []
+last_updated: 2026-05-25
+tags: [downloader, ux, webview, credentials]
+related: [downloader-unified-multi-source, safe-download-sources-survey]
 ---
 
-# Quality settings + unique lossless-track tagging
+# In-app download-gate assistant (Hypeddit etc.)
 
 > **Caveman style.** Fragments, bullets. Drop articles/filler/hedges. No prose paragraphs. Respect per-section caps below.
 > State = folder + filename prefix (not frontmatter). Lifecycle = audit trail. See `../README.md`.
@@ -18,14 +18,15 @@ related: []
 
 - 2026-05-22 — `research/idea_` — created from template
 - 2026-05-22 — `research/drafting_` — state move (manual); ready for the `research-draft` routine to fill Problem → Research Plan
+- 2026-05-25 — `research/ideagate_` — `research-draft` routine filled Problem → Research Plan + Idea Verification (PASS); awaits GATE A
 
 ## Original Idea (verbatim — never edit)
 
-In den Download-Einstellungen sollte man Quality-Präferenzen festlegen können
-(z. B. „Lossless bevorzugen", „Maximum Hi-Res"). Lossless-Tracks sollten in
-der Library eindeutig markiert werden — über einen Tag, ein Icon oder ein
-DB-Feld — sodass man auf einen Blick sieht, was echtes Lossless ist und was
-lossy.
+Möglichkeit, in den Einstellungen vorab Accounts für Download-Gate-Dienste
+(Hypeddit etc.) zu hinterlegen. Beim Download eines gegateten Tracks soll das
+Gate direkt in der App geöffnet werden (eingebettetes Webview), sodass der
+User den Gate-Durchlauf bequem an einer Stelle durchklicken kann — ohne viel
+Werbung und ohne ständiges Neu-Einloggen.
 
 ---
 
@@ -33,41 +34,61 @@ lossy.
 
 ## Problem
 
-≤60 words. What / why / cost-of-not-doing.
+Free-promo tracks gated behind Hypeddit / Toneden etc. — user visits each gate per track, clicks through ad flow, re-logs-in often. Cost: 30-60 s per gated track; context-switch out of app; some gates demand email / social-follow even after past completion.
 
 ## Goals / Non-goals
 
 **Goals**
-- …
+- Settings: pre-configure gate-service accounts (Hypeddit, Toneden, …)
+- On gated download: open gate in embedded webview, auto-logged-in via stored session
+- Pass-through to actual download once gate completes (user clicks through manually)
+- Encrypted credential storage at rest (OS keyring / DPAPI)
+- Cookie jar persistence per gate-service (avoid re-login each visit)
+- Integration with `accepted_downloader-unified-multi-source.md` gated-track resolution
 
 **Non-goals**
-- …
+- Bypassing gate (illegitimate — artists set gate intentionally)
+- Auto-clicking through gate ("ad-skip" — ToS-violating + adversarial)
+- Headless / scripted gate completion (same risk as bypass)
+- Building gate-service ourselves
 
 ## Constraints
 
 External facts bounding solution (rate limits, data shape, perf budget, legal, capacity). Cite source.
 
-- …
+- Tauri 2 webview (Wry / WebView2 on Windows) — supports embedded URLs; per-window cookie isolation possible
+- Credentials → encrypted store: `keyring` Python lib (system keyring), Rust `keyring` crate, or DPAPI on Windows direct
+- `require_session` bearer auth (per `coding-rules.md`) — any credential-fetch endpoint behind it; never log creds (not at INFO / DEBUG / redacted)
+- Each gate-service ToS must allow embedded webview login + manual click-through (not scripted)
+- Per `accepted_downloader-unified-multi-source.md` — gated-track resolution routes through this assistant; integration point in source-resolver
+- Browser-dev mode (`npm run dev:full`) — no Tauri webview; gate-assistant degrades to "open in default browser" fallback
 
 ## Open Questions
 
 Numbered. Each resolvable (yes/no or X vs Y), not philosophy. Each becomes a parallel research agent in Stage 2.
 
-1. …
+1. Tauri 2 webview: can embed external URL with isolated cookie jar per service?
+2. Credential store: `keyring` Python lib vs Rust `keyring` crate vs Windows DPAPI direct?
+3. Hypeddit / Toneden ToS: do they allow embedded-webview login (not just browser-only)?
+4. Gate detection: source resolver returns gate-URL, or downloader probes link first?
+5. MVP gate-service list — Hypeddit only, or also Toneden / others?
+6. Existing OSS tools in this space (cross-link `drafting_safe-download-sources-survey.md` findings)?
 
 ## Research Plan
 
 Required by `ideagate_` (GATE A). ≤80 words. Which aspects Stage 2 researches in parallel — one bullet per agent. User confirms this list at GATE A.
 
-- Agent 1: …
-- Agent 2: …
+- Agent 1: Tauri 2 webview embedding — isolated cookie jars per origin, persistent session, URL injection patterns
+- Agent 2: Gate-service inventory + ToS — Hypeddit, Toneden, others; which allow embedded-webview login; MVP shortlist
+- Agent 3: Credential store — `keyring` Python lib vs Rust `keyring` crate vs DPAPI; integration with `require_session` bearer model
+- Agent 4: Gate detection + downloader integration — where in unified-downloader does gated-track route; UX on first gate
 
 ## Idea Verification
 
 Stage 1 Agent 2. Dated entries, append-only. PASS / FAIL + ≤40-word reason (checked vs `## Original Idea`).
 
-### YYYY-MM-DD — <PASS|FAIL>
-- …
+### 2026-05-25 — PASS
+- Draft covers all three Original-Idea pillars: (a) pre-configured gate-service accounts in Settings, (b) embedded in-app webview on gated download, (c) streamlined click-through without ads + without constant re-login. No scope creep.
 
 ---
 

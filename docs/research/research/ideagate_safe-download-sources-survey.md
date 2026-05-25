@@ -3,9 +3,9 @@ slug: safe-download-sources-survey
 title: Survey of safe / legit download tooling on GitHub
 owner: tb
 created: 2026-05-22
-last_updated: 2026-05-22
-tags: []
-related: []
+last_updated: 2026-05-25
+tags: [downloader, survey, oss, integration]
+related: [downloader-unified-multi-source, external-track-match-unified-module, download-gate-assistant]
 ---
 
 # Survey of safe / legit download tooling on GitHub
@@ -18,6 +18,7 @@ related: []
 
 - 2026-05-22 — `research/idea_` — created from template
 - 2026-05-22 — `research/drafting_` — state move (manual); ready for the `research-draft` routine to fill Problem → Research Plan
+- 2026-05-25 — `research/ideagate_` — `research-draft` routine filled Problem → Research Plan + Idea Verification (PASS); awaits GATE A
 
 ## Original Idea (verbatim — never edit)
 
@@ -33,41 +34,61 @@ Frage kommen.
 
 ## Problem
 
-≤60 words. What / why / cost-of-not-doing.
+Downloader narrow in source coverage. Unknown what OSS prior art exists (streamrip-class, Bandcamp, Beatport collection-downloaders, multi-source orchestrators) or which architectures (account-based / mirror-scrape / buy-to-own) ship safely. Cost: reinventing solved patterns; missing legit integration paths; building on shaky legal / safety ground.
 
 ## Goals / Non-goals
 
 **Goals**
-- …
+- Catalog active OSS download tooling on GitHub (≥1 release in last 12 mo OR commit < 6 mo old)
+- Per-tool: source coverage, auth model, license, safety / legal posture, last update
+- Architecture taxonomy: account-based vs mirror-scrape vs buy-to-own vs API-keyed
+- Integration shortlist: Python library? CLI shell-out? logic port? inspiration only?
+- Feed source-priority list of `accepted_downloader-unified-multi-source.md`
 
 **Non-goals**
-- …
+- Building new sources in this doc (separate implementation docs per source)
+- Legal opinion (flag risk only — don't adjudicate)
+- Re-evaluating already-accepted unified-downloader architecture
+- Closed-source tools (scope is OSS prior art)
 
 ## Constraints
 
 External facts bounding solution (rate limits, data shape, perf budget, legal, capacity). Cite source.
 
-- …
+- Project license — must check root `LICENSE` for vendoring compat (MIT/Apache → GPL code only shellable-out, not vendor-able)
+- Python sidecar — Python-native libs preferred; Rust/Go OK via subprocess; pure-JS browser-extensions unusable
+- Local-first — tools requiring own backend server out of scope
+- "Safe" = clear ToS posture + no telemetry + user pays for content downloaded
+- 2026 maintenance reality: many Qobuz/Tidal forks abandoned post-API changes — verify activity not just popularity
+- Existing modules to reuse: `external_track_match` (matching), `require_session` (auth), `quality_engine` (per accepted downloader doc)
 
 ## Open Questions
 
 Numbered. Each resolvable (yes/no or X vs Y), not philosophy. Each becomes a parallel research agent in Stage 2.
 
-1. …
+1. streamrip vs orpheusdl vs custom: which is most maintained 2026 + best integration shape?
+2. Bandcamp: official-API tools (bandcamp-dl class) vs scraping — which still works 2026?
+3. Beatport: does a legit collection-downloader (buy-to-own) exist or only scraping?
+4. Multi-source orchestrators: are there "downloader-of-downloaders" patterns worth copying?
+5. Account auth: how do existing tools store credentials (keyring / env / encrypted file)?
+6. License compat: which tools' code can vendor/port (MIT/Apache) vs only inspire (GPL)?
 
 ## Research Plan
 
 Required by `ideagate_` (GATE A). ≤80 words. Which aspects Stage 2 researches in parallel — one bullet per agent. User confirms this list at GATE A.
 
-- Agent 1: …
-- Agent 2: …
+- Agent 1: streamrip-class (Qobuz/Tidal/Deezer multi-source) — top 5 active forks 2026, feature matrix, license, integration shape
+- Agent 2: Bandcamp ecosystem — official-API tools, buy-to-own flow, what still works 2026
+- Agent 3: Beatport / DJ-store tooling — collection-downloaders, buy-to-own legality, what exists
+- Agent 4: Multi-source orchestrator patterns + credential storage — plugin registry, source-priority resolution
+- Agent 5: License + safety audit — GPL-compat, telemetry, ToS posture per candidate
 
 ## Idea Verification
 
 Stage 1 Agent 2. Dated entries, append-only. PASS / FAIL + ≤40-word reason (checked vs `## Original Idea`).
 
-### YYYY-MM-DD — <PASS|FAIL>
-- …
+### 2026-05-25 — PASS
+- Draft covers Original Idea: GitHub survey of legit / "safe" tooling (streamrip-class, Bandcamp / Beatport, multi-source) AND architecture inspirations (account / mirror-scraping / buy-to-own) feeding the unified downloader. No scope creep.
 
 ---
 

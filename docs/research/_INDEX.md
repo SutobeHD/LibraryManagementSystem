@@ -18,12 +18,12 @@ If this index drifts from the file system, the file system wins — re-derive wi
 - [idea_security-mobile-paired-tokens-phase2.md](research/idea_security-mobile-paired-tokens-phase2.md) — Phase-2 paired-device tokens + QR-pairing flow; hard prereq for mobile-companion; sidecar-local SQLite, `require_session` accepts boot+device tokens (2026-05-19)
 
 ### drafting
-- [drafting_download-gate-assistant.md](research/drafting_download-gate-assistant.md) — In-app download-gate assistant: pre-configured accounts + embedded Hypeddit/Toneden webview for a streamlined gate click-through (2026-05-22)
-- [drafting_safe-download-sources-survey.md](research/drafting_safe-download-sources-survey.md) — GitHub survey of legit / „safe" download tooling (streamrip-class, Bandcamp/Beatport collection downloaders) as inspiration + integration paths (2026-05-22)
-- [drafting_quality-settings-lossless-tagging.md](research/drafting_quality-settings-lossless-tagging.md) — Quality-preference settings + unique marker (tag/icon/DB-field) for genuine lossless tracks in the library (2026-05-22)
+_(none)_
 
 ### ideagate ⛔ GATE A
-_(none)_
+- [ideagate_download-gate-assistant.md](research/ideagate_download-gate-assistant.md) — In-app download-gate assistant: pre-configured accounts + embedded Hypeddit/Toneden webview for a streamlined gate click-through; awaits GATE A (2026-05-25)
+- [ideagate_safe-download-sources-survey.md](research/ideagate_safe-download-sources-survey.md) — GitHub survey of legit / „safe" download tooling (streamrip-class, Bandcamp/Beatport collection downloaders) as inspiration + integration paths; awaits GATE A (2026-05-25)
+- [ideagate_quality-settings-lossless-tagging.md](research/ideagate_quality-settings-lossless-tagging.md) — Quality-preference settings + unique marker (tag/icon/DB-field) for genuine lossless tracks in the library; awaits GATE A (2026-05-25)
 
 ### exploring
 - [exploring_recommender-rules-baseline.md](research/exploring_recommender-rules-baseline.md) — Teil 1: BPM/Key/Genre/MyTag/Energy ranking + Camelot harmonic mixing; local + SoundCloud modes (2026-05-11)

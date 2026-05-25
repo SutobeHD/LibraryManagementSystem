@@ -1,14 +1,14 @@
 ---
-slug: download-gate-assistant
-title: In-app download-gate assistant (Hypeddit etc.)
+slug: quality-settings-lossless-tagging
+title: Quality settings + unique lossless-track tagging
 owner: tb
 created: 2026-05-22
-last_updated: 2026-05-22
-tags: []
-related: []
+last_updated: 2026-05-25
+tags: [downloader, library, quality, schema]
+related: [library-quality-upgrade-finder, downloader-unified-multi-source]
 ---
 
-# In-app download-gate assistant (Hypeddit etc.)
+# Quality settings + unique lossless-track tagging
 
 > **Caveman style.** Fragments, bullets. Drop articles/filler/hedges. No prose paragraphs. Respect per-section caps below.
 > State = folder + filename prefix (not frontmatter). Lifecycle = audit trail. See `../README.md`.
@@ -18,14 +18,15 @@ related: []
 
 - 2026-05-22 — `research/idea_` — created from template
 - 2026-05-22 — `research/drafting_` — state move (manual); ready for the `research-draft` routine to fill Problem → Research Plan
+- 2026-05-25 — `research/ideagate_` — `research-draft` routine filled Problem → Research Plan + Idea Verification (PASS); awaits GATE A
 
 ## Original Idea (verbatim — never edit)
 
-Möglichkeit, in den Einstellungen vorab Accounts für Download-Gate-Dienste
-(Hypeddit etc.) zu hinterlegen. Beim Download eines gegateten Tracks soll das
-Gate direkt in der App geöffnet werden (eingebettetes Webview), sodass der
-User den Gate-Durchlauf bequem an einer Stelle durchklicken kann — ohne viel
-Werbung und ohne ständiges Neu-Einloggen.
+In den Download-Einstellungen sollte man Quality-Präferenzen festlegen können
+(z. B. „Lossless bevorzugen", „Maximum Hi-Res"). Lossless-Tracks sollten in
+der Library eindeutig markiert werden — über einen Tag, ein Icon oder ein
+DB-Feld — sodass man auf einen Blick sieht, was echtes Lossless ist und was
+lossy.
 
 ---
 
@@ -33,41 +34,59 @@ Werbung und ohne ständiges Neu-Einloggen.
 
 ## Problem
 
-≤60 words. What / why / cost-of-not-doing.
+Downloader fetches mixed quality (MP3 / FLAC / Hi-Res) — no user preference. Library shows no lossless marker — user can't see at a glance what's real lossless vs lossy / transcoded. Cost: wrong-quality downloads waste storage; manual per-track quality audit; can't filter library by quality tier.
 
 ## Goals / Non-goals
 
 **Goals**
-- …
+- Settings: quality-preference ladder (e.g. Lossless-preferred → MP3-fallback; Max-Hi-Res mode)
+- Downloader honors preference when picking source variant
+- Library marker (DB field + UI badge) — lossless vs lossy vs hi-res
+- Marker computed from probed file, not source-stated quality
+- Reuse `quality_engine` + integrate with `accepted_downloader-unified-multi-source.md`
 
 **Non-goals**
-- …
+- Transcode-detection deep-dive (lives in `exploring_library-quality-upgrade-finder.md`)
+- Audio-fingerprint quality classifier (separate research)
+- Re-encoding lossy → lossless (impossible)
+- Auto-replacing existing library tracks (quality-upgrade-finder territory)
 
 ## Constraints
 
 External facts bounding solution (rate limits, data shape, perf budget, legal, capacity). Cite source.
 
-- …
+- Source-stated quality often lies — MP3-source transcoded → FLAC label common; ground truth needs probe (`exploring_library-quality-upgrade-finder.md`)
+- `master.db` schema change → migration + `_db_write_lock` per `coding-rules.md`
+- Reuse mandatory: `quality_engine` + unified-downloader source-variant resolver (per `accepted_downloader-unified-multi-source.md`)
+- Hi-Res threshold: typically > 16-bit and/or > 44.1 kHz; no universal definition (community: > 16/48 minimum)
+- SQLite WAL on `master.db` — pattern reference: `app/usb_one_library.py`
+- ffprobe already shipped in PATH (per `CLAUDE.md`) — cheap probe primitive available
 
 ## Open Questions
 
 Numbered. Each resolvable (yes/no or X vs Y), not philosophy. Each becomes a parallel research agent in Stage 2.
 
-1. …
+1. DB field shape: enum (`lossless` / `lossy` / `hires` / `unknown`) vs bool-pair (`is_lossless`, `is_hires`)?
+2. Marker computed at download time vs library-scan time vs both?
+3. Quality-preference ladder: per-source override or global only?
+4. UI marker: TrackList column + badge vs filter-pill only? Where exactly?
+5. Reuse `quality-upgrade-finder` probe logic or independent probe path?
 
 ## Research Plan
 
 Required by `ideagate_` (GATE A). ≤80 words. Which aspects Stage 2 researches in parallel — one bullet per agent. User confirms this list at GATE A.
 
-- Agent 1: …
-- Agent 2: …
+- Agent 1: Integration with `quality_engine` + downloader source-variant resolver + settings-side preference-ladder shape
+- Agent 2: DB schema — enum vs bool-pair; migration cost; reuse of `quality-upgrade-finder` fields if any
+- Agent 3: UI placement — TrackList column, badge component, settings panel; pattern-match existing conventions
+- Agent 4: Probe-vs-trust — cheapest reliable probe (ffprobe metadata vs spectral); reuse `quality-upgrade-finder` logic?
 
 ## Idea Verification
 
 Stage 1 Agent 2. Dated entries, append-only. PASS / FAIL + ≤40-word reason (checked vs `## Original Idea`).
 
-### YYYY-MM-DD — <PASS|FAIL>
-- …
+### 2026-05-25 — PASS
+- Draft covers both pillars of Original Idea: (a) quality-preference settings ("Lossless bevorzugen", "Maximum Hi-Res") and (b) unique lossless library marker (Tag/Icon/DB-Feld). No scope creep, no missing pillars.
 
 ---
 
