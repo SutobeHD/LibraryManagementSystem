@@ -17,6 +17,7 @@ related: []
 ## Lifecycle
 
 - 2026-05-28 — `research/idea_` — created from template
+- 2026-05-28 — `research/drafting_` — advanced for research-draft routine
 
 ## Original Idea (verbatim — never edit)
 
