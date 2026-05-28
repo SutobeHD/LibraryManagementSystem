@@ -15,6 +15,8 @@ ai_tasks: false
 
 - 2026-05-19 — `research/idea_` — scaffolded from auth-hardening adjacent finding (metadata-name-fixer Constraints)
 - 2026-05-19 — `research/idea_` — deep exploration toward exploring_-ready (empirical audit)
+- 2026-05-28 — `research/drafting_` — Stage 1 worker formally complete (Prior Art + Research Plan retrofitted to match current template; content was already at exploring_ depth)
+- 2026-05-28 — `research/ideagate_` — Stage 1 verifier PASS, awaiting GATE A
 
 ## AI Tasks
 
@@ -81,6 +83,20 @@ _(all re-verified 2026-05-19 this session)_
 6. **rbox ProcessPoolExecutor interaction** — RESOLVED. `anlz_safe.py` is read-only (verified `anlz_safe.py:1-40` docstring + grep: only `get_content_anlz_paths` reads + `rbox.Anlz` beatgrid reads). Parser never writes `master.db`, so the threading-only lock not crossing the process boundary is irrelevant. No action.
 
 > PARKED (out of scope, future doc): `LiveRekordboxDB` per-thread `rbox.MasterDb` handles (`live_database.py:21,35`) are the structural reason a single missed lock corrupts. A shared single connection + lock would be defence-in-depth. Trigger: if gap-closing proves insufficient under the OQ5 harness, or Phase-2 mobile load. Larger refactor — own topic.
+
+## Idea Verification
+
+Stage 1 Verifier. Dated entries, append-only.
+
+### 2026-05-28 — PASS
+- **Intent**: scaffold premise (every method unprotected) overturned by 2026-05-19 audit; real scope (1 RekordboxDB miss + 3 LiveRekordboxDB bypasses + drift-proofing) fully consistent with the auth-hardening adjacent-finding from which it was carved. No scope-creep: PARKED note keeps per-thread-handle refactor out, "Adjacent bug" note keeps the save_track_cues AttributeError out.
+- **Prior-art**: 2 carve-out anchors cited verbatim — `security-api-auth-hardening` (parent), `metadata-name-fixer` (sibling). No duplication.
+- **Plan**: all 6 OQs RESOLVED inline (audit produced answers), Options Considered + Recommendation already drafted with explicit draftplan-gate conditions (prefix-set finalise, harness flakiness, XMLDB inclusion, Option B-vs-C). User GATE A is the next blocker — content is exploring_-ready.
+
+---
+
+> ⛔ GATE A — user `/gate-pass` (→ `exploring_`) or `/gate-reject` (→ `drafting_`).
+> Note: the empirical audit + Options + Recommendation already cover most of Stage 2's deliverables. GATE A pass is expected to advance straight through exploring_ verifier on the first cycle.
 
 ## Findings / Investigation
 
