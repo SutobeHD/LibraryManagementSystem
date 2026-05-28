@@ -195,7 +195,7 @@
 | `docs/FILE_MAP.md` | **This file** — master project navigation map, one-line-per-file |
 | `docs/architecture.md` | System architecture, data flows (8 flows), security model, performance characteristics |
 | `docs/frontend-index.md` | React component index: props, key functions, Tauri IPC calls |
-| `docs/backend-index.md` | All 146 FastAPI routes grouped by feature + Python class/method index |
+| `docs/backend-index.md` | All 147 FastAPI routes grouped by feature + Python class/method index |
 | `docs/rust-index.md` | Tauri commands, Rust module index, event system, crate list |
 | `docs/SECURITY.md` | Dependency hardening (Schicht A), threat model, accepted risks |
 | `docs/NAMING_MAP.md` | Mapping doc for v0.0.2 rename refactor — kept for audit trail |
