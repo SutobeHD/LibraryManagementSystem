@@ -130,8 +130,11 @@ Defined in `.claude/commands/`:
 | `/research-new` | Scaffold new research topic |
 | `/pipeline` | Show research pipeline state + open gates |
 | `/dashboard` | Start the local research-pipeline web dashboard |
+| `/gate-list` | List every open user gate (A/B/C/D) with pass/reject commands |
+| `/gate-status` | Show one research doc's pipeline state + next step |
 | `/gate-pass` | Pass a research gate (A/B/C) — advance the doc |
 | `/gate-reject` | Reject a research gate — send the doc back |
+| `/print-routine` | Print a routine prompt below `---` (paste-ready for claude.ai/code) |
 | `/commit` | Stage + atomic commit with Conventional-Commits message |
 | `/pr-new` | Create branch + push + open PR |
 | `/changelog-bump` | Append unreleased commits to CHANGELOG.md |
