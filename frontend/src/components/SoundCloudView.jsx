@@ -7,7 +7,12 @@ import { listen } from '@tauri-apps/api/event';
 
 const SoundCloudView = () => {
     const [url, setUrl] = useState('');
-    const [token, setToken] = useState('');
+    // PRIVACY: do not hold the actual OAuth token in React state — the real
+    // token lives in the OS keyring on the backend and is never exposed via
+    // /api/settings. We track *whether* the user is authenticated as a bool
+    // so the UI can render "Reconnect" vs "Login" without ever touching the
+    // secret in the renderer process.
+    const [hasToken, setHasToken] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);
     const [tasks, setTasks] = useState({});
     const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -18,12 +23,12 @@ const SoundCloudView = () => {
     const loginInFlightRef = React.useRef(false);
 
     useEffect(() => {
-        // Load existing token
-        api.get('/api/settings').then(res => {
-            if (res.data.soundcloud_auth_token) {
-                setToken(res.data.soundcloud_auth_token);
-            }
-        }).catch(() => { /* settings may not be loaded yet — ignore */ });
+        // Probe auth state via the SC profile endpoint — succeeds (200) iff
+        // a valid token is present in the OS keyring. We deliberately don't
+        // pull the secret over the wire.
+        api.get('/api/soundcloud/me')
+            .then(() => setHasToken(true))
+            .catch(() => setHasToken(false));
 
         // EC12: Poll for tasks; .catch() ensures a failed request never freezes the spinner.
         const interval = setInterval(() => {
@@ -51,7 +56,7 @@ const SoundCloudView = () => {
 
         // EC7: React to the global 'sc:auth-expired' event from the Axios interceptor
         const onAuthExpired = () => {
-            setToken('');
+            setHasToken(false);
             setLoginMessage('');
         };
         window.addEventListener('sc:auth-expired', onAuthExpired);
@@ -90,9 +95,11 @@ const SoundCloudView = () => {
         try {
             const newToken = await invoke('login_to_soundcloud');
             setLoginMessage('Saving credentials securely...');
-            // Save token via HttpOnly cookie securely
+            // Hand the secret straight to the backend keyring — never persisted
+            // in React state. We flip the local auth-flag once the backend has
+            // confirmed it accepted the token.
             await api.post('/api/soundcloud/auth-token', { token: newToken });
-            setToken(newToken);
+            setHasToken(true);
             toast.success('SoundCloud Login erfolgreich!');
         } catch (e) {
             const errStr = String(e);
@@ -183,14 +190,14 @@ const SoundCloudView = () => {
                     <div className="glass-panel p-6 rounded-3xl border border-white/10 bg-white/5 backdrop-blur-md">
                         <div className="flex items-center justify-between mb-6">
                             <div className="flex items-center gap-3">
-                                <ShieldCheck className={token ? "text-emerald-400" : "text-amber2"} size={20} />
+                                <ShieldCheck className={hasToken ? "text-emerald-400" : "text-amber2"} size={20} />
                                 <h2 className="font-bold text-white">Go+ Authentication</h2>
                             </div>
-                            {token && <span className="text-[10px] font-bold text-emerald-500 uppercase flex items-center gap-1"><CheckCircle size={10} /> Authenticated</span>}
+                            {hasToken && <span className="text-[10px] font-bold text-emerald-500 uppercase flex items-center gap-1"><CheckCircle size={10} /> Authenticated</span>}
                         </div>
 
                         <p className="text-xs text-ink-secondary mb-6 leading-relaxed">
-                            {token ? "Your SoundCloud account is connected. You can download high-quality tracks and playlists." : "Log in to your SoundCloud account to download full tracks in 256kbps AAC or original lossless files."}
+                            {hasToken ? "Your SoundCloud account is connected. You can download high-quality tracks and playlists." : "Log in to your SoundCloud account to download full tracks in 256kbps AAC or original lossless files."}
                         </p>
 
                         <button
@@ -199,8 +206,8 @@ const SoundCloudView = () => {
                             className={`w-full flex flex-col items-center justify-center gap-2 py-4 ${isLoggingIn ? 'bg-orange-500/20 text-orange-400' : 'bg-orange-500 hover:bg-orange-400 text-white'} rounded-xl font-bold transition-colors`}
                         >
                             <div className="flex items-center gap-2">
-                                {isLoggingIn ? <Loader2 size={16} className="animate-spin" /> : (token ? <RefreshCw size={16} /> : <LogIn size={16} />)}
-                                {isLoggingIn ? 'Authenticating...' : (token ? 'Reconnect Account' : 'Login with SoundCloud')}
+                                {isLoggingIn ? <Loader2 size={16} className="animate-spin" /> : (hasToken ? <RefreshCw size={16} /> : <LogIn size={16} />)}
+                                {isLoggingIn ? 'Authenticating...' : (hasToken ? 'Reconnect Account' : 'Login with SoundCloud')}
                             </div>
                             {isLoggingIn && loginMessage && (
                                 <span className="text-[10px] uppercase tracking-widest opacity-80">{loginMessage}</span>
