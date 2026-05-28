@@ -25,6 +25,7 @@ related: []
 - 2026-05-15 — research/exploring_ — promoted; quality bar met (6/10 OQ resolved + 4 PARKED; Option E added; M0/M1/M2 with Deliverables + Gate blocks)
 - 2026-05-17 — research/exploring_ — deeper exploration toward evaluated_-ready: fixed stale `_db_write_lock` ref (now `app/database.py:22`); added auth-hardening Phase-1 Constraint (`Depends(require_session)` on all metadata-fixer mutation routes); added MusicBrainz client-lib Constraint (`httpx` not pinned, `musicbrainzngs==0.7.1` PyPI-available); added ANLZ string-cache Constraint; split revert-equality Goal (DB byte-identical vs tag semantic); added OQ #11 (ANLZ regen-vs-lazy) + OQ #12 (MB client lib choice); M0 Gate now requires Class-{2} empirical sample + OQ #11 decision; M1 deliverables explicitly require `Depends(require_session)`; M2 deliverables defer client-lib pick to draftplan
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
+- 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: advance to `midgate_` for user GATE B
 
 ---
 
@@ -205,6 +206,56 @@ Status: **(R) resolved this iteration**, **(P) parked till evaluated_/draftplan_
 - Open Q11 (ANLZ lazy vs fixer-owned regen) gets a sharper resolution rule: same-SHA pre/post mutation = fixer owns regen via `app/anlz_writer.py:737`; differing SHA = lazy works, fixer no-op.
 - M0 Gate adds per-format tag round-trip test (only ID3 verified to date).
 - Goal text on revert-equality corrected: ID3 IS byte-stable; raw-block sidecar is forensic for non-ID3 formats only.
+
+### 2026-05-28 — Adversarial Findings (wave-2)
+
+**Weak assumptions**
+- 1 req/s MB sweep "8h / 30k" ignores 503+Retry-After and ISRC-miss → fuzzy-search re-cost; real wall-clock likely 12–18h first run. Cache hit ratio on a second run unverified.
+- Class {3} (reversed) recall claim depends on MB ISRC coverage — Findings asserts ≥70% but no measurement. SoundCloud rips (the actual class-3 source) usually have no ISRC → MB fuzzy-only → precision collapses.
+- Counter-example for `_TRACK_NUM_PREFIX_RE` (`^\d{1,2}\s*[-.\s]\s*`): matches `"19 - Naughty Forty"` (real release name) → strips legit `"19 - "`. Needs negative-corpus test.
+- Tag-SHA equality after revert assumes mutagen 1.47.0 stable — pin holds, but ID3v2.3 vs v2.4 conversion path on write_tags is untested for round-trip.
+- `db_lock` retrofit is parked but parallel writers from existing 85 routes can still corrupt during a fixer run — fixer can't gate other routes' writes.
+
+## Citation Quality
+
+### 2026-05-28 — wave-2 spot-check
+
+- `app/database.py:22` `_db_write_lock = threading.RLock()` — **PASS** (verified).
+- `app/database.py:25-26` `@contextmanager db_lock()` — **PASS**.
+- `app/database.py:268` `_split_artists` — **PASS** (now method on class, not module-fn).
+- `app/database.py:1007` `update_tracks_metadata` — **PASS**.
+- `app/audio_tags.py:245/254/309/342/355` `_DISPATCH/write_tags/_READ_KEYS/_parse_filename/read_tags` — **PASS** all 5.
+- `app/anlz_writer.py:737` `write_anlz_files` — **PASS**.
+- `app/auth.py:95` `require_session` — **PASS**.
+- `requirements.txt:20` `requests==2.33.1`, `:58 mutagen==1.47.0` — **PASS**, no `httpx`/`musicbrainzngs` — **PASS**.
+- `app/main.py:892` `POST /api/track/{tid}` — **FAIL on line, PASS on substance**. Actual line **1124**.
+- `app/main.py:926` `PATCH /api/tracks/batch` — **FAIL on line, PASS on substance**. Actual line **1160**.
+- `app/main.py` grep `db_lock|_db_write_lock` → 0 matches — **PASS** (broken-invariant claim correct).
+- Commit `8fe5036` subject + ~1333 LOC removal — **PASS** (main.py delta is -239 not -231, minor drift).
+
+Verdict: 10/12 PASS, 2 FAIL on line numbers only. Substance intact.
+
+## Mid-Research Checkpoint
+
+### Status — 2026-05-28 (routine wave-1)
+
+**Covered**: 8-class catalogue + precision rank; 4-layer safety architecture; source-of-truth matrix (DB authoritative); MB rate-limit + UA policy; backup-engine-removal impact; ID3 byte-stability empirical; auth Phase-1 verified active; `db_lock` gap surfaced.
+
+**Still open (parked, non-blocking)**: Q4 Discogs trigger, Q7 revert granularity UI, Q9 NFC vs NFKC hardware check, Q10 `feat.` policy (sample at M0), Q11 ANLZ regen path (M0 Gate), Q12 MB client lib (draftplan).
+
+**Direction**: Phased D→A→B (M0 detect-only → M1 apply with sidecar log → M2 MB enrichment). M0 Gate gates Q10/Q11/Q9 + per-format tag round-trip.
+
+**Adversarial concerns**: MB wall-clock + class-3 ISRC coverage, `_TRACK_NUM_PREFIX_RE` false-positive on real releases, parallel-writer race vs other 85 routes (out-of-scope but real).
+
+## Research Verification
+
+### 2026-05-28 — PASS with stale-line warning
+
+- All file-symbol citations factually correct; two `app/main.py` line refs (892, 926) are stale by ~230 lines (correct lines: 1124, 1160). Substance (routes carry `Depends(require_session)`) verified.
+- Broken-invariant claim (`db_lock` unheld across 85 routes) re-verified — **0 matches** in `app/main.py`. Justifies the in-doc Constraint and the parked retrofit task.
+- Adversarial gap closed via wave-2 entry above. No blocker.
+- Options matrix coverage estimates are anecdotal but explicitly flagged so — acceptable for `exploring_` bar.
+- Recommendation single doc edit batch: fix two stale numbers (`app/main.py:892` → `:1124`, `:926` → `:1160`) before advancing to `evaluated_`.
 
 ## Options Considered
 

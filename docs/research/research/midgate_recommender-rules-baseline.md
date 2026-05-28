@@ -20,6 +20,7 @@ ai_tasks: false
 - 2026-05-15 — research/exploring_ — scope clarification re: new local-only sibling doc
 - 2026-05-15 — research/exploring_ — deeper exploration pass (toward evaluated_ readiness)
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
+- 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: advance to `midgate_` for user GATE B
 
 ## Problem
 
@@ -154,6 +155,67 @@ Measured on i7-12700H, 32 GB RAM, Windows 11. Headroom vs 100 ms P95 budget = **
 **MyTag access cost** — `_load_mytags()` at `live_database.py:141` populates `self.track_to_tag_ids` dict at startup. `get_track_mytags(tid)` at `:906` is a dict lookup → O(1). Safe to call per-candidate in hot path even at 50k.
 
 **Route-style verification** — `dependencies=[Depends(require_session)]` is the convention in `app/main.py` (14 occurrences). Recommender routes use same form.
+
+### 2026-05-28 — Adversarial Findings (wave-2)
+
+- **Brightness ≠ energy assumption weak.** `brightness = spec_cent / (nyquist*0.5)` (analysis_engine.py:1682) measures spectral centroid only; a quiet flute solo can score higher than a dense bass-heavy techno track. Energy proxy fails for bass-driven genres — exactly the use-case (DJ harmonic-mix). Mitigation: M2 must add `mood["warmth"]` blend.
+- **Camelot table = simplification.** Real harmonic-compat: +1/-1/relative are not equal-weight in practice; relative-minor-to-major shifts perceived energy ≠ +1 wheel step. Fixed-table 0.7 will produce surprising rankings users blame on "broken recommender". Reasons-list partially mitigates.
+- **Jaccard-on-max underweights single-tag overlap.** Seed with 1 tag matching candidate's 5 tags → 1/5=0.2; same tag matching candidate's 1 tag → 1/1=1.0. Asymmetric. Test G5 (per-feature ≥0.05) doesn't catch this asymmetry as a bug.
+- **No counter-example for genre binary.** "Techno"≠"Tech House" → 0.0 score → harsh cliff. Genre-hint at analysis_engine.py:1718 branches coarse buckets, but Rekordbox `Genre` is free-text — sub-genre mismatches will dominate local-mode genre subscore.
+- **G1 80% gate not validated.** 50k synthetic + ≥5 results @ 80% seeds is assumed. No mention of seed distribution. Tiny BPM tails / rare camelot keys could push fail-rate >20% silently.
+
+## Citation Quality
+
+### 2026-05-28 — wave-2 spot-check
+
+Spot-check 5 cited refs:
+
+- `app/auth.py:95 def require_session(...)` — **PASS** (exact match).
+- `app/analysis_engine.py:200 _CAMELOT_MAP = {...}` — **PASS**.
+- `app/analysis_engine.py:1682 brightness = min(1.0, spec_cent / (nyquist*0.5))` — **PASS** (exact line + formula).
+- `app/soundcloud_api.py:167 _sc_get(...)` — **MINOR FAIL** (actual line 168, 1-off).
+- `app/live_database.py:902-994 list_mytags/get_track_mytags` — **FAIL** (actual `list_mytags` at line 1002, `get_track_mytags` at 1006). `_load_mytags` doc:141 → actual :148 (7-off).
+- `app/soundcloud_api.py:566 _fuzzy_match_with_score` — **MINOR FAIL** (actual line 567, 1-off).
+- `app/main.py:4047 lines` — **STALE** (actual 4564 lines). Route handler insert "near line 770" may be wrong slot now.
+- "14+ require_session usages" — **UNDERSTATED**, actual 84 occurrences of `dependencies=[Depends(require_session)]`.
+
+Net: numeric line refs to mature modules (auth.py, analysis_engine.py) hold; refs into churning modules (live_database.py, main.py) drift. Re-Grep at implementation-start mandatory.
+
+## Mid-Research Checkpoint
+
+GATE B. `research-explore` fills Status after wave 1. User fills Verdict via `/gate-pass` or `/gate-reject`.
+
+### Status — 2026-05-28 (routine wave-1)
+
+**Covered**: scoring model picked (Option B), 9 testable goals with verbatim pytest signatures, 13 OQs RESOLVED/PARKED, empirical 50k benchmark (44ms median / 62ms P95), 8-commit implementation plan with diffs+messages, sibling-doc coordination (4 cross-links), feature-source line refs to analysis_engine + live_database + soundcloud_api.
+
+**Still open** (user-gated, not blockers): OQ 1 default (M1 backend-only), OQ 2 default (`key_first` preset), OQ 4 weight (relative=0.7). All three are one-line flips; defaults pinned with rationale.
+
+**Direction**: stay on Option B. Plan is implementation-ready. Citation drift in live_database.py / main.py needs Grep-refresh at first commit, not blocking research.
+
+**Adversarial concerns**: brightness-as-energy weakness, Camelot-table flattening, Jaccard asymmetry, genre binary cliff, G1 80% gate not empirically validated. All M1-shippable; M2 backlog should pick up brightness+warmth blend, sub-genre fuzzy match, MMR diversity rerank.
+
+### Verdict — YYYY-MM-DD (user)
+- _(empty until GATE B)_
+
+---
+
+> ⛔ GATE B — user `/gate-pass` (→ `exploring_` wave 2) or `/gate-reject` (→ `exploring_` + feedback).
+> ↓ Stage 2 wave 2 — `research-explore` deepens, runs Adversarial + Citation verifiers.
+
+## Research Verification
+
+Stage 2 wave-2 verifier over whole research body. PASS → `evaluated_`; gaps → more Findings.
+
+### 2026-05-28 — PASS-with-notes
+
+- Codebase claims verified: `_CAMELOT_MAP@200`, `require_session@95`, `brightness@1682`, SC `/related|/stations` absent (0 grep matches). PASS.
+- Line-ref drift in live_database.py (MyTag CRUD shifted ~100 lines) and main.py (4047→4564). Caveat noted in Citation Quality; not a research blocker since semantic claims hold.
+- Empirical benchmark (44ms median / 62ms P95 @ 50k) recorded with method (single-pass score+sort, pure-Python, seeded synthetic). Reproducible. PASS.
+- 9 goals each ship pytest signature with assertion shape — atypical for `exploring_`, raises implementation-readiness above evaluated_ bar.
+- Adversarial pass added 2026-05-28 surfaces real weaknesses; none invalidate M1 scope but feed M2 backlog.
+
+Verdict: PASS for `midgate_` advancement. Gaps are M2-scoped, not research-stage holes.
 
 ## Options Considered
 

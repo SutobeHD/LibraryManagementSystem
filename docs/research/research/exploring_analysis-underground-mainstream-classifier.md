@@ -25,6 +25,7 @@ ai_tasks: false  # set true to opt-in AI routines — see ## AI Tasks below
 - 2026-05-15 — research/exploring_ — promoted; quality bar met (Spotify cold-scan 3h→3.3min via batch endpoint; 8/12 OQ resolved; Findings #2 supersede; M1-M4 phased rollout)
 - 2026-05-15 — research/exploring_ — deeper exploration pass (toward evaluated_ readiness)
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
+- 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: stay `exploring_` until citation drift + Spotify carve-out + ISRC audit closed
 
 ## AI Tasks
 
@@ -308,6 +309,64 @@ M1 ships this in `app/popularity_audit.py` as standalone module — single depen
 - `require_session` gate on writes: `app/main.py:33` (import), applied on lines L557, L582, L630, L733, L773, L845, L859, L875, L886 (sampled). Popularity refresh endpoint (POST) gated; popularity read (GET) ungated.
 
 **Open Questions touched (this entry):** none directly resolved — entire entry is implementation-readiness verification. All prior PARKED/RESOLVED states preserved.
+
+### 2026-05-28 — Adversarial Findings (wave-2)
+
+**Weak assumption #1 — Spotify `popularity` semantics misread.** Doc treats Spotify `popularity` as a "0-100 already-log-normalised" plug-and-play percentile. Spotify docs: it is a proprietary recency-weighted score (Findings #3 admits this), reset partially every ~24h. Two failure modes: (a) percentile-of-percentile when fed through library-wide ECDF = signal collapse near 0.5; (b) snapshot drift — a track scoring 60 in March can read 40 in May with no real popularity change. Mitigation MUST: store `popularity` raw, skip ECDF for Spotify, and treat its band placement as platform-internal rank.
+
+**Weak assumption #2 — equal-mean aggregation defends nothing.** "Equal weights" (Q4) is presented as MVP simplicity. Failure mode: techno track on SC=99th-percentile + Spotify=10th = mean 0.55 → `niche` band. But user-intent is "underground in techno space" = SC dominates. Equal-mean inverts the curatorial signal for the exact users (electronic DJs) the app targets. Genre-aware weighting (deferred to M3) is actually the MVP — M2 equal-mean ships a known-broken default.
+
+**Weak assumption #3 — ISRC coverage hypothesis untested.** Findings #3 asserts "Beatport/iTunes/Bandcamp ~100% ISRC, SC ~0%, drag-drop ~30-50%". Zero measurement in repo. Q12-style audit runnable today (db.tracks ISRC histogram). Without it, M2 fuzzy-fallback rate (and Spotify match success) is guesswork.
+
+**Counter-example — Last.fm demographic skew weaponises against user.** Findings #2 acknowledges "older / Western / indie-heavy" bias then treats it as cosmetic. For an underground-electronic DJ library, Last.fm playcount near-zero is the DEFAULT, not a signal. Feeding Last.fm `0` plays into ECDF + equal-mean = drags every techno score toward 0.33 ceiling.
+
+**Failure mode — Spotify ToS user-key fallback (Q11).** Resolution accepts "user supplies own keys". Spotify dev terms forbid app-distributable client_secrets, BUT also forbid app-bundled software from prompting users to enter credentials in app UI without registering as a "client" themselves. UX of "paste your client_secret into .env" puts ToS burden on the user — informational read still required pre-M2.
+
+**Failure mode — `_normalize_track` 4 call-sites (Findings #6) is the wrong attack surface.** Adding `playback_count` to L329 is "trivial 1-line"; but downstream consumers expect the SC-payload-derived dict shape. Defaulting matters; `raw.get("playback_count")` (no default) is the only safe form.
+
+## Citation Quality
+
+### 2026-05-28 — wave-2 spot-check
+
+- `app/database.py:22` — `_db_write_lock = threading.RLock()` — **PASS** exact match.
+- `app/soundcloud_api.py:36` — `def get_sc_client_id()` declared L37 (decorator/blank at 36). **PASS** loose (±1).
+- `app/soundcloud_api.py:566` — `_fuzzy_match_with_score` defined at **L567**. **OFF-BY-ONE**.
+- `app/soundcloud_api.py:297-330` — `_normalize_track` body L297-331; return-dict ends L331; no `playback_count` key today. **PASS**.
+- `app/services.py:1111` — ISRC writer. Actual `"ISRC": tags.get("isrc")` at **L1163**. **FAIL** (~50 off; line drifted).
+- `app/usb_pdb.py:497` — "ISRC devicesql string slot 0". L497 is docstring listing fields; actual `string_payloads.append(encode_devicesql_string(isrc))` at **L518**. **PARTIAL** (function lives there, exact line wrong).
+- `app/soundcloud_downloader.py:723-727` — "audio_tags.write_tags doesn't have ISRC alias — skip silently". Actual at **L927-931**. **FAIL** (200 off; major drift).
+- `app/main.py:138-204` `validate_audio_path` — body L185-223, `is_relative_to` at **L207** not L191. **FAIL** (range off; line wrong).
+- Findings #6 `require_session` sample lines L557, L582, L630, L733, L773, L845, L859, L875, L886 — L557/L582 are Pydantic class declarations, NOT route guards. Real guards L744, L774, L823, L939, L994. **FAIL** — fabricated sample.
+- `app/analysis_cache.py:42-44` cache dir + `:124-126` lock write — **PASS** both ranges accurate.
+
+Verdict: 4/10 PASS, 4/10 FAIL, 2/10 PARTIAL. Doc cites correct symbols but stale/wrong line numbers across 4 high-signal references. Must regenerate citations before plan-stage.
+
+## Mid-Research Checkpoint
+
+### Status — 2026-05-28 (routine wave-1)
+
+**Covered:** Q1, Q3, Q6, Q7, Q9, Q10, Q11 RESOLVED with defended logic; Q2, Q12 PARKED-with-plan + runnable audit; Q4 partial (equal-mean MVP, genre-aware deferred to M3); Q5 RESOLVED (TTL sidecar). Options A-D quantified. Recommendation = A→B+D layered with M1-M4 phasing, entry/exit, rollback. M1 skeleton (sidecar store, route sigs, ~18 pytest names, git-diff preview) implementation-ready.
+
+**Still open:** Q8 (UI surface) PARKED to frontend exploration — fine. Q4 genre-aware weighting deferred to M3 — adversarial finding #2 challenges this. Q11 ToS user-key fallback — owner-read still recommended before M2 distribution.
+
+**Direction:** sound at architecture level (sidecar SQLite, hand-roll httpx, ECDF + log10 + mean). Two structural risks unaddressed: (a) Spotify `popularity` semantics not handled as platform-internal rank; (b) equal-mean defaults are demographically inverted for the target user (electronic DJ). Both fixable in plan-stage without rework.
+
+**Adversarial concerns surfaced this pass:** see Adversarial Findings 2026-05-28 — 6 items spanning Spotify recency drift, equal-mean inversion for techno, untested ISRC coverage hypothesis, Last.fm demographic skew weaponisation, Spotify ToS shift to user, normalizer-default-value foot-gun.
+
+## Research Verification
+
+### 2026-05-28 — GAPS
+
+**Verdict: GAPS.** Body is dense and implementation-ready at the structural level (M1 skeleton + pytest sigs + git-diff lines = rare for `exploring_`). Blocking gaps:
+
+1. **Citation drift** — 4/10 spot-checked file:line refs FAIL (services.py:1111→1163, downloader.py:723→927, main.py:191→207, fabricated require_session sample). Plan stage cannot inherit stale refs.
+2. **No adversarial pass on aggregation math** — equal-mean MVP is the surfaced default but inverts curatorial signal for electronic catalogues. Decide pre-M2 whether to ship genre-aware from day one, gated only on Q2 audit output.
+3. **Spotify `popularity` field treated as ECDF input** — recency-weighting + 0-100 pre-normalisation makes double-percentile a signal-collapse path. Math section must carve Spotify out of `log10 + ECDF` chain.
+4. **ISRC coverage hypothesis unmeasured** — same one-pass audit pattern as Q2/Q12; no reason to defer.
+
+**Non-blocking:** Q8 PARKED to frontend (correct).
+
+PASS-conditions: regenerate the 4 failing line refs; add Spotify ECDF carve-out to Findings #3 + Normalisation section; add ISRC-coverage audit to M1 side-deliverables alongside genre audit.
 
 ## Options Considered
 

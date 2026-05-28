@@ -24,6 +24,7 @@ related: []
 - 2026-05-15 — research/exploring_ — promoted; quality bar met (9/14 OQ resolved + 1 PARKED + 4 OPEN; corrected route count 12→17; Option E added; Pre-M1/M1.0/M1.1/M1.2/M1.3/M2 phased matrix; security Phase-1+2 hard prereq)
 - 2026-05-17 — research/exploring_ — deeper-exploration rework toward evaluated_ readiness (auth Phase-1 Steps 0-3 partial-landing reflected in Constraints; Tailscale Funnel concrete ports 443/8443/10000 + tailnet-DNS-only HTTPS-only constraints added; iOS 26 default-Web-App + Safari 18.4 Declarative Web Push surfaced; OQ15 added re: iOS 26 onboarding simplification; OQ12 lean reaffirmed against env-var pattern already proven by Phase-1 `LMS_TOKEN=`)
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
+- 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: stay `exploring_` — 4 gaps + hard prereq `ideagate_security-mobile-paired-tokens-phase2` GATE A pending
 
 ---
 
@@ -505,6 +506,50 @@ tailscale funnel --bg 8000     # listens on :443 (HTTPS), proxies to localhost:8
 ```
 
 No code support, no embed. Tailnet-DNS-only (no custom domain on free tier). Funnel constraint: ports 443 / 8443 / 10000 only — direct `:8000` exposure impossible, the `funnel 8000` command auto-binds 443.
+
+### 2026-05-28 — Adversarial Findings (wave-2 verifier)
+
+- **Stale line refs throughout.** `app/main.py` grew ~280 lines since 2026-05-17. Actual offsets today: `POST /api/track/{tid}` `:1124` (doc says `:892`), `POST /api/mytags` `:1073` (doc `:845`), `GET /api/track/{tid}` `:973` (doc `:758`), `GET /api/library/status` `:1478` (doc `:1202`), CORS block `:236-252` (doc `:209-224`), `require_session` hit-count `87` (doc `81`). Mobile draftplan that pastes doc-cited lines will mis-patch.
+- **CORS shape regressed for mobile assumption.** Doc claims `allow_credentials=True, allow_methods=["*"], allow_headers=["*"]`. Actual (`app/main.py:249-251`): `allow_credentials=False`, explicit method list, explicit header list. Bearer-attach still works (Authorization in `allow_headers`), but if mobile design ever wanted cookies it's already foreclosed. Surface in OQ12 sketch (a) — `MOBILE_ALLOWED_ORIGINS` patch must respect `allow_credentials=False` baseline.
+- **Phase-2 prereq doc HAS advanced.** `ideagate_security-mobile-paired-tokens-phase2.md` exists at GATE A (verifier PASS 2026-05-28). Doc still calls it "0 LoC ahead." True at code level (grep for `paired_devices` → all hits are research docs / SECURITY.md, zero in `app/`), but the planning surface moved. Re-state hard prereq as "code 0 LoC, design through GATE A pending".
+- **G7 latency budget assumption fragile.** Skip-tags mitigation rests on a 3-LoC `?skip_tags=true` param not yet specced. Untested. Contested + tags-ON p95 507 ms remains real failure mode if mitigation slips.
+
+## Citation Quality
+
+### 2026-05-28 — wave-2 spot-check
+
+- `app/main.py:892 POST /api/track/{tid}` — **FAIL**. Actual at `:1124`.
+- `app/main.py:845 POST /api/mytags` — **FAIL**. Actual at `:1073`.
+- `app/main.py:209-224 CORS allowlist` — **FAIL**. Actual at `:236-252`; further, `allow_credentials=False` (doc says `True`), methods/headers now explicit lists not `"*"`.
+- `app/database.py:22 _db_write_lock RLock` — **PASS**. Line 22 hosts `_db_write_lock = threading.RLock()`.
+- `app/auth.py:84 SESSION_TOKEN` — **PASS**.
+- `frontend/src/components/RankingView.jsx:81 myTagSupported` — **PASS**.
+- `frontend/src/components/RankingView.jsx:88 space hotkey` — **PASS**.
+- `frontend/src/api/api.js:184-204 Bearer interceptor` — **PASS**.
+
+Verdict: 5/8 PASS, 3/8 FAIL — all failures are file-grew drift in `app/main.py`. Fix: doc-wide search-and-replace of `app/main.py:<oldline>` against today's grep before `evaluated_`.
+
+## Mid-Research Checkpoint
+
+### Status — 2026-05-28 (routine wave-1)
+
+- **Covered:** What mobile is (Ranking-mode parity, no audio), API surface (17 routes mapped), tech choice (PWA M1, Capacitor M2), pairing UX (QR → device-token Bearer), off-LAN recipe (Tailscale Funnel docs-only), bundle budget (200 KB gz first-paint, jsQR pick), iOS 26 onboarding (OQ15 RESOLVED), phased gates Pre-M1/M1.0–M1.3/M2, pseudocode for `PairFlow.jsx`, `main.jsx`, `service-worker.js`, `manifest.webmanifest`, `vite.config.js` MPA delta.
+- **Still open:** OQ14 (60 s pairing-QR TTL sign-off), OQ7 (text-only M1 vs cover-thumb M1.3), Phase-2 paired-device-token implementation (0 LoC in `app/`, design at GATE A as of 2026-05-28).
+- **Direction:** Lean execute Option A under Phase-2 dependency; CORS env-extension OQ12 trigger-parked is safe.
+- **Adversarial concerns:** Stale `app/main.py` line refs throughout; CORS `allow_credentials` regression invalidates one paragraph in Findings #1; skip-tags mitigation for G7 budget is unspecced.
+
+## Research Verification
+
+### 2026-05-28 — GAPS
+
+- Coverage: Goals + Constraints + 15 OQs + 4 Findings entries + Recommendation = exploring_-complete depth.
+- Gaps blocking `evaluated_`:
+  1. `app/main.py` line refs all drifted (~280-line shift since 2026-05-17); Citation Quality spot-check 3/8 FAIL. Doc-wide refresh required.
+  2. CORS Constraints paragraph asserts `allow_credentials=True` + `allow_methods=["*"]` + `allow_headers=["*"]`; current code = `False` + explicit lists. Mobile OQ12 sketch (a) must respect the new baseline.
+  3. OQ14 (QR TTL) + OQ7 (cover-thumb) still OPEN per author's own Recommendation.
+  4. Hard prereq `ideagate_security-mobile-paired-tokens-phase2` GATE A pending (NOT passed). Mobile stays blocked at code level until Phase-2 ships.
+
+Recommendation: stay `exploring_` until (a) line-ref refresh, (b) CORS paragraph correction, (c) OQ14 + OQ7 user sign-off, (d) Phase-2 prereq advances past GATE A.
 
 ## Options Considered
 

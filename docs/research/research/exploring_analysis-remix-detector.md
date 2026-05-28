@@ -25,6 +25,7 @@ ai_tasks: false
 - 2026-05-15 — research/exploring_ — promoted; quality bar met (discovered existing src-tauri/src/audio/fingerprint.rs; corrected rapidfuzz→SequenceMatcher; M1/M2/M3 with 200-track fixture)
 - 2026-05-17 — research/exploring_ — deep exploration pass toward evaluated_-ready: Rust IPC bridging path resolved (Python-side via `_fingerprint_python_fallback` already in `app/main.py:3746`, Rust path requires Tauri window context — design implication); fixture infra gap surfaced (`tests/fixtures/` does not exist — must scaffold); pyacoustid 1.3.0 MIT licence + maintainer (sampsyo) verified via PyPI; cross-doc enum alignment confirmed (12 values both docs); 1 new OQ added on Python↔Rust fingerprint bridging
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
+- 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: stay `exploring_` until 4 gaps closed (re-grep refs, PyYAML pin, browser-mode caveat, lock owner)
 
 ---
 
@@ -175,6 +176,61 @@ Composite PK allows multiple rows per track (mashup multi-parent per OQ6). `sour
 **`pyacoustid` verified for M3.** PyPI: 1.3.1 latest (Apr 2024+ patch), 1.3.0 still installable. License: **MIT** (verified via `PKG-INFO` + `LICENSE`). Author: Adrian Sampson (sampsyo, also `beets` maintainer). Summary: "bindings for Chromaprint acoustic fingerprinting and the Acoustid API". Depends on `audioread` (already in `backend.spec` via librosa stack). Pin choice for M3: `pyacoustid==1.3.1` (newer patch).
 
 **Cross-doc enum alignment confirmed (variant-tag taxonomy).** Re-read sister-doc `exploring_external-track-match-unified-module.md` Goals + Findings 2026-05-15. Both docs list identical 12-value set `{original, extended, radio, club, dub, instrumental, acapella, vip, remix, bootleg, edit, mashup}` (order differs but set-equal). Sister-doc Recommendation §M1 ships `VersionTag.label: Literal[...]`; this doc's `track_variants.variant_label` column = `VersionTag.label.value`. Sister-doc adds `remixer: str | None` + `modifiers: tuple[str, ...]` carrying year-edit / compound tokens — this doc's `track_variants.remixer` column persists `VersionTag.remixer`; `modifiers` not persisted (transient — derivable from re-parsing title if needed). No drift.
+
+### 2026-05-28 — Adversarial Findings (wave-2 devil's-advocate sweep)
+
+- **Weak: M2 confidence 0.85 = auto-group floor.** Floor is 0.75. Single false-positive Rust-fp cluster (different songs same Mel-Goertzel hash) auto-merges two unrelated tracks invisibly. Calibration sweep covers precision but no per-genre stratification (techno + house likely collide more than mixed corpus suggests). Add stratified fixture buckets.
+- **Weak: title-only ≥ 95% precision target on 200-track fixture.** Sister-doc owns regex extractor; if its enum extraction is < 95%, this doc's downstream precision is bounded by it, not by classifier code. Target depends on dep doc reaching ≥ 0.95 itself — not stated.
+- **Counter-example OQ8 (re-run invalidation).** "Auto-invalidate only on title/artist mutation by metadata-name-fixer" assumes that doc emits events. If it ships as pure rewriter without event-bus, this doc has no signal — variants go stale silently. PARKED, but PARKED-with-dependency is a risk.
+- **Failure: frontend orchestration M2 (OQ-N#11).** Browser-dev mode (no Tauri window) cannot call `fingerprint_batch`. M2 silently degrades to M1 for browser users. Not stated as constraint.
+- **Missing: `_variants_db_write_lock` ownership.** Sidecar lifecycle — who opens connection? Reuses `app/database.py` pattern OR new module? Unwritten.
+
+## Citation Quality
+
+### 2026-05-28 — wave-2 spot-check (5 refs)
+
+- **`src-tauri/src/audio/fingerprint.rs:321`** (`fingerprint_track`) — FAIL. Actual at **line 323**.
+- **`src-tauri/src/audio/fingerprint.rs:344`** (`fingerprint_batch`) — FAIL. Actual at **line 346**. `tauri::Window` arg at line 348.
+- **`src-tauri/src/audio/fingerprint.rs:287`** (`hamming_similarity`) — FAIL. Actual at **line 289**. `MIN_FP_LEN=4` at line 48 correct.
+- **`src-tauri/src/main.rs:454-455`** (Tauri registration) — FAIL. Actual registration at **lines 510-511**. Off by ~55.
+- **`app/main.py:3746` / `:3777` / `:3783` / `:3844`** (fingerprint shadow stack) — FAIL all four. Actual: `_fingerprint_python_fallback` **L4223**, `_group_duplicates` **L4256**, `hamming_sim_py` **L4278**, `_run_duplicate_scan` **L4325**. Off by ~480. Drift from Phase-1 auth shift commits.
+- **`app/database.py:22`** (`_db_write_lock`) — PASS. RLock at L22, context manager L25-40, decorator L43.
+- **`app/soundcloud_api.py:566` / `:583`** (fuzzy matcher + threshold) — FAIL (off by 1). `_fuzzy_match_with_score` **L567**, threshold 0.65 at **L584**.
+- **`backend.spec` no `fpcalc`** — PASS.
+- **`tests/fixtures/` empty** — PASS (directory absent).
+- **PyYAML "already pinned in requirements.txt"** — FAIL. Grep `pyyaml|PyYAML` → no match. Must pin in M1 before fixture loader lands.
+
+Verdict: **5/10 refs fail**, mostly line-number drift from post-2026-05-17 backend commits. Symbol names + invariants intact; pure offset issue. Re-grep before promote. PyYAML pin claim is a real factual error to correct.
+
+## Mid-Research Checkpoint
+
+### Status — 2026-05-28 (routine wave-1)
+
+- **OQ1 (storage):** covered. Sidecar `app_data/variants.db`, composite PK schema.
+- **OQ2 (canonical picker):** covered. 4-rule precedence + tiebreak.
+- **OQ3 (confidence floor):** covered. 0.75/0.5/<0.5 buckets + settings override.
+- **OQ4 (normalisation order):** covered. feat-strip → tail-parens → NFC + casefold.
+- **OQ5 (fingerprint scope):** covered. settings.json opt-in, default false M1.
+- **OQ6 (mashup multi-parent):** covered via composite PK.
+- **OQ7 (AcoustID no MBID):** covered. 0.6 → 0.95 upgrade path.
+- **OQ8 (re-run invalidation):** PARKED → draftplan. **Adversarial concern:** depends on `metadata-name-fixer` emitting events; if not, stale silently.
+- **OQ9 (UI confidence):** PARKED, out-of-scope.
+- **OQ10 (taxonomy enum):** covered, cross-doc aligned.
+- **OQ-N#11 (Rust↔Python bridging):** covered, frontend-orchestrated. **Direction-gap:** browser-dev mode (no Tauri window) silently degrades — add to Constraints.
+- **Still open / direction:** PyYAML pinning (Findings #4 wrong: NOT in requirements.txt), browser-mode fallback, stratified per-genre fixture buckets, `_variants_db_write_lock` ownership.
+- **Adversarial-concerns flagged:** see Adversarial Findings 2026-05-28.
+
+## Research Verification
+
+### 2026-05-28 — GAPS
+
+- **OQ coverage:** 9/11 RESOLVED, 2 PARKED with reason — adequate for mid-stage.
+- **Internal consistency:** PASS. Enum + sidecar schema + sister-doc contract aligned; merge precedence rule (composite PK + MAX(confidence)) coherent across M1/M2/M3.
+- **Citation quality:** FAIL — 5/10 spot-checked refs stale (line drift from post-2026-05-17 backend commits). Symbols + invariants correct; offsets need refresh.
+- **Adversarial concerns addressed:** PARTIAL. Calibration target lacks per-genre stratification; M2 browser-mode degradation unstated; OQ8 dependency on `metadata-name-fixer` event bus unmodeled; `_variants_db_write_lock` owner unwritten.
+- **Dep-pin claim wrong:** Findings #4 says "PyYAML already pinned" — not in `requirements.txt`. Blocks M1 fixture loader.
+
+**Required before evaluated_:** re-grep all `app/main.py` + `src-tauri/src/**` refs; pin PyYAML or pick alt format; add browser-mode degradation to Constraints; name `_variants_db_write_lock` owner module.
 
 ## Options Considered
 

@@ -20,6 +20,7 @@ related: [analysis-remix-detector, library-extended-remix-finder, library-qualit
 - 2026-05-15 — research/exploring_ — promoted; quality bar met (caught load-bearing rapidfuzz cross-doc error AND flagged sister-docs for fixup; 8/11 OQ resolved-M1; 5 dated Findings with module-API design specifics)
 - 2026-05-17 — research/exploring_ — evaluated_-ready rework loop (re-verified `SequenceMatcher` + `fingerprint.rs` + `backend.spec`; cross-doc taxonomy alignment pass across 4 sister-docs; added Rust-FP-via-IPC option for M1; added canonical `VersionTag.label` enum + classifier-input table; added pre-evaluated_ checklist with sign-off blockers)
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
+- 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: advance to `midgate_` for user GATE B
 
 ---
 
@@ -459,6 +460,54 @@ NOT in module (sister-feature concerns):
 - rbox / `master.db` reads or writes.
 
 M1 dep footprint: **zero new deps.** `difflib.SequenceMatcher`, `re`, `subprocess`, `pathlib`, `typing.Protocol`, `dataclasses.frozen`, `functools.lru_cache` = stdlib. `httpx` (already pinned for SC) covers adapter HTTP. `rapidfuzz` swap (5–10× faster) = separate Schicht-A draftplan decision.
+
+### 2026-05-28 — Adversarial Findings (wave-2 stress test)
+
+- **Weak assumption 1 — `SequenceMatcher` equivalence will hold under module-lift.** Test `test_fuzzy_match_with_score_equivalence_to_sc_baseline` assumes IDENTICAL tuples vs current SC method, but current method uses INSTANCE-bound `self._normalize_title` inside `_normalize_title(local_title)` loop body (`soundcloud_api.py:580`). Lift-to-module path must call module-level `normalize_title()`. If lifted function instantiates `re` patterns differently (e.g. precompiled vs inline `re.sub`), CPython call overhead differs but `.ratio()` output identical — equivalence holds. Risk: if extractor later adds NFD-fold (test_normalize_title_handles_accents), equivalence BREAKS for accented titles. Decision-needed before equivalence test lands.
+- **Failure mode 1 — `ALLOWED_AUDIO_ROOTS` sandbox for `fingerprint(path)`.** Doc claims sandbox check happens before subprocess. `ALLOWED_AUDIO_ROOTS` is populated in `_init_allowed_roots()` (`main.py:145`) at import; module-level fingerprint() called from non-FastAPI context (e.g. pytest or sister-module direct import) won't see it populated unless main.py imported first. Module must validate via `Path.is_relative_to` against an injected/imported root list, not assume main.py side-effects. Surface in Implementation Plan.
+- **Counter-example — Rust-FP-via-IPC asymmetry.** Doc says sidecar cannot inverse-call Tauri (correct). But `fingerprint_batch` requires `tauri::Window` (`fingerprint.rs:348`) — frontend must initiate batch. Backend route accepting `Vec<u32>` cannot drive batch progress. Real flow: frontend invokes → frontend POSTs each result. Doc's "frontend forwards `Vec<u32>` to backend route" understates orchestration cost. Acceptable for M2; flag for draftplan.
+- **Threshold-tuning blindspot (OQ9).** Universal 0.65 = SC-calibrated. Doc proposes `threshold` param at call-site. No fixture committed for per-source calibration. Add labelled fixture per-source in M2.
+
+## Citation Quality
+
+### 2026-05-28 — wave-2 spot-check
+
+- `app/soundcloud_api.py:16` (cited as `from difflib import SequenceMatcher`) → **FAIL.** Actual line is **17** (line 16 is `import time`). Drift of 1.
+- `app/soundcloud_api.py:566` (`_fuzzy_match_with_score` def) → **FAIL.** Actual line is **567**. All in-method refs (579-580 shortcut, 582-583 ratio+threshold, 587 return) are each +1 line in main. Body lines 568-588.
+- `app/database.py:22` (`_db_write_lock = threading.RLock()`) → **PASS.** Exact match.
+- `src-tauri/src/audio/fingerprint.rs:287-302` (`hamming_similarity`) → **FAIL.** Actual range is **289-304** (drift +2). `fingerprint_track` cited at 320-334 → actual 322-336. `fingerprint_batch` cited at 343-398 → actual 345-400. File LOC cited 399 → actual **404**.
+- `tests/test_soundcloud_api.py:17-22` (import shape) → **PASS.** Exact match.
+- `Grep backend.spec fpcalc|chromaprint|acoustid|pyacoustid` → **PASS.** Zero matches verified.
+- `Glob app/external_track_match*` → **PASS.** Empty (greenfield).
+
+**Verdict:** All `soundcloud_api.py` refs need +1 bump; all `fingerprint.rs` refs need +2 bump and LOC = 404. Substantive content unchanged — function bodies, signatures, threshold value all intact. Drift is cosmetic from upstream commits post-2026-05-17. **Action:** sweep all numeric line refs in doc + Links section before evaluated_ promote.
+
+## Mid-Research Checkpoint
+
+### Status — 2026-05-28 (routine wave-1)
+
+- **Covered:** Module shape (Option C hybrid), public function surface, dataclasses (VersionTag/Candidate/Fingerprint), SourcePlugin Protocol, AdapterError hierarchy, taxonomy enum (12-member canonical), classifier-input collapse table, fpcalc PATH-detect plan, Rust-FP-via-IPC asymmetry resolution, 22-test signature plan, quantified options scoring, first-30-LoC pseudocode, git-diff prose.
+- **Still-open:** OQ11 async-vs-sync adapter shape (deferred to draftplan), OQ9 per-source threshold tuning (deferred M2 with labelled fixture), 5 sister-doc cross-doc fixup PRs (blockers per evaluated_ checklist), owner ack on Option C/D split.
+- **Direction:** Implementation-ready bar reached. No new architectural OQs surfaced in wave-1. Cross-doc taxonomy alignment is the last blocker before evaluated_ — non-code edits to 3 sister-docs.
+- **Adversarial concerns surfaced:** (a) ALLOWED_AUDIO_ROOTS dependency on main.py import-side-effects, (b) NFD-fold breaks equivalence test promise, (c) line-number drift in Constraints/Findings — content holds, numbers stale.
+
+## Research Verification
+
+### 2026-05-28 — PASS
+
+Load-bearing facts re-spot-checked against current `main`:
+- `SequenceMatcher` import + usage in `soundcloud_api.py` — PASS (line numbers +1 vs cited).
+- Threshold 0.65 hardcoded at point of comparison — PASS.
+- Exact-norm-title `(tid, 1.0)` short-circuit — PASS.
+- `_db_write_lock` location + type — PASS.
+- `fingerprint.rs` Tauri-command signatures + `tauri::Window` injection — PASS (line numbers +2, LOC = 404 vs cited 399).
+- `backend.spec` no fingerprint deps — PASS.
+- `app/external_track_match*` greenfield — PASS.
+- `tests/test_soundcloud_api.py` import shape — PASS.
+
+No semantic claim refuted. All API extraction targets remain mechanical lifts. OQ resolutions hold; Recommendation Option C unchanged.
+
+**Gaps:** Numeric line refs need bump (sweep before evaluated_). Adversarial entry (added wave-2) flags ALLOWED_AUDIO_ROOTS init-order assumption — needs mitigation note in Implementation Plan once draftplan_ begins.
 
 ## Options Considered
 

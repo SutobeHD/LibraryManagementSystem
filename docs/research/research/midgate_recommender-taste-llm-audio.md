@@ -20,6 +20,7 @@ ai_tasks: false
 - 2026-05-15 — research/exploring_ — scope clarification re: new local-only sibling doc
 - 2026-05-15 — research/exploring_ — deeper exploration pass (toward evaluated_ readiness)
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
+- 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: advance to `midgate_` for user GATE B
 
 ## Problem
 
@@ -325,6 +326,67 @@ Path-B preference order when gate passes: CLAP (text-query bonus) → MERT (musi
 - **DECIDED**: OQ1, OQ2, OQ3, OQ4, OQ5, OQ7, OQ8, OQ9, OQ10, OQ12.
 - **TRIGGER-PARKED** (default committed, revisit only on named trigger): OQ6 (skip-thresholds; trigger = Teil-1 `plays` lands → 2-week tb logging spike), OQ11 (weight tuning; trigger = eval NDCG@10 < baseline+0.15), OQ13 (LLM API-key UX; trigger = "explain" feature ships in M3).
 - **Gates before `evaluated_` → `accepted_`** (named hard-deps, not OQs): sister doc M1 lands vector pipeline; Teil-1 lands writable `plays` table; auth-hardening draftplan land (`require_session` available for `Depends`).
+
+## Findings / Investigation
+
+> Empirical investigation entries also live in `## Log` (dated, append-only). This section captures wave-2 adversarial output.
+
+### 2026-05-28 — Adversarial Findings (wave-2 stress-test)
+
+- **Cold-start under-determined**: OQ5 weighting `Rating==5→1.5, Rating==4→1.0` assumes Rekordbox Rating is set. Real libraries often have ≤ 10% rated. Min-8 fallback to Teil-1 may fire on > 50% of users — M1 = de facto Teil-1 for most. Mitigation: add `min_rated_tracks_observed` telemetry to `refresh_taste_profile` return dict.
+- **NDCG@10 baseline circular**: eval set scored by same user authoring taste model. Scoring bias inflates NDCG vs Teil-1. Need blind A/B: 2 panels, no seed-knowledge. Currently unspecified.
+- **Sister-doc HARD dep is single-point-of-failure**: if sister stalls at GATE A/B/C, this doc cannot enter M1. No fallback extractor here. Counter: spawn a 100-LoC degraded extractor (10-dim BPM+key+LUFS+mood only) in same doc as M0 hedge.
+- **P95 ≤ 200 ms at 50k × 46-dim brute cosine**: plausible (Numpy BLAS, ~9 MB scan) but unverified on cold disk read of `vector_blob`. SQLite blob fetch + numpy unpack at 50k can exceed budget if not memory-mapped.
+- **Option D explanation cache key**: `taste_profile_hash` invalidates on every nightly refresh → cache hit rate near 0 unless hash quantises drift. Underspecified.
+
+## Citation Quality
+
+### 2026-05-28 — wave-2 spot-check
+
+- `app/analysis_engine.py` 2239 LOC, `detect_mood` line 1656 — **PASS** (verified).
+- `app/analysis_cache.py:30 ANALYSIS_VERSION = 3` — **PASS**.
+- `Grep fps_id app/` = 0 hits — **PASS** (verified, 0 hits).
+- `Grep spectral_bandwidth|spectral_flatness|tempo_variability app/analysis_engine.py` = 0 — **PASS**.
+- `app/main.py:557` claimed as `Depends(require_session)` exemplar — **FAIL**: line 557 is `AudioImportReq(BaseModel)`. First actual `dependencies=[Depends(require_session)]` decorator at line 744.
+- `app/live_database.py:197` PlayCount hit — **FAIL** (off-by-12): actual hit at line 209.
+- `app/auth.py:95-115 require_session` — **PASS** (exact range).
+- `frontend/src/api/api.js:199` Bearer interceptor — **PASS**.
+- `backend.spec:21 collect_all(...)` — **PASS** (pkg-tuple iteration).
+- `requirements.txt` no torch/tensorflow/transformers — **PASS** (verified 0 hits).
+
+## Mid-Research Checkpoint
+
+GATE B. `research-explore` fills Status after wave 1. User fills Verdict via `/gate-pass` or `/gate-reject`.
+
+### Status — 2026-05-28 (routine wave-1)
+
+**Covered**: stack constraints (Python 3.10 / FastAPI / no torch in `requirements.txt`); persisted feature inventory (12-15 dense + categorical, line-cited); auth wiring via `require_session` Bearer (87 `main.py` usages); SoundCloud `/related` not yet implemented (0 hits confirmed); sister-doc storage schema inherited (`track_vectors.db (track_id PK, vector_blob, vector_version, computed_at)`); 13 OQs all DECIDED or TRIGGER-PARKED; M1/M2/M3 phasing with exact file-level deliverables + pytest signatures.
+
+**Still open**: (1) blind eval-set scoring protocol — NDCG@10 currently self-scored, bias unmeasured. (2) M0 fallback path if sister doc slips GATE A/B/C. (3) Cache invalidation strategy for Option-D LLM explanation layer. (4) `vector_blob` read budget at 50k uncached (SQLite BLOB fetch path unmeasured).
+
+**Direction**: M1 file-by-file diff is implementation-ready; gates well-named (sister M1 + Teil-1 `plays` + auth-hardening draftplan). Recommendation is concrete + falsifiable.
+
+**Adversarial concerns**: cold-start dominance risk (Rating sparsity), sister-doc single-point-of-failure, P95 budget hand-wavy on disk-cold path, explanation-cache near-zero hit rate.
+
+### Verdict — YYYY-MM-DD (user)
+- _(empty until GATE B)_
+
+## Research Verification
+
+Stage 2 wave-2 verifier over whole research body. PASS → `evaluated_`; gaps → more Findings.
+
+### 2026-05-28 — GAPS (recoverable)
+
+Body strengths: empirical re-verification block (2026-05-17) is exemplary — 6 grep counts cited with hit-totals. M1 deliverables file-by-file with public sigs + pseudocode + pytest signatures = implementation-ready. M2 6-criterion benchmark gate table is falsifiable. OQ resolution matrix (13/13 closed) = exit-ready content.
+
+Body gaps:
+- 2 stale line-cites (`main.py:557` should be `:744`; `live_database.py:197` should be `:209`) — both off after recent refactors
+- Adversarial section never written (closed via wave-2 entry above)
+- NDCG@10 acceptance metric methodologically circular (same user authors both eval set + taste signal)
+- Cache invalidation for Option-D not specified (every refresh invalidates → near-0 hit rate)
+- P95 ≤ 200 ms unverified on cold disk read of `vector_blob` at 50k × 184 B = ~9 MB blob scan
+
+Fix line-cites + spell M0 hedge (degraded 10-dim extractor) → ready for `midgate_`.
 
 ## Decision
 

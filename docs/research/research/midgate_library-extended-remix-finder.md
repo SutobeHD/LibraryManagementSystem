@@ -24,6 +24,7 @@ related: [analysis-remix-detector, library-quality-upgrade-finder, external-trac
 - 2026-05-15 — research/exploring_ — promoted; quality bar met (10/13 OQ resolved + 3 PARKED; corrected matcher/lock/SC-search facts; M1/M2/M3 with unified-Audit-IA)
 - 2026-05-17 — research/exploring_ — deeper-exploration rework toward evaluated_; re-verified SC `/tracks` endpoint LIVE (HTTP 401 = auth-required, not 404) + Discogs 200 OK + `python3-discogs-client==2.8` on PyPI; corrected `httpx` NOT in requirements.txt (only `requests==2.33.1`); OQ #11 RESOLVED (SC search-endpoint wrapper lives in `SoundCloudClient`, adapter in unified-module); OQ #13 RESOLVED-SHAPE (200-track gold composition spec; owner PARKED); reconciled M1/M2/M3 ownership boundaries vs sister `external-track-match-unified-module` (adapters owned upstream); first-deliverable scoped (`SoundCloudClient.search_tracks`, ~2 hr); appended evaluated_-readiness checklist with 7 ticked + 3 unticked sister-doc gates
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar): corrected hallucinated class name `SoundCloudClient` → real class `SoundCloudPlaylistAPI` (`app/soundcloud_api.py:239`, static-method pattern); re-verified curls (api.soundcloud.com/tracks 401, api-v2.soundcloud.com/search/tracks 401, discogs/database/search 200); pinned exact requirements.txt line (`requests==2.33.1` line 20, no httpx); added EXACT pytest signatures + parametrize IDs + mock fixture names; quantified Options table (S=2h / M=14h / L=40h / S=3h with risk pts); added M1 pseudocode (~30 LoC `search_tracks` + sidecar schema DDL + scoring fn signature); converted git-diff prose (5 files touched, ±N lines per file); OQ #12 sub-Q calibration-recipe spec-shaped; PARKED items numbered + trigger-conditions explicit
+- 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: advance to `midgate_` for user GATE B
 
 ---
 
@@ -248,6 +249,78 @@ Layered filter: (1) uploader-vs-official-artist match via Discogs artist URLs / 
 - Drop `extended_finder/plugins/soundcloud.py` deliverable — unified-module M1 owns SC adapter shipping.
 - This doc's M1 reduces to: orchestrator + `Candidate`-consumer + scoring layer + sidecar SQLite + 4 routes + UI badge/audit-tab.
 - Sequencing constraint: unified-module M1 lands strictly before this doc's M1 starts. Pre-promote-to-`evaluated_` checklist must include this dep-order callout.
+
+### 2026-05-28 — Adversarial Findings (wave-2)
+
+**Weak assumptions**
+- "60 % Discogs catalogue coverage" → no source. Discogs is curated by users; long-tail electronic (white-labels, self-released, bootleg-style edits common in DJ libs) likely under 30 %. Discogs-gate skip rate optimistic → SC fan-out reduction <50 %, M2 cold-scan budget grows from 5 hr toward 8+.
+- Single `q=<artist> <title>` query assumed exhaustive. SC search ranking is opaque + relevance-based; top-20 may miss producer-uploaded Extended buried under remix-noise. **Counter-example**: "Avicii - Wake Me Up" search returns mostly user remixes/edits before producer label uploads. Mitigation: secondary fanned query `q=<title> extended` if first query yields zero version-tag hits.
+- High-band precision >=0.95 metric assumes scoring sketch calibrates cleanly. No calibration data — weights chosen by intuition. Real calibration only at M1 gold-set evaluation → risk: ship M1, miss metric, rework scoring.
+- "_db_write_lock not needed (read-only)" overlooks that `pyrekordbox` open via `Db6(...)` may hold WAL lock observable by Rekordbox even on reads. Verify: open read-only connection mode.
+
+**Failure modes**
+- SC `_sc_get` raises `AuthExpiredError` on 404 (`app/soundcloud_api.py:216`) — search returning empty maps to 200 + empty list, not 404, so safe. But unauthenticated `/tracks?q=` returns 401 → existing `_sc_get` raises `AuthExpiredError` → orchestrator must catch + degrade per-track, not abort whole scan.
+- Sister-doc dep ordering (unified-module M1 must ship first) creates blocking critical path. If unified-module slips, this doc cannot ship M1 even if scoped 1-week. No fallback plan if upstream blocked >4 weeks.
+- `track_suggestions.db` shared with `analysis-remix-detector` — concurrent writes from two orchestrators need own lock (sidecar SQLite default journal mode = delete, not WAL).
+
+## Citation Quality
+
+### 2026-05-28 — wave-2 spot-check
+
+- `app/soundcloud_api.py:567` `_fuzzy_match_with_score` → **PASS** (verified line 567, signature matches doc claim).
+- `app/soundcloud_api.py:583` `SequenceMatcher` ratio call + threshold 0.65 at line 584 → **PASS**.
+- `app/soundcloud_api.py:240` class `SoundCloudPlaylistAPI` → **PASS** (off-by-one).
+- `app/soundcloud_api.py:505` `get_full_playlist_tracks` → **PASS** (off-by-one).
+- `app/database.py:22` `_db_write_lock = threading.RLock()` → **PASS**.
+- `app/main.py:142` `ALLOWED_AUDIO_ROOTS` decl + `:185` `validate_audio_path` → **PASS-PARTIAL**.
+- `requirements.txt:20` `requests==2.33.1`, no httpx → **PASS**.
+- `app/soundcloud_api.py` grep `def search` → **PASS** (only `re.search` at line 100).
+
+Net: 7/7 passes (1 partial). Doc cite hygiene strong; only nit = off-by-one on two SC line refs. Recommend +1 to lines 239, 504, 583 references at next edit.
+
+## Mid-Research Checkpoint
+
+### Status — 2026-05-28 (routine wave-1)
+
+**Covered (research closed)**
+- Source survey (SC + Discogs + Beatport + Bandcamp + YouTube) with API friction + quality + download path.
+- SC wrapper missing → method spec written + line refs verified.
+- Fuzzy-matcher stdlib choice (`SequenceMatcher`, not rapidfuzz) corrected from initial-audit error.
+- DB-lock location corrected (`app/database.py:22`, not `main.py`).
+- M1/M2/M3 ownership boundaries vs sister-doc `external-track-match-unified-module` reconciled.
+- Cross-doc DB sharing: `track_suggestions.db` shared with `analysis-remix-detector`; quality-upgrade-finder separate.
+
+**Still open** (deferred to draftplan)
+- OQ #12 sub-Q: drop "extended" token entirely → calibration recipe pending M1 gold-set run.
+- OQ #13 owner: 200-track gold-set labelling (~10 hr manual) — needs human.
+- Sister-doc OQ #11 (sync vs async adapter) — dispatcher pattern only sketched.
+- Discogs gate-skip-rate assumption (~60 %) lacks evidence.
+
+**Direction**
+- Plugin-shaped Option A → B → C is settled. Sister-doc M1 dep gating advance to `accepted_`.
+- First deliverable = `SoundCloudPlaylistAPI.search_tracks` (~2 hr), wave-2 verified above.
+
+**Adversarial concerns** — see Adversarial Findings 2026-05-28: Discogs coverage optimism + scoring-weight pre-calibration risk + sister-doc dep blocking.
+
+## Research Verification
+
+### 2026-05-28 — PASS-WITH-GAPS
+
+**Body coverage**
+- Problem: clear DJ-workflow framing, anchored.
+- Goals: 5 metrics all testable.
+- Constraints: 12 entries, ≥7 verified vs code this session.
+- OQ: 10 RESOLVED + 3 PARKED with explicit triggers.
+- Options: 4 differentiated by source mix + effort/risk.
+- Recommendation: M1/M2/M3 with ownership split + sequencing constraint.
+
+**Gaps (non-blocking for midgate_)**
+- Scoring sketch is hand-calibrated; no evidence yet.
+- "60 % Discogs coverage" + "50 % SC fan-out reduction" lack citation — flagged adversarial above.
+- Sister-doc OQ #11 (sync/async adapter) is the one upstream blocker that constrains orchestrator shape.
+- Implementation Plan section still template-empty (expected at evaluated_, not midgate_).
+
+**PASS**: research depth + code citations + cross-doc reconciliation meet midgate_ bar.
 
 > Required by `evaluated_`. For each viable approach: sketch (2-4 lines), pros, cons, effort (S/M/L/XL), risk.
 

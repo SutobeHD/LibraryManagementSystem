@@ -22,6 +22,7 @@ related: [library-extended-remix-finder, analysis-remix-detector, external-track
 - 2026-05-15 — research/exploring_ — promoted; quality bar met (6 OQ resolved + 5 PARKED; corrected _db_write_lock location bug; extended safety rules 5→7; Phase 1/2/3 with measurable exit gates)
 - 2026-05-17 — research/exploring_ — deeper exploration toward evaluated_ readiness (fixed db_lock() helper-name + line-number bug; verified librosa.spectral_centroid/rolloff precedent in analysis_engine.py; added Q12 auth-hardening dependency for /api/quality/* gating; added Phase-1 first deliverable + measurable acceptance bar)
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
+- 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: stay `exploring_` until line-ref refresh + library_swap extraction coordination with sister `ideagate_library-format-converter`
 
 ---
 
@@ -370,6 +371,72 @@ Tolerance defaults: `assert abs(result.cutoff_hz - reference_hz) < 200`. Fixture
 - `draftplan_security-api-auth-hardening.md` — Phase-1 marked shipped (auth.py + 87 wired routes). Q12 closes. No further coordination needed beyond "consume `require_session`".
 - `library-extended-remix-finder` — own-DB vs unified-DB still open (Q9 trigger).
 - `external-track-match-unified-module` — M1 function-only API + fpcalc PATH-detect still upstream blocker for Phase-2 (rule 2 chromaprint). Unchanged.
+
+### 2026-05-28 — Adversarial Findings (wave-2 verifier)
+
+**Weak assumptions**
+- 5-track Phase-1a fixture asserts `cutoff_hz ± 200 Hz`; tolerance derived from one MP3-128 sample. Cross-encoder variance (LAME vs Fraunhofer vs FFmpeg-internal) easily 500-1500 Hz on the same nominal bitrate — 200 Hz may make tests flaky.
+- "librosa-load dominates 76%" measurement is single-box, single-MP3. FLAC decode path likely 3-5× faster (no MP3 codec), so 4-worker 6h ceiling is over-conservative for FLAC-heavy libraries and under-conservative for V0/V2 VBR.
+- Rule 6 Rekordbox-process check (`tasklist`/`pgrep`) loses to (a) renamed exe (`rekordbox.exe.bak` running via mklink), (b) Rekordbox-7 split processes (`rekordbox.exe` + `rekordbox-agent.exe` + `Upmgr.exe`).
+- Composite weight assertion "sum = 1.00" not enforced — drift risk on tuning iteration. Pin as `assert sum(w.values()) == 1.0` in code.
+
+**Failure modes**
+- `app/main.py:validate_audio_path` exact-match escape hatch at `:213-221` admits any path present in `db.tracks` — quality-probe inherits this; an attacker who can write to a path that happens to match a track row bypasses sandbox. Doc notes the TODO but does not flag inheritance.
+- `librosa.load(sr=None)` on a corrupt MP3 can raise inside C codec → silent process death in ProcessPool worker; Phase-1b needs `concurrent.futures.BrokenProcessPool` recovery, not in scope yet.
+
+**Counter-examples**
+- Cross-overlap with `ideagate_library-format-converter` (OQ 2: merge vs extract `app/library_swap/`) NOT mentioned in this doc. Sister-doc already cites this file's safety rules 4/6/7 as shared primitive; Phase-2 specification here freezes those rules without coordinating extraction — risks double-implementation. Surface explicitly before draftplan.
+
+## Citation Quality
+
+### 2026-05-28 — wave-2 spot-check
+
+Anchors re-verified against current HEAD:
+
+- `_db_write_lock` RLock at `app/database.py:22` — **PASS** (exact).
+- `db_lock()` ctx-manager at `app/database.py:26-40` — **PASS** (`@contextmanager` line 25, body 26-40).
+- `_serialised` private decorator at `app/database.py:43-53` — **PASS** (body 43-53).
+- `ALLOWED_AUDIO_ROOTS` at `app/main.py:130` — **FAIL** (actual `:142`; `_init_allowed_roots()` at `:145-167`). Line-number drift +12.
+- `validate_audio_path` at `app/main.py:160-197`, `is_relative_to` at `:183`, escape hatch at `:191-195`, TODO at `:189` — **FAIL** (actual: function `:185-223`; `is_relative_to` `:207`; escape `:213-221`; TODO `:211`). All claims +24 lines off.
+- `/api/file/write` at `app/main.py:582-628` — **FAIL** (actual `:774`+; doc anchor +192 lines off). Architecturally still the canonical `Depends(require_session)` precedent.
+- `app/services.py:177-183` ffprobe pattern — **PASS** (`subprocess.run([FFMPEG_BIN.replace("ffmpeg","ffprobe"), ...], timeout=10)` at exact range).
+- `app/config.py:6` `FFMPEG_BIN = "ffmpeg"` — **PASS**.
+- `app/analysis_engine.py:1675-1677` `librosa.feature.spectral_centroid` + `spectral_rolloff` precedent — **PASS**.
+- `app/auth.py` 116 lines, `require_session` Bearer dep — **PASS** lines correct; `SESSION_TOKEN` mint claimed `:78-80`, actual `:84` — **PARTIAL FAIL**.
+- `app/main.py` `require_session` on "87 routes" — **PASS** (Grep count 87 exact).
+- `SHUTDOWN_TOKEN` historic comment at `app/main.py:935` — **FAIL** (actual `:1171`; +236 lines off).
+- `requirements.txt:34` `librosa==0.10.1` pin — **PASS**.
+
+Verdict: semantic claims accurate, but ~ half the `app/main.py` line numbers are stale by 12-236 lines. Re-anchor before draftplan.
+
+## Mid-Research Checkpoint
+
+### Status — 2026-05-28 (routine wave-1)
+
+- **Covered**: Q1/Q2/Q3/Q4/Q7/Q8/Q10/Q11/Q12 RESOLVED (9/12 = 75%). Phase-1a deliverable shape + pseudocode + 7 named tests + exit gates. Empirical cost re-measurement (3.5 s/track). Auth dependency closed (Phase-1 shipped). Composite weights pre-decided. Safety rules 1-7 specified.
+- **Still open**: Q5 (re-analyse policy — Phase-2 trigger). Q6 (composite-weight calibration — 50-track fixture trigger). Q9 (own-DB vs unified-DB — sister-doc trigger). Owner acks on bias for Q5/Q6/Q9 + Option D + Phase-1a deliverable.
+- **Direction**: continue toward `evaluated_`. Phase-1a is implementation-ready (signature + tests + pseudocode), unblocked by Phase-1 auth shipped + auth.py available + librosa precedent verified. Phase-2 chromaprint dependency on sister `external-track-match-unified-module` M1 — not a Phase-1 blocker.
+- **Adversarial concerns**: see Adversarial Findings 2026-05-28. Cross-overlap with `ideagate_library-format-converter` (shared `app/library_swap/` primitive — OQ 2 there) is the dominant unresolved coordination question. Plus: validate_audio_path escape hatch inherited by quality-probe, cutoff tolerance 200 Hz cross-encoder fragility, line-number drift across half the main.py anchors.
+
+## Research Verification
+
+### 2026-05-28 — GAPS
+
+**PASS**:
+- Architecture decisions: separate `app/quality_engine.py`, ProcessPool, no `analysis_engine` invocation, sidecar `app/data/track_quality.db`, `Depends(require_session)` on every route — all internally consistent + grounded in verified precedents.
+- Empirical cost model based on real measurement, not estimate.
+- Phase-1a smallest-shippable unit well-defined: 1 endpoint, 7 named pytest functions, no DB writes, ≤ 500 LoC. Reversible if rejected.
+- 9/12 OQ resolved; remaining 3 PARKED-with-bias + explicit triggers.
+- Safety rules 1-7 cover the irreversible-overwrite blast radius; rule 4 snapshot path inside `ALLOWED_AUDIO_ROOTS[0]` sandbox-correct.
+
+**GAPS**:
+- Citation drift: ~ 50% of `app/main.py` line numbers stale 12-236 lines. Semantics correct, anchors wrong.
+- Cross-doc overlap with `ideagate_library-format-converter` (shared snapshot+swap+migrate primitive — OQ 2 there proposes `app/library_swap/` extraction) NOT acknowledged in this doc's Recommendation/Constraints. Phase-2 spec here freezes safety rules 4/6/7 without coordinating extraction.
+- `validate_audio_path` escape hatch (`:213-221`) inherited by quality-probe; doc cites TODO but does not analyse the trust assumption transfer.
+- Cutoff tolerance `± 200 Hz` derived from n=1 sample; cross-encoder variance + fixture-rebuild fragility unaddressed.
+- Composite-weight sum invariant not enforced in code.
+
+**Required before evaluated_**: re-anchor stale `app/main.py` line numbers, resolve `app/library_swap/` extraction-vs-merge with sister `ideagate_library-format-converter`, then promote.
 
 ## Options Considered
 

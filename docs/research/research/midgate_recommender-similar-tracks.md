@@ -26,6 +26,7 @@ related: [recommender-rules-baseline, recommender-taste-llm-audio, security-api-
 - 2026-05-15 — research/exploring_ — promoted; quality bar met (corrected ~12-15 dim actual vs 46 claimed; 11 OQ accounted; M1/M2/M3 with concrete deliverables + exit criteria)
 - 2026-05-17 — research/exploring_ — evaluated_-ready deepening pass: corrected sklearn-not-in-requirements; specified Bearer auth via `Depends(require_session)` per draftplan; reconciled path-(a)+(b) duality in OQ11; tightened external-track-match cross-doc scope (matching-not-ranking); added OQ12 sklearn-dep status
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
+- 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: advance to `midgate_` for user GATE B
 
 ---
 
@@ -195,6 +196,78 @@ Token handoff = Tauri stdout+file (per draftplan Findings/Recommendation pick). 
 **Open Questions newly answerable:**
 - **OQ11** — bumped from "path-(a) preferred" to "both-paths required; user sign-off only on path-(a)" — narrower gate.
 - **OQ12 (new)** — sklearn-as-new-dep status documented; default = stay numpy-only.
+
+### 2026-05-28 — Adversarial Findings (wave-2 red-team)
+
+**Weak assumptions**
+- **P95 ≤ 100 ms holds with filter overhead.** Recommendation cites "35-50 ms brute cosine over 50k × 46-dim". Ignores: (a) candidate-set rebuild per query (BPM/duration/MyTag filters require Python-side row iteration unless prebuilt index columns), (b) reasons-list construction per top-N row, (c) cold mmap of `vector_blob` BLOB column from SQLite — first-query overhead untested. Mitigation: benchmark MUST include `pytest-benchmark` cold + warm paths; "50k synthetic" fixture in M1 exit-criteria does not specify filter-fanout — add ≥ 50% filter rejection to fixture.
+- **Backfill ≈ 0.4 s/track on cached `y`.** Finding line 191 assumes `analysis_cache` returns decoded `y`. Re-check: `analysis_cache.py` caches the **result dict** (line 2207 `cache.put(file_path, result)`), NOT the raw `y` PCM array. Backfill must re-decode every file via librosa.load (~1-3 s/track @ sr=22050 mono). Revised 50k estimate: **8-15 h single-process**, 2-4 h with 4 workers — breaks the "< 2 h" exit-criteria.
+
+**Failure modes**
+- **vector-store / master.db track-id drift.** `track_vectors.db` keyed by Rekordbox `track_id`. If user re-imports a track Rekordbox assigns NEW id → orphan vector row + cold-start on "same" file. Need ON-DELETE-CASCADE-equivalent reconciliation absent from recommendation.
+- **Weights tuning offers no falsification path.** Option C weights asserted, not derived. No eval-driven weight-search in M1 — risk: M1 ships, eval-set fails 3/10 threshold, no closed-loop to tune weights vs swap to Option B. Mitigation: M1 exit-criteria should require a weight-grid sweep over the 20-seed eval (cheap; ~1k cosine combos).
+
+**Counter-example: explainability claim vs cosine.** Goals promise "≥ 2 reasons / row with subscores ≥ 0.05". A 46-dim cosine bloc collapses MFCC/chroma into one scalar — reasons need per-block sub-cosines (MFCC-only, chroma-only) computed separately. Plan must split vector into named slices (`v["mfcc"]`, `v["chroma"]`, `v["spectral"]`, `v["dynamics"]`) BEFORE storage, not at query time.
+
+## Citation Quality
+
+### 2026-05-28 — wave-2 spot-check
+
+| Claim | Cited ref | Verdict |
+|---|---|---|
+| Result dict at `analysis_engine.py:2152-2201` | `result = {` opener at 2152, closes at 2201 — all fields present | **PASS** |
+| `require_session` Bearer-only at `app/auth.py:96-119` | actual: scheme check line 107, `safe_compare` line 114, raises 401 on mismatch | **PASS** (off-by-4) |
+| `numpy==1.26.4` at `requirements.txt:32` | actual line 31 | **MINOR FAIL** (off-by-1) |
+| `ANALYSIS_VERSION = 3` at `analysis_cache.py:30` | exact match | **PASS** |
+| `spectral_bandwidth\|spectral_flatness\|tempo_variability` = 0 hits in `analysis_engine.py` | confirmed 0 matches | **PASS** |
+| `plays\|play_history\|play_count` = 1 comment hit in `live_database.py` | 1 match (count-only verified) | **PASS** |
+| sklearn bundled via `backend.spec:21` | exact: pkg-tuple iteration | **PASS** |
+| MFCC per-phrase at `analysis_engine.py:1132` | `mfcc = librosa.feature.mfcc(y=seg, sr=sr, n_mfcc=13)` inside phrase loop | **PASS** |
+| chroma in `_detect_key` at `analysis_engine.py:357-373` | chroma_cqt/cens/stft calls present | **PASS** |
+| `detect_mood` at line 1666 | actual `def detect_mood(` at **line 1656** | **MINOR FAIL** (off-by-10) |
+| `require_session` already used 40+ times in `app/main.py` | actual **87 occurrences** | **PASS** (claim conservative) |
+
+Net: 9 PASS / 2 MINOR off-by-N. No load-bearing refs broken.
+
+## Mid-Research Checkpoint
+
+### Status — 2026-05-28 (routine wave-1)
+
+**Covered (resolved or with proposed default):**
+- OQ1 (shared pipeline), OQ6 (filter+score hybrid), OQ9 (cold-start excluded), OQ10 (sidecar SQLite) — fully resolved
+- OQ2, OQ5, OQ11, OQ12 — partial w/ default proposal
+- Vector spec (~12-15 persisted vs ~46 target dims, gap quantified at Finding #3)
+- Auth wiring (`Depends(require_session)`, Bearer-only)
+- Dep status (numpy-only M1; sklearn deferred to M2 trigger)
+- Cross-doc scope vs Teil-1, Teil-2, external-track-match (all clarified)
+
+**Still open / gate-required for `evaluated_`:** OQ3 (separation vs combined), OQ4 (UX entry-points), OQ5 confirm, OQ11 path-(a) sign-off — all flagged as user-pick gates in Recommendation.
+
+**Direction:** Option C (handcrafted + categorical weighting) on numpy-only stack, with Option-B-compatible storage schema for future Teil-2 swap. Phased M1→M2→M3 milestones with explicit triggers.
+
+**Adversarial concerns surfaced (full block in Adversarial Findings 2026-05-28):**
+- Backfill cost assumes cached `y` — `analysis_cache.py` caches dict not PCM; revised estimate breaks "< 2 h" target
+- Vector-store track_id drift on re-import not addressed
+- Weights asserted without eval-driven derivation
+- Filter-fanout not modelled in P95 benchmark
+- Reasons-list requires named vector slices, not query-time bloc-cosine decomposition
+
+### Verdict — YYYY-MM-DD (user)
+- _(empty until GATE B)_
+
+## Research Verification
+
+### 2026-05-28 — PASS
+
+**PASS over body** with two PLAN-SHAPE corrections required before `evaluated_`:
+
+1. **Backfill cost model needs revision.** Finding 2026-05-17 line 191 assumed cached `y`; `analysis_cache.py:30` confirms only the result dict is cached (line 2207 `cache.put(file_path, result)`). Either: extend exit-criteria backfill window, or restrict backfill to path-(a) catch-up on next-decode.
+
+2. **Vector storage must be named slices, not flat 46-dim bloc.** Recommendation M1 implies flat `vector_blob`; reasons-list goal needs per-block sub-cosines computed at query time, only cheap if pre-sliced. Patch: `vector_blob` becomes a struct or 4 separate BLOB columns — schema decision must land BEFORE M1 implementation.
+
+Citations spot-checked: 9 PASS, 2 minor off-by-N line drift, no load-bearing ref broken. Cross-doc claims all consistent with source docs.
+
+**Recommendation:** advance to `midgate_` for user GATE B review; address 2 plan-shape corrections at GATE-B feedback.
 
 ## Options Considered
 
