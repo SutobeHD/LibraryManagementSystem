@@ -21,6 +21,8 @@ superseded_by: []
 ## Lifecycle
 
 - 2026-05-28 — `research/idea_` — created (user request after SC-downloader security audit)
+- 2026-05-28 — `research/drafting_` — Stage 1 worker filled Problem → Research Plan inline at creation time (faster than waiting for next routine cycle; same outputs the routine would have produced)
+- 2026-05-28 — `research/ideagate_` — Stage 1 verifier PASS, awaiting GATE A
 
 ## Original Idea (verbatim — never edit)
 
@@ -113,8 +115,10 @@ Stage 1 Worker. Each bullet = one Stage-2 agent.
 
 Stage 1 Verifier. Dated entries, append-only. PASS / FAIL + ≤40-word reason (checked vs `## Original Idea` + `## Prior Art`).
 
-### YYYY-MM-DD — <PASS|FAIL>
-- …
+### 2026-05-28 — PASS
+- **Intent**: AIFF default + Settings-Dropdown both in Goals, OQ 5 surfaces the AIFF-vs-ALAC clarifier (user wrote "AIFF (Apple Lossless)", which are two different formats — answer waits for GATE A). "Nichts unnötig doppeln" honoured: every overlap with `library-format-converter` / `downloader-unified-multi-source` is a Prior-Art cross-link, not a re-spec.
+- **Prior-art**: Both active sister docs labelled with explicit scope-delta (per-download here, library-batch / multi-source there). Half-built code state (`_convert_to_aiff` + `sc_download_format`) cited file-precise — anchors the diff against drift.
+- **Plan**: 6 OQs all yes/no or X-vs-Y, no philosophy. 4 Research-Plan bullets cover OQs 1-6 without orphans (codebase delta agent doubles for OQs 2+5; UI agent answers the Settings-pattern unknown).
 
 ---
 

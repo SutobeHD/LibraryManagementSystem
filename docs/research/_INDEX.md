@@ -16,13 +16,13 @@ If this index drifts from the file system, the file system wins — re-derive wi
 ### idea
 - [idea_db-write-lock-retrofit.md](research/idea_db-write-lock-retrofit.md) — Retrofit `_db_write_lock` on 85 unprotected `master.db` write routes; `@_serialised` decorator defined but 0 applications; rbox 0.1.7 concurrent-write panic risk (2026-05-19)
 - [idea_security-mobile-paired-tokens-phase2.md](research/idea_security-mobile-paired-tokens-phase2.md) — Phase-2 paired-device tokens + QR-pairing flow; hard prereq for mobile-companion; sidecar-local SQLite, `require_session` accepts boot+device tokens (2026-05-19)
-- [idea_download-format-setting.md](research/idea_download-format-setting.md) — Per-download AIFF default + user-configurable target format setting; ship-bare narrow subset of `library-format-converter` (batch) + `downloader-unified-multi-source` (Q11) (2026-05-28)
 
 ### drafting
 _(none)_
 
 ### ideagate ⛔ GATE A
 - [ideagate_library-format-converter.md](research/ideagate_library-format-converter.md) — Library-weiter Audio-Format-Konverter (m4a/AIFF/FLAC/WAV/MP3) mit DB-Integrität; HIGH overlap mit `library-quality-upgrade-finder` (OQ 2); 6 OQs + 5 Research-Plan-Bullets; Verifier PASS (2026-05-28)
+- [ideagate_download-format-setting.md](research/ideagate_download-format-setting.md) — Per-download AIFF default + Settings-UI für Ziel-Format; ship-bare narrow subset of `library-format-converter` (batch) + `downloader-unified-multi-source` (Q11); 6 OQs incl. AIFF-vs-ALAC clarifier; Verifier PASS (2026-05-28)
 
 ### exploring
 - [exploring_recommender-rules-baseline.md](research/exploring_recommender-rules-baseline.md) — Teil 1: BPM/Key/Genre/MyTag/Energy ranking + Camelot harmonic mixing; local + SoundCloud modes (2026-05-11)
