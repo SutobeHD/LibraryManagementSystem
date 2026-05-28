@@ -54,6 +54,7 @@ POST-DOWNLOAD PIPELINE
   4. Background: Auto-import into library + auto-sort into matching SC playlist
 """
 
+import ipaddress
 import logging
 import re
 import shutil
@@ -63,6 +64,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 
@@ -83,41 +85,30 @@ _MAX_NAME_LEN = 80
 _API_TIMEOUT = 15  # seconds — URL resolution / redirect
 _DOWNLOAD_TIMEOUT = 180  # seconds — actual file download (large files up to ~500 MB)
 
-# Hard cap on single-file download size. Prevents a malicious or corrupted
-# upstream from filling the user's disk: SC tracks are real audio (typically
-# 5-80 MB MP3, <=500 MB WAV/FLAC). 1 GiB is well above any plausible legitimate
-# audio file, while still bounding the worst case. Exceeded → download aborts
-# and the partial temp-file is unlinked.
+# Disk-exhaustion guard. 1 GiB > any plausible single SC audio file.
 _MAX_DOWNLOAD_BYTES = 1_073_741_824  # 1 GiB
 
-# CDN host allowlist for the *final* (post-redirect) download URL. SC may
-# 302-redirect /tracks/{id}/download to a signed AWS S3 / Cloudfront URL, but
-# we never want to follow a redirect into an unrelated host (SSRF surface,
-# would also leak the OAuth header to a third-party origin if we attached it).
-# Match by suffix on the resolved URL's hostname (case-insensitive).
+# Hosts the final download URL is allowed to live on. Anything outside this
+# list is SSRF surface — see project_sc_downloader_security memory.
 _ALLOWED_CDN_HOST_SUFFIXES = (
-    "sndcdn.com",  # SC's own CDN
-    "soundcloud.com",  # SC API + own hosting
-    "amazonaws.com",  # AWS S3 (SC's CDN backend)
-    "cloudfront.net",  # AWS CloudFront
-    "akamaihd.net",  # SC has historically used Akamai too
+    "sndcdn.com",
+    "soundcloud.com",
+    "amazonaws.com",
+    "cloudfront.net",
+    "akamaihd.net",
     "akamaized.net",
 )
 
-# First-party SC hosts ONLY. The OAuth token must NEVER be sent to anyone
-# else — signed CDN URLs (S3/Cloudfront/Akamai) carry their own short-lived
-# signature in the query string and reject (or worse, log) extra Authorization
-# headers. Sending the token to a third-party host would also leak it to that
-# operator's access logs.
+# Hosts the OAuth bearer is allowed to reach. Strict SC-only subset of the
+# CDN allowlist — signed AWS/Cloudfront/Akamai URLs carry their own query
+# signature and must never see the user's token.
 _SC_FIRST_PARTY_HOST_SUFFIXES = (
     "soundcloud.com",
-    "sndcdn.com",  # SC's own infra — first-party for header purposes
+    "sndcdn.com",
 )
 
-# ffmpeg protocol allowlist for HLS input. Without this, ffmpeg's default
-# protocol set includes `file:`, `pipe:`, `concat:` — a hostile m3u8 from a
-# compromised CDN could reference local files (path-traversal read) or
-# arbitrary URLs. We pin to network primitives only.
+# ffmpeg's default protocol set includes `file:` and `concat:`. A hostile
+# m3u8 from a compromised CDN could read local files — pin to network only.
 _FFMPEG_PROTOCOL_WHITELIST = "https,tls,tcp,crypto,httpproxy"
 
 # v2 API — needed for `media.transcodings[]`. The public v1 (api.soundcloud.com)
@@ -232,59 +223,49 @@ def _guess_extension(content_type: str, url: str) -> str:
     return suffix if suffix in _ALLOWED_EXTS else ".mp3"
 
 
-def _is_sc_first_party_url(url: str) -> bool:
-    """Return True iff `url` points at SC-owned infrastructure.
+def _host_matches_suffixes(
+    url: str,
+    suffixes: tuple[str, ...],
+    *,
+    allow_http: bool = False,
+    reject_ip_literals: bool = False,
+) -> bool:
+    """Shared primitive behind `_is_sc_first_party_url` and `_is_allowed_cdn_url`.
 
-    Used to decide whether to attach the OAuth Authorization header. We
-    deliberately exclude AWS / Cloudfront / Akamai — those host SC content
-    but the user's bearer token has no business landing in a third-party
-    operator's access log.
+    `host == apex` OR `host endswith ".apex"` — the dotted form blocks the
+    `evil.sndcdn.com.attacker.com` suffix-confusion attack while still
+    accepting the apex domain itself.
     """
-    from urllib.parse import urlparse
-
     try:
         parsed = urlparse(url)
     except ValueError:
         return False
-    if parsed.scheme != "https":
+    allowed_schemes = ("http", "https") if allow_http else ("https",)
+    if parsed.scheme not in allowed_schemes:
         return False
     host = (parsed.hostname or "").lower()
     if not host:
         return False
-    return any(host == suf or host.endswith("." + suf) for suf in _SC_FIRST_PARTY_HOST_SUFFIXES)
+    if reject_ip_literals:
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            pass  # not a literal — proceed
+        else:
+            return False
+    return host in suffixes or any(host.endswith("." + s) for s in suffixes)
+
+
+def _is_sc_first_party_url(url: str) -> bool:
+    """The OAuth bearer must only ever leave the process for these hosts."""
+    return _host_matches_suffixes(url, _SC_FIRST_PARTY_HOST_SUFFIXES)
 
 
 def _is_allowed_cdn_url(url: str) -> bool:
-    """Validate a resolved download URL points at a known SoundCloud CDN host.
-
-    Defence against SSRF / redirect-to-internal: if SC (or a MitM) ever
-    returned a 302 pointing at `http://169.254.169.254/…` (cloud metadata)
-    or any non-CDN host, we'd happily attach the OAuth header and stream
-    the response back. Pre-flighting the final URL through a host allowlist
-    blocks that whole class of bug.
-
-    Rejects:
-      - non-http(s) schemes (file:, ftp:, gopher:, data:, …)
-      - hostnames not ending in one of `_ALLOWED_CDN_HOST_SUFFIXES`
-      - IP-literal hosts (no DNS name → can't be a known CDN)
-    """
-    from urllib.parse import urlparse
-
-    try:
-        parsed = urlparse(url)
-    except ValueError:
-        return False
-    if parsed.scheme not in ("http", "https"):
-        return False
-    host = (parsed.hostname or "").lower()
-    if not host:
-        return False
-    # Reject IP literals — known CDNs always resolve via DNS names.
-    # urlparse already strips brackets from IPv6 hosts, so checking for
-    # digits-and-dots / colons catches both v4 and v6 literals.
-    if all(c.isdigit() or c == "." for c in host) or ":" in host:
-        return False
-    return any(host == suf or host.endswith("." + suf) for suf in _ALLOWED_CDN_HOST_SUFFIXES)
+    """Final-URL SSRF guard: only hosts that may receive a download GET."""
+    return _host_matches_suffixes(
+        url, _ALLOWED_CDN_HOST_SUFFIXES, allow_http=True, reject_ip_literals=True
+    )
 
 
 # ── Network helpers ────────────────────────────────────────────────────────────
@@ -727,16 +708,7 @@ def _download_hls_to_temp(
             logger.error("[SC-DL] ffmpeg output too small (%d bytes) — aborting", size)
             out_path.unlink(missing_ok=True)
             return None
-        # Defence in depth: -fs above should already enforce the budget,
-        # but a buggy/old ffmpeg might over-shoot on the closing fragment.
-        if size > _MAX_DOWNLOAD_BYTES:
-            logger.error(
-                "[SC-DL] ffmpeg output exceeds size limit (%d > %d) — discarding",
-                size,
-                _MAX_DOWNLOAD_BYTES,
-            )
-            out_path.unlink(missing_ok=True)
-            return None
+        # ffmpeg -fs (above) is authoritative on the byte budget — no second check.
 
         logger.info("[SC-DL] HLS muxed %d bytes → %s", size, out_path.name)
         return out_path
