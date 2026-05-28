@@ -1,10 +1,12 @@
 # Routine prompts — multi-agent research pipeline
 
-Versioned prompts for the 5 remote routines that run the research pipeline. Each `<name>.md` here holds a routine prompt; everything below its `---` divider is the text to paste into a claude.ai/code routine.
+Versioned prompts for the 8 remote routines that run the research pipeline. Each `<name>.md` here holds a routine prompt; everything below its `---` divider is the text to paste into a claude.ai/code routine.
 
 Keeping the prompts in the repo means they are reviewable, diffable, and survive a routine being recreated. **The repo file is the source of truth — edit it here, then re-paste into claude.ai/code.**
 
-## The 5 routines
+## The 8 routines
+
+### Daily work-state routines (advance docs through the pipeline)
 
 | File | Routine | Cron (Berlin) | Cron expression | Writes |
 |---|---|---|---|---|
@@ -14,7 +16,15 @@ Keeping the prompts in the repo means they are reviewable, diffable, and survive
 | `research-implement.md` | `research-implement` | 03:00 + 15:00 | `0 3,15 * * *` | code → `routine/*` branches + PRs |
 | `research-triage.md` | `research-triage` | 07:30 | `30 7 * * *` | nothing — read-only, GitHub Issue |
 
-Cron is evaluated in the routine's configured timezone — set it to **Europe/Berlin** on claude.ai/code. Slots are staggered so a doc can flow draft → explore → plan → implement across a day, pausing at each user gate.
+### Cross-cutting routines (idea generation, re-validation, conflict detection)
+
+| File | Routine | Cron (Berlin) | Cron expression | Writes |
+|---|---|---|---|---|
+| `research-spawn.md` | `research-spawn` | Sundays 04:00 | `0 4 * * 0` | nothing — read-only, `Idea Backlog` issue |
+| `research-watchdog.md` | `research-watchdog` | 1st of month 04:00 | `0 4 1 * *` | `## Lifecycle` lines on `archived/implemented_*` + `Idea Backlog` issue |
+| `research-cross-linker.md` | `research-cross-linker` | Tuesdays 04:30 | `30 4 * * 2` | `related:` frontmatter + `## Cross-links` block on active docs |
+
+Cron is evaluated in the routine's configured timezone — set it to **Europe/Berlin** on claude.ai/code. Daily slots are staggered so a doc can flow draft → explore → plan → implement across a day, pausing at each user gate. The cross-cutting routines run on lower-frequency schedules so they don't compete with the work routines for `main`-branch commits.
 
 ## Deploy
 
@@ -35,6 +45,9 @@ Routines run with their own permission config on claude.ai/code (separate from t
 - **research-draft / research-explore / research-plan** — docs only. Need: read/edit files, `git add/commit/mv/push origin main`, `git pull --ff-only`, the Agent tool, WebSearch/WebFetch (explore only). No PR or merge permissions.
 - **research-implement** — writes code. Need: all of the above **plus** `git checkout -b`, `git push -u origin routine/*`, `gh pr create`, `gh pr view`. **Must NOT have** `gh pr merge`, `git merge`, `git rebase`, or `git push --force` — merging is GATE D, the user's.
 - **research-triage** — read-only. Need: read files, `python`, `gh issue list/view/create/edit/comment`. No write/commit/PR-merge permissions.
+- **research-spawn** — repo read-only, GitHub Issue write. Need: read files, WebSearch/WebFetch, `git log` / `git show`, `gh issue list/view/create/edit/comment`. **No** repo writes, **no** `git commit/push`. Touches only the `Idea Backlog` issue.
+- **research-watchdog** — narrow repo write (only `## Lifecycle` lines on `archived/implemented_*`) + GitHub Issue write. Need: read files, WebFetch (for dep CHANGELOGs), `gh api` reads, `git add/commit/push origin main` for the Lifecycle edits, `gh issue edit/comment`. **Must NOT** create new files, `git mv`, or touch non-archived docs.
+- **research-cross-linker** — narrow repo write (only `related:` frontmatter and `## Cross-links` blocks on active docs). Need: read files, `git add/commit/push origin main`, `gh issue comment` (for the digest notification). **Must NOT** touch `## Original Idea`, `## Lifecycle`, or content sections.
 
 ## Replace the old routines
 
@@ -53,9 +66,18 @@ There is no automatic sync — the repo file and the deployed routine are kept i
 ## How the routines fit together
 
 ```
+                  ┌─ research-spawn (Sun 04:00) ──▶ Idea Backlog issue (user picks)
+                  │
+                  ▼
 idea_ ──draft──▶ ideagate_ ⛔A ──▶ exploring_ ──explore──▶ midgate_ ⛔B
        ──▶ exploring_(w2) ──explore──▶ evaluated_ ──plan──▶ plangate_ ⛔C
        ──▶ accepted_ ──implement──▶ inprogress_ ──▶ PRs ⛔D ──▶ implemented_
+                                                                    │
+                                                                    ▼
+                  research-watchdog (1st of month) ──▶ Idea Backlog issue (followups)
+
+research-cross-linker (Tue 04:30) — scans all active docs, updates related: + ## Cross-links
+research-triage       (daily 07:30) — reports open gates + ready PRs to Pipeline Digest issue
 ```
 
-`research-triage` runs across all of it, read-only, reporting open gates daily. Full state/gate reference: `../README.md`.
+**Daily routines** advance docs forward through the pipeline. **Cross-cutting routines** keep the pipeline healthy: `research-spawn` feeds new ideas at the top, `research-watchdog` flags rot on the bottom, `research-cross-linker` finds collisions in the middle, `research-triage` reports state. Full state/gate reference: `../README.md`.
