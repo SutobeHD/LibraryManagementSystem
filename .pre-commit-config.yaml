@@ -80,6 +80,31 @@ repos:
         language: system
         files: '^frontend/src/.*\.(js|jsx)$'
 
+  # ── Research-pipeline doc structure ──────────────────────────────────────
+  # Catches drift in `docs/research/`: filename / state / folder mismatch,
+  # frontmatter slug !== filename slug, Lifecycle latest state !== filename
+  # state (rename without lifecycle update), missing Lifecycle. Warnings
+  # (legacy missing Original Idea) print but don't block.
+  - repo: local
+    hooks:
+      - id: validate-research-docs
+        name: validate research-pipeline doc structure
+        entry: python scripts/validate_research_docs.py
+        language: system
+        files: '^docs/research/(research|implement|archived)/.*\.md$'
+
+  # ── Routine prompt sanity ────────────────────────────────────────────────
+  # Every routine prompt file must have a `---` divider so
+  # scripts/print_routine.py can split header from prompt.
+  - repo: local
+    hooks:
+      - id: routine-divider-check
+        name: routine prompts have a `---` divider
+        entry: python scripts/print_routine.py --check
+        language: system
+        files: '^docs/research/routines/.*\.md$'
+        pass_filenames: false
+
   # ── Forbid secrets / large user data ─────────────────────────────────────
   - repo: local
     hooks:
