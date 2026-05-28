@@ -120,6 +120,8 @@ X-Routine: research-cross-linker
 
 If at least one new **CONFLICT** appeared since the previous run, post a `gh issue comment` on the `Pipeline Digest` issue (created by `research-triage`) with the conflict pairs. Keep it short — the doc edits are the source of truth.
 
+In the comment, point the user at `docs/research/README.md` → **Conflict resolution** (3 options: sequence / merge / pause). The routine **never resolves a CONFLICT itself** — that's the user's call (which doc wins, which gets parked or superseded).
+
 ## Hard limits
 
 - **Edit only `related:` frontmatter and the `## Cross-links (auto-managed …)` block.** Never touch other sections, `## Original Idea`, `## Lifecycle`, content sections.

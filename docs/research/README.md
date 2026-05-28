@@ -190,6 +190,40 @@ Editing a doc yourself and want routines to leave it alone → `git mv` it to `p
 
 ---
 
+## Conflict resolution — when cross-linker flags CONFLICT
+
+`research-cross-linker` (Tuesdays 04:30) detects when **two or more active docs at stage ≥ `draftplan` target the same file(s)**. Two plans landing on `main` near-simultaneously will collide. The CONFLICT lands as a `## Cross-links` section on both docs and a comment on the `Pipeline Digest` issue.
+
+You have **3 resolution options**:
+
+### 1. Sequence — let one finish, then the other
+
+If the two docs touch the same file but are otherwise independent: order them so the second waits for the first.
+
+1. Pick the higher-priority / smaller-scope doc to run first.
+2. `git mv` the other to `parked_` (if still in research/) or `blocked_` (if in implement/). Routines skip both.
+3. Append a `## Lifecycle` line: `YYYY-MM-DD — <stage>/<paused-state>_ — sequenced behind <other-slug>, awaiting its merge`.
+4. Update `_INDEX.md`.
+5. When the first ships (`archived/implemented_`), `git mv` the second back to its prior work state + Lifecycle line + `_INDEX.md`. Routines resume.
+
+### 2. Merge — combine into a single plan
+
+If the two docs really cover the same feature with different angles: merge them.
+
+1. Pick the more developed doc as the "host". Archive the other as `superseded_<slug>_<date>.md`.
+2. In the superseded doc, fill `## Decision / Outcome`: `Result: superseded`, `Why: merged into <host-slug>`, code refs = none.
+3. In the host doc, fold the superseded doc's `## Findings`, `## Adversarial Findings`, `## Options Considered` into the host as dated subsections — never edit past entries, append.
+4. Update `_INDEX.md` for both moves.
+5. Re-run `research-cross-linker` (manual trigger or wait for Tuesday) — should now show no CONFLICT.
+
+### 3. Pause — kick the can to the user
+
+If you don't have time to decide right now: `git mv` both to `parked_` / `blocked_`. They sit idle until you decide. `research-triage` will flag them as stalled after 7 days.
+
+**Don't** let routines work two `inprogress_` docs that target the same file simultaneously — you'll get duplicate refactors, merge conflicts on `main`, and review-agent confusion. Resolve every CONFLICT before either reaches GATE D.
+
+---
+
 ## Graduation: `implemented_` lands
 
 Rename + doc updates. **Before** the `git mv` → `archived/implemented_`:
