@@ -18,6 +18,7 @@ related: []
 
 - 2026-05-28 — `research/idea_` — created from template
 - 2026-05-28 — `research/drafting_` — advanced for research-draft routine
+- 2026-05-28 — `research/ideagate_` — drafted (scout+prior-art+risk-surface+worker+verifier PASS), awaiting GATE A
 
 ## Original Idea (verbatim — never edit)
 
@@ -33,43 +34,82 @@ Library-weite Audio-Format-Konvertierung als Tool-Feature mit DB-Integrität. Us
 
 > ↓ Stage 1 — `drafting_`. `research-draft` fills Problem → Research Plan. Agent 2 fills Idea Verification.
 
+## Prior Art
+
+- **HIGH overlap** with [`exploring_library-quality-upgrade-finder`](exploring_library-quality-upgrade-finder.md) — gleicher snapshot → swap → migrate Primitive (Rule 4 snapshot dir, Rule 6 Rekordbox-process check, Rule 7 `os.replace` atomic swap, `content_id` row update). Triggert dort auf "Quality strictly better"; hier auf "User-chosen target format regardless of verdict". → siehe OQ 2.
+- [`accepted_downloader-unified-multi-source`](../implement/accepted_downloader-unified-multi-source.md) — exakte FFmpeg-AIFF Command-Shape (`pcm_s16le/24le -map_metadata 0 -vn`) + Mutagen Tag-Preservation. Verbatim reusable.
+- [`exploring_metadata-name-fixer`](exploring_metadata-name-fixer.md) — Snapshot + Audit-Log-SQLite + `db_lock()` + `Depends(require_session)` Precedent. Pattern-share.
+- [`idea_db-write-lock-retrofit`](idea_db-write-lock-retrofit.md) — Prereq: 85 unlocked `master.db` Writers; dieses Feature MUSS `_db_write_lock` halten.
+
 ## Problem
 
-≤60 words. What / why / cost-of-not-doing.
+User-Library mixed Formate (m4a/mp3/wav/aiff/flac/alac). Kein UI-Pfad für Batch-Format-Migration mit DB-Integrität. `scripts/dev/safe_format_swap.py` Standalone-Skript proved Konzept (3041 Tracks), aber kein Endpoint, kein Auth, kein Frontend-Progress, kein Rollback-UI. Manuelle CLI-Operation pro Migration, Edge-Cases unsichtbar fürs Tool.
 
 ## Goals / Non-goals
 
 **Goals**
-- …
+- POST endpoint behind `Depends(require_session)`: scope (track-ids | playlist | all-m4a + filter) × target (AIFF | FLAC | WAV | MP3).
+- Erhalt: Cues, Beatgrid, Hot Cues, Memory Cues, Playlist-Membership, BPM, Key, Color, Rating, MyTag — alle `content_id`-keyed.
+- Snapshot + Manifest + Rollback (shared Primitive mit `library-quality-upgrade-finder`).
+- Disk-Space Pre-flight + Pioneer Auto-Restart Watchdog + per-Track Timeout.
+- Frontend Page: Scope-Picker, Format-Picker, Dry-Run-Preview, Progress-UI, Rollback-Button.
 
 **Non-goals**
-- …
+- Keine CDJ-Kompatibilität / USB-Export Änderungen.
+- Keine Quality-Auditierung (delegated → `library-quality-upgrade-finder`).
+- Kein Rekordbox-Re-Analyse-Trigger (user-initiated in RB-UI).
+- Kein Rust-DSP-Pfad — offline Transcode = Python (`coding-rules.md:20-21`).
 
 ## Constraints
 
-External facts bounding solution (rate limits, data shape, perf budget, legal, capacity). Cite source.
+- `_db_write_lock` (`app/database.py:22`) mandatory für `update_content` Calls.
+- `Depends(require_session)` on POST; Bearer-Token only, no cookies (`docs/SECURITY.md:116-119`).
+- `validate_audio_path` Sandbox für Input + Output Paths (`app/main.py:168`).
+- Per-Track Subprocess-Timeout: Vorschlag 600s; deviates von 30s Default (`.claude/rules/coding-rules.md:35`) → OQ 3.
+- rbox 0.1.7: `MasterDb.update_content` (proven `scripts/dev/safe_format_swap.py:311`); broken `OneLibrary.create_content` Pfad vermeiden.
+- ANLZ-Sidecar bindet vermutlich an `content_id` (zu verifizieren — OQ 5).
+- Storage: ~5x Expansion AAC→AIFF (30 GB Lib → +150 GB).
+- Pioneer Auto-Restart Watchdog: kill `rekordbox.exe`/`Upmgr` periodic (Pattern aus `scripts/dev/safe_format_swap.py:77-94`).
+- Python: Pydantic v2, type hints, pathlib, no bare except, no f-string SQL.
+- React: no `alert/confirm/prompt`, `useToast` + Confirm-Modal-Component, axios via `frontend/src/api/api.js`.
 
-- …
+## Dependencies
+
+All present — no new deps required.
+
+| dep | kind | license | needed-for | Schicht-A cost |
+|---|---|---|---|---|
+| FFmpeg | system PATH | LGPL/GPL | Transcode + ffprobe SR-Detection | 0 — already required |
+| pyrekordbox==0.1.7 (`rbox`) | py | MIT | `content_id` Row-Update | 0 — `requirements.txt:28` |
+| mutagen==1.47.0 | py | GPL | ID3 Tag-Preservation cross-format | 0 — `requirements.txt:58` |
+| psutil==5.9.8 | py | BSD | Disk-free Pre-flight, cross-platform Proc-Scan | 0 — `requirements.txt:21` |
 
 ## Open Questions
 
-Numbered. Each resolvable (yes/no or X vs Y), not philosophy. Each becomes a parallel research agent in Stage 2.
-
-1. …
+1. **AAC priming-drift**: welches Sample-Offset matched Rekordbox' internes AAC-Decoder-Timing? Observed: skip=0 → minimal left, skip=2112 → ~44ms right. Tightest korrekter Wert?
+2. **Shared Swap-Primitive**: (a) merge in `library-quality-upgrade-finder` als zweite Trigger-Variante, ODER (b) extract `app/library_swap/` Modul beide consumen?
+3. **Per-Track Subprocess-Timeout**: 600s defensible für längste realistische Tracks (60-min DJ-Sets ~250 MB lossless)? Empirical cap nötig.
+4. **Disk-Space Pre-flight**: free ≥ (estimated × N)? Vorschlag: 1.5× hard-abort, 1.2× Warnung.
+5. **ANLZ-Key-Surface**: bindet `master.db` Beatgrid/Cues auch an file hash / mtime / size, neben `content_id`? Wenn ja → Transcode bricht Beatgrid silent.
+6. **FLAC Bit-depth Policy**: 16/24 explizit pick, oder auto aus source? Affects file size 1.5×.
 
 ## Research Plan
 
-Required by `ideagate_` (GATE A). ≤80 words. Which aspects Stage 2 researches in parallel — one bullet per agent. User confirms this list at GATE A.
-
-- Agent 1: …
-- Agent 2: …
+Stage 2 parallel Agents:
+- **ANLZ-Key-Surface** (OQ 5): codebase + rbox source + Pioneer reverse-engineering docs.
+- **AAC-Priming empirical** (OQ 1): A/B-Test Rekordbox-Decoder-Timing vs Encoder/SR/Bit-depth.
+- **Swap-Module-Factoring** (OQ 2): Diff vs `library-quality-upgrade-finder` Rule 4/6/7; propose shared API.
+- **Op-Budgets** (OQ 3, 4): empirical FFmpeg-Timeout + Disk-Space-Thresholds.
+- **Format-Target-Matrix** (OQ 6 + lossy-target Policy): FLAC Bit-depth/SR + MP3 Quality.
 
 ## Idea Verification
 
 Stage 1 Agent 2. Dated entries, append-only. PASS / FAIL + ≤40-word reason (checked vs `## Original Idea`).
 
-### YYYY-MM-DD — <PASS|FAIL>
-- …
+### 2026-05-28 — PASS
+- **Intent**: Scope×Format-Matrix, DB-Integrity-Liste (Cues/Beatgrid/Hot/Memory/Playlist) + Erprobung-Anker (3041 Tracks, 3 Edge-Cases) alle in Goals/Problem; AAC-Priming → OQ 1, RB-Restart → Constraints, Cover-Art implizit via Cmd-Reuse. Non-goals (no CDJ/USB, no Quality-Audit) verhindern Creep.
+- **Prior-art**: HIGH overlap mit `library-quality-upgrade-finder` explizit gelabelt + an OQ 2 (merge vs extract) gebunden; 3 weitere Docs sauber als Pattern/Prereq klassifiziert.
+- **Plan**: 6 OQs alle yes/no oder X-vs-Y; 5 Research-Plan-Bullets covern OQ 1-6 ohne Orphans (Op-Budgets bundelt 3+4, Format-Matrix bundelt 6+lossy).
 
 ---
 

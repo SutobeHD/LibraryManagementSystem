@@ -18,10 +18,10 @@ If this index drifts from the file system, the file system wins — re-derive wi
 - [idea_security-mobile-paired-tokens-phase2.md](research/idea_security-mobile-paired-tokens-phase2.md) — Phase-2 paired-device tokens + QR-pairing flow; hard prereq for mobile-companion; sidecar-local SQLite, `require_session` accepts boot+device tokens (2026-05-19)
 
 ### drafting
-- [drafting_library-format-converter.md](research/drafting_library-format-converter.md) — Library-weiter Audio-Format-Konverter (m4a/AIFF/FLAC/WAV/MP3) mit DB-Integrität; erprobt 2026-05-28 via `scripts/dev/safe_format_swap.py` (3041 m4a→AIFF, voller Rollback) (2026-05-28)
+_(none)_
 
 ### ideagate ⛔ GATE A
-_(none)_
+- [ideagate_library-format-converter.md](research/ideagate_library-format-converter.md) — Library-weiter Audio-Format-Konverter (m4a/AIFF/FLAC/WAV/MP3) mit DB-Integrität; HIGH overlap mit `library-quality-upgrade-finder` (OQ 2); 6 OQs + 5 Research-Plan-Bullets; Verifier PASS (2026-05-28)
 
 ### exploring
 - [exploring_recommender-rules-baseline.md](research/exploring_recommender-rules-baseline.md) — Teil 1: BPM/Key/Genre/MyTag/Energy ranking + Camelot harmonic mixing; local + SoundCloud modes (2026-05-11)
