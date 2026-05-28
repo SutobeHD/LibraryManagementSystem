@@ -23,11 +23,10 @@ const SoundCloudView = () => {
     const loginInFlightRef = React.useRef(false);
 
     useEffect(() => {
-        // Probe auth state via the SC profile endpoint — succeeds (200) iff
-        // a valid token is present in the OS keyring. We deliberately don't
-        // pull the secret over the wire.
-        api.get('/api/soundcloud/me')
-            .then(() => setHasToken(true))
+        // Local-only auth probe — pure keyring lookup, no SC round-trip, no
+        // sc:auth-expired interceptor noise on mount.
+        api.get('/api/soundcloud/auth-status')
+            .then(res => setHasToken(Boolean(res.data?.data?.authenticated)))
             .catch(() => setHasToken(false));
 
         // EC12: Poll for tasks; .catch() ensures a failed request never freezes the spinner.
