@@ -15,6 +15,17 @@ Read `docs/research/README.md`, `docs/research/_TEMPLATE.md`, and `.claude/rules
 1. Verify git identity (`46030159+SutobeHD@users.noreply.github.com` / `SutobeHD`).
 2. `git checkout main && git pull --ff-only`.
 
+## Commit conventions
+
+Every commit you make includes **two trailers** in the body:
+
+```
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+X-Routine: research-explore
+```
+
+The `X-Routine:` trailer lets `research-triage` detect your activity precisely. Never omit it. When this prompt says "+ Co-Authored-By trailer" or "+ standard trailers", both trailers above are required.
+
 ## Trigger
 
 Find work: `ls docs/research/research/exploring_*.md`.

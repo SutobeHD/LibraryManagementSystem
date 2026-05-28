@@ -17,6 +17,17 @@ Read `docs/research/README.md` first.
 1. Verify git identity (`46030159+SutobeHD@users.noreply.github.com` / `SutobeHD`).
 2. `git checkout main && git pull --ff-only`.
 
+## Commit conventions
+
+Every commit you make includes **two trailers** in the body:
+
+```
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+X-Routine: research-cross-linker
+```
+
+The `X-Routine:` trailer lets `research-triage` detect your activity precisely. Never omit it.
+
 ## Gather active docs
 
 1. List every doc under `docs/research/research/` + `docs/research/implement/` (everything except `archived/`). Skip `parked_`, `blocked_`, `idea_` (idea_ has no content yet).
@@ -94,13 +105,14 @@ For docs with no overlaps:
 
 ## Commit
 
-One commit (all per-doc edits together):
+One commit (all per-doc edits together) with standard trailers:
 ```
 docs(research): cross-linker — <N> docs scanned, <C> conflicts, <O> overlaps, <X> neighbours
 
 <one bullet per CONFLICT: slug-A ↔ slug-B (shared file count)>
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+X-Routine: research-cross-linker
 ```
 `git push origin main`.
 

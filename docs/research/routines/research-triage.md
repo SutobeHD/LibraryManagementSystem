@@ -36,15 +36,21 @@ Docs per state across `research/`, `implement/`, `archived/` — from `pipeline_
 
 ### 4. Routine activity (last 7 days)
 
-`git log --since="7 days ago" --pretty=format:"%h %s" main`. Group commit messages by routine signature:
-- `docs(research): draft <slug>` → `research-draft`
-- `docs(research): explore <slug>` → `research-explore`
-- `docs(research): plan <slug>` → `research-plan`
-- `docs(research): <slug> reconcile` / `PR log` / `approach-probe` / `→ inprogress_` → `research-implement`
-- `docs(research): watchdog re-check` → `research-watchdog`
-- `docs(research): cross-linker` → `research-cross-linker`
+For each of the 6 commit-writing routines (`research-draft`, `research-explore`, `research-plan`, `research-implement`, `research-watchdog`, `research-cross-linker`):
 
-Per routine: count of commits + dates + whether at least one successful state-advance happened. Routines with **zero** commits in 7 days are flagged as "silent" — may indicate the routine is broken on claude.ai/code (no docs to work IS the expected case for spawn/watchdog/cross-linker on most weeks, so consider their schedule before flagging).
+```bash
+git log --since="7 days ago" \
+  --grep="X-Routine: <routine-name>" \
+  --pretty=format:"%h %ad %s" --date=short
+```
+
+The `X-Routine:` trailer is the precise signal — each routine prompt mandates the trailer in its `## Commit conventions`. Count commits, latest date, and whether at least one successful state-advance commit happened (subject contains `→ <state>_`).
+
+**Fallback for older commits** (before the X-Routine convention shipped 2026-05-28): if `--grep="X-Routine:"` returns 0 hits but `git log --since="7 days ago" --pretty=format:"%s" main | grep "docs(research):"` is non-empty, fall back to fuzzy subject matching by prefix (`draft`/`explore`/`plan`/`PR log`/`watchdog`/`cross-linker`).
+
+`research-spawn` and `research-triage` do not commit — gauge their activity via the `Idea Backlog` and `Pipeline Digest` issues' edit history: `gh issue view <num> --json updatedAt`.
+
+Routines with **zero** commits/edits in 7 days are flagged as "silent" — may indicate the routine is broken on claude.ai/code (no docs to work IS the expected case for `research-watchdog` on most weeks and `research-cross-linker` on weeks with no active overlap, so consider their schedule before flagging).
 
 ### 5. Trend metrics
 

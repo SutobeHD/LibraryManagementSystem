@@ -16,6 +16,17 @@ Read `docs/research/README.md`, `docs/research/_TEMPLATE.md`, `.claude/rules/res
 1. Verify git identity (`46030159+SutobeHD@users.noreply.github.com` / `SutobeHD`).
 2. `git checkout main && git pull --ff-only`.
 
+## Commit conventions
+
+Every commit you make includes **two trailers** in the body — on `main` doc-tracking commits **and** on `routine/*` branch code commits:
+
+```
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+X-Routine: research-implement
+```
+
+The `X-Routine:` trailer lets `research-triage` detect your activity precisely. Never omit it on either commit category. When this prompt or `commit-and-git.md` says "+ standard trailers", both trailers above are required.
+
 ## Trigger
 
 Find work: `ls docs/research/implement/inprogress_*.md` then `ls docs/research/implement/accepted_*.md`.

@@ -15,6 +15,17 @@ Read `docs/research/README.md`, `docs/research/_TEMPLATE.md`, and `.claude/rules
 1. Verify git identity: `git config user.email` = `46030159+SutobeHD@users.noreply.github.com`, `git config user.name` = `SutobeHD`. Set per-repo if wrong.
 2. `git checkout main && git pull --ff-only`.
 
+## Commit conventions
+
+Every commit you make includes **two trailers** in the body (Conventional-Commits compatible):
+
+```
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+X-Routine: research-draft
+```
+
+The `X-Routine:` trailer lets `research-triage` detect your activity precisely via `git log --grep="X-Routine: research-draft"`. Never omit it. When this prompt says "commit … + standard trailers", that means both trailers above.
+
 ## Trigger
 
 Find work: `ls docs/research/research/drafting_*.md`.
@@ -83,11 +94,12 @@ Append the result to `## Idea Verification` as a dated `### YYYY-MM-DD — PASS|
 2. Append `## Lifecycle` line: `YYYY-MM-DD — research/ideagate_ — drafted (scout+prior-art+risk-surface+worker+verifier), awaiting GATE A`
 3. Move the doc's line in `_INDEX.md` to the `### ideagate` section.
 4. Bump `last_updated` in frontmatter.
-5. Commit to `main` (Conventional Commits):
+5. Commit to `main` (Conventional Commits + standard trailers):
    ```
    docs(research): draft <slug> → ideagate_ (GATE A)
 
    Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+   X-Routine: research-draft
    ```
 6. `git push origin main`.
 

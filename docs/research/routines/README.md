@@ -59,9 +59,24 @@ This pipeline supersedes the previous 3-routine setup. On claude.ai/code, **dele
 ## Updating a prompt
 
 1. Edit the `<name>.md` file here, commit it (normal repo PR flow).
-2. Re-paste the section below the `---` into the routine on claude.ai/code.
+2. Run `python scripts/print_routine.py <name>` and pipe to clipboard (`| clip` on Windows, `| pbcopy` on macOS) to grab just the deploy-ready prompt (everything below `---`).
+3. Re-paste into the routine on claude.ai/code.
+4. `python scripts/print_routine.py --check` is run in CI to ensure every routine file still has a `---` divider — break that, CI fails.
 
-There is no automatic sync — the repo file and the deployed routine are kept in step by hand. A future enhancement could push prompts via the claude.ai API.
+There is no automatic push from the repo into a deployed routine — the repo file and the deployed routine are kept in step by hand. A future enhancement could push prompts via the claude.ai API.
+
+## Commit trailer convention — X-Routine
+
+Every commit-writing routine (draft / explore / plan / implement / watchdog / cross-linker) appends an `X-Routine: <routine-name>` trailer to its commit messages, alongside the standard `Co-Authored-By:` trailer. Example:
+
+```
+docs(research): plan downloader-unified → plangate_ (GATE C)
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+X-Routine: research-plan
+```
+
+This lets `research-triage` count per-routine activity precisely via `git log --grep="X-Routine: research-plan"` instead of fuzzy subject-prefix matching. The trailer is mandatory — each routine prompt's `## Commit conventions` block enforces it. `research-spawn` and `research-triage` do not commit, so the trailer doesn't apply to them.
 
 ## How the routines fit together
 

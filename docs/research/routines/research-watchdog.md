@@ -17,6 +17,17 @@ Read `docs/research/README.md` first.
 1. Verify git identity (`46030159+SutobeHD@users.noreply.github.com` / `SutobeHD`).
 2. `git checkout main && git pull --ff-only`.
 
+## Commit conventions
+
+Every commit you make (Lifecycle-line edits only) includes **two trailers** in the body:
+
+```
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+X-Routine: research-watchdog
+```
+
+The `X-Routine:` trailer lets `research-triage` detect your activity precisely. Never omit it.
+
 ## Pick targets
 
 1. List `ls docs/research/archived/implemented_*.md`.
@@ -56,13 +67,14 @@ Append one `## Lifecycle` line: `YYYY-MM-DD — watchdog — OK` (no other chang
 3. Proposed slug template: `<original-slug>-followup-<reason-token>` (e.g. `security-api-auth-hardening-followup-rate-limit-cve`).
 4. Seed: ≤60 words including the original `## Original Idea` reference for context (e.g. `> Followup to security-api-auth-hardening (2026-05-17): … <new finding>`).
 
-Commit the doc edits (Lifecycle lines only, no file moves) as one commit:
+Commit the doc edits (Lifecycle lines only, no file moves) as one commit with standard trailers:
 ```
 docs(research): watchdog re-check — <N> docs (<X> OK, <Y> WARN, <Z> FLAG)
 
 <one bullet per FLAG/WARN with the slug and reason>
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+X-Routine: research-watchdog
 ```
 `git push origin main`.
 
