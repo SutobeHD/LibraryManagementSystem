@@ -14,7 +14,7 @@ If this index drifts from the file system, the file system wins — re-derive wi
 ## research/
 
 ### idea
-- [idea_security-mobile-paired-tokens-phase2.md](research/idea_security-mobile-paired-tokens-phase2.md) — Phase-2 paired-device tokens + QR-pairing flow; hard prereq for mobile-companion; sidecar-local SQLite, `require_session` accepts boot+device tokens (2026-05-19)
+_(none)_
 
 ### drafting
 _(none)_
@@ -23,6 +23,7 @@ _(none)_
 - [ideagate_library-format-converter.md](research/ideagate_library-format-converter.md) — Library-weiter Audio-Format-Konverter (m4a/AIFF/FLAC/WAV/MP3) mit DB-Integrität; HIGH overlap mit `library-quality-upgrade-finder` (OQ 2); 6 OQs + 5 Research-Plan-Bullets; Verifier PASS (2026-05-28)
 - [ideagate_download-format-setting.md](research/ideagate_download-format-setting.md) — Per-download AIFF default + Settings-UI für Ziel-Format; ship-bare narrow subset of `library-format-converter` (batch) + `downloader-unified-multi-source` (Q11); 6 OQs incl. AIFF-vs-ALAC clarifier; Verifier PASS (2026-05-28)
 - [ideagate_db-write-lock-retrofit.md](research/ideagate_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps on `master.db`; audit found 1 RekordboxDB miss (`ensure_standalone_master_db`) + 3 LiveRekordboxDB mytag mutators bypassed via `_require_live_db()`; Option B (prefix-matched auto-wrap) recommended; content already at exploring_ depth (2026-05-28)
+- [ideagate_security-mobile-paired-tokens-phase2.md](research/ideagate_security-mobile-paired-tokens-phase2.md) — Per-device long-lived bearer + QR-pairing + revoke; sidecar-local `auth.db` (NOT master.db), `require_session` dual-accepts SESSION_TOKEN + paired tokens; hard prereq for mobile-companion shipping (2026-05-28)
 
 ### exploring
 - [exploring_recommender-rules-baseline.md](research/exploring_recommender-rules-baseline.md) — Teil 1: BPM/Key/Genre/MyTag/Energy ranking + Camelot harmonic mixing; local + SoundCloud modes (2026-05-11)

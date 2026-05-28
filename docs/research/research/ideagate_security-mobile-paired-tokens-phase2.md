@@ -18,6 +18,8 @@ ai_tasks: false  # set true to opt-in AI routines — see ## AI Tasks below
 
 - 2026-05-19 — `research/idea_` — scaffolded as Phase-2 carve-out from security-api-auth-hardening
 - 2026-05-19 — research/idea_ — deep exploration toward exploring_-ready
+- 2026-05-28 — `research/drafting_` — Stage 1 worker formally complete (content already at exploring_ depth — Findings + Options + Recommendation populated 2026-05-19)
+- 2026-05-28 — `research/ideagate_` — Stage 1 verifier PASS, awaiting GATE A
 
 ## AI Tasks
 
@@ -86,6 +88,20 @@ Numbered. Each resolvable (yes/no or X vs Y), not philosophy. RESOLVED = answere
 8. **RESOLVED — `@rate_limit(steady=5, burst=10, key_mode="both")` on `complete`; same on `start`.** Reuses Phase-1's HIGH tier (archive Decisions: shutdown/restart used `5/min, burst=10`). 256-bit pairing-code is already brute-force-proof by entropy; rate-limit = defense-in-depth + log-noise cap + cheap insurance against a future shorter-code variant. Apply to `start` too — caps code-minting spam from a compromised desktop-origin script. `key_mode="both"` (IP|Bearer): `complete` has no Bearer so it keys on IP; loopback (Tauri-main calling `start`) hits the `__whitelist__` sentinel and is never throttled.
 9. **RESOLVED — keep `SESSION_TOKEN` for Tauri-main; paired tokens for everything else. No auto-pair-on-boot.** `require_session` accepts EITHER (dual-acceptance, see Findings 2026-05-19). Tauri-main keeps the stdout-banner `SESSION_TOKEN` it already has — making it "pair itself" adds a bootstrap dependency (sidecar must serve `/api/pairing/*` before the main window can authenticate) for zero gain. The `X-Session-Token` legacy header is already gone (Phase-1 archive line 515 — dropped day 1, never shipped), so there is no compat header left to remove. `SESSION_TOKEN` removal is therefore a non-event: it simply coexists as the Tauri-main credential.
 10. **RESOLVED — name the file `auth.db`, scope it as the sidecar auth store.** Not `paired_devices.db`. `auth.db` is deliberately broad so future auth-adjacent state (audit log of pairing events, possibly persisted rate-limit buckets if the in-memory `_store` ever needs durability) lands in the same file without a rename migration. Phase-2 ships exactly one table (`paired_devices`); the filename leaves headroom. Rate-limit buckets stay in-memory for now (rate-limit archive OQ8 RESOLVED: in-memory only) — `auth.db` is a *possible* future home, not a commitment.
+
+## Idea Verification
+
+Stage 1 Verifier. Dated entries, append-only.
+
+### 2026-05-28 — PASS
+- **Intent**: scope ("per-device long-lived bearer + QR pairing + revoke for mobile-companion") + carve-out from `security-api-auth-hardening` is consistent; G1-G7 each carry a concrete test as success metric. PARKED items (LAN-bind / mDNS / row-ACL) keep scope tight without losing the trail.
+- **Prior-art**: 2 explicit cross-refs (`security-api-auth-hardening` parent, `mobile-companion-ranking-app` sibling). Sister-doc OQs (4, 12, 14) reused verbatim where they already froze decisions — no re-litigation.
+- **Plan**: 10 OQs all RESOLVED or PARKED (with named trigger). Findings + Options + Recommendation already drafted. Bind decision deferred to mobile-companion doc — correct ownership. User GATE A is the next blocker; expected exploring_ wave 2 verifier PASS on first cycle.
+
+---
+
+> ⛔ GATE A — user `/gate-pass` (→ `exploring_`) or `/gate-reject` (→ `drafting_`).
+> Note: hard prereq for any mobile-companion shipping. Without GATE A pass, the mobile-companion doc stays blocked.
 
 ## Findings / Investigation
 
