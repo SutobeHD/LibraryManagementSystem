@@ -88,49 +88,6 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
     }
   };
 
-  // When in playlists tab, render PlaylistBrowser full-height without extra chrome
-  if (activeTab === 'playlists' && !selectedItem) {
-    return (
-      <div className="h-full flex flex-col">
-        {/* Minimal tab bar */}
-        <div className="flex justify-between items-center px-4 py-3 border-b border-white/5 bg-mx-deepest/30 backdrop-blur-md shrink-0">
-          <div className="flex items-center gap-6">
-            <h1 className="text-xl font-bold text-white flex items-center gap-2">
-              <Music size={20} className="text-amber2" />
-              Library
-            </h1>
-            <div className="flex bg-black/40 p-0.5 rounded-lg border border-white/5">
-              {[
-                { id: 'playlists', icon: List, label: 'Playlists' },
-                { id: 'artists', icon: User, label: 'Artists' },
-                { id: 'labels', icon: Tag, label: 'Labels' },
-                { id: 'albums', icon: Disc, label: 'Albums' }
-              ].map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 ${activeTab === tab.id ? 'bg-amber2 text-white shadow-lg' : 'text-ink-muted hover:text-ink-primary'}`}
-                >
-                  <tab.icon size={11} />
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-        {/* PlaylistBrowser fills the remaining space */}
-        <div className="flex-1 overflow-hidden">
-          <PlaylistBrowser
-            onSelectTrack={onSelectTrack}
-            onEditTrack={onEditTrack}
-            onPlayTrack={onPlayTrack}
-            libraryStatus={libraryStatus}
-          />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="h-full flex flex-col p-4">
       {/* Tab Switcher & Header */}
@@ -210,6 +167,15 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
               onEditTrack={onEditTrack}
               onPlay={onPlayTrack}
               playlistId={`${activeTab.toUpperCase()}_${selectedItem.id}`}
+            />
+          </div>
+        ) : activeTab === 'playlists' ? (
+          <div className="absolute inset-0">
+            <PlaylistBrowser
+              onSelectTrack={onSelectTrack}
+              onEditTrack={onEditTrack}
+              onPlayTrack={onPlayTrack}
+              libraryStatus={libraryStatus}
             />
           </div>
         ) : (

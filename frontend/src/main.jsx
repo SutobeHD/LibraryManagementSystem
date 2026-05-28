@@ -131,7 +131,6 @@ const TAB_WORKSPACE = {
 const TopBar = ({
   workspaces,
   activeWorkspace,
-  currentWorkspace,
   activeTab,
   onPickWorkspace,
   setActiveTab,
@@ -186,28 +185,6 @@ const TopBar = ({
           </button>
         )
       })}
-
-      {/* View tabs for the active workspace */}
-      <div className="flex items-stretch min-w-0 overflow-x-auto">
-        {currentWorkspace.items.map((it) => {
-          const Icon = it.icon
-          const active = activeTab === it.tab
-          return (
-            <button
-              key={it.tab}
-              onClick={() => setActiveTab(it.tab)}
-              className={`flex items-center gap-1.5 px-3 text-[11px] whitespace-nowrap border-r border-line-subtle transition-colors ${
-                active
-                  ? 'bg-mx-selected text-ink-primary font-medium'
-                  : 'text-ink-secondary hover:text-ink-primary hover:bg-mx-hover'
-              }`}
-            >
-              <Icon size={13} className={active ? 'text-amber2' : 'opacity-70'} />
-              {it.label}
-            </button>
-          )
-        })}
-      </div>
 
       <div className="flex-1 min-w-[12px]" />
 
@@ -651,7 +628,6 @@ const App = () => {
   const handlePlayTrack = useCallback((track) => { setPlayerTrack(track); }, []);
 
   const workspaces = useMemo(() => buildWorkspaces(libraryStatus), [libraryStatus]);
-  const currentWorkspace = workspaces.find((w) => w.id === activeWorkspace) || workspaces[0];
 
   // Keep the workspace tab in sync when the view changes from elsewhere
   // (e.g. "edit track" jumps straight to the editor). Tabs with no workspace
@@ -724,7 +700,6 @@ const App = () => {
       <TopBar
         workspaces={workspaces}
         activeWorkspace={activeWorkspace}
-        currentWorkspace={currentWorkspace}
         activeTab={activeTab}
         onPickWorkspace={handleWorkspacePick}
         setActiveTab={setActiveTab}
