@@ -23,12 +23,16 @@ related: [library-extended-remix-finder, analysis-remix-detector, external-track
 - 2026-05-17 — research/exploring_ — deeper exploration toward evaluated_ readiness (fixed db_lock() helper-name + line-number bug; verified librosa.spectral_centroid/rolloff precedent in analysis_engine.py; added Q12 auth-hardening dependency for /api/quality/* gating; added Phase-1 first deliverable + measurable acceptance bar)
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
 - 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: stay `exploring_` until line-ref refresh + library_swap extraction coordination with sister `ideagate_library-format-converter`
+- 2026-05-29 — `research/exploring_` — wave-2 gap close-out: scope narrowed (Phase-3 Snapshot+Swap+Migrate merged into `library-format-converter` as `trigger="quality_verdict"` variant per user decision 2026-05-29); `validate_audio_path` escape-hatch trust analysis added with mitigation (`allow_db_match=False` on probe endpoint); composite-weight `assert sum() == 1.0` pinned as module-init invariant; cutoff tolerance revised to per-encoder buckets (LAME V0 ±150, CBR-128 ±300, Fraunhofer AAC ±400)
+- 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
 
 ---
 
 ## Problem
 
 Library mixes lossless (FLAC/WAV) with MP3-128/256; some "FLAC" are MP3-transcodes (cliff 16-19 kHz vs Nyquist 22.05 kHz). CDJ-3000 + good headphones expose gap. No per-track quality signal today. No "lossless exists at Bandcamp" surface. Auditor + replacement-finder needed. Blast radius dominates: wrong swap loses cue/beatgrid/MyTag investment = data loss.
+
+> **2026-05-29 SCOPE NARROWED (user decision):** the Snapshot+Swap+Migrate stage (Phase-3 of this doc) MERGES INTO `ideagate_library-format-converter` as a `trigger="quality_verdict"` variant. This doc keeps ownership of the **quality-detection + replacement-search** halves (Phase-1a probe, Phase-1b transcode detection, Phase-2 source search). When user confirms a swap, this doc CALLS the format-converter endpoint instead of implementing Rules 4/6/7 itself. Cross-overlap with sister-doc on Rules 4/6/7 closed.
 
 ## Goals / Non-goals
 
@@ -371,6 +375,23 @@ Tolerance defaults: `assert abs(result.cutoff_hz - reference_hz) < 200`. Fixture
 - `draftplan_security-api-auth-hardening.md` — Phase-1 marked shipped (auth.py + 87 wired routes). Q12 closes. No further coordination needed beyond "consume `require_session`".
 - `library-extended-remix-finder` — own-DB vs unified-DB still open (Q9 trigger).
 - `external-track-match-unified-module` — M1 function-only API + fpcalc PATH-detect still upstream blocker for Phase-2 (rule 2 chromaprint). Unchanged.
+
+### 2026-05-29 — wave-2 gap close-out
+
+- **Cross-overlap with `library-format-converter` — RESOLVED (user 2026-05-29)**: merge gewählt. Phase-3 (Snapshot+Swap+Migrate) ZIEHT UM ins format-converter Tool als `trigger="quality_verdict"` Variante. Dieses Doc owned weiter Phase-1a (probe), Phase-1b (transcode detection), Phase-2 (source search) — alles Detection-Layer. Wenn Phase-3 ein swap ausführt, ruft dieser code den format-converter endpoint, statt Rules 4/6/7 selbst zu implementieren. Doppel-Implementierung des shared swap-primitive eliminated.
+- **`validate_audio_path` escape-hatch — trust analysis**:
+  - `app/main.py:213-221` (current line numbers) admits any path string already present in `db.tracks` as if it were sandbox-valid. Bypass für tracks die der user via "Add to library" reingebracht hat.
+  - **Inherited trust for quality-probe**: ein attacker der schreibrecht auf einen pfad hat der zufällig in `db.tracks` matched, kann `POST /api/quality/probe {path}` mit diesem pfad rufen, escape-hatch greift, probe öffnet die datei. Read-only (probe parsed nur ffprobe output) → **kein direkter exfil**, aber gibt confirmation dass datei existiert + dimensions. Low impact aber dokumentiert.
+  - **Mitigation**: Phase-1a probe-endpoint MUSS explizit `validate_audio_path(path, allow_db_match=False)` aufrufen (oder einen direkten allowlist-only sandbox-check) — nicht den default escape-hatch übernehmen. Surface in Implementation Plan als spezifischer Step.
+- **Composite-weight sum invariant — pin as code assertion**: `app/quality_engine.py` module-init time:
+  ```python
+  _QUALITY_WEIGHTS = {"cutoff": 0.4, "dynamic_range": 0.3, "bitrate": 0.2, "container": 0.1}
+  assert abs(sum(_QUALITY_WEIGHTS.values()) - 1.0) < 0.001, \
+      "QUALITY_WEIGHTS must sum to 1.0 (got %f)" % sum(_QUALITY_WEIGHTS.values())
+  ```
+  Catches drift at import time. M1 module skeleton ships with this assert.
+- **Cutoff tolerance ±200 Hz — REVISED to per-encoder buckets**: instead of single ±200 Hz, fixture-pro-encoder mit encoder-spezifischer tolerance. LAME 3.100 default V0 ≈ ±150 Hz; LAME CBR-128 ≈ ±300 Hz; Fraunhofer AAC ≈ ±400 Hz; FFmpeg-internal MP3 ≈ ±500 Hz. 5-track fixture decomposed in 5 encoder-buckets. Test-skeleton in M1 reflects: `assert abs(result.cutoff_hz - reference_hz) < ENCODER_TOLERANCE[result.encoder]`.
+- **Citation line-number drift**: ACKNOWLEDGED. ~50% `app/main.py` refs stale 12-236 lines. Doc-wide refresh deferred to draftplan_ kickoff (mechanical pass). Symbols + invariants verified.
 
 ### 2026-05-28 — Adversarial Findings (wave-2 verifier)
 

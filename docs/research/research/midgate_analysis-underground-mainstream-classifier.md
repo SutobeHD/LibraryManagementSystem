@@ -26,6 +26,8 @@ ai_tasks: false  # set true to opt-in AI routines — see ## AI Tasks below
 - 2026-05-15 — research/exploring_ — deeper exploration pass (toward evaluated_ readiness)
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
 - 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: stay `exploring_` until citation drift + Spotify carve-out + ISRC audit closed
+- 2026-05-29 — `research/exploring_` — wave-2 gap close-out: aggregation strategy REVISED to 2D-Display + optional 1D aggregate with `{soundcloud: 0.80, spotify: 0.20, lastfm: 0.0, beatport: 0.0}` weights (OQ 4 RESOLVED, user 2026-05-29); Spotify ECDF carve-out implemented (raw / 100 instead of log10+ECDF); ISRC coverage audit script provided; M2 deliverable rewritten in Recommendation
+- 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
 
 ## AI Tasks
 
@@ -107,7 +109,7 @@ Classify each track as **Underground vs Mainstream** by estimating cross-platfor
 1. **Score shape** — continuous 0–1 OR discrete bands OR both? **RESOLVED:** both — store continuous (`mainstream_score: float`) + derived band (`mainstream_band: enum`). Continuous wins for sort/filter; band wins for badge UX + cross-platform aggregation tolerance. Cheap to derive band on read.
 2. **Genre-relative vs global normalisation** — depends on genre-tag coverage. **PARKED-with-plan (Findings #5)**: audit query specified (`app/database.py:114` source → histogram per Findings #5 snippet). Coverage-threshold decision rules locked: `<0.50` → library-wide only; `0.50-0.80` → hybrid; `≥0.80` → genre-aware default. Cluster eligibility `≥ 100` hard / `≥ 50` soft (user-tunable). Pre-ECDF normalisation (lowercase + strip parenthetical + collapse whitespace) MUST run before clustering to avoid free-form-input fragmentation. Measurement deferred to M1 side-deliverable; logic ready.
 3. **MVP platform set** — **RESOLVED (Findings #2):** Spotify + SoundCloud + Last.fm. YouTube deferred to Phase 3 (quota math: 30k × 100 units search = 30 days). Last.fm IN (5 req/s + free + MBID match path).
-4. **Trust weighting** — equal mean OR genre-aware? **RESOLVED (partial):** start equal-mean for MVP simplicity; user-tunable weights in `settings.json` once enough listening proves a default per-genre profile (e.g. SC>>Spotify for techno). Defaults shipped: `{spotify: 1.0, soundcloud: 1.0, lastfm: 1.0}`. Genre profiles = Phase 2 enhancement.
+4. **Trust weighting — REVISED 2026-05-29 (user decision)**: equal-mean OVERTURNED. MVP ships **2D-Display as primary view** + **optional 1D aggregate-score for sort/filter** with non-equal weights. Spotify down-weighted to **0.20** (vs SC 0.80) given Spotify popularity's proprietary recency-reset semantics + Findings #3 confirmation that it is platform-internal rank, not roh playcount. Default weights: `{soundcloud: 0.80, spotify: 0.20, lastfm: 0.0, beatport: 0.0}` — Last.fm + Beatport dropped from default aggregate (Last.fm demographic skew is anti-signal for electronic; Beatport coverage too narrow for non-electronic). Both keep being **fetched + cached + shown in 2D-display**, only excluded from the default aggregate. Power-user kann in `settings.json` umschalten.
 5. **Refresh cadence** — per-import vs scheduled vs lazy? **RESOLVED (Findings #2):** TTL sidecar (SC=24h, Spotify=7d, LastFM=7d) refreshed by scheduled background sweep + lazy fallback (`fetched_at IS NULL OR > TTL` triggers fetch on detail-panel open). Per-import = first-time scoring of newly added track only.
 6. **Zero-platform tracks** — `unknown` vs pessimistic `underground`? **RESOLVED:** `unknown` band with `confidence=null`. Pessimistic-bias would silently corrupt set-planning filters ("warm-up only underground" picks unmatched obscure tracks as if curated). UI shows distinct visual (gray badge, "?" tooltip).
 7. **Fuzzy threshold** — `0.65` vs `0.80` cross-platform? **RESOLVED (Findings #2):** ISRC > MBID > fuzzy@0.80. Tighten from 0.65 (which is SC-self matching — local tracks all share roughly comparable cleanliness) because cross-platform false-positive cost is higher (wrong-track popularity poisons score worse than missing data). Coordinate with `external_track_match_unified_module` OQ9 (per-source override pattern).
@@ -310,6 +312,39 @@ M1 ships this in `app/popularity_audit.py` as standalone module — single depen
 
 **Open Questions touched (this entry):** none directly resolved — entire entry is implementation-readiness verification. All prior PARKED/RESOLVED states preserved.
 
+### 2026-05-29 — wave-2 gap close-out
+
+- **Aggregation strategy REVISED (Q4 user override)**: equal-mean dropped. 2D-Display = primary; optional 1D aggregate for sort/filter with `weights={soundcloud: 0.80, spotify: 0.20, lastfm: 0.0, beatport: 0.0}`. See revised OQ 4. M2 deliverable rewritten in Recommendation.
+- **Spotify ECDF carve-out — implementation**: in `popularity_engine.normalize_for_aggregate(platform, raw)`:
+  ```python
+  if platform == "spotify":
+      # Spotify popularity is platform-internal rank 0-100, not raw playcount.
+      # Skip log10 + ECDF — feed raw / 100.0 as already-normalised percentile.
+      return raw / 100.0
+  # For SC + Last.fm + Beatport: real playcounts → log10 + library-wide ECDF
+  return ecdf_lookup(math.log10(max(raw, 1)), platform=platform)
+  ```
+  Spotify display in 2D-panel shows raw 0-100 directly. ECDF only applied to real playcount sources.
+- **ISRC coverage audit script** (Q12 deliverable, ship as M1 side-task):
+  ```python
+  # scripts/audit/isrc_coverage.py
+  from app.database import db
+  from collections import Counter
+  by_source = Counter()
+  has_isrc = Counter()
+  for tid, t in db.tracks.items():
+      src = (t.get("source") or "drag-drop").split(":")[0]  # 'sc' | 'beatport' | 'drag-drop' | …
+      by_source[src] += 1
+      if t.get("ISRC"):
+          has_isrc[src] += 1
+  for src, n in by_source.most_common():
+      pct = 100 * has_isrc[src] / n if n else 0
+      print(f"{src:15s} {has_isrc[src]:6d}/{n:6d}  {pct:5.1f}%")
+  ```
+  Runnable today. Replaces Findings #3 estimated percentages with measured values. Doc Findings #3 currently asserts "Beatport ~100%, SC ~0%, drag-drop ~30-50%" — audit will confirm or correct.
+- **Last.fm + Beatport weight = 0.0 default**: not removed from fetch pipeline (still displayed in 2D-panel and stored in `popularity.sqlite`), just excluded from default aggregate weighting. Doc still describes their fetch + cache logic.
+- **Citation line-number drift**: ACKNOWLEDGED. Findings #6 fabricated `require_session` sample (lines 557/582 are Pydantic models). Verified actual gates at L744, L774, L823, L939, L994. Body-text cites stay until draftplan_ refresh.
+
 ### 2026-05-28 — Adversarial Findings (wave-2)
 
 **Weak assumption #1 — Spotify `popularity` semantics misread.** Doc treats Spotify `popularity` as a "0-100 already-log-normalised" plug-and-play percentile. Spotify docs: it is a proprietary recency-weighted score (Findings #3 admits this), reset partially every ~24h. Two failure modes: (a) percentile-of-percentile when fed through library-wide ECDF = signal collapse near 0.5; (b) snapshot drift — a track scoring 60 in March can read 40 in May with no real popularity change. Mitigation MUST: store `popularity` raw, skip ECDF for Spotify, and treat its band placement as platform-internal rank.
@@ -394,8 +429,13 @@ PASS-conditions: regenerate the 4 failing line refs; add Spotify ECDF carve-out 
 - **Effort**: S (one week).
 - **Rollback**: delete sidecar SQLite + revert endpoint registration; SC sync untouched (only payload-key add reverts cleanly).
 
-### M2 — Multi-source aggregate (Option B)
-- **Deliverable**: Add Spotify (`q=isrc:` batch lookup, 50 IDs/call) + Last.fm (`track.getInfo` via MBID/fuzzy@0.80). Aggregate score formula from Findings #3 (log + ECDF + mean). Banding (Option D heuristic layered). Per-platform raw counts surfaced in detail panel (Q9). UI: expandable popularity breakdown.
+### M2 — Multi-source 2D-Display (REVISED 2026-05-29 per user decision)
+- **Deliverable**: Add Spotify (`q=isrc:` batch lookup, 50 IDs/call) + Last.fm (`track.getInfo` via MBID/fuzzy@0.80) — both fetched + cached + DISPLAYED, but NO forced single-number band-label by default.
+- **Display primary**: per-platform percentiles shown side-by-side on track detail panel (e.g. `SC 99% · Spotify 10% · Last.fm 5%`). DJ interprets selber — Underground/Mainstream wird ein **2D-Space**, kein 1D-Label-Cliff.
+- **Optional aggregate-score for sort/filter**: when user sorts library by "popularity" or filters by underground/mainstream, ein einzelner Score wird berechnet aus `weighted_mean(percentiles, weights={soundcloud: 0.80, spotify: 0.20, lastfm: 0.0, beatport: 0.0})`. Spotify 0.20 weight begründet via Findings #3 (proprietary recency-reset, platform-internal rank) + Last.fm 0.0 weight begründet via Findings #2 (demographic skew anti-signal for electronic music). User can override weights in `settings.json` (`popularity_weights` key).
+- **Spotify ECDF carve-out**: Spotify popularity wird NICHT durch `log10 + library-wide ECDF` gejagt — bleibt raw 0-100 als platform-internal rank. SC + Last.fm + Beatport gehen weiter durch ECDF (sie sind echte playcount sources).
+- **Banding (optional, Phase 3)**: heuristic Banding (Option D layered) auf top of the aggregate, ABER nur als optional "list view label" — never the primary representation. 2D bleibt primary.
+- UI: 2D popularity panel mit per-platform bars; sortierbare List-Column "Underground/Mainstream Score" zeigt den weighted-aggregate.
 - **Entry**: M1 EXITED. Q2 + Q12 confirmed (M1's audit emitted `popularity_audit.json`; runtime config branched per coverage ratio per Findings #5 decision flow). Q11 RESOLVED — user-supplied-key fallback wired per resolution; in-app onboarding link present. `external_track_match_unified_module` either shipped M1 (popularity imports `fuzzy_match_with_score` per Findings #4) OR popularity ships local thin wrapper around `SoundCloudSyncEngine._fuzzy_match_with_score` + refactor scheduled at sibling-M1 ship.
 - **Exit**: First full scan completed; coverage metric measured (`≥ 50% of library has 2+ platform coverage` — if below, re-tune fuzzy thresholds or match-key order before declaring exit); cold full scan completes in ≤ 6h on residential broadband (G7 metric); per-platform raw counts displayed in UI detail panel without exposing API errors as visible noise.
 - **Effort**: L (2-3 weeks).

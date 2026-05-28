@@ -26,10 +26,7 @@ _(none)_
 - [ideagate_security-mobile-paired-tokens-phase2.md](research/ideagate_security-mobile-paired-tokens-phase2.md) — Per-device long-lived bearer + QR-pairing + revoke; sidecar-local `auth.db` (NOT master.db), `require_session` dual-accepts SESSION_TOKEN + paired tokens; hard prereq for mobile-companion shipping (2026-05-28)
 
 ### exploring
-- [exploring_analysis-underground-mainstream-classifier.md](research/exploring_analysis-underground-mainstream-classifier.md) — Underground vs Mainstream classifier; wave-2 GAPS: citation drift + Spotify ECDF carve-out + ISRC audit needed (2026-05-28)
-- [exploring_analysis-remix-detector.md](research/exploring_analysis-remix-detector.md) — Remix/edit/bootleg variant detector; wave-2 GAPS: 5/10 cite refs stale + PyYAML pin missing + browser-mode degrades silently (2026-05-28)
-- [exploring_library-quality-upgrade-finder.md](research/exploring_library-quality-upgrade-finder.md) — Quality auditor + transcode detection; wave-2 GAPS: ~50% of main.py line refs stale + library_swap extraction unresolved with sister `ideagate_library-format-converter` (2026-05-28)
-- [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); wave-2 GAPS: line refs stale + CORS regression unreflected + hard prereq `ideagate_security-mobile-paired-tokens-phase2` GATE A pending (2026-05-28)
+- [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); CORS rewrite done (now reflects shipped `allow_credentials=False`); STAYS exploring_ — hard prereq `ideagate_security-mobile-paired-tokens-phase2` GATE A pending (2026-05-29)
 
 ### midgate ⛔ GATE B
 - [midgate_external-track-match-unified-module.md](research/midgate_external-track-match-unified-module.md) — Cross-cutting fuzzy+chromaprint+adapter module shared by 3 sister features; wave-2 PASS (cosmetic line drift only); awaiting GATE B (2026-05-28)
@@ -38,6 +35,9 @@ _(none)_
 - [midgate_recommender-rules-baseline.md](research/midgate_recommender-rules-baseline.md) — Teil 1 ranking baseline (BPM/Key/Genre/MyTag/Energy + Camelot); wave-2 PASS-with-notes (3 user-pick default gates remain) (2026-05-28)
 - [midgate_recommender-similar-tracks.md](research/midgate_recommender-similar-tracks.md) — LOCAL-ONLY similar-tracks recommender; wave-2 PASS with 2 plan-shape corrections (backfill model, named vector slices) (2026-05-28)
 - [midgate_recommender-taste-llm-audio.md](research/midgate_recommender-taste-llm-audio.md) — Teil 2 taste/LLM recommender; wave-2 GAPS-recoverable (2 stale line-cites + cache invalidation underspecified) (2026-05-28)
+- [midgate_analysis-remix-detector.md](research/midgate_analysis-remix-detector.md) — Remix/edit/bootleg variant detector; wave-2 gaps closed-out 2026-05-29 (PyYAML→JSON, browser-mode constraint, lock owner picked, stratified fixture buckets) (2026-05-29)
+- [midgate_analysis-underground-mainstream-classifier.md](research/midgate_analysis-underground-mainstream-classifier.md) — Underground vs Mainstream classifier; aggregation REVISED to 2D-Display + 1D-aggregate with SC 0.80 / Spotify 0.20 weights (user 2026-05-29); ISRC audit script provided (2026-05-29)
+- [midgate_library-quality-upgrade-finder.md](research/midgate_library-quality-upgrade-finder.md) — Quality auditor; scope narrowed to detection-only (Phase-3 Snapshot+Swap+Migrate MERGED into `library-format-converter` per user 2026-05-29); `validate_audio_path` trust analysis added; weight-sum invariant pinned (2026-05-29)
 
 ### evaluated
 _(none)_

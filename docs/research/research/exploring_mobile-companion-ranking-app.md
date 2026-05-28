@@ -25,6 +25,7 @@ related: []
 - 2026-05-17 — research/exploring_ — deeper-exploration rework toward evaluated_ readiness (auth Phase-1 Steps 0-3 partial-landing reflected in Constraints; Tailscale Funnel concrete ports 443/8443/10000 + tailnet-DNS-only HTTPS-only constraints added; iOS 26 default-Web-App + Safari 18.4 Declarative Web Push surfaced; OQ15 added re: iOS 26 onboarding simplification; OQ12 lean reaffirmed against env-var pattern already proven by Phase-1 `LMS_TOKEN=`)
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
 - 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: stay `exploring_` — 4 gaps + hard prereq `ideagate_security-mobile-paired-tokens-phase2` GATE A pending
+- 2026-05-29 — `research/exploring_` — partial wave-2 close-out: CORS Constraints paragraph rewritten to reflect shipped `allow_credentials=False` + explicit method/header lists (was incorrectly asserting wildcards + True). Hard prereq `ideagate_security-mobile-paired-tokens-phase2` GATE A still pending → STAYS exploring_ until user passes that gate
 
 ---
 
@@ -154,7 +155,7 @@ Mobile must reproduce: source picker (4 modes), queue progress, per-track stars 
 13 reads + 3 mutations + 1 status = 17 routes touched. The 3 mutations take `Depends(require_session)` Phase-1 LANDED 2026-05-17 (grep `require_session` against `app/main.py` → 81 hits, of which 80 are route decorations). Mobile additionally needs Phase-2 pairing endpoints (`POST /api/pairing/start`, `POST /api/pairing/complete`, `DELETE /api/pairing/{device_id}`) — **verified absent 2026-05-17** (grep `paired_devices|/api/pairing/` across `app/` → 0 hits).
 
 **Network reality**:
-- CORS allowlist (`main.py:216-232` post-hotfix) blocks every non-localhost / non-tauri origin. `allow_credentials=True`, `allow_methods=["*"]`, `allow_headers=["*"]`. Mobile origin must be added env-driven (OQ12).
+- CORS allowlist (`main.py:236-252` post-Phase-B shipped 2026-05-19): `allow_credentials=False`, **explicit method list** (`["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]`), **explicit header list** (`["Authorization", "Content-Type", "X-Requested-With"]`). Bearer-token auth still works via `Authorization` in allow_headers. Cookies foreclosed (`allow_credentials=False`). Mobile-OQ12 env-driven origin addition must respect this tightened baseline — no return to `allow_credentials=True` for mobile (would unwind shipped Phase-B). **REVISED 2026-05-29** (this paragraph rewritten — original asserted `True` + wildcards; current code is False + explicit lists since `implemented_security-cors-allow-credentials-tightening_2026-05-18.md`).
 - Axios baseURL hard-coded `http://127.0.0.1:8000` (`api.js:10`), overridable via `VITE_API_BASE_URL`. Mobile runtime injection required.
 - Auth gap is current — `draftplan_security-api-auth-hardening.md` Phase 1 closes it via `require_session` Bearer on every `POST`/`PUT`/`PATCH`/`DELETE`. Mobile depends on Phase 2 (paired-device tokens) on top.
 

@@ -55,7 +55,13 @@ SC-Downloads schreiben Source-Format (MP3 progressive / AAC HLS / Original-Uploa
 
 **Goals**
 - **Default-Setting** `sc_download_format = "aiff"` (statt heutigem `"auto"`).
-- **Settings-UI** (Settings-Tab) mit Dropdown: AIFF / FLAC / WAV / ALAC / MP3-320 / Original (passthrough).
+- **Settings-UI** (Settings-Tab) mit Dropdown — 6 Targets, AIFF preselected:
+  1. **AIFF** (uncompressed PCM, ~30 MB / 3 min, CDJ-3000 nativ) ← Default
+  2. **ALAC** (Apple Lossless, .m4a Container, ~15 MB / 3 min)
+  3. **FLAC** (Free Lossless Audio Codec, ~15 MB / 3 min, best DJ-SW compat outside Rekordbox)
+  4. **WAV** (uncompressed PCM, RIFF Container, ~30 MB / 3 min, equivalent to AIFF audio-wise)
+  5. **MP3-320 CBR** (lossy 320 kbps Constant-Bitrate, ~7 MB / 3 min) — surfaces lossy warning toast
+  6. **Original** (passthrough — was SC liefert, kein Re-Encode-Step nach HLS-Mux)
 - **Setting persisted** via existing `SettingsManager` + `SetReq` Pydantic field.
 - **Per-format Conversion-Matrix** dokumentiert: welche Source → welches Target ist sinnvoll (kein fake-lossless re-encode MP3→FLAC).
 - **Reuse** of existing `_convert_to_aiff` + extension dafür (`_convert_to_target_format`).
@@ -99,7 +105,7 @@ Stage 1 Worker. Numbered. Each resolvable.
 2. **`"original"` semantics**: passthrough (= heute "auto") = bytes-identisch wie SC sie liefert (MP3/AAC/WAV/FLAC je nach Quality-Tier des Tracks), kein Re-Encode. Aber: HLS-Streams werden bereits per ffmpeg `-c copy` zu .m4a remuxt — gilt das schon als "non-original"? Vorschlag: ja, "original" = "kein zusätzlicher conversion-Step nach dem download/mux". Reicht das oder muss user explizit sehen "wir haben dein MP3 zu AIFF konvertiert"?
 3. **Quality-Loss-Warnung bei lossless → lossy** (z.B. user wählt MP3-320 als Default): UI-Warnung nötig? Vorschlag: bei MP3 / ALAC-256kbps Targets einmal "lossy target — Original-Quality geht verloren" toast/disclaimer.
 4. **MP3-Bitrate-Fixierung**: 320 kbps CBR fest, oder Sub-Setting (192/256/320/VBR-V0)? Vorschlag: 320 CBR fix für MVP — der DJ-Use-Case will eine konsistente Qualitätsfloor, kein Bitrate-Tuning.
-5. **ALAC vs AIFF Default**: User sagt "AIFF (Apple Lossless)" — sie sind aber NICHT dasselbe. AIFF = uncompressed PCM (groß, einfach). ALAC = Apple Lossless Audio Codec (compressed lossless, .m4a, ~50% kleiner). Beide lossless. Für CDJ-3000: AIFF nativ + komfortable Tag-Behandlung; ALAC funktioniert auch via Rekordbox-USB-Export, aber weniger getestet. Vorschlag: AIFF default (User-Wording matches), ALAC als alternative Option. Confirm bei GATE A?
+5. **ALAC vs AIFF Default — RESOLVED 2026-05-29 (user)**: AIFF default (uncompressed PCM, CDJ-3000 nativ, dein Wording matches). ALAC als alternative Settings-Option (compressed lossless, .m4a, ~50% kleiner). Full dropdown ships M1 mit 6 Targets — AIFF preselected. Apple Lossless / ALAC ist im Dropdown sichtbar mit Hinweis "lossless, kleiner als AIFF, weniger DJ-SW-getestet".
 6. **Apply-zu-Lokal-Import**: Soll dieses Setting auch greifen beim manuellen Drag-und-Drop-Import (`app/services.py:ImportManager`)? Vorschlag: NEIN für MVP — lokal-importierte Files lässt der User idR im Original (er hat sie ja schon im finalen Format gespeichert). Apply nur auf Downloads (SC heute, unified later).
 
 ## Research Plan

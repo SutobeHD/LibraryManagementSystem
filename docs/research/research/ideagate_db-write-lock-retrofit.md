@@ -146,11 +146,11 @@ Whichever option ships, `tests/test_concurrency.py` test (a) is the actual drift
 
 ## Recommendation
 
-**Option B (auto-wrap, prefix-matched) + OQ5 introspection test.** Two reasons B wins decisively now: (1) drift is the real defect — the audit proved the hand list silently fell behind, and a list will do so again; (2) the audit found a *second* class needing wrapping (`LiveRekordboxDB` via `_require_live_db()`). A and C both scale by repetition (a 2nd loop list / a 2nd batch of `@` decorators + a cross-module import); B's one prefix-matched decorator applies to N classes by one `@` line each. B removes the drifting artefact instead of duplicating it.
+**Option B (auto-wrap, prefix-matched) + OQ5 introspection test.** **CONFIRMED 2026-05-29 by user.** Two reasons B wins decisively: (1) drift is the real defect — the audit proved the hand list silently fell behind, and a list will do so again; (2) the audit found a *second* class needing wrapping (`LiveRekordboxDB` via `_require_live_db()`). A and C both scale by repetition (a 2nd loop list / a 2nd batch of `@` decorators + a cross-module import); B's one prefix-matched decorator applies to N classes by one `@` line each. B removes the drifting artefact instead of duplicating it.
 
 Diff spans `database.py` + `live_database.py`: one `@serialise_mutators` decorator, applied to `RekordboxDB` + `LiveRekordboxDB`; `ensure_standalone_master_db` + the 3 live mytag writers get covered automatically by prefix; delete the old `setattr` loop; add `tests/test_concurrency.py`. No `main.py` churn, no route changes. Docstring `database.py:36-37` is already accurate — no doc repair (scaffold was wrong about that).
 
-Fallback: if B's prefix-matching reads as too implicit in review, Option C is the readable runner-up (same test, explicit `@_serialised`) at a larger, two-file diff.
+**Option C status:** DEFERRED. Reviewers who would prefer explicit `@_serialised` per def-site can request it at PR review — code-review-checklist convention covers visibility, the CI introspection test covers correctness either way. If review pushback ever appears at draftplan_ time, switch is mechanical (delete `@serialise_mutators` lines, scatter `@_serialised` to each def — same test pinning behaviour).
 
 **Scope split:** the broken `save_track_cues`/`save_track_beatgrid` routes (`AttributeError` — non-existent facade methods) are a *separate* bug — own task, do not bundle into this draftplan.
 
