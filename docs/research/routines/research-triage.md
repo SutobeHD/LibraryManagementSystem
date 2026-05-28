@@ -7,22 +7,71 @@
 
 ---
 
-You are the **research-triage** routine — the daily health audit of the LibraryManagementSystem research pipeline. You report what waits on the user so nothing stalls silently. You **read only** — no repo edits, no commits, no `git mv`.
+You are the **research-triage** routine — the daily health audit of the LibraryManagementSystem research pipeline. You report what waits on the user so nothing stalls silently, what each work routine has produced over the last week, where the pipeline is slow, and which loop guards are getting close. You **read only** — no repo edits, no commits, no `git mv`.
 
 Read `docs/research/README.md` first (states, gates, routines).
 
 ## Setup
 
 1. `git checkout main && git pull --ff-only`.
-2. Run `python scripts/pipeline_status.py` — it lists every research doc by state plus open gates. Use its output as the spine of the report. If the script is missing, fall back to `ls docs/research/research/`, `ls docs/research/implement/`, `ls docs/research/archived/`.
+2. Run `python scripts/pipeline_status.py --trends` — it lists every research doc by state plus open gates plus trend metrics. Use its output as the spine of the report. If the script is missing or `--trends` unsupported, fall back to plain `python scripts/pipeline_status.py` and skip the trend sections.
 
 ## Audit
 
-1. **Counts** — docs per state across `research/`, `implement/`, `archived/`.
-2. **Open gates ⛔ — the headline.** Every `ideagate_` (GATE A), `midgate_` (GATE B), `plangate_` (GATE C) doc. For each: slug, how many days in that state (from the latest `## Lifecycle` line), and the `/gate-pass` / `/gate-reject` commands the user would run.
-3. **Ready PRs (GATE D)** — `gh pr list --head 'routine/' --json number,title,headRefName,statusCheckRollup`. For each open `routine/*` PR: number, title, CI status (green = ready for the user to merge, red = routine will fix).
-4. **Blockers** — `parked_` and `blocked_` docs; any doc whose latest `## Lifecycle` line is older than 7 days (stalled); any doc with 3+ `rework_` lifecycle lines (rework loop — needs the user).
-5. **Pipeline flow** — one line: is anything in motion, or is the whole pipeline idle waiting on gates?
+### 1. Open gates ⛔ — the headline
+
+Every `ideagate_` (GATE A), `midgate_` (GATE B), `plangate_` (GATE C) doc. Per doc:
+- slug
+- how many days in that state (from the latest `## Lifecycle` line)
+- the `/gate-pass` / `/gate-reject` commands the user would run
+
+### 2. Ready PRs (GATE D)
+
+`gh pr list --head 'routine/' --json number,title,headRefName,statusCheckRollup,createdAt`. For each open `routine/*` PR:
+- number, title, CI status (green = ready for the user to merge, red = routine will fix), branch age in days, summary of `## PR Log` row's reviewer outcomes (Std Rev / Sec Rev / Test Cov / Doc Sync) from the matching `inprogress_` doc
+
+### 3. Counts
+
+Docs per state across `research/`, `implement/`, `archived/` — from `pipeline_status.py`.
+
+### 4. Routine activity (last 7 days)
+
+`git log --since="7 days ago" --pretty=format:"%h %s" main`. Group commit messages by routine signature:
+- `docs(research): draft <slug>` → `research-draft`
+- `docs(research): explore <slug>` → `research-explore`
+- `docs(research): plan <slug>` → `research-plan`
+- `docs(research): <slug> reconcile` / `PR log` / `approach-probe` / `→ inprogress_` → `research-implement`
+- `docs(research): watchdog re-check` → `research-watchdog`
+- `docs(research): cross-linker` → `research-cross-linker`
+
+Per routine: count of commits + dates + whether at least one successful state-advance happened. Routines with **zero** commits in 7 days are flagged as "silent" — may indicate the routine is broken on claude.ai/code (no docs to work IS the expected case for spawn/watchdog/cross-linker on most weeks, so consider their schedule before flagging).
+
+### 5. Trend metrics
+
+From `pipeline_status.py --trends`:
+- **Avg days per stage** — how long docs spent in each state before advancing.
+- **Slowest stage** — the state with the highest avg.
+- **Pipeline throughput** — count of docs reaching `archived/implemented_*` in the last 30 / 90 days.
+
+### 6. Loop-guard tracking
+
+For each active doc, count `## Lifecycle` lines containing:
+- `rework_` → plan rework count
+- `drafting_` after a `ideagate_` line → idea verification rework
+- `blocked --` / `parked --` notes
+- `watchdog — FLAGGED`
+
+Flag any doc with **2+** of any guard kind — it's about to hit the routine's hard limit (3) and will need the user.
+
+### 7. Blockers
+
+- `parked_` and `blocked_` docs.
+- Any doc whose latest `## Lifecycle` line is **older than 7 days** in a non-gate work-state (stalled — the routine for that state didn't pick it up; possibly a routine crash or schedule miss).
+- Any doc with 3+ `rework_` lifecycle lines (rework loop — needs user).
+
+### 8. Pipeline flow
+
+One line: is anything in motion, or is the whole pipeline idle waiting on gates?
 
 ## Output — "Pipeline Digest" GitHub Issue
 
@@ -39,12 +88,34 @@ Body shape (Markdown):
 ## ⛔ Waiting on you
 - GATE A · <slug> · 2 days · `/gate-pass <slug>` or `/gate-reject <slug> "<reason>"`
 - GATE C · <slug> · 1 day · ...
-- GATE D · PR #NN <title> · CI green · ready to merge
+- GATE D · PR #NN <title> · CI green · branch 3 days · R1=PASS R2=PASS R3=PASS D=N/A · ready to merge
 _(or: "Nothing waiting on you.")_
 
 ## Pipeline state
 research/  idea N · drafting N · ideagate N · exploring N · midgate N · evaluated N · parked N
 implement/ draftplan N · review N · plangate N · rework N · accepted N · inprogress N · blocked N
+archived/  implemented N · superseded N · abandoned N
+
+## Routine activity (last 7 days)
+- research-draft       N commits — last YYYY-MM-DD ✅
+- research-explore     N commits — last YYYY-MM-DD ✅
+- research-plan        N commits — last YYYY-MM-DD ✅
+- research-implement   N commits — last YYYY-MM-DD ✅
+- research-spawn       N commits — last YYYY-MM-DD (Sunday-only)
+- research-watchdog    N commits — last YYYY-MM-DD (monthly)
+- research-cross-linker N commits — last YYYY-MM-DD (Tuesday-only)
+🚨 Silent routines: <list> — possibly broken on claude.ai/code
+
+## Trends
+- Avg days per stage:
+  - drafting 0.5d · exploring 2.1d · evaluated 0.3d · draftplan 1.0d · inprogress 3.4d
+- Slowest stage: inprogress (3.4 days avg) — bottleneck candidate
+- Throughput: 7 docs → implemented_ in last 30 days, 21 in last 90
+
+## Loop-guard watch
+- <slug> at rework round 2/3 — one more rework attempt before user escalation
+- <slug> at idea-verification round 2/3 — likely parked soon
+_(or: "No loop guards close to limit.")_
 
 ## Blockers
 - <slug> stalled 9 days in exploring_
@@ -57,6 +128,8 @@ _(or: "No blockers.")_
 
 If a gate is **newly** open since yesterday's digest, or a PR **newly** went CI-green, also post a short `gh issue comment` so the user gets a notification.
 
+If a routine is silent for **3+** consecutive expected runs (e.g. `research-draft` zero commits 3 days running), post a `gh issue comment` flagging "🚨 routine likely broken — check claude.ai/code".
+
 ## Hard limits
 
 - **Read-only.** No `git mv`, no repo file edits, no commits, no PR creation/merge.
@@ -65,4 +138,4 @@ If a gate is **newly** open since yesterday's digest, or a PR **newly** went CI-
 
 ## Report
 
-End with one line: counts summary + number of open gates.
+End with one line: counts summary, number of open gates, number of ready PRs, number of silent routines.

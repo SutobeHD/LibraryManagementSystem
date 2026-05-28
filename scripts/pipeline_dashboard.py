@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pipeline_status import (
     GATE_STATES,
     STAGE_STATES,
+    compute_trends,
     fetch_routine_prs,
     open_gates,
     scan,
@@ -46,9 +47,12 @@ _PR_CACHE: dict = {"at": 0.0, "data": None}
 _PR_CACHE_TTL = 60.0
 
 _ROUTINES = (
-    "research-draft 05:00 &middot; research-explore 06:00+14:00 &middot; "
+    "Daily: research-draft 05:00 &middot; research-explore 06:00+14:00 &middot; "
     "research-plan 13:00 &middot; research-implement 03:00+15:00 &middot; "
-    "research-triage 07:30 (Berlin)"
+    "research-triage 07:30. "
+    "Cross-cutting: research-spawn Sun 04:00 &middot; "
+    "research-watchdog 1st-of-month 04:00 &middot; "
+    "research-cross-linker Tue 04:30 (Berlin)"
 )
 
 CSS = """
@@ -105,6 +109,14 @@ code { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:12p
 .spacer { margin-left:auto; }
 .blocker-item { border-left:3px solid #f85149; }
 .blocker-tag { color:#f85149; font-size:12px; font-family:ui-monospace,monospace; }
+.trend-row { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:7px; }
+.trend-tile { background:#161b22; border:1px solid #30363d; border-radius:8px;
+  padding:9px 11px; min-width:120px; flex:0 1 auto; }
+.trend-tile.slow { border-color:#e3b341; }
+.trend-state { font-size:11px; color:#7d8590; text-transform:uppercase; letter-spacing:.05em; }
+.trend-val { font-family:ui-monospace,monospace; font-size:15px; font-weight:650; }
+.trend-n { color:#7d8590; font-size:11px; font-family:ui-monospace,monospace; }
+.trend-foot { color:#7d8590; font-size:12px; margin-top:4px; }
 footer { margin-top:36px; color:#56606b; font-size:11.5px;
   border-top:1px solid #21262d; padding-top:14px; line-height:1.7; }
 """
@@ -200,6 +212,35 @@ def _render_prs(prs: list[dict] | None) -> str:
     return "".join(rows)
 
 
+def _render_trends(docs: list) -> str:
+    t = compute_trends(docs)
+    avg = t["avg_per_state"]
+    if not avg:
+        return '<div class="empty-note">No completed transitions yet (no history to average).</div>'
+    slowest = t["slowest_state"]
+    tiles = []
+    for _stage, states in STAGE_STATES.items():
+        for state in states:
+            if state not in avg:
+                continue
+            css = "trend-tile slow" if state == slowest else "trend-tile"
+            tiles.append(
+                f'<div class="{css}">'
+                f'<div class="trend-state">{_esc(state)}</div>'
+                f'<div class="trend-val">{avg[state]:.1f}d</div>'
+                f'<div class="trend-n">n={t["sample_size"][state]}</div>'
+                "</div>"
+            )
+    foot = (
+        f'<div class="trend-foot">Throughput: {t["throughput_30"]} docs '
+        f'&rarr; implemented_ in last 30 days, {t["throughput_90"]} in last 90'
+    )
+    if slowest:
+        foot += f' &middot; slowest work state: <strong>{_esc(slowest)}</strong> ({t["slowest_avg"]:.1f}d avg)'
+    foot += "</div>"
+    return f'<div class="trend-row">{"".join(tiles)}</div>{foot}'
+
+
 def _render_blockers(docs: list) -> str:
     items = []
     for d in docs:
@@ -250,6 +291,7 @@ def render_html() -> str:
         f"&middot; auto-refresh {REFRESH_SECONDS}s</span></header>"
         "<h2>Waiting on you</h2>" + _render_gates(docs)
         + "<h2>Pipeline</h2>" + lanes
+        + "<h2>Trends (avg days per state, completed visits)</h2>" + _render_trends(docs)
         + "<h2>Open routine PRs (GATE D)</h2>" + _render_prs(prs)
         + "<h2>Blockers</h2>" + _render_blockers(docs)
         + "<footer>Read-only view of docs/research/. Advance gate docs with "
