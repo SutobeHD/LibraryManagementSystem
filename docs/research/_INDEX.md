@@ -26,11 +26,10 @@ _(none)_
 - [exploring_db-write-lock-retrofit.md](research/exploring_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps; Option B (auto-wrap) committed; wave-2 verify → GAPS (3rd gap: `AnalysisDBWriter` rbox-direct write uncovered by class decorator; circular drift guard); stays exploring_ (2026-05-29)
 - [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); wave-2 GAPS narrowed (CORS para corrected, 3/3 stale main.py refs refreshed+PASS, Phase-2 prereq now past GATE A); remaining blocker = OQ14+OQ7 user sign-off only; stays exploring_ (2026-05-29)
 ### midgate ⛔ GATE B
-- [midgate_download-format-setting.md](research/midgate_download-format-setting.md) — AIFF default + 6-Option-Dropdown; wave 1 done (4 agents, all 6 OQs covered, 3 doc corrections); awaiting GATE B (2026-05-29)
-- [midgate_library-format-converter.md](research/midgate_library-format-converter.md) — Library-wide format converter; wave 1 OVERTURNED 3 OQs (proof script absent, AAC priming ffmpeg-trimmed ~48ms risk, update_track_path can't rename in live mode); OQ2/OQ5 confirmed; awaiting GATE B (recommend reject-to-wave-2) (2026-05-29)
+- [midgate_library-format-converter.md](research/midgate_library-format-converter.md) — Library-wide format converter; wave 1 OVERTURNED 3 OQs (proof script absent, AAC priming ffmpeg-trimmed ~48ms risk, update_track_path can't rename in live mode); OQ2/OQ5 confirmed; **HELD at GATE B — recommend reject-to-wave-2, NOT passed** (2026-05-29)
 
 ### evaluated
-_(none)_
+- [evaluated_download-format-setting.md](research/evaluated_download-format-setting.md) — AIFF default + 6-target dropdown (Option A); GATE B passed (agent-delegated) + wave-2 PASS (code citations PASS, web MEDIUM); ready for draftplan_ (2026-05-29)
 
 ### parked
 _(none)_

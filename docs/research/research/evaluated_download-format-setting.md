@@ -25,6 +25,7 @@ superseded_by: []
 - 2026-05-28 — `research/ideagate_` — Stage 1 verifier PASS, awaiting GATE A
 - 2026-05-29 — `research/exploring_` — GATE A PASSED by user; AIFF default + 6-Option-Dropdown specs confirmed; advanced for Stage 2 wave-2 verifier
 - 2026-05-29 — `research/midgate_` — Stage 2 wave 1 done (4 tiered agents: code-surface + sister-delta + web-DJ-formats + UI-pattern). All 6 OQs covered; 3 doc corrections found (180s timeout not 360s, POST not PUT, current convert drops artwork). Awaiting GATE B.
+- 2026-05-29 — `research/evaluated_` — GATE B PASSED (user-delegated authority) + wave-2 verification run on the wave-1 body: Adversarial (artwork-drop, remux-wording, fake-lossless, storage), Citation Quality (code PASS / web MEDIUM, Pioneer 403), Research Verification PASS; Options + Recommendation (Option A) written.
 
 ## Original Idea (verbatim — never edit)
 
@@ -167,17 +168,21 @@ Stage 2 Synthesis-Agents (one per OQ). Dated subsections, append-only. ≤150 wo
 
 Stage 2 Adversarial-Agent (wave 2). Devil's-advocate — what could go wrong, what assumptions are weak. ≤120 words. Append-only.
 
-### YYYY-MM-DD
-- **Weak assumption:** …
-- **Failure mode:** …
-- **Counter-example:** …
+### 2026-05-29
+- **Weak assumption:** "reuse `_convert_to_aiff`" assumes the existing convert preserves tags/art. It does NOT — `-vn` (`soundcloud_downloader.py:964-976`) drops cover art and there is no `-map_metadata 0`, so the current AIFF path already loses most tags. The MVP must add `-map_metadata 0` + a mutagen overlay (`audio_tags.py:write_tags`), not reuse as-is.
+- **Failure mode:** `"original"` after the HLS `-c copy` remux (`soundcloud_downloader.py:679`) is NOT byte-identical to the source — it is re-containerised to `.m4a`. UI wording must say "source codec, no re-encode", not "original file untouched".
+- **Counter-example (fake-lossless):** MP3-320 source → user picks FLAC/AIFF target produces a lossless *container* around lossy audio. Tags must never claim lossless provenance (Constraint, lossless-first rule). Surface a one-time "target is lossless container of a lossy source — no quality gain" note.
+- **Storage:** AAC→AIFF ~5× expansion (Constraint) is real; the Settings disclaimer is necessary, not optional, for library-scale users.
 
 ## Citation Quality
 
 Stage 2 Citation-Verifier (wave 2). Checks every `file:line` ref + URL in `## Findings` exists + says what the Finding claims.
 
-### YYYY-MM-DD — <PASS|FAIL>
-- …
+### 2026-05-29 — PASS (code) / MEDIUM (web)
+
+- **Code refs — PASS** (verified by wave-1 codebase agents at exact lines): `_aiff_requested` `soundcloud_downloader.py:1014` reading `sc_download_format` at `:1019`; default `services.py:656`; `SetReq` field `main.py:414` (`_Literal["auto","aiff"]|None`); `_convert_to_aiff` `:953`, ffmpeg cmd `:964-976` (`pcm_s16le -vn`), timeout `:982` (=`_DOWNLOAD_TIMEOUT` 180s); conversion gate `:1314-1324`; HLS `-c copy` `:679`; `audio_tags.py` dispatch `:245-251`, `write_tags:254`; `SettingsView.jsx:108`, batch POST `:128`; `SettingsExport.jsx:62-68` raw `<select>` pattern.
+- **Web refs — MEDIUM** (Pioneer/AlphaTheta WebFetch returned 403; claims sourced from WebSearch snippets): CDJ-3000 native FLAC/ALAC USB support, AIFF ID3v2 read-glitches, FLAC-best-all-round convention. These inform **dropdown labelling only**, not the core feature — flagged for re-verify if a primary source becomes fetchable, but non-blocking.
+- Verdict: all load-bearing (code) citations PASS; web citations MEDIUM-confidence, scoped to non-critical UX copy.
 
 ## Mid-Research Checkpoint
 
@@ -202,32 +207,37 @@ GATE B. `research-explore` fills Status after wave 1. User fills Verdict via `/g
 
 Stage 2 wave-2 verifier over whole research body. PASS → `evaluated_`; gaps → more Findings.
 
-### YYYY-MM-DD — <PASS|GAPS>
-- …
+### 2026-05-29 — PASS
+
+- All 6 OQs answered (Status 2026-05-29); each backed by ≥1 cited Finding.
+- Citation Quality: code refs PASS; web refs MEDIUM (scoped to dropdown labelling, non-blocking).
+- Adversarial concerns (artwork/tag loss in current convert, "original" remux wording, fake-lossless tagging, storage disclaimer) are all actionable at implementation — none overturn the recommendation (extend `_convert_to_aiff` → `_convert_to_target_format`, AIFF default, 6-target dropdown).
+- No open research questions remain; the 3 doc corrections (180s timeout, POST not PUT, artwork-drop) are recorded.
+- Verdict: **PASS** → `evaluated_`. (GATE B passed by user-delegated authority 2026-05-29; wave-2 verification run on the existing wave-1 body.)
 
 ## Options Considered
 
 Stage 2 Synthesis-Agent (wave 2 PASS). Per option: sketch ≤5 bullets, pros, cons, S/M/L/XL, risk, prior-art match.
 
-### Option A — <name>
-- Sketch:
-- Pros:
-- Cons:
-- Effort:
-- Risk:
-- Prior-art match: <slug or "novel">
+### Option A — Setting-driven default + Settings dropdown (extend existing convert)
+- Sketch: `sc_download_format` default `"aiff"`; `SetReq` Literal → 6 values; extend `_convert_to_aiff` → `_convert_to_target_format(src, target)` (per-target ffmpeg cmd matrix referenced from `library-format-converter`, **+`-map_metadata 0`** + mutagen art overlay to fix the artwork-drop); 6-target `<select>` in `SettingsExport.jsx` "Format Defaults"; `react-hot-toast` lossy warning on MP3.
+- Pros: smallest delta, reuses convert + tag infra; no new routes (batch POST `/api/settings`); applies only to downloads (Non-goal scope kept).
+- Cons: must fix the existing artwork/tag-loss bug as part of it; storage disclaimer needed.
+- Effort: S–M.
+- Risk: Low — single read-site (`soundcloud_downloader.py:1019`), behaviour change only for fresh installs (existing `"auto"`/missing keys unchanged).
+- Prior-art match: `library-format-converter` (ffmpeg matrix + tag rule), `downloader-unified-multi-source` (Q11 AIFF-default, lossless-first).
 
-### Option B — <name>
-- Sketch:
-- Pros:
-- Cons:
-- Effort:
-- Risk:
-- Prior-art match: <slug or "novel">
+### Option B — Per-download format override in the download button [REJECTED for MVP]
+- Sketch: format picker inline on each download action, no global setting.
+- Pros: max flexibility per track.
+- Cons: more UI surface, per-action friction; explicit Non-goal ("Setting only, MVP").
+- Effort: M.
+- Risk: scope-creep vs the Original Idea ("einstellbar in Settings").
+- Prior-art match: novel.
 
 ## Recommendation
 
-Stage 2 Synthesis-Agent (wave 2 PASS). ≤120 words.
+**Option A.** Default `sc_download_format="aiff"` (fresh installs only; `"auto"`/missing preserved, UI-labelled "Original"); 6-target Settings dropdown (AIFF preselected); extend `_convert_to_aiff` → `_convert_to_target_format` **with `-map_metadata 0` + mutagen art overlay** (fixes the current artwork/tag-drop). Lossy-target toast; storage disclaimer. No new routes (batch `POST /api/settings`). Blocks before draftplan: confirm OQ1 (hard-default vs first-run dialog — leans hard-default) and the per-target ffmpeg matrix reference from `library-format-converter`. Per-download override (Option B) deferred — Non-goal for MVP.
 
 ---
 
