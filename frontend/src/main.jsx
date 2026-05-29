@@ -253,6 +253,37 @@ const TopBar = ({
   )
 }
 
+/**
+ * WorkspaceNav — in-content nav for the active workspace's sibling views.
+ *
+ * Lives at the top of the content area (NOT the global top chrome), so the
+ * top bar stays constant across workspaces. Rendered only when a workspace
+ * has more than one view — single-view workspaces (e.g. Studio in live mode)
+ * stay fully immersive.
+ */
+const WorkspaceNav = ({ items, activeTab, setActiveTab }) => (
+  <div className="flex items-stretch h-9 bg-mx-shell/40 border-b border-line-subtle shrink-0 px-2 gap-1 select-none">
+    {items.map((it) => {
+      const Icon = it.icon
+      const active = activeTab === it.tab
+      return (
+        <button
+          key={it.tab}
+          onClick={() => setActiveTab(it.tab)}
+          className={`flex items-center gap-1.5 px-3 my-1 rounded-sm text-[11px] whitespace-nowrap transition-colors ${
+            active
+              ? 'bg-mx-selected text-ink-primary font-medium'
+              : 'text-ink-secondary hover:text-ink-primary hover:bg-mx-hover'
+          }`}
+        >
+          <Icon size={13} className={active ? 'text-amber2' : 'opacity-70'} />
+          {it.label}
+        </button>
+      )
+    })}
+  </div>
+)
+
 // Subtle dot-grid backdrop — sharp, low-contrast, no blur. Sits behind the
 // content so the screen feels like an extension of the app shell rather than
 // a soft hero gradient.
@@ -628,6 +659,7 @@ const App = () => {
   const handlePlayTrack = useCallback((track) => { setPlayerTrack(track); }, []);
 
   const workspaces = useMemo(() => buildWorkspaces(libraryStatus), [libraryStatus]);
+  const currentWorkspace = workspaces.find((w) => w.id === activeWorkspace) || workspaces[0];
 
   // Keep the workspace tab in sync when the view changes from elsewhere
   // (e.g. "edit track" jumps straight to the editor). Tabs with no workspace
@@ -708,8 +740,15 @@ const App = () => {
         onUnloadLibrary={handleUnloadLibrary}
       />
 
-      <main className="flex-1 min-h-0 overflow-hidden relative z-10 bg-mx-deepest">
-        <div className={`h-full w-full relative ${playerTrack ? 'pb-20' : ''}`}>
+      <main className="flex-1 min-h-0 overflow-hidden relative z-10 bg-mx-deepest flex flex-col">
+        {currentWorkspace.items.length > 1 && (
+          <WorkspaceNav
+            items={currentWorkspace.items}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+          />
+        )}
+        <div className={`flex-1 min-h-0 w-full relative ${playerTrack ? 'pb-20' : ''}`}>
           <Suspense fallback={<ViewLoader />}>
             {/* STABILITY: Each view wrapped in its own ErrorBoundary */}
             <div className={activeTab === 'library' ? 'h-full' : 'hidden'}>
