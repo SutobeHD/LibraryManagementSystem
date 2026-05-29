@@ -25,6 +25,7 @@
 | `app/audio_analyzer.py` | LibraryManagementSystem -- Audio Analyzer (Unified Wrapper) |
 | `app/audio_tags.py` | audio_tags — write metadata back to the source audio file. |
 | `app/auth.py` | Bearer-token authentication for the FastAPI sidecar. |
+| `app/auth_db.py` | auth_db — sidecar-local store for per-device paired tokens (Phase-2 auth). |
 | `app/batch_worker.py` | Setup logging |
 | `app/config.py` | *(no module docstring)* |
 | `app/database.py` | *(no module docstring)* |
@@ -198,6 +199,7 @@
 | `tests/test_main_security.py` | Regression tests for ``POST /api/file/reveal`` sandbox. |
 | `tests/test_metadata_fixer_detector.py` | M0 detector tests — read-only malformation detection. |
 | `tests/test_onelibrary_wal_flush.py` | End-to-end regression test for OneLibraryUsbWriter — runs the FULL |
+| `tests/test_pairing.py` | Phase-2 paired-token store tests (T1 — app/auth_db.py). |
 | `tests/test_pdb_structure.py` | PDB writer structural test against F: drive Pioneer reference. |
 | `tests/test_rate_limit.py` | Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter. |
 | `tests/test_security_compare.py` | Tests for ``app/security_compare.py::safe_compare``. |

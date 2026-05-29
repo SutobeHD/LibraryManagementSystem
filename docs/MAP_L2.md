@@ -128,6 +128,16 @@ Bearer-token authentication for the FastAPI sidecar.
 
 - `require_session()` — Authenticate one HTTP request against the boot-time session token.
 
+### `app/auth_db.py`
+
+auth_db — sidecar-local store for per-device paired tokens (Phase-2 auth).
+
+- `init_db()` — Idempotent schema create.
+- `create_device()` — Register a freshly-issued device token.
+- `paired_token_valid()` — True iff ``candidate`` matches a non-revoked paired device token.
+- `list_devices()` — All devices (incl.
+- `revoke_device()` — Revoke a device (UPDATE flag, not DELETE).
+
 ### `app/batch_worker.py`
 
 Setup logging
@@ -1684,6 +1694,22 @@ End-to-end regression test for OneLibraryUsbWriter — runs the FULL
 - `  FakeSource.get_track_anlz_paths()`
 - `make_tracks()`
 - `main()`
+
+### `tests/test_pairing.py`
+
+Phase-2 paired-token store tests (T1 — app/auth_db.py).
+
+- `fresh_db()` — Point auth_db at a throwaway DB file and reset the thread-local conn.
+- `test_create_and_validate()`
+- `test_token_stored_hashed_not_plaintext()`
+- `test_revoke_flips_and_invalidates()`
+- `test_revoke_unknown_device_returns_false()`
+- `test_last_seen_write_throttled()`
+- `test_last_seen_refreshes_when_stale()`
+- `test_empty_candidate_is_false()`
+- `test_create_empty_token_raises()`
+- `test_list_devices_newest_first()`
+- `test_two_devices_independent_validation()`
 
 ### `tests/test_pdb_structure.py`
 
