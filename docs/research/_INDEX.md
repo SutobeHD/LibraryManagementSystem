@@ -31,7 +31,6 @@ _(none)_
 
 ### evaluated
 - [evaluated_recommender-taste-llm-audio.md](research/evaluated_recommender-taste-llm-audio.md) — GATE B PASSED 2026-05-29 (re-attempt after cache invalidation resolved) (2026-05-29)
-- [evaluated_security-mobile-paired-tokens-phase2.md](research/evaluated_security-mobile-paired-tokens-phase2.md) — Per-device QR-pairing + sidecar `auth.db` (Option A); wave-2 PASS (Citation 8/8, Adversarial validated); draftplan carry-forward: last_seen_at write contention (2026-05-29)
 
 ### parked
 _(none)_
@@ -48,6 +47,7 @@ _(none)_
 
 ### plangate ⛔ GATE C
 - [plangate_metadata-name-fixer.md](implement/plangate_metadata-name-fixer.md) — Artist/title normaliser; M0 detect / M1 apply+revert {1,4,5,6,7,8} / M2 MB enrich; Implementation Plan + 10-task queue; Reviewer 5/5 PASS; awaiting GATE C (carry-forward: T9 needs httpx dep-approval) (2026-05-29)
+- [plangate_security-mobile-paired-tokens-phase2.md](implement/plangate_security-mobile-paired-tokens-phase2.md) — Per-device QR pairing + sidecar `auth.db` (Option A); dual-acceptance require_session; Implementation Plan + 7-task queue; Reviewer 5/5 PASS (last_seen_at contention resolved in plan); awaiting GATE C — hard prereq for mobile-companion (2026-05-29)
 
 ### review
 _(none)_
