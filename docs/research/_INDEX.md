@@ -63,13 +63,12 @@ _(none)_
 - [accepted_library-quality-upgrade-finder.md](implement/accepted_library-quality-upgrade-finder.md) — Quality auditor (detection-only); Phase-3 swap delegated; GATE C PASSED 2026-05-29 (2026-05-29)
 - [accepted_recommender-rules-baseline.md](implement/accepted_recommender-rules-baseline.md) — Teil 1 ranking baseline; defaults T-10 confirmed (M1 backend / key_first / relative=0.7); GATE C PASSED 2026-05-29 (2026-05-29)
 - [accepted_recommender-similar-tracks.md](implement/accepted_recommender-similar-tracks.md) — LOCAL-ONLY similar-tracks; 4 named slice BLOBs; GATE C PASSED 2026-05-29 (2026-05-29)
-- [accepted_metadata-name-fixer.md](implement/accepted_metadata-name-fixer.md) — Artist/title normaliser; M0 detect / M1 apply+revert {1,4,5,6,7,8} / M2 MB enrich; GATE C PASSED 2026-05-29 (agent-delegated) (2026-05-29)
 - [accepted_security-mobile-paired-tokens-phase2.md](implement/accepted_security-mobile-paired-tokens-phase2.md) — Per-device QR pairing + sidecar `auth.db` (Option A); dual-acceptance require_session; GATE C PASSED 2026-05-29 (agent-delegated); hard prereq for mobile-companion (2026-05-29)
 - [accepted_recommender-taste-llm-audio.md](implement/accepted_recommender-taste-llm-audio.md) — Taste-aware recommender (Teil 2); M1 Option-A centroid / M2 embedding-benchmark / M3 LLM-explain; GATE C PASSED 2026-05-29 (agent-delegated); M1 blocked on sister vector + Teil-1 plays (2026-05-29)
 - [accepted_download-format-setting.md](implement/accepted_download-format-setting.md) — AIFF default + 6-target dropdown (Option A); full plan + Threat Model; GATE C PASSED 2026-05-29 (agent-delegated); load-bearing task = -map_metadata 0 + mutagen art-overlay fix (2026-05-29)
 
 ### inprogress
-_(none)_
+- [inprogress_metadata-name-fixer.md](implement/inprogress_metadata-name-fixer.md) — Artist/title normaliser; **T1 M0 detector SHIPPED** (`app/metadata_fixer/detector.py`, 12 tests green, ruff clean); T2–T10 `[ ]` for `research-implement` routine (2026-05-29)
 
 ### blocked
 _(none)_

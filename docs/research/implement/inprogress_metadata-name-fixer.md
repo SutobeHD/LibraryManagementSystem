@@ -35,6 +35,7 @@ related: []
 - 2026-05-29 — `implement/review_` — Plan-Reviewer pass: 5/5 checklist boxes ticked, PASS
 - 2026-05-29 — `implement/plangate_` — plan reviewed (Planner + Reviewer PASS), awaiting GATE C. Carry-forward: T9 MB client `httpx==0.28.1` needs user dep-approval before M2.
 - 2026-05-29 — `implement/accepted_` — GATE C PASSED (user delegated gate authority to the agent for PASS-verified plans). Ready for `inprogress_`; implement-tier needs branch-model direction (`routine/*` PR flow vs single working branch).
+- 2026-05-29 — `implement/inprogress_` — T1 (M0 detector) shipped on `claude/research-continuation-7rm30` (12 tests green, ruff clean). T2–T10 remain `[ ]` for `research-implement` routine.
 
 ---
 
@@ -456,7 +457,7 @@ Followed by 8 `def _rule_{1..8}(track: dict) -> Match | None` functions register
 ### Task Queue
 > Small, independently-committable; each = one `routine/metadata-name-fixer-task-N` branch = one PR. Ordered so earlier unblock later.
 
-- [ ] **T1 (M0, Step 1):** `detector.py` + 8 `Rule` classes + 500-track corpus fixture + `tests/test_metadata_fixer_detector.py` (per-class precision/recall + negative-corpus). No deps. Tests: all M0 detector signatures.
+- [x] **T1 (M0, Step 1):** `app/metadata_fixer/{__init__,detector.py}` — 7 `Rule` classes {1,2,4,5,6,7,8} (class 3 deferred to M2 per plan), `scan()` pure/read-only + `ACTIVE_RULE_IDS` subset; `tests/test_metadata_fixer_detector.py` 12 tests (per-class + 6×{pos100,neg100} corpus precision/recall + zero-write smoke + none-tolerant). **DONE 2026-05-29** — 12/12 pass, ruff clean. Negative-corpus guard ("19 - Naughty Forty" survives) verified.
 - [ ] **T2 (M0, Step 1):** `GET /api/metadata-fixer/scan` route (`require_session`) + `MetadataFixerReport.jsx` (read-only, CSV export) + `metadataFixer.js`. Deps: T1. Tests: scan smoke + zero-write smoke.
 - [ ] **T3 (M0 gate, Step 1):** empirical gate harness — OQ10 `feat.` sample, OQ11 ANLZ SHA diff, OQ9 NFC hardware check, per-format tag round-trip. Deps: T1. Resolves OQ9/10/11.
 - [ ] **T4 (M1, Step 2):** `schema.py` sidecar DDL + `metadata_fixer_log.db` (`runs`+`mutations`). Deps: T1. Tests: schema-create + revert-row shape.
@@ -487,8 +488,12 @@ Followed by 8 `def _rule_{1..8}(track: dict) -> Match | None` functions register
 
 > Filled during `inprogress_`. What got built, what surprised us, what changed from the plan. Dated entries.
 
-### YYYY-MM-DD
-- …
+### 2026-05-29 — T1 M0 detector (agent, on `claude/research-continuation-7rm30`)
+- Built `app/metadata_fixer/__init__.py` + `detector.py`: `Match`/`Rule` frozen dataclasses, 7 rule fns (1 artist-in-parens, 2 feat suggestion-only, 4 track-num prefix, 5 HTML entities, 6 smart-quotes+NFC, 7 double-encoded artist prefix, 8 catalog bracket), `scan(tracks, rule_ids=None)` pure, `ACTIVE_RULE_IDS={1,4,5,6,7,8}`.
+- **Deviation from plan:** class 3 (reversed) not implemented — needs MusicBrainz (M2), correctly excluded from M0 catalogue. Class 2 ships as `active=False` suggestion (conf 0.50).
+- **Surprise:** class-4 collision guard (Adversarial "19 - Naughty Forty") solved by zero-padded/single-digit-only prefix regex `^(?:0\d|\d)\s*[-.\s]\s+` — strips "01 - Intro", preserves "19 - Naughty Forty". Precision trade documented.
+- Tests: 12/12 pass (`tests/test_metadata_fixer_detector.py`), ruff + ruff-format clean. (conftest needs fastapi — absent in agent sandbox; ran `--noconftest`; CI has deps.)
+- **Remaining for routines** (Task Queue T2–T10): scan route + report UI (T2), M0 empirical gate harness (T3), applier + sidecar DB + apply/revert routes + UI (T4–T8), MB enrichment (T9–T10, dep-gated). `research-implement` continues per the queue.
 
 ---
 
