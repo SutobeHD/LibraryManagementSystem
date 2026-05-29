@@ -18,6 +18,7 @@ ai_tasks: false
 - 2026-05-28 — `research/drafting_` — Stage 1 worker formally complete (Prior Art + Research Plan retrofitted to match current template; content was already at exploring_ depth)
 - 2026-05-28 — `research/ideagate_` — Stage 1 verifier PASS, awaiting GATE A
 - 2026-05-29 — `research/exploring_` — GATE A PASSED by user; Option B (auto-wrap, prefix-matched) committed in Recommendation; advanced for Stage 2 wave-2 verifier
+- 2026-05-29 — `research/exploring_` — wave-2 verification: citation refresh (5 stale line-anchors fixed) + Adversarial + Research Verifier → **GAPS**. Found THIRD gap class: `AnalysisDBWriter` rbox-direct `master.db` write (`update_content`/`update_content_key`) uncovered by any class decorator; OQ5 drift guard circular. Stays `exploring_` for wave-2 round 2.
 
 ## AI Tasks
 
@@ -116,6 +117,40 @@ Stage 1 Verifier. Dated entries, append-only.
 - **rbox concurrent-write panic — evidence chain:** `anlz_safe.py:6-16` documents rbox aborting the whole process via `Option::unwrap()` on `None` (Windows exit `0xC0000409`) — that's the *read* path. `coding-rules.md` "Backend concurrency" states the same crate panics on concurrent *writes*. No in-repo reproducer captured yet (the panic aborts before a traceback) — OQ5 harness is the planned reproducer.
 - **ProcessPool boundary:** `anlz_safe.py` worker is read-only (docstring `anlz_safe.py:20-39` + grep: `get_content_anlz_paths` reads, `rbox.Anlz` reads). Lock not crossing the process boundary is moot — no write to serialise there.
 - **`db_lock()` 0 callsites** — not dead code; it's the multi-step-transaction helper, simply unused so far. Leave as-is.
+
+### 2026-05-29 — wave-2 verification (line-ref refresh + THIRD gap class)
+- **Line-ref refresh** (code shifted down since 2026-05-19 audit; every symbol + claim unchanged, anchors corrected, all re-Read this session):
+  - `_require_live_db()` → `main.py:1053` (was 949); returns `db.active_db` (`main.py:1057`), which is the `LiveRekordboxDB` instance in live mode.
+  - mytag route calls → `main.py:1079` (create), `1090` (delete), `1106` (set); routes `@1073 / 1087 / 1103`.
+  - `LiveRekordboxDB` mytag defs → `live_database.py:1025 / 1037 / 1049` (was 925/937/949).
+  - per-thread handle → `live_database.py:27` (`threading.local()`), `41` (`rbox.MasterDb(...)`), `36-37` (`db` property).
+  - broken cue/grid routes → `main.py:1116 / 1121` call `db.save_track_cues / save_track_beatgrid`; still absent on every class → `AttributeError` stands (separate task).
+- **THIRD gap class — `AnalysisDBWriter` writes `master.db` OUTSIDE both facades.** `LiveRekordboxDB.get_analysis_writer()` (`live_database.py:1128`) returns `AnalysisDBWriter`. `AnalysisDBWriter._update_db` (`analysis_db_writer.py:223-264`, called from `analyze_and_save` at `:134`) writes `djmdContent` via `self.live_db.db.update_content(item)` (`:245`) + `self.live_db.db.update_content_key(...)` (`:255`) — direct `rbox.MasterDb` calls on the per-thread handle, **no `_db_write_lock`**. These are methods on the rbox handle, NOT on `RekordboxDB`/`LiveRekordboxDB`, so **no class-level wrapping (Option A/B/C) can ever cover them** — and `get_analysis_writer` is `get_`-prefixed, explicitly excluded by Option B's allowlist. Goal-1 metric ("unwrapped mutators = 0" by class introspection) reports green while this path stays unprotected = false pass. The DB write runs **in-process** (the `ProcessPoolExecutor` at `analysis_db_writer.py:64` parallelises analysis, not the write), so an RLock CAN serialise it — but only if the retrofit locks `analyze_and_save`/`_update_db` at the callsite, not via a decorator on the two DB classes.
+- Confidence: high (every claim re-Read this session at the cited line).
+
+## Adversarial Findings
+
+### 2026-05-29 — devil's-advocate pass on Option B
+- **Coverage claim false on arrival.** The `AnalysisDBWriter` write path (Findings 2026-05-29) is an unprotected `master.db` writer reached via `get_analysis_writer` (`live_database.py:1128`), excluded by the `get_` prefix and not a method on either wrapped class. Higher concurrent-write volume than the mytag routes (runs per analysed track). Refs Goal 1, Recommendation 2026-05-29.
+- **Drift guard is circular.** OQ5 introspection test (a) shares the prefix set with the `@serialise_mutators` decorator. A mutator named off-prefix (a future `commit`/`flush`/`import_*`, or the rbox-direct writes above) passes BOTH test and decorator. The guard catches only a known-prefix method that lost its `@` — not the real drift class (new name shape). Refs OQ5 (2026-05-19), Option B failure-mode.
+- **`vars(cls)` excludes inherited.** `RekordboxDB` / `LiveRekordboxDB` / `RekordboxXMLDB` are independent (no shared base — `database.py:55`, `live_database.py:24`), so no double-wrap; but `RekordboxXMLDB` (gate-condition 3) is a genuine third surface needing its own `@`, not "free". Refs Recommendation gate 3.
+- **RLock reentrancy is thread-local only.** `LiveRekordboxDB.load()` (`live_database.py:44`) spawns a daemon beatgrid-loader thread (`_start_beatgrid_background_load` at `:94`). A wrapped mutator that offloads work to another thread which then calls a wrapped mutator would NOT reenter (different thread) → deadlock. Currently read-only so latent, but OQ3's "RLock makes nesting safe" is unqualified. Refs OQ3 (2026-05-19).
+
+## Citation Quality
+
+### 2026-05-29 — PASS-with-refresh
+- PASS (line-accurate, verified): `database.py:22, 25-40, 43-53, 728, 738, 1076-1086` (loop = exactly 21 names; `ensure_standalone_master_db` genuinely absent), `database.py:36-37` docstring accurate, `anlz_safe.py:1-40` read-only, `grep -cE '@app\.(post|put|patch|delete)' app/main.py` = 85, no `__getattr__` on `RekordboxDB`.
+- FAIL→refreshed (stale line only — symbol + claim correct): the 5 `main.py` / `live_database.py` refs, corrected in Findings 2026-05-29 (`_require_live_db`, mytag routes, live mytag defs, per-thread handle, cue/grid routes). Code shifted ~62-104 lines (main.py) / ~100-124 (live_database.py). No substantive claim was false.
+- Verdict: all claims substantively accurate; anchors refreshed.
+
+## Research Verification
+
+### 2026-05-29 — GAPS
+- OQ1–OQ6 each have ≥1 Finding: yes. Citation Quality: PASS (after refresh).
+- **GAP (blocking):** the `AnalysisDBWriter` direct-rbox write path (Findings + Adversarial 2026-05-29) is a real unprotected `master.db` writer that the chosen Option B (class-level prefix decorator) structurally cannot cover — the writes are `rbox.MasterDb` calls (`update_content` / `update_content_key`), not methods on `RekordboxDB`/`LiveRekordboxDB`. Goal-1 metric would green while this path stays unprotected.
+- **GAP (design):** OQ5 drift guard is circular (shares prefix set with the decorator) — cannot catch off-prefix mutators.
+- Required before `evaluated_`: (1) decide scope — wrap `AnalysisDBWriter.analyze_and_save`/`_update_db` explicitly at the callsite (lock acquire, not class decorator), or PARK analysis-write serialisation as its own doc; (2) redesign the drift guard to enumerate writers by AST / actual-write detection, not by the same prefix set the decorator uses; (3) re-state Goal 1 so the metric cannot green-light an uncovered rbox-direct writer.
+- Verdict: **GAPS** — doc stays `exploring_`. Next explore wave (or user) resolves the 3 items above.
 
 ## Options Considered
 

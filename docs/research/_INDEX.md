@@ -23,7 +23,7 @@ _(none)_
 _(none)_
 
 ### exploring
-- [exploring_db-write-lock-retrofit.md](research/exploring_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps; Option B (auto-wrap) committed; GATE A PASSED 2026-05-29 (2026-05-29)
+- [exploring_db-write-lock-retrofit.md](research/exploring_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps; Option B (auto-wrap) committed; wave-2 verify → GAPS (3rd gap: `AnalysisDBWriter` rbox-direct write uncovered by class decorator; circular drift guard); stays exploring_ (2026-05-29)
 - [exploring_download-format-setting.md](research/exploring_download-format-setting.md) — AIFF default + 6-Option-Dropdown; GATE A PASSED 2026-05-29 (2026-05-29)
 - [exploring_library-format-converter.md](research/exploring_library-format-converter.md) — Audio-Format-Konverter + merged Snapshot+Swap+Migrate engine; 6 OQs technisch beantwortet; GATE A PASSED 2026-05-29 (2026-05-29)
 - [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); CORS rewritten; Phase-2 hard-prereq now UNBLOCKED (2026-05-29)
