@@ -30,7 +30,6 @@ _(none)_
 - [midgate_library-format-converter.md](research/midgate_library-format-converter.md) — Library-wide format converter; wave 1 OVERTURNED 3 OQs (proof script absent, AAC priming ffmpeg-trimmed ~48ms risk, update_track_path can't rename in live mode); OQ2/OQ5 confirmed; awaiting GATE B (recommend reject-to-wave-2) (2026-05-29)
 
 ### evaluated
-- [evaluated_metadata-name-fixer.md](research/evaluated_metadata-name-fixer.md) — GATE B PASSED 2026-05-29 (re-attempt after line-ref refresh) (2026-05-29)
 - [evaluated_recommender-taste-llm-audio.md](research/evaluated_recommender-taste-llm-audio.md) — GATE B PASSED 2026-05-29 (re-attempt after cache invalidation resolved) (2026-05-29)
 - [evaluated_security-mobile-paired-tokens-phase2.md](research/evaluated_security-mobile-paired-tokens-phase2.md) — Per-device QR-pairing + sidecar `auth.db` (Option A); wave-2 PASS (Citation 8/8, Adversarial validated); draftplan carry-forward: last_seen_at write contention (2026-05-29)
 
@@ -48,7 +47,7 @@ _(none)_
 _(none)_
 
 ### plangate ⛔ GATE C
-_(none)_
+- [plangate_metadata-name-fixer.md](implement/plangate_metadata-name-fixer.md) — Artist/title normaliser; M0 detect / M1 apply+revert {1,4,5,6,7,8} / M2 MB enrich; Implementation Plan + 10-task queue; Reviewer 5/5 PASS; awaiting GATE C (carry-forward: T9 needs httpx dep-approval) (2026-05-29)
 
 ### review
 _(none)_
