@@ -4,7 +4,7 @@
  * Renders the list of registered + connected USB drives. Selection state
  * is owned by the parent container (UsbView) and passed in via props.
  */
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     HardDrive, Usb, AlertTriangle, Loader2, Clock,
 } from 'lucide-react';
@@ -22,6 +22,15 @@ const UsbDeviceList = ({
 }) => {
     const sel = allDevices.find(d => d.device_id === selectedDeviceId);
 
+    // Surface a hint when a scan runs long (a disconnected/unreadable drive
+    // can stall it). The header "Scan" button is always available to retry.
+    const [slowScan, setSlowScan] = useState(false);
+    useEffect(() => {
+        if (!scanning) { setSlowScan(false); return undefined; }
+        const t = setTimeout(() => setSlowScan(true), 8000);
+        return () => clearTimeout(t);
+    }, [scanning]);
+
     return (
         <div className="w-72 border-r border-line-subtle overflow-y-auto p-2 space-y-1 bg-mx-shell">
             <div className="mx-caption px-3 py-2">Devices</div>
@@ -37,8 +46,13 @@ const UsbDeviceList = ({
                 </div>
             )}
             {scanning && allDevices.length === 0 && (
-                <div className="flex items-center justify-center h-32">
+                <div className="flex flex-col items-center justify-center h-32 gap-3 px-4 text-center">
                     <Loader2 size={20} className="animate-spin text-amber2" />
+                    {slowScan && (
+                        <p className="text-[10px] text-ink-placeholder">
+                            Still scanning — a disconnected or unreadable drive can slow this. Use Scan to retry.
+                        </p>
+                    )}
                 </div>
             )}
 

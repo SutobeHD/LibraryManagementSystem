@@ -45,12 +45,20 @@ export default function UsbSettingsView() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);   // bump to re-run initial load
+  const [slow, setSlow] = useState(false);         // true once load exceeds the slow-threshold
 
   // ── Initial load: schema (once) + device list ─────────────────────────────
+  // Re-runnable via `reloadKey` (Retry button). A slow-threshold timer flips
+  // `slow` so a stalled drive scan surfaces a Retry affordance instead of an
+  // endless spinner.
   useEffect(() => {
     let cancelled = false;
+    setSlow(false);
+    const slowTimer = setTimeout(() => { if (!cancelled) setSlow(true); }, 8000);
     (async () => {
       setLoading(true);
+      setError(null);
       try {
         const [schemaRes, devRes, profRes] = await Promise.all([
           api.get('/api/usb/mysettings/schema'),
@@ -81,8 +89,8 @@ export default function UsbSettingsView() {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
-  }, []);
+    return () => { cancelled = true; clearTimeout(slowTimer); };
+  }, [reloadKey]);
 
   // ── Load values whenever the selected device changes ──────────────────────
   useEffect(() => {
@@ -164,7 +172,13 @@ export default function UsbSettingsView() {
         <div className="mx-card p-6 max-w-md text-center">
           <AlertTriangle size={28} className="text-amber2 mx-auto mb-3" />
           <div className="text-ink-primary font-semibold mb-1">USB Settings unavailable</div>
-          <div className="text-tiny text-ink-muted">{error}</div>
+          <div className="text-tiny text-ink-muted mb-4">{error}</div>
+          <button
+            onClick={() => setReloadKey(k => k + 1)}
+            className="flex items-center gap-2 px-3 py-2 rounded-mx-sm text-tiny font-semibold border border-line-subtle text-ink-secondary hover:bg-mx-hover transition-all mx-auto"
+          >
+            <RotateCcw size={12} /> Retry
+          </button>
         </div>
       </div>
     );
@@ -172,8 +186,22 @@ export default function UsbSettingsView() {
 
   if (loading && !schema) {
     return (
-      <div className="h-full flex items-center justify-center">
+      <div className="h-full flex flex-col items-center justify-center gap-3 text-center px-6">
         <Loader2 className="animate-spin text-amber2" size={28} />
+        <div className="text-tiny text-ink-muted">Scanning USB drives…</div>
+        {slow && (
+          <div className="mt-1 max-w-xs flex flex-col items-center gap-3">
+            <div className="text-tiny text-ink-muted">
+              This is taking longer than usual — a disconnected or unreadable drive can stall the scan.
+            </div>
+            <button
+              onClick={() => setReloadKey(k => k + 1)}
+              className="flex items-center gap-2 px-3 py-2 rounded-mx-sm text-tiny font-semibold border border-line-subtle text-ink-secondary hover:bg-mx-hover transition-all"
+            >
+              <RotateCcw size={12} /> Retry
+            </button>
+          </div>
+        )}
       </div>
     );
   }
