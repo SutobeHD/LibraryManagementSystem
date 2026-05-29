@@ -23,6 +23,7 @@ related: [analysis-remix-detector, library-extended-remix-finder, library-qualit
 - 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: advance to `midgate_` for user GATE B
 - 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
 - 2026-05-29 — `research/evaluated_` — GATE B PASSED by user; sister-doc prereq for 3 midgate_ docs now unblocked; ready for draftplan_ owner
+- 2026-05-29 — `implement/draftplan_` — Stage 3 Planner-agent filled Implementation Plan + Threat Model + Migration Path + Perf Budget + API/UX Surface + Telemetry + Test Plan + Task Queue (12 atomic tasks)
 
 ---
 
@@ -627,23 +628,174 @@ Fires when ALL true:
 
 ## Implementation Plan
 
-> Required from `implement/draftplan_` onward. Concrete enough that someone else executes without re-deriving.
-
 ### Scope
-- **In:** …
-- **Out:** …
+
+**In:**
+- New `app/external_track_match.py` (~400-500 LoC, single file).
+- New `tests/test_external_track_match.py` (22 tests + 1 autouse fixture).
+- New `tests/fixtures/external_track_match/titles_corpus.json` (≥200 labelled titles; JSON not YAML — PyYAML NOT pinned in `requirements.txt`).
+- Lift body of `SoundCloudSyncEngine._fuzzy_match_with_score` (`app/soundcloud_api.py:567-588`) + `_normalize_title` (`app/soundcloud_api.py:559-560`) to module-level pure functions; method bodies become delegates.
+- Doc refresh: `docs/MAP.md` + `docs/MAP_L2.md` (regen) + `docs/FILE_MAP.md` entry.
+
+**Out:**
+- Any FastAPI route, Pydantic model, frontend UI.
+- Real adapter implementations beyond mock (Discogs/Beatport = M2/M3).
+- `fpcalc` binary bundling (M3; M1 = PATH-detect only).
+- `master.db` writes, `_db_write_lock` acquisition, `rbox`/`pyrekordbox` imports.
 
 ### Step-by-step
-1. …
+
+1. Create `tests/fixtures/external_track_match/` + `titles_corpus.json` schema. Owner manually labels ≥200 rows (≥15 per primary tag).
+2. Add `app/external_track_match.py` skeleton: imports (stdlib only), logger, `VersionLabel` Literal (12-member canonical), 3 frozen dataclasses (`VersionTag`, `Candidate`, `Fingerprint`), `FingerprintUnavailable` sentinel, `AdapterError` hierarchy (4 subclasses), `SourcePlugin` Protocol, `ADAPTER_REGISTRY` dict + `register_adapter`/`get_adapter`/`list_adapters`.
+3. Add pure functions: `normalize_title`, `extract_title_stem`, `parse_version_tag`, `fuzzy_match_with_score` (port body line 567-588 verbatim).
+4. Add `lru_cache(maxsize=4096)` on `extract_title_stem` + `parse_version_tag`.
+5. Add fingerprint surface: `is_fingerprinting_available()` (cached `shutil.which("fpcalc")`), `fingerprint(audio_path, *, sample_seconds=120, timeout=10.0) -> Fingerprint | FingerprintUnavailable`. Sandbox via injected `allowed_roots` arg (lazy-import `app.main.ALLOWED_AUDIO_ROOTS` when None).
+6. Refactor `app/soundcloud_api.py`: add `from . import external_track_match as etm` near line 17. Replace `_normalize_title` body with delegate. Replace `_fuzzy_match_with_score` body with delegate.
+7. Add `tests/test_external_track_match.py` 22 tests + autouse `_reset_registry`. Equivalence test excludes NFD-fold cases.
+8. Quality gates: ruff + ruff format + mypy + pytest (both new + existing SC).
+9. Regen MAP docs; spawn `doc-syncer` for `FILE_MAP.md`.
+10. Atomic commit per task.
 
 ### Files touched
-- …
+
+| Path | Role | Why |
+|---|---|---|
+| `app/external_track_match.py` | NEW public module | Lift target |
+| `app/soundcloud_api.py` | MODIFIED — lines 17, 559-560, 567-588 | Delegate to module |
+| `tests/test_external_track_match.py` | NEW | 22 unit tests gate M1 |
+| `tests/fixtures/external_track_match/titles_corpus.json` | NEW | ≥200 labels for ≥95% recall metric |
+| `docs/MAP.md`, `docs/MAP_L2.md` | REGEN | CI gates drift |
+| `docs/FILE_MAP.md` | MODIFIED | Manual entry for new module |
 
 ### Testing
-- …
+
+- Pure Python, no async/DB/network. `pytest tests/test_external_track_match.py -v` <2s.
+- Regression-equivalence gate: SC sync suite stays green.
+- Label-recall gate: parametrised ≥200-row corpus.
+- Real `fpcalc` NOT invoked in CI (binary not bundled); marker `@pytest.mark.integration`.
 
 ### Risks & rollback
-- …
+
+- **R1 — `SequenceMatcher` equivalence breaks under NFD-fold.** Mitigation: gate NFD-fold behind `normalize_title(title, *, nfd_fold=False)` flag; equivalence test uses default.
+- **R2 — `ALLOWED_AUDIO_ROOTS` empty at import time.** Mitigation: lazy import inside `fingerprint()` body.
+- **R3 — Corpus labelling drift.** Mitigation: version header + CHANGELOG entry on revision.
+- **R4 — Module-global `ADAPTER_REGISTRY` leaks across tests.** Mitigation: autouse `_reset_registry` fixture.
+- **Rollback:** `git revert` for module + tests + SC delegate. Pure code revert; no DB/migration.
+
+## Threat Model
+
+### Assets
+- `fpcalc` subprocess execution path.
+- Local audio file content (read via `fpcalc -length`).
+- Module-global `ADAPTER_REGISTRY`.
+
+### Trust boundaries
+- Untrusted: `audio_path` argument to `fingerprint()` (caller-supplied).
+- Trusted: `ADAPTER_REGISTRY` mutators (sidecar Python only, no HTTP M1).
+- External: `fpcalc` binary (PATH-resolved).
+
+### Threats (STRIDE-light)
+
+| ID | Threat | Mitigation | Test |
+|---|---|---|---|
+| T1 | Path-traversal via `audio_path` | `Path.resolve().is_relative_to(root)` check before `subprocess.run`; inherits `validate_audio_path` semantics | T23 |
+| T2 | Symlink escape (resolve-then-check race) | `Path.resolve(strict=True)` follows before check | T23 |
+| T3 | `fpcalc` subprocess hang DoS | Explicit `timeout=10.0`; returns `FingerprintUnavailable.Timeout` | T24 |
+| T4 | `fpcalc` arg injection via crafted path | `subprocess.run([...], shell=False)` + list arg | — |
+| T5 | `ADAPTER_REGISTRY` mutation by malicious plugin | Idempotent register; no HTTP exposure M1 | T17 |
+| T6 | `lru_cache` poisoning via large title corpus | `maxsize=4096` cap; eviction on overflow | — |
+
+### Residual risk
+Low. Module is read-only by design. Subprocess attack surface bounded by `ALLOWED_AUDIO_ROOTS` + `timeout`. No network in M1.
+
+## Migration Path
+
+**N/A — no DB schema / persistent state owned by module.** `ADAPTER_REGISTRY` is in-memory + boot-time populated. SC sync behaviour BIT-IDENTICAL (equivalence-test gate). No user-visible change in M1.
+
+## Performance Budget
+
+| Path | Budget | Measured today |
+|---|---|---|
+| `normalize_title(title)` per call | <50 µs | `re.sub` on 60-char string: ~5-10 µs |
+| `extract_title_stem` cached | <100 µs miss, <1 µs hit | new |
+| `parse_version_tag` cached | <200 µs miss, <1 µs hit | new |
+| `fuzzy_match_with_score(q, a, 30k)` | <500 ms | ~300 ms baseline (single-thread `SequenceMatcher`) |
+| `fingerprint(audio_path)` | <2 s | fpcalc 120s sample: ~0.3 s real |
+| `is_fingerprinting_available()` first call | <5 ms | `shutil.which` PATH scan |
+
+### Worst-case scenario
+30k-track library × 3 sister-features simultaneously = ~900 ms wall-time per scan. Mitigation: each sister-feature owns own scan-batch + caches results in sidecar SQLite.
+
+### Mitigation if budget exceeded
+Schicht-A `rapidfuzz` swap (5-10× faster); separate draftplan per OQ1/OQ3.
+
+## API / UX Surface
+
+### Backend (FastAPI)
+None in M1. Module is internal Python only.
+
+### Frontend (React)
+None.
+
+### Tauri (Rust commands)
+None in M1. Rust-FP-via-IPC is M2.
+
+### CLI / sidecar logs
+None.
+
+### Public Python API (sister-feature consumers)
+- Functions: `normalize_title`, `extract_title_stem`, `parse_version_tag`, `fuzzy_match_with_score`, `fingerprint`, `is_fingerprinting_available`, `register_adapter`, `get_adapter`, `list_adapters`.
+- Types: `VersionLabel`, `VersionTag`, `Candidate`, `Fingerprint`, `FingerprintUnavailable`, `SourcePlugin`.
+- Errors: `AdapterError`, `AdapterNotRegistered`, `AdapterTransportError`, `AdapterQuotaExceeded`, `AdapterParseError`.
+- Module state: `ADAPTER_REGISTRY: dict[str, SourcePlugin]`.
+
+## Telemetry
+
+- `INFO etm.fingerprint path=%s elapsed=%.3fs result=ok|timeout|missing`
+- `INFO etm.fpcalc_path_detect available=%s path=%s` (once at first call)
+- `DEBUG etm.match query=%s best=%s score=%.3f candidates=%d` (env-var gated `LOG_TRACK_MATCH=1`)
+- `WARN etm.adapter_replaced name=%s` (idempotent replace)
+- `INFO etm.adapter_registered name=%s`
+
+Counters exposed via `etm.stats()` getter:
+- `match_calls_total`, `match_exact_hits`, `match_fuzzy_hits`, `match_no_match_total`
+- `fingerprint_calls_total`, `fingerprint_unavailable_total`, `fingerprint_timeout_total`
+
+User-visible status: none in M1.
+
+## Test Plan
+
+| ID | Layer | Test file | Case | Covers |
+|---|---|---|---|---|
+| T1 | unit | `tests/test_external_track_match.py::test_normalize_title_lowercases_and_strips_punct` | mirrors `soundcloud_api.py:560` | Step 3 |
+| T2 | unit | `test_normalize_title_handles_accents` | NFD-fold flag | Step 3, R1 |
+| T3-T7 | unit | `test_extract_title_stem_*` | paren/bracket/dash/feat/round-trip | Step 3 |
+| T8 | parametrize | `test_parse_version_tag_label_recall` | ≥200 corpus ≥95% recall | Step 3, Goal |
+| T9-T12 | unit | `test_parse_version_tag_*` | remixer/year/None/canonical-label-set | Step 3 |
+| T13 | regression | `test_fuzzy_match_with_score_equivalence_to_sc_baseline` | 50 pairs identical | Step 6 |
+| T14-T16 | unit | `test_fuzzy_match_with_score_*` | exact/threshold/no-match | Step 3 |
+| T17-T19 | unit | `test_register_adapter_*` / `test_get_adapter_*` / `test_list_adapters_*` | registry contracts | Step 2 |
+| T20-T22 | unit | `test_is_fingerprinting_available_*` / `test_fingerprint_returns_unavailable_*` | PATH detect + missing-binary | Step 5 |
+| T23 | security | `test_fingerprint_validates_audio_path_sandbox` | path outside roots → ValueError before subprocess | Step 5, T1 |
+| T24 | unit | `test_fingerprint_respects_timeout_param` | mock records `timeout=10.0` | Step 5, T3 |
+| T25 | unit | `test_fingerprint_returns_fingerprint_dataclass_on_success` | mock stdout → Fingerprint | Step 5 |
+| T26 | invariant | `test_module_has_no_db_writer_imports` | grep module for `_db_write_lock\|pyrekordbox\|rbox` empty | Goal |
+| T27 | regression | `tests/test_soundcloud_api.py` (existing) | green after delegate | Step 6 |
+
+## Task Queue
+
+- [ ] T-1 Scaffold `tests/fixtures/external_track_match/` + JSON schema header — covers Step 1, tests T8
+- [ ] T-2 Owner labels ≥200 titles in `titles_corpus.json` (manual, ≥15 per primary tag) — covers Step 1, tests T8 T12
+- [ ] T-3 Add `app/external_track_match.py` skeleton (imports + types + registry) — covers Step 2, tests T17-T19
+- [ ] T-4 Add `normalize_title` + `extract_title_stem` (with `lru_cache`) — covers Step 3-4, tests T1-T7
+- [ ] T-5 Add `parse_version_tag` + classifier-input collapse — covers Step 3-4, tests T8-T12
+- [ ] T-6 Add `fuzzy_match_with_score` (verbatim port) — covers Step 3, tests T13-T16
+- [ ] T-7 Add `is_fingerprinting_available` + `fingerprint` (subprocess + sandbox + lazy ALLOWED_AUDIO_ROOTS) — covers Step 5, tests T20-T25
+- [ ] T-8 Add `tests/test_external_track_match.py` 22 tests + autouse `_reset_registry` — covers Step 7
+- [ ] T-9 Add `test_module_has_no_db_writer_imports` invariant — covers Step 7, tests T26
+- [ ] T-10 Refactor `app/soundcloud_api.py`: add `etm` import, replace 2 method bodies with delegates — covers Step 6, tests T13 T27
+- [ ] T-11 Run quality gates (`pytest` + `mypy` + `ruff`); fix until green — covers Step 8
+- [ ] T-12 Regen MAP docs (`python scripts/regen_maps.py`) + `doc-syncer` for FILE_MAP — covers Step 9
 
 ## Review
 

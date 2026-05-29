@@ -29,6 +29,7 @@ ai_tasks: false
 - 2026-05-29 — `research/exploring_` — wave-2 gap close-out (Findings entry "2026-05-29 — wave-2 gap close-out"): PyYAML→JSON fixtures, browser-mode degradation added to Constraints, `_variants_db_write_lock` owner picked (own RLock in `app/variant_detector.py`), stratified per-genre fixture buckets added to M1 exit-criteria, citation drift acknowledged for draftplan_ refresh
 - 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
 - 2026-05-29 — `research/evaluated_` — GATE B PASSED by user; sister-doc dep (`external-track-match-unified-module`) now also evaluated_ — same-day unblock
+- 2026-05-29 — `implement/draftplan_` — Stage 3 supplement filled (M1/M2/M3 phases, 12 atomic tasks, sidecar `variants.db` schema, browser-mode degradation handled)
 
 ---
 
@@ -369,6 +370,112 @@ Cluster keying is **string-equality on normalised tuple**, NOT fuzzy ratio. Fuzz
 - …
 
 ---
+
+## Stage 3 Supplement
+
+### Implementation Plan
+
+**Scope M1 (title-only, no network, no new dep):** new module `app/variant_detector.py` (sidecar SQLite owner + classifier orchestrator); `app/variant_schema.py` (DDL + migration); sidecar DB at `MUSIC_DIR/variants.db` (parallel to `app/download_registry.py:42`); private `_variants_db_write_lock = threading.RLock()` inside `app/variant_detector.py`; CLI driver `scripts/scan_variants.py`; FastAPI routes `POST /api/variants/scan`, `GET /api/variants/{track_id}`, `GET /api/variants/cluster/{root_key}`, `POST /api/variants/{track_id}/pin-canonical`; at-import hook (non-blocking, asyncio.create_task); fixture tree `tests/fixtures/variant_detector/labelled_corpus.json` (200 tracks, **stratified per-genre**: techno/house/dnb/ambient/pop/rock ≥5 each). Consumes `external-track-match-unified-module` API (`parse_version_tag`, `extract_title_stem`).
+
+**Scope M2 (Rust-fp local cluster):** frontend orchestrator `frontend/src/api/variants.js` calls `invoke('fingerprint_batch', {paths})` at `src-tauri/src/audio/fingerprint.rs:346`; backend `POST /api/variants/fingerprints/ingest`; cluster job reuses `_group_duplicates` shape from `app/main.py:4256`. **Browser-mode degradation:** `if (typeof window.__TAURI__ === 'undefined')` → disable fingerprint button + tooltip "Fingerprinting requires desktop app".
+
+**Scope M3 (opt-in external):** `pyacoustid==1.3.1` pinned; `shutil.which('fpcalc')` PATH-detect; `app/fingerprint_acoustid.py` (3 r/s asyncio semaphore); `app/musicbrainz_relations.py` (httpx + 1 r/s); `acoustid_cache` table; settings `variant_detector.external_enabled` default false.
+
+**Out:** Rekordbox `master.db` writes; ID3 tag rewriting; missing-version acquisition (sister `library-extended-remix-finder`); fuzzy-matcher reimpl (sister `external-track-match`); cover-detection; Shazam-class arbitrary-audio recognition.
+
+**Files:** new `app/variant_detector.py`, `app/variant_schema.py`, `scripts/scan_variants.py`, `frontend/src/api/variants.js`, `frontend/src/components/VariantClusterPanel.jsx`, `tests/fixtures/variant_detector/labelled_corpus.json`, `tests/test_variant_detector.py`. Edit `app/main.py` (after L4448), `app/analysis_engine.py`, `app/models.py`, `tests/conftest.py`. M3: `requirements.txt`, `app/fingerprint_acoustid.py`, `app/musicbrainz_relations.py`.
+
+### Threat Model
+
+- **Auth**: all 4 routes `Depends(require_session)`.
+- **SSRF (M3)**: AcoustID + MB endpoints hardcoded; no user-supplied URL.
+- **SQL-injection**: parameterised; no f-string SQL.
+- **Path-traversal**: M2 ingestion takes `dict[str, list[int]]`; validate paths via `validate_audio_path` before persist; reject paths outside `ALLOWED_AUDIO_ROOTS`.
+- **Resource exhaustion**: M1 <5s for 30k; M2 batch N=500; M3 rate-limited (AcoustID 3 r/s, MB 1 r/s).
+- **Token leakage**: never log Authorization; AcoustID key never logged (only `fingerprint_hash[:8]`).
+
+### Migration Path
+
+Sidecar `variants.db` at `Path(MUSIC_DIR) / "variants.db"`. WAL, `check_same_thread=False`. NOT `_db_write_lock` (own RLock).
+
+Initial schema (v1): `track_variants(track_id, variant_label, normalised_root, remixer, parent_track_id, confidence, source, computed_at, is_canonical, PK(track_id, source, parent_track_id))` + indices on `normalised_root` + `parent_track_id` + `schema_version` table.
+
+M2 additions (v2): `variants_fp_staging(path PK, fingerprint BLOB, ingested_at)`.
+M3 additions (v3): `acoustid_cache(fpcalc_fingerprint, duration_rounded, mbid, recording_json, cached_at, PK)`.
+
+Migration runner in `app/variant_schema.py:migrate(conn)` — idempotent. Rollback: delete `variants.db` → full rescan from `master.db` (no irreversible state).
+
+### Performance Budget
+
+| Op | Budget | Source |
+|---|---|---|
+| M1 30k title scan, cold, single thread | <5s wall | Goal line 47 |
+| M1 per-track classify | <200µs | derived |
+| M1 sidecar upsert | <1ms/row batched | `download_registry` pattern |
+| M2 Rust fp per track | ~0.5-1.0s | `fingerprint.rs:323` (Symphonia + Goertzel) |
+| M2 batch 500 tracks end-to-end | <30s | 500 × 60ms median |
+| M2 cluster job 10k fingerprints | <60s | `_group_duplicates:4256` O(N²) Hamming |
+| M3 AcoustID lookup | 3 r/s | acoustid.org/webservice |
+| M3 MB recording-recording | 1 r/s | musicbrainz API rate-limit |
+| M3 cold lookup 5000 untagged | ≤30 min | 5000/3 ≈ 28 min |
+
+### API / UX Surface
+
+| Method | Path | Auth | Body / Returns |
+|---|---|---|---|
+| POST | `/api/variants/scan` | session | `{full, track_ids?}` → `{job_id}` |
+| GET | `/api/variants/scan/{job_id}` | session | progress |
+| GET | `/api/variants/{track_id}` | session | `{variants[]}` |
+| GET | `/api/variants/cluster/{root_key}` | session | `{members[], canonical_track_id}` |
+| POST | `/api/variants/fingerprints/ingest` (M2) | session | `{fingerprints}` → `{ingested, job_id}` |
+| POST | `/api/variants/{track_id}/pin-canonical` | session | `{is_canonical}` → `{ok}` |
+
+Frontend `VariantClusterPanel.jsx`: collapsible Library row panel, member list + canonical badge + confidence badge. ≥0.75 green "Auto-grouped"; 0.5-0.74 amber "Suggested"; hidden <0.5. Browser-mode degradation handled.
+
+### Telemetry
+
+`variant.scan.start/done`, `variant.classify.label` (DEBUG), `variant.cluster.size`, `variant.dedup.hit`, `variant.fingerprint.ingest`, `variant.acoustid.lookup` (cache_hit bool), `variant.mb.relation`, `variant.error.classify`.
+
+Aggregate counters via `GET /api/variants/stats`: `{total_classified, total_clusters, dedup_hit_rate, sources_distribution}`.
+
+Never log: session token, AcoustID key, full fingerprint payloads at INFO (DEBUG-only).
+
+### Test Plan
+
+| ID | File | Type | Asserts |
+|---|---|---|---|
+| T-VD-01 | `test_variant_detector.py::test_classify_label_precision` | unit | 200-track ≥95% overall |
+| T-VD-02 | `test_classify_per_genre_stratified` | unit | **≥95% precision per bucket** (techno/house/dnb/ambient/pop/rock) ≥5 tracks each |
+| T-VD-03 | `test_classify_recall` | unit | ≥80% recall |
+| T-VD-04 | `test_canonical_picker_ordering` | unit | OQ2 precedence enforced |
+| T-VD-05 | `test_lock_reentrancy` | unit | RLock allows nested upsert same thread |
+| T-VD-06 | `test_master_db_no_writes` | integration | `_db_write_lock` never acquired (mock raises) |
+| T-VD-07 | `test_sidecar_isolation` | integration | DB opens at `MUSIC_DIR/variants.db` |
+| T-VD-08 | `test_route_auth_gate` | integration | All routes 401 without Bearer |
+| T-VD-09 | `test_scan_30k_wall_time` | integration | <5s single thread |
+| T-VD-10 | `test_hamming_threshold_sweep` (M2) | calibration | sweet spot ≥(0.95, 0.80) |
+| T-VD-11 | `test_fp_ingest_route` (M2) | integration | 500 fingerprints persisted, cluster job runs |
+| T-VD-12 | `variantPanel.test.jsx` (M2) | frontend | `window.__TAURI__` undefined → button disabled |
+| T-VD-13 | `test_fpcalc_missing_graceful` (M3) | unit | mock `which → None`, `AVAILABLE=False`, no crash |
+| T-VD-14 | `test_rate_limit_budget` (M3) | unit | 10 lookups ≥3s wall |
+| T-VD-15 | `test_user_agent_header` (M3) | unit | MB User-Agent matches `MusicLibraryManager/x.x.x (...)` |
+| T-VD-16 | `test_master_db_zero_diff` | regression | before/after full scan `master.db` byte-identical |
+| T-VD-17 | `test_at_import_hook_nonblocking` | E2E | `analysis_engine` import <100ms even if classify throws |
+
+### Task Queue
+
+- [ ] T-1 Fixtures + `labelled_corpus.json` (200 tracks, stratified) + `conftest.py` loader (~250 LoC mostly data) — blocked by sister-doc reaching `accepted_`
+- [ ] T-2 `app/variant_schema.py` DDL + migration runner (~80 LoC)
+- [ ] T-3 `app/variant_detector.py` (`_variants_db_write_lock`, `_conn()`, `classify_track`, `upsert_variant`, `cluster_by_root`, canonical-picker) (~250 LoC) — blocked by T2 + sister-doc API
+- [ ] T-4 FastAPI routes 4 endpoints in `app/main.py` after L4448 (~150 LoC) — `route-architect`
+- [ ] T-5 At-import hook in `analysis_engine.py` + CLI `scripts/scan_variants.py` (~80 LoC)
+- [ ] T-6 Tests T-VD-01 through T-VD-09 + T-VD-16/17 (~400 LoC)
+- [ ] T-7 Frontend variant-cluster panel + axios wrapper (~250 LoC) — `e2e-tester`
+- [ ] T-8 Doc-sync: backend-index + FILE_MAP + architecture (~100 LoC, `doc-syncer`)
+- [ ] T-9 M2 frontend orchestrator + browser-mode degradation (~100 LoC)
+- [ ] T-10 M2 backend ingest route + cluster job + threshold calibration test (~200 LoC)
+- [ ] T-11 M3 pin pyacoustid + fingerprint_acoustid.py + musicbrainz_relations.py + acoustid_cache + settings (~350 LoC)
+- [ ] T-12 M3 tests + final docs + CHANGELOG (~300 LoC)
 
 ## Decision / Outcome
 

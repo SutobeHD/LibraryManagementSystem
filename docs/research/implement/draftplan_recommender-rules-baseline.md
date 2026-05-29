@@ -23,6 +23,7 @@ ai_tasks: false
 - 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: advance to `midgate_` for user GATE B
 - 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
 - 2026-05-29 — `research/evaluated_` — GATE B PASSED by user with note: 3 default-picks (M1 backend-only / key_first preset / relative=0.7 weight) explicitly deferred to draftplan_ sign-off
+- 2026-05-29 — `implement/draftplan_` — Stage 3 supplement (Threat Model + Migration + Perf Budget + API/UX + Telemetry + Test Plan + Task Queue) filled; existing Implementation Plan retained; 3 default-picks surfaced as user-action T-10
 
 ## Problem
 
@@ -469,6 +470,105 @@ preset, relative-major-minor weight 0.7.
 
 - LoC: ~600 production + ~350 test = ~950 total (±50).
 - Hours: ~22 hrs single-developer (±4), assuming familiarity with FastAPI + repo conventions. Subagent delegation (`route-architect` for commit 3, `test-runner` for 2/6, `doc-syncer` for 7) cuts main-context by ~40%.
+
+## Threat Model
+
+STRIDE-light: read-only routes, no DB writes, no `_db_write_lock` needed. Inherits Phase-1 auth surface via `Depends(require_session)` at `app/auth.py:95`. Response leaks only track IDs from caller's own library or public SC API. JSONL log local-only at `app_data_dir`, no secrets logged. DoS bounded by `limit=Query(20, ge=1, le=50)` + `bpm_tol=Query(0.06, ge=0.01, le=0.15)`. No new attack surface beyond 2 GET routes.
+
+## Migration Path
+
+**N/A — additive only.** No DB schema change. Recommender reads existing `master.db` fields (BPM, key, camelot, mood.brightness, Genre, MyTag). Two new GET routes; clients unaware continue working. JSONL log lazy-created on first request. `pytest-benchmark` dep additive (verified no version conflict). Rollback = revert 7 commits + remove `app/recommender.py` + 5 test files.
+
+## Performance Budget
+
+Empirical 2026-05-17 (i7-12700H, 50k synthetic library): **median 44 ms, P95 62 ms**.
+
+| Operation | Budget | Worst-case 50k | Mitigation |
+|---|---|---|---|
+| `score_pair() × N` | 0.001 ms/call | 0.05 ms | numpy vectorize |
+| `local()` end-to-end | 50 ms | 44/62 ms | re-bench at 100k |
+| `db.get_all_tracks()` snapshot | 50 ms (one-time, cached) | ~30 ms | cache invalidate on `POST /api/refresh` |
+| Pydantic serialize | 10 ms | ~3 ms | `model_dump(mode="json")` |
+| `_log_event` JSONL append | 5 ms | ~1 ms | buffered async write |
+| **Route end-to-end** | **100 ms P95** | **~75 ms** | **25 ms headroom** |
+| SC route (1 RTT) | 2000 ms | ~500-1500 ms | cache `/related` 5 min |
+
+**Re-benchmark trigger**: library > 100k OR P95 prod > 80 ms over 100 reqs.
+
+## API / UX Surface
+
+### Backend
+
+| Route | Method | Auth | Query | Response |
+|---|---|---|---|---|
+| `/api/recommend/local` | GET | `require_session` | `track_id`, `limit=20`, `bpm_tol=0.06`, `key_strict=false`, `weights_preset`, `log_events=true` | `{seed, mode, weights_preset, results[], latency_ms, note}` |
+| `/api/recommend/soundcloud` | GET | `require_session` | `track_id`, `limit=20`, `source="related"`, `hide_owned=true`, `log_events=true` | Same; `mode="soundcloud"` |
+
+Errors: 401 (missing/invalid Bearer), 404 (seed not in library), 422 (unanalyzed seed), 503 (SC auth/down).
+
+Insert slot: `app/main.py` after `@app.get("/api/track/{tid}/beatgrid")` at ~`:991`. Pattern: `route-architect` subagent before editing.
+
+### Frontend — M2 only
+- Context-menu "Find next track" on track row.
+- Side panel `<RecommenderPanel seedId>` calling `api.get('/api/recommend/local')`.
+- Reason chips per result row.
+
+### Logs
+- `INFO recommender op=local seed=<id> count=<n> latency_ms=<f> preset=<str>`
+- `WARN recommender seed_not_analyzed seed=<id>`
+- `WARN recommender empty_results seed=<id> bpm_tol=<f>` (OQ 13)
+
+## Telemetry
+
+Structured log lines via `logging.getLogger("APP_MAIN")`:
+
+| Marker | Trigger | Fields |
+|---|---|---|
+| `recommender.local.served` | local 200 | `seed_id`, `count`, `latency_ms`, `weights_preset`, `bpm_tol`, `key_strict` |
+| `recommender.sc.served` | SC 200 | `seed_id`, `count`, `latency_ms`, `hide_owned`, `filtered_count` |
+| `recommender.empty_result` | results==[] | `seed_id`, `bpm_tol`, `note` |
+| `recommender.seed_not_analyzed` | 422 | `seed_id` |
+| `recommender.log_rotated` | JSONL > 100MB | `old_size_mb`, `path` |
+| `recommender.sc_fetch_fail` | get_related raises | `seed_sc_id`, `err_type` |
+
+JSONL event log `app_data/recommendations.log.jsonl` captures every call for offline eval.
+
+## Test Plan
+
+20 tests across 5 files. Key items:
+
+| ID | Test | File | Pass |
+|---|---|---|---|
+| G1 | `test_local_eval_50seeds_min5` | `test_recommender_perf.py` | ≥80% return ≥5 rows |
+| G2 | `test_determinism_100_calls` | `test_recommender_determinism.py` | Hash-stable 100 calls |
+| G3 | `test_no_random_imports` | same | Grep no `random`/`secrets`/`time.time(` |
+| G4 | `test_reasons_min_two` | `test_recommender_unit.py` | Every row ≥2 reasons |
+| G5 | `test_reasons_threshold` | same | Per-reason ≥0.05 |
+| G6 | `test_local_p95_50k` | `test_recommender_perf.py` | `pytest-benchmark` P95 ≤ 100ms |
+| G7 | `test_no_audio_deps` | `test_recommender_determinism.py` | No librosa/essentia/madmom |
+| G8 | `test_route_requires_session` | `test_recommender_routes.py` | 401 without Bearer |
+| G9 | `test_no_local_camelot_map` | `test_recommender_determinism.py` | `_CAMELOT_MAP =` not redefined |
+| T10 | `test_unanalyzed_seed_returns_422` | routes | Status 422 + detail |
+| T11 | `test_empty_result_returns_note` | routes | results=[] + note populated |
+| T12-T14 | JSONL log tests | `test_recommender_log.py` | Append + rotation + opt-out |
+| T15-T17 | Scoring math | unit | BPM/Camelot/Jaccard |
+| T18-T20 | Route shape tests | routes | hide_owned, weights_preset, invalid params |
+
+## Task Queue
+
+- [ ] T-1 Re-Grep refs at impl-start + verify drift (0.5h) — covers Step 1
+- [ ] T-2 Add `pytest-benchmark==4.0.0` to requirements.txt + user confirm (0.5h, dep-add) — covers Step 7
+- [ ] T-3 Create `app/recommender.py` (Commit 1, ~6h) — covers Steps 2-3, tests G2/G3/G4/G5/G7/G9
+- [ ] T-4 Unit + determinism tests (Commit 2, ~3h) — tests T15-T17, G3/G7
+- [ ] T-5 Wire `GET /api/recommend/local` (Commit 3, ~2h, `route-architect`) — covers Step 4, tests G8/T10/T11
+- [ ] T-6 Add `get_related_tracks` + SC route (Commit 4, ~4h, `route-architect`) — covers Step 5
+- [ ] T-7 JSONL log + rotation (Commit 5, ~2h) — covers Step 6, tests T12-T14
+- [ ] T-8 Perf benchmark + G8 auth test (Commit 6, ~2h) — covers Step 7, tests G1/G6
+- [ ] T-9 Docs sync: `backend-index.md` + regen MAP (~1h, `doc-syncer`) — covers Step 8
+- [ ] T-10 Resolve OQ 1/2/4 defaults at user GATE C sign-off (0.5h, USER-action) — defaults: M1 backend-only, `key_first` preset, relative=0.7 weight
+- [ ] T-11 State move `draftplan_` → `review_` (0.5h)
+
+Total effort: ~22h single-developer.
 
 ## Decision / Outcome
 

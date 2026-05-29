@@ -29,6 +29,7 @@ ai_tasks: false  # set true to opt-in AI routines — see ## AI Tasks below
 - 2026-05-29 — `research/exploring_` — wave-2 gap close-out: aggregation strategy REVISED to 2D-Display + optional 1D aggregate with `{soundcloud: 0.80, spotify: 0.20, lastfm: 0.0, beatport: 0.0}` weights (OQ 4 RESOLVED, user 2026-05-29); Spotify ECDF carve-out implemented (raw / 100 instead of log10+ECDF); ISRC coverage audit script provided; M2 deliverable rewritten in Recommendation
 - 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
 - 2026-05-29 — `research/evaluated_` — GATE B PASSED by user; 2D-Display + SC 0.80 / Spotify 0.20 aggregation strategy locked, ISRC audit + ECDF carve-out ready for draftplan_ M1
+- 2026-05-29 — `implement/draftplan_` — Stage 3 supplement filled (M1 SC-only + M2 2D-Display + Spotify carve-out from day one + M3 banding optional, 12 atomic tasks, ~33h M1 effort)
 
 ## AI Tasks
 
@@ -620,6 +621,125 @@ def test_post_refresh_force_bypasses_ttl(client, seed_pop, monkeypatch): ...
 - …
 
 ---
+
+## Stage 3 Supplement
+
+### Implementation Plan (bakes in 2026-05-29 user decisions)
+
+**Scope M1 (SC-only MVP):** `app/popularity_engine.py` — `PopularityStore` (SQLite WAL sidecar at `~/.cache/rb_editor_pro/popularity/popularity.sqlite`, mirrors `analysis_cache.py:44` XDG pattern) + ECDF normaliser + aggregator stub. `app/popularity_audit.py` — genre + ISRC coverage histograms (Q2/Q12). `scripts/dev/popularity_audit_cli.py` standalone. Edit `app/soundcloud_api.py:330` — append `playback_count` + `favoritings_count` into `_normalize_track` return. 3 routes: GET unauthed cache lookup, POST refresh + POST scan both `Depends(require_session)`. Tests 27 cases.
+
+**Scope M2 (2D-Display primary + 1D-aggregate secondary):** `app/popularity_spotify.py` (hand-roll httpx Client Credentials) + `app/popularity_lastfm.py` (hand-roll httpx + `xml.etree.ElementTree`). **2D-Display primary view** on track detail panel (per-platform percentiles side-by-side). **1D-aggregate weights** `{soundcloud: 0.80, spotify: 0.20, lastfm: 0.0, beatport: 0.0}` (settings.json override `popularity_weights`). **Spotify ECDF carve-out**: `normalize_for_aggregate(platform, raw)` returns `raw / 100.0` for Spotify (NOT log10+ECDF). SC + Last.fm + Beatport still fetched + cached + 2D-displayed, only excluded from default aggregate.
+
+**Scope M3 (Phase-3 banding optional):** genre-aware weight overrides (techno → SC↑, pop → Spotify↑) gated on Q2 audit ≥0.80 coverage. Discrete band overlay as **optional list-view label** — NEVER primary representation per user decision 2026-05-29.
+
+**Out:** YouTube + Beatport adapters (M4). ListenBrainz (M3 candidate). `master.db` column writes. Real-time refresh (TTL-only). Genre alias-map (M3).
+
+**Steps M1:**
+1. Create `app/popularity_engine.py` skeleton: `PopularityStore.__init__` → `_init_schema` → `_connect` ctx-mgr. Schema + index. WAL mode.
+2. Add `popularity_meta` table for schema version.
+3. Implement `upsert`, `get`, `get_stale(ttl)`.
+4. Implement `normalize_for_aggregate(platform, raw)` — **Spotify carve-out gate baked from day one** (M1 ships only SC, but branch ready for M2).
+5. Implement ECDF builder `build_library_ecdf(genre)` reading `app.database.db.tracks`.
+6. Implement banding helper `score_to_band(score)` config-tunable.
+7. Create `app/popularity_audit.py` — port Findings #6 snippet + ISRC source histogram.
+8. CLI wrapper.
+9. Edit `app/soundcloud_api.py:330` — insert 2 dict keys (4 call-sites inherit single-point edit per Findings #6).
+10. Register 3 routes in `app/main.py`. Mirror `Depends(require_session)` verified at L744/L774/L823/L939/L994.
+11. Run audit lazy first request; cache 24h.
+12. Tests + ruff + mypy + docs sync.
+
+**Files:** new `app/popularity_engine.py` (~350 LoC), `app/popularity_audit.py` (~120), `tests/test_popularity_engine.py` (~300), `tests/test_popularity_audit.py` (~120), `scripts/dev/popularity_audit_cli.py` (~40). Edit `app/soundcloud_api.py:330`, `app/main.py` (+import + 3 routes ~30 LoC). Zero new deps in `requirements.txt`.
+
+**Risks:**
+- R1 `_normalize_track` 4 call-sites break on new keys → `raw.get(..., 0)` default; non-breaking.
+- R2 Sidecar WAL corruption → `threading.Lock` + `IF NOT EXISTS`; tests cover concurrency.
+- R3 Spotify ECDF carve-out wrong at M2 → M1 ships carve-out branch already coded (gated on `platform == "spotify"`).
+- R4 Genre normalisation strips legitimate content → coverage <50% triggers library-wide-only fallback.
+- Feature flag `popularity_enabled` (default true). Disabling skips audit + route registration → zero side effects.
+
+### Threat Model
+
+- **S Spoofing**: hostname pinning per adapter (`SPOTIFY_HOSTS = {"api.spotify.com", "accounts.spotify.com"}`, `LASTFM_HOSTS = {"ws.audioscrobbler.com"}`); httpx default cert verify ON.
+- **T Tampering**: File mode 0o600 on sidecar SQLite. No HMAC (low-value).
+- **I Info-disclosure (KEYS)**: `SPOTIFY_CLIENT_SECRET` + `LASTFM_API_KEY` NEVER logged at any level. Token redaction at httpx adapter. `.env` gitignored (`forbid-env-files` pre-commit). User-supplied-keys posture (Q11 RESOLVED) eliminates bundled-creds distribution.
+- **I Info-disclosure (TRACK META)**: User-key gating = user consents per platform. Outbound only on authed routes. Document in `docs/SECURITY.md`.
+- **I Info-disclosure (host allowlist)**: httpx wrapper asserts URL host membership.
+- **D DoS outbound**: Per-platform rate limiter (Spotify 180/min, SC 0.3s spacing, Last.fm 5/s) + exponential backoff envelope copied from `app/soundcloud_api.py:168-232`.
+- **D DoS inbound**: `Depends(require_session)` Bearer gate. Single-flight scan (returns existing job_id).
+- **E Elevation**: GET read-only; `force=True` only on POST refresh (authed).
+
+### Migration Path
+
+Sidecar `popularity.sqlite` at `~/.cache/rb_editor_pro/popularity/`. Schema v1: `popularity_meta(key PK, value)` + `popularity(track_id, platform, raw_count, log_count, percentile, fetched_at, match_method, match_confidence, PK(track_id, platform))` + indices on `fetched_at` + `platform`.
+
+Migrate-on-open contract in `PopularityStore._init_schema`: PRAGMA WAL → check schema_version → call `_migrate_vN_to_vN+1()` until current. Each migration idempotent transaction.
+
+Future schemas (reserved): v2 (M2) adds `genre_at_fetch`, `ecdf_basis`. v3 (M3) adds `weight_profile_at_fetch`.
+
+Settings migration: `popularity_enabled`, `popularity_weights`, `popularity_platforms`, `popularity_bands`, `popularity.min_genre_cluster`. Missing keys → in-code defaults.
+
+Rollback: `rm popularity.sqlite` → next request rebuilds schema. Cold rescan ~2.5h M1, ~6h M2.
+
+### Performance Budget
+
+| Platform | Endpoint | Batch | Rate | 30k cold wall |
+|---|---|---|---|---|
+| SoundCloud | `/tracks/{id}` | 1 | 0.3s spacing | ~2.5h |
+| Spotify | `GET /v1/tracks?ids=...` | **50/call** | ~180/min | ~3.3 min |
+| Last.fm | `track.getInfo` | 1 | 5/s | ~1.7h |
+
+Parallelism: 3 adapters in separate `asyncio.Task` groups. Wall = max(SC, LastFM) ≈ 2.5h + ~30 min match overhead + 50% retry budget = **~4h total** (inside G7 6h budget).
+
+Hard caps: connect 5s, read 15s/10s/15s (SC/LastFM/Spotify), max retries 3 exponential (2s base, 30s cap), 429 `Retry-After` parsed, per-track ceiling 60s.
+
+ECDF cache memory: ~30k × ~50 genres = ~6 MB. WAL ceiling ~50 MB for 30k × 4-platform.
+
+### API / UX Surface
+
+3 routes after existing block:
+- `GET /api/popularity/{tid}` — unauthed (cache lookup). Returns `{track_id, aggregate_score, aggregate_band, confidence, platforms[2D-display], audit}`. `display_mode` per platform: `"ecdf"` (SC/LastFM/Beatport) or `"raw_pct"` (Spotify carve-out).
+- `POST /api/popularity/{tid}/refresh` — authed, `?force&platforms`.
+- `POST /api/popularity/scan` — authed, returns `{job_id, queued, ttl_skipped}`.
+
+Frontend (separate exploration per OQ8 PARKED):
+- **Primary (2D-display)**: per-platform percentile bars side-by-side on track detail panel. SC bar uses ECDF percentile; Spotify bar uses raw 0-100 rendered as-is.
+- **Sortable column** "U/M Score" pulls `aggregate_score`.
+- **Filter chip** underground/niche/rising/mainstream (M3 optional).
+
+### Telemetry
+
+`fetch_rate`, `cache_hit_ratio` (per-1000 aggregate), `isrc_match_success`, `mbid_match_success`, `fuzzy_match_rate`, `ttl_skip_rate`, `rate_limit_hit`, `audit_summary`, `schema_migration`, `outbound_host_denied`. Aggregates batched every 1000 events or 5min.
+
+Never log: raw_count values (library composition fingerprint), API keys, track titles in failures (truncate to `tid=X`).
+
+### Test Plan (27 cases)
+
+| # | File | Test | Type |
+|---|---|---|---|
+| 1-4 | `test_popularity_engine.py` | store init/upsert/TTL/concurrent | unit |
+| 5-13 | same | normalisation math (log_count, ECDF, banding, **Spotify carve-out**, SC full chain) | unit |
+| 14 | same | settings_json_weights_override | unit |
+| 15-16 | same | normalize_track carries playback_count + default 0 | integration |
+| 17-20 | same | routes (404/200/auth/force) | route |
+| 21-23 | `test_popularity_audit.py` | coverage/paren-normalisation/whitespace | unit |
+| 24 | same | ISRC histogram per source | unit |
+| 25 | same | audit_emits_audit_json | integration |
+| 26-27 | same | empty db + clusters_ge_100 filter | unit |
+
+### Task Queue (~33h ≈ 4 working days M1)
+
+- [ ] T1 Sidecar skeleton (`PopularityStore` + tables + WAL) 4h
+- [ ] T2 Schema migration framework + `SCHEMA_VERSION=1` 3h
+- [ ] T3 Store CRUD (upsert/get/get_stale) 3h
+- [ ] T4 Normalisation math + **Spotify carve-out from day one** + ECDF + bands 5h
+- [ ] T5 Aggregator + weights from settings.json 4h
+- [ ] T6 SC payload edit `soundcloud_api.py:330` 1h
+- [ ] T7 Audit module + genre histogram + ISRC histogram + emitter 4h
+- [ ] T8 CLI wrapper 1h
+- [ ] T9 3 routes + `require_session` 3h, `route-architect`
+- [ ] T10 Telemetry structured logs 2h
+- [ ] T11 Doc-sync `backend-index.md` + regen MAP 1h, `doc-syncer`
+- [ ] T12 M1 exit gate: pytest green + audit JSON valid + GET endpoint valid 2h
 
 ## Decision / Outcome
 

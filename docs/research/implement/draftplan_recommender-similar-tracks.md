@@ -29,6 +29,7 @@ related: [recommender-rules-baseline, recommender-taste-llm-audio, security-api-
 - 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: advance to `midgate_` for user GATE B
 - 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
 - 2026-05-29 — `research/evaluated_` — GATE B PASSED by user; 2 plan-shape corrections (backfill cost model, named vector slices) deferred to draftplan_ entry
+- 2026-05-29 — `implement/draftplan_` — Stage 3 supplement filled; **both plan-shape corrections baked in** (4 named slice BLOB columns + re-decode via librosa.load) — backfill revised 50k = 8-15h single-process / 2-4h with 4 workers
 
 ---
 
@@ -412,6 +413,118 @@ If `recommender-taste-llm-audio` later picks Option B, this doc upgrades by chan
 - …
 
 ---
+
+## Stage 3 Supplement (Implementation Plan extension)
+
+### Scope (bakes in 2 wave-2 plan-shape corrections)
+
+**In:**
+- `app/track_vector_builder.py` — `compute_track_vector(y, sr, existing_analysis) -> dict[str, np.ndarray]` returns **4 named slices** (mfcc26/chroma12/spectral4/dynamics4), NOT a flat 46-dim array.
+- Sidecar SQLite `app_data/track_vectors.db` (new, NOT `master.db`); schema with **4 BLOB columns** per slice.
+- `app/track_vector_store.py` — `put(track_id, slices, version)` + `bulk_load() -> dict[str, ndarray]` returning 4 stacked matrices for vectorised cosine.
+- Path-(a) hot-pipeline hook in `app/analysis_engine.py:2207` (post `cache.put`) — try/except, non-blocking.
+- Path-(b) backfill `POST /api/track-vectors/backfill` — **re-decodes via `librosa.load(sr=22050, mono=True)`**, NOT cached `y` (Adversarial finding: `analysis_cache.py:30` caches only result dict, line 2207 confirmed).
+- `app/recommender_similar.py` — `find_similar(seed_id, *, limit, filters, weights)`; numpy cosine per-slice, weighted sum, top-N via `np.argpartition`.
+- Route `GET /api/similar/local`, `Depends(require_session)` Bearer auth.
+- Frontend: context-menu "Find similar" → side-panel.
+- Tests: `tests/test_recommender_similar.py`, `tests/test_similar_perf.py` (`pytest-benchmark`, filter-fanout ≥ 50%).
+- Eval: `eval/similar_tracks_2026-05.jsonl` (20 seeds × top-10 manually scored).
+
+**Out:** sklearn/FAISS/PyTorch (M2/M3); MMR diversity (M2); fuzzy dedup via `external_track_match.py` (M3); `master.db` touch.
+
+### Schema (sidecar `track_vectors.db`)
+
+```sql
+CREATE TABLE IF NOT EXISTS track_vectors (
+    track_id        INTEGER PRIMARY KEY,
+    mfcc_blob       BLOB    NOT NULL,
+    chroma_blob     BLOB    NOT NULL,
+    spectral_blob   BLOB    NOT NULL,
+    dynamics_blob   BLOB    NOT NULL,
+    vector_version  INTEGER NOT NULL,
+    computed_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_track_vectors_version ON track_vectors(vector_version);
+```
+
+Per-row ~200 bytes; 50k ≈ 10 MB. `VECTOR_VERSION = 1`.
+
+### Performance Budget (P95 ≤ 100 ms top-20 over 50k)
+
+| Stage | Budget |
+|---|---|
+| SQL prefilter (BPM ±6%, duration ±50%, same-artist exclude) | ≤ 20 ms |
+| Cold mmap 4 BLOB columns | ≤ 30 ms first query, < 1 ms warm |
+| 4 per-slice cosines on filtered N≈25k | ≤ 30 ms (numpy matmul + norm) |
+| Weighted sum + categorical bonuses | ≤ 10 ms |
+| Top-N `np.argpartition(scores, -20)` | ≤ 2 ms |
+| Reasons-list per-slice subscores ≥ 0.05 | ≤ 5 ms |
+| **Total P95** | **≤ 97 ms** (3 ms headroom) |
+
+**Backfill (path-b) revised:** 50k single-process = 8-15 h; 4-worker `ProcessPoolExecutor` = 2-4 h (NOT < 2 h as previously claimed). Exit-criteria: 5k @ 4 workers < 30 min.
+
+### Threat Model
+
+Minimal. All routes `Depends(require_session)`. New SQLite file `app_data/track_vectors.db` written by sidecar only; no SQL injection (parameterised queries, no f-string SQL). Backfill route single-flight (returns 409 on double-run). Purely local — zero network in `find_similar` (enforced via `--disable-socket` test). No new attack surface beyond auth baseline.
+
+### Migration Path
+
+Schema-additive only. New sidecar SQLite, `master.db` untouched. `VECTOR_VERSION` bump on librosa upgrade / slice dim change / new slice. Wipe `track_vectors.db` → 503 → re-run backfill.
+
+Future Teil-2 swap (parked M3): add `embedding_blob BLOB NULL`, `embedding_kind TEXT NULL` — schema-additive.
+
+### API / UX Surface
+
+`GET /api/similar/local` query params: `seed_track_id`, `limit=20`, `exclude_same_artist=true`, `exclude_same_playlist=true`, `bpm_window=0.06`, `duration_window_pct=0.5`, `key_strict=false`, `weights` (CSV override).
+
+Response: `{seed_track_id, results[{track_id, score, reasons[{feature, subscore}]}], unanalysed_count, vector_version}`.
+
+`POST /api/track-vectors/backfill` returns `{job_id, queued}`; double-run 409; status via `GET /api/track-vectors/backfill/{job_id}`.
+
+Frontend: context-menu "Find similar in library" in `TrackTable.jsx` + new `SimilarPanel.jsx`. Bearer via existing `frontend/src/api/api.js`.
+
+### Telemetry
+
+- `similar_query` (every call): `seed_id`, `n_candidates_pre`, `n_candidates_post_filter`, `latency_ms`, `version`.
+- `similar_query_slow` (latency > 150ms): adds `top1_score`.
+- `backfill_progress` (every 100 tracks): `job_id`, `done`, `total`, `errors`, `elapsed_s`.
+- `vector_extraction_failed` (path-a try/except): `track_id`, `error_class`.
+- `vector_version_mismatch` (query time): `track_id`, `stored_version`, `current_version`.
+
+No PII. No raw paths. No token.
+
+### Test Plan (17 cases)
+
+| ID | File | Asserts |
+|---|---|---|
+| T1 | `tests/test_recommender_similar.py::test_cosine_per_slice` | Per-slice math vs hand-computed |
+| T2-T5 | filter tests | same-artist, same-playlist, BPM-window, duration-window exclusion |
+| T6 | `test_reasons_list_min_two` | Every row ≥2 reasons with subscore ≥0.05 |
+| T7 | `test_unanalysed_count_surfaced` | OQ9 deliverable |
+| T8 | `test_no_network` (`--disable-socket`) | Pure-offline goal |
+| T9 | `tests/test_similar_perf.py::test_p95_50k_with_filter_fanout` | P95 ≤ 100ms, filter-fanout ≥ 50% |
+| T10 | `test_cold_vs_warm_mmap` | Both paths benched |
+| T11-T12 | `test_track_vector_builder.py` | Slice shapes + version bump invalidates |
+| T13-T14 | `test_track_vector_store.py` | Atomic put + bulk_load 4-matrices |
+| T15-T16 | `test_routes_similar.py` | Unauth 401 + backfill 409 double-run |
+| T17 | Manual: `eval/similar_tracks_2026-05.jsonl` | tb scores 20 seeds top-10 ≥ 3 musically similar |
+
+### Task Queue
+
+- [ ] T-1 `app/track_vector_builder.py` (4 named slices + `VECTOR_VERSION=1`) — S, tests T11/T12
+- [ ] T-2 `app/track_vector_store.py` (SQLite, 4 BLOB columns) — S, tests T13/T14
+- [ ] T-3 Path-(a) hook at `analysis_engine.py:2207` (try/except non-blocking) — S, blocked by T1+T2
+- [ ] T-4 `app/recommender_similar.py` (`find_similar`, prefilter SQL, per-slice cosine, weighted sum, top-N, reasons) — M, blocked by T2, tests T1-T8
+- [ ] T-5 `GET /api/similar/local` route (`route-architect` first!) — S, blocked by T4, tests T15
+- [ ] T-6 `POST /api/track-vectors/backfill` route + worker (single-flight, `ProcessPoolExecutor`, re-decode librosa.load) — M, tests T16
+- [ ] T-7 `tests/test_similar_perf.py` (50k synthetic, filter-fanout ≥ 50%, cold+warm) — S, tests T9/T10
+- [ ] T-8 Frontend `TrackTable.jsx` context-menu + `SimilarPanel.jsx` (`e2e-tester` after) — M, blocked by T5
+- [ ] T-9 Eval harness `eval/similar_tracks_2026-05.jsonl` + `scripts/dev/eval_score.py` — S, blocked by T4
+- [ ] T-10 Weight-grid sweep `scripts/dev/weight_sweep.py` (Adversarial mitigation) — S, blocked by T9
+- [ ] T-11 Docs sync (`doc-syncer`) — S, blocked by T5+T6
+- [ ] T-12 CHANGELOG.md bump under `[Unreleased]` — XS, blocked by T8
+
+GATE C checklist: confirm OQ3/4/5/11 defaults locked pre-T1.
 
 ## Decision / Outcome
 

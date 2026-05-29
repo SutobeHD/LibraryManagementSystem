@@ -33,13 +33,7 @@ _(none)_
 - [midgate_recommender-taste-llm-audio.md](research/midgate_recommender-taste-llm-audio.md) — Teil 2 taste/LLM recommender; reject-recovery done — Option-D cache invalidation resolved (`taste_profile_hash` → `taste_profile_version` bumps only on significant drift); re-awaiting GATE B (2026-05-29)
 
 ### evaluated
-- [evaluated_external-track-match-unified-module.md](research/evaluated_external-track-match-unified-module.md) — Cross-cutting fuzzy+chromaprint+adapter module shared by 3 sister features; GATE B PASSED 2026-05-29; ready for draftplan_ owner (2026-05-29)
-- [evaluated_library-extended-remix-finder.md](research/evaluated_library-extended-remix-finder.md) — Extended/Club/Long version finder via Discogs-gated SC search; GATE B PASSED 2026-05-29 — scoring calibration + Discogs % deferred to draftplan_ (2026-05-29)
-- [evaluated_recommender-rules-baseline.md](research/evaluated_recommender-rules-baseline.md) — Teil 1 ranking baseline; GATE B PASSED 2026-05-29 with note — 3 default-picks deferred to draftplan_ sign-off (2026-05-29)
-- [evaluated_recommender-similar-tracks.md](research/evaluated_recommender-similar-tracks.md) — LOCAL-ONLY similar-tracks recommender; GATE B PASSED 2026-05-29 — 2 plan-shape corrections (backfill model, named vector slices) deferred to draftplan_ (2026-05-29)
-- [evaluated_analysis-remix-detector.md](research/evaluated_analysis-remix-detector.md) — Remix/edit/bootleg variant detector; GATE B PASSED 2026-05-29; sister `external-track-match` same-day unblock (2026-05-29)
-- [evaluated_analysis-underground-mainstream-classifier.md](research/evaluated_analysis-underground-mainstream-classifier.md) — Underground vs Mainstream classifier; GATE B PASSED 2026-05-29; 2D-Display + SC 0.80 / Spotify 0.20 aggregation locked (2026-05-29)
-- [evaluated_library-quality-upgrade-finder.md](research/evaluated_library-quality-upgrade-finder.md) — Quality auditor (detection-only after merge with `library-format-converter`); GATE B PASSED 2026-05-29 (2026-05-29)
+_(none)_
 
 ### parked
 _(none)_
@@ -49,7 +43,13 @@ _(none)_
 ## implement/
 
 ### draftplan
-_(none)_
+- [draftplan_external-track-match-unified-module.md](implement/draftplan_external-track-match-unified-module.md) — Cross-cutting fuzzy+chromaprint+adapter; full Stage 3 plan; 12 atomic tasks; sister-doc prereq for 3 other draftplan_ docs (2026-05-29)
+- [draftplan_analysis-remix-detector.md](implement/draftplan_analysis-remix-detector.md) — Remix/edit/bootleg variant detector; M1/M2/M3 phases; sidecar `variants.db`; 12 atomic tasks (2026-05-29)
+- [draftplan_analysis-underground-mainstream-classifier.md](implement/draftplan_analysis-underground-mainstream-classifier.md) — Underground/Mainstream; 2D-Display + SC 0.80 / Spotify 0.20 weights; ECDF carve-out baked in; 12 atomic tasks ~33h M1 (2026-05-29)
+- [draftplan_library-extended-remix-finder.md](implement/draftplan_library-extended-remix-finder.md) — Extended/Club/Long versions via SC search; critical path = sister `external-track-match` shipping `inprogress_`; 12 atomic tasks (2026-05-29)
+- [draftplan_library-quality-upgrade-finder.md](implement/draftplan_library-quality-upgrade-finder.md) — Quality auditor (detection-only); Phase-3 swap delegated to `library-format-converter`; `allow_db_match=False` mitigation; 12 atomic tasks (2026-05-29)
+- [draftplan_recommender-rules-baseline.md](implement/draftplan_recommender-rules-baseline.md) — Teil 1 ranking baseline; 3 default-picks surfaced as user-action; 12 atomic tasks ~22h (2026-05-29)
+- [draftplan_recommender-similar-tracks.md](implement/draftplan_recommender-similar-tracks.md) — LOCAL-ONLY similar-tracks; **both plan-shape corrections baked in** (4 named slice BLOB columns + re-decode via librosa.load); 12 atomic tasks (2026-05-29)
 
 ### review
 _(none)_
