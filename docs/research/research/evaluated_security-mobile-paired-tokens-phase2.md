@@ -21,6 +21,7 @@ ai_tasks: false  # set true to opt-in AI routines — see ## AI Tasks below
 - 2026-05-28 — `research/drafting_` — Stage 1 worker formally complete (content already at exploring_ depth — Findings + Options + Recommendation populated 2026-05-19)
 - 2026-05-28 — `research/ideagate_` — Stage 1 verifier PASS, awaiting GATE A
 - 2026-05-29 — `research/exploring_` — GATE A PASSED by user; entblockt `exploring_mobile-companion-ranking-app` hard-prereq; advanced for Stage 2 wave-2 verifier
+- 2026-05-29 — `research/evaluated_` — Stage 2 wave-2 verifier PASS (Citation Quality 8/8, Adversarial validates Option A). 1 material draftplan carry-forward: `last_seen_at` write-per-request contention (throttle+WAL+per-thread conn). Recommendation Option A stands.
 
 ## AI Tasks
 
@@ -212,6 +213,32 @@ def require_session(authorization = Header(None)) -> None:
 - `SESSION_TOKEN` empty-string guard already holds: in a `ProcessPoolExecutor` child `SESSION_TOKEN == ""`, and `safe_compare(candidate, "")` is `False` for any real token — branch 1 safely no-ops there.
 - WebSocket variant: Phase-1 archive line 429 mandates a future `require_session_ws`. Still 0 `@app.websocket` routes (sister doc verified). If a paired-mobile WS ever lands, `require_session_ws` reuses the same two-branch check inside the handler. Not in Phase-2 scope — noted so the dual-acceptance logic is written once, in a shared helper, not duplicated.
 
+## Adversarial Findings
+
+### 2026-05-29 — devil's-advocate on Option A
+
+- **`last_seen_at` write-per-GET (material).** Best-effort (Findings 2026-05-19 schema, line 147) covers *errors*, not *contention*. Every authed GET becomes a SQLite WRITE under the `auth.db` `threading.Lock` (line 148) → serializes all auth + fsync under concurrent mobile load. Risks the sister doc's G7 p95≤350ms budget. Mitigation absent: write only if `>60s` stale + WAL (`PRAGMA synchronous=NORMAL`) or async-queue. **Resolve at draftplan.**
+- **Connection lifecycle underspecified.** `require_session` is sync (`auth.py:95`) → FastAPI threadpool → many threads hit `auth.db`. Doc's `threading.Lock` serializes writers but never states read connection model. A single shared connection + `check_same_thread` throws/serializes; needs per-thread connections (`live_database.py:27` pattern). Underspecified, not wrong.
+- **QR shoulder-surf (accepted-risk, make explicit).** `lmsapp://pair?host=&port=&code=` shown as QR + plaintext; camera-capture within the 60s TTL = full pairing. Bounded by one-shot + physical proximity. Add an explicit accepted-risk line vs leaving silent.
+- **No pairing/auth audit log (Repudiation).** `revoked` flag keeps a device audit trail, but no record of pairing attempts / auth failures despite the `auth.db` "headroom" rationale (OQ10). If `last_seen_at` writes get throttled (above), it's also the only breach signal — detection degrades. Minor; note for draftplan.
+- **`complete` rate-limit key.** `@rate_limit(5,10,"both")` mandated (G6) — good; but `make_key` keys unauth `complete` on IP (`rate_limit.py:126`), so all phones behind one NAT share a bucket / IP-rotation defeats it. 256-bit code makes guessing moot; minor.
+
+## Citation Quality
+
+### 2026-05-29 — PASS (8/8)
+
+- PASS: `require_session` sync + `safe_compare(candidate, SESSION_TOKEN)` (`auth.py:95-115`, l.114); `SESSION_TOKEN` (`auth.py:84`); `MainProcess` guard (`auth.py:83`, banner l.85 + token-file l.87); non-main `SESSION_TOKEN = ""` (`auth.py:92`) → `safe_compare(x,"")` False; `safe_compare` (`security_compare.py:23`, `secrets.compare_digest`); `BucketStore` in-mem TTL store (`rate_limit.py:82`, `_purge_stale` l.90; commit `830c056` confirmed); ZERO `@app.websocket` routes (grep empty).
+- Cosmetic: `rate_limit.py` lock is `RLock` not plain `Lock` (doc said `Lock`). Harmless.
+- ABSENT = planned new code (not a wrong cite): `_extract_bearer` helper (doc pseudocode) — to be written in Phase-2.
+
+## Research Verification
+
+### 2026-05-29 — PASS
+
+- All 10 OQs RESOLVED/PARKED; Findings cite-accurate (Citation Quality 8/8 PASS); 4 options compared with a decision matrix; Recommendation (Option A) internally consistent and unchallenged by the adversarial pass (it found refinements to Option A's *implementation*, not a reason to prefer B/C/D).
+- **Carry-forward to draftplan (do NOT block `evaluated_`):** (1) `last_seen_at` write strategy — throttle (>60s stale) + WAL + per-thread connections, so auth reads don't serialize on a write lock; (2) explicit QR shoulder-surf accepted-risk line; (3) optional pairing/auth audit log. These are plan-stage design details, not open research questions.
+- Verdict: **PASS** → advance to `evaluated_`. Next user gate is C (after the plan).
+
 ## Options Considered
 
 Required by `evaluated_`. Per option: sketch ≤3 bullets, pros, cons, S/M/L/XL, risk. Axes that differ: token-at-rest form, pairing-code persistence, code-store location.
@@ -261,7 +288,7 @@ Required by `evaluated_`. Per option: sketch ≤3 bullets, pros, cons, S/M/L/XL,
 
 Required by `evaluated_`. ≤80 words. Which option + what blocks commit.
 
-**Option A** — `token_hash` in sidecar-local `auth.db` + in-memory 60 s pairing-code store. Hashed-at-rest contains multi-device leak blast-radius (vs B); no new dep and a usable Settings device-list (vs C); no Rekordbox lock contention (vs D). Reuses Phase-1 `auth.py` + `rate_limit.py` shapes wholesale. **Gate to `evaluated_`**: none of OQ1-10 block — 9 RESOLVED, OQ7 PARKED (non-blocking, mobile-doc owns it). Promote once a reviewer confirms the dual-acceptance + handshake sketches. **Gate to `draftplan_`**: confirm `complete` replay → 409 vs 410 split with the sister doc's test contract.
+**Option A** — `token_hash` in sidecar-local `auth.db` + in-memory 60 s pairing-code store. Hashed-at-rest contains multi-device leak blast-radius (vs B); no new dep and a usable Settings device-list (vs C); no Rekordbox lock contention (vs D). Reuses Phase-1 `auth.py` + `rate_limit.py` shapes wholesale. **Gate to `evaluated_`**: none of OQ1-10 block — 9 RESOLVED, OQ7 PARKED (non-blocking, mobile-doc owns it). Promote once a reviewer confirms the dual-acceptance + handshake sketches. **Gate to `draftplan_`**: confirm `complete` replay → 409 vs 410 split with the sister doc's test contract; AND resolve the `last_seen_at` write-per-request contention (Adversarial 2026-05-29) — write-throttle (>60s stale) + WAL + per-thread `auth.db` connections so authed reads never serialize on the writer lock.
 
 ---
 

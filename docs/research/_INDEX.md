@@ -25,7 +25,6 @@ _(none)_
 ### exploring
 - [exploring_db-write-lock-retrofit.md](research/exploring_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps; Option B (auto-wrap) committed; wave-2 verify → GAPS (3rd gap: `AnalysisDBWriter` rbox-direct write uncovered by class decorator; circular drift guard); stays exploring_ (2026-05-29)
 - [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); wave-2 GAPS narrowed (CORS para corrected, 3/3 stale main.py refs refreshed+PASS, Phase-2 prereq now past GATE A); remaining blocker = OQ14+OQ7 user sign-off only; stays exploring_ (2026-05-29)
-- [exploring_security-mobile-paired-tokens-phase2.md](research/exploring_security-mobile-paired-tokens-phase2.md) — Per-device QR-pairing + sidecar `auth.db`; GATE A PASSED 2026-05-29 (2026-05-29)
 ### midgate ⛔ GATE B
 - [midgate_download-format-setting.md](research/midgate_download-format-setting.md) — AIFF default + 6-Option-Dropdown; wave 1 done (4 agents, all 6 OQs covered, 3 doc corrections); awaiting GATE B (2026-05-29)
 - [midgate_library-format-converter.md](research/midgate_library-format-converter.md) — Library-wide format converter; wave 1 OVERTURNED 3 OQs (proof script absent, AAC priming ffmpeg-trimmed ~48ms risk, update_track_path can't rename in live mode); OQ2/OQ5 confirmed; awaiting GATE B (recommend reject-to-wave-2) (2026-05-29)
@@ -33,6 +32,7 @@ _(none)_
 ### evaluated
 - [evaluated_metadata-name-fixer.md](research/evaluated_metadata-name-fixer.md) — GATE B PASSED 2026-05-29 (re-attempt after line-ref refresh) (2026-05-29)
 - [evaluated_recommender-taste-llm-audio.md](research/evaluated_recommender-taste-llm-audio.md) — GATE B PASSED 2026-05-29 (re-attempt after cache invalidation resolved) (2026-05-29)
+- [evaluated_security-mobile-paired-tokens-phase2.md](research/evaluated_security-mobile-paired-tokens-phase2.md) — Per-device QR-pairing + sidecar `auth.db` (Option A); wave-2 PASS (Citation 8/8, Adversarial validated); draftplan carry-forward: last_seen_at write contention (2026-05-29)
 
 ### parked
 _(none)_
