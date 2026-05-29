@@ -26,6 +26,8 @@ superseded_by: []
 - 2026-05-29 — `research/exploring_` — GATE A PASSED by user; AIFF default + 6-Option-Dropdown specs confirmed; advanced for Stage 2 wave-2 verifier
 - 2026-05-29 — `research/midgate_` — Stage 2 wave 1 done (4 tiered agents: code-surface + sister-delta + web-DJ-formats + UI-pattern). All 6 OQs covered; 3 doc corrections found (180s timeout not 360s, POST not PUT, current convert drops artwork). Awaiting GATE B.
 - 2026-05-29 — `research/evaluated_` — GATE B PASSED (user-delegated authority) + wave-2 verification run on the wave-1 body: Adversarial (artwork-drop, remux-wording, fake-lossless, storage), Citation Quality (code PASS / web MEDIUM, Pioneer 403), Research Verification PASS; Options + Recommendation (Option A) written.
+- 2026-05-29 — `implement/draftplan_`→`review_`→`plangate_` — research-plan: Implementation Plan filled, Threat Model STRIDE table (TM1-4→tests), API/UX corrected PUT→POST, Review 14/14 PASS. Pre-scaffolded Migration/Perf/Telemetry/Test-Plan/Task-Queue retained.
+- 2026-05-29 — `implement/accepted_` — GATE C PASSED (user-delegated authority for PASS-verified plans). Ready for `inprogress_`; load-bearing task = the `-map_metadata 0` + mutagen art-overlay fix (gated by T3).
 
 ## Original Idea (verbatim — never edit)
 
@@ -248,20 +250,28 @@ Stage 2 Synthesis-Agent (wave 2 PASS). Per option: sketch ≤5 bullets, pros, co
 Stage 3 Planner-Agent.
 
 ### Scope
-- **In:** …
-- **Out:** …
+- **In:** Option A — `sc_download_format` default → `"aiff"` (fresh installs); `SetReq` Literal → 6 targets; `_convert_to_aiff` → `_convert_to_target_format(src, target)` (per-target ffmpeg + `-map_metadata 0` + mutagen art overlay); 6-target Settings dropdown (AIFF preselected); lossy toast + storage disclaimer; format-badge on download task card.
+- **Out:** per-download override (Non-goal, Option B); library batch conversion (sister `library-format-converter`); local-import conversion (OQ6 NO); filename rewrites.
 
 ### Step-by-step
-1. …
+1. `SetReq.sc_download_format` → `_Literal["aiff","alac","flac","wav","mp3","original"] | None` (`main.py:414`); `SettingsManager` default `"aiff"` (`services.py:656`). `"auto"` kept as accepted alias of `"original"` (back-compat).
+2. `_convert_to_target_format(src, target) -> Path|None` extending `_convert_to_aiff` (`soundcloud_downloader.py:953`): per-target ffmpeg cmd (AIFF/WAV `pcm_s16le`, FLAC `flac` + bit-depth via ffprobe `sample_fmt`, ALAC `alac` in `.m4a`, MP3 `libmp3lame -b:a 320k`, original=passthrough). **Add `-map_metadata 0`** (currently absent) + post-convert `audio_tags.write_tags` art/tag overlay — fixes the `-vn` artwork-drop (wave-2 Adversarial). Bump convert timeout from `_DOWNLOAD_TIMEOUT` (180s) toward the HLS path's `*2` (360s) for long-set worst-case (correction #1).
+3. Replace `_aiff_requested()` branch in `_do_download` (`:1314-1324`) with the full target switch reading `sc_download_format`.
+4. Frontend: 6-target `<select>` in `SettingsExport.jsx` "Format Defaults" `<Section>` (raw `<select className="input-glass w-full">` + `<Field>` pattern, `:62-68`); persists via batch `POST /api/settings` (`SettingsView.jsx:128`) — add key to `DEFAULTS`. `react-hot-toast` lossy warning on MP3 select. Format-badge on task card.
+5. Docs sync.
 
 ### Files touched
-- …
+- **Modified:** `app/main.py` (`SetReq` field), `app/services.py` (`SettingsManager` default), `app/soundcloud_downloader.py` (`_convert_to_target_format` + `_do_download` switch + `-map_metadata 0` + overlay), `frontend/src/components/settings/SettingsExport.jsx` (dropdown), `frontend/src/components/SettingsView.jsx` (`DEFAULTS`), download-task-card component (badge), `docs/backend-index.md` (SetReq), `CHANGELOG.md`.
+- **New:** `tests/test_soundcloud_downloader.py`, `tests/test_sc_download_format_e2e.py`.
 
 ### Testing
-- …
+- See `## Test Plan` (T1–T7). Key: `_convert_to_target_format` dispatch per target; **cross-format tag+art round-trip** (T3, guards the `-map_metadata 0` fix); enum rejection (T4); `"auto"` alias back-compat (T5); dropdown persists via POST (T6); e2e AIFF download (T7).
 
 ### Risks & rollback
-- …
+- **Existing artwork/tag-drop bug** must be fixed as part of step 2 (`-vn` + no `-map_metadata 0`) — otherwise AIFF default ships data loss. Gated by T3.
+- **Default change is user-visible** — mitigated: fresh-installs only; existing `"auto"`/missing keys unchanged (Migration Path).
+- **Storage 5× expansion** AAC→AIFF — Settings disclaimer (necessary, not optional).
+- **Rollback:** revert `SetReq` Literal → defaults fall to `"auto"`; schema-additive, no migration to undo. No `master.db` touched.
 
 ## Threat Model
 
@@ -270,18 +280,21 @@ Stage 3 Threat-Modeller-Agent. Required when feature touches: auth, `require_ses
 **Preliminary**: feature touches user-supplied path (`tempfile` + final move into `MUSIC_DIR/SoundCloud/<artist>/<title>.<ext>`) via existing `_build_save_path` sandbox. New FFmpeg subprocess invocation. Both patterns already audited in shipped SC downloader. **Likely N/A — no new attack surface beyond [[project-sc-downloader-security]] invariants.**
 
 ### Assets
-- …
+- User audio files + their metadata; settings.json.
 
 ### Trust boundaries
-- …
+- `POST /api/settings` (`require_session` Bearer); ffmpeg subprocess; final file move into `MUSIC_DIR` via existing `_build_save_path` sandbox.
 
 ### Threats (STRIDE-light)
 | ID | Threat | Mitigation in plan | Test covers |
 |---|---|---|---|
-| T1 | … | step N / file X | test_… |
+| TM1 | Tampering — out-of-enum `sc_download_format` value injected via settings | `SetReq` Pydantic `Literal` (6 values) rejects at write API | T4 |
+| TM2 | Elevation/Path — target path traversal on the converted file | reuse `_build_save_path` + `validate_audio_path` sandbox (unchanged) | T7 |
+| TM3 | DoS — ffmpeg hang on malformed/huge source | subprocess `timeout` (raised to 360s for long-set worst-case) + user-cancel | T1, perf row |
+| TM4 | Info-disclosure — lossy source written with lossless-claiming tags | no provenance-faking; lossy-target toast; tags never assert lossless | T3 (Adversarial) |
 
 ### Residual risk
-- …
+- Low — no new route, no new auth surface; reuses shipped SC-downloader sandbox + Bearer-gated settings. Web-sourced format claims (dropdown labels) are MEDIUM-confidence cosmetic only.
 
 ## Migration Path
 
@@ -320,8 +333,8 @@ Stage 3 Perf-Budget-Agent.
 Stage 3 Planner-Agent.
 
 ### Backend (FastAPI)
-- New routes: **none** — settings flow uses existing `PUT /api/settings` + `GET /api/settings` (both `Depends(require_session)` for mutation).
-- Changed routes: `SetReq` Pydantic model gains one typed field.
+- New routes: **none** — settings flow uses existing batch `POST /api/settings` + `GET /api/settings` (`POST` is `Depends(require_session)`). _(Corrected 2026-05-29: persistence is batch **POST**, not `PUT` — `SettingsView.jsx:128` `api.post('/api/settings', settings)`.)_
+- Changed routes: `SetReq` Pydantic model gains one typed `Literal` field.
 
 ### Frontend (React)
 - New components: Settings-Dropdown für Download-Format (Component pattern depends on Agent 4 finding).
@@ -366,21 +379,22 @@ Stage 3 Test-Plan-Agent.
 
 Stage 3 Reviewer-Agent (`review_`). Unchecked box or rework reason → `rework_`.
 
-- [ ] Plan addresses all goals
-- [ ] Plan matches `## Original Idea` — no scope-creep
-- [ ] Open questions answered or deferred
-- [ ] Prior Art referenced — no duplicated past work
-- [ ] Threat Model present + each threat has a test (or N/A justified)
-- [ ] Migration Path present + rollback documented (or N/A justified)
-- [ ] Performance Budget set + worst-case scenario documented (or N/A justified)
-- [ ] API / UX Surface enumerated for every layer touched
-- [ ] Telemetry defined for shipped behavior (or N/A justified)
-- [ ] Test Plan covers every Threat + every Step + every Perf row
-- [ ] Task Queue items are small + independently committable + reference Steps + Tests
-- [ ] Dependencies audited — new libs have Schicht-A entries
-- [ ] Risk mitigations defined
-- [ ] Rollback path clear
-- [ ] Affected docs identified (`architecture.md`, `FILE_MAP.md`, indexes, `CHANGELOG.md`)
+- [x] Plan addresses all goals — default AIFF, 6-target dropdown, persisted setting, conversion matrix, reuse + tag/art preservation (the fix), all in Scope + Steps.
+- [x] Plan matches `## Original Idea` — no scope-creep — "in AIFF umgewandelt" + "einstellbar in Settings" + "an Format-Konverter-Research anschließen" all honoured; per-download override deferred.
+- [x] Open questions answered or deferred — OQ1-6 resolved (OQ5 user, OQ1 leans hard-default at draftplan).
+- [x] Prior Art referenced — `library-format-converter` (ffmpeg matrix), `downloader-unified-multi-source` (Q11) — referenced, not duplicated.
+- [x] Threat Model present + each threat has a test — TM1→T4, TM2→T7, TM3→T1/perf, TM4→T3.
+- [x] Migration Path present + rollback documented — schema-additive, fresh-install-only, revert SetReq field.
+- [x] Performance Budget set + worst-case documented — 60-min set; timeout raised to 360s for convert.
+- [x] API / UX Surface enumerated — backend (POST settings, corrected), frontend (dropdown+badge), Tauri none, logs marker.
+- [x] Telemetry defined — `[SC-DL] format-policy=` marker + per-format counter + task-card badge.
+- [x] Test Plan covers every Threat + Step + Perf row — T1-T7 mapped.
+- [x] Task Queue items small + independently committable + reference Steps + Tests — 4 tasks.
+- [x] Dependencies audited — none new (FFmpeg + mutagen already pinned).
+- [x] Risk mitigations defined — artwork-drop fix gated by T3, default-change scoped, storage disclaimer.
+- [x] Rollback path clear — revert SetReq Literal; additive only.
+
+**Reviewer note (2026-05-29):** PASS. The one load-bearing item is the artwork/tag-drop fix (`-map_metadata 0` + mutagen overlay) — without it AIFF-default ships data loss; gated by T3. API/UX corrected PUT→POST. No new deps, no new routes, no `master.db` surface.
 
 **Rework reasons:**
 - …

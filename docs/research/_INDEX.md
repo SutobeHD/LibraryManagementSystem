@@ -29,7 +29,7 @@ _(none)_
 - [midgate_library-format-converter.md](research/midgate_library-format-converter.md) — Library-wide format converter; wave 1 OVERTURNED 3 OQs (proof script absent, AAC priming ffmpeg-trimmed ~48ms risk, update_track_path can't rename in live mode); OQ2/OQ5 confirmed; **HELD at GATE B — recommend reject-to-wave-2, NOT passed** (2026-05-29)
 
 ### evaluated
-- [evaluated_download-format-setting.md](research/evaluated_download-format-setting.md) — AIFF default + 6-target dropdown (Option A); GATE B passed (agent-delegated) + wave-2 PASS (code citations PASS, web MEDIUM); ready for draftplan_ (2026-05-29)
+_(none)_
 
 ### parked
 _(none)_
@@ -66,6 +66,7 @@ _(none)_
 - [accepted_metadata-name-fixer.md](implement/accepted_metadata-name-fixer.md) — Artist/title normaliser; M0 detect / M1 apply+revert {1,4,5,6,7,8} / M2 MB enrich; GATE C PASSED 2026-05-29 (agent-delegated) (2026-05-29)
 - [accepted_security-mobile-paired-tokens-phase2.md](implement/accepted_security-mobile-paired-tokens-phase2.md) — Per-device QR pairing + sidecar `auth.db` (Option A); dual-acceptance require_session; GATE C PASSED 2026-05-29 (agent-delegated); hard prereq for mobile-companion (2026-05-29)
 - [accepted_recommender-taste-llm-audio.md](implement/accepted_recommender-taste-llm-audio.md) — Taste-aware recommender (Teil 2); M1 Option-A centroid / M2 embedding-benchmark / M3 LLM-explain; GATE C PASSED 2026-05-29 (agent-delegated); M1 blocked on sister vector + Teil-1 plays (2026-05-29)
+- [accepted_download-format-setting.md](implement/accepted_download-format-setting.md) — AIFF default + 6-target dropdown (Option A); full plan + Threat Model; GATE C PASSED 2026-05-29 (agent-delegated); load-bearing task = -map_metadata 0 + mutagen art-overlay fix (2026-05-29)
 
 ### inprogress
 _(none)_
