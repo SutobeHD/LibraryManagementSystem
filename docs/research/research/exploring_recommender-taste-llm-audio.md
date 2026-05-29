@@ -21,6 +21,8 @@ ai_tasks: false
 - 2026-05-15 — research/exploring_ — deeper exploration pass (toward evaluated_ readiness)
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
 - 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: advance to `midgate_` for user GATE B
+- 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
+- 2026-05-29 — `research/exploring_` — GATE B REJECTED by user with feedback: Option-D Explanation-Cache invalidation strategy needs explicit solution (current: `taste_profile_hash` invalidates every nightly refresh = near-0 hit rate) before re-promotion
 
 ## Problem
 

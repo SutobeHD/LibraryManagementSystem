@@ -21,6 +21,8 @@ related: [analysis-remix-detector, library-extended-remix-finder, library-qualit
 - 2026-05-17 — research/exploring_ — evaluated_-ready rework loop (re-verified `SequenceMatcher` + `fingerprint.rs` + `backend.spec`; cross-doc taxonomy alignment pass across 4 sister-docs; added Rust-FP-via-IPC option for M1; added canonical `VersionTag.label` enum + classifier-input table; added pre-evaluated_ checklist with sign-off blockers)
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
 - 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: advance to `midgate_` for user GATE B
+- 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
+- 2026-05-29 — `research/evaluated_` — GATE B PASSED by user; sister-doc prereq for 3 midgate_ docs now unblocked; ready for draftplan_ owner
 
 ---
 

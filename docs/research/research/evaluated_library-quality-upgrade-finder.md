@@ -25,6 +25,7 @@ related: [library-extended-remix-finder, analysis-remix-detector, external-track
 - 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: stay `exploring_` until line-ref refresh + library_swap extraction coordination with sister `ideagate_library-format-converter`
 - 2026-05-29 — `research/exploring_` — wave-2 gap close-out: scope narrowed (Phase-3 Snapshot+Swap+Migrate merged into `library-format-converter` as `trigger="quality_verdict"` variant per user decision 2026-05-29); `validate_audio_path` escape-hatch trust analysis added with mitigation (`allow_db_match=False` on probe endpoint); composite-weight `assert sum() == 1.0` pinned as module-init invariant; cutoff tolerance revised to per-encoder buckets (LAME V0 ±150, CBR-128 ±300, Fraunhofer AAC ±400)
 - 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
+- 2026-05-29 — `research/evaluated_` — GATE B PASSED by user; scope narrowed to detection-layers only (Phase-3 swap delegated to `library-format-converter` via `trigger="quality_verdict"`); sister-doc dep (`external-track-match`) also evaluated_
 
 ---
 

@@ -28,6 +28,7 @@ ai_tasks: false
 - 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: stay `exploring_` until 4 gaps closed (re-grep refs, PyYAML pin, browser-mode caveat, lock owner)
 - 2026-05-29 — `research/exploring_` — wave-2 gap close-out (Findings entry "2026-05-29 — wave-2 gap close-out"): PyYAML→JSON fixtures, browser-mode degradation added to Constraints, `_variants_db_write_lock` owner picked (own RLock in `app/variant_detector.py`), stratified per-genre fixture buckets added to M1 exit-criteria, citation drift acknowledged for draftplan_ refresh
 - 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
+- 2026-05-29 — `research/evaluated_` — GATE B PASSED by user; sister-doc dep (`external-track-match-unified-module`) now also evaluated_ — same-day unblock
 
 ---
 

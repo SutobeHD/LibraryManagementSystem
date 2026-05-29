@@ -28,6 +28,7 @@ ai_tasks: false  # set true to opt-in AI routines — see ## AI Tasks below
 - 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: stay `exploring_` until citation drift + Spotify carve-out + ISRC audit closed
 - 2026-05-29 — `research/exploring_` — wave-2 gap close-out: aggregation strategy REVISED to 2D-Display + optional 1D aggregate with `{soundcloud: 0.80, spotify: 0.20, lastfm: 0.0, beatport: 0.0}` weights (OQ 4 RESOLVED, user 2026-05-29); Spotify ECDF carve-out implemented (raw / 100 instead of log10+ECDF); ISRC coverage audit script provided; M2 deliverable rewritten in Recommendation
 - 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
+- 2026-05-29 — `research/evaluated_` — GATE B PASSED by user; 2D-Display + SC 0.80 / Spotify 0.20 aggregation strategy locked, ISRC audit + ECDF carve-out ready for draftplan_ M1
 
 ## AI Tasks
 

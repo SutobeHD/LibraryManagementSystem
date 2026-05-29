@@ -23,25 +23,25 @@ _(none)_
 _(none)_
 
 ### exploring
-- [exploring_db-write-lock-retrofit.md](research/exploring_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps; Option B (auto-wrap, prefix-matched) committed; GATE A PASSED 2026-05-29 (2026-05-29)
-- [exploring_download-format-setting.md](research/exploring_download-format-setting.md) — AIFF default + 6-Option-Dropdown (AIFF/ALAC/FLAC/WAV/MP3-320/Original); GATE A PASSED 2026-05-29 (2026-05-29)
-- [exploring_library-format-converter.md](research/exploring_library-format-converter.md) — Library-weiter Audio-Format-Konverter + merged Snapshot+Swap+Migrate engine (quality-upgrade trigger variant inside); 6 OQs technisch beantwortet; GATE A PASSED 2026-05-29 (2026-05-29)
-- [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); CORS rewrite done; Phase-2 hard-prereq now UNBLOCKED via security-mobile-paired-tokens-phase2 GATE A pass (2026-05-29)
-- [exploring_security-mobile-paired-tokens-phase2.md](research/exploring_security-mobile-paired-tokens-phase2.md) — Per-device QR-pairing + sidecar `auth.db`; GATE A PASSED 2026-05-29; entblockt mobile-companion (2026-05-29)
+- [exploring_db-write-lock-retrofit.md](research/exploring_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps; Option B (auto-wrap) committed; GATE A PASSED 2026-05-29 (2026-05-29)
+- [exploring_download-format-setting.md](research/exploring_download-format-setting.md) — AIFF default + 6-Option-Dropdown; GATE A PASSED 2026-05-29 (2026-05-29)
+- [exploring_library-format-converter.md](research/exploring_library-format-converter.md) — Audio-Format-Konverter + merged Snapshot+Swap+Migrate engine; 6 OQs technisch beantwortet; GATE A PASSED 2026-05-29 (2026-05-29)
+- [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); CORS rewritten; Phase-2 hard-prereq now UNBLOCKED (2026-05-29)
+- [exploring_security-mobile-paired-tokens-phase2.md](research/exploring_security-mobile-paired-tokens-phase2.md) — Per-device QR-pairing + sidecar `auth.db`; GATE A PASSED 2026-05-29 (2026-05-29)
+- [exploring_metadata-name-fixer.md](research/exploring_metadata-name-fixer.md) — Artist/Title normaliser; GATE B REJECTED 2026-05-29 — stale main.py line refs need refresh (892→1124, 926→1160) (2026-05-29)
+- [exploring_recommender-taste-llm-audio.md](research/exploring_recommender-taste-llm-audio.md) — Teil 2 taste/LLM recommender; GATE B REJECTED 2026-05-29 — Option-D Explanation-Cache invalidation strategy needs explicit solution (2026-05-29)
 
 ### midgate ⛔ GATE B
-- [midgate_external-track-match-unified-module.md](research/midgate_external-track-match-unified-module.md) — Cross-cutting fuzzy+chromaprint+adapter module shared by 3 sister features; wave-2 PASS (cosmetic line drift only); awaiting GATE B (2026-05-28)
-- [midgate_library-extended-remix-finder.md](research/midgate_library-extended-remix-finder.md) — Find Extended/Club/Long versions via Discogs-gated SC search; wave-2 PASS-with-gaps (scoring calibration + Discogs coverage % deferred to evaluated_) (2026-05-28)
-- [midgate_metadata-name-fixer.md](research/midgate_metadata-name-fixer.md) — Normalise artist/title metadata with 4-layer safety + undo log; wave-2 PASS with 2 stale main.py line refs (892→1124, 926→1160) (2026-05-28)
-- [midgate_recommender-rules-baseline.md](research/midgate_recommender-rules-baseline.md) — Teil 1 ranking baseline (BPM/Key/Genre/MyTag/Energy + Camelot); wave-2 PASS-with-notes (3 user-pick default gates remain) (2026-05-28)
-- [midgate_recommender-similar-tracks.md](research/midgate_recommender-similar-tracks.md) — LOCAL-ONLY similar-tracks recommender; wave-2 PASS with 2 plan-shape corrections (backfill model, named vector slices) (2026-05-28)
-- [midgate_recommender-taste-llm-audio.md](research/midgate_recommender-taste-llm-audio.md) — Teil 2 taste/LLM recommender; wave-2 GAPS-recoverable (2 stale line-cites + cache invalidation underspecified) (2026-05-28)
-- [midgate_analysis-remix-detector.md](research/midgate_analysis-remix-detector.md) — Remix/edit/bootleg variant detector; wave-2 gaps closed-out 2026-05-29 (PyYAML→JSON, browser-mode constraint, lock owner picked, stratified fixture buckets) (2026-05-29)
-- [midgate_analysis-underground-mainstream-classifier.md](research/midgate_analysis-underground-mainstream-classifier.md) — Underground vs Mainstream classifier; aggregation REVISED to 2D-Display + 1D-aggregate with SC 0.80 / Spotify 0.20 weights (user 2026-05-29); ISRC audit script provided (2026-05-29)
-- [midgate_library-quality-upgrade-finder.md](research/midgate_library-quality-upgrade-finder.md) — Quality auditor; scope narrowed to detection-only (Phase-3 Snapshot+Swap+Migrate MERGED into `library-format-converter` per user 2026-05-29); `validate_audio_path` trust analysis added; weight-sum invariant pinned (2026-05-29)
+_(none)_
 
 ### evaluated
-_(none)_
+- [evaluated_external-track-match-unified-module.md](research/evaluated_external-track-match-unified-module.md) — Cross-cutting fuzzy+chromaprint+adapter module shared by 3 sister features; GATE B PASSED 2026-05-29; ready for draftplan_ owner (2026-05-29)
+- [evaluated_library-extended-remix-finder.md](research/evaluated_library-extended-remix-finder.md) — Extended/Club/Long version finder via Discogs-gated SC search; GATE B PASSED 2026-05-29 — scoring calibration + Discogs % deferred to draftplan_ (2026-05-29)
+- [evaluated_recommender-rules-baseline.md](research/evaluated_recommender-rules-baseline.md) — Teil 1 ranking baseline; GATE B PASSED 2026-05-29 with note — 3 default-picks deferred to draftplan_ sign-off (2026-05-29)
+- [evaluated_recommender-similar-tracks.md](research/evaluated_recommender-similar-tracks.md) — LOCAL-ONLY similar-tracks recommender; GATE B PASSED 2026-05-29 — 2 plan-shape corrections (backfill model, named vector slices) deferred to draftplan_ (2026-05-29)
+- [evaluated_analysis-remix-detector.md](research/evaluated_analysis-remix-detector.md) — Remix/edit/bootleg variant detector; GATE B PASSED 2026-05-29; sister `external-track-match` same-day unblock (2026-05-29)
+- [evaluated_analysis-underground-mainstream-classifier.md](research/evaluated_analysis-underground-mainstream-classifier.md) — Underground vs Mainstream classifier; GATE B PASSED 2026-05-29; 2D-Display + SC 0.80 / Spotify 0.20 aggregation locked (2026-05-29)
+- [evaluated_library-quality-upgrade-finder.md](research/evaluated_library-quality-upgrade-finder.md) — Quality auditor (detection-only after merge with `library-format-converter`); GATE B PASSED 2026-05-29 (2026-05-29)
 
 ### parked
 _(none)_

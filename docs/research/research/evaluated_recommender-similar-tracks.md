@@ -27,6 +27,8 @@ related: [recommender-rules-baseline, recommender-taste-llm-audio, security-api-
 - 2026-05-17 — research/exploring_ — evaluated_-ready deepening pass: corrected sklearn-not-in-requirements; specified Bearer auth via `Depends(require_session)` per draftplan; reconciled path-(a)+(b) duality in OQ11; tightened external-track-match cross-doc scope (matching-not-ranking); added OQ12 sklearn-dep status
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
 - 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: advance to `midgate_` for user GATE B
+- 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
+- 2026-05-29 — `research/evaluated_` — GATE B PASSED by user; 2 plan-shape corrections (backfill cost model, named vector slices) deferred to draftplan_ entry
 
 ---
 
