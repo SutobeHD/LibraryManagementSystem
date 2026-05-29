@@ -25,6 +25,7 @@ ai_tasks: false  # set true to opt-in AI routines — see ## AI Tasks below
 - 2026-05-29 — `implement/draftplan_` — planning started (Implementation Plan + 7-task queue; last_seen_at contention resolved in plan)
 - 2026-05-29 — `implement/review_` — Plan-Reviewer pass: 5/5 boxes ticked, PASS (adversarial carry-forward addressed)
 - 2026-05-29 — `implement/plangate_` — plan reviewed (Planner + Reviewer PASS), awaiting GATE C. Hard runtime prereq for mobile-companion shipping.
+- 2026-05-29 — `implement/accepted_` — GATE C PASSED (user delegated gate authority to the agent for PASS-verified plans). Ready for `inprogress_`; implement-tier needs branch-model direction.
 
 ## AI Tasks
 

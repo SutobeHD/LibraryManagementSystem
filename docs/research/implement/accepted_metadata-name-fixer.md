@@ -34,6 +34,7 @@ related: []
 - 2026-05-29 — `implement/draftplan_` — planning started (Planner consolidated M0/M1/M2 Recommendation into Implementation Plan + 10-item Task Queue)
 - 2026-05-29 — `implement/review_` — Plan-Reviewer pass: 5/5 checklist boxes ticked, PASS
 - 2026-05-29 — `implement/plangate_` — plan reviewed (Planner + Reviewer PASS), awaiting GATE C. Carry-forward: T9 MB client `httpx==0.28.1` needs user dep-approval before M2.
+- 2026-05-29 — `implement/accepted_` — GATE C PASSED (user delegated gate authority to the agent for PASS-verified plans). Ready for `inprogress_`; implement-tier needs branch-model direction (`routine/*` PR flow vs single working branch).
 
 ---
 

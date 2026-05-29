@@ -29,6 +29,7 @@ ai_tasks: false
 - 2026-05-29 — `implement/draftplan_` — planning started (Implementation Plan + Task Queue + Review sections added — doc previously lacked them; M1/M2/M3 consolidated, anchors refreshed to main.py:744)
 - 2026-05-29 — `implement/review_` — Plan-Reviewer 5/5 PASS; carry-forwards: HARD-DEPs (sister vector + Teil-1 plays) gate M1 start; M2 torch + M3 API-key UX need user decisions
 - 2026-05-29 — `implement/plangate_` — plan reviewed (Planner + Reviewer PASS), awaiting GATE C
+- 2026-05-29 — `implement/accepted_` — GATE C PASSED (user delegated gate authority to the agent for PASS-verified plans). M1 still blocked on HARD-DEPs (sister vector + Teil-1 plays); implement-tier needs branch-model direction.
 
 ## Problem
 

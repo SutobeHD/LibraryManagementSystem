@@ -46,9 +46,7 @@ _(none)_
 _(none)_
 
 ### plangate ⛔ GATE C
-- [plangate_metadata-name-fixer.md](implement/plangate_metadata-name-fixer.md) — Artist/title normaliser; M0 detect / M1 apply+revert {1,4,5,6,7,8} / M2 MB enrich; Implementation Plan + 10-task queue; Reviewer 5/5 PASS; awaiting GATE C (carry-forward: T9 needs httpx dep-approval) (2026-05-29)
-- [plangate_security-mobile-paired-tokens-phase2.md](implement/plangate_security-mobile-paired-tokens-phase2.md) — Per-device QR pairing + sidecar `auth.db` (Option A); dual-acceptance require_session; Implementation Plan + 7-task queue; Reviewer 5/5 PASS (last_seen_at contention resolved in plan); awaiting GATE C — hard prereq for mobile-companion (2026-05-29)
-- [plangate_recommender-taste-llm-audio.md](implement/plangate_recommender-taste-llm-audio.md) — Taste-aware recommender (Teil 2); M1 Option-A centroid / M2 embedding-benchmark / M3 LLM-explain; Implementation Plan + Task Queue added (doc lacked them); Reviewer 5/5 PASS; awaiting GATE C (HARD-DEPs: sister vector + Teil-1 plays) (2026-05-29)
+_(none)_
 
 ### review
 _(none)_
@@ -66,6 +64,9 @@ _(none)_
 - [accepted_library-quality-upgrade-finder.md](implement/accepted_library-quality-upgrade-finder.md) — Quality auditor (detection-only); Phase-3 swap delegated; GATE C PASSED 2026-05-29 (2026-05-29)
 - [accepted_recommender-rules-baseline.md](implement/accepted_recommender-rules-baseline.md) — Teil 1 ranking baseline; defaults T-10 confirmed (M1 backend / key_first / relative=0.7); GATE C PASSED 2026-05-29 (2026-05-29)
 - [accepted_recommender-similar-tracks.md](implement/accepted_recommender-similar-tracks.md) — LOCAL-ONLY similar-tracks; 4 named slice BLOBs; GATE C PASSED 2026-05-29 (2026-05-29)
+- [accepted_metadata-name-fixer.md](implement/accepted_metadata-name-fixer.md) — Artist/title normaliser; M0 detect / M1 apply+revert {1,4,5,6,7,8} / M2 MB enrich; GATE C PASSED 2026-05-29 (agent-delegated) (2026-05-29)
+- [accepted_security-mobile-paired-tokens-phase2.md](implement/accepted_security-mobile-paired-tokens-phase2.md) — Per-device QR pairing + sidecar `auth.db` (Option A); dual-acceptance require_session; GATE C PASSED 2026-05-29 (agent-delegated); hard prereq for mobile-companion (2026-05-29)
+- [accepted_recommender-taste-llm-audio.md](implement/accepted_recommender-taste-llm-audio.md) — Taste-aware recommender (Teil 2); M1 Option-A centroid / M2 embedding-benchmark / M3 LLM-explain; GATE C PASSED 2026-05-29 (agent-delegated); M1 blocked on sister vector + Teil-1 plays (2026-05-29)
 
 ### inprogress
 _(none)_
