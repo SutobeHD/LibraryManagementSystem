@@ -23,6 +23,7 @@ superseded_by: []
 - 2026-05-28 — `research/idea_` — created (user request after SC-downloader security audit)
 - 2026-05-28 — `research/drafting_` — Stage 1 worker filled Problem → Research Plan inline at creation time (faster than waiting for next routine cycle; same outputs the routine would have produced)
 - 2026-05-28 — `research/ideagate_` — Stage 1 verifier PASS, awaiting GATE A
+- 2026-05-29 — `research/exploring_` — GATE A PASSED by user; AIFF default + 6-Option-Dropdown specs confirmed; advanced for Stage 2 wave-2 verifier
 
 ## Original Idea (verbatim — never edit)
 

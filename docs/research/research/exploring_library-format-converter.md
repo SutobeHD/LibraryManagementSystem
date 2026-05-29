@@ -19,6 +19,7 @@ related: []
 - 2026-05-28 — `research/idea_` — created from template
 - 2026-05-28 — `research/drafting_` — advanced for research-draft routine
 - 2026-05-28 — `research/ideagate_` — drafted (scout+prior-art+risk-surface+worker+verifier PASS), awaiting GATE A
+- 2026-05-29 — `research/exploring_` — GATE A PASSED by user; Merge-Architektur committed (quality-upgrade als `trigger="quality_verdict"` Variante) + 6 OQs technisch beantwortet; advanced for Stage 2 wave-2 verifier
 
 ## Original Idea (verbatim — never edit)
 

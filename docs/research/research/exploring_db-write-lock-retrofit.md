@@ -17,6 +17,7 @@ ai_tasks: false
 - 2026-05-19 — `research/idea_` — deep exploration toward exploring_-ready (empirical audit)
 - 2026-05-28 — `research/drafting_` — Stage 1 worker formally complete (Prior Art + Research Plan retrofitted to match current template; content was already at exploring_ depth)
 - 2026-05-28 — `research/ideagate_` — Stage 1 verifier PASS, awaiting GATE A
+- 2026-05-29 — `research/exploring_` — GATE A PASSED by user; Option B (auto-wrap, prefix-matched) committed in Recommendation; advanced for Stage 2 wave-2 verifier
 
 ## AI Tasks
 

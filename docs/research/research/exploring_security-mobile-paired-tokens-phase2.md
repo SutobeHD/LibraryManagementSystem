@@ -20,6 +20,7 @@ ai_tasks: false  # set true to opt-in AI routines — see ## AI Tasks below
 - 2026-05-19 — research/idea_ — deep exploration toward exploring_-ready
 - 2026-05-28 — `research/drafting_` — Stage 1 worker formally complete (content already at exploring_ depth — Findings + Options + Recommendation populated 2026-05-19)
 - 2026-05-28 — `research/ideagate_` — Stage 1 verifier PASS, awaiting GATE A
+- 2026-05-29 — `research/exploring_` — GATE A PASSED by user; entblockt `exploring_mobile-companion-ranking-app` hard-prereq; advanced for Stage 2 wave-2 verifier
 
 ## AI Tasks
 

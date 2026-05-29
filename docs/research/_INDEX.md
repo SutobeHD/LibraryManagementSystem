@@ -20,13 +20,14 @@ _(none)_
 _(none)_
 
 ### ideagate ⛔ GATE A
-- [ideagate_library-format-converter.md](research/ideagate_library-format-converter.md) — Library-weiter Audio-Format-Konverter (m4a/AIFF/FLAC/WAV/MP3) mit DB-Integrität; HIGH overlap mit `library-quality-upgrade-finder` (OQ 2); 6 OQs + 5 Research-Plan-Bullets; Verifier PASS (2026-05-28)
-- [ideagate_download-format-setting.md](research/ideagate_download-format-setting.md) — Per-download AIFF default + Settings-UI für Ziel-Format; ship-bare narrow subset of `library-format-converter` (batch) + `downloader-unified-multi-source` (Q11); 6 OQs incl. AIFF-vs-ALAC clarifier; Verifier PASS (2026-05-28)
-- [ideagate_db-write-lock-retrofit.md](research/ideagate_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps on `master.db`; audit found 1 RekordboxDB miss (`ensure_standalone_master_db`) + 3 LiveRekordboxDB mytag mutators bypassed via `_require_live_db()`; Option B (prefix-matched auto-wrap) recommended; content already at exploring_ depth (2026-05-28)
-- [ideagate_security-mobile-paired-tokens-phase2.md](research/ideagate_security-mobile-paired-tokens-phase2.md) — Per-device long-lived bearer + QR-pairing + revoke; sidecar-local `auth.db` (NOT master.db), `require_session` dual-accepts SESSION_TOKEN + paired tokens; hard prereq for mobile-companion shipping (2026-05-28)
+_(none)_
 
 ### exploring
-- [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); CORS rewrite done (now reflects shipped `allow_credentials=False`); STAYS exploring_ — hard prereq `ideagate_security-mobile-paired-tokens-phase2` GATE A pending (2026-05-29)
+- [exploring_db-write-lock-retrofit.md](research/exploring_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps; Option B (auto-wrap, prefix-matched) committed; GATE A PASSED 2026-05-29 (2026-05-29)
+- [exploring_download-format-setting.md](research/exploring_download-format-setting.md) — AIFF default + 6-Option-Dropdown (AIFF/ALAC/FLAC/WAV/MP3-320/Original); GATE A PASSED 2026-05-29 (2026-05-29)
+- [exploring_library-format-converter.md](research/exploring_library-format-converter.md) — Library-weiter Audio-Format-Konverter + merged Snapshot+Swap+Migrate engine (quality-upgrade trigger variant inside); 6 OQs technisch beantwortet; GATE A PASSED 2026-05-29 (2026-05-29)
+- [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); CORS rewrite done; Phase-2 hard-prereq now UNBLOCKED via security-mobile-paired-tokens-phase2 GATE A pass (2026-05-29)
+- [exploring_security-mobile-paired-tokens-phase2.md](research/exploring_security-mobile-paired-tokens-phase2.md) — Per-device QR-pairing + sidecar `auth.db`; GATE A PASSED 2026-05-29; entblockt mobile-companion (2026-05-29)
 
 ### midgate ⛔ GATE B
 - [midgate_external-track-match-unified-module.md](research/midgate_external-track-match-unified-module.md) — Cross-cutting fuzzy+chromaprint+adapter module shared by 3 sister features; wave-2 PASS (cosmetic line drift only); awaiting GATE B (2026-05-28)
