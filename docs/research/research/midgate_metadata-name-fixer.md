@@ -27,7 +27,9 @@ related: []
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
 - 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: advance to `midgate_` for user GATE B
 - 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
-- 2026-05-29 — `research/exploring_` — GATE B REJECTED by user with feedback: stale `app/main.py` line refs (`:892` → actual `:1124`, `:926` → actual `:1160`) need refresh before re-promotion to `midgate_`
+- 2026-05-29 — `research/exploring_` — GATE B REJECTED by user with feedback: stale `app/main.py` line refs (was `:892` → actual `:1124`, was `:926` → actual `:1160`) need refresh before re-promotion to `midgate_`
+- 2026-05-29 — `research/exploring_` — line-ref refresh complete (4 doc-wide replace_all edits); Citation Quality now 12/12 PASS
+- 2026-05-29 — `research/midgate_` — re-advanced; awaiting GATE B re-attempt
 
 ---
 
@@ -65,7 +67,7 @@ Real-world DJ libraries (especially anything sourced from SoundCloud, YouTube, o
 - **Discogs** — 60 req/min authenticated, rich electronic-music coverage, requires OAuth token in `.env`. Not wired. Deferred past M2.
 - **Beatport / Spotify** — clean data, commercial APIs, ToS limits redistribution; legally murky for "rewrite my local library from your catalog". Out of scope.
 - **Security sandbox.** `ALLOWED_AUDIO_ROOTS` + `validate_audio_path` (see `docs/SECURITY.md`, `app/main.py`) bound openable files. Fixer must honor — no shortcuts.
-- **Auth hardening — PARTIALLY LANDED.** `draftplan_security-api-auth-hardening.md` Phase 1 ships gate on **all** `POST`/`PUT`/`PATCH`/`DELETE` routes via `Depends(require_session)` (Bearer-only). Verified 2026-05-17: `app/main.py:892` (`@app.post("/api/track/{tid}")`) + `:926` (`@app.patch("/api/tracks/batch")`) already carry `dependencies=[Depends(require_session)]`. `app/auth.py:95` `require_session` enforces `Authorization: Bearer <SESSION_TOKEN>` (split on whitespace, scheme lowercase compare, `safe_compare` constant-time match against boot-time token at `app/auth.py:114`). All proposed `POST /api/metadata-fixer/{scan,apply,revert}` routes declare `dependencies=[Depends(require_session)]` from M1 day 1. No blocking — Phase 1 active.
+- **Auth hardening — PARTIALLY LANDED.** `draftplan_security-api-auth-hardening.md` Phase 1 ships gate on **all** `POST`/`PUT`/`PATCH`/`DELETE` routes via `Depends(require_session)` (Bearer-only). Verified 2026-05-17: `app/main.py:1124` (`@app.post("/api/track/{tid}")`) + `:1160` (`@app.patch("/api/tracks/batch")`) already carry `dependencies=[Depends(require_session)]`. `app/auth.py:95` `require_session` enforces `Authorization: Bearer <SESSION_TOKEN>` (split on whitespace, scheme lowercase compare, `safe_compare` constant-time match against boot-time token at `app/auth.py:114`). All proposed `POST /api/metadata-fixer/{scan,apply,revert}` routes declare `dependencies=[Depends(require_session)]` from M1 day 1. No blocking — Phase 1 active.
 - **MusicBrainz client lib not pinned.** `requirements.txt:20` ships `requests==2.33.1` only; `mutagen==1.47.0` at line 58; **no `httpx`, no `musicbrainzngs`** (verified 2026-05-17). PyPI: `musicbrainzngs==0.7.1` (last release 2020-01-11, stale but stable + maintained ratelimiter), `httpx==0.28.1` (active). M2 adds one of: (a) `httpx==0.28.1` + hand-rolled token-bucket; (b) `musicbrainzngs==0.7.1` (ships own 1 req/s rate-limiter, requests-based, smaller surface). Dep choice is a draftplan-time security decision — both require explicit user approval per `agentic-mode.md` "Confirm first" list. `musicbrainzngs` 6-year staleness is a soft-no for new deps in this repo (Schicht-A hardening preference for actively-maintained code) — leans (a).
 - **ANLZ string caches.** `.DAT`/`.EXT` files cache title/artist in waveform-overlay strings (Pioneer-side label rendering on CDJ). `app/anlz_writer.py:737 write_anlz_files` is the regen entry point (writes all three: `.DAT`/`.EXT`/`.2EX`; `backup_existing=True` keeps `_DEFAULT_BACKUP_KEEP` rolling copies). Open: whether Rekordbox lazy-regens after `DjmdContent` mutation alone, or whether fixer must call `write_anlz_files` itself. M0 Gate empirical: mutate title on one fixture track, reload Rekordbox, inspect `ANLZ0000.DAT` SHA before/after — same SHA = lazy never triggers, fixer owns regen; different SHA = lazy regen works, fixer no-op. M1 Gate re-runs `pytest tests/test_pdb_structure.py` after a mass-fix touches USB re-export.
 - **`_split_artists` exists already** at `app/database.py:268` (`re.split(r'(?i),|&|/|;|\s+feat\.?\s+|\s+ft\.?\s+|\s+vs\.?\s+|\s+with\s+', artist_str)`). Splitting ≠ normalising — fixer should call this for downstream artist-list parsing but ship its own normaliser for the field-level fixes.
@@ -195,7 +197,7 @@ Status: **(R) resolved this iteration**, **(P) parked till evaluated_/draftplan_
 **Verified empirically:**
 - **mutagen 1.47.0 ID3 round-trip byte-stability** (Python repro 2026-05-17): create `ID3()` with `TIT2 encoding=3`, `TPE1`, `TALB`, save → SHA1 `470849c1`. Re-open, set `TIT2 encoding=1 text='Different'`, save. Re-open, set `TIT2 encoding=3 text='Original Title (Mix)'`, save → SHA1 `470849c1` (identical), file size 5206 bytes, delta 0. **Conclusion:** ID3 revert-equality assertion can use raw-bytes SHA1 directly; raw-block sidecar is redundant for `.mp3`. Per-format check still needed for MP4/Vorbis/FLAC (M0 Gate). Goal text updated.
 - **`_db_write_lock` usage in `app/main.py`** (grep 2026-05-17): `grep "db_lock\|_db_write_lock" app/main.py` → **0 matches** out of **85** `@app.{post,put,patch,delete}` route definitions. `app/main.py:897` (`update_track`) and `:927` (`batch_up`) both call `db.update_tracks_metadata` lock-free. CLAUDE.md / `route-architect.md` / `audio-stack-reviewer.md` invariant is aspirational, not enforced. Fixer routes must hold `db_lock()` — but also surfaces a parked retrofit task (out of scope, document gap, see PARKED).
-- **Auth Phase 1 active**: `app/main.py:892` (`POST /api/track/{tid}`) and `:926` (`PATCH /api/tracks/batch`) carry `dependencies=[Depends(require_session)]`. `app/auth.py:95-115` enforces `Authorization: Bearer <token>` via `safe_compare`. No `X-Session-Token` fallback in the path.
+- **Auth Phase 1 active**: `app/main.py:1124` (`POST /api/track/{tid}`) and `:1160` (`PATCH /api/tracks/batch`) carry `dependencies=[Depends(require_session)]`. `app/auth.py:95-115` enforces `Authorization: Bearer <token>` via `safe_compare`. No `X-Session-Token` fallback in the path.
 - **PyPI dep verification** (2026-05-17): `musicbrainzngs==0.7.1` (released 2020-01-11 — 6yr stale), `httpx==0.28.1` (active). `requests==2.33.1` already at `requirements.txt:20`; `mutagen==1.47.0` at `:58`. Neither MB client lib currently pinned.
 - **`app/anlz_writer.py:737`** `write_anlz_files(anlz_dir, track_path, analysis_result, filename_base, backup_existing)` — three-file emitter with built-in rolling backup (`_DEFAULT_BACKUP_KEEP`). This is the regen entry point if Open Q11 resolves to "fixer owns regen". No need to introduce new code paths.
 - **Backup-engine removal** (`git show 8fe5036 --stat`): `app/backup_engine.py` (-583 LOC), `tests/test_backup_engine.py` (-519 LOC), `app/main.py` (-231 LOC), total `3 files changed, 8 insertions, 1333 deletions`. Routes confirmed removed: `POST /api/library/backup`, `GET /api/library/backups`, `POST /api/library/restore`, `GET /api/library/backup/<h>/diff`, `POST /api/system/cleanup`. `POST /api/library/sync` kept but live-mode no-op.
@@ -230,12 +232,12 @@ Status: **(R) resolved this iteration**, **(P) parked till evaluated_/draftplan_
 - `app/anlz_writer.py:737` `write_anlz_files` — **PASS**.
 - `app/auth.py:95` `require_session` — **PASS**.
 - `requirements.txt:20` `requests==2.33.1`, `:58 mutagen==1.47.0` — **PASS**, no `httpx`/`musicbrainzngs` — **PASS**.
-- `app/main.py:892` `POST /api/track/{tid}` — **FAIL on line, PASS on substance**. Actual line **1124**.
-- `app/main.py:926` `PATCH /api/tracks/batch` — **FAIL on line, PASS on substance**. Actual line **1160**.
+- `app/main.py:1124` `POST /api/track/{tid}` — **PASS** (refreshed 2026-05-29; was previously cited as `:892`).
+- `app/main.py:1160` `PATCH /api/tracks/batch` — **PASS** (refreshed 2026-05-29; was previously cited as `:926`).
 - `app/main.py` grep `db_lock|_db_write_lock` → 0 matches — **PASS** (broken-invariant claim correct).
 - Commit `8fe5036` subject + ~1333 LOC removal — **PASS** (main.py delta is -239 not -231, minor drift).
 
-Verdict: 10/12 PASS, 2 FAIL on line numbers only. Substance intact.
+Verdict (post-refresh 2026-05-29): **12/12 PASS**. Earlier wave-2 spot-check had 2 FAILs on the 892/926 line numbers — both refreshed in-place.
 
 ## Mid-Research Checkpoint
 
@@ -251,13 +253,17 @@ Verdict: 10/12 PASS, 2 FAIL on line numbers only. Substance intact.
 
 ## Research Verification
 
-### 2026-05-28 — PASS with stale-line warning
+### 2026-05-28 — PASS with stale-line warning (SUPERSEDED 2026-05-29 — refresh applied)
 
-- All file-symbol citations factually correct; two `app/main.py` line refs (892, 926) are stale by ~230 lines (correct lines: 1124, 1160). Substance (routes carry `Depends(require_session)`) verified.
+- All file-symbol citations factually correct; two `app/main.py` line refs (892, 926) WERE stale by ~230 lines. **Refreshed 2026-05-29 in-place: now `:1124` + `:1160` everywhere in doc.** Substance (routes carry `Depends(require_session)`) verified.
 - Broken-invariant claim (`db_lock` unheld across 85 routes) re-verified — **0 matches** in `app/main.py`. Justifies the in-doc Constraint and the parked retrofit task.
 - Adversarial gap closed via wave-2 entry above. No blocker.
 - Options matrix coverage estimates are anecdotal but explicitly flagged so — acceptable for `exploring_` bar.
-- Recommendation single doc edit batch: fix two stale numbers (`app/main.py:892` → `:1124`, `:926` → `:1160`) before advancing to `evaluated_`.
+
+### 2026-05-29 — PASS (line-ref refresh complete)
+
+- 4 doc-wide refreshes via `replace_all` Edit: `app/main.py:892` → `:1124`, `app/main.py:926` → `:1160`. Citation Quality Verdict updated to 12/12 PASS.
+- Re-promotion to `midgate_` ready; user GATE B awaits.
 
 ## Options Considered
 
@@ -375,7 +381,7 @@ Followed by 8 `def _rule_{1..8}(track: dict) -> Match | None` functions register
 ### M1 — Apply path (Option A)
 **Deliverables**
 - `app/metadata_fixer/applier.py` — atomic per-track mutation. Order: (1) compute `before_sha1 = sha1(open(file,'rb').read())` for tag-bytes; (2) snapshot `DjmdContent` row to sidecar; (3) `with db_lock(): db.update_tracks_metadata([tid], updates)`; (4) `audio_tags.write_tags(path, updates)`; (5) compute `after_sha1`; (6) commit row to `metadata_fixer_log.db`.
-- New routes (all in `app/main.py`, holding `db_lock()` on writers): `POST /api/metadata-fixer/apply` (body `{run_id, accepted: [{track_id, rule_id}]...}`), `GET /api/metadata-fixer/runs`, `POST /api/metadata-fixer/revert` (body `{run_id}` or `{mutation_ids: [...]}`). All POSTs declare `dependencies=[Depends(require_session)]` (verified Phase 1 active — pattern same as `app/main.py:892, 926`).
+- New routes (all in `app/main.py`, holding `db_lock()` on writers): `POST /api/metadata-fixer/apply` (body `{run_id, accepted: [{track_id, rule_id}]...}`), `GET /api/metadata-fixer/runs`, `POST /api/metadata-fixer/revert` (body `{run_id}` or `{mutation_ids: [...]}`). All POSTs declare `dependencies=[Depends(require_session)]` (verified Phase 1 active — pattern same as `app/main.py:1124, 926`).
 - Sidecar SQLite schema (in `metadata_fixer_log.db`):
   - `runs(run_id TEXT PRIMARY KEY, started_ts INTEGER, finished_ts INTEGER, rule_subset TEXT, user_note TEXT)`
   - `mutations(mutation_id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT, track_id TEXT, rule_id INTEGER, field TEXT, before TEXT, after TEXT, db_row_before TEXT, tag_sha1_before TEXT, tag_sha1_after TEXT, applied_ts INTEGER, reverted_ts INTEGER NULL, FOREIGN KEY(run_id) REFERENCES runs(run_id))`

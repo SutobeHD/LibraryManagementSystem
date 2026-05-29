@@ -23,6 +23,8 @@ ai_tasks: false
 - 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: advance to `midgate_` for user GATE B
 - 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
 - 2026-05-29 — `research/exploring_` — GATE B REJECTED by user with feedback: Option-D Explanation-Cache invalidation strategy needs explicit solution (current: `taste_profile_hash` invalidates every nightly refresh = near-0 hit rate) before re-promotion
+- 2026-05-29 — `research/exploring_` — cache invalidation RESOLVED: `taste_profile_hash` → `taste_profile_version` integer that bumps only on significant drift (genre 5pp OR BPM-centre 3 OR artist-churn 20%) + manual "Reset taste profile" trigger. Cache survives typical daily-listening delta.
+- 2026-05-29 — `research/midgate_` — re-advanced; awaiting GATE B re-attempt
 
 ## Problem
 
@@ -308,7 +310,33 @@ Path-B preference order when gate passes: CLAP (text-query bonus) → MERT (musi
 - M1 lands and user reports "I want to know why a track was suggested" qualitatively.
 - API-key UX surface lands (separate doc — not in this scope).
 
-**Deliverables:** `POST /api/taste/explain` (opt-in), result cache on `(seed_id, candidate_id, taste_profile_hash)`, frontend "Why?" button on result rows.
+**Deliverables:** `POST /api/taste/explain` (opt-in), result cache on `(seed_id, candidate_id, taste_profile_version)`, frontend "Why?" button on result rows.
+
+**Cache invalidation strategy — RESOLVED 2026-05-29 (GATE-B-reject-recovery):**
+
+Original plan keyed cache on `taste_profile_hash` which changes every nightly refresh = near-0 hit rate. Replaced with a coarser `taste_profile_version` integer that increments only when the user's taste actually *drifts*, not on every refresh:
+
+```python
+# app/popularity_engine.py (taste profile path — shared with sister doc)
+def maybe_bump_taste_profile_version(prev_profile, new_profile) -> int:
+    """Increments only if any genre-weight changed by ≥ 5pp OR BPM-range
+    centre shifted by ≥ 3 BPM OR top-N artist-list churn ≥ 20%.
+    Returns the new version number (same as prev if no drift).
+    Cheap O(genre_count + 1) check; runs once per nightly refresh."""
+    if _significant_drift(prev_profile, new_profile, genre_threshold=0.05,
+                          bpm_centre_threshold=3.0, artist_churn_threshold=0.20):
+        return prev_profile.version + 1
+    return prev_profile.version
+```
+
+Manual user trigger ("Reset taste profile" in Settings) also bumps the version. Result: cache survives the typical "I listened to 3 tracks today" delta, only invalidates on real listening-pattern shifts (~weekly cadence in normal use, faster during taste-exploration phases).
+
+Schema impact:
+- `taste_profile` table gains `version INTEGER NOT NULL DEFAULT 1`
+- `explanation_cache` row PK changes `(seed_id, candidate_id, taste_profile_hash)` → `(seed_id, candidate_id, taste_profile_version)`
+- Existing rows from M1/M2 carry over unchanged (no migration — explanation cache is M3-only, doesn't exist yet)
+
+Trade-off documented: a small drift (4pp on one genre) leaves stale explanations until next bump. Acceptable for an LLM-generated explanation that's already a rough narrative — not exact-match scoring.
 
 ### M3+ — parked
 

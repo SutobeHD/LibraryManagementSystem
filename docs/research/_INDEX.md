@@ -28,11 +28,9 @@ _(none)_
 - [exploring_library-format-converter.md](research/exploring_library-format-converter.md) — Audio-Format-Konverter + merged Snapshot+Swap+Migrate engine; 6 OQs technisch beantwortet; GATE A PASSED 2026-05-29 (2026-05-29)
 - [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); CORS rewritten; Phase-2 hard-prereq now UNBLOCKED (2026-05-29)
 - [exploring_security-mobile-paired-tokens-phase2.md](research/exploring_security-mobile-paired-tokens-phase2.md) — Per-device QR-pairing + sidecar `auth.db`; GATE A PASSED 2026-05-29 (2026-05-29)
-- [exploring_metadata-name-fixer.md](research/exploring_metadata-name-fixer.md) — Artist/Title normaliser; GATE B REJECTED 2026-05-29 — stale main.py line refs need refresh (892→1124, 926→1160) (2026-05-29)
-- [exploring_recommender-taste-llm-audio.md](research/exploring_recommender-taste-llm-audio.md) — Teil 2 taste/LLM recommender; GATE B REJECTED 2026-05-29 — Option-D Explanation-Cache invalidation strategy needs explicit solution (2026-05-29)
-
 ### midgate ⛔ GATE B
-_(none)_
+- [midgate_metadata-name-fixer.md](research/midgate_metadata-name-fixer.md) — Artist/Title normaliser; reject-recovery done — stale `app/main.py` refs refreshed (892→1124, 926→1160); Citation Quality now 12/12 PASS; re-awaiting GATE B (2026-05-29)
+- [midgate_recommender-taste-llm-audio.md](research/midgate_recommender-taste-llm-audio.md) — Teil 2 taste/LLM recommender; reject-recovery done — Option-D cache invalidation resolved (`taste_profile_hash` → `taste_profile_version` bumps only on significant drift); re-awaiting GATE B (2026-05-29)
 
 ### evaluated
 - [evaluated_external-track-match-unified-module.md](research/evaluated_external-track-match-unified-module.md) — Cross-cutting fuzzy+chromaprint+adapter module shared by 3 sister features; GATE B PASSED 2026-05-29; ready for draftplan_ owner (2026-05-29)
