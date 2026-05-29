@@ -799,16 +799,25 @@ User-visible status: none in M1.
 
 ## Review
 
-Filled at `review_`. Unchecked box or rework reason → `rework_`.
+### 2026-05-29 — Reviewer pass (Stage 3)
 
-- [ ] Plan addresses all goals
-- [ ] Open questions answered or deferred
-- [ ] Risk mitigations defined
-- [ ] Rollback path clear
-- [ ] Affected docs identified (`architecture.md`, `FILE_MAP.md`, indexes, `CHANGELOG.md`)
+- [x] Plan addresses all goals — Goals G1-G7 each mapped to test (T1-T27). Module-level lifts cover acceptance criteria; fingerprint surface = M1; adapters M2/M3.
+- [x] Plan matches `## Original Idea` — pure lift + module-level reorganization; no scope-creep into sister features.
+- [x] Open questions answered or deferred — 14 OQs resolved-M1 or PARKED with trigger; OQ11 (sync/async adapter) deferred to draftplan-time decision, surfaces in dispatcher branch.
+- [x] Prior Art referenced — 5 sister-docs cited in Findings (`analysis-remix-detector`, `library-extended-remix-finder`, `library-quality-upgrade-finder`, `analysis-underground-mainstream`, `recommender-rules-baseline`).
+- [x] Threat Model present + each threat has test — T23 (path-traversal), T24 (timeout), T17 (registry mutation); 6-threat STRIDE-light table.
+- [x] Migration Path — N/A justified (no DB schema, `ADAPTER_REGISTRY` in-memory only).
+- [x] Performance Budget set — 7-row table; cached `lru_cache` numbers; 30k×3 worst-case mitigation.
+- [x] API / UX Surface enumerated — Public Python API listed (no FastAPI/Tauri/Frontend in M1).
+- [x] Telemetry defined — 5 log markers + counter set via `etm.stats()`.
+- [x] Test Plan covers Threat + Step + Perf — 27 tests, IDs mapped to Steps + Threats.
+- [x] Task Queue items small + independently committable — 12 tasks, each = 1 PR; max effort 6h/task.
+- [x] Dependencies audited — no new libs M1 (PyYAML→JSON for stdlib-only). M3 pin `pyacoustid==1.3.1` MIT-licensed.
+- [x] Risk mitigations defined — R1-R4 + Rollback path documented.
+- [x] Rollback path clear — `git revert` for module + tests + SC delegate; no DB state to clean.
+- [x] Affected docs identified — `MAP.md`/`MAP_L2.md` (regen), `FILE_MAP.md` (`doc-syncer`).
 
-**Rework reasons:**
-- …
+**No rework reasons.** Ready for GATE C.
 
 ## Implementation Log
 

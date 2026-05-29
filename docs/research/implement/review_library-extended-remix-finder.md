@@ -463,16 +463,25 @@ Rationale: Pure Option A ships fastest but locks UX into single-source assumptio
 
 ## Review
 
-> Filled by reviewer at `review_`. If any box is unchecked or rework reasons are listed, the doc moves to `rework_`.
+### 2026-05-29 — Reviewer pass (Stage 3)
 
-- [ ] Plan addresses all goals
-- [ ] Open questions answered or explicitly deferred
-- [ ] Risk mitigations defined
-- [ ] Rollback path clear
-- [ ] Affected docs identified (`architecture.md`, `FILE_MAP.md`, indexes, `CHANGELOG.md`)
+- [x] Plan addresses all goals — M1 SC-only + calibration + Discogs audit cover precision ≥0.95.
+- [x] Plan matches `## Original Idea` — Extended/Club/Long-version finder scope held.
+- [x] Open questions — 13 OQs resolved or PARKED; OQ#13 owner labelling (10h) is real USER-action.
+- [x] Prior Art — sister-doc `external-track-match` (M1 dep), `analysis-remix-detector` (shared DB).
+- [x] Threat Model — STRIDE + SSRF (SC download hardening inherited).
+- [x] Migration Path — sidecar `track_suggestions.db` shared via `kind` discriminator; WAL.
+- [x] Performance Budget — M1 cold scan 1.5h @ 4 concurrent.
+- [x] API / UX Surface — 5 routes + "EXT" badge + "Library Audit" tab.
+- [x] Telemetry — 9 markers; tokens never logged.
+- [x] Test Plan — 13 tests incl. calibration + Discogs smoke.
+- [x] Task Queue — 12 tasks; **critical path = sister `external-track-match` shipping `inprogress_`**.
+- [x] Dependencies — zero new M1 pins.
+- [x] Risk mitigations — R1 (sister-doc slip) has fallback + escalation.
+- [x] Rollback — feature flag `extended_finder_enabled` (default OFF first release).
+- [x] Affected docs — `backend-index.md`, `frontend-index.md`, `FILE_MAP.md`, `architecture.md`.
 
-**Rework reasons** (only if applicable):
-- …
+**No rework reasons.** Ready for GATE C.
 
 ## Implementation Log
 

@@ -602,16 +602,25 @@ def test_post_refresh_force_bypasses_ttl(client, seed_pop, monkeypatch): ...
 
 ## Review
 
-> Filled by reviewer at `review_`. If any box is unchecked or rework reasons are listed, the doc moves to `rework_`.
+### 2026-05-29 — Reviewer pass (Stage 3)
 
-- [ ] Plan addresses all goals
-- [ ] Open questions answered or explicitly deferred
-- [ ] Risk mitigations defined
-- [ ] Rollback path clear
-- [ ] Affected docs identified (`architecture.md`, `FILE_MAP.md`, indexes, `CHANGELOG.md`)
+- [x] Plan addresses all goals — 2D-Display primary + 1D-aggregate secondary solves Techno-DJ inversion.
+- [x] Plan matches `## Original Idea` — Underground/Mainstream classifier scope held.
+- [x] Open questions — 13 OQs all RESOLVED or DECIDED.
+- [x] Prior Art — sister-docs cited.
+- [x] Threat Model — STRIDE for API keys + outbound rate + hostname allowlist.
+- [x] Migration Path — sidecar `popularity.sqlite` v1 + migrate-on-open.
+- [x] Performance Budget — ~4h for 30k library (inside 6h G7).
+- [x] API / UX Surface — 3 routes + 2D-display + sortable column.
+- [x] Telemetry — 10+ markers; aggregated per 1000 events.
+- [x] Test Plan — 27 cases incl. Spotify carve-out math.
+- [x] Task Queue — 12 tasks ~33h M1.
+- [x] Dependencies — zero new pins.
+- [x] Risk mitigations — R1-R4 + feature flag.
+- [x] Rollback — `rm popularity.sqlite` rebuilds.
+- [x] Affected docs — `backend-index.md`, `MAP.md`/`MAP_L2.md`.
 
-**Rework reasons** (only if applicable):
-- …
+**No rework reasons.** Ready for GATE C.
 
 ## Implementation Log
 

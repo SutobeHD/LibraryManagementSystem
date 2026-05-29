@@ -351,16 +351,25 @@ Cluster keying is **string-equality on normalised tuple**, NOT fuzzy ratio. Fuzz
 
 ## Review
 
-> Filled by reviewer at `review_`. If any box is unchecked or rework reasons are listed, the doc moves to `rework_`.
+### 2026-05-29 — Reviewer pass (Stage 3)
 
-- [ ] Plan addresses all goals
-- [ ] Open questions answered or explicitly deferred
-- [ ] Risk mitigations defined
-- [ ] Rollback path clear
-- [ ] Affected docs identified (`architecture.md`, `FILE_MAP.md`, indexes, `CHANGELOG.md`)
+- [x] Plan addresses all goals — M1/M2/M3 phases cover detect+cluster+canonical-pick acceptance.
+- [x] Plan matches `## Original Idea` — variant detection scope, no creep.
+- [x] Open questions — OQ1-OQ10 resolved or PARKED-with-trigger; sister-doc dep on `external-track-match` (now also draftplan_).
+- [x] Prior Art — explicit cross-link to `external-track-match-unified-module`.
+- [x] Threat Model — STRIDE covers auth + SSRF (M3) + SQL-injection + path-traversal + token leakage.
+- [x] Migration Path — sidecar `variants.db` v1/v2/v3 additive; rollback = delete file.
+- [x] Performance Budget — M1 <5s for 30k; M3 AcoustID 3 r/s budgeted.
+- [x] API / UX Surface — 4 routes M1 + 2 routes M2; browser-mode degradation handled.
+- [x] Telemetry — 9 markers + counters via `/api/variants/stats`.
+- [x] Test Plan — 17 tests T-VD-01 through T-VD-17.
+- [x] Task Queue — 12 tasks; blocked by sister-doc `accepted_` first.
+- [x] Dependencies — M3 only adds `pyacoustid==1.3.1` (MIT, Schicht-A clean).
+- [x] Risk mitigations — R1-R4 + RLock + WAL + at-import circuit-breaker.
+- [x] Rollback — delete `variants.db` → full rescan from `master.db`.
+- [x] Affected docs — `backend-index.md`, `FILE_MAP.md`, `architecture.md`.
 
-**Rework reasons** (only if applicable):
-- …
+**No rework reasons.** Ready for GATE C.
 
 ## Implementation Log
 

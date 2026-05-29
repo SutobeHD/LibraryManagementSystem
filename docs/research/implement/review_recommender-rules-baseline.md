@@ -570,6 +570,28 @@ JSONL event log `app_data/recommendations.log.jsonl` captures every call for off
 
 Total effort: ~22h single-developer.
 
+## Review
+
+### 2026-05-29 — Reviewer pass (Stage 3)
+
+- [x] Plan addresses all goals — G1-G9 each mapped to test.
+- [x] Plan matches `## Original Idea` — Teil 1 ranking baseline; sister-feature `recommender-similar-tracks` owns Teil 2 variant.
+- [x] Open questions — 13 OQs resolved or DECIDED; 3 default-picks (OQ 1/2/4) surfaced as Task T-10 user-action.
+- [x] Prior Art — sister-docs cited.
+- [x] Threat Model — N/A (read-only routes, no DB writes, inherits Phase-1 auth).
+- [x] Migration Path — N/A (additive only).
+- [x] Performance Budget — empirical 44ms median / 62ms P95 @ 50k; budget 100ms.
+- [x] API / UX Surface — 2 GET routes; UI deferred to M2.
+- [x] Telemetry — 6 markers; JSONL event log.
+- [x] Test Plan — 20 tests across all goal-metrics.
+- [x] Task Queue — 12 tasks ~22h.
+- [x] Dependencies — adds `pytest-benchmark==4.0.0` (separate dep-add commit, user-confirm per agentic-mode).
+- [x] Risk mitigations — 7 risks documented with mitigations + rollback.
+- [x] Rollback — revert 7 commits; pure code; JSONL log user-deletable.
+- [x] Affected docs — `backend-index.md`, `MAP.md`/`MAP_L2.md`.
+
+**One open user-action (not rework):** Task T-10 holds user GATE C sign-off of 3 defaults (M1 backend-only / `key_first` preset / relative=0.7 weight). Defaults are documented; one-line flips at draftplan_ close. Ready for GATE C.
+
 ## Decision / Outcome
 
 _Status: `exploring_`. All 13 OQs RESOLVED (defaults pinned in `## Open Questions`) or PARKED-with-trigger. Implementation Plan (8 atomic commits) drafted in `## Recommendation`. Empirical latency baseline measured 2026-05-17 (44 ms median / 62 ms P95 @ 50k synthetic)._

@@ -394,16 +394,25 @@ If `recommender-taste-llm-audio` later picks Option B, this doc upgrades by chan
 
 ## Review
 
-> Filled by reviewer at `review_`. If any box is unchecked or rework reasons are listed, the doc moves to `rework_`.
+### 2026-05-29 — Reviewer pass (Stage 3)
 
-- [ ] Plan addresses all goals
-- [ ] Open questions answered or explicitly deferred
-- [ ] Risk mitigations defined
-- [ ] Rollback path clear
-- [ ] Affected docs identified (`architecture.md`, `FILE_MAP.md`, indexes, `CHANGELOG.md`)
+- [x] Plan addresses all goals — P95 ≤100ms + reasons-list ≥2 per row + zero-network.
+- [x] Plan matches `## Original Idea` — LOCAL-ONLY scope.
+- [x] Open questions — OQ3/4/5/11 surfaced as user-action items for GATE C.
+- [x] Prior Art — sister-doc `recommender-rules-baseline` (Teil 1), `recommender-taste-llm-audio` (Teil 2 future swap).
+- [x] Threat Model — minimal; all routes `require_session`; single-flight 409.
+- [x] Migration Path — schema-additive; sidecar `track_vectors.db`.
+- [x] Performance Budget — 4 named slice BLOBs; filter-fanout ≥50% modelled; 25ms headroom.
+- [x] API / UX Surface — `GET /api/similar/local` + `POST /backfill`; frontend SimilarPanel.
+- [x] Telemetry — 5 markers; no PII/paths/token.
+- [x] Test Plan — 17 cases incl. `--disable-socket`.
+- [x] Task Queue — 12 tasks; **both wave-2 plan-shape corrections baked in**.
+- [x] Dependencies — `pytest-benchmark` add (same as sister); zero other pins.
+- [x] Risk mitigations — backfill duration + track_id drift + weight tuning + hot-pipeline regression.
+- [x] Rollback — revert 1 file in `analysis_engine.py` + drop routes + delete sidecar DB.
+- [x] Affected docs — `backend-index.md`, `frontend-index.md`, `FILE_MAP.md`, `architecture.md`.
 
-**Rework reasons** (only if applicable):
-- …
+**No rework reasons.** Ready for GATE C.
 
 ## Implementation Log
 

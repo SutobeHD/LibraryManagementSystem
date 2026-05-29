@@ -577,16 +577,25 @@ Required from `implement/draftplan_`. Concrete enough that someone else executes
 
 ## Review
 
-Filled at `review_`. Unchecked box or rework reason → `rework_`.
+### 2026-05-29 — Reviewer pass (Stage 3)
 
-- [ ] Plan addresses all goals
-- [ ] Open questions answered or deferred
-- [ ] Risk mitigations defined
-- [ ] Rollback path clear
-- [ ] Affected docs identified (`architecture.md`, `FILE_MAP.md`, indexes, `CHANGELOG.md`)
+- [x] Plan addresses all goals — Phase-1a probe + Phase-1b scan + Phase-2 source search + Phase-3 delegated swap cover detection + replacement-finder goals.
+- [x] Plan matches `## Original Idea` — scope narrowed (merge with format-converter per user 2026-05-29); detection ownership held here.
+- [x] Open questions — 12 OQs resolved or PARKED-with-trigger.
+- [x] Prior Art — sister-docs `external-track-match-unified-module` (Phase-2 dep), `library-format-converter` (Phase-3 swap delegate).
+- [x] Threat Model — STRIDE for Bearer + escape-hatch trust transfer (mitigated via `allow_db_match=False`) + librosa OOM + ffprobe hang.
+- [x] Migration Path — sidecar `track_quality.db` v1 schema; resume key 4-tuple; pipeline version invalidates rows.
+- [x] Performance Budget — 3.5s/track empirical; 4-worker cap (memory-bound); 50k = 12-15h with soft 6h checkpoint.
+- [x] API / UX Surface — 9 routes (4 Phase-1a/1b + 2 Phase-2 + 1 Phase-3 delegate); standalone QualityAuditPanel + per-row badge.
+- [x] Telemetry — probe/scan counters + per-encoder precision regression gate.
+- [x] Test Plan — 17 tests across phases including security (`allow_db_match=False`).
+- [x] Task Queue — 12 tasks; T-1 = librosa bump separate commit; T-2 = `validate_audio_path` kwarg.
+- [x] Dependencies — librosa 0.10.1 → 0.11.0 pin bump (CVE check required, T-1).
+- [x] Risk mitigations — R1-R5 + feature flag for Phase-3 delegation.
+- [x] Rollback — each phase reversible via `git revert`; no `master.db` writes from this doc.
+- [x] Affected docs — `backend-index.md`, `frontend-index.md`, `FILE_MAP.md`.
 
-**Rework reasons:**
-- …
+**No rework reasons.** Ready for GATE C.
 
 ## Implementation Log
 
