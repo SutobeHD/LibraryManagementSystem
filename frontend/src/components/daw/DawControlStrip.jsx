@@ -173,7 +173,7 @@ const DawControlStrip = React.memo(({
     return (
         <div className="bg-mx-shell/80 border-t border-white/5 flex flex-col shrink-0 overflow-hidden">
 
-            {/* ── ROW 1 — transport · time chips · hot-cue pad grid ── */}
+            {/* ── ROW 1 — transport · time / BPM chips ── */}
             <div className="flex items-center gap-3 px-3 py-2 border-b border-white/5">
                 {/* Transport */}
                 <div className="flex items-center gap-1.5 shrink-0">
@@ -223,45 +223,46 @@ const DawControlStrip = React.memo(({
                     </div>
                 </div>
 
-                {/* Hot-cue pad grid — fills the row, equal-width pads */}
-                <div className="flex items-stretch gap-1 flex-1 min-w-0">
-                    {hotCues.map((cue, i) => {
-                        const letter = String.fromCharCode(65 + i);
-                        if (!cue) {
-                            return (
-                                <button
-                                    key={i}
-                                    onClick={() => handleHotCueClick(i)}
-                                    className="flex-1 h-9 rounded-sm flex items-center justify-center text-[10px] font-bold font-mono text-ink-placeholder bg-mx-card/60 border border-dashed border-white/10 hover:bg-mx-hover/60 transition-all"
-                                    title={`Set Hot Cue ${letter}`}
-                                >
-                                    {letter}
-                                </button>
-                            );
-                        }
+            </div>
+
+            {/* ── ROW 2 — 16 hot-cue pads (A–P), full width ── */}
+            <div className="flex items-stretch gap-1 px-3 py-2 border-b border-white/5">
+                {hotCues.map((cue, i) => {
+                    const letter = String.fromCharCode(65 + i);
+                    if (!cue) {
                         return (
                             <button
                                 key={i}
                                 onClick={() => handleHotCueClick(i)}
-                                onContextMenu={(e) => { e.preventDefault(); handleDeleteHotCue(i, e); }}
-                                className="flex-1 h-9 rounded-sm flex flex-col items-center justify-center font-mono leading-none transition-all hover:brightness-110"
-                                style={{
-                                    background: `rgb(${cue.red} ${cue.green} ${cue.blue} / 0.18)`,
-                                    border: `1px solid rgb(${cue.red} ${cue.green} ${cue.blue} / 0.55)`,
-                                    color: `rgb(${cue.red},${cue.green},${cue.blue})`,
-                                    boxShadow: `inset 0 -2px 0 rgb(${cue.red} ${cue.green} ${cue.blue} / 0.4)`,
-                                }}
-                                title={`${cue.name} — ${formatTime(cue.time)} (Right-click to delete)`}
+                                className="flex-1 h-9 rounded-sm flex items-center justify-center text-[10px] font-bold font-mono text-ink-placeholder bg-mx-card/60 border border-dashed border-white/10 hover:bg-mx-hover/60 transition-all"
+                                title={`Set Hot Cue ${letter}`}
                             >
-                                <span className="text-[8px] font-bold opacity-80">{letter}</span>
-                                <span className="text-[10px] font-bold">{formatTime(cue.time)}</span>
+                                {letter}
                             </button>
                         );
-                    })}
-                </div>
+                    }
+                    return (
+                        <button
+                            key={i}
+                            onClick={() => handleHotCueClick(i)}
+                            onContextMenu={(e) => { e.preventDefault(); handleDeleteHotCue(i, e); }}
+                            className="flex-1 h-9 rounded-sm flex flex-col items-center justify-center font-mono leading-none transition-all hover:brightness-110"
+                            style={{
+                                background: `rgb(${cue.red} ${cue.green} ${cue.blue} / 0.18)`,
+                                border: `1px solid rgb(${cue.red} ${cue.green} ${cue.blue} / 0.55)`,
+                                color: `rgb(${cue.red},${cue.green},${cue.blue})`,
+                                boxShadow: `inset 0 -2px 0 rgb(${cue.red} ${cue.green} ${cue.blue} / 0.4)`,
+                            }}
+                            title={`${cue.name} — ${formatTime(cue.time)} (Right-click to delete)`}
+                        >
+                            <span className="text-[8px] font-bold opacity-80">{letter}</span>
+                            <span className="text-[9px] font-bold">{formatTime(cue.time)}</span>
+                        </button>
+                    );
+                })}
             </div>
 
-            {/* ── ROW 2 — beat grid · edit tools · snap/zoom · loop · export ── */}
+            {/* ── ROW 3 — beat grid · edit tools · snap/zoom · loop · export ── */}
             <div className="flex items-center gap-2 px-3 py-1.5">
                 {/* Grid shift */}
                 <div className="flex items-center gap-0.5">

@@ -56,7 +56,7 @@ export function createInitialState(overrides = {}) {
         selectionRange: null,  // { start, end } in seconds
 
         // Cue Points & Loops
-        hotCues: Array(8).fill(null),  // [A-H], each: { name, time, red, green, blue } or null
+        hotCues: Array(16).fill(null),  // [A-P], each: { name, time, red, green, blue } or null
         memoryCues: [],                // [{ name, time, red, green, blue }]
         loops: [],                     // [{ name, startTime, endTime, active, red, green, blue }]
         activeLoopIndex: -1,           // Index of the active loop in loops array
@@ -244,6 +244,15 @@ export const HOT_CUE_COLORS = [
     { red: 255, green: 100, blue: 0, label: 'Orange' },     // F
     { red: 255, green: 220, blue: 0, label: 'Yellow' },     // G
     { red: 255, green: 0, blue: 0, label: 'Red' },          // H
+    // Second bank (I–P) — distinct hues so 9–16 stay readable.
+    { red: 0, green: 230, blue: 160, label: 'Teal' },       // I
+    { red: 150, green: 230, blue: 0, label: 'Lime' },       // J
+    { red: 0, green: 150, blue: 255, label: 'Sky' },        // K
+    { red: 150, green: 80, blue: 255, label: 'Violet' },    // L
+    { red: 255, green: 0, blue: 200, label: 'Magenta' },    // M
+    { red: 255, green: 160, blue: 60, label: 'Amber' },     // N
+    { red: 120, green: 200, blue: 255, label: 'Ice' },      // O
+    { red: 230, green: 230, blue: 230, label: 'White' },    // P
 ];
 
 /**
@@ -304,14 +313,14 @@ export function stateToCuePoints(hotCues, memoryCues, loops) {
  * Helper: Convert POSITION_MARK cue points from .rbep to DAW state format
  */
 export function cuePointsToState(cuePoints = []) {
-    const hotCues = Array(8).fill(null);
+    const hotCues = Array(16).fill(null);
     const memoryCues = [];
     const loops = [];
 
     for (const cp of cuePoints) {
         if (cp.type === 0) {
             // Cue point
-            if (cp.num >= 0 && cp.num < 8) {
+            if (cp.num >= 0 && cp.num < 16) {
                 // Hot cue
                 hotCues[cp.num] = {
                     name: cp.name,
