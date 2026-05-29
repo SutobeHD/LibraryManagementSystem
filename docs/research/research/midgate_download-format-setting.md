@@ -24,6 +24,7 @@ superseded_by: []
 - 2026-05-28 — `research/drafting_` — Stage 1 worker filled Problem → Research Plan inline at creation time (faster than waiting for next routine cycle; same outputs the routine would have produced)
 - 2026-05-28 — `research/ideagate_` — Stage 1 verifier PASS, awaiting GATE A
 - 2026-05-29 — `research/exploring_` — GATE A PASSED by user; AIFF default + 6-Option-Dropdown specs confirmed; advanced for Stage 2 wave-2 verifier
+- 2026-05-29 — `research/midgate_` — Stage 2 wave 1 done (4 tiered agents: code-surface + sister-delta + web-DJ-formats + UI-pattern). All 6 OQs covered; 3 doc corrections found (180s timeout not 360s, POST not PUT, current convert drops artwork). Awaiting GATE B.
 
 ## Original Idea (verbatim — never edit)
 
@@ -142,6 +143,26 @@ Stage 2 Synthesis-Agents (one per OQ). Dated subsections, append-only. ≤150 wo
 - **Synthesis:** …
 - **Confidence:** high / medium / low
 
+### 2026-05-29 — Code surface: where the setting lives + what convert does (Agent 1)
+- **Codebase:** `sc_download_format` read at exactly ONE runtime site — `_aiff_requested()` `soundcloud_downloader.py:1014`, reads `SettingsManager.load().get("sc_download_format","auto") == "aiff"` (`:1019`). Default dict entry `services.py:656` (`"auto"`). Typed validation only at write API: `SetReq` field `main.py:414` = `_Literal["auto","aiff"] | None = None`. `_sanitize_loaded` (`services.py:670-703`) applies generic caps only — no field-specific value check on load. `_convert_to_aiff` `soundcloud_downloader.py:953`; ffmpeg cmd `:964-976` = `[-i src -c:a pcm_s16le -vn -y dst]`. Call site `_do_download:1215`, conversion gated `:1314-1324`. `ImportManager.process_import` (`services.py:1052`) does **no** format conversion — local import never re-encodes. No unified-downloader stub (only doc-comments).
+- **Synthesis:** half-built confirmed; single read-site = clean extension point. Two doc CORRECTIONS: (1) Constraint line 87 wrong — `_convert_to_aiff` uses plain `_DOWNLOAD_TIMEOUT=180s` (`:982`), NOT `*2`/360s (the `*2` is the HLS download path `:695`). (2) `_convert_to_aiff` passes `-vn` (drops artwork) and omits `-map_metadata 0` — **current AIFF convert loses cover art + most tags**; the "reuse `_convert_to_aiff`" plan must add `-map_metadata 0` + mutagen overlay, not reuse as-is.
+- **Confidence:** high (every claim re-Read).
+
+### 2026-05-29 — Sister-doc reuse delta + OQ2 (Agent 2)
+- **Codebase/docs:** Reuse VERBATIM from `library-format-converter`: per-target ffmpeg cmd table + bit-depth-from-source (converter-doc:78,93,95), `-map_metadata 0` + mutagen overlay via `audio_tags.py:write_tags:254` (converter-doc:85), AAC priming = do NOT strip 2112 samples (converter OQ1 RESOLVED:90). NOT reusable: snapshot/rollback/`update_content` row-rewrite/cues/beatgrid (converter-doc:52-56,66,73,94) — all keyed to a track already in `master.db`; freshly-downloaded track has no `content_id` (import is post-download). Unified Q11 = AIFF default (accepted-doc:53,188,289-308), lossless-first rule (:45) — scope independent (no SpotiFLAC/100%-match dep). OQ2: `"original"` = post-mux/pre-AIFF as-served codec — ACCURATE; HLS `-c copy` remux (`soundcloud_downloader.py:679`) is container repackaging not re-encode; official `/download` source already tagged `"quality":"original"` (`:1254`). `audio_tags.py` dispatches all 6 formats via mutagen (`:245-251`); ISRC read-only (write-gap).
+- **Synthesis:** OQ2 RESOLVED (original = no extra conversion after download/mux). Reuse boundary crisp — this doc references converter's ffmpeg matrix + tag rule, specs nothing DB-side.
+- **Confidence:** high.
+
+### 2026-05-29 — DJ-format support for the dropdown rationale (Agent 3, web)
+- **Web:** CDJ-3000 plays MP3/AAC/WAV/AIFF/**FLAC**/**ALAC** natively from USB — first CDJ with FLAC+Apple-Lossless; 16/24-bit ≤96kHz, 192k unsupported; FAT/HFS+ only ([AlphaTheta supported-formats](https://support.pioneerdj.com/hc/en-us/articles/4406128262681-Which-file-formats-can-I-play), [boothready CDJ-3000](https://boothready.app/players/cdj-3000)). Rekordbox reads AIFF ID3v2 but glitchy — label-edit can delete embedded art ([Pioneer forum](https://forums.pioneerdj.com/hc/en-us/community/posts/203052319)). FLAC supported library + CDJ USB export ([AlphaTheta FAQ](https://support.pioneerdj.com/hc/en-us/articles/20841184201881)). ALAC weakest — Serato Mac/Win10-only, reads first 5 cues ([Serato file types](https://support.serato.com/hc/en-us/articles/204177974)). Convention: FLAC lossless master / AIFF max tag integrity ([DJ TechTools](https://djtechtools.com/2017/11/08/format-djs-buy-music-djs-guide-mp3-flac-wav/)).
+- **Synthesis:** user's AIFF-default (OQ5) stands — safest tag integrity, uncompressed PCM native. FLAC is the strongest all-round (half the size, native CDJ-3000) → dropdown should label FLAC "smallest lossless, native CDJ-3000". All 6 targets are CDJ-3000-playable. AIFF artwork-loss risk (web + Agent 1 `-vn`) reinforces: overlay art via mutagen post-convert.
+- **Confidence:** medium (WebFetch 403 on Pioneer/AlphaTheta; claims from WebSearch snippets — citation-verifier must re-check in wave 2).
+
+### 2026-05-29 — Settings-UI dropdown pattern (Agent 4)
+- **Codebase:** `SettingsView.jsx:108`, 8 tabs (`:96`), delegates each to `settings/Settings<Tab>.jsx` with `settings`+`setSettings` (`:138-150`). Existing dropdowns = raw `<select className="input-glass w-full">` inside `<Field label>` — quote `SettingsExport.jsx:62-68` (`export_format` select). `Field`/`Section` from `SettingsControls.jsx:34,44`; a reusable `Select` exists (`:52`) but Export uses raw `<select>`. Persistence = ONE batch `api.post('/api/settings', settings)` (`SettingsView.jsx:128`) — **POST, not PUT**; loaded via `api.get('/api/settings')` (`:115`). Add key to `DEFAULTS` (`:50-54`). No "Download" section — fits "Format Defaults" `<Section>` (`SettingsExport.jsx:61`). Toasts: SettingsExport uses `react-hot-toast` directly (`toast.error` `:49`), not `useToast`.
+- **Synthesis:** OQ-UI RESOLVED. Doc CORRECTION (3): API/UX line 291 + Migration say `PUT /api/settings` — actual is batch `POST /api/settings`. Dropdown goes in `SettingsExport.jsx` "Format Defaults" Section, raw `<select>` + `<Field>`, lossy warning via `react-hot-toast`.
+- **Confidence:** high.
+
 ## Adversarial Findings
 
 Stage 2 Adversarial-Agent (wave 2). Devil's-advocate — what could go wrong, what assumptions are weak. ≤120 words. Append-only.
@@ -162,11 +183,12 @@ Stage 2 Citation-Verifier (wave 2). Checks every `file:line` ref + URL in `## Fi
 
 GATE B. `research-explore` fills Status after wave 1. User fills Verdict via `/gate-pass` or `/gate-reject`.
 
-### Status — YYYY-MM-DD (routine)
-- Covered: …
-- Still open: …
-- Direction: …
-- Adversarial concerns surfaced: …
+### Status — 2026-05-29 (routine, wave 1)
+- **Covered:** all 6 OQs. OQ1 (fresh-install default) → hard-set `"aiff"`, no first-run dialog (simpler; AIFF = safest tags). OQ2 (`"original"` semantics) → RESOLVED: post-mux/pre-AIFF as-served codec, accurate. OQ3 (lossy warning) → yes, `react-hot-toast` on MP3 target. OQ4 (MP3 bitrate) → 320 CBR fixed MVP. OQ5 → user-resolved (AIFF default; ALAC/FLAC in dropdown; web confirms all 6 CDJ-3000-playable, FLAC strongest all-round). OQ6 (local import) → NO: `process_import` has zero conversion today, downloads-only MVP confirmed.
+- **Still open (wave 2):** verify the medium-confidence web claims (Pioneer WebFetch 403'd — citation-verifier must re-check FLAC/ALAC native-USB support); finalise the per-target ffmpeg matrix reference vs `library-format-converter`.
+- **Direction:** extend `_convert_to_aiff` → `_convert_to_target_format(src, target)`; add `-map_metadata 0` + mutagen art overlay (fixes current artwork-drop); `SetReq` Literal → 6 values; dropdown in `SettingsExport.jsx` "Format Defaults". No new routes, no DB-side logic.
+- **3 doc corrections found:** (1) convert timeout is 180s not 360s (Constraint:87); (2) settings persist via **POST** `/api/settings` not PUT (API/UX:291); (3) current `_convert_to_aiff` `-vn` drops artwork + no `-map_metadata 0` → loses tags — must fix in impl.
+- **Adversarial concerns surfaced:** (a) artwork/tag loss in the existing convert path — the "reuse as-is" assumption is unsafe; (b) "original" after HLS `-c copy` remux is not byte-identical to source (re-containerised) — UI wording must not over-promise; (c) MP3→lossless targets must NOT claim lossless in tags (fake-lossless). Full adversarial pass deferred to wave 2.
 
 ### Verdict — YYYY-MM-DD (user)
 - _(empty until GATE B)_
