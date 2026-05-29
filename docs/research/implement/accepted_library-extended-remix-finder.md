@@ -28,6 +28,9 @@ related: [analysis-remix-detector, library-quality-upgrade-finder, external-trac
 - 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
 - 2026-05-29 — `research/evaluated_` — GATE B PASSED by user; scoring calibration + Discogs coverage % deferred to draftplan_ entry
 - 2026-05-29 — `implement/draftplan_` — Stage 3 supplement filled; critical path = sister `external-track-match-unified-module` shipping `inprogress_`
+- 2026-05-29 — `implement/review_` — Reviewer PASS (all 15 checklist items ticked)
+- 2026-05-29 — `implement/plangate_` — awaiting GATE C
+- 2026-05-29 — `implement/accepted_` — GATE C PASSED by user; ready for `inprogress_` once sister `external-track-match` ships
 
 ---
 

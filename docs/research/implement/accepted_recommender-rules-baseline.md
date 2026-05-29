@@ -24,6 +24,9 @@ ai_tasks: false
 - 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
 - 2026-05-29 — `research/evaluated_` — GATE B PASSED by user with note: 3 default-picks (M1 backend-only / key_first preset / relative=0.7 weight) explicitly deferred to draftplan_ sign-off
 - 2026-05-29 — `implement/draftplan_` — Stage 3 supplement (Threat Model + Migration + Perf Budget + API/UX + Telemetry + Test Plan + Task Queue) filled; existing Implementation Plan retained; 3 default-picks surfaced as user-action T-10
+- 2026-05-29 — `implement/review_` — Reviewer PASS (all 15 checklist items ticked); 1 open user-action (T-10 default-picks)
+- 2026-05-29 — `implement/plangate_` — awaiting GATE C
+- 2026-05-29 — `implement/accepted_` — GATE C PASSED by user; defaults T-10 confirmed (M1 backend-only / `key_first` preset / relative=0.7 weight); ready for `inprogress_`
 
 ## Problem
 

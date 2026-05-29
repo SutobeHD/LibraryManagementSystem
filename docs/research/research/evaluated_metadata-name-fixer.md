@@ -30,6 +30,7 @@ related: []
 - 2026-05-29 — `research/exploring_` — GATE B REJECTED by user with feedback: stale `app/main.py` line refs (was `:892` → actual `:1124`, was `:926` → actual `:1160`) need refresh before re-promotion to `midgate_`
 - 2026-05-29 — `research/exploring_` — line-ref refresh complete (4 doc-wide replace_all edits); Citation Quality now 12/12 PASS
 - 2026-05-29 — `research/midgate_` — re-advanced; awaiting GATE B re-attempt
+- 2026-05-29 — `research/evaluated_` — GATE B PASSED by user (re-attempt after line-ref refresh); ready for draftplan_ owner
 
 ---
 

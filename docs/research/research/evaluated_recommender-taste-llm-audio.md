@@ -25,6 +25,7 @@ ai_tasks: false
 - 2026-05-29 — `research/exploring_` — GATE B REJECTED by user with feedback: Option-D Explanation-Cache invalidation strategy needs explicit solution (current: `taste_profile_hash` invalidates every nightly refresh = near-0 hit rate) before re-promotion
 - 2026-05-29 — `research/exploring_` — cache invalidation RESOLVED: `taste_profile_hash` → `taste_profile_version` integer that bumps only on significant drift (genre 5pp OR BPM-centre 3 OR artist-churn 20%) + manual "Reset taste profile" trigger. Cache survives typical daily-listening delta.
 - 2026-05-29 — `research/midgate_` — re-advanced; awaiting GATE B re-attempt
+- 2026-05-29 — `research/evaluated_` — GATE B PASSED by user (re-attempt after cache invalidation strategy resolved); ready for draftplan_ owner
 
 ## Problem
 

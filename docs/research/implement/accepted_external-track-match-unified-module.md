@@ -24,6 +24,9 @@ related: [analysis-remix-detector, library-extended-remix-finder, library-qualit
 - 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
 - 2026-05-29 — `research/evaluated_` — GATE B PASSED by user; sister-doc prereq for 3 midgate_ docs now unblocked; ready for draftplan_ owner
 - 2026-05-29 — `implement/draftplan_` — Stage 3 Planner-agent filled Implementation Plan + Threat Model + Migration Path + Perf Budget + API/UX Surface + Telemetry + Test Plan + Task Queue (12 atomic tasks)
+- 2026-05-29 — `implement/review_` — Reviewer PASS (all 15 checklist items ticked)
+- 2026-05-29 — `implement/plangate_` — awaiting GATE C
+- 2026-05-29 — `implement/accepted_` — GATE C PASSED by user; **critical-path feature** — sister-doc prereq for 3 other accepted_ docs (remix-detector, extended-remix-finder, quality-upgrade-finder); ready for `inprogress_`
 
 ---
 

@@ -29,11 +29,11 @@ _(none)_
 - [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); CORS rewritten; Phase-2 hard-prereq now UNBLOCKED (2026-05-29)
 - [exploring_security-mobile-paired-tokens-phase2.md](research/exploring_security-mobile-paired-tokens-phase2.md) — Per-device QR-pairing + sidecar `auth.db`; GATE A PASSED 2026-05-29 (2026-05-29)
 ### midgate ⛔ GATE B
-- [midgate_metadata-name-fixer.md](research/midgate_metadata-name-fixer.md) — Artist/Title normaliser; reject-recovery done — stale `app/main.py` refs refreshed (892→1124, 926→1160); Citation Quality now 12/12 PASS; re-awaiting GATE B (2026-05-29)
-- [midgate_recommender-taste-llm-audio.md](research/midgate_recommender-taste-llm-audio.md) — Teil 2 taste/LLM recommender; reject-recovery done — Option-D cache invalidation resolved (`taste_profile_hash` → `taste_profile_version` bumps only on significant drift); re-awaiting GATE B (2026-05-29)
+_(none)_
 
 ### evaluated
-_(none)_
+- [evaluated_metadata-name-fixer.md](research/evaluated_metadata-name-fixer.md) — GATE B PASSED 2026-05-29 (re-attempt after line-ref refresh) (2026-05-29)
+- [evaluated_recommender-taste-llm-audio.md](research/evaluated_recommender-taste-llm-audio.md) — GATE B PASSED 2026-05-29 (re-attempt after cache invalidation resolved) (2026-05-29)
 
 ### parked
 _(none)_
@@ -49,13 +49,7 @@ _(none)_
 _(none)_
 
 ### plangate ⛔ GATE C
-- [plangate_external-track-match-unified-module.md](implement/plangate_external-track-match-unified-module.md) — Reviewer PASS; awaiting GATE C (2026-05-29)
-- [plangate_analysis-remix-detector.md](implement/plangate_analysis-remix-detector.md) — Reviewer PASS; awaiting GATE C (2026-05-29)
-- [plangate_analysis-underground-mainstream-classifier.md](implement/plangate_analysis-underground-mainstream-classifier.md) — Reviewer PASS; awaiting GATE C (2026-05-29)
-- [plangate_library-extended-remix-finder.md](implement/plangate_library-extended-remix-finder.md) — Reviewer PASS; critical path = sister `external-track-match` shipping `inprogress_` (2026-05-29)
-- [plangate_library-quality-upgrade-finder.md](implement/plangate_library-quality-upgrade-finder.md) — Reviewer PASS; awaiting GATE C (2026-05-29)
-- [plangate_recommender-rules-baseline.md](implement/plangate_recommender-rules-baseline.md) — Reviewer PASS with note: 3 default-picks T-10 user-action at GATE C (2026-05-29)
-- [plangate_recommender-similar-tracks.md](implement/plangate_recommender-similar-tracks.md) — Reviewer PASS; awaiting GATE C (2026-05-29)
+_(none)_
 
 ### review
 _(none)_
@@ -66,6 +60,13 @@ _(none)_
 
 ### accepted
 - [accepted_downloader-unified-multi-source.md](implement/accepted_downloader-unified-multi-source.md) — Unified multi-source downloader: owner sign-off granted; integrated with parallel research (matching delegated to `external_track_match`, auth via `require_session`, `quality_engine` reuse). Ready for `inprogress_` (2026-05-21)
+- [accepted_external-track-match-unified-module.md](implement/accepted_external-track-match-unified-module.md) — **CRITICAL PATH**: sister-doc prereq for 3 other accepted_ features (remix-detector, extended-remix-finder, quality-upgrade-finder). GATE C PASSED 2026-05-29 (2026-05-29)
+- [accepted_analysis-remix-detector.md](implement/accepted_analysis-remix-detector.md) — Variant detector M1/M2/M3; sidecar `variants.db`; GATE C PASSED 2026-05-29 (2026-05-29)
+- [accepted_analysis-underground-mainstream-classifier.md](implement/accepted_analysis-underground-mainstream-classifier.md) — 2D-Display + SC 0.80/Spotify 0.20 aggregate; ECDF carve-out; GATE C PASSED 2026-05-29 (2026-05-29)
+- [accepted_library-extended-remix-finder.md](implement/accepted_library-extended-remix-finder.md) — Extended/Club/Long-version finder; gated on sister `external-track-match` shipping `inprogress_`; GATE C PASSED 2026-05-29 (2026-05-29)
+- [accepted_library-quality-upgrade-finder.md](implement/accepted_library-quality-upgrade-finder.md) — Quality auditor (detection-only); Phase-3 swap delegated; GATE C PASSED 2026-05-29 (2026-05-29)
+- [accepted_recommender-rules-baseline.md](implement/accepted_recommender-rules-baseline.md) — Teil 1 ranking baseline; defaults T-10 confirmed (M1 backend / key_first / relative=0.7); GATE C PASSED 2026-05-29 (2026-05-29)
+- [accepted_recommender-similar-tracks.md](implement/accepted_recommender-similar-tracks.md) — LOCAL-ONLY similar-tracks; 4 named slice BLOBs; GATE C PASSED 2026-05-29 (2026-05-29)
 
 ### inprogress
 _(none)_

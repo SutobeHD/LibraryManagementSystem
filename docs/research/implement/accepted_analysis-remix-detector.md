@@ -30,6 +30,9 @@ ai_tasks: false
 - 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
 - 2026-05-29 — `research/evaluated_` — GATE B PASSED by user; sister-doc dep (`external-track-match-unified-module`) now also evaluated_ — same-day unblock
 - 2026-05-29 — `implement/draftplan_` — Stage 3 supplement filled (M1/M2/M3 phases, 12 atomic tasks, sidecar `variants.db` schema, browser-mode degradation handled)
+- 2026-05-29 — `implement/review_` — Reviewer PASS (all 15 checklist items ticked)
+- 2026-05-29 — `implement/plangate_` — awaiting GATE C
+- 2026-05-29 — `implement/accepted_` — GATE C PASSED by user; ready for `inprogress_` Task Queue execution
 
 ---
 

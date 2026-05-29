@@ -30,6 +30,9 @@ ai_tasks: false  # set true to opt-in AI routines — see ## AI Tasks below
 - 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
 - 2026-05-29 — `research/evaluated_` — GATE B PASSED by user; 2D-Display + SC 0.80 / Spotify 0.20 aggregation strategy locked, ISRC audit + ECDF carve-out ready for draftplan_ M1
 - 2026-05-29 — `implement/draftplan_` — Stage 3 supplement filled (M1 SC-only + M2 2D-Display + Spotify carve-out from day one + M3 banding optional, 12 atomic tasks, ~33h M1 effort)
+- 2026-05-29 — `implement/review_` — Reviewer PASS (all 15 checklist items ticked)
+- 2026-05-29 — `implement/plangate_` — awaiting GATE C
+- 2026-05-29 — `implement/accepted_` — GATE C PASSED by user; ready for `inprogress_` Task Queue execution
 
 ## AI Tasks
 

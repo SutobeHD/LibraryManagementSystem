@@ -27,6 +27,9 @@ related: [library-extended-remix-finder, analysis-remix-detector, external-track
 - 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
 - 2026-05-29 — `research/evaluated_` — GATE B PASSED by user; scope narrowed to detection-layers only (Phase-3 swap delegated to `library-format-converter` via `trigger="quality_verdict"`); sister-doc dep (`external-track-match`) also evaluated_
 - 2026-05-29 — `implement/draftplan_` — Stage 3 supplement filled (Phase-1a/1b/2/3, 12 atomic tasks, `validate_audio_path(allow_db_match=False)` mitigation baked in, librosa 0.10.1→0.11.0 bump, per-encoder cutoff tolerance buckets)
+- 2026-05-29 — `implement/review_` — Reviewer PASS (all 15 checklist items ticked)
+- 2026-05-29 — `implement/plangate_` — awaiting GATE C
+- 2026-05-29 — `implement/accepted_` — GATE C PASSED by user; ready for `inprogress_` (Phase-3 swap delegated to `library-format-converter`)
 
 ---
 

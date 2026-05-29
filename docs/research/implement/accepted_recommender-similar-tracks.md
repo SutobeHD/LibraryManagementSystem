@@ -30,6 +30,9 @@ related: [recommender-rules-baseline, recommender-taste-llm-audio, security-api-
 - 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
 - 2026-05-29 — `research/evaluated_` — GATE B PASSED by user; 2 plan-shape corrections (backfill cost model, named vector slices) deferred to draftplan_ entry
 - 2026-05-29 — `implement/draftplan_` — Stage 3 supplement filled; **both plan-shape corrections baked in** (4 named slice BLOB columns + re-decode via librosa.load) — backfill revised 50k = 8-15h single-process / 2-4h with 4 workers
+- 2026-05-29 — `implement/review_` — Reviewer PASS (all 15 checklist items ticked)
+- 2026-05-29 — `implement/plangate_` — awaiting GATE C
+- 2026-05-29 — `implement/accepted_` — GATE C PASSED by user; ready for `inprogress_`
 
 ---
 
