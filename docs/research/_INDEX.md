@@ -30,7 +30,7 @@ _(none)_
 - [midgate_library-format-converter.md](research/midgate_library-format-converter.md) — Library-wide format converter; wave 1 OVERTURNED 3 OQs (proof script absent, AAC priming ffmpeg-trimmed ~48ms risk, update_track_path can't rename in live mode); OQ2/OQ5 confirmed; awaiting GATE B (recommend reject-to-wave-2) (2026-05-29)
 
 ### evaluated
-- [evaluated_recommender-taste-llm-audio.md](research/evaluated_recommender-taste-llm-audio.md) — GATE B PASSED 2026-05-29 (re-attempt after cache invalidation resolved) (2026-05-29)
+_(none)_
 
 ### parked
 _(none)_
@@ -48,6 +48,7 @@ _(none)_
 ### plangate ⛔ GATE C
 - [plangate_metadata-name-fixer.md](implement/plangate_metadata-name-fixer.md) — Artist/title normaliser; M0 detect / M1 apply+revert {1,4,5,6,7,8} / M2 MB enrich; Implementation Plan + 10-task queue; Reviewer 5/5 PASS; awaiting GATE C (carry-forward: T9 needs httpx dep-approval) (2026-05-29)
 - [plangate_security-mobile-paired-tokens-phase2.md](implement/plangate_security-mobile-paired-tokens-phase2.md) — Per-device QR pairing + sidecar `auth.db` (Option A); dual-acceptance require_session; Implementation Plan + 7-task queue; Reviewer 5/5 PASS (last_seen_at contention resolved in plan); awaiting GATE C — hard prereq for mobile-companion (2026-05-29)
+- [plangate_recommender-taste-llm-audio.md](implement/plangate_recommender-taste-llm-audio.md) — Taste-aware recommender (Teil 2); M1 Option-A centroid / M2 embedding-benchmark / M3 LLM-explain; Implementation Plan + Task Queue added (doc lacked them); Reviewer 5/5 PASS; awaiting GATE C (HARD-DEPs: sister vector + Teil-1 plays) (2026-05-29)
 
 ### review
 _(none)_
