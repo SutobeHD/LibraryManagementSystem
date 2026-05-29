@@ -46,19 +46,20 @@ _(none)_
 _(none)_
 
 ### review
-- [review_external-track-match-unified-module.md](implement/review_external-track-match-unified-module.md) — Reviewer PASS; ready for GATE C (2026-05-29)
-- [review_analysis-remix-detector.md](implement/review_analysis-remix-detector.md) — Reviewer PASS; ready for GATE C (2026-05-29)
-- [review_analysis-underground-mainstream-classifier.md](implement/review_analysis-underground-mainstream-classifier.md) — Reviewer PASS; ready for GATE C (2026-05-29)
-- [review_library-extended-remix-finder.md](implement/review_library-extended-remix-finder.md) — Reviewer PASS; critical path = sister `external-track-match` shipping `inprogress_` (2026-05-29)
-- [review_library-quality-upgrade-finder.md](implement/review_library-quality-upgrade-finder.md) — Reviewer PASS; ready for GATE C (2026-05-29)
-- [review_recommender-rules-baseline.md](implement/review_recommender-rules-baseline.md) — Reviewer PASS with note: 3 default-picks T-10 user-action at GATE C (2026-05-29)
-- [review_recommender-similar-tracks.md](implement/review_recommender-similar-tracks.md) — Reviewer PASS; ready for GATE C (2026-05-29)
+_(none)_
+
+### plangate ⛔ GATE C
+- [plangate_external-track-match-unified-module.md](implement/plangate_external-track-match-unified-module.md) — Reviewer PASS; awaiting GATE C (2026-05-29)
+- [plangate_analysis-remix-detector.md](implement/plangate_analysis-remix-detector.md) — Reviewer PASS; awaiting GATE C (2026-05-29)
+- [plangate_analysis-underground-mainstream-classifier.md](implement/plangate_analysis-underground-mainstream-classifier.md) — Reviewer PASS; awaiting GATE C (2026-05-29)
+- [plangate_library-extended-remix-finder.md](implement/plangate_library-extended-remix-finder.md) — Reviewer PASS; critical path = sister `external-track-match` shipping `inprogress_` (2026-05-29)
+- [plangate_library-quality-upgrade-finder.md](implement/plangate_library-quality-upgrade-finder.md) — Reviewer PASS; awaiting GATE C (2026-05-29)
+- [plangate_recommender-rules-baseline.md](implement/plangate_recommender-rules-baseline.md) — Reviewer PASS with note: 3 default-picks T-10 user-action at GATE C (2026-05-29)
+- [plangate_recommender-similar-tracks.md](implement/plangate_recommender-similar-tracks.md) — Reviewer PASS; awaiting GATE C (2026-05-29)
 
 ### review
 _(none)_
 
-### plangate ⛔ GATE C
-_(none)_
 
 ### rework
 _(none)_
