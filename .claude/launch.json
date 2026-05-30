@@ -1,5 +1,10 @@
 {
   "$comment": "Named server definitions consumed by mcp__Claude_Preview__preview_start. Format is repo-internal — confirmed by docs/e2e-testing.md.",
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "frontend", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev", "--prefix", "frontend"], "port": 5173 },
+    { "name": "backend", "runtimeExecutable": "python", "runtimeArgs": ["-m", "app.main"], "port": 8000 }
+  ],
   "servers": [
     {
       "name": "backend",
