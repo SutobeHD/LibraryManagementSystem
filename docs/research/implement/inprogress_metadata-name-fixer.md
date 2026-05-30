@@ -36,6 +36,7 @@ related: []
 - 2026-05-29 — `implement/plangate_` — plan reviewed (Planner + Reviewer PASS), awaiting GATE C. Carry-forward: T9 MB client `httpx==0.28.1` needs user dep-approval before M2.
 - 2026-05-29 — `implement/accepted_` — GATE C PASSED (user delegated gate authority to the agent for PASS-verified plans). Ready for `inprogress_`; implement-tier needs branch-model direction (`routine/*` PR flow vs single working branch).
 - 2026-05-29 — `implement/inprogress_` — T1 (M0 detector) shipped on `claude/research-continuation-7rm30` (12 tests green, ruff clean). T2–T10 remain `[ ]` for `research-implement` routine.
+- 2026-05-29 — `implement/inprogress_` — T4 (`app/metadata_fixer/schema.py` undo-log) shipped (7 tests green, ruff clean). T2/T3/T5–T10 remain `[ ]`.
 
 ---
 
@@ -460,7 +461,7 @@ Followed by 8 `def _rule_{1..8}(track: dict) -> Match | None` functions register
 - [x] **T1 (M0, Step 1):** `app/metadata_fixer/{__init__,detector.py}` — 7 `Rule` classes {1,2,4,5,6,7,8} (class 3 deferred to M2 per plan), `scan()` pure/read-only + `ACTIVE_RULE_IDS` subset; `tests/test_metadata_fixer_detector.py` 12 tests (per-class + 6×{pos100,neg100} corpus precision/recall + zero-write smoke + none-tolerant). **DONE 2026-05-29** — 12/12 pass, ruff clean. Negative-corpus guard ("19 - Naughty Forty" survives) verified.
 - [ ] **T2 (M0, Step 1):** `GET /api/metadata-fixer/scan` route (`require_session`) + `MetadataFixerReport.jsx` (read-only, CSV export) + `metadataFixer.js`. Deps: T1. Tests: scan smoke + zero-write smoke.
 - [ ] **T3 (M0 gate, Step 1):** empirical gate harness — OQ10 `feat.` sample, OQ11 ANLZ SHA diff, OQ9 NFC hardware check, per-format tag round-trip. Deps: T1. Resolves OQ9/10/11.
-- [ ] **T4 (M1, Step 2):** `schema.py` sidecar DDL + `metadata_fixer_log.db` (`runs`+`mutations`). Deps: T1. Tests: schema-create + revert-row shape.
+- [x] **T4 (M1, Step 2):** `schema.py` sidecar DDL + `metadata_fixer_log.db` (`runs`+`mutations`). Deps: T1. **DONE 2026-05-29** — `app/metadata_fixer/schema.py` (mirrors `auth_db.py`: WAL, per-thread conn, writer Lock, MainProcess-guard). `mutations` carries full DjmdContent pre-image JSON + before/after SHA-1 + reverted flag → byte-for-byte revert via `get_mutations(reverse=True)`. `tests/test_metadata_fixer_schema.py` 7/7 (schema-create, run round-trip, revert-row shape, undo ordering, idempotent revert, status/listing), ruff clean.
 - [ ] **T5 (M1, Step 2):** `applier.py` atomic 6-step mutation + `db_lock()`. Deps: T4. Tests: `test_apply_holds_db_write_lock`, apply→revert byte-identity (DB JSON + ID3 SHA1).
 - [ ] **T6 (M1, Step 2):** `POST apply` / `POST revert` / `GET runs` routes (`require_session`, `db_lock` on writers). Deps: T5. Tests: route smoke + revert.
 - [ ] **T7 (M1, Step 2):** frontend apply UI — checkboxes, rule grouping, "I reviewed N" modal (N>50), per-track LLM-suggest. Deps: T2, T6. Tests: `test_no_mutation_without_explicit_apply_click` (e2e).
@@ -494,6 +495,13 @@ Followed by 8 `def _rule_{1..8}(track: dict) -> Match | None` functions register
 - **Surprise:** class-4 collision guard (Adversarial "19 - Naughty Forty") solved by zero-padded/single-digit-only prefix regex `^(?:0\d|\d)\s*[-.\s]\s+` — strips "01 - Intro", preserves "19 - Naughty Forty". Precision trade documented.
 - Tests: 12/12 pass (`tests/test_metadata_fixer_detector.py`), ruff + ruff-format clean. (conftest needs fastapi — absent in agent sandbox; ran `--noconftest`; CI has deps.)
 - **Remaining for routines** (Task Queue T2–T10): scan route + report UI (T2), M0 empirical gate harness (T3), applier + sidecar DB + apply/revert routes + UI (T4–T8), MB enrichment (T9–T10, dep-gated). `research-implement` continues per the queue.
+
+### 2026-05-29 — T4 undo-log schema (agent, `claude/research-continuation-7rm30`)
+- Built `app/metadata_fixer/schema.py`: `runs` + `mutations` tables in `metadata_fixer_log.db` (sidecar, NOT `master.db`). API: `create_run`, `record_mutation` (stores full DjmdContent pre-image JSON + before/after file SHA-1, bumps run count), `set_run_status`, `mark_mutation_reverted`, `get_run`/`list_runs`, `get_mutations(reverse=)` for reverse-replay undo.
+- **Decision:** the exact DDL wasn't pinned in the plan ("Recommendation DDL") — designed a revert-capable shape: `mutations` holds enough pre-image (row JSON + file SHA-1) for T5's apply→revert byte-identity test. `foreign_keys=ON`, `mutations.run_id` FK → `runs`.
+- **No deviation** from plan intent. Pattern lifted verbatim from `auth_db.py` (WAL/per-thread/Lock/MainProcess-guard) so both sidecar DBs behave identically.
+- Tests: 7/7 (`tests/test_metadata_fixer_schema.py`), ruff clean. Ran via `uv run` (sandbox lacks fastapi for conftest).
+- **Remaining:** T5 (applier — consumes this schema), T6 (routes), T2/T3 (scan route + gate harness), T7+ (UI/MB).
 
 ---
 

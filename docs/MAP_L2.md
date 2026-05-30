@@ -577,6 +577,19 @@ Read-only detection of malformed artist/title metadata.
 - `Rule`
 - `scan()` — Run the catalogue over ``tracks``.
 
+### `app/metadata_fixer/schema.py`
+
+metadata_fixer.schema — sidecar undo-log DB for the metadata fixer (T4).
+
+- `init_db()` — Idempotent schema create.
+- `create_run()` — Open a new fix run; returns its ``run_id``.
+- `record_mutation()` — Journal one applied mutation with its full pre-image; bump the run count.
+- `set_run_status()` — Transition a run (completed / reverted / failed).
+- `mark_mutation_reverted()` — Flag one mutation reverted.
+- `get_run()` — Fetch one run, or ``None``.
+- `list_runs()` — All runs, newest first (the ``GET /runs`` surface).
+- `get_mutations()` — Mutations of a run; ``reverse=True`` orders newest-first for undo replay.
+
 ### `app/pairing_store.py`
 
 pairing_store — in-memory one-shot pairing codes (Phase-2 auth, T2).
@@ -1693,6 +1706,19 @@ M0 detector tests — read-only malformation detection.
 - `test_detector_zero_writes_smoke()` — scan() must never mutate the input track dicts.
 - `test_class2_feat_is_suggestion_only_not_active()`
 - `test_scan_tolerates_missing_or_none_fields()`
+
+### `tests/test_metadata_fixer_schema.py`
+
+metadata-fixer undo-log schema tests (T4 — app/metadata_fixer/schema.py).
+
+- `fresh_db()` — Point the schema module at a throwaway DB and reset the thread-local conn.
+- `test_schema_create_tables_exist()`
+- `test_create_run_round_trip()`
+- `test_record_mutation_revert_row_shape()`
+- `test_get_mutations_reverse_order_for_undo()`
+- `test_mark_mutation_reverted_idempotent()`
+- `test_set_run_status_and_list_newest_first()`
+- `test_get_run_unknown_returns_none()`
 
 ### `tests/test_onelibrary_wal_flush.py`
 
