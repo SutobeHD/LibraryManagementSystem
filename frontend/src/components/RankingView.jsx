@@ -266,33 +266,32 @@ const RankingView = ({ libraryStatus, appMode }) => {
         ];
         return (
             <div className="h-full flex flex-col">
-                {/* Header — Ranking title + source tabs + search (full-width, library-style) */}
-                <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-line-subtle shrink-0">
-                    <div className="flex items-center gap-4 min-w-0">
-                        <h1 className="text-2xl font-bold text-white flex items-center gap-2 shrink-0">
-                            <Zap size={24} className="text-amber2" /> Ranking
-                        </h1>
-                        <div className="flex bg-mx-input border border-line-subtle rounded-mx-sm overflow-hidden">
-                            {SOURCE_TABS.map(({ id, label, Icon }) => (
-                                <button
-                                    key={id}
-                                    onClick={() => setSourceMode(id)}
-                                    className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider border-r border-line-subtle last:border-r-0 transition-colors ${sourceMode === id ? 'bg-amber2/15 text-amber2' : 'text-ink-muted hover:text-ink-primary hover:bg-mx-hover'}`}
-                                >
-                                    <Icon size={12} /> {label}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
+                {/* Source tabs — identical flat strip to the Library workspace nav */}
+                <div className="flex items-stretch h-9 bg-mx-shell/40 border-b border-line-subtle shrink-0 px-2 gap-1 select-none">
+                    {SOURCE_TABS.map(({ id, label, Icon }) => {
+                        const active = sourceMode === id;
+                        return (
+                            <button
+                                key={id}
+                                onClick={() => setSourceMode(id)}
+                                className={`flex items-center gap-1.5 px-3 my-1 rounded-sm text-[11px] whitespace-nowrap transition-colors ${active ? 'bg-mx-selected text-ink-primary font-medium' : 'text-ink-secondary hover:text-ink-primary hover:bg-mx-hover'}`}
+                            >
+                                <Icon size={13} className={active ? 'text-amber2' : 'opacity-70'} />
+                                {label}
+                            </button>
+                        );
+                    })}
                     {sourceMode !== 'playlist' && (
-                        <div className="relative w-64 shrink-0">
-                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" />
-                            <input
-                                className="input-glass w-full pl-9 py-1.5 text-xs rounded-full bg-black/20"
-                                placeholder={`Search ${sourceMode}s...`}
-                                value={searchTerm}
-                                onChange={e => setSearchTerm(e.target.value)}
-                            />
+                        <div className="flex-1 flex items-center justify-end">
+                            <div className="relative w-56 my-1">
+                                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-muted" />
+                                <input
+                                    className="input-glass w-full pl-8 py-1 text-[11px] rounded-full bg-black/20"
+                                    placeholder={`Search ${sourceMode}s...`}
+                                    value={searchTerm}
+                                    onChange={e => setSearchTerm(e.target.value)}
+                                />
+                            </div>
                         </div>
                     )}
                 </div>

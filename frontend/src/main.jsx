@@ -1,7 +1,7 @@
 import React, { useState, useMemo, Component, useEffect, useCallback, Suspense, lazy } from 'react'
 import { invoke } from '@tauri-apps/api/core'; // Tauri Invoke
 import ReactDOM from 'react-dom/client'
-import { Music, Cloud, Download, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2, Sparkles, Copy, Layers, FilePlus, FolderOpen, ArrowLeft, Sliders, List, User, Tag, Disc } from 'lucide-react'
+import { Music, Cloud, Download, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2, Sparkles, Copy, Layers, FilePlus, FolderOpen, ArrowLeft, Sliders, List, User, Tag, Disc, RefreshCw, TrendingDown, PlayCircle, ImageOff } from 'lucide-react'
 import './index.css'
 import { ToastProvider } from './components/ToastContext'
 import { Toaster } from 'react-hot-toast'
@@ -115,9 +115,16 @@ const buildWorkspaces = (libraryStatus) => [
   {
     id: 'utilities',
     label: 'Utilities',
+    // Tools + Library-Health filters are dissolved into individual flat tabs
+    // (no inner grid/toggle); each is a `util-<mode>` view.
     items: [
-      { tab: 'util-tools', label: 'Tools', icon: Wrench },
-      { tab: 'util-health', label: 'Library Health', icon: Activity },
+      { tab: 'util-phrase', label: 'Phrase Cues', icon: Layers },
+      { tab: 'util-duplicates', label: 'Duplicates', icon: Copy },
+      { tab: 'util-xml', label: 'XML Cleaner', icon: FileCode },
+      { tab: 'util-converter', label: 'Converter', icon: RefreshCw },
+      { tab: 'util-low_quality', label: 'Low Quality', icon: TrendingDown },
+      { tab: 'util-lost', label: 'Lost', icon: PlayCircle },
+      { tab: 'util-no_artwork', label: 'No Cover', icon: ImageOff },
       { tab: 'insights', label: 'Insights', icon: BarChart3 },
     ],
   },
@@ -130,7 +137,9 @@ const TAB_WORKSPACE = {
   ranking: 'ranking',
   editor: 'editor', xml: 'editor',
   usb: 'sync', 'usb-settings': 'sync', soundcloud: 'sync', 'sc-sync': 'sync', downloads: 'sync',
-  'util-tools': 'utilities', 'util-health': 'utilities', insights: 'utilities',
+  'util-phrase': 'utilities', 'util-duplicates': 'utilities', 'util-xml': 'utilities',
+  'util-converter': 'utilities', 'util-low_quality': 'utilities', 'util-lost': 'utilities',
+  'util-no_artwork': 'utilities', insights: 'utilities',
 }
 
 /**
