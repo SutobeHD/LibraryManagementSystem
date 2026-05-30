@@ -569,6 +569,14 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 
 metadata_fixer — detect + (later) fix malformed artist/title metadata.
 
+### `app/metadata_fixer/applier.py`
+
+metadata_fixer.applier — atomic apply + revert for the metadata fixer (T5).
+
+- `FixRequest` — One requested change: set ``content_id``'s ``field`` to ``after_value``.
+- `apply_fixes()` — Apply ``fixes`` in one journalled run.
+- `revert_run()` — Undo a run: restore each pre-image field value in reverse.
+
 ### `app/metadata_fixer/detector.py`
 
 Read-only detection of malformed artist/title metadata.
@@ -1691,6 +1699,23 @@ Regression tests for ``POST /api/file/reveal`` sandbox.
 - `  TestFileRevealSandboxRejects.test_directory_path_is_rejected()`
 - `TestFileRevealSandboxAccepts`
 - `  TestFileRevealSandboxAccepts.test_valid_audio_calls_subprocess_with_platform_argv()`
+
+### `tests/test_metadata_fixer_applier.py`
+
+metadata-fixer apply/revert tests (T5 — app/metadata_fixer/applier.py).
+
+- `FakeDB` — Dict-backed stand-in for the RekordboxDB slice the applier uses.
+- `  FakeDB.get_track_details()`
+- `  FakeDB.update_tracks_metadata()`
+- `fresh_db()`
+- `lock_counter()` — Replace the db_lock with a counting no-op context manager.
+- `no_tag_write()` — Stub the audio tag write so tests never touch real files by default.
+- `test_apply_holds_db_write_lock()`
+- `test_apply_writes_db_and_journals()`
+- `test_apply_then_revert_restores_db_value()`
+- `test_apply_revert_file_sha1_round_trip()`
+- `test_write_tags_disabled_skips_tag_mirror()`
+- `test_apply_skips_failed_db_write()`
 
 ### `tests/test_metadata_fixer_detector.py`
 

@@ -37,6 +37,7 @@ related: []
 - 2026-05-29 — `implement/accepted_` — GATE C PASSED (user delegated gate authority to the agent for PASS-verified plans). Ready for `inprogress_`; implement-tier needs branch-model direction (`routine/*` PR flow vs single working branch).
 - 2026-05-29 — `implement/inprogress_` — T1 (M0 detector) shipped on `claude/research-continuation-7rm30` (12 tests green, ruff clean). T2–T10 remain `[ ]` for `research-implement` routine.
 - 2026-05-29 — `implement/inprogress_` — T4 (`app/metadata_fixer/schema.py` undo-log) shipped (7 tests green, ruff clean). T2/T3/T5–T10 remain `[ ]`.
+- 2026-05-29 — `implement/inprogress_` — T5 (`app/metadata_fixer/applier.py` apply/revert) shipped (6 tests green, ruff clean). T2/T3/T6–T10 remain `[ ]`.
 
 ---
 
@@ -462,7 +463,7 @@ Followed by 8 `def _rule_{1..8}(track: dict) -> Match | None` functions register
 - [ ] **T2 (M0, Step 1):** `GET /api/metadata-fixer/scan` route (`require_session`) + `MetadataFixerReport.jsx` (read-only, CSV export) + `metadataFixer.js`. Deps: T1. Tests: scan smoke + zero-write smoke.
 - [ ] **T3 (M0 gate, Step 1):** empirical gate harness — OQ10 `feat.` sample, OQ11 ANLZ SHA diff, OQ9 NFC hardware check, per-format tag round-trip. Deps: T1. Resolves OQ9/10/11.
 - [x] **T4 (M1, Step 2):** `schema.py` sidecar DDL + `metadata_fixer_log.db` (`runs`+`mutations`). Deps: T1. **DONE 2026-05-29** — `app/metadata_fixer/schema.py` (mirrors `auth_db.py`: WAL, per-thread conn, writer Lock, MainProcess-guard). `mutations` carries full DjmdContent pre-image JSON + before/after SHA-1 + reverted flag → byte-for-byte revert via `get_mutations(reverse=True)`. `tests/test_metadata_fixer_schema.py` 7/7 (schema-create, run round-trip, revert-row shape, undo ordering, idempotent revert, status/listing), ruff clean.
-- [ ] **T5 (M1, Step 2):** `applier.py` atomic 6-step mutation + `db_lock()`. Deps: T4. Tests: `test_apply_holds_db_write_lock`, apply→revert byte-identity (DB JSON + ID3 SHA1).
+- [x] **T5 (M1, Step 2):** `applier.py` atomic 6-step mutation + `db_lock()`. Deps: T4. **DONE 2026-05-29** — `app/metadata_fixer/applier.py`: `apply_fixes` (6-step: before_sha1→snapshot→locked write→tag mirror→after_sha1→journal) + `revert_run` (reverse replay, idempotent). DB injected; `db_lock`/`audio_tags` lazy-indirected (no heavy import at load). `tests/test_metadata_fixer_applier.py` 6/6 (`test_apply_holds_db_write_lock`, db write+journal, apply→revert DB byte-identity, file-SHA-1 round-trip, write_tags=False skip, failed-write skip).
 - [ ] **T6 (M1, Step 2):** `POST apply` / `POST revert` / `GET runs` routes (`require_session`, `db_lock` on writers). Deps: T5. Tests: route smoke + revert.
 - [ ] **T7 (M1, Step 2):** frontend apply UI — checkboxes, rule grouping, "I reviewed N" modal (N>50), per-track LLM-suggest. Deps: T2, T6. Tests: `test_no_mutation_without_explicit_apply_click` (e2e).
 - [ ] **T8 (M1 gate, Step 2):** `test_pdb_structure_green_after_mass_fix`. Deps: T5, T6.
@@ -502,6 +503,13 @@ Followed by 8 `def _rule_{1..8}(track: dict) -> Match | None` functions register
 - **No deviation** from plan intent. Pattern lifted verbatim from `auth_db.py` (WAL/per-thread/Lock/MainProcess-guard) so both sidecar DBs behave identically.
 - Tests: 7/7 (`tests/test_metadata_fixer_schema.py`), ruff clean. Ran via `uv run` (sandbox lacks fastapi for conftest).
 - **Remaining:** T5 (applier — consumes this schema), T6 (routes), T2/T3 (scan route + gate harness), T7+ (UI/MB).
+
+### 2026-05-29 — T5 apply/revert engine (agent, `claude/research-continuation-7rm30`)
+- Built `app/metadata_fixer/applier.py`: `FixRequest` dataclass, `apply_fixes` (6-step order per plan), `revert_run` (reverse replay from the undo log, idempotent via `reverted` flag).
+- **Decision:** DB injected via `_DB` Protocol (not imported) + `db_lock`/`audio_tags` reached through `_db_lock`/`_write_tags` lazy helpers. Reason: importing `app.database` pulls `rbox`/`anlz_safe` (heavy, sandbox-fragile) — the indirection keeps the applier import light AND gives tests clean monkeypatch points for the lock-held assertion and tag-write capture.
+- **No deviation** from the 6-step plan order. Revert restores per-field pre-image value (single-field fixes → byte-identical); full row JSON snapshot retained for future multi-field restore.
+- Tests: 6/6 (`tests/test_metadata_fixer_applier.py`), ruff clean, applier mypy-clean. Real-temp-file SHA-1 round-trip proves bytes restored after revert.
+- **Remaining:** T6 (apply/revert/runs routes — touch `app/main.py`), T2/T3 (scan route + M0 gate harness), T7+ (UI), T9/T10 (MB, dep-gated).
 
 ---
 

@@ -37,6 +37,7 @@
 | `app/logging_utils.py` | Log redaction helpers — scrub absolute paths from log lines + tracebacks. |
 | `app/main.py` | *(no module docstring)* |
 | `app/metadata_fixer/__init__.py` | metadata_fixer — detect + (later) fix malformed artist/title metadata. |
+| `app/metadata_fixer/applier.py` | metadata_fixer.applier — atomic apply + revert for the metadata fixer (T5). |
 | `app/metadata_fixer/detector.py` | Read-only detection of malformed artist/title metadata. |
 | `app/metadata_fixer/schema.py` | metadata_fixer.schema — sidecar undo-log DB for the metadata fixer (T4). |
 | `app/pairing_store.py` | pairing_store — in-memory one-shot pairing codes (Phase-2 auth, T2). |
@@ -199,6 +200,7 @@
 | `tests/test_database.py` | Tests for `app/database.py`. |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
 | `tests/test_main_security.py` | Regression tests for ``POST /api/file/reveal`` sandbox. |
+| `tests/test_metadata_fixer_applier.py` | metadata-fixer apply/revert tests (T5 — app/metadata_fixer/applier.py). |
 | `tests/test_metadata_fixer_detector.py` | M0 detector tests — read-only malformation detection. |
 | `tests/test_metadata_fixer_schema.py` | metadata-fixer undo-log schema tests (T4 — app/metadata_fixer/schema.py). |
 | `tests/test_onelibrary_wal_flush.py` | End-to-end regression test for OneLibraryUsbWriter — runs the FULL |
