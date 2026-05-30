@@ -156,7 +156,7 @@
 | `frontend/src/components/usb/UsbSyncPanel.jsx` | UsbSyncPanel — the right-hand main pane. |
 | `frontend/src/components/UsbSettingsView.jsx` | UsbSettingsView — edit MYSETTING.DAT / MYSETTING2.DAT / DJMMYSETTING.DAT Per-stick CDJ + DJM hardware setting… |
 | `frontend/src/components/UsbView.jsx` | UsbView — Melodex-styled USB device manager (container). |
-| `frontend/src/components/UtilitiesView.jsx` | UtilitiesView — Library-Verwaltungs-Tools Zwei Sub-Tabs: • Tools — Phrase Cues, Duplicate Finder, XML Cleaner… |
+| `frontend/src/components/UtilitiesView.jsx` | UtilitiesView — router for the Utilities workspace. |
 | `frontend/src/components/waveform/ConfirmModal.jsx` | Replaces native window.confirm with a themed dialog. |
 | `frontend/src/components/waveform/WaveformCanvas.jsx` | Canvas-based beatgrid renderer + WaveSurfer mount points (main + overview + 3-band layers). |
 | `frontend/src/components/waveform/WaveformControls.jsx` | Top toolbars — header, project select, hot-cue strip, transport, volume, viz toggle, |

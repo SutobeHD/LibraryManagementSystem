@@ -1370,7 +1370,7 @@ UsbView — Melodex-styled USB device manager (container).
 
 ### `frontend/src/components/UtilitiesView.jsx`
 
-UtilitiesView — Library-Verwaltungs-Tools Zwei Sub-Tabs: • Tools — Phrase Cues, Duplicate Finder, XML Cleaner, Format Converter • Library H…
+UtilitiesView — router for the Utilities workspace.
 
 ### `frontend/src/components/waveform/ConfirmModal.jsx`
 
