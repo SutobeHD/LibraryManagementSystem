@@ -26,10 +26,10 @@ _(none)_
 - [exploring_db-write-lock-retrofit.md](research/exploring_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps; Option B (auto-wrap) committed; wave-2 verify → GAPS (3rd gap: `AnalysisDBWriter` rbox-direct write uncovered by class decorator; circular drift guard); stays exploring_ (2026-05-29)
 - [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); wave-2 GAPS narrowed (CORS para corrected, 3/3 stale main.py refs refreshed+PASS, Phase-2 prereq now past GATE A); remaining blocker = OQ14+OQ7 user sign-off only; stays exploring_ (2026-05-29)
 ### midgate ⛔ GATE B
-- [exploring_library-format-converter.md](research/exploring_library-format-converter.md) — Library-wide format converter; **GATE B PASSED-to-wave-2 (agent, delegated)** with 3 BLOCKING items (proof artifact, AAC-priming beatgrid A/B, extension-changing path write); verifier may NOT graduate to evaluated_ until all 3 close (2026-05-29)
+_(none)_
 
 ### evaluated
-_(none)_
+- [evaluated_library-format-converter.md](research/evaluated_library-format-converter.md) — Library-wide format converter; wave 2 closed all 3 blockers (proof script `fdb461c`, AAC priming empirical A/B sample-identical, path-write via direct rbox `update_content`), 6 adversarial concerns addressed/carried-forward, citation MIXED non-load-bearing, V-PASS round 2, 3 options (A/B/C) + Recommendation = Option A (full engine, sister-doc unblocks) with 4 commit-blockers for draftplan_ (2026-05-30)
 
 ### parked
 _(none)_

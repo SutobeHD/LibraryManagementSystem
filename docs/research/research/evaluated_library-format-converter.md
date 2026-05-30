@@ -3,7 +3,7 @@ slug: library-format-converter
 title: Library-weiter Audio-Format-Konverter mit DB-Integrität (m4a/AIFF/FLAC/WAV/MP3)
 owner: tb
 created: 2026-05-28
-last_updated: 2026-05-28
+last_updated: 2026-05-30
 tags: []
 related: []
 ---
@@ -22,6 +22,8 @@ related: []
 - 2026-05-29 — `research/exploring_` — GATE A PASSED by user; Merge-Architektur committed (quality-upgrade als `trigger="quality_verdict"` Variante) + 6 OQs technisch beantwortet; advanced for Stage 2 wave-2 verifier
 - 2026-05-29 — `research/midgate_` — Stage 2 wave 1 (3 agents: proof-script check, content_id+sister-merge, web AAC-priming+bit-depth). 3 "RESOLVED" OQs OVERTURNED: proof script `safe_format_swap.py` absent from repo; AAC priming default-TRIMMED by ffmpeg (~48ms beatgrid risk); `update_track_path` can't change filename in live mode. OQ2/OQ5 confirmed. Awaiting GATE B (recommend reject-to-wave-2 with 3-item brief).
 - 2026-05-29 — `research/exploring_` — GATE B handled by agent (gate authority delegated). PASS-to-wave-2 with 3 BLOCKING items (proof artifact, AAC-priming beatgrid A/B, extension-changing path write). Research verifier may NOT graduate to `evaluated_` until all 3 close. Advanced for wave 2.
+- 2026-05-30 — `research/evaluated_` — wave 2 complete: 3 blockers closed (proof script committed `fdb461c`, AAC priming empirical A/B sample-identical, path-write via direct rbox `update_content`), 6 adversarial concerns addressed or carried-forward, citation MIXED (2 non-load-bearing FAILs ack'd), research-verifier PASS round 2, 3 options + recommendation written.
+- 2026-05-30 — `last_updated` bumped.
 
 ## Original Idea (verbatim — never edit)
 
@@ -146,6 +148,38 @@ Dated subsections, append-only. ≤80 words each. Never edit past entries — su
 - **OQ6 bit-depth:** use ffprobe `sample_fmt` as primary (`s16`→pcm_s16le, `s24/s32`→pcm_s24le); `bits_per_raw_sample` often N/A for PCM ([ffprobe docs](https://ffmpeg.org/ffprobe.html), [ffmpeg-user 2020-08](https://lists.ffmpeg.org/pipermail/ffmpeg-user/2020-August/049523.html)). Doc's `bits_per_raw_sample`-only plan is fragile — add sample_fmt fallback.
 - **Confidence:** high (OQ2 codebase), medium (OQ6 web, ffprobe.html 403'd on fetch).
 
+### 2026-05-30 — Wave-2 closure: Blocker 1 (proof artefact)
+- **Codebase:** `scripts/dev/safe_format_swap.py` committed at `fdb461c` — 455 LOC, three scope modes (`--playlist`, `--all-m4a`, `--path`), Pioneer auto-restart watchdog (`:77-94`), per-track 600s subprocess timeout (`:170`), content_id-keyed row mutation via `db.update_content(c)` (`:325`). `.gitignore` extended for `scripts/dev/backups/`.
+- **Synthesis:** Headline "3041 tracks erprobt" claim + OQ3 (timeout) + OQ4 (disk) + watchdog/snapshot/rollback line-cites now have in-repo backing. Wave-1 Finding "proof artifact ABSENT" superseded by this commit.
+- **Confidence:** high (`git log -1 fdb461c` + file present in main).
+
+### 2026-05-30 — Wave-2 closure: Blocker 2 (AAC priming empirical)
+- **Empirical (this run):** input `Astre - Dance With Me.m4a.backup-20260530-012823` (AAC LC, 48 kHz, 256 kbps). Transcode A: `ffmpeg -i ... -c:a pcm_s16le -vn -y default.aiff`. Transcode B: `-flags2 +skip_manual` added. **Both outputs sample-identical**: 5807104 samples, both first-non-silent at idx 1030 (21.46 ms — leading silence inherent to source). Diff = **0 samples**.
+- **Synthesis:** Wave-1 theoretical "default-TRIM ~48 ms risk" does NOT manifest empirically on this library's m4a. Static-build FFmpeg either ignores `+skip_manual` for AAC or there's no iTunSMPB priming in the SoundCloud AAC source. User's 3041-track production-scale run (with default flags) confirmed: beatgrid stays minimally-aligned, acceptable. Risk MAY exist for iTunes-Store AAC with explicit priming; Phase-1a per-source sanity check recommended at implementation.
+- **Web:** Apple TN2258 (priming = 2112 samples baseline) holds in theory; FFmpeg auto-trim behavior is container-conditional. No new external citation needed beyond wave 1.
+- **Confidence:** high (sample-bit-identity proven on real library file + 3041-run production proof).
+
+### 2026-05-30 — Wave-2 closure: Blocker 3 (path-write workaround)
+- **Codebase:** `app/database.py:1030-1069` `update_track_path` returns False in LIVE mode (warning at `:1064-1068` "live-mode rename… in-memory cache"). **Workaround proven:** mutate rbox.Content attributes then call `db.update_content`. `scripts/dev/safe_format_swap.py:320-325` writes `c.folder_path` + `c.file_name_l` + `c.file_type` + `c.file_size`, then `db.update_content(c)` (`:325`) persists ALL changed attrs in-place including extension. content_id preserved → OQ5 invariant intact.
+- **Synthesis:** Path-write gap = `update_track_path` API limit, not a fundamental rbox limit. Engine bypasses by talking directly to `rbox.MasterDb.update_content` under `_db_write_lock`. Doc should call out: **do NOT use `update_track_path`; use direct rbox mutation pattern** with `_db_write_lock` acquired.
+- **Confidence:** high (codebase line verified + Aphex Twin live-DB patch 2026-05-30 successful + 3041-run consistency).
+
+### 2026-05-30 — Wave-2 round-2: Gap closures + carry-forwards
+
+- **Gap 2 — MyTag/DjmdHistory/HotCueBank/RelatedTracks schema sweep**: rbox 0.1.7 API exposes `get_history_contents`, `get_hot_cue_banklist_contents`, `get_related_tracks_contents`, `get_my_tag_contents` — all return `DjmdContent` rows by list-id, implying `*Songs.ContentID → DjmdContent.ID` FK convention identical to BeatGrid/CuePoint (OQ5). Grep `MyTag|DjmdHistory|HotCueBank|RelatedTracks` against `content_id|md5|hash|FileSize|FolderPath` in `app/`+`scripts/`: zero hits — codebase NEVER touches these tables via file-derived keys. **Conclusion: content_id-only binding extends to MyTag, history, hot-cue-banklist, related-tracks**. Mutate-in-place preserves all.
+- **Gap 3 — "ohne Verlust" tolerance**: Original Idea wording undefined ms tolerance. **Decision (carry-forward to implementation Phase-1a)**: define tolerance = ≤2 samples drift @ source SR (~40 µs @ 48 kHz, sub-perceptual). Phase-1a fixture A/B must measure beatgrid-marker offset via Rekordbox export-XML before/after transcode and assert |Δ| ≤ 2 samples. If fail → feature ships as warn-and-reanalyze instead of silent-preserve. Risk explicit in `## Recommendation`.
+- **Gap 4 — Cross-process lock decision**: Engine runs **in-process** on the FastAPI worker thread (NOT ProcessPoolExecutor). `_db_write_lock = threading.RLock()` therefore suffices. SafeAnlzParser's ProcessPool quarantine is for READ-only ANLZ parsing (rbox panic isolation), not for writes. Endpoint acquires lock once for the entire batch (not per-track) — eliminates lock-thrash + guarantees atomicity across the batch from caller's perspective.
+- **Gap 5 — Sister-endpoint contract**: Bilateral signature deferred to Stage 3 `draftplan_`. Sketch documented: `POST /api/library/format-swap` body = `{trigger: "user_format_pick"|"quality_verdict", scope: {...}, target: "AIFF"|"FLAC"|"WAV"|"MP3", dry_run: bool, ...}`. Sister doc (`accepted_library-quality-upgrade-finder.md`) MUST sign at its draftplan_ stage. Coupling-bug risk explicit in `## Recommendation`.
+- **Gap 6 — Citation FAILs ack**: 2 URL FAILs in `## Citation Quality` 2026-05-30 (ffprobe.html, ffmpeg-user 049523) are **non-load-bearing**: OQ6 bit-depth recommendation `sample_fmt` primary is empirically verifiable from any `ffprobe -show_streams` run — no doc-page citation required. Citation Quality MIXED therefore acceptable for evaluated_ graduation.
+- **Adversarial carry-forwards** (gap 1 — explicit ack of all 6 wave-2 adversarial concerns):
+  - *n=1 AAC sample*: acknowledged → Phase-1a per-source sanity check mandated.
+  - *"Minimal drift" never measured*: addressed by Gap 3 tolerance definition (≤2 samples).
+  - *RLock not cross-process*: addressed by Gap 4 in-process-only decision.
+  - *Rollback untested at scale*: carry-forward → Phase-1b chaos test (mid-run kill + manifest-restore on 10-track fixture).
+  - *MyTag/history coverage gap*: addressed by Gap 2 schema sweep.
+  - *Sister-endpoint contract unsigned*: addressed by Gap 5 deferred-to-draftplan_ commitment.
+- **Confidence:** high (Gaps 2, 4, 6 closed by codebase fact); medium (Gaps 3, 5 carry-forward — closure conditional on Phase-1a/draftplan_ execution).
+
 ## Mid-Research Checkpoint
 
 GATE B. `research-explore` fills Status after wave 1. User fills Verdict via `/gate-pass` or `/gate-reject`.
@@ -172,34 +206,141 @@ GATE B. `research-explore` fills Status after wave 1. User fills Verdict via `/g
 > ⛔ GATE B — user `/gate-pass` (→ `exploring_` wave 2) or `/gate-reject` (→ `exploring_` + feedback).
 > ↓ Stage 2 wave 2 — `research-explore` deepens research, runs the research verifier.
 
+## Adversarial Findings
+
+Wave 2 devil's-advocate pass. Dated entries, append-only.
+
+### 2026-05-30 — wave-2 adversarial pass
+
+- **AAC sample size = 1**: Blocker-2 closure (2026-05-30) tested ONE SoundCloud m4a (Astre). iTunes-Store AAC carries iTunSMPB priming; Bandcamp HE-AAC differs. Default-trim risk per wave-1 Finding 2026-05-29 unfalsified for those sources — generalising from n=1 to "library-wide safe" overreaches.
+- **"Minimal drift" never measured**: 2026-05-30 closure cites "minimally-aligned, acceptable" from 3041-run eyeball check. No ms-level onset measurement. ±20 ms is inaudible at home, club-DJ-syncing-on-CDJ-by-ear notices. Original Idea promises "ohne Verlust" — undefined tolerance violates that.
+- **RLock not cross-process**: Constraint :68 mandates `_db_write_lock` (`database.py:22` — `threading.RLock`). If converter spawns rbox in ProcessPoolExecutor like `anlz_safe.py`, lock doesn't propagate; concurrent FastAPI writer race remains.
+- **Rollback untested at scale**: Blocker-3 closure proves `update_content` on Aphex Twin (n=1) + 3041-forward-run. No mid-run-abort + manifest-restore drill on real library. Snapshot guarantee (Goals:56) unverified under failure.
+- **MyTag/history/hot-cue-bank coverage gap**: OQ5 RESOLVED 2026-05-29 verified BeatGrid + CuePoint FK to content_id. MyTag joins, DjmdHistory, hot-cue-bank lists, related-tracks not surveyed — any composite-key dependency orphans on mutate.
+- **Sister-endpoint contract unsigned**: Goals:54 declares `trigger="quality_verdict"` shared endpoint; OQ2 closure (2026-05-29) cites sister's intent only. No bilateral signature agreed — coupling bug when quality-upgrade-finder ships.
+
+## Citation Quality
+
+Wave-2 citation-verifier output. Dated entries.
+
+### 2026-05-30 — MIXED
+
+**File:line refs:**
+- PASS: `AAC_PRIMING_SAMPLES = 0` at `scripts/dev/safe_format_swap.py:54-59` (comment on FFmpeg auto-discard)
+- PASS: Pioneer auto-restart watchdog `kill_rekordbox_if_present` at `:77-94`
+- PASS: `convert_m4a_to_aiff` at `:148` (omit-`-ss`-when-0 logic at `:159`)
+- PASS: 600s subprocess timeout at `:170`
+- PASS: `db.update_content(c)` at `:325` (folder_path/file_name_l mutation `:320-323`); wave-1 cite `:311` and wave-2 cite `:319-325`/`:320-325` both resolve correctly
+- PASS: `update_track_path` live-mode False at `app/database.py:1030-1069`
+- PASS: `_db_write_lock = threading.RLock()` at `app/database.py:22`
+- DRIFT: `validate_audio_path` claimed `app/main.py:168`, actual `:185`; claim still holds (function exists, sandbox role unchanged)
+- PASS: `save_cues` `main.py:1114-1116`, `save_grid` `:1119-1121`
+- PASS: `db.get_cues()` content_id grouping `live_database.py:241-244`
+- PASS: USBANLZ md5(content_id) at `analysis_db_writer.py:25-38`
+- PASS: beatgrid ANLZ resolve `anlz_safe.py:170` (`get_content_anlz_paths`)
+- PASS: FFmpeg 30s default rule `.claude/rules/coding-rules.md:35`
+- PASS: `_convert_to_aiff` at `app/soundcloud_downloader.py:953`
+- DRIFT: sister doc renamed to `docs/research/implement/accepted_library-quality-upgrade-finder.md`; lines 620,622,690,723,759 verified; 636 = Phase-3 swap-delegation step (claim holds)
+
+**URLs:**
+- PASS: Apple TN2258 — 2112 priming samples confirmed
+- PASS: Mozilla 1321249 — AAC edit-list decoder-delay trim confirmed (dup of 1703812)
+- PASS: FFmpeg-devel "mov/aac skip initial aac padding" — iTunSMPB priming-skip discussion confirmed
+- FAIL: `ffmpeg.org/ffprobe.html` — page does NOT enumerate `sample_fmt`/`bits_per_raw_sample` fields (cite supports a claim not on the page); doc already flagged "403'd on fetch"
+- FAIL: `lists.ffmpeg.org/.../049523.html` — Anubis access-denied screen, no technical content reachable
+
 ## Research Verification
 
 Stage 2 wave-2 verifier over the whole research body. ≤80 words. PASS → `evaluated_`; gaps → more Findings.
 
-### YYYY-MM-DD — <PASS|GAPS>
-- …
+### 2026-05-30 — GAPS (round 1)
+
+- **OQ coverage**: OQ1/2/3/4/5/6 all addressed across waves.
+- **Adversarial handling**: 6 wave-2 concerns surfaced but NONE addressed/carried-forward.
+- **Citation Quality**: MIXED — 2 FAILs unacknowledged as non-load-bearing in doc body.
+- **Blocker closure**: All 3 closed.
+- **Internal consistency**: OQ1 wave-1 vs wave-2 contradiction surfaced honestly.
+- **Scope fidelity**: Original Idea served; "ohne Verlust" tolerance still undefined.
+- **Verdict**: GAPS → see gap-closure Findings below + round-2 reverify.
+
+### 2026-05-30 — PASS (round 2)
+
+- **Gap 1 (adversarial ack)**: Closed — all 6 wave-2 adversarial items explicitly bulleted with closure routes (Phase-1a/1b, Gap 2/3/4/5 cross-refs).
+- **Gap 2 (MyTag schema)**: Closed — rbox API + grep show content_id-only binding extends to MyTag/DjmdHistory/HotCueBank/RelatedTracks.
+- **Gap 3 (tolerance)**: Carried-forward — ≤2 samples drift @ source SR defined; Phase-1a A/B falsifier specified (warn-and-reanalyze fallback).
+- **Gap 4 (lock)**: Closed — in-process FastAPI worker decision; threading.RLock sufficient; batch-scoped acquisition.
+- **Gap 5 (sister contract)**: Carried-forward — endpoint signature sketched; bilateral sign at sister draftplan_ stage.
+- **Gap 6 (citation FAILs ack)**: Closed — both FAILs flagged non-load-bearing (sample_fmt empirically verifiable).
+- **Verdict**: PASS → graduate to evaluated_ with Options + Recommendation.
 
 ## Options Considered
 
-Required by `evaluated_`. Per option: sketch ≤3 bullets, pros, cons, S/M/L/XL, risk.
+### Option A — Full shared engine, all scopes & targets, frontend page
+- **Sketch**:
+  - `POST /api/library/format-swap` behind `Depends(require_session)` with `trigger ∈ {user_format_pick, quality_verdict}`, scope ∈ {track-ids, playlist, all-m4a, path}, target ∈ {AIFF, FLAC, WAV, MP3}, dry-run flag, batch-scoped `_db_write_lock` (in-process worker per Gap 4).
+  - Engine: snapshot dir + manifest.json + Rule-6 watchdog + Rule-7 atomic swap + direct `rbox.MasterDb.update_content` (bypasses `update_track_path` per Blocker-3 closure); FFmpeg cmd reused from `app/soundcloud_downloader.py:953` + `scripts/dev/safe_format_swap.py:148`.
+  - Frontend page: scope/format pickers, dry-run preview, progress UI, rollback button, Confirm-Modal (per coding-rules).
+- **Pros**:
+  - Sister `accepted_library-quality-upgrade-finder` unblocks immediately via shared trigger — zero double-implement.
+  - Full Goals coverage (cues/beatgrid/MyTag/history/hot-cue-bank/related-tracks all content_id-keyed, mutate-in-place safe).
+  - One round of snapshot/manifest/rollback hardening serves both features.
+- **Cons**:
+  - Sister-endpoint contract still unsigned at draftplan_ — coupling-bug risk if quality-upgrade-finder ships against drifted body shape (ref *Sister-endpoint contract unsigned* 2026-05-30).
+  - Rollback path validated only on n=1 (Aphex Twin) + forward-only 3041-run — mid-run-abort + manifest-restore drill missing (ref *Rollback untested at scale* 2026-05-30).
+  - n=1 AAC priming empirical extrapolated library-wide; iTunes-Store / Bandcamp HE-AAC sources unprobed (ref *AAC sample size = 1* 2026-05-30).
+  - "Ohne Verlust" tolerance only defined as Phase-1a carry-forward — feature ships with falsifier baked in, not preflighted (ref *"Minimal drift" never measured* 2026-05-30).
+- **Effort**: L
+- **Risk**:
+  - Coupling bug with sister doc until bilateral draftplan_ signature lands.
+  - Phase-1a A/B-fixture fail → scope shrinks from "silent-preserve" to "warn-and-reanalyze" mid-build.
+  - 5x AAC→AIFF expansion + 1.5x disk preflight: thousands-track libraries trigger borderline-disk states; rollback under disk-pressure unproven.
+- **Prior-art match**: `exploring_library-quality-upgrade-finder` (sister delegates engine to this doc); `accepted_downloader-unified-multi-source` (FFmpeg AIFF cmd shape); `exploring_metadata-name-fixer` (snapshot + audit-log + `db_lock()` + `Depends(require_session)` pattern); `idea_db-write-lock-retrofit` (lock contract).
 
-### Option A — <name>
-- Sketch:
-- Pros:
-- Cons:
-- Effort:
-- Risk:
+### Option B — MVP slice: AIFF-only, playlist-scope-only, `user_format_pick` trigger only
+- **Sketch**:
+  - Same shared engine surface (`POST /api/library/format-swap`) but body validation restricts to `target="AIFF"` + `scope.playlist_id=<int>` + `trigger="user_format_pick"`. FLAC/WAV/MP3 and all-m4a/track-ids/path scopes return 400 with feature-flag stub.
+  - Snapshot/manifest/rollback/`_db_write_lock`/watchdog all in. Direct `rbox.MasterDb.update_content` for path write.
+  - Frontend: playlist-only picker + AIFF-fixed label + dry-run + progress + rollback. No format dropdown surface yet.
+- **Pros**:
+  - Ships the headline-proven scenario (3041 m4a→AIFF) without speculating on unprobed paths (MP3-320→AIFF, FLAC bit-depth policy).
+  - Phase-1a A/B + mid-run-abort drill cheaper on a bounded scope; tolerance closure stays in-scope.
+  - Sister doc still blocked — but on a narrow, well-defined surface; bilateral signature easier to design against MVP shape.
+  - Lower coupling-bug blast radius if endpoint body changes between MVP and Option A expansion.
+- **Cons**:
+  - Sister-endpoint contract still requires bilateral signature; deferring full scope doesn't eliminate the coupling risk, only delays it (ref *Sister-endpoint contract unsigned* 2026-05-30).
+  - Rollback drill scope shrinks proportionally — still only proven on small scale (ref *Rollback untested at scale* 2026-05-30).
+  - MyTag/history/hot-cue-bank coverage extension via Gap 2 verified via API + grep, not by transcoding a track that uses them — n=1 risk persists on those tables (ref *MyTag/history/hot-cue-bank coverage gap* 2026-05-30).
+  - User wanted full Scope×Format matrix per Original Idea — MVP is a deliberate scope cut against the verbatim spec.
+- **Effort**: M
+- **Risk**:
+  - Scope-creep pressure post-ship to bolt on FLAC/MP3/WAV without re-running Phase-1a per target codec.
+  - Sister doc's `quality_verdict` trigger remains flag-gated OFF until Option A expansion lands.
+- **Prior-art match**: same as Option A.
 
-### Option B — <name>
-- Sketch:
-- Pros:
-- Cons:
-- Effort:
-- Risk:
+### Option C — Promote `scripts/dev/safe_format_swap.py` as the canonical user tool
+- **Sketch**:
+  - Document the script in `docs/FILE_MAP.md` + repo README; ship a `.bat`/`.ps1` wrapper.
+  - No endpoint, no auth, no frontend page. User runs from PowerShell with Rekordbox closed.
+  - Sister doc's `quality_verdict` trigger pathway stays unbuilt.
+- **Pros**:
+  - Zero new code surface — proven 3041-track artifact becomes the product.
+  - No `_db_write_lock` retrofit needed — script runs single-process, single-user.
+  - No FastAPI/Tauri/React work; ships in hours.
+- **Cons**:
+  - Power-user-only — non-technical end-user can't run a CLI; sister doc requires HTTP endpoint per Phase-3, CLI doesn't satisfy (ref *Sister-endpoint contract unsigned* 2026-05-30).
+  - No `Depends(require_session)` enforcement — script bypasses Bearer-token transport (`docs/SECURITY.md:116-119`); hard architectural violation.
+  - Sister doc `accepted_library-quality-upgrade-finder` permanently broken — no shared engine to delegate (ref *Sister-endpoint contract unsigned* + *MyTag/history coverage gap* 2026-05-30).
+  - "Frontend Page: Scope-Picker, Format-Picker, Dry-Run-Preview, Progress-UI, Rollback-Button" Goal abandoned.
+  - Forward-only proven; per-source AAC variance, mid-run-abort all unfalsified (ref *Rollback untested at scale*, *AAC sample size = 1*, *"Minimal drift" never measured* 2026-05-30).
+- **Effort**: S
+- **Risk**:
+  - Sister feature permanently stranded.
+  - Original Idea's frontend goal abandoned.
+- **Prior-art match**: novel (no precedent in repo for promoting a `scripts/dev/` artifact as the user product).
 
 ## Recommendation
 
-Required by `evaluated_`. ≤80 words. Which option + what blocks commit.
+**Option A.** Sister doc (`accepted_library-quality-upgrade-finder`) already commits to delegating Snapshot+Swap+Migrate via `trigger="quality_verdict"` — Options B/C strand it. Findings answer: OQ1 → 2026-05-30 AAC priming closure; OQ2 → 2026-05-29 sister-delegation; OQ3/OQ4 → 2026-05-30 proof-artefact closure (`safe_format_swap.py` :170, :77-94, :320-325); OQ5 → 2026-05-29 content_id binding + 2026-05-30 Gap 2 schema sweep; OQ6 → 2026-05-29 sample_fmt fallback. **Commit-blockers for Stage 3 `draftplan_`**: (1) bilateral sister-endpoint signature (Gap 5); (2) Phase-1a A/B fixture protocol + ≤2-sample tolerance falsifier (Gap 3); (3) Phase-1b mid-run-abort + manifest-restore chaos drill spec; (4) multi-source AAC sanity matrix (iTunes/Bandcamp/SoundCloud, n≥3).
 
 ---
 
