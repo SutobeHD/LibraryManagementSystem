@@ -63,7 +63,7 @@ _(none)_
 - [accepted_library-quality-upgrade-finder.md](implement/accepted_library-quality-upgrade-finder.md) — Quality auditor (detection-only); Phase-3 swap delegated; GATE C PASSED 2026-05-29 (2026-05-29)
 - [accepted_recommender-rules-baseline.md](implement/accepted_recommender-rules-baseline.md) — Teil 1 ranking baseline; defaults T-10 confirmed (M1 backend / key_first / relative=0.7); GATE C PASSED 2026-05-29 (2026-05-29)
 - [accepted_recommender-similar-tracks.md](implement/accepted_recommender-similar-tracks.md) — LOCAL-ONLY similar-tracks; 4 named slice BLOBs; GATE C PASSED 2026-05-29 (2026-05-29)
-- [accepted_recommender-taste-llm-audio.md](implement/accepted_recommender-taste-llm-audio.md) — Taste-aware recommender (Teil 2); M1 Option-A centroid / M2 embedding-benchmark / M3 LLM-explain; GATE C PASSED 2026-05-29 (agent-delegated); M1 blocked on sister vector + Teil-1 plays (2026-05-29)
+- [inprogress_recommender-taste-llm-audio.md](implement/inprogress_recommender-taste-llm-audio.md) — Taste-aware recommender (Teil 2); M1 Option-A centroid / M2 embedding-benchmark / M3 LLM-explain; **T1 `app/db_taste.py` SHIPPED** (sidecar taste-vector store, 7 tests green); T2+ blocked on sister vector + Teil-1 plays (2026-05-29)
 - [accepted_download-format-setting.md](implement/accepted_download-format-setting.md) — AIFF default + 6-target dropdown (Option A); full plan + Threat Model; GATE C PASSED 2026-05-29 (agent-delegated); load-bearing task = -map_metadata 0 + mutagen art-overlay fix (2026-05-29)
 
 ### inprogress

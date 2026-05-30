@@ -29,6 +29,7 @@
 | `app/batch_worker.py` | Setup logging |
 | `app/config.py` | *(no module docstring)* |
 | `app/database.py` | *(no module docstring)* |
+| `app/db_taste.py` | db_taste — sidecar store for per-user taste vectors (recommender-taste-llm M1, T1). |
 | `app/download_registry.py` | Download Registry — SQLite-based deduplication & analysis history log. |
 | `app/folder_watcher.py` | FolderWatcher — auto-import audio files from user-configured folders. |
 | `app/import_tracker.py` | Per-file import-progress tracker — gives the frontend a live transparent |
@@ -198,6 +199,7 @@
 | `tests/test_analysis.py` | Regression tests for the analysis pipeline. |
 | `tests/test_auth.py` | Tests for ``app/auth.py`` -- Bearer-token session authentication. |
 | `tests/test_database.py` | Tests for `app/database.py`. |
+| `tests/test_db_taste.py` | taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py). |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
 | `tests/test_main_security.py` | Regression tests for ``POST /api/file/reveal`` sandbox. |
 | `tests/test_metadata_fixer_applier.py` | metadata-fixer apply/revert tests (T5 — app/metadata_fixer/applier.py). |

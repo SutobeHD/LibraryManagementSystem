@@ -232,6 +232,16 @@ Setup logging
 - `  RekordboxDB.update_track_comment()`
 - `  RekordboxDB.update_track_path()` — Update the on-disk file path of a track after a rename operation.
 
+### `app/db_taste.py`
+
+db_taste — sidecar store for per-user taste vectors (recommender-taste-llm M1, T1).
+
+- `init_taste_db()` — Create the ``user_taste_vectors`` table if absent.
+- `upsert_taste_vector()` — Atomically write (or overwrite) one taste vector.
+- `get_taste_vector()` — Fetch one stored taste vector, or ``None`` if absent.
+- `list_taste_vectors()` — All stored vectors for a profile (e.g.
+- `delete_profile()` — Drop all vectors for a profile.
+
 ### `app/download_registry.py`
 
 Download Registry — SQLite-based deduplication & analysis history log.
@@ -1675,6 +1685,19 @@ Tests for `app/database.py`.
 - `  TestFilterTracks.test_falls_back_to_location_key()` — Raw XML stores the URL under `Location` rather than `path`.
 - `  TestFilterTracks.test_unknown_scheme_preserved()` — Only the four explicit prefixes are filtered.
 - `  TestFilterTracks.test_unknown_input_type_passed_through()` — If the caller hands a non-dict / non-list we just return it.
+
+### `tests/test_db_taste.py`
+
+taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py).
+
+- `fresh_db()` — Point db_taste at a throwaway DB file.
+- `test_init_is_idempotent()`
+- `test_upsert_round_trip()`
+- `test_insert_or_replace_overwrites_in_place()`
+- `test_get_unknown_returns_none()`
+- `test_invalid_kind_rejected()`
+- `test_empty_profile_id_rejected()`
+- `test_list_and_delete_profile()`
 
 ### `tests/test_logging_redaction.py`
 
