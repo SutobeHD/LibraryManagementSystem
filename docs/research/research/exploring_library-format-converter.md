@@ -20,6 +20,8 @@ related: []
 - 2026-05-28 — `research/drafting_` — advanced for research-draft routine
 - 2026-05-28 — `research/ideagate_` — drafted (scout+prior-art+risk-surface+worker+verifier PASS), awaiting GATE A
 - 2026-05-29 — `research/exploring_` — GATE A PASSED by user; Merge-Architektur committed (quality-upgrade als `trigger="quality_verdict"` Variante) + 6 OQs technisch beantwortet; advanced for Stage 2 wave-2 verifier
+- 2026-05-29 — `research/midgate_` — Stage 2 wave 1 (3 agents: proof-script check, content_id+sister-merge, web AAC-priming+bit-depth). 3 "RESOLVED" OQs OVERTURNED: proof script `safe_format_swap.py` absent from repo; AAC priming default-TRIMMED by ffmpeg (~48ms beatgrid risk); `update_track_path` can't change filename in live mode. OQ2/OQ5 confirmed. Awaiting GATE B (recommend reject-to-wave-2 with 3-item brief).
+- 2026-05-29 — `research/exploring_` — GATE B handled by agent (gate authority delegated). PASS-to-wave-2 with 3 BLOCKING items (proof artifact, AAC-priming beatgrid A/B, extension-changing path write). Research verifier may NOT graduate to `evaluated_` until all 3 close. Advanced for wave 2.
 
 ## Original Idea (verbatim — never edit)
 
@@ -124,17 +126,46 @@ Dated subsections, append-only. ≤80 words each. Never edit past entries — su
 ### YYYY-MM-DD — <label>
 - …
 
+### 2026-05-29 — Proof artifact ABSENT from repo (wave 1, blocking)
+- `scripts/dev/safe_format_swap.py` does **not exist**. `scripts/dev/` dir absent; `git log --all -S safe_format_swap` → only doc commits, never code. All line cites resting on it (Constraints:70 `update_content` "line 311", :73 watchdog "77-94", OQ3 600s timeout, OQ4 disk thresholds, snapshot/rollback) are **unverifiable** — design intent, not proven code. The Original-Idea "erprobt 3041 Tracks" claim has no in-repo backing (user may hold it locally/uncommitted).
+- Real reusable artifact = `app/soundcloud_downloader.py:953` `_convert_to_aiff` (pcm_s16le only, `-vn` drops art, timeout `_DOWNLOAD_TIMEOUT`, deletes original — NO snapshot/rollback/lock).
+- **Confidence:** high (filesystem + git verified).
+
+### 2026-05-29 — content_id binding VERIFIED + path-write gap (OQ5, wave 1)
+- Cues bind by `content_id`: `live_database.py:241-244` groups `db.get_cues()` by `cue.content_id`; saves via `save_track_cues(track_id,...)` `main.py:1114-1116`, beatgrid `main.py:1119-1121`. Beatgrid load resolves ANLZ per content_id `anlz_safe.py:170`. No hash/mtime/size keying anywhere (grep empty). rbox USBANLZ dir = md5 of content_id string (`analysis_db_writer.py:25-38`), not file-derived.
+- **GAP:** `update_track_path` (`database.py:1030-1069`) returns False in live mode ("use Rekordbox Relocate") — cannot persist a changed FolderPath/FileName. Same-path in-place blob swap is fine, but a **format change alters the extension** (.m4a→.flac) → needs a path write the current code can't do. The converter's swap engine must solve this (rbox direct, or in-place same-name not possible across formats).
+- **Confidence:** high.
+
+### 2026-05-29 — AAC priming claim OVERTURNED (OQ1, wave 1)
+- **Web:** 2112 priming samples ≈ 48ms@44.1k confirmed ([Apple TN2258](https://developer.apple.com/library/archive/technotes/tn2258/_index.html)). But FFmpeg **trims** encoder delay by default for container AAC (MP4/MOV) via edit-list / iTunSMPB ([FFmpeg-devel "mov/aac skip initial aac padding"](https://ffmpeg.org/pipermail/ffmpeg-devel/2012-July/127834.html), [Mozilla 1321249](https://bugzilla.mozilla.org/show_bug.cgi?id=1321249)). Raw `.aac/.adts` carry no priming info → not trimmed.
+- **Synthesis:** OQ1's "ffmpeg default preserves priming, no extra flag" is **wrong** for the .m4a→AIFF case (the headline 3041-track scenario). Default trim → ~48ms beatgrid shift vs a decoder that keeps priming. Must force-preserve (`-flags2 +skip_manual`) AND empirically verify Rekordbox's own AAC decode (does RB trim or keep?). Beatgrid-preservation — the feature's core promise — is NOT yet proven.
+- **Confidence:** medium-high (FFmpeg behavior cited; Rekordbox decode side still needs empirical A/B).
+
+### 2026-05-29 — OQ2 shared engine + OQ6 bit-depth (wave 1)
+- **OQ2 CONFIRMED no conflict:** sister `accepted_library-quality-upgrade-finder.md` explicitly delegates — "NO Snapshot+Swap+Migrate code lives here; all Rules 4/6/7 enforced by converter" (sister:620,622,690); calls `POST /api/quality/swap/request` → `{trigger:"quality_verdict",...}` (sister:636,723,759), flag-gated OFF until converter `inprogress_`. This doc owns the engine + `db_lock()`.
+- **OQ6 bit-depth:** use ffprobe `sample_fmt` as primary (`s16`→pcm_s16le, `s24/s32`→pcm_s24le); `bits_per_raw_sample` often N/A for PCM ([ffprobe docs](https://ffmpeg.org/ffprobe.html), [ffmpeg-user 2020-08](https://lists.ffmpeg.org/pipermail/ffmpeg-user/2020-August/049523.html)). Doc's `bits_per_raw_sample`-only plan is fragile — add sample_fmt fallback.
+- **Confidence:** high (OQ2 codebase), medium (OQ6 web, ffprobe.html 403'd on fetch).
+
 ## Mid-Research Checkpoint
 
 GATE B. `research-explore` fills Status after wave 1. User fills Verdict via `/gate-pass` or `/gate-reject`.
 
-### Status — YYYY-MM-DD (routine)
-- Covered: …
-- Still open: …
-- Direction: …
+### Status — 2026-05-29 (routine, wave 1)
+- **Covered:** OQ2 (shared engine — confirmed, sister doc delegates), OQ5 (content_id binding — verified), OQ6 (bit-depth — add sample_fmt). 3 codebase + web agents.
+- **Still open / OVERTURNED (needs GATE-B attention before wave 2):**
+  1. **Proof artifact missing.** `scripts/dev/safe_format_swap.py` not in repo — the "3041-track erprobt" claim + OQ3/OQ4 empirical numbers + watchdog/snapshot/rollback line-cites have no in-repo backing. Either user commits the script, or these are re-derived from scratch.
+  2. **AAC priming (OQ1) wrong.** FFmpeg default *trims* m4a encoder delay; the headline m4a→AIFF path risks a ~48ms beatgrid shift. Needs `-flags2 +skip_manual` + empirical Rekordbox-decode A/B. Beatgrid preservation NOT yet proven.
+  3. **Path-write gap.** `update_track_path` can't persist a changed FolderPath/FileName in live mode (`database.py:1030-1069`); format change alters extension → swap engine must solve the rbox path write.
+- **Direction:** wave 2 must (a) get/recreate the proof script or re-run the empirical timeout/disk/priming tests, (b) resolve the AAC-priming + Rekordbox-decode A/B with a real fixture, (c) spec the extension-changing path write. Recommend GATE-B reject-to-wave-2 with these 3 as the wave-2 brief, OR user supplies the local script.
+- **Adversarial concerns surfaced:** core promise (lossless transcode preserving beatgrid/cues) hinges on the unverified priming behavior + an absent proof script — the riskiest assumptions are the least substantiated. Full adversarial pass deferred to wave 2.
 
-### Verdict — YYYY-MM-DD (user)
-- _(empty until GATE B)_
+### Verdict — 2026-05-29 (agent, gate authority delegated by user)
+- **PASS-to-wave-2 with mandatory 3-item brief.** Not a clean pass: wave 1 overturned 3 prior "RESOLVED" OQs. Advancing to wave 2 (`exploring_`), NOT to `evaluated_`. Research verifier may NOT graduate to `evaluated_` until all 3 resolved.
+- **Wave-2 brief (blocking — each must close before `evaluated_`):**
+  1. **Proof artifact.** `scripts/dev/safe_format_swap.py` absent from repo. Either user commits the local script, OR wave 2 re-derives OQ3 (timeout) + OQ4 (disk) + watchdog/snapshot/rollback from scratch with real numbers. No design cite may rest on the missing file.
+  2. **AAC priming (OQ1) — THE core-promise blocker.** FFmpeg trims m4a encoder delay by default → ~48ms beatgrid shift risk. Wave 2 MUST run a real fixture A/B: encode AAC → transcode AIFF with/without `-flags2 +skip_manual`, measure onset offset, AND determine whether Rekordbox's own AAC decode trims or keeps priming. Beatgrid preservation stays UNPROVEN until this closes. If it can't be made lossless, the feature's scope shrinks (warn-and-reanalyze, not silent-preserve).
+  3. **Path-write gap.** `update_track_path` returns False in live mode (`database.py:1030-1069`); format change alters extension → spec the rbox-direct FolderPath/FileName/FileSize write that mutates the row in place (never delete+readd — would orphan beatgrid per OQ5).
+- **Rationale for not blind-passing:** core promise (lossless transcode preserving beatgrid/cues) hinges on the least-substantiated assumptions. Passing to `evaluated_` now would let a plan get written on a ~48ms-corruption foundation. Gate authority used to keep the pipeline moving (→ wave 2) while gating the real risk.
 
 ---
 

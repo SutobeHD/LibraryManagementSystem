@@ -26,6 +26,7 @@ related: []
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
 - 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: stay `exploring_` — 4 gaps + hard prereq `ideagate_security-mobile-paired-tokens-phase2` GATE A pending
 - 2026-05-29 — `research/exploring_` — partial wave-2 close-out: CORS Constraints paragraph rewritten to reflect shipped `allow_credentials=False` + explicit method/header lists (was incorrectly asserting wildcards + True). Hard prereq `ideagate_security-mobile-paired-tokens-phase2` GATE A still pending → STAYS exploring_ until user passes that gate
+- 2026-05-29 — `research/exploring_` — wave-2 GAPS narrowed: Constraints line 63 actually corrected (CORS `allow_credentials=False`, refs `:238-251`); 3/3 stale `app/main.py` citations refreshed (`:1124`/`:1073`/`:238-251`) + re-verified PASS; Phase-2 prereq now PASSED GATE A (exploring_), but its CODE is still 0 LoC. Remaining blocker = OQ14 + OQ7 user sign-off only. STAYS exploring_ (user-gated)
 
 ---
 
@@ -60,7 +61,7 @@ A **soft / thin mobile version** of the desktop app, **mainly focused on Ranking
 
 > External facts that bound the solution space — API rate limits, existing data shape, performance budgets, legal/licensing, team capacity. Cite source where possible.
 
-- **CORS allowlist is localhost-only** (`app/main.py:209-224`, re-verified 2026-05-17 post-Phase-1): `http://localhost:1420`, `127.0.0.1:1420`, `localhost:5173`, `127.0.0.1:5173`, `localhost:8000`, `127.0.0.1:8000`, `tauri://localhost`, `https://tauri.localhost`. `allow_credentials=True`, `allow_methods=["*"]`, `allow_headers=["*"]`. **Any mobile origin (`http://192.168.x.y:5173`, `https://<tailscale-name>.ts.net`, `https://<slug>.trycloudflare.com`) is rejected.** Must extend allowlist env-driven (`MOBILE_ALLOWED_ORIGINS` env list, comma-split — grep `MOBILE_ALLOWED_ORIGINS` across repo: 0 hits today, the env var is doc-only). **CORS ≠ auth** — non-browser callers (curl, native mobile, Python) bypass CORS entirely; per `draftplan_security-api-auth-hardening.md` Findings §2 the comment on line 208 (`# --- SECURITY: CORS locked to localhost only ---`) is misleading and the threat model relies on the loopback bind + bearer-token gate, not CORS.
+- **CORS allowlist is localhost-only** (`app/main.py:238-251`, re-verified 2026-05-29): origins `http://localhost:1420`, `127.0.0.1:1420`, `localhost:5173`, `127.0.0.1:5173`, `localhost:8000`, `127.0.0.1:8000`, `tauri://localhost`, `https://tauri.localhost`. **Post-Phase-B baseline (shipped 2026-05-19):** `allow_credentials=False` (`:249`), `allow_methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"]` (`:250`), `allow_headers=["Content-Type","X-Session-Token","Authorization"]` (`:251`) — explicit lists, NOT wildcards. **Any mobile origin (`http://192.168.x.y:5173`, `https://<tailscale-name>.ts.net`, `https://<slug>.trycloudflare.com`) is rejected.** Must extend allowlist env-driven (`MOBILE_ALLOWED_ORIGINS` env list, comma-split — grep `MOBILE_ALLOWED_ORIGINS` across repo: 0 hits today, the env var is doc-only); the env-extension MUST keep `allow_credentials=False` (no cookie auth — bearer only). **CORS ≠ auth** — non-browser callers (curl, native mobile, Python) bypass CORS entirely; the threat model relies on the loopback bind + bearer-token gate, not CORS. _(Corrected 2026-05-29: earlier text asserted `allow_credentials=True` + `["*"]` wildcards + ref `:209-224` — all stale pre-Phase-B.)_
 - **Frontend axios baseURL** = `import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'` in Tauri runtime, empty string (Vite-proxied) in browser-dev (`frontend/src/api/api.js:14-19`). Mobile build needs the host's LAN IP or tunnel hostname injected at runtime (mobile can't know LAN IP at compile time). Re-use the same `VITE_API_BASE_URL` hook; build-time env in `frontend/.env.local` or runtime-injected via a `<meta>` tag the mobile entry reads pre-bootstrap.
 - **Auth gate — Phase-1 backend + frontend FULLY LANDED (2026-05-17), Phase-2 paired-device tokens still 0 LoC.** Re-verified vs commits `6021acf..f90f5f8`:
   - **Landed backend (commits `6021acf..1c7d410..7dfdef5..8498937`):** `app/auth.py` (Bearer-parsing `require_session` dep + `SESSION_TOKEN` self-gen at import + `LMS_TOKEN=<value>` stdout banner + `%APPDATA%/MusicLibraryManager/.session-token` write via `platformdirs==4.2.2`); `app/security_compare.py:safe_compare` (constant-time comparator); bulk `dependencies=[Depends(require_session)]` decoration on **80+ POST/PUT/PATCH/DELETE routes** in `app/main.py` (grep `require_session` → 81 hits — `app.main:33` import + 80 route decorations); `SHUTDOWN_TOKEN` query-param scheme deleted from `/api/system/shutdown` + `/api/system/restart` (now Bearer-gated, `app/main.py:2060,2066`); heartbeat token-leak field removed (`app/main.py:929-940`).
@@ -483,7 +484,7 @@ describe('mobile axios bearer-attach', () => {
 |---|---|---|---|
 | Phone → home-router (2.4 GHz Wi-Fi) | 5 ms | 12 ms | LAN ping baseline |
 | Router → desktop loopback | 2 ms | 4 ms | LAN ping baseline |
-| FastAPI route dispatch + Pydantic parse | 3 ms | 7 ms | `app/main.py:892` (`update_track`) |
+| FastAPI route dispatch + Pydantic parse | 3 ms | 7 ms | `app/main.py:1124` (`update_track`, `POST /api/track/{tid}`) |
 | `_db_write_lock` acquisition (uncontended) | < 1 ms | 2 ms | `app/database.py:22` RLock |
 | `_db_write_lock` acquisition (contested w/ desktop save) | 10 ms | 150 ms | one SQLite commit serial wait |
 | `db.update_tracks_metadata` SQLite write (no contention) | 50 ms | 120 ms | typical `master.db` of ~10k tracks |
@@ -530,6 +531,14 @@ No code support, no embed. Tailnet-DNS-only (no custom domain on free tier). Fun
 
 Verdict: 5/8 PASS, 3/8 FAIL — all failures are file-grew drift in `app/main.py`. Fix: doc-wide search-and-replace of `app/main.py:<oldline>` against today's grep before `evaluated_`.
 
+### 2026-05-29 — re-verify after refresh
+
+- `app/main.py:1124 POST /api/track/{tid}` (`update_track`) — **PASS** (grep-confirmed; Perf-budget row + line 63/486/612 refs updated).
+- `app/main.py:1073 POST /api/mytags` — **PASS** (grep-confirmed).
+- `app/main.py:238-251 CORS` — **PASS**. `allow_credentials=False` (`:249`), explicit method list (`:250`), explicit header list (`:251`). Constraints paragraph (line 63) corrected to match; stale `:209-224` / `True` / `["*"]` assertions removed.
+- `Depends(require_session)` count now **84** (was 80 at 2026-05-17 Recommendation) — grep `grep -c 'Depends(require_session)' app/main.py`.
+- Verdict: 3/3 previously-FAIL citations now PASS. No remaining stale `app/main.py` refs in the doc.
+
 ## Mid-Research Checkpoint
 
 ### Status — 2026-05-28 (routine wave-1)
@@ -551,6 +560,14 @@ Verdict: 5/8 PASS, 3/8 FAIL — all failures are file-grew drift in `app/main.py
   4. Hard prereq `ideagate_security-mobile-paired-tokens-phase2` GATE A pending (NOT passed). Mobile stays blocked at code level until Phase-2 ships.
 
 Recommendation: stay `exploring_` until (a) line-ref refresh, (b) CORS paragraph correction, (c) OQ14 + OQ7 user sign-off, (d) Phase-2 prereq advances past GATE A.
+
+### 2026-05-29 — GAPS (narrowed)
+
+- **(a) line-ref refresh DONE** — Citation Quality 2026-05-29 re-verify: 3/3 previously-FAIL `app/main.py` refs now PASS (`:1124`, `:1073`, `:238-251`); no stale refs remain.
+- **(b) CORS paragraph corrected DONE** — Constraints line 63 now matches shipped Phase-B (`allow_credentials=False`, explicit lists, ref `:238-251`).
+- **(d) Phase-2 prereq advanced** — `security-mobile-paired-tokens-phase2` PASSED GATE A 2026-05-29, now `exploring_` (was `ideagate_`). Design surface unblocked. **Code still 0 LoC in `app/`** (`app/pairing.py` / `paired_devices` absent) — Pre-M1 gate still requires Phase-2 *implementation*, not just design sign-off.
+- **REMAINING GAP — user-only (blocks `evaluated_`):** (c) OQ14 (60s pairing-QR TTL sign-off) + OQ7 (text-only M1 vs cover-thumb M1.3) need user decision per the author's own Recommendation. These are not routine-resolvable.
+- Verdict: **GAPS narrowed to user sign-off**. 3 of 4 blockers cleared. Doc stays `exploring_` pending OQ14 + OQ7 user decision; Phase-2 *code* remains the hard runtime prereq regardless.
 
 ## Options Considered
 
@@ -609,7 +626,7 @@ Recommendation: stay `exploring_` until (a) line-ref refresh, (b) CORS paragraph
 **Hard prerequisites** (status 2026-05-17 post-Phase-1 landing):
 1. ~~`draftplan_security-api-auth-hardening.md` **Phase-1** — `require_session` Bearer on every `POST`/`PUT`/`PATCH`/`DELETE`.~~ **DONE.** Commits `6021acf..1c7d410..7dfdef5..d12ad1a..f90f5f8..8498937`. `app/main.py` has 80 `Depends(require_session)` route decorations; frontend axios attaches `Authorization: Bearer …`; Tauri Rust supervisor captures + scrubs `LMS_TOKEN=` from sidecar stdout. Anonymous-write hole on LAN CLOSED — `curl -X POST http://127.0.0.1:8000/api/track/{tid}` returns 401 today.
 2. **Phase-2** — paired-device tokens. Sidecar-local SQLite `paired_devices` table (NOT `master.db` per security-doc Option B), `POST /api/pairing/start`, `POST /api/pairing/complete`, `DELETE /api/pairing/{device_id}` revoke. Phase-1's `SESSION_TOKEN` is single-host (one secret per sidecar process; rotates on restart; revokes every client on regeneration) and CANNOT be handed to a phone. **Status 2026-05-17: 0 LoC in `app/`, entire phase ahead.** Blocks mobile.
-3. CORS allowlist env-driven (`MOBILE_ALLOWED_ORIGINS`, comma-split) per OQ12 — TRIGGER-PARKED to draftplan kickoff; ~5 LoC patch to `app/main.py:209-224`, landed alongside Phase-2 frontend wiring.
+3. CORS allowlist env-driven (`MOBILE_ALLOWED_ORIGINS`, comma-split) per OQ12 — TRIGGER-PARKED to draftplan kickoff; ~5 LoC patch to `app/main.py:238-251` (keep `allow_credentials=False`), landed alongside Phase-2 frontend wiring.
 4. (Optional, defensive) Rate-limit decorator from WIP `app/rate_limit.py` (commit `830c056`) applied to `POST /api/pairing/complete` to throttle brute-force pairing-token guesses (defensive vs the already-256-bit-entropic token). Out of mobile-side scope.
 
 **Phased delivery + gates** (mirrors Findings #3 matrix):

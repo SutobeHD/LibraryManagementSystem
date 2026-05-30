@@ -23,17 +23,13 @@ _(none)_
 _(none)_
 
 ### exploring
-- [exploring_db-write-lock-retrofit.md](research/exploring_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps; Option B (auto-wrap) committed; GATE A PASSED 2026-05-29 (2026-05-29)
-- [exploring_download-format-setting.md](research/exploring_download-format-setting.md) — AIFF default + 6-Option-Dropdown; GATE A PASSED 2026-05-29 (2026-05-29)
-- [exploring_library-format-converter.md](research/exploring_library-format-converter.md) — Audio-Format-Konverter + merged Snapshot+Swap+Migrate engine; 6 OQs technisch beantwortet; GATE A PASSED 2026-05-29 (2026-05-29)
-- [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); CORS rewritten; Phase-2 hard-prereq now UNBLOCKED (2026-05-29)
-- [exploring_security-mobile-paired-tokens-phase2.md](research/exploring_security-mobile-paired-tokens-phase2.md) — Per-device QR-pairing + sidecar `auth.db`; GATE A PASSED 2026-05-29 (2026-05-29)
+- [exploring_db-write-lock-retrofit.md](research/exploring_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps; Option B (auto-wrap) committed; wave-2 verify → GAPS (3rd gap: `AnalysisDBWriter` rbox-direct write uncovered by class decorator; circular drift guard); stays exploring_ (2026-05-29)
+- [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); wave-2 GAPS narrowed (CORS para corrected, 3/3 stale main.py refs refreshed+PASS, Phase-2 prereq now past GATE A); remaining blocker = OQ14+OQ7 user sign-off only; stays exploring_ (2026-05-29)
 ### midgate ⛔ GATE B
-_(none)_
+- [exploring_library-format-converter.md](research/exploring_library-format-converter.md) — Library-wide format converter; **GATE B PASSED-to-wave-2 (agent, delegated)** with 3 BLOCKING items (proof artifact, AAC-priming beatgrid A/B, extension-changing path write); verifier may NOT graduate to evaluated_ until all 3 close (2026-05-29)
 
 ### evaluated
-- [evaluated_metadata-name-fixer.md](research/evaluated_metadata-name-fixer.md) — GATE B PASSED 2026-05-29 (re-attempt after line-ref refresh) (2026-05-29)
-- [evaluated_recommender-taste-llm-audio.md](research/evaluated_recommender-taste-llm-audio.md) — GATE B PASSED 2026-05-29 (re-attempt after cache invalidation resolved) (2026-05-29)
+_(none)_
 
 ### parked
 _(none)_
@@ -67,9 +63,12 @@ _(none)_
 - [accepted_library-quality-upgrade-finder.md](implement/accepted_library-quality-upgrade-finder.md) — Quality auditor (detection-only); Phase-3 swap delegated; GATE C PASSED 2026-05-29 (2026-05-29)
 - [accepted_recommender-rules-baseline.md](implement/accepted_recommender-rules-baseline.md) — Teil 1 ranking baseline; defaults T-10 confirmed (M1 backend / key_first / relative=0.7); GATE C PASSED 2026-05-29 (2026-05-29)
 - [accepted_recommender-similar-tracks.md](implement/accepted_recommender-similar-tracks.md) — LOCAL-ONLY similar-tracks; 4 named slice BLOBs; GATE C PASSED 2026-05-29 (2026-05-29)
+- [accepted_recommender-taste-llm-audio.md](implement/accepted_recommender-taste-llm-audio.md) — Taste-aware recommender (Teil 2); M1 Option-A centroid / M2 embedding-benchmark / M3 LLM-explain; GATE C PASSED 2026-05-29 (agent-delegated); M1 blocked on sister vector + Teil-1 plays (2026-05-29)
+- [accepted_download-format-setting.md](implement/accepted_download-format-setting.md) — AIFF default + 6-target dropdown (Option A); full plan + Threat Model; GATE C PASSED 2026-05-29 (agent-delegated); load-bearing task = -map_metadata 0 + mutagen art-overlay fix (2026-05-29)
 
 ### inprogress
-_(none)_
+- [inprogress_metadata-name-fixer.md](implement/inprogress_metadata-name-fixer.md) — Artist/title normaliser; **T1 M0 detector SHIPPED** (`app/metadata_fixer/detector.py`, 12 tests green, ruff clean); T2–T10 `[ ]` for `research-implement` routine (2026-05-29)
+- [inprogress_security-mobile-paired-tokens-phase2.md](implement/inprogress_security-mobile-paired-tokens-phase2.md) — Per-device QR pairing (Option A); **T1 `app/auth_db.py` SHIPPED** (hashed-at-rest, throttled last_seen, 10 tests green); T2–T7 `[ ]` for `research-implement` routine (2026-05-29)
 
 ### blocked
 _(none)_
