@@ -2,6 +2,9 @@
 .env
 .env.local
 .env.*.local
+# Local-only dev-script run artefacts (manifests, master.db backups, ffmpeg logs).
+# scripts/dev/safe_format_swap.py writes here at runtime; not for version control.
+scripts/dev/backups/
 # Generic settings.json — used by some legacy local tooling. Negate the .claude/
 # settings.json explicitly so the committed agent config isn't accidentally swallowed.
 /settings.json
