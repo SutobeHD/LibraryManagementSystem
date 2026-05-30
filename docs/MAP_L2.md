@@ -639,6 +639,18 @@ playcount_sync.py — USB Play-Count Sync Engine
 - `resolve_playcounts()` — Commit resolved play counts to both the PC Rekordbox DB and the USB XML.
 - `read_usb_xml_playcounts()` — Parse a Rekordbox-format XML file on the USB drive and return play-count data.
 
+### `app/popularity_engine.py`
+
+Popularity sidecar engine — SoundCloud-only at M1 (underground-mainstream T1-T3).
+
+- `PopularityStore` — Per-track per-platform popularity sidecar.
+- `  PopularityStore.schema_version()` — Stored schema version (0 if unstamped — should not happen post-init).
+- `  PopularityStore.upsert()` — Insert or replace one (track_id, platform) popularity row.
+- `  PopularityStore.get()` — Fetch one row, or ``None``.
+- `  PopularityStore.get_all()` — All platform rows for a track (the per-track breakdown panel).
+- `  PopularityStore.get_stale()` — Rows whose ``fetched_at`` is older than ``ttl_seconds`` (refresh queue).
+- `  PopularityStore.delete()` — Drop one platform row (or all rows for a track).
+
 ### `app/rate_limit.py`
 
 In-process token-bucket rate limiter for the FastAPI sidecar.
@@ -1814,6 +1826,22 @@ PDB writer structural test against F: drive Pioneer reference.
 
 - `make_synthetic_input()` — Mimic the data shape that OneLibraryUsbWriter._write_pdb_from_db
 - `main()`
+
+### `tests/test_popularity_engine.py`
+
+PopularityStore tests (underground-mainstream-classifier T1-T3).
+
+- `store()`
+- `test_init_creates_tables_and_stamps_version()`
+- `test_reopen_is_idempotent()`
+- `test_upsert_and_get_round_trip()`
+- `test_upsert_replaces_in_place()`
+- `test_get_all_multiple_platforms()`
+- `test_get_unknown_returns_none()`
+- `test_get_stale_filters_by_ttl()`
+- `test_delete_one_platform_and_whole_track()`
+- `test_upsert_validates_empty_keys()`
+- `test_migrate_runs_from_old_version()`
 
 ### `tests/test_rate_limit.py`
 

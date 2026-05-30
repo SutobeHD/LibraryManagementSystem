@@ -44,6 +44,7 @@
 | `app/pairing_store.py` | pairing_store — in-memory one-shot pairing codes (Phase-2 auth, T2). |
 | `app/phrase_generator.py` | phrase_generator.py — Phrase & Auto-Cue Generator |
 | `app/playcount_sync.py` | playcount_sync.py — USB Play-Count Sync Engine |
+| `app/popularity_engine.py` | Popularity sidecar engine — SoundCloud-only at M1 (underground-mainstream T1-T3). |
 | `app/rate_limit.py` | In-process token-bucket rate limiter for the FastAPI sidecar. |
 | `app/rbep_parser.py` | RBEP Parser — Parses Rekordbox Editor Project (.rbep) files. |
 | `app/rekordbox_bridge.py` | *(no module docstring)* |
@@ -209,6 +210,7 @@
 | `tests/test_pairing.py` | Phase-2 paired-token store tests (T1 — app/auth_db.py). |
 | `tests/test_pairing_store.py` | Phase-2 pairing-code store tests (T2 — app/pairing_store.py). |
 | `tests/test_pdb_structure.py` | PDB writer structural test against F: drive Pioneer reference. |
+| `tests/test_popularity_engine.py` | PopularityStore tests (underground-mainstream-classifier T1-T3). |
 | `tests/test_rate_limit.py` | Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter. |
 | `tests/test_require_session.py` | Phase-2 require_session dual-acceptance tests (T3 — app/auth.py). |
 | `tests/test_security_compare.py` | Tests for ``app/security_compare.py::safe_compare``. |
