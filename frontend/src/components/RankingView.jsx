@@ -263,12 +263,12 @@ const RankingView = ({ libraryStatus, appMode }) => {
                 <div className="w-80 bg-mx-shell/50 border-r border-white/5 flex flex-col backdrop-blur-md">
                     <div className="p-4 border-b border-white/5">
                         <h2 className="text-ink-muted font-bold uppercase text-[10px] mb-4 tracking-widest">Select Source</h2>
-                        <div className="flex bg-black/40 p-1 rounded-lg border border-white/5 mb-4">
+                        <div className="flex bg-mx-input border border-line-subtle rounded-mx-sm overflow-hidden mb-4">
                             {['playlist', 'artist', 'label', 'album'].map(mode => (
                                 <button
                                     key={mode}
                                     onClick={() => setSourceMode(mode)}
-                                    className={`flex-1 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all ${sourceMode === mode ? 'bg-amber2 text-white shadow-lg' : 'text-ink-muted hover:text-ink-primary'}`}
+                                    className={`flex-1 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-colors border-r border-line-subtle last:border-r-0 ${sourceMode === mode ? 'bg-amber2/15 text-amber2' : 'text-ink-muted hover:text-ink-primary hover:bg-mx-hover'}`}
                                 >
                                     {mode.charAt(0).toUpperCase() + mode.slice(1)}
                                 </button>
@@ -321,11 +321,11 @@ const RankingView = ({ libraryStatus, appMode }) => {
     return (
         <div className="h-full flex flex-col bg-transparent overflow-hidden relative">
             <div className="absolute top-0 w-full h-1 bg-mx-card">
-                <div className="h-full bg-amber2 transition-all duration-300 shadow-[0_0_10px_#06b6d4]" style={{ width: `${((currentIndex + 1) / queue.length) * 100}%` }}></div>
+                <div className="h-full bg-amber2 transition-all duration-300 shadow-[0_0_10px_rgba(232,164,42,0.5)]" style={{ width: `${((currentIndex + 1) / queue.length) * 100}%` }}></div>
             </div>
 
             <div className="bg-mx-shell/80 p-4 border-b border-white/5 flex justify-between items-center shrink-0 z-10 backdrop-blur-md">
-                <h2 className="text-xl font-bold flex items-center gap-2 text-white"><Zap className="text-yellow-400" size={20} /> {selectedPlaylist.Name}</h2>
+                <h2 className="text-xl font-bold flex items-center gap-2 text-white"><Zap className="text-amber2" size={20} /> {selectedPlaylist.Name}</h2>
                 <div className="flex items-center gap-4">
                     <div className="text-ink-secondary text-sm font-mono bg-black/20 px-3 py-1 rounded-full border border-white/5">Track {currentIndex + 1} / {queue.length}</div>
                     <button onClick={() => setSelectedPlaylist(null)} className="text-xs text-amber2 hover:text-white uppercase font-bold tracking-widest hover:underline border border-amber2/30 px-3 py-1 rounded-full hover:bg-amber2/10 transition-colors">Exit Full Screen</button>
@@ -489,7 +489,7 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                                                         }
                                                                     }}
                                                                     className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all ${isActive
-                                                                        ? 'bg-amber2/20 border-amber2 text-amber2 shadow-[0_0_10px_rgba(6,182,212,0.2)]'
+                                                                        ? 'bg-amber2/20 border-amber2 text-amber2 shadow-[0_0_10px_rgba(232,164,42,0.2)]'
                                                                         : 'bg-black/20 border-white/5 text-ink-muted hover:border-white/20 hover:text-ink-primary'
                                                                         }`}
                                                                 >
@@ -566,7 +566,7 @@ const RankingView = ({ libraryStatus, appMode }) => {
                         <div className="mt-8 flex justify-center items-center pb-8">
                             <button
                                 onClick={saveAndNext}
-                                className="group relative px-16 py-6 bg-amber2 hover:bg-amber2 rounded-2xl font-black text-2xl uppercase tracking-widest text-black shadow-[0_0_40px_rgba(6,182,212,0.4)] hover:shadow-[0_0_60px_rgba(6,182,212,0.6)] transform transition-all hover:-translate-y-1 hover:scale-105 active:scale-95 flex items-center gap-4"
+                                className="group relative px-16 py-6 bg-amber2 hover:bg-amber2-hover rounded-2xl font-black text-2xl uppercase tracking-widest text-black shadow-[0_0_40px_rgba(232,164,42,0.4)] hover:shadow-[0_0_60px_rgba(232,164,42,0.6)] transform transition-all hover:-translate-y-1 hover:scale-105 active:scale-95 flex items-center gap-4"
                             >
                                 <span className="relative z-10">Save & Next</span>
                                 <ArrowRight size={32} className="relative z-10 group-hover:translate-x-2 transition-transform" />
