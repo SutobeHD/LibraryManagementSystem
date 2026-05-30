@@ -21,6 +21,7 @@ related: []
 - 2026-05-28 — `research/ideagate_` — drafted (scout+prior-art+risk-surface+worker+verifier PASS), awaiting GATE A
 - 2026-05-29 — `research/exploring_` — GATE A PASSED by user; Merge-Architektur committed (quality-upgrade als `trigger="quality_verdict"` Variante) + 6 OQs technisch beantwortet; advanced for Stage 2 wave-2 verifier
 - 2026-05-29 — `research/midgate_` — Stage 2 wave 1 (3 agents: proof-script check, content_id+sister-merge, web AAC-priming+bit-depth). 3 "RESOLVED" OQs OVERTURNED: proof script `safe_format_swap.py` absent from repo; AAC priming default-TRIMMED by ffmpeg (~48ms beatgrid risk); `update_track_path` can't change filename in live mode. OQ2/OQ5 confirmed. Awaiting GATE B (recommend reject-to-wave-2 with 3-item brief).
+- 2026-05-29 — `research/exploring_` — GATE B handled by agent (gate authority delegated). PASS-to-wave-2 with 3 BLOCKING items (proof artifact, AAC-priming beatgrid A/B, extension-changing path write). Research verifier may NOT graduate to `evaluated_` until all 3 close. Advanced for wave 2.
 
 ## Original Idea (verbatim — never edit)
 
@@ -158,8 +159,13 @@ GATE B. `research-explore` fills Status after wave 1. User fills Verdict via `/g
 - **Direction:** wave 2 must (a) get/recreate the proof script or re-run the empirical timeout/disk/priming tests, (b) resolve the AAC-priming + Rekordbox-decode A/B with a real fixture, (c) spec the extension-changing path write. Recommend GATE-B reject-to-wave-2 with these 3 as the wave-2 brief, OR user supplies the local script.
 - **Adversarial concerns surfaced:** core promise (lossless transcode preserving beatgrid/cues) hinges on the unverified priming behavior + an absent proof script — the riskiest assumptions are the least substantiated. Full adversarial pass deferred to wave 2.
 
-### Verdict — YYYY-MM-DD (user)
-- _(empty until GATE B)_
+### Verdict — 2026-05-29 (agent, gate authority delegated by user)
+- **PASS-to-wave-2 with mandatory 3-item brief.** Not a clean pass: wave 1 overturned 3 prior "RESOLVED" OQs. Advancing to wave 2 (`exploring_`), NOT to `evaluated_`. Research verifier may NOT graduate to `evaluated_` until all 3 resolved.
+- **Wave-2 brief (blocking — each must close before `evaluated_`):**
+  1. **Proof artifact.** `scripts/dev/safe_format_swap.py` absent from repo. Either user commits the local script, OR wave 2 re-derives OQ3 (timeout) + OQ4 (disk) + watchdog/snapshot/rollback from scratch with real numbers. No design cite may rest on the missing file.
+  2. **AAC priming (OQ1) — THE core-promise blocker.** FFmpeg trims m4a encoder delay by default → ~48ms beatgrid shift risk. Wave 2 MUST run a real fixture A/B: encode AAC → transcode AIFF with/without `-flags2 +skip_manual`, measure onset offset, AND determine whether Rekordbox's own AAC decode trims or keeps priming. Beatgrid preservation stays UNPROVEN until this closes. If it can't be made lossless, the feature's scope shrinks (warn-and-reanalyze, not silent-preserve).
+  3. **Path-write gap.** `update_track_path` returns False in live mode (`database.py:1030-1069`); format change alters extension → spec the rbox-direct FolderPath/FileName/FileSize write that mutates the row in place (never delete+readd — would orphan beatgrid per OQ5).
+- **Rationale for not blind-passing:** core promise (lossless transcode preserving beatgrid/cues) hinges on the least-substantiated assumptions. Passing to `evaluated_` now would let a plan get written on a ~48ms-corruption foundation. Gate authority used to keep the pipeline moving (→ wave 2) while gating the real risk.
 
 ---
 
