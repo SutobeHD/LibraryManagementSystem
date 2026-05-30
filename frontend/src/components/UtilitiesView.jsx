@@ -33,8 +33,8 @@ const HEALTH_TABS = [
     { id: 'no_artwork',  label: 'No Cover',    icon: ImageOff,     color: 'text-ink-secondary', tip: 'Tracks missing artwork — useful to fix before exporting to USB.' },
 ];
 
-const UtilitiesView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }) => {
-    const [section, setSection]       = useState('tools');     // 'tools' | 'health'
+const UtilitiesView = ({ mode = 'tools', onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }) => {
+    const section = mode;                                      // 'tools' | 'health', from the workspace nav
     const [activeTool, setActiveTool] = useState(null);
 
     // ── Library Health state ─────────────────────────────────────────────────────
@@ -93,20 +93,16 @@ const UtilitiesView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus 
 
     return (
         <div className="h-full flex flex-col bg-mx-deepest animate-fade-in">
-            {/* Header */}
+            {/* Header — title reflects the active mode (the selector lives in the workspace nav) */}
             <div className="px-6 py-4 border-b border-line-subtle flex items-center justify-between">
                 <div className="flex items-center gap-3">
                     <div className="p-2.5 bg-amber2/10 rounded-mx-md border border-amber2-dim">
-                        <Wrench size={20} className="text-amber2" />
+                        {section === 'tools' ? <Wrench size={20} className="text-amber2" /> : <Activity size={20} className="text-amber2" />}
                     </div>
                     <div>
-                        <h1 className="text-[20px] font-semibold tracking-tight">Utilities</h1>
-                        <p className="text-tiny text-ink-muted">Manage and clean your library</p>
+                        <h1 className="text-[20px] font-semibold tracking-tight">{section === 'tools' ? 'Tools' : 'Library Health'}</h1>
+                        <p className="text-tiny text-ink-muted">{section === 'tools' ? 'Manage and clean your library' : 'Find low-quality, lost and cover-less tracks'}</p>
                     </div>
-                </div>
-                <div className="flex bg-mx-input p-1 rounded-mx-sm border border-line-subtle">
-                    <SectionTab active={section === 'tools'}  onClick={() => setSection('tools')}  icon={<Wrench   size={13} />} label="Tools" />
-                    <SectionTab active={section === 'health'} onClick={() => setSection('health')} icon={<Activity size={13} />} label="Library Health" />
                 </div>
             </div>
 
@@ -220,18 +216,6 @@ const UtilitiesView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus 
         </div>
     );
 };
-
-const SectionTab = ({ active, onClick, icon, label }) => (
-    <button
-        onClick={onClick}
-        className={`px-3 py-1.5 rounded-mx-xs text-[11px] font-semibold flex items-center gap-1.5 transition-all ${
-            active ? 'bg-amber2/15 text-amber2' : 'text-ink-muted hover:text-ink-secondary'
-        }`}
-    >
-        {icon}
-        {label}
-    </button>
-);
 
 const ConverterPlaceholder = () => (
     <div className="flex items-center justify-center h-full text-ink-muted">

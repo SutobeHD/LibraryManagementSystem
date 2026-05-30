@@ -116,7 +116,8 @@ const buildWorkspaces = (libraryStatus) => [
     id: 'utilities',
     label: 'Utilities',
     items: [
-      { tab: 'utilities', label: 'Utilities', icon: Wrench },
+      { tab: 'util-tools', label: 'Tools', icon: Wrench },
+      { tab: 'util-health', label: 'Library Health', icon: Activity },
       { tab: 'insights', label: 'Insights', icon: BarChart3 },
     ],
   },
@@ -129,7 +130,7 @@ const TAB_WORKSPACE = {
   ranking: 'ranking',
   editor: 'editor', xml: 'editor',
   usb: 'sync', 'usb-settings': 'sync', soundcloud: 'sync', 'sc-sync': 'sync', downloads: 'sync',
-  utilities: 'utilities', insights: 'utilities',
+  'util-tools': 'utilities', 'util-health': 'utilities', insights: 'utilities',
 }
 
 /**
@@ -817,9 +818,10 @@ const App = () => {
 
             {activeTab === 'usb' && <ErrorBoundary key="eb-usb"><UsbView /></ErrorBoundary>}
             {activeTab === 'usb-settings' && <ErrorBoundary key="eb-usb-settings"><UsbSettingsView /></ErrorBoundary>}
-            {activeTab === 'utilities' && (
+            {activeTab.startsWith('util-') && (
               <ErrorBoundary key="eb-utilities">
                 <UtilitiesView
+                  mode={activeTab.replace('util-', '')}
                   onSelectTrack={handleTrackSelect}
                   onEditTrack={handleTrackEdit}
                   onPlayTrack={(track) => setPlayerTrack(track)}

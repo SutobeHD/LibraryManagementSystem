@@ -53,7 +53,8 @@ const STEPS = [
     ['10-soundcloud', '/^SoundCloud$/i', 1800],
     ['11-sc-library', '/^SCloudLibrary$/i', 1800],
     ['12-downloads', '/^Downloads$/i', 1800],
-    ['13-utilities', '/^Utilities$/i', 1800],
+    ['13-utilities-tools', '/^Utilities$/i', 1800],
+    ['13b-library-health', '/^Library Health$/i', 2200],
     ['14-insights', '/^Insights$/i', 2200],
 ];
 
