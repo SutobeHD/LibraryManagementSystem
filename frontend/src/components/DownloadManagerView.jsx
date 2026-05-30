@@ -347,7 +347,7 @@ const DownloadManagerView = () => {
                             onClick={() => setSource(s.id)}
                             className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all border ${
                                 source === s.id
-                                    ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
+                                    ? 'bg-amber2/20 text-amber2 border-amber2/40'
                                     : 'bg-mx-card border-white/10 text-ink-secondary hover:bg-white/5'
                             }`}
                         >

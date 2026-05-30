@@ -502,7 +502,7 @@ const SoundCloudSyncView = () => {
                             <Cloud size={28} className="text-orange-400" />
                         </div>
                         <div>
-                            <h1 className="text-2xl font-black italic tracking-tighter uppercase">SoundCloud Manager</h1>
+                            <h1 className="text-2xl font-bold tracking-tight">SoundCloud Manager</h1>
                             <p className="text-ink-muted text-sm">
                                 {playlists.length} Playlisten · {likes?.track_count || 0} Likes
                             </p>
