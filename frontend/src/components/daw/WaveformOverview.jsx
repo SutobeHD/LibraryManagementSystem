@@ -94,16 +94,10 @@ const WaveformOverview = React.memo(({ state, dispatch }) => {
         };
     }, [handleMouseMove, handleMouseUp]);
 
-    // No track — show placeholder
+    // No track — render nothing (the timeline area shows its own "No Project
+    // Loaded" empty state; an empty overview band just looks broken).
     if (!totalDuration || totalDuration <= 0) {
-        return (
-            <div
-                className="w-full shrink-0 flex items-center justify-center"
-                style={{ height: OVERVIEW_HEIGHT, background: '#080b14', borderBottom: '1px solid rgba(255,255,255,0.05)' }}
-            >
-                <span className="text-[9px] text-ink-placeholder uppercase tracking-widest font-bold">Overview — No Track Loaded</span>
-            </div>
-        );
+        return null;
     }
 
     return (
