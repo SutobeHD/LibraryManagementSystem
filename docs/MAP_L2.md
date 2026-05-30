@@ -909,6 +909,25 @@ USB export.pdb writer — legacy CDJ DeviceLibrary format.
 - `  PdbExtBuilder.build()`
 - `write_export_ext_pdb()` — Write `<usb>/PIONEER/rekordbox/exportExt.pdb`.
 
+### `app/variant_detector.py`
+
+variant_detector — title-only variant classifier + clusterer (M1).
+
+- `init()` — Create/migrate the sidecar schema.
+- `classify_track()` — Classify one track row → a ``track_variants``-shaped dict (not yet persisted).
+- `pick_canonical()` — Return the ``track_id`` of the cluster's canonical original (OQ2 order).
+- `cluster_by_root()` — Group tracks sharing a ``normalised_root`` → variant-edge rows.
+- `upsert_variant()` — Insert or replace one variant-edge row (PK ``track_id, source, parent_track_id``).
+- `get_variants()` — All variant-edge rows for a track.
+- `get_cluster()` — All rows in a normalised-root cluster.
+- `scan()` — Classify + cluster + persist a track batch.
+
+### `app/variant_schema.py`
+
+variant_schema — DDL + idempotent migration runner for the variants sidecar.
+
+- `migrate()` — Bring ``conn`` to ``SCHEMA_VERSION``.
+
 ### `app/xml_generator.py`
 
 *(no module docstring)*
@@ -2135,6 +2154,27 @@ Tests for `app/usb_manager.py`.
 - `  TestLockedSync.test_concurrent_acquire_raises()` — A second `locked_sync` over the same root while the first
 - `  TestLockedSync.test_lock_released_after_exception()` — Even if the body raises, the lock file must be cleaned up.
 - `  TestLockedSync.test_stale_lock_is_replaced()` — A lock file older than 10 minutes is treated as stale and replaced
+
+### `tests/test_variant_detector.py`
+
+variant_schema + variant_detector tests (analysis-remix-detector T-2, T-3).
+
+- `test_migrate_creates_tables_and_stamps_version()`
+- `test_migrate_idempotent()`
+- `test_migrate_leaves_newer_db_untouched()`
+- `test_classify_extended_mix()`
+- `test_classify_remix_captures_remixer()`
+- `test_classify_untagged_defaults_to_original()`
+- `test_pick_canonical_prefers_original()`
+- `test_pick_canonical_user_pin_overrides()`
+- `test_pick_canonical_tiebreak_lowest_id()`
+- `test_pick_canonical_earliest_release()`
+- `test_cluster_same_artist_high_confidence()`
+- `test_cluster_cross_artist_lower_confidence()`
+- `test_cluster_singleton_emits_no_edge()`
+- `db_path()`
+- `test_scan_persists_and_reads_back()`
+- `test_upsert_replaces_in_place()`
 
 
 ## scripts/ — Dev/Build Utilities
