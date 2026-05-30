@@ -4,11 +4,15 @@ import api from '../api/api';
 import TrackTable from './TrackTable';
 import PlaylistBrowser from './PlaylistBrowser';
 import { promptModal } from './PromptModal';
-import { Search, User, ArrowLeft, Tag, Disc, GitMerge, Music, List, RotateCw } from 'lucide-react';
+import { Search, User, ArrowLeft, Tag, Disc, GitMerge, RotateCw } from 'lucide-react';
 
-const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }) => {
-  // Default to 'playlists' — removed separate 'tracks' tab since Collection is now inside PlaylistBrowser
-  const [activeTab, setActiveTab] = useState('playlists');
+/**
+ * MetadataView — library browser. The active mode (playlists / artists /
+ * labels / albums) is driven by the workspace nav in main.jsx via the
+ * `mode` prop; this view no longer carries its own title + tab bar.
+ */
+const MetadataView = ({ mode = 'playlists', onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }) => {
+  const activeTab = mode; // controlled by the Library workspace nav
   const [items, setItems] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
   const [tracks, setTracks] = useState([]);
@@ -29,8 +33,7 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
 
     if (endpoint) {
       api.get(endpoint).then(res => {
-        if (activeTab === 'tracks') setTracks(res.data);
-        else setItems(res.data);
+        setItems(res.data);
       }).catch(e => {
         console.error("Failed to load items", e);
         toast.error(`Failed to load ${activeTab}`);
@@ -88,63 +91,55 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
     }
   };
 
+  // Playlists mode → PlaylistBrowser owns the whole area (its own search + tree).
+  if (activeTab === 'playlists' && !selectedItem) {
+    return (
+      <div className="h-full">
+        <PlaylistBrowser
+          onSelectTrack={onSelectTrack}
+          onEditTrack={onEditTrack}
+          onPlayTrack={onPlayTrack}
+          libraryStatus={libraryStatus}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="h-full flex flex-col p-4">
-      {/* Tab Switcher & Header */}
-      <div className="flex justify-between items-center mb-6">
+      {/* Header — back + item name when an item is open, else just search */}
+      <div className="flex justify-between items-center mb-4 gap-4">
         {selectedItem ? (
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 min-w-0">
             <button
               onClick={() => setSelectedItem(null)}
-              className="p-2 hover:bg-white/10 rounded-full transition-colors text-ink-secondary hover:text-white"
+              className="p-2 hover:bg-white/10 rounded-full transition-colors text-ink-secondary hover:text-white shrink-0"
             >
-              <ArrowLeft size={24} />
+              <ArrowLeft size={22} />
             </button>
-            <div>
-              <h1 className="text-4xl font-bold text-white flex items-center gap-3">
-                {activeTab === 'artists' ? <User size={32} className="text-amber2" /> :
-                  activeTab === 'labels' ? <Tag size={32} className="text-purple-400" /> :
-                    <Disc size={32} className="text-amber-400" />}
-                {selectedItem.name}
+            <div className="min-w-0">
+              <h1 className="text-2xl font-bold text-white flex items-center gap-2.5 truncate">
+                {activeTab === 'artists' ? <User size={26} className="text-amber2 shrink-0" /> :
+                  activeTab === 'labels' ? <Tag size={26} className="text-purple-400 shrink-0" /> :
+                    <Disc size={26} className="text-amber-400 shrink-0" />}
+                <span className="truncate">{selectedItem.name}</span>
               </h1>
-              <p className="text-ink-secondary text-sm mt-1">{filteredTracks.length} / {selectedItem.track_count || tracks.length} Tracks</p>
+              <p className="text-ink-secondary text-sm mt-0.5">{filteredTracks.length} / {selectedItem.track_count || tracks.length} Tracks</p>
             </div>
           </div>
-        ) : (
-          <div className="flex items-center gap-8">
-            <h1 className="text-4xl font-bold text-white flex items-center gap-3">
-              <Music size={32} className="text-amber2" />
-              Library
-            </h1>
-            <div className="flex bg-black/40 p-1 rounded-xl border border-white/5">
-              {[
-                { id: 'playlists', icon: List, label: 'Playlists' },
-                { id: 'artists', icon: User, label: 'Artists' },
-                { id: 'labels', icon: Tag, label: 'Labels' },
-                { id: 'albums', icon: Disc, label: 'Albums' }
-              ].map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-2 ${activeTab === tab.id ? 'bg-amber2 text-white shadow-lg' : 'text-ink-muted hover:text-ink-primary'}`}
-                >
-                  <tab.icon size={12} />
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+        ) : <div />}
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={loadItems}
-            disabled={isLoading}
-            className={`p-2 rounded-full transition-all border border-white/5 hover:bg-white/10 text-ink-secondary hover:text-amber2 ${isLoading ? 'animate-spin opacity-50' : ''}`}
-            title="Refresh View"
-          >
-            <RotateCw size={16} />
-          </button>
+        <div className="flex items-center gap-3 shrink-0">
+          {!selectedItem && (
+            <button
+              onClick={loadItems}
+              disabled={isLoading}
+              className={`p-2 rounded-full transition-all border border-white/5 hover:bg-white/10 text-ink-secondary hover:text-amber2 ${isLoading ? 'animate-spin opacity-50' : ''}`}
+              title="Refresh View"
+            >
+              <RotateCw size={16} />
+            </button>
+          )}
           <div className="relative group w-64">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted group-focus-within:text-amber2 transition-colors" />
             <input
@@ -167,15 +162,6 @@ const MetadataView = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }
               onEditTrack={onEditTrack}
               onPlay={onPlayTrack}
               playlistId={`${activeTab.toUpperCase()}_${selectedItem.id}`}
-            />
-          </div>
-        ) : activeTab === 'playlists' ? (
-          <div className="absolute inset-0">
-            <PlaylistBrowser
-              onSelectTrack={onSelectTrack}
-              onEditTrack={onEditTrack}
-              onPlayTrack={onPlayTrack}
-              libraryStatus={libraryStatus}
             />
           </div>
         ) : (

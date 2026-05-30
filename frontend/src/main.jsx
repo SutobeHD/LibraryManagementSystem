@@ -1,7 +1,7 @@
 import React, { useState, useMemo, Component, useEffect, useCallback, Suspense, lazy } from 'react'
 import { invoke } from '@tauri-apps/api/core'; // Tauri Invoke
 import ReactDOM from 'react-dom/client'
-import { Music, Cloud, Download, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2, Sparkles, Copy, Layers, FilePlus, FolderOpen, ArrowLeft, Sliders } from 'lucide-react'
+import { Music, Cloud, Download, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2, Sparkles, Copy, Layers, FilePlus, FolderOpen, ArrowLeft, Sliders, List, User, Tag, Disc } from 'lucide-react'
 import './index.css'
 import { ToastProvider } from './components/ToastContext'
 import { Toaster } from 'react-hot-toast'
@@ -22,7 +22,6 @@ const MetadataView = lazy(() => import('./components/MetadataView'));
 const ImportView = lazy(() => import('./components/ImportView'));
 const UsbView = lazy(() => import('./components/UsbView'));
 const UsbSettingsView = lazy(() => import('./components/UsbSettingsView'));
-const DesignView = lazy(() => import('./components/DesignView'));
 const SoundCloudView = lazy(() => import('./components/SoundCloudView'));
 const SoundCloudSyncView = lazy(() => import('./components/SoundCloudSyncView'));
 const DownloadManagerView = lazy(() => import('./components/DownloadManagerView'));
@@ -73,12 +72,24 @@ const buildWorkspaces = (libraryStatus) => [
   {
     id: 'library',
     label: 'Library',
+    // The library's metadata modes are the workspace's views (lifted up from
+    // MetadataView's own header). activeTab is 'lib-<mode>'.
     items: [
-      { tab: 'library', label: 'Library', icon: Music },
-      { tab: 'import', label: 'Audio Import', icon: Upload },
-      { tab: 'ranking', label: 'Ranking Mode', icon: Zap },
-      { tab: 'insights', label: 'Insights', icon: BarChart3 },
+      { tab: 'lib-playlists', label: 'Playlists', icon: List },
+      { tab: 'lib-artists', label: 'Artists', icon: User },
+      { tab: 'lib-labels', label: 'Labels', icon: Tag },
+      { tab: 'lib-albums', label: 'Albums', icon: Disc },
     ],
+  },
+  {
+    id: 'import',
+    label: 'Audio Import',
+    items: [{ tab: 'import', label: 'Audio Import', icon: Upload }],
+  },
+  {
+    id: 'ranking',
+    label: 'Ranking',
+    items: [{ tab: 'ranking', label: 'Ranking Mode', icon: Zap }],
   },
   {
     id: 'editor',
@@ -104,22 +115,21 @@ const buildWorkspaces = (libraryStatus) => [
   {
     id: 'utilities',
     label: 'Utilities',
-    items: [{ tab: 'utilities', label: 'Utilities', icon: Wrench }],
-  },
-  {
-    id: 'lab',
-    label: 'Lab',
-    items: [{ tab: 'design', label: 'Design Lab', icon: Sparkles }],
+    items: [
+      { tab: 'utilities', label: 'Utilities', icon: Wrench },
+      { tab: 'insights', label: 'Insights', icon: BarChart3 },
+    ],
   },
 ]
 
 /** tab id → workspace id (XML resolves to the editor workspace). */
 const TAB_WORKSPACE = {
-  library: 'library', import: 'library', ranking: 'library', insights: 'library',
+  'lib-playlists': 'library', 'lib-artists': 'library', 'lib-labels': 'library', 'lib-albums': 'library',
+  import: 'import',
+  ranking: 'ranking',
   editor: 'editor', xml: 'editor',
   usb: 'sync', 'usb-settings': 'sync', soundcloud: 'sync', 'sc-sync': 'sync', downloads: 'sync',
-  utilities: 'utilities',
-  design: 'lab',
+  utilities: 'utilities', insights: 'utilities',
 }
 
 /**
@@ -453,7 +463,7 @@ const ViewLoader = () => (
 
 const App = () => {
   const [appMode, setAppMode] = useState('choice')
-  const [activeTab, setActiveTab] = useState('library')
+  const [activeTab, setActiveTab] = useState('lib-playlists')
   const [activeWorkspace, setActiveWorkspace] = useState('library')
   const [activeTrack, setActiveTrack] = useState(null)
   const [playerTrack, setPlayerTrack] = useState(null)
@@ -501,7 +511,7 @@ const App = () => {
       setIsInitialLoading(true);
       try {
         await api.post('/api/library/new', {});
-        setActiveTab('library');
+        setActiveTab('lib-playlists');
         await checkLibraryStatus();
       } catch (e) {
         console.error("Create empty library failed", e);
@@ -522,14 +532,14 @@ const App = () => {
           await api.post('/api/library/new', { path: STANDALONE_PATH });
           await api.post('/api/library/load', { path: STANDALONE_PATH });
         }
-        setActiveTab('library');
+        setActiveTab('lib-playlists');
         await checkLibraryStatus();
       } catch (e) {
         console.error("Standalone init failed", e);
         try {
           await api.post('/api/library/new', { path: STANDALONE_PATH });
           await api.post('/api/library/load', { path: STANDALONE_PATH });
-          setActiveTab('library');
+          setActiveTab('lib-playlists');
           await checkLibraryStatus();
         } catch (e2) {
           console.error("Standalone fallback create failed", e2);
@@ -575,7 +585,7 @@ const App = () => {
           setAppMode('xml-submode');
           return;
         }
-        setActiveTab('library');
+        setActiveTab('lib-playlists');
         await checkLibraryStatus();
       } catch (e) {
         console.error("Defined-path load failed", e);
@@ -751,9 +761,9 @@ const App = () => {
         <div className={`flex-1 min-h-0 w-full relative ${playerTrack ? 'pb-20' : ''}`}>
           <Suspense fallback={<ViewLoader />}>
             {/* STABILITY: Each view wrapped in its own ErrorBoundary */}
-            <div className={activeTab === 'library' ? 'h-full' : 'hidden'}>
+            <div className={activeTab.startsWith('lib-') ? 'h-full' : 'hidden'}>
               <ErrorBoundary key="eb-library">
-                <MetadataView onSelectTrack={handleTrackSelect} onEditTrack={handleTrackEdit} onPlayTrack={handlePlayTrack} libraryStatus={libraryStatus} />
+                <MetadataView mode={activeTab.replace('lib-', '')} onSelectTrack={handleTrackSelect} onEditTrack={handleTrackEdit} onPlayTrack={handlePlayTrack} libraryStatus={libraryStatus} />
               </ErrorBoundary>
             </div>
 
@@ -807,7 +817,6 @@ const App = () => {
 
             {activeTab === 'usb' && <ErrorBoundary key="eb-usb"><UsbView /></ErrorBoundary>}
             {activeTab === 'usb-settings' && <ErrorBoundary key="eb-usb-settings"><UsbSettingsView /></ErrorBoundary>}
-            {activeTab === 'design' && <ErrorBoundary key="eb-design"><DesignView /></ErrorBoundary>}
             {activeTab === 'utilities' && (
               <ErrorBoundary key="eb-utilities">
                 <UtilitiesView
