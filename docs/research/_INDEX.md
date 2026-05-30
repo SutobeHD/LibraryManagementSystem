@@ -68,7 +68,7 @@ _(none)_
 
 ### inprogress
 - [inprogress_metadata-name-fixer.md](implement/inprogress_metadata-name-fixer.md) — Artist/title normaliser; **T1 M0 detector SHIPPED** (`app/metadata_fixer/detector.py`, 12 tests green, ruff clean); T2–T10 `[ ]` for `research-implement` routine (2026-05-29)
-- [inprogress_security-mobile-paired-tokens-phase2.md](implement/inprogress_security-mobile-paired-tokens-phase2.md) — Per-device QR pairing (Option A); **T1 `app/auth_db.py` SHIPPED** (hashed-at-rest, throttled last_seen, 10 tests green); T2–T7 `[ ]` for `research-implement` routine (2026-05-29)
+- [inprogress_security-mobile-paired-tokens-phase2.md](implement/inprogress_security-mobile-paired-tokens-phase2.md) — Per-device QR pairing (Option A); **T1–T3 SHIPPED** (`auth_db` hashed store, `pairing_store` one-shot codes, `require_session` dual-acceptance; 31 tests green); T4–T7 (routes/Tauri/UI) `[ ]` for `research-implement` routine (2026-05-29)
 
 ### blocked
 _(none)_

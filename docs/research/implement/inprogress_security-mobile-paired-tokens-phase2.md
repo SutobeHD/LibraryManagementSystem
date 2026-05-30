@@ -27,6 +27,7 @@ ai_tasks: false  # set true to opt-in AI routines — see ## AI Tasks below
 - 2026-05-29 — `implement/plangate_` — plan reviewed (Planner + Reviewer PASS), awaiting GATE C. Hard runtime prereq for mobile-companion shipping.
 - 2026-05-29 — `implement/accepted_` — GATE C PASSED (user delegated gate authority to the agent for PASS-verified plans). Ready for `inprogress_`; implement-tier needs branch-model direction.
 - 2026-05-29 — `implement/inprogress_` — T1 (`app/auth_db.py`) shipped on `claude/research-continuation-7rm30` (10 tests green, ruff clean). T2–T7 remain `[ ]` for `research-implement` routine.
+- 2026-05-29 — `implement/inprogress_` — T2 (`app/pairing_store.py`) + T3 (`app/auth.py` dual-acceptance) shipped (31/31 combined green). T4–T7 remain `[ ]`.
 
 ## AI Tasks
 
@@ -332,8 +333,8 @@ Required from `implement/draftplan_`. Concrete enough that someone else executes
 > Each = one `routine/security-mobile-paired-tokens-phase2-task-N` branch = one PR. Ordered.
 
 - [x] **T1 (Step 1):** `app/auth_db.py` — `auth.db` init (WAL, per-thread conn, writer Lock) + schema + `create_device`/`paired_token_valid` (throttled last_seen)/`list_devices`/`revoke_device`. **DONE 2026-05-29** — `tests/test_pairing.py` 10/10 pass (create+validate, hashed-at-rest, revoke flips+invalidates, last_seen throttle + stale-refresh, list, independent devices), ruff clean.
-- [ ] **T2 (Step 2):** in-memory pairing-code store (TTL dict + Lock + lazy purge). No deps. Tests: mint/consume one-shot, expiry purge.
-- [ ] **T3 (Step 3):** `app/auth.py` `_extract_bearer` + `require_session` dual-acceptance (shared helper reusable by future `require_session_ws`). Deps: T1. Tests: dual-acceptance matrix + child-process empty-token.
+- [x] **T2 (Step 2):** in-memory pairing-code store (TTL dict + Lock + lazy purge). No deps. **DONE 2026-05-29** — `app/pairing_store.py` (mirrors `rate_limit.py:BucketStore`); `ConsumeStatus` enum gives the 409/410 split (CONSUMED replay vs UNKNOWN/EXPIRED). `tests/test_pairing_store.py` 6/6 (distinct codes, one-shot+replay, unknown, expired+drop, purge, clear), ruff clean.
+- [x] **T3 (Step 3):** `app/auth.py` `_extract_bearer` + `require_session` dual-acceptance (shared helper reusable by future `require_session_ws`). Deps: T1. **DONE 2026-05-29** — branch 1 SESSION_TOKEN (guarded vs empty child-process token) OR branch 2 `auth_db.paired_token_valid`; degrades to clean 401 when `auth.db` absent. `tests/test_require_session.py` 15/15 (`_extract_bearer` 9-case matrix + dual-acceptance: session/device/revoked/unknown/missing/child-process-empty).
 - [ ] **T4 (Step 4):** `POST /api/pairing/start` + `POST /api/pairing/complete` (`@rate_limit(5,10,"both")`, 409/410 split). Deps: T1, T2, T3. Tests: handshake, replay 409, expired 410, rate-limit 429.
 - [ ] **T5 (Step 4):** `DELETE /api/pairing/{device_id}` + `GET /api/pairing/devices` (`require_session`). Deps: T1, T3. Tests: list + revoke→401.
 - [ ] **T6 (Step 5):** Tauri QR render + `/start` call with SESSION_TOKEN + plaintext fallback. Deps: T4.
@@ -364,6 +365,12 @@ Filled during `inprogress_`. Dated entries. What built / surprised / changed-fro
 - **Surprise:** sandbox lacks `platformdirs`/`fastapi`; ran tests via `uv run --no-project --with platformdirs --with pytest` → 10/10 green. CI has the deps.
 - **No deviation** from plan. `_extract_bearer` (the only net-new helper flagged at planning) lands in T3 with the `require_session` dual-acceptance.
 - **Remaining for routines** (T2–T7): in-memory pairing-code store (T2), `require_session` dual-acceptance + `_extract_bearer` (T3), pairing routes start/complete (T4), revoke/list routes (T5), Tauri QR (T6), Settings UI (T7). `research-implement` continues per the queue.
+
+### 2026-05-29 — T2 + T3 (agent, `claude/research-continuation-7rm30`)
+- **T2** `app/pairing_store.py`: one-shot pairing codes, dict+Lock+lazy-purge per `rate_limit.py`. Decision: `ConsumeStatus` enum (not bool) so T4 can map CONSUMED→409 vs UNKNOWN/EXPIRED→410 cleanly. 6 tests.
+- **T3** `app/auth.py`: `_extract_bearer` factored out + dual-acceptance branch. **Surprise:** the `ruff check --fix` PostToolUse hook stripped the `paired_token_valid` import on the first edit (still unused at that point) — re-added after wiring the call. Branch 1 guarded by `if SESSION_TOKEN` for the empty child-process token. 15 tests.
+- **Not yet wired:** `auth_db.init_db()` at app startup + the 4 routes are T4/T5 (touch `app/main.py`). Until then dual-acceptance is dormant (no devices, table may be absent → graceful 401). Combined suite (T1+T2+T3) 31/31 green via `uv run`.
+- **Remaining:** T4 (start/complete routes), T5 (revoke/list routes), T6 (Tauri QR), T7 (Settings UI).
 
 ---
 

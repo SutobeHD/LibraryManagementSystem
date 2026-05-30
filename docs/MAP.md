@@ -38,6 +38,7 @@
 | `app/main.py` | *(no module docstring)* |
 | `app/metadata_fixer/__init__.py` | metadata_fixer — detect + (later) fix malformed artist/title metadata. |
 | `app/metadata_fixer/detector.py` | Read-only detection of malformed artist/title metadata. |
+| `app/pairing_store.py` | pairing_store — in-memory one-shot pairing codes (Phase-2 auth, T2). |
 | `app/phrase_generator.py` | phrase_generator.py — Phrase & Auto-Cue Generator |
 | `app/playcount_sync.py` | playcount_sync.py — USB Play-Count Sync Engine |
 | `app/rate_limit.py` | In-process token-bucket rate limiter for the FastAPI sidecar. |
@@ -200,8 +201,10 @@
 | `tests/test_metadata_fixer_detector.py` | M0 detector tests — read-only malformation detection. |
 | `tests/test_onelibrary_wal_flush.py` | End-to-end regression test for OneLibraryUsbWriter — runs the FULL |
 | `tests/test_pairing.py` | Phase-2 paired-token store tests (T1 — app/auth_db.py). |
+| `tests/test_pairing_store.py` | Phase-2 pairing-code store tests (T2 — app/pairing_store.py). |
 | `tests/test_pdb_structure.py` | PDB writer structural test against F: drive Pioneer reference. |
 | `tests/test_rate_limit.py` | Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter. |
+| `tests/test_require_session.py` | Phase-2 require_session dual-acceptance tests (T3 — app/auth.py). |
 | `tests/test_security_compare.py` | Tests for ``app/security_compare.py::safe_compare``. |
 | `tests/test_security_hotfixes.py` | Regression tests for the 5 security hotfixes in commit e3a5ae8. |
 | `tests/test_services.py` | Tests for `app/services.py`. |

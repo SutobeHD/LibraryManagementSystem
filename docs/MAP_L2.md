@@ -126,7 +126,7 @@ audio_tags — write metadata back to the source audio file.
 
 Bearer-token authentication for the FastAPI sidecar.
 
-- `require_session()` — Authenticate one HTTP request against the boot-time session token.
+- `require_session()` — Authenticate one HTTP request against an accepted bearer token.
 
 ### `app/auth_db.py`
 
@@ -576,6 +576,18 @@ Read-only detection of malformed artist/title metadata.
 - `Match` — One detected malformation.
 - `Rule`
 - `scan()` — Run the catalogue over ``tracks``.
+
+### `app/pairing_store.py`
+
+pairing_store — in-memory one-shot pairing codes (Phase-2 auth, T2).
+
+- `ConsumeStatus` — Outcome of a :meth:`PairingCodeStore.consume` attempt.
+- `PairingCodeStore` — Process-wide TTL'd map of pairing-code to its one-shot state.
+- `  PairingCodeStore.mint()` — Create a fresh single-use code valid for ``ttl_s`` seconds.
+- `  PairingCodeStore.consume()` — Redeem ``code`` once; report why if it cannot be redeemed.
+- `  PairingCodeStore.clear()` — Test helper: drop all codes and reset the purge clock.
+- `mint_code()` — Mint a one-shot pairing code on the shared store.
+- `consume_code()` — Redeem a pairing code on the shared store.
 
 ### `app/phrase_generator.py`
 
@@ -1711,6 +1723,17 @@ Phase-2 paired-token store tests (T1 — app/auth_db.py).
 - `test_list_devices_newest_first()`
 - `test_two_devices_independent_validation()`
 
+### `tests/test_pairing_store.py`
+
+Phase-2 pairing-code store tests (T2 — app/pairing_store.py).
+
+- `test_mint_returns_distinct_codes()`
+- `test_consume_one_shot_then_replay_is_consumed()`
+- `test_unknown_code_is_unknown()`
+- `test_expired_code_is_expired()`
+- `test_purge_stale_drops_expired_entries()`
+- `test_clear_resets_store()`
+
 ### `tests/test_pdb_structure.py`
 
 PDB writer structural test against F: drive Pioneer reference.
@@ -1729,6 +1752,19 @@ Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter.
 - `test_concurrent_take()`
 - `test_ttl_purge()`
 - `test_auth_before_ratelimit()` — Unauth + over-limit MUST surface as 401, not 429.
+
+### `tests/test_require_session.py`
+
+Phase-2 require_session dual-acceptance tests (T3 — app/auth.py).
+
+- `paired()` — Throwaway auth.db + a known SESSION_TOKEN for require_session.
+- `test_extract_bearer_matrix()`
+- `test_session_token_authenticates()`
+- `test_paired_device_token_authenticates()`
+- `test_revoked_device_token_rejected()`
+- `test_unknown_token_rejected()`
+- `test_missing_header_rejected()`
+- `test_child_process_empty_session_token_still_accepts_device()`
 
 ### `tests/test_security_compare.py`
 
