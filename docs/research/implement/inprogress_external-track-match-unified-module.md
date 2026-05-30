@@ -27,6 +27,7 @@ related: [analysis-remix-detector, library-extended-remix-finder, library-qualit
 - 2026-05-29 — `implement/review_` — Reviewer PASS (all 15 checklist items ticked)
 - 2026-05-29 — `implement/plangate_` — awaiting GATE C
 - 2026-05-29 — `implement/accepted_` — GATE C PASSED by user; **critical-path feature** — sister-doc prereq for 3 other accepted_ docs (remix-detector, extended-remix-finder, quality-upgrade-finder); ready for `inprogress_`
+- 2026-05-29 — `implement/inprogress_` — promoted; the standalone module (T-3..T-9) shipped on `claude/research-continuation-7rm30` — `app/external_track_match.py` + 26-test suite (ruff + mypy clean). **Deferred:** T-1/T-2 (owner ≥200-row corpus labelling), T-10 (SC delegate refactor — regression-gated, needs full SC import), T-12 doc-sync (folded into commit). Sister docs can now consume `parse_version_tag`/`extract_title_stem`.
 
 ---
 
@@ -789,13 +790,13 @@ User-visible status: none in M1.
 
 - [ ] T-1 Scaffold `tests/fixtures/external_track_match/` + JSON schema header — covers Step 1, tests T8
 - [ ] T-2 Owner labels ≥200 titles in `titles_corpus.json` (manual, ≥15 per primary tag) — covers Step 1, tests T8 T12
-- [ ] T-3 Add `app/external_track_match.py` skeleton (imports + types + registry) — covers Step 2, tests T17-T19
-- [ ] T-4 Add `normalize_title` + `extract_title_stem` (with `lru_cache`) — covers Step 3-4, tests T1-T7
-- [ ] T-5 Add `parse_version_tag` + classifier-input collapse — covers Step 3-4, tests T8-T12
-- [ ] T-6 Add `fuzzy_match_with_score` (verbatim port) — covers Step 3, tests T13-T16
-- [ ] T-7 Add `is_fingerprinting_available` + `fingerprint` (subprocess + sandbox + lazy ALLOWED_AUDIO_ROOTS) — covers Step 5, tests T20-T25
-- [ ] T-8 Add `tests/test_external_track_match.py` 22 tests + autouse `_reset_registry` — covers Step 7
-- [ ] T-9 Add `test_module_has_no_db_writer_imports` invariant — covers Step 7, tests T26
+- [x] T-3 Add `app/external_track_match.py` skeleton (imports + types + registry) — **DONE 2026-05-29** dataclasses (VersionTag/Candidate/Fingerprint), FingerprintUnavailable union, AdapterError x4, SourcePlugin Protocol, ADAPTER_REGISTRY + register/get/list
+- [x] T-4 Add `normalize_title` + `extract_title_stem` (with `lru_cache`) — **DONE 2026-05-29** NFD-fold flag (default on; off = byte-equiv old matcher); stem strips repeated tail groups + feat. + trailing-dash
+- [x] T-5 Add `parse_version_tag` — **DONE 2026-05-29** full remix-detector regex catalogue (pure/year/remixer/compound/trailing-dash); bootleg synonyms (flip/refix/rework)->bootleg; 12-member canonical labels. (≥200-row corpus recall test T8/T12 = owner labelling, deferred)
+- [x] T-6 Add `fuzzy_match_with_score` — **DONE 2026-05-29** verbatim port of soundcloud_api._fuzzy_match_with_score (combined ratio + exact-norm short-circuit 1.0, threshold 0.65)
+- [x] T-7 Add `is_fingerprinting_available` + `fingerprint` — **DONE 2026-05-29** cached PATH-detect; subprocess with timeout + sandbox (is_relative_to roots, lazy app.main import); BinaryMissing/Timeout/DecodeError sentinels; logs path+elapsed
+- [x] T-8 Add `tests/test_external_track_match.py` — **DONE 2026-05-29** 26 tests + autouse _reset_registry (corpus-recall row excluded; cases gate correctness)
+- [x] T-9 `test_module_has_no_db_writer_imports` — **DONE 2026-05-29** AST-walk asserts no rbox/pyrekordbox/app.database/app.live_database import
 - [ ] T-10 Refactor `app/soundcloud_api.py`: add `etm` import, replace 2 method bodies with delegates — covers Step 6, tests T13 T27
 - [ ] T-11 Run quality gates (`pytest` + `mypy` + `ruff`); fix until green — covers Step 8
 - [ ] T-12 Regen MAP docs (`python scripts/regen_maps.py`) + `doc-syncer` for FILE_MAP — covers Step 9

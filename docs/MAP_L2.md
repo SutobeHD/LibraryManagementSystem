@@ -259,6 +259,36 @@ Download Registry — SQLite-based deduplication & analysis history log.
 - `get_stats()` — Aggregate statistics for the history dashboard widget.
 - `compute_sha256()` — Stream-hash a file with SHA-256.
 
+### `app/external_track_match.py`
+
+external_track_match — shared title/version parsing + fuzzy-match + fingerprint.
+
+- `VersionTag` — A parsed version descriptor.
+- `Candidate` — One external-source match returned by ``SourcePlugin.search``.
+- `Fingerprint` — A computed acoustic fingerprint (Chromaprint via ``fpcalc``).
+- `FingerprintUnavailable` — Base sentinel: fingerprinting could not produce a result.
+- `BinaryMissing` — ``fpcalc`` not found on PATH (M1 default — binary not bundled).
+- `Timeout` — ``fpcalc`` exceeded the timeout.
+- `DecodeError` — ``fpcalc`` ran but failed to decode the audio / parse output.
+- `AdapterError` — Base of the source-adapter error hierarchy.
+- `AdapterNotRegistered` — Lookup for an adapter name absent from the registry.
+- `AdapterTransportError` — Network/HTTP failure inside a ``SourcePlugin.search``.
+- `AdapterQuotaExceeded` — Adapter refused because its API quota is exhausted.
+- `AdapterParseError` — Adapter could not parse a source payload.
+- `SourcePlugin` — Duck-typed external-source adapter.
+- `  SourcePlugin.search()`
+- `  SourcePlugin.parse_version()`
+- `  SourcePlugin.quota_remaining()`
+- `register_adapter()` — Register (or replace) an adapter under ``name``.
+- `get_adapter()` — Look up a registered adapter; raise :class:`AdapterNotRegistered` if absent.
+- `list_adapters()` — Names of all registered adapters.
+- `normalize_title()` — Lowercase, accent-fold, strip non-word punctuation.
+- `extract_title_stem()` — Strip tail variant groups + optional feat.
+- `parse_version_tag()` — Parse the tail version descriptor of ``title`` → :class:`VersionTag` or ``None``.
+- `fuzzy_match_with_score()` — Best fuzzy match over ``candidates`` → ``(best_id_or_None, rounded_score)``.
+- `is_fingerprinting_available()` — True iff ``fpcalc`` is resolvable on PATH (cached).
+- `fingerprint()` — Compute a Chromaprint fingerprint via ``fpcalc``.
+
 ### `app/folder_watcher.py`
 
 FolderWatcher — auto-import audio files from user-configured folders.
@@ -1710,6 +1740,37 @@ taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py).
 - `test_invalid_kind_rejected()`
 - `test_empty_profile_id_rejected()`
 - `test_list_and_delete_profile()`
+
+### `tests/test_external_track_match.py`
+
+external_track_match unit tests (external-track-match-unified-module T-3..T-9).
+
+- `test_normalize_title_lowercases_and_strips_punct()`
+- `test_normalize_title_handles_accents()`
+- `test_normalize_title_nfd_fold_off_keeps_accent()`
+- `test_extract_title_stem_strips_paren_suffix()`
+- `test_extract_title_stem_strips_bracket_suffix()`
+- `test_extract_title_stem_strips_trailing_dash_variant()`
+- `test_extract_title_stem_drops_feat_by_default()`
+- `test_extract_title_stem_round_trip_shapes_collapse()`
+- `test_parse_version_tag_returns_none_on_no_suffix()`
+- `test_parse_version_tag_pure_variant()`
+- `test_parse_version_tag_captures_remixer()`
+- `test_parse_version_tag_bootleg_synonyms_map_to_bootleg()`
+- `test_parse_version_tag_captures_year_modifier()`
+- `test_parse_version_tag_compound_extended_remix()`
+- `test_parse_version_tag_trailing_dash()`
+- `test_parse_version_tag_all_labels_canonical()`
+- `test_fuzzy_match_exact_normalised_title_short_circuits()`
+- `test_fuzzy_match_below_threshold_returns_none()`
+- `test_fuzzy_match_picks_best_above_threshold()`
+- `test_register_get_list_adapter()`
+- `test_register_adapter_idempotent_replace()`
+- `test_get_adapter_unknown_raises()`
+- `test_stub_plugin_satisfies_protocol()`
+- `test_fingerprint_unavailable_when_binary_missing()`
+- `test_fingerprint_rejects_path_outside_roots()`
+- `test_module_has_no_db_writer_imports()`
 
 ### `tests/test_logging_redaction.py`
 
