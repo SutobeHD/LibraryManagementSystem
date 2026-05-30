@@ -258,61 +258,70 @@ const RankingView = ({ libraryStatus, appMode }) => {
     };
 
     if (!selectedPlaylist) {
+        const SOURCE_TABS = [
+            { id: 'playlist', label: 'Playlists', Icon: ListMusic },
+            { id: 'artist', label: 'Artists', Icon: User },
+            { id: 'label', label: 'Labels', Icon: Tag },
+            { id: 'album', label: 'Albums', Icon: Disc },
+        ];
         return (
-            <div className="flex h-full relative">
-                <div className="w-80 bg-mx-shell/50 border-r border-white/5 flex flex-col backdrop-blur-md">
-                    <div className="p-4 border-b border-white/5">
-                        <h2 className="text-ink-muted font-bold uppercase text-[10px] mb-4 tracking-widest">Select Source</h2>
-                        <div className="flex bg-mx-input border border-line-subtle rounded-mx-sm overflow-hidden mb-4">
-                            {['playlist', 'artist', 'label', 'album'].map(mode => (
+            <div className="h-full flex flex-col">
+                {/* Header — Ranking title + source tabs + search (full-width, library-style) */}
+                <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-line-subtle shrink-0">
+                    <div className="flex items-center gap-4 min-w-0">
+                        <h1 className="text-2xl font-bold text-white flex items-center gap-2 shrink-0">
+                            <Zap size={24} className="text-amber2" /> Ranking
+                        </h1>
+                        <div className="flex bg-mx-input border border-line-subtle rounded-mx-sm overflow-hidden">
+                            {SOURCE_TABS.map(({ id, label, Icon }) => (
                                 <button
-                                    key={mode}
-                                    onClick={() => setSourceMode(mode)}
-                                    className={`flex-1 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-colors border-r border-line-subtle last:border-r-0 ${sourceMode === mode ? 'bg-amber2/15 text-amber2' : 'text-ink-muted hover:text-ink-primary hover:bg-mx-hover'}`}
+                                    key={id}
+                                    onClick={() => setSourceMode(id)}
+                                    className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider border-r border-line-subtle last:border-r-0 transition-colors ${sourceMode === id ? 'bg-amber2/15 text-amber2' : 'text-ink-muted hover:text-ink-primary hover:bg-mx-hover'}`}
                                 >
-                                    {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                                    <Icon size={12} /> {label}
                                 </button>
                             ))}
                         </div>
-                        {sourceMode !== 'playlist' && (
-                            <div className="relative group">
-                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" />
-                                <input
-                                    className="input-glass w-full pl-9 py-1.5 text-xs"
-                                    placeholder={`Filter ${sourceMode}s...`}
-                                    value={searchTerm}
-                                    onChange={e => setSearchTerm(e.target.value)}
-                                />
-                            </div>
-                        )}
                     </div>
+                    {sourceMode !== 'playlist' && (
+                        <div className="relative w-64 shrink-0">
+                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" />
+                            <input
+                                className="input-glass w-full pl-9 py-1.5 text-xs rounded-full bg-black/20"
+                                placeholder={`Search ${sourceMode}s...`}
+                                value={searchTerm}
+                                onChange={e => setSearchTerm(e.target.value)}
+                            />
+                        </div>
+                    )}
+                </div>
 
-                    <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                        {sourceMode === 'playlist' ? (
-                            tree.map(n => <PlaylistNode key={n.ID} node={n} onSelect={handleSelectSource} />)
-                        ) : (
-                            filteredItems.map(item => (
+                {/* Content — full width. Click an item to start power ranking. */}
+                <div className="flex-1 overflow-y-auto">
+                    {sourceMode === 'playlist' ? (
+                        <div className="py-2">
+                            {tree.length === 0
+                                ? <div className="text-center text-ink-muted text-sm py-16">No playlists found</div>
+                                : tree.map(n => <PlaylistNode key={n.ID} node={n} onSelect={handleSelectSource} />)}
+                        </div>
+                    ) : (
+                        <div className="p-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                            {filteredItems.map(item => (
                                 <div
                                     key={item.id}
                                     onClick={() => handleSelectSource(item)}
-                                    className="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 cursor-pointer group transition-all border border-transparent hover:border-white/5"
+                                    className="bg-mx-card/40 hover:bg-amber2/10 border border-white/5 hover:border-amber2/50 p-6 rounded-xl cursor-pointer transition-all group flex flex-col items-center justify-center text-center gap-2"
                                 >
-                                    <div className="w-8 h-8 rounded-full bg-mx-card flex items-center justify-center text-ink-muted group-hover:text-amber2 group-hover:bg-amber2/10 transition-colors">
-                                        {sourceMode === 'artist' ? <User size={14} /> : sourceMode === 'label' ? <Tag size={14} /> : <Disc size={14} />}
+                                    <div className="w-16 h-16 rounded-full bg-mx-shell flex items-center justify-center mb-2 group-hover:scale-110 transition-transform border border-white/5 text-ink-muted group-hover:text-amber2">
+                                        {sourceMode === 'artist' ? <User size={32} /> : sourceMode === 'label' ? <Tag size={32} /> : <Disc size={32} />}
                                     </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="text-sm font-medium text-ink-primary group-hover:text-white truncate">{item.name}</div>
-                                        <div className="text-[10px] text-ink-placeholder group-hover:text-ink-muted">{item.track_count} tracks</div>
-                                    </div>
-                                    <ChevronRight size={14} className="text-ink-placeholder group-hover:text-amber2 opacity-0 group-hover:opacity-100 transition-all" />
+                                    <div className="font-bold text-ink-primary group-hover:text-white truncate w-full">{item.name}</div>
+                                    <div className="text-xs text-ink-muted font-mono bg-black/20 px-2 py-1 rounded-full">{item.track_count} tracks</div>
                                 </div>
-                            ))
-                        )}
-                    </div>
-                </div>
-                <div className="flex-1 flex items-center justify-center text-ink-muted flex-col bg-transparent">
-                    <Zap size={80} className="mb-6 opacity-10" />
-                    <p className="text-xl font-light text-ink-secondary">Select a source to start power ranking</p>
+                            ))}
+                        </div>
+                    )}
                 </div>
             </div>
         );
