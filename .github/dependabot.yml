@@ -24,6 +24,10 @@ updates:
     # Group all non-security minor/patch into single PR
     groups:
       frontend-minor-patch:
+        # eslint-plugin-react-refresh excluded: its 0.4->0.5 bump pulls a peer
+        # range that breaks `npm install` (ERESOLVE) — needs isolated handling.
+        exclude-patterns:
+          - "eslint-plugin-react-refresh"
         update-types:
           - "minor"
           - "patch"
@@ -68,6 +72,11 @@ updates:
       - "backend"
     groups:
       python-minor-patch:
+        # pyrekordbox excluded: as a 0.x package its SemVer-"minor" bumps
+        # (0.1->0.4) are breaking and collide with documented rbox workarounds
+        # (anlz_safe, usb_one_library). Gets its own PR for isolated review.
+        exclude-patterns:
+          - "pyrekordbox"
         update-types:
           - "minor"
           - "patch"

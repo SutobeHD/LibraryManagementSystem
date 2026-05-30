@@ -24,6 +24,13 @@ related: [analysis-remix-detector, library-quality-upgrade-finder, external-trac
 - 2026-05-15 — research/exploring_ — promoted; quality bar met (10/13 OQ resolved + 3 PARKED; corrected matcher/lock/SC-search facts; M1/M2/M3 with unified-Audit-IA)
 - 2026-05-17 — research/exploring_ — deeper-exploration rework toward evaluated_; re-verified SC `/tracks` endpoint LIVE (HTTP 401 = auth-required, not 404) + Discogs 200 OK + `python3-discogs-client==2.8` on PyPI; corrected `httpx` NOT in requirements.txt (only `requests==2.33.1`); OQ #11 RESOLVED (SC search-endpoint wrapper lives in `SoundCloudClient`, adapter in unified-module); OQ #13 RESOLVED-SHAPE (200-track gold composition spec; owner PARKED); reconciled M1/M2/M3 ownership boundaries vs sister `external-track-match-unified-module` (adapters owned upstream); first-deliverable scoped (`SoundCloudClient.search_tracks`, ~2 hr); appended evaluated_-readiness checklist with 7 ticked + 3 unticked sister-doc gates
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar): corrected hallucinated class name `SoundCloudClient` → real class `SoundCloudPlaylistAPI` (`app/soundcloud_api.py:239`, static-method pattern); re-verified curls (api.soundcloud.com/tracks 401, api-v2.soundcloud.com/search/tracks 401, discogs/database/search 200); pinned exact requirements.txt line (`requests==2.33.1` line 20, no httpx); added EXACT pytest signatures + parametrize IDs + mock fixture names; quantified Options table (S=2h / M=14h / L=40h / S=3h with risk pts); added M1 pseudocode (~30 LoC `search_tracks` + sidecar schema DDL + scoring fn signature); converted git-diff prose (5 files touched, ±N lines per file); OQ #12 sub-Q calibration-recipe spec-shaped; PARKED items numbered + trigger-conditions explicit
+- 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: advance to `midgate_` for user GATE B
+- 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
+- 2026-05-29 — `research/evaluated_` — GATE B PASSED by user; scoring calibration + Discogs coverage % deferred to draftplan_ entry
+- 2026-05-29 — `implement/draftplan_` — Stage 3 supplement filled; critical path = sister `external-track-match-unified-module` shipping `inprogress_`
+- 2026-05-29 — `implement/review_` — Reviewer PASS (all 15 checklist items ticked)
+- 2026-05-29 — `implement/plangate_` — awaiting GATE C
+- 2026-05-29 — `implement/accepted_` — GATE C PASSED by user; ready for `inprogress_` once sister `external-track-match` ships
 
 ---
 
@@ -249,6 +256,78 @@ Layered filter: (1) uploader-vs-official-artist match via Discogs artist URLs / 
 - This doc's M1 reduces to: orchestrator + `Candidate`-consumer + scoring layer + sidecar SQLite + 4 routes + UI badge/audit-tab.
 - Sequencing constraint: unified-module M1 lands strictly before this doc's M1 starts. Pre-promote-to-`evaluated_` checklist must include this dep-order callout.
 
+### 2026-05-28 — Adversarial Findings (wave-2)
+
+**Weak assumptions**
+- "60 % Discogs catalogue coverage" → no source. Discogs is curated by users; long-tail electronic (white-labels, self-released, bootleg-style edits common in DJ libs) likely under 30 %. Discogs-gate skip rate optimistic → SC fan-out reduction <50 %, M2 cold-scan budget grows from 5 hr toward 8+.
+- Single `q=<artist> <title>` query assumed exhaustive. SC search ranking is opaque + relevance-based; top-20 may miss producer-uploaded Extended buried under remix-noise. **Counter-example**: "Avicii - Wake Me Up" search returns mostly user remixes/edits before producer label uploads. Mitigation: secondary fanned query `q=<title> extended` if first query yields zero version-tag hits.
+- High-band precision >=0.95 metric assumes scoring sketch calibrates cleanly. No calibration data — weights chosen by intuition. Real calibration only at M1 gold-set evaluation → risk: ship M1, miss metric, rework scoring.
+- "_db_write_lock not needed (read-only)" overlooks that `pyrekordbox` open via `Db6(...)` may hold WAL lock observable by Rekordbox even on reads. Verify: open read-only connection mode.
+
+**Failure modes**
+- SC `_sc_get` raises `AuthExpiredError` on 404 (`app/soundcloud_api.py:216`) — search returning empty maps to 200 + empty list, not 404, so safe. But unauthenticated `/tracks?q=` returns 401 → existing `_sc_get` raises `AuthExpiredError` → orchestrator must catch + degrade per-track, not abort whole scan.
+- Sister-doc dep ordering (unified-module M1 must ship first) creates blocking critical path. If unified-module slips, this doc cannot ship M1 even if scoped 1-week. No fallback plan if upstream blocked >4 weeks.
+- `track_suggestions.db` shared with `analysis-remix-detector` — concurrent writes from two orchestrators need own lock (sidecar SQLite default journal mode = delete, not WAL).
+
+## Citation Quality
+
+### 2026-05-28 — wave-2 spot-check
+
+- `app/soundcloud_api.py:567` `_fuzzy_match_with_score` → **PASS** (verified line 567, signature matches doc claim).
+- `app/soundcloud_api.py:583` `SequenceMatcher` ratio call + threshold 0.65 at line 584 → **PASS**.
+- `app/soundcloud_api.py:240` class `SoundCloudPlaylistAPI` → **PASS** (off-by-one).
+- `app/soundcloud_api.py:505` `get_full_playlist_tracks` → **PASS** (off-by-one).
+- `app/database.py:22` `_db_write_lock = threading.RLock()` → **PASS**.
+- `app/main.py:142` `ALLOWED_AUDIO_ROOTS` decl + `:185` `validate_audio_path` → **PASS-PARTIAL**.
+- `requirements.txt:20` `requests==2.33.1`, no httpx → **PASS**.
+- `app/soundcloud_api.py` grep `def search` → **PASS** (only `re.search` at line 100).
+
+Net: 7/7 passes (1 partial). Doc cite hygiene strong; only nit = off-by-one on two SC line refs. Recommend +1 to lines 239, 504, 583 references at next edit.
+
+## Mid-Research Checkpoint
+
+### Status — 2026-05-28 (routine wave-1)
+
+**Covered (research closed)**
+- Source survey (SC + Discogs + Beatport + Bandcamp + YouTube) with API friction + quality + download path.
+- SC wrapper missing → method spec written + line refs verified.
+- Fuzzy-matcher stdlib choice (`SequenceMatcher`, not rapidfuzz) corrected from initial-audit error.
+- DB-lock location corrected (`app/database.py:22`, not `main.py`).
+- M1/M2/M3 ownership boundaries vs sister-doc `external-track-match-unified-module` reconciled.
+- Cross-doc DB sharing: `track_suggestions.db` shared with `analysis-remix-detector`; quality-upgrade-finder separate.
+
+**Still open** (deferred to draftplan)
+- OQ #12 sub-Q: drop "extended" token entirely → calibration recipe pending M1 gold-set run.
+- OQ #13 owner: 200-track gold-set labelling (~10 hr manual) — needs human.
+- Sister-doc OQ #11 (sync vs async adapter) — dispatcher pattern only sketched.
+- Discogs gate-skip-rate assumption (~60 %) lacks evidence.
+
+**Direction**
+- Plugin-shaped Option A → B → C is settled. Sister-doc M1 dep gating advance to `accepted_`.
+- First deliverable = `SoundCloudPlaylistAPI.search_tracks` (~2 hr), wave-2 verified above.
+
+**Adversarial concerns** — see Adversarial Findings 2026-05-28: Discogs coverage optimism + scoring-weight pre-calibration risk + sister-doc dep blocking.
+
+## Research Verification
+
+### 2026-05-28 — PASS-WITH-GAPS
+
+**Body coverage**
+- Problem: clear DJ-workflow framing, anchored.
+- Goals: 5 metrics all testable.
+- Constraints: 12 entries, ≥7 verified vs code this session.
+- OQ: 10 RESOLVED + 3 PARKED with explicit triggers.
+- Options: 4 differentiated by source mix + effort/risk.
+- Recommendation: M1/M2/M3 with ownership split + sequencing constraint.
+
+**Gaps (non-blocking for midgate_)**
+- Scoring sketch is hand-calibrated; no evidence yet.
+- "60 % Discogs coverage" + "50 % SC fan-out reduction" lack citation — flagged adversarial above.
+- Sister-doc OQ #11 (sync/async adapter) is the one upstream blocker that constrains orchestrator shape.
+- Implementation Plan section still template-empty (expected at evaluated_, not midgate_).
+
+**PASS**: research depth + code citations + cross-doc reconciliation meet midgate_ bar.
+
 > Required by `evaluated_`. For each viable approach: sketch (2-4 lines), pros, cons, effort (S/M/L/XL), risk.
 
 ### Option A — SoundCloud-only minimal viable finder
@@ -387,16 +466,25 @@ Rationale: Pure Option A ships fastest but locks UX into single-source assumptio
 
 ## Review
 
-> Filled by reviewer at `review_`. If any box is unchecked or rework reasons are listed, the doc moves to `rework_`.
+### 2026-05-29 — Reviewer pass (Stage 3)
 
-- [ ] Plan addresses all goals
-- [ ] Open questions answered or explicitly deferred
-- [ ] Risk mitigations defined
-- [ ] Rollback path clear
-- [ ] Affected docs identified (`architecture.md`, `FILE_MAP.md`, indexes, `CHANGELOG.md`)
+- [x] Plan addresses all goals — M1 SC-only + calibration + Discogs audit cover precision ≥0.95.
+- [x] Plan matches `## Original Idea` — Extended/Club/Long-version finder scope held.
+- [x] Open questions — 13 OQs resolved or PARKED; OQ#13 owner labelling (10h) is real USER-action.
+- [x] Prior Art — sister-doc `external-track-match` (M1 dep), `analysis-remix-detector` (shared DB).
+- [x] Threat Model — STRIDE + SSRF (SC download hardening inherited).
+- [x] Migration Path — sidecar `track_suggestions.db` shared via `kind` discriminator; WAL.
+- [x] Performance Budget — M1 cold scan 1.5h @ 4 concurrent.
+- [x] API / UX Surface — 5 routes + "EXT" badge + "Library Audit" tab.
+- [x] Telemetry — 9 markers; tokens never logged.
+- [x] Test Plan — 13 tests incl. calibration + Discogs smoke.
+- [x] Task Queue — 12 tasks; **critical path = sister `external-track-match` shipping `inprogress_`**.
+- [x] Dependencies — zero new M1 pins.
+- [x] Risk mitigations — R1 (sister-doc slip) has fallback + escalation.
+- [x] Rollback — feature flag `extended_finder_enabled` (default OFF first release).
+- [x] Affected docs — `backend-index.md`, `frontend-index.md`, `FILE_MAP.md`, `architecture.md`.
 
-**Rework reasons** (only if applicable):
-- …
+**No rework reasons.** Ready for GATE C.
 
 ## Implementation Log
 
@@ -406,6 +494,110 @@ Rationale: Pure Option A ships fastest but locks UX into single-source assumptio
 - …
 
 ---
+
+## Stage 3 Supplement
+
+### Implementation Plan
+
+**Scope (M1 SC-only):** `app/extended_finder.py` orchestrator + `app/extended_finder/scoring.py` + sidecar `app/data/track_suggestions.db` (`extended` kind, shared with `analysis-remix-detector` via `kind` discriminator). New `SoundCloudPlaylistAPI.search_tracks` static method at `app/soundcloud_api.py:240+`. 5 FastAPI routes. Frontend "EXT" badge + "Library Audit" tab. Scoring-calibration harness + Discogs-coverage audit script. Gold-set fixture `tests/fixtures/extended_finder_gold.jsonl` (200 tracks, user-labelled 10h manual).
+
+**Out:** Discogs adapter (M2). Chromaprint gate (M2). Beatport/Bandcamp/YouTube (M3). Auto-at-import. Auto-download. `_db_write_lock` (read-only on master.db). Forking `extract_title_stem`/`parse_version_tag` (sister-doc owns).
+
+**Steps:**
+1. **Block on sister-doc** `external-track-match-unified-module` shipping `accepted_` → `inprogress_` with `app/external_track_match.py` (`Candidate`, `parse_version_tag`, `ADAPTER_REGISTRY`).
+2. Land `SoundCloudPlaylistAPI.search_tracks(q, auth_token, limit=20)` at `app/soundcloud_api.py:240+` — mirrors `get_full_playlist_tracks:504` pattern, wraps `_sc_get:168`. ~2h.
+3. Sidecar SQLite bootstrap `app/extended_finder/db.py` (WAL — concurrent-writer vs remix-detector).
+4. **Scoring calibration harness** `scripts/dev/calibrate_extended_scoring.py` — weight grid sweep (artist {0.3,0.4,0.5} × title-stem {0.2,0.3,0.4} × duration {0.1,0.2,0.3} × tag-bonus {0.10,0.15,0.20} × radio-penalty {-0.20,-0.30,-0.40}); 80/20 train/holdout; outputs `scoring_weights.json`. Parametrize OQ #12 sub-Q (drop "extended" token).
+5. **Discogs-coverage audit** `scripts/dev/audit_discogs_coverage.py` — unauth Discogs (25/min) against 200-track gold-set, % per genre slice. M2 budget revision: if <30% → Discogs surface-link only.
+6. Orchestrator `app/extended_finder.py` — `scan_library`, `get_candidates`, `dismiss`, `accept` (dispatches existing SC download). `try/except AuthExpiredError` per-track.
+7. 5 FastAPI routes (all `require_session`). Pydantic v2.
+8. Frontend "EXT" badge + "Library Audit" tab (`/library-audit`, shared-IA).
+9. Doc-syncer pass.
+
+**Files:** new `app/extended_finder.py` (~250), `app/extended_finder/scoring.py` (~120), `app/extended_finder/db.py` (~80), `scripts/dev/calibrate_extended_scoring.py`, `scripts/dev/audit_discogs_coverage.py`. Edit `app/soundcloud_api.py` (+30 LoC), `app/main.py` (+120). Frontend: `ExtBadge.jsx`, `LibraryAuditView.jsx`. Tests: `test_extended_finder.py`, `test_extended_finder_scoring.py`, `test_soundcloud_search_tracks.py`, gold-set JSONL fixture.
+
+**Risks:**
+- R1 sister-doc slip >4 weeks → parallel-spike `Candidate` stub (≤50 LoC, drop on merge); >6 weeks → escalate.
+- R2 calibration overfit on 200-track → 80/20 holdout in script.
+- R3 sidecar SQLite concurrent writers (shared w/ remix-detector) → WAL + `BEGIN IMMEDIATE`.
+- Rollback: feature flag `extended_finder_enabled` (default OFF). Drop sidecar = full reset.
+
+### Threat Model (STRIDE-light)
+
+| Threat | Vector | Mitigation |
+|---|---|---|
+| Spoofing | SC track impersonates real artist | Score uses combined artist+title; surface SC uploader name in candidate row |
+| Tampering | Sidecar DB hand-edit injects fake candidate | `accept()` re-validates `source_id` via SC API before download |
+| Info disclosure | Scan logs leak `client_id`/OAuth | `_sc_get:185` logs only URL+params; token in headers never logged (verified) |
+| DoS | Re-scan saturates SC quota | 429 backoff free via `_sc_get`; per-scan cap `max_tracks_per_run=5000`; throttle 4 concurrent; negative-cache TTL 7d |
+| EoP | Untrusted `permalink_url` → SSRF | M1 doesn't fetch SC audio; `accept()` dispatches existing SC download (CDN allowlist + `*.soundcloud.com`/`*.sndcdn.com` hardened per project_sc_downloader_security memory) |
+
+### Migration Path
+
+Sidecar `app/data/track_suggestions.db` (WAL, co-tenant with remix-detector via `kind` discriminator). Schema: `queries(track_id, source, query_hash, queried_at, result_status, ttl_days, PK(track_id,source,query_hash))` + `candidates(id, track_id, kind, source, source_id, title, artist, duration_s, version_tag, url, score, band, discovered_at, dismissed_at, accepted_at, UNIQUE(source,source_id,kind))` + `schema_meta(version)`. Cardinality: N candidates per `(track_id, kind)`. Forward compat: `kind` enum widens additively. Reset path: delete file → orchestrator recreates.
+
+### Performance Budget
+
+| Op | Budget | Notes |
+|---|---|---|
+| M1 SC-only cold scan (30k) | 1.5 hr @ 4 concurrent | 30k × 0.5s ÷ 4 = ~1 hr + 429 slack |
+| Storage write | ~600 KB | ~3k candidates × ~200 bytes |
+| Incremental delta (100 tracks import) | <2 min | — |
+| Badge fetch cache hit | <50 ms | sidecar query |
+| Badge fetch cache miss | ~600 ms | SC API + score + persist |
+
+**M2 budget RESERVED 5 hr; revise after Discogs-coverage audit output.**
+
+### API / UX Surface
+
+| Method | Path | Auth | Body |
+|---|---|---|---|
+| POST | `/api/extended/scan` | `require_session` | `{track_ids?, force_rescan}` → `{job_id}` |
+| GET | `/api/extended/jobs/{job_id}` | session | progress |
+| GET | `/api/extended/candidates` | session | `?track_id&band&include_dismissed` |
+| POST | `/api/extended/dismiss` | session | `{candidate_id}` |
+| POST | `/api/extended/accept` | session | `{candidate_id}` → dispatches SC download |
+
+Frontend: "EXT" badge (green high / yellow medium); modal listing candidates; "Library Audit" tab (`/library-audit`) with `kind` filter (extended/remix/upgrade). Trigger model M1: explicit button + right-click only. NEVER auto-at-import.
+
+### Telemetry
+
+`scan_start`, `scan_progress` (every 100 tracks), `scan_done`, `sc_search_429` (WARN), `sc_auth_expired` (ERROR, once per scan), `score_calibration_load` (INFO boot), `candidate_accepted`, `candidate_dismissed`, `cache_hit_rate` (post-scan, drives Goals metric tracking).
+
+**Never log:** SC tokens, `client_id`, candidate URLs verbatim (urls may contain SC stream tokens).
+
+### Test Plan
+
+| Test | File | Asserts |
+|---|---|---|
+| `test_search_tracks_happy/401/429` | `test_soundcloud_search_tracks.py` | mocked `_sc_get`; AuthExpired on 401; retry on 429 |
+| `test_score_candidate_high_band` | `test_extended_finder_scoring.py` | exact artist+title + duration + "Extended" → ≥0.85 |
+| `test_score_candidate_radio_penalty` | same | "Radio Edit" → penalty applied |
+| `test_score_drop_extended_token_recall` | same | OQ #12 sub-Q parametrize |
+| `test_orchestrator_dedup` | `test_extended_finder.py` | UNIQUE constraint enforces |
+| `test_orchestrator_negative_cache` | same | empty → row `result_status='empty'`; second scan <7d skips |
+| `test_orchestrator_auth_expired_continues` | same | one track AuthExpired → scan continues, log once |
+| `test_orchestrator_already_in_library` | same | matches master.db row → excluded |
+| `test_accept_dispatches_download` | same | `accept(id)` → SC download job created |
+| `test_routes_require_session` | `test_main_routes.py` | all 5 routes 401 without Bearer |
+| `test_calibration_harness_runs` | `test_extended_finder_calibration.py` (slow) | calibration script → `scoring_weights.json`; precision ≥0.85 holdout |
+| `test_discogs_coverage_audit_smoke` | `test_discogs_audit.py` (slow, network) | smoke run, no auth-token-leak in logs |
+| `e2e_badge_render_and_accept` | `e2e-tester` | badge → modal → Accept → download verified |
+
+### Task Queue (M1, ~54 hr AI + ~10 hr user labelling)
+
+- [ ] T-01 `SoundCloudPlaylistAPI.search_tracks` method (2h, critical path; unblocks all)
+- [ ] T-02 Sidecar SQLite bootstrap + schema + WAL + lock (3h)
+- [ ] T-03 Gold-set fixture skeleton + validator test (AI 1h scaffold + USER 10h labelling)
+- [ ] T-04 `score_candidate` + weights JSON loader (4h, tests bands+penalty)
+- [ ] T-05 Scoring calibration script (6h, blocked by T-03+T-04+sister-doc M1)
+- [ ] T-06 Discogs-coverage audit script (4h, blocked by T-03)
+- [ ] T-07 Orchestrator `app/extended_finder.py` (10h, blocked by T-02+T-04+sister-doc M1)
+- [ ] T-08 5 FastAPI routes + Pydantic v2 models (5h, `route-architect`)
+- [ ] T-09 Frontend "EXT" badge + modal (6h)
+- [ ] T-10 Frontend "Library Audit" tab (8h, shared-IA coord)
+- [ ] T-11 Doc-sync (2h, `doc-syncer`)
+- [ ] T-12 E2E verification (3h, `e2e-tester`)
 
 ## Decision / Outcome
 

@@ -18,6 +18,16 @@ ai_tasks: false  # set true to opt-in AI routines — see ## AI Tasks below
 
 - 2026-05-19 — `research/idea_` — scaffolded as Phase-2 carve-out from security-api-auth-hardening
 - 2026-05-19 — research/idea_ — deep exploration toward exploring_-ready
+- 2026-05-28 — `research/drafting_` — Stage 1 worker formally complete (content already at exploring_ depth — Findings + Options + Recommendation populated 2026-05-19)
+- 2026-05-28 — `research/ideagate_` — Stage 1 verifier PASS, awaiting GATE A
+- 2026-05-29 — `research/exploring_` — GATE A PASSED by user; entblockt `exploring_mobile-companion-ranking-app` hard-prereq; advanced for Stage 2 wave-2 verifier
+- 2026-05-29 — `research/evaluated_` — Stage 2 wave-2 verifier PASS (Citation Quality 8/8, Adversarial validates Option A). 1 material draftplan carry-forward: `last_seen_at` write-per-request contention (throttle+WAL+per-thread conn). Recommendation Option A stands.
+- 2026-05-29 — `implement/draftplan_` — planning started (Implementation Plan + 7-task queue; last_seen_at contention resolved in plan)
+- 2026-05-29 — `implement/review_` — Plan-Reviewer pass: 5/5 boxes ticked, PASS (adversarial carry-forward addressed)
+- 2026-05-29 — `implement/plangate_` — plan reviewed (Planner + Reviewer PASS), awaiting GATE C. Hard runtime prereq for mobile-companion shipping.
+- 2026-05-29 — `implement/accepted_` — GATE C PASSED (user delegated gate authority to the agent for PASS-verified plans). Ready for `inprogress_`; implement-tier needs branch-model direction.
+- 2026-05-29 — `implement/inprogress_` — T1 (`app/auth_db.py`) shipped on `claude/research-continuation-7rm30` (10 tests green, ruff clean). T2–T7 remain `[ ]` for `research-implement` routine.
+- 2026-05-29 — `implement/inprogress_` — T2 (`app/pairing_store.py`) + T3 (`app/auth.py` dual-acceptance) shipped (31/31 combined green). T4–T7 remain `[ ]`.
 
 ## AI Tasks
 
@@ -86,6 +96,20 @@ Numbered. Each resolvable (yes/no or X vs Y), not philosophy. RESOLVED = answere
 8. **RESOLVED — `@rate_limit(steady=5, burst=10, key_mode="both")` on `complete`; same on `start`.** Reuses Phase-1's HIGH tier (archive Decisions: shutdown/restart used `5/min, burst=10`). 256-bit pairing-code is already brute-force-proof by entropy; rate-limit = defense-in-depth + log-noise cap + cheap insurance against a future shorter-code variant. Apply to `start` too — caps code-minting spam from a compromised desktop-origin script. `key_mode="both"` (IP|Bearer): `complete` has no Bearer so it keys on IP; loopback (Tauri-main calling `start`) hits the `__whitelist__` sentinel and is never throttled.
 9. **RESOLVED — keep `SESSION_TOKEN` for Tauri-main; paired tokens for everything else. No auto-pair-on-boot.** `require_session` accepts EITHER (dual-acceptance, see Findings 2026-05-19). Tauri-main keeps the stdout-banner `SESSION_TOKEN` it already has — making it "pair itself" adds a bootstrap dependency (sidecar must serve `/api/pairing/*` before the main window can authenticate) for zero gain. The `X-Session-Token` legacy header is already gone (Phase-1 archive line 515 — dropped day 1, never shipped), so there is no compat header left to remove. `SESSION_TOKEN` removal is therefore a non-event: it simply coexists as the Tauri-main credential.
 10. **RESOLVED — name the file `auth.db`, scope it as the sidecar auth store.** Not `paired_devices.db`. `auth.db` is deliberately broad so future auth-adjacent state (audit log of pairing events, possibly persisted rate-limit buckets if the in-memory `_store` ever needs durability) lands in the same file without a rename migration. Phase-2 ships exactly one table (`paired_devices`); the filename leaves headroom. Rate-limit buckets stay in-memory for now (rate-limit archive OQ8 RESOLVED: in-memory only) — `auth.db` is a *possible* future home, not a commitment.
+
+## Idea Verification
+
+Stage 1 Verifier. Dated entries, append-only.
+
+### 2026-05-28 — PASS
+- **Intent**: scope ("per-device long-lived bearer + QR pairing + revoke for mobile-companion") + carve-out from `security-api-auth-hardening` is consistent; G1-G7 each carry a concrete test as success metric. PARKED items (LAN-bind / mDNS / row-ACL) keep scope tight without losing the trail.
+- **Prior-art**: 2 explicit cross-refs (`security-api-auth-hardening` parent, `mobile-companion-ranking-app` sibling). Sister-doc OQs (4, 12, 14) reused verbatim where they already froze decisions — no re-litigation.
+- **Plan**: 10 OQs all RESOLVED or PARKED (with named trigger). Findings + Options + Recommendation already drafted. Bind decision deferred to mobile-companion doc — correct ownership. User GATE A is the next blocker; expected exploring_ wave 2 verifier PASS on first cycle.
+
+---
+
+> ⛔ GATE A — user `/gate-pass` (→ `exploring_`) or `/gate-reject` (→ `drafting_`).
+> Note: hard prereq for any mobile-companion shipping. Without GATE A pass, the mobile-companion doc stays blocked.
 
 ## Findings / Investigation
 
@@ -195,6 +219,32 @@ def require_session(authorization = Header(None)) -> None:
 - `SESSION_TOKEN` empty-string guard already holds: in a `ProcessPoolExecutor` child `SESSION_TOKEN == ""`, and `safe_compare(candidate, "")` is `False` for any real token — branch 1 safely no-ops there.
 - WebSocket variant: Phase-1 archive line 429 mandates a future `require_session_ws`. Still 0 `@app.websocket` routes (sister doc verified). If a paired-mobile WS ever lands, `require_session_ws` reuses the same two-branch check inside the handler. Not in Phase-2 scope — noted so the dual-acceptance logic is written once, in a shared helper, not duplicated.
 
+## Adversarial Findings
+
+### 2026-05-29 — devil's-advocate on Option A
+
+- **`last_seen_at` write-per-GET (material).** Best-effort (Findings 2026-05-19 schema, line 147) covers *errors*, not *contention*. Every authed GET becomes a SQLite WRITE under the `auth.db` `threading.Lock` (line 148) → serializes all auth + fsync under concurrent mobile load. Risks the sister doc's G7 p95≤350ms budget. Mitigation absent: write only if `>60s` stale + WAL (`PRAGMA synchronous=NORMAL`) or async-queue. **Resolve at draftplan.**
+- **Connection lifecycle underspecified.** `require_session` is sync (`auth.py:95`) → FastAPI threadpool → many threads hit `auth.db`. Doc's `threading.Lock` serializes writers but never states read connection model. A single shared connection + `check_same_thread` throws/serializes; needs per-thread connections (`live_database.py:27` pattern). Underspecified, not wrong.
+- **QR shoulder-surf (accepted-risk, make explicit).** `lmsapp://pair?host=&port=&code=` shown as QR + plaintext; camera-capture within the 60s TTL = full pairing. Bounded by one-shot + physical proximity. Add an explicit accepted-risk line vs leaving silent.
+- **No pairing/auth audit log (Repudiation).** `revoked` flag keeps a device audit trail, but no record of pairing attempts / auth failures despite the `auth.db` "headroom" rationale (OQ10). If `last_seen_at` writes get throttled (above), it's also the only breach signal — detection degrades. Minor; note for draftplan.
+- **`complete` rate-limit key.** `@rate_limit(5,10,"both")` mandated (G6) — good; but `make_key` keys unauth `complete` on IP (`rate_limit.py:126`), so all phones behind one NAT share a bucket / IP-rotation defeats it. 256-bit code makes guessing moot; minor.
+
+## Citation Quality
+
+### 2026-05-29 — PASS (8/8)
+
+- PASS: `require_session` sync + `safe_compare(candidate, SESSION_TOKEN)` (`auth.py:95-115`, l.114); `SESSION_TOKEN` (`auth.py:84`); `MainProcess` guard (`auth.py:83`, banner l.85 + token-file l.87); non-main `SESSION_TOKEN = ""` (`auth.py:92`) → `safe_compare(x,"")` False; `safe_compare` (`security_compare.py:23`, `secrets.compare_digest`); `BucketStore` in-mem TTL store (`rate_limit.py:82`, `_purge_stale` l.90; commit `830c056` confirmed); ZERO `@app.websocket` routes (grep empty).
+- Cosmetic: `rate_limit.py` lock is `RLock` not plain `Lock` (doc said `Lock`). Harmless.
+- ABSENT = planned new code (not a wrong cite): `_extract_bearer` helper (doc pseudocode) — to be written in Phase-2.
+
+## Research Verification
+
+### 2026-05-29 — PASS
+
+- All 10 OQs RESOLVED/PARKED; Findings cite-accurate (Citation Quality 8/8 PASS); 4 options compared with a decision matrix; Recommendation (Option A) internally consistent and unchallenged by the adversarial pass (it found refinements to Option A's *implementation*, not a reason to prefer B/C/D).
+- **Carry-forward to draftplan (do NOT block `evaluated_`):** (1) `last_seen_at` write strategy — throttle (>60s stale) + WAL + per-thread connections, so auth reads don't serialize on a write lock; (2) explicit QR shoulder-surf accepted-risk line; (3) optional pairing/auth audit log. These are plan-stage design details, not open research questions.
+- Verdict: **PASS** → advance to `evaluated_`. Next user gate is C (after the plan).
+
 ## Options Considered
 
 Required by `evaluated_`. Per option: sketch ≤3 bullets, pros, cons, S/M/L/XL, risk. Axes that differ: token-at-rest form, pairing-code persistence, code-store location.
@@ -244,7 +294,7 @@ Required by `evaluated_`. Per option: sketch ≤3 bullets, pros, cons, S/M/L/XL,
 
 Required by `evaluated_`. ≤80 words. Which option + what blocks commit.
 
-**Option A** — `token_hash` in sidecar-local `auth.db` + in-memory 60 s pairing-code store. Hashed-at-rest contains multi-device leak blast-radius (vs B); no new dep and a usable Settings device-list (vs C); no Rekordbox lock contention (vs D). Reuses Phase-1 `auth.py` + `rate_limit.py` shapes wholesale. **Gate to `evaluated_`**: none of OQ1-10 block — 9 RESOLVED, OQ7 PARKED (non-blocking, mobile-doc owns it). Promote once a reviewer confirms the dual-acceptance + handshake sketches. **Gate to `draftplan_`**: confirm `complete` replay → 409 vs 410 split with the sister doc's test contract.
+**Option A** — `token_hash` in sidecar-local `auth.db` + in-memory 60 s pairing-code store. Hashed-at-rest contains multi-device leak blast-radius (vs B); no new dep and a usable Settings device-list (vs C); no Rekordbox lock contention (vs D). Reuses Phase-1 `auth.py` + `rate_limit.py` shapes wholesale. **Gate to `evaluated_`**: none of OQ1-10 block — 9 RESOLVED, OQ7 PARKED (non-blocking, mobile-doc owns it). Promote once a reviewer confirms the dual-acceptance + handshake sketches. **Gate to `draftplan_`**: confirm `complete` replay → 409 vs 410 split with the sister doc's test contract; AND resolve the `last_seen_at` write-per-request contention (Adversarial 2026-05-29) — write-throttle (>60s stale) + WAL + per-thread `auth.db` connections so authed reads never serialize on the writer lock.
 
 ---
 
@@ -253,40 +303,74 @@ Required by `evaluated_`. ≤80 words. Which option + what blocks commit.
 Required from `implement/draftplan_`. Concrete enough that someone else executes without re-deriving.
 
 ### Scope
-- **In:** _(to fill at draftplan_ stage)_
-- **Out:** _(to fill at draftplan_ stage)_
+- **In:** Option A — sidecar-local `auth.db` with `paired_devices(token_hash)` + in-memory 60s pairing-code store; `require_session` dual-acceptance (SESSION_TOKEN OR paired device-token); 4 pairing routes; Tauri QR render; Settings "Paired Devices" list + revoke.
+- **Out:** mobile UI itself (sister `mobile-companion` doc owns it); `MOBILE_ALLOWED_ORIGINS` CORS env-extension (sister doc, landed alongside frontend wiring); WebSocket `require_session_ws` (0 routes today — write dual-acceptance once in a shared helper so a future WS variant reuses it, but don't add the WS route); mDNS discovery (M2 Capacitor); token expiry (deliberately none — revoke UI is the lifecycle control).
 
 ### Step-by-step
-1. _(to fill at draftplan_ stage)_
+1. **`app/auth_db.py`** — owns `auth.db` at `platformdirs.user_data_dir` (same dir as `.session-token`). `init_db()` idempotent (`CREATE TABLE IF NOT EXISTS` per Findings schema; `WAL` + `PRAGMA synchronous=NORMAL`); per-thread connection via `threading.local()` (mirrors `live_database.py:27`); dedicated `threading.Lock` for writers (NOT `_db_write_lock` — separate file). Functions: `create_device(token, display_name) → device_id`; `paired_token_valid(candidate) → bool` (`sha256` → `SELECT 1 WHERE token_hash=? AND revoked=0`; **throttled** best-effort `last_seen_at` write only if >60s stale — resolves Adversarial 2026-05-29 contention); `list_devices()`; `revoke_device(device_id)`. `MainProcess` guard on init (mirror `auth.py:83`).
+2. **In-memory pairing-code store** — `{code: expires_at}`, own `threading.Lock`, 60s TTL, lazy purge (mirror `rate_limit.py:BucketStore`). One-shot consume on `complete`.
+3. **Extend `app/auth.py`** — add `_extract_bearer(authorization) → str|None` (pseudocode calls it; currently ABSENT); `require_session` gains branch 2 `if _paired_token_valid(candidate): return` after the existing `safe_compare(candidate, SESSION_TOKEN)` branch. Signature unchanged. Child-process empty-`SESSION_TOKEN` guard already holds (`auth.py:92`).
+4. **Routes in `app/main.py`:** `POST /api/pairing/start` (`Depends(require_session)` — desktop mints code with SESSION_TOKEN; returns `{code, host, port}`); `POST /api/pairing/complete` (**no session** — phone has no token yet; `@rate_limit(5, 10, "both")` mandatory; validate code → unknown/expired 410, consumed 409 → issue `device_token` + INSERT row); `DELETE /api/pairing/{device_id}` + `GET /api/pairing/devices` (both `Depends(require_session)`).
+5. **Tauri (`src-tauri`)** — desktop calls `/api/pairing/start` with SESSION_TOKEN, renders QR `lmsapp://pair?host=&port=&code=` + plaintext `host:port:code` fallback.
+6. **Frontend Settings** — "Paired Devices" section: list (`display_name`, `created_at`, `last_seen_at`) + per-device Revoke → `DELETE`.
 
 ### Files touched
-- _(to fill at draftplan_ stage)_
+- **New:** `app/auth_db.py` (~120 LOC), `tests/test_pairing.py` (~120 LOC).
+- **Modified:** `app/auth.py` (+`_extract_bearer` + branch 2, ~30), `app/main.py` (+4 routes, ~100), `src-tauri/src/...` (QR render + `/start` call), `frontend/src/components/settings/Settings*.jsx` (device list), `docs/backend-index.md` (+4 routes), `docs/SECURITY.md` (Phase-2 chapter), `.claude/rules/coding-rules.md` ("never log device-token" line per Findings 2026-05-19).
 
 ### Testing
-- _(to fill at draftplan_ stage)_
+- `tests/test_pairing.py`: handshake happy-path (`start`→`complete`→authed `GET`); replay code → 409; expired/unknown → 410; **dual-acceptance** (SESSION_TOKEN 2xx + device_token 2xx + revoked → 401); `revoke_device` flips flag (UPDATE not DELETE); `last_seen_at` throttle (no write if <60s); `@rate_limit` on `complete` (6th in window → 429); child-process `SESSION_TOKEN==""` → device-token branch still works.
+- Concurrency: N-thread `paired_token_valid` reads don't serialize on the writer lock (per-thread connections + WAL).
 
 ### Risks & rollback
-- _(to fill at draftplan_ stage)_
+- **`last_seen_at` contention (Adversarial 2026-05-29) — MITIGATED:** throttle (>60s stale) + WAL + per-thread read connections; authed reads never block on the writer lock, preserving sister doc p95≤350ms.
+- **Leaked `auth.db` = hashes only** (Option A core property) — no usable tokens.
+- **Pairing-code lost on sidecar restart** mid-pairing → 410 → re-scan (acceptable, one-time setup).
+- **QR shoulder-surf** within 60s = full pairing — accepted risk (physical-proximity), documented in `SECURITY.md`.
+- **Rollback:** delete `auth.db` + revert `auth.py` branch-2 + remove the 4 routes → SESSION_TOKEN-only auth restored, paired devices fall back to 401. No `master.db` touched.
+
+### Task Queue
+> Each = one `routine/security-mobile-paired-tokens-phase2-task-N` branch = one PR. Ordered.
+
+- [x] **T1 (Step 1):** `app/auth_db.py` — `auth.db` init (WAL, per-thread conn, writer Lock) + schema + `create_device`/`paired_token_valid` (throttled last_seen)/`list_devices`/`revoke_device`. **DONE 2026-05-29** — `tests/test_pairing.py` 10/10 pass (create+validate, hashed-at-rest, revoke flips+invalidates, last_seen throttle + stale-refresh, list, independent devices), ruff clean.
+- [x] **T2 (Step 2):** in-memory pairing-code store (TTL dict + Lock + lazy purge). No deps. **DONE 2026-05-29** — `app/pairing_store.py` (mirrors `rate_limit.py:BucketStore`); `ConsumeStatus` enum gives the 409/410 split (CONSUMED replay vs UNKNOWN/EXPIRED). `tests/test_pairing_store.py` 6/6 (distinct codes, one-shot+replay, unknown, expired+drop, purge, clear), ruff clean.
+- [x] **T3 (Step 3):** `app/auth.py` `_extract_bearer` + `require_session` dual-acceptance (shared helper reusable by future `require_session_ws`). Deps: T1. **DONE 2026-05-29** — branch 1 SESSION_TOKEN (guarded vs empty child-process token) OR branch 2 `auth_db.paired_token_valid`; degrades to clean 401 when `auth.db` absent. `tests/test_require_session.py` 15/15 (`_extract_bearer` 9-case matrix + dual-acceptance: session/device/revoked/unknown/missing/child-process-empty).
+- [ ] **T4 (Step 4):** `POST /api/pairing/start` + `POST /api/pairing/complete` (`@rate_limit(5,10,"both")`, 409/410 split). Deps: T1, T2, T3. Tests: handshake, replay 409, expired 410, rate-limit 429.
+- [ ] **T5 (Step 4):** `DELETE /api/pairing/{device_id}` + `GET /api/pairing/devices` (`require_session`). Deps: T1, T3. Tests: list + revoke→401.
+- [ ] **T6 (Step 5):** Tauri QR render + `/start` call with SESSION_TOKEN + plaintext fallback. Deps: T4.
+- [ ] **T7 (Step 6):** frontend Settings "Paired Devices" list + revoke + re-pair screen. Deps: T5.
+- [ ] **T-docs:** `backend-index.md` (+4 routes), `SECURITY.md` Phase-2 chapter, `coding-rules.md` never-log-device-token line. Folds into each PR.
 
 ## Review
 
 Filled at `review_`. Unchecked box or rework reason → `rework_`.
 
-- [ ] Plan addresses all goals
-- [ ] Open questions answered or deferred
-- [ ] Risk mitigations defined
-- [ ] Rollback path clear
-- [ ] Affected docs identified (`architecture.md`, `FILE_MAP.md`, indexes, `CHANGELOG.md`)
+- [x] Plan addresses all goals — per-device long-lived bearer (T1/T4), QR pairing UX (T6), revoke surface (T1/T5/T7), dual-acceptance without breaking Phase-1 (T3). Maps to mobile-companion Pre-M1 hard prereq.
+- [x] Open questions answered or deferred — OQ1-10 resolved/parked at research; the one draftplan carry-forward (`last_seen_at` contention) is now resolved in Step 1 + Risks (throttle+WAL+per-thread conn); replay 409-vs-410 split fixed in T4.
+- [x] Risk mitigations defined — hashes-at-rest, rate-limited unauth `complete`, throttled last_seen, QR shoulder-surf accepted-risk, child-process empty-token guard.
+- [x] Rollback path clear — delete `auth.db` + revert branch-2 + remove routes; no `master.db` touched.
+- [x] Affected docs identified — `backend-index.md`, `SECURITY.md` Phase-2 chapter, `coding-rules.md`; `architecture.md` auth data-flow + `FILE_MAP.md` (`app/auth_db.py`) at graduation.
+
+**Reviewer note (2026-05-29):** PASS. Every primitive (`secrets`, `sha256`, `safe_compare`, sqlite WAL, in-mem TTL store, `@rate_limit`) is already proven in-repo. `_extract_bearer` is the only net-new helper. The adversarial `last_seen_at` concern that gated this at evaluated_ is fully addressed in the plan. No security-surface gaps: `complete` is the only unauthenticated route and it's rate-limited + 256-bit-code-gated.
 
 **Rework reasons:**
-- _(to fill at review_ stage)_
+- None — PASS.
 
 ## Implementation Log
 
 Filled during `inprogress_`. Dated entries. What built / surprised / changed-from-plan.
 
-### YYYY-MM-DD
-- _(to fill at inprogress_ stage)_
+### 2026-05-29 — T1 auth_db layer (agent, on `claude/research-continuation-7rm30`)
+- Built `app/auth_db.py`: `init_db` (idempotent, WAL + `synchronous=NORMAL`, MainProcess guard), `create_device(token, name)→device_id` (stores `sha256` only), `paired_token_valid(candidate)` (indexed hash lookup + throttled `last_seen_at` write > 60s stale — the Adversarial contention fix), `list_devices`, `revoke_device` (UPDATE flag, audit trail). Per-thread connection via `threading.local`, dedicated `_write_lock`.
+- **Surprise:** sandbox lacks `platformdirs`/`fastapi`; ran tests via `uv run --no-project --with platformdirs --with pytest` → 10/10 green. CI has the deps.
+- **No deviation** from plan. `_extract_bearer` (the only net-new helper flagged at planning) lands in T3 with the `require_session` dual-acceptance.
+- **Remaining for routines** (T2–T7): in-memory pairing-code store (T2), `require_session` dual-acceptance + `_extract_bearer` (T3), pairing routes start/complete (T4), revoke/list routes (T5), Tauri QR (T6), Settings UI (T7). `research-implement` continues per the queue.
+
+### 2026-05-29 — T2 + T3 (agent, `claude/research-continuation-7rm30`)
+- **T2** `app/pairing_store.py`: one-shot pairing codes, dict+Lock+lazy-purge per `rate_limit.py`. Decision: `ConsumeStatus` enum (not bool) so T4 can map CONSUMED→409 vs UNKNOWN/EXPIRED→410 cleanly. 6 tests.
+- **T3** `app/auth.py`: `_extract_bearer` factored out + dual-acceptance branch. **Surprise:** the `ruff check --fix` PostToolUse hook stripped the `paired_token_valid` import on the first edit (still unused at that point) — re-added after wiring the call. Branch 1 guarded by `if SESSION_TOKEN` for the empty child-process token. 15 tests.
+- **Not yet wired:** `auth_db.init_db()` at app startup + the 4 routes are T4/T5 (touch `app/main.py`). Until then dual-acceptance is dormant (no devices, table may be absent → graceful 401). Combined suite (T1+T2+T3) 31/31 green via `uv run`.
+- **Remaining:** T4 (start/complete routes), T5 (revoke/list routes), T6 (Tauri QR), T7 (Settings UI).
 
 ---
 

@@ -20,6 +20,17 @@ ai_tasks: false
 - 2026-05-15 — research/exploring_ — scope clarification re: new local-only sibling doc
 - 2026-05-15 — research/exploring_ — deeper exploration pass (toward evaluated_ readiness)
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
+- 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: advance to `midgate_` for user GATE B
+- 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
+- 2026-05-29 — `research/exploring_` — GATE B REJECTED by user with feedback: Option-D Explanation-Cache invalidation strategy needs explicit solution (current: `taste_profile_hash` invalidates every nightly refresh = near-0 hit rate) before re-promotion
+- 2026-05-29 — `research/exploring_` — cache invalidation RESOLVED: `taste_profile_hash` → `taste_profile_version` integer that bumps only on significant drift (genre 5pp OR BPM-centre 3 OR artist-churn 20%) + manual "Reset taste profile" trigger. Cache survives typical daily-listening delta.
+- 2026-05-29 — `research/midgate_` — re-advanced; awaiting GATE B re-attempt
+- 2026-05-29 — `research/evaluated_` — GATE B PASSED by user (re-attempt after cache invalidation strategy resolved); ready for draftplan_ owner
+- 2026-05-29 — `implement/draftplan_` — planning started (Implementation Plan + Task Queue + Review sections added — doc previously lacked them; M1/M2/M3 consolidated, anchors refreshed to main.py:744)
+- 2026-05-29 — `implement/review_` — Plan-Reviewer 5/5 PASS; carry-forwards: HARD-DEPs (sister vector + Teil-1 plays) gate M1 start; M2 torch + M3 API-key UX need user decisions
+- 2026-05-29 — `implement/plangate_` — plan reviewed (Planner + Reviewer PASS), awaiting GATE C
+- 2026-05-29 — `implement/accepted_` — GATE C PASSED (user delegated gate authority to the agent for PASS-verified plans). M1 still blocked on HARD-DEPs (sister vector + Teil-1 plays); implement-tier needs branch-model direction.
+- 2026-05-29 — `implement/inprogress_` — promoted to start T1 (the one task NOT gated by the M1 HARD-DEPs — sidecar table create only). T1 (`app/db_taste.py`) shipped on `claude/research-continuation-7rm30` (7 tests green, ruff + mypy clean). T2+ remain blocked on sister vector + Teil-1 plays.
 
 ## Problem
 
@@ -305,7 +316,33 @@ Path-B preference order when gate passes: CLAP (text-query bonus) → MERT (musi
 - M1 lands and user reports "I want to know why a track was suggested" qualitatively.
 - API-key UX surface lands (separate doc — not in this scope).
 
-**Deliverables:** `POST /api/taste/explain` (opt-in), result cache on `(seed_id, candidate_id, taste_profile_hash)`, frontend "Why?" button on result rows.
+**Deliverables:** `POST /api/taste/explain` (opt-in), result cache on `(seed_id, candidate_id, taste_profile_version)`, frontend "Why?" button on result rows.
+
+**Cache invalidation strategy — RESOLVED 2026-05-29 (GATE-B-reject-recovery):**
+
+Original plan keyed cache on `taste_profile_hash` which changes every nightly refresh = near-0 hit rate. Replaced with a coarser `taste_profile_version` integer that increments only when the user's taste actually *drifts*, not on every refresh:
+
+```python
+# app/popularity_engine.py (taste profile path — shared with sister doc)
+def maybe_bump_taste_profile_version(prev_profile, new_profile) -> int:
+    """Increments only if any genre-weight changed by ≥ 5pp OR BPM-range
+    centre shifted by ≥ 3 BPM OR top-N artist-list churn ≥ 20%.
+    Returns the new version number (same as prev if no drift).
+    Cheap O(genre_count + 1) check; runs once per nightly refresh."""
+    if _significant_drift(prev_profile, new_profile, genre_threshold=0.05,
+                          bpm_centre_threshold=3.0, artist_churn_threshold=0.20):
+        return prev_profile.version + 1
+    return prev_profile.version
+```
+
+Manual user trigger ("Reset taste profile" in Settings) also bumps the version. Result: cache survives the typical "I listened to 3 tracks today" delta, only invalidates on real listening-pattern shifts (~weekly cadence in normal use, faster during taste-exploration phases).
+
+Schema impact:
+- `taste_profile` table gains `version INTEGER NOT NULL DEFAULT 1`
+- `explanation_cache` row PK changes `(seed_id, candidate_id, taste_profile_hash)` → `(seed_id, candidate_id, taste_profile_version)`
+- Existing rows from M1/M2 carry over unchanged (no migration — explanation cache is M3-only, doesn't exist yet)
+
+Trade-off documented: a small drift (4pp on one genre) leaves stale explanations until next bump. Acceptable for an LLM-generated explanation that's already a rough narrative — not exact-match scoring.
 
 ### M3+ — parked
 
@@ -325,6 +362,133 @@ Path-B preference order when gate passes: CLAP (text-query bonus) → MERT (musi
 - **DECIDED**: OQ1, OQ2, OQ3, OQ4, OQ5, OQ7, OQ8, OQ9, OQ10, OQ12.
 - **TRIGGER-PARKED** (default committed, revisit only on named trigger): OQ6 (skip-thresholds; trigger = Teil-1 `plays` lands → 2-week tb logging spike), OQ11 (weight tuning; trigger = eval NDCG@10 < baseline+0.15), OQ13 (LLM API-key UX; trigger = "explain" feature ships in M3).
 - **Gates before `evaluated_` → `accepted_`** (named hard-deps, not OQs): sister doc M1 lands vector pipeline; Teil-1 lands writable `plays` table; auth-hardening draftplan land (`require_session` available for `Depends`).
+
+## Findings / Investigation
+
+> Empirical investigation entries also live in `## Log` (dated, append-only). This section captures wave-2 adversarial output.
+
+### 2026-05-28 — Adversarial Findings (wave-2 stress-test)
+
+- **Cold-start under-determined**: OQ5 weighting `Rating==5→1.5, Rating==4→1.0` assumes Rekordbox Rating is set. Real libraries often have ≤ 10% rated. Min-8 fallback to Teil-1 may fire on > 50% of users — M1 = de facto Teil-1 for most. Mitigation: add `min_rated_tracks_observed` telemetry to `refresh_taste_profile` return dict.
+- **NDCG@10 baseline circular**: eval set scored by same user authoring taste model. Scoring bias inflates NDCG vs Teil-1. Need blind A/B: 2 panels, no seed-knowledge. Currently unspecified.
+- **Sister-doc HARD dep is single-point-of-failure**: if sister stalls at GATE A/B/C, this doc cannot enter M1. No fallback extractor here. Counter: spawn a 100-LoC degraded extractor (10-dim BPM+key+LUFS+mood only) in same doc as M0 hedge.
+- **P95 ≤ 200 ms at 50k × 46-dim brute cosine**: plausible (Numpy BLAS, ~9 MB scan) but unverified on cold disk read of `vector_blob`. SQLite blob fetch + numpy unpack at 50k can exceed budget if not memory-mapped.
+- **Option D explanation cache key**: `taste_profile_hash` invalidates on every nightly refresh → cache hit rate near 0 unless hash quantises drift. Underspecified.
+
+## Citation Quality
+
+### 2026-05-28 — wave-2 spot-check
+
+- `app/analysis_engine.py` 2239 LOC, `detect_mood` line 1656 — **PASS** (verified).
+- `app/analysis_cache.py:30 ANALYSIS_VERSION = 3` — **PASS**.
+- `Grep fps_id app/` = 0 hits — **PASS** (verified, 0 hits).
+- `Grep spectral_bandwidth|spectral_flatness|tempo_variability app/analysis_engine.py` = 0 — **PASS**.
+- `app/main.py:557` claimed as `Depends(require_session)` exemplar — **FAIL**: line 557 is `AudioImportReq(BaseModel)`. First actual `dependencies=[Depends(require_session)]` decorator at line 744.
+- `app/live_database.py:197` PlayCount hit — **FAIL** (off-by-12): actual hit at line 209.
+- `app/auth.py:95-115 require_session` — **PASS** (exact range).
+- `frontend/src/api/api.js:199` Bearer interceptor — **PASS**.
+- `backend.spec:21 collect_all(...)` — **PASS** (pkg-tuple iteration).
+- `requirements.txt` no torch/tensorflow/transformers — **PASS** (verified 0 hits).
+
+## Mid-Research Checkpoint
+
+GATE B. `research-explore` fills Status after wave 1. User fills Verdict via `/gate-pass` or `/gate-reject`.
+
+### Status — 2026-05-28 (routine wave-1)
+
+**Covered**: stack constraints (Python 3.10 / FastAPI / no torch in `requirements.txt`); persisted feature inventory (12-15 dense + categorical, line-cited); auth wiring via `require_session` Bearer (87 `main.py` usages); SoundCloud `/related` not yet implemented (0 hits confirmed); sister-doc storage schema inherited (`track_vectors.db (track_id PK, vector_blob, vector_version, computed_at)`); 13 OQs all DECIDED or TRIGGER-PARKED; M1/M2/M3 phasing with exact file-level deliverables + pytest signatures.
+
+**Still open**: (1) blind eval-set scoring protocol — NDCG@10 currently self-scored, bias unmeasured. (2) M0 fallback path if sister doc slips GATE A/B/C. (3) Cache invalidation strategy for Option-D LLM explanation layer. (4) `vector_blob` read budget at 50k uncached (SQLite BLOB fetch path unmeasured).
+
+**Direction**: M1 file-by-file diff is implementation-ready; gates well-named (sister M1 + Teil-1 `plays` + auth-hardening draftplan). Recommendation is concrete + falsifiable.
+
+**Adversarial concerns**: cold-start dominance risk (Rating sparsity), sister-doc single-point-of-failure, P95 budget hand-wavy on disk-cold path, explanation-cache near-zero hit rate.
+
+### Verdict — YYYY-MM-DD (user)
+- _(empty until GATE B)_
+
+## Research Verification
+
+Stage 2 wave-2 verifier over whole research body. PASS → `evaluated_`; gaps → more Findings.
+
+### 2026-05-28 — GAPS (recoverable)
+
+Body strengths: empirical re-verification block (2026-05-17) is exemplary — 6 grep counts cited with hit-totals. M1 deliverables file-by-file with public sigs + pseudocode + pytest signatures = implementation-ready. M2 6-criterion benchmark gate table is falsifiable. OQ resolution matrix (13/13 closed) = exit-ready content.
+
+Body gaps:
+- 2 stale line-cites (`main.py:557` should be `:744`; `live_database.py:197` should be `:209`) — both off after recent refactors
+- Adversarial section never written (closed via wave-2 entry above)
+- NDCG@10 acceptance metric methodologically circular (same user authors both eval set + taste signal)
+- Cache invalidation for Option-D not specified (every refresh invalidates → near-0 hit rate)
+- P95 ≤ 200 ms unverified on cold disk read of `vector_blob` at 50k × 184 B = ~9 MB blob scan
+
+Fix line-cites + spell M0 hedge (degraded 10-dim extractor) → ready for `midgate_`.
+
+## Implementation Plan
+
+> Stage-3 (research-plan) consolidation of the M1/M2/M3 Recommendation into executable form. Current anchors re-verified 2026-05-29 (corrects Citation-Quality stale cites: `require_session` example now `app/main.py:744`, 84 usages; `/related` still 0 hits in `soundcloud_api.py`; `ANALYSIS_VERSION=3` `analysis_cache.py:30`; `detect_mood` `analysis_engine.py:1656`).
+
+### Scope
+- **In:** M1 Option-A taste ranking — recency-weighted centroid, dual-mode (local filter + SoundCloud single-call), consuming sister `track_vectors.db`; sibling `user_taste_vectors` table; 2 Bearer-gated routes; `TasteRankedPanel`; eval harness. M2 Option-B benchmark + conditional swap (dep-gated). M3 LLM explain-only (cache on `taste_profile_version`).
+- **Out:** vector extraction (sister `recommender-similar-tracks` owns it); writable `plays` table (Teil-1 owns it); multi-user / collaborative filtering; audio generation; mood-cluster centroids (M2+); per-context skip detection (M3+).
+
+### Step-by-step
+**M1 (Option A):**
+1. `app/db_taste.py` — `user_taste_vectors(profile_id TEXT, kind TEXT, vector_blob BLOB, n_source_tracks INTEGER, computed_at TIMESTAMP, PK(profile_id,kind))` sibling table in `app_data/track_vectors.db`; `INSERT OR REPLACE` atomic write. No `_db_write_lock` (sidecar file).
+2. `app/taste_profile.py` — `build_taste_vector(user_id, kind="centroid") → np.ndarray(46)` (plays table if present, else Rekordbox `Rating`/MyTag fallback, min-8 cold-start else `taste_cold=true`); `refresh_taste_profile(user_id) → dict` (writes centroid; returns `n_source_tracks` + `min_rated_tracks_observed` telemetry — Adversarial mitigation).
+3. `app/recommender_taste.py` — `find_taste_ranked(seed_or_context, source, *, limit, filters, weights) → list[Result]` + `_local_candidates` + `_soundcloud_candidates` (one `get_related` call) + `_score` (weighted cosine .55 / bpm .15 / key .10 / lufs .10 / mytag .05 / recency .05). Each `Result.reasons` ≥ 2 entries.
+4. `app/soundcloud_api.py` — `get_related(sc_track_id) → list[SCTrack]` wrapping `GET /tracks/{id}/related` (absent today); reuse existing backoff + 0.3s spacing.
+5. `app/main.py` — `GET /api/taste/ranked` + `POST /api/taste/refresh`, both `dependencies=[Depends(require_session)]` (pattern at `main.py:744`).
+6. `frontend/src/components/TasteRankedPanel.jsx` — "Play next" / "Build a set" → side-panel with reason chips; axios via `api.js` (Bearer auto-attached).
+7. `eval/taste_recommender_2026-05.jsonl` — 30-seed × top-10 scored set + **blind A/B protocol** (2 panels, no seed-knowledge — resolves the circular-NDCG Adversarial gap).
+
+**M2 (Option B, dep-gated):** `scripts/benchmark_embeddings.py` runs the 6-criterion gate (extract p95 ≤3s, 50k cold-scan ≤30h, installer Δ ≤400MB, boot Δ ≤5s, NDCG +0.10, PyInstaller green Win/macOS×2). All-pass → swap CLAP→MERT→OpenL3 order; `torch` dep-add needs explicit user approval.
+
+**M3 (Option D explain):** `POST /api/taste/explain` (opt-in) + cache keyed `(seed_id, candidate_id, taste_profile_version)`; `maybe_bump_taste_profile_version` drift check (genre 5pp / BPM-centre 3 / artist-churn 20% — RESOLVED 2026-05-29); frontend "Why?" button.
+
+### Files touched
+- **New:** `app/{db_taste,taste_profile,recommender_taste}.py`, `frontend/src/components/TasteRankedPanel.jsx`, `eval/taste_recommender_2026-05.jsonl`, `tests/{test_recommender_taste,test_taste_profile,test_taste_perf,test_api_taste}.py`; (M2) `scripts/benchmark_embeddings.py`; (M3) explain route + cache module.
+- **Modified:** `app/main.py` (+2 routes M1, +1 M3), `app/soundcloud_api.py` (+`get_related`), `requirements.txt` (M2 only: `torch` + model, after approval), `docs/backend-index.md` (+routes), `docs/frontend-index.md` (+panel).
+
+### Testing
+- Exact pytest signatures already in Recommendation M1 (`test_recommender_taste.py`, `test_taste_profile.py`, `test_taste_perf.py`, `test_api_taste.py`). Perf: p95 ≤200ms local 50k (pytest-benchmark). API: Bearer 401/200. Cold-start → Teil-1 fallback. Blind eval: NDCG@10 ≥ baseline+0.15.
+
+### Risks & rollback
+- **HARD-DEP chain** (sister M1 vector + Teil-1 `plays` + auth `require_session`) — sister stall is a single point of failure. **M0 hedge:** 100-LoC degraded 10-dim extractor (BPM+key+LUFS+mood) here if sister slips GATE A/B/C (Adversarial 2026-05-28).
+- **Cold-start dominance** (Rating sparsity → min-8 fires for >50% users) → `min_rated_tracks_observed` telemetry + Teil-1 fallback.
+- **`vector_blob` cold-read budget** at 50k unverified → mmap / batched fetch; perf test gates it.
+- **NDCG circularity** → blind A/B protocol (Step 7).
+- **Rollback:** feature-flag the 2 routes off; drop `user_taste_vectors` table; no `master.db` touched.
+
+### Task Queue
+> Each = one `routine/recommender-taste-llm-audio-task-N` branch = one PR. Ordered; HARD-DEPs gate M1 start.
+
+- [x] **T1 (M1, Step 1):** `app/db_taste.py` — `user_taste_vectors` table + `INSERT OR REPLACE` helper. No deps. **DONE 2026-05-29** — stdlib `sqlite3` sidecar (mirrors `download_registry.py`), sibling table in `app_data/track_vectors.db`, no `_db_write_lock`. `vector_blob` opaque bytes (numpy serialisation deferred to T2). API: `init_taste_db`/`upsert_taste_vector` (kind-validated, atomic INSERT OR REPLACE)/`get_taste_vector`/`list_taste_vectors`/`delete_profile`. `tests/test_db_taste.py` 7/7 (idempotent init, round-trip, overwrite-in-place, kind/profile validation, list+delete-isolation), ruff + mypy clean. **Not blocked by M1 HARD-DEPs** — writes its own sibling table to the shared file; sister vector + Teil-1 plays gate the *consumers* (T2+).
+- [ ] **T2 (M1, Step 2):** `app/taste_profile.py` — `build_taste_vector` (centroid, cold-start fallback) + `refresh_taste_profile` (+ telemetry). Deps: T1. Tests: `test_taste_profile.py` (5 sigs).
+- [ ] **T3 (M1, Step 3):** `app/recommender_taste.py` — `find_taste_ranked` + `_score` + candidates. Deps: T1, T2. Tests: `test_recommender_taste.py` (9 sigs).
+- [ ] **T4 (M1, Step 4):** `app/soundcloud_api.py::get_related` (single `/related`). No deps. Tests: single-call mock.
+- [ ] **T5 (M1, Step 5):** `GET /api/taste/ranked` + `POST /api/taste/refresh` (`require_session`). Deps: T3, T4. Tests: `test_api_taste.py` (Bearer 401/200).
+- [ ] **T6 (M1, Step 6):** `TasteRankedPanel.jsx` + reasons chips. Deps: T5.
+- [ ] **T7 (M1, Step 7):** `eval/*.jsonl` 30-seed set + blind A/B protocol + `test_taste_perf.py` p95 gate. Deps: T3.
+- [ ] **T-hedge (M0):** degraded 10-dim extractor — only if sister doc slips. Conditional.
+- [ ] **T8 (M2):** `scripts/benchmark_embeddings.py` 6-criterion gate. **Blocked on user `torch` dep-approval.** Deps: T3.
+- [ ] **T9 (M3):** `POST /api/taste/explain` + `taste_profile_version` cache + Why? button. **Blocked on API-key-UX doc.** Deps: T5.
+- [ ] **T-docs:** `backend-index.md`, `frontend-index.md`. Folds into each PR.
+
+## Review
+
+Stage-3 Plan-Reviewer (`review_`). Unchecked box or rework reason → `rework_`.
+
+- [x] Plan addresses all goals — personalised ranking (T3), audio-similarity beyond metadata (Option-A vector → M2 embedding), dual-mode signature (T3), local-first P95 (T7 gate), explainable reasons (T3 `Result.reasons`), reuse shared infra (T1 consumes sister `track_vectors.db`).
+- [x] Open questions answered or deferred — OQ1-5,7-10,12 DECIDED; OQ6/11/13 TRIGGER-PARKED with named triggers; the GATE-B-reject cache-invalidation OQ RESOLVED (`taste_profile_version` drift bump).
+- [x] Risk mitigations defined — HARD-DEP M0 hedge, cold-start telemetry+fallback, vector_blob mmap, blind-eval protocol, per-route feature-flag rollback.
+- [x] Rollback path clear — flag routes off + drop sidecar table; no `master.db` touched.
+- [x] Affected docs identified — `backend-index.md`, `frontend-index.md`; `architecture.md` recommender data-flow + `FILE_MAP.md` (3 new `app/` modules) at graduation; `requirements.txt`/Schicht-A at M2.
+
+**Reviewer note (2026-05-29):** PASS. Non-standard-template doc — Implementation Plan / Task Queue / Review added this pass; security surface inline (both routes `require_session`; sidecar SQLite not `master.db`; no new deps in M1). Two carry-forwards to GATE C: (1) M1 cannot start until the two HARD-DEPs land (sister vector pipeline + Teil-1 `plays` table) — these are sequencing facts, not plan defects; (2) M2 `torch` and M3 API-key UX both need explicit user decisions before those milestones. Stale cites from the 2026-05-28 Citation-Quality FAILs (`main.py:557`, `live_database.py:197`) superseded by current anchors in this plan; historical Log entries left unedited (append-only).
+
+**Rework reasons:**
+- None — PASS.
 
 ## Decision
 

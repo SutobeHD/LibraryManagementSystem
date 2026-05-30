@@ -25,18 +25,27 @@
 | `app/audio_analyzer.py` | LibraryManagementSystem -- Audio Analyzer (Unified Wrapper) |
 | `app/audio_tags.py` | audio_tags — write metadata back to the source audio file. |
 | `app/auth.py` | Bearer-token authentication for the FastAPI sidecar. |
+| `app/auth_db.py` | auth_db — sidecar-local store for per-device paired tokens (Phase-2 auth). |
 | `app/batch_worker.py` | Setup logging |
 | `app/config.py` | *(no module docstring)* |
 | `app/database.py` | *(no module docstring)* |
+| `app/db_taste.py` | db_taste — sidecar store for per-user taste vectors (recommender-taste-llm M1, T1). |
 | `app/download_registry.py` | Download Registry — SQLite-based deduplication & analysis history log. |
+| `app/external_track_match.py` | external_track_match — shared title/version parsing + fuzzy-match + fingerprint. |
 | `app/folder_watcher.py` | FolderWatcher — auto-import audio files from user-configured folders. |
 | `app/import_tracker.py` | Per-file import-progress tracker — gives the frontend a live transparent |
 | `app/library_source.py` | LibrarySource — uniform abstraction over Live (master.db) and XML modes. |
 | `app/live_database.py` | *(no module docstring)* |
 | `app/logging_utils.py` | Log redaction helpers — scrub absolute paths from log lines + tracebacks. |
 | `app/main.py` | *(no module docstring)* |
+| `app/metadata_fixer/__init__.py` | metadata_fixer — detect + (later) fix malformed artist/title metadata. |
+| `app/metadata_fixer/applier.py` | metadata_fixer.applier — atomic apply + revert for the metadata fixer (T5). |
+| `app/metadata_fixer/detector.py` | Read-only detection of malformed artist/title metadata. |
+| `app/metadata_fixer/schema.py` | metadata_fixer.schema — sidecar undo-log DB for the metadata fixer (T4). |
+| `app/pairing_store.py` | pairing_store — in-memory one-shot pairing codes (Phase-2 auth, T2). |
 | `app/phrase_generator.py` | phrase_generator.py — Phrase & Auto-Cue Generator |
 | `app/playcount_sync.py` | playcount_sync.py — USB Play-Count Sync Engine |
+| `app/popularity_engine.py` | Popularity sidecar engine — SoundCloud-only at M1 (underground-mainstream T1-T3). |
 | `app/rate_limit.py` | In-process token-bucket rate limiter for the FastAPI sidecar. |
 | `app/rbep_parser.py` | RBEP Parser — Parses Rekordbox Editor Project (.rbep) files. |
 | `app/rekordbox_bridge.py` | *(no module docstring)* |
@@ -143,7 +152,7 @@
 | `frontend/src/components/SmartPlaylistEditor.jsx` | *(no module docstring)* |
 | `frontend/src/components/SoundCloudProgressModal.jsx` | Listen to progress events from Rust |
 | `frontend/src/components/SoundCloudSyncView.jsx` | *(no module docstring)* |
-| `frontend/src/components/SoundCloudView.jsx` | EC11: Ref-based guard prevents multiple simultaneous login requests |
+| `frontend/src/components/SoundCloudView.jsx` | PRIVACY: do not hold the actual OAuth token in React state — the real |
 | `frontend/src/components/ToastContext.jsx` | *(no module docstring)* |
 | `frontend/src/components/ToolsView.jsx` | Mirror of LibraryTools.smart_rename's token substitution + sanitisation, |
 | `frontend/src/components/TrackTable.jsx` | Camelot |
@@ -192,23 +201,37 @@
 | `tests/test_analysis.py` | Regression tests for the analysis pipeline. |
 | `tests/test_auth.py` | Tests for ``app/auth.py`` -- Bearer-token session authentication. |
 | `tests/test_database.py` | Tests for `app/database.py`. |
+| `tests/test_db_taste.py` | taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py). |
+| `tests/test_external_track_match.py` | external_track_match unit tests (external-track-match-unified-module T-3..T-9). |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
 | `tests/test_main_security.py` | Regression tests for ``POST /api/file/reveal`` sandbox. |
+| `tests/test_metadata_fixer_applier.py` | metadata-fixer apply/revert tests (T5 — app/metadata_fixer/applier.py). |
+| `tests/test_metadata_fixer_detector.py` | M0 detector tests — read-only malformation detection. |
+| `tests/test_metadata_fixer_schema.py` | metadata-fixer undo-log schema tests (T4 — app/metadata_fixer/schema.py). |
 | `tests/test_onelibrary_wal_flush.py` | End-to-end regression test for OneLibraryUsbWriter — runs the FULL |
+| `tests/test_pairing.py` | Phase-2 paired-token store tests (T1 — app/auth_db.py). |
+| `tests/test_pairing_store.py` | Phase-2 pairing-code store tests (T2 — app/pairing_store.py). |
 | `tests/test_pdb_structure.py` | PDB writer structural test against F: drive Pioneer reference. |
+| `tests/test_popularity_engine.py` | PopularityStore tests (underground-mainstream-classifier T1-T3). |
 | `tests/test_rate_limit.py` | Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter. |
+| `tests/test_require_session.py` | Phase-2 require_session dual-acceptance tests (T3 — app/auth.py). |
 | `tests/test_security_compare.py` | Tests for ``app/security_compare.py::safe_compare``. |
 | `tests/test_security_hotfixes.py` | Regression tests for the 5 security hotfixes in commit e3a5ae8. |
 | `tests/test_services.py` | Tests for `app/services.py`. |
 | `tests/test_settings_caps.py` | Tests for `SetReq` payload caps + `SettingsManager.load` sanitizer. |
 | `tests/test_soundcloud_api.py` | Tests for `app/soundcloud_api.py`. |
+| `tests/test_soundcloud_auth_status.py` | Tests for GET /api/soundcloud/auth-status. |
+| `tests/test_soundcloud_downloader_security.py` | Security regression tests for app/soundcloud_downloader. |
 | `tests/test_usb_manager.py` | Tests for `app/usb_manager.py`. |
 
 ## scripts/ — Dev/Build Utilities
 
 | File | Purpose |
 |------|---------|
+| `scripts/pipeline_dashboard.py` | Local web dashboard for the research pipeline. |
 | `scripts/pipeline_status.py` | Show the research pipeline state at a glance. |
+| `scripts/print_routine.py` | Extract the deploy-ready prompt from a routine .md file. |
 | `scripts/regen_maps.py` | Auto-generate tiered code maps from the actual source tree. |
 | `scripts/screenshot.py` | *(no module docstring)* |
 | `scripts/test_xml_sync.py` | Add app to path |
+| `scripts/validate_research_docs.py` | Validate every doc under docs/research/{research,implement,archived}/. |

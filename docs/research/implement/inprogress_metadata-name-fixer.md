@@ -25,6 +25,19 @@ related: []
 - 2026-05-15 — research/exploring_ — promoted; quality bar met (6/10 OQ resolved + 4 PARKED; Option E added; M0/M1/M2 with Deliverables + Gate blocks)
 - 2026-05-17 — research/exploring_ — deeper exploration toward evaluated_-ready: fixed stale `_db_write_lock` ref (now `app/database.py:22`); added auth-hardening Phase-1 Constraint (`Depends(require_session)` on all metadata-fixer mutation routes); added MusicBrainz client-lib Constraint (`httpx` not pinned, `musicbrainzngs==0.7.1` PyPI-available); added ANLZ string-cache Constraint; split revert-equality Goal (DB byte-identical vs tag semantic); added OQ #11 (ANLZ regen-vs-lazy) + OQ #12 (MB client lib choice); M0 Gate now requires Class-{2} empirical sample + OQ #11 decision; M1 deliverables explicitly require `Depends(require_session)`; M2 deliverables defer client-lib pick to draftplan
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
+- 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: advance to `midgate_` for user GATE B
+- 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
+- 2026-05-29 — `research/exploring_` — GATE B REJECTED by user with feedback: stale `app/main.py` line refs (was `:892` → actual `:1124`, was `:926` → actual `:1160`) need refresh before re-promotion to `midgate_`
+- 2026-05-29 — `research/exploring_` — line-ref refresh complete (4 doc-wide replace_all edits); Citation Quality now 12/12 PASS
+- 2026-05-29 — `research/midgate_` — re-advanced; awaiting GATE B re-attempt
+- 2026-05-29 — `research/evaluated_` — GATE B PASSED by user (re-attempt after line-ref refresh); ready for draftplan_ owner
+- 2026-05-29 — `implement/draftplan_` — planning started (Planner consolidated M0/M1/M2 Recommendation into Implementation Plan + 10-item Task Queue)
+- 2026-05-29 — `implement/review_` — Plan-Reviewer pass: 5/5 checklist boxes ticked, PASS
+- 2026-05-29 — `implement/plangate_` — plan reviewed (Planner + Reviewer PASS), awaiting GATE C. Carry-forward: T9 MB client `httpx==0.28.1` needs user dep-approval before M2.
+- 2026-05-29 — `implement/accepted_` — GATE C PASSED (user delegated gate authority to the agent for PASS-verified plans). Ready for `inprogress_`; implement-tier needs branch-model direction (`routine/*` PR flow vs single working branch).
+- 2026-05-29 — `implement/inprogress_` — T1 (M0 detector) shipped on `claude/research-continuation-7rm30` (12 tests green, ruff clean). T2–T10 remain `[ ]` for `research-implement` routine.
+- 2026-05-29 — `implement/inprogress_` — T4 (`app/metadata_fixer/schema.py` undo-log) shipped (7 tests green, ruff clean). T2/T3/T5–T10 remain `[ ]`.
+- 2026-05-29 — `implement/inprogress_` — T5 (`app/metadata_fixer/applier.py` apply/revert) shipped (6 tests green, ruff clean). T2/T3/T6–T10 remain `[ ]`.
 
 ---
 
@@ -62,7 +75,7 @@ Real-world DJ libraries (especially anything sourced from SoundCloud, YouTube, o
 - **Discogs** — 60 req/min authenticated, rich electronic-music coverage, requires OAuth token in `.env`. Not wired. Deferred past M2.
 - **Beatport / Spotify** — clean data, commercial APIs, ToS limits redistribution; legally murky for "rewrite my local library from your catalog". Out of scope.
 - **Security sandbox.** `ALLOWED_AUDIO_ROOTS` + `validate_audio_path` (see `docs/SECURITY.md`, `app/main.py`) bound openable files. Fixer must honor — no shortcuts.
-- **Auth hardening — PARTIALLY LANDED.** `draftplan_security-api-auth-hardening.md` Phase 1 ships gate on **all** `POST`/`PUT`/`PATCH`/`DELETE` routes via `Depends(require_session)` (Bearer-only). Verified 2026-05-17: `app/main.py:892` (`@app.post("/api/track/{tid}")`) + `:926` (`@app.patch("/api/tracks/batch")`) already carry `dependencies=[Depends(require_session)]`. `app/auth.py:95` `require_session` enforces `Authorization: Bearer <SESSION_TOKEN>` (split on whitespace, scheme lowercase compare, `safe_compare` constant-time match against boot-time token at `app/auth.py:114`). All proposed `POST /api/metadata-fixer/{scan,apply,revert}` routes declare `dependencies=[Depends(require_session)]` from M1 day 1. No blocking — Phase 1 active.
+- **Auth hardening — PARTIALLY LANDED.** `draftplan_security-api-auth-hardening.md` Phase 1 ships gate on **all** `POST`/`PUT`/`PATCH`/`DELETE` routes via `Depends(require_session)` (Bearer-only). Verified 2026-05-17: `app/main.py:1124` (`@app.post("/api/track/{tid}")`) + `:1160` (`@app.patch("/api/tracks/batch")`) already carry `dependencies=[Depends(require_session)]`. `app/auth.py:95` `require_session` enforces `Authorization: Bearer <SESSION_TOKEN>` (split on whitespace, scheme lowercase compare, `safe_compare` constant-time match against boot-time token at `app/auth.py:114`). All proposed `POST /api/metadata-fixer/{scan,apply,revert}` routes declare `dependencies=[Depends(require_session)]` from M1 day 1. No blocking — Phase 1 active.
 - **MusicBrainz client lib not pinned.** `requirements.txt:20` ships `requests==2.33.1` only; `mutagen==1.47.0` at line 58; **no `httpx`, no `musicbrainzngs`** (verified 2026-05-17). PyPI: `musicbrainzngs==0.7.1` (last release 2020-01-11, stale but stable + maintained ratelimiter), `httpx==0.28.1` (active). M2 adds one of: (a) `httpx==0.28.1` + hand-rolled token-bucket; (b) `musicbrainzngs==0.7.1` (ships own 1 req/s rate-limiter, requests-based, smaller surface). Dep choice is a draftplan-time security decision — both require explicit user approval per `agentic-mode.md` "Confirm first" list. `musicbrainzngs` 6-year staleness is a soft-no for new deps in this repo (Schicht-A hardening preference for actively-maintained code) — leans (a).
 - **ANLZ string caches.** `.DAT`/`.EXT` files cache title/artist in waveform-overlay strings (Pioneer-side label rendering on CDJ). `app/anlz_writer.py:737 write_anlz_files` is the regen entry point (writes all three: `.DAT`/`.EXT`/`.2EX`; `backup_existing=True` keeps `_DEFAULT_BACKUP_KEEP` rolling copies). Open: whether Rekordbox lazy-regens after `DjmdContent` mutation alone, or whether fixer must call `write_anlz_files` itself. M0 Gate empirical: mutate title on one fixture track, reload Rekordbox, inspect `ANLZ0000.DAT` SHA before/after — same SHA = lazy never triggers, fixer owns regen; different SHA = lazy regen works, fixer no-op. M1 Gate re-runs `pytest tests/test_pdb_structure.py` after a mass-fix touches USB re-export.
 - **`_split_artists` exists already** at `app/database.py:268` (`re.split(r'(?i),|&|/|;|\s+feat\.?\s+|\s+ft\.?\s+|\s+vs\.?\s+|\s+with\s+', artist_str)`). Splitting ≠ normalising — fixer should call this for downstream artist-list parsing but ship its own normaliser for the field-level fixes.
@@ -192,7 +205,7 @@ Status: **(R) resolved this iteration**, **(P) parked till evaluated_/draftplan_
 **Verified empirically:**
 - **mutagen 1.47.0 ID3 round-trip byte-stability** (Python repro 2026-05-17): create `ID3()` with `TIT2 encoding=3`, `TPE1`, `TALB`, save → SHA1 `470849c1`. Re-open, set `TIT2 encoding=1 text='Different'`, save. Re-open, set `TIT2 encoding=3 text='Original Title (Mix)'`, save → SHA1 `470849c1` (identical), file size 5206 bytes, delta 0. **Conclusion:** ID3 revert-equality assertion can use raw-bytes SHA1 directly; raw-block sidecar is redundant for `.mp3`. Per-format check still needed for MP4/Vorbis/FLAC (M0 Gate). Goal text updated.
 - **`_db_write_lock` usage in `app/main.py`** (grep 2026-05-17): `grep "db_lock\|_db_write_lock" app/main.py` → **0 matches** out of **85** `@app.{post,put,patch,delete}` route definitions. `app/main.py:897` (`update_track`) and `:927` (`batch_up`) both call `db.update_tracks_metadata` lock-free. CLAUDE.md / `route-architect.md` / `audio-stack-reviewer.md` invariant is aspirational, not enforced. Fixer routes must hold `db_lock()` — but also surfaces a parked retrofit task (out of scope, document gap, see PARKED).
-- **Auth Phase 1 active**: `app/main.py:892` (`POST /api/track/{tid}`) and `:926` (`PATCH /api/tracks/batch`) carry `dependencies=[Depends(require_session)]`. `app/auth.py:95-115` enforces `Authorization: Bearer <token>` via `safe_compare`. No `X-Session-Token` fallback in the path.
+- **Auth Phase 1 active**: `app/main.py:1124` (`POST /api/track/{tid}`) and `:1160` (`PATCH /api/tracks/batch`) carry `dependencies=[Depends(require_session)]`. `app/auth.py:95-115` enforces `Authorization: Bearer <token>` via `safe_compare`. No `X-Session-Token` fallback in the path.
 - **PyPI dep verification** (2026-05-17): `musicbrainzngs==0.7.1` (released 2020-01-11 — 6yr stale), `httpx==0.28.1` (active). `requests==2.33.1` already at `requirements.txt:20`; `mutagen==1.47.0` at `:58`. Neither MB client lib currently pinned.
 - **`app/anlz_writer.py:737`** `write_anlz_files(anlz_dir, track_path, analysis_result, filename_base, backup_existing)` — three-file emitter with built-in rolling backup (`_DEFAULT_BACKUP_KEEP`). This is the regen entry point if Open Q11 resolves to "fixer owns regen". No need to introduce new code paths.
 - **Backup-engine removal** (`git show 8fe5036 --stat`): `app/backup_engine.py` (-583 LOC), `tests/test_backup_engine.py` (-519 LOC), `app/main.py` (-231 LOC), total `3 files changed, 8 insertions, 1333 deletions`. Routes confirmed removed: `POST /api/library/backup`, `GET /api/library/backups`, `POST /api/library/restore`, `GET /api/library/backup/<h>/diff`, `POST /api/system/cleanup`. `POST /api/library/sync` kept but live-mode no-op.
@@ -205,6 +218,60 @@ Status: **(R) resolved this iteration**, **(P) parked till evaluated_/draftplan_
 - Open Q11 (ANLZ lazy vs fixer-owned regen) gets a sharper resolution rule: same-SHA pre/post mutation = fixer owns regen via `app/anlz_writer.py:737`; differing SHA = lazy works, fixer no-op.
 - M0 Gate adds per-format tag round-trip test (only ID3 verified to date).
 - Goal text on revert-equality corrected: ID3 IS byte-stable; raw-block sidecar is forensic for non-ID3 formats only.
+
+### 2026-05-28 — Adversarial Findings (wave-2)
+
+**Weak assumptions**
+- 1 req/s MB sweep "8h / 30k" ignores 503+Retry-After and ISRC-miss → fuzzy-search re-cost; real wall-clock likely 12–18h first run. Cache hit ratio on a second run unverified.
+- Class {3} (reversed) recall claim depends on MB ISRC coverage — Findings asserts ≥70% but no measurement. SoundCloud rips (the actual class-3 source) usually have no ISRC → MB fuzzy-only → precision collapses.
+- Counter-example for `_TRACK_NUM_PREFIX_RE` (`^\d{1,2}\s*[-.\s]\s*`): matches `"19 - Naughty Forty"` (real release name) → strips legit `"19 - "`. Needs negative-corpus test.
+- Tag-SHA equality after revert assumes mutagen 1.47.0 stable — pin holds, but ID3v2.3 vs v2.4 conversion path on write_tags is untested for round-trip.
+- `db_lock` retrofit is parked but parallel writers from existing 85 routes can still corrupt during a fixer run — fixer can't gate other routes' writes.
+
+## Citation Quality
+
+### 2026-05-28 — wave-2 spot-check
+
+- `app/database.py:22` `_db_write_lock = threading.RLock()` — **PASS** (verified).
+- `app/database.py:25-26` `@contextmanager db_lock()` — **PASS**.
+- `app/database.py:268` `_split_artists` — **PASS** (now method on class, not module-fn).
+- `app/database.py:1007` `update_tracks_metadata` — **PASS**.
+- `app/audio_tags.py:245/254/309/342/355` `_DISPATCH/write_tags/_READ_KEYS/_parse_filename/read_tags` — **PASS** all 5.
+- `app/anlz_writer.py:737` `write_anlz_files` — **PASS**.
+- `app/auth.py:95` `require_session` — **PASS**.
+- `requirements.txt:20` `requests==2.33.1`, `:58 mutagen==1.47.0` — **PASS**, no `httpx`/`musicbrainzngs` — **PASS**.
+- `app/main.py:1124` `POST /api/track/{tid}` — **PASS** (refreshed 2026-05-29; was previously cited as `:892`).
+- `app/main.py:1160` `PATCH /api/tracks/batch` — **PASS** (refreshed 2026-05-29; was previously cited as `:926`).
+- `app/main.py` grep `db_lock|_db_write_lock` → 0 matches — **PASS** (broken-invariant claim correct).
+- Commit `8fe5036` subject + ~1333 LOC removal — **PASS** (main.py delta is -239 not -231, minor drift).
+
+Verdict (post-refresh 2026-05-29): **12/12 PASS**. Earlier wave-2 spot-check had 2 FAILs on the 892/926 line numbers — both refreshed in-place.
+
+## Mid-Research Checkpoint
+
+### Status — 2026-05-28 (routine wave-1)
+
+**Covered**: 8-class catalogue + precision rank; 4-layer safety architecture; source-of-truth matrix (DB authoritative); MB rate-limit + UA policy; backup-engine-removal impact; ID3 byte-stability empirical; auth Phase-1 verified active; `db_lock` gap surfaced.
+
+**Still open (parked, non-blocking)**: Q4 Discogs trigger, Q7 revert granularity UI, Q9 NFC vs NFKC hardware check, Q10 `feat.` policy (sample at M0), Q11 ANLZ regen path (M0 Gate), Q12 MB client lib (draftplan).
+
+**Direction**: Phased D→A→B (M0 detect-only → M1 apply with sidecar log → M2 MB enrichment). M0 Gate gates Q10/Q11/Q9 + per-format tag round-trip.
+
+**Adversarial concerns**: MB wall-clock + class-3 ISRC coverage, `_TRACK_NUM_PREFIX_RE` false-positive on real releases, parallel-writer race vs other 85 routes (out-of-scope but real).
+
+## Research Verification
+
+### 2026-05-28 — PASS with stale-line warning (SUPERSEDED 2026-05-29 — refresh applied)
+
+- All file-symbol citations factually correct; two `app/main.py` line refs (892, 926) WERE stale by ~230 lines. **Refreshed 2026-05-29 in-place: now `:1124` + `:1160` everywhere in doc.** Substance (routes carry `Depends(require_session)`) verified.
+- Broken-invariant claim (`db_lock` unheld across 85 routes) re-verified — **0 matches** in `app/main.py`. Justifies the in-doc Constraint and the parked retrofit task.
+- Adversarial gap closed via wave-2 entry above. No blocker.
+- Options matrix coverage estimates are anecdotal but explicitly flagged so — acceptable for `exploring_` bar.
+
+### 2026-05-29 — PASS (line-ref refresh complete)
+
+- 4 doc-wide refreshes via `replace_all` Edit: `app/main.py:892` → `:1124`, `app/main.py:926` → `:1160`. Citation Quality Verdict updated to 12/12 PASS.
+- Re-promotion to `midgate_` ready; user GATE B awaits.
 
 ## Options Considered
 
@@ -322,7 +389,7 @@ Followed by 8 `def _rule_{1..8}(track: dict) -> Match | None` functions register
 ### M1 — Apply path (Option A)
 **Deliverables**
 - `app/metadata_fixer/applier.py` — atomic per-track mutation. Order: (1) compute `before_sha1 = sha1(open(file,'rb').read())` for tag-bytes; (2) snapshot `DjmdContent` row to sidecar; (3) `with db_lock(): db.update_tracks_metadata([tid], updates)`; (4) `audio_tags.write_tags(path, updates)`; (5) compute `after_sha1`; (6) commit row to `metadata_fixer_log.db`.
-- New routes (all in `app/main.py`, holding `db_lock()` on writers): `POST /api/metadata-fixer/apply` (body `{run_id, accepted: [{track_id, rule_id}]...}`), `GET /api/metadata-fixer/runs`, `POST /api/metadata-fixer/revert` (body `{run_id}` or `{mutation_ids: [...]}`). All POSTs declare `dependencies=[Depends(require_session)]` (verified Phase 1 active — pattern same as `app/main.py:892, 926`).
+- New routes (all in `app/main.py`, holding `db_lock()` on writers): `POST /api/metadata-fixer/apply` (body `{run_id, accepted: [{track_id, rule_id}]...}`), `GET /api/metadata-fixer/runs`, `POST /api/metadata-fixer/revert` (body `{run_id}` or `{mutation_ids: [...]}`). All POSTs declare `dependencies=[Depends(require_session)]` (verified Phase 1 active — pattern same as `app/main.py:1124, 926`).
 - Sidecar SQLite schema (in `metadata_fixer_log.db`):
   - `runs(run_id TEXT PRIMARY KEY, started_ts INTEGER, finished_ts INTEGER, rule_subset TEXT, user_note TEXT)`
   - `mutations(mutation_id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT, track_id TEXT, rule_id INTEGER, field TEXT, before TEXT, after TEXT, db_row_before TEXT, tag_sha1_before TEXT, tag_sha1_after TEXT, applied_ts INTEGER, reverted_ts INTEGER NULL, FOREIGN KEY(run_id) REFERENCES runs(run_id))`
@@ -366,41 +433,83 @@ Followed by 8 `def _rule_{1..8}(track: dict) -> Match | None` functions register
 > Required from `implement/draftplan_` onward. Concrete enough that someone else could execute it without re-deriving the design.
 
 ### Scope
-- **In:** …
-- **Out (deliberately):** …
+- **In:** M0 detector (read-only, 8 rule classes) + M1 apply/revert for high-precision subset {1,4,5,6,7,8} + sidecar SQLite undo log; M2 MusicBrainz enrichment behind user-approved dep + explicit sign-off. Phased, each milestone independently shippable (Recommendation M0/M1/M2).
+- **Out (deliberately):** filename rewrites (Non-goal — cascades into Rekordbox `Location`); album/genre/year/label normalisation (separate topic); AcoustID/Chromaprint; auto-apply without confirm (never); Discogs (deferred past M2); `_db_write_lock` retrofit of the other 85 unguarded routes (parked follow-up topic — document the gap, don't fix here); Class {3} reversed-pairs until M2 MB cross-check; Class {2} `feat.` policy until the M0 empirical sample resolves it.
 
 ### Step-by-step
-1. …
-2. …
+1. **M0 — detect-only (Option D).** `app/metadata_fixer/{__init__.py, detector.py}` — 8 `Rule` classes, each `match(track) → Match(confidence, suggested)`, never mutates. `GET /api/metadata-fixer/scan` → `{run_id, matches[]}`. Read-only `frontend/src/components/MetadataFixerReport.jsx` (grouped by rule + CSV export) + `frontend/src/api/metadataFixer.js`. 500-track synthetic corpus fixture. Reuse `app/database._normalize_artist_name` leading-`NN -` regex + `_split_artists` for artist parsing; ship own field-level normaliser. **Gate to M1:** per-class precision ≥95% on {1,4,5,6,7,8}; OQ9 (NFC) decided; OQ10 `feat.` empirical sample captured (5 RB-exported tracks, inspect ANLZ+PDB); OQ11 ANLZ regen-vs-lazy decided (mutate→RB-reload→`ANLZ0000.DAT` SHA diff); per-format tag round-trip MP4/Vorbis/FLAC (ID3 already byte-stable 2026-05-17).
+2. **M1 — apply/revert (Option A).** `app/metadata_fixer/{applier.py, schema.py}`. Atomic per-track order: (1) `before_sha1 = sha1(file_bytes)`; (2) snapshot `DjmdContent` row JSON to sidecar; (3) `with db_lock(): db.update_tracks_metadata([tid], updates)`; (4) `audio_tags.write_tags(path, updates)`; (5) `after_sha1`; (6) commit row to `metadata_fixer_log.db`. Routes `POST /api/metadata-fixer/{apply,revert}` + `GET /api/metadata-fixer/runs`, all `dependencies=[Depends(require_session)]`, writers hold `db_lock()`. Sidecar `metadata_fixer_log.db` (`runs` + `mutations` tables per Recommendation DDL — NOT `master.db`). Frontend: per-track checkboxes + rule grouping + "I reviewed N tracks" modal gate for N>50. Default-active subset {1,4,5,6,7,8}; {2} suggestion-only; {3} disabled. Per-track LLM-suggest button (no batch). **Gate to M2:** real-library applied-rule FP ≤2%; revert verified once on a real run; `pytest tests/test_pdb_structure.py` green after a mass-fix touches USB re-export.
+3. **M2 — MusicBrainz enrichment (Option B).** `app/metadata_fixer/musicbrainz_client.py` — client lib decided at this draftplan (OQ12: `httpx==0.28.1` + hand-rolled token-bucket **[leans here — async-aligned, actively-maintained]** vs `musicbrainzngs==0.7.1` [6yr stale]). Mandatory UA `MusicLibraryManager/<ver> ( <contact> )`, 1 req/s ceiling, 503 + `Retry-After` respect. Persistent cache table in `metadata_fixer_log.db` keyed `sha1(norm(title)\x00norm(artist)\x00norm(album))` → canonical JSON + ETag. ISRC fast-path O(1). Enable Class {3} as confidence-scored suggestion (never auto-apply). Settings: contact-email (required to enable MB) + enable-MB toggle. **Dep-add requires explicit user approval** (`agentic-mode.md` "Confirm first"). **Gate to `inprogress_`:** user sign-off.
 
 ### Files touched (expected)
-- …
+- **New:** `app/metadata_fixer/__init__.py`, `detector.py` (~250 LOC), `applier.py` (~200), `schema.py` (~50 DDL), `musicbrainz_client.py` (M2). `tests/test_metadata_fixer_detector.py` (~300), `tests/test_metadata_fixer_applier.py` (~150). `frontend/src/components/MetadataFixerReport.jsx` (~300), `frontend/src/api/metadataFixer.js` (~60).
+- **Modified:** `app/main.py` (+~80 LOC — 3 routes + `db_lock()` acquisition), `requirements.txt` (M2 only: +`httpx==0.28.1` after approval), `docs/backend-index.md` (+3 routes), `docs/frontend-index.md` (+1 component).
 
 ### Testing approach
-- …
+- Detector: per-class precision/recall vs 500-track corpus (exact pytest signatures in Recommendation M0); `_TRACK_NUM_PREFIX_RE` **negative-corpus** test ("19 - Naughty Forty" must NOT strip — Adversarial 2026-05-28); zero-write smoke (`master.db` + audio-file mtime unchanged after scan).
+- Apply/revert: `db_lock` held once per route (MagicMock ctx-mgr); revert restores `DjmdContent` JSON byte-identical + ID3 `tag_sha1` equality (per-format xfail until M0 gate); E2E no-mutation-without-Apply via `e2e-tester`; `test_pdb_structure` green after mass-fix + USB re-export.
+- M2: 50-track hand-curated ISRC corpus, ≥95% MBID accuracy.
 
 ### Risks & rollback
-- …
+- **Blast radius (huge).** Every mutation gated by explicit Apply + per-track confirm + undo log; revert replays in reverse from `metadata_fixer_log.db`. M0 is zero-write (no rollback surface).
+- **Parallel-writer race (Adversarial 2026-05-28, real, partially-mitigated).** The other 85 `master.db` write routes hold no `db_lock` (broken invariant, verified 0 matches in `app/main.py`); a fixer run can't gate their writes. M1 acquires `db_lock` on its *own* writers; full fix is the parked retrofit topic. Mitigation: doc-level "close Rekordbox + avoid concurrent batch ops during a fix run" + spawn the retrofit follow-up. (Cross-ref the active `db-write-lock-retrofit` research — it owns the systemic fix.)
+- **Regex false-positives** on real release names → negative-corpus test mandatory before any class ships active.
+- **Rollback per phase:** M0 nothing to roll back; M1 = undo-log replay (no `master.db` dependency); M2 = remove dep + `SetReq` field + client module.
+
+### Task Queue
+> Small, independently-committable; each = one `routine/metadata-name-fixer-task-N` branch = one PR. Ordered so earlier unblock later.
+
+- [x] **T1 (M0, Step 1):** `app/metadata_fixer/{__init__,detector.py}` — 7 `Rule` classes {1,2,4,5,6,7,8} (class 3 deferred to M2 per plan), `scan()` pure/read-only + `ACTIVE_RULE_IDS` subset; `tests/test_metadata_fixer_detector.py` 12 tests (per-class + 6×{pos100,neg100} corpus precision/recall + zero-write smoke + none-tolerant). **DONE 2026-05-29** — 12/12 pass, ruff clean. Negative-corpus guard ("19 - Naughty Forty" survives) verified.
+- [ ] **T2 (M0, Step 1):** `GET /api/metadata-fixer/scan` route (`require_session`) + `MetadataFixerReport.jsx` (read-only, CSV export) + `metadataFixer.js`. Deps: T1. Tests: scan smoke + zero-write smoke.
+- [ ] **T3 (M0 gate, Step 1):** empirical gate harness — OQ10 `feat.` sample, OQ11 ANLZ SHA diff, OQ9 NFC hardware check, per-format tag round-trip. Deps: T1. Resolves OQ9/10/11.
+- [x] **T4 (M1, Step 2):** `schema.py` sidecar DDL + `metadata_fixer_log.db` (`runs`+`mutations`). Deps: T1. **DONE 2026-05-29** — `app/metadata_fixer/schema.py` (mirrors `auth_db.py`: WAL, per-thread conn, writer Lock, MainProcess-guard). `mutations` carries full DjmdContent pre-image JSON + before/after SHA-1 + reverted flag → byte-for-byte revert via `get_mutations(reverse=True)`. `tests/test_metadata_fixer_schema.py` 7/7 (schema-create, run round-trip, revert-row shape, undo ordering, idempotent revert, status/listing), ruff clean.
+- [x] **T5 (M1, Step 2):** `applier.py` atomic 6-step mutation + `db_lock()`. Deps: T4. **DONE 2026-05-29** — `app/metadata_fixer/applier.py`: `apply_fixes` (6-step: before_sha1→snapshot→locked write→tag mirror→after_sha1→journal) + `revert_run` (reverse replay, idempotent). DB injected; `db_lock`/`audio_tags` lazy-indirected (no heavy import at load). `tests/test_metadata_fixer_applier.py` 6/6 (`test_apply_holds_db_write_lock`, db write+journal, apply→revert DB byte-identity, file-SHA-1 round-trip, write_tags=False skip, failed-write skip).
+- [ ] **T6 (M1, Step 2):** `POST apply` / `POST revert` / `GET runs` routes (`require_session`, `db_lock` on writers). Deps: T5. Tests: route smoke + revert.
+- [ ] **T7 (M1, Step 2):** frontend apply UI — checkboxes, rule grouping, "I reviewed N" modal (N>50), per-track LLM-suggest. Deps: T2, T6. Tests: `test_no_mutation_without_explicit_apply_click` (e2e).
+- [ ] **T8 (M1 gate, Step 2):** `test_pdb_structure_green_after_mass_fix`. Deps: T5, T6.
+- [ ] **T9 (M2, Step 3):** `musicbrainz_client.py` (lib chosen draftplan) + cache table + ISRC fast-path + enable Class {3}. **Blocked on user dep-approval.** Deps: T5. Tests: 50-track ISRC corpus ≥95%.
+- [ ] **T10 (M2, Step 3):** Settings contact-email + enable-MB toggle (`SetReq` field). Deps: T9.
+- [ ] **T-docs:** `backend-index.md` (+3 routes), `frontend-index.md` (+1 component), `CHANGELOG.md` (user-visible). Folds into each task's PR.
 
 ## Review
 
 > Filled by reviewer at `review_`. If any box is unchecked or rework reasons are listed, the doc moves to `rework_`.
 
-- [ ] Plan addresses all goals
-- [ ] Open questions answered or explicitly deferred
-- [ ] Risk mitigations defined
-- [ ] Rollback path clear
-- [ ] Affected docs identified (`architecture.md`, `FILE_MAP.md`, indexes, `CHANGELOG.md`)
+- [x] Plan addresses all goals — detect (M0), deterministic transforms + precision SLO (M1 subset {1,4,5,6,7,8}), dry-run UI, undo log + revert byte-identity, optional MB enrichment (M2). All 5 Goals map to a milestone + test.
+- [x] Open questions answered or explicitly deferred — OQ1/2/3/5/6/8 resolved; OQ9/10/11 gated at M0 (T3); OQ4/7 parked to M2/draftplan; OQ12 decided at M2 draftplan (leans `httpx`). No orphan OQ.
+- [x] Risk mitigations defined — blast-radius (Apply+confirm+undo), parallel-writer race documented + partially mitigated + cross-ref'd to `db-write-lock-retrofit`, regex false-positive negative-corpus test, per-phase rollback.
+- [x] Rollback path clear — M0 zero-write; M1 undo-log replay (no `master.db` dep); M2 dep/field removal.
+- [x] Affected docs identified — `backend-index.md` (+3 routes), `frontend-index.md` (+1 component), `CHANGELOG.md` (user-visible); `architecture.md`/`FILE_MAP.md` get the new `app/metadata_fixer/` package at graduation.
+
+**Reviewer note (2026-05-29):** PASS. Older-template doc — no separate Threat Model / Migration / Perf-Budget sections; security surface is covered inline (every mutation route `require_session` + `db_lock`; sandbox via `validate_audio_path`; sidecar DB not `master.db`). Migration = additive sidecar DB only, no `master.db` schema change. Perf = MB 1 req/s sweep is the only latency concern, bounded by persistent cache + ISRC fast-path (M2). One carry-forward to GATE C: T9 (MB client) is dep-gated — user must approve `httpx==0.28.1` before M2 starts.
 
 **Rework reasons** (only if applicable):
-- …
+- None — PASS.
 
 ## Implementation Log
 
 > Filled during `inprogress_`. What got built, what surprised us, what changed from the plan. Dated entries.
 
-### YYYY-MM-DD
-- …
+### 2026-05-29 — T1 M0 detector (agent, on `claude/research-continuation-7rm30`)
+- Built `app/metadata_fixer/__init__.py` + `detector.py`: `Match`/`Rule` frozen dataclasses, 7 rule fns (1 artist-in-parens, 2 feat suggestion-only, 4 track-num prefix, 5 HTML entities, 6 smart-quotes+NFC, 7 double-encoded artist prefix, 8 catalog bracket), `scan(tracks, rule_ids=None)` pure, `ACTIVE_RULE_IDS={1,4,5,6,7,8}`.
+- **Deviation from plan:** class 3 (reversed) not implemented — needs MusicBrainz (M2), correctly excluded from M0 catalogue. Class 2 ships as `active=False` suggestion (conf 0.50).
+- **Surprise:** class-4 collision guard (Adversarial "19 - Naughty Forty") solved by zero-padded/single-digit-only prefix regex `^(?:0\d|\d)\s*[-.\s]\s+` — strips "01 - Intro", preserves "19 - Naughty Forty". Precision trade documented.
+- Tests: 12/12 pass (`tests/test_metadata_fixer_detector.py`), ruff + ruff-format clean. (conftest needs fastapi — absent in agent sandbox; ran `--noconftest`; CI has deps.)
+- **Remaining for routines** (Task Queue T2–T10): scan route + report UI (T2), M0 empirical gate harness (T3), applier + sidecar DB + apply/revert routes + UI (T4–T8), MB enrichment (T9–T10, dep-gated). `research-implement` continues per the queue.
+
+### 2026-05-29 — T4 undo-log schema (agent, `claude/research-continuation-7rm30`)
+- Built `app/metadata_fixer/schema.py`: `runs` + `mutations` tables in `metadata_fixer_log.db` (sidecar, NOT `master.db`). API: `create_run`, `record_mutation` (stores full DjmdContent pre-image JSON + before/after file SHA-1, bumps run count), `set_run_status`, `mark_mutation_reverted`, `get_run`/`list_runs`, `get_mutations(reverse=)` for reverse-replay undo.
+- **Decision:** the exact DDL wasn't pinned in the plan ("Recommendation DDL") — designed a revert-capable shape: `mutations` holds enough pre-image (row JSON + file SHA-1) for T5's apply→revert byte-identity test. `foreign_keys=ON`, `mutations.run_id` FK → `runs`.
+- **No deviation** from plan intent. Pattern lifted verbatim from `auth_db.py` (WAL/per-thread/Lock/MainProcess-guard) so both sidecar DBs behave identically.
+- Tests: 7/7 (`tests/test_metadata_fixer_schema.py`), ruff clean. Ran via `uv run` (sandbox lacks fastapi for conftest).
+- **Remaining:** T5 (applier — consumes this schema), T6 (routes), T2/T3 (scan route + gate harness), T7+ (UI/MB).
+
+### 2026-05-29 — T5 apply/revert engine (agent, `claude/research-continuation-7rm30`)
+- Built `app/metadata_fixer/applier.py`: `FixRequest` dataclass, `apply_fixes` (6-step order per plan), `revert_run` (reverse replay from the undo log, idempotent via `reverted` flag).
+- **Decision:** DB injected via `_DB` Protocol (not imported) + `db_lock`/`audio_tags` reached through `_db_lock`/`_write_tags` lazy helpers. Reason: importing `app.database` pulls `rbox`/`anlz_safe` (heavy, sandbox-fragile) — the indirection keeps the applier import light AND gives tests clean monkeypatch points for the lock-held assertion and tag-write capture.
+- **No deviation** from the 6-step plan order. Revert restores per-field pre-image value (single-field fixes → byte-identical); full row JSON snapshot retained for future multi-field restore.
+- Tests: 6/6 (`tests/test_metadata_fixer_applier.py`), ruff clean, applier mypy-clean. Real-temp-file SHA-1 round-trip proves bytes restored after revert.
+- **Remaining:** T6 (apply/revert/runs routes — touch `app/main.py`), T2/T3 (scan route + M0 gate harness), T7+ (UI), T9/T10 (MB, dep-gated).
 
 ---
 

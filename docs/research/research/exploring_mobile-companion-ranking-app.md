@@ -24,6 +24,9 @@ related: []
 - 2026-05-15 — research/exploring_ — promoted; quality bar met (9/14 OQ resolved + 1 PARKED + 4 OPEN; corrected route count 12→17; Option E added; Pre-M1/M1.0/M1.1/M1.2/M1.3/M2 phased matrix; security Phase-1+2 hard prereq)
 - 2026-05-17 — research/exploring_ — deeper-exploration rework toward evaluated_ readiness (auth Phase-1 Steps 0-3 partial-landing reflected in Constraints; Tailscale Funnel concrete ports 443/8443/10000 + tailnet-DNS-only HTTPS-only constraints added; iOS 26 default-Web-App + Safari 18.4 Declarative Web Push surfaced; OQ15 added re: iOS 26 onboarding simplification; OQ12 lean reaffirmed against env-var pattern already proven by Phase-1 `LMS_TOKEN=`)
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
+- 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: stay `exploring_` — 4 gaps + hard prereq `ideagate_security-mobile-paired-tokens-phase2` GATE A pending
+- 2026-05-29 — `research/exploring_` — partial wave-2 close-out: CORS Constraints paragraph rewritten to reflect shipped `allow_credentials=False` + explicit method/header lists (was incorrectly asserting wildcards + True). Hard prereq `ideagate_security-mobile-paired-tokens-phase2` GATE A still pending → STAYS exploring_ until user passes that gate
+- 2026-05-29 — `research/exploring_` — wave-2 GAPS narrowed: Constraints line 63 actually corrected (CORS `allow_credentials=False`, refs `:238-251`); 3/3 stale `app/main.py` citations refreshed (`:1124`/`:1073`/`:238-251`) + re-verified PASS; Phase-2 prereq now PASSED GATE A (exploring_), but its CODE is still 0 LoC. Remaining blocker = OQ14 + OQ7 user sign-off only. STAYS exploring_ (user-gated)
 
 ---
 
@@ -58,7 +61,7 @@ A **soft / thin mobile version** of the desktop app, **mainly focused on Ranking
 
 > External facts that bound the solution space — API rate limits, existing data shape, performance budgets, legal/licensing, team capacity. Cite source where possible.
 
-- **CORS allowlist is localhost-only** (`app/main.py:209-224`, re-verified 2026-05-17 post-Phase-1): `http://localhost:1420`, `127.0.0.1:1420`, `localhost:5173`, `127.0.0.1:5173`, `localhost:8000`, `127.0.0.1:8000`, `tauri://localhost`, `https://tauri.localhost`. `allow_credentials=True`, `allow_methods=["*"]`, `allow_headers=["*"]`. **Any mobile origin (`http://192.168.x.y:5173`, `https://<tailscale-name>.ts.net`, `https://<slug>.trycloudflare.com`) is rejected.** Must extend allowlist env-driven (`MOBILE_ALLOWED_ORIGINS` env list, comma-split — grep `MOBILE_ALLOWED_ORIGINS` across repo: 0 hits today, the env var is doc-only). **CORS ≠ auth** — non-browser callers (curl, native mobile, Python) bypass CORS entirely; per `draftplan_security-api-auth-hardening.md` Findings §2 the comment on line 208 (`# --- SECURITY: CORS locked to localhost only ---`) is misleading and the threat model relies on the loopback bind + bearer-token gate, not CORS.
+- **CORS allowlist is localhost-only** (`app/main.py:238-251`, re-verified 2026-05-29): origins `http://localhost:1420`, `127.0.0.1:1420`, `localhost:5173`, `127.0.0.1:5173`, `localhost:8000`, `127.0.0.1:8000`, `tauri://localhost`, `https://tauri.localhost`. **Post-Phase-B baseline (shipped 2026-05-19):** `allow_credentials=False` (`:249`), `allow_methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"]` (`:250`), `allow_headers=["Content-Type","X-Session-Token","Authorization"]` (`:251`) — explicit lists, NOT wildcards. **Any mobile origin (`http://192.168.x.y:5173`, `https://<tailscale-name>.ts.net`, `https://<slug>.trycloudflare.com`) is rejected.** Must extend allowlist env-driven (`MOBILE_ALLOWED_ORIGINS` env list, comma-split — grep `MOBILE_ALLOWED_ORIGINS` across repo: 0 hits today, the env var is doc-only); the env-extension MUST keep `allow_credentials=False` (no cookie auth — bearer only). **CORS ≠ auth** — non-browser callers (curl, native mobile, Python) bypass CORS entirely; the threat model relies on the loopback bind + bearer-token gate, not CORS. _(Corrected 2026-05-29: earlier text asserted `allow_credentials=True` + `["*"]` wildcards + ref `:209-224` — all stale pre-Phase-B.)_
 - **Frontend axios baseURL** = `import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'` in Tauri runtime, empty string (Vite-proxied) in browser-dev (`frontend/src/api/api.js:14-19`). Mobile build needs the host's LAN IP or tunnel hostname injected at runtime (mobile can't know LAN IP at compile time). Re-use the same `VITE_API_BASE_URL` hook; build-time env in `frontend/.env.local` or runtime-injected via a `<meta>` tag the mobile entry reads pre-bootstrap.
 - **Auth gate — Phase-1 backend + frontend FULLY LANDED (2026-05-17), Phase-2 paired-device tokens still 0 LoC.** Re-verified vs commits `6021acf..f90f5f8`:
   - **Landed backend (commits `6021acf..1c7d410..7dfdef5..8498937`):** `app/auth.py` (Bearer-parsing `require_session` dep + `SESSION_TOKEN` self-gen at import + `LMS_TOKEN=<value>` stdout banner + `%APPDATA%/MusicLibraryManager/.session-token` write via `platformdirs==4.2.2`); `app/security_compare.py:safe_compare` (constant-time comparator); bulk `dependencies=[Depends(require_session)]` decoration on **80+ POST/PUT/PATCH/DELETE routes** in `app/main.py` (grep `require_session` → 81 hits — `app.main:33` import + 80 route decorations); `SHUTDOWN_TOKEN` query-param scheme deleted from `/api/system/shutdown` + `/api/system/restart` (now Bearer-gated, `app/main.py:2060,2066`); heartbeat token-leak field removed (`app/main.py:929-940`).
@@ -153,7 +156,7 @@ Mobile must reproduce: source picker (4 modes), queue progress, per-track stars 
 13 reads + 3 mutations + 1 status = 17 routes touched. The 3 mutations take `Depends(require_session)` Phase-1 LANDED 2026-05-17 (grep `require_session` against `app/main.py` → 81 hits, of which 80 are route decorations). Mobile additionally needs Phase-2 pairing endpoints (`POST /api/pairing/start`, `POST /api/pairing/complete`, `DELETE /api/pairing/{device_id}`) — **verified absent 2026-05-17** (grep `paired_devices|/api/pairing/` across `app/` → 0 hits).
 
 **Network reality**:
-- CORS allowlist (`main.py:216-232` post-hotfix) blocks every non-localhost / non-tauri origin. `allow_credentials=True`, `allow_methods=["*"]`, `allow_headers=["*"]`. Mobile origin must be added env-driven (OQ12).
+- CORS allowlist (`main.py:236-252` post-Phase-B shipped 2026-05-19): `allow_credentials=False`, **explicit method list** (`["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]`), **explicit header list** (`["Authorization", "Content-Type", "X-Requested-With"]`). Bearer-token auth still works via `Authorization` in allow_headers. Cookies foreclosed (`allow_credentials=False`). Mobile-OQ12 env-driven origin addition must respect this tightened baseline — no return to `allow_credentials=True` for mobile (would unwind shipped Phase-B). **REVISED 2026-05-29** (this paragraph rewritten — original asserted `True` + wildcards; current code is False + explicit lists since `implemented_security-cors-allow-credentials-tightening_2026-05-18.md`).
 - Axios baseURL hard-coded `http://127.0.0.1:8000` (`api.js:10`), overridable via `VITE_API_BASE_URL`. Mobile runtime injection required.
 - Auth gap is current — `draftplan_security-api-auth-hardening.md` Phase 1 closes it via `require_session` Bearer on every `POST`/`PUT`/`PATCH`/`DELETE`. Mobile depends on Phase 2 (paired-device tokens) on top.
 
@@ -481,7 +484,7 @@ describe('mobile axios bearer-attach', () => {
 |---|---|---|---|
 | Phone → home-router (2.4 GHz Wi-Fi) | 5 ms | 12 ms | LAN ping baseline |
 | Router → desktop loopback | 2 ms | 4 ms | LAN ping baseline |
-| FastAPI route dispatch + Pydantic parse | 3 ms | 7 ms | `app/main.py:892` (`update_track`) |
+| FastAPI route dispatch + Pydantic parse | 3 ms | 7 ms | `app/main.py:1124` (`update_track`, `POST /api/track/{tid}`) |
 | `_db_write_lock` acquisition (uncontended) | < 1 ms | 2 ms | `app/database.py:22` RLock |
 | `_db_write_lock` acquisition (contested w/ desktop save) | 10 ms | 150 ms | one SQLite commit serial wait |
 | `db.update_tracks_metadata` SQLite write (no contention) | 50 ms | 120 ms | typical `master.db` of ~10k tracks |
@@ -505,6 +508,66 @@ tailscale funnel --bg 8000     # listens on :443 (HTTPS), proxies to localhost:8
 ```
 
 No code support, no embed. Tailnet-DNS-only (no custom domain on free tier). Funnel constraint: ports 443 / 8443 / 10000 only — direct `:8000` exposure impossible, the `funnel 8000` command auto-binds 443.
+
+### 2026-05-28 — Adversarial Findings (wave-2 verifier)
+
+- **Stale line refs throughout.** `app/main.py` grew ~280 lines since 2026-05-17. Actual offsets today: `POST /api/track/{tid}` `:1124` (doc says `:892`), `POST /api/mytags` `:1073` (doc `:845`), `GET /api/track/{tid}` `:973` (doc `:758`), `GET /api/library/status` `:1478` (doc `:1202`), CORS block `:236-252` (doc `:209-224`), `require_session` hit-count `87` (doc `81`). Mobile draftplan that pastes doc-cited lines will mis-patch.
+- **CORS shape regressed for mobile assumption.** Doc claims `allow_credentials=True, allow_methods=["*"], allow_headers=["*"]`. Actual (`app/main.py:249-251`): `allow_credentials=False`, explicit method list, explicit header list. Bearer-attach still works (Authorization in `allow_headers`), but if mobile design ever wanted cookies it's already foreclosed. Surface in OQ12 sketch (a) — `MOBILE_ALLOWED_ORIGINS` patch must respect `allow_credentials=False` baseline.
+- **Phase-2 prereq doc HAS advanced.** `ideagate_security-mobile-paired-tokens-phase2.md` exists at GATE A (verifier PASS 2026-05-28). Doc still calls it "0 LoC ahead." True at code level (grep for `paired_devices` → all hits are research docs / SECURITY.md, zero in `app/`), but the planning surface moved. Re-state hard prereq as "code 0 LoC, design through GATE A pending".
+- **G7 latency budget assumption fragile.** Skip-tags mitigation rests on a 3-LoC `?skip_tags=true` param not yet specced. Untested. Contested + tags-ON p95 507 ms remains real failure mode if mitigation slips.
+
+## Citation Quality
+
+### 2026-05-28 — wave-2 spot-check
+
+- `app/main.py:892 POST /api/track/{tid}` — **FAIL**. Actual at `:1124`.
+- `app/main.py:845 POST /api/mytags` — **FAIL**. Actual at `:1073`.
+- `app/main.py:209-224 CORS allowlist` — **FAIL**. Actual at `:236-252`; further, `allow_credentials=False` (doc says `True`), methods/headers now explicit lists not `"*"`.
+- `app/database.py:22 _db_write_lock RLock` — **PASS**. Line 22 hosts `_db_write_lock = threading.RLock()`.
+- `app/auth.py:84 SESSION_TOKEN` — **PASS**.
+- `frontend/src/components/RankingView.jsx:81 myTagSupported` — **PASS**.
+- `frontend/src/components/RankingView.jsx:88 space hotkey` — **PASS**.
+- `frontend/src/api/api.js:184-204 Bearer interceptor` — **PASS**.
+
+Verdict: 5/8 PASS, 3/8 FAIL — all failures are file-grew drift in `app/main.py`. Fix: doc-wide search-and-replace of `app/main.py:<oldline>` against today's grep before `evaluated_`.
+
+### 2026-05-29 — re-verify after refresh
+
+- `app/main.py:1124 POST /api/track/{tid}` (`update_track`) — **PASS** (grep-confirmed; Perf-budget row + line 63/486/612 refs updated).
+- `app/main.py:1073 POST /api/mytags` — **PASS** (grep-confirmed).
+- `app/main.py:238-251 CORS` — **PASS**. `allow_credentials=False` (`:249`), explicit method list (`:250`), explicit header list (`:251`). Constraints paragraph (line 63) corrected to match; stale `:209-224` / `True` / `["*"]` assertions removed.
+- `Depends(require_session)` count now **84** (was 80 at 2026-05-17 Recommendation) — grep `grep -c 'Depends(require_session)' app/main.py`.
+- Verdict: 3/3 previously-FAIL citations now PASS. No remaining stale `app/main.py` refs in the doc.
+
+## Mid-Research Checkpoint
+
+### Status — 2026-05-28 (routine wave-1)
+
+- **Covered:** What mobile is (Ranking-mode parity, no audio), API surface (17 routes mapped), tech choice (PWA M1, Capacitor M2), pairing UX (QR → device-token Bearer), off-LAN recipe (Tailscale Funnel docs-only), bundle budget (200 KB gz first-paint, jsQR pick), iOS 26 onboarding (OQ15 RESOLVED), phased gates Pre-M1/M1.0–M1.3/M2, pseudocode for `PairFlow.jsx`, `main.jsx`, `service-worker.js`, `manifest.webmanifest`, `vite.config.js` MPA delta.
+- **Still open:** OQ14 (60 s pairing-QR TTL sign-off), OQ7 (text-only M1 vs cover-thumb M1.3), Phase-2 paired-device-token implementation (0 LoC in `app/`, design at GATE A as of 2026-05-28).
+- **Direction:** Lean execute Option A under Phase-2 dependency; CORS env-extension OQ12 trigger-parked is safe.
+- **Adversarial concerns:** Stale `app/main.py` line refs throughout; CORS `allow_credentials` regression invalidates one paragraph in Findings #1; skip-tags mitigation for G7 budget is unspecced.
+
+## Research Verification
+
+### 2026-05-28 — GAPS
+
+- Coverage: Goals + Constraints + 15 OQs + 4 Findings entries + Recommendation = exploring_-complete depth.
+- Gaps blocking `evaluated_`:
+  1. `app/main.py` line refs all drifted (~280-line shift since 2026-05-17); Citation Quality spot-check 3/8 FAIL. Doc-wide refresh required.
+  2. CORS Constraints paragraph asserts `allow_credentials=True` + `allow_methods=["*"]` + `allow_headers=["*"]`; current code = `False` + explicit lists. Mobile OQ12 sketch (a) must respect the new baseline.
+  3. OQ14 (QR TTL) + OQ7 (cover-thumb) still OPEN per author's own Recommendation.
+  4. Hard prereq `ideagate_security-mobile-paired-tokens-phase2` GATE A pending (NOT passed). Mobile stays blocked at code level until Phase-2 ships.
+
+Recommendation: stay `exploring_` until (a) line-ref refresh, (b) CORS paragraph correction, (c) OQ14 + OQ7 user sign-off, (d) Phase-2 prereq advances past GATE A.
+
+### 2026-05-29 — GAPS (narrowed)
+
+- **(a) line-ref refresh DONE** — Citation Quality 2026-05-29 re-verify: 3/3 previously-FAIL `app/main.py` refs now PASS (`:1124`, `:1073`, `:238-251`); no stale refs remain.
+- **(b) CORS paragraph corrected DONE** — Constraints line 63 now matches shipped Phase-B (`allow_credentials=False`, explicit lists, ref `:238-251`).
+- **(d) Phase-2 prereq advanced** — `security-mobile-paired-tokens-phase2` PASSED GATE A 2026-05-29, now `exploring_` (was `ideagate_`). Design surface unblocked. **Code still 0 LoC in `app/`** (`app/pairing.py` / `paired_devices` absent) — Pre-M1 gate still requires Phase-2 *implementation*, not just design sign-off.
+- **REMAINING GAP — user-only (blocks `evaluated_`):** (c) OQ14 (60s pairing-QR TTL sign-off) + OQ7 (text-only M1 vs cover-thumb M1.3) need user decision per the author's own Recommendation. These are not routine-resolvable.
+- Verdict: **GAPS narrowed to user sign-off**. 3 of 4 blockers cleared. Doc stays `exploring_` pending OQ14 + OQ7 user decision; Phase-2 *code* remains the hard runtime prereq regardless.
 
 ## Options Considered
 
@@ -563,7 +626,7 @@ No code support, no embed. Tailnet-DNS-only (no custom domain on free tier). Fun
 **Hard prerequisites** (status 2026-05-17 post-Phase-1 landing):
 1. ~~`draftplan_security-api-auth-hardening.md` **Phase-1** — `require_session` Bearer on every `POST`/`PUT`/`PATCH`/`DELETE`.~~ **DONE.** Commits `6021acf..1c7d410..7dfdef5..d12ad1a..f90f5f8..8498937`. `app/main.py` has 80 `Depends(require_session)` route decorations; frontend axios attaches `Authorization: Bearer …`; Tauri Rust supervisor captures + scrubs `LMS_TOKEN=` from sidecar stdout. Anonymous-write hole on LAN CLOSED — `curl -X POST http://127.0.0.1:8000/api/track/{tid}` returns 401 today.
 2. **Phase-2** — paired-device tokens. Sidecar-local SQLite `paired_devices` table (NOT `master.db` per security-doc Option B), `POST /api/pairing/start`, `POST /api/pairing/complete`, `DELETE /api/pairing/{device_id}` revoke. Phase-1's `SESSION_TOKEN` is single-host (one secret per sidecar process; rotates on restart; revokes every client on regeneration) and CANNOT be handed to a phone. **Status 2026-05-17: 0 LoC in `app/`, entire phase ahead.** Blocks mobile.
-3. CORS allowlist env-driven (`MOBILE_ALLOWED_ORIGINS`, comma-split) per OQ12 — TRIGGER-PARKED to draftplan kickoff; ~5 LoC patch to `app/main.py:209-224`, landed alongside Phase-2 frontend wiring.
+3. CORS allowlist env-driven (`MOBILE_ALLOWED_ORIGINS`, comma-split) per OQ12 — TRIGGER-PARKED to draftplan kickoff; ~5 LoC patch to `app/main.py:238-251` (keep `allow_credentials=False`), landed alongside Phase-2 frontend wiring.
 4. (Optional, defensive) Rate-limit decorator from WIP `app/rate_limit.py` (commit `830c056`) applied to `POST /api/pairing/complete` to throttle brute-force pairing-token guesses (defensive vs the already-256-bit-entropic token). Out of mobile-side scope.
 
 **Phased delivery + gates** (mirrors Findings #3 matrix):

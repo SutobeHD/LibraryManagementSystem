@@ -160,6 +160,10 @@ standalone.xml
 rekordbox.xml
 download_registry.db
 
+# --- uv artifact (project uses pip/requirements.txt, not uv; uv.lock is a
+#     side-effect of running the test suite via `uv run` in CI/sandbox) ---
+uv.lock
+
 # --- Local-only dev backup ---
 .aiexclude
 .release-backup/

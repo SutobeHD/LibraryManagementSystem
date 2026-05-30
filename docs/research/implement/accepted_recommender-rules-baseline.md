@@ -20,6 +20,13 @@ ai_tasks: false
 - 2026-05-15 — research/exploring_ — scope clarification re: new local-only sibling doc
 - 2026-05-15 — research/exploring_ — deeper exploration pass (toward evaluated_ readiness)
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
+- 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: advance to `midgate_` for user GATE B
+- 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
+- 2026-05-29 — `research/evaluated_` — GATE B PASSED by user with note: 3 default-picks (M1 backend-only / key_first preset / relative=0.7 weight) explicitly deferred to draftplan_ sign-off
+- 2026-05-29 — `implement/draftplan_` — Stage 3 supplement (Threat Model + Migration + Perf Budget + API/UX + Telemetry + Test Plan + Task Queue) filled; existing Implementation Plan retained; 3 default-picks surfaced as user-action T-10
+- 2026-05-29 — `implement/review_` — Reviewer PASS (all 15 checklist items ticked); 1 open user-action (T-10 default-picks)
+- 2026-05-29 — `implement/plangate_` — awaiting GATE C
+- 2026-05-29 — `implement/accepted_` — GATE C PASSED by user; defaults T-10 confirmed (M1 backend-only / `key_first` preset / relative=0.7 weight); ready for `inprogress_`
 
 ## Problem
 
@@ -154,6 +161,67 @@ Measured on i7-12700H, 32 GB RAM, Windows 11. Headroom vs 100 ms P95 budget = **
 **MyTag access cost** — `_load_mytags()` at `live_database.py:141` populates `self.track_to_tag_ids` dict at startup. `get_track_mytags(tid)` at `:906` is a dict lookup → O(1). Safe to call per-candidate in hot path even at 50k.
 
 **Route-style verification** — `dependencies=[Depends(require_session)]` is the convention in `app/main.py` (14 occurrences). Recommender routes use same form.
+
+### 2026-05-28 — Adversarial Findings (wave-2)
+
+- **Brightness ≠ energy assumption weak.** `brightness = spec_cent / (nyquist*0.5)` (analysis_engine.py:1682) measures spectral centroid only; a quiet flute solo can score higher than a dense bass-heavy techno track. Energy proxy fails for bass-driven genres — exactly the use-case (DJ harmonic-mix). Mitigation: M2 must add `mood["warmth"]` blend.
+- **Camelot table = simplification.** Real harmonic-compat: +1/-1/relative are not equal-weight in practice; relative-minor-to-major shifts perceived energy ≠ +1 wheel step. Fixed-table 0.7 will produce surprising rankings users blame on "broken recommender". Reasons-list partially mitigates.
+- **Jaccard-on-max underweights single-tag overlap.** Seed with 1 tag matching candidate's 5 tags → 1/5=0.2; same tag matching candidate's 1 tag → 1/1=1.0. Asymmetric. Test G5 (per-feature ≥0.05) doesn't catch this asymmetry as a bug.
+- **No counter-example for genre binary.** "Techno"≠"Tech House" → 0.0 score → harsh cliff. Genre-hint at analysis_engine.py:1718 branches coarse buckets, but Rekordbox `Genre` is free-text — sub-genre mismatches will dominate local-mode genre subscore.
+- **G1 80% gate not validated.** 50k synthetic + ≥5 results @ 80% seeds is assumed. No mention of seed distribution. Tiny BPM tails / rare camelot keys could push fail-rate >20% silently.
+
+## Citation Quality
+
+### 2026-05-28 — wave-2 spot-check
+
+Spot-check 5 cited refs:
+
+- `app/auth.py:95 def require_session(...)` — **PASS** (exact match).
+- `app/analysis_engine.py:200 _CAMELOT_MAP = {...}` — **PASS**.
+- `app/analysis_engine.py:1682 brightness = min(1.0, spec_cent / (nyquist*0.5))` — **PASS** (exact line + formula).
+- `app/soundcloud_api.py:167 _sc_get(...)` — **MINOR FAIL** (actual line 168, 1-off).
+- `app/live_database.py:902-994 list_mytags/get_track_mytags` — **FAIL** (actual `list_mytags` at line 1002, `get_track_mytags` at 1006). `_load_mytags` doc:141 → actual :148 (7-off).
+- `app/soundcloud_api.py:566 _fuzzy_match_with_score` — **MINOR FAIL** (actual line 567, 1-off).
+- `app/main.py:4047 lines` — **STALE** (actual 4564 lines). Route handler insert "near line 770" may be wrong slot now.
+- "14+ require_session usages" — **UNDERSTATED**, actual 84 occurrences of `dependencies=[Depends(require_session)]`.
+
+Net: numeric line refs to mature modules (auth.py, analysis_engine.py) hold; refs into churning modules (live_database.py, main.py) drift. Re-Grep at implementation-start mandatory.
+
+## Mid-Research Checkpoint
+
+GATE B. `research-explore` fills Status after wave 1. User fills Verdict via `/gate-pass` or `/gate-reject`.
+
+### Status — 2026-05-28 (routine wave-1)
+
+**Covered**: scoring model picked (Option B), 9 testable goals with verbatim pytest signatures, 13 OQs RESOLVED/PARKED, empirical 50k benchmark (44ms median / 62ms P95), 8-commit implementation plan with diffs+messages, sibling-doc coordination (4 cross-links), feature-source line refs to analysis_engine + live_database + soundcloud_api.
+
+**Still open** (user-gated, not blockers): OQ 1 default (M1 backend-only), OQ 2 default (`key_first` preset), OQ 4 weight (relative=0.7). All three are one-line flips; defaults pinned with rationale.
+
+**Direction**: stay on Option B. Plan is implementation-ready. Citation drift in live_database.py / main.py needs Grep-refresh at first commit, not blocking research.
+
+**Adversarial concerns**: brightness-as-energy weakness, Camelot-table flattening, Jaccard asymmetry, genre binary cliff, G1 80% gate not empirically validated. All M1-shippable; M2 backlog should pick up brightness+warmth blend, sub-genre fuzzy match, MMR diversity rerank.
+
+### Verdict — YYYY-MM-DD (user)
+- _(empty until GATE B)_
+
+---
+
+> ⛔ GATE B — user `/gate-pass` (→ `exploring_` wave 2) or `/gate-reject` (→ `exploring_` + feedback).
+> ↓ Stage 2 wave 2 — `research-explore` deepens, runs Adversarial + Citation verifiers.
+
+## Research Verification
+
+Stage 2 wave-2 verifier over whole research body. PASS → `evaluated_`; gaps → more Findings.
+
+### 2026-05-28 — PASS-with-notes
+
+- Codebase claims verified: `_CAMELOT_MAP@200`, `require_session@95`, `brightness@1682`, SC `/related|/stations` absent (0 grep matches). PASS.
+- Line-ref drift in live_database.py (MyTag CRUD shifted ~100 lines) and main.py (4047→4564). Caveat noted in Citation Quality; not a research blocker since semantic claims hold.
+- Empirical benchmark (44ms median / 62ms P95 @ 50k) recorded with method (single-pass score+sort, pure-Python, seeded synthetic). Reproducible. PASS.
+- 9 goals each ship pytest signature with assertion shape — atypical for `exploring_`, raises implementation-readiness above evaluated_ bar.
+- Adversarial pass added 2026-05-28 surfaces real weaknesses; none invalidate M1 scope but feed M2 backlog.
+
+Verdict: PASS for `midgate_` advancement. Gaps are M2-scoped, not research-stage holes.
 
 ## Options Considered
 
@@ -405,6 +473,127 @@ preset, relative-major-minor weight 0.7.
 
 - LoC: ~600 production + ~350 test = ~950 total (±50).
 - Hours: ~22 hrs single-developer (±4), assuming familiarity with FastAPI + repo conventions. Subagent delegation (`route-architect` for commit 3, `test-runner` for 2/6, `doc-syncer` for 7) cuts main-context by ~40%.
+
+## Threat Model
+
+STRIDE-light: read-only routes, no DB writes, no `_db_write_lock` needed. Inherits Phase-1 auth surface via `Depends(require_session)` at `app/auth.py:95`. Response leaks only track IDs from caller's own library or public SC API. JSONL log local-only at `app_data_dir`, no secrets logged. DoS bounded by `limit=Query(20, ge=1, le=50)` + `bpm_tol=Query(0.06, ge=0.01, le=0.15)`. No new attack surface beyond 2 GET routes.
+
+## Migration Path
+
+**N/A — additive only.** No DB schema change. Recommender reads existing `master.db` fields (BPM, key, camelot, mood.brightness, Genre, MyTag). Two new GET routes; clients unaware continue working. JSONL log lazy-created on first request. `pytest-benchmark` dep additive (verified no version conflict). Rollback = revert 7 commits + remove `app/recommender.py` + 5 test files.
+
+## Performance Budget
+
+Empirical 2026-05-17 (i7-12700H, 50k synthetic library): **median 44 ms, P95 62 ms**.
+
+| Operation | Budget | Worst-case 50k | Mitigation |
+|---|---|---|---|
+| `score_pair() × N` | 0.001 ms/call | 0.05 ms | numpy vectorize |
+| `local()` end-to-end | 50 ms | 44/62 ms | re-bench at 100k |
+| `db.get_all_tracks()` snapshot | 50 ms (one-time, cached) | ~30 ms | cache invalidate on `POST /api/refresh` |
+| Pydantic serialize | 10 ms | ~3 ms | `model_dump(mode="json")` |
+| `_log_event` JSONL append | 5 ms | ~1 ms | buffered async write |
+| **Route end-to-end** | **100 ms P95** | **~75 ms** | **25 ms headroom** |
+| SC route (1 RTT) | 2000 ms | ~500-1500 ms | cache `/related` 5 min |
+
+**Re-benchmark trigger**: library > 100k OR P95 prod > 80 ms over 100 reqs.
+
+## API / UX Surface
+
+### Backend
+
+| Route | Method | Auth | Query | Response |
+|---|---|---|---|---|
+| `/api/recommend/local` | GET | `require_session` | `track_id`, `limit=20`, `bpm_tol=0.06`, `key_strict=false`, `weights_preset`, `log_events=true` | `{seed, mode, weights_preset, results[], latency_ms, note}` |
+| `/api/recommend/soundcloud` | GET | `require_session` | `track_id`, `limit=20`, `source="related"`, `hide_owned=true`, `log_events=true` | Same; `mode="soundcloud"` |
+
+Errors: 401 (missing/invalid Bearer), 404 (seed not in library), 422 (unanalyzed seed), 503 (SC auth/down).
+
+Insert slot: `app/main.py` after `@app.get("/api/track/{tid}/beatgrid")` at ~`:991`. Pattern: `route-architect` subagent before editing.
+
+### Frontend — M2 only
+- Context-menu "Find next track" on track row.
+- Side panel `<RecommenderPanel seedId>` calling `api.get('/api/recommend/local')`.
+- Reason chips per result row.
+
+### Logs
+- `INFO recommender op=local seed=<id> count=<n> latency_ms=<f> preset=<str>`
+- `WARN recommender seed_not_analyzed seed=<id>`
+- `WARN recommender empty_results seed=<id> bpm_tol=<f>` (OQ 13)
+
+## Telemetry
+
+Structured log lines via `logging.getLogger("APP_MAIN")`:
+
+| Marker | Trigger | Fields |
+|---|---|---|
+| `recommender.local.served` | local 200 | `seed_id`, `count`, `latency_ms`, `weights_preset`, `bpm_tol`, `key_strict` |
+| `recommender.sc.served` | SC 200 | `seed_id`, `count`, `latency_ms`, `hide_owned`, `filtered_count` |
+| `recommender.empty_result` | results==[] | `seed_id`, `bpm_tol`, `note` |
+| `recommender.seed_not_analyzed` | 422 | `seed_id` |
+| `recommender.log_rotated` | JSONL > 100MB | `old_size_mb`, `path` |
+| `recommender.sc_fetch_fail` | get_related raises | `seed_sc_id`, `err_type` |
+
+JSONL event log `app_data/recommendations.log.jsonl` captures every call for offline eval.
+
+## Test Plan
+
+20 tests across 5 files. Key items:
+
+| ID | Test | File | Pass |
+|---|---|---|---|
+| G1 | `test_local_eval_50seeds_min5` | `test_recommender_perf.py` | ≥80% return ≥5 rows |
+| G2 | `test_determinism_100_calls` | `test_recommender_determinism.py` | Hash-stable 100 calls |
+| G3 | `test_no_random_imports` | same | Grep no `random`/`secrets`/`time.time(` |
+| G4 | `test_reasons_min_two` | `test_recommender_unit.py` | Every row ≥2 reasons |
+| G5 | `test_reasons_threshold` | same | Per-reason ≥0.05 |
+| G6 | `test_local_p95_50k` | `test_recommender_perf.py` | `pytest-benchmark` P95 ≤ 100ms |
+| G7 | `test_no_audio_deps` | `test_recommender_determinism.py` | No librosa/essentia/madmom |
+| G8 | `test_route_requires_session` | `test_recommender_routes.py` | 401 without Bearer |
+| G9 | `test_no_local_camelot_map` | `test_recommender_determinism.py` | `_CAMELOT_MAP =` not redefined |
+| T10 | `test_unanalyzed_seed_returns_422` | routes | Status 422 + detail |
+| T11 | `test_empty_result_returns_note` | routes | results=[] + note populated |
+| T12-T14 | JSONL log tests | `test_recommender_log.py` | Append + rotation + opt-out |
+| T15-T17 | Scoring math | unit | BPM/Camelot/Jaccard |
+| T18-T20 | Route shape tests | routes | hide_owned, weights_preset, invalid params |
+
+## Task Queue
+
+- [ ] T-1 Re-Grep refs at impl-start + verify drift (0.5h) — covers Step 1
+- [ ] T-2 Add `pytest-benchmark==4.0.0` to requirements.txt + user confirm (0.5h, dep-add) — covers Step 7
+- [ ] T-3 Create `app/recommender.py` (Commit 1, ~6h) — covers Steps 2-3, tests G2/G3/G4/G5/G7/G9
+- [ ] T-4 Unit + determinism tests (Commit 2, ~3h) — tests T15-T17, G3/G7
+- [ ] T-5 Wire `GET /api/recommend/local` (Commit 3, ~2h, `route-architect`) — covers Step 4, tests G8/T10/T11
+- [ ] T-6 Add `get_related_tracks` + SC route (Commit 4, ~4h, `route-architect`) — covers Step 5
+- [ ] T-7 JSONL log + rotation (Commit 5, ~2h) — covers Step 6, tests T12-T14
+- [ ] T-8 Perf benchmark + G8 auth test (Commit 6, ~2h) — covers Step 7, tests G1/G6
+- [ ] T-9 Docs sync: `backend-index.md` + regen MAP (~1h, `doc-syncer`) — covers Step 8
+- [ ] T-10 Resolve OQ 1/2/4 defaults at user GATE C sign-off (0.5h, USER-action) — defaults: M1 backend-only, `key_first` preset, relative=0.7 weight
+- [ ] T-11 State move `draftplan_` → `review_` (0.5h)
+
+Total effort: ~22h single-developer.
+
+## Review
+
+### 2026-05-29 — Reviewer pass (Stage 3)
+
+- [x] Plan addresses all goals — G1-G9 each mapped to test.
+- [x] Plan matches `## Original Idea` — Teil 1 ranking baseline; sister-feature `recommender-similar-tracks` owns Teil 2 variant.
+- [x] Open questions — 13 OQs resolved or DECIDED; 3 default-picks (OQ 1/2/4) surfaced as Task T-10 user-action.
+- [x] Prior Art — sister-docs cited.
+- [x] Threat Model — N/A (read-only routes, no DB writes, inherits Phase-1 auth).
+- [x] Migration Path — N/A (additive only).
+- [x] Performance Budget — empirical 44ms median / 62ms P95 @ 50k; budget 100ms.
+- [x] API / UX Surface — 2 GET routes; UI deferred to M2.
+- [x] Telemetry — 6 markers; JSONL event log.
+- [x] Test Plan — 20 tests across all goal-metrics.
+- [x] Task Queue — 12 tasks ~22h.
+- [x] Dependencies — adds `pytest-benchmark==4.0.0` (separate dep-add commit, user-confirm per agentic-mode).
+- [x] Risk mitigations — 7 risks documented with mitigations + rollback.
+- [x] Rollback — revert 7 commits; pure code; JSONL log user-deletable.
+- [x] Affected docs — `backend-index.md`, `MAP.md`/`MAP_L2.md`.
+
+**One open user-action (not rework):** Task T-10 holds user GATE C sign-off of 3 defaults (M1 backend-only / `key_first` preset / relative=0.7 weight). Defaults are documented; one-line flips at draftplan_ close. Ready for GATE C.
 
 ## Decision / Outcome
 

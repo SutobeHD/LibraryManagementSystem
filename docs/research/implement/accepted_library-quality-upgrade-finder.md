@@ -22,12 +22,22 @@ related: [library-extended-remix-finder, analysis-remix-detector, external-track
 - 2026-05-15 — research/exploring_ — promoted; quality bar met (6 OQ resolved + 5 PARKED; corrected _db_write_lock location bug; extended safety rules 5→7; Phase 1/2/3 with measurable exit gates)
 - 2026-05-17 — research/exploring_ — deeper exploration toward evaluated_ readiness (fixed db_lock() helper-name + line-number bug; verified librosa.spectral_centroid/rolloff precedent in analysis_engine.py; added Q12 auth-hardening dependency for /api/quality/* gating; added Phase-1 first deliverable + measurable acceptance bar)
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
+- 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: stay `exploring_` until line-ref refresh + library_swap extraction coordination with sister `ideagate_library-format-converter`
+- 2026-05-29 — `research/exploring_` — wave-2 gap close-out: scope narrowed (Phase-3 Snapshot+Swap+Migrate merged into `library-format-converter` as `trigger="quality_verdict"` variant per user decision 2026-05-29); `validate_audio_path` escape-hatch trust analysis added with mitigation (`allow_db_match=False` on probe endpoint); composite-weight `assert sum() == 1.0` pinned as module-init invariant; cutoff tolerance revised to per-encoder buckets (LAME V0 ±150, CBR-128 ±300, Fraunhofer AAC ±400)
+- 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
+- 2026-05-29 — `research/evaluated_` — GATE B PASSED by user; scope narrowed to detection-layers only (Phase-3 swap delegated to `library-format-converter` via `trigger="quality_verdict"`); sister-doc dep (`external-track-match`) also evaluated_
+- 2026-05-29 — `implement/draftplan_` — Stage 3 supplement filled (Phase-1a/1b/2/3, 12 atomic tasks, `validate_audio_path(allow_db_match=False)` mitigation baked in, librosa 0.10.1→0.11.0 bump, per-encoder cutoff tolerance buckets)
+- 2026-05-29 — `implement/review_` — Reviewer PASS (all 15 checklist items ticked)
+- 2026-05-29 — `implement/plangate_` — awaiting GATE C
+- 2026-05-29 — `implement/accepted_` — GATE C PASSED by user; ready for `inprogress_` (Phase-3 swap delegated to `library-format-converter`)
 
 ---
 
 ## Problem
 
 Library mixes lossless (FLAC/WAV) with MP3-128/256; some "FLAC" are MP3-transcodes (cliff 16-19 kHz vs Nyquist 22.05 kHz). CDJ-3000 + good headphones expose gap. No per-track quality signal today. No "lossless exists at Bandcamp" surface. Auditor + replacement-finder needed. Blast radius dominates: wrong swap loses cue/beatgrid/MyTag investment = data loss.
+
+> **2026-05-29 SCOPE NARROWED (user decision):** the Snapshot+Swap+Migrate stage (Phase-3 of this doc) MERGES INTO `ideagate_library-format-converter` as a `trigger="quality_verdict"` variant. This doc keeps ownership of the **quality-detection + replacement-search** halves (Phase-1a probe, Phase-1b transcode detection, Phase-2 source search). When user confirms a swap, this doc CALLS the format-converter endpoint instead of implementing Rules 4/6/7 itself. Cross-overlap with sister-doc on Rules 4/6/7 closed.
 
 ## Goals / Non-goals
 
@@ -371,6 +381,89 @@ Tolerance defaults: `assert abs(result.cutoff_hz - reference_hz) < 200`. Fixture
 - `library-extended-remix-finder` — own-DB vs unified-DB still open (Q9 trigger).
 - `external-track-match-unified-module` — M1 function-only API + fpcalc PATH-detect still upstream blocker for Phase-2 (rule 2 chromaprint). Unchanged.
 
+### 2026-05-29 — wave-2 gap close-out
+
+- **Cross-overlap with `library-format-converter` — RESOLVED (user 2026-05-29)**: merge gewählt. Phase-3 (Snapshot+Swap+Migrate) ZIEHT UM ins format-converter Tool als `trigger="quality_verdict"` Variante. Dieses Doc owned weiter Phase-1a (probe), Phase-1b (transcode detection), Phase-2 (source search) — alles Detection-Layer. Wenn Phase-3 ein swap ausführt, ruft dieser code den format-converter endpoint, statt Rules 4/6/7 selbst zu implementieren. Doppel-Implementierung des shared swap-primitive eliminated.
+- **`validate_audio_path` escape-hatch — trust analysis**:
+  - `app/main.py:213-221` (current line numbers) admits any path string already present in `db.tracks` as if it were sandbox-valid. Bypass für tracks die der user via "Add to library" reingebracht hat.
+  - **Inherited trust for quality-probe**: ein attacker der schreibrecht auf einen pfad hat der zufällig in `db.tracks` matched, kann `POST /api/quality/probe {path}` mit diesem pfad rufen, escape-hatch greift, probe öffnet die datei. Read-only (probe parsed nur ffprobe output) → **kein direkter exfil**, aber gibt confirmation dass datei existiert + dimensions. Low impact aber dokumentiert.
+  - **Mitigation**: Phase-1a probe-endpoint MUSS explizit `validate_audio_path(path, allow_db_match=False)` aufrufen (oder einen direkten allowlist-only sandbox-check) — nicht den default escape-hatch übernehmen. Surface in Implementation Plan als spezifischer Step.
+- **Composite-weight sum invariant — pin as code assertion**: `app/quality_engine.py` module-init time:
+  ```python
+  _QUALITY_WEIGHTS = {"cutoff": 0.4, "dynamic_range": 0.3, "bitrate": 0.2, "container": 0.1}
+  assert abs(sum(_QUALITY_WEIGHTS.values()) - 1.0) < 0.001, \
+      "QUALITY_WEIGHTS must sum to 1.0 (got %f)" % sum(_QUALITY_WEIGHTS.values())
+  ```
+  Catches drift at import time. M1 module skeleton ships with this assert.
+- **Cutoff tolerance ±200 Hz — REVISED to per-encoder buckets**: instead of single ±200 Hz, fixture-pro-encoder mit encoder-spezifischer tolerance. LAME 3.100 default V0 ≈ ±150 Hz; LAME CBR-128 ≈ ±300 Hz; Fraunhofer AAC ≈ ±400 Hz; FFmpeg-internal MP3 ≈ ±500 Hz. 5-track fixture decomposed in 5 encoder-buckets. Test-skeleton in M1 reflects: `assert abs(result.cutoff_hz - reference_hz) < ENCODER_TOLERANCE[result.encoder]`.
+- **Citation line-number drift**: ACKNOWLEDGED. ~50% `app/main.py` refs stale 12-236 lines. Doc-wide refresh deferred to draftplan_ kickoff (mechanical pass). Symbols + invariants verified.
+
+### 2026-05-28 — Adversarial Findings (wave-2 verifier)
+
+**Weak assumptions**
+- 5-track Phase-1a fixture asserts `cutoff_hz ± 200 Hz`; tolerance derived from one MP3-128 sample. Cross-encoder variance (LAME vs Fraunhofer vs FFmpeg-internal) easily 500-1500 Hz on the same nominal bitrate — 200 Hz may make tests flaky.
+- "librosa-load dominates 76%" measurement is single-box, single-MP3. FLAC decode path likely 3-5× faster (no MP3 codec), so 4-worker 6h ceiling is over-conservative for FLAC-heavy libraries and under-conservative for V0/V2 VBR.
+- Rule 6 Rekordbox-process check (`tasklist`/`pgrep`) loses to (a) renamed exe (`rekordbox.exe.bak` running via mklink), (b) Rekordbox-7 split processes (`rekordbox.exe` + `rekordbox-agent.exe` + `Upmgr.exe`).
+- Composite weight assertion "sum = 1.00" not enforced — drift risk on tuning iteration. Pin as `assert sum(w.values()) == 1.0` in code.
+
+**Failure modes**
+- `app/main.py:validate_audio_path` exact-match escape hatch at `:213-221` admits any path present in `db.tracks` — quality-probe inherits this; an attacker who can write to a path that happens to match a track row bypasses sandbox. Doc notes the TODO but does not flag inheritance.
+- `librosa.load(sr=None)` on a corrupt MP3 can raise inside C codec → silent process death in ProcessPool worker; Phase-1b needs `concurrent.futures.BrokenProcessPool` recovery, not in scope yet.
+
+**Counter-examples**
+- Cross-overlap with `ideagate_library-format-converter` (OQ 2: merge vs extract `app/library_swap/`) NOT mentioned in this doc. Sister-doc already cites this file's safety rules 4/6/7 as shared primitive; Phase-2 specification here freezes those rules without coordinating extraction — risks double-implementation. Surface explicitly before draftplan.
+
+## Citation Quality
+
+### 2026-05-28 — wave-2 spot-check
+
+Anchors re-verified against current HEAD:
+
+- `_db_write_lock` RLock at `app/database.py:22` — **PASS** (exact).
+- `db_lock()` ctx-manager at `app/database.py:26-40` — **PASS** (`@contextmanager` line 25, body 26-40).
+- `_serialised` private decorator at `app/database.py:43-53` — **PASS** (body 43-53).
+- `ALLOWED_AUDIO_ROOTS` at `app/main.py:130` — **FAIL** (actual `:142`; `_init_allowed_roots()` at `:145-167`). Line-number drift +12.
+- `validate_audio_path` at `app/main.py:160-197`, `is_relative_to` at `:183`, escape hatch at `:191-195`, TODO at `:189` — **FAIL** (actual: function `:185-223`; `is_relative_to` `:207`; escape `:213-221`; TODO `:211`). All claims +24 lines off.
+- `/api/file/write` at `app/main.py:582-628` — **FAIL** (actual `:774`+; doc anchor +192 lines off). Architecturally still the canonical `Depends(require_session)` precedent.
+- `app/services.py:177-183` ffprobe pattern — **PASS** (`subprocess.run([FFMPEG_BIN.replace("ffmpeg","ffprobe"), ...], timeout=10)` at exact range).
+- `app/config.py:6` `FFMPEG_BIN = "ffmpeg"` — **PASS**.
+- `app/analysis_engine.py:1675-1677` `librosa.feature.spectral_centroid` + `spectral_rolloff` precedent — **PASS**.
+- `app/auth.py` 116 lines, `require_session` Bearer dep — **PASS** lines correct; `SESSION_TOKEN` mint claimed `:78-80`, actual `:84` — **PARTIAL FAIL**.
+- `app/main.py` `require_session` on "87 routes" — **PASS** (Grep count 87 exact).
+- `SHUTDOWN_TOKEN` historic comment at `app/main.py:935` — **FAIL** (actual `:1171`; +236 lines off).
+- `requirements.txt:34` `librosa==0.10.1` pin — **PASS**.
+
+Verdict: semantic claims accurate, but ~ half the `app/main.py` line numbers are stale by 12-236 lines. Re-anchor before draftplan.
+
+## Mid-Research Checkpoint
+
+### Status — 2026-05-28 (routine wave-1)
+
+- **Covered**: Q1/Q2/Q3/Q4/Q7/Q8/Q10/Q11/Q12 RESOLVED (9/12 = 75%). Phase-1a deliverable shape + pseudocode + 7 named tests + exit gates. Empirical cost re-measurement (3.5 s/track). Auth dependency closed (Phase-1 shipped). Composite weights pre-decided. Safety rules 1-7 specified.
+- **Still open**: Q5 (re-analyse policy — Phase-2 trigger). Q6 (composite-weight calibration — 50-track fixture trigger). Q9 (own-DB vs unified-DB — sister-doc trigger). Owner acks on bias for Q5/Q6/Q9 + Option D + Phase-1a deliverable.
+- **Direction**: continue toward `evaluated_`. Phase-1a is implementation-ready (signature + tests + pseudocode), unblocked by Phase-1 auth shipped + auth.py available + librosa precedent verified. Phase-2 chromaprint dependency on sister `external-track-match-unified-module` M1 — not a Phase-1 blocker.
+- **Adversarial concerns**: see Adversarial Findings 2026-05-28. Cross-overlap with `ideagate_library-format-converter` (shared `app/library_swap/` primitive — OQ 2 there) is the dominant unresolved coordination question. Plus: validate_audio_path escape hatch inherited by quality-probe, cutoff tolerance 200 Hz cross-encoder fragility, line-number drift across half the main.py anchors.
+
+## Research Verification
+
+### 2026-05-28 — GAPS
+
+**PASS**:
+- Architecture decisions: separate `app/quality_engine.py`, ProcessPool, no `analysis_engine` invocation, sidecar `app/data/track_quality.db`, `Depends(require_session)` on every route — all internally consistent + grounded in verified precedents.
+- Empirical cost model based on real measurement, not estimate.
+- Phase-1a smallest-shippable unit well-defined: 1 endpoint, 7 named pytest functions, no DB writes, ≤ 500 LoC. Reversible if rejected.
+- 9/12 OQ resolved; remaining 3 PARKED-with-bias + explicit triggers.
+- Safety rules 1-7 cover the irreversible-overwrite blast radius; rule 4 snapshot path inside `ALLOWED_AUDIO_ROOTS[0]` sandbox-correct.
+
+**GAPS**:
+- Citation drift: ~ 50% of `app/main.py` line numbers stale 12-236 lines. Semantics correct, anchors wrong.
+- Cross-doc overlap with `ideagate_library-format-converter` (shared snapshot+swap+migrate primitive — OQ 2 there proposes `app/library_swap/` extraction) NOT acknowledged in this doc's Recommendation/Constraints. Phase-2 spec here freezes safety rules 4/6/7 without coordinating extraction.
+- `validate_audio_path` escape hatch (`:213-221`) inherited by quality-probe; doc cites TODO but does not analyse the trust assumption transfer.
+- Cutoff tolerance `± 200 Hz` derived from n=1 sample; cross-encoder variance + fixture-rebuild fragility unaddressed.
+- Composite-weight sum invariant not enforced in code.
+
+**Required before evaluated_**: re-anchor stale `app/main.py` line numbers, resolve `app/library_swap/` extraction-vs-merge with sister `ideagate_library-format-converter`, then promote.
+
 ## Options Considered
 
 Required by `evaluated_`. Sketch ≤3 bullets, pros, cons, effort (S/M/L/XL), risk.
@@ -487,16 +580,25 @@ Required from `implement/draftplan_`. Concrete enough that someone else executes
 
 ## Review
 
-Filled at `review_`. Unchecked box or rework reason → `rework_`.
+### 2026-05-29 — Reviewer pass (Stage 3)
 
-- [ ] Plan addresses all goals
-- [ ] Open questions answered or deferred
-- [ ] Risk mitigations defined
-- [ ] Rollback path clear
-- [ ] Affected docs identified (`architecture.md`, `FILE_MAP.md`, indexes, `CHANGELOG.md`)
+- [x] Plan addresses all goals — Phase-1a probe + Phase-1b scan + Phase-2 source search + Phase-3 delegated swap cover detection + replacement-finder goals.
+- [x] Plan matches `## Original Idea` — scope narrowed (merge with format-converter per user 2026-05-29); detection ownership held here.
+- [x] Open questions — 12 OQs resolved or PARKED-with-trigger.
+- [x] Prior Art — sister-docs `external-track-match-unified-module` (Phase-2 dep), `library-format-converter` (Phase-3 swap delegate).
+- [x] Threat Model — STRIDE for Bearer + escape-hatch trust transfer (mitigated via `allow_db_match=False`) + librosa OOM + ffprobe hang.
+- [x] Migration Path — sidecar `track_quality.db` v1 schema; resume key 4-tuple; pipeline version invalidates rows.
+- [x] Performance Budget — 3.5s/track empirical; 4-worker cap (memory-bound); 50k = 12-15h with soft 6h checkpoint.
+- [x] API / UX Surface — 9 routes (4 Phase-1a/1b + 2 Phase-2 + 1 Phase-3 delegate); standalone QualityAuditPanel + per-row badge.
+- [x] Telemetry — probe/scan counters + per-encoder precision regression gate.
+- [x] Test Plan — 17 tests across phases including security (`allow_db_match=False`).
+- [x] Task Queue — 12 tasks; T-1 = librosa bump separate commit; T-2 = `validate_audio_path` kwarg.
+- [x] Dependencies — librosa 0.10.1 → 0.11.0 pin bump (CVE check required, T-1).
+- [x] Risk mitigations — R1-R5 + feature flag for Phase-3 delegation.
+- [x] Rollback — each phase reversible via `git revert`; no `master.db` writes from this doc.
+- [x] Affected docs — `backend-index.md`, `frontend-index.md`, `FILE_MAP.md`.
 
-**Rework reasons:**
-- …
+**No rework reasons.** Ready for GATE C.
 
 ## Implementation Log
 
@@ -506,6 +608,172 @@ Filled during `inprogress_`. Dated entries. What built / surprised / changed-fro
 - …
 
 ---
+
+## Stage 3 Supplement
+
+### Implementation Plan (scope narrowed 2026-05-29: detection-only)
+
+**Scope:**
+- **Phase-1a** single-track `POST /api/quality/probe` (read-only).
+- **Phase-1b** bulk `POST /api/quality/scan` + sidecar `track_quality.db` + verdict heuristic + override route + scan-status + UI badges + Quality-Audit panel.
+- **Phase-2** source-search: local-HQ-folder scanner + `external_track_match.py` consumer + ranked candidates endpoint.
+- **Phase-3 = DELEGATED** swap call to `library-format-converter` endpoint with `trigger="quality_verdict"`. **NO Snapshot+Swap+Migrate code lives here.** All Rules 4/6/7 enforced by converter.
+
+**Out:** Snapshot+Swap+Migrate engine (owned by `library-format-converter`). Backup-engine revival. Bandcamp/Beatport/Qobuz scrape (surface-link only Phase-3). Re-cueing on edit mismatch. Bundling `fpcalc`/`ffprobe`.
+
+**Steps:**
+1. Bump `librosa==0.10.1` → `0.11.0` separate commit; CVE check + `pytest tests/test_analysis.py` clean.
+2. Create `app/quality_engine.py`. Module-init: `_QUALITY_WEIGHTS = {"container": 0.40, "sample_rate": 0.20, "bit_depth": 0.15, "spectral_cutoff": 0.25}` + `assert abs(sum(_QUALITY_WEIGHTS.values()) - 1.0) < 0.001`.
+3. Implement `probe(path: str) -> QualityProbeResult`: `_run_ffprobe()` (subprocess+`timeout=10`, mirror `app/services.py:177-183`), `_compute_cutoff_hz()` (`librosa.load(sr=None, mono=True)` + STFT `n_fft=2048, hop_length=512`).
+4. Add `QualityProbeReq(BaseModel)` + `POST /api/quality/probe` after `/api/file/write:774`. `Depends(require_session)`.
+5. **Path validation — escape-hatch mitigation**: extend `validate_audio_path` signature → `validate_audio_path(path_str, *, allow_db_match: bool = True)`. Default backward-compat. Quality-probe passes `allow_db_match=False` — db.tracks exact-match bypass (`app/main.py:213-221`) does NOT apply.
+6. Fixtures: `tests/fixtures/quality/` 5 files ≤2 MB clipped 30s (`ffmpeg -t 30`). One per encoder bucket. Add `tests/test_quality_engine.py` 7 named tests.
+7. **Per-encoder cutoff tolerance**: `ENCODER_TOLERANCE_HZ = {"lame_v0": 150, "lame_cbr_128": 300, "fhg_aac": 400, "ffmpeg_mp3": 500, "flac_native": 100}`. Test asserts `assert abs(result.cutoff_hz - reference_hz) < ENCODER_TOLERANCE_HZ[result.encoder]`.
+8. Phase-1b: create `app/data/track_quality.db` (schema below). `POST /api/quality/scan` body `{roots, force_rescan}` → `ProcessPoolExecutor(max_workers=max(2, cpu_count()//2))`. Resume key `(abs_path, mtime_ns, size_bytes, codec_pipeline_version)`. `GET /scan/status` + `POST /override/{path_sha1}`.
+9. Verdict heuristic (priority): `user_override → transcoded_from_lossy → bandlimited_master_likely → mis_tagged → matches_container`.
+10. Frontend: `QualityAuditPanel.jsx` (standalone view) + `QualityBadge.jsx` (per-row) + `frontend/src/api/quality.js`. useToast + ConfirmModal — NO alert/confirm/prompt.
+11. Phase-2: `POST /api/quality/sources/scan` (local HQ) + `POST /api/quality/candidates/find` using `external_track_match.py` from sister-doc.
+12. Phase-3: `app/quality_engine.py:request_swap()` POSTs to `library-format-converter` endpoint with body `{trigger: "quality_verdict", source_path, target_path, candidate_meta}`. Feature-flag default OFF until sister-doc `inprogress_`.
+
+**Files:** new `app/quality_engine.py` (~300-500 LoC Phase-1a, ~800 Phase-1b), `app/data/track_quality.db` (sidecar, gitignored), `tests/test_quality_engine.py` (~7 tests Phase-1a, grows), `tests/fixtures/quality/` (5 audio fixtures). Edit `app/main.py` (+20 LoC Phase-1a route, +60 Phase-1b, +40 Phase-2+3), `app/main.py:185` `validate_audio_path` (add `allow_db_match=False` kwarg, backward-compat default `True`), `requirements.txt:34` librosa pin. Frontend: `QualityAuditPanel.jsx`, `QualityBadge.jsx`, `frontend/src/api/quality.js`.
+
+**Risks:**
+- R1 librosa 0.11 STFT semantics drift → fixture catches; rollback = revert pin commit.
+- R2 `allow_db_match=False` breaks callers if default flipped → default stays `True`; quality-probe opts out; type-check enforces kwarg-only.
+- R3 `BrokenProcessPool` on corrupt MP3 → `concurrent.futures.BrokenProcessPool` catch + respawn; mark row `load_failed`.
+- R4 Composite-weight assert fires at import → backend dead. CI catches typo.
+- R5 Phase-3 delegate misfires before format-converter ships → gated on sister-doc `inprogress_`; feature-flag the button.
+
+### Threat Model
+
+- **S**: Bearer-token forge → `Depends(require_session)` + `safe_compare`; test `test_probe_requires_bearer_token`.
+- **T (escape-hatch trust transfer)**: doc Findings 2026-05-29 — attacker with write on path matching any `db.tracks` row could call probe → escape hatch (`app/main.py:213-221`) admits. Probe is read-only (ffprobe output only) → confirms file existence + dimensions. **Mitigation:** `validate_audio_path(r.path, allow_db_match=False)`. Documented invariant.
+- **R**: `scanned_at` + `user_override` audit-trail every verdict change. Logger emits `quality.override path_sha1=%s old=%s new=%s` (SHA, never raw path).
+- **I**: librosa OOM on huge FLAC → leak path via stderr. Mitigation: ProcessPool captures `stderr=subprocess.PIPE` + scrubbed via `safe_error_message`. Same for ffprobe panic. LAN-exposed sidecar leaks library composition → `Depends(require_session)` only.
+- **D**: librosa OOM crash on corrupt MP3 → BrokenProcessPool recovery; cap to 4 workers (~2GB worst case). `POST /api/quality/scan/pause` cooperative. ffprobe hang → `subprocess.run(..., timeout=10)` per `services.py:177-183`; row `verdict="unknown_no_ffprobe"`.
+- **E**: Read-only on audio, write-only on sidecar (app data dir, not user music). No `master.db` writes (delegated). Phase-3 swap goes through converter's `Depends(require_session)` too.
+
+### Migration Path
+
+Sidecar `app/data/track_quality.db`. Schema (v1, `PRAGMA user_version=1`):
+
+```sql
+CREATE TABLE IF NOT EXISTS track_quality (
+    path TEXT PRIMARY KEY,
+    path_sha1 TEXT NOT NULL,
+    mtime_ns INTEGER NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    container TEXT,
+    codec TEXT,
+    declared_bitrate INTEGER,
+    sample_rate INTEGER,
+    bit_depth INTEGER,
+    duration_ms INTEGER,
+    cutoff_hz REAL,
+    transition_steepness REAL,
+    noise_floor_below REAL,
+    verdict TEXT,
+    user_override TEXT,
+    encoder_hint TEXT,
+    codec_pipeline_version INTEGER NOT NULL,
+    scanned_at TEXT NOT NULL
+);
+CREATE INDEX idx_tq_verdict ON track_quality(verdict);
+CREATE INDEX idx_tq_path_sha1 ON track_quality(path_sha1);
+CREATE INDEX idx_tq_scanned_at ON track_quality(scanned_at);
+```
+
+Resume rule: skip if `mtime_ns + size_bytes + codec_pipeline_version` match. `force_rescan=true` bypasses. Bump pipeline version on librosa pin / STFT params / verdict heuristic change; CI fails PR if mutates verdict without bump.
+
+Coordination Q9: stay own DB (`track_quality.db`) — 1 row per file vs N candidates per track. If forced unified, keep as separate table in shared physical file.
+
+NO `master.db` migration. Phase-3 delegates to converter (owns `db_lock()`).
+
+### Performance Budget
+
+Empirical 2026-05-17 (real MP3-128, 5:33, i7): ffprobe 277ms (8%) + librosa.load 2657ms (76%) + STFT+cutoff 555ms (16%) = **~3500ms per track cold cache**.
+
+FLAC adversarial: FLAC decode 3-5× faster (no MP3 codec); V0/V2 VBR higher variance. Budget treats 3.5s as worst-typical.
+
+Library-scale (4-worker ProcessPool):
+- 10k tracks: 2.4-3 h
+- 25k tracks: 6-7.5 h
+- 50k tracks: 12-15 h
+
+Soft cap: `MAX_SCAN_RUNTIME_S = 6*3600`. Checkpoints every 100 tracks; resume next launch.
+
+Per-probe budget: ≤5s wall (3.5s empirical + 1.5s headroom). Worker memory ~200-500 MB float32 PCM per FLAC load; cap workers at 4 (memory-bound).
+
+Source-search Phase-2: same 3.5s/track for HQ folder one-time; ranked-candidates compute <50ms + fpcalc ~800ms warm.
+
+### API / UX Surface
+
+All routes `dependencies=[Depends(require_session)]`:
+
+| Method | Path | Body / params | Phase |
+|---|---|---|---|
+| POST | `/api/quality/probe` | `{path}` | 1a |
+| POST | `/api/quality/scan` | `{roots?, force_rescan}` | 1b |
+| GET | `/api/quality/scan/status` | — | 1b |
+| POST | `/api/quality/scan/pause` | — | 1b |
+| POST | `/api/quality/override/{path_sha1}` | `{verdict}` | 1b |
+| GET | `/api/quality/track/{path_sha1}` | — | 1b |
+| POST | `/api/quality/sources/scan` | `{root}` | 2 |
+| POST | `/api/quality/candidates/find` | `{track_id, sources}` | 2 |
+| POST | `/api/quality/swap/request` | `{track_id, candidate_id}` → proxies to format-converter `trigger="quality_verdict"` | 3 |
+
+Pydantic v2 models (`.model_dump()` never `.dict()`).
+
+Frontend:
+- **Standalone view** `QualityAuditPanel.jsx`: scope picker, Start-Scan, progress bar ETA, sortable table (path/container/cutoff/verdict/override), pause/resume.
+- **Per-row badge** `QualityBadge.jsx`: green lossless / yellow bandlimited / red transcoded / grey unknown.
+- **Confirm modal**: NO `alert()`/`confirm()`/`prompt()` (coding-rules forbid). `useToast()` + ConfirmModal.
+- **Coordination**: Quality-Audit shares chrome with `library-extended-remix-finder` + `analysis-remix-detector` via tabbed "Library Audit" parent (`kind` facet).
+
+### Telemetry
+
+`quality.probe.total/ok/unknown_no_ffprobe/load_failed` counters + alert at `load_failed/total > 0.01`. Per-fixture-run precision logged to `logs/quality_verdict_precision.jsonl`. Per-encoder precision breakdown (regression gate per bucket). `quality.candidates.found/no_match/confirmed_by_user/rejected_by_user` (user-precision). `quality.probe.duration_ms` p50/p95/p99 (warn p95 >5000). `quality.scan.tracks_per_min` (alert <30/min/worker).
+
+Security counters: `quality.auth.unauthorized_count`, `quality.path.sandbox_blocked` (enumeration probe signal).
+
+NO token in any field. NO full track paths — only `path_sha1`.
+
+### Test Plan (17 cases)
+
+| Test | File | Phase | Asserts |
+|---|---|---|---|
+| `test_probe_genuine_flac_returns_lossless_container` | `test_quality_engine.py` | 1a | container="flac", verdict="ok" |
+| `test_probe_mp3_128_cutoff_within_tolerance` | same | 1a | `< ENCODER_TOLERANCE_HZ["lame_cbr_128"]` (300) |
+| `test_probe_mp3_320_cutoff_within_tolerance` | same | 1a | tolerance lame_v0 (150) |
+| `test_probe_transcoded_flac_cutoff_matches_source_mp3` | same | 1a | FLAC-from-MP3-128 cutoff in lossy band |
+| `test_probe_missing_ffprobe_returns_verdict_unknown` | same | 1a | monkeypatch PATH → "unknown_no_ffprobe" |
+| `test_probe_rejects_out_of_sandbox_path_via_validate` | same | 1a | 403 with `allow_db_match=False` |
+| `test_probe_requires_bearer_token` | same | 1a | 401 sans Authorization |
+| `test_probe_perf_within_budget` | same | 1a | wall <5000ms |
+| `test_quality_weights_sum_to_one` | same | 1a | module-init assert fires |
+| `test_corrupt_mp3_broken_process_pool_recovery` | `test_quality_scan.py` | 1b | corrupt → BrokenProcessPool → respawn → `load_failed` |
+| `test_scan_resume_skips_done_rows` | same | 1b | kill mid-scan + restart |
+| `test_verdict_precision_50_track_fixture` | same | 1b | ≥0.95 on labelled fixture |
+| `test_override_pins_verdict` | same | 1b | POST override respected by subsequent scan |
+| `test_candidate_recall_100_track_fixture` | `test_quality_sources.py` | 2 | recall ≥0.70, FP ≤0.05 |
+| `test_swap_request_delegates_to_converter` | `test_quality_swap.py` | 3 | POST body `{trigger: "quality_verdict", ...}`, NOT Rules 4/6/7 path |
+| `test_quality_panel_renders_badges` | `__tests__/QualityAuditPanel.test.jsx` | 1b | colour-coded per verdict |
+| `test_no_alert_confirm_in_swap_modal` | same | 3 | grep no `alert(`/`confirm(`/`prompt(` |
+
+### Task Queue
+
+- [ ] T-1 `chore(deps): bump librosa 0.10.1 → 0.11.0` (separate commit, CVE check)
+- [ ] T-2 `feat(backend): allow_db_match kwarg on validate_audio_path` at `app/main.py:185` (backward-compat default `True`)
+- [ ] T-3 `feat(quality): app/quality_engine.py probe + dataclass + module-init weight assert` (~300 LoC)
+- [ ] T-4 `feat(backend): POST /api/quality/probe + Pydantic model` insert after `/api/file/write:774` (`route-architect`)
+- [ ] T-5 `test(quality): Phase-1a 9-test fixture suite` (`tests/fixtures/quality/` 5 audio + `test_quality_engine.py`)
+- [ ] T-6 `feat(quality): track_quality.db schema + bootstrap` (DDL + `PRAGMA user_version=1`)
+- [ ] T-7 `feat(quality): bulk scan + ProcessPool + resume key + BrokenProcessPool recovery`
+- [ ] T-8 `feat(quality): verdict heuristic + per-encoder tolerance buckets + override route`
+- [ ] T-9 `feat(frontend): QualityBadge + QualityAuditPanel + quality.js` (useToast, no alert/confirm)
+- [ ] T-10 `feat(quality): Phase-2 local-HQ-folder source scan + candidates` (consumes sister `external_track_match.py`)
+- [ ] T-11 `feat(quality): Phase-3 swap delegation to library-format-converter` (feature-flag default OFF until sister `inprogress_`)
+- [ ] T-12 `docs(quality): backend-index + frontend-index + FILE_MAP sync` (`doc-syncer` + CHANGELOG once Phase-1b ships)
 
 ## Decision / Outcome
 

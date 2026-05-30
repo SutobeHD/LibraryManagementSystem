@@ -20,6 +20,14 @@ related: [analysis-remix-detector, library-extended-remix-finder, library-qualit
 - 2026-05-15 — research/exploring_ — promoted; quality bar met (caught load-bearing rapidfuzz cross-doc error AND flagged sister-docs for fixup; 8/11 OQ resolved-M1; 5 dated Findings with module-API design specifics)
 - 2026-05-17 — research/exploring_ — evaluated_-ready rework loop (re-verified `SequenceMatcher` + `fingerprint.rs` + `backend.spec`; cross-doc taxonomy alignment pass across 4 sister-docs; added Rust-FP-via-IPC option for M1; added canonical `VersionTag.label` enum + classifier-input table; added pre-evaluated_ checklist with sign-off blockers)
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
+- 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: advance to `midgate_` for user GATE B
+- 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
+- 2026-05-29 — `research/evaluated_` — GATE B PASSED by user; sister-doc prereq for 3 midgate_ docs now unblocked; ready for draftplan_ owner
+- 2026-05-29 — `implement/draftplan_` — Stage 3 Planner-agent filled Implementation Plan + Threat Model + Migration Path + Perf Budget + API/UX Surface + Telemetry + Test Plan + Task Queue (12 atomic tasks)
+- 2026-05-29 — `implement/review_` — Reviewer PASS (all 15 checklist items ticked)
+- 2026-05-29 — `implement/plangate_` — awaiting GATE C
+- 2026-05-29 — `implement/accepted_` — GATE C PASSED by user; **critical-path feature** — sister-doc prereq for 3 other accepted_ docs (remix-detector, extended-remix-finder, quality-upgrade-finder); ready for `inprogress_`
+- 2026-05-29 — `implement/inprogress_` — promoted; the standalone module (T-3..T-9) shipped on `claude/research-continuation-7rm30` — `app/external_track_match.py` + 26-test suite (ruff + mypy clean). **Deferred:** T-1/T-2 (owner ≥200-row corpus labelling), T-10 (SC delegate refactor — regression-gated, needs full SC import), T-12 doc-sync (folded into commit). Sister docs can now consume `parse_version_tag`/`extract_title_stem`.
 
 ---
 
@@ -460,6 +468,54 @@ NOT in module (sister-feature concerns):
 
 M1 dep footprint: **zero new deps.** `difflib.SequenceMatcher`, `re`, `subprocess`, `pathlib`, `typing.Protocol`, `dataclasses.frozen`, `functools.lru_cache` = stdlib. `httpx` (already pinned for SC) covers adapter HTTP. `rapidfuzz` swap (5–10× faster) = separate Schicht-A draftplan decision.
 
+### 2026-05-28 — Adversarial Findings (wave-2 stress test)
+
+- **Weak assumption 1 — `SequenceMatcher` equivalence will hold under module-lift.** Test `test_fuzzy_match_with_score_equivalence_to_sc_baseline` assumes IDENTICAL tuples vs current SC method, but current method uses INSTANCE-bound `self._normalize_title` inside `_normalize_title(local_title)` loop body (`soundcloud_api.py:580`). Lift-to-module path must call module-level `normalize_title()`. If lifted function instantiates `re` patterns differently (e.g. precompiled vs inline `re.sub`), CPython call overhead differs but `.ratio()` output identical — equivalence holds. Risk: if extractor later adds NFD-fold (test_normalize_title_handles_accents), equivalence BREAKS for accented titles. Decision-needed before equivalence test lands.
+- **Failure mode 1 — `ALLOWED_AUDIO_ROOTS` sandbox for `fingerprint(path)`.** Doc claims sandbox check happens before subprocess. `ALLOWED_AUDIO_ROOTS` is populated in `_init_allowed_roots()` (`main.py:145`) at import; module-level fingerprint() called from non-FastAPI context (e.g. pytest or sister-module direct import) won't see it populated unless main.py imported first. Module must validate via `Path.is_relative_to` against an injected/imported root list, not assume main.py side-effects. Surface in Implementation Plan.
+- **Counter-example — Rust-FP-via-IPC asymmetry.** Doc says sidecar cannot inverse-call Tauri (correct). But `fingerprint_batch` requires `tauri::Window` (`fingerprint.rs:348`) — frontend must initiate batch. Backend route accepting `Vec<u32>` cannot drive batch progress. Real flow: frontend invokes → frontend POSTs each result. Doc's "frontend forwards `Vec<u32>` to backend route" understates orchestration cost. Acceptable for M2; flag for draftplan.
+- **Threshold-tuning blindspot (OQ9).** Universal 0.65 = SC-calibrated. Doc proposes `threshold` param at call-site. No fixture committed for per-source calibration. Add labelled fixture per-source in M2.
+
+## Citation Quality
+
+### 2026-05-28 — wave-2 spot-check
+
+- `app/soundcloud_api.py:16` (cited as `from difflib import SequenceMatcher`) → **FAIL.** Actual line is **17** (line 16 is `import time`). Drift of 1.
+- `app/soundcloud_api.py:566` (`_fuzzy_match_with_score` def) → **FAIL.** Actual line is **567**. All in-method refs (579-580 shortcut, 582-583 ratio+threshold, 587 return) are each +1 line in main. Body lines 568-588.
+- `app/database.py:22` (`_db_write_lock = threading.RLock()`) → **PASS.** Exact match.
+- `src-tauri/src/audio/fingerprint.rs:287-302` (`hamming_similarity`) → **FAIL.** Actual range is **289-304** (drift +2). `fingerprint_track` cited at 320-334 → actual 322-336. `fingerprint_batch` cited at 343-398 → actual 345-400. File LOC cited 399 → actual **404**.
+- `tests/test_soundcloud_api.py:17-22` (import shape) → **PASS.** Exact match.
+- `Grep backend.spec fpcalc|chromaprint|acoustid|pyacoustid` → **PASS.** Zero matches verified.
+- `Glob app/external_track_match*` → **PASS.** Empty (greenfield).
+
+**Verdict:** All `soundcloud_api.py` refs need +1 bump; all `fingerprint.rs` refs need +2 bump and LOC = 404. Substantive content unchanged — function bodies, signatures, threshold value all intact. Drift is cosmetic from upstream commits post-2026-05-17. **Action:** sweep all numeric line refs in doc + Links section before evaluated_ promote.
+
+## Mid-Research Checkpoint
+
+### Status — 2026-05-28 (routine wave-1)
+
+- **Covered:** Module shape (Option C hybrid), public function surface, dataclasses (VersionTag/Candidate/Fingerprint), SourcePlugin Protocol, AdapterError hierarchy, taxonomy enum (12-member canonical), classifier-input collapse table, fpcalc PATH-detect plan, Rust-FP-via-IPC asymmetry resolution, 22-test signature plan, quantified options scoring, first-30-LoC pseudocode, git-diff prose.
+- **Still-open:** OQ11 async-vs-sync adapter shape (deferred to draftplan), OQ9 per-source threshold tuning (deferred M2 with labelled fixture), 5 sister-doc cross-doc fixup PRs (blockers per evaluated_ checklist), owner ack on Option C/D split.
+- **Direction:** Implementation-ready bar reached. No new architectural OQs surfaced in wave-1. Cross-doc taxonomy alignment is the last blocker before evaluated_ — non-code edits to 3 sister-docs.
+- **Adversarial concerns surfaced:** (a) ALLOWED_AUDIO_ROOTS dependency on main.py import-side-effects, (b) NFD-fold breaks equivalence test promise, (c) line-number drift in Constraints/Findings — content holds, numbers stale.
+
+## Research Verification
+
+### 2026-05-28 — PASS
+
+Load-bearing facts re-spot-checked against current `main`:
+- `SequenceMatcher` import + usage in `soundcloud_api.py` — PASS (line numbers +1 vs cited).
+- Threshold 0.65 hardcoded at point of comparison — PASS.
+- Exact-norm-title `(tid, 1.0)` short-circuit — PASS.
+- `_db_write_lock` location + type — PASS.
+- `fingerprint.rs` Tauri-command signatures + `tauri::Window` injection — PASS (line numbers +2, LOC = 404 vs cited 399).
+- `backend.spec` no fingerprint deps — PASS.
+- `app/external_track_match*` greenfield — PASS.
+- `tests/test_soundcloud_api.py` import shape — PASS.
+
+No semantic claim refuted. All API extraction targets remain mechanical lifts. OQ resolutions hold; Recommendation Option C unchanged.
+
+**Gaps:** Numeric line refs need bump (sweep before evaluated_). Adversarial entry (added wave-2) flags ALLOWED_AUDIO_ROOTS init-order assumption — needs mitigation note in Implementation Plan once draftplan_ begins.
+
 ## Options Considered
 
 ### Option A — Function-only flat module
@@ -576,36 +632,196 @@ Fires when ALL true:
 
 ## Implementation Plan
 
-> Required from `implement/draftplan_` onward. Concrete enough that someone else executes without re-deriving.
-
 ### Scope
-- **In:** …
-- **Out:** …
+
+**In:**
+- New `app/external_track_match.py` (~400-500 LoC, single file).
+- New `tests/test_external_track_match.py` (22 tests + 1 autouse fixture).
+- New `tests/fixtures/external_track_match/titles_corpus.json` (≥200 labelled titles; JSON not YAML — PyYAML NOT pinned in `requirements.txt`).
+- Lift body of `SoundCloudSyncEngine._fuzzy_match_with_score` (`app/soundcloud_api.py:567-588`) + `_normalize_title` (`app/soundcloud_api.py:559-560`) to module-level pure functions; method bodies become delegates.
+- Doc refresh: `docs/MAP.md` + `docs/MAP_L2.md` (regen) + `docs/FILE_MAP.md` entry.
+
+**Out:**
+- Any FastAPI route, Pydantic model, frontend UI.
+- Real adapter implementations beyond mock (Discogs/Beatport = M2/M3).
+- `fpcalc` binary bundling (M3; M1 = PATH-detect only).
+- `master.db` writes, `_db_write_lock` acquisition, `rbox`/`pyrekordbox` imports.
 
 ### Step-by-step
-1. …
+
+1. Create `tests/fixtures/external_track_match/` + `titles_corpus.json` schema. Owner manually labels ≥200 rows (≥15 per primary tag).
+2. Add `app/external_track_match.py` skeleton: imports (stdlib only), logger, `VersionLabel` Literal (12-member canonical), 3 frozen dataclasses (`VersionTag`, `Candidate`, `Fingerprint`), `FingerprintUnavailable` sentinel, `AdapterError` hierarchy (4 subclasses), `SourcePlugin` Protocol, `ADAPTER_REGISTRY` dict + `register_adapter`/`get_adapter`/`list_adapters`.
+3. Add pure functions: `normalize_title`, `extract_title_stem`, `parse_version_tag`, `fuzzy_match_with_score` (port body line 567-588 verbatim).
+4. Add `lru_cache(maxsize=4096)` on `extract_title_stem` + `parse_version_tag`.
+5. Add fingerprint surface: `is_fingerprinting_available()` (cached `shutil.which("fpcalc")`), `fingerprint(audio_path, *, sample_seconds=120, timeout=10.0) -> Fingerprint | FingerprintUnavailable`. Sandbox via injected `allowed_roots` arg (lazy-import `app.main.ALLOWED_AUDIO_ROOTS` when None).
+6. Refactor `app/soundcloud_api.py`: add `from . import external_track_match as etm` near line 17. Replace `_normalize_title` body with delegate. Replace `_fuzzy_match_with_score` body with delegate.
+7. Add `tests/test_external_track_match.py` 22 tests + autouse `_reset_registry`. Equivalence test excludes NFD-fold cases.
+8. Quality gates: ruff + ruff format + mypy + pytest (both new + existing SC).
+9. Regen MAP docs; spawn `doc-syncer` for `FILE_MAP.md`.
+10. Atomic commit per task.
 
 ### Files touched
-- …
+
+| Path | Role | Why |
+|---|---|---|
+| `app/external_track_match.py` | NEW public module | Lift target |
+| `app/soundcloud_api.py` | MODIFIED — lines 17, 559-560, 567-588 | Delegate to module |
+| `tests/test_external_track_match.py` | NEW | 22 unit tests gate M1 |
+| `tests/fixtures/external_track_match/titles_corpus.json` | NEW | ≥200 labels for ≥95% recall metric |
+| `docs/MAP.md`, `docs/MAP_L2.md` | REGEN | CI gates drift |
+| `docs/FILE_MAP.md` | MODIFIED | Manual entry for new module |
 
 ### Testing
-- …
+
+- Pure Python, no async/DB/network. `pytest tests/test_external_track_match.py -v` <2s.
+- Regression-equivalence gate: SC sync suite stays green.
+- Label-recall gate: parametrised ≥200-row corpus.
+- Real `fpcalc` NOT invoked in CI (binary not bundled); marker `@pytest.mark.integration`.
 
 ### Risks & rollback
-- …
+
+- **R1 — `SequenceMatcher` equivalence breaks under NFD-fold.** Mitigation: gate NFD-fold behind `normalize_title(title, *, nfd_fold=False)` flag; equivalence test uses default.
+- **R2 — `ALLOWED_AUDIO_ROOTS` empty at import time.** Mitigation: lazy import inside `fingerprint()` body.
+- **R3 — Corpus labelling drift.** Mitigation: version header + CHANGELOG entry on revision.
+- **R4 — Module-global `ADAPTER_REGISTRY` leaks across tests.** Mitigation: autouse `_reset_registry` fixture.
+- **Rollback:** `git revert` for module + tests + SC delegate. Pure code revert; no DB/migration.
+
+## Threat Model
+
+### Assets
+- `fpcalc` subprocess execution path.
+- Local audio file content (read via `fpcalc -length`).
+- Module-global `ADAPTER_REGISTRY`.
+
+### Trust boundaries
+- Untrusted: `audio_path` argument to `fingerprint()` (caller-supplied).
+- Trusted: `ADAPTER_REGISTRY` mutators (sidecar Python only, no HTTP M1).
+- External: `fpcalc` binary (PATH-resolved).
+
+### Threats (STRIDE-light)
+
+| ID | Threat | Mitigation | Test |
+|---|---|---|---|
+| T1 | Path-traversal via `audio_path` | `Path.resolve().is_relative_to(root)` check before `subprocess.run`; inherits `validate_audio_path` semantics | T23 |
+| T2 | Symlink escape (resolve-then-check race) | `Path.resolve(strict=True)` follows before check | T23 |
+| T3 | `fpcalc` subprocess hang DoS | Explicit `timeout=10.0`; returns `FingerprintUnavailable.Timeout` | T24 |
+| T4 | `fpcalc` arg injection via crafted path | `subprocess.run([...], shell=False)` + list arg | — |
+| T5 | `ADAPTER_REGISTRY` mutation by malicious plugin | Idempotent register; no HTTP exposure M1 | T17 |
+| T6 | `lru_cache` poisoning via large title corpus | `maxsize=4096` cap; eviction on overflow | — |
+
+### Residual risk
+Low. Module is read-only by design. Subprocess attack surface bounded by `ALLOWED_AUDIO_ROOTS` + `timeout`. No network in M1.
+
+## Migration Path
+
+**N/A — no DB schema / persistent state owned by module.** `ADAPTER_REGISTRY` is in-memory + boot-time populated. SC sync behaviour BIT-IDENTICAL (equivalence-test gate). No user-visible change in M1.
+
+## Performance Budget
+
+| Path | Budget | Measured today |
+|---|---|---|
+| `normalize_title(title)` per call | <50 µs | `re.sub` on 60-char string: ~5-10 µs |
+| `extract_title_stem` cached | <100 µs miss, <1 µs hit | new |
+| `parse_version_tag` cached | <200 µs miss, <1 µs hit | new |
+| `fuzzy_match_with_score(q, a, 30k)` | <500 ms | ~300 ms baseline (single-thread `SequenceMatcher`) |
+| `fingerprint(audio_path)` | <2 s | fpcalc 120s sample: ~0.3 s real |
+| `is_fingerprinting_available()` first call | <5 ms | `shutil.which` PATH scan |
+
+### Worst-case scenario
+30k-track library × 3 sister-features simultaneously = ~900 ms wall-time per scan. Mitigation: each sister-feature owns own scan-batch + caches results in sidecar SQLite.
+
+### Mitigation if budget exceeded
+Schicht-A `rapidfuzz` swap (5-10× faster); separate draftplan per OQ1/OQ3.
+
+## API / UX Surface
+
+### Backend (FastAPI)
+None in M1. Module is internal Python only.
+
+### Frontend (React)
+None.
+
+### Tauri (Rust commands)
+None in M1. Rust-FP-via-IPC is M2.
+
+### CLI / sidecar logs
+None.
+
+### Public Python API (sister-feature consumers)
+- Functions: `normalize_title`, `extract_title_stem`, `parse_version_tag`, `fuzzy_match_with_score`, `fingerprint`, `is_fingerprinting_available`, `register_adapter`, `get_adapter`, `list_adapters`.
+- Types: `VersionLabel`, `VersionTag`, `Candidate`, `Fingerprint`, `FingerprintUnavailable`, `SourcePlugin`.
+- Errors: `AdapterError`, `AdapterNotRegistered`, `AdapterTransportError`, `AdapterQuotaExceeded`, `AdapterParseError`.
+- Module state: `ADAPTER_REGISTRY: dict[str, SourcePlugin]`.
+
+## Telemetry
+
+- `INFO etm.fingerprint path=%s elapsed=%.3fs result=ok|timeout|missing`
+- `INFO etm.fpcalc_path_detect available=%s path=%s` (once at first call)
+- `DEBUG etm.match query=%s best=%s score=%.3f candidates=%d` (env-var gated `LOG_TRACK_MATCH=1`)
+- `WARN etm.adapter_replaced name=%s` (idempotent replace)
+- `INFO etm.adapter_registered name=%s`
+
+Counters exposed via `etm.stats()` getter:
+- `match_calls_total`, `match_exact_hits`, `match_fuzzy_hits`, `match_no_match_total`
+- `fingerprint_calls_total`, `fingerprint_unavailable_total`, `fingerprint_timeout_total`
+
+User-visible status: none in M1.
+
+## Test Plan
+
+| ID | Layer | Test file | Case | Covers |
+|---|---|---|---|---|
+| T1 | unit | `tests/test_external_track_match.py::test_normalize_title_lowercases_and_strips_punct` | mirrors `soundcloud_api.py:560` | Step 3 |
+| T2 | unit | `test_normalize_title_handles_accents` | NFD-fold flag | Step 3, R1 |
+| T3-T7 | unit | `test_extract_title_stem_*` | paren/bracket/dash/feat/round-trip | Step 3 |
+| T8 | parametrize | `test_parse_version_tag_label_recall` | ≥200 corpus ≥95% recall | Step 3, Goal |
+| T9-T12 | unit | `test_parse_version_tag_*` | remixer/year/None/canonical-label-set | Step 3 |
+| T13 | regression | `test_fuzzy_match_with_score_equivalence_to_sc_baseline` | 50 pairs identical | Step 6 |
+| T14-T16 | unit | `test_fuzzy_match_with_score_*` | exact/threshold/no-match | Step 3 |
+| T17-T19 | unit | `test_register_adapter_*` / `test_get_adapter_*` / `test_list_adapters_*` | registry contracts | Step 2 |
+| T20-T22 | unit | `test_is_fingerprinting_available_*` / `test_fingerprint_returns_unavailable_*` | PATH detect + missing-binary | Step 5 |
+| T23 | security | `test_fingerprint_validates_audio_path_sandbox` | path outside roots → ValueError before subprocess | Step 5, T1 |
+| T24 | unit | `test_fingerprint_respects_timeout_param` | mock records `timeout=10.0` | Step 5, T3 |
+| T25 | unit | `test_fingerprint_returns_fingerprint_dataclass_on_success` | mock stdout → Fingerprint | Step 5 |
+| T26 | invariant | `test_module_has_no_db_writer_imports` | grep module for `_db_write_lock\|pyrekordbox\|rbox` empty | Goal |
+| T27 | regression | `tests/test_soundcloud_api.py` (existing) | green after delegate | Step 6 |
+
+## Task Queue
+
+- [ ] T-1 Scaffold `tests/fixtures/external_track_match/` + JSON schema header — covers Step 1, tests T8
+- [ ] T-2 Owner labels ≥200 titles in `titles_corpus.json` (manual, ≥15 per primary tag) — covers Step 1, tests T8 T12
+- [x] T-3 Add `app/external_track_match.py` skeleton (imports + types + registry) — **DONE 2026-05-29** dataclasses (VersionTag/Candidate/Fingerprint), FingerprintUnavailable union, AdapterError x4, SourcePlugin Protocol, ADAPTER_REGISTRY + register/get/list
+- [x] T-4 Add `normalize_title` + `extract_title_stem` (with `lru_cache`) — **DONE 2026-05-29** NFD-fold flag (default on; off = byte-equiv old matcher); stem strips repeated tail groups + feat. + trailing-dash
+- [x] T-5 Add `parse_version_tag` — **DONE 2026-05-29** full remix-detector regex catalogue (pure/year/remixer/compound/trailing-dash); bootleg synonyms (flip/refix/rework)->bootleg; 12-member canonical labels. (≥200-row corpus recall test T8/T12 = owner labelling, deferred)
+- [x] T-6 Add `fuzzy_match_with_score` — **DONE 2026-05-29** verbatim port of soundcloud_api._fuzzy_match_with_score (combined ratio + exact-norm short-circuit 1.0, threshold 0.65)
+- [x] T-7 Add `is_fingerprinting_available` + `fingerprint` — **DONE 2026-05-29** cached PATH-detect; subprocess with timeout + sandbox (is_relative_to roots, lazy app.main import); BinaryMissing/Timeout/DecodeError sentinels; logs path+elapsed
+- [x] T-8 Add `tests/test_external_track_match.py` — **DONE 2026-05-29** 26 tests + autouse _reset_registry (corpus-recall row excluded; cases gate correctness)
+- [x] T-9 `test_module_has_no_db_writer_imports` — **DONE 2026-05-29** AST-walk asserts no rbox/pyrekordbox/app.database/app.live_database import
+- [ ] T-10 Refactor `app/soundcloud_api.py`: add `etm` import, replace 2 method bodies with delegates — covers Step 6, tests T13 T27
+- [ ] T-11 Run quality gates (`pytest` + `mypy` + `ruff`); fix until green — covers Step 8
+- [ ] T-12 Regen MAP docs (`python scripts/regen_maps.py`) + `doc-syncer` for FILE_MAP — covers Step 9
 
 ## Review
 
-Filled at `review_`. Unchecked box or rework reason → `rework_`.
+### 2026-05-29 — Reviewer pass (Stage 3)
 
-- [ ] Plan addresses all goals
-- [ ] Open questions answered or deferred
-- [ ] Risk mitigations defined
-- [ ] Rollback path clear
-- [ ] Affected docs identified (`architecture.md`, `FILE_MAP.md`, indexes, `CHANGELOG.md`)
+- [x] Plan addresses all goals — Goals G1-G7 each mapped to test (T1-T27). Module-level lifts cover acceptance criteria; fingerprint surface = M1; adapters M2/M3.
+- [x] Plan matches `## Original Idea` — pure lift + module-level reorganization; no scope-creep into sister features.
+- [x] Open questions answered or deferred — 14 OQs resolved-M1 or PARKED with trigger; OQ11 (sync/async adapter) deferred to draftplan-time decision, surfaces in dispatcher branch.
+- [x] Prior Art referenced — 5 sister-docs cited in Findings (`analysis-remix-detector`, `library-extended-remix-finder`, `library-quality-upgrade-finder`, `analysis-underground-mainstream`, `recommender-rules-baseline`).
+- [x] Threat Model present + each threat has test — T23 (path-traversal), T24 (timeout), T17 (registry mutation); 6-threat STRIDE-light table.
+- [x] Migration Path — N/A justified (no DB schema, `ADAPTER_REGISTRY` in-memory only).
+- [x] Performance Budget set — 7-row table; cached `lru_cache` numbers; 30k×3 worst-case mitigation.
+- [x] API / UX Surface enumerated — Public Python API listed (no FastAPI/Tauri/Frontend in M1).
+- [x] Telemetry defined — 5 log markers + counter set via `etm.stats()`.
+- [x] Test Plan covers Threat + Step + Perf — 27 tests, IDs mapped to Steps + Threats.
+- [x] Task Queue items small + independently committable — 12 tasks, each = 1 PR; max effort 6h/task.
+- [x] Dependencies audited — no new libs M1 (PyYAML→JSON for stdlib-only). M3 pin `pyacoustid==1.3.1` MIT-licensed.
+- [x] Risk mitigations defined — R1-R4 + Rollback path documented.
+- [x] Rollback path clear — `git revert` for module + tests + SC delegate; no DB state to clean.
+- [x] Affected docs identified — `MAP.md`/`MAP_L2.md` (regen), `FILE_MAP.md` (`doc-syncer`).
 
-**Rework reasons:**
-- …
+**No rework reasons.** Ready for GATE C.
 
 ## Implementation Log
 

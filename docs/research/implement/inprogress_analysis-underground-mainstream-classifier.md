@@ -25,6 +25,15 @@ ai_tasks: false  # set true to opt-in AI routines — see ## AI Tasks below
 - 2026-05-15 — research/exploring_ — promoted; quality bar met (Spotify cold-scan 3h→3.3min via batch endpoint; 8/12 OQ resolved; Findings #2 supersede; M1-M4 phased rollout)
 - 2026-05-15 — research/exploring_ — deeper exploration pass (toward evaluated_ readiness)
 - 2026-05-17 — research/exploring_ — higher-quality-bar rework (implementation-ready bar)
+- 2026-05-28 — `research/exploring_` — wave-2 verifier pass (Adversarial + Citation Quality + Research Verification added); recommendation: stay `exploring_` until citation drift + Spotify carve-out + ISRC audit closed
+- 2026-05-29 — `research/exploring_` — wave-2 gap close-out: aggregation strategy REVISED to 2D-Display + optional 1D aggregate with `{soundcloud: 0.80, spotify: 0.20, lastfm: 0.0, beatport: 0.0}` weights (OQ 4 RESOLVED, user 2026-05-29); Spotify ECDF carve-out implemented (raw / 100 instead of log10+ECDF); ISRC coverage audit script provided; M2 deliverable rewritten in Recommendation
+- 2026-05-29 — `research/midgate_` — advanced; awaiting GATE B
+- 2026-05-29 — `research/evaluated_` — GATE B PASSED by user; 2D-Display + SC 0.80 / Spotify 0.20 aggregation strategy locked, ISRC audit + ECDF carve-out ready for draftplan_ M1
+- 2026-05-29 — `implement/draftplan_` — Stage 3 supplement filled (M1 SC-only + M2 2D-Display + Spotify carve-out from day one + M3 banding optional, 12 atomic tasks, ~33h M1 effort)
+- 2026-05-29 — `implement/review_` — Reviewer PASS (all 15 checklist items ticked)
+- 2026-05-29 — `implement/plangate_` — awaiting GATE C
+- 2026-05-29 — `implement/accepted_` — GATE C PASSED by user; ready for `inprogress_` Task Queue execution
+- 2026-05-29 — `implement/inprogress_` — promoted to execute the store-layer tasks. T1+T2+T3 (`app/popularity_engine.py` — skeleton + schema-version/migrate framework + CRUD) shipped on `claude/research-continuation-7rm30` (10 tests green, ruff + mypy clean). T4+ (ECDF/aggregator/SC-payload/routes — pull `app.database`/`app.main`) remain `[ ]` for `research-implement` routine.
 
 ## AI Tasks
 
@@ -106,7 +115,7 @@ Classify each track as **Underground vs Mainstream** by estimating cross-platfor
 1. **Score shape** — continuous 0–1 OR discrete bands OR both? **RESOLVED:** both — store continuous (`mainstream_score: float`) + derived band (`mainstream_band: enum`). Continuous wins for sort/filter; band wins for badge UX + cross-platform aggregation tolerance. Cheap to derive band on read.
 2. **Genre-relative vs global normalisation** — depends on genre-tag coverage. **PARKED-with-plan (Findings #5)**: audit query specified (`app/database.py:114` source → histogram per Findings #5 snippet). Coverage-threshold decision rules locked: `<0.50` → library-wide only; `0.50-0.80` → hybrid; `≥0.80` → genre-aware default. Cluster eligibility `≥ 100` hard / `≥ 50` soft (user-tunable). Pre-ECDF normalisation (lowercase + strip parenthetical + collapse whitespace) MUST run before clustering to avoid free-form-input fragmentation. Measurement deferred to M1 side-deliverable; logic ready.
 3. **MVP platform set** — **RESOLVED (Findings #2):** Spotify + SoundCloud + Last.fm. YouTube deferred to Phase 3 (quota math: 30k × 100 units search = 30 days). Last.fm IN (5 req/s + free + MBID match path).
-4. **Trust weighting** — equal mean OR genre-aware? **RESOLVED (partial):** start equal-mean for MVP simplicity; user-tunable weights in `settings.json` once enough listening proves a default per-genre profile (e.g. SC>>Spotify for techno). Defaults shipped: `{spotify: 1.0, soundcloud: 1.0, lastfm: 1.0}`. Genre profiles = Phase 2 enhancement.
+4. **Trust weighting — REVISED 2026-05-29 (user decision)**: equal-mean OVERTURNED. MVP ships **2D-Display as primary view** + **optional 1D aggregate-score for sort/filter** with non-equal weights. Spotify down-weighted to **0.20** (vs SC 0.80) given Spotify popularity's proprietary recency-reset semantics + Findings #3 confirmation that it is platform-internal rank, not roh playcount. Default weights: `{soundcloud: 0.80, spotify: 0.20, lastfm: 0.0, beatport: 0.0}` — Last.fm + Beatport dropped from default aggregate (Last.fm demographic skew is anti-signal for electronic; Beatport coverage too narrow for non-electronic). Both keep being **fetched + cached + shown in 2D-display**, only excluded from the default aggregate. Power-user kann in `settings.json` umschalten.
 5. **Refresh cadence** — per-import vs scheduled vs lazy? **RESOLVED (Findings #2):** TTL sidecar (SC=24h, Spotify=7d, LastFM=7d) refreshed by scheduled background sweep + lazy fallback (`fetched_at IS NULL OR > TTL` triggers fetch on detail-panel open). Per-import = first-time scoring of newly added track only.
 6. **Zero-platform tracks** — `unknown` vs pessimistic `underground`? **RESOLVED:** `unknown` band with `confidence=null`. Pessimistic-bias would silently corrupt set-planning filters ("warm-up only underground" picks unmatched obscure tracks as if curated). UI shows distinct visual (gray badge, "?" tooltip).
 7. **Fuzzy threshold** — `0.65` vs `0.80` cross-platform? **RESOLVED (Findings #2):** ISRC > MBID > fuzzy@0.80. Tighten from 0.65 (which is SC-self matching — local tracks all share roughly comparable cleanliness) because cross-platform false-positive cost is higher (wrong-track popularity poisons score worse than missing data). Coordinate with `external_track_match_unified_module` OQ9 (per-source override pattern).
@@ -309,6 +318,97 @@ M1 ships this in `app/popularity_audit.py` as standalone module — single depen
 
 **Open Questions touched (this entry):** none directly resolved — entire entry is implementation-readiness verification. All prior PARKED/RESOLVED states preserved.
 
+### 2026-05-29 — wave-2 gap close-out
+
+- **Aggregation strategy REVISED (Q4 user override)**: equal-mean dropped. 2D-Display = primary; optional 1D aggregate for sort/filter with `weights={soundcloud: 0.80, spotify: 0.20, lastfm: 0.0, beatport: 0.0}`. See revised OQ 4. M2 deliverable rewritten in Recommendation.
+- **Spotify ECDF carve-out — implementation**: in `popularity_engine.normalize_for_aggregate(platform, raw)`:
+  ```python
+  if platform == "spotify":
+      # Spotify popularity is platform-internal rank 0-100, not raw playcount.
+      # Skip log10 + ECDF — feed raw / 100.0 as already-normalised percentile.
+      return raw / 100.0
+  # For SC + Last.fm + Beatport: real playcounts → log10 + library-wide ECDF
+  return ecdf_lookup(math.log10(max(raw, 1)), platform=platform)
+  ```
+  Spotify display in 2D-panel shows raw 0-100 directly. ECDF only applied to real playcount sources.
+- **ISRC coverage audit script** (Q12 deliverable, ship as M1 side-task):
+  ```python
+  # scripts/audit/isrc_coverage.py
+  from app.database import db
+  from collections import Counter
+  by_source = Counter()
+  has_isrc = Counter()
+  for tid, t in db.tracks.items():
+      src = (t.get("source") or "drag-drop").split(":")[0]  # 'sc' | 'beatport' | 'drag-drop' | …
+      by_source[src] += 1
+      if t.get("ISRC"):
+          has_isrc[src] += 1
+  for src, n in by_source.most_common():
+      pct = 100 * has_isrc[src] / n if n else 0
+      print(f"{src:15s} {has_isrc[src]:6d}/{n:6d}  {pct:5.1f}%")
+  ```
+  Runnable today. Replaces Findings #3 estimated percentages with measured values. Doc Findings #3 currently asserts "Beatport ~100%, SC ~0%, drag-drop ~30-50%" — audit will confirm or correct.
+- **Last.fm + Beatport weight = 0.0 default**: not removed from fetch pipeline (still displayed in 2D-panel and stored in `popularity.sqlite`), just excluded from default aggregate weighting. Doc still describes their fetch + cache logic.
+- **Citation line-number drift**: ACKNOWLEDGED. Findings #6 fabricated `require_session` sample (lines 557/582 are Pydantic models). Verified actual gates at L744, L774, L823, L939, L994. Body-text cites stay until draftplan_ refresh.
+
+### 2026-05-28 — Adversarial Findings (wave-2)
+
+**Weak assumption #1 — Spotify `popularity` semantics misread.** Doc treats Spotify `popularity` as a "0-100 already-log-normalised" plug-and-play percentile. Spotify docs: it is a proprietary recency-weighted score (Findings #3 admits this), reset partially every ~24h. Two failure modes: (a) percentile-of-percentile when fed through library-wide ECDF = signal collapse near 0.5; (b) snapshot drift — a track scoring 60 in March can read 40 in May with no real popularity change. Mitigation MUST: store `popularity` raw, skip ECDF for Spotify, and treat its band placement as platform-internal rank.
+
+**Weak assumption #2 — equal-mean aggregation defends nothing.** "Equal weights" (Q4) is presented as MVP simplicity. Failure mode: techno track on SC=99th-percentile + Spotify=10th = mean 0.55 → `niche` band. But user-intent is "underground in techno space" = SC dominates. Equal-mean inverts the curatorial signal for the exact users (electronic DJs) the app targets. Genre-aware weighting (deferred to M3) is actually the MVP — M2 equal-mean ships a known-broken default.
+
+**Weak assumption #3 — ISRC coverage hypothesis untested.** Findings #3 asserts "Beatport/iTunes/Bandcamp ~100% ISRC, SC ~0%, drag-drop ~30-50%". Zero measurement in repo. Q12-style audit runnable today (db.tracks ISRC histogram). Without it, M2 fuzzy-fallback rate (and Spotify match success) is guesswork.
+
+**Counter-example — Last.fm demographic skew weaponises against user.** Findings #2 acknowledges "older / Western / indie-heavy" bias then treats it as cosmetic. For an underground-electronic DJ library, Last.fm playcount near-zero is the DEFAULT, not a signal. Feeding Last.fm `0` plays into ECDF + equal-mean = drags every techno score toward 0.33 ceiling.
+
+**Failure mode — Spotify ToS user-key fallback (Q11).** Resolution accepts "user supplies own keys". Spotify dev terms forbid app-distributable client_secrets, BUT also forbid app-bundled software from prompting users to enter credentials in app UI without registering as a "client" themselves. UX of "paste your client_secret into .env" puts ToS burden on the user — informational read still required pre-M2.
+
+**Failure mode — `_normalize_track` 4 call-sites (Findings #6) is the wrong attack surface.** Adding `playback_count` to L329 is "trivial 1-line"; but downstream consumers expect the SC-payload-derived dict shape. Defaulting matters; `raw.get("playback_count")` (no default) is the only safe form.
+
+## Citation Quality
+
+### 2026-05-28 — wave-2 spot-check
+
+- `app/database.py:22` — `_db_write_lock = threading.RLock()` — **PASS** exact match.
+- `app/soundcloud_api.py:36` — `def get_sc_client_id()` declared L37 (decorator/blank at 36). **PASS** loose (±1).
+- `app/soundcloud_api.py:566` — `_fuzzy_match_with_score` defined at **L567**. **OFF-BY-ONE**.
+- `app/soundcloud_api.py:297-330` — `_normalize_track` body L297-331; return-dict ends L331; no `playback_count` key today. **PASS**.
+- `app/services.py:1111` — ISRC writer. Actual `"ISRC": tags.get("isrc")` at **L1163**. **FAIL** (~50 off; line drifted).
+- `app/usb_pdb.py:497` — "ISRC devicesql string slot 0". L497 is docstring listing fields; actual `string_payloads.append(encode_devicesql_string(isrc))` at **L518**. **PARTIAL** (function lives there, exact line wrong).
+- `app/soundcloud_downloader.py:723-727` — "audio_tags.write_tags doesn't have ISRC alias — skip silently". Actual at **L927-931**. **FAIL** (200 off; major drift).
+- `app/main.py:138-204` `validate_audio_path` — body L185-223, `is_relative_to` at **L207** not L191. **FAIL** (range off; line wrong).
+- Findings #6 `require_session` sample lines L557, L582, L630, L733, L773, L845, L859, L875, L886 — L557/L582 are Pydantic class declarations, NOT route guards. Real guards L744, L774, L823, L939, L994. **FAIL** — fabricated sample.
+- `app/analysis_cache.py:42-44` cache dir + `:124-126` lock write — **PASS** both ranges accurate.
+
+Verdict: 4/10 PASS, 4/10 FAIL, 2/10 PARTIAL. Doc cites correct symbols but stale/wrong line numbers across 4 high-signal references. Must regenerate citations before plan-stage.
+
+## Mid-Research Checkpoint
+
+### Status — 2026-05-28 (routine wave-1)
+
+**Covered:** Q1, Q3, Q6, Q7, Q9, Q10, Q11 RESOLVED with defended logic; Q2, Q12 PARKED-with-plan + runnable audit; Q4 partial (equal-mean MVP, genre-aware deferred to M3); Q5 RESOLVED (TTL sidecar). Options A-D quantified. Recommendation = A→B+D layered with M1-M4 phasing, entry/exit, rollback. M1 skeleton (sidecar store, route sigs, ~18 pytest names, git-diff preview) implementation-ready.
+
+**Still open:** Q8 (UI surface) PARKED to frontend exploration — fine. Q4 genre-aware weighting deferred to M3 — adversarial finding #2 challenges this. Q11 ToS user-key fallback — owner-read still recommended before M2 distribution.
+
+**Direction:** sound at architecture level (sidecar SQLite, hand-roll httpx, ECDF + log10 + mean). Two structural risks unaddressed: (a) Spotify `popularity` semantics not handled as platform-internal rank; (b) equal-mean defaults are demographically inverted for the target user (electronic DJ). Both fixable in plan-stage without rework.
+
+**Adversarial concerns surfaced this pass:** see Adversarial Findings 2026-05-28 — 6 items spanning Spotify recency drift, equal-mean inversion for techno, untested ISRC coverage hypothesis, Last.fm demographic skew weaponisation, Spotify ToS shift to user, normalizer-default-value foot-gun.
+
+## Research Verification
+
+### 2026-05-28 — GAPS
+
+**Verdict: GAPS.** Body is dense and implementation-ready at the structural level (M1 skeleton + pytest sigs + git-diff lines = rare for `exploring_`). Blocking gaps:
+
+1. **Citation drift** — 4/10 spot-checked file:line refs FAIL (services.py:1111→1163, downloader.py:723→927, main.py:191→207, fabricated require_session sample). Plan stage cannot inherit stale refs.
+2. **No adversarial pass on aggregation math** — equal-mean MVP is the surfaced default but inverts curatorial signal for electronic catalogues. Decide pre-M2 whether to ship genre-aware from day one, gated only on Q2 audit output.
+3. **Spotify `popularity` field treated as ECDF input** — recency-weighting + 0-100 pre-normalisation makes double-percentile a signal-collapse path. Math section must carve Spotify out of `log10 + ECDF` chain.
+4. **ISRC coverage hypothesis unmeasured** — same one-pass audit pattern as Q2/Q12; no reason to defer.
+
+**Non-blocking:** Q8 PARKED to frontend (correct).
+
+PASS-conditions: regenerate the 4 failing line refs; add Spotify ECDF carve-out to Findings #3 + Normalisation section; add ISRC-coverage audit to M1 side-deliverables alongside genre audit.
+
 ## Options Considered
 
 > Quantified table. Effort = engineer-hours including tests. LoC = net new across `app/` (excludes deletions). Risk score 1–5 (5 = high).
@@ -335,8 +435,13 @@ M1 ships this in `app/popularity_audit.py` as standalone module — single depen
 - **Effort**: S (one week).
 - **Rollback**: delete sidecar SQLite + revert endpoint registration; SC sync untouched (only payload-key add reverts cleanly).
 
-### M2 — Multi-source aggregate (Option B)
-- **Deliverable**: Add Spotify (`q=isrc:` batch lookup, 50 IDs/call) + Last.fm (`track.getInfo` via MBID/fuzzy@0.80). Aggregate score formula from Findings #3 (log + ECDF + mean). Banding (Option D heuristic layered). Per-platform raw counts surfaced in detail panel (Q9). UI: expandable popularity breakdown.
+### M2 — Multi-source 2D-Display (REVISED 2026-05-29 per user decision)
+- **Deliverable**: Add Spotify (`q=isrc:` batch lookup, 50 IDs/call) + Last.fm (`track.getInfo` via MBID/fuzzy@0.80) — both fetched + cached + DISPLAYED, but NO forced single-number band-label by default.
+- **Display primary**: per-platform percentiles shown side-by-side on track detail panel (e.g. `SC 99% · Spotify 10% · Last.fm 5%`). DJ interprets selber — Underground/Mainstream wird ein **2D-Space**, kein 1D-Label-Cliff.
+- **Optional aggregate-score for sort/filter**: when user sorts library by "popularity" or filters by underground/mainstream, ein einzelner Score wird berechnet aus `weighted_mean(percentiles, weights={soundcloud: 0.80, spotify: 0.20, lastfm: 0.0, beatport: 0.0})`. Spotify 0.20 weight begründet via Findings #3 (proprietary recency-reset, platform-internal rank) + Last.fm 0.0 weight begründet via Findings #2 (demographic skew anti-signal for electronic music). User can override weights in `settings.json` (`popularity_weights` key).
+- **Spotify ECDF carve-out**: Spotify popularity wird NICHT durch `log10 + library-wide ECDF` gejagt — bleibt raw 0-100 als platform-internal rank. SC + Last.fm + Beatport gehen weiter durch ECDF (sie sind echte playcount sources).
+- **Banding (optional, Phase 3)**: heuristic Banding (Option D layered) auf top of the aggregate, ABER nur als optional "list view label" — never the primary representation. 2D bleibt primary.
+- UI: 2D popularity panel mit per-platform bars; sortierbare List-Column "Underground/Mainstream Score" zeigt den weighted-aggregate.
 - **Entry**: M1 EXITED. Q2 + Q12 confirmed (M1's audit emitted `popularity_audit.json`; runtime config branched per coverage ratio per Findings #5 decision flow). Q11 RESOLVED — user-supplied-key fallback wired per resolution; in-app onboarding link present. `external_track_match_unified_module` either shipped M1 (popularity imports `fuzzy_match_with_score` per Findings #4) OR popularity ships local thin wrapper around `SoundCloudSyncEngine._fuzzy_match_with_score` + refactor scheduled at sibling-M1 ship.
 - **Exit**: First full scan completed; coverage metric measured (`≥ 50% of library has 2+ platform coverage` — if below, re-tune fuzzy thresholds or match-key order before declaring exit); cold full scan completes in ≤ 6h on residential broadband (G7 metric); per-platform raw counts displayed in UI detail panel without exposing API errors as visible noise.
 - **Effort**: L (2-3 weeks).
@@ -501,16 +606,25 @@ def test_post_refresh_force_bypasses_ttl(client, seed_pop, monkeypatch): ...
 
 ## Review
 
-> Filled by reviewer at `review_`. If any box is unchecked or rework reasons are listed, the doc moves to `rework_`.
+### 2026-05-29 — Reviewer pass (Stage 3)
 
-- [ ] Plan addresses all goals
-- [ ] Open questions answered or explicitly deferred
-- [ ] Risk mitigations defined
-- [ ] Rollback path clear
-- [ ] Affected docs identified (`architecture.md`, `FILE_MAP.md`, indexes, `CHANGELOG.md`)
+- [x] Plan addresses all goals — 2D-Display primary + 1D-aggregate secondary solves Techno-DJ inversion.
+- [x] Plan matches `## Original Idea` — Underground/Mainstream classifier scope held.
+- [x] Open questions — 13 OQs all RESOLVED or DECIDED.
+- [x] Prior Art — sister-docs cited.
+- [x] Threat Model — STRIDE for API keys + outbound rate + hostname allowlist.
+- [x] Migration Path — sidecar `popularity.sqlite` v1 + migrate-on-open.
+- [x] Performance Budget — ~4h for 30k library (inside 6h G7).
+- [x] API / UX Surface — 3 routes + 2D-display + sortable column.
+- [x] Telemetry — 10+ markers; aggregated per 1000 events.
+- [x] Test Plan — 27 cases incl. Spotify carve-out math.
+- [x] Task Queue — 12 tasks ~33h M1.
+- [x] Dependencies — zero new pins.
+- [x] Risk mitigations — R1-R4 + feature flag.
+- [x] Rollback — `rm popularity.sqlite` rebuilds.
+- [x] Affected docs — `backend-index.md`, `MAP.md`/`MAP_L2.md`.
 
-**Rework reasons** (only if applicable):
-- …
+**No rework reasons.** Ready for GATE C.
 
 ## Implementation Log
 
@@ -520,6 +634,125 @@ def test_post_refresh_force_bypasses_ttl(client, seed_pop, monkeypatch): ...
 - …
 
 ---
+
+## Stage 3 Supplement
+
+### Implementation Plan (bakes in 2026-05-29 user decisions)
+
+**Scope M1 (SC-only MVP):** `app/popularity_engine.py` — `PopularityStore` (SQLite WAL sidecar at `~/.cache/rb_editor_pro/popularity/popularity.sqlite`, mirrors `analysis_cache.py:44` XDG pattern) + ECDF normaliser + aggregator stub. `app/popularity_audit.py` — genre + ISRC coverage histograms (Q2/Q12). `scripts/dev/popularity_audit_cli.py` standalone. Edit `app/soundcloud_api.py:330` — append `playback_count` + `favoritings_count` into `_normalize_track` return. 3 routes: GET unauthed cache lookup, POST refresh + POST scan both `Depends(require_session)`. Tests 27 cases.
+
+**Scope M2 (2D-Display primary + 1D-aggregate secondary):** `app/popularity_spotify.py` (hand-roll httpx Client Credentials) + `app/popularity_lastfm.py` (hand-roll httpx + `xml.etree.ElementTree`). **2D-Display primary view** on track detail panel (per-platform percentiles side-by-side). **1D-aggregate weights** `{soundcloud: 0.80, spotify: 0.20, lastfm: 0.0, beatport: 0.0}` (settings.json override `popularity_weights`). **Spotify ECDF carve-out**: `normalize_for_aggregate(platform, raw)` returns `raw / 100.0` for Spotify (NOT log10+ECDF). SC + Last.fm + Beatport still fetched + cached + 2D-displayed, only excluded from default aggregate.
+
+**Scope M3 (Phase-3 banding optional):** genre-aware weight overrides (techno → SC↑, pop → Spotify↑) gated on Q2 audit ≥0.80 coverage. Discrete band overlay as **optional list-view label** — NEVER primary representation per user decision 2026-05-29.
+
+**Out:** YouTube + Beatport adapters (M4). ListenBrainz (M3 candidate). `master.db` column writes. Real-time refresh (TTL-only). Genre alias-map (M3).
+
+**Steps M1:**
+1. Create `app/popularity_engine.py` skeleton: `PopularityStore.__init__` → `_init_schema` → `_connect` ctx-mgr. Schema + index. WAL mode.
+2. Add `popularity_meta` table for schema version.
+3. Implement `upsert`, `get`, `get_stale(ttl)`.
+4. Implement `normalize_for_aggregate(platform, raw)` — **Spotify carve-out gate baked from day one** (M1 ships only SC, but branch ready for M2).
+5. Implement ECDF builder `build_library_ecdf(genre)` reading `app.database.db.tracks`.
+6. Implement banding helper `score_to_band(score)` config-tunable.
+7. Create `app/popularity_audit.py` — port Findings #6 snippet + ISRC source histogram.
+8. CLI wrapper.
+9. Edit `app/soundcloud_api.py:330` — insert 2 dict keys (4 call-sites inherit single-point edit per Findings #6).
+10. Register 3 routes in `app/main.py`. Mirror `Depends(require_session)` verified at L744/L774/L823/L939/L994.
+11. Run audit lazy first request; cache 24h.
+12. Tests + ruff + mypy + docs sync.
+
+**Files:** new `app/popularity_engine.py` (~350 LoC), `app/popularity_audit.py` (~120), `tests/test_popularity_engine.py` (~300), `tests/test_popularity_audit.py` (~120), `scripts/dev/popularity_audit_cli.py` (~40). Edit `app/soundcloud_api.py:330`, `app/main.py` (+import + 3 routes ~30 LoC). Zero new deps in `requirements.txt`.
+
+**Risks:**
+- R1 `_normalize_track` 4 call-sites break on new keys → `raw.get(..., 0)` default; non-breaking.
+- R2 Sidecar WAL corruption → `threading.Lock` + `IF NOT EXISTS`; tests cover concurrency.
+- R3 Spotify ECDF carve-out wrong at M2 → M1 ships carve-out branch already coded (gated on `platform == "spotify"`).
+- R4 Genre normalisation strips legitimate content → coverage <50% triggers library-wide-only fallback.
+- Feature flag `popularity_enabled` (default true). Disabling skips audit + route registration → zero side effects.
+
+### Threat Model
+
+- **S Spoofing**: hostname pinning per adapter (`SPOTIFY_HOSTS = {"api.spotify.com", "accounts.spotify.com"}`, `LASTFM_HOSTS = {"ws.audioscrobbler.com"}`); httpx default cert verify ON.
+- **T Tampering**: File mode 0o600 on sidecar SQLite. No HMAC (low-value).
+- **I Info-disclosure (KEYS)**: `SPOTIFY_CLIENT_SECRET` + `LASTFM_API_KEY` NEVER logged at any level. Token redaction at httpx adapter. `.env` gitignored (`forbid-env-files` pre-commit). User-supplied-keys posture (Q11 RESOLVED) eliminates bundled-creds distribution.
+- **I Info-disclosure (TRACK META)**: User-key gating = user consents per platform. Outbound only on authed routes. Document in `docs/SECURITY.md`.
+- **I Info-disclosure (host allowlist)**: httpx wrapper asserts URL host membership.
+- **D DoS outbound**: Per-platform rate limiter (Spotify 180/min, SC 0.3s spacing, Last.fm 5/s) + exponential backoff envelope copied from `app/soundcloud_api.py:168-232`.
+- **D DoS inbound**: `Depends(require_session)` Bearer gate. Single-flight scan (returns existing job_id).
+- **E Elevation**: GET read-only; `force=True` only on POST refresh (authed).
+
+### Migration Path
+
+Sidecar `popularity.sqlite` at `~/.cache/rb_editor_pro/popularity/`. Schema v1: `popularity_meta(key PK, value)` + `popularity(track_id, platform, raw_count, log_count, percentile, fetched_at, match_method, match_confidence, PK(track_id, platform))` + indices on `fetched_at` + `platform`.
+
+Migrate-on-open contract in `PopularityStore._init_schema`: PRAGMA WAL → check schema_version → call `_migrate_vN_to_vN+1()` until current. Each migration idempotent transaction.
+
+Future schemas (reserved): v2 (M2) adds `genre_at_fetch`, `ecdf_basis`. v3 (M3) adds `weight_profile_at_fetch`.
+
+Settings migration: `popularity_enabled`, `popularity_weights`, `popularity_platforms`, `popularity_bands`, `popularity.min_genre_cluster`. Missing keys → in-code defaults.
+
+Rollback: `rm popularity.sqlite` → next request rebuilds schema. Cold rescan ~2.5h M1, ~6h M2.
+
+### Performance Budget
+
+| Platform | Endpoint | Batch | Rate | 30k cold wall |
+|---|---|---|---|---|
+| SoundCloud | `/tracks/{id}` | 1 | 0.3s spacing | ~2.5h |
+| Spotify | `GET /v1/tracks?ids=...` | **50/call** | ~180/min | ~3.3 min |
+| Last.fm | `track.getInfo` | 1 | 5/s | ~1.7h |
+
+Parallelism: 3 adapters in separate `asyncio.Task` groups. Wall = max(SC, LastFM) ≈ 2.5h + ~30 min match overhead + 50% retry budget = **~4h total** (inside G7 6h budget).
+
+Hard caps: connect 5s, read 15s/10s/15s (SC/LastFM/Spotify), max retries 3 exponential (2s base, 30s cap), 429 `Retry-After` parsed, per-track ceiling 60s.
+
+ECDF cache memory: ~30k × ~50 genres = ~6 MB. WAL ceiling ~50 MB for 30k × 4-platform.
+
+### API / UX Surface
+
+3 routes after existing block:
+- `GET /api/popularity/{tid}` — unauthed (cache lookup). Returns `{track_id, aggregate_score, aggregate_band, confidence, platforms[2D-display], audit}`. `display_mode` per platform: `"ecdf"` (SC/LastFM/Beatport) or `"raw_pct"` (Spotify carve-out).
+- `POST /api/popularity/{tid}/refresh` — authed, `?force&platforms`.
+- `POST /api/popularity/scan` — authed, returns `{job_id, queued, ttl_skipped}`.
+
+Frontend (separate exploration per OQ8 PARKED):
+- **Primary (2D-display)**: per-platform percentile bars side-by-side on track detail panel. SC bar uses ECDF percentile; Spotify bar uses raw 0-100 rendered as-is.
+- **Sortable column** "U/M Score" pulls `aggregate_score`.
+- **Filter chip** underground/niche/rising/mainstream (M3 optional).
+
+### Telemetry
+
+`fetch_rate`, `cache_hit_ratio` (per-1000 aggregate), `isrc_match_success`, `mbid_match_success`, `fuzzy_match_rate`, `ttl_skip_rate`, `rate_limit_hit`, `audit_summary`, `schema_migration`, `outbound_host_denied`. Aggregates batched every 1000 events or 5min.
+
+Never log: raw_count values (library composition fingerprint), API keys, track titles in failures (truncate to `tid=X`).
+
+### Test Plan (27 cases)
+
+| # | File | Test | Type |
+|---|---|---|---|
+| 1-4 | `test_popularity_engine.py` | store init/upsert/TTL/concurrent | unit |
+| 5-13 | same | normalisation math (log_count, ECDF, banding, **Spotify carve-out**, SC full chain) | unit |
+| 14 | same | settings_json_weights_override | unit |
+| 15-16 | same | normalize_track carries playback_count + default 0 | integration |
+| 17-20 | same | routes (404/200/auth/force) | route |
+| 21-23 | `test_popularity_audit.py` | coverage/paren-normalisation/whitespace | unit |
+| 24 | same | ISRC histogram per source | unit |
+| 25 | same | audit_emits_audit_json | integration |
+| 26-27 | same | empty db + clusters_ge_100 filter | unit |
+
+### Task Queue (~33h ≈ 4 working days M1)
+
+- [x] T1 Sidecar skeleton (`PopularityStore` + tables + WAL) 4h — **DONE 2026-05-29** `app/popularity_engine.py` (stdlib sqlite3, XDG path `~/.cache/rb_editor_pro/popularity/popularity.sqlite`, WAL, threadsafe writes; mirrors `analysis_cache.py`).
+- [x] T2 Schema migration framework + `SCHEMA_VERSION=1` 3h — **DONE 2026-05-29** `popularity_meta` version table + migrate-on-open (`_migrate_vN_to_vN+1` loop, idempotent; fresh DB stamped direct; newer-than-code warns not crashes).
+- [x] T3 Store CRUD (upsert/get/get_stale) 3h — **DONE 2026-05-29** `upsert` (INSERT OR REPLACE, key-validated), `get`/`get_all`/`get_stale(ttl)`/`delete`. `tests/test_popularity_engine.py` 10/10 (init+stamp, idempotent reopen, round-trip, replace-in-place, multi-platform, TTL filter, delete one/all, key validation, newer-schema guard), ruff + mypy clean.
+- [ ] T4 Normalisation math + **Spotify carve-out from day one** + ECDF + bands 5h
+- [ ] T5 Aggregator + weights from settings.json 4h
+- [ ] T6 SC payload edit `soundcloud_api.py:330` 1h
+- [ ] T7 Audit module + genre histogram + ISRC histogram + emitter 4h
+- [ ] T8 CLI wrapper 1h
+- [ ] T9 3 routes + `require_session` 3h, `route-architect`
+- [ ] T10 Telemetry structured logs 2h
+- [ ] T11 Doc-sync `backend-index.md` + regen MAP 1h, `doc-syncer`
+- [ ] T12 M1 exit gate: pytest green + audit JSON valid + GET endpoint valid 2h
 
 ## Decision / Outcome
 

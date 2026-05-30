@@ -7,6 +7,7 @@
     "dev": "npm run dev --prefix frontend",
     "cleanup": "powershell -Command \"try { Get-NetTCPConnection -LocalPort 8000,5173 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } } catch {}; exit 0\"",
     "dev:full": "npm run cleanup && concurrently \"npm run dev --prefix frontend\" \"python -m app.main\"",
+    "dashboard": "python scripts/pipeline_dashboard.py",
     "build": "npm run build --prefix frontend",
     "tauri": "tauri",
     "audit": "npm audit --audit-level=high && npm audit signatures",
@@ -21,7 +22,7 @@
   "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
-    "@tauri-apps/cli": "2.11.1",
+    "@tauri-apps/cli": "2.11.2",
     "concurrently": "9.2.1"
   },
   "dependencies": {

@@ -131,6 +131,7 @@ Marker convention in the route tables below:
 | GET | `/api/soundcloud/playlists` | Fetch SC playlists for authenticated user |
 | GET | `/api/soundcloud/me` | Get authenticated SC user profile |
 | POST | `/api/soundcloud/auth-token` `[AUTH]` `[RL]` | Store SC OAuth token (called after Tauri OAuth flow). Rate-limited: 5 req/min steady, burst 10, `key_mode="both"`. |
+| GET | `/api/soundcloud/auth-status` | Local keyring probe — returns `{authenticated: bool}` without any network round-trip. UI uses this on mount instead of `/me` to avoid the 100-500 ms SC round-trip and the `sc:auth-expired` interceptor noise. |
 | GET | `/api/soundcloud/settings` | Get SC-specific settings (target folder, etc.) |
 | PUT | `/api/soundcloud/settings` `[AUTH]` | Update SC settings |
 | POST | `/api/soundcloud/preview-matches` `[AUTH]` | Preview library matches for SC playlist tracks (dry run) |

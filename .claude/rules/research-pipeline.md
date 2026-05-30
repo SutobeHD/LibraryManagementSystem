@@ -4,13 +4,30 @@
 
 ## Workflow
 
-1. Check `docs/research/_INDEX.md` (or run `/pipeline`) — in-flight doc for this area? Read end-to-end before suggesting anything.
+1. Check `docs/research/_INDEX.md` (or run `/pipeline`) — in-flight doc for this area? Read end-to-end before suggesting anything. Also check the `Idea Backlog` GitHub Issue — `research-spawn` may have already proposed something.
 2. No existing doc → `/research-new <slug>` scaffolds `docs/research/research/idea_<slug>.md` from `_TEMPLATE.md`. User fills `## Original Idea` (1–3 sentences) — the only manual writing the pipeline needs.
 3. State chain (each `git mv` = + `## Lifecycle` line + `_INDEX.md` update):
    `idea_` → `drafting_` → `ideagate_`⛔A → `exploring_` → `midgate_`⛔B → `evaluated_` → `draftplan_` → `review_` → `plangate_`⛔C → `accepted_` → `inprogress_` → `archived/implemented_`
 4. **Skip pipeline for:** one-off bug fixes, single-file refactors, plain questions, doc edits.
 
-Full stage/prefix cheat-sheet + routines + branch flow: `docs/research/README.md`.
+Full stage/prefix cheat-sheet + 8 routines + branch flow: `docs/research/README.md`.
+
+## The 8 routines — quick map
+
+5 daily work-state routines move docs forward; 3 cross-cutting routines maintain pipeline health.
+
+| Routine | Schedule (Berlin) | Trigger | Touches |
+|---|---|---|---|
+| `research-draft` | daily 05:00 | `drafting_*.md` exists | docs → `main` |
+| `research-explore` | daily 06:00 + 14:00 | `exploring_*.md` exists | docs → `main` |
+| `research-plan` | daily 13:00 | `evaluated_*.md` or `rework_*.md` | docs → `main` |
+| `research-implement` | daily 03:00 + 15:00 | `accepted_*.md` or `inprogress_*.md` | code on `routine/*` branches + PRs |
+| `research-triage` | daily 07:30 | always | `Pipeline Digest` GitHub Issue |
+| `research-spawn` | Sundays 04:00 | TODO/FIXME, CHANGELOG, GH issues, etc. | `Idea Backlog` GitHub Issue |
+| `research-watchdog` | 1st of month 04:00 | archived/implemented_ unchecked 30+ days | `## Lifecycle` line + `Idea Backlog` follow-ups |
+| `research-cross-linker` | Tuesdays 04:30 | active docs with footprint overlap | `related:` frontmatter + `## Cross-links` block |
+
+Every work routine spawns specialist sub-agents (Scout / Prior-Art / Risk-Surface; Codebase + Web + Synthesis per OQ; Threat-Modeller / Migration / Perf-Budget / Test-Plan; Approach-Probe + multi-reviewer). Full per-routine agent chain: `docs/research/README.md` "Multi-agent mechanics".
 
 ## The 4 gates — user sign-off points
 
@@ -42,7 +59,7 @@ The old "routines are docs-only" rule is relaxed. `research-implement` may write
 Research docs are **persistent files**, not user output. Apply Caveman+ per `working-style.md`:
 
 - Bullets > prose. Fragments OK. Drop articles/filler/hedges.
-- Respect per-section word caps in `_TEMPLATE.md` (Problem ≤60 words, Findings entries ≤80 words, Recommendation ≤80 words).
+- Respect per-section **soft** word caps in `_TEMPLATE.md` (Problem ≤60, Findings ≤150, Threat Model ≤300, etc. — recommendations, exceedable when topic complexity demands).
 - No "we considered", "it appears that", "in order to", "it should be noted", "after investigation". Direct subject + verb + object.
 - No section meta-prose ("This section captures..."). The heading carries the meaning.
 
