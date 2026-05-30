@@ -126,7 +126,7 @@ audio_tags — write metadata back to the source audio file.
 
 Bearer-token authentication for the FastAPI sidecar.
 
-- `require_session()` — Authenticate one HTTP request against the boot-time session token.
+- `require_session()` — Authenticate one HTTP request against an accepted bearer token.
 
 ### `app/auth_db.py`
 
@@ -231,6 +231,16 @@ Setup logging
 - `  RekordboxDB.update_tracks_metadata()`
 - `  RekordboxDB.update_track_comment()`
 - `  RekordboxDB.update_track_path()` — Update the on-disk file path of a track after a rename operation.
+
+### `app/db_taste.py`
+
+db_taste — sidecar store for per-user taste vectors (recommender-taste-llm M1, T1).
+
+- `init_taste_db()` — Create the ``user_taste_vectors`` table if absent.
+- `upsert_taste_vector()` — Atomically write (or overwrite) one taste vector.
+- `get_taste_vector()` — Fetch one stored taste vector, or ``None`` if absent.
+- `list_taste_vectors()` — All stored vectors for a profile (e.g.
+- `delete_profile()` — Drop all vectors for a profile.
 
 ### `app/download_registry.py`
 
@@ -569,6 +579,14 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 
 metadata_fixer — detect + (later) fix malformed artist/title metadata.
 
+### `app/metadata_fixer/applier.py`
+
+metadata_fixer.applier — atomic apply + revert for the metadata fixer (T5).
+
+- `FixRequest` — One requested change: set ``content_id``'s ``field`` to ``after_value``.
+- `apply_fixes()` — Apply ``fixes`` in one journalled run.
+- `revert_run()` — Undo a run: restore each pre-image field value in reverse.
+
 ### `app/metadata_fixer/detector.py`
 
 Read-only detection of malformed artist/title metadata.
@@ -576,6 +594,31 @@ Read-only detection of malformed artist/title metadata.
 - `Match` — One detected malformation.
 - `Rule`
 - `scan()` — Run the catalogue over ``tracks``.
+
+### `app/metadata_fixer/schema.py`
+
+metadata_fixer.schema — sidecar undo-log DB for the metadata fixer (T4).
+
+- `init_db()` — Idempotent schema create.
+- `create_run()` — Open a new fix run; returns its ``run_id``.
+- `record_mutation()` — Journal one applied mutation with its full pre-image; bump the run count.
+- `set_run_status()` — Transition a run (completed / reverted / failed).
+- `mark_mutation_reverted()` — Flag one mutation reverted.
+- `get_run()` — Fetch one run, or ``None``.
+- `list_runs()` — All runs, newest first (the ``GET /runs`` surface).
+- `get_mutations()` — Mutations of a run; ``reverse=True`` orders newest-first for undo replay.
+
+### `app/pairing_store.py`
+
+pairing_store — in-memory one-shot pairing codes (Phase-2 auth, T2).
+
+- `ConsumeStatus` — Outcome of a :meth:`PairingCodeStore.consume` attempt.
+- `PairingCodeStore` — Process-wide TTL'd map of pairing-code to its one-shot state.
+- `  PairingCodeStore.mint()` — Create a fresh single-use code valid for ``ttl_s`` seconds.
+- `  PairingCodeStore.consume()` — Redeem ``code`` once; report why if it cannot be redeemed.
+- `  PairingCodeStore.clear()` — Test helper: drop all codes and reset the purge clock.
+- `mint_code()` — Mint a one-shot pairing code on the shared store.
+- `consume_code()` — Redeem a pairing code on the shared store.
 
 ### `app/phrase_generator.py`
 
@@ -1643,6 +1686,19 @@ Tests for `app/database.py`.
 - `  TestFilterTracks.test_unknown_scheme_preserved()` — Only the four explicit prefixes are filtered.
 - `  TestFilterTracks.test_unknown_input_type_passed_through()` — If the caller hands a non-dict / non-list we just return it.
 
+### `tests/test_db_taste.py`
+
+taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py).
+
+- `fresh_db()` — Point db_taste at a throwaway DB file.
+- `test_init_is_idempotent()`
+- `test_upsert_round_trip()`
+- `test_insert_or_replace_overwrites_in_place()`
+- `test_get_unknown_returns_none()`
+- `test_invalid_kind_rejected()`
+- `test_empty_profile_id_rejected()`
+- `test_list_and_delete_profile()`
+
 ### `tests/test_logging_redaction.py`
 
 Unit tests for `app.logging_utils.RedactingFormatter`.
@@ -1667,6 +1723,23 @@ Regression tests for ``POST /api/file/reveal`` sandbox.
 - `TestFileRevealSandboxAccepts`
 - `  TestFileRevealSandboxAccepts.test_valid_audio_calls_subprocess_with_platform_argv()`
 
+### `tests/test_metadata_fixer_applier.py`
+
+metadata-fixer apply/revert tests (T5 — app/metadata_fixer/applier.py).
+
+- `FakeDB` — Dict-backed stand-in for the RekordboxDB slice the applier uses.
+- `  FakeDB.get_track_details()`
+- `  FakeDB.update_tracks_metadata()`
+- `fresh_db()`
+- `lock_counter()` — Replace the db_lock with a counting no-op context manager.
+- `no_tag_write()` — Stub the audio tag write so tests never touch real files by default.
+- `test_apply_holds_db_write_lock()`
+- `test_apply_writes_db_and_journals()`
+- `test_apply_then_revert_restores_db_value()`
+- `test_apply_revert_file_sha1_round_trip()`
+- `test_write_tags_disabled_skips_tag_mirror()`
+- `test_apply_skips_failed_db_write()`
+
 ### `tests/test_metadata_fixer_detector.py`
 
 M0 detector tests — read-only malformation detection.
@@ -1681,6 +1754,19 @@ M0 detector tests — read-only malformation detection.
 - `test_detector_zero_writes_smoke()` — scan() must never mutate the input track dicts.
 - `test_class2_feat_is_suggestion_only_not_active()`
 - `test_scan_tolerates_missing_or_none_fields()`
+
+### `tests/test_metadata_fixer_schema.py`
+
+metadata-fixer undo-log schema tests (T4 — app/metadata_fixer/schema.py).
+
+- `fresh_db()` — Point the schema module at a throwaway DB and reset the thread-local conn.
+- `test_schema_create_tables_exist()`
+- `test_create_run_round_trip()`
+- `test_record_mutation_revert_row_shape()`
+- `test_get_mutations_reverse_order_for_undo()`
+- `test_mark_mutation_reverted_idempotent()`
+- `test_set_run_status_and_list_newest_first()`
+- `test_get_run_unknown_returns_none()`
 
 ### `tests/test_onelibrary_wal_flush.py`
 
@@ -1711,6 +1797,17 @@ Phase-2 paired-token store tests (T1 — app/auth_db.py).
 - `test_list_devices_newest_first()`
 - `test_two_devices_independent_validation()`
 
+### `tests/test_pairing_store.py`
+
+Phase-2 pairing-code store tests (T2 — app/pairing_store.py).
+
+- `test_mint_returns_distinct_codes()`
+- `test_consume_one_shot_then_replay_is_consumed()`
+- `test_unknown_code_is_unknown()`
+- `test_expired_code_is_expired()`
+- `test_purge_stale_drops_expired_entries()`
+- `test_clear_resets_store()`
+
 ### `tests/test_pdb_structure.py`
 
 PDB writer structural test against F: drive Pioneer reference.
@@ -1729,6 +1826,19 @@ Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter.
 - `test_concurrent_take()`
 - `test_ttl_purge()`
 - `test_auth_before_ratelimit()` — Unauth + over-limit MUST surface as 401, not 429.
+
+### `tests/test_require_session.py`
+
+Phase-2 require_session dual-acceptance tests (T3 — app/auth.py).
+
+- `paired()` — Throwaway auth.db + a known SESSION_TOKEN for require_session.
+- `test_extract_bearer_matrix()`
+- `test_session_token_authenticates()`
+- `test_paired_device_token_authenticates()`
+- `test_revoked_device_token_rejected()`
+- `test_unknown_token_rejected()`
+- `test_missing_header_rejected()`
+- `test_child_process_empty_session_token_still_accepts_device()`
 
 ### `tests/test_security_compare.py`
 

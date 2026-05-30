@@ -14,6 +14,7 @@ Load-bearing constraints, not style preferences. Violating them breaks the proje
 - `ALLOWED_AUDIO_ROOTS` sandboxes filesystem. Never bypass via `os.path.normpath` tricks. Use `Path.is_relative_to(resolved_root)` — canonical pattern in `app/main.py:validate_audio_path`.
 - All mutating endpoints (POST/PUT/PATCH/DELETE) behind `Depends(require_session)` (`app/auth.py`). Bearer token in `Authorization: Bearer <SESSION_TOKEN>`. Token born in sidecar at boot, printed as first stdout line `LMS_TOKEN=<value>`, captured + scrubbed by Tauri Rust supervisor, also persisted to `%APPDATA%/MusicLibraryManager/.session-token` for browser-dev fallback. Never log the token — not at INFO, not at DEBUG, not even redacted.
 - Bearer-in-header is the only authenticated transport; no `response.set_cookie(...)` carrying an auth secret. Future PRs introducing cookie-auth MUST be rejected; the CORS `allow_credentials=True` flag exists only for the SC sentinel cookie (write-only marker, no auth value), which is itself scheduled for deletion in Phase B of security-cors-allow-credentials-tightening.
+- **Paired device-tokens (Phase 2, `app/auth_db.py`) follow the same never-log rule as `SESSION_TOKEN`.** Plaintext device-token is returned to the phone exactly once at pairing and never persisted — `auth.db` stores only the `sha256` hash. Never log a device-token or a pairing-code at any level. `paired_token_valid` takes the candidate by value and never echoes it; the pairing-code store (`app/pairing_store.py`) keeps codes in-memory only.
 
 ## Stack boundaries
 

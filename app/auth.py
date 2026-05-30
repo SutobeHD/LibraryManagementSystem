@@ -36,6 +36,7 @@ from typing import Annotated
 from fastapi import Header, HTTPException
 from platformdirs import user_data_dir
 
+from app.auth_db import paired_token_valid
 from app.security_compare import safe_compare
 
 logger = logging.getLogger("APP_AUTH")
@@ -92,24 +93,48 @@ else:
     SESSION_TOKEN = ""
 
 
+def _extract_bearer(authorization: str | None) -> str | None:
+    """Parse an ``Authorization: Bearer <token>`` header.
+
+    Returns the bare token, or ``None`` when the header is missing, malformed,
+    not a Bearer scheme, or carries an empty credential. Kept separate from
+    :func:`require_session` so a future ``require_session_ws`` (WebSocket auth)
+    reuses the exact same parsing.
+    """
+    if not authorization:
+        return None
+    parts = authorization.split(None, 1)
+    if len(parts) != 2:
+        return None
+    scheme, raw_credentials = parts
+    if scheme.lower() != "bearer":
+        return None
+    candidate = raw_credentials.strip()
+    return candidate or None
+
+
 def require_session(
     authorization: Annotated[str | None, Header()] = None,
 ) -> None:
-    """Authenticate one HTTP request against the boot-time session token."""
-    if not authorization:
+    """Authenticate one HTTP request against an accepted bearer token.
+
+    Dual-acceptance (Phase 2): a request authenticates if its bearer token is
+    EITHER the boot-time ``SESSION_TOKEN`` (constant-time compare) OR a
+    non-revoked paired device token (``auth_db``). The device-token branch is a
+    no-op until a device is paired, and degrades to a clean 401 if ``auth.db``
+    is absent.
+    """
+    candidate = _extract_bearer(authorization)
+    if candidate is None:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    parts = authorization.split(None, 1)
-    if len(parts) != 2:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+    # Branch 1 — boot-time session token. Guarded so the empty child-process
+    # SESSION_TOKEN ("" in non-MainProcess workers) never spuriously matches.
+    if SESSION_TOKEN and safe_compare(candidate, SESSION_TOKEN):
+        return
 
-    scheme, raw_credentials = parts
-    if scheme.lower() != "bearer":
-        raise HTTPException(status_code=401, detail="Unauthorized")
+    # Branch 2 — long-lived per-device paired token.
+    if paired_token_valid(candidate):
+        return
 
-    candidate = raw_credentials.strip()
-    if not candidate:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    if not safe_compare(candidate, SESSION_TOKEN):
-        raise HTTPException(status_code=401, detail="Unauthorized")
+    raise HTTPException(status_code=401, detail="Unauthorized")

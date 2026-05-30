@@ -63,12 +63,12 @@ _(none)_
 - [accepted_library-quality-upgrade-finder.md](implement/accepted_library-quality-upgrade-finder.md) — Quality auditor (detection-only); Phase-3 swap delegated; GATE C PASSED 2026-05-29 (2026-05-29)
 - [accepted_recommender-rules-baseline.md](implement/accepted_recommender-rules-baseline.md) — Teil 1 ranking baseline; defaults T-10 confirmed (M1 backend / key_first / relative=0.7); GATE C PASSED 2026-05-29 (2026-05-29)
 - [accepted_recommender-similar-tracks.md](implement/accepted_recommender-similar-tracks.md) — LOCAL-ONLY similar-tracks; 4 named slice BLOBs; GATE C PASSED 2026-05-29 (2026-05-29)
-- [accepted_recommender-taste-llm-audio.md](implement/accepted_recommender-taste-llm-audio.md) — Taste-aware recommender (Teil 2); M1 Option-A centroid / M2 embedding-benchmark / M3 LLM-explain; GATE C PASSED 2026-05-29 (agent-delegated); M1 blocked on sister vector + Teil-1 plays (2026-05-29)
+- [inprogress_recommender-taste-llm-audio.md](implement/inprogress_recommender-taste-llm-audio.md) — Taste-aware recommender (Teil 2); M1 Option-A centroid / M2 embedding-benchmark / M3 LLM-explain; **T1 `app/db_taste.py` SHIPPED** (sidecar taste-vector store, 7 tests green); T2+ blocked on sister vector + Teil-1 plays (2026-05-29)
 - [accepted_download-format-setting.md](implement/accepted_download-format-setting.md) — AIFF default + 6-target dropdown (Option A); full plan + Threat Model; GATE C PASSED 2026-05-29 (agent-delegated); load-bearing task = -map_metadata 0 + mutagen art-overlay fix (2026-05-29)
 
 ### inprogress
-- [inprogress_metadata-name-fixer.md](implement/inprogress_metadata-name-fixer.md) — Artist/title normaliser; **T1 M0 detector SHIPPED** (`app/metadata_fixer/detector.py`, 12 tests green, ruff clean); T2–T10 `[ ]` for `research-implement` routine (2026-05-29)
-- [inprogress_security-mobile-paired-tokens-phase2.md](implement/inprogress_security-mobile-paired-tokens-phase2.md) — Per-device QR pairing (Option A); **T1 `app/auth_db.py` SHIPPED** (hashed-at-rest, throttled last_seen, 10 tests green); T2–T7 `[ ]` for `research-implement` routine (2026-05-29)
+- [inprogress_metadata-name-fixer.md](implement/inprogress_metadata-name-fixer.md) — Artist/title normaliser; **T1 detector + T4 schema + T5 apply/revert engine SHIPPED** (`app/metadata_fixer/{detector,schema,applier}.py`, 25 tests green); T2/T3/T6–T10 `[ ]` for `research-implement` routine (2026-05-29)
+- [inprogress_security-mobile-paired-tokens-phase2.md](implement/inprogress_security-mobile-paired-tokens-phase2.md) — Per-device QR pairing (Option A); **T1–T3 SHIPPED** (`auth_db` hashed store, `pairing_store` one-shot codes, `require_session` dual-acceptance; 31 tests green); T4–T7 (routes/Tauri/UI) `[ ]` for `research-implement` routine (2026-05-29)
 
 ### blocked
 _(none)_

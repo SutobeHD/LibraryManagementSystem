@@ -29,6 +29,7 @@
 | `app/batch_worker.py` | Setup logging |
 | `app/config.py` | *(no module docstring)* |
 | `app/database.py` | *(no module docstring)* |
+| `app/db_taste.py` | db_taste — sidecar store for per-user taste vectors (recommender-taste-llm M1, T1). |
 | `app/download_registry.py` | Download Registry — SQLite-based deduplication & analysis history log. |
 | `app/folder_watcher.py` | FolderWatcher — auto-import audio files from user-configured folders. |
 | `app/import_tracker.py` | Per-file import-progress tracker — gives the frontend a live transparent |
@@ -37,7 +38,10 @@
 | `app/logging_utils.py` | Log redaction helpers — scrub absolute paths from log lines + tracebacks. |
 | `app/main.py` | *(no module docstring)* |
 | `app/metadata_fixer/__init__.py` | metadata_fixer — detect + (later) fix malformed artist/title metadata. |
+| `app/metadata_fixer/applier.py` | metadata_fixer.applier — atomic apply + revert for the metadata fixer (T5). |
 | `app/metadata_fixer/detector.py` | Read-only detection of malformed artist/title metadata. |
+| `app/metadata_fixer/schema.py` | metadata_fixer.schema — sidecar undo-log DB for the metadata fixer (T4). |
+| `app/pairing_store.py` | pairing_store — in-memory one-shot pairing codes (Phase-2 auth, T2). |
 | `app/phrase_generator.py` | phrase_generator.py — Phrase & Auto-Cue Generator |
 | `app/playcount_sync.py` | playcount_sync.py — USB Play-Count Sync Engine |
 | `app/rate_limit.py` | In-process token-bucket rate limiter for the FastAPI sidecar. |
@@ -195,13 +199,18 @@
 | `tests/test_analysis.py` | Regression tests for the analysis pipeline. |
 | `tests/test_auth.py` | Tests for ``app/auth.py`` -- Bearer-token session authentication. |
 | `tests/test_database.py` | Tests for `app/database.py`. |
+| `tests/test_db_taste.py` | taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py). |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
 | `tests/test_main_security.py` | Regression tests for ``POST /api/file/reveal`` sandbox. |
+| `tests/test_metadata_fixer_applier.py` | metadata-fixer apply/revert tests (T5 — app/metadata_fixer/applier.py). |
 | `tests/test_metadata_fixer_detector.py` | M0 detector tests — read-only malformation detection. |
+| `tests/test_metadata_fixer_schema.py` | metadata-fixer undo-log schema tests (T4 — app/metadata_fixer/schema.py). |
 | `tests/test_onelibrary_wal_flush.py` | End-to-end regression test for OneLibraryUsbWriter — runs the FULL |
 | `tests/test_pairing.py` | Phase-2 paired-token store tests (T1 — app/auth_db.py). |
+| `tests/test_pairing_store.py` | Phase-2 pairing-code store tests (T2 — app/pairing_store.py). |
 | `tests/test_pdb_structure.py` | PDB writer structural test against F: drive Pioneer reference. |
 | `tests/test_rate_limit.py` | Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter. |
+| `tests/test_require_session.py` | Phase-2 require_session dual-acceptance tests (T3 — app/auth.py). |
 | `tests/test_security_compare.py` | Tests for ``app/security_compare.py::safe_compare``. |
 | `tests/test_security_hotfixes.py` | Regression tests for the 5 security hotfixes in commit e3a5ae8. |
 | `tests/test_services.py` | Tests for `app/services.py`. |

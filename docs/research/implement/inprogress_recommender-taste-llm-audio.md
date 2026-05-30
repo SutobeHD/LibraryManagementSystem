@@ -30,6 +30,7 @@ ai_tasks: false
 - 2026-05-29 — `implement/review_` — Plan-Reviewer 5/5 PASS; carry-forwards: HARD-DEPs (sister vector + Teil-1 plays) gate M1 start; M2 torch + M3 API-key UX need user decisions
 - 2026-05-29 — `implement/plangate_` — plan reviewed (Planner + Reviewer PASS), awaiting GATE C
 - 2026-05-29 — `implement/accepted_` — GATE C PASSED (user delegated gate authority to the agent for PASS-verified plans). M1 still blocked on HARD-DEPs (sister vector + Teil-1 plays); implement-tier needs branch-model direction.
+- 2026-05-29 — `implement/inprogress_` — promoted to start T1 (the one task NOT gated by the M1 HARD-DEPs — sidecar table create only). T1 (`app/db_taste.py`) shipped on `claude/research-continuation-7rm30` (7 tests green, ruff + mypy clean). T2+ remain blocked on sister vector + Teil-1 plays.
 
 ## Problem
 
@@ -462,7 +463,7 @@ Fix line-cites + spell M0 hedge (degraded 10-dim extractor) → ready for `midga
 ### Task Queue
 > Each = one `routine/recommender-taste-llm-audio-task-N` branch = one PR. Ordered; HARD-DEPs gate M1 start.
 
-- [ ] **T1 (M1, Step 1):** `app/db_taste.py` — `user_taste_vectors` table + `INSERT OR REPLACE` helper. No deps. Tests: schema + round-trip.
+- [x] **T1 (M1, Step 1):** `app/db_taste.py` — `user_taste_vectors` table + `INSERT OR REPLACE` helper. No deps. **DONE 2026-05-29** — stdlib `sqlite3` sidecar (mirrors `download_registry.py`), sibling table in `app_data/track_vectors.db`, no `_db_write_lock`. `vector_blob` opaque bytes (numpy serialisation deferred to T2). API: `init_taste_db`/`upsert_taste_vector` (kind-validated, atomic INSERT OR REPLACE)/`get_taste_vector`/`list_taste_vectors`/`delete_profile`. `tests/test_db_taste.py` 7/7 (idempotent init, round-trip, overwrite-in-place, kind/profile validation, list+delete-isolation), ruff + mypy clean. **Not blocked by M1 HARD-DEPs** — writes its own sibling table to the shared file; sister vector + Teil-1 plays gate the *consumers* (T2+).
 - [ ] **T2 (M1, Step 2):** `app/taste_profile.py` — `build_taste_vector` (centroid, cold-start fallback) + `refresh_taste_profile` (+ telemetry). Deps: T1. Tests: `test_taste_profile.py` (5 sigs).
 - [ ] **T3 (M1, Step 3):** `app/recommender_taste.py` — `find_taste_ranked` + `_score` + candidates. Deps: T1, T2. Tests: `test_recommender_taste.py` (9 sigs).
 - [ ] **T4 (M1, Step 4):** `app/soundcloud_api.py::get_related` (single `/related`). No deps. Tests: single-call mock.
