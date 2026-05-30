@@ -33,6 +33,7 @@ ai_tasks: false
 - 2026-05-29 — `implement/review_` — Reviewer PASS (all 15 checklist items ticked)
 - 2026-05-29 — `implement/plangate_` — awaiting GATE C
 - 2026-05-29 — `implement/accepted_` — GATE C PASSED by user; ready for `inprogress_` Task Queue execution
+- 2026-05-30 — `implement/inprogress_` — promoted; T-2 (`variant_schema.py`) + T-3 (`variant_detector.py`) shipped on `claude/research-continuation-7rm30` (15 tests green, ruff + mypy clean). Consumes the just-merged `external_track_match` API. Deferred: T-1 (owner ≥200-row corpus), T-4 (routes, route-architect), T-5 (at-import hook + CLI), T-6 frontend, M2/M3.
 
 ---
 
@@ -477,8 +478,8 @@ Never log: session token, AcoustID key, full fingerprint payloads at INFO (DEBUG
 ### Task Queue
 
 - [ ] T-1 Fixtures + `labelled_corpus.json` (200 tracks, stratified) + `conftest.py` loader (~250 LoC mostly data) — blocked by sister-doc reaching `accepted_`
-- [ ] T-2 `app/variant_schema.py` DDL + migration runner (~80 LoC)
-- [ ] T-3 `app/variant_detector.py` (`_variants_db_write_lock`, `_conn()`, `classify_track`, `upsert_variant`, `cluster_by_root`, canonical-picker) (~250 LoC) — blocked by T2 + sister-doc API
+- [x] T-2 `app/variant_schema.py` DDL + migration runner — **DONE 2026-05-30** track_variants (PK track_id,source,parent_track_id) + root/parent indices + variant_meta version; idempotent migrate(conn), newer-DB guard, additive v2/v3 hooks
+- [x] T-3 `app/variant_detector.py` — **DONE 2026-05-30** consumes etm.parse_version_tag/extract_title_stem (sister API now shipped); classify_track (untagged->original), pick_canonical (OQ2: original+0.3/earliest+0.2/shortest+0.1/pin-override/id-tiebreak), cluster_by_root (0.75 same-artist / 0.55 cross-artist), upsert/get_variants/get_cluster/scan; injectable db_path; _variants_db_write_lock RLock
 - [ ] T-4 FastAPI routes 4 endpoints in `app/main.py` after L4448 (~150 LoC) — `route-architect`
 - [ ] T-5 At-import hook in `analysis_engine.py` + CLI `scripts/scan_variants.py` (~80 LoC)
 - [ ] T-6 Tests T-VD-01 through T-VD-09 + T-VD-16/17 (~400 LoC)

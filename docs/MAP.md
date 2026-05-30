@@ -62,6 +62,8 @@
 | `app/usb_mysettings.py` | USB MYSETTING / DJMMYSETTING file read/write + schema for frontend. |
 | `app/usb_one_library.py` | USB OneLibrary writer — uses rbox.OneLibrary to build PIONEER/rekordbox/exportLibrary.db |
 | `app/usb_pdb.py` | USB export.pdb writer — legacy CDJ DeviceLibrary format. |
+| `app/variant_detector.py` | variant_detector — title-only variant classifier + clusterer (M1). |
+| `app/variant_schema.py` | variant_schema — DDL + idempotent migration runner for the variants sidecar. |
 | `app/xml_generator.py` | *(no module docstring)* |
 
 ## frontend/src/ — React Frontend
@@ -223,6 +225,7 @@
 | `tests/test_soundcloud_auth_status.py` | Tests for GET /api/soundcloud/auth-status. |
 | `tests/test_soundcloud_downloader_security.py` | Security regression tests for app/soundcloud_downloader. |
 | `tests/test_usb_manager.py` | Tests for `app/usb_manager.py`. |
+| `tests/test_variant_detector.py` | variant_schema + variant_detector tests (analysis-remix-detector T-2, T-3). |
 
 ## scripts/ — Dev/Build Utilities
 
