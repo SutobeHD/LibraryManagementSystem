@@ -33,6 +33,7 @@ ai_tasks: false  # set true to opt-in AI routines — see ## AI Tasks below
 - 2026-05-29 — `implement/review_` — Reviewer PASS (all 15 checklist items ticked)
 - 2026-05-29 — `implement/plangate_` — awaiting GATE C
 - 2026-05-29 — `implement/accepted_` — GATE C PASSED by user; ready for `inprogress_` Task Queue execution
+- 2026-05-29 — `implement/inprogress_` — promoted to execute the store-layer tasks. T1+T2+T3 (`app/popularity_engine.py` — skeleton + schema-version/migrate framework + CRUD) shipped on `claude/research-continuation-7rm30` (10 tests green, ruff + mypy clean). T4+ (ECDF/aggregator/SC-payload/routes — pull `app.database`/`app.main`) remain `[ ]` for `research-implement` routine.
 
 ## AI Tasks
 
@@ -740,9 +741,9 @@ Never log: raw_count values (library composition fingerprint), API keys, track t
 
 ### Task Queue (~33h ≈ 4 working days M1)
 
-- [ ] T1 Sidecar skeleton (`PopularityStore` + tables + WAL) 4h
-- [ ] T2 Schema migration framework + `SCHEMA_VERSION=1` 3h
-- [ ] T3 Store CRUD (upsert/get/get_stale) 3h
+- [x] T1 Sidecar skeleton (`PopularityStore` + tables + WAL) 4h — **DONE 2026-05-29** `app/popularity_engine.py` (stdlib sqlite3, XDG path `~/.cache/rb_editor_pro/popularity/popularity.sqlite`, WAL, threadsafe writes; mirrors `analysis_cache.py`).
+- [x] T2 Schema migration framework + `SCHEMA_VERSION=1` 3h — **DONE 2026-05-29** `popularity_meta` version table + migrate-on-open (`_migrate_vN_to_vN+1` loop, idempotent; fresh DB stamped direct; newer-than-code warns not crashes).
+- [x] T3 Store CRUD (upsert/get/get_stale) 3h — **DONE 2026-05-29** `upsert` (INSERT OR REPLACE, key-validated), `get`/`get_all`/`get_stale(ttl)`/`delete`. `tests/test_popularity_engine.py` 10/10 (init+stamp, idempotent reopen, round-trip, replace-in-place, multi-platform, TTL filter, delete one/all, key validation, newer-schema guard), ruff + mypy clean.
 - [ ] T4 Normalisation math + **Spotify carve-out from day one** + ECDF + bands 5h
 - [ ] T5 Aggregator + weights from settings.json 4h
 - [ ] T6 SC payload edit `soundcloud_api.py:330` 1h
