@@ -108,7 +108,6 @@
 | `frontend/src/components/daw/DjEditDaw.jsx` | DjEditDaw — Root container for the DJ Edit DAW. |
 | `frontend/src/components/daw/ExportModal.jsx` | ExportModal — Project Export UI Features: - Reads the user's default export folder from /api/settings (Settin… |
 | `frontend/src/components/daw/WaveformOverview.jsx` | WaveformOverview — Full-track mini-map with draggable viewport window Renders a downsampled mono/3-band wavef… |
-| `frontend/src/components/DesignView.jsx` | *(no module docstring)* |
 | `frontend/src/components/DownloadManagerView.jsx` | Stage pipeline (in execution order) — covers BOTH SC-DL and local-import |
 | `frontend/src/components/DuplicateView.jsx` | DuplicateView — Acoustic Duplicate Finder & Merge UI Left panel: list of duplicate groups with similarity bad… |
 | `frontend/src/components/editor/EditorBrowser.jsx` | Ensure we have an array |
@@ -123,7 +122,7 @@
 | `frontend/src/components/InsightsView.jsx` | InsightsView — DJ-Style Analytics Dashboard Datenbasierte Einblicke in den eigenen DJ-Stil und die Library: •… |
 | `frontend/src/components/LibraryView.jsx` | *(no module docstring)* |
 | `frontend/src/components/MatchInspectorModal.jsx` | *(no module docstring)* |
-| `frontend/src/components/MetadataView.jsx` | Default to 'playlists' — removed separate 'tracks' tab since Collection is now inside PlaylistBrowser |
+| `frontend/src/components/MetadataView.jsx` | MetadataView — library browser. |
 | `frontend/src/components/PhraseGeneratorView.jsx` | PhraseGeneratorView — Phrase & Auto-Cue Generator Generates hot cue points at every N-bar phrase boundary for… |
 | `frontend/src/components/Player.jsx` | Three staggered equalizer bars — shown next to the title while playing. |
 | `frontend/src/components/PlaylistBrowser.jsx` | *(no module docstring)* |

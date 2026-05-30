@@ -1156,10 +1156,6 @@ ExportModal — Project Export UI Features: - Reads the user's default export fo
 
 WaveformOverview — Full-track mini-map with draggable viewport window Renders a downsampled mono/3-band waveform of the entire track via Wa…
 
-### `frontend/src/components/DesignView.jsx`
-
-*(no module docstring)*
-
 ### `frontend/src/components/DownloadManagerView.jsx`
 
 Stage pipeline (in execution order) — covers BOTH SC-DL and local-import
@@ -1218,7 +1214,7 @@ InsightsView — DJ-Style Analytics Dashboard Datenbasierte Einblicke in den eig
 
 ### `frontend/src/components/MetadataView.jsx`
 
-Default to 'playlists' — removed separate 'tracks' tab since Collection is now inside PlaylistBrowser
+MetadataView — library browser.
 
 ### `frontend/src/components/PhraseGeneratorView.jsx`
 

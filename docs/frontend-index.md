@@ -9,7 +9,7 @@
 
 | File | Purpose |
 |------|---------|
-| `main.jsx` | App root — single unified top bar (Blender-style workspace tabs + active-workspace view tabs + library status + Settings/Exit), mode picker (Live/XML/standalone/import/defined-path), error boundary, lazy-loaded tab router (Suspense), heartbeat + library-status polling, session-token injection. |
+| `main.jsx` | App root — single unified top bar (brand + workspace tabs + library status + Settings/Exit). Workspaces: Library · Audio Import · Ranking · Editor · Sync · Utilities. Per-workspace views render in an in-content `WorkspaceNav` strip (shown when a workspace has >1 view); the Library workspace's strip carries the metadata modes (Playlists/Artists/Labels/Albums) as `lib-<mode>` tabs. Mode picker, error boundary, lazy-loaded tab router (Suspense), heartbeat + library-status polling, session-token injection. |
 | `utils/log.js` | Dev-only logger; `log.debug` / `log.info` no-op in production via Vite's `import.meta.env.DEV` guard. `log.warn` / `log.error` always pass through. |
 | `config/constants.js` | Frontend-wide tunables: `HEARTBEAT_INTERVAL_MS`, `LIBRARY_STATUS_INTERVAL_MS`, `RENDER_API_TIMEOUT_MS`, `BLOB_URL_REVOKE_DELAY_MS`, `TOAST_DURATION_LONG_MS`. |
 
@@ -58,7 +58,7 @@ All DAW state is managed in this directory. Do NOT duplicate in component-local 
 
 | File | Purpose | Key API calls |
 |------|---------|--------------|
-| `components/MetadataView.jsx` | Default library tab — playlist tree + track table, batch edit, rename, drag-reorder. Wraps `PlaylistBrowser` + `TrackTable`. Routes to: `library`. | `GET /api/library/tracks`, `POST /api/track/{tid}`, `PATCH /api/tracks/batch` |
+| `components/MetadataView.jsx` | Library browser — mode (`playlists`/`artists`/`labels`/`albums`) driven by the `mode` prop from the Library workspace nav (no own title/tab bar). Playlists → `PlaylistBrowser`; artists/labels/albums → item grid → `TrackTable`. Routes to: `lib-*`. | `GET /api/artists\|labels\|albums`, `GET /api/{type}/{id}/tracks`, `POST /api/metadata/merge` |
 | `components/RankingView.jsx` | Ranking-mode view: per-track hot-cue / tag / quality controls with embedded `WaveformEditor` in `simpleMode`. Routes to: `ranking`. | `GET /api/library/tracks` |
 | `components/InsightsView.jsx` | DJ-style analytics dashboard — BPM histogram, Camelot key wheel, genre breakdown, most-played tracks, library composition (energy/format/era). Routes to: `insights`. | `GET /api/insights/bpm_distribution` (+ others) |
 | `components/ImportView.jsx` | Audio import wizard — drag-drop or filesystem picker, scan + analyse, watcher integration. Routes to: `import`. | `POST /api/audio/import` |
@@ -72,7 +72,6 @@ All DAW state is managed in this directory. Do NOT duplicate in component-local 
 | `components/PhraseGeneratorView.jsx` | Phrase & Auto-Cue Generator — pick a track, choose 8/16/32-bar phrase length, preview hot-cue placements, commit to library. Lazy-loaded inside `UtilitiesView`. | `POST /api/phrase/generate`, `POST /api/phrase/commit` |
 | `components/DuplicateView.jsx` | Acoustic duplicate finder + merge UI — group list (similarity badge), per-track radio for master selection, "Auto" picks highest-bitrate, merge play-counts option. Lazy-loaded inside `UtilitiesView`. | `POST /api/duplicates/scan`, `GET /api/duplicates/results`, `POST /api/duplicates/merge` |
 | `components/SettingsView.jsx` | Tabbed preferences panel **container** — owns merged `settings` state and active-tab pointer; loads on mount (`GET /api/settings`) and saves on demand (`POST /api/settings`). Each tab body lives in `components/settings/*`. Routes to: `settings`. | `GET /api/settings`, `POST /api/settings` |
-| `components/DesignView.jsx` | UI mock-up gallery for upcoming features (stem separation, smart playlists, set planner, etc.). Routes to: `design`. | — |
 | `components/WaveformEditor.jsx` | Standalone WaveSurfer.js editor used by `RankingView` (`simpleMode`). Slim orchestrator that composes the hooks + sub-components under `components/waveform/`. Exposes ref API: `stop()`, `setTime(t)`, `getCurrentTime()`, `playPause()`; fires `onPlayPause(bool)` on play/pause/finish. |
 
 > Legacy reference: `components/LibraryView.jsx` and `components/ToolsView.jsx` still ship but are not lazy-mounted from `main.jsx` — they remain importable for reuse. `LibraryView` is a minimal Camelot-coloured `TrackTable` wrapper; `ToolsView` is the older batch-tools hub superseded by `UtilitiesView`.
