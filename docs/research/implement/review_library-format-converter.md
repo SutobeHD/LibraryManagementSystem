@@ -25,6 +25,7 @@ related: []
 - 2026-05-30 — `research/evaluated_` — wave 2 complete: 3 blockers closed (proof script committed `fdb461c`, AAC priming empirical A/B sample-identical, path-write via direct rbox `update_content`), 6 adversarial concerns addressed or carried-forward, citation MIXED (2 non-load-bearing FAILs ack'd), research-verifier PASS round 2, 3 options + recommendation written.
 - 2026-05-30 — `last_updated` bumped.
 - 2026-05-31 — `implement/draftplan_` — planning started (research-plan routine)
+- 2026-05-31 — `implement/review_` — plan filled (P + Threat + Migration + Perf + Test-Plan + Task-Queue: 9 threats, 33 tests, 15 tasks); Plan-Reviewer next
 
 ## Original Idea (verbatim — never edit)
 
@@ -577,7 +578,43 @@ Counters/timing: per-batch converted/failed/skipped, elapsed_s, MB written. Heal
 
 ## Test Plan
 
-_(Stage 3 Test-Plan-Agent — pending)_
+One row per test case. Layer ∈ py/js/integration/perf.
+
+| ID | Layer | Test file | Case | Covers |
+|---|---|---|---|---|
+| T1 | py | `tests/test_format_converter.py::test_engine_ports_row_mutation` | engine mutate folder_path/file_name/file_type/file_size → update_content, no delete+readd | Step 1, Migration |
+| T2 | py | `tests/test_format_converter.py::test_batch_acquires_db_write_lock_once` | engine grabs `_db_write_lock` once batch-scoped, in-process thread | Step 2 |
+| T3 | py | `tests/test_format_converter.py::test_aiff_codec_args` | AIFF cmd → pcm_s16le/s24le, -ar locked source SR, no resample | Step 3 |
+| T4 | py | `tests/test_format_converter.py::test_flac_wav_mp3_codec_args` | FLAC sample_fmt s16/s32, WAV pcm, MP3 libmp3lame -q:a | Step 3 |
+| T5 | py | `tests/test_format_converter.py::test_probe_bit_depth_sample_fmt` | ffprobe sample_fmt s16→16, s32/s24→24; bits_per_raw fallback | Step 4, OQ6 |
+| T6 | py | `tests/test_format_converter.py::test_disk_preflight_abort_15x` | est=src×ratio; free<1.5×→400 abort, <1.2×→warn flag | Step 5, OQ4 |
+| T7 | py | `tests/test_format_converter.py::test_per_track_timeout_600s` | subprocess timeout=600 wired, ffprobe stays 30s | Step 6, OQ3 |
+| T8 | py | `tests/test_format_converter.py::test_post_dry_run_returns_plan` | dry_run=true → sync plan (counts/size/preview), no writes | Step 7/8, API |
+| T9 | py | `tests/test_format_converter.py::test_post_launch_returns_task_id` | dry_run=false → register+spawn daemon thread, {task_id} | Step 7/8, API |
+| T10 | py | `tests/test_format_converter.py::test_status_endpoint_returns_tracker` | GET status → tracker dict (state/progress/manifest_id/beatgrid_preserved) | Step 8/9, API |
+| T11 | py | `tests/test_format_converter.py::test_sister_quality_verdict_reaches_engine` | sister request → engine trigger=quality_verdict, scope/target resolved | Step 11 |
+| T12 | py | `tests/test_format_converter.py::test_content_id_preserved_children_survive` | same content_id → beatgrid/cues/mytag FK rows intact post-swap | OQ5, Migration |
+| T13 | py | `tests/test_format_converter.py::test_path_scope_rejects_traversal` | scope.path `../`/symlink/abs → dir resolve+is_relative_to reject | FS-1 |
+| T14 | py | `tests/test_format_converter.py::test_dst_path_stays_in_sandbox` | dst derived from validated src dir, re-resolved; body dst ignored | FS-2 |
+| T15 | py | `tests/test_format_converter.py::test_routes_require_bearer` | 3 routes 401 without Bearer, safe_compare | A-1 |
+| T16 | py | `tests/test_format_converter.py::test_ffmpeg_arg_list_no_shell` | crafted filename → arg-list shell=False, no injection | CI-1 |
+| T17 | py | `tests/test_format_converter.py::test_huge_batch_disk_abort_before_write` | 5.5× expansion → 400 abort, zero files written | DOS-1 |
+| T18 | py | `tests/test_format_converter.py::test_rekordbox_running_returns_409` | `_is_rekordbox_running` true → 409, lock not bypassed | TI-1 |
+| T19 | py | `tests/test_format_converter.py::test_rollback_manifest_id_basename_only` | manifest_id with sep/`..` rejected; resolve under BACKUP_DIR | FS-3 |
+| T20 | py | `tests/test_format_converter.py::test_manifest_anchored_before_first_track` | manifest atomic+anchored pre-write; originals kept `.backup-ts` | T-1 |
+| T21 | py | `tests/test_format_converter.py::test_logs_omit_token_and_full_paths` | markers log filenames only, no token, safe_error_message | ID-1 |
+| T22 | py | `tests/test_format_converter.py::test_rollback_restores_db_wal_shm_and_files` | rollback restores DB+WAL+SHM, renames backups, deletes new | Step 9, Migration |
+| T23 | py | `tests/test_format_converter.py::test_xml_mode_returns_400` | mode≠live → 400 | Step 7, API |
+| T24 | integration | `tests/test_format_converter.py::test_phase1a_ab_2sample_falsifier` | synth 1kHz→AAC→each target, onset \|Δ\|≤2 samples else warn-reanalyze | Step 12, OQ1 |
+| T25 | integration | `tests/test_format_converter.py::test_phase1b_midrun_abort_chaos_drill` | 10-track, kill mid-run, rollback → DB+files restored, content_ids intact | Step 13 |
+| T26 | integration | `tests/test_format_converter.py::test_multisource_aac_matrix` | n≥3 AAC (iTunes/Bandcamp/SoundCloud) through falsifier, per-source warn | Step 14 |
+| T27 | perf | `tests/test_format_converter_perf.py::test_dry_run_latency_3041_tracks` | dry-run p95 ≤1.5s, DB-only no probe | Perf dry-run |
+| T28 | perf | `tests/test_format_converter_perf.py::test_launch_returns_under_50ms` | launch ≤50ms to task_id | Perf launch |
+| T29 | perf | `tests/test_format_converter_perf.py::test_status_latency_under_10ms` | status p95 ≤10ms in-mem lookup | Perf status |
+| T30 | perf | `tests/test_format_converter_perf.py::test_transcode_throughput_10x_realtime` | per-track ≥10× realtime | Perf throughput |
+| T31 | perf | `tests/test_format_converter_perf.py::test_peak_memory_under_150mb` | peak RSS ≤150MB over baseline, no whole-lib in RAM | Perf peak mem |
+| T32 | js | `frontend/src/views/FormatConverterView.test.js::test_renders_pickers_progress_rollback` | view renders scope/format picker, dry-run table, progress bar, rollback list | Step 15, API frontend |
+| T33 | js | `frontend/src/views/FormatConverterView.test.js::test_confirmmodal_gates_convert_and_rollback` | ConfirmModal gates convert+rollback, useToast errors, no alert/confirm | Step 15, API frontend |
 
 ## Task Queue
 
@@ -588,7 +625,23 @@ routine/<slug>-task-<N>. 1 task = 1 feature = 1 PR. Tick - [x] when the PR is me
 Each task maps back to a Step in ## Implementation Plan + has ≥1 row in ## Test Plan.
 -->
 
-_(Stage 3 Planner-Agent second pass — pending)_
+Ordered so earlier tasks unblock later (model → tracker → engine → routes → sister → falsifiers → perf → frontend). 1 task = 1 `routine/library-format-converter-task-N` branch = 1 PR.
+
+- [ ] **T-1 — Shared request model.** `FormatSwapReq` Pydantic v2 (`trigger`/`scope`/`target`/`dry_run`/`options`) in a standalone module importable by both this feature + sister `quality-upgrade-finder`. Validators: exactly-one-scope-key, target enum, options caps. — covers Step 7/10, tests T8, T23.
+- [ ] **T-2 — Task tracker.** `app/format_swap_tracker.py` — thread-safe singleton (`register/update/get`, `_MAX_KEEP` prune), modeled on `app/import_tracker.py`. — covers Step 8, test T10.
+- [ ] **T-3 — Engine probe + codec + disk preflight.** `app/format_converter.py` (part 1): `probe_bit_depth`/`probe_sample_rate` (ffprobe), per-target FFmpeg cmd builder (AIFF/FLAC/WAV/MP3, arg-list `shell=False`, `-ar` source-locked, 600s timeout), disk preflight (1.5× abort / 1.2× warn). — covers Steps 3/4/5/6, tests T3, T4, T5, T6, T7, T16.
+- [ ] **T-4 — Engine swap + snapshot + manifest.** `app/format_converter.py` (part 2): `FormatSwapEngine.run` — batch `_db_write_lock` acquire, watchdog (kill RB every 50 tracks), atomic manifest anchored pre-write, per-track row mutation `update_content` (content_id preserved, no delete+readd), per-track DB-fail individual rollback, tracker updates. — covers Steps 1/2, tests T1, T2, T12, T20.
+- [ ] **T-5 — Engine rollback.** `FormatSwapEngine.rollback(manifest_id)` — restore DB+WAL+SHM, rename `.backup-<ts>` audio back, delete new files, under `db_lock()`; `manifest_id` opaque-basename guard under `FORMAT_SWAP_BACKUP_DIR`. — covers Step 9, tests T19, T22.
+- [ ] **T-6 — POST /api/library/format-swap route.** `app/main.py`: `Depends(require_session)`, `validate_audio_path` per src+dst, dir-scope resolve+`is_relative_to`, `_is_rekordbox_running` 409, mode≠live 400; `dry_run=True` sync plan, `dry_run=False` spawn daemon thread + `{task_id}`. Never log token/full paths. — covers Step 7, tests T8, T9, T13, T14, T15, T17, T18, T21, T23.
+- [ ] **T-7 — GET status + POST rollback routes.** `app/main.py`: `GET .../status/{task_id}` (tracker lookup), `POST .../rollback` (`require_session`, basename-guard). — covers Steps 8/9, tests T10, T19, T22.
+- [ ] **T-8 — Sister bilateral wiring.** `/api/quality/swap/request` resolves `{track_id, candidate_id}` → calls engine in-process with `trigger="quality_verdict"`, imports shared `FormatSwapReq` (T-1). Sister doc signs at its draftplan_. — covers Steps 10/11, test T11.
+- [ ] **T-9 — Phase-1a beatgrid falsifier.** `tests/fixtures/` synth-tone AAC + RB-export-XML beatgrid-marker compare helper; assert onset |Δ| ≤ 2 samples per target, else `beatgrid_preserved=false`. — covers Step 12, test T24, OQ1.
+- [ ] **T-10 — Phase-1b chaos drill.** 10-track fixture, kill engine mid-run (or simulate `update_content` raise), run rollback from partial manifest, assert DB+files restored + content_ids intact. — covers Step 13, test T25.
+- [ ] **T-11 — Multi-source AAC matrix.** n≥3 AAC source fixtures (iTunes-Store iTunSMPB / Bandcamp HE-AAC / SoundCloud LC) through the Phase-1a falsifier; per-source warn-and-reanalyze flag. — covers Step 14, test T26.
+- [ ] **T-12 — Perf tests.** `tests/test_format_converter_perf.py` — dry-run p95, launch ≤50ms, status ≤10ms, throughput ≥10×, peak RSS ≤150MB. — covers Perf rows, tests T27–T31.
+- [ ] **T-13 — Frontend API helpers.** `frontend/src/api/api.js` — `formatSwap`, `formatSwapStatus`, `formatSwapRollback` (axios via shared `api`). — covers Step 15 (frontend transport).
+- [ ] **T-14 — Frontend view + nav.** `frontend/src/views/FormatConverterView.jsx` — scope/format pickers, dry-run preview table, progress poll, rollback list; ConfirmModal gates convert+rollback; `useToast`; no `alert/confirm/prompt`. Register in nav/router. — covers Step 15, tests T32, T33.
+- [ ] **T-15 — Docs graduation.** `docs/architecture.md` (new data flow), `FILE_MAP.md` + `backend-index.md` + `frontend-index.md` (new module/routes/view), `CHANGELOG.md`. — done at `implemented_`.
 
 ## Review
 

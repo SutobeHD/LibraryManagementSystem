@@ -32,10 +32,10 @@ _(none)_
 ## implement/
 
 ### draftplan
-- [draftplan_library-format-converter.md](implement/draftplan_library-format-converter.md) — Library-wide format converter (Option A: full shared engine); planning started — Planner + Threat/Migration/Perf + Test-Plan + Task-Queue + Reviewer + Mockup. 4 commit-blockers carried from evaluated_ (sister contract, Phase-1a tolerance, mid-run-abort drill, multi-source AAC matrix) (2026-05-31)
+_(none)_
 
 ### review
-_(none)_
+- [review_library-format-converter.md](implement/review_library-format-converter.md) — Library-wide format converter (Option A); plan filled — 14-step Impl Plan, 9-threat STRIDE model, in-place row-mutation migration + rollback recipe, perf budget (batch-lock starvation cost flagged), 33-row Test Plan, 15-task queue. Plan-Reviewer pending → approvalgate_ (2026-05-31)
 
 ### approvalgate ⛔ THE GATE
 _(none)_
