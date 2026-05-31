@@ -27,6 +27,7 @@ related: []
 - 2026-05-31 — `implement/draftplan_` — planning started (research-plan routine)
 - 2026-05-31 — `implement/review_` — plan filled (P + Threat + Migration + Perf + Test-Plan + Task-Queue: 9 threats, 33 tests, 15 tasks); Plan-Reviewer next
 - 2026-05-31 — `implement/approvalgate_` — Plan-Reviewer REWORK round 1 (step-numbering + 1 perf row) resolved inline → PASS; mockup + Approval Summary written; awaiting user `/approve` or `/reject`
+- 2026-05-31 — `implement/accepted_` — approved by user (batch approve alongside db-write-lock-retrofit)
 
 ## Original Idea (verbatim — never edit)
 

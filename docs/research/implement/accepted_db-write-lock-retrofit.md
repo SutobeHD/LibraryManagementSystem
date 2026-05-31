@@ -3,7 +3,7 @@ slug: db-write-lock-retrofit
 title: Close _db_write_lock coverage gaps on master.db write methods
 owner: tb
 created: 2026-05-19
-last_updated: 2026-05-19
+last_updated: 2026-05-31
 tags: [backend, concurrency, rbox, security, follow-up]
 related: [security-api-auth-hardening]
 ai_tasks: false
@@ -23,6 +23,7 @@ ai_tasks: false
 - 2026-05-31 — `implement/draftplan_` — planning started (research-plan routine)
 - 2026-05-31 — `implement/review_` — plan filled (Impl Plan + Threat + Migration N/A + Perf + API/UX none + Telemetry + 9-row Test Plan + 5-task queue; XMLDB excluded, import-cycle risk flagged); Plan-Reviewer next
 - 2026-05-31 — `implement/approvalgate_` — Plan-Reviewer PASS (all 14 boxes, 0 rework; verified AST scope complete + import-cycle/mytag/AnalysisDBWriter handling); mockup + Approval Summary ready; awaiting user `/approve` or `/reject`
+- 2026-05-31 — `implement/accepted_` — approved by user (batch approve alongside library-format-converter)
 
 ## AI Tasks
 

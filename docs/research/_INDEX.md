@@ -38,13 +38,14 @@ _(none)_
 _(none)_
 
 ### approvalgate ⛔ THE GATE
-- [approvalgate_library-format-converter.md](implement/approvalgate_library-format-converter.md) — Library-wide format converter (Option A: full shared engine). Plan complete: 14-step Impl Plan, 9-threat STRIDE model, in-place row-mutation migration + rollback recipe, perf budget (batch-lock starvation flagged), 33-row Test Plan, 15-task queue; Plan-Reviewer PASS (round-1 step-numbering rework resolved inline); mockup + Approval Summary ready. **Awaiting user `/approve` or `/reject`** (2026-05-31)
-- [approvalgate_db-write-lock-retrofit.md](implement/approvalgate_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps (Option B `@serialise_mutators` prefix decorator + AnalysisDBWriter callsite lock + prefix-independent AST write-sink drift guard). Plan complete: Threat (integrity/DoS-via-rbox-panic), Migration N/A (code-only), Perf negligible, no API/UI surface, 9-row Test Plan, 5-task queue; Plan-Reviewer PASS (14/14, 0 rework). **Awaiting user `/approve` or `/reject`** (2026-05-31)
+_(none)_
 
 ### rework
 _(none)_
 
 ### accepted
+- [accepted_library-format-converter.md](implement/accepted_library-format-converter.md) — Library-wide format converter (Option A: full shared engine). **Approved by user 2026-05-31.** 14-step plan, 9-threat model, in-place row-mutation migration + rollback, 33-row Test Plan, 15-task queue. Ready for `inprogress_` (`research-implement` builds Task Queue) (2026-05-31)
+- [accepted_db-write-lock-retrofit.md](implement/accepted_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps (Option B prefix decorator + AnalysisDBWriter callsite lock + AST write-sink drift guard). **Approved by user 2026-05-31.** 5-task queue, 9-row Test Plan. Ready for `inprogress_` (2026-05-31)
 - [accepted_downloader-unified-multi-source.md](implement/accepted_downloader-unified-multi-source.md) — Unified multi-source downloader: owner sign-off granted; integrated with parallel research (matching delegated to `external_track_match`, auth via `require_session`, `quality_engine` reuse). Ready for `inprogress_` (2026-05-21)
 - [inprogress_external-track-match-unified-module.md](implement/inprogress_external-track-match-unified-module.md) — **CRITICAL PATH**: sister-doc prereq for 3 other features (remix-detector, extended-remix-finder, quality-upgrade-finder). **Module T-3..T-9 SHIPPED** (`app/external_track_match.py` — parse_version_tag/extract_title_stem/fuzzy/fingerprint, 26 tests green); T-1/T-2 corpus + T-10 SC-delegate `[ ]` for routine/owner (2026-05-29)
 - [inprogress_analysis-remix-detector.md](implement/inprogress_analysis-remix-detector.md) — Variant detector M1/M2/M3; sidecar `variants.db`. **T-2 schema + T-3 detector SHIPPED** (classify/cluster/canonical-pick, consumes external_track_match, 15 tests green); T-1 corpus + T-4 routes + T-5 hook/CLI `[ ]` (2026-05-30)
