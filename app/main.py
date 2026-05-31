@@ -1913,17 +1913,6 @@ async def get_artwork(path: str):
     return FileResponse(file_path)
 
 
-@app.get("/api/library/tracks")
-def get_library_tracks():
-    logger.info("Fetching all library tracks...")
-    if not db.active_db:
-        logger.warning("No active DB found for library tracks.")
-        return []
-    tracks = db.active_db.get_all_tracks()
-    logger.info(f"Returning {len(tracks)} tracks from library.")
-    return tracks
-
-
 @app.get("/api/playlist/{pid}/tracks")
 def get_ptracks(pid: str):
     try:
