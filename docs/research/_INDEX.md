@@ -17,11 +17,12 @@ If this index drifts from the file system, the file system wins — re-derive wi
 _(none)_
 
 ### drafting
-- [drafting_soundcloud-persistent-login.md](research/drafting_soundcloud-persistent-login.md) — Persistent SoundCloud login: stop discarding refresh_token + expiry, silent server-side refresh, survive restart / no re-login per action (2026-05-31)
+_(none)_
 
 ### exploring
 - [exploring_db-write-lock-retrofit.md](research/exploring_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps; Option B (auto-wrap) committed; wave-2 verify → GAPS (3rd gap: `AnalysisDBWriter` rbox-direct write uncovered by class decorator; circular drift guard); stays exploring_ (2026-05-29)
 - [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); wave-2 GAPS narrowed (CORS para corrected, 3/3 stale main.py refs refreshed+PASS, Phase-2 prereq now past GATE A); remaining blocker = OQ14+OQ7 user sign-off only; stays exploring_ (2026-05-29)
+- [exploring_soundcloud-persistent-login.md](research/exploring_soundcloud-persistent-login.md) — Persistent SoundCloud login: refresh_token+expires_in discarded across Rust/Python/frontend → ~1h forced re-login; draft PASS, 8 OQs queued for explore (2026-05-31)
 
 ### evaluated
 - [evaluated_library-format-converter.md](research/evaluated_library-format-converter.md) — Library-wide format converter; wave 2 closed all 3 blockers (proof script `fdb461c`, AAC priming empirical A/B sample-identical, path-write via direct rbox `update_content`), 6 adversarial concerns addressed/carried-forward, citation MIXED non-load-bearing, V-PASS round 2, 3 options (A/B/C) + Recommendation = Option A (full engine, sister-doc unblocks) with 4 commit-blockers for draftplan_ (2026-05-30)

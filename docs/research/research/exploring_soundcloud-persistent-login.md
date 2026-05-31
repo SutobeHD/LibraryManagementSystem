@@ -22,6 +22,7 @@ superseded_by: []
 
 - 2026-05-31 — `research/idea_` — created from template
 - 2026-05-31 — `research/drafting_` — Original Idea filled; advanced for research-draft routine
+- 2026-05-31 — `research/exploring_` — drafted (scout + prior-art + risk-surface + worker + idea-verifier PASS), ready for explore
 
 ## Original Idea (verbatim — never edit)
 
@@ -33,67 +34,80 @@ After logging in to SoundCloud I have to log in again before almost every action
 
 ## Prior Art
 
-Stage 1 Prior-Art-Agent. Adjacent shipped / explored / abandoned work. ≤120 words. Link by slug (relative path).
-
-- **Shipped:** [implemented_<slug>_<date>](../archived/implemented_<slug>_<date>.md) — what it covers, what it doesn't
-- **Active research:** [<state>_<slug>](../research/<state>_<slug>.md) — overlap, conflict?
-- **Superseded / abandoned:** [<archived>](../archived/…) — why it didn't ship; lessons
-- **External precedent:** rekordbox/serato/traktor/library-manager behavior — cite source
-
-If no prior art: **"None — greenfield."**
+- **Shipped:** [implemented_security-api-auth-hardening_2026-05-17](../archived/implemented_security-api-auth-hardening_2026-05-17.md) — Bearer + `require_session` + keyring token-handoff pattern. Covers app session token (`LMS_TOKEN`); does NOT touch SC OAuth refresh/expiry.
+- **Shipped:** [implemented_security-cors-allow-credentials-tightening_2026-05-18](../archived/implemented_security-cors-allow-credentials-tightening_2026-05-18.md) — bearer-in-header only, no auth cookies. Constrains: SC refresh must not add cookie-auth.
+- **Active:** [inprogress_security-mobile-paired-tokens-phase2](../implement/inprogress_security-mobile-paired-tokens-phase2.md) — hashed-token `auth.db` + `last_seen_at` throttle. Reusable storage pattern if keyring rejected.
+- **Active:** [accepted_downloader-unified-multi-source](../implement/accepted_downloader-unified-multi-source.md) — downloads depend on SC auth; token expiry mid-download must not break flow.
+- **External precedent:** SoundCloud OAuth 2.1 (`secure.soundcloud.com`) issues `refresh_token` + `expires_in` (~1h) for auth-code grant; `grant_type=refresh_token` renews (RFC 6749 §6). Verify in explore.
+- Verdict: **greenfield** for SC token persistence/refresh — reuses existing auth infra, no overlap/duplication.
 
 ## Problem
 
-Stage 1 Worker. ≤60 words (soft). What / why / cost-of-not-doing.
+SC OAuth access token ~1h TTL. App persists only bare access token (`app/main.py:3509`); `refresh_token` + `expires_in` arrive from SC but get discarded in Rust (`soundcloud_client.rs:107-115,232`), in the frontend, and in the backend (`ScAuthTokenReq` = 1 field, `app/main.py:3474`). No renewal path. On expiry every SC action 401s → forced interactive browser re-login (`api.js:168`). Restart shows false "logged in" (existence-only `auth-status`, `app/main.py:3534`). Cost: constant re-login; long sync/download breaks mid-flight.
 
 ## Goals / Non-goals
 
 **Goals**
-- …
+- SC login survives app + sidecar restart — no re-login on next launch.
+- Token renews **silently server-side** — no browser popup until refresh genuinely fails.
+- One shared auth state across all SC features (browse, library sync, downloads).
+- Long-running download/sync survives token expiry mid-operation.
+- Explicit logout still wipes all SC credentials.
 
 **Non-goals**
-- …
+- First-time interactive OAuth login unchanged (Rust PKCE flow stays).
+- No multi-account / account switching.
+- No new OAuth scopes.
+- No cookie-based auth (forbidden, `coding-rules.md:16`).
+- App session-token (`LMS_TOKEN`) auth untouched.
 
 ## Constraints
 
-Stage 1 Worker + Risk-Surface-Agent. External facts bounding solution. Cite source per bullet.
-
-- **External APIs / rate limits:** …
-- **Data shape (`master.db`, ANLZ, USB PDB):** … (cite `file:line` invariant if applicable)
-- **Schicht-A pinning / library version:** … (cite `requirements.txt:N` or `Cargo.toml:N`)
-- **Perf / capacity:** … (latency budget, memory ceiling)
-- **Legal / compliance:** … (license, GDPR, region)
-- **Concurrency invariants:** `_db_write_lock`, `validate_audio_path`, `SafeAnlzParser` if relevant
+- **External API / rate limits:** SoundCloud OAuth `secure.soundcloud.com` — `AUTH_URL` `src-tauri/src/soundcloud_client.rs:89`, `TOKEN_URL` :90. Access token short-lived; renew via `grant_type=refresh_token`. Exact TTL + whether SC rotates/expires refresh tokens = OQ1/OQ2.
+- **Token never-log:** `.claude/rules/coding-rules.md:15` + `docs/SECURITY.md:167,169` — never log token at any level; `refresh_token` falls under the same rule.
+- **Bearer-only, no cookie auth:** `.claude/rules/coding-rules.md:16` — refresh path must not introduce `set_cookie`.
+- **Secrets:** `SOUNDCLOUD_CLIENT_ID/SECRET` in `.env` only (`.claude/rules/coding-rules.md:13`); refresh grant needs `client_secret` — already present in Python `.env` + Rust config.
+- **Keyring storage:** `KEYRING_SERVICE`/`KEYRING_SC_TOKEN` `app/main.py:76,78`; store at :3509, logout-delete at :3514. New `refresh_token` + `expires_at` need extra keys / blob.
+- **Schicht-A pinning:** `.claude/rules/coding-rules.md:7` — deps `==X.Y.Z`. `requests==2.33.1` (`requirements.txt:20`) + `keyring==25.7.0` (`requirements.txt:45`) already pinned + already used by SC code.
+- **No `requests` in async:** `.claude/rules/coding-rules.md:35`. Existing SC code is sync `requests` (`app/soundcloud_api.py:20`, `app/soundcloud_downloader.py:69`); refresh call must fit that context (sync helper / executor) → OQ3.
+- **Auth gating + rate-limit:** `/api/soundcloud/auth-token` behind `require_session` + `@rate_limit(steady=5,burst=10)` `app/main.py:3481-3482`; a new refresh route needs both.
+- **Concurrency invariants:** `_db_write_lock` / `validate_audio_path` / `SafeAnlzParser` — N/A (no `master.db` write, no filesystem path, no ANLZ).
 
 ## Dependencies
 
-Stage 1 Risk-Surface-Agent. New libs / external services / hardware required. Each row sized for a Schicht-A audit decision.
+Baseline: **None — uses existing stack only.** Refresh reuses pinned `keyring` (store) + `requests` (refresh-grant POST, matches existing SC code). `httpx` only if explore (OQ3) picks async-by-the-book refresh → then a new Schicht-A dep.
 
 | Dep | Kind | Version | License | Schicht-A audit needed? | Why |
 |---|---|---|---|---|---|
-| <name> | py / npm / cargo / system | X.Y.Z | MIT/BSD/… | yes/no | <one-line reason> |
-
-If none: **"None — uses existing stack only."**
+| keyring | py | 25.7.0 (`requirements.txt:45`) | MIT | no — already pinned/used | store `refresh_token` + `expires_at` |
+| requests | py | 2.33.1 (`requirements.txt:20`) | Apache-2.0 | no — already pinned/used | refresh-grant POST (matches `soundcloud_api.py`) |
+| httpx | py | absent/unpinned | BSD-3 | yes — only IF added | only if async refresh chosen (OQ3) |
 
 ## Open Questions
 
-Stage 1 Worker. Numbered. Each resolvable (yes/no or X vs Y), not philosophy. Each becomes a parallel research agent in Stage 2.
-
-1. …
+1. Does SoundCloud's PKCE auth-code flow return a usable `refresh_token` + `expires_in`, and does `grant_type=refresh_token` mint a fresh access token without re-prompting? (yes/no — SC docs + already-deserialized struct fields `soundcloud_client.rs:107-115`).
+2. Does SoundCloud rotate the `refresh_token` on each refresh (must re-store the new one), and do refresh tokens themselves expire? (rotate yes/no; refresh-TTL value).
+3. Where does the refresh grant run — Python (reuse sync `requests`, `client_secret` from `.env`) vs Rust (`soundcloud_client.rs`, secret already there)? Sync `requests` vs httpx-async per `coding-rules.md:35`? (Python vs Rust).
+4. Credential storage shape — keyring multi-key (`sc_refresh_token`, `sc_token_expiry`) vs single JSON blob under `sc_token` vs reuse `auth.db` (paired-tokens phase2)? (multikey vs blob vs auth.db).
+5. Refresh trigger — proactive (on launch / when `now > expires_at − buffer`) vs reactive (on 401, retry-once) vs both? (which strategy).
+6. Should `/api/soundcloud/auth-status` report real validity/refreshability instead of existence-only (`app/main.py:3534`)? (existence vs validity).
+7. Frontend rework — replace interactive `_refreshScToken` → `invoke('login_to_soundcloud')` (`api.js:168`) with a silent backend `POST /api/soundcloud/refresh`; scope the 401 interceptor to SC URLs only (does it currently fire on non-SC 401s? `api.js:227`); share auth state across the 3 views. (confirm approach).
+8. Logout ceremony — explicit logout must delete access + refresh + expiry (today only `sc_token` cleared, `app/main.py:3514`). (enumerate keys to clear).
 
 ## Research Plan
 
-Stage 1 Worker. ≤120 words (soft). Which aspects Stage 2 researches in parallel — one bullet per agent. Drives the autonomous explore stage; phrase each bullet so two parallel agents (codebase + web) could split it.
-
-- Agent 1 (codebase + web): …
-- Agent 2 (codebase + web): …
+- Agent 1 (web + codebase): SoundCloud OAuth token semantics — `refresh_token` issuance, `expires_in` value, refresh-token rotation + expiry, `grant_type=refresh_token` request/response shape (SC dev docs) cross-checked vs `soundcloud_client.rs:107-234`. Covers OQ1, OQ2.
+- Agent 2 (codebase + web): refresh ownership Rust-vs-Python — `client_secret` location, sync `requests` vs httpx-async constraint (`coding-rules.md:35`, `soundcloud_api.py:20`), how async routes invoke sync SC helpers. Covers OQ3, OQ7-async.
+- Agent 3 (codebase): credential storage shape — keyring multi-key vs JSON blob vs `auth.db` reuse (paired-tokens phase2); never-log compliance; logout clear-all set. Covers OQ4, OQ8.
+- Agent 4 (codebase): renewal trigger + `auth-status` validity + frontend interceptor/per-view rework (`api.js:227-249`, `SoundCloudView.jsx:15`, `SoundCloudSyncView.jsx:219`). Covers OQ5, OQ6, OQ7.
 
 ## Idea Verification
 
-Stage 1 Verifier. Dated entries, append-only. PASS / FAIL + ≤40-word reason (checked vs `## Original Idea` + `## Prior Art`).
-
-### YYYY-MM-DD — <PASS|FAIL>
-- …
+### 2026-05-31 — PASS
+- **Intent fidelity:** clean — all 3 wants (restart-persist, silent per-action renewal, logout-wipe) map to Goals; Non-goals fence scope-creep.
+- **Prior-art:** clean — 4 adjacent docs classified (overlap / constraint / reusable); greenfield verdict justified.
+- **Research-Plan:** clean — 8 OQs all decidable, each maps to ≥1 agent, no orphans either way.
+- Citations spot-checked (`main.py:3474/3509/3534`, `soundcloud_client.rs:107-115`, `api.js:168`, `requirements.txt:20/45`) — accurate.
 
 ---
 
