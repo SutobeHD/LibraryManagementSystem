@@ -19,6 +19,7 @@ ai_tasks: false
 - 2026-05-28 — `research/ideagate_` — Stage 1 verifier PASS, awaiting GATE A
 - 2026-05-29 — `research/exploring_` — GATE A PASSED by user; Option B (auto-wrap, prefix-matched) committed in Recommendation; advanced for Stage 2 wave-2 verifier
 - 2026-05-29 — `research/exploring_` — wave-2 verification: citation refresh (5 stale line-anchors fixed) + Adversarial + Research Verifier → **GAPS**. Found THIRD gap class: `AnalysisDBWriter` rbox-direct `master.db` write (`update_content`/`update_content_key`) uncovered by any class decorator; OQ5 drift guard circular. Stays `exploring_` for wave-2 round 2.
+- 2026-05-31 — `research/evaluated_` — wave-2 round-2: all 3 GAPS closed (AnalysisDBWriter → wrap-at-callsite in-scope; drift guard → prefix-independent AST write-sink detection + `KNOWN_CALLSITE_PROTECTED` manifest; Goal-1 metric re-stated). Research Verifier PASS round 2. Option B + callsite-lock recommendation stands.
 
 ## AI Tasks
 
@@ -46,7 +47,7 @@ The structural defect is the **list itself**: any future `RekordboxDB` mutator a
 ## Goals / Non-goals
 
 **Goals**
-- Every mutating method on **both** `RekordboxDB` and `LiveRekordboxDB` serialised. Metric: a test introspects mutators of both classes, asserts each carries `_serialised` (`func.__wrapped__` present) — count of unwrapped mutators = 0. Closes `ensure_standalone_master_db` (facade) + the 3 `LiveRekordboxDB` mytag writers reached via `_require_live_db()`.
+- Every `master.db` write path serialised under `_db_write_lock` — covering (i) mutating methods on `RekordboxDB` + `LiveRekordboxDB` (auto-wrapped by `@serialise_mutators`, Option B), and (ii) rbox-direct writers that bypass both facades (`AnalysisDBWriter._update_db`'s `update_content`/`update_content_key`), serialised by an explicit lock acquire at the callsite. Metric: a CI introspection test enumerates writers by **AST write-sink detection** (methods calling `<recv>.db.<rbox-write>`, `self._try_call`, or module-level `rbox.*.create`) across `database.py` + `live_database.py` + `analysis_db_writer.py` — NOT by name prefix — and asserts each flagged writer is either `__wrapped__` or listed in a small `KNOWN_CALLSITE_PROTECTED` manifest. Count of flagged-but-unprotected writers = 0. Cannot green-light an uncovered rbox-direct writer (AnalysisDBWriter), since detection is independent of the decorator's prefix allowlist.
 - Coverage cannot silently drift. Metric: adding a new mutating method to either class without protection fails CI (the introspection test above).
 - Zero behavior change for read paths. Metric: all `get_*`/`list_*` methods + property accessors stay unwrapped; existing `pytest tests/` green, no new failures.
 - Concurrent writers proven to serialise. Metric: N-thread (N=8) concurrent-write harness completes with 0 rbox panics + 0 sqlite `database is locked`; with the lock monkeypatched to a no-op the same harness fails (negative control).
@@ -128,6 +129,33 @@ Stage 1 Verifier. Dated entries, append-only.
 - **THIRD gap class — `AnalysisDBWriter` writes `master.db` OUTSIDE both facades.** `LiveRekordboxDB.get_analysis_writer()` (`live_database.py:1128`) returns `AnalysisDBWriter`. `AnalysisDBWriter._update_db` (`analysis_db_writer.py:223-264`, called from `analyze_and_save` at `:134`) writes `djmdContent` via `self.live_db.db.update_content(item)` (`:245`) + `self.live_db.db.update_content_key(...)` (`:255`) — direct `rbox.MasterDb` calls on the per-thread handle, **no `_db_write_lock`**. These are methods on the rbox handle, NOT on `RekordboxDB`/`LiveRekordboxDB`, so **no class-level wrapping (Option A/B/C) can ever cover them** — and `get_analysis_writer` is `get_`-prefixed, explicitly excluded by Option B's allowlist. Goal-1 metric ("unwrapped mutators = 0" by class introspection) reports green while this path stays unprotected = false pass. The DB write runs **in-process** (the `ProcessPoolExecutor` at `analysis_db_writer.py:64` parallelises analysis, not the write), so an RLock CAN serialise it — but only if the retrofit locks `analyze_and_save`/`_update_db` at the callsite, not via a decorator on the two DB classes.
 - Confidence: high (every claim re-Read this session at the cited line).
 
+### 2026-05-31 — wave-2 round-2: gap closures (3 verifier GAPS resolved)
+
+All cites re-Read this session. Gap-1/2/3 from `## Research Verification` 2026-05-29 closed below.
+
+**Gap 1 — AnalysisDBWriter scope: DECIDED → wrap at callsite (option a), NOT a new doc.**
+- `AnalysisDBWriter._update_db` (`analysis_db_writer.py:223-264`) writes `master.db` via `self.live_db.db.update_content(item)` (`:245`) + `self.live_db.db.update_content_key(...)` (`:255`) — calls on the per-thread `rbox.MasterDb` handle, not methods on `RekordboxDB`/`LiveRekordboxDB`. No class decorator (Option B) can reach them. `get_analysis_writer` (`live_database.py:1128`) is `get_`-prefixed → excluded from Option B allowlist.
+- **In-process confirmed (stronger than verifier stated).** `ProcessPoolExecutor` at `analysis_db_writer.py:64` (`_get_executor`) is **never called** — zero `.submit()`, `_get_executor` zero callers. Vestigial. `run_full_analysis` (`:119`) + `_update_db` (`:134` call) run synchronously in the same thread.
+- Both routes dispatch in-process: `analyze_track_full` → `loop.run_in_executor(None, writer.analyze_and_save, ...)` (`main.py:3086`, default ThreadPool); `analyze_batch` → plain `for ... in writer.analyze_batch(...)` (`main.py:3126`, event-loop thread). `threading.RLock` serialises both vs facade/live mutators on other request threads.
+- **Decision: wrap at callsite, in scope.** Acquire `_db_write_lock` around the write in `_update_db` (`:244-258`), or via `db_lock()` ctx-mgr (`database.py:25-40`, importable, 0 prior callsites — its intended use). RLock reentrancy safe if a wrapped live-mutator is called inside. NOT parked: same `master.db`, same race, higher write volume (per analysed track) than mytag routes — parking leaves the highest-volume writer unprotected + re-opens the false-green Goal-1 closes. ~2 LoC, one file.
+
+**Gap 2 — drift guard redesign: AST write-sink detection, prefix-set-independent.**
+- Root defect: old OQ5 test (a) shared the decorator's prefix allowlist → off-prefix writer passes BOTH. New guard detects *actual rbox write calls*, never consulting the prefix set.
+- **Design — `test_concurrency.py::test_no_unprotected_master_db_writer`:**
+  1. AST-parse `app/database.py`, `app/live_database.py`, `app/analysis_db_writer.py` (grep-seeded module list, asserted in test).
+  2. For each method, walk body. Flag as **writer** if it contains any write-sink (none name-prefix-keyed):
+     - `<recv>.db.<attr>(...)` where `<attr>` ∈ rbox write-API set (`update_content*`, `create_content*`, `create_playlist*`, `delete_playlist*`, `update_content_artist/genre/album/key`, `commit`, …) — catches `_update_db` (`:245`/`:255`), `add_track`@828, `update_track_metadata`@909, `delete_playlist`@1213, `create_playlist`@1223, `add_track_to_playlist`@1245, `remove_track_from_playlist`@1254 (AST-verified this session).
+     - `self._try_call([...], ...)` — dynamic dispatch helper (`live_database.py:1012`, `getattr(self.db, name)()`). Catches `create_mytag`@1025, `delete_mytag`@1037, `set_track_mytags`@1049 (reach rbox indirectly, no literal `.db.<write>`).
+     - module-level `rbox.<Class>.<create|...>(...)` — catches `ensure_standalone_master_db`@728 (`rbox.OneLibrary.create`@738).
+  3. For each flagged writer assert protected: `getattr(method, "__wrapped__", None)` set (Option B) **or** name in explicit `KNOWN_CALLSITE_PROTECTED` manifest (callsite-locked, e.g. `AnalysisDBWriter._update_db`). Else flagged-but-unprotected = CI fail.
+- Non-circular: detection key = "calls a rbox write sink", orthogonal to decorator prefix logic. Future `commit`/`flush`/`import_library` writing rbox is flagged the instant it touches a sink. Manual surface = small `KNOWN_CALLSITE_PROTECTED` + the rbox-write-API set (grow when rbox adds APIs, itself diffable).
+- Edge: `_try_call` rule may over-flag a read-only `_try_call` (none today — all write). Fails safe (toward protection), unlike old false-green.
+
+**Gap 3 — Goal 1 re-stated.** See `## Goals / Non-goals` revised Goal-1 bullet — metric now keyed on AST write-sink detection across all three modules + callsite-protected manifest, so a rbox-direct writer (AnalysisDBWriter) cannot green while unprotected.
+
+**Stale-cite note:** `## Links` block still shows pre-2026-05-29 anchors (`live_database.py:21,35`, mytag `:925,937,949`) — symbol+claim correct, refresh to `:27/:41` + `:1025/1037/1049` at draftplan (non-blocking).
+- **Confidence:** high (AST walk + grep + every cite re-Read this session).
+
 ## Adversarial Findings
 
 ### 2026-05-29 — devil's-advocate pass on Option B
@@ -151,6 +179,14 @@ Stage 1 Verifier. Dated entries, append-only.
 - **GAP (design):** OQ5 drift guard is circular (shares prefix set with the decorator) — cannot catch off-prefix mutators.
 - Required before `evaluated_`: (1) decide scope — wrap `AnalysisDBWriter.analyze_and_save`/`_update_db` explicitly at the callsite (lock acquire, not class decorator), or PARK analysis-write serialisation as its own doc; (2) redesign the drift guard to enumerate writers by AST / actual-write detection, not by the same prefix set the decorator uses; (3) re-state Goal 1 so the metric cannot green-light an uncovered rbox-direct writer.
 - Verdict: **GAPS** — doc stays `exploring_`. Next explore wave (or user) resolves the 3 items above.
+
+### 2026-05-31 — PASS (round 2)
+- All 3 GAPS from 2026-05-29 closed by wave-2 round-2 (Findings 2026-05-31), every cite re-Read this session:
+- **Gap 1 (scope) — CLOSED.** Decided: wrap `AnalysisDBWriter._update_db` (`analysis_db_writer.py:223-264`) at the callsite via `_db_write_lock`/`db_lock()`, NOT a separate doc. Code-justified: write runs in-process (ProcessPoolExecutor `:64` vestigial — never `.submit()`ed; both routes dispatch in-process, `main.py:3086`/`3126`), so RLock serialises it; it is the highest-volume `master.db` writer (per analysed track) — parking defeats the goal. In scope, ~2 LoC, one file.
+- **Gap 2 (circular guard) — CLOSED.** New drift guard detects writers by AST write-sink (`.db.<rbox-write>` + `self._try_call` + module-level `rbox.*.create`) across 3 modules, with a small `KNOWN_CALLSITE_PROTECTED` manifest. Detection orthogonal to the decorator's prefix allowlist → off-prefix + rbox-direct writers caught. AST-verified vs current code (surfaces 6 live mutators + 3 mytag methods + `ensure_standalone_master_db` + `AnalysisDBWriter._update_db`).
+- **Gap 3 (Goal 1 metric) — CLOSED.** Goal 1 re-stated to key the metric on AST write-sink detection + callsite manifest, explicitly covering the rbox-direct AnalysisDBWriter path; cannot report green while unprotected.
+- OQ1–OQ6 each still ≥1 Finding. Citation Quality PASS (2026-05-29) holds; no new stale cites (Links `:21,35`/`:925…` flagged for draftplan refresh, non-blocking — symbol+claim correct).
+- Verdict: **PASS** — graduate `exploring_` → `evaluated_`.
 
 ## Options Considered
 
