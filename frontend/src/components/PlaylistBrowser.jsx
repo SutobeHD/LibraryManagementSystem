@@ -150,7 +150,9 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
     const toast = useToast();
     const [tree, setTree] = useState([]);
     const [selectedPlaylist, setSelectedPlaylist] = useState(null);
-    const [showCollection, setShowCollection] = useState(false);
+    // Default to the Collection (whole library) so the view shows tracks on
+    // first open instead of an empty "select a playlist" placeholder.
+    const [showCollection, setShowCollection] = useState(true);
     const [tracks, setTracks] = useState([]);
     const [allTracks, setAllTracks] = useState([]);
     const [loading, setLoading] = useState(false);
