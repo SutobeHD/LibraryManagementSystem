@@ -4,7 +4,7 @@ argument-hint: "[--port N]   default: 8765"
 allowed-tools: Bash
 ---
 
-Start the research pipeline dashboard — a local, auto-refreshing web view of `docs/research/` (docs by state, open gates, routine PRs, blockers).
+Start the research pipeline dashboard — a local, auto-refreshing web view of `docs/research/` (docs by state, the open approval gate, routine PRs, blockers).
 
 ## Process
 
@@ -23,5 +23,5 @@ Start the research pipeline dashboard — a local, auto-refreshing web view of `
 ## Notes
 
 - The server keeps running in the background. To stop it, end that background process.
-- Read-only: the dashboard never edits files or git. Use `/gate-pass` / `/gate-reject` for actions.
+- Read-only: the dashboard never edits files or git. Use `/approve` / `/reject` for actions.
 - Equivalent without the slash command: `npm run dashboard`.
