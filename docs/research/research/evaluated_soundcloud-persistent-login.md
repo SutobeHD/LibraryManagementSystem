@@ -24,6 +24,7 @@ superseded_by: []
 - 2026-05-31 — `research/drafting_` — Original Idea filled; advanced for research-draft routine
 - 2026-05-31 — `research/exploring_` — drafted (scout + prior-art + risk-surface + worker + idea-verifier PASS), ready for explore
 - 2026-05-31 — `research/exploring_` — explore phase 1 done (tiered codebase+web+synthesis × 4 aspects / 8 OQs)
+- 2026-05-31 — `research/evaluated_` — explore phase 2 verified (adversarial + citation + research-verifier PASS), recommendation = Option A
 
 ## Original Idea (verbatim — never edit)
 
@@ -142,22 +143,25 @@ Baseline: **None — uses existing stack only.** Refresh reuses pinned `keyring`
 
 ## Adversarial Findings
 
-Stage 2 Adversarial-Agent (phase 2). Devil's-advocate — what could go wrong, what assumptions are weak, what dependencies betray us. ≤120 words. Append-only.
-
-### YYYY-MM-DD
-- **Weak assumption:** …
-- **Failure mode:** …
-- **Counter-example:** …
-
-If none survive scrutiny: **"No surviving objections — proceed with caution flags above."**
+### 2026-05-31
+- **Weak assumption (F1/F4):** single-flight must be **backend-side** (a lock around the refresh grant), not just `api.js`. SC refresh is single-use → concurrent refreshes, proactive+reactive firing together, or a mid-refresh sidecar restart consume the rotated token; the loser holds a dead refresh_token → forced re-login despite the persistence promise.
+- **Failure mode (F3):** 3 separate keyring writes are **non-atomic** — crash between writing access + refresh = mismatched pair → silent `invalid_grant` next launch. Mitigation: write refresh first, validate-on-read, treat partial state as logged-out.
+- **Failure mode (F1/F4):** clock skew breaks the proactive `expires_at − buffer` trigger → reactive-on-401 must remain the backstop.
+- **Failure mode (F2):** `client_secret` in Python `.env` widens blast radius to 2 processes (Rust + Python) — Constraints permit, but accept + document.
+- **Coverage gap:** **browser-dev mode (no Tauri)** absent from F1-F4 — silent `/refresh` assumes the sidecar owns refresh; confirm it works without the Rust shell (secret in Python → should), else "persist across restart" breaks in dev.
+- **Missing constraint:** never-log applies to `refresh_token` — new `/refresh` route + `invalid_grant` path must not echo it (→ threat-model). In-flight long downloads vs mid-refresh token handoff undefined (downloader prior-art).
+- **Counter-example:** Nango blog (F4 cite) exists *because* in-memory single-flight + rotation still races across instances; their fix = server-side lock + stored token → reinforces backend single-flight.
+- **Mitigated:** SSRF — refresh hits fixed `TOKEN_URL`, no user input ✔. Cookie-auth regression — bearer-only kept ✔.
+- **Blockers:** (1) backend serialized single-flight + atomic store ordering; (2) browser-dev-mode refresh path. **Carry-forward:** clock skew, secret dual-process, refresh_token in logs, in-flight download handoff.
 
 ## Citation Quality
 
-Stage 2 Citation-Verifier (phase 2). Checks every `file:line` ref + URL in `## Findings` exists + says what the Finding claims. PASS / FAIL list. ≤80 words.
-
-### YYYY-MM-DD — <PASS|FAIL>
-- PASS: Findings 1, 2, 4 — citations verified
-- FAIL: Finding 3 — `app/main.py:123` no such symbol, replace or remove
+### 2026-05-31 — PASS
+- PASS F1 — `soundcloud_client.rs:107-115` dead_code refresh_token/expires_in, `:233` returns access_token only, `:171-199` no `scope`; SC guide confirms single-use rotation + refresh params.
+- PASS F2 — `:67-80` env getters; `soundcloud_api.py:52` reads CLIENT_ID; grep confirms Python never reads CLIENT_SECRET (0 matches).
+- PASS F3 — `main.py:3509/3514` set/delete `sc_token`; keyring#540 confirms ~1280B Windows Credential Manager ceiling.
+- PASS F4 — `api.js:227` 401 guard has no SC-URL scoping (any 401), `:168` invoke login; `main.py:3534` existence-only auth-status, `:3613` asyncio.to_thread.
+- All 7 load-bearing citations verified; no FAIL, no unreachable URL.
 
 ---
 
@@ -167,35 +171,45 @@ Stage 2 Citation-Verifier (phase 2). Checks every `file:line` ref + URL in `## F
 
 Stage 2 wave-2 verifier over whole research body. ≤120 words. PASS → `evaluated_`; gaps → more Findings.
 
-### YYYY-MM-DD — <PASS|GAPS>
-- Coverage of Open Questions: …
-- Internal consistency: …
-- Citation quality (cross-ref `## Citation Quality`): …
-- Adversarial concerns addressed: …
+### 2026-05-31 — PASS
+- **OQ coverage:** all 8 mapped, no orphans. OQ1→F1, OQ2→F1 (rotation yes; refresh-TTL flagged unknown), OQ3→F2, OQ4→F3, OQ5→F4, OQ6→F4, OQ7→F4+F2, OQ8→F3.
+- **Internal consistency:** clean. F2 Python-side refresh + `client_secret` matches Constraints (secret in `.env`, dual-process accepted in Adversarial); refresh_token plaintext-usable (F3) ≠ hashed device-tokens (correct, must replay); never-log extended to refresh_token + carried forward. No contradictions.
+- **Citation quality:** PASS — `## Citation Quality` all 4 findings PASS, 7 load-bearing cites verified, no FAIL/unreachable.
+- **Adversarial concerns:** all captured. Both blockers present (backend single-flight + atomic store; browser-dev refresh). Carry-forwards: clock skew, secret dual-process, refresh_token-in-logs, in-flight download handoff. None dropped.
 
 ## Options Considered
 
-Stage 2 Synthesis-Agent (phase 2 PASS). Per option: sketch ≤5 bullets, pros, cons, S/M/L/XL, risk, prior-art match.
-
-### Option A — <name>
+### Option A — Backend-owned silent refresh (Python sidecar)
 - Sketch:
-- Pros:
-- Cons:
-- Effort:
-- Risk:
-- Prior-art match: <slug or "novel">
+  - Rust: return `{access_token, refresh_token, expires_in}` from exchange (stop discarding, `soundcloud_client.rs:233`) → frontend POSTs all three to backend.
+  - Python: extend `ScAuthTokenReq` (access + refresh + expires_in); store 3 separate keyring entries (`sc_token`/`sc_refresh_token`/`sc_token_expiry`); add `SOUNDCLOUD_CLIENT_SECRET` to Python env loading.
+  - Python `_ensure_valid_token()`: proactive (`now > expires_at − 60s`) + reactive (on SC 401) `grant_type=refresh_token` via existing `asyncio.to_thread` + sync `requests`, serialized by a `threading.Lock` (single-flight); atomically re-store rotated token (refresh-first write order).
+  - New `POST /api/soundcloud/refresh` (`require_session` + `@rate_limit`); `auth-status` reports validity/refreshability; frontend `_refreshScToken` → that route (no browser); scope 401-interceptor to `/api/soundcloud/*`; interactive login only on `invalid_grant`; logout deletes all 3 keys.
+- Pros: meets every Goal — silent, survives app + sidecar restart, shared backend state, background downloads/sync renew themselves; no new dep (`requests`+`keyring`); backend single-flight kills the rotation race.
+- Cons: moves `client_secret` into Python `.env` (Adversarial 2026-05-31, dual-process exposure — accept+document); 3-key write non-atomic needs refresh-first ordering + validate-on-read (Adversarial 2026-05-31); browser-dev path must be verified (Adversarial 2026-05-31 blocker 2).
+- Effort: M
+- Risk: med — auth-path change; mitigated by write-ordering + tests.
+- Prior-art match: reuses keyring pattern from `implemented_security-api-auth-hardening`; bearer-only per `implemented_security-cors-allow-credentials-tightening`.
 
-### Option B — <name>
-- Sketch:
-- Pros:
-- Cons:
-- Effort:
-- Risk:
-- Prior-art match: <slug or "novel">
+### Option B — Rust-owned refresh (keep secret in Rust)
+- Sketch: new `refresh_to_soundcloud` Tauri command does `grant_type=refresh_token` (secret already in Rust `:75-80`); frontend `invoke`s it silently → POSTs new token to backend; refresh_token persisted Rust-side.
+- Pros: `client_secret` stays only in Rust (no dual-process exposure); reuses existing Rust OAuth module.
+- Cons: refresh only works inside Tauri — **browser-dev mode can't `invoke`** → no silent refresh in dev (Adversarial 2026-05-31 blocker 2 made worse); background sidecar work (downloads/sync) can't trigger a Rust refresh while frontend idle → mid-download expiry still breaks (Adversarial 2026-05-31 in-flight concern unaddressed); refresh_token split-brain (Rust vs backend keyring); more IPC.
+- Effort: M-L
+- Risk: med-high — background-renewal gap, cross-process token state.
+- Prior-art match: extends Rust `soundcloud_client` — novel for refresh.
+
+### Option C — Minimal reactive-only backend refresh
+- Sketch: Python stores refresh+expiry; refresh ONLY on SC 401 (reactive, retry-once), serialized; frontend calls silent `/refresh`; skip proactive trigger, auth-status-validity, per-view sharing, interceptor scoping.
+- Pros: smallest change; fixes core "forced browser re-login" + restart persistence; no clock-skew surface (Adversarial 2026-05-31 — no proactive timer).
+- Cons: first action each ~1h still eats one 401+retry latency; leaves the any-401 interceptor bug + per-view state unfixed (partial vs Goals); in-flight long download 401s mid-stream unless retry rewires the running request (Adversarial 2026-05-31 in-flight concern).
+- Effort: S-M
+- Risk: low
+- Prior-art match: same keyring reuse as Option A.
 
 ## Recommendation
 
-Stage 2 Synthesis-Agent (phase 2 PASS). ≤120 words. Which option + what blocks commit + which OQ each Finding answers.
+**Option A** — only option meeting all Goals (silent, restart- + sidecar-persistent, shared state, background-safe) with no new dependency. Option B breaks silent refresh in browser-dev + background tasks; Option C leaves the interceptor bug + in-flight expiry. **Blocks to resolve in plan:** (1) backend serialized single-flight + atomic refresh-first keyring write (Adversarial 2026-05-31 blocker 1); (2) verify the silent `/refresh` works in browser-dev without Tauri (blocker 2). **Threat-model carry-forwards:** `client_secret` dual-process, `refresh_token` never-logged in `/refresh` + `invalid_grant` paths, clock-skew (reactive backstop mitigates), in-flight download token handoff. Findings→OQ: F1→OQ1/2, F2→OQ3/7, F3→OQ4/8, F4→OQ5/6/7.
 
 ---
 
