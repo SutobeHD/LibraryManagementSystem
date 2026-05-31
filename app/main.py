@@ -4201,6 +4201,339 @@ async def phrase_commit(body: PhraseCommitRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# ── Phrase batch (background job over many tracks) ──────────────────────────────
+
+# In-memory job store for background phrase-batch jobs (sibling of _dup_jobs,
+# declared in the duplicate-finder section below; kept here so the whole phrase
+# batch surface is in one place).
+# {job_id: {status, total, done, percent, eta_seconds, current_track,
+#           succeeded, skipped, failed, errors, errors_truncated, ...}}
+_phrase_jobs: dict[str, dict[str, Any]] = {}
+
+# Single-flight guard: only one phrase batch runs at a time (ANLZ writes are
+# serial + heavy). Lock asymmetry is intentional: it is *acquired* in the
+# /api/phrase/batch/start handler (so the 409 check + acquire are atomic against
+# the request) and *released* in _run_phrase_batch's finally block.
+_phrase_batch_lock = asyncio.Lock()
+
+_PHRASE_ERROR_CAP = 200  # max per-track error records kept in a job
+
+
+class PhraseScope(BaseModel):
+    """Selection of tracks a phrase batch should run over."""
+
+    kind: str  # "single" | "playlist" | "selection" | "collection"
+    track_id: int | None = None
+    playlist_id: str | None = None
+    track_ids: list[int] | None = None
+
+
+class PhraseBatchStartRequest(BaseModel):
+    """Start a background phrase-cue batch over a scope of tracks."""
+
+    scope: PhraseScope
+    phrase_length: int = 16  # bars
+    align_downbeat: bool = False
+    include_bar_markers: bool = False
+
+
+class PhraseBatchCancelRequest(BaseModel):
+    """Cancel a running phrase batch by job id."""
+
+    job_id: str
+
+
+def _phrase_db_path() -> str:
+    """Resolve the Rekordbox master.db path (same rule as phrase_generate)."""
+    from .config import DB_FILENAME
+
+    rb_root = Path(os.environ.get("APPDATA", "")) / "Pioneer" / "rekordbox"
+    return str(rb_root / DB_FILENAME)
+
+
+def _phrase_track_fields(t: dict[str, Any]) -> dict[str, Any] | None:
+    """Map a library track dict to {id, title, path}.
+
+    Key shapes differ by DB mode (verified against app/live_database.py and
+    app/database.py): live mode → ID/Title/path, xml mode → id/Title/path.
+    Fallbacks (TrackID/Name/Location) cover older/raw shapes defensively.
+    Returns None when no usable integer id can be derived.
+    """
+    raw_id = t.get("ID") or t.get("id") or t.get("TrackID")
+    if raw_id is None:
+        return None
+    try:
+        tid = int(raw_id)
+    except (TypeError, ValueError):
+        return None
+    title = t.get("Title") or t.get("Name") or ""
+    path = t.get("path") or t.get("Location") or ""
+    return {"id": tid, "title": str(title), "path": str(path)}
+
+
+def resolve_track_scope(scope: PhraseScope) -> list[dict[str, Any]]:
+    """Resolve a PhraseScope to a de-duped list of {id, title, path}.
+
+    Uses the in-process `db` facade. Folder recursion for playlists is handled
+    inside db.get_playlist_tracks(). Returns [] when nothing matches.
+    """
+    raw: list[dict[str, Any]] = []
+
+    if scope.kind == "single":
+        if scope.track_id is None:
+            raise HTTPException(status_code=400, detail="scope.track_id required for kind=single")
+        details = db.get_track_details(str(scope.track_id))
+        if details:
+            raw = [details]
+
+    elif scope.kind == "playlist":
+        if not scope.playlist_id:
+            raise HTTPException(
+                status_code=400, detail="scope.playlist_id required for kind=playlist"
+            )
+        raw = db.get_playlist_tracks(scope.playlist_id) or []
+
+    elif scope.kind == "selection":
+        if not scope.track_ids:
+            raise HTTPException(
+                status_code=400, detail="scope.track_ids required for kind=selection"
+            )
+        wanted = {int(x) for x in scope.track_ids}
+        for t in db.get_all_tracks() or []:
+            mapped = _phrase_track_fields(t)
+            if mapped and mapped["id"] in wanted:
+                raw.append(t)
+
+    elif scope.kind == "collection":
+        raw = db.get_all_tracks() or []
+
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown scope.kind: {scope.kind!r}")
+
+    # Map + de-dupe by id, preserving first-seen order.
+    seen: set[int] = set()
+    out: list[dict[str, Any]] = []
+    for t in raw:
+        mapped = _phrase_track_fields(t)
+        if mapped is None or mapped["id"] in seen:
+            continue
+        seen.add(mapped["id"])
+        out.append(mapped)
+    return out
+
+
+def _phrase_append_error(job: dict[str, Any], tid: int, title: str, reason: str) -> None:
+    """Append a per-track error record, capped at _PHRASE_ERROR_CAP."""
+    errs = job["errors"]
+    if len(errs) < _PHRASE_ERROR_CAP:
+        errs.append({"track_id": tid, "title": title, "reason": reason})
+    else:
+        job["errors_truncated"] = True
+
+
+async def _run_phrase_batch(
+    job_id: str,
+    scope_tracks: list[dict[str, Any]],
+    phrase_length: int,
+    align_downbeat: bool,
+    include_bar_markers: bool,
+) -> None:
+    """Background task: generate + commit phrase memory cues over many tracks.
+
+    Mirrors _run_duplicate_scan. Blocking phrase_generator calls run in the
+    default executor so the event loop stays free. Releases _phrase_batch_lock
+    in finally (lock acquired in the start handler — see lock comment above).
+    """
+    loop = asyncio.get_event_loop()
+    db_path = _phrase_db_path()
+    total = len(scope_tracks)
+    started = time.monotonic()
+    logger.info("[PHRASE] batch %s: %d tracks (len=%d)", job_id, total, phrase_length)
+
+    job = _phrase_jobs[job_id]
+    try:
+        for idx, track in enumerate(scope_tracks):
+            if job.get("cancel_requested"):
+                logger.info("[PHRASE] batch %s cancelled at %d/%d", job_id, idx, total)
+                job["status"] = "cancelled"
+                break
+
+            tid = track["id"]
+            title = track["title"]
+            path = track["path"]
+            job["current_track"] = {"id": tid, "title": title}
+
+            try:
+                beats = await loop.run_in_executor(
+                    None, lambda t=tid: extract_beats_from_db(t, db_path)
+                )
+                if not beats:
+                    job["skipped"] += 1
+                    _phrase_append_error(job, tid, title, "no beatgrid")
+                    continue
+
+                if align_downbeat and path:
+                    downbeat_t = await loop.run_in_executor(
+                        None, lambda p=path, b=beats: detect_first_downbeat(p, b)
+                    )
+                    beats = [b for b in beats if b >= downbeat_t - 0.01]
+
+                cues = generate_phrase_cues(beats, phrase_length=phrase_length)
+                if not any(c.get("type") == "phrase_start" for c in cues):
+                    job["skipped"] += 1
+                    _phrase_append_error(job, tid, title, "no phrase cues")
+                    continue
+
+                await loop.run_in_executor(
+                    None,
+                    lambda t=tid, c=cues: commit_phrase_cues(
+                        t, c, db_path, include_bar_markers=include_bar_markers
+                    ),
+                )
+                job["succeeded"] += 1
+
+            except PhraseNotAnalysedError:
+                job["skipped"] += 1
+                _phrase_append_error(job, tid, title, "not analysed")
+            except Exception as exc:
+                # One bad track must not kill the batch — recorded + continue.
+                logger.warning("[PHRASE] batch %s: track %d failed — %s", job_id, tid, exc)
+                job["failed"] += 1
+                _phrase_append_error(job, tid, title, str(exc))
+
+            # Progress + ETA after each track (success or skip/fail).
+            done = idx + 1
+            job["done"] = done
+            job["percent"] = round(done / total * 100, 1) if total else 100.0
+            elapsed = time.monotonic() - started
+            job["eta_seconds"] = (
+                round(elapsed / done * (total - done), 1) if 0 < done < total else 0.0
+            )
+
+        else:
+            # for-loop finished without break → not cancelled.
+            job["status"] = "done"
+
+        job["current_track"] = None
+        logger.info(
+            "[PHRASE] batch %s %s: ok=%d skip=%d fail=%d",
+            job_id,
+            job["status"],
+            job["succeeded"],
+            job["skipped"],
+            job["failed"],
+        )
+
+    except Exception as exc:
+        logger.error("[PHRASE] batch %s crashed: %s", job_id, exc, exc_info=True)
+        job["status"] = "error"
+        job["error"] = str(exc)
+    finally:
+        # Lock acquired in the start handler; worker owns its release.
+        if _phrase_batch_lock.locked():
+            _phrase_batch_lock.release()
+
+
+@app.post("/api/phrase/batch/start", dependencies=[Depends(require_session)])
+async def phrase_batch_start(body: PhraseBatchStartRequest, background_tasks: BackgroundTasks):
+    """
+    Start a background phrase-cue batch over a scope of tracks.
+
+    Returns a job_id immediately. Poll /api/phrase/batch/status?job_id=...
+    Only one batch runs at a time (409 while one is in flight).
+
+    Request body: {scope, phrase_length?, align_downbeat?, include_bar_markers?}
+    Returns: {status, data: {job_id, total}}
+    """
+    import uuid
+
+    if not db.loaded:
+        raise HTTPException(status_code=400, detail="Library not loaded")
+
+    if body.phrase_length not in (8, 16, 32):
+        raise HTTPException(
+            status_code=400,
+            detail=f"phrase_length must be 8, 16, or 32 — got {body.phrase_length}",
+        )
+
+    if _phrase_batch_lock.locked():
+        raise HTTPException(status_code=409, detail="A phrase batch is already running")
+
+    scope_tracks = resolve_track_scope(body.scope)
+    if not scope_tracks:
+        raise HTTPException(status_code=400, detail="No tracks matched the requested scope")
+
+    # Acquire here so the 409 check + acquire are atomic for this request;
+    # _run_phrase_batch releases it in finally. Never contended on acquire (we
+    # just checked .locked()), so this returns immediately.
+    await _phrase_batch_lock.acquire()
+
+    job_id = str(uuid.uuid4())
+    _phrase_jobs[job_id] = {
+        "status": "running",
+        "total": len(scope_tracks),
+        "done": 0,
+        "percent": 0.0,
+        "eta_seconds": 0.0,
+        "current_track": None,
+        "succeeded": 0,
+        "skipped": 0,
+        "failed": 0,
+        "errors": [],
+        "errors_truncated": False,
+        "cancel_requested": False,
+        "scope_kind": body.scope.kind,
+    }
+    logger.info(
+        "[PHRASE] batch start: job_id=%s kind=%s tracks=%d len=%d downbeat=%s bars=%s",
+        job_id,
+        body.scope.kind,
+        len(scope_tracks),
+        body.phrase_length,
+        body.align_downbeat,
+        body.include_bar_markers,
+    )
+
+    background_tasks.add_task(
+        _run_phrase_batch,
+        job_id,
+        scope_tracks,
+        body.phrase_length,
+        body.align_downbeat,
+        body.include_bar_markers,
+    )
+    return {"status": "ok", "data": {"job_id": job_id, "total": len(scope_tracks)}}
+
+
+@app.get("/api/phrase/batch/status")
+async def phrase_batch_status(job_id: str):
+    """
+    Poll a phrase batch's status.
+
+    Query params: job_id
+    Returns: {status, data: <job>}  (404 if unknown job_id)
+    """
+    if not job_id or job_id not in _phrase_jobs:
+        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+    return {"status": "ok", "data": _phrase_jobs[job_id]}
+
+
+@app.post("/api/phrase/batch/cancel", dependencies=[Depends(require_session)])
+async def phrase_batch_cancel(body: PhraseBatchCancelRequest):
+    """
+    Request cancellation of a running phrase batch.
+
+    The worker stops before the next track and sets status=cancelled.
+    Request body: {job_id}
+    Returns: {status, data: {cancelled: true}}  (404 if unknown job_id)
+    """
+    if not body.job_id or body.job_id not in _phrase_jobs:
+        raise HTTPException(status_code=404, detail=f"Job not found: {body.job_id}")
+    _phrase_jobs[body.job_id]["cancel_requested"] = True
+    logger.info("[PHRASE] batch cancel requested: job_id=%s", body.job_id)
+    return {"status": "ok", "data": {"cancelled": True}}
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  ACOUSTIC DUPLICATE FINDER
 # ═══════════════════════════════════════════════════════════════════════════════
