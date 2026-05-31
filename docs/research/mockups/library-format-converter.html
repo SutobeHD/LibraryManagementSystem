@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Format Converter — wireframe</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1d2026; --panel2: #23272f; --edge: #323845;
+    --text: #e6e9ef; --muted: #9aa3b2; --accent: #4f8cff; --accent2: #2f6fe0;
+    --ok: #3fb950; --warn: #d29922; --danger: #f85149; --chip: #2a2f38;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .panel { background: var(--panel); border: 1px solid var(--edge);
+    border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .label { font-weight: 600; margin-bottom: 8px; display: block; }
+  .seg { display: inline-flex; border: 1px solid var(--edge);
+    border-radius: 8px; overflow: hidden; }
+  .seg button { background: var(--panel2); color: var(--text); border: 0;
+    padding: 8px 14px; cursor: pointer; border-right: 1px solid var(--edge); }
+  .seg button:last-child { border-right: 0; }
+  .seg button.on { background: var(--accent2); color: #fff; }
+  select, input[type=text] { background: var(--panel2); color: var(--text);
+    border: 1px solid var(--edge); border-radius: 8px; padding: 8px 10px; min-width: 220px; }
+  .btn { background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+    padding: 9px 16px; font-weight: 600; cursor: pointer; }
+  .btn.ghost { background: transparent; border: 1px solid var(--edge); color: var(--text); }
+  .btn.danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); }
+  table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--edge); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .chip { display: inline-block; background: var(--chip); border: 1px solid var(--edge);
+    border-radius: 999px; padding: 2px 10px; font-size: 12px; color: var(--muted); }
+  .warnbar { background: rgba(210,153,34,.12); border: 1px solid var(--warn);
+    color: var(--warn); border-radius: 8px; padding: 10px 12px; margin: 12px 0; }
+  .progress { height: 10px; background: var(--panel2); border-radius: 999px; overflow: hidden; border: 1px solid var(--edge); }
+  .progress > span { display: block; height: 100%; width: 62%; background: linear-gradient(90deg, var(--accent2), var(--accent)); }
+  .muted { color: var(--muted); }
+  .ok { color: var(--ok); } .danger { color: var(--danger); }
+  .spacer { flex: 1; }
+  .note { font-size: 12px; color: var(--muted); margin-top: 18px; border-top: 1px dashed var(--edge); padding-top: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Format Converter</h1>
+  <p class="sub">Convert your library to a target format while keeping every cue, beatgrid, hot/memory cue, MyTag and playlist intact.</p>
+
+  <!-- Step 1: scope + format pickers -->
+  <div class="panel">
+    <span class="label">1 · What to convert</span>
+    <div class="seg" role="tablist">
+      <button>Selected tracks</button>
+      <button class="on">Playlist</button>
+      <button>All m4a</button>
+      <button>Folder…</button>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <select><option>Playlist: Summer House Set (1,204 tracks)</option></select>
+    </div>
+
+    <span class="label" style="margin-top:18px">2 · Target format</span>
+    <div class="seg">
+      <button class="on">AIFF</button>
+      <button>FLAC</button>
+      <button>WAV</button>
+      <button>MP3</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <span class="chip">Bit depth: auto from source</span>
+      <span class="chip">Sample rate: preserved</span>
+    </div>
+
+    <div class="row" style="margin-top:18px">
+      <button class="btn ghost">Dry run / preview</button>
+      <div class="spacer"></div>
+      <button class="btn">Convert…</button>
+    </div>
+  </div>
+
+  <!-- Step 2: dry-run preview -->
+  <div class="panel">
+    <span class="label">Dry-run preview</span>
+    <div class="warnbar">⚠ Large batch (1,204 tracks). Other library edits are paused while a conversion runs. Estimated time ~12–40 min.</div>
+    <table>
+      <tr><th>Convertible</th><th>Skipped</th><th>Source size</th><th>Est. after (AIFF)</th><th>Disk free</th></tr>
+      <tr><td>1,180</td><td>24 <span class="muted">(already AIFF)</span></td><td>410 MB</td><td>~2.26 GB</td><td class="ok">51 GB ✓</td></tr>
+    </table>
+    <p class="muted" style="margin-top:10px">First rows: <span class="chip">kick_loop.m4a</span> <span class="chip">deep_groove.m4a</span> <span class="chip">sunrise.m4a</span> …</p>
+  </div>
+
+  <!-- Step 3: progress -->
+  <div class="panel">
+    <span class="label">Converting…</span>
+    <div class="progress"><span></span></div>
+    <div class="row" style="margin-top:10px">
+      <span>743 / 1,180 done</span>
+      <span class="chip">current: midnight_drive.m4a</span>
+      <span class="chip ok">beatgrid preserved ✓</span>
+      <span class="muted">1 failed</span>
+      <div class="spacer"></div>
+      <button class="btn ghost">Abort</button>
+    </div>
+  </div>
+
+  <!-- Step 4: rollback -->
+  <div class="panel">
+    <span class="label">Recent conversions</span>
+    <table>
+      <tr><th>When</th><th>Scope → format</th><th>Result</th><th></th></tr>
+      <tr><td>today 14:12</td><td>Summer House Set → AIFF</td><td class="ok">1,180 converted</td><td><button class="btn danger">Roll back</button></td></tr>
+      <tr><td>yesterday</td><td>All m4a → FLAC</td><td class="ok">3,041 converted</td><td><button class="btn danger">Roll back</button></td></tr>
+    </table>
+    <p class="muted" style="margin-top:10px">Originals are kept as <code>.backup-&lt;timestamp&gt;</code> until you confirm. Roll back restores both the files and the Rekordbox database.</p>
+  </div>
+
+  <p class="note">Static wireframe — represents the <em>planned</em> screen from <code>## API / UX Surface</code>. Not a live capture. Close Rekordbox before converting; the app pauses other library writes for the duration of a run.</p>
+</div>
+</body>
+</html>

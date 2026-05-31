@@ -35,10 +35,10 @@ _(none)_
 _(none)_
 
 ### review
-- [review_library-format-converter.md](implement/review_library-format-converter.md) — Library-wide format converter (Option A); plan filled — 14-step Impl Plan, 9-threat STRIDE model, in-place row-mutation migration + rollback recipe, perf budget (batch-lock starvation cost flagged), 33-row Test Plan, 15-task queue. Plan-Reviewer pending → approvalgate_ (2026-05-31)
+_(none)_
 
 ### approvalgate ⛔ THE GATE
-_(none)_
+- [approvalgate_library-format-converter.md](implement/approvalgate_library-format-converter.md) — Library-wide format converter (Option A: full shared engine). Plan complete: 14-step Impl Plan, 9-threat STRIDE model, in-place row-mutation migration + rollback recipe, perf budget (batch-lock starvation flagged), 33-row Test Plan, 15-task queue; Plan-Reviewer PASS (round-1 step-numbering rework resolved inline); mockup + Approval Summary ready. **Awaiting user `/approve` or `/reject`** (2026-05-31)
 
 ### rework
 _(none)_
