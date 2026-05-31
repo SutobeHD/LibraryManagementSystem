@@ -24,7 +24,7 @@ _(none)_
 - [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); wave-2 GAPS narrowed (CORS para corrected, 3/3 stale main.py refs refreshed+PASS, Phase-2 prereq now past GATE A); remaining blocker = OQ14+OQ7 user sign-off only; stays exploring_ (2026-05-29)
 
 ### evaluated
-- [evaluated_library-format-converter.md](research/evaluated_library-format-converter.md) — Library-wide format converter; wave 2 closed all 3 blockers (proof script `fdb461c`, AAC priming empirical A/B sample-identical, path-write via direct rbox `update_content`), 6 adversarial concerns addressed/carried-forward, citation MIXED non-load-bearing, V-PASS round 2, 3 options (A/B/C) + Recommendation = Option A (full engine, sister-doc unblocks) with 4 commit-blockers for draftplan_ (2026-05-30)
+_(none)_
 
 ### parked
 _(none)_
@@ -34,7 +34,7 @@ _(none)_
 ## implement/
 
 ### draftplan
-_(none)_
+- [draftplan_library-format-converter.md](implement/draftplan_library-format-converter.md) — Library-wide format converter (Option A: full shared engine); planning started — Planner + Threat/Migration/Perf + Test-Plan + Task-Queue + Reviewer + Mockup. 4 commit-blockers carried from evaluated_ (sister contract, Phase-1a tolerance, mid-run-abort drill, multi-source AAC matrix) (2026-05-31)
 
 ### review
 _(none)_
