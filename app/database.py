@@ -1,62 +1,37 @@
 import logging
 import os
 import re
-import threading
 import time
 import xml.etree.ElementTree as ET
 from collections import defaultdict
-from contextlib import contextmanager
-from functools import lru_cache, wraps
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
 
+from ._db_lock import (
+    _db_write_lock,
+    _serialised,
+    db_lock,
+    serialise_mutators,
+)
 from .live_database import LiveRekordboxDB
 
 logger = logging.getLogger(__name__)
 
-# Module-level reentrant lock that serialises all mutating operations on the
-# global `db` singleton against concurrent FastAPI request threads.
-# RLock is used so methods that internally call other mutating methods
-# (e.g. `update_tracks_metadata` → `save_xml`) don't deadlock themselves.
-_db_write_lock = threading.RLock()
+# `_db_write_lock`, `db_lock`, `_serialised` are re-exported from `._db_lock`
+# (above) so existing `from app.database import _db_write_lock` / `db_lock`
+# callers keep working. They live in `_db_lock` to avoid a circular import
+# with `live_database`, which also needs `serialise_mutators`.
 
+__all__ = ["RekordboxDB", "RekordboxXMLDB", "_db_write_lock", "_serialised", "db", "db_lock"]
 
-@contextmanager
-def db_lock():
-    """Acquire `_db_write_lock` for the duration of the `with` block.
-
-    Use this when several mutations must form one atomic transaction
-    from a route handler, e.g.::
-
-        with db_lock():
-            db.add_track(...)
-            db.add_track_to_playlist(...)
-
-    Individual mutating methods on `RekordboxDB` are already wrapped, so
-    you only need this for multi-step transactions.
-    """
-    with _db_write_lock:
-        yield
-
-
-def _serialised(method):
-    """Decorator: serialise a method against `_db_write_lock`.
-
-    Applied below to every mutating method on `RekordboxDB` so individual
-    calls are already lock-safe without callers needing to remember.
-    """
-    @wraps(method)
-    def wrapper(self, *args, **kwargs):
-        with _db_write_lock:
-            return method(self, *args, **kwargs)
-    return wrapper
 
 class RekordboxXMLDB:
     def __init__(self):
         self.xml_path = Path("rekordbox.xml")
-        self.tracks = {} # ID -> Track Dict
-        self.playlists = [] # List of playlist nodes
+        self.tracks = {}  # ID -> Track Dict
+        self.playlists = []  # List of playlist nodes
         self.playlists_tracks = defaultdict(list)
         self.artists = []
         self.genres = []
@@ -90,7 +65,9 @@ class RekordboxXMLDB:
             # Extract Metadata
             self._extract_metadata()
             self.loaded = True
-            logger.info(f"Loaded XML: {len(self.tracks)} tracks, {len(self.playlists)} playlist nodes")
+            logger.info(
+                f"Loaded XML: {len(self.tracks)} tracks, {len(self.playlists)} playlist nodes"
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to load XML: {e}")
@@ -98,7 +75,8 @@ class RekordboxXMLDB:
 
     def _parse_track(self, node):
         tid = node.get("TrackID")
-        if not tid: return
+        if not tid:
+            return
 
         self.tracks[tid] = {
             "id": tid,
@@ -123,17 +101,19 @@ class RekordboxXMLDB:
             "ReleaseYear": int(node.get("Year", 0) or 0),
             "StockDate": node.get("DateAdded", ""),
             "SampleRate": int(node.get("SampleRate", 0) or 0),
-            "ISRC": node.get("ISRC", "")
+            "ISRC": node.get("ISRC", ""),
         }
 
         beat_grid = []
         for tempo in node.findall("TEMPO"):
-            beat_grid.append({
-                "time": float(tempo.get("Inizio", 0)),
-                "bpm": float(tempo.get("Bpm", 0)),
-                "beat": int(tempo.get("Battito", 1)),
-                "metro": tempo.get("Metro", "4/4")
-            })
+            beat_grid.append(
+                {
+                    "time": float(tempo.get("Inizio", 0)),
+                    "bpm": float(tempo.get("Bpm", 0)),
+                    "beat": int(tempo.get("Battito", 1)),
+                    "metro": tempo.get("Metro", "4/4"),
+                }
+            )
         self.tracks[tid]["beatGrid"] = beat_grid
 
         position_marks = []
@@ -145,7 +125,7 @@ class RekordboxXMLDB:
                 "Num": int(mark.get("Num", -1)),
                 "Red": int(mark.get("Red") or 0),
                 "Green": int(mark.get("Green") or 0),
-                "Blue": int(mark.get("Blue") or 0)
+                "Blue": int(mark.get("Blue") or 0),
             }
             if mark.get("End"):
                 m_data["End"] = float(mark.get("End"))
@@ -153,7 +133,8 @@ class RekordboxXMLDB:
         self.tracks[tid]["positionMarks"] = position_marks
 
     def _decode_path(self, location: str) -> str:
-        if not location: return ""
+        if not location:
+            return ""
         try:
             decoded = unquote(location)
             if decoded.startswith("file://localhost/"):
@@ -161,7 +142,7 @@ class RekordboxXMLDB:
             elif decoded.startswith("file://"):
                 decoded = decoded.replace("file://", "")
 
-            if os.name == 'nt' and decoded.startswith("/") and ":" in decoded[0:10]:
+            if os.name == "nt" and decoded.startswith("/") and ":" in decoded[0:10]:
                 decoded = decoded.lstrip("/")
             return os.path.normpath(decoded)
         except Exception as e:
@@ -169,12 +150,14 @@ class RekordboxXMLDB:
             return location
 
     def _parse_playlist_node(self, node, parent_id):
-        if node is None: return []
+        if node is None:
+            return []
         return self._recursive_playlist_parse(node, parent_id)
 
     def _recursive_playlist_parse(self, node, parent_id, seq_start=0):
         flat_list = []
-        if node is None: return []
+        if node is None:
+            return []
         for i, child in enumerate(node.findall("NODE")):
             child_name = child.get("Name")
             child_type = child.get("Type")
@@ -184,7 +167,7 @@ class RekordboxXMLDB:
                 "Name": child_name,
                 "ParentID": parent_id,
                 "Type": child_type,
-                "Seq": seq_start + i
+                "Seq": seq_start + i,
             }
             if child_type == "1":
                 self._cache_playlist_tracks(my_id, child)
@@ -193,6 +176,7 @@ class RekordboxXMLDB:
             elif child_type == "4":
                 # Smart playlist — parse SmartList sub-element if present
                 from .smart_playlist_engine import from_xml_node
+
                 sl = child.find("SmartList")
                 node_data["SmartList"] = from_xml_node(sl) if sl is not None else {}
                 # Cache materialised tracks too (snapshot at load)
@@ -204,8 +188,9 @@ class RekordboxXMLDB:
         return flat_list
 
     def _cache_playlist_tracks(self, pid, node):
-        if not hasattr(self, 'playlists_tracks'): self.playlists_tracks = defaultdict(list)
-        existing_keys = {t['id'] for t in self.playlists_tracks[pid]}
+        if not hasattr(self, "playlists_tracks"):
+            self.playlists_tracks = defaultdict(list)
+        existing_keys = {t["id"] for t in self.playlists_tracks[pid]}
         for t in node.findall("TRACK"):
             key = t.get("Key")
             if key in self.tracks and key not in existing_keys:
@@ -226,26 +211,28 @@ class RekordboxXMLDB:
                 track_artists = self._split_artists(t["Artist"])
                 for artist in track_artists:
                     artist_counts[artist] += 1
-            if t.get("Genre"): genre_counts[t["Genre"]] += 1
+            if t.get("Genre"):
+                genre_counts[t["Genre"]] += 1
 
         self.artists = []
         threshold = 0
         try:
             from .services import SettingsManager
+
             threshold = SettingsManager.load().get("artist_view_threshold", 0)
         except (OSError, ValueError, KeyError, AttributeError) as e:
             logger.warning(
-                "database: failed to load artist_view_threshold — using 0 (%s)", e,
+                "database: failed to load artist_view_threshold — using 0 (%s)",
+                e,
             )
 
         for i, (name, count) in enumerate(sorted(artist_counts.items())):
             if count >= threshold:
-                self.artists.append({
-                    "id": f"art_{i}",
-                    "name": name,
-                    "track_count": count
-                })
-        self.genres = [{"id": f"gen_{i}", "name": name, "track_count": count} for i, (name, count) in enumerate(sorted(genre_counts.items()))]
+                self.artists.append({"id": f"art_{i}", "name": name, "track_count": count})
+        self.genres = [
+            {"id": f"gen_{i}", "name": name, "track_count": count}
+            for i, (name, count) in enumerate(sorted(genre_counts.items()))
+        ]
 
     @lru_cache(maxsize=1)
     def get_all_labels(self):
@@ -255,84 +242,129 @@ class RekordboxXMLDB:
             if label:
                 normalized = self._normalize_artist_name(label)
                 label_counts[normalized] += 1
-        return [{"id": f"lbl_{i}", "name": name, "track_count": count} for i, (name, count) in enumerate(sorted(label_counts.items()))]
+        return [
+            {"id": f"lbl_{i}", "name": name, "track_count": count}
+            for i, (name, count) in enumerate(sorted(label_counts.items()))
+        ]
 
     @lru_cache(maxsize=1)
     def get_all_albums(self):
         album_counts = defaultdict(int)
         for t in self.tracks.values():
             album = t.get("Album")
-            if album: album_counts[album] += 1
-        return [{"id": f"alb_{i}", "name": name, "track_count": count} for i, (name, count) in enumerate(sorted(album_counts.items()))]
+            if album:
+                album_counts[album] += 1
+        return [
+            {"id": f"alb_{i}", "name": name, "track_count": count}
+            for i, (name, count) in enumerate(sorted(album_counts.items()))
+        ]
 
     def _split_artists(self, artist_str):
-        if not artist_str: return []
+        if not artist_str:
+            return []
         # Split by common separators: , & / ; feat. ft. vs. with
-        parts = re.split(r'(?i),|&|/|;|\s+feat\.?\s+|\s+ft\.?\s+|\s+vs\.?\s+|\s+with\s+', artist_str)
+        parts = re.split(
+            r"(?i),|&|/|;|\s+feat\.?\s+|\s+ft\.?\s+|\s+vs\.?\s+|\s+with\s+", artist_str
+        )
         return [self._normalize_artist_name(p.strip()) for p in parts if p.strip()]
 
     def _normalize_artist_name(self, name):
-        if not name: return ""
+        if not name:
+            return ""
 
         # 0. Check for manual mapping first
         try:
             from .services import MetadataManager
+
             mapped = MetadataManager.get_mapped_name("artists", name)
-            if mapped != name: return mapped
+            if mapped != name:
+                return mapped
         except Exception as e:
             logger.debug(
-                "database: artist-name mapping failed for %r (%s)", name, e,
+                "database: artist-name mapping failed for %r (%s)",
+                name,
+                e,
             )
 
         # 1. Strip leading numbers like "01 ", "1. ", "02-", "1 "
-        name = re.sub(r'^\d{1,2}[\s.-]+', '', name)
+        name = re.sub(r"^\d{1,2}[\s.-]+", "", name)
 
         # 2. Strip common prefixes (case insensitive)
-        name = re.sub(r'(?i)^.*(supported by|premiere:?|exclusive:?|dj\s+)\s*', '', name)
+        name = re.sub(r"(?i)^.*(supported by|premiere:?|exclusive:?|dj\s+)\s*", "", name)
 
         # 3. Strip common suffixes (case insensitive)
-        name = re.sub(r'(?i)\s+(re-?edit|edit|r[em]+ix|rework|bootleg|flip|cut|vip)\s*.*$', '', name)
+        name = re.sub(
+            r"(?i)\s+(re-?edit|edit|r[em]+ix|rework|bootleg|flip|cut|vip)\s*.*$", "", name
+        )
 
         return name.strip()
 
     def get_tracks_by_artist(self, aid):
         artist_name = next((a["name"] for a in self.artists if a["id"] == aid), None)
-        if not artist_name: return []
-        return [t for t in self.tracks.values() if artist_name in self._split_artists(t.get("Artist", ""))]
+        if not artist_name:
+            return []
+        return [
+            t
+            for t in self.tracks.values()
+            if artist_name in self._split_artists(t.get("Artist", ""))
+        ]
 
     def get_tracks_by_label(self, aid):
         label_name = next((l["name"] for l in self.get_all_labels() if l["id"] == aid), None)
-        if not label_name: return []
-        return [t for t in self.tracks.values() if self._normalize_artist_name(t.get("Label", "")) == label_name]
+        if not label_name:
+            return []
+        return [
+            t
+            for t in self.tracks.values()
+            if self._normalize_artist_name(t.get("Label", "")) == label_name
+        ]
 
     def get_tracks_by_album(self, aid):
         album_name = next((a["name"] for a in self.get_all_albums() if a["id"] == aid), None)
-        if not album_name: return []
+        if not album_name:
+            return []
         return [t for t in self.tracks.values() if t.get("Album") == album_name]
 
     def get_tracks_by_label(self, aid):
         label_name = next((l["name"] for l in self.get_all_labels() if l["id"] == aid), None)
-        if not label_name: return []
-        return [t for t in self.tracks.values() if self._normalize_artist_name(t.get("Label", "")) == label_name]
+        if not label_name:
+            return []
+        return [
+            t
+            for t in self.tracks.values()
+            if self._normalize_artist_name(t.get("Label", "")) == label_name
+        ]
 
     def get_tracks_by_album(self, aid):
         album_name = next((a["name"] for a in self.get_all_albums() if a["id"] == aid), None)
-        if not album_name: return []
+        if not album_name:
+            return []
         return [t for t in self.tracks.values() if t.get("Album") == album_name]
 
     def get_tracks_by_artist(self, aid):
         artist_name = next((a["name"] for a in self.artists if a["id"] == aid), None)
-        if not artist_name: return []
-        return [t for t in self.tracks.values() if artist_name in self._split_artists(t.get("Artist", ""))]
+        if not artist_name:
+            return []
+        return [
+            t
+            for t in self.tracks.values()
+            if artist_name in self._split_artists(t.get("Artist", ""))
+        ]
 
     def get_tracks_by_label(self, aid):
         label_name = next((l["name"] for l in self.get_all_labels() if l["id"] == aid), None)
-        if not label_name: return []
-        return [t for t in self.tracks.values() if self._normalize_artist_name(t.get("Label", "")) == label_name]
+        if not label_name:
+            return []
+        return [
+            t
+            for t in self.tracks.values()
+            if self._normalize_artist_name(t.get("Label", "")) == label_name
+        ]
 
     def get_tracks_by_album(self, aid):
         album_name = next((a["name"] for a in self.get_all_albums() if a["id"] == aid), None)
-        if not album_name: return []
+        if not album_name:
+            return []
         return [t for t in self.tracks.values() if t.get("Album") == album_name]
 
     def add_track(self, track_data):
@@ -371,7 +403,9 @@ class RekordboxXMLDB:
         if not track:
             logger.warning(f"add_track_to_playlist: track {tid} not in library")
             return False
-        existing_ids = {str(t.get("id") or t.get("TrackID")) for t in self.playlists_tracks.get(pid, [])}
+        existing_ids = {
+            str(t.get("id") or t.get("TrackID")) for t in self.playlists_tracks.get(pid, [])
+        }
         if tid in existing_ids:
             return True  # already there
         self.playlists_tracks[pid].append(track)
@@ -380,6 +414,7 @@ class RekordboxXMLDB:
 
     def find_playlist_by_name(self, name):
         """Walk playlists tree, return first matching node."""
+
         def _walk(nodes):
             for n in nodes:
                 if n.get("Name") == name:
@@ -389,6 +424,7 @@ class RekordboxXMLDB:
                 if hit:
                     return hit
             return None
+
         return _walk(self.playlists)
 
     def find_playlist(self, pid):
@@ -403,28 +439,28 @@ class RekordboxXMLDB:
         """Build hierarchical tree (same shape as LiveRekordboxDB.get_playlist_tree)."""
         if not self.playlists:
             return []
-        node_map = {r['ID']: {**r, 'Children': []} for r in self.playlists}
+        node_map = {r["ID"]: {**r, "Children": []} for r in self.playlists}
         tree = []
         for r in self.playlists:
-            pid = r.get('ParentID')
+            pid = r.get("ParentID")
             if pid in node_map:
-                node_map[pid]['Children'].append(node_map[r['ID']])
+                node_map[pid]["Children"].append(node_map[r["ID"]])
             elif str(pid).upper() == "ROOT":
-                tree.append(node_map[r['ID']])
+                tree.append(node_map[r["ID"]])
         for node in node_map.values():
-            node['Children'].sort(key=lambda x: x.get('Seq', 0))
-        tree.sort(key=lambda x: x.get('Seq', 0))
+            node["Children"].sort(key=lambda x: x.get("Seq", 0))
+        tree.sort(key=lambda x: x.get("Seq", 0))
         return tree
 
     def remove_track_from_playlist(self, pid, tid):
         """Remove track tid from playlist pid (does not delete from collection)."""
-        pid = str(pid); tid = str(tid)
+        pid = str(pid)
+        tid = str(tid)
         if pid not in self.playlists_tracks:
             return False
         before = len(self.playlists_tracks[pid])
         self.playlists_tracks[pid] = [
-            t for t in self.playlists_tracks[pid]
-            if str(t.get("id") or t.get("TrackID")) != tid
+            t for t in self.playlists_tracks[pid] if str(t.get("id") or t.get("TrackID")) != tid
         ]
         if len(self.playlists_tracks[pid]) < before:
             self.save_xml()
@@ -433,12 +469,14 @@ class RekordboxXMLDB:
 
     def reorder_playlist_track(self, pid, tid, new_index):
         """Move track tid within playlist pid to position new_index (0-based)."""
-        pid = str(pid); tid = str(tid)
+        pid = str(pid)
+        tid = str(tid)
         if pid not in self.playlists_tracks:
             return False
         tracks = self.playlists_tracks[pid]
-        idx = next((i for i, t in enumerate(tracks)
-                    if str(t.get("id") or t.get("TrackID")) == tid), -1)
+        idx = next(
+            (i for i, t in enumerate(tracks) if str(t.get("id") or t.get("TrackID")) == tid), -1
+        )
         if idx < 0:
             return False
         track = tracks.pop(idx)
@@ -458,8 +496,8 @@ class RekordboxXMLDB:
 
     def move_playlist(self, pid, new_parent_id, target_id=None, position=None):
         """Move playlist node. position can be:
-           - int (XML-native order)
-           - "inside"/"before"/"after" with target_id (Live-DB style)
+        - int (XML-native order)
+        - "inside"/"before"/"after" with target_id (Live-DB style)
         """
         node = self.find_playlist(pid)
         if not node:
@@ -472,7 +510,9 @@ class RekordboxXMLDB:
             if sibling:
                 new_parent_id = sibling.get("ParentID") or "ROOT"
         # Cycle protection
-        target = self.find_playlist(new_parent_id) if new_parent_id and new_parent_id != "ROOT" else None
+        target = (
+            self.find_playlist(new_parent_id) if new_parent_id and new_parent_id != "ROOT" else None
+        )
         if target:
             cur = target
             while cur:
@@ -549,6 +589,7 @@ class RekordboxXMLDB:
     def evaluate_smart_playlist(self, pid):
         """Apply smart-list criteria → list of matching tracks."""
         from .smart_playlist_engine import evaluate
+
         node = self.find_playlist(pid)
         if not node or node.get("Type") != "4":
             return []
@@ -557,8 +598,8 @@ class RekordboxXMLDB:
     # ── MyTags (Pioneer parity for XML mode) ───────────────────────────────
     def _ensure_mytags(self):
         if not hasattr(self, "_mytags"):
-            self._mytags = {}            # tag_id → name
-            self._track_mytags = {}      # track_id → set(tag_ids)
+            self._mytags = {}  # tag_id → name
+            self._track_mytags = {}  # track_id → set(tag_ids)
 
     def list_mytags(self):
         self._ensure_mytags()
@@ -597,7 +638,8 @@ class RekordboxXMLDB:
             # Remove from every playlist
             for pid in list(self.playlists_tracks.keys()):
                 self.playlists_tracks[pid] = [
-                    t for t in self.playlists_tracks[pid]
+                    t
+                    for t in self.playlists_tracks[pid]
                     if str(t.get("id") or t.get("TrackID")) != tid
                 ]
             self.save_xml()
@@ -650,8 +692,11 @@ class RekordboxXMLDB:
             # Wrap in a top-level ROOT NODE (Type=0) so the Rekordbox XML schema
             # — and our own _recursive_playlist_parse — can walk the tree.
             playlists_root_node = ET.SubElement(
-                playlists_root, "NODE", Name="ROOT", Type="0",
-                Count=str(len([p for p in self.playlists if p.get('ParentID') == 'ROOT'])),
+                playlists_root,
+                "NODE",
+                Name="ROOT",
+                Type="0",
+                Count=str(len([p for p in self.playlists if p.get("ParentID") == "ROOT"])),
             )
 
             def _add_smart_list(parent_node, criteria):
@@ -670,32 +715,39 @@ class RekordboxXMLDB:
                     cn.set("ValueUnit", str(c.get("ValueUnit", "0")))
 
             def build_xml_node(parent_node, pid):
-                children = [p for p in self.playlists if p['ParentID'] == pid]
-                for child in sorted(children, key=lambda x: x.get('Seq', 0)):
-                    ctype = child.get('Type', '1')
-                    node = ET.SubElement(parent_node, "NODE", Name=child['Name'], Type=ctype)
+                children = [p for p in self.playlists if p["ParentID"] == pid]
+                for child in sorted(children, key=lambda x: x.get("Seq", 0)):
+                    ctype = child.get("Type", "1")
+                    node = ET.SubElement(parent_node, "NODE", Name=child["Name"], Type=ctype)
                     if ctype == "0":
                         # Folder
-                        node.set("Count", str(len([p for p in self.playlists if p['ParentID'] == child['ID']])))
-                        build_xml_node(node, child['ID'])
+                        node.set(
+                            "Count",
+                            str(len([p for p in self.playlists if p["ParentID"] == child["ID"]])),
+                        )
+                        build_xml_node(node, child["ID"])
                     elif ctype == "4":
                         # Smart playlist
                         _add_smart_list(node, child.get("SmartList") or {})
                         # Optional: also persist current materialised matches for tools that read XML literally
                         try:
                             from .smart_playlist_engine import evaluate as _eval_smart
-                            matched = _eval_smart(child.get("SmartList") or {}, list(self.tracks.values()))
+
+                            matched = _eval_smart(
+                                child.get("SmartList") or {}, list(self.tracks.values())
+                            )
                         except Exception:
                             matched = []
                         node.set("Entries", str(len(matched)))
                         for t in matched:
-                            ET.SubElement(node, "TRACK", Key=str(t.get('id') or t.get('TrackID')))
+                            ET.SubElement(node, "TRACK", Key=str(t.get("id") or t.get("TrackID")))
                     else:
                         # Normal playlist (Type=1)
-                        tracks_in_pl = self.playlists_tracks.get(child['ID'], [])
+                        tracks_in_pl = self.playlists_tracks.get(child["ID"], [])
                         node.set("Entries", str(len(tracks_in_pl)))
                         for t in tracks_in_pl:
-                            ET.SubElement(node, "TRACK", Key=str(t['id']))
+                            ET.SubElement(node, "TRACK", Key=str(t["id"]))
+
             build_xml_node(playlists_root_node, "ROOT")
             tree = ET.ElementTree(root)
             tree.write(str(self.xml_path), encoding="utf-8", xml_declaration=True)
@@ -705,6 +757,8 @@ class RekordboxXMLDB:
             logger.error(f"Failed to save XML: {e}", exc_info=True)
             return False
 
+
+@serialise_mutators
 class RekordboxDB:
     def __init__(self):
         # Discover Live DB path
@@ -716,7 +770,9 @@ class RekordboxDB:
         # 2. Fallback: standalone master.db inside our own app-data folder
         # (created on demand via OneLibrary.create — see ensure_standalone_master_db)
         if not self.live_db_path.exists():
-            standalone_dir = Path(os.path.expandvars(r"%APPDATA%\LibraryManagementSystem\rekordbox"))
+            standalone_dir = Path(
+                os.path.expandvars(r"%APPDATA%\LibraryManagementSystem\rekordbox")
+            )
             self.live_db_path = standalone_dir / "master.db"
 
         self.mode = "live" if self.live_db_path.exists() else "xml"
@@ -733,6 +789,7 @@ class RekordboxDB:
             return True
         try:
             import rbox
+
             self.live_db_path.parent.mkdir(parents=True, exist_ok=True)
             mytag_dbid = "lms_local_master"
             rbox.OneLibrary.create(str(self.live_db_path), mytag_dbid)
@@ -745,6 +802,7 @@ class RekordboxDB:
     def _get_hide_streaming_setting(self):
         try:
             from .services import SettingsManager
+
             return SettingsManager.load().get("hide_streaming", False)
         except (OSError, ValueError, KeyError, AttributeError) as e:
             logger.warning(
@@ -760,9 +818,15 @@ class RekordboxDB:
 
         def is_streaming(t):
             # Check both 'path' (standardized) and 'Location' (raw XML)
-            p = t.get('path', t.get('Location', ''))
-            if not p: return False
-            return p.startswith('soundcloud:') or p.startswith('spotify:') or p.startswith('tidal:') or p.startswith('beatport:')
+            p = t.get("path", t.get("Location", ""))
+            if not p:
+                return False
+            return (
+                p.startswith("soundcloud:")
+                or p.startswith("spotify:")
+                or p.startswith("tidal:")
+                or p.startswith("beatport:")
+            )
 
         if isinstance(tracks_source, dict):
             return {tid: t for tid, t in tracks_source.items() if not is_streaming(t)}
@@ -775,13 +839,16 @@ class RekordboxDB:
         return self._filter_tracks(self.active_db.tracks)
 
     @property
-    def playlists(self): return self.active_db.playlists
+    def playlists(self):
+        return self.active_db.playlists
 
     @property
-    def artists(self): return self.active_db.artists
+    def artists(self):
+        return self.active_db.artists
 
     @property
-    def genres(self): return self.active_db.genres
+    def genres(self):
+        return self.active_db.genres
 
     @property
     def xml_path(self):
@@ -796,11 +863,14 @@ class RekordboxDB:
         return self.xml_db
 
     def set_mode(self, mode: str) -> bool:
-        if mode not in ["xml", "live"]: return False
+        if mode not in ["xml", "live"]:
+            return False
         if mode == "live" and not self.live_db_path.exists():
             # auto-create our private standalone master.db so Live works without Rekordbox
             if not self.ensure_standalone_master_db():
-                logger.error("Cannot switch to live mode: master.db unavailable and standalone creation failed")
+                logger.error(
+                    "Cannot switch to live mode: master.db unavailable and standalone creation failed"
+                )
                 return False
         self.mode = mode
         logger.info(f"Switched to mode: {self.mode}")
@@ -812,7 +882,8 @@ class RekordboxDB:
             self.loaded = success
             return success
         else:
-            if not path: path = "rekordbox.xml"
+            if not path:
+                path = "rekordbox.xml"
             success = self.xml_db.load_xml(path)
             self.loaded = success
             return success
@@ -822,8 +893,8 @@ class RekordboxDB:
         self.xml_db.playlists = []
         self.xml_db.loaded = False
         if self.live_db:
-             self.live_db.tracks = {}
-             self.live_db.loaded = False
+            self.live_db.tracks = {}
+            self.live_db.loaded = False
         self.loaded = False
         return True
 
@@ -844,7 +915,8 @@ class RekordboxDB:
         return True
 
     def refresh_metadata(self) -> None:
-        if not self.active_db: return
+        if not self.active_db:
+            return
         if hasattr(self.active_db, "_finalize_ui_metadata"):
             self.active_db._finalize_ui_metadata()
         elif hasattr(self.active_db, "_extract_metadata"):
@@ -854,8 +926,12 @@ class RekordboxDB:
     def get_all_tracks(self) -> list[dict[str, Any]]:
         return list(self.tracks.values())
 
-    def get_all_artists(self) -> list[dict[str, Any]]: return self.active_db.artists
-    def get_all_genres(self) -> list[dict[str, Any]]: return self.active_db.genres
+    def get_all_artists(self) -> list[dict[str, Any]]:
+        return self.active_db.artists
+
+    def get_all_genres(self) -> list[dict[str, Any]]:
+        return self.active_db.genres
+
     def get_all_labels(self) -> list[dict[str, Any]]:
         if hasattr(self.active_db, "get_all_labels"):
             return self.active_db.get_all_labels()
@@ -865,22 +941,28 @@ class RekordboxDB:
         if hasattr(self.active_db, "get_all_albums"):
             return self.active_db.get_all_albums()
         return []
+
     def get_playlist_tree(self) -> list[dict[str, Any]]:
         if hasattr(self.active_db, "get_playlist_tree"):
             return self.active_db.get_playlist_tree()
         return []
+
     def get_tracks_by_artist(self, aid: str) -> list[dict[str, Any]]:
         return self._filter_tracks(self.active_db.get_tracks_by_artist(aid))
+
     def get_tracks_by_label(self, aid: str) -> list[dict[str, Any]]:
         if hasattr(self.active_db, "get_tracks_by_label"):
             return self._filter_tracks(self.active_db.get_tracks_by_label(aid))
         return []
+
     def get_tracks_by_album(self, aid: str) -> list[dict[str, Any]]:
         if hasattr(self.active_db, "get_tracks_by_album"):
             return self._filter_tracks(self.active_db.get_tracks_by_album(aid))
         return []
+
     def get_playlist_tracks(self, pid: str) -> list[dict[str, Any]]:
         return self._filter_tracks(self.active_db.get_playlist_tracks(pid))
+
     def get_track_details(self, tid: str) -> dict[str, Any] | None:
         return self.active_db.get_track_details(tid)
 
@@ -927,7 +1009,9 @@ class RekordboxDB:
             return self.active_db.create_playlist(name, parent_id, is_folder=True)
         return None
 
-    def create_smart_playlist(self, name: str, criteria: dict[str, Any], parent_id: str = "ROOT") -> dict[str, Any] | None:
+    def create_smart_playlist(
+        self, name: str, criteria: dict[str, Any], parent_id: str = "ROOT"
+    ) -> dict[str, Any] | None:
         if hasattr(self.active_db, "create_smart_playlist"):
             return self.active_db.create_smart_playlist(name, criteria, parent_id)
         # Fallback for LiveDB: register the criteria on a normal Type-1 playlist
@@ -959,6 +1043,7 @@ class RekordboxDB:
             return self.active_db.evaluate_smart_playlist(pid)
         # Fallback evaluator using our smart engine + DB-wrapper tracks
         from .smart_playlist_engine import evaluate as _eval
+
         criteria = (getattr(self, "_smart_overlay", {}) or {}).get(str(pid)) or {}
         if not criteria:
             return []
@@ -968,7 +1053,7 @@ class RekordboxDB:
         """Returns a list of tracks where Artwork is empty or None."""
         missing: list[dict[str, Any]] = []
         for t in self.tracks.values():
-            if not t.get('Artwork'):
+            if not t.get("Artwork"):
                 missing.append(t)
         return missing
 
@@ -982,7 +1067,7 @@ class RekordboxDB:
         if hasattr(self.active_db, "create_playlist"):
             pl = self.active_db.create_playlist(name, parent_id, is_folder)
             if pl and tracks:
-                pid = pl.get('ID') if isinstance(pl, dict) else getattr(pl, 'id', None)
+                pid = pl.get("ID") if isinstance(pl, dict) else getattr(pl, "id", None)
                 if pid:
                     for tid in tracks:
                         self.add_track_to_playlist(str(pid), str(tid))
@@ -1002,7 +1087,7 @@ class RekordboxDB:
     def save(self) -> bool:
         if hasattr(self.active_db, "save_xml"):
             return self.active_db.save_xml()
-        return True # Live DB is auto-saved or handled via updates
+        return True  # Live DB is auto-saved or handled via updates
 
     def update_tracks_metadata(self, track_ids: list[str], updates: dict[str, Any]) -> bool:
         success = True
@@ -1069,21 +1154,12 @@ class RekordboxDB:
             return False
 
 
-# Wrap every mutating method on the facade with the module-level write
-# lock so concurrent route handlers can't race against each other.
-# Reads (tracks property, get_track_details, get_playlist_tracks, etc.)
-# are NOT wrapped — they snapshot the underlying dicts on access.
-for _name in (
-    "set_mode", "load_library", "unload_library", "create_new_library",
-    "refresh_metadata", "add_track", "delete_track", "rename_playlist",
-    "move_playlist", "delete_playlist", "reorder_playlist_track",
-    "create_folder", "create_smart_playlist", "update_smart_playlist",
-    "create_playlist", "add_track_to_playlist", "remove_track_from_playlist",
-    "save", "update_tracks_metadata", "update_track_comment",
-    "update_track_path",
-):
-    setattr(RekordboxDB, _name, _serialised(getattr(RekordboxDB, _name)))
-del _name
+# Mutating methods on the facade are auto-wrapped by `@serialise_mutators`
+# (applied to the class above) — the module-level write lock serialises
+# concurrent route handlers. Reads (tracks property, get_*/list_* methods)
+# are NOT wrapped — they snapshot the underlying dicts on access. The old
+# hand-maintained `setattr` name-list was replaced by the prefix decorator
+# because the list silently drifted (missed `ensure_standalone_master_db`).
 
 
 db = RekordboxDB()

@@ -16,11 +16,13 @@ try:
 except ImportError:
     rbox = None
 
+from ._db_lock import serialise_mutators
 from .anlz_safe import SafeAnlzParser
 
 logger = logging.getLogger(__name__)
 
 
+@serialise_mutators
 class LiveRekordboxDB:
     def __init__(self, db_path: str):
         self.db_path = Path(db_path)
