@@ -1,7 +1,7 @@
 import React, { useState, useMemo, Component, useEffect, useCallback, Suspense, lazy } from 'react'
 import { invoke } from '@tauri-apps/api/core'; // Tauri Invoke
 import ReactDOM from 'react-dom/client'
-import { Music, Cloud, Download, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, Minus, Square, Unplug, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2, Sparkles, Copy, Layers, FilePlus, FolderOpen, ArrowLeft, Sliders, List, User, Tag, Disc, RefreshCw, TrendingDown, PlayCircle, ImageOff } from 'lucide-react'
+import { Music, Cloud, Download, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, Minus, Square, Unplug, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2, Sparkles, Copy, Layers, FilePlus, FolderOpen, ArrowLeft, Sliders, List, User, Tag, Disc, RefreshCw, TrendingDown, PlayCircle, ImageOff, Library } from 'lucide-react'
 import './index.css'
 import { ToastProvider } from './components/ToastContext'
 import { Toaster } from 'react-hot-toast'
@@ -114,7 +114,7 @@ const buildWorkspaces = (libraryStatus) => [
     label: 'SoundCloud',
     items: [
       { tab: 'soundcloud', label: 'SoundCloud', icon: Cloud },
-      { tab: 'sc-sync', label: 'SCloudLibrary', icon: Download },
+      { tab: 'sc-sync', label: 'Library', icon: Library },
       { tab: 'downloads', label: 'Downloads', icon: Download },
     ],
   },
@@ -325,7 +325,7 @@ const TopBar = ({
  * has more than one view — single-view workspaces (e.g. Studio in live mode)
  * stay fully immersive.
  */
-const WorkspaceNav = ({ items, activeTab, setActiveTab }) => (
+const WorkspaceNav = ({ items, activeTab, setActiveTab, rightSlot }) => (
   <div className="flex items-stretch h-7 bg-mx-shell/40 border-b border-line-subtle shrink-0 px-2 gap-1 select-none">
     {items.map((it) => {
       const Icon = it.icon
@@ -345,8 +345,80 @@ const WorkspaceNav = ({ items, activeTab, setActiveTab }) => (
         </button>
       )
     })}
+    {rightSlot && (
+      <>
+        <div className="flex-1 min-w-[8px]" />
+        <div className="flex items-center pr-0.5">{rightSlot}</div>
+      </>
+    )}
   </div>
 )
+
+/**
+ * ScAccountChip — compact "logged in as" indicator for the SoundCloud
+ * workspace, pinned to the right of the WorkspaceNav row so it shows across
+ * the SoundCloud / Library / Downloads views. Pulls the account once from the
+ * keyring-backed /api/soundcloud/me proxy and re-pulls on the shared
+ * sc:auth-changed / sc:auth-expired window events — no polling.
+ */
+const ScAccountChip = () => {
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      api
+        .get('/api/soundcloud/me')
+        .then((res) => { if (alive) setUser(res.data?.user ?? null); })
+        .catch(() => { if (alive) setUser(null); });
+    };
+    load();
+    const onChanged = () => load();
+    const onExpired = () => { if (alive) setUser(null); };
+    window.addEventListener('sc:auth-changed', onChanged);
+    window.addEventListener('sc:auth-expired', onExpired);
+    return () => {
+      alive = false;
+      window.removeEventListener('sc:auth-changed', onChanged);
+      window.removeEventListener('sc:auth-expired', onExpired);
+    };
+  }, []);
+
+  if (!user) {
+    return (
+      <span className="flex items-center gap-1.5 px-2 text-[10px] text-ink-muted">
+        <Cloud size={12} className="opacity-60" />
+        Not connected
+      </span>
+    );
+  }
+
+  return (
+    <a
+      href={user.permalink_url || 'https://soundcloud.com'}
+      target="_blank"
+      rel="noreferrer"
+      title={`Logged in as ${user.username}`}
+      className="flex items-center gap-1.5 pl-1 pr-2 py-0.5 rounded-full bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 transition-colors"
+    >
+      {user.avatar_url ? (
+        <img
+          src={user.avatar_url.replace('-large', '-t50x50')}
+          alt={user.username}
+          className="w-[18px] h-[18px] rounded-full object-cover ring-1 ring-orange-500/30"
+          onError={(e) => { e.target.style.display = 'none'; }}
+        />
+      ) : (
+        <span className="w-[18px] h-[18px] rounded-full bg-orange-500/30 flex items-center justify-center text-[9px] font-black text-orange-300">
+          {(user.username || '?')[0].toUpperCase()}
+        </span>
+      )}
+      <span className="text-[10px] font-semibold text-orange-300 max-w-[130px] truncate">
+        {user.username}
+      </span>
+    </a>
+  );
+};
 
 // Subtle dot-grid backdrop — sharp, low-contrast, no blur. Sits behind the
 // content so the screen feels like an extension of the app shell rather than
@@ -810,6 +882,7 @@ const App = () => {
             items={currentWorkspace.items}
             activeTab={activeTab}
             setActiveTab={setActiveTab}
+            rightSlot={currentWorkspace.id === 'soundcloud' ? <ScAccountChip /> : null}
           />
         )}
         <div className={`flex-1 min-h-0 w-full relative ${playerTrack ? 'pb-20' : ''}`}>

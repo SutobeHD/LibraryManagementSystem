@@ -99,6 +99,8 @@ const SoundCloudView = () => {
             // confirmed it accepted the token.
             await api.post('/api/soundcloud/auth-token', { token: newToken });
             setHasToken(true);
+            // Tell the workspace-bar account chip to re-pull /me.
+            window.dispatchEvent(new CustomEvent('sc:auth-changed'));
             toast.success('SoundCloud Login erfolgreich!');
         } catch (e) {
             const errStr = String(e);

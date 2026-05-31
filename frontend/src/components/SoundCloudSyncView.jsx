@@ -314,6 +314,8 @@ const SoundCloudSyncView = () => {
             await api.post('/api/soundcloud/auth-token', { token });
             toast.success('SoundCloud Login erfolgreich!');
             setAuthRequired(false);
+            // Tell the workspace-bar account chip to re-pull /me.
+            window.dispatchEvent(new CustomEvent('sc:auth-changed'));
             await fetchPlaylists();
         } catch (e) {
             const errStr = String(e);
