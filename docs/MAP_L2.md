@@ -310,6 +310,29 @@ FolderWatcher — auto-import audio files from user-configured folders.
 - `init_watcher()`
 - `shutdown_watcher()`
 
+### `app/format_swap_codec.py`
+
+Pure (dependency-free) decision logic for the library format converter.
+
+- `TargetSpec`
+- `target_extension()`
+- `rekordbox_file_type()` — The `DjmdContent.FileType` int the engine sets for a converted file.
+- `parse_bit_depth()` — Map `ffprobe -show_entries stream=sample_fmt,bits_per_raw_sample` output
+- `build_ffmpeg_cmd()` — Build the FFmpeg arg list (never a shell string — paths are list
+- `estimate_target_bytes()` — Estimated on-disk size of the converted batch (sum of sources × ratio).
+- `disk_verdict()` — Pre-flight verdict (OQ4).
+
+### `app/format_swap_tracker.py`
+
+Per-batch format-conversion progress tracker.
+
+- `register()` — Create a task for a batch we're about to convert.
+- `update()` — Patch fields on a task.
+- `mark_track()` — Convenience: record one track outcome (increments converted/failed).
+- `get()`
+- `get_all()`
+- `clear_finished()`
+
 ### `app/import_tracker.py`
 
 Per-file import-progress tracker — gives the frontend a live transparent
@@ -1813,6 +1836,29 @@ external_track_match unit tests (external-track-match-unified-module T-3..T-9).
 - `test_fingerprint_unavailable_when_binary_missing()`
 - `test_fingerprint_rejects_path_outside_roots()`
 - `test_module_has_no_db_writer_imports()`
+
+### `tests/test_format_swap.py`
+
+Unit tests for the dependency-free format-converter foundation:
+
+- `test_target_extensions()`
+- `test_unknown_target_raises()`
+- `test_rekordbox_file_type_codes_pinned()` — PROVISIONAL byte-level RB FileType codes — pinned so any change is
+- `test_aiff_cmd_16_and_24_bit()`
+- `test_flac_uses_s32_for_24bit()`
+- `test_mp3_quality_and_id3()`
+- `test_cmd_is_arg_list_no_shell_injection()` — A crafted filename stays a single list element — no shell parsing.
+- `test_no_ar_flag_when_sample_rate_missing()`
+- `test_parse_bit_depth_sample_fmt()`
+- `test_parse_bit_depth_bits_fallback()`
+- `test_parse_bit_depth_ambiguous_defaults_16()`
+- `test_estimate_target_bytes()`
+- `test_disk_verdict_abort_warn_ok()`
+- `test_tracker_register_and_get()`
+- `test_tracker_mark_track_progress()`
+- `test_tracker_beatgrid_flag_sticks_false()`
+- `test_tracker_status_history_dedupes()`
+- `test_tracker_clear_finished()`
 
 ### `tests/test_logging_redaction.py`
 

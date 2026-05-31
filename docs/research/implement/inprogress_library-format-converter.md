@@ -630,8 +630,8 @@ Each task maps back to a Step in ## Implementation Plan + has ≥1 row in ## Tes
 Ordered so earlier tasks unblock later (model → tracker → engine → routes → sister → falsifiers → perf → frontend). 1 task = 1 `routine/library-format-converter-task-N` branch = 1 PR.
 
 - [ ] **T-1 — Shared request model.** `FormatSwapReq` Pydantic v2 (`trigger`/`scope`/`target`/`dry_run`/`options`) in a standalone module importable by both this feature + sister `quality-upgrade-finder`. Validators: exactly-one-scope-key, target enum, options caps. — covers Step 7/10, tests T8, T23.
-- [ ] **T-2 — Task tracker.** `app/format_swap_tracker.py` — thread-safe singleton (`register/update/get`, `_MAX_KEEP` prune), modeled on `app/import_tracker.py`. — covers Step 8, test T10.
-- [ ] **T-3 — Engine probe + codec + disk preflight.** `app/format_converter.py` (part 1): `probe_bit_depth`/`probe_sample_rate` (ffprobe), per-target FFmpeg cmd builder (AIFF/FLAC/WAV/MP3, arg-list `shell=False`, `-ar` source-locked, 600s timeout), disk preflight (1.5× abort / 1.2× warn). — covers Steps 3/4/5/6, tests T3, T4, T5, T6, T7, T16.
+- [x] **T-2 — Task tracker.** `app/format_swap_tracker.py` — thread-safe singleton (`register/update/get/mark_track/clear_finished`, `_MAX_KEEP` prune), modeled on `app/import_tracker.py`. — covers Step 8, test T10. **DONE** (commit pending; `tests/test_format_swap.py`, runnable without deps).
+- [~] **T-3 — Engine probe + codec + disk preflight.** PURE decision logic DONE + tested in `app/format_swap_codec.py` (`build_ffmpeg_cmd` arg-list/`-ar`-locked/per-target codec, `parse_bit_depth` sample_fmt+fallback, `estimate_target_bytes`, `disk_verdict` 1.5×/1.2×, `TARGET_SPECS` incl. provisional Rekordbox `FileType` codes). REMAINING: the `ffprobe` subprocess invocation + 600s-timeout wiring live in `app/format_converter.py` (engine) — deferred to a runner with FFmpeg. — covers Steps 3/4/5/6, tests T3, T4, T5, T6, T7, T16.
 - [ ] **T-4 — Engine swap + snapshot + manifest.** `app/format_converter.py` (part 2): `FormatSwapEngine.run` — batch `_db_write_lock` acquire, watchdog (kill RB every 50 tracks), atomic manifest anchored pre-write, per-track row mutation `update_content` (content_id preserved, no delete+readd), per-track DB-fail individual rollback, tracker updates. — covers Steps 1/2, tests T1, T2, T12, T20.
 - [ ] **T-5 — Engine rollback.** `FormatSwapEngine.rollback(manifest_id)` — restore DB+WAL+SHM, rename `.backup-<ts>` audio back, delete new files, under `db_lock()`; `manifest_id` opaque-basename guard under `FORMAT_SWAP_BACKUP_DIR`. — covers Step 9, tests T19, T22.
 - [ ] **T-6 — POST /api/library/format-swap route.** `app/main.py`: `Depends(require_session)`, `validate_audio_path` per src+dst, dir-scope resolve+`is_relative_to`, `_is_rekordbox_running` 409, mode≠live 400; `dry_run=True` sync plan, `dry_run=False` spawn daemon thread + `{task_id}`. Never log token/full paths. — covers Step 7, tests T8, T9, T13, T14, T15, T17, T18, T21, T23.
@@ -715,8 +715,27 @@ Stage 4. One row per task PR. `research-implement` appends; user notes the merge
 
 Filled during `inprogress_`. Dated entries. What built / surprised / changed-from-plan.
 
-### YYYY-MM-DD
-- …
+### 2026-05-31 — foundation shipped (T-2 + T-3-pure); engine/routes/UI deferred; proof-script blocker
+
+**Built + verified (commit pending, branch `claude/research-continuation-U6R4p`):**
+- `app/format_swap_tracker.py` (T-2) — thread-safe batch progress singleton (`register/update/mark_track/get/get_all/clear_finished`, status `Queued|Converting|Completed|Aborted|Failed`, auto-progress %, sticky `beatgrid_preserved=false`). Modelled on `import_tracker.py`.
+- `app/format_swap_codec.py` (T-3 pure core) — dependency-free decision logic, the correctness-critical part: `build_ffmpeg_cmd` (arg-list never shell — Threat CI-1; `-vn`/`-map_metadata 0`/`-ar` source-locked per OQ1; per-target codec), `parse_bit_depth` (sample_fmt primary + bits fallback, OQ6), `estimate_target_bytes` + `disk_verdict` (1.5× abort / 1.2× warn, OQ4), `TARGET_SPECS`.
+- `tests/test_format_swap.py` — 19 tests, all green; `ruff` + `mypy` clean. Run directly (no FFmpeg/rbox/pydantic/fastapi needed).
+
+**Changed from plan:** split T-3's pure logic into `format_swap_codec.py` (separate from the rbox/FFmpeg engine `format_converter.py`) so it is unit-testable in CI without FFmpeg. Engine orchestration imports it.
+
+**Added per owner feedback:** Rekordbox `DjmdContent.FileType` codes in `TARGET_SPECS` (AIFF=12/WAV=11/FLAC=5/MP3=1, M4A=4 source) so the engine reuses one source of truth. **PROVISIONAL** — byte-level RB values, pinned by `test_rekordbox_file_type_codes_pinned`; MUST be verified against a real `master.db` / pyrekordbox `FileType` enum before `implemented_` (CLAUDE.md byte-verification rule).
+
+**BLOCKER (Step 1 premise):** the plan's Step 1 says "port `scripts/dev/safe_format_swap.py` into `FormatSwapEngine`". **That file does NOT exist in this checkout** — `ls` + `git log --all -- scripts/dev/safe_format_swap.py` find nothing. Research wave-1 originally found it ABSENT; the wave-2 "closure" claimed it was committed at `fdb461c` — that claim is not backed by a file on this branch. The engine's snapshot/manifest/watchdog/rollback design rests on line-cites into a missing artifact. Before T-4/T-5 (engine + rollback) can be built faithfully, either the real script must be located/committed, or the engine re-derived from `app/soundcloud_downloader.py:_convert_to_aiff` + first principles (and re-reviewed).
+
+**Deferred (need a runner with the deps — NOT blind-shipped, this path mutates master.db + transcodes irreplaceable audio):**
+- T-1 `FormatSwapReq` Pydantic model — needs `pydantic` (absent); best authored with the route.
+- T-3 remainder — `ffprobe` subprocess + 600s-timeout wiring (needs FFmpeg).
+- T-4/T-5 engine swap + rollback — need `rbox` + FFmpeg + a real `master.db`; blocked also by the proof-script finding above.
+- T-6/T-7 routes — need `fastapi`.
+- T-9/T-10/T-11 Phase-1a/1b/multi-source empirical drills — need FFmpeg + real AAC fixtures + (ideally) Rekordbox export-XML.
+- T-12 perf — needs the engine.
+- T-13/T-14 frontend — need node/browser (`e2e-tester`).
 
 ---
 
