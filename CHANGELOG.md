@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- Hardened: `master.db` write serialisation now covers every writer. A
+  prefix-matched `@serialise_mutators` class decorator (`app/_db_lock.py`)
+  replaces the hand-maintained name-list that had silently drifted (it missed
+  `ensure_standalone_master_db` and the `LiveRekordboxDB` MyTag writers reached
+  via `_require_live_db()`); `AnalysisDBWriter`'s rbox-direct write now acquires
+  `db_lock()` at the callsite. A prefix-independent AST write-sink drift guard
+  (`tests/test_concurrency.py`) fails CI if any future unprotected `master.db`
+  writer is added. Prevents concurrent-write corruption / rbox panics under
+  multi-threaded request load.
 - Added: Phase-1 Bearer-token authentication on 84 mutation endpoints.
   New `app/auth.py` self-generates session token at sidecar boot, captured
   by Tauri stdout reader + dev-middleware fallback. Frontend attaches

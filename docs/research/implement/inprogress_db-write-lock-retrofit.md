@@ -24,6 +24,7 @@ ai_tasks: false
 - 2026-05-31 — `implement/review_` — plan filled (Impl Plan + Threat + Migration N/A + Perf + API/UX none + Telemetry + 9-row Test Plan + 5-task queue; XMLDB excluded, import-cycle risk flagged); Plan-Reviewer next
 - 2026-05-31 — `implement/approvalgate_` — Plan-Reviewer PASS (all 14 boxes, 0 rework; verified AST scope complete + import-cycle/mytag/AnalysisDBWriter handling); mockup + Approval Summary ready; awaiting user `/approve` or `/reject`
 - 2026-05-31 — `implement/accepted_` — approved by user (batch approve alongside library-format-converter)
+- 2026-05-31 — `implement/inprogress_` — T-1..T-4 shipped on `claude/research-continuation-U6R4p` (commit `4eecafb`): `app/_db_lock.py` + `@serialise_mutators` on both classes, `setattr` loop deleted, AnalysisDBWriter callsite lock, `tests/test_concurrency.py` (drift guard + harness, 9 tests). ruff+mypy clean; tests verified directly (rbox/fastapi absent in env). T-5 docs remaining
 
 ## AI Tasks
 
@@ -371,11 +372,11 @@ Small, individually-committable implementation tasks. 1 task = 1 routine/db-writ
 Each task maps to Steps in ## Implementation Plan + ≥1 row in ## Test Plan.
 -->
 
-- [ ] **T-1 — `@serialise_mutators` decorator + apply + delete loop.** Define decorator + `_MUTATOR_PREFIXES` (resolve cross-module lock/decorator hosting, no import cycle — `app/_db_lock.py` if needed); apply to `RekordboxDB` + `LiveRekordboxDB`; delete `setattr` loop `:1076-1086`. — covers Steps 1-4, tests TC4, TC5, TC6, TC8.
-- [ ] **T-2 — AnalysisDBWriter callsite lock + manifest.** `with db_lock():` around `_update_db` write region (`:244-258`); add `KNOWN_CALLSITE_PROTECTED` manifest. — covers Steps 5-6, test TC7.
-- [ ] **T-3 — AST write-sink drift guard (CI gate).** `tests/test_concurrency.py::test_no_unprotected_master_db_writer` — prefix-independent write-sink detection across 3 modules. — covers Step 7, test T-conc2.
-- [ ] **T-4 — Concurrent harness + negative control.** `@pytest.mark.slow` 8-thread write harness + no-op-lock negative control. — covers Step 8, tests T-conc1, T-conc3.
-- [ ] **T-5 — Docs sync.** `docs/FILE_MAP.md` + `/regen-maps` (new `test_concurrency.py`, decorator symbol); `CHANGELOG.md` if deemed user-visible (internal hardening — likely a one-line note). — done at `implemented_`.
+- [x] **T-1 — `@serialise_mutators` decorator + apply + delete loop.** Define decorator + `_MUTATOR_PREFIXES` (resolve cross-module lock/decorator hosting, no import cycle — `app/_db_lock.py` if needed); apply to `RekordboxDB` + `LiveRekordboxDB`; delete `setattr` loop `:1076-1086`. — covers Steps 1-4, tests TC4, TC5, TC6, TC8. **(commit `4eecafb`)**
+- [x] **T-2 — AnalysisDBWriter callsite lock + manifest.** `with db_lock():` around `_update_db` write region (`:244-258`); add `KNOWN_CALLSITE_PROTECTED` manifest. — covers Steps 5-6, test TC7. **(commit `4eecafb`)**
+- [x] **T-3 — AST write-sink drift guard (CI gate).** `tests/test_concurrency.py::test_no_unprotected_master_db_writer` — prefix-independent write-sink detection across 3 modules. — covers Step 7, test T-conc2. **(commit `4eecafb`)**
+- [x] **T-4 — Concurrent harness + negative control.** serialisation harness + no-op-lock negative control. — covers Step 8, tests T-conc1, T-conc3. **(commit `4eecafb`)**
+- [x] **T-5 — Docs sync.** `docs/MAP.md`/`MAP_L2.md` regen (`4eecafb`); `docs/FILE_MAP.md` (`_db_lock.py` row + `database`/`live_database`/`analysis_db_writer` updates); `CHANGELOG.md` Unreleased note.
 
 ## Review
 
@@ -460,7 +461,14 @@ FAILED - unprotected master.db writer: LiveRekordboxDB.import_library
 
 ## Implementation Log
 
-_(empty — fill at `inprogress_`)_
+### 2026-05-31 — T-1..T-4 shipped (commit `4eecafb`, branch `claude/research-continuation-U6R4p`)
+
+- **Import cycle resolved** as the plan's gate-condition flagged: `database.py:14` imports `LiveRekordboxDB`, so the lock/decorator moved to a standalone `app/_db_lock.py` (pure stdlib, nothing cycles through it). `database.py` re-exports `_db_write_lock`/`db_lock`/`_serialised` → existing importers (`tests/test_database.py`, `app/metadata_fixer/applier.py`) unchanged.
+- **Prefix tuple verified empirically** against `vars(RekordboxDB)`/`vars(LiveRekordboxDB)`: wraps all 22 RekordboxDB mutators (incl. the previously-missed `ensure_standalone_master_db`) + all 14 LiveRekordboxDB writers (incl. the 3 `_try_call` mytag methods); leaves every `get_*`/`list_*`/property/`load` untouched. 0 over/under-wrap.
+- **Changed-from-plan — serialisation harness**: plan T-conc1 specified an 8-thread real-`master.db` write harness. rbox is not pip-installable on this runner (+ no fastapi → full pytest can't run here), so the harness instead drives a `@serialise_mutators`-wrapped probe through the real `_db_write_lock` and asserts peak in-critical-section concurrency == 1, with a no-op-lock negative control asserting peak > 1. Deterministic, rbox-independent, proves the same contract (the lock is load-bearing). A real-rbox integration harness can be added when rbox is available on a runner.
+- **Drift guard** detects writers by AST write-sink (`.db.<rbox-write>` / `self._try_call` / module-level `rbox.*.create`) across the 3 modules, independent of the decorator's prefix set; `KNOWN_CALLSITE_PROTECTED={"AnalysisDBWriter._update_db"}` and the guard asserts each manifest entry actually acquires the lock (non-gameable). `test_drift_guard_finds_the_known_writers` guards against the guard silently detecting nothing.
+- **Verification**: 9/9 tests pass (run directly, no pytest/rbox); `ruff check` clean on `_db_lock.py` + `test_concurrency.py` + `analysis_db_writer.py`; `mypy app/_db_lock.py` clean; `database.py`/`live_database.py` carry only pre-existing slopcode-cleanup lint (none on changed lines). `docs/MAP.md`/`MAP_L2.md` regenerated.
+- **Remaining**: T-5 (FILE_MAP + CHANGELOG). Not graduating to `implemented_` — needs user sign-off + (ideally) a real-rbox run of the harness on a capable runner.
 
 ---
 
