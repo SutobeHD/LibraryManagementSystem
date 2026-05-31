@@ -417,15 +417,92 @@ Stage 2 wave-2 verifier over the whole research body. ≤80 words. PASS → `eva
 
 ## Threat Model
 
-_(Stage 3 Threat-Modeller-Agent — pending)_
+### Assets
+- **Rekordbox `master.db`** + WAL/SHM — beatgrid, cues, hot/memory cues, MyTag, playlist membership (content_id-keyed). Corruption = silent library loss.
+- **Original audio files** — irreplaceable user masters; snapshot/manifest is sole recovery.
+- **`SESSION_TOKEN`** / paired device-token (`app/auth.py`) — bearer secrets, never-log.
+- **Filesystem outside `ALLOWED_AUDIO_ROOTS`** — attacker goal: read/write/overwrite arbitrary files via crafted `scope.path`, output path, or `manifest_id`.
+
+### Trust boundaries
+- HTTP body (`scope`, `target`, `options`, `manifest_id`) = **untrusted** — validate before use.
+- `require_session` gate = trust boundary; only past it does engine touch DB/FS.
+- `db.tracks` paths = user-trusted (Rekordbox import) per `validate_audio_path:208-217` escape-hatch.
+- FFmpeg subprocess = trusted binary, **untrusted argv** (filenames from FS/DB).
+- rbox `update_content` = trusted only under `_db_write_lock` held.
+
+### Threats (STRIDE-light)
+
+| ID | Threat | Mitigation in plan | Test covers |
+|---|---|---|---|
+| FS-1 | `scope.path` traverses outside sandbox (`../`, symlink, abs path) | Resolve + `is_relative_to(ALLOWED_AUDIO_ROOTS)` on dir before enumeration; `validate_audio_path:185` per resolved src; dir-scope needs its own resolve-then-`is_relative_to` check (validate_audio_path is file-only/extension-gated, won't cover a dir) | T13 |
+| FS-2 | Output/dst path escapes sandbox (new ext, attacker-influenced name) | Derive dst from validated src dir only (same parent, ext swap); re-resolve + `is_relative_to` dst; never accept dst from body | T14 |
+| A-1 | Missing/forged Bearer hits mutating routes | All 3 routes `Depends(require_session)` (`app/auth.py`); constant-time `safe_compare` | T15 |
+| CI-1 | Command injection via crafted filename into FFmpeg | `subprocess.run([...], shell=False)` arg-list (never string); paths passed as list elements, `-i`/dst positional | T16 |
+| DOS-1 | Huge batch / 5.5× expansion exhausts disk | Step 5 preflight `shutil.disk_usage().free`; 400 abort at 1.5×est before any write; per-track 600s timeout (Step 6) | T17 |
+| TI-1 | Concurrent writer corrupts `master.db` (lock bypass) | `_db_write_lock` (`app/database.py:22`) acquired once batch-scoped, in-process thread (Gap 4); `_is_rekordbox_running` → 409 | T18 |
+| FS-3 | Rollback `manifest_id` traversal → restore/overwrite arbitrary file | Treat `manifest_id` as opaque basename; reject path separators/`..`; resolve under fixed `FORMAT_SWAP_BACKUP_DIR` (app-data, Step 9) + `is_relative_to` | T19 |
+| T-1 | Originals deleted/overwritten before snapshot | Manifest written atomically + anchored before first track (Step 9/Risks); originals kept `.backup-<ts>`, never deleted until user confirm; per-track DB-fail individual rollback | T20 |
+| ID-1 | Token / full paths leak in logs | Never-log token rule (`app/auth.py`); Telemetry logs filenames+markers only, no token, no full src paths; `safe_error_message` sanitises | T21 |
+
+### Residual risk
+n=1→library-wide AAC-priming extrapolation may mis-preserve beatgrid for unprobed sources → `beatgrid_preserved=false` warn-and-reanalyze fallback, not corruption. Rollback proven small-scale only (Phase-1b drill). `validate_audio_path` db.tracks exact-match escape-hatch trusts import integrity. Disk-pressure rollback path unproven. Sister-endpoint coupling drift until bilateral signature lands.
 
 ## Migration Path
 
-_(Stage 3 Migration-Path-Agent — pending)_
+### Before → After
+
+**DjmdContent row (today):** `content_id=<N>`, `FolderPath="D:/Music/x.m4a"`, `FileName="x.m4a"`, `FileType=4` (m4a), `FileSize=<aac bytes>`. On disk: `x.m4a`. Beatgrid/CuePoint/MyTag/History/HotCueBank/RelatedTracks all FK → `content_id` (OQ5; Gap 2 sweep).
+
+**After swap:** SAME `content_id=<N>`. `FolderPath="D:/Music/x.aiff"`, `FileName="x.aiff"`, `FileType=<aiff code>`, `FileSize=<pcm bytes>`. On disk: `x.aiff` (new) + `x.m4a.backup-<ts>` (original kept). All content_id-keyed children untouched.
+
+**Existing-data handling:** in-place row mutation — `c.folder_path/file_name_l/file_type/file_size` set, then `db.update_content(c)` (`safe_format_swap.py:320-325`) under batch `_db_write_lock`. NEVER delete+readd (new content_id orphans beatgrid/cues).
+
+### Backfill / forward-compat
+
+**No schema migration** — no new `master.db` table/column; row-level field mutation only. No backfill script.
+
+**Old client reads:** Rekordbox reads mutated rows directly. content_id binding keeps beatgrid, cues, hot/memory cues, MyTag, playlist membership intact (OQ5 + Gap 2). RB re-reads audio at new FolderPath.
+
+**Rollback recipe** (from `manifest.json`, ported `safe_format_swap.py:383-412`):
+1. RB closed — `_is_rekordbox_running()` → 409 abort if open.
+2. For each `manifest["db_backups"]` entry: `shutil.copy2(backup, orig)` — restores `master.db` + `-wal` + `-shm`.
+3. For each `manifest["tracks"]`: rename `original.audio_backup` (`x.m4a.backup-<ts>`) → `original.folder_path` (`x.m4a`); `unlink` `new.folder_path` (`x.aiff`).
+4. Under `db_lock()`. Manifest written atomically (tmp+replace, `:273-278`), anchored before first track — partial runs fully revertable.
+
+### User-visible behavior during migration
+
+**Downtime:** Rekordbox MUST be closed. Pre-flight 409 if running; watchdog kills auto-relaunched `rekordbox.exe`/`Upmgr` every 50 tracks (`:77-94`, `:290`). Library locked from RB use until run completes or rolled back.
+
+**Progress UI:** non-blocking — `POST` returns `task_id` immediately; daemon thread converts; frontend polls `GET status/{task_id}` (Queued|Converting|Completed|Aborted|Failed, per-track counter, `beatgrid_preserved`).
+
+**App startup:** independent — converter is a triggered batch task, not a boot dependency. App starts/runs normally before, during, after. Originals kept as `.backup-<ts>` until user confirms.
 
 ## Performance Budget
 
-_(Stage 3 Perf-Budget-Agent — pending)_
+| Path | Budget | Measured today | Source |
+|---|---|---|---|
+| `POST .../format-swap` dry-run (sync) | p95 ≤ 1.5s for 3041 tracks | untested | estimate. Enumerate from DB + sum `file_size` (no ffprobe per track — uses `DjmdContent.FileSize` already in `master.db`). No per-track probe in dry-run → fast. |
+| `POST .../format-swap` launch (`dry_run=false`) | ≤ 50ms to return `task_id` | untested | estimate. Registers task + spawns daemon thread, returns immediately. No transcode on request path. |
+| `GET .../status/{task_id}` | p95 ≤ 10ms | untested | estimate. In-memory dict lookup in `format_swap_tracker` (clone of `import_tracker`). No DB, no disk. |
+| Per-track transcode throughput | ≥ 10x realtime | ~10x realtime, CPU+disk-bound | OQ3 empirical (ffmpeg `pcm_s16le`). 60-min set: 6-30s SSD / 60-180s slow USB. |
+| Full-batch wall-clock, 3041-track headline (m4a→AIFF) | SSD ≤ 25 min; slow USB ≤ 3.5 hr | proven complete (3041-run, `safe_format_swap.py`, wall-clock not recorded) | OQ3 extrapolation. Avg ~4-min track ≈ 0.4-2.4s SSD / 4-12s USB. ×3041 ≈ 20-120 min SSD, 3-10 hr USB. Mix-dependent. |
+| Peak memory | ≤ 150 MB RSS over baseline | untested | estimate. Engine streams one ffmpeg subprocess per track; no whole-library audio in RAM. Manifest JSON + DB handle only. |
+
+### Worst-case scenario
+
+Input: 5000-track lib, all 60-min DJ sets, target AIFF, on antivirus-scanned slow USB.
+
+Impact:
+- Wall-clock: 5000 × 60-180s = **80-250 hr** (multi-day). Per-track 600s timeout caps any single hang.
+- Disk: 5.5x expansion + `.backup-<ts>` originals kept → ~6.5x source footprint live. Preflight aborts (400) before write if `free < 1.5×est`.
+- **Lock contention (key risk):** engine holds `_db_write_lock` for the WHOLE batch (Gap 4, per-batch for atomicity). Every other `master.db` writer — mytag edits, analysis writes, cue saves — **blocks for the entire run** (here days, realistically minutes-hours). Real cost, not theoretical.
+
+Mitigation if exceeded:
+- Disk preflight 1.5x hard-abort / 1.2x warn (OQ4).
+- Per-track 600s subprocess timeout (OQ3).
+- RB-restart watchdog every 50 tracks.
+- Scope down (track_ids / playlist / path) — user controls batch size.
+- Lock tradeoff: per-track lock would free writers between tracks but **breaks batch atomicity** (partial-state visible to concurrent readers, harder rollback). Plan chose per-batch deliberately (Gap 4). **Documented contention cost: long batches = long writer starvation. Recommend UI warning when batch > ~500 tracks; consider per-N-track lock release as a future option if starvation observed.**
 
 ## API / UX Surface
 
