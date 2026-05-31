@@ -1,7 +1,7 @@
 import React, { useState, useMemo, Component, useEffect, useCallback, Suspense, lazy } from 'react'
 import { invoke } from '@tauri-apps/api/core'; // Tauri Invoke
 import ReactDOM from 'react-dom/client'
-import { Music, Cloud, Download, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2, Sparkles, Copy, Layers, FilePlus, FolderOpen, ArrowLeft, Sliders, List, User, Tag, Disc, RefreshCw, TrendingDown, PlayCircle, ImageOff } from 'lucide-react'
+import { Music, Cloud, Download, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, Minus, Square, Unplug, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2, Sparkles, Copy, Layers, FilePlus, FolderOpen, ArrowLeft, Sliders, List, User, Tag, Disc, RefreshCw, TrendingDown, PlayCircle, ImageOff } from 'lucide-react'
 import './index.css'
 import { ToastProvider } from './components/ToastContext'
 import { Toaster } from 'react-hot-toast'
@@ -158,25 +158,46 @@ const TopBar = ({
   onLoadLibrary,
   onUnloadLibrary,
 }) => {
-  const handleExit = async () => {
-    if (await confirmModal({ title: 'Exit Application?', confirmLabel: 'Exit' })) {
+  const isTauri =
+    typeof window !== 'undefined' &&
+    !!(window.__TAURI_INTERNALS__ || window.__TAURI__ || window.__TAURI_METADATA__);
+
+  // Frameless window (decorations:false): we draw our own minimize / maximize /
+  // close controls. Close pings the sidecar shutdown route first (Bearer
+  // auto-attached by the api.js interceptor) before tearing the window down.
+  const winCtl = async (action) => {
+    if (action === 'close') {
       try {
-        // Phase-1 auth: shutdown is gated via require_session Bearer
-        // (auto-attached by api.js interceptor). No query-string token.
         await api.post('/api/system/shutdown');
       } catch (e) {
-        // Best-effort shutdown ping — backend might already be down by the
-        // time we get here (Tauri runtime closes before this resolves).
+        // Best-effort — backend may already be down by the time this resolves.
         log.debug('shutdown ping failed', e);
       }
-      window.close();
-      document.body.innerHTML =
-        "<div style='color:white;display:flex;justify-content:center;height:100vh;align-items:center;background:#0f172a;font-family:sans-serif'>Application Closed</div>";
+    }
+    if (!isTauri) {
+      if (action === 'close') {
+        window.close();
+        document.body.innerHTML =
+          "<div style='color:white;display:flex;justify-content:center;height:100vh;align-items:center;background:#0f172a;font-family:sans-serif'>Application Closed</div>";
+      }
+      return;
+    }
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const w = getCurrentWindow();
+      if (action === 'min') return await w.minimize();
+      if (action === 'max') return await w.toggleMaximize();
+      if (action === 'close') return await w.close();
+    } catch (e) {
+      log.debug('window control failed', e);
     }
   };
 
   return (
-    <div className="flex items-stretch h-10 bg-mx-shell border-b border-line-subtle shrink-0 select-none relative z-20">
+    <div
+      data-tauri-drag-region
+      className="flex items-stretch h-10 bg-mx-shell border-b border-line-subtle shrink-0 select-none relative z-20"
+    >
       {/* Brand */}
       <div className="flex items-center gap-2 px-3.5 border-r border-line-subtle shrink-0">
         <div className="flex items-end gap-[2px]">
@@ -206,7 +227,7 @@ const TopBar = ({
         )
       })}
 
-      <div className="flex-1 min-w-[12px]" />
+      <div className="flex-1 min-w-[12px]" data-tauri-drag-region />
 
       {/* Library status */}
       <div className="flex items-center gap-2 px-3 border-l border-line-subtle shrink-0">
@@ -245,12 +266,12 @@ const TopBar = ({
             className="p-1 bg-mx-card hover:bg-bad/15 text-ink-muted hover:text-bad rounded-mx-sm transition-colors border border-line-subtle"
             title="Unload library"
           >
-            <X size={11} />
+            <Unplug size={11} />
           </button>
         )}
       </div>
 
-      {/* Settings + Exit */}
+      {/* Settings */}
       <button
         onClick={() => setActiveTab('settings')}
         title="Settings"
@@ -262,12 +283,28 @@ const TopBar = ({
       >
         <Settings size={15} />
       </button>
+
+      {/* Window controls (frameless — replaces the native title bar) */}
       <button
-        onClick={handleExit}
-        title="Exit"
-        className="flex items-center px-3 border-l border-line-subtle text-ink-muted hover:text-bad hover:bg-mx-hover transition-colors shrink-0"
+        onClick={() => winCtl('min')}
+        title="Minimize"
+        className="flex items-center px-3 border-l border-line-subtle text-ink-secondary hover:text-ink-primary hover:bg-mx-hover transition-colors shrink-0"
       >
-        <AlertTriangle size={15} />
+        <Minus size={15} />
+      </button>
+      <button
+        onClick={() => winCtl('max')}
+        title="Maximize"
+        className="flex items-center px-3 border-l border-line-subtle text-ink-secondary hover:text-ink-primary hover:bg-mx-hover transition-colors shrink-0"
+      >
+        <Square size={12} />
+      </button>
+      <button
+        onClick={() => winCtl('close')}
+        title="Close"
+        className="flex items-center px-3 border-l border-line-subtle text-ink-secondary hover:text-white hover:bg-bad transition-colors shrink-0"
+      >
+        <X size={15} />
       </button>
     </div>
   )
@@ -282,7 +319,7 @@ const TopBar = ({
  * stay fully immersive.
  */
 const WorkspaceNav = ({ items, activeTab, setActiveTab }) => (
-  <div className="flex items-stretch h-9 bg-mx-shell/40 border-b border-line-subtle shrink-0 px-2 gap-1 select-none">
+  <div className="flex items-stretch h-7 bg-mx-shell/40 border-b border-line-subtle shrink-0 px-2 gap-1 select-none">
     {items.map((it) => {
       const Icon = it.icon
       const active = activeTab === it.tab
@@ -290,13 +327,13 @@ const WorkspaceNav = ({ items, activeTab, setActiveTab }) => (
         <button
           key={it.tab}
           onClick={() => setActiveTab(it.tab)}
-          className={`flex items-center gap-1.5 px-3 my-1 rounded-sm text-[11px] whitespace-nowrap transition-colors ${
+          className={`flex items-center gap-1.5 px-2.5 my-0.5 rounded-sm text-[10px] whitespace-nowrap transition-colors ${
             active
               ? 'bg-mx-selected text-ink-primary font-medium'
               : 'text-ink-secondary hover:text-ink-primary hover:bg-mx-hover'
           }`}
         >
-          <Icon size={13} className={active ? 'text-amber2' : 'opacity-70'} />
+          <Icon size={12} className={active ? 'text-amber2' : 'opacity-70'} />
           {it.label}
         </button>
       )
