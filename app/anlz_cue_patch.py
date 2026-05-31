@@ -141,6 +141,45 @@ def _patch_one_file(path: Path, memory_cues: list[dict[str, Any]], include_pco2:
     return True
 
 
+def read_beats_from_anlz(anlz_dir: str) -> list[float]:
+    """
+    Read beat timestamps (in seconds) from a track's ANLZ PQTZ tag.
+
+    rbox's MasterDb exposes no beat-grid getter, so the grid is read straight
+    from the on-disk ANLZ `.DAT` — the same beat grid Rekordbox persists and
+    the same file the phrase cues are written into. Returns [] when there is
+    no `.DAT` / PQTZ tag (track not analysed) or the file is malformed.
+
+    PQTZ layout (big-endian): 24-byte header
+        tag(4) hdr_len(4) total_len(4) reserved(4) reserved(4) entry_count(4)
+    then `entry_count` 8-byte entries: beat_number(u16) tempo(u16) time_ms(u32).
+    """
+    dats = sorted(Path(anlz_dir).glob("*.DAT"))
+    if not dats:
+        return []
+    data = dats[0].read_bytes()
+    if data[:4] != PMAI_MAGIC:
+        return []
+
+    tags, _ = _walk_tags(data)
+    for magic, start, total_len in tags:
+        if magic != b"PQTZ" or total_len < 24:
+            continue
+        entry_count = struct.unpack(">I", data[start + 20 : start + 24])[0]
+        beats: list[float] = []
+        off = start + 24
+        for _ in range(entry_count):
+            if off + 8 > len(data):
+                break
+            time_ms = struct.unpack(">I", data[off + 4 : off + 8])[0]
+            beats.append(time_ms / 1000.0)
+            off += 8
+        beats.sort()
+        logger.info("read_beats_from_anlz: %d beats from %s", len(beats), dats[0].name)
+        return beats
+    return []
+
+
 def patch_memory_cues(
     anlz_dir: str,
     memory_cues: list[dict[str, Any]],

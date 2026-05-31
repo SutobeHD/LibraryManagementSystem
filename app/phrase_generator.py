@@ -16,7 +16,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from .anlz_cue_patch import patch_memory_cues
+from .anlz_cue_patch import patch_memory_cues, read_beats_from_anlz
 
 logger = logging.getLogger(__name__)
 
@@ -36,18 +36,20 @@ class PhraseNotAnalysedError(RuntimeError):
 
 def extract_beats_from_db(track_id: int, db_path: str) -> list[float]:
     """
-    Retrieve stored beat positions (in seconds) from the Rekordbox master.db.
+    Retrieve stored beat positions (in seconds) for a track.
 
-    Uses rbox to access the track's beatgrid.  Returns an empty list if the
-    track has no stored beatgrid (e.g. not yet analysed).
+    rbox's MasterDb exposes no beat-grid getter, so beats are read from the
+    track's on-disk ANLZ PQTZ tag — the same grid Rekordbox persists and the
+    same file the phrase cues are written into. `db_path` is used only to
+    locate the ANLZ directory (via rbox). Returns [] when the track has no
+    ANLZ / beat grid (not analysed).
 
     Args:
         track_id: Rekordbox integer track ID.
-        db_path:  Absolute path to Rekordbox master.db.
+        db_path:  Absolute path to Rekordbox master.db (locates the ANLZ dir).
 
     Returns:
-        Sorted list of beat timestamps in seconds.
-        Returns [] on any error (caller must handle gracefully).
+        Sorted list of beat timestamps in seconds. [] on any failure.
     """
     if not isinstance(track_id, int) or track_id <= 0:
         logger.warning("extract_beats_from_db: invalid track_id=%r", track_id)
@@ -56,66 +58,14 @@ def extract_beats_from_db(track_id: int, db_path: str) -> list[float]:
         logger.warning("extract_beats_from_db: invalid db_path=%r", db_path)
         return []
 
-    db = Path(db_path)
-    if not db.exists():
-        logger.error("extract_beats_from_db: master.db not found: %s", db)
+    anlz_dir = resolve_anlz_dir(track_id, db_path)
+    if not anlz_dir:
+        logger.info("extract_beats_from_db: no ANLZ dir for track_id=%d", track_id)
         return []
 
-    logger.debug("extract_beats_from_db: loading beatgrid for track_id=%d", track_id)
-
-    try:
-        import rbox  # type: ignore  # soft-dependency
-
-        master_db = rbox.MasterDb(str(db))
-        # rbox returns beat_grid as a list of (position_ms, bpm) tuples
-        beatgrid = master_db.get_beat_grid(track_id)
-        if not beatgrid:
-            logger.info("extract_beats_from_db: no beatgrid for track_id=%d", track_id)
-            return []
-
-        # beatgrid entries: each entry is a marker for one beat.
-        # We expand them into individual beat timestamps using the BPM.
-        beats: list[float] = []
-        entries = sorted(beatgrid, key=lambda e: e[0])
-
-        for i, (pos_ms, bpm) in enumerate(entries):
-            if bpm is None or bpm <= 0:
-                logger.warning(
-                    "extract_beats_from_db: invalid bpm=%s at pos=%s — skipping segment",
-                    bpm,
-                    pos_ms,
-                )
-                continue
-            next_pos_ms = entries[i + 1][0] if i + 1 < len(entries) else None
-            beat_interval_s = 60.0 / float(bpm)
-            t = pos_ms / 1000.0
-            while True:
-                beats.append(t)
-                t += beat_interval_s
-                if next_pos_ms is not None and (t * 1000) >= next_pos_ms:
-                    break
-                # Safety: don't generate beats past 3 hours
-                if t > 10800.0:
-                    break
-
-        beats.sort()
-        logger.info(
-            "extract_beats_from_db: %d beats extracted for track_id=%d",
-            len(beats),
-            track_id,
-        )
-        return beats
-
-    except ImportError:
-        logger.warning("extract_beats_from_db: rbox not installed")
-        return []
-    except Exception as exc:
-        logger.error(
-            "extract_beats_from_db: unexpected error for track_id=%d — %s",
-            track_id,
-            exc,
-        )
-        return []
+    beats = read_beats_from_anlz(anlz_dir)
+    logger.info("extract_beats_from_db: %d beats for track_id=%d", len(beats), track_id)
+    return beats
 
 
 # ─────────────────────────────────────────────────────────────────────────────

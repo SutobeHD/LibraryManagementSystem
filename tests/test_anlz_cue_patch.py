@@ -214,3 +214,14 @@ def test_large_cue_list(tmp_path):
 def test_missing_dat_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         patch.patch_memory_cues(str(tmp_path), NEW_MEM)
+
+
+def test_read_beats_from_anlz_roundtrip(tmp_path):
+    # BEATS uses time_ms = i*500 → seconds = i*0.5
+    _write_dat(tmp_path)
+    beats = patch.read_beats_from_anlz(str(tmp_path))
+    assert beats == [i * 0.5 for i in range(8)]
+
+
+def test_read_beats_no_dat_returns_empty(tmp_path):
+    assert patch.read_beats_from_anlz(str(tmp_path)) == []
