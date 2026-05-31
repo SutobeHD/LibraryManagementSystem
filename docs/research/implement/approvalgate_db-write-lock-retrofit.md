@@ -22,6 +22,7 @@ ai_tasks: false
 - 2026-05-31 — `research/evaluated_` — wave-2 round-2: all 3 GAPS closed (AnalysisDBWriter → wrap-at-callsite in-scope; drift guard → prefix-independent AST write-sink detection + `KNOWN_CALLSITE_PROTECTED` manifest; Goal-1 metric re-stated). Research Verifier PASS round 2. Option B + callsite-lock recommendation stands.
 - 2026-05-31 — `implement/draftplan_` — planning started (research-plan routine)
 - 2026-05-31 — `implement/review_` — plan filled (Impl Plan + Threat + Migration N/A + Perf + API/UX none + Telemetry + 9-row Test Plan + 5-task queue; XMLDB excluded, import-cycle risk flagged); Plan-Reviewer next
+- 2026-05-31 — `implement/approvalgate_` — Plan-Reviewer PASS (all 14 boxes, 0 rework; verified AST scope complete + import-cycle/mytag/AnalysisDBWriter handling); mockup + Approval Summary ready; awaiting user `/approve` or `/reject`
 
 ## AI Tasks
 
@@ -379,24 +380,31 @@ Each task maps to Steps in ## Implementation Plan + ≥1 row in ## Test Plan.
 
 Stage 3 Reviewer-Agent (`review_`). Unchecked box or rework reason → `rework_`.
 
-- [ ] Plan addresses all goals
-- [ ] Plan matches `## Original Idea` — no scope-creep
-- [ ] Open questions answered or deferred
-- [ ] Prior Art referenced — no duplicated past work
-- [ ] Threat Model present + each threat has a test (or N/A justified)
-- [ ] Migration Path present + rollback documented (or N/A justified)
-- [ ] Performance Budget set + worst-case scenario documented (or N/A justified)
-- [ ] API / UX Surface enumerated for every layer touched
-- [ ] Telemetry defined for shipped behavior (or N/A justified)
-- [ ] Test Plan covers every Threat + every Step + every Perf row
-- [ ] Task Queue items are small + independently committable + reference Steps + Tests
-- [ ] Dependencies audited — new libs have Schicht-A entries
-- [ ] Risk mitigations defined
-- [ ] Rollback path clear
-- [ ] Affected docs identified (`architecture.md`, `FILE_MAP.md`, indexes, `CHANGELOG.md`)
+### 2026-05-31 — Plan-Reviewer → PASS
+
+- [x] Plan addresses all goals — Steps 1-4 (RekordboxDB+LiveRekordboxDB auto-wrap) + Step 5 (AnalysisDBWriter callsite) → Goal-1; Step 7 prefix-independent drift guard → Goal-2; TC6 read-paths → Goal-3; Step 8 harness + T-conc3 negative control → Goal-4. T-1..T-4 map.
+- [x] Plan matches `## Original Idea` — no scope-creep — Non-goals park per-thread-pool refactor, save_track_cues/grid AttributeError (own task), row-level locking; XMLDB = optional non-gap, not coverage scope.
+- [x] Open questions answered or deferred — OQ1-6 RESOLVED; 4 draftplan gate conds addressed: prefix tuple finalised (Step 2), harness→`@pytest.mark.slow` (Step 8), XMLDB EXCLUDE+optional sweep, Option C DEFERRED.
+- [x] Prior Art referenced — no duplicated past work — security-api-auth-hardening (parent carve-out), metadata-name-fixer (sibling).
+- [x] Threat Model present + each threat has a test (or N/A justified) — TM1→T-conc1, TM2→T-conc2, TM3/TM4→T-conc1, neg-control→T-conc3; all real Test-Plan rows. Spoof/Repud/Info/EoP N/A justified (no identity/secret/privilege boundary, single local user).
+- [x] Migration Path present + rollback documented (or N/A justified) — N/A verified: code-only, no master.db schema/row, no PDB/ANLZ bytes, no IPC contract, no route signature, no .env/settings key, no Tauri command. `git revert` rollback.
+- [x] Performance Budget set + worst-case scenario documented (or N/A justified) — µs uncontended RLock; worst-case serialised single-writer "acceptable, not a regression" reasoning holds — rbox 0.1.7 cannot do concurrent master.db writes regardless (coding-rules.md).
+- [x] API / UX Surface enumerated for every layer touched — backend none (all 85 routes unchanged), frontend none, tauri none, logs optional-debug-only; verified change adds no route/IPC.
+- [x] Telemetry defined for shipped behavior (or N/A justified) — CI drift guard is the keep-working signal; no runtime counter; optional debug lock-wait log off by default. Justified.
+- [x] Test Plan covers every Threat + every Step + every Perf row — Step1→TC4/TC6, Step2→TC4/TC5, Step3→TC5/TC8 (import-cycle), Step4→TC4 (old-loop-deletion coverage preserved: every RekordboxDB mutator incl. ensure_standalone_master_db wrapped), Step5→TC7, Step6→T-conc2, Step7→T-conc2, Step8→T-conc1/T-conc3. Every threat + perf row (T-conc1) covered.
+- [x] Task Queue items are small + independently committable + reference Steps + Tests — T-1..T-5 each ref Steps + Tests; ordering unblocks (T-1 decorator before T-3 guard asserting `__wrapped__`). T-1 is the largest (decorator def + 2-class apply + loop delete) but is genuinely atomic — loop-delete must land with decorator-apply or coverage regresses mid-sequence; splitting creates a red intermediate. Acceptable.
+- [x] Dependencies audited — new libs have Schicht-A entries — none added; stdlib `ast`/`functools`/`threading` only.
+- [x] Risk mitigations defined — import cycle (shared `app/_db_lock.py` or post-import apply + boot verify + TC8), prefix over/under-wrap (drift guard prefix-INDEPENDENT → under-wrap fails CI, over-wrap harmless RLock), harness flakiness (`@pytest.mark.slow`, drift guard is the CI gate).
+- [x] Affected docs identified (`architecture.md`, `FILE_MAP.md`, indexes, `CHANGELOG.md`) — T-5: FILE_MAP + regen-maps + CHANGELOG. architecture.md correctly omitted (no data-flow change, concurrency-internal).
 
 **Rework reasons:**
-- _(pending Plan-Reviewer)_
+- none — **PASS**.
+
+**Reviewer notes (non-blocking):**
+- Verified import-cycle is real: `app/database.py:13` does `from .live_database import LiveRekordboxDB`, so `live_database.py` importing the lock/decorator back would cycle. Step-3 mitigation (`app/_db_lock.py` host or post-import apply) is concrete + TC8-tested.
+- Verified decorator/drift-guard consistency on mytag mutators: `create_mytag`/`delete_mytag`/`set_track_mytags` reach rbox via `self._try_call([...])` (`live_database.py:1012`), NOT a literal `.db.<write>`. Decorator catches by name-prefix; drift guard catches by the dedicated `_try_call` AST rule. Both cover, consistent.
+- Verified AnalysisDBWriter ProcessPoolExecutor is vestigial (no `.submit()` callsite) → write runs in-process → RLock at `_update_db` callsite serialises correctly.
+- 3-module AST scope (database/live_database/analysis_db_writer) captures every live-master.db writer: `soundcloud_api.py` writes route through wrapped facade/active_db methods (consumer, not rbox-direct); `usb_one_library.py`/`build_template.py` write the USB export `exportLibrary.db`, not master.db. A future *new* rbox-direct module would need adding to the in-test asserted module list — acceptable documented manual surface, same class as `KNOWN_CALLSITE_PROTECTED`.
 
 ## Approval Summary
 
