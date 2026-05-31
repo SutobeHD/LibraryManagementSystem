@@ -32,10 +32,10 @@ _(none)_
 ## implement/
 
 ### draftplan
-- [draftplan_db-write-lock-retrofit.md](implement/draftplan_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps (Option B prefix decorator + callsite lock for AnalysisDBWriter + AST write-sink drift guard); planning started (2026-05-31)
+_(none)_
 
 ### review
-_(none)_
+- [review_db-write-lock-retrofit.md](implement/review_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps (Option B prefix decorator + AnalysisDBWriter callsite lock + prefix-independent AST drift guard); plan filled — Threat (integrity/DoS), Migration N/A, Perf negligible, no API/UI surface, 9-row Test Plan, 5-task queue. Plan-Reviewer pending → approvalgate_ (2026-05-31)
 
 ### approvalgate ⛔ THE GATE
 - [approvalgate_library-format-converter.md](implement/approvalgate_library-format-converter.md) — Library-wide format converter (Option A: full shared engine). Plan complete: 14-step Impl Plan, 9-threat STRIDE model, in-place row-mutation migration + rollback recipe, perf budget (batch-lock starvation flagged), 33-row Test Plan, 15-task queue; Plan-Reviewer PASS (round-1 step-numbering rework resolved inline); mockup + Approval Summary ready. **Awaiting user `/approve` or `/reject`** (2026-05-31)
