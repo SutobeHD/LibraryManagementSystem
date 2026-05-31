@@ -34,9 +34,12 @@ RESEARCH_DIR = REPO_ROOT / "docs" / "research"
 # Mirrors pipeline_status._KNOWN_STATES — kept in sync by hand. The script
 # is intentionally stdlib-only so it works in pre-commit without a sys.path
 # dance. Drift between the two lists is caught by --check in CI.
+# (ideagate/midgate/plangate retired 2026-05-31 — single-gate migration. They
+# are no longer valid filename states, but stay in the lifecycle regex below so
+# historical lines on archived/active docs still parse.)
 STATES_PER_STAGE: dict[str, set[str]] = {
-    "research": {"idea", "drafting", "ideagate", "exploring", "midgate", "evaluated", "parked"},
-    "implement": {"draftplan", "review", "plangate", "rework", "accepted", "inprogress", "blocked"},
+    "research": {"idea", "drafting", "exploring", "evaluated", "parked"},
+    "implement": {"draftplan", "review", "approvalgate", "rework", "accepted", "inprogress", "blocked"},
     "archived": {"implemented", "superseded", "abandoned"},
 }
 REQUIRED_FRONTMATTER = ("slug", "title", "created")
@@ -45,9 +48,10 @@ _DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 _LIFECYCLE_LINE_RE = re.compile(
     r"(\d{4}-\d{2}-\d{2})\s*[—\-]+\s*"
     r"(?:`?(research|implement|archived)/)?"
-    r"(idea|drafting|ideagate|exploring|midgate|evaluated|parked|"
-    r"draftplan|review|plangate|rework|accepted|inprogress|blocked|"
-    r"implemented|superseded|abandoned|watchdog)_"
+    r"(idea|drafting|exploring|evaluated|parked|"
+    r"draftplan|review|approvalgate|rework|accepted|inprogress|blocked|"
+    r"implemented|superseded|abandoned|watchdog|"
+    r"ideagate|midgate|plangate)_"  # trailing 3 = legacy gates, historical lines only
 )
 
 

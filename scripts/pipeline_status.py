@@ -38,30 +38,36 @@ RESEARCH_DIR = REPO_ROOT / "docs" / "research"
 
 # State order per stage (pipeline order).
 STAGE_STATES: dict[str, list[str]] = {
-    "research": ["idea", "drafting", "ideagate", "exploring", "midgate", "evaluated", "parked"],
-    "implement": ["draftplan", "review", "plangate", "rework", "accepted", "inprogress", "blocked"],
+    "research": ["idea", "drafting", "exploring", "evaluated", "parked"],
+    "implement": ["draftplan", "review", "approvalgate", "rework", "accepted", "inprogress", "blocked"],
     "archived": ["implemented", "superseded", "abandoned"],
 }
 
-# Gate states → gate letter. These wait on the user.
-GATE_STATES: dict[str, str] = {"ideagate": "A", "midgate": "B", "plangate": "C"}
+# The single user gate → display label. Waits on the user.
+# (Legacy ideagate/midgate/plangate retired 2026-05-31 in the single-gate
+# migration — they live on only in _LEGACY_STATES for historical parsing.)
+GATE_STATES: dict[str, str] = {"approvalgate": "Approval"}
 
 _DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 
-# Known pipeline states (must match STAGE_STATES below) — explicit alternation
-# avoids matching arbitrary `WORD_` tokens elsewhere in lifecycle lines
-# (e.g. SHUTDOWN_TOKEN in commit-style summaries).
+# Legacy gate states, retired 2026-05-31 in the single-gate migration. No live
+# doc uses them as a filename state anymore, but archived/active docs still carry
+# them in historical `## Lifecycle` lines — keep them parseable so trends + the
+# latest-state check don't choke on old history.
+_LEGACY_STATES = ("ideagate", "midgate", "plangate")
+
+# Known pipeline states (current ones must match STAGE_STATES above) — explicit
+# alternation avoids matching arbitrary `WORD_` tokens elsewhere in lifecycle
+# lines (e.g. SHUTDOWN_TOKEN in commit-style summaries).
 _KNOWN_STATES = (
     "idea",
     "drafting",
-    "ideagate",
     "exploring",
-    "midgate",
     "evaluated",
     "parked",
     "draftplan",
     "review",
-    "plangate",
+    "approvalgate",
     "rework",
     "accepted",
     "inprogress",
@@ -69,6 +75,7 @@ _KNOWN_STATES = (
     "implemented",
     "superseded",
     "abandoned",
+    *_LEGACY_STATES,
 )
 # Matches a typical lifecycle line: `YYYY-MM-DD — <stage>/<state>_ — context`
 # (em-dash u2014 or plain hyphen separator). Captures (date, stage, state).
@@ -278,14 +285,14 @@ def open_gates(docs: list[Doc]) -> list[Doc]:
 def print_gates(docs: list[Doc]) -> None:
     gates = open_gates(docs)
     if not gates:
-        print("No open gates - nothing waiting on you.")
+        print("No open approvals - nothing waiting on you.")
         return
-    print(f"WAITING ON YOU ({len(gates)} gate{'s' if len(gates) != 1 else ''})")
+    print(f"WAITING ON YOU ({len(gates)} approval{'s' if len(gates) != 1 else ''})")
     for d in gates:
-        letter = GATE_STATES[d.state]
+        label = GATE_STATES[d.state]
         print(
-            f"  GATE {letter}  {d.state}_  {d.slug}  ({_age_str(d)})"
-            f"  ->  /gate-pass {d.slug}   |   /gate-reject {d.slug} \"<reason>\""
+            f"  {label.upper()}  {d.state}_  {d.slug}  ({_age_str(d)})"
+            f"  ->  /approve {d.slug}   |   /reject {d.slug} \"<reason>\""
         )
 
 

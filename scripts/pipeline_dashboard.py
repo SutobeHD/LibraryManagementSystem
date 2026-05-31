@@ -147,19 +147,19 @@ def _cached_prs() -> list[dict] | None:
 def _render_gates(docs: list) -> str:
     gates = open_gates(docs)
     if not gates:
-        return '<div class="empty-note ok">No open gates &mdash; nothing waiting on you.</div>'
+        return '<div class="empty-note ok">No open approvals &mdash; nothing waiting on you.</div>'
     cards = []
     for d in gates:
-        letter = GATE_STATES[d.state]
+        label = GATE_STATES[d.state]
         cards.append(
             '<div class="gate-card">'
-            f'<div class="gate-badge">GATE {letter}</div>'
+            f'<div class="gate-badge">{_esc(label.upper())}</div>'
             '<div class="gate-body">'
             f'<div class="gate-slug">{_esc(d.slug)}</div>'
             f'<div class="gate-sub">{_esc(d.state)}_ &middot; waiting {_age_label(d.age_days)}</div>'
             '<div class="gate-cmds">'
-            f"<code>/gate-pass {_esc(d.slug)}</code>"
-            f'<code>/gate-reject {_esc(d.slug)} "&hellip;"</code>'
+            f"<code>/approve {_esc(d.slug)}</code>"
+            f'<code>/reject {_esc(d.slug)} "&hellip;"</code>'
             "</div></div></div>"
         )
     return '<div class="gates">' + "".join(cards) + "</div>"
@@ -174,7 +174,7 @@ def _render_lane(title: str, states: list[str], by_state: dict) -> str:
             css += " gate"
         css += " has" if entries else " empty"
         tag = (
-            f'<span class="gate-tag">GATE {GATE_STATES[state]}</span>'
+            f'<span class="gate-tag">{_esc(GATE_STATES[state].upper())}</span>'
             if state in GATE_STATES
             else ""
         )
@@ -292,11 +292,11 @@ def render_html() -> str:
         "<h2>Waiting on you</h2>" + _render_gates(docs)
         + "<h2>Pipeline</h2>" + lanes
         + "<h2>Trends (avg days per state, completed visits)</h2>" + _render_trends(docs)
-        + "<h2>Open routine PRs (GATE D)</h2>" + _render_prs(prs)
+        + "<h2>Open routine PRs (test + merge)</h2>" + _render_prs(prs)
         + "<h2>Blockers</h2>" + _render_blockers(docs)
-        + "<footer>Read-only view of docs/research/. Advance gate docs with "
-        "<code>/gate-pass</code> / <code>/gate-reject</code>; routines never "
-        "merge to main.<br>Routines: " + _ROUTINES + "</footer>"
+        + "<footer>Read-only view of docs/research/. Approve docs with "
+        "<code>/approve</code> / <code>/reject</code>; routines never "
+        "merge to main &mdash; you test the branch, then merge.<br>Routines: " + _ROUTINES + "</footer>"
         "</div></body></html>"
     )
 
