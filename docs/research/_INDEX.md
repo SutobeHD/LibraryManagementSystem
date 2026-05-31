@@ -5,7 +5,7 @@ Live dashboard. Each entry mirrors a file under `docs/research/{research,impleme
 Format per line:
 `<state>_<slug>.md — one-line hook (YYYY-MM-DD)`
 
-Gate states (`ideagate_`, `midgate_`, `plangate_`) wait on the user — see "The 4 Gates" in `README.md`.
+The approval gate (`approvalgate_`) waits on the user — see "The One Gate" in `README.md`.
 
 If this index drifts from the file system, the file system wins — re-derive with `ls docs/research/*/` or `python scripts/pipeline_status.py`.
 
@@ -19,14 +19,9 @@ _(none)_
 ### drafting
 _(none)_
 
-### ideagate ⛔ GATE A
-_(none)_
-
 ### exploring
 - [exploring_db-write-lock-retrofit.md](research/exploring_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps; Option B (auto-wrap) committed; wave-2 verify → GAPS (3rd gap: `AnalysisDBWriter` rbox-direct write uncovered by class decorator; circular drift guard); stays exploring_ (2026-05-29)
 - [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); wave-2 GAPS narrowed (CORS para corrected, 3/3 stale main.py refs refreshed+PASS, Phase-2 prereq now past GATE A); remaining blocker = OQ14+OQ7 user sign-off only; stays exploring_ (2026-05-29)
-### midgate ⛔ GATE B
-_(none)_
 
 ### evaluated
 - [evaluated_library-format-converter.md](research/evaluated_library-format-converter.md) — Library-wide format converter; wave 2 closed all 3 blockers (proof script `fdb461c`, AAC priming empirical A/B sample-identical, path-write via direct rbox `update_content`), 6 adversarial concerns addressed/carried-forward, citation MIXED non-load-bearing, V-PASS round 2, 3 options (A/B/C) + Recommendation = Option A (full engine, sister-doc unblocks) with 4 commit-blockers for draftplan_ (2026-05-30)
@@ -44,12 +39,8 @@ _(none)_
 ### review
 _(none)_
 
-### plangate ⛔ GATE C
+### approvalgate ⛔ THE GATE
 _(none)_
-
-### review
-_(none)_
-
 
 ### rework
 _(none)_
@@ -101,4 +92,4 @@ When a doc changes state:
 2. Update the date at the end of the line
 3. If the file moved across stages (e.g. `research/` → `implement/`), also update the markdown link path
 
-Work-state → work-state moves are done by routines. Gate-state → work-state moves are done by the user (`/gate-pass`, `/gate-reject`). `/pipeline` shows the live state without reading this file.
+Work-state → work-state moves are done by routines. Approval-gate → work-state moves are done by the user (`/approve`, `/reject`). `/pipeline` shows the live state without reading this file.

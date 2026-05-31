@@ -1,5 +1,5 @@
 ---
-description: Show the research pipeline state + open gates waiting on you
+description: Show the research pipeline state + the open approval gate waiting on you
 argument-hint: "[--gates]   --gates = only show open gates"
 allowed-tools: Bash
 ---
@@ -16,10 +16,10 @@ Show the current state of the multi-agent research pipeline.
 
 2. Print the script output verbatim.
 
-3. If any gate is open, add a one-line nudge below it:
-   - "Pass a gate: `/gate-pass <slug>` · Reject: `/gate-reject <slug> \"<reason>\"`"
-   - For open `routine/*` PRs (GATE D): "Review the PR, then merge it yourself — routines never merge to `main`."
+3. If an approval is open, add a one-line nudge below it:
+   - "Approve: `/approve <slug>` · Reject: `/reject <slug> \"<reason>\"`"
+   - For open `routine/*` PRs: "Test the branch locally, then merge it yourself — routines never merge to `main`."
 
-4. If nothing is open, say so in one line: "Pipeline idle — no gates, no routine PRs waiting."
+4. If nothing is open, say so in one line: "Pipeline idle — no approvals, no routine PRs waiting."
 
 Keep it terse. This is a status glance, not a report.

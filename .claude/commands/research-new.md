@@ -13,7 +13,7 @@ Start a new research topic. Slug + optional title: $ARGUMENTS
    - Must be unique across `docs/research/{research,implement,archived}/*.md`. Check with `ls docs/research/research/ docs/research/implement/ docs/research/archived/`. If slug already exists, **stop and ask** the user to pick another.
 
 2. **Verify pipeline rules:**
-   - Re-read `docs/research/README.md` once if you haven't this session, especially the **Stages and prefixes** and **The 4 Gates** sections.
+   - Re-read `docs/research/README.md` once if you haven't this session, especially the **Stages and prefixes** and **The One Gate** sections.
 
 3. **Scaffold the file:**
    - Source: `docs/research/_TEMPLATE.md`

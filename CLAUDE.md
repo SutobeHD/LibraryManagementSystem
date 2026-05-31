@@ -128,12 +128,12 @@ Defined in `.claude/commands/`:
 | `/regen-maps` | Regenerate `docs/MAP.md` + `docs/MAP_L2.md` from AST |
 | `/route-add` | Guided FastAPI route scaffold |
 | `/research-new` | Scaffold new research topic |
-| `/pipeline` | Show research pipeline state + open gates |
+| `/pipeline` | Show research pipeline state + the open approval gate |
 | `/dashboard` | Start the local research-pipeline web dashboard |
-| `/gate-list` | List every open user gate (A/B/C/D) with pass/reject commands |
+| `/gate-list` | List the open approval gate + PRs waiting to test & merge |
 | `/gate-status` | Show one research doc's pipeline state + next step |
-| `/gate-pass` | Pass a research gate (A/B/C) — advance the doc |
-| `/gate-reject` | Reject a research gate — send the doc back |
+| `/approve` | Approve the doc at `approvalgate_` — start implementation |
+| `/reject` | Reject the doc at `approvalgate_` — send the plan back |
 | `/print-routine` | Print a routine prompt below `---` (paste-ready for claude.ai/code) |
 | `/commit` | Stage + atomic commit with Conventional-Commits message |
 | `/pr-new` | Create branch + push + open PR |
@@ -144,16 +144,16 @@ Defined in `.claude/commands/`:
 
 ## AI autonomy & remote routines — streamlining bias
 
-This repo runs a **multi-agent research pipeline**: **8 remote routines** (claude.ai/code) advance `docs/research/` docs autonomously while the user is afk. Daily routines trigger on a doc's **state** (folder + filename prefix); cross-cutting routines maintain pipeline health (idea generation, re-validation, conflict detection). Each routine spawns multiple specialist sub-agents in parallel; verification agents gate every stage; the user keeps 4 sign-off gates (A/B/C/D).
+This repo runs a **multi-agent research pipeline**: **8 remote routines** (claude.ai/code) advance `docs/research/` docs autonomously while the user is afk. Daily routines trigger on a doc's **state** (folder + filename prefix); cross-cutting routines maintain pipeline health (idea generation, re-validation, conflict detection). Each routine spawns multiple specialist sub-agents in parallel; verification agents gate every stage. The user signs off **once** — at the single approval gate (`approvalgate_`: idea summary + mockup + change list) — then tests + merges the finished branch.
 
 ### Daily work-state routines
 
 | Routine | Cron (Berlin) | Reads state | Does |
 |---|---|---|---|
-| `research-draft` | 05:00 | `drafting_` | Scout + Prior-Art + Risk-Surface (parallel) → Worker → Verifier → `ideagate_` (GATE A) |
-| `research-explore` | 06:00 + 14:00 | `exploring_` | Tiered per-OQ (Codebase + Web + Synthesis); wave 2 + Adversarial + Citation-Verifier → `midgate_` (GATE B) / `evaluated_` |
-| `research-plan` | 13:00 | `evaluated_`, `rework_` | Planner → parallel Threat-Modeller + Migration + Perf-Budget → Test-Plan → Task Queue → Reviewer → `plangate_` (GATE C) |
-| `research-implement` | 03:00 + 15:00 | `accepted_`, `inprogress_` | Approach-Probe → Code → Standard + Security + Test-Coverage Reviews → Doc-Sync → PR (GATE D) |
+| `research-draft` | 05:00 | `drafting_` | Scout + Prior-Art + Risk-Surface (parallel) → Worker → Verifier → `exploring_` (autonomous) |
+| `research-explore` | 06:00 + 14:00 | `exploring_` | Tiered per-OQ (Codebase + Web + Synthesis) → Adversarial + Citation + Research-Verifier → `evaluated_` (autonomous) |
+| `research-plan` | 13:00 | `evaluated_`, `rework_` | Planner → parallel Threat-Modeller + Migration + Perf-Budget → Test-Plan → Task Queue → Reviewer → Mockup+Summary → `approvalgate_` (the gate) |
+| `research-implement` | 03:00 + 15:00 | `accepted_`, `inprogress_` | Approach-Probe → Code → Standard + Security + Test-Coverage Reviews → Doc-Sync → PR (you test + merge) |
 | `research-triage` | 07:30 | all (read-only) | Pipeline Digest issue: gates, ready PRs, routine activity, trend metrics, loop-guards, blockers |
 
 ### Cross-cutting routines
@@ -164,7 +164,7 @@ This repo runs a **multi-agent research pipeline**: **8 remote routines** (claud
 | `research-watchdog` | 1st-of-month 04:00 | 5 oldest unchecked `archived/implemented_*` | parallel probes (code refs / deps / external invariants / library health) → `## Lifecycle` line + follow-up proposals into Idea Backlog |
 | `research-cross-linker` | Tue 04:30 | all active docs | per-doc Extractors + Overlap-Analyser → `related:` frontmatter + `## Cross-links` block; CONFLICT notifications |
 
-`research-implement` may write code — bounded to `inprogress_` docs, `routine/*` branches, GATE-C-approved Task Queue items. It never merges/rebases to `main`. `research-watchdog` and `research-cross-linker` write narrow doc edits only (Lifecycle lines / frontmatter / Cross-links block). `research-spawn` never creates `idea_*.md` — only proposals in the Idea Backlog issue (user authors the real Original Idea).
+`research-implement` may write code — bounded to `inprogress_` docs, `routine/*` branches, approval-gate-approved Task Queue items (no new research). It never merges/rebases to `main` — the user tests the branch + merges. `research-watchdog` and `research-cross-linker` write narrow doc edits only (Lifecycle lines / frontmatter / Cross-links block). `research-spawn` never creates `idea_*.md` — only proposals in the Idea Backlog issue (user authors the real Original Idea).
 
 Full rules: `.claude/rules/research-pipeline.md` + `docs/research/README.md`. Routine prompts versioned in `docs/research/routines/`.
 

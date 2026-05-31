@@ -32,4 +32,4 @@ Repo culture is **maximum AI autonomy + minimum manual steps**. When you spot a 
 - Edit user data: `**/music/`, `**/exports/`, `**/backups/`, USB drives, `master.db`, `*.DAT`, `*.ANLZ` outside `app/templates/`.
 - `--no-verify` / bypass signing / skip security audits. `--no-verify` is in deny list.
 - Commit `.env`, `*.db`, audio files, build artefacts (gitignored).
-- Pass a research-pipeline user gate (`ideagate_` / `midgate_` / `plangate_`) or merge a routine PR — those are GATE A/B/C/D, user-only. See `research-pipeline.md` "The 4 gates".
+- Pass the research-pipeline approval gate (`approvalgate_` → `accepted_`) or merge a routine PR — the single sign-off and the merge are both user-only. See `research-pipeline.md` "The one gate".

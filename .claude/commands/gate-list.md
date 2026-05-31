@@ -1,9 +1,9 @@
 ---
-description: List every open user gate (A/B/C/D) with the commands to pass/reject each
+description: List the open approval gate + PRs waiting for you to test & merge
 allowed-tools: Bash
 ---
 
-Show every user sign-off gate currently waiting on the user.
+Show everything in the pipeline currently waiting on you: the single approval gate + ready PRs.
 
 ## Process
 
@@ -11,38 +11,32 @@ Show every user sign-off gate currently waiting on the user.
    ```bash
    python scripts/pipeline_status.py --gates
    ```
-   This lists every doc in a `*gate_` state with its age + the `/gate-pass` / `/gate-reject` commands.
+   This lists every doc at `approvalgate_` with its age + the `/approve` / `/reject` commands.
 
-2. List open GATE D (PR-review) gates as well:
+2. List open `routine/*` PRs (the merge step):
    ```bash
    gh pr list --search "head:routine/" --state open --json number,title,headRefName,statusCheckRollup
    ```
-   For each routine/* PR — show number, title, CI status (green/red/pending), and the branch name. CI-green PRs are GATE D ready-to-merge; CI-red PRs are routine-blocked (the routine will fix them on its next run).
+   For each — show number, title, CI status (green/red/pending), branch name. CI-green PRs are ready for you to test locally + merge; CI-red PRs are routine-blocked (the routine fixes them on its next run).
 
-3. Reply format — one heading per gate kind, bullet per doc/PR:
+3. Reply format — one heading per kind, bullet per doc/PR:
 
    ```
-   ## ⛔ GATE A · <count>
+   ## ⛔ Approval · <count>
    - <slug> · <N days waiting>
-     `/gate-pass <slug>` · `/gate-reject <slug> "<reason>"`
+     `/approve <slug>` · `/reject <slug> "<reason>"`
 
-   ## ⛔ GATE B · <count>
-   - …
-
-   ## ⛔ GATE C · <count>
-   - …
-
-   ## ⛔ GATE D · <count> (PRs)
-   - #NN <title> · `routine/<slug>-task-N` · CI green · ready to merge
+   ## 🔀 Ready to test + merge · <count> (PRs)
+   - #NN <title> · `routine/<slug>-task-N` · CI green · test locally, then merge
    - #NN <title> · `routine/<slug>-task-N` · CI red · routine will fix on next run
    ```
 
-4. If nothing is open at any gate, reply with one line: "**Pipeline idle — nothing waiting on you.**"
+4. If nothing is open at the gate and no PRs are ready, reply with one line: "**Pipeline idle — nothing waiting on you.**"
 
 5. Don't editorialise — the output is a checklist, not a status report.
 
 ## Don'ts
 
-- Don't run `gh pr merge` automatically — GATE D is the user's. Print the PR list; the user merges.
-- Don't include closed gates or merged PRs.
+- Don't run `gh pr merge` automatically — you test the branch first, then merge. Print the PR list; you merge.
+- Don't include closed approvals or merged PRs.
 - Don't expand to per-doc detail — that's `/gate-status <slug>`.
