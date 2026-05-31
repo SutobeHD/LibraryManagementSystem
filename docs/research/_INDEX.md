@@ -22,7 +22,7 @@ _(none)_
 - [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); wave-2 GAPS narrowed (CORS para corrected, 3/3 stale main.py refs refreshed+PASS, Phase-2 prereq now past GATE A); remaining blocker = OQ14+OQ7 user sign-off only; stays exploring_ (2026-05-29)
 
 ### evaluated
-- [evaluated_db-write-lock-retrofit.md](research/evaluated_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps; Option B (auto-wrap prefix decorator) + callsite-lock for `AnalysisDBWriter`; wave-2 round-2 closed all 3 GAPS (AnalysisDBWriter wrap-at-callsite, prefix-independent AST write-sink drift guard, Goal-1 metric re-stated), Research Verifier PASS round 2 → ready for plan (2026-05-31)
+_(none)_
 
 ### parked
 _(none)_
@@ -32,7 +32,7 @@ _(none)_
 ## implement/
 
 ### draftplan
-_(none)_
+- [draftplan_db-write-lock-retrofit.md](implement/draftplan_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps (Option B prefix decorator + callsite lock for AnalysisDBWriter + AST write-sink drift guard); planning started (2026-05-31)
 
 ### review
 _(none)_

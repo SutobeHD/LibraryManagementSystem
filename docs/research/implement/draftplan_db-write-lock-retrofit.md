@@ -20,6 +20,7 @@ ai_tasks: false
 - 2026-05-29 — `research/exploring_` — GATE A PASSED by user; Option B (auto-wrap, prefix-matched) committed in Recommendation; advanced for Stage 2 wave-2 verifier
 - 2026-05-29 — `research/exploring_` — wave-2 verification: citation refresh (5 stale line-anchors fixed) + Adversarial + Research Verifier → **GAPS**. Found THIRD gap class: `AnalysisDBWriter` rbox-direct `master.db` write (`update_content`/`update_content_key`) uncovered by any class decorator; OQ5 drift guard circular. Stays `exploring_` for wave-2 round 2.
 - 2026-05-31 — `research/evaluated_` — wave-2 round-2: all 3 GAPS closed (AnalysisDBWriter → wrap-at-callsite in-scope; drift guard → prefix-independent AST write-sink detection + `KNOWN_CALLSITE_PROTECTED` manifest; Goal-1 metric re-stated). Research Verifier PASS round 2. Option B + callsite-lock recommendation stands.
+- 2026-05-31 — `implement/draftplan_` — planning started (research-plan routine)
 
 ## AI Tasks
 
