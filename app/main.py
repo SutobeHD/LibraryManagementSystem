@@ -82,7 +82,8 @@ from .audio_analyzer import LIBROSA_AVAILABLE, AudioAnalyzer
 from .config import EXPORT_DIR, LOG_DIR, MUSIC_DIR, TEMP_DIR
 from .database import db
 from .phrase_generator import (
-    commit_cues_to_db,
+    PhraseNotAnalysedError,
+    commit_phrase_cues,
     detect_first_downbeat,
     extract_beats_from_db,
     generate_phrase_cues,
@@ -4158,9 +4159,10 @@ async def phrase_generate(body: PhraseGenerateRequest):
 @app.post("/api/phrase/commit", dependencies=[Depends(require_session)])
 async def phrase_commit(body: PhraseCommitRequest):
     """
-    Write generated cue points to the Rekordbox database as hot cues.
+    Write phrase markers as Rekordbox MEMORY cues into the track's ANLZ files.
 
-    Up to 8 phrase-start cues are mapped to hot cue slots A–H.
+    Non-destructive: only the memory-cue tags are replaced (beat grid, waveform
+    and hot cues are preserved). The track must already be analysed.
 
     Request body: {track_id, cues}
     Returns: {status, data: {written: int}}
@@ -4177,16 +4179,18 @@ async def phrase_commit(body: PhraseCommitRequest):
         rb_root = str(Path(_os.environ.get("APPDATA", "")) / "Pioneer" / "rekordbox")
         db_path = str(Path(rb_root) / DB_FILENAME)
 
-        await asyncio.get_event_loop().run_in_executor(
+        result = await asyncio.get_event_loop().run_in_executor(
             None,
-            lambda: commit_cues_to_db(body.track_id, body.cues, db_path),
+            lambda: commit_phrase_cues(body.track_id, body.cues, db_path),
         )
 
-        written = len([c for c in body.cues if c.get("type") == "phrase_start"])
-        written = min(written, 8)  # Max hot cues
-        logger.info("[PHRASE] committed %d hot cues for track_id=%d", written, body.track_id)
+        written = int(result.get("written", 0))
+        logger.info("[PHRASE] committed %d memory cues for track_id=%d", written, body.track_id)
         return {"status": "ok", "data": {"written": written}}
 
+    except PhraseNotAnalysedError as exc:
+        logger.warning("[PHRASE] commit skipped (not analysed): %s", exc)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except RuntimeError as exc:
         logger.error("[PHRASE] commit runtime error: %s", exc)
         raise HTTPException(status_code=503, detail=str(exc))

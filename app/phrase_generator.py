@@ -1,31 +1,38 @@
 """
 phrase_generator.py — Phrase & Auto-Cue Generator
 
-Generates hot cue points at every N-bar phrase boundary in a track.
-Uses beat positions from the Rekordbox database (no re-analysis required
-if the track is already analyzed). Falls back to FFT energy analysis to
-detect the first true downbeat so the phrase grid is musically aligned.
+Generates phrase markers at every N-bar phrase boundary in a track and writes
+them as Rekordbox MEMORY cues (unlimited, separate from the 8 hot-cue slots).
+Beat positions come from the Rekordbox database (no re-analysis needed if the
+track is already analysed); optional FFT energy analysis detects the first true
+downbeat so the phrase grid is musically aligned.
 
-All DB writes are non-destructive at the API level: the caller decides
-whether to commit.
+The commit is non-destructive: only the memory-cue tags in the track's existing
+ANLZ files are replaced (see anlz_cue_patch); beat grid, waveform and hot cues
+are preserved.
 """
 
 import logging
 from pathlib import Path
+from typing import Any
+
+from .anlz_cue_patch import patch_memory_cues
 
 logger = logging.getLogger(__name__)
 
-# Maximum number of hot cues Rekordbox supports per track.
-_MAX_HOT_CUES = 8
+# Colours (0xRRGGBB) assigned to phrase / bar markers.
+_COLOR_PHRASE_START = 0xFF8C00  # amber / orange — phrase boundary
+_COLOR_BAR_START = 0x444444  # dark grey — bar marker (non-phrase)
 
-# Colors (Rekordbox color IDs) assigned to phrase/bar markers.
-_COLOR_PHRASE_START = 0xFF8C00   # amber / orange — phrase boundary
-_COLOR_BAR_START    = 0x444444   # dark grey — bar marker (non-phrase)
+
+class PhraseNotAnalysedError(RuntimeError):
+    """Raised when a track has no existing ANLZ files to patch (not analysed)."""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Beat extraction
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def extract_beats_from_db(track_id: int, db_path: str) -> list[float]:
     """
@@ -63,9 +70,7 @@ def extract_beats_from_db(track_id: int, db_path: str) -> list[float]:
         # rbox returns beat_grid as a list of (position_ms, bpm) tuples
         beatgrid = master_db.get_beat_grid(track_id)
         if not beatgrid:
-            logger.info(
-                "extract_beats_from_db: no beatgrid for track_id=%d", track_id
-            )
+            logger.info("extract_beats_from_db: no beatgrid for track_id=%d", track_id)
             return []
 
         # beatgrid entries: each entry is a marker for one beat.
@@ -77,7 +82,8 @@ def extract_beats_from_db(track_id: int, db_path: str) -> list[float]:
             if bpm is None or bpm <= 0:
                 logger.warning(
                     "extract_beats_from_db: invalid bpm=%s at pos=%s — skipping segment",
-                    bpm, pos_ms,
+                    bpm,
+                    pos_ms,
                 )
                 continue
             next_pos_ms = entries[i + 1][0] if i + 1 < len(entries) else None
@@ -95,7 +101,8 @@ def extract_beats_from_db(track_id: int, db_path: str) -> list[float]:
         beats.sort()
         logger.info(
             "extract_beats_from_db: %d beats extracted for track_id=%d",
-            len(beats), track_id,
+            len(beats),
+            track_id,
         )
         return beats
 
@@ -105,7 +112,8 @@ def extract_beats_from_db(track_id: int, db_path: str) -> list[float]:
     except Exception as exc:
         logger.error(
             "extract_beats_from_db: unexpected error for track_id=%d — %s",
-            track_id, exc,
+            track_id,
+            exc,
         )
         return []
 
@@ -113,6 +121,7 @@ def extract_beats_from_db(track_id: int, db_path: str) -> list[float]:
 # ─────────────────────────────────────────────────────────────────────────────
 #  Downbeat detection
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def detect_first_downbeat(audio_path: str, beats: list[float]) -> float:
     """
@@ -155,8 +164,8 @@ def detect_first_downbeat(audio_path: str, beats: list[float]) -> float:
 
         # Only analyse the first 8 beats — enough to find the downbeat
         candidates = beats[:8]
-        sr_target = 11025   # Low SR is sufficient for energy analysis
-        window_dur = 0.05   # 50 ms window around each beat
+        sr_target = 11025  # Low SR is sufficient for energy analysis
+        window_dur = 0.05  # 50 ms window around each beat
 
         # Load just the section we need (up to ~8 beats + buffer)
         load_duration = min(candidates[-1] + 1.0, 30.0) if candidates else 5.0
@@ -173,9 +182,9 @@ def detect_first_downbeat(audio_path: str, beats: list[float]) -> float:
 
         for idx, beat_t in enumerate(candidates):
             start_sample = int((beat_t - window_dur / 2) * sr)
-            end_sample   = int((beat_t + window_dur / 2) * sr)
+            end_sample = int((beat_t + window_dur / 2) * sr)
             start_sample = max(0, start_sample)
-            end_sample   = min(len(y), end_sample)
+            end_sample = min(len(y), end_sample)
 
             if end_sample <= start_sample:
                 continue
@@ -191,7 +200,9 @@ def detect_first_downbeat(audio_path: str, beats: list[float]) -> float:
         result = float(beats[best_idx])
         logger.info(
             "detect_first_downbeat: downbeat at %.3fs (beat index %d, energy=%.4f)",
-            result, best_idx, best_energy,
+            result,
+            best_idx,
+            best_energy,
         )
         return result
 
@@ -209,6 +220,7 @@ def detect_first_downbeat(audio_path: str, beats: list[float]) -> float:
 #  Cue generation
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def generate_phrase_cues(
     beats: list[float],
     phrase_length: int = 16,
@@ -220,8 +232,9 @@ def generate_phrase_cues(
     downbeat alignment), a cue is placed at every phrase_length beats
     (phrase start) and optionally at every 4 beats (bar start).
 
-    The first 8 phrase-start cues are mapped as hot cue A–H.
-    Bar-start cues are type "bar_start" (shown as grey markers in the UI).
+    Phrase-start cues are emitted as type "phrase_start", bar-start cues as
+    type "bar_start". The caller maps phrase_start cues to memory cues at
+    commit time (see commit_phrase_cues).
 
     Args:
         beats:         Sorted list of beat timestamps in seconds.
@@ -258,32 +271,37 @@ def generate_phrase_cues(
 
     logger.debug(
         "generate_phrase_cues: %d beats, phrase_length=%d",
-        len(beats), phrase_length,
+        len(beats),
+        phrase_length,
     )
 
     for beat_num, t in enumerate(beats):
-        position_ms = int(round(t * 1000))
+        position_ms = round(t * 1000)
         is_phrase = (beat_num % phrase_length) == 0
-        is_bar    = (beat_num % beats_per_bar) == 0
+        is_bar = (beat_num % beats_per_bar) == 0
 
         if is_phrase:
             phrase_idx += 1
-            cues.append({
-                "position_ms": position_ms,
-                "type": "phrase_start",
-                "label": f"P{phrase_idx}",
-                "color": _COLOR_PHRASE_START,
-                "index": phrase_idx,
-            })
+            cues.append(
+                {
+                    "position_ms": position_ms,
+                    "type": "phrase_start",
+                    "label": f"P{phrase_idx}",
+                    "color": _COLOR_PHRASE_START,
+                    "index": phrase_idx,
+                }
+            )
         elif is_bar:
             bar_idx += 1
-            cues.append({
-                "position_ms": position_ms,
-                "type": "bar_start",
-                "label": f"B{bar_idx}",
-                "color": _COLOR_BAR_START,
-                "index": bar_idx,
-            })
+            cues.append(
+                {
+                    "position_ms": position_ms,
+                    "type": "bar_start",
+                    "label": f"B{bar_idx}",
+                    "color": _COLOR_BAR_START,
+                    "index": bar_idx,
+                }
+            )
 
     logger.info(
         "generate_phrase_cues: generated %d cues (%d phrase, %d bar)",
@@ -295,84 +313,139 @@ def generate_phrase_cues(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  DB commit
+#  Memory-cue commit (non-destructive ANLZ write)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def commit_cues_to_db(
+
+def _rgb(color_int: int) -> tuple[int, int, int]:
+    """Split a 0xRRGGBB integer into an (r, g, b) tuple."""
+    return ((color_int >> 16) & 0xFF, (color_int >> 8) & 0xFF, color_int & 0xFF)
+
+
+def phrase_cues_to_memory_dicts(
+    cues: list[dict],
+    include_bar_markers: bool = False,
+) -> list[dict[str, Any]]:
+    """
+    Map generate_phrase_cues() output to anlz_writer memory-cue dicts.
+
+    Phrase-start cues always become memory cues. Bar-start cues are included
+    only when include_bar_markers is True — a full track yields hundreds of bar
+    markers, so they are off by default.
+
+    Returns dicts in anlz_writer format:
+        {"type": "memory_cue", "time_ms": int, "number": 0,
+         "name": str, "color_rgb": (r, g, b)}.
+    """
+    wanted = {"phrase_start", "bar_start"} if include_bar_markers else {"phrase_start"}
+    out: list[dict[str, Any]] = []
+    for cue in cues:
+        if cue.get("type") not in wanted:
+            continue
+        pos_ms = cue.get("position_ms")
+        if pos_ms is None:
+            continue
+        out.append(
+            {
+                "type": "memory_cue",
+                "time_ms": int(pos_ms),
+                "number": 0,
+                "name": cue.get("label", ""),
+                "color_rgb": _rgb(int(cue.get("color", _COLOR_PHRASE_START))),
+            }
+        )
+    return out
+
+
+def resolve_anlz_dir(track_id: int, db_path: str) -> str | None:
+    """
+    Find the existing ANLZ directory for a track via rbox, or None if the track
+    has no ANLZ files (i.e. not analysed).
+
+    Mirrors analysis_db_writer._resolve_anlz_dir but standalone (no live-db
+    instance needed): tries get_content_anlz_dir, then derives the parent from
+    explicit ANLZ file paths.
+    """
+    try:
+        import rbox  # type: ignore
+    except ImportError:
+        logger.warning("resolve_anlz_dir: rbox not installed")
+        return None
+
+    try:
+        master_db = rbox.MasterDb(db_path)
+        anlz_dir = master_db.get_content_anlz_dir(str(track_id))
+        if anlz_dir and Path(str(anlz_dir)).is_dir():
+            return str(anlz_dir)
+
+        paths = master_db.get_content_anlz_paths(str(track_id))
+        if paths and hasattr(paths, "get"):
+            for key in ("DAT", "EXT", "2EX"):
+                p = paths.get(key)
+                if p:
+                    parent = Path(str(p)).parent
+                    if parent.is_dir():
+                        return str(parent)
+    except Exception as exc:
+        logger.warning("resolve_anlz_dir: failed for track_id=%s — %s", track_id, exc)
+    return None
+
+
+def commit_phrase_cues(
     track_id: int,
     cues: list[dict],
     db_path: str,
-) -> None:
+    *,
+    include_bar_markers: bool = False,
+) -> dict[str, Any]:
     """
-    Write generated cue points into the Rekordbox master.db as hot cues.
-
-    Only phrase_start cues up to _MAX_HOT_CUES (8) are written as hot cues
-    (A–H).  All cues are also stored in the .rbep overlay system via the
-    existing RbepSerializer pattern so they appear in the DAW timeline.
-
-    The actual DB write uses rbox if available; otherwise raises RuntimeError
-    so the API layer can return a meaningful 503.
+    Write phrase markers as Rekordbox MEMORY cues into the track's existing
+    ANLZ files. Non-destructive: only the memory-cue tags are replaced; beat
+    grid, waveform and hot cues are preserved (see anlz_cue_patch).
 
     Args:
-        track_id: Rekordbox integer track ID.
-        cues:     List of cue dicts from generate_phrase_cues().
-        db_path:  Path to Rekordbox master.db.
+        track_id:            Rekordbox integer track ID.
+        cues:                Cue dicts from generate_phrase_cues().
+        db_path:             Path to Rekordbox master.db (used to locate ANLZ).
+        include_bar_markers: Also write bar-start markers as memory cues.
+
+    Returns:
+        {"written": int, "anlz_dir": str, "dat": bool, "ext": bool,
+         "backups": [...], "base": str}.
 
     Raises:
-        RuntimeError: If rbox is unavailable or the DB write fails.
-        ValueError:   If arguments are invalid.
+        ValueError:             Invalid arguments.
+        PhraseNotAnalysedError: Track has no ANLZ files to patch.
+        RuntimeError:           The ANLZ write failed.
     """
     if not isinstance(track_id, int) or track_id <= 0:
-        raise ValueError(f"commit_cues_to_db: invalid track_id={track_id!r}")
+        raise ValueError(f"commit_phrase_cues: invalid track_id={track_id!r}")
     if not isinstance(cues, list):
-        raise ValueError(f"commit_cues_to_db: cues must be list, got {type(cues)}")
+        raise ValueError(f"commit_phrase_cues: cues must be list, got {type(cues)}")
     if not db_path or not isinstance(db_path, str):
-        raise ValueError(f"commit_cues_to_db: invalid db_path={db_path!r}")
+        raise ValueError(f"commit_phrase_cues: invalid db_path={db_path!r}")
 
-    db = Path(db_path)
-    if not db.exists():
-        raise RuntimeError(f"master.db not found: {db}")
+    memory_cues = phrase_cues_to_memory_dicts(cues, include_bar_markers=include_bar_markers)
 
-    logger.info(
-        "commit_cues_to_db: writing %d cues for track_id=%d → %s",
-        len(cues), track_id, db,
-    )
-
-    # Select only phrase_start cues for hot cues (up to 8)
-    hot_cue_candidates = [c for c in cues if c.get("type") == "phrase_start"]
-    hot_cues = hot_cue_candidates[:_MAX_HOT_CUES]
+    anlz_dir = resolve_anlz_dir(track_id, db_path)
+    if not anlz_dir:
+        raise PhraseNotAnalysedError(
+            f"track_id={track_id} has no ANLZ files — analyse the track first"
+        )
 
     try:
-        import rbox  # type: ignore
-
-        master_db = rbox.MasterDb(str(db))
-
-        # rbox hot cue structure: list of dicts with keys:
-        #   index (0-7), position_ms, name, color
-        rbox_cues = []
-        for i, cue in enumerate(hot_cues):
-            pos_ms = cue.get("position_ms")
-            if pos_ms is None:
-                continue
-            rbox_cues.append({
-                "index": i,
-                "position_ms": int(pos_ms),
-                "name": cue.get("label", f"P{i+1}"),
-                "color": cue.get("color", _COLOR_PHRASE_START),
-            })
-
-        master_db.set_hot_cues(track_id, rbox_cues)
-        logger.info(
-            "commit_cues_to_db: %d hot cues written for track_id=%d",
-            len(rbox_cues), track_id,
-        )
-
-    except ImportError as exc:
-        raise RuntimeError(
-            "rbox library not installed — cannot write to Rekordbox database"
-        ) from exc
+        result = patch_memory_cues(anlz_dir, memory_cues)
+    except FileNotFoundError as exc:
+        raise PhraseNotAnalysedError(str(exc)) from exc
     except Exception as exc:
-        logger.error(
-            "commit_cues_to_db: DB write failed for track_id=%d — %s", track_id, exc
-        )
-        raise RuntimeError(f"Failed to write cues to database: {exc}") from exc
+        logger.error("commit_phrase_cues: ANLZ write failed for track_id=%d — %s", track_id, exc)
+        raise RuntimeError(f"Failed to write memory cues: {exc}") from exc
+
+    result["written"] = len(memory_cues)
+    logger.info(
+        "commit_phrase_cues: %d memory cues written for track_id=%d → %s",
+        len(memory_cues),
+        track_id,
+        anlz_dir,
+    )
+    return result
