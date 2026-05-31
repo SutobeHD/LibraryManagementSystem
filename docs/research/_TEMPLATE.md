@@ -15,7 +15,7 @@ superseded_by: []
 > **Caveman+ style.** Fragments, bullets. Drop articles/filler/hedges. No prose paragraphs.
 > Word caps are **soft** — recommendations, not hard blocks. Exceed when topic complexity demands; routines may flag excess length but never truncate facts.
 > State = folder + filename prefix (not frontmatter). Lifecycle = audit trail. See `../README.md`.
-> Routines advance this doc by state. 4 user gates: A `ideagate_`, B `midgate_`, C `plangate_`, D PR-merge.
+> Routines advance this doc **autonomously** by state. **One** user gate: `approvalgate_` — read `## Approval Summary` + `## Mockup`, then `/approve` or `/reject`. After approval you test the finished branch locally and merge it yourself.
 > Section ownership: each `> ↓ Stage X — <agent>: …` marker names the agent that fills the section. Don't write into a section before its stage.
 
 ## Lifecycle
@@ -88,7 +88,7 @@ Stage 1 Worker. Numbered. Each resolvable (yes/no or X vs Y), not philosophy. Ea
 
 ## Research Plan
 
-Stage 1 Worker. Required by `ideagate_` (GATE A). ≤120 words (soft). Which aspects Stage 2 researches in parallel — one bullet per agent. User confirms list at GATE A.
+Stage 1 Worker. ≤120 words (soft). Which aspects Stage 2 researches in parallel — one bullet per agent. Drives the autonomous explore stage; phrase each bullet so two parallel agents (codebase + web) could split it.
 
 - Agent 1 (codebase + web): …
 - Agent 2 (codebase + web): …
@@ -102,8 +102,7 @@ Stage 1 Verifier. Dated entries, append-only. PASS / FAIL + ≤40-word reason (c
 
 ---
 
-> ⛔ GATE A — user `/gate-pass` (→ `exploring_`) or `/gate-reject` (→ `drafting_`).
-> ↓ Stage 2 — `exploring_`. `research-explore` runs parallel tiered agents (codebase + web + synthesis per OQ), an Adversarial agent, and a Citation-Quality verifier.
+> ↓ Stage 2 — `exploring_` (autonomous; no user gate). On Idea-Verifier PASS, `research-draft` advances `drafting_` → `exploring_` directly. `research-explore` runs parallel tiered agents (codebase + web + synthesis per OQ), an Adversarial agent, a Citation-Quality verifier, and a Research-Verifier — one autonomous pass to `evaluated_`.
 
 ## Findings / Investigation
 
@@ -117,7 +116,7 @@ Stage 2 Synthesis-Agents (one per OQ). Dated subsections, append-only. ≤150 wo
 
 ## Adversarial Findings
 
-Stage 2 Adversarial-Agent (wave 2). Devil's-advocate — what could go wrong, what assumptions are weak, what dependencies betray us. ≤120 words. Append-only.
+Stage 2 Adversarial-Agent (phase 2). Devil's-advocate — what could go wrong, what assumptions are weak, what dependencies betray us. ≤120 words. Append-only.
 
 ### YYYY-MM-DD
 - **Weak assumption:** …
@@ -128,29 +127,15 @@ If none survive scrutiny: **"No surviving objections — proceed with caution fl
 
 ## Citation Quality
 
-Stage 2 Citation-Verifier (wave 2). Checks every `file:line` ref + URL in `## Findings` exists + says what the Finding claims. PASS / FAIL list. ≤80 words.
+Stage 2 Citation-Verifier (phase 2). Checks every `file:line` ref + URL in `## Findings` exists + says what the Finding claims. PASS / FAIL list. ≤80 words.
 
 ### YYYY-MM-DD — <PASS|FAIL>
 - PASS: Findings 1, 2, 4 — citations verified
 - FAIL: Finding 3 — `app/main.py:123` no such symbol, replace or remove
 
-## Mid-Research Checkpoint
-
-GATE B. `research-explore` fills Status after wave 1. User fills Verdict via `/gate-pass` or `/gate-reject`.
-
-### Status — YYYY-MM-DD (routine)
-- Covered: …
-- Still open: …
-- Direction: …
-- Adversarial concerns surfaced: …
-
-### Verdict — YYYY-MM-DD (user)
-- _(empty until GATE B)_
-
 ---
 
-> ⛔ GATE B — user `/gate-pass` (→ `exploring_` wave 2) or `/gate-reject` (→ `exploring_` + feedback).
-> ↓ Stage 2 wave 2 — `research-explore` deepens, runs Adversarial + Citation verifiers.
+> ↓ Stage 2 phase 2 (autonomous; no user gate) — `research-explore` deepens findings, runs Adversarial + Citation verifiers, then the Research-Verifier gates the whole body before Options-Synthesis advances the doc to `evaluated_`.
 
 ## Research Verification
 
@@ -164,7 +149,7 @@ Stage 2 wave-2 verifier over whole research body. ≤120 words. PASS → `evalua
 
 ## Options Considered
 
-Stage 2 Synthesis-Agent (wave 2 PASS). Per option: sketch ≤5 bullets, pros, cons, S/M/L/XL, risk, prior-art match.
+Stage 2 Synthesis-Agent (phase 2 PASS). Per option: sketch ≤5 bullets, pros, cons, S/M/L/XL, risk, prior-art match.
 
 ### Option A — <name>
 - Sketch:
@@ -184,11 +169,11 @@ Stage 2 Synthesis-Agent (wave 2 PASS). Per option: sketch ≤5 bullets, pros, co
 
 ## Recommendation
 
-Stage 2 Synthesis-Agent (wave 2 PASS). ≤120 words. Which option + what blocks commit + which OQ each Finding answers.
+Stage 2 Synthesis-Agent (phase 2 PASS). ≤120 words. Which option + what blocks commit + which OQ each Finding answers.
 
 ---
 
-> ↓ Stage 3 — `implement/draftplan_`. `research-plan` fills Implementation Plan + Task Queue via 5 agents (Planner, Threat-Modeller, Migration, Perf-Budget, Test-Plan). Reviewer fills Review.
+> ↓ Stage 3 — `implement/draftplan_`. `research-plan` fills Implementation Plan + Task Queue via 5 agents (Planner, Threat-Modeller, Migration, Perf-Budget, Test-Plan). Reviewer fills Review. On Review PASS, the Mockup+Summary-Agent fills `## Approval Summary` + `## Mockup`, then advances to `approvalgate_`.
 
 ## Implementation Plan
 
@@ -304,7 +289,7 @@ Stage 3 Test-Plan-Agent. Concrete test cases, one row per. Must cover Threat Mod
 
 <!--
 Small, individually-committable implementation tasks. Written by research-plan (Stage 3),
-approved by the user at GATE C. research-implement works ONE task per branch:
+approved by the user at the Approval Gate. research-implement works ONE task per branch:
 routine/<slug>-task-<N>. 1 task = 1 feature = 1 PR. Tick - [x] when the PR is merged.
 Keep tasks small — a task too big to review in one PR must be split.
 Each task should map back to a Step in ## Implementation Plan and have ≥1 row in ## Test Plan.
@@ -335,14 +320,39 @@ Stage 3 Reviewer-Agent (`review_`). Unchecked box or rework reason → `rework_`
 **Rework reasons:**
 - …
 
+## Approval Summary
+
+Stage 3 Mockup+Summary-Agent (after Plan-Reviewer PASS). **Plain user-facing English — NOT Caveman.** This block is what the user reads to decide yes/no. ≤200 words. No `file:line` jargon — describe effects, not internals.
+
+- **What it does:** 1–2 sentences, plain language. What the feature gives the user.
+- **What you'll notice:** bullet list of user-visible effects (new button, faster scan, new export option, …).
+- **Scope:** N files touched · N tasks · effort S/M/L · risk low/med/high.
+- **Rollback:** one line — how it's undone if you dislike it after merge.
+- **Mockup:** see `## Mockup` below.
+
+## Mockup
+
+Stage 3 Mockup+Summary-Agent. Adaptive to feature type — decide from `## API / UX Surface`:
+
+- **UI feature** (has frontend components): write a self-contained static wireframe to `docs/research/mockups/<slug>.html` (inline CSS, no build step, no external assets — open in a browser locally). Fill the **UI** block below. Leave the **Backend** block empty/removed.
+- **Backend / DSP / USB / DB feature** (no visible UI): fill the **Backend** block with a concrete example — sample API request/response, CLI/log output, or before→after data (metadata tags, USB tree, DB rows). Show the shape the user will actually see. Leave the **UI** block empty/removed.
+
+### UI — mockup file
+- `docs/research/mockups/<slug>.html` — <one-line layout + key-interaction description>
+
+### Backend — concrete example
+```text
+<sample response / CLI output / before→after — the user-visible shape>
+```
+
 ---
 
-> ⛔ GATE C — user `/gate-pass` (→ `accepted_`) or `/gate-reject` (→ `rework_`).
-> ↓ Stage 4 — `inprogress_`. `research-implement` builds each Task Queue item via 5 agents (Approach-Probe, Code, Standard-Review, Security-Review, Test-Coverage-Review, Doc-Sync) on a `routine/*` branch.
+> ⛔ APPROVAL GATE — user `/approve` (→ `accepted_`) or `/reject "<reason>"` (→ `rework_`). The single sign-off: read `## Approval Summary` + `## Mockup`. After approval, nothing is re-researched.
+> ↓ Stage 4 — `inprogress_`. `research-implement` builds each Task Queue item via 5 agents (Approach-Probe, Code, Standard-Review, Security-Review, Test-Coverage-Review, Doc-Sync) on a `routine/*` branch. You test + merge the branch yourself.
 
 ## PR Log
 
-Stage 4. One row per task PR. `research-implement` appends; user notes merge (GATE D).
+Stage 4. One row per task PR. `research-implement` appends; user notes merge after local testing.
 
 | Task | Branch | PR | CI | Std Rev | Sec Rev | Test Cov | Doc Sync | Merged |
 |---|---|---|---|---|---|---|---|---|
@@ -366,7 +376,7 @@ Stage 4 Code-Agent + Approach-Probe. Dated entries. What built / surprised / cha
 
 ## Decision / Outcome
 
-Required by `archived/*`. Stage 4 Doc-Sync-Agent populates the checklist; user signs off (GATE D).
+Required by `archived/*`. Stage 4 Doc-Sync-Agent populates the checklist; user signs off after testing the branch locally + merging.
 
 **Result**: implemented | superseded | abandoned
 **Why**: …

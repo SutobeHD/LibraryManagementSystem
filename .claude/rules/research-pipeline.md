@@ -7,7 +7,8 @@
 1. Check `docs/research/_INDEX.md` (or run `/pipeline`) — in-flight doc for this area? Read end-to-end before suggesting anything. Also check the `Idea Backlog` GitHub Issue — `research-spawn` may have already proposed something.
 2. No existing doc → `/research-new <slug>` scaffolds `docs/research/research/idea_<slug>.md` from `_TEMPLATE.md`. User fills `## Original Idea` (1–3 sentences) — the only manual writing the pipeline needs.
 3. State chain (each `git mv` = + `## Lifecycle` line + `_INDEX.md` update):
-   `idea_` → `drafting_` → `ideagate_`⛔A → `exploring_` → `midgate_`⛔B → `evaluated_` → `draftplan_` → `review_` → `plangate_`⛔C → `accepted_` → `inprogress_` → `archived/implemented_`
+   `idea_` → `drafting_` → `exploring_` → `evaluated_` → `draftplan_` → `review_` → `approvalgate_`⛔ → `accepted_` → `inprogress_` → `archived/implemented_`
+   Everything `drafting_` → `review_` runs **autonomously** — verification agents gate each hop, no user stop. The **single** user gate is `approvalgate_` (idea summary + mockup + change list). After `/approve` the build runs autonomously to PRs; you test the `routine/*` branch locally and merge it yourself.
 4. **Skip pipeline for:** one-off bug fixes, single-file refactors, plain questions, doc edits.
 
 Full stage/prefix cheat-sheet + 8 routines + branch flow: `docs/research/README.md`.
@@ -29,28 +30,26 @@ Full stage/prefix cheat-sheet + 8 routines + branch flow: `docs/research/README.
 
 Every work routine spawns specialist sub-agents (Scout / Prior-Art / Risk-Surface; Codebase + Web + Synthesis per OQ; Threat-Modeller / Migration / Perf-Budget / Test-Plan; Approach-Probe + multi-reviewer). Full per-routine agent chain: `docs/research/README.md` "Multi-agent mechanics".
 
-## The 4 gates — user sign-off points
+## The one gate — single user sign-off point
 
-Routines advance **work-states** autonomously. Three gate-states + the PR gate need the user:
+Routines advance **every** work-state autonomously (verification agents gate each hop). The user is asked **once**, at `approvalgate_`, and then again only to merge.
 
 | Gate | State | User action |
 |---|---|---|
-| A | `ideagate_` | `/gate-pass` (→ `exploring_`) or `/gate-reject` (→ `drafting_`) — confirm idea + Research Plan |
-| B | `midgate_` | `/gate-pass` / `/gate-reject` — review mid-research checkpoint |
-| C | `plangate_` | `/gate-pass` (→ `accepted_`) or `/gate-reject` (→ `rework_`) — approve plan + Task Queue |
-| D | open PR | review the `routine/*` PR, order the rebase/merge to `main` |
+| **Approval** | `approvalgate_` | `/approve` (→ `accepted_`) or `/reject "<reason>"` (→ `rework_`) — read the `## Approval Summary` (idea in plain words + change list) + `## Mockup`, then yes/no |
+| Merge | open PR | test the `routine/*` branch locally, merge it yourself — **not a research gate**, just landing finished work |
 
-**Only the user passes a gate.** A routine reaching a `*gate_` state stops there. **Never** auto-advance a `*gate_` doc. **Never** merge or rebase a routine branch to `main` — that is GATE D, user-ordered.
+**Only the user passes the Approval Gate.** A routine reaching `approvalgate_` stops there. **Never** auto-advance it. **Never** merge or rebase a routine branch to `main` — the user merges after local testing.
 
-This replaces the old "no unilateral promotion" rule: the gates ARE the sign-off. Verification agents gate the work-states in between (idea-check, research-check, plan-review).
+The earlier idea/mid-research/plan checkpoints (old GATE A/B/C) are gone as user stops — verification agents replace them: Idea-Verifier (drafting), Adversarial + Citation + Research-Verifier (exploring), Plan-Reviewer (review). Everything the user needs to decide is bundled into the Approval Summary + Mockup so the single yes/no is fully informed and **nothing is re-researched after `/approve`**.
 
 ## Routines write code — bounded
 
 The old "routines are docs-only" rule is relaxed. `research-implement` may write code, but **only**:
 - in `inprogress_` state,
 - on `routine/<slug>-task-<N>` branches — **never `main`**,
-- Task Queue items approved at GATE C — no freelancing,
-- 1 task = 1 small PR; CI + a review-agent gate it; the user merges (GATE D).
+- Task Queue items approved at the Approval Gate — no freelancing, no new research,
+- 1 task = 1 small PR; CI + a review-agent gate it; the user tests locally + merges.
 
 `research-draft` / `research-explore` / `research-plan` stay docs-only. No routine touches `app/`, `frontend/`, `src-tauri/`, `tests/` outside an `inprogress_` doc's approved Task Queue.
 
@@ -69,7 +68,7 @@ Research docs are **persistent files**, not user output. Apply Caveman+ per `wor
 **Good** (8 words, same info):
 > AcoustID 3 req/s. Bulk endpoint preferred. Batch by 100.
 
-The plain instruction line under each `_TEMPLATE.md` heading (e.g. "≤60 words. What / why...") is overwritten by real content. Stage/gate markers (`> ↓ Stage…`, `> ⛔ GATE…`) are structural — keep them. `## Original Idea` is verbatim — never edit it.
+The plain instruction line under each `_TEMPLATE.md` heading (e.g. "≤60 words. What / why...") is overwritten by real content. Stage/gate markers (`> ↓ Stage…`, `> ⛔ APPROVAL GATE…`) are structural — keep them. `## Original Idea` is verbatim — never edit it. **Exception:** `## Approval Summary` is **plain user-facing English** (not Caveman) — the user reads it to decide yes/no; full sentences are fine there.
 
 ## Graduation: `implemented_` lands
 
