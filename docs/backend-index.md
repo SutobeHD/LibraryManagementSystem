@@ -330,6 +330,18 @@ Writes Rekordbox-compatible binary ANLZ files (.DAT, .EXT, .2EX). All output is 
 
 ---
 
+## ANLZ Memory-Cue Patcher (`app/anlz_cue_patch.py`)
+
+Non-destructive in-place patch of an **existing** ANLZ. Walks the flat PMAI tag chain and replaces ONLY the memory-cue (`cue_type == 0`) PCOB/PCO2 tags; every other tag (PQTZ beat grid, PWAV/PWV* waveforms, hot-cue PCOB, PSSI) is carried through byte-for-byte, then the PMAI file length is recomputed. Reuses `anlz_writer`'s `_build_pcob`/`_build_pco2`/`_build_file_header`/backup helpers so output is byte-identical to the analysis pipeline. Idempotent across re-runs.
+
+| Function | Signature | Notes |
+|----------|-----------|-------|
+| `patch_memory_cues` | `(anlz_dir, memory_cues, *, backup=True) -> dict` | Replace memory cues in the dir's `.DAT` (+ `.EXT` if present). Returns `{dat, ext, backups, base}`. Raises `FileNotFoundError` if no `.DAT` (track not analysed) |
+| `_walk_tags` | `(data) -> (tags, end)` | Walk the tag chain past the PMAI header; stops (not raises) on a malformed length so the remainder is carried verbatim |
+| `_patch_one_file` | `(path, memory_cues, include_pco2) -> bool` | Rewrite one `.DAT`/`.EXT`; `include_pco2=True` for `.EXT` only. Appends a memory PCOB/PCO2 if the file lacks one |
+
+---
+
 ## Analysis-to-DB Orchestrator (`app/analysis_db_writer.py`) — `AnalysisDBWriter`
 
 Ties analysis → ANLZ files → master.db in a single pipeline. **Requires live DB mode and Rekordbox closed.**
@@ -494,18 +506,29 @@ New module for three-way play-count diffing between PC and USB.
 
 ## Phrase & Auto-Cue Generator (`app/phrase_generator.py`)
 
+Writes phrase markers as Rekordbox **MEMORY cues** (not hot cues) — unlimited, separate from the 8 hot-cue slots. Commit is **non-destructive**: only the memory-cue tags in the track's existing ANLZ are replaced via `app/anlz_cue_patch.py` (beat grid + waveform + hot cues preserved).
+
 | Function | Signature | Notes |
 |----------|-----------|-------|
-| `extract_beats_from_db` | `(track_id: int, db_path: str) -> list[float]` | Reads rbox beatgrid |
-| `detect_first_downbeat` | `(audio_path: str, beats: list[float]) -> float` | librosa energy analysis |
-| `generate_phrase_cues` | `(beats, phrase_length=16) -> list[dict]` | phrase_start / bar_start cues |
-| `commit_cues_to_db` | `(track_id, cues, db_path) -> None` | Writes hot cues A–H via rbox |
+| `extract_beats_from_db` | `(track_id: int, db_path: str) -> list[float]` | Reads rbox beatgrid; `[]` on any failure |
+| `detect_first_downbeat` | `(audio_path: str, beats: list[float]) -> float` | librosa low-band energy; falls back to `beats[0]` |
+| `generate_phrase_cues` | `(beats, phrase_length=16) -> list[dict]` | `phrase_start` / `bar_start` cue dicts |
+| `phrase_cues_to_memory_dicts` | `(cues, include_bar_markers=False) -> list[dict]` | Map cues → `anlz_writer` memory-cue dicts; bar markers off by default |
+| `resolve_anlz_dir` | `(track_id: int, db_path: str) -> str \| None` | Find track's existing ANLZ dir via rbox; `None` if not analysed |
+| `commit_phrase_cues` | `(track_id, cues, db_path, *, include_bar_markers=False) -> dict` | Write phrase markers as MEMORY cues into existing ANLZ via `patch_memory_cues`. Returns `{written, anlz_dir/dat/ext, backups, base}`. Raises `PhraseNotAnalysedError` if no ANLZ |
 
-**API endpoints added to `app/main.py`**:
+Exception: `PhraseNotAnalysedError(RuntimeError)` — track has no ANLZ files to patch. (The old broken `commit_cues_to_db`, which called a non-existent rbox `set_hot_cues`, is removed.)
+
+**API endpoints added to `app/main.py`** (PHRASE section):
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/phrase/generate` `[AUTH]` | Generate phrase cues from beat grid |
-| POST | `/api/phrase/commit` `[AUTH]` | Write hot cues to Rekordbox DB |
+| POST | `/api/phrase/commit` `[AUTH]` | Write phrase markers as MEMORY cues into the track's existing ANLZ (non-destructive) |
+| POST | `/api/phrase/batch/start` `[AUTH]` | Start a background phrase-cue batch over a scope. Body `{scope:{kind:"single"\|"playlist"\|"selection"\|"collection", track_id?, playlist_id?, track_ids?}, phrase_length?, align_downbeat?, include_bar_markers?}`. Returns `{job_id, total}`. 409 if a batch already runs, 400 on empty/invalid scope. Single-flight via `_phrase_batch_lock` (asyncio.Lock) |
+| GET | `/api/phrase/batch/status?job_id=` | Poll job: `{status, total, done, percent, eta_seconds, succeeded, skipped, failed, current_track, errors[]}` |
+| POST | `/api/phrase/batch/cancel` `[AUTH]` | Cooperative cancel of a running batch by `job_id` |
+
+Batch internals (module-level in `main.py`): `_phrase_jobs` (in-memory job store), `_phrase_batch_lock` (single-flight asyncio.Lock, acquired in `start`, released in `_run_phrase_batch` finally), `resolve_track_scope(scope)` → de-duped `[{id,title,path}]`, `_run_phrase_batch` background worker (blocking generator calls run in the default executor).
 
 ---
 

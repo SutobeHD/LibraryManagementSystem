@@ -76,6 +76,12 @@ LibraryManagementSystem -- Analysis Settings
 - `get_settings()`
 - `reload_settings()` — Re-read environment and rebuild settings (for tests / config UIs).
 
+### `app/anlz_cue_patch.py`
+
+anlz_cue_patch.py — non-destructive memory-cue injection into existing ANLZ files.
+
+- `patch_memory_cues()` — Inject `memory_cues` into the existing ANLZ files in `anlz_dir`, preserving
+
 ### `app/anlz_safe.py`
 
 Safe wrapper around `rbox.MasterDb` + `rbox.Anlz` for PQTZ beatgrid loading.
@@ -598,7 +604,14 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `PhraseGenerateRequest` — Request to generate phrase cues for a track.
 - `PhraseCommitRequest` — Request to commit generated cues to the DB.
 - `phrase_generate()` — Generate phrase-aligned cue points for a track.
-- `phrase_commit()` — Write generated cue points to the Rekordbox database as hot cues.
+- `phrase_commit()` — Write phrase markers as Rekordbox MEMORY cues into the track's ANLZ files.
+- `PhraseScope` — Selection of tracks a phrase batch should run over.
+- `PhraseBatchStartRequest` — Start a background phrase-cue batch over a scope of tracks.
+- `PhraseBatchCancelRequest` — Cancel a running phrase batch by job id.
+- `resolve_track_scope()` — Resolve a PhraseScope to a de-duped list of {id, title, path}.
+- `phrase_batch_start()` — Start a background phrase-cue batch over a scope of tracks.
+- `phrase_batch_status()` — Poll a phrase batch's status.
+- `phrase_batch_cancel()` — Request cancellation of a running phrase batch.
 - `DuplicateScanRequest` — Start a background duplicate scan over provided track paths.
 - `DuplicateMergeRequest` — Merge a set of duplicate tracks into one master.
 - `duplicates_scan()` — Start a background duplicate scan across the provided track paths.
@@ -654,10 +667,13 @@ pairing_store — in-memory one-shot pairing codes (Phase-2 auth, T2).
 
 phrase_generator.py — Phrase & Auto-Cue Generator
 
+- `PhraseNotAnalysedError` — Raised when a track has no existing ANLZ files to patch (not analysed).
 - `extract_beats_from_db()` — Retrieve stored beat positions (in seconds) from the Rekordbox master.db.
 - `detect_first_downbeat()` — Detect the position of the first true downbeat using spectral energy analysis.
 - `generate_phrase_cues()` — Generate a list of cue point dicts at every N-bar phrase boundary.
-- `commit_cues_to_db()` — Write generated cue points into the Rekordbox master.db as hot cues.
+- `phrase_cues_to_memory_dicts()` — Map generate_phrase_cues() output to anlz_writer memory-cue dicts.
+- `resolve_anlz_dir()` — Find the existing ANLZ directory for a track via rbox, or None if the track
+- `commit_phrase_cues()` — Write phrase markers as Rekordbox MEMORY cues into the track's existing
 
 ### `app/playcount_sync.py`
 
@@ -1150,6 +1166,12 @@ seededWaveform — deterministic pseudo-waveform generator + painter.
 - `waveAmps()` — export function hashSeed(input) { const str = String(input ??
 - `drawSeededWave()` — Paint a seeded waveform onto `canvas`, sized to its parent's width.
 
+### `frontend/src/components/usePhraseBatch.js`
+
+usePhraseBatch — start + poll a phrase-cue batch job.
+
+- `usePhraseBatch()`
+
 ### `frontend/src/components/waveform/computeBeats.js`
 
 Builds the beat array used for grid rendering + snap-to-grid.
@@ -1343,9 +1365,21 @@ InsightsView — DJ-Style Analytics Dashboard Datenbasierte Einblicke in den eig
 
 MetadataView — library browser.
 
+### `frontend/src/components/PhraseBatchProgress.jsx`
+
+PhraseBatchProgress — live progress panel for a phrase-cue batch.
+
+- `PhraseBatchProgress()`
+
 ### `frontend/src/components/PhraseGeneratorView.jsx`
 
-PhraseGeneratorView — Phrase & Auto-Cue Generator Generates hot cue points at every N-bar phrase boundary for any analysed track in the Rek…
+PhraseGeneratorView — Phrase & Auto-Cue Generator (batch) Writes phrase markers as Rekordbox MEMORY cues across a chosen scope: a single tr…
+
+### `frontend/src/components/PhraseScopePicker.jsx`
+
+PhraseScopePicker — choose which tracks a phrase batch runs over.
+
+- `PhraseScopePicker()` — ── Main ────────────────────────────────────────────────────────────────────
 
 ### `frontend/src/components/Player.jsx`
 
@@ -1683,6 +1717,20 @@ Regression tests for the analysis pipeline.
 - `test_cue_toggles_kwarg_overrides_settings()` — Per-call kwarg overrides the global setting.
 - `test_e2e_anlz_write_roundtrip()`
 
+### `tests/test_anlz_cue_patch.py`
+
+Round-trip tests for app/anlz_cue_patch.py.
+
+- `test_dat_preserves_non_cue_tags_and_replaces_memory()`
+- `test_dat_pmai_length_recomputed()`
+- `test_ext_replaces_pcob_and_pco2()`
+- `test_hot_cue_pcob_untouched()` — Patching memory cues must never disturb the hot-cue PCOB (cue_type=1).
+- `test_backup_created()`
+- `test_idempotent()`
+- `test_empty_cue_list()`
+- `test_large_cue_list()`
+- `test_missing_dat_raises()`
+
 ### `tests/test_auth.py`
 
 Tests for ``app/auth.py`` -- Bearer-token session authentication.
@@ -1909,6 +1957,38 @@ PDB writer structural test against F: drive Pioneer reference.
 
 - `make_synthetic_input()` — Mimic the data shape that OneLibraryUsbWriter._write_pdb_from_db
 - `main()`
+
+### `tests/test_phrase_batch.py`
+
+Tests for the phrase-batch backend (app/main.py):
+
+- `test_phrase_track_fields()`
+- `test_scope_single()`
+- `test_scope_single_missing_returns_empty()`
+- `test_scope_single_without_id_raises()`
+- `test_scope_playlist()`
+- `test_scope_selection_filters()`
+- `test_scope_collection_all()`
+- `test_scope_dedupes_by_id()`
+- `test_scope_unknown_kind_raises()`
+- `test_worker_all_succeed()`
+- `test_worker_skips_no_beatgrid()`
+- `test_worker_skips_no_phrase_cues()`
+- `test_worker_skips_not_analysed()`
+- `test_worker_records_failure()`
+- `test_worker_cancel_before_first()`
+- `test_worker_error_cap()`
+- `test_worker_eta_positive_mid_run()`
+- `test_start_requires_auth()`
+- `test_start_library_not_loaded()`
+- `test_start_bad_phrase_length()`
+- `test_start_empty_scope()`
+- `test_start_conflict_when_locked()`
+- `test_start_happy_returns_job()`
+- `test_status_unknown_404()`
+- `test_status_returns_job()`
+- `test_cancel_unknown_404()`
+- `test_cancel_sets_flag()`
 
 ### `tests/test_popularity_engine.py`
 
@@ -2181,6 +2261,41 @@ variant_schema + variant_detector tests (analysis-remix-detector T-2, T-3).
 
 
 ## scripts/ — Dev/Build Utilities
+
+### `scripts/dev/phrase_spike.py`
+
+phrase_spike.py — manual P0 verification for the phrase memory-cue ANLZ write.
+
+- `main()`
+
+### `scripts/dev/rescan_unreadable.py`
+
+Re-scan only the rows marked unreadable in audio_report.json.
+
+- `main()`
+
+### `scripts/dev/safe_format_swap.py`
+
+safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist.
+
+- `check_rekordbox_running()` — Abort if rekordbox.exe is in the Windows tasklist.
+- `kill_rekordbox_if_present()` — Proactive watchdog: if Pioneer auto-restarted Rekordbox during a long
+- `backup_master_db()` — Copy master.db and its WAL/SHM siblings.
+- `detect_aiff_filetype()` — Look up the FileType integer Rekordbox uses for existing AIFF rows.
+- `find_playlist()`
+- `probe_sample_rate()` — Return the source sample rate via ffprobe.
+- `convert_m4a_to_aiff()` — ffmpeg src -> dst.
+- `execute()`
+- `rollback()`
+- `main()`
+
+### `scripts/dev/scan_audio_quality.py`
+
+Scan an audio library with ffprobe, aggregate codec/bitrate/sample-rate.
+
+- `probe()`
+- `classify()` — Bucket per club-readiness tier.
+- `main()`
 
 ### `scripts/pipeline_dashboard.py`
 

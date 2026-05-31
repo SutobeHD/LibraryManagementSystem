@@ -53,7 +53,8 @@
 | `app/sidecar.py` | `SidecarStorage` — persists artist metadata (SoundCloud links, custom fields) in `app_data.json` sidecar file |
 | `app/batch_worker.py` | CLI tool for batch track metadata updates (comments/tags) using rbox `MasterDb` — find/replace/append/set operations |
 | `app/playcount_sync.py` | **NEW** USB Play-Count Sync engine: `load_usb_sync_meta`, `save_usb_sync_meta`, `diff_playcounts` (three-way diff), `resolve_playcounts` (commits to PC DB + USB XML), `read_usb_xml_playcounts`. API: `GET /api/usb/playcount/diff`, `POST /api/usb/playcount/resolve` |
-| `app/phrase_generator.py` | **NEW** Phrase & Auto-Cue Generator: `extract_beats_from_db`, `detect_first_downbeat` (librosa energy), `generate_phrase_cues` (phrase/bar markers), `commit_cues_to_db` (hot cues A–H via rbox). API: `POST /api/phrase/generate`, `POST /api/phrase/commit` |
+| `app/phrase_generator.py` | Phrase & Auto-Cue Generator: `extract_beats_from_db`, `detect_first_downbeat` (librosa low-band energy), `generate_phrase_cues` (phrase/bar markers), `phrase_cues_to_memory_dicts`, `resolve_anlz_dir`, `commit_phrase_cues(track_id, cues, db_path, *, include_bar_markers=False)` — writes phrase markers as Rekordbox **MEMORY cues** into the track's existing ANLZ via `anlz_cue_patch.patch_memory_cues` (non-destructive; beat grid + waveform + hot cues preserved). Raises `PhraseNotAnalysedError` if no ANLZ. (Old broken `commit_cues_to_db` / rbox `set_hot_cues` removed.) API: `POST /api/phrase/generate`, `POST /api/phrase/commit`, `POST /api/phrase/batch/{start,cancel}`, `GET /api/phrase/batch/status` |
+| `app/anlz_cue_patch.py` | **NEW** Non-destructive memory-cue patcher for an existing ANLZ. `patch_memory_cues(anlz_dir, memory_cues, *, backup=True)` walks the PMAI tag chain and replaces ONLY the memory-cue (`cue_type==0`) PCOB/PCO2 tags, carrying every other tag (PQTZ beat grid, PWAV/PWV* waveforms, hot-cue PCOB, PSSI) through byte-for-byte, recomputing the PMAI length, backing up originals first. Reuses `anlz_writer`'s tag builders so output is byte-identical. Helpers: `_walk_tags`, `_patch_one_file`. Idempotent across re-runs. |
 | `app/__init__.py` | Package init (empty) |
 
 ---
@@ -108,7 +109,10 @@
 | `frontend/src/components/ToolsView.jsx` | Batch operations: rename, clean titles, find duplicates, batch comments |
 | `frontend/src/components/UtilitiesView.jsx` | Router on `mode` (from workspace nav): each tool (Phrase Cues / Duplicates / XML Cleaner / Converter-placeholder) + each Library-Health filter (Low Quality / Lost / No Cover) is its own `util-<mode>` tab — no inner grid/toggle |
 | `frontend/src/components/WaveformEditor.jsx` | Legacy waveform editor (superseded by `DjEditDaw`) |
-| `frontend/src/components/PhraseGeneratorView.jsx` | **NEW** Phrase & Auto-Cue Generator: track selector, phrase length picker (8/16/32), generate preview list (amber phrase / grey bar markers), two-step Generate → Commit flow |
+| `frontend/src/components/PhraseGeneratorView.jsx` | Phrase & Auto-Cue Generator (**batch**): `PhraseScopePicker` (Single/Playlist/Selection/Collection) + config (phrase length 8/16/32, downbeat-align toggle, bar-marker toggle) + Generate (always direct) + `PhraseBatchProgress` via `usePhraseBatch`. Writes phrase markers as MEMORY cues. POST `/api/phrase/batch/start`, GET `/api/phrase/batch/status`, POST `/api/phrase/batch/cancel` |
+| `frontend/src/components/PhraseScopePicker.jsx` | **NEW** Phrase-batch scope picker — Single/Playlist/Selection/Collection; self-contained multi-select checklist. `onScopeChange({scope,valid,count,mode})` emits a backend `scope` object. Loads `GET /api/library/tracks`, `GET /api/playlists/tree`, `GET /api/playlist/{id}/tracks` |
+| `frontend/src/components/PhraseBatchProgress.jsx` | **NEW** Phrase-batch live progress panel — bar, done/total, %, ETA, written/skipped/failed, current track, cancel, expandable skip/fail reason list. Props: `progress`, `running`, `onCancel`. Pure presentation |
+| `frontend/src/components/usePhraseBatch.js` | **NEW** Hook: start + poll a phrase-cue batch (mirrors `DuplicateView`). POST start → poll `/status` @1500 ms → terminal. Returns `{progress, running, error, start, cancel, reset}` |
 | `frontend/src/components/DuplicateView.jsx` | **NEW** Acoustic Duplicate Finder: scan library, group by fingerprint similarity, left group list + right card detail panel, master selection, merge play counts, POST /api/duplicates/merge |
 
 ### Shared UI Components
@@ -183,6 +187,7 @@
 |------|---------|
 | `scripts/screenshot.py` | Playwright screenshot utility for UI at localhost:5173 |
 | `scripts/test_xml_sync.py` | Validates Rekordbox XML generation with mock track data |
+| `scripts/dev/phrase_spike.py` | Manual P0 verification: patches phrase memory cues into one real track's ANLZ (timestamped `.bak-*` first; `--restore` rolls back) to confirm whether Rekordbox shows ANLZ memory cues for already-imported tracks. Never writes `master.db`. Run from repo root: `python scripts/dev/phrase_spike.py --track-id N` |
 
 ---
 

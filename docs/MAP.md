@@ -19,6 +19,7 @@
 | `app/analysis_db_writer.py` | LibraryManagementSystem -- Analysis-to-Database Writer |
 | `app/analysis_engine.py` | LibraryManagementSystem -- High-Accuracy Analysis Engine (v2.0) |
 | `app/analysis_settings.py` | LibraryManagementSystem -- Analysis Settings |
+| `app/anlz_cue_patch.py` | anlz_cue_patch.py — non-destructive memory-cue injection into existing ANLZ files. |
 | `app/anlz_safe.py` | Safe wrapper around `rbox.MasterDb` + `rbox.Anlz` for PQTZ beatgrid loading. |
 | `app/anlz_sidecar.py` | ANLZ-Sidecar writer — shared helper used by every track-import path |
 | `app/anlz_writer.py` | LibraryManagementSystem -- ANLZ Binary File Writer |
@@ -96,6 +97,7 @@
 | `frontend/src/components/editor/useEditorPlayback.js` | useEditorPlayback - Audio loading + playback engine + render/export Owns: - audioContextRef, sourceBufferRef,… |
 | `frontend/src/components/editor/useEditorRegions.js` | useEditorRegions - Region/palette/marker/zoom/snap/grid handlers. |
 | `frontend/src/components/shared/seededWaveform.js` | seededWaveform — deterministic pseudo-waveform generator + painter. |
+| `frontend/src/components/usePhraseBatch.js` | usePhraseBatch — start + poll a phrase-cue batch job. |
 | `frontend/src/components/waveform/computeBeats.js` | Builds the beat array used for grid rendering + snap-to-grid. |
 | `frontend/src/components/waveform/persistence.js` | localStorage auto-save (cuts + cues, keyed by track.id) |
 | `frontend/src/components/waveform/previewBuffer.js` | --- Shared decode context (reused, not recreated per insert) --- |
@@ -134,7 +136,9 @@
 | `frontend/src/components/LibraryView.jsx` | *(no module docstring)* |
 | `frontend/src/components/MatchInspectorModal.jsx` | *(no module docstring)* |
 | `frontend/src/components/MetadataView.jsx` | MetadataView — library browser. |
-| `frontend/src/components/PhraseGeneratorView.jsx` | PhraseGeneratorView — Phrase & Auto-Cue Generator Generates hot cue points at every N-bar phrase boundary for… |
+| `frontend/src/components/PhraseBatchProgress.jsx` | PhraseBatchProgress — live progress panel for a phrase-cue batch. |
+| `frontend/src/components/PhraseGeneratorView.jsx` | PhraseGeneratorView — Phrase & Auto-Cue Generator (batch) Writes phrase markers as Rekordbox MEMORY cues acro… |
+| `frontend/src/components/PhraseScopePicker.jsx` | PhraseScopePicker — choose which tracks a phrase batch runs over. |
 | `frontend/src/components/Player.jsx` | Three staggered equalizer bars — shown next to the title while playing. |
 | `frontend/src/components/PlaylistBrowser.jsx` | *(no module docstring)* |
 | `frontend/src/components/PromptModal.jsx` | Module-level subscriber registry so a single mounted <PromptModalRoot /> |
@@ -201,6 +205,7 @@
 | `tests/__init__.py` | *(no module docstring)* |
 | `tests/conftest.py` | Pytest fixtures shared across the suite. |
 | `tests/test_analysis.py` | Regression tests for the analysis pipeline. |
+| `tests/test_anlz_cue_patch.py` | Round-trip tests for app/anlz_cue_patch.py. |
 | `tests/test_auth.py` | Tests for ``app/auth.py`` -- Bearer-token session authentication. |
 | `tests/test_database.py` | Tests for `app/database.py`. |
 | `tests/test_db_taste.py` | taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py). |
@@ -214,6 +219,7 @@
 | `tests/test_pairing.py` | Phase-2 paired-token store tests (T1 — app/auth_db.py). |
 | `tests/test_pairing_store.py` | Phase-2 pairing-code store tests (T2 — app/pairing_store.py). |
 | `tests/test_pdb_structure.py` | PDB writer structural test against F: drive Pioneer reference. |
+| `tests/test_phrase_batch.py` | Tests for the phrase-batch backend (app/main.py): |
 | `tests/test_popularity_engine.py` | PopularityStore tests (underground-mainstream-classifier T1-T3). |
 | `tests/test_rate_limit.py` | Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter. |
 | `tests/test_require_session.py` | Phase-2 require_session dual-acceptance tests (T3 — app/auth.py). |
@@ -231,6 +237,10 @@
 
 | File | Purpose |
 |------|---------|
+| `scripts/dev/phrase_spike.py` | phrase_spike.py — manual P0 verification for the phrase memory-cue ANLZ write. |
+| `scripts/dev/rescan_unreadable.py` | Re-scan only the rows marked unreadable in audio_report.json. |
+| `scripts/dev/safe_format_swap.py` | safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist. |
+| `scripts/dev/scan_audio_quality.py` | Scan an audio library with ffprobe, aggregate codec/bitrate/sample-rate. |
 | `scripts/pipeline_dashboard.py` | Local web dashboard for the research pipeline. |
 | `scripts/pipeline_status.py` | Show the research pipeline state at a glance. |
 | `scripts/print_routine.py` | Extract the deploy-ready prompt from a routine .md file. |
