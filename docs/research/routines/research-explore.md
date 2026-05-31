@@ -32,17 +32,18 @@ Find work: `ls docs/research/research/exploring_*.md`.
 - **None → stop now.** Report "research-explore: nothing to do" and exit.
 - One or more → pick the **first by filename**. Process exactly **one doc** this run.
 
-## Wave detection
+## Phase detection
 
-Read the doc's `## Mid-Research Checkpoint` section:
-- `### Verdict` is **empty** (no user sign-off) → **Wave 1**.
-- `### Verdict` has a dated user entry → **Wave 2**.
+**No user gate in this stage anymore** — phases self-trigger off doc content (not a user verdict):
+- `## Findings / Investigation` has **no** dated entry yet → **Phase 1** (then continue into Phase 2 in the same run if budget allows).
+- `## Findings / Investigation` has entries but `## Research Verification` has **no** PASS → **Phase 2**.
+- `## Research Verification` already PASSed but the doc is still `exploring_` → finish the advance (Phase 2 step 6).
 
 ---
 
-## Wave 1 — tiered parallel research
+## Phase 1 — tiered parallel research
 
-1. Read `## Research Plan` (aspects, confirmed at GATE A), `## Open Questions`, `## Prior Art`, `## Constraints`.
+1. Read `## Research Plan` (aspects), `## Open Questions`, `## Prior Art`, `## Constraints`.
 2. For each Open Question (or Research-Plan aspect — whichever is more granular), spawn **two research agents in parallel** plus mark a synthesis step:
 
    #### Agent OQ<N>-C — Codebase Researcher
@@ -63,21 +64,17 @@ Read the doc's `## Mid-Research Checkpoint` section:
 
 5. Append each synthesised Finding to `## Findings / Investigation` (append-only, never edit past entries).
 
-6. Fill `## Mid-Research Checkpoint` → `### Status — YYYY-MM-DD (routine)` with: Covered / Still open / Direction / Adversarial concerns surfaced (leave "(deferred to wave 2)" if not yet probed).
+6. Commit Phase 1 findings to `main` — the doc **stays `exploring_`** (no state change, no gate):
+   - `## Lifecycle` line: `YYYY-MM-DD — research/exploring_ — explore phase 1 done (tiered codebase+web+synthesis × N OQs)`
+   - Bump `last_updated`. Commit to `main`: `docs(research): explore <slug> phase 1 (findings)` + standard trailers. `git push origin main`.
 
-7. Advance to **GATE B**:
-   - `git mv docs/research/research/exploring_<slug>.md docs/research/research/midgate_<slug>.md`
-   - `## Lifecycle` line: `YYYY-MM-DD — research/midgate_ — research wave 1 done (tiered codebase+web+synthesis × N OQs), awaiting GATE B`
-   - Move the line in `_INDEX.md` to `### midgate`; bump `last_updated`.
-   - Commit to `main`: `docs(research): explore <slug> wave 1 → midgate_ (GATE B)` + Co-Authored-By trailer. `git push origin main`.
-
-**Stop at `midgate_`.** The user reviews and passes GATE B with `/gate-pass`.
+7. **Continue straight into Phase 2 in the same run if budget allows.** If the run is out of budget, stop here — the doc stays `exploring_`, and the next cron run sees Findings-present + no Verification PASS → Phase 2. **There is no `midgate_` and no user stop — Phase 1 never pauses for a human.**
 
 ---
 
-## Wave 2 — deepen + adversarial + citation-verify + synthesise
+## Phase 2 — deepen + adversarial + citation-verify + synthesise
 
-1. Read `### Verdict` — the user's GATE-B feedback. If it requests deeper research on specific gaps, **for each gap spawn the same tiered triple** (Codebase + Web + Synthesis) as Wave 1; append findings.
+1. Re-read `## Findings / Investigation` for gaps the Phase-1 synthesis flagged low-confidence or left open (any Finding with `Confidence: low/medium`, any unanswered Open Question). For each such gap, **spawn the same tiered triple** (Codebase + Web + Synthesis) as Phase 1; append findings. (No user feedback to read — this is autonomous; the Research-Verifier in step 4 is the quality bar.)
 
 2. Spawn **Agent A — Adversarial-Agent** (devil's advocate):
    Brief: `## Original Idea`, `## Prior Art`, `## Constraints`, all of `## Findings / Investigation`.
@@ -93,7 +90,7 @@ Read the doc's `## Mid-Research Checkpoint` section:
    Brief: `## Original Idea`, `## Research Plan`, `## Open Questions`, `## Findings / Investigation`, `## Adversarial Findings`, `## Citation Quality`.
    Task: judge completeness, internal consistency, OQ coverage. Each OQ has ≥1 Finding? Adversarial concerns either resolved by Findings or carried forward as acknowledged risks? Citation Quality PASS? Output `PASS` or `GAPS` + a concrete gap list.
    Append to `## Research Verification` as `### YYYY-MM-DD — PASS|GAPS`.
-   - **GAPS** → spawn the tiered triple for each listed gap, append findings, re-run Adversarial + Citation + Verifier. **Max 2 verify rounds per run.** If still GAPS, leave the doc in `exploring_` with a note in `## Research Verification` and stop — next run continues Wave 2.
+   - **GAPS** → spawn the tiered triple for each listed gap, append findings, re-run Adversarial + Citation + Verifier. **Max 2 verify rounds per run.** If still GAPS, leave the doc in `exploring_` with a note in `## Research Verification` and stop — next run continues Phase 2.
 
 5. **On PASS** — spawn **Agent O — Options-Synthesis-Agent**:
    Brief: all Findings + Adversarial Findings + `## Original Idea` + `## Prior Art` + `## Constraints`.
@@ -110,11 +107,11 @@ Read the doc's `## Mid-Research Checkpoint` section:
 - **Docs only.** Never touch `app/`, `frontend/`, `src-tauri/`, `tests/`.
 - **One doc per run.**
 - **Never edit `## Original Idea`** or past `## Findings`, `## Adversarial Findings`, `## Citation Quality` entries — append/supersede only.
-- **Never advance past `midgate_` in Wave 1.** That is GATE B.
-- **Every Finding must cite.** Codebase = `file:line`. Web = URL. No claim without source. The Citation-Quality verifier enforces this in wave 2.
-- `evaluated_` is a work-state — advancing there is allowed (the research verifier gated it). The next user gate is C, after the plan.
+- **No user gate in this stage.** Phase 1 → commit findings, stay `exploring_`. Phase 2 → `evaluated_` on Research-Verifier PASS. The user is never consulted here — the next (and only) sign-off is the Approval Gate, after the plan.
+- **Every Finding must cite.** Codebase = `file:line`. Web = URL. No claim without source. The Citation-Quality verifier enforces this in phase 2.
+- `evaluated_` is a work-state — advancing there is allowed (the research verifier gated it). The next user gate is the Approval Gate, after the plan.
 - Commit directly to `main` (docs, reversible).
 
 ## Report
 
-End with one line: which doc, wave, PASS/GAPS, final state, number of Findings, number of Adversarial concerns, Citation Quality PASS/FAIL.
+End with one line: which doc, phase, PASS/GAPS, final state, number of Findings, number of Adversarial concerns, Citation Quality PASS/FAIL.

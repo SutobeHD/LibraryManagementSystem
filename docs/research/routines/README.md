@@ -24,7 +24,7 @@ Keeping the prompts in the repo means they are reviewable, diffable, and survive
 | `research-watchdog.md` | `research-watchdog` | 1st of month 04:00 | `0 4 1 * *` | `## Lifecycle` lines on `archived/implemented_*` + `Idea Backlog` issue |
 | `research-cross-linker.md` | `research-cross-linker` | Tuesdays 04:30 | `30 4 * * 2` | `related:` frontmatter + `## Cross-links` block on active docs |
 
-Cron is evaluated in the routine's configured timezone — set it to **Europe/Berlin** on claude.ai/code. Daily slots are staggered so a doc can flow draft → explore → plan → implement across a day, pausing at each user gate. The cross-cutting routines run on lower-frequency schedules so they don't compete with the work routines for `main`-branch commits.
+Cron is evaluated in the routine's configured timezone — set it to **Europe/Berlin** on claude.ai/code. Daily slots are staggered so a doc can flow draft → explore → plan across a day and pause only at the single approval gate (then implement once approved). The cross-cutting routines run on lower-frequency schedules so they don't compete with the work routines for `main`-branch commits.
 
 ## Deploy
 
@@ -43,7 +43,7 @@ For each routine:
 Routines run with their own permission config on claude.ai/code (separate from the local `.claude/settings.json`).
 
 - **research-draft / research-explore / research-plan** — docs only. Need: read/edit files, `git add/commit/mv/push origin main`, `git pull --ff-only`, the Agent tool, WebSearch/WebFetch (explore only). No PR or merge permissions.
-- **research-implement** — writes code. Need: all of the above **plus** `git checkout -b`, `git push -u origin routine/*`, `gh pr create`, `gh pr view`. **Must NOT have** `gh pr merge`, `git merge`, `git rebase`, or `git push --force` — merging is GATE D, the user's.
+- **research-implement** — writes code. Need: all of the above **plus** `git checkout -b`, `git push -u origin routine/*`, `gh pr create`, `gh pr view`. **Must NOT have** `gh pr merge`, `git merge`, `git rebase`, or `git push --force` — merging is the user's, after they test the branch locally.
 - **research-triage** — read-only. Need: read files, `python`, `gh issue list/view/create/edit/comment`. No write/commit/PR-merge permissions.
 - **research-spawn** — repo read-only, GitHub Issue write. Need: read files, WebSearch/WebFetch, `git log` / `git show`, `gh issue list/view/create/edit/comment`. **No** repo writes, **no** `git commit/push`. Touches only the `Idea Backlog` issue.
 - **research-watchdog** — narrow repo write (only `## Lifecycle` lines on `archived/implemented_*`) + GitHub Issue write. Need: read files, WebFetch (for dep CHANGELOGs), `gh api` reads, `git add/commit/push origin main` for the Lifecycle edits, `gh issue edit/comment`. **Must NOT** create new files, `git mv`, or touch non-archived docs.
@@ -70,7 +70,7 @@ There is no automatic push from the repo into a deployed routine — the repo fi
 Every commit-writing routine (draft / explore / plan / implement / watchdog / cross-linker) appends an `X-Routine: <routine-name>` trailer to its commit messages, alongside the standard `Co-Authored-By:` trailer. Example:
 
 ```
-docs(research): plan downloader-unified → plangate_ (GATE C)
+docs(research): plan downloader-unified → approvalgate_ (mockup + summary)
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 X-Routine: research-plan
@@ -84,9 +84,8 @@ This lets `research-triage` count per-routine activity precisely via `git log --
                   ┌─ research-spawn (Sun 04:00) ──▶ Idea Backlog issue (user picks)
                   │
                   ▼
-idea_ ──draft──▶ ideagate_ ⛔A ──▶ exploring_ ──explore──▶ midgate_ ⛔B
-       ──▶ exploring_(w2) ──explore──▶ evaluated_ ──plan──▶ plangate_ ⛔C
-       ──▶ accepted_ ──implement──▶ inprogress_ ──▶ PRs ⛔D ──▶ implemented_
+idea_ ──draft──▶ exploring_ ──explore──▶ evaluated_ ──plan(+mockup)──▶ approvalgate_ ⛔
+       ──/approve──▶ accepted_ ──implement──▶ inprogress_ ──▶ PRs ──user test+merge──▶ implemented_
                                                                     │
                                                                     ▼
                   research-watchdog (1st of month) ──▶ Idea Backlog issue (followups)

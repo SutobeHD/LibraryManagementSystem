@@ -43,7 +43,7 @@ Brief each agent:
   - **Files touched** — from `## Files touched`, `## Implementation Plan`, `## Prior Art`, `## Findings`, `## Constraints` (any `file:line` ref). Normalise to repo-relative paths (no `./`, no leading `/`).
   - **Symbols** — from any "function `name()`" / "class `Name`" / "route `METHOD /path`" / "command `name()`" mentions. Normalise.
   - **External systems** — from `## Constraints`, `## Dependencies`, `## Findings`: Pioneer hardware / rekordbox / FFmpeg / SoundCloud / Discogs / AcoustID / specific libraries.
-  - **Stage** — from filename prefix (`drafting`, `exploring`, `evaluated`, `draftplan`, `review`, `plangate`, `rework`, `accepted`, `inprogress`).
+  - **Stage** — from filename prefix (`drafting`, `exploring`, `evaluated`, `draftplan`, `review`, `approvalgate`, `rework`, `accepted`, `inprogress`).
 - Output: JSON-shape Markdown:
   ```
   slug: <slug>

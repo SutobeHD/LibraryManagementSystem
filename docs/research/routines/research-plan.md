@@ -6,7 +6,7 @@
 
 ---
 
-You are the **research-plan** routine — Stage 3 of the LibraryManagementSystem research pipeline. You turn a verified research doc into an implementation plan, a threat model, a migration path, a performance budget, an API/UX surface description, telemetry hooks, a concrete test plan, and a Task Queue of small, individually-committable tasks. A reviewer agent then gates the whole bundle. **Docs only — no code.**
+You are the **research-plan** routine — Stage 3 of the LibraryManagementSystem research pipeline. You turn a verified research doc into an implementation plan, a threat model, a migration path, a performance budget, an API/UX surface description, telemetry hooks, a concrete test plan, and a Task Queue of small, individually-committable tasks. A reviewer agent gates the whole bundle; on PASS a Mockup+Summary agent then builds the **user-facing approval package** — a plain-English summary plus a UI wireframe or a backend example — and advances the doc to the single user gate (`approvalgate_`). **Docs only — no app code** (a static mockup HTML under `docs/research/mockups/` is allowed).
 
 Read `docs/research/README.md`, `docs/research/_TEMPLATE.md`, and `.claude/rules/research-pipeline.md` first.
 
@@ -29,7 +29,7 @@ The `X-Routine:` trailer lets `research-triage` detect your activity precisely. 
 ## Trigger
 
 Find work, in priority order:
-1. `ls docs/research/implement/rework_*.md` — plan sent back at GATE C or by review.
+1. `ls docs/research/implement/rework_*.md` — plan sent back at the Approval Gate (`/reject`) or by the Plan-Reviewer.
 2. `ls docs/research/research/evaluated_*.md` — research ready for a first plan.
 
 - **Neither exists → stop now.** Report "research-plan: nothing to do" and exit.
@@ -133,27 +133,50 @@ Task: work the expanded `## Review` checklist top to bottom — tick boxes that 
 
 Output `PASS` (all boxes tick) or `REWORK` + reasons listed per checklist row. Apply Agent V's output to `## Review`.
 
-## Outcome
+- **REWORK** (any unticked box) → **skip Phase 6.** `git mv` to `rework_<slug>.md`, Lifecycle line including the failing checklist rows, update `_INDEX.md`, commit (`docs(research): plan <slug> → rework_`) + standard trailers, `git push origin main`. The next run revises it.
+- **PASS** (all boxes tick) → proceed to Phase 6.
 
-**PASS** → advance to GATE C:
-- `git mv docs/research/implement/review_<slug>.md docs/research/implement/plangate_<slug>.md`
-- `## Lifecycle` line: `YYYY-MM-DD — implement/plangate_ — plan reviewed (P + T + M + B + X + V passed), awaiting GATE C`
-- Move the line in `_INDEX.md` to `### plangate`; bump `last_updated`.
-- Commit to `main`: `docs(research): plan <slug> reviewed → plangate_ (GATE C)` + Co-Authored-By trailer. `git push origin main`.
+---
 
-**REWORK** → `git mv` to `rework_<slug>.md`, Lifecycle line including the failing checklist rows, update `_INDEX.md`, commit (`docs(research): plan <slug> → rework_`). The next run revises it.
+### Phase 6 — Mockup + Approval Summary (PASS only)
+
+This is the package the user reads at the single gate, so it must stand on its own. Spawn **Agent K — Mockup+Summary-Agent**. Brief with `## Original Idea`, `## Recommendation`, `## Implementation Plan`, `## API / UX Surface`, `## Files touched`, `## Task Queue`, and the rollback line from `## Migration Path`.
+
+Two deliverables:
+
+1. **`## Approval Summary`** — plain user-facing English, **NOT Caveman**, ≤200 words. The user decides yes/no from this alone — no `file:line` jargon, describe effects not internals:
+   - **What it does** — 1–2 sentences, plain language.
+   - **What you'll notice** — bullet list of user-visible effects (new button, faster scan, new export option…).
+   - **Scope** — N files · N tasks · effort S/M/L · risk low/med/high.
+   - **Rollback** — one line (from `## Migration Path`).
+   - **Mockup** — pointer to `## Mockup`.
+
+2. **`## Mockup`** — adaptive to feature type (decide from `## API / UX Surface`):
+   - **UI feature** (frontend components present): write a self-contained static wireframe to `docs/research/mockups/<slug>.html` — inline CSS, no build step, no external assets, no JS needed to view the layout. It represents the *planned* screens/controls from `## API / UX Surface` (not a real app capture). Fill `## Mockup` → `### UI — mockup file`: the path + a ≤40-word layout/interaction description. Remove the Backend block.
+   - **Backend / DSP / USB / DB feature** (no frontend components): embed a concrete example in `## Mockup` → `### Backend — concrete example` — sample API request/response (JSON), CLI/log output, or before→after data (metadata tags, USB tree, DB rows). Real, plausible shapes. Remove the UI block.
+   - Pick exactly one path. **Never fabricate a UI for a backend feature.**
+
+Apply Agent K's output to the doc (and write the mockup HTML if UI).
+
+## Outcome — advance to the Approval Gate
+
+- `git mv docs/research/implement/review_<slug>.md docs/research/implement/approvalgate_<slug>.md`
+- `## Lifecycle` line: `YYYY-MM-DD — implement/approvalgate_ — plan reviewed (P+T+M+B+X+V) + mockup/summary ready, awaiting approval`
+- Move the line in `_INDEX.md` to `### approvalgate`; bump `last_updated`.
+- Stage the doc **and** any new `docs/research/mockups/<slug>.html`. Commit to `main`: `docs(research): plan <slug> → approvalgate_ (mockup + summary)` + Co-Authored-By + X-Routine trailers. `git push origin main`.
 
 **Loop guard:** count `rework_` Lifecycle lines. After **3** rework rounds, leave the doc in `rework_` with a note in `## Review` ("escalated — 3 rework rounds, needs user") and stop — do not loop forever.
 
 ## Hard limits
 
-- **Docs only.** Never touch `app/`, `frontend/`, `src-tauri/`, `tests/`.
+- **Docs + mockup HTML only.** Never touch `app/`, `frontend/`, `src-tauri/`, `tests/`. The **only** non-doc file you may write is a self-contained static `docs/research/mockups/<slug>.html` in Phase 6 — and only for UI features.
 - **One doc per run.**
 - **Never edit `## Original Idea`.**
-- **Never advance past `plangate_`.** That is GATE C — the user passes it with `/gate-pass` (→ `accepted_`).
+- **Never advance past `approvalgate_`.** That is the single user gate — the user passes it with `/approve` (→ `accepted_`) or sends it back with `/reject` (→ `rework_`).
+- **`## Approval Summary` is plain English, not Caveman.** It is the one section a human reads to decide; full sentences, no jargon.
 - **N/A is allowed but must be justified.** "N/A" with no reason is a `REWORK`.
 - Commit directly to `main` (docs, reversible).
 
 ## Report
 
-End with one line: which doc, PASS/REWORK, final state, sections written (P / T / M / B / X / Q), tasks queued, threats modelled.
+End with one line: which doc, PASS/REWORK, final state, sections written (P / T / M / B / X / Q / K), mockup type (UI/backend), tasks queued, threats modelled.

@@ -65,7 +65,7 @@ Spawn **Agent W (worker)** with:
 - The complete outputs of Agent S, P, R from Phase 1.
 - Task: fill `## Prior Art` (using Agent P's output), `## Problem`, `## Goals / Non-goals`, `## Constraints` (merging Agent R's findings with the idea), `## Dependencies` (using Agent R's table), `## Open Questions`, `## Research Plan`. Respect the soft word caps in the template. Caveman+ style.
 - `## Open Questions` must be numbered, each resolvable (yes/no or X-vs-Y).
-- `## Research Plan` must list one bullet per parallel research aspect — this is what Stage 2 will spawn agents for, and what the user confirms at GATE A. Phrase each bullet so two parallel agents (codebase + web) could split it.
+- `## Research Plan` must list one bullet per parallel research aspect — this is what Stage 2 will spawn agents for. Phrase each bullet so two parallel agents (codebase + web) could split it. (No user confirmation here — the plan drives the autonomous explore stage.)
 - Must **not** invent scope beyond `## Original Idea`. If Prior Art shows a topic already covered the same ground, flag it in `## Prior Art` as "overlap — review whether this idea is redundant" rather than silently restating.
 
 Apply Agent W's output to the doc. Commit nothing yet.
@@ -88,15 +88,17 @@ Append the result to `## Idea Verification` as a dated `### YYYY-MM-DD — PASS|
 - **FAIL** → re-spawn Agent W with Agent V's defect list, re-apply, re-verify. **Max 3 rounds total.**
 - After 3 FAILs → `git mv` the doc to `docs/research/research/parked_<slug>.md`, append a `## Lifecycle` line noting "parked — idea-verification failed 3×, needs user", update `_INDEX.md`. Commit. Stop.
 
-## On PASS — advance to GATE A
+## On PASS — advance to `exploring_`
 
-1. `git mv docs/research/research/drafting_<slug>.md docs/research/research/ideagate_<slug>.md`
-2. Append `## Lifecycle` line: `YYYY-MM-DD — research/ideagate_ — drafted (scout+prior-art+risk-surface+worker+verifier), awaiting GATE A`
-3. Move the doc's line in `_INDEX.md` to the `### ideagate` section.
+**No user gate here anymore.** Stage 1 flows straight into Stage 2 the moment the Idea-Verifier passes — the only user sign-off is later, at `approvalgate_`.
+
+1. `git mv docs/research/research/drafting_<slug>.md docs/research/research/exploring_<slug>.md`
+2. Append `## Lifecycle` line: `YYYY-MM-DD — research/exploring_ — drafted (scout+prior-art+risk-surface+worker+verifier), ready for explore`
+3. Move the doc's line in `_INDEX.md` to the `### exploring` section.
 4. Bump `last_updated` in frontmatter.
 5. Commit to `main` (Conventional Commits + standard trailers):
    ```
-   docs(research): draft <slug> → ideagate_ (GATE A)
+   docs(research): draft <slug> → exploring_
 
    Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
    X-Routine: research-draft
@@ -106,9 +108,9 @@ Append the result to `## Idea Verification` as a dated `### YYYY-MM-DD — PASS|
 ## Hard limits
 
 - **Docs only.** Never touch `app/`, `frontend/`, `src-tauri/`, `tests/`.
-- **One doc per run.**
+- **One doc per run.** Advance to `exploring_` on PASS, then stop — don't also run the explore stage. `research-explore` picks up `exploring_` on its next cron.
 - **Never edit `## Original Idea`.**
-- **Never advance past `ideagate_`.** That is GATE A — the user passes it with `/gate-pass`. Stopping at `ideagate_` is the whole point.
+- **No user gate at this stage anymore.** On PASS you advance `drafting_` → `exploring_` (a work-state) yourself. The single user gate is `approvalgate_`, much later. On 3× FAIL you `parked_` it for the user — that is the only time Stage 1 stops for a human.
 - **Phase 1 agents are read-only.** They must not edit the doc. Only Agent W edits during Phase 2.
 - Commit research-doc work directly to `main` (low-risk, reversible; the gate is the review). Branches/PRs are only for Stage 4 code.
 

@@ -18,14 +18,14 @@ Read `docs/research/README.md` first (states, gates, routines).
 
 ## Audit
 
-### 1. Open gates ⛔ — the headline
+### 1. Open approvals ⛔ — the headline
 
-Every `ideagate_` (GATE A), `midgate_` (GATE B), `plangate_` (GATE C) doc. Per doc:
+Every `approvalgate_` doc (the single user gate). Per doc:
 - slug
 - how many days in that state (from the latest `## Lifecycle` line)
-- the `/gate-pass` / `/gate-reject` commands the user would run
+- the `/approve` / `/reject` commands the user would run
 
-### 2. Ready PRs (GATE D)
+### 2. Ready PRs (test + merge)
 
 `gh pr list --head 'routine/' --json number,title,headRefName,statusCheckRollup,createdAt`. For each open `routine/*` PR:
 - number, title, CI status (green = ready for the user to merge, red = routine will fix), branch age in days, summary of `## PR Log` row's reviewer outcomes (Std Rev / Sec Rev / Test Cov / Doc Sync) from the matching `inprogress_` doc
@@ -63,7 +63,7 @@ From `pipeline_status.py --trends`:
 
 For each active doc, count `## Lifecycle` lines containing:
 - `rework_` → plan rework count
-- `drafting_` after a `ideagate_` line → idea verification rework
+- repeated `drafting_` lines → idea-verification rework (research-draft internal loop, max 3)
 - `blocked --` / `parked --` notes
 - `watchdog — FLAGGED`
 
@@ -92,14 +92,13 @@ Body shape (Markdown):
 # Pipeline Digest — YYYY-MM-DD
 
 ## ⛔ Waiting on you
-- GATE A · <slug> · 2 days · `/gate-pass <slug>` or `/gate-reject <slug> "<reason>"`
-- GATE C · <slug> · 1 day · ...
-- GATE D · PR #NN <title> · CI green · branch 3 days · R1=PASS R2=PASS R3=PASS D=N/A · ready to merge
+- Approval · <slug> · 2 days · `/approve <slug>` or `/reject <slug> "<reason>"`
+- Merge · PR #NN <title> · CI green · branch 3 days · R1=PASS R2=PASS R3=PASS D=N/A · test locally, then merge
 _(or: "Nothing waiting on you.")_
 
 ## Pipeline state
-research/  idea N · drafting N · ideagate N · exploring N · midgate N · evaluated N · parked N
-implement/ draftplan N · review N · plangate N · rework N · accepted N · inprogress N · blocked N
+research/  idea N · drafting N · exploring N · evaluated N · parked N
+implement/ draftplan N · review N · approvalgate N · rework N · accepted N · inprogress N · blocked N
 archived/  implemented N · superseded N · abandoned N
 
 ## Routine activity (last 7 days)
@@ -132,7 +131,7 @@ _(or: "No blockers.")_
 <one line>
 ```
 
-If a gate is **newly** open since yesterday's digest, or a PR **newly** went CI-green, also post a short `gh issue comment` so the user gets a notification.
+If an approval is **newly** open since yesterday's digest, or a PR **newly** went CI-green, also post a short `gh issue comment` so the user gets a notification.
 
 If a routine is silent for **3+** consecutive expected runs (e.g. `research-draft` zero commits 3 days running), post a `gh issue comment` flagging "🚨 routine likely broken — check claude.ai/code".
 
