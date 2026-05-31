@@ -618,7 +618,10 @@ const App = () => {
     setIsInitialLoading(true);
     try {
       await api.post('/api/library/mode', { mode });
-      setActiveTab('library');
+      // 'library' is a workspace id, NOT a view tab — the content area matches
+      // tabs via startsWith('lib-'), so 'library' rendered nothing (blank screen
+      // on launch in Rekordbox Live mode). Open the Playlists view directly.
+      setActiveTab('lib-playlists');
     } catch (e) {
       console.error("Mode select failed", e);
     }
