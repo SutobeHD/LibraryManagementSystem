@@ -102,11 +102,17 @@ const buildWorkspaces = (libraryStatus) => [
     ],
   },
   {
-    id: 'sync',
-    label: 'Sync',
+    id: 'usb',
+    label: 'USB',
     items: [
       { tab: 'usb', label: 'USB Export', icon: HardDrive },
       { tab: 'usb-settings', label: 'USB Settings', icon: Sliders },
+    ],
+  },
+  {
+    id: 'soundcloud',
+    label: 'SoundCloud',
+    items: [
       { tab: 'soundcloud', label: 'SoundCloud', icon: Cloud },
       { tab: 'sc-sync', label: 'SCloudLibrary', icon: Download },
       { tab: 'downloads', label: 'Downloads', icon: Download },
@@ -136,7 +142,8 @@ const TAB_WORKSPACE = {
   import: 'import',
   ranking: 'ranking',
   editor: 'editor', xml: 'editor',
-  usb: 'sync', 'usb-settings': 'sync', soundcloud: 'sync', 'sc-sync': 'sync', downloads: 'sync',
+  usb: 'usb', 'usb-settings': 'usb',
+  soundcloud: 'soundcloud', 'sc-sync': 'soundcloud', downloads: 'soundcloud',
   'util-phrase': 'utilities', 'util-duplicates': 'utilities', 'util-xml': 'utilities',
   'util-converter': 'utilities', 'util-low_quality': 'utilities', 'util-lost': 'utilities',
   'util-no_artwork': 'utilities', insights: 'utilities',
