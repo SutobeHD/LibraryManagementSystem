@@ -17,7 +17,7 @@ If this index drifts from the file system, the file system wins — re-derive wi
 _(none)_
 
 ### drafting
-_(none)_
+- [drafting_soundcloud-persistent-login.md](research/drafting_soundcloud-persistent-login.md) — Persistent SoundCloud login: stop discarding refresh_token + expiry, silent server-side refresh, survive restart / no re-login per action (2026-05-31)
 
 ### exploring
 - [exploring_db-write-lock-retrofit.md](research/exploring_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps; Option B (auto-wrap) committed; wave-2 verify → GAPS (3rd gap: `AnalysisDBWriter` rbox-direct write uncovered by class decorator; circular drift guard); stays exploring_ (2026-05-29)
