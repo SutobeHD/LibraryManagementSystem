@@ -23,6 +23,7 @@ superseded_by: []
 - 2026-05-31 — `research/idea_` — created from template
 - 2026-05-31 — `research/drafting_` — Original Idea filled; advanced for research-draft routine
 - 2026-05-31 — `research/exploring_` — drafted (scout + prior-art + risk-surface + worker + idea-verifier PASS), ready for explore
+- 2026-05-31 — `research/exploring_` — explore phase 1 done (tiered codebase+web+synthesis × 4 aspects / 8 OQs)
 
 ## Original Idea (verbatim — never edit)
 
@@ -115,13 +116,29 @@ Baseline: **None — uses existing stack only.** Refresh reuses pinned `keyring`
 
 ## Findings / Investigation
 
-Stage 2 Synthesis-Agents (one per OQ). Dated subsections, append-only. ≤150 words each (soft). Never edit past entries — supersede.
+### 2026-05-31 — F1: SC OAuth token lifecycle (OQ1, OQ2)
+- **Codebase:** `TokenResponse` (`soundcloud_client.rs:107-115`) deserializes `access_token` (used) + `token_type`/`expires_in`/`refresh_token` (all `#[allow(dead_code)]`). `exchange_code_for_token` returns only `access_token` (`:233`). `get_auth_url` (`:171-199`): `response_type=code`, PKCE S256, **no `scope`**. `AUTH_URL`/`TOKEN_URL` `:89-90`. Zero expiry/refresh handling in `app/` or `src-tauri/`.
+- **Web:** auth-code+PKCE returns `access_token`+`refresh_token`+`expires_in`+`scope`; access TTL ~1h per guide (conflict: 2024 blog says 6h → trust runtime `expires_in`). `grant_type=refresh_token` POST params: `grant_type,client_id,client_secret,refresh_token` (no `redirect_uri`). **Refresh token is SINGLE-USE / rotates** — each refresh returns a NEW refresh_token; must persist it. Refresh-token TTL undocumented → handle `invalid_grant` by forcing re-auth. (https://developers.soundcloud.com/docs/api/guide, https://developers.soundcloud.com/blog/security-updates-api/, https://github.com/soundcloud/api/issues/80)
+- **Synthesis:** Persistent login feasible — SC already returns everything; app discards it (`:233`). Rotation is the key complication: each renewal consumes the old refresh_token, so renewal must serialize + atomically store the rotated token.
+- **Confidence:** high (codebase + primary vendor docs agree; only refresh-token TTL unknown).
 
-### YYYY-MM-DD — <label>
-- **Codebase:** … (`file:line` refs required)
-- **Web:** … (cited URLs required)
-- **Synthesis:** …
-- **Confidence:** high / medium / low
+### 2026-05-31 — F2: Refresh ownership + sync/async (OQ3, OQ7-async)
+- **Codebase:** Python loads `SOUNDCLOUD_CLIENT_ID` via `os.environ` (`soundcloud_api.py:52`) but **NOT the secret** — Python has no `client_secret` today. Rust has both (`soundcloud_client.rs:67-72,75-80`), used in exchange (`:211-212`). Async routes call sync SC helpers via `asyncio.to_thread(...)` (`main.py:3613,3657,3316`). `AuthExpiredError` exists (`soundcloud_api.py:138`); no refresh.
+- **Web:** Refresh **server-side**: Python sidecar = confidential client (may hold secret); Tauri shell = public client (PKCE only). refresh grant requires `client_secret`. Sync `requests` in `async def` blocks loop → `run_in_threadpool`/`asyncio.to_thread` (existing pattern) or async `httpx`. (https://www.oauth.com/oauth2-servers/access-tokens/refreshing-access-tokens/, https://workos.com/blog/oauth-best-practices, https://fastapi.tiangolo.com/async/)
+- **Synthesis:** Refresh in Python sidecar → must add `SOUNDCLOUD_CLIENT_SECRET` to Python env loading (Rust-only today). Reuse existing `asyncio.to_thread` + `requests` (no new dep) vs async `httpx` per `coding-rules.md:35` = the OQ3 fork. Rust-side refresh keeps secret put but can't renew during background sidecar work → Python preferred.
+- **Confidence:** high.
+
+### 2026-05-31 — F3: Credential storage + logout (OQ4, OQ8)
+- **Codebase:** keyring stores only bare access token (`main.py:3509`); reads at `:3226,3303,3534,3589,3650,3683,3731,3776,3822`; logout deletes only `sc_token` (`:3514`); `KEYRING_*` consts `:76,78`. Paired-tokens phase2 `app/auth_db.py`: `%APPDATA%/MusicLibraryManager/auth.db`, table `paired_devices` (sha256 `token_hash`, WAL, per-thread conns, `_write_lock`).
+- **Web:** keyring multi-entry vs JSON blob. **Windows Credential Manager practical ~1280-byte ceiling** → combined blob risks overflow; favor separate entries. OS keyring is the recommended at-rest store for refresh tokens (never plaintext). (https://github.com/jaraco/keyring/issues/540, https://developers.google.com/identity/protocols/oauth2/resources/best-practices, https://learn.microsoft.com/en-us/windows/win32/api/wincred/ns-wincred-credentiala)
+- **Synthesis:** Store 3 separate keyring entries (`sc_token`, `sc_refresh_token`, `sc_token_expiry`) under existing service — dodges the 1280-byte cap, OS-native, minimal change. `auth.db` reuse is overkill (single user, no per-device need). Refresh_token stored **plaintext-usable** (NOT hashed like device tokens — must be replayable). Logout must delete all 3 keys.
+- **Confidence:** high.
+
+### 2026-05-31 — F4: Renewal trigger + auth-status + frontend (OQ5, OQ6, OQ7)
+- **Codebase:** 401 interceptor fires on **ANY** 401, no URL check (`api.js:227`); `_refreshScToken` calls interactive `invoke('login_to_soundcloud')` (`:168`); `MAX_REFRESH_FAILS=2` (`:132`). Per-view independent auth state, no sharing, no re-check on tab switch (CSS `hidden`) (`SoundCloudView.jsx:28`, `SoundCloudSyncView.jsx:237`). `auth-status` existence-only (`main.py:3534`).
+- **Web:** Combine proactive (refresh-ahead at `expires_at − buffer`, ~70-80% lifetime) + reactive (on-401 retry-once). Scope interceptor to `/api/soundcloud/*`. **Single-flight dedupe** (one shared refresh promise) — critical given single-use refresh tokens (concurrent refreshes race). Buffer 30-60s min. (https://nango.dev/blog/concurrency-with-oauth-token-refreshes/, https://www.oauth.com/oauth2-servers/making-authenticated-requests/refreshing-an-access-token/, https://www.npmjs.com/package/axios-auth-refresh)
+- **Synthesis:** Backend owns renewal (proactive near-expiry + reactive on 401), serialized single-flight (matches SC rotation). Frontend `_refreshScToken` → silent `POST /api/soundcloud/refresh`; interactive login only on `invalid_grant`. Scope 401-handler to SC URLs (fixes wrong-popup-on-any-401). `auth-status` reports validity/refreshability. Per-view state → shared `sc:auth-changed` re-check (partly wired via ScAccountChip).
+- **Confidence:** high.
 
 ## Adversarial Findings
 
