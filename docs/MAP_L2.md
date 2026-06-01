@@ -80,6 +80,7 @@ LibraryManagementSystem -- Analysis Settings
 
 anlz_cue_patch.py — non-destructive memory-cue injection into existing ANLZ files.
 
+- `read_beats_from_anlz()` — Read beat timestamps (in seconds) from a track's ANLZ PQTZ tag.
 - `patch_memory_cues()` — Inject `memory_cues` into the existing ANLZ files in `anlz_dir`, preserving
 
 ### `app/anlz_safe.py`
@@ -667,7 +668,7 @@ pairing_store — in-memory one-shot pairing codes (Phase-2 auth, T2).
 phrase_generator.py — Phrase & Auto-Cue Generator
 
 - `PhraseNotAnalysedError` — Raised when a track has no existing ANLZ files to patch (not analysed).
-- `extract_beats_from_db()` — Retrieve stored beat positions (in seconds) from the Rekordbox master.db.
+- `extract_beats_from_db()` — Retrieve stored beat positions (in seconds) for a track.
 - `detect_first_downbeat()` — Detect the position of the first true downbeat using spectral energy analysis.
 - `generate_phrase_cues()` — Generate a list of cue point dicts at every N-bar phrase boundary.
 - `phrase_cues_to_memory_dicts()` — Map generate_phrase_cues() output to anlz_writer memory-cue dicts.
@@ -1729,6 +1730,8 @@ Round-trip tests for app/anlz_cue_patch.py.
 - `test_empty_cue_list()`
 - `test_large_cue_list()`
 - `test_missing_dat_raises()`
+- `test_read_beats_from_anlz_roundtrip()`
+- `test_read_beats_no_dat_returns_empty()`
 
 ### `tests/test_auth.py`
 

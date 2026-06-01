@@ -337,6 +337,7 @@ Non-destructive in-place patch of an **existing** ANLZ. Walks the flat PMAI tag 
 | Function | Signature | Notes |
 |----------|-----------|-------|
 | `patch_memory_cues` | `(anlz_dir, memory_cues, *, backup=True) -> dict` | Replace memory cues in the dir's `.DAT` (+ `.EXT` if present). Returns `{dat, ext, backups, base}`. Raises `FileNotFoundError` if no `.DAT` (track not analysed) |
+| `read_beats_from_anlz` | `(anlz_dir) -> list[float]` | Read beat timestamps (s) from the `.DAT` PQTZ tag — rbox MasterDb has no beat-grid getter. `[]` if no `.DAT`/PQTZ |
 | `_walk_tags` | `(data) -> (tags, end)` | Walk the tag chain past the PMAI header; stops (not raises) on a malformed length so the remainder is carried verbatim |
 | `_patch_one_file` | `(path, memory_cues, include_pco2) -> bool` | Rewrite one `.DAT`/`.EXT`; `include_pco2=True` for `.EXT` only. Appends a memory PCOB/PCO2 if the file lacks one |
 
@@ -510,7 +511,7 @@ Writes phrase markers as Rekordbox **MEMORY cues** (not hot cues) — unlimited,
 
 | Function | Signature | Notes |
 |----------|-----------|-------|
-| `extract_beats_from_db` | `(track_id: int, db_path: str) -> list[float]` | Reads rbox beatgrid; `[]` on any failure |
+| `extract_beats_from_db` | `(track_id: int, db_path: str) -> list[float]` | Beats (s) from the track's ANLZ PQTZ via `resolve_anlz_dir` + `read_beats_from_anlz` (rbox has no `get_beat_grid`); `db_path` only locates the ANLZ dir; `[]` on any failure |
 | `detect_first_downbeat` | `(audio_path: str, beats: list[float]) -> float` | librosa low-band energy; falls back to `beats[0]` |
 | `generate_phrase_cues` | `(beats, phrase_length=16) -> list[dict]` | `phrase_start` / `bar_start` cue dicts |
 | `phrase_cues_to_memory_dicts` | `(cues, include_bar_markers=False) -> list[dict]` | Map cues → `anlz_writer` memory-cue dicts; bar markers off by default |
