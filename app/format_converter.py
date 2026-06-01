@@ -577,3 +577,23 @@ class FormatSwapEngine:
                 new_audio.unlink()
         logger.info("op=format_swap.rollback manifest=%s restored=%d", safe_name, restored)
         return {"restored_tracks": restored, "db_restored": db_restored}
+
+
+def build_engine_from_live_db(backup_dir: Path | None = None) -> FormatSwapEngine:
+    """Construct an engine bound to the app's live `master.db` (`app.database.db`).
+
+    MUST be called on the thread that will run the engine: rbox opens a
+    per-thread connection (`LiveRekordboxDB.db`), so resolving the handle here
+    and using it on another thread would cross connections. The route therefore
+    calls this inside the daemon worker (for `run`) or on the request thread
+    (for `dry_run`).
+    """
+    from .database import db as _db
+
+    live = getattr(_db, "active_db", None)
+    if live is None or not hasattr(live, "db"):
+        raise FormatSwapError("live library not loaded — open the library first.")
+    master_db_path = Path(str(getattr(_db, "live_db_path", "")))
+    if backup_dir is None:
+        return FormatSwapEngine(db=live.db, master_db_path=master_db_path)
+    return FormatSwapEngine(db=live.db, master_db_path=master_db_path, backup_dir=backup_dir)

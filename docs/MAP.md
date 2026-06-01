@@ -36,6 +36,7 @@
 | `app/folder_watcher.py` | FolderWatcher — auto-import audio files from user-configured folders. |
 | `app/format_converter.py` | Library format-converter engine — snapshot + transcode + content_id-keyed |
 | `app/format_swap_codec.py` | Pure (dependency-free) decision logic for the library format converter. |
+| `app/format_swap_models.py` | Pydantic request models for the library format converter. |
 | `app/format_swap_tracker.py` | Per-batch format-conversion progress tracker. |
 | `app/import_tracker.py` | Per-file import-progress tracker — gives the frontend a live transparent |
 | `app/library_source.py` | LibrarySource — uniform abstraction over Live (master.db) and XML modes. |

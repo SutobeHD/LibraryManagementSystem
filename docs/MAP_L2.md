@@ -321,6 +321,7 @@ Library format-converter engine — snapshot + transcode + content_id-keyed
 - `  FormatSwapEngine.dry_run()` — Synchronous plan — counts, size forecast, disk verdict, preview.
 - `  FormatSwapEngine.run()` — Execute the batch.
 - `  FormatSwapEngine.rollback()` — Restore DB+WAL+SHM from snapshot, rename `.backup-<ts>` audio back,
+- `build_engine_from_live_db()` — Construct an engine bound to the app's live `master.db` (`app.database.db`).
 
 ### `app/format_swap_codec.py`
 
@@ -333,6 +334,16 @@ Pure (dependency-free) decision logic for the library format converter.
 - `build_ffmpeg_cmd()` — Build the FFmpeg arg list (never a shell string — paths are list
 - `estimate_target_bytes()` — Estimated on-disk size of the converted batch (sum of sources x ratio).
 - `disk_verdict()` — Pre-flight verdict (OQ4).
+
+### `app/format_swap_models.py`
+
+Pydantic request models for the library format converter.
+
+- `FormatSwapScope` — Exactly one of the four scope selectors must be set.
+- `FormatSwapOptions`
+- `FormatSwapReq`
+- `  FormatSwapReq.scope_dict()` — Engine-ready scope dict (carries `trigger` for the log marker).
+- `FormatSwapRollbackReq`
 
 ### `app/format_swap_tracker.py`
 
@@ -540,6 +551,9 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `import_paths()` — Import a mixed list of absolute filesystem paths (files OR directories).
 - `get_import_tasks()` — Live status of every local-file import (drag-drop / folder browse).
 - `clear_import_tasks()` — Drop all completed/failed/skipped tasks from the tracker.
+- `format_swap()` — Batch-convert tracks to AIFF/FLAC/WAV/MP3, preserving cues/beatgrid via
+- `format_swap_status()` — Live status of a running/finished format-swap batch.
+- `format_swap_rollback()` — Undo a format-swap batch: restore master.db + originals from its manifest.
 - `get_artwork()` — Serves artwork image from absolute path or Rekordbox relative path.
 - `get_library_tracks()`
 - `get_ptracks()`

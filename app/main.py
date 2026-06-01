@@ -81,6 +81,10 @@ from . import audio_tags, download_registry, folder_watcher
 from .audio_analyzer import LIBROSA_AVAILABLE, AudioAnalyzer
 from .config import EXPORT_DIR, LOG_DIR, MUSIC_DIR, TEMP_DIR
 from .database import db
+from .format_swap_models import (
+    FormatSwapReq,
+    FormatSwapRollbackReq,
+)
 from .phrase_generator import (
     commit_cues_to_db,
     detect_first_downbeat,
@@ -1857,6 +1861,97 @@ def clear_import_tasks():
     from . import import_tracker
 
     return {"removed": import_tracker.clear_finished()}
+
+
+# --------------------------------------------------------------------------
+# Library format converter (research doc: library-format-converter)
+# Engine: app/format_converter.py. dry_run is synchronous; a real run spawns a
+# daemon thread and reports via app/format_swap_tracker.py.
+# --------------------------------------------------------------------------
+
+
+@app.post("/api/library/format-swap", dependencies=[Depends(require_session)])
+def format_swap(req: FormatSwapReq):
+    """Batch-convert tracks to AIFF/FLAC/WAV/MP3, preserving cues/beatgrid via
+    content_id-keyed in-place row mutation. `dry_run=True` returns a plan;
+    otherwise returns a `task_id` to poll at `/status/{task_id}`."""
+    from . import format_converter as fcv
+    from . import format_swap_tracker as fst
+
+    if db.mode != "live":
+        raise HTTPException(400, "Format conversion requires live (master.db) mode.")
+
+    # Threat FS-1: a user-supplied directory must resolve under the sandbox
+    # before we enumerate anything beneath it.
+    if req.scope.path:
+        try:
+            p = Path(req.scope.path).resolve()
+        except (ValueError, OSError) as e:
+            raise HTTPException(400, "Invalid path") from e
+        if not any(p.is_relative_to(root) for root in ALLOWED_AUDIO_ROOTS):
+            raise HTTPException(403, "Access denied: path outside allowed directories")
+
+    scope_dict = req.scope_dict()
+    options = req.options.model_dump()
+
+    if req.dry_run:
+        plan = fcv.build_engine_from_live_db().dry_run(scope_dict, req.target)
+        return {"status": "ok", "data": plan}
+
+    if fcv._is_rekordbox_running():
+        raise HTTPException(409, "Rekordbox is running — close it before converting.")
+
+    plan = fcv.build_engine_from_live_db().dry_run(scope_dict, req.target)
+    if plan["disk_abort"]:
+        raise HTTPException(
+            400,
+            f"Insufficient disk space: ~{plan['estimated_target_mb']:.0f} MB needed, "
+            f"{plan['disk_free_mb']:.0f} MB free.",
+        )
+    task_id = fst.register(req.trigger, req.target, plan["scope"], plan["convertible"])
+
+    def _run():
+        try:
+            # Build the engine ON this thread — rbox uses a per-thread connection.
+            fcv.build_engine_from_live_db().run(
+                scope_dict, req.target, options=options, task_id=task_id
+            )
+        except Exception as exc:
+            fst.update(task_id, status="Failed", error=str(exc))
+            logger.warning("op=format_swap.fatal task=%s err=%s", task_id, exc)
+
+    threading.Thread(target=_run, daemon=True, name=f"format-swap-{task_id}").start()
+    return {"status": "ok", "data": {"task_id": task_id, "convertible": plan["convertible"]}}
+
+
+@app.get(
+    "/api/library/format-swap/status/{task_id}",
+    dependencies=[Depends(require_session)],
+)
+def format_swap_status(task_id: str):
+    """Live status of a running/finished format-swap batch."""
+    from . import format_swap_tracker as fst
+
+    t = fst.get(task_id)
+    if not t:
+        raise HTTPException(404, "format-swap task not found")
+    return {"status": "ok", "data": t}
+
+
+@app.post("/api/library/format-swap/rollback", dependencies=[Depends(require_session)])
+def format_swap_rollback(req: FormatSwapRollbackReq):
+    """Undo a format-swap batch: restore master.db + originals from its manifest."""
+    from . import format_converter as fcv
+
+    if db.mode != "live":
+        raise HTTPException(400, "Rollback requires live (master.db) mode.")
+    if fcv._is_rekordbox_running():
+        raise HTTPException(409, "Rekordbox is running — close it before rolling back.")
+    try:
+        result = fcv.build_engine_from_live_db().rollback(req.manifest_id)
+    except fcv.FormatSwapError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"status": "ok", "data": result}
 
 
 @app.get("/api/artwork")
