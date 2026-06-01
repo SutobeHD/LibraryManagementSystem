@@ -14,15 +14,13 @@ import {
 const isTauri = !!(window.__TAURI_INTERNALS__ || window.__TAURI_METADATA__ || window.__TAURI__);
 
 // EC1/EC2: No trailing slash on baseURL; all route paths start with '/'
-const API_BASE_URL = isTauri
-    ? (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000')
-    : ''; // empty string → browser uses Vite proxy (see vite.config.js)
+const API_BASE_URL = isTauri ? import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000' : ''; // empty string → browser uses Vite proxy (see vite.config.js)
 
 // ─── Axios Instance ────────────────────────────────────────────────────────────
 const api = axios.create({
     baseURL: API_BASE_URL,
-    timeout: 10_000,          // EC8: 10 s hard timeout on every request
-    withCredentials: false,   // Bearer-in-header only; no cookie-auth transport
+    timeout: 10_000, // EC8: 10 s hard timeout on every request
+    withCredentials: false, // Bearer-in-header only; no cookie-auth transport
 });
 
 // Re-export the auth-store helpers under the legacy api.js names so
@@ -43,8 +41,8 @@ export { getSessionToken, setSessionToken };
 // surface a non-dismissable toast.
 
 const TAURI_BOOTSTRAP_INTERVAL_MS = 500;
-const TAURI_BOOTSTRAP_MAX_ATTEMPTS = 60;          // 60 × 500 ms = 30 s
-const TAURI_BOOTSTRAP_LONG_WAIT_MS = 5_000;       // toast after 5 s
+const TAURI_BOOTSTRAP_MAX_ATTEMPTS = 60; // 60 × 500 ms = 30 s
+const TAURI_BOOTSTRAP_LONG_WAIT_MS = 5_000; // toast after 5 s
 
 async function _bootstrapFromTauri() {
     const { invoke } = await import('@tauri-apps/api/core');
@@ -100,10 +98,10 @@ async function _bootstrap() {
     } catch (err) {
         console.error('[API] Authentication bootstrap failed:', err);
         setBootstrapFailed(true);
-        toast.error(
-            'Authentication bootstrap failed. Restart the app.',
-            { duration: Infinity, id: 'auth-bootstrap-failed' }
-        );
+        toast.error('Authentication bootstrap failed. Restart the app.', {
+            duration: Infinity,
+            id: 'auth-bootstrap-failed',
+        });
         throw err;
     }
 }
@@ -126,10 +124,10 @@ export function ready() {
 // ─── EC15: Token-refresh state ────────────────────────────────────────────────
 // Prevents an infinite refresh loop if the refresh request itself fails.
 // Pattern: queue all 401-waiting requests, drain them after one refresh.
-let _isRefreshing        = false;           // true while a refresh is in flight
-let _refreshSubscribers  = [];             // resolve/reject callbacks queued during refresh
-let _refreshFailCount    = 0;              // consecutive refresh failures
-const MAX_REFRESH_FAILS  = 2;             // stop trying after this many failures
+let _isRefreshing = false; // true while a refresh is in flight
+let _refreshSubscribers = []; // resolve/reject callbacks queued during refresh
+let _refreshFailCount = 0; // consecutive refresh failures
+const MAX_REFRESH_FAILS = 2; // stop trying after this many failures
 
 /** Add a callback that will be called once the token has been refreshed. */
 function _subscribeRefresh(callback) {
@@ -138,7 +136,7 @@ function _subscribeRefresh(callback) {
 
 /** Drain the subscriber queue after a successful (or failed) refresh. */
 function _drainRefreshQueue(newToken, error) {
-    _refreshSubscribers.forEach(cb => cb(newToken, error));
+    _refreshSubscribers.forEach((cb) => cb(newToken, error));
     _refreshSubscribers = [];
 }
 
@@ -254,7 +252,9 @@ api.interceptors.response.use(
             const errs = error.response.data?.errors ?? [];
             console.error(
                 `[API] Validation error on ${originalRequest?.url}:`,
-                errs.length ? errs.map(e => `${e.field.join('.')} → ${e.message}`).join(', ') : error.response.data
+                errs.length
+                    ? errs.map((e) => `${e.field.join('.')} → ${e.message}`).join(', ')
+                    : error.response.data
             );
         }
 
@@ -300,6 +300,23 @@ export function cancellablePost(url, data, config = {}) {
     const controller = new AbortController();
     const promise = api.post(url, data, { ...config, signal: controller.signal });
     return { promise, cancel: () => controller.abort() };
+}
+
+// ─── Library format converter ─────────────────────────────────────────────────
+// Mirrors app/main.py /api/library/format-swap routes (research: library-format-converter).
+/** Convert / dry-run. `body` = FormatSwapReq. dry_run=true → plan; else → {task_id}. */
+export function formatSwap(body) {
+    return api.post('/api/library/format-swap', body);
+}
+
+/** Poll a running/finished format-swap batch by task id. */
+export function formatSwapStatus(taskId) {
+    return api.get(`/api/library/format-swap/status/${encodeURIComponent(taskId)}`);
+}
+
+/** Undo a format-swap batch from its manifest id. */
+export function formatSwapRollback(manifestId) {
+    return api.post('/api/library/format-swap/rollback', { manifest_id: manifestId });
 }
 
 export default api;
