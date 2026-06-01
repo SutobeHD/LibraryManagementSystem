@@ -1935,57 +1935,6 @@ def get_ptracks(pid: str):
         return []
 
 
-@app.get("/api/artist/{aid}/tracks")
-def get_arttracks(aid: str):
-    try:
-        tracks = []
-        raw_tracks = db.get_tracks_by_artist(aid)
-        for t in raw_tracks:
-            d = dict(t)
-            d["ArtistName"] = d.get("Artist") or "Unknown Artist"
-            p = Path(d.get("path", ""))
-            d["filename"] = urllib.parse.quote(p.name)
-            tracks.append(d)
-        return tracks
-    except Exception as e:
-        logger.error(f"Error fetching artist tracks: {e}")
-        return []
-
-
-@app.get("/api/label/{aid}/tracks")
-def get_lbltracks(aid: str):
-    try:
-        tracks = []
-        raw_tracks = db.get_tracks_by_label(aid)
-        for t in raw_tracks:
-            d = dict(t)
-            d["ArtistName"] = d.get("Artist") or "Unknown Artist"
-            p = Path(d.get("path", ""))
-            d["filename"] = urllib.parse.quote(p.name)
-            tracks.append(d)
-        return tracks
-    except Exception as e:
-        logger.error(f"Error fetching label tracks: {e}")
-        return []
-
-
-@app.get("/api/album/{aid}/tracks")
-def get_albtracks(aid: str):
-    try:
-        tracks = []
-        raw_tracks = db.get_tracks_by_album(aid)
-        for t in raw_tracks:
-            d = dict(t)
-            d["ArtistName"] = d.get("Artist") or "Unknown Artist"
-            p = Path(d.get("path", ""))
-            d["filename"] = urllib.parse.quote(p.name)
-            tracks.append(d)
-        return tracks
-    except Exception as e:
-        logger.error(f"Error fetching album tracks: {e}")
-        return []
-
-
 @app.get("/api/projects")
 def list_projects():
     prj_dir = Path("PRJ")

@@ -508,9 +508,6 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `clear_import_tasks()` — Drop all completed/failed/skipped tasks from the tracker.
 - `get_artwork()` — Serves artwork image from absolute path or Rekordbox relative path.
 - `get_ptracks()`
-- `get_arttracks()`
-- `get_lbltracks()`
-- `get_albtracks()`
 - `list_projects()`
 - `save_project()`
 - `load_project_endpoint()`
