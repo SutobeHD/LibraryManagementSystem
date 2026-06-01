@@ -24,6 +24,7 @@ superseded_by: []
 - 2026-06-01 — `research/drafting_` — promoted from idea_ (entered Stage 1)
 - 2026-06-01 — `research/exploring_` — drafted (scout+prior-art+risk-surface+worker+verifier), idea-verify PASS → ready for explore
 - 2026-06-01 — `research/exploring_` — explore phase 1 done (tiered codebase+web+synthesis × 6 aspects); BLOCKER surfaced: PDL = Export-mode only, no live track-id in Performance mode
+- 2026-06-01 — `research/evaluated_` — explore phase 2 done (adversarial + citation PASS, research-verifier PASS); recommendation = spike-gate (3 device spikes) → Option A else B; PDL track-id unmet (Performance mode)
 
 ## Original Idea (verbatim — never edit)
 
@@ -101,6 +102,8 @@ DJ wants sets recorded as more than audio. No tool captures *what the DJ physica
 7. **Timeline format:** Standard MIDI File (universal, replayable) vs custom JSON/JSONL (richer: tracks, levels) vs both (SMF + JSON sidecar)? Must suffice for *future* replay.
 8. **Audio input source:** which device exposes the controller's master out for capture, and does cpal `build_input_stream` capture it on Windows WASAPI? (yes/no + device kind)
 9. **PDL slimming:** can `python-prodj-link`'s UDP listener (Construct structs) be extracted without PyQt5/PyOpenGL? (yes/no)
+10. **Audio-capture path (SPIKE):** does cpal WASAPI loopback on the output device capture the controller's master, or **silence** when Rekordbox/Serato hold the device in exclusive WASAPI / ASIO? If silence → which device / virtual-cable yields the master? (per-device spike; from Adversarial 2026-06-01)
+11. **EQ on the wire (SPIKE):** on the target controller, is channel EQ (esp. Highs) emitted as MIDI/HID, or applied audio-first in hardware DSP and NOT on the stream? Determines whether the headline EQ-animation has a data source. (per-model spike; from Adversarial 2026-06-01)
 
 ## Research Plan
 
@@ -162,22 +165,21 @@ DJ wants sets recorded as more than audio. No tool captures *what the DJ physica
 
 ## Adversarial Findings
 
-Stage 2 Adversarial-Agent (phase 2). Devil's-advocate — what could go wrong, what assumptions are weak, what dependencies betray us. ≤120 words. Append-only.
-
-### YYYY-MM-DD
-- **Weak assumption:** …
-- **Failure mode:** …
-- **Counter-example:** …
-
-If none survive scrutiny: **"No surviving objections — proceed with caution flags above."**
+### 2026-06-01
+- **Failure mode — audio loopback** (vs Finding "Capture libs + audio input", 2026-06-01): cpal WASAPI loopback is **shared-mode only**; exclusive-mode streams can't be loopback-captured + bypass the mixer ([MS Learn](https://learn.microsoft.com/en-us/windows/win32/coreaudio/loopback-recording)). Rekordbox/Serato routinely open the controller out in **ASIO / WASAPI-Exclusive** for low latency → loopback captures **silence**. Downgrades that Finding's "high" confidence; capture likely needs the controller's dedicated loopback device or a virtual cable, not `default_output_device`. → OQ10.
+- **Counter-example — EQ in hardware** (vs Original Idea "Highs raus" + Finding "Control-mapping", 2026-06-01): on several DDJs (e.g. DDJ-800/1000) channel EQ is "audio-first", hardwired, can't unlink from audio ([Pioneer forum](https://forums.pioneerdj.com/hc/en-us/community/posts/16914047357977)). If EQ is in-controller DSP and not on the MIDI/HID stream, the headline "show Highs cut" has **no data source** on those models. Finding assumed every control emits CC — unverified for EQ. → OQ11.
+- **Weak assumption — resvg perf** (vs Finding "Video pipeline", 2026-06-01): "faster-than-realtime" unproven — ~55-66 ms / modest frame; 60-min set @30fps = 108k frames × ~60 ms ≈ 108 min single-thread + 10-50 GB PNG scratch. Needs dirty-region/diff render or low fps. Budget it.
+- **Failure mode — realtime JSONL writer** (vs Finding "Timeline format", 2026-06-01): per-event file write must NOT run in the realtime audio/MIDI callback (`!Send` thread) — blocking I/O = xruns. Plan must mandate `mpsc` → dedicated writer thread.
+- **Compounding risk:** co-read + EQ-in-DSP + loopback-exclusive are **correlated on the exact stated target** (Pioneer DDJ + Rekordbox). All three failing together = MVP delivers neither video nor clean audio. The crux Finding ("Co-read", medium) gates the headline feature — its spike must precede `/approve`, not implementation.
+- **PDL blocker** (vs Finding "Track identity ⚠", 2026-06-01): survives — correctly flagged; consequence understated. User's stated goal "track-info live from Rekordbox" is **unmet at MVP** (Performance mode = no PDL). Approval Summary must state this plainly, not bury it.
 
 ## Citation Quality
 
-Stage 2 Citation-Verifier (phase 2). Checks every `file:line` ref + URL in `## Findings` exists + says what the Finding claims. PASS / FAIL list. ≤80 words.
-
-### YYYY-MM-DD — <PASS|FAIL>
-- PASS: Findings 1, 2, 4 — citations verified
-- FAIL: Finding 3 — `app/main.py:123` no such symbol, replace or remove
+### 2026-06-01 — PASS
+- **PASS:** Findings 2, 3, 5, 6 — all `file:line` + load-bearing URLs verified (cpal LOOPBACK-on-eRender; `app/services.py:279` confirmed missing `timeout=`; SMF 7-bit/no-float; MediaRecorder realtime-only; `validate_audio_path` at `app/main.py:186,208`).
+- **PASS (caveat):** Finding 1 "Co-read" — codebase ref + HID ring-buffer + MIDI single-client (`MMSYSERR_ALLOCATED`) confirmed; teragonaudio URL unreachable → that one unverified, claim corroborated by MS-Learn.
+- **PASS (weak citation):** Finding 4 "Track identity" — Export-mode / Performance=HID claim corroborated by the Pioneer Performance-mode guide + dysentery, **but the lead djtechtools URL does not contain the assertion** → demote to secondary / replace; the claim itself stands.
+- No hard FAIL → no re-research round triggered.
 
 ---
 
@@ -185,37 +187,41 @@ Stage 2 Citation-Verifier (phase 2). Checks every `file:line` ref + URL in `## F
 
 ## Research Verification
 
-Stage 2 wave-2 verifier over whole research body. ≤120 words. PASS → `evaluated_`; gaps → more Findings.
-
-### YYYY-MM-DD — <PASS|GAPS>
-- Coverage of Open Questions: …
-- Internal consistency: …
-- Citation quality (cross-ref `## Citation Quality`): …
-- Adversarial concerns addressed: …
+### 2026-06-01 — PASS
+- **OQ coverage:** OQ1–9 each have ≥1 Finding; OQ10–11 added from adversarial (audio-capture-path + EQ-on-wire spikes) — open by design (hardware-resolvable only).
+- **Internal consistency:** findings agree; no contradictions. cpal pin (`0.15`) supports the loopback claim; metering line refs cross-checked by Citation.
+- **Citation quality:** PASS (see `## Citation Quality`); one weak URL (Finding 4) non-load-bearing — claim holds on two other sources.
+- **Adversarial concerns addressed:** carried forward as acknowledged risks + spikes (co-read, loopback-exclusive, EQ-in-DSP, resvg perf, realtime-writer threading). None are knowledge gaps closeable by more web research — all are device-spikes that must gate `/approve`. PASS → `evaluated_` with these flagged in `## Recommendation`.
 
 ## Options Considered
 
-Stage 2 Synthesis-Agent (phase 2 PASS). Per option: sketch ≤5 bullets, pros, cons, S/M/L/XL, risk, prior-art match.
+### Option A — Full vision, spike-gated
+- Sketch: Rust recorder (`audio_in` loopback + `midi_in`/`hid_in` co-read + shared `clock`) → JSONL+SMF timeline → offline `resvg`→PNG→ffmpeg controller-outline video; best-effort track log.
+- Pros: delivers the whole idea — audio + animated controller video (incl. EQ) + replay-capable timeline + per-second level.
+- Cons: high, **correlated** hardware risk (Adversarial 2026-06-01: co-read + loopback-exclusive + EQ-in-DSP all on the stated target); largest surface; resvg perf budget.
+- Effort: XL.
+- Risk: high.
+- Prior-art match: novel.
 
-### Option A — <name>
-- Sketch:
-- Pros:
-- Cons:
-- Effort:
-- Risk:
-- Prior-art match: <slug or "novel">
+### Option B — De-risked incremental (audio + timeline first, video later)
+- Sketch: Phase 1 = reliable master capture via an **explicit** loopback/virtual-cable device (not naive `default_output`) + control-timeline (HID/MIDI co-read) + JSONL/SMF; defer video render + live-track-id (manual/post-hoc reconcile from Rekordbox history).
+- Pros: each piece independently useful; sidesteps loopback-exclusive (explicit device) + PDL blocker (post-hoc); ships sooner; spikes de-risked one at a time.
+- Cons: headline controller-video deferred; track-id not live (Adversarial 2026-06-01: stated goal unmet at MVP).
+- Effort: L.
+- Risk: medium.
+- Prior-art match: novel.
 
-### Option B — <name>
-- Sketch:
-- Pros:
-- Cons:
-- Effort:
-- Risk:
-- Prior-art match: <slug or "novel">
+### Option C — Reconfigure-rig capture (MIDI-mode + virtual cable)
+- Sketch: user routes master to a virtual audio cable + runs the controller in class-MIDI mode via a virtual-MIDI fan-out → app reads both deterministically; build the full vision on that known-capturable base.
+- Pros: removes the co-read + exclusive-WASAPI unknowns (deterministic capture).
+- Cons: imposes rig reconfiguration on the user (may clash with how they DJ); MIDI-mode loses HID richness; setup friction.
+- Effort: L–XL.
+- Risk: medium (technical) / high (UX adoption).
+- Prior-art match: novel.
 
 ## Recommendation
 
-Stage 2 Synthesis-Agent (phase 2 PASS). ≤120 words. Which option + what blocks commit + which OQ each Finding answers.
+**Spike before committing — then Option A if spikes pass, else Option B.** Three device-spikes gate the headline feature and MUST run on the user's real DDJ+Rekordbox before `/approve`: (1) **co-read** (OQ1) — read controller HID while Rekordbox owns it; (2) **audio-capture path** (OQ10) — loopback vs exclusive/ASIO silence; (3) **EQ-on-wire** (OQ11) — is Highs emitted as MIDI/HID. All three pass → **Option A** (full vision). Any fail → **Option B** (audio+timeline now, video/live-track-id deferred). **Option C** is the fallback if co-read/loopback fail but the user accepts rig reconfiguration. **Track-id live from Rekordbox is unmet** (PDL = Export-mode only, Finding "Track identity ⚠") → manual/post-hoc reconcile at MVP regardless of option. Findings→OQ map: OQ1/2→co-read; OQ2/8→capture libs; OQ3→mapping; OQ4/9→PDL; OQ5/6→video+level; OQ7→timeline; OQ10/11→spike gaps.
 
 ---
 
