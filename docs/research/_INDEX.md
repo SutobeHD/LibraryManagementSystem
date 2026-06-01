@@ -40,10 +40,10 @@ _(none)_
 _(none)_
 
 ### approvalgate ⛔ THE GATE
-- [approvalgate_recording-booth.md](implement/approvalgate_recording-booth.md) — ⛔ **AWAITING /approve** — DJ-set recorder (master audio + controller-MIDI capture + controller-outline video + JSONL/SMF replay-timeline + per-second levels); Stage-3 plan complete (15 tasks: 3 spikes + 9 core + 3 video), Review 15/15 PASS; target = DDJ-FLX4 lead +DDJ-400/GRV6 (all class-MIDI) + Rekordbox; live path = Tauri events (no WS); **spike-gated** A/B/C on co-read / audio-loopback / EQ-on-wire; live track-id unmet (PDL=Export-only) → post-hoc Rekordbox-history reconcile (2026-06-01)
+_(none)_
 
 ### rework
-_(none)_
+- [rework_recording-booth.md](implement/rework_recording-booth.md) — DJ-set recorder; **REJECTED at gate 2026-06-02** (user) → re-scope **lead model FLX4 → DDJ-GRV6** (4-channel / STEMS-native / GROOVE CIRCUIT + Sound-Color/Beat-FX + 4 decks). Re-plan in progress: GRV6 outline + full control map (stem-ISO/drum/FX), spike 1c extended (stem-ISO/sound-color/GROOVE-CIRCUIT on-the-wire), 4-deck timeline; capture unchanged (class-MIDI → `midir`) (2026-06-02)
 
 ### accepted
 - [accepted_downloader-unified-multi-source.md](implement/accepted_downloader-unified-multi-source.md) — Unified multi-source downloader: owner sign-off granted; integrated with parallel research (matching delegated to `external_track_match`, auth via `require_session`, `quality_engine` reuse). Ready for `inprogress_` (2026-05-21)

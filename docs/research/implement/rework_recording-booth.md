@@ -30,6 +30,7 @@ superseded_by: []
 - 2026-06-01 — `implement/review_` — Plan-Reviewer 15/15 PASS. Loud caveat carried to Approval Summary: class-MIDI controllers → harder co-read (WinMM single-client); build branches A/B/C on the 3 hardware spikes (co-read / audio / EQ-on-wire).
 - 2026-06-01 — `implement/approvalgate_` — Mockup (`mockups/recording-booth.html`) + plain-English Approval Summary filled; awaiting user `/approve` or `/reject` (THE single gate).
 - 2026-06-01 — `implement/approvalgate_` — pre-approval refinement (user request): spike specs (1a/1b/1c PASS/PARTIAL/FAIL + A/A′/B/C decision matrix), Task Queue DoD + deps (Task 11 split → 11a/11b), measurable Goal success criteria + goal↔spike map, mockup fidelity (FILTER + tempo + spike-1c EQ caveat). **State unchanged — still at the gate, not advanced.**
+- 2026-06-02 — `implement/rework_` — **REJECTED at gate** (user, via scope review): re-scope **lead model FLX4 → DDJ-GRV6**. GRV6 = 4-channel / STEMS-native / GROOVE CIRCUIT (drum-sampler) + Sound-Color/Beat-FX + 4 decks — materially richer than the FLX4 the plan had picked. Re-plan needed: GRV6 outline, full control map (incl. stem-ISO + drum section + FX), spike 1c extended to stem-ISO/sound-color/GROOVE-CIRCUIT on-the-wire, 4-deck timeline. Capture mechanism unchanged (GRV6 is class-MIDI → `midir`).
 
 ## Original Idea (verbatim — never edit)
 
