@@ -115,6 +115,11 @@
   .fader .cap { position: absolute; left: -4px; right: -4px; height: 14px; background: var(--ink); border-radius: 4px; }
   .fader.a .cap { top: 22px; }
   .fader.b .cap { top: 50px; }
+  .faderrow { display: flex; gap: 12px; align-items: flex-end; }
+  .fcol { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+  .flbl { font-size: 9px; color: var(--muted); letter-spacing: .4px; }
+  .fader.tempo { height: 92px; opacity: .9; }
+  .fader.tempo .cap { top: 36px; background: var(--muted); }
   .center-col { display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 12px; }
   .xfader { width: 92px; height: 24px; background: #11161e; border: 1px solid var(--line); border-radius: 6px; position: relative; }
   .xfader .cap { position: absolute; top: -4px; bottom: -4px; width: 16px; background: var(--ink); border-radius: 4px; left: 38px; }
@@ -242,8 +247,12 @@
                 <div class="knob lit hi-cut"><div class="dial"><i></i></div><div class="k">HI</div></div>
                 <div class="knob"><div class="dial"><i></i></div><div class="k">MID</div></div>
                 <div class="knob"><div class="dial"><i></i></div><div class="k">LOW</div></div>
+                <div class="knob"><div class="dial"><i></i></div><div class="k">FILTER</div></div>
               </div>
-              <div class="fader a"><span class="cap"></span></div>
+              <div class="faderrow">
+                <div class="fcol"><div class="fader a"><span class="cap"></span></div><span class="flbl">VOL</span></div>
+                <div class="fcol"><div class="fader tempo"><span class="cap"></span></div><span class="flbl">TEMPO</span></div>
+              </div>
               <div class="pads"><i class="lit"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
             </div>
 
@@ -264,12 +273,17 @@
                 <div class="knob"><div class="dial"><i></i></div><div class="k">HI</div></div>
                 <div class="knob lit"><div class="dial"><i></i></div><div class="k">MID</div></div>
                 <div class="knob"><div class="dial"><i></i></div><div class="k">LOW</div></div>
+                <div class="knob"><div class="dial"><i></i></div><div class="k">FILTER</div></div>
               </div>
-              <div class="fader b"><span class="cap"></span></div>
+              <div class="faderrow">
+                <div class="fcol"><div class="fader b"><span class="cap"></span></div><span class="flbl">VOL</span></div>
+                <div class="fcol"><div class="fader tempo"><span class="cap"></span></div><span class="flbl">TEMPO</span></div>
+              </div>
               <div class="pads"><i></i><i></i><i class="lit"></i><i></i><i></i><i></i><i></i><i></i></div>
             </div>
           </div>
         </div>
+        <div class="note" style="color:var(--amber)">EQ animation (the Highs-cut) depends on <b>spike 1c</b> — confirmed only if Hi/Mid/Lo are emitted as MIDI&nbsp;CC on this controller. If EQ is hardware-DSP only, faders/pads/jogs still animate (Option&nbsp;A&prime;).</div>
         <div class="note">Live preview reuses the existing canvas render pattern, fed by Tauri events (<code>recording-meter</code> / <code>recording-control</code>) — no WebSocket.</div>
       </div>
     </div>

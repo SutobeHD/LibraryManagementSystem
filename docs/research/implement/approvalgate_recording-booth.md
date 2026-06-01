@@ -29,6 +29,7 @@ superseded_by: []
 - 2026-06-01 — `implement/draftplan_` — Stage 3 plan filled (Planner+Threat+Migration+Perf+Test-Plan+Task-Queue). Target locked to user's gear: DDJ-FLX4 lead + DDJ-400/DDJ-GRV6 siblings (all class-MIDI) + Rekordbox. Capture path = MIDI (`midir`), `hidapi` deferred. Live path = Tauri events → no WebSocket / no `require_session_ws` (supersedes Constraints WS assumption). Track-id = post-hoc Rekordbox-history reconcile (read-only, no `_db_write_lock`).
 - 2026-06-01 — `implement/review_` — Plan-Reviewer 15/15 PASS. Loud caveat carried to Approval Summary: class-MIDI controllers → harder co-read (WinMM single-client); build branches A/B/C on the 3 hardware spikes (co-read / audio / EQ-on-wire).
 - 2026-06-01 — `implement/approvalgate_` — Mockup (`mockups/recording-booth.html`) + plain-English Approval Summary filled; awaiting user `/approve` or `/reject` (THE single gate).
+- 2026-06-01 — `implement/approvalgate_` — pre-approval refinement (user request): spike specs (1a/1b/1c PASS/PARTIAL/FAIL + A/A′/B/C decision matrix), Task Queue DoD + deps (Task 11 split → 11a/11b), measurable Goal success criteria + goal↔spike map, mockup fidelity (FILTER + tempo + spike-1c EQ caveat). **State unchanged — still at the gate, not advanced.**
 
 ## Original Idea (verbatim — never edit)
 
@@ -60,17 +61,19 @@ DJ wants sets recorded as more than audio. No tool captures *what the DJ physica
 **Goals** — each = capability + success criterion. MVP minimum = G1+G2+G4+G5; **G3 (video) = headline, spike-gated**. Target setup throughout: USB controller + laptop running Rekordbox/Serato (not standalone CDJ/DJM).
 
 *Primary (each traces to Original Idea):*
-- **G1 — Set audio recording.** Full-set master audio → one lossless file (WAV/AIFF; format configurable later). *Success:* a played set yields one gapless file matching wall-clock duration. *Acquisition (research):* explicit loopback / virtual-cable input device via cpal `build_input_stream` — **not** naive `default_output` loopback (silent under exclusive-WASAPI/ASIO — Adversarial 2026-06-01, OQ10).
-- **G2 — Controller control capture.** Every control event — channel faders, EQ hi/mid/lo, crossfader, play/cue/pad buttons, knobs, jog touch+turn — with monotonic timestamps. *Success:* each physical move on the mapped controller = one timestamped event carrying normalized (0–1) **and** raw value. *Spike-gated:* co-read of the in-use controller (OQ1) + EQ-on-wire (OQ11).
-- **G3 — Controller-outline performance video (headline).** Static controller outline + every mapped control animated to its captured value over time (Highs-knob visibly turns down on an EQ cut), muxed with G1 audio. *Success:* played side-by-side, the video reproduces the DJ's visible gestures in sync with the audio. *Pipeline (research):* offline resvg→PNG→ffmpeg, deterministic.
-- **G4 — Replay-capable control-timeline file.** All events + track loads + level envelope in a documented format rich enough that a *future* automated replay could re-perform the set. *Success:* file round-trips every event with raw bytes + normalized value + controller-map version + monotonic clock + pitch. Replay itself is **not** built (Non-goal). *Format (research):* JSONL source-of-truth + optional SMF export.
-- **G5 — Track + per-second level timeline.** Which track played per deck over time + a per-second volume/level envelope. *Success:* per-deck track changes + a per-second RMS/LUFS series from the recorded master (reuse `app/analysis_engine.py:917-922,1572-1599`). *Constraint (research):* live track-id from Rekordbox is unavailable in Performance mode (PDL = Export-only — Finding "Track identity ⚠") → MVP = level live, track-id via **post-hoc reconcile from Rekordbox history** (audio-fingerprint later).
+- **G1 — Set audio recording.** Full-set master audio → one lossless file (WAV/AIFF; format configurable later). *Success:* one gapless file, duration within ±1 audio-buffer of wall-clock, **0 dropped callbacks** (Test T1/T3). *Acquisition (research):* explicit loopback / virtual-cable input device via cpal `build_input_stream` — **not** naive `default_output` loopback (silent under exclusive-WASAPI/ASIO — Adversarial 2026-06-01, OQ10).
+- **G2 — Controller control capture.** Every control event — channel faders, EQ hi/mid/lo, crossfader, play/cue/pad buttons, knobs, jog touch+turn — with monotonic timestamps. *Success:* each physical move on the mapped controller = one timestamped event carrying normalized (0–1) **and** raw value; **no missed event** under a 10-moves/s sweep; timestamps monotonic + strictly increasing (Test T2). *Spike-gated:* co-read of the in-use controller (OQ1) + EQ-on-wire (OQ11).
+- **G3 — Controller-outline performance video (headline).** Static controller outline + every mapped control animated to its captured value over time (Highs-knob visibly turns down on an EQ cut), muxed with G1 audio. *Success:* in frame(t) every mapped control sits within **±1 frame** of its `set.jsonl` value; **A/V drift ≤1 frame** end-to-end (Test T4). **Gated on spikes 1a+1c** — if EQ is not on the wire (1c FAIL) the headline Highs-cut cannot be animated → **Option A′** (animate faders/pads/jogs only). *Pipeline (research):* offline resvg→PNG→ffmpeg, deterministic.
+- **G4 — Replay-capable control-timeline file.** All events + track loads + level envelope in a documented format rich enough that a *future* automated replay could re-perform the set. *Success:* file round-trips every event with raw bytes + normalized value + controller-map version + monotonic clock + pitch (Test T5). Replay itself is **not** built (Non-goal). *Format (research):* JSONL source-of-truth + optional SMF export.
+- **G5 — Track + per-second level timeline.** Which track played per deck over time + a per-second volume/level envelope. *Success:* per-deck track changes + a per-second RMS/LUFS series from the recorded master (reuse `app/analysis_engine.py:917-922,1572-1599`); per-second RMS/LUFS within **±0.5 dB** of the offline `analysis_engine` reference (Test T6). *Constraint (research):* live track-id from Rekordbox is unavailable in Performance mode (PDL = Export-only — Finding "Track identity ⚠") → MVP = level live, track-id via **post-hoc reconcile from Rekordbox history** (audio-fingerprint later).
 
 *Cross-cutting (how, not what):*
 - **G6 — One controller model end-to-end first.** Ship the full chain (capture → timeline → video) for the user's actual model before generalizing. Mapping = own JSON schema (`control_id → {midi|hid, kind, outline x/y}`), re-authored from reference facts — **not** copied from GPL Mixxx data (Finding "Control-mapping").
 - **G7 — Non-destructive, sandboxed, off-the-realtime-path.** All outputs written inside `ALLOWED_AUDIO_ROOTS` via `validate_audio_path`; record start/stop behind `require_session`; the timeline writer runs on a dedicated `mpsc` thread, never in the audio/MIDI callback (Adversarial 2026-06-01).
 
 **MVP "done":** a real set on the target controller produces (a) the audio file, (b) the timeline file, (c) the synced controller video. If the three spikes don't all pass → Option-B subset: (a)+(b) ship, (c) video explicitly deferred.
+
+**Goal ↔ spike gate:** G1→spike 1b (audio path); G2→spike 1a (co-read); G3→spikes 1a+1b+1c (full video; EQ needs 1c → else A′); G4 · G5 · G6 · G7 = spike-independent (ship in Option B regardless of hardware outcome).
 
 **Non-goals**
 - **Automated replay/playback** of the timeline — explicitly deferred by the user ("das setzen wir aber nicht um"); only the *format* must support it later (G4).
@@ -273,6 +276,48 @@ Target locked (user, 2026-06-01): **DDJ-FLX4 lead model**, **DDJ-400 + DDJ-GRV6 
 9. **Option A video** — `recorder/video.rs` + `render_recording_video(session_id, fps)` Tauri command (`spawn_blocking`): `resvg`/`usvg`/`tiny-skia` render the FLX4 outline per frame from `set.jsonl`, **stream raw RGBA → ffmpeg stdin** (`-f rawvideo`, no PNG scratch) mux with `set.wav` → `set.mp4`. ffmpeg subprocess **with timeout** (Rust wait-with-timeout). Diff-render unchanged controls; 30fps default, fallback 15/10. Frontend `<video>` player.
 10. **Docs sync** — rust-index, backend-index, frontend-index, FILE_MAP, architecture data-flow, CHANGELOG.
 
+### Spike specifications (Tasks 1–3 — run on real DDJ-FLX4 + Rekordbox before Option A)
+
+Dev-only Tauri commands (behind a debug `cfg`/dev build, no production surface). Each logs one verdict line to stdout + appends to `## Implementation Log`. Run order: 1a → 1c (after 1a, or standalone) → 1b (independent).
+
+**Spike 1a — MIDI co-read (OQ1, the crux).** `spike_midi_coread`
+- *Setup:* FLX4 USB → Win11; Rekordbox in **Performance mode** owning the FLX4; a track loaded + playing so Rekordbox visibly reacts.
+- *Steps:* open FLX4 input via (i) `midir` default **WinMM** backend, then (ii) `midir` **WinRT** backend; callback logs `(t_us,status,d1,d2)`; move one channel fader; watch our log **and** Rekordbox's on-screen fader.
+- *PASS:* our process logs the fader CC **while** Rekordbox still moves its on-screen fader (both clients receive).
+- *PARTIAL:* only WinRT opens (WinMM → `MMSYSERR_ALLOCATED`) → co-read possible, **pin the WinRT backend**.
+- *FAIL:* both backends fail to open, or open but log 0 events while Rekordbox holds the port.
+- *Log:* `op=spike.coread backend=<winmm|winrt> opened=<bool> events=<n> rbox_reacting=<bool> verdict=<PASS|PARTIAL|FAIL>`.
+- *Branch:* PASS/PARTIAL → live controller capture viable. FAIL → **Option C** (virtual-MIDI bridge) or ship Option B without live controller capture.
+
+**Spike 1b — audio-capture path (OQ10).** `spike_audio_loopback`
+- *Setup:* FLX4 as the audio device; Rekordbox outputting master through it; audio playing.
+- *Steps:* enumerate cpal input + output devices (log names); attempt cpal loopback `build_input_stream` on the FLX4 **render** endpoint (eRender → `AUDCLNT_STREAMFLAGS_LOOPBACK`); measure captured RMS over ~3 s; if silent, retry on any virtual-cable input + the FLX4 dedicated capture endpoint.
+- *PASS:* some device yields non-silent buffers (RMS > −60 dBFS) tracking the playing audio → record that device name as the capture source.
+- *FAIL:* every candidate returns silence (Rekordbox holds the device exclusive WASAPI/ASIO).
+- *Log:* `op=spike.audio device=<name> mode=<shared|exclusive> rms_dbfs=<x> verdict=<PASS|FAIL> capture_device=<name|none>`.
+- *Branch:* PASS → audio capture viable on the named device. FAIL → audio needs a documented virtual-cable setup step before video/clean-audio.
+
+**Spike 1c — EQ-on-wire (OQ11).** `spike_eq_onwire`
+- *Setup:* as 1a; if 1a FAIL, run standalone (FLX4 **not** owned by Rekordbox) to confirm EQ emits CC at all.
+- *Steps:* full-sweep Hi, then Mid, then Lo, on deck A then deck B; log every CC `(status,cc,min..max)`.
+- *PASS:* each of Hi/Mid/Lo emits a distinct CC with a continuous 0–127 sweep → data source for the EQ animation exists.
+- *PARTIAL:* some bands emit, others don't.
+- *FAIL:* EQ moves produce no CC (EQ is hardware-DSP, audio-first) → the headline Highs-cut **has no MIDI data source** on this controller.
+- *Log:* `op=spike.eq band=<hi|mid|lo> deck=<a|b> cc=<n|none> range=<min..max> verdict=<PASS|PARTIAL|FAIL>`.
+- *Branch:* PASS → full EQ animation. PARTIAL/FAIL → **Option A′** — animate everything on the wire **except** EQ; report "Highs raus" as not animatable for this model.
+
+**Decision matrix — set the build branch from the 3 verdicts before Task 13:**
+
+| 1a co-read | 1b audio | 1c EQ | Build branch |
+|---|---|---|---|
+| PASS/PARTIAL | PASS | PASS | **A** — audio + timeline + full controller video (incl. EQ) |
+| PASS/PARTIAL | PASS | PARTIAL/FAIL | **A′** — same, video animates all-but-EQ (headline gesture flagged unavailable) |
+| PASS/PARTIAL | FAIL | any | **B** — controller timeline + post-hoc levels ship; audio + video blocked until a capture device is found |
+| FAIL | PASS | (standalone) | **C** — virtual-MIDI bridge for controller capture, else B-no-ctrl (audio + levels only) |
+| FAIL | FAIL | — | **B-minimal** — manual rig setup (virtual cable + virtual MIDI) before anything past level analysis |
+
+Same shipped code across all branches; they differ only in which Task-Queue blocks run (core always; video 13–15 only on A/A′).
+
 ### Files touched
 - **New (Rust):** `src-tauri/src/audio/recorder/{mod,clock,audio_in,midi_in,collector}.rs` (capture), `recorder/hid_in.rs` (stub), `recorder/video.rs` (Option A), `src-tauri/resources/recorder/maps/{ddj-flx4,ddj-400,ddj-grv6}.json`, `src-tauri/resources/recorder/outline/ddj-flx4.svg`.
 - **New (Python):** `app/recording_booth.py` (sidecar DB + levels + reconcile + REST), `tests/test_recording_booth.py`, `tests/test_recording_jsonl_schema.py`, `tests/test_recording_e2e.py`, `tests/perf/test_recording_render.py`.
@@ -411,28 +456,31 @@ Keep tasks small — a task too big to review in one PR must be split.
 Each task should map back to a Step in ## Implementation Plan and have ≥1 row in ## Test Plan.
 -->
 
-**Spikes first — hardware-gated, you run on the DDJ-FLX4 (decide A/B/C before Tasks 13-15):**
-- [ ] Task 1 — Spike: MIDI co-read (WinMM **+** WinRT multi-client) while Rekordbox owns FLX4 — dev cmd `spike_midi_coread`, logs PASS/FAIL (S · Step 1a · OQ1 · diagnostic, no test row)
-- [ ] Task 2 — Spike: audio-capture path (cpal loopback vs ASIO silence; enumerate inputs) — `spike_audio_loopback` (S · Step 1b · OQ10)
-- [ ] Task 3 — Spike: EQ-on-wire — `spike_eq_onwire`, log CC for Hi/Mid/Lo (S · Step 1c · OQ11)
+Each line: `(size · Step · Tests)` then **DoD** (merge bar) + **dep** (must-merge-first). Sizes S/M/L. Tick `- [x]` when the PR merges.
+
+**Spikes first — hardware-gated, you run on the DDJ-FLX4. Decide A/A′/B/C from the decision matrix before Task 13:**
+- [ ] Task 1 — Spike: MIDI co-read (WinMM **+** WinRT) while Rekordbox owns FLX4 — `spike_midi_coread` (S · Step 1a · OQ1 · diagnostic, no test row). **DoD:** verdict PASS/PARTIAL/FAIL logged per backend with event count + `rbox_reacting`; result in `## Implementation Log`. **dep:** none.
+- [ ] Task 2 — Spike: audio-capture path (cpal loopback vs ASIO/exclusive silence; enumerate inputs) — `spike_audio_loopback` (S · Step 1b · OQ10). **DoD:** the device name yielding non-silent master RMS logged, or FAIL-all; verdict in log. **dep:** none.
+- [ ] Task 3 — Spike: EQ-on-wire — `spike_eq_onwire` (S · Step 1c · OQ11). **DoD:** CC + sweep range for Hi/Mid/Lo per deck logged, or FAIL (EQ not on wire); verdict in log. **dep:** none (standalone if Task 1 FAIL).
 
 **Core — Option B baseline (ships regardless of spike outcome):**
-- [ ] Task 4 — Rust `recorder/{clock,audio_in}` + WAV capture on confined thread (M · Step 2 · T1/T3)
-- [ ] Task 5 — Rust `recorder/{midi_in,collector}` + JSONL writer thread (M · Step 2 · T1/T2/T5)
-- [ ] Task 6 — Mapping schema + `ddj-flx4.json` + loader (+400/grv6 stubs) (M · Step 3 · T2)
-- [ ] Task 7 — Tauri commands + events + `.manage` state wiring (M · Step 4 · T10)
-- [ ] Task 8 — Python `recording_booth.py`: sidecar DB + `analyze-levels` route (M · Step 5 · T6/T8)
-- [ ] Task 9 — Python `reconcile-tracks` route (read-only Rekordbox history) (M · Step 6 · T7)
-- [ ] Task 10 — Recordings index + `list`/`{id}` routes (S · Step 7 · T8)
-- [ ] Task 11 — React Recording Booth view: pickers + record + live meter/control + list (L · Step 8 · T10)
-- [ ] Task 12 — docs sync B: rust/backend/frontend-index, FILE_MAP, architecture, CHANGELOG (S · Step 10)
+- [ ] Task 4 — Rust `recorder/{clock,audio_in}` + WAV via `hound` on confined thread (M · Step 2 · T1/T3). **DoD:** start/stop → valid `set.wav` at device sample-rate; shared `Instant` epoch stamped; no `unsafe impl Send`; `cargo test`+`clippy -D warnings` green. **dep:** none.
+- [ ] Task 5 — Rust `recorder/{midi_in,collector}` + append-only JSONL writer thread (M · Step 2 · T1/T2/T5). **DoD:** MIDI CC → `ev` lines with `raw{ch,cc,v7}` preserved verbatim; collector drains `mpsc` on its own thread, **never blocks the audio callback** (xrun-guard test passes). **dep:** Task 4 (clock).
+- [ ] Task 6 — Mapping schema + `ddj-flx4.json` + loader (+ `ddj-400`/`ddj-grv6` stubs) (M · Step 3 · T2). **DoD:** loader resolves CC → `control_id` + outline `{x,y,w,h}`; `map_version` present; schema documented; round-trip test. **dep:** none (parallel to 4/5).
+- [ ] Task 7 — Tauri commands + events + `.manage` state (M · Step 4 · T10). **DoD:** `list_midi_inputs`/`list_recording_inputs`/`start_recording`/`stop_recording`/`recording_status` callable; `recording-meter|control|status|error` emit; `Result<_,String>`, no `unwrap` in fallible paths. **dep:** Tasks 4,5,6.
+- [ ] Task 8 — Python `recording_booth.py`: sidecar DB + `POST /api/recording/analyze-levels` (M · Step 5 · T6/T8). **DoD:** `require_session` + `validate_audio_path` on the wav; per-second RMS/LUFS within ±0.5 dB of `analysis_engine`; appends `lvl` lines; 401-unauth test. **dep:** none (fixture wav).
+- [ ] Task 9 — Python `POST /api/recording/reconcile-tracks` (read-only Rekordbox history) (M · Step 6 · T7). **DoD:** read-only over `[t0,t_end]`, **no `master.db` write / no `_db_write_lock`** (asserted by test); appends `trk` lines; manual fallback path. **dep:** Task 8 (sidecar DB).
+- [ ] Task 10 — Recordings index + `GET /api/recording/list` + `/{id}` (S · Step 7 · T8). **DoD:** both routes `require_session`; return rows from `recording_booth.db`. **dep:** Task 8.
+- [ ] Task 11a — React view shell: device pickers + record/stop + status (M · Step 8 · T10). **DoD:** pickers populate via `invoke`; start/stop dispatch (+ `confirmModal` on stop); tab registered in `main.jsx` (`buildWorkspaces`+`TAB_WORKSPACE`+lazy import). **dep:** Task 7.
+- [ ] Task 11b — React live meter + control-activity canvas + recordings list (M · Step 8 · T10). **DoD:** `listen('recording-meter'|'recording-control')` drives a canvas reusing the `WaveformCanvas`/`DawTimeline` RAF pattern; list from `GET /api/recording/list`; constants in `config/constants.js`. **dep:** Tasks 11a,10.
+- [ ] Task 12 — docs sync B: rust/backend/frontend-index, FILE_MAP, architecture data-flow, CHANGELOG (S · Step 10). **DoD:** indices + FILE_MAP + new architecture flow + CHANGELOG land; `regen_maps.py --check` green. **dep:** Tasks 4–11b.
 
-**Headline — Option A (only if Tasks 1-3 all pass):**
-- [ ] Task 13 — Rust `recorder/video.rs`: resvg→raw-RGBA→ffmpeg-stdin mux + outline SVG (L · Step 9 · T4/T12)
-- [ ] Task 14 — `render_recording_video` command + frontend `<video>` player (M · Step 9 · T4)
-- [ ] Task 15 — perf test + render budget guard (S · Perf row 5 · T12)
+**Headline — Option A (only if Tasks 1-3 → branch A or A′):**
+- [ ] Task 13 — Rust `recorder/video.rs`: resvg→raw-RGBA→ffmpeg-stdin mux + outline SVG (L · Step 9 · T4/T12). **DoD:** deterministic golden frame at a knob position; streams RGBA to ffmpeg stdin (**0 PNG scratch**); ffmpeg subprocess **with timeout**; `set.mp4` muxes `set.wav`; EQ animated only on branch A (A′ skips EQ). **dep:** Tasks 5 (jsonl),6 (map/outline); gate 1a+1b PASS.
+- [ ] Task 14 — `render_recording_video` command + frontend `<video>` player (M · Step 9 · T4). **DoD:** command on `spawn_blocking`; view plays `set.mp4` scrubbed against the timeline. **dep:** Task 13.
+- [ ] Task 15 — perf test + render budget guard (S · Perf row 5 · T12). **DoD:** 60-min synthetic render ≤1× realtime, 0 scratch; frame-budget guard + fps fallback (30→15→10) + user-cancel. **dep:** Task 13.
 
-Each task = 1 branch `routine/recording-booth-task-<N>` = 1 PR.
+**Branch/PR order:** spikes 1-3 → 4 → 5; 6 parallel → 7 → 8 → {9,10} → 11a → 11b → 12; then (post-gate, A/A′ only) 13 → {14,15}. Each task = 1 branch `routine/recording-booth-task-<N>` (`11a`/`11b` keep the suffix) = 1 PR.
 
 ## Review
 
