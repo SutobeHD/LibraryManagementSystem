@@ -25,6 +25,7 @@ superseded_by: []
 - 2026-06-01 — `research/exploring_` — drafted (scout+prior-art+risk-surface+worker+verifier), idea-verify PASS → ready for explore
 - 2026-06-01 — `research/exploring_` — explore phase 1 done (tiered codebase+web+synthesis × 6 aspects); BLOCKER surfaced: PDL = Export-mode only, no live track-id in Performance mode
 - 2026-06-01 — `research/evaluated_` — explore phase 2 done (adversarial + citation PASS, research-verifier PASS); recommendation = spike-gate (3 device spikes) → Option A else B; PDL track-id unmet (Performance mode)
+- 2026-06-01 — `research/evaluated_` — goals expanded (G1–G7 + success criteria + MVP-done) per user request; intent unchanged vs Original Idea
 
 ## Original Idea (verbatim — never edit)
 
@@ -53,19 +54,29 @@ DJ wants sets recorded as more than audio. No tool captures *what the DJ physica
 
 ## Goals / Non-goals
 
-**Goals**
-- Record set master audio (Rust `cpal` input stream).
-- Capture controller control events (MIDI/HID), timestamped: faders, EQ, buttons, knobs, jogs.
-- Render video: controller outline + controls animated to captured events (EQ-cut visibly shown).
-- Write control-timeline file — format sufficient to drive *future* automated replay.
-- Log track timeline + per-second volume/level.
-- Target setup: USB controller + laptop; track info live from Rekordbox (Serato degraded/none).
+**Goals** — each = capability + success criterion. MVP minimum = G1+G2+G4+G5; **G3 (video) = headline, spike-gated**. Target setup throughout: USB controller + laptop running Rekordbox/Serato (not standalone CDJ/DJM).
+
+*Primary (each traces to Original Idea):*
+- **G1 — Set audio recording.** Full-set master audio → one lossless file (WAV/AIFF; format configurable later). *Success:* a played set yields one gapless file matching wall-clock duration. *Acquisition (research):* explicit loopback / virtual-cable input device via cpal `build_input_stream` — **not** naive `default_output` loopback (silent under exclusive-WASAPI/ASIO — Adversarial 2026-06-01, OQ10).
+- **G2 — Controller control capture.** Every control event — channel faders, EQ hi/mid/lo, crossfader, play/cue/pad buttons, knobs, jog touch+turn — with monotonic timestamps. *Success:* each physical move on the mapped controller = one timestamped event carrying normalized (0–1) **and** raw value. *Spike-gated:* co-read of the in-use controller (OQ1) + EQ-on-wire (OQ11).
+- **G3 — Controller-outline performance video (headline).** Static controller outline + every mapped control animated to its captured value over time (Highs-knob visibly turns down on an EQ cut), muxed with G1 audio. *Success:* played side-by-side, the video reproduces the DJ's visible gestures in sync with the audio. *Pipeline (research):* offline resvg→PNG→ffmpeg, deterministic.
+- **G4 — Replay-capable control-timeline file.** All events + track loads + level envelope in a documented format rich enough that a *future* automated replay could re-perform the set. *Success:* file round-trips every event with raw bytes + normalized value + controller-map version + monotonic clock + pitch. Replay itself is **not** built (Non-goal). *Format (research):* JSONL source-of-truth + optional SMF export.
+- **G5 — Track + per-second level timeline.** Which track played per deck over time + a per-second volume/level envelope. *Success:* per-deck track changes + a per-second RMS/LUFS series from the recorded master (reuse `app/analysis_engine.py:917-922,1572-1599`). *Constraint (research):* live track-id from Rekordbox is unavailable in Performance mode (PDL = Export-only — Finding "Track identity ⚠") → MVP = level live, track-id via **post-hoc reconcile from Rekordbox history** (audio-fingerprint later).
+
+*Cross-cutting (how, not what):*
+- **G6 — One controller model end-to-end first.** Ship the full chain (capture → timeline → video) for the user's actual model before generalizing. Mapping = own JSON schema (`control_id → {midi|hid, kind, outline x/y}`), re-authored from reference facts — **not** copied from GPL Mixxx data (Finding "Control-mapping").
+- **G7 — Non-destructive, sandboxed, off-the-realtime-path.** All outputs written inside `ALLOWED_AUDIO_ROOTS` via `validate_audio_path`; record start/stop behind `require_session`; the timeline writer runs on a dedicated `mpsc` thread, never in the audio/MIDI callback (Adversarial 2026-06-01).
+
+**MVP "done":** a real set on the target controller produces (a) the audio file, (b) the timeline file, (c) the synced controller video. If the three spikes don't all pass → Option-B subset: (a)+(b) ship, (c) video explicitly deferred.
 
 **Non-goals**
-- Automated replay/playback of the timeline (user: explicitly deferred — "das setzen wir aber nicht um").
-- Standalone CDJ/DJM capture (mixer moves absent from any data stream).
-- Multi-controller-model support at MVP — one model first.
-- Live streaming/broadcast; editing the recorded video/timeline.
+- **Automated replay/playback** of the timeline — explicitly deferred by the user ("das setzen wir aber nicht um"); only the *format* must support it later (G4).
+- **Standalone CDJ/DJM capture** — mixer EQ/faders/crossfader aren't in any data stream; controller+laptop only.
+- **Live track-identity in Performance mode** beyond post-hoc/fingerprint — PDL can't deliver it; no live now-playing readout at MVP.
+- **Multi-controller-model support** at MVP — one model first; the mapping schema is designed to extend.
+- **Mixing / playing through this app** — it records an *external* DJ rig; it does not become a 2-deck player.
+- **Editing** the recorded video or timeline (trim, recolor, re-mix) — capture/render only.
+- **Live streaming / broadcast / OBS integration.**
 
 ## Constraints
 
