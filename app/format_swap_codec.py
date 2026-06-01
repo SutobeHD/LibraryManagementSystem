@@ -51,9 +51,15 @@ TARGET_SPECS: dict[str, TargetSpec] = {
 # M4A/AAC is the headline source. PROVISIONAL — verify with TARGET_SPECS values.
 SOURCE_FILE_TYPES: dict[str, int] = {"MP3": 1, "M4A": 4, "FLAC": 5, "WAV": 11, "AIFF": 12}
 
-# Disk pre-flight thresholds vs estimated target size (OQ4).
-DISK_ABORT_FACTOR = 1.5
-DISK_WARN_FACTOR = 1.2
+# Disk pre-flight thresholds vs estimated target size (OQ4). Monotonic bands:
+#   free < 1.2x  -> ABORT  (can't even fit target + snapshot + temp overhead)
+#   1.2x <= free < 1.5x -> WARNING (borderline; expect to need cleanup mid-run)
+#   free >= 1.5x -> OK     (comfortable headroom the doc calls for)
+# Note: the research doc's loose "1.5x hard-abort" wording is reconciled here as
+# the 1.5x *comfort* line; the hard abort floor is 1.2x (a 1.5x abort with a
+# 1.2x warn is an impossible band — warn could never fire). Confirm at review.
+DISK_MIN_FACTOR = 1.2  # hard floor: abort below this
+DISK_SAFE_FACTOR = 1.5  # comfortable: warn below this (but >= floor)
 
 
 def target_extension(target: str) -> str:
@@ -132,21 +138,24 @@ def build_ffmpeg_cmd(
 
 
 def estimate_target_bytes(source_total_bytes: int, target: str) -> int:
-    """Estimated on-disk size of the converted batch (sum of sources × ratio)."""
+    """Estimated on-disk size of the converted batch (sum of sources x ratio)."""
     return int(max(0, source_total_bytes) * _spec(target).expansion_ratio)
 
 
 def disk_verdict(free_bytes: int, estimated_target_bytes: int) -> dict:
-    """Pre-flight verdict (OQ4). Aborts before any write if free space can't
-    hold target + snapshot-copies-of-originals + temp overhead (1.5x); warns at
-    1.2x ('borderline, expect to need cleanup mid-run')."""
-    need_abort = free_bytes < estimated_target_bytes * DISK_ABORT_FACTOR
-    need_warn = (not need_abort) and free_bytes < estimated_target_bytes * DISK_WARN_FACTOR
+    """Pre-flight verdict (OQ4). Aborts before any write if free space is below
+    the 1.2x hard floor (can't fit target + snapshot-copies-of-originals + temp
+    overhead); warns when free is between the 1.2x floor and the 1.5x comfort
+    line ('borderline, expect to need cleanup mid-run')."""
+    abort_threshold = estimated_target_bytes * DISK_MIN_FACTOR
+    warn_threshold = estimated_target_bytes * DISK_SAFE_FACTOR
+    need_abort = free_bytes < abort_threshold
+    need_warn = (not need_abort) and free_bytes < warn_threshold
     return {
         "abort": need_abort,
         "warning": need_warn,
         "free_bytes": int(free_bytes),
         "estimated_target_bytes": int(estimated_target_bytes),
-        "abort_threshold_bytes": int(estimated_target_bytes * DISK_ABORT_FACTOR),
-        "warn_threshold_bytes": int(estimated_target_bytes * DISK_WARN_FACTOR),
+        "abort_threshold_bytes": int(abort_threshold),
+        "warn_threshold_bytes": int(warn_threshold),
     }

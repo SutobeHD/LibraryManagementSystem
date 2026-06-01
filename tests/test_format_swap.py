@@ -133,15 +133,18 @@ def test_estimate_target_bytes():
 
 def test_disk_verdict_abort_warn_ok():
     est = 1000
-    # free below 1.5x → abort
-    v = codec.disk_verdict(free_bytes=1400, estimated_target_bytes=est)
+    # free below the 1.2x floor -> abort
+    v = codec.disk_verdict(free_bytes=1100, estimated_target_bytes=est)
     assert v["abort"] and not v["warning"]
-    # free between 1.2x and 1.5x → warning (not abort)
+    # free between the 1.2x floor and the 1.5x comfort line -> warning, not abort
     v = codec.disk_verdict(free_bytes=1300, estimated_target_bytes=est)
     assert not v["abort"] and v["warning"]
-    # free above 1.5x → clean
+    # free at/above 1.5x -> clean
     v = codec.disk_verdict(free_bytes=2000, estimated_target_bytes=est)
     assert not v["abort"] and not v["warning"]
+    # exactly at the 1.2x floor is acceptable (>= floor -> not abort)
+    v = codec.disk_verdict(free_bytes=1200, estimated_target_bytes=est)
+    assert not v["abort"] and v["warning"]
 
 
 # ---------------------------------------------------------------------------

@@ -65,7 +65,7 @@ def register(trigger: str, target: str, scope: str, total: int) -> str:
     return tid
 
 
-def update(task_id: str, **kwargs) -> None:
+def update(task_id: str | None, **kwargs) -> None:
     """Patch fields on a task. Recomputes `progress` from converted+failed/total
     unless `progress` is passed explicitly. Appends to stage_history on status
     change."""
@@ -89,7 +89,9 @@ def update(task_id: str, **kwargs) -> None:
                 t["progress"] = min(100, round(done * 100 / total))
 
 
-def mark_track(task_id: str, name: str, *, ok: bool, beatgrid_preserved: bool = True) -> None:
+def mark_track(
+    task_id: str | None, name: str, *, ok: bool, beatgrid_preserved: bool = True
+) -> None:
     """Convenience: record one track outcome (increments converted/failed)."""
     if not task_id:
         return

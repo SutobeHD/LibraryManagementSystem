@@ -310,6 +310,18 @@ FolderWatcher — auto-import audio files from user-configured folders.
 - `init_watcher()`
 - `shutdown_watcher()`
 
+### `app/format_converter.py`
+
+Library format-converter engine — snapshot + transcode + content_id-keyed
+
+- `FormatSwapError` — Raised for fatal, caller-visible engine failures (bad scope, RB running,
+- `default_backup_dir()` — App-data backup/manifest dir (NOT scripts/dev/backups).
+- `FormatSwapEngine` — One engine per request.
+- `  FormatSwapEngine.resolve_scope()` — Return (content_rows, human_label) for a scope dict.
+- `  FormatSwapEngine.dry_run()` — Synchronous plan — counts, size forecast, disk verdict, preview.
+- `  FormatSwapEngine.run()` — Execute the batch.
+- `  FormatSwapEngine.rollback()` — Restore DB+WAL+SHM from snapshot, rename `.backup-<ts>` audio back,
+
 ### `app/format_swap_codec.py`
 
 Pure (dependency-free) decision logic for the library format converter.
@@ -319,7 +331,7 @@ Pure (dependency-free) decision logic for the library format converter.
 - `rekordbox_file_type()` — The `DjmdContent.FileType` int the engine sets for a converted file.
 - `parse_bit_depth()` — Map `ffprobe -show_entries stream=sample_fmt,bits_per_raw_sample` output
 - `build_ffmpeg_cmd()` — Build the FFmpeg arg list (never a shell string — paths are list
-- `estimate_target_bytes()` — Estimated on-disk size of the converted batch (sum of sources × ratio).
+- `estimate_target_bytes()` — Estimated on-disk size of the converted batch (sum of sources x ratio).
 - `disk_verdict()` — Pre-flight verdict (OQ4).
 
 ### `app/format_swap_tracker.py`
@@ -1836,6 +1848,34 @@ external_track_match unit tests (external-track-match-unified-module T-3..T-9).
 - `test_fingerprint_unavailable_when_binary_missing()`
 - `test_fingerprint_rejects_path_outside_roots()`
 - `test_module_has_no_db_writer_imports()`
+
+### `tests/test_format_converter.py`
+
+Engine tests for `app/format_converter.py` (T-4 swap/snapshot/manifest +
+
+- `FakeContent`
+- `FakeMasterDb`
+- `  FakeMasterDb.get_contents()`
+- `  FakeMasterDb.get_playlist_contents()`
+- `  FakeMasterDb.get_playlists()`
+- `  FakeMasterDb.update_content()`
+- `env()` — Build a music dir + a couple of m4a files + a dummy master.db, plus an
+- `test_resolve_scope_track_ids()`
+- `test_resolve_scope_all_m4a()`
+- `test_resolve_scope_path()`
+- `test_resolve_scope_playlist()`
+- `test_resolve_scope_none_raises()`
+- `test_dry_run_counts_and_no_writes()`
+- `test_dry_run_skips_already_target()`
+- `test_run_converts_mutates_and_preserves_content_id()`
+- `test_run_db_failure_recovers_that_track()`
+- `test_run_ffmpeg_failure_leaves_original_intact()`
+- `test_run_rekordbox_running_raises()`
+- `test_run_disk_abort_raises()`
+- `test_run_empty_scope_completes_noop()`
+- `test_rollback_restores_files_and_db()`
+- `test_rollback_rejects_path_traversal()`
+- `test_rollback_missing_manifest_raises()`
 
 ### `tests/test_format_swap.py`
 

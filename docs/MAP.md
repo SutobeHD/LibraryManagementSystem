@@ -34,6 +34,7 @@
 | `app/download_registry.py` | Download Registry — SQLite-based deduplication & analysis history log. |
 | `app/external_track_match.py` | external_track_match — shared title/version parsing + fuzzy-match + fingerprint. |
 | `app/folder_watcher.py` | FolderWatcher — auto-import audio files from user-configured folders. |
+| `app/format_converter.py` | Library format-converter engine — snapshot + transcode + content_id-keyed |
 | `app/format_swap_codec.py` | Pure (dependency-free) decision logic for the library format converter. |
 | `app/format_swap_tracker.py` | Per-batch format-conversion progress tracker. |
 | `app/import_tracker.py` | Per-file import-progress tracker — gives the frontend a live transparent |
@@ -209,6 +210,7 @@
 | `tests/test_database.py` | Tests for `app/database.py`. |
 | `tests/test_db_taste.py` | taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py). |
 | `tests/test_external_track_match.py` | external_track_match unit tests (external-track-match-unified-module T-3..T-9). |
+| `tests/test_format_converter.py` | Engine tests for `app/format_converter.py` (T-4 swap/snapshot/manifest + |
 | `tests/test_format_swap.py` | Unit tests for the dependency-free format-converter foundation: |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
 | `tests/test_main_security.py` | Regression tests for ``POST /api/file/reveal`` sandbox. |
