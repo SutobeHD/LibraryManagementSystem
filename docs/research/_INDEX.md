@@ -25,7 +25,6 @@ _(none)_
 ### evaluated
 - [evaluated_library-format-converter.md](research/evaluated_library-format-converter.md) — Library-wide format converter; wave 2 closed all 3 blockers (proof script `fdb461c`, AAC priming empirical A/B sample-identical, path-write via direct rbox `update_content`), 6 adversarial concerns addressed/carried-forward, citation MIXED non-load-bearing, V-PASS round 2, 3 options (A/B/C) + Recommendation = Option A (full engine, sister-doc unblocks) with 4 commit-blockers for draftplan_ (2026-05-30)
 - [evaluated_soundcloud-persistent-login.md](research/evaluated_soundcloud-persistent-login.md) — Persistent SoundCloud login; explore done, Research-Verifier PASS (adversarial + citation PASS); Recommendation = Option A (backend-owned silent refresh, no new dep); plan-blockers: backend single-flight + atomic keyring store, browser-dev refresh path (2026-05-31)
-- [evaluated_recording-booth.md](research/evaluated_recording-booth.md) — DJ-set recorder (audio + controller MIDI/HID + outline-video + JSONL/SMF timeline); explore done, Research-Verifier PASS; Recommendation = **spike-gate** (co-read / loopback / EQ-on-wire on real DDJ) → Option A else B; ⚠ PDL = Export-mode-only → live track-id unmet in Performance mode (2026-06-01)
 
 ### parked
 _(none)_
@@ -41,7 +40,7 @@ _(none)_
 _(none)_
 
 ### approvalgate ⛔ THE GATE
-_(none)_
+- [approvalgate_recording-booth.md](implement/approvalgate_recording-booth.md) — ⛔ **AWAITING /approve** — DJ-set recorder (master audio + controller-MIDI capture + controller-outline video + JSONL/SMF replay-timeline + per-second levels); Stage-3 plan complete (15 tasks: 3 spikes + 9 core + 3 video), Review 15/15 PASS; target = DDJ-FLX4 lead +DDJ-400/GRV6 (all class-MIDI) + Rekordbox; live path = Tauri events (no WS); **spike-gated** A/B/C on co-read / audio-loopback / EQ-on-wire; live track-id unmet (PDL=Export-only) → post-hoc Rekordbox-history reconcile (2026-06-01)
 
 ### rework
 _(none)_
