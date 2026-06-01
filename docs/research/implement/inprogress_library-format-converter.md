@@ -641,8 +641,8 @@ Ordered so earlier tasks unblock later (model → tracker → engine → routes 
 - [ ] **T-10 — Phase-1b chaos drill.** 10-track fixture, kill engine mid-run (or simulate `update_content` raise), run rollback from partial manifest, assert DB+files restored + content_ids intact. — covers Step 12, test T25.
 - [ ] **T-11 — Multi-source AAC matrix.** n≥3 AAC source fixtures (iTunes-Store iTunSMPB / Bandcamp HE-AAC / SoundCloud LC) through the Phase-1a falsifier; per-source warn-and-reanalyze flag. — covers Step 13, test T26.
 - [ ] **T-12 — Perf tests.** `tests/test_format_converter_perf.py` — dry-run p95, launch ≤50ms, status ≤10ms, throughput ≥10×, peak RSS ≤150MB. — covers Perf rows, tests T27–T31.
-- [ ] **T-13 — Frontend API helpers.** `frontend/src/api/api.js` — `formatSwap`, `formatSwapStatus`, `formatSwapRollback` (axios via shared `api`). — covers Step 14 (frontend transport).
-- [ ] **T-14 — Frontend view + nav.** `frontend/src/views/FormatConverterView.jsx` — scope/format pickers, dry-run preview table, progress poll, rollback list; ConfirmModal gates convert+rollback; `useToast`; no `alert/confirm/prompt`. Register in nav/router. — covers Step 14, tests T32, T33.
+- [x] **T-13 — Frontend API helpers.** `frontend/src/api/api.js` — `formatSwap`/`formatSwapStatus`/`formatSwapRollback` (axios via shared `api`). — covers Step 14. **DONE** (commit `210f130`).
+- [x] **T-14 — Frontend view + nav.** `frontend/src/components/FormatConverterView.jsx` (note: `components/`, not `views/` — repo convention) — scope picker (all_m4a/playlist/folder) + target picker, dry-run preview (counts/size/disk warn+abort), Convert (ConfirmModal) + live progress poll, per-run Roll back (ConfirmModal); `useToast`; no `alert/confirm/prompt`. Wired into the existing `'converter'` tab in `UtilitiesView.jsx` (replaced the placeholder). — covers Step 14, tests T32,T33. **DONE** (commit `210f130`). ⚠ Prettier-clean + valid JSX; ESLint-semantic + e2e not run here (no local node_modules / Python sidecar).
 - [ ] **T-15 — Docs graduation.** `docs/architecture.md` (new data flow), `FILE_MAP.md` + `backend-index.md` + `frontend-index.md` (new module/routes/view), `CHANGELOG.md`. — done at `implemented_`.
 
 ## Review
@@ -753,7 +753,15 @@ Filled during `inprogress_`. Dated entries. What built / surprised / changed-fro
 - **T-8 contract ready, not fully wired.** The shared model + `trigger="quality_verdict"` pass-through are in place; the sister `/api/quality/swap/request` → engine call is built in the quality-upgrade-finder feature.
 - **Verification limit (honest):** routes + model are **ruff-clean and AST-parse**, but the env has no `pydantic`/`fastapi`, so they are NOT import- or runtime-verified. Per the pipeline design, the `routine/*`/feature branch is tested locally by the owner before merge. Engine logic itself remains covered by the 16 rbox-free tests.
 
-**Remaining: T-9/T-10/T-11 (empirical beatgrid drills — FFmpeg + real AAC + RB export-XML), T-12 (perf), T-13/T-14 (React view). Plus byte-verify the provisional RB FileType codes against a real master.db before `implemented_`.**
+**Remaining after this entry: T-9/T-10/T-11 (empirical beatgrid drills — FFmpeg + real AAC + RB export-XML), T-12 (perf). Plus byte-verify the provisional RB FileType codes against a real master.db before `implemented_`.**
+
+### 2026-05-31 (later still) — frontend T-13/T-14 (commit `210f130`)
+
+- **T-13** `frontend/src/api/api.js` — `formatSwap`/`formatSwapStatus`/`formatSwapRollback` named helpers (axios via the shared `api` instance + Bearer bootstrap).
+- **T-14** `frontend/src/components/FormatConverterView.jsx` (repo puts views in `components/`, not `views/`) — scope picker (All m4a / Playlist id / Folder path) + target picker (AIFF/FLAC/WAV/MP3); Dry-run → preview (convertible/skipped/source/est-size + disk warn/abort banners); Convert gated by `confirmModal` → `setInterval` poll of `/status/{task_id}` with a progress bar + `beatgrid_preserved` notice; per-run Roll back gated by `confirmModal`. `useToast` for all errors; no `alert/confirm/prompt`; `console.error` on failures.
+- **Nav:** `UtilitiesView.jsx` already had a `'converter'` tab rendering a "coming soon" placeholder — swapped it for `<FormatConverterView />` (lazy) and removed the dead placeholder + its now-unused `RefreshCw` import.
+- **Scope cut (honest):** the plan's Rollback UI implied a manifest *list*; the backend exposes no list-manifests endpoint, so rollback is offered for the just-completed run's `manifest_id` (from the status poll). A manifest browser would need a new backend route — left for a follow-up. `track_ids` scope is API-supported but not surfaced in this v1 (needs a track-selection UI).
+- **Verification limit:** Prettier-clean + valid JSX (parsed by prettier). ESLint's semantic pass needs the repo's pinned eslint (`node_modules` absent here; global eslint 10 dropped legacy `.eslintrc.cjs`). Real e2e needs the Python sidecar (fastapi absent) — run `e2e-tester` on a full-stack runner.
 
 ---
 
