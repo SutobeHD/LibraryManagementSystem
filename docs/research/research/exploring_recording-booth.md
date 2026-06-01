@@ -23,6 +23,7 @@ superseded_by: []
 - 2026-06-01 — `research/idea_` — created from template
 - 2026-06-01 — `research/drafting_` — promoted from idea_ (entered Stage 1)
 - 2026-06-01 — `research/exploring_` — drafted (scout+prior-art+risk-surface+worker+verifier), idea-verify PASS → ready for explore
+- 2026-06-01 — `research/exploring_` — explore phase 1 done (tiered codebase+web+synthesis × 6 aspects); BLOCKER surfaced: PDL = Export-mode only, no live track-id in Performance mode
 
 ## Original Idea (verbatim — never edit)
 
@@ -123,13 +124,41 @@ DJ wants sets recorded as more than audio. No tool captures *what the DJ physica
 
 ## Findings / Investigation
 
-Stage 2 Synthesis-Agents (one per OQ). Dated subsections, append-only. ≤150 words each (soft). Never edit past entries — supersede.
+### 2026-06-01 — Co-read feasibility (Windows) [OQ1, OQ2]
+- **Codebase:** greenfield — no HID/MIDI code anywhere. `!Send` Stream confinement pattern `src-tauri/src/audio/playback.rs:13-20`.
+- **Web:** HID class driver buffers input reports in a per-handle ring buffer, shared-open allowed ([MS Learn](https://learn.microsoft.com/en-us/windows-hardware/drivers/hid/obtaining-hid-reports); [hidapi #302](https://github.com/signal11/hidapi/issues/302)); hidapi opens `FILE_SHARE_READ|WRITE` by default. WinMM MIDI input = single-client per driver unless vendor ships multi-client → "Device is busy" ([teragonaudio](http://midi.teragonaudio.com/tech/share.htm); [midiInOpen](https://learn.microsoft.com/en-us/windows/win32/api/mmeapi/nf-mmeapi-midiinopen)). Fan-out: [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html).
+- **Synthesis:** HID-mode = best odds (per-handle ring buffer → two readers *plausibly* both get reports; but MS doesn't guarantee duplicate delivery, and DDJ proprietary HID may use drainable feature-reports). MIDI-mode = single-owner → second open fails. loopMIDI fan-out still needs one app owning the hardware port → can't coexist with Rekordbox. Recommend HID shared-read primary path; **spike before committing.** SPIKE: real DDJ+Win11, Rekordbox owning device, run `hid_open`+`hid_read` loop, move fader — pass = our process logs report bytes WHILE Rekordbox still reacts; repeat MIDI-mode via `midir`.
+- **Confidence:** medium.
 
-### YYYY-MM-DD — <label>
-- **Codebase:** … (`file:line` refs required)
-- **Web:** … (cited URLs required)
-- **Synthesis:** …
-- **Confidence:** high / medium / low
+### 2026-06-01 — Capture libs + audio input [OQ2, OQ8]
+- **Codebase:** output `Stream` thread-confined (`src-tauri/src/audio/playback.rs:78-138`; `!Send` rationale `:11-25`); decoder→ring-buffer `src-tauri/src/audio/engine.rs:114-206`; pinned `cpal="0.15"`,`ringbuf="0.3"` (`src-tauri/Cargo.toml:30,33`); no input/MIDI/HID today.
+- **Web:** cpal v0.15.3 sets `AUDCLNT_STREAMFLAGS_LOOPBACK` when `data_flow()==eRender` → pass the **output** device to `build_input_stream` to capture master-out ([device.rs:509-513](https://raw.githubusercontent.com/RustAudio/cpal/v0.15.3/src/host/wasapi/device.rs)); loopback forces shared-mode+polling ([cpal#476](https://github.com/RustAudio/cpal/issues/476)). `midir` MIT/active, µs-timestamp callback, no virtual ports on Windows ([docs.rs/midir](https://docs.rs/midir/)). `hidapi-rs` MIT/active, dedicated `read_timeout` thread ([github](https://github.com/ruabmbua/hidapi-rs)).
+- **Synthesis:** new `src-tauri/src/audio/recorder/` — `audio_in.rs` (cpal loopback on `default_output_device`, own thread mirroring `playback.rs` confinement), `midi_in.rs` (midir callback→`mpsc`), `hid_in.rs` (hidapi blocking-read thread→same channel), `clock.rs` (shared monotonic `Instant` epoch). Stamp every audio callback + event against that epoch; merge in a collector thread. No `unsafe impl Send`.
+- **Confidence:** high.
+
+### 2026-06-01 — Control-mapping sourcing [OQ3]
+- **Codebase:** greenfield — no control-map code.
+- **Web:** Mixxx mapping format ([wiki](https://github.com/mixxxdj/mixxx/wiki/Midi-Controller-Mapping-File-Format)); real [DDJ-FLX4.midi.xml](https://github.com/mixxxdj/mixxx/blob/main/res/controllers/Pioneer-DDJ-FLX4.midi.xml) (~800 entries); [HID-mapping wiki](https://github.com/mixxxdj/mixxx/wiki/Hid-Mapping) (script-only byte parse, `--controllerDebug`); Mixxx [GPLv2+](https://github.com/mixxxdj/mixxx/blob/main/LICENSE); [Serato maps](https://github.com/marscanbueno/serato-dj-pro-midi-maps); [djtechtools maps](https://maps.djtechtools.com/).
+- **Synthesis:** Mixxx MIDI XML covers most DDJ + encodes CC/note (`<status>0xB0</status>`+`<midino>0x07</midino>`) but has **no x/y** → outline coords always hand-authored. HID-mode DDJ has no semantic byte-map → byte offsets read from `incomingData`. Reuse = read assignments as **reference facts** + re-author; do NOT copy Mixxx XML/JS into our tree (GPLv2+ copyleft). Single MIDI fact not copyrightable; bulk file is. Hand-map one 2-ch DDJ ≈40-60 controls via MIDI-Learn/`--controllerDebug`. Own JSON schema: `control_id → {midi{status,cc} | hid{byte,mask}, kind, outline{x,y,w,h}}`.
+- **Confidence:** high.
+
+### 2026-06-01 — Track identity (Pro DJ Link) + dep-slimming [OQ4, OQ9] ⚠ BLOCKER
+- **Codebase:** greenfield — no PDL/UDP listener (all `udp|socket` hits are SoundCloud HTTP / unrelated math).
+- **Web:** **(a) BLOCKER:** Pro DJ Link runs in rekordbox **EXPORT mode only, NOT Performance mode.** Controller+laptop = Performance mode = HID → no PDL broadcast ([djtechtools](https://djtechtools.com/2018/10/08/pro-dj-link-5-secret-features-of-pioneer-djs-protocol/); [Pioneer Performance-mode guide](https://cdn.rekordbox.com/files/20200312171207/rekordbox5.3.0_connection_guide_for_performance_mode_EN.pdf)). Even on PDL, rekordbox sends mixer-style packets, not per-deck status ([dysentery vcdj](https://djl-analysis.deepsymmetry.org/djl-analysis/vcdj.html)). Hardware CDJ status (port 50002, type `0a`) carries beat/tempo/position/play; track-id in status, title/artist via separate NFS/dbserver ([packet analysis](https://djl-analysis.deepsymmetry.org/djl-analysis/packets.html)). **(b)** Slimmable: protocol = `prodj/network/packets.py` (Construct) + `prodj/core/*` + `prodj/network/*`; GUI isolated in `prodj/gui/*` (PyQt5/PyOpenGL); core needs `construct`+`netifaces` only ([repo](https://github.com/flesniak/python-prodj-link)). **(c)** Serato = no open live API → fingerprint-vs-library only.
+- **Synthesis:** PDL gives **nothing** for the stated controller+laptop Performance-mode target. Live track-id there → audio fingerprint (heavy, separate aspect) OR user switches to Export mode / hardware CDJs later (then vendor `prodj/{network,core,data}`, drop `gui`; deps `construct`+`netifaces`). MVP options: (1) defer track-id to manual/post-hoc reconcile, (2) fingerprint the recorded master.
+- **Confidence:** high.
+
+### 2026-06-01 — Video pipeline + per-second level [OQ5, OQ6]
+- **Codebase:** metering `app/analysis_engine.py:917-922` `rms_array` (hop=`sr/detail_fps`; set hop=`sr` → 1 RMS/sec), `:1572-1599` `calculate_lufs` (`pyloudnorm.Meter` `:1587`, `integrated_loudness` `:1593`). ffmpeg mux pattern `app/services.py:271,279` — **note `:279` lacks `timeout=`, new mux MUST add it** (`coding-rules.md:36`). No resvg crate (greenfield). Canvas reuse `frontend/src/components/daw/DawTimeline.jsx`, `WaveformCanvas.jsx`.
+- **Web:** resvg = pure-Rust, deterministic, `render`→tiny-skia Pixmap→PNG ([docs.rs](https://docs.rs/resvg/), [github](https://github.com/linebender/resvg)); ffmpeg `-framerate N -i frame%05d.png -i audio -c:v libx264 -pix_fmt yuv420p` ([ffmpeg.org](https://ffmpeg.org/ffmpeg.html)); MediaRecorder = realtime-only, drops frames under load, no non-realtime export ([MDN](https://developer.mozilla.org/en-US/docs/Web/API/MediaStream_Recording_API), [w3c #213](https://github.com/w3c/mediacapture-record/issues/213)).
+- **Synthesis:** resvg→PNG→ffmpeg = deterministic, faster-than-realtime offline, reuses existing subprocess pattern; headless browser = ships Chromium, heavy, non-deterministic; realtime MediaRecorder = wall-clock-bound + WebM, unfit for archival. **Recommend (i):** Rust `resvg`/`usvg`/`tiny-skia` SVG-template-per-frame → PNG seq → ffmpeg mux (+`timeout=`). Per-second level: `rms_array(y, hop=sr)` primary; optional `pyloudnorm` per 1s for true LUFS/sec.
+- **Confidence:** high.
+
+### 2026-06-01 — Timeline file format [OQ7]
+- **Codebase:** greenfield; `midly` already proposed; per-second level reuse `app/analysis_engine.py:817-1129`; write inside `ALLOWED_AUDIO_ROOTS` via `validate_audio_path` (`app/main.py:186,208`).
+- **Web:** SMF = 7-bit CC (0-127), tick time tied to quarter-note, tempo µs/qn — **cannot** carry float levels or arbitrary metadata ([midispec](https://midimusic.github.io/tech/midispec.html), [somascape](http://www.somascape.org/midi/tech/mfile.html)). Mixxx records audio only, no control persistence ([manual](https://manual.mixxx.org/2.3/en/chapters/advanced_topics)). Ableton stores controller envelopes + automation in proprietary `.als/.alc` ([ableton](https://www.ableton.com/en/manual/clip-envelopes/)).
+- **Synthesis:** **Recommend BOTH** — JSONL source-of-truth (one event/line, append-only, crash-safe, floats, metadata) + optional SMF export (DAW/host interop). Schema: `hdr{v,t0_unix_ms,sr,controller,map_version,decks}`; `ev{t_ms,deck,control_id,type,value(0-1),raw{ch,cc,v7}}`; `trk{t_ms,deck,track_id,title,artist,bpm,key,pitch_pct,dur_ms}`; `lvl{t_ms,deck,rms,lufs}`. Replay needs (capture NOW, don't under-collect): raw MIDI/HID bytes+channel, normalized **and** native value, versioned controller-map ref, monotonic clock, `pitch_pct`, fader-vs-measured-level distinction (OQ5). Keep `raw` even when `control_id` known → unmapped controls replay verbatim.
+- **Confidence:** high.
 
 ## Adversarial Findings
 
