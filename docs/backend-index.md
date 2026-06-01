@@ -97,6 +97,9 @@ Marker convention in the route tables below:
 | POST | `/api/library/folder-watcher/remove` `[AUTH]` | Stop watching a folder |
 | GET | `/api/import/tasks` | List pending/completed import tasks |
 | POST | `/api/import/tasks/clear` `[AUTH]` | Clear completed import tasks |
+| POST | `/api/library/format-swap` `[AUTH]` | Batch-convert tracks to AIFF/FLAC/WAV/MP3 (content_id-preserving). Body: `FormatSwapReq` `{ trigger, scope:{track_ids\|playlist_id\|all_m4a\|path}, target, dry_run, options }`. `dry_run=True` → sync plan; else `{ task_id }`. Live-mode + RB-running(409) + disk(400) + path-sandbox(403) guards |
+| GET | `/api/library/format-swap/status/{task_id}` `[AUTH]` | Live status of a format-swap batch (Queued/Converting/Completed/Aborted/Failed) |
+| POST | `/api/library/format-swap/rollback` `[AUTH]` | Undo a batch from its manifest (restore master.db + originals). Body: `{ manifest_id }` (basename-guarded) |
 | POST | `/api/debug/load_xml` `[AUTH]` | Debug endpoint: reload XML from disk |
 
 ### Rekordbox XML Endpoints
