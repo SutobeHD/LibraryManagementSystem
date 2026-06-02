@@ -999,6 +999,8 @@ variant_schema — DDL + idempotent migration runner for the variants sidecar.
 ─── EC2: Runtime detection of Tauri context ───────────────────────────────────
 
 - `cancellableGet()` — ─── AbortController helpers ────────────────────────────────────────────────── export function crea…
+- `formatSwap()` — export function cancellablePost(url, data, config = {}) { const controller = new AbortController();…
+- `formatSwapRollback()` — export function formatSwapStatus(taskId) { return api.get(`/api/library/format-swap/status/${encode…
 
 ### `frontend/src/audio/AudioRegion.js`
 
@@ -1307,6 +1309,10 @@ Stage pipeline (in execution order) — covers BOTH SC-DL and local-import
 ### `frontend/src/components/DuplicateView.jsx`
 
 DuplicateView — Acoustic Duplicate Finder & Merge UI Left panel: list of duplicate groups with similarity badge.
+
+### `frontend/src/components/FormatConverterView.jsx`
+
+*(no module docstring)*
 
 ### `frontend/src/components/ImportProgressBanner.jsx`
 
@@ -1890,6 +1896,16 @@ Engine tests for `app/format_converter.py` (T-4 swap/snapshot/manifest +
 - `test_rollback_restores_files_and_db()`
 - `test_rollback_rejects_path_traversal()`
 - `test_rollback_missing_manifest_raises()`
+- `test_partial_abort_then_rollback_restores_only_converted()`
+
+### `tests/test_format_converter_perf.py`
+
+Performance-budget tests for the format converter (T-12).
+
+- `test_status_lookup_latency()` — tracker.get() is an in-memory dict read — p95 must stay well under 10ms.
+- `test_dry_run_plan_latency_large_library()` — Dry-run enumerates the DB + sums file_size (no per-track ffprobe).
+- `test_transcode_throughput_placeholder()` — TODO(full-runner): transcode a real fixture, assert >= ~10x realtime
+- `test_peak_memory_placeholder()` — TODO(full-runner): run a batch under tracemalloc / RSS sampling, assert
 
 ### `tests/test_format_swap.py`
 

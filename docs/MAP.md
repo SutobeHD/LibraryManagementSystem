@@ -117,6 +117,7 @@
 | `frontend/src/components/ConfirmModal.jsx` | Module-level subscriber registry so a single mounted <ConfirmModalRoot /> |
 | `frontend/src/components/DownloadManagerView.jsx` | Stage pipeline (in execution order) — covers BOTH SC-DL and local-import |
 | `frontend/src/components/DuplicateView.jsx` | DuplicateView — Acoustic Duplicate Finder & Merge UI Left panel: list of duplicate groups with similarity bad… |
+| `frontend/src/components/FormatConverterView.jsx` | *(no module docstring)* |
 | `frontend/src/components/ImportProgressBanner.jsx` | Sticky progress banner — visible on every screen while local-file or SoundCloud imports are running. |
 | `frontend/src/components/ImportView.jsx` | Recursively walk a DataTransferItemList, returning every File inside any dropped folder. |
 | `frontend/src/components/InsightsView.jsx` | InsightsView — DJ-Style Analytics Dashboard Datenbasierte Einblicke in den eigenen DJ-Stil und die Library: •… |
@@ -212,6 +213,7 @@
 | `tests/test_db_taste.py` | taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py). |
 | `tests/test_external_track_match.py` | external_track_match unit tests (external-track-match-unified-module T-3..T-9). |
 | `tests/test_format_converter.py` | Engine tests for `app/format_converter.py` (T-4 swap/snapshot/manifest + |
+| `tests/test_format_converter_perf.py` | Performance-budget tests for the format converter (T-12). |
 | `tests/test_format_swap.py` | Unit tests for the dependency-free format-converter foundation: |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
 | `tests/test_main_security.py` | Regression tests for ``POST /api/file/reveal`` sandbox. |
