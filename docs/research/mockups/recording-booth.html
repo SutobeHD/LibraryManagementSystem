@@ -131,6 +131,7 @@
   .dot-btn { width: 22px; height: 22px; border-radius: 50%; background: radial-gradient(circle at 50% 35%, #2c2c32, #131316); border: 1px solid #000; box-shadow: inset 0 1px 1px rgba(255,255,255,.12); }
   .dot-btn.amber { background: radial-gradient(circle at 50% 35%, #ff8c44, #c4520f); border-color: #6a3210; box-shadow: 0 0 8px rgba(255,122,47,.5); }
   .dot-btn.cyan { background: radial-gradient(circle at 50% 35%, #34e6cf, #138b7c); border-color: #0c4a43; box-shadow: 0 0 10px rgba(45,212,191,.5); }
+  .dot-btn.red { background: radial-gradient(circle at 50% 35%, #ff5a68, #b3303c); border-color: #5a1f27; box-shadow: 0 0 9px rgba(226,59,75,.55); }
 
   /* GROOVE CIRCUIT + browser band */
   .band-top { display: grid; grid-template-columns: 1fr 0.62fr 1fr; gap: 14px; margin-bottom: 14px; }
@@ -175,17 +176,23 @@
   .jog .needle { position: absolute; top: 26px; left: 50%; width: 3px; height: 38px; background: linear-gradient(#ff5a68,#b3303c);
     transform-origin: 50% 90px; transform: translateX(-50%) rotate(28deg); border-radius: 2px; z-index: 2; box-shadow: 0 0 8px rgba(255,90,104,.8); }
   .jog.r .needle { transform: translateX(-50%) rotate(-42deg); }
+  .jog .disp { position: absolute; inset: 92px; border-radius: 50%; background: radial-gradient(circle at 50% 40%, #16242e, #0a0e12); border: 1px solid #20323d; box-shadow: inset 0 0 12px #000, 0 0 0 3px #0a0a0c; z-index: 1; }
+  .jog .disp::after { content: ""; position: absolute; inset: 6px; border-radius: 50%; border: 2px solid #15333a; border-top-color: #2dd4bf; border-right-color: #2dd4bf; }
   .jog-side { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 
-  .deck-bottom { display: flex; align-items: flex-end; gap: 12px; }
-  .transport { display: flex; flex-direction: column; gap: 8px; }
-  .tcue, .tplay { width: 42px; height: 30px; border-radius: 7px; border: 1px solid #000; display:flex; align-items:center; justify-content:center; font-size: 12px; color: var(--clbl); background: linear-gradient(#26262c,#141418); box-shadow: inset 0 1px 1px rgba(255,255,255,.1); }
-  .tplay.lit { color: var(--green); border-color: #1d5a30; box-shadow: inset 0 0 8px rgba(78,196,106,.4); }
-  .tcue.lit { color: var(--cyan); border-color: #14534b; box-shadow: inset 0 0 8px rgba(45,212,191,.4); }
-  .tempo { width: 30px; height: 150px; background: #0c0c0e; border: 1px solid #000; border-radius: 6px; position: relative; box-shadow: inset 0 0 8px #000; }
-  .tempo .cap { position: absolute; left: -5px; right: -5px; height: 22px; background: linear-gradient(#3a3a42,#1c1c20); border: 1px solid #000; border-radius: 4px; box-shadow: 0 1px 2px #000; }
-  .tempo .cap::after { content:""; position:absolute; top:50%; left:3px; right:3px; height:2px; background:#000; }
-  .syncgrp { display: flex; flex-direction: column; gap: 6px; }
+  .deck-bottom { display: flex; align-items: flex-end; gap: 14px; justify-content: center; padding-top: 2px; }
+  .transport { display: flex; flex-direction: column; gap: 7px; align-items: center; }
+  .tcue, .tplay { width: 52px; height: 38px; border-radius: 9px; border: 1px solid #000; display:flex; align-items:center; justify-content:center; font-size: 13px; font-weight: 700; color: var(--clbl); background: linear-gradient(#2c2c33,#161619); box-shadow: inset 0 1px 1px rgba(255,255,255,.12), 0 2px 3px rgba(0,0,0,.5); }
+  .tplay.lit { color: var(--green); border-color: #1d5a30; box-shadow: inset 0 0 10px rgba(78,196,106,.45), 0 2px 3px #000; }
+  .tcue.lit { color: var(--cyan); border-color: #14534b; box-shadow: inset 0 0 10px rgba(45,212,191,.45), 0 2px 3px #000; }
+  .tempocol { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+  .tempo { width: 32px; height: 182px; background: linear-gradient(#0a0a0c,#141418); border: 1px solid #000; border-radius: 6px; position: relative; box-shadow: inset 0 0 10px #000; }
+  .tempo::before { content:""; position:absolute; left:3px; right:3px; top:50%; height:2px; background:#34343c; transform:translateY(-50%); }
+  .tempo .cap { position: absolute; left: -6px; right: -6px; height: 24px; background: linear-gradient(#45454e,#1c1c20); border: 1px solid #000; border-radius: 4px; box-shadow: 0 1px 3px #000; }
+  .tempo .cap::after { content:""; position:absolute; top:50%; left:3px; right:3px; height:2px; background:#cfd5dd; transform:translateY(-50%); }
+  .synccol { display: flex; flex-direction: column; gap: 14px; justify-content: flex-end; padding-bottom: 6px; }
+  .knb2 { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .onoff { font-size: 8px; font-weight: 800; color: #2a1405; background: linear-gradient(#ffce4d,#e0a52f); border: 1px solid #7a5a12; border-radius: 5px; padding: 5px 8px; text-align: center; }
 
   /* mixer */
   .mixer { display: flex; gap: 12px; justify-content: center; }
@@ -337,13 +344,23 @@
           <div class="deck-sel"><span class="silk">Deck</span><span class="dnum on">3</span><span class="silk">Dual</span><span class="dnum">1</span></div>
         </div>
         <div class="jogzone">
-          <div class="jog"><div class="ring"></div><div class="platter"></div><div class="hub"></div><span class="needle"></span></div>
-          <div class="jog-side"><div class="dot-btn"></div><span class="silk">M.Tempo</span></div>
+          <div class="jog"><div class="ring"></div><div class="platter"></div><div class="hub"></div><div class="disp"></div><span class="needle"></span></div>
         </div>
         <div class="deck-bottom">
-          <div class="transport"><span class="tcue">CUE</span><span class="tplay lit">&#9654;</span></div>
-          <div class="knb"><div class="tempo"><span class="cap" style="top:42px"></span></div><span class="silk">Tempo</span></div>
-          <div class="syncgrp"><span class="btn blue">BEAT SYNC</span><span class="btn blue">KEY SYNC</span><span class="silk">Shift</span></div>
+          <div class="transport">
+            <span class="tcue">CUE</span>
+            <span class="tplay lit">&#9654;</span>
+            <div class="knb"><div class="dot-btn"></div><span class="silk">Shift</span></div>
+          </div>
+          <div class="tempocol">
+            <div class="knb"><div class="dot-btn red"></div><span class="silk o">M.Tempo</span></div>
+            <div class="tempo"><span class="cap" style="top:72px"></span></div>
+            <span class="silk">Tempo · Range</span>
+          </div>
+          <div class="synccol">
+            <div class="knb2"><span class="btn blue">BEAT SYNC</span><span class="silk">Master</span></div>
+            <div class="knb2"><span class="btn blue">KEY SYNC</span><span class="silk">Key Reset</span></div>
+          </div>
         </div>
       </div>
 
@@ -392,11 +409,12 @@
             <span class="silk" style="color:#cfe0ff">BEAT FX</span>
             <div class="bdiv"><i>1/4</i><i>1/2</i><i>3/4</i><i>1</i></div>
             <div class="bdiv"><i>4</i><i>8</i><i>16</i><i>32</i></div>
-            <div class="kn big"><span class="ptr"></span></div>
+            <div class="knb"><div class="kn big"><span class="ptr"></span></div><span class="silk">Echo &#9662;</span></div>
             <div class="assign"><span class="btn blue">1</span><span class="btn blue">2</span><span class="btn blue">3</span><span class="btn blue">4</span></div>
             <div class="assign"><span class="btn blue">SP</span><span class="btn blue">MST</span></div>
             <div class="knb"><div class="kn"><span class="ptr"></span></div><span class="silk">Lvl/Depth</span></div>
-            <div class="dot-btn cyan"></div><span class="silk">Release FX</span>
+            <div class="onoff">ON / OFF</div>
+            <div class="knb"><div class="dot-btn cyan"></div><span class="silk">Release FX</span></div>
           </div>
         </div>
       </div>
@@ -413,13 +431,23 @@
           <div class="deck-sel"><span class="silk">Deck</span><span class="dnum">2</span><span class="silk">Dual</span><span class="dnum on">4</span></div>
         </div>
         <div class="jogzone">
-          <div class="jog-side"><div class="dot-btn"></div><span class="silk">M.Tempo</span></div>
-          <div class="jog r"><div class="ring"></div><div class="platter"></div><div class="hub"></div><span class="needle"></span></div>
+          <div class="jog r"><div class="ring"></div><div class="platter"></div><div class="hub"></div><div class="disp"></div><span class="needle"></span></div>
         </div>
         <div class="deck-bottom">
-          <div class="syncgrp"><span class="btn blue">BEAT SYNC</span><span class="btn blue">KEY SYNC</span><span class="silk">Shift</span></div>
-          <div class="knb"><div class="tempo"><span class="cap" style="top:60px"></span></div><span class="silk">Tempo</span></div>
-          <div class="transport"><span class="tcue lit">CUE</span><span class="tplay">&#9654;</span></div>
+          <div class="synccol">
+            <div class="knb2"><span class="btn blue">BEAT SYNC</span><span class="silk">Master</span></div>
+            <div class="knb2"><span class="btn blue">KEY SYNC</span><span class="silk">Key Reset</span></div>
+          </div>
+          <div class="tempocol">
+            <div class="knb"><div class="dot-btn red"></div><span class="silk o">M.Tempo</span></div>
+            <div class="tempo"><span class="cap" style="top:88px"></span></div>
+            <span class="silk">Tempo · Range</span>
+          </div>
+          <div class="transport">
+            <span class="tcue lit">CUE</span>
+            <span class="tplay">&#9654;</span>
+            <div class="knb"><div class="dot-btn"></div><span class="silk">Shift</span></div>
+          </div>
         </div>
       </div>
     </div>
