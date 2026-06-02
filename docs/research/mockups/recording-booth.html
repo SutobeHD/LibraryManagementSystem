@@ -167,22 +167,22 @@
   .dnum.on { color: #fff; border-color: var(--red); box-shadow: inset 0 0 6px rgba(226,59,75,.5); }
 
   .jogzone { display: flex; gap: 10px; align-items: center; justify-content: center; }
-  .jog { width: 256px; height: 256px; border-radius: 50%; position: relative; flex: 0 0 auto;
+  .jog { width: 330px; height: 330px; border-radius: 50%; position: relative; flex: 0 0 auto;
     background: repeating-conic-gradient(from 0deg, #32323a 0deg 1.0deg, #0f0f13 1.0deg 2.0deg);
-    box-shadow: 0 8px 18px rgba(0,0,0,.7), inset 0 0 0 1px #000; }
-  .jog .ring { position: absolute; inset: 13px; border-radius: 50%; background: #0b0b0e;
-    box-shadow: inset 0 0 0 2px #000, inset 0 0 0 6px #161619, inset 0 0 0 7px #000; }
-  .jog .platter { position: absolute; inset: 24px; border-radius: 50%;
+    box-shadow: 0 9px 22px rgba(0,0,0,.7), inset 0 0 0 1px #000; }
+  .jog .ring { position: absolute; inset: 5.1%; border-radius: 50%; background: #0b0b0e;
+    box-shadow: inset 0 0 0 2px #000, inset 0 0 0 7px #161619, inset 0 0 0 8px #000; }
+  .jog .platter { position: absolute; inset: 9.4%; border-radius: 50%;
     background: radial-gradient(circle at 50% 33%, #3c3c46 0%, #24242b 40%, #131318 70%, #0a0a0e 100%);
-    box-shadow: inset 0 0 42px rgba(0,0,0,.85), inset 0 3px 5px rgba(255,255,255,.06); }
-  .jog .platter::after { content: ""; position: absolute; inset: 18px; border-radius: 50%;
-    background: repeating-radial-gradient(circle, rgba(255,255,255,.035) 0 1px, transparent 1px 8px); opacity: .6; }
-  .jog .hub { position: absolute; inset: 92px; border-radius: 50%;
+    box-shadow: inset 0 0 54px rgba(0,0,0,.85), inset 0 3px 5px rgba(255,255,255,.06); }
+  .jog .platter::after { content: ""; position: absolute; inset: 8.5%; border-radius: 50%;
+    background: repeating-radial-gradient(circle, rgba(255,255,255,.035) 0 1px, transparent 1px 9px); opacity: .55; }
+  .jog .hub { position: absolute; inset: 36%; border-radius: 50%;
     background: radial-gradient(circle at 50% 32%, #34343d 0%, #1a1a20 60%, #0c0c10 100%);
-    border: 1px solid #3c3c46; box-shadow: inset 0 1px 2px rgba(255,255,255,.10), inset 0 0 16px #000, 0 0 0 5px rgba(0,0,0,.45); }
+    border: 1px solid #3c3c46; box-shadow: inset 0 1px 2px rgba(255,255,255,.10), inset 0 0 18px #000, 0 0 0 6px rgba(0,0,0,.45); }
   .jog .hub::after { content: ""; position: absolute; inset: 40%; border-radius: 50%; background: radial-gradient(circle at 50% 35%, #45454f, #1d1d23); box-shadow: inset 0 1px 1px rgba(255,255,255,.15); }
-  .jog .needle { position: absolute; top: 30px; left: 50%; width: 3px; height: 42px; background: linear-gradient(#ff5a68,#b3303c);
-    transform-origin: 50% 98px; transform: translateX(-50%) rotate(28deg); border-radius: 2px; z-index: 2; box-shadow: 0 0 8px rgba(255,90,104,.8); }
+  .jog .needle { position: absolute; top: 12%; left: 50%; width: 4px; height: 16.5%; background: linear-gradient(#ff5a68,#b3303c);
+    transform-origin: 50% 230%; transform: translateX(-50%) rotate(28deg); border-radius: 2px; z-index: 2; box-shadow: 0 0 8px rgba(255,90,104,.8); }
   .jog.r .needle { transform: translateX(-50%) rotate(-42deg); }
   .jog-side { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 
@@ -192,7 +192,7 @@
   .tplay.lit { color: var(--green); border-color: #1d5a30; box-shadow: inset 0 0 10px rgba(78,196,106,.45), 0 2px 3px #000; }
   .tcue.lit { color: var(--cyan); border-color: #14534b; box-shadow: inset 0 0 10px rgba(45,212,191,.45), 0 2px 3px #000; }
   .tempocol { display: flex; flex-direction: column; align-items: center; gap: 5px; }
-  .tempo { width: 32px; height: 182px; background: linear-gradient(#0a0a0c,#141418); border: 1px solid #000; border-radius: 6px; position: relative; box-shadow: inset 0 0 10px #000; }
+  .tempo { width: 30px; height: 150px; background: linear-gradient(#0a0a0c,#141418); border: 1px solid #000; border-radius: 6px; position: relative; box-shadow: inset 0 0 10px #000; }
   .tempo::before { content:""; position:absolute; left:3px; right:3px; top:50%; height:2px; background:#34343c; transform:translateY(-50%); }
   .tempo .cap { position: absolute; left: -6px; right: -6px; height: 24px; background: linear-gradient(#45454e,#1c1c20); border: 1px solid #000; border-radius: 4px; box-shadow: 0 1px 3px #000; }
   .tempo .cap::after { content:""; position:absolute; top:50%; left:3px; right:3px; height:2px; background:#cfd5dd; transform:translateY(-50%); }
@@ -350,6 +350,11 @@
           <div class="deck-sel"><span class="silk">Deck</span><span class="dnum on">3</span><span class="silk">Dual</span><span class="dnum">1</span></div>
         </div>
         <div class="jogzone">
+          <div class="tempocol">
+            <div class="knb"><div class="dot-btn red"></div><span class="silk o">M.Tempo</span></div>
+            <div class="tempo"><span class="cap" style="top:64px"></span></div>
+            <span class="silk">Tempo · Range</span>
+          </div>
           <div class="jog"><div class="ring"></div><div class="platter"></div><div class="hub"></div><span class="needle"></span></div>
         </div>
         <div class="deck-bottom">
@@ -361,11 +366,6 @@
           <div class="synccol">
             <div class="knb2"><span class="btn blue">BEAT SYNC</span><span class="silk">Master</span></div>
             <div class="knb2"><span class="btn blue">KEY SYNC</span><span class="silk">Key Reset</span></div>
-          </div>
-          <div class="tempocol">
-            <div class="knb"><div class="dot-btn red"></div><span class="silk o">M.Tempo</span></div>
-            <div class="tempo"><span class="cap" style="top:78px"></span></div>
-            <span class="silk">Tempo · Range</span>
           </div>
         </div>
       </div>
@@ -438,13 +438,13 @@
         </div>
         <div class="jogzone">
           <div class="jog r"><div class="ring"></div><div class="platter"></div><div class="hub"></div><span class="needle"></span></div>
-        </div>
-        <div class="deck-bottom">
           <div class="tempocol">
             <div class="knb"><div class="dot-btn red"></div><span class="silk o">M.Tempo</span></div>
-            <div class="tempo"><span class="cap" style="top:96px"></span></div>
+            <div class="tempo"><span class="cap" style="top:80px"></span></div>
             <span class="silk">Tempo · Range</span>
           </div>
+        </div>
+        <div class="deck-bottom">
           <div class="synccol">
             <div class="knb2"><span class="btn blue">BEAT SYNC</span><span class="silk">Master</span></div>
             <div class="knb2"><span class="btn blue">KEY SYNC</span><span class="silk">Key Reset</span></div>
