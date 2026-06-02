@@ -118,7 +118,7 @@
   .led::after { content:""; position:absolute; inset:0; background: repeating-linear-gradient(0deg, rgba(0,0,0,.85) 0 1px, transparent 1px 5px); }
 
   /* buttons */
-  .pad { height: 36px; border-radius: 5px; background: linear-gradient(#16264a,#0f1a30); border: 1px solid #07101f;
+  .pad { height: 30px; border-radius: 5px; background: linear-gradient(#16264a,#0f1a30); border: 1px solid #07101f;
     box-shadow: inset 0 0 5px rgba(58,120,214,.25); }
   .pad.lit { background: linear-gradient(#4f8ce6,#2f63b8); box-shadow: inset 0 0 6px rgba(150,190,255,.7), 0 0 8px rgba(58,120,214,.6); }
   .sw { width: 15px; height: 22px; border-radius: 3px; background: linear-gradient(#2b2b31,#16161a); border: 1px solid #000; box-shadow: inset 0 1px 1px rgba(255,255,255,.12); }
@@ -132,11 +132,12 @@
   .dot-btn.amber { background: radial-gradient(circle at 50% 35%, #ff8c44, #c4520f); border-color: #6a3210; box-shadow: 0 0 8px rgba(255,122,47,.5); }
   .dot-btn.cyan { background: radial-gradient(circle at 50% 35%, #34e6cf, #138b7c); border-color: #0c4a43; box-shadow: 0 0 10px rgba(45,212,191,.5); }
   .dot-btn.red { background: radial-gradient(circle at 50% 35%, #ff5a68, #b3303c); border-color: #5a1f27; box-shadow: 0 0 9px rgba(226,59,75,.55); }
+  .dot-btn.sm { width: 16px; height: 16px; }
 
   /* GROOVE CIRCUIT + browser band */
   .band-top { display: grid; grid-template-columns: 1fr 0.62fr 1fr; gap: 14px; margin-bottom: 14px; }
-  .gc { border: 1px solid #000; border-radius: 10px; padding: 9px 11px 8px; background: linear-gradient(#1a1a1e,#101012);
-    box-shadow: inset 0 0 0 1px rgba(255,122,47,.12); }
+  .gc { border: 1px solid #000; border-radius: 10px; padding: 9px 11px 8px; background: linear-gradient(#2a2a2e 0%,#1a1a1e 45%,#0e0e10 100%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.11), inset 0 0 0 1px rgba(255,122,47,.14), 0 1px 2px rgba(0,0,0,.5); }
   .gc-h { font-size: 8.5px; letter-spacing: 1px; color: var(--orange); font-weight: 800; text-align:center; margin-bottom: 8px; }
   .gc-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
   .gc-seg { display: flex; flex-direction: column; align-items: center; gap: 4px; }
@@ -158,15 +159,15 @@
   /* main band */
   .band-main { display: grid; grid-template-columns: 1.55fr 1fr 1.55fr; gap: 14px; align-items: start; }
   .deck { display: flex; flex-direction: column; gap: 11px; }
-  .deck-top { display: grid; grid-template-columns: repeat(4,1fr); gap: 5px; width: 210px; align-self: center; }
+  .deck-top { display: grid; grid-template-columns: repeat(8,1fr); gap: 4px; }
   .deck-ctl { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-  .loopgrp { display: flex; gap: 8px; }
-  .padmode { display: flex; gap: 4px; flex-wrap: wrap; }
+  .loopgrp { display: flex; gap: 5px; }
+  .padmode { display: flex; gap: 4px; }
   .deck-sel { display: flex; gap: 4px; align-items: center; }
   .dnum { width: 19px; height: 19px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; border: 1px solid #000; color: var(--clbl); background: #16161a; }
   .dnum.on { color: #fff; border-color: var(--red); box-shadow: inset 0 0 6px rgba(226,59,75,.5); }
 
-  .jogzone { display: flex; gap: 10px; align-items: center; justify-content: center; }
+  .jogzone { display: flex; gap: 12px; align-items: flex-end; justify-content: center; }
   .jog { width: 330px; height: 330px; border-radius: 50%; position: relative; flex: 0 0 auto;
     background: repeating-conic-gradient(from 0deg, #32323a 0deg 1.0deg, #0f0f13 1.0deg 2.0deg);
     box-shadow: 0 9px 22px rgba(0,0,0,.7), inset 0 0 0 1px #000; }
@@ -201,7 +202,9 @@
   .onoff { font-size: 8px; font-weight: 800; color: #2a1405; background: linear-gradient(#ffce4d,#e0a52f); border: 1px solid #7a5a12; border-radius: 5px; padding: 5px 8px; text-align: center; }
 
   /* mixer */
-  .mixer { display: flex; gap: 12px; justify-content: center; }
+  .mixer { display: flex; gap: 12px; justify-content: center; padding: 12px 14px 10px; background: linear-gradient(#131315,#0c0c0e);
+    border-radius: 12px; border-left: 1px solid #2c2c33; border-right: 1px solid #2c2c33;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.04), inset 0 0 0 1px rgba(0,0,0,.6), inset 0 3px 16px rgba(0,0,0,.6); }
   .chans { display: flex; flex-direction: column; gap: 8px; }
   .chrow { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; }
   .ch { display: flex; flex-direction: column; align-items: center; gap: 7px; }
@@ -342,8 +345,9 @@
       <div class="deck">
         <div class="deck-top"><span class="pad lit"></span><span class="pad"></span><span class="pad"></span><span class="pad"></span><span class="pad"></span><span class="pad"></span><span class="pad"></span><span class="pad"></span></div>
         <div class="deck-ctl">
-          <div class="loopgrp"><div class="knb"><div class="dot-btn amber"></div><span class="silk">In</span></div><div class="knb"><div class="dot-btn amber"></div><span class="silk">Out</span></div><div class="knb"><div class="dot-btn"></div><span class="silk">Reloop</span></div></div>
+          <div class="loopgrp"><div class="knb"><div class="dot-btn sm amber"></div><span class="silk">In</span></div><div class="knb"><div class="dot-btn sm amber"></div><span class="silk">Out</span></div><div class="knb"><div class="dot-btn sm"></div><span class="silk">Reloop</span></div></div>
           <div class="padmode"><span class="btn blue lit">HOT CUE</span><span class="btn blue">STEMS</span><span class="btn blue">B.JUMP</span><span class="btn blue">SAMPLER</span></div>
+          <div class="loopgrp"><div class="knb"><div class="dot-btn sm"></div><span class="silk">Call&#9664;</span></div><div class="knb"><div class="dot-btn sm"></div><span class="silk">Call&#9654;</span></div><div class="knb"><div class="dot-btn sm"></div><span class="silk">Mem</span></div></div>
         </div>
         <div class="deck-ctl">
           <div style="display:flex;gap:6px"><span class="btn red">SLIP</span><span class="btn">QUANTIZE</span></div>
@@ -351,9 +355,9 @@
         </div>
         <div class="jogzone">
           <div class="tempocol">
-            <div class="knb"><div class="dot-btn red"></div><span class="silk o">M.Tempo</span></div>
+            <span class="btn">M.TEMPO</span>
             <div class="tempo"><span class="cap" style="top:64px"></span></div>
-            <span class="silk">Tempo · Range</span>
+            <span class="silk">Tempo</span>
           </div>
           <div class="jog"><div class="ring"></div><div class="platter"></div><div class="hub"></div><span class="needle"></span></div>
         </div>
@@ -429,8 +433,9 @@
       <div class="deck">
         <div class="deck-top"><span class="pad"></span><span class="pad"></span><span class="pad lit"></span><span class="pad"></span><span class="pad"></span><span class="pad"></span><span class="pad"></span><span class="pad"></span></div>
         <div class="deck-ctl">
-          <div class="loopgrp"><div class="knb"><div class="dot-btn amber"></div><span class="silk">In</span></div><div class="knb"><div class="dot-btn amber"></div><span class="silk">Out</span></div><div class="knb"><div class="dot-btn"></div><span class="silk">Reloop</span></div></div>
+          <div class="loopgrp"><div class="knb"><div class="dot-btn sm amber"></div><span class="silk">In</span></div><div class="knb"><div class="dot-btn sm amber"></div><span class="silk">Out</span></div><div class="knb"><div class="dot-btn sm"></div><span class="silk">Reloop</span></div></div>
           <div class="padmode"><span class="btn blue">HOT CUE</span><span class="btn blue">STEMS</span><span class="btn blue">B.JUMP</span><span class="btn blue">SAMPLER</span></div>
+          <div class="loopgrp"><div class="knb"><div class="dot-btn sm"></div><span class="silk">Call&#9664;</span></div><div class="knb"><div class="dot-btn sm"></div><span class="silk">Call&#9654;</span></div><div class="knb"><div class="dot-btn sm"></div><span class="silk">Mem</span></div></div>
         </div>
         <div class="deck-ctl">
           <div style="display:flex;gap:6px"><span class="btn red">SLIP</span><span class="btn">QUANTIZE</span></div>
@@ -439,9 +444,9 @@
         <div class="jogzone">
           <div class="jog r"><div class="ring"></div><div class="platter"></div><div class="hub"></div><span class="needle"></span></div>
           <div class="tempocol">
-            <div class="knb"><div class="dot-btn red"></div><span class="silk o">M.Tempo</span></div>
+            <span class="btn">M.TEMPO</span>
             <div class="tempo"><span class="cap" style="top:80px"></span></div>
-            <span class="silk">Tempo · Range</span>
+            <span class="silk">Tempo</span>
           </div>
         </div>
         <div class="deck-bottom">
