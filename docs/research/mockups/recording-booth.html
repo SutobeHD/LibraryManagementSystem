@@ -153,7 +153,7 @@
   .load { font-size: 9px; font-weight: 800; color: #cfe0ff; border: 1px solid #18305a; border-radius: 4px; padding: 4px 7px; background: linear-gradient(#1a2c4e,#11203c); box-shadow: inset 0 0 5px rgba(58,120,214,.4); }
 
   /* main band */
-  .band-main { display: grid; grid-template-columns: 1.3fr 1fr 1.3fr; gap: 14px; align-items: start; }
+  .band-main { display: grid; grid-template-columns: 1.55fr 1fr 1.55fr; gap: 14px; align-items: start; }
   .deck { display: flex; flex-direction: column; gap: 11px; }
   .deck-top { display: grid; grid-template-columns: repeat(8,1fr); gap: 4px; }
   .deck-ctl { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
@@ -164,19 +164,19 @@
   .dnum.on { color: #fff; border-color: var(--red); box-shadow: inset 0 0 6px rgba(226,59,75,.5); }
 
   .jogzone { display: flex; gap: 10px; align-items: center; justify-content: center; }
-  .jog { width: 232px; height: 232px; border-radius: 50%; position: relative; flex: 0 0 auto;
+  .jog { width: 256px; height: 256px; border-radius: 50%; position: relative; flex: 0 0 auto;
     background: repeating-conic-gradient(from 0deg, #2d2d34 0deg 2.2deg, #121215 2.2deg 4.4deg);
-    box-shadow: 0 5px 12px rgba(0,0,0,.65), inset 0 0 0 1px #000; }
-  .jog .ring { position: absolute; inset: 14px; border-radius: 50%; background: #0d0d10; box-shadow: inset 0 0 0 3px #000; }
-  .jog .platter { position: absolute; inset: 24px; border-radius: 50%;
+    box-shadow: 0 6px 14px rgba(0,0,0,.65), inset 0 0 0 1px #000; }
+  .jog .ring { position: absolute; inset: 16px; border-radius: 50%; background: #0d0d10; box-shadow: inset 0 0 0 3px #000; }
+  .jog .platter { position: absolute; inset: 27px; border-radius: 50%;
     background: radial-gradient(circle at 50% 38%, #30303a 0%, #1a1a1f 55%, #0c0c0f 100%);
-    box-shadow: inset 0 0 30px rgba(0,0,0,.85), inset 0 2px 3px rgba(255,255,255,.05); }
-  .jog .hub { position: absolute; inset: 80px; border-radius: 50%; background: radial-gradient(circle at 50% 36%, #2a2a31, #111114);
+    box-shadow: inset 0 0 32px rgba(0,0,0,.85), inset 0 2px 3px rgba(255,255,255,.05); }
+  .jog .hub { position: absolute; inset: 90px; border-radius: 50%; background: radial-gradient(circle at 50% 36%, #2a2a31, #111114);
     border: 1px solid #34343c; box-shadow: inset 0 0 16px #000, 0 0 0 6px rgba(0,0,0,.4); }
-  .jog .needle { position: absolute; top: 26px; left: 50%; width: 3px; height: 38px; background: linear-gradient(#ff5a68,#b3303c);
-    transform-origin: 50% 90px; transform: translateX(-50%) rotate(28deg); border-radius: 2px; z-index: 2; box-shadow: 0 0 8px rgba(255,90,104,.8); }
+  .jog .needle { position: absolute; top: 28px; left: 50%; width: 3px; height: 44px; background: linear-gradient(#ff5a68,#b3303c);
+    transform-origin: 50% 100px; transform: translateX(-50%) rotate(28deg); border-radius: 2px; z-index: 2; box-shadow: 0 0 8px rgba(255,90,104,.8); }
   .jog.r .needle { transform: translateX(-50%) rotate(-42deg); }
-  .jog .disp { position: absolute; inset: 92px; border-radius: 50%; background: radial-gradient(circle at 50% 40%, #16242e, #0a0e12); border: 1px solid #20323d; box-shadow: inset 0 0 12px #000, 0 0 0 3px #0a0a0c; z-index: 1; }
+  .jog .disp { position: absolute; inset: 104px; border-radius: 50%; background: radial-gradient(circle at 50% 40%, #16242e, #0a0e12); border: 1px solid #20323d; box-shadow: inset 0 0 12px #000, 0 0 0 3px #0a0a0c; z-index: 1; }
   .jog .disp::after { content: ""; position: absolute; inset: 6px; border-radius: 50%; border: 2px solid #15333a; border-top-color: #2dd4bf; border-right-color: #2dd4bf; }
   .jog-side { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 
@@ -348,18 +348,18 @@
         </div>
         <div class="deck-bottom">
           <div class="transport">
+            <div class="knb"><div class="dot-btn"></div><span class="silk">Shift</span></div>
             <span class="tcue">CUE</span>
             <span class="tplay lit">&#9654;</span>
-            <div class="knb"><div class="dot-btn"></div><span class="silk">Shift</span></div>
-          </div>
-          <div class="tempocol">
-            <div class="knb"><div class="dot-btn red"></div><span class="silk o">M.Tempo</span></div>
-            <div class="tempo"><span class="cap" style="top:72px"></span></div>
-            <span class="silk">Tempo · Range</span>
           </div>
           <div class="synccol">
             <div class="knb2"><span class="btn blue">BEAT SYNC</span><span class="silk">Master</span></div>
             <div class="knb2"><span class="btn blue">KEY SYNC</span><span class="silk">Key Reset</span></div>
+          </div>
+          <div class="tempocol">
+            <div class="knb"><div class="dot-btn red"></div><span class="silk o">M.Tempo</span></div>
+            <div class="tempo"><span class="cap" style="top:78px"></span></div>
+            <span class="silk">Tempo · Range</span>
           </div>
         </div>
       </div>
@@ -398,7 +398,7 @@
             <div class="ch"><div class="cfader"><span class="cap" style="top:12px"></span></div></div>
             <div class="ch"><div class="cfader"><span class="cap" style="top:54px"></span></div></div>
           </div>
-          <div class="xrow"><span class="silk">Crossfader</span><div class="xfader"><span class="cap"></span></div></div>
+          <div class="xrow"><div class="xfader"><span class="cap"></span></div></div>
         </div>
 
         <div class="mstack">
@@ -434,19 +434,19 @@
           <div class="jog r"><div class="ring"></div><div class="platter"></div><div class="hub"></div><div class="disp"></div><span class="needle"></span></div>
         </div>
         <div class="deck-bottom">
+          <div class="tempocol">
+            <div class="knb"><div class="dot-btn red"></div><span class="silk o">M.Tempo</span></div>
+            <div class="tempo"><span class="cap" style="top:96px"></span></div>
+            <span class="silk">Tempo · Range</span>
+          </div>
           <div class="synccol">
             <div class="knb2"><span class="btn blue">BEAT SYNC</span><span class="silk">Master</span></div>
             <div class="knb2"><span class="btn blue">KEY SYNC</span><span class="silk">Key Reset</span></div>
           </div>
-          <div class="tempocol">
-            <div class="knb"><div class="dot-btn red"></div><span class="silk o">M.Tempo</span></div>
-            <div class="tempo"><span class="cap" style="top:88px"></span></div>
-            <span class="silk">Tempo · Range</span>
-          </div>
           <div class="transport">
+            <div class="knb"><div class="dot-btn"></div><span class="silk">Shift</span></div>
             <span class="tcue lit">CUE</span>
             <span class="tplay">&#9654;</span>
-            <div class="knb"><div class="dot-btn"></div><span class="silk">Shift</span></div>
           </div>
         </div>
       </div>
