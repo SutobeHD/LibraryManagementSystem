@@ -118,7 +118,7 @@
   .led::after { content:""; position:absolute; inset:0; background: repeating-linear-gradient(0deg, rgba(0,0,0,.85) 0 1px, transparent 1px 5px); }
 
   /* buttons */
-  .pad { height: 27px; border-radius: 5px; background: linear-gradient(#16264a,#0f1a30); border: 1px solid #07101f;
+  .pad { height: 36px; border-radius: 5px; background: linear-gradient(#16264a,#0f1a30); border: 1px solid #07101f;
     box-shadow: inset 0 0 5px rgba(58,120,214,.25); }
   .pad.lit { background: linear-gradient(#4f8ce6,#2f63b8); box-shadow: inset 0 0 6px rgba(150,190,255,.7), 0 0 8px rgba(58,120,214,.6); }
   .sw { width: 15px; height: 22px; border-radius: 3px; background: linear-gradient(#2b2b31,#16161a); border: 1px solid #000; box-shadow: inset 0 1px 1px rgba(255,255,255,.12); }
@@ -140,11 +140,14 @@
   .gc-h { font-size: 8.5px; letter-spacing: 1px; color: var(--orange); font-weight: 800; text-align:center; margin-bottom: 8px; }
   .gc-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
   .gc-seg { display: flex; flex-direction: column; align-items: center; gap: 4px; }
-  .swrow { display: flex; gap: 4px; }
-  .droll { display: grid; grid-template-columns: repeat(4,1fr); gap: 3px; }
-  .droll i { width: 15px; height: 20px; border-radius: 3px; background: linear-gradient(#3a2410,#241606); border: 1px solid #4a3014; }
-  .droll i.lit { background: linear-gradient(#ff7a2f,#d65f17); border-color: #ff7a2f; box-shadow: 0 0 7px rgba(255,122,47,.6); }
-  .release { width: 18px; height: 26px; border-radius: 4px; background: linear-gradient(#ff7a2f,#c4520f); border: 1px solid #7a3a12; }
+  /* GROOVE CIRCUIT: drum-swap + drum-roll button blocks, center capture, release lever */
+  .gcpads { display: flex; gap: 3px; }
+  .gcpad { width: 13px; height: 19px; border-radius: 3px; background: linear-gradient(#34220f,#1f1305); border: 1px solid #4a3014; box-shadow: inset 0 0 4px rgba(255,122,47,.15); }
+  .gcpad.lit { background: linear-gradient(#ff8c44,#d65f17); border-color: #ff7a2f; box-shadow: 0 0 7px rgba(255,122,47,.6); }
+  .capture { width: 28px; height: 28px; border-radius: 50%; background: radial-gradient(circle at 50% 35%, #2c2c32, #131316); border: 1px solid #000; box-shadow: inset 0 1px 1px rgba(255,255,255,.12), 0 2px 3px #000; }
+  .capture.lit { background: radial-gradient(circle at 50% 35%, #ff9a52, #c4520f); border-color: #6a3210; box-shadow: inset 0 1px 1px rgba(255,255,255,.22), 0 0 11px rgba(255,122,47,.65); }
+  .lever { width: 16px; height: 34px; border-radius: 5px; position: relative; background: linear-gradient(#1b1209,#0d0904); border: 1px solid #3a2410; box-shadow: inset 0 0 6px #000; }
+  .lever .lcap { position: absolute; left: -3px; right: -3px; top: 8px; height: 14px; border-radius: 4px; background: linear-gradient(#ff9a52,#c4520f); border: 1px solid #7a3a12; box-shadow: 0 1px 3px #000, 0 0 7px rgba(255,122,47,.5); }
 
   .browser { display: flex; flex-direction: column; align-items: center; gap: 7px; padding-top: 2px; }
   .brow { display: flex; gap: 5px; }
@@ -155,7 +158,7 @@
   /* main band */
   .band-main { display: grid; grid-template-columns: 1.55fr 1fr 1.55fr; gap: 14px; align-items: start; }
   .deck { display: flex; flex-direction: column; gap: 11px; }
-  .deck-top { display: grid; grid-template-columns: repeat(8,1fr); gap: 4px; }
+  .deck-top { display: grid; grid-template-columns: repeat(4,1fr); gap: 5px; width: 210px; align-self: center; }
   .deck-ctl { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
   .loopgrp { display: flex; gap: 8px; }
   .padmode { display: flex; gap: 4px; flex-wrap: wrap; }
@@ -165,19 +168,22 @@
 
   .jogzone { display: flex; gap: 10px; align-items: center; justify-content: center; }
   .jog { width: 256px; height: 256px; border-radius: 50%; position: relative; flex: 0 0 auto;
-    background: repeating-conic-gradient(from 0deg, #2d2d34 0deg 2.2deg, #121215 2.2deg 4.4deg);
-    box-shadow: 0 6px 14px rgba(0,0,0,.65), inset 0 0 0 1px #000; }
-  .jog .ring { position: absolute; inset: 16px; border-radius: 50%; background: #0d0d10; box-shadow: inset 0 0 0 3px #000; }
-  .jog .platter { position: absolute; inset: 27px; border-radius: 50%;
-    background: radial-gradient(circle at 50% 38%, #30303a 0%, #1a1a1f 55%, #0c0c0f 100%);
-    box-shadow: inset 0 0 32px rgba(0,0,0,.85), inset 0 2px 3px rgba(255,255,255,.05); }
-  .jog .hub { position: absolute; inset: 90px; border-radius: 50%; background: radial-gradient(circle at 50% 36%, #2a2a31, #111114);
-    border: 1px solid #34343c; box-shadow: inset 0 0 16px #000, 0 0 0 6px rgba(0,0,0,.4); }
-  .jog .needle { position: absolute; top: 28px; left: 50%; width: 3px; height: 44px; background: linear-gradient(#ff5a68,#b3303c);
-    transform-origin: 50% 100px; transform: translateX(-50%) rotate(28deg); border-radius: 2px; z-index: 2; box-shadow: 0 0 8px rgba(255,90,104,.8); }
+    background: repeating-conic-gradient(from 0deg, #32323a 0deg 1.0deg, #0f0f13 1.0deg 2.0deg);
+    box-shadow: 0 8px 18px rgba(0,0,0,.7), inset 0 0 0 1px #000; }
+  .jog .ring { position: absolute; inset: 13px; border-radius: 50%; background: #0b0b0e;
+    box-shadow: inset 0 0 0 2px #000, inset 0 0 0 6px #161619, inset 0 0 0 7px #000; }
+  .jog .platter { position: absolute; inset: 24px; border-radius: 50%;
+    background: radial-gradient(circle at 50% 33%, #3c3c46 0%, #24242b 40%, #131318 70%, #0a0a0e 100%);
+    box-shadow: inset 0 0 42px rgba(0,0,0,.85), inset 0 3px 5px rgba(255,255,255,.06); }
+  .jog .platter::after { content: ""; position: absolute; inset: 18px; border-radius: 50%;
+    background: repeating-radial-gradient(circle, rgba(255,255,255,.035) 0 1px, transparent 1px 8px); opacity: .6; }
+  .jog .hub { position: absolute; inset: 92px; border-radius: 50%;
+    background: radial-gradient(circle at 50% 32%, #34343d 0%, #1a1a20 60%, #0c0c10 100%);
+    border: 1px solid #3c3c46; box-shadow: inset 0 1px 2px rgba(255,255,255,.10), inset 0 0 16px #000, 0 0 0 5px rgba(0,0,0,.45); }
+  .jog .hub::after { content: ""; position: absolute; inset: 40%; border-radius: 50%; background: radial-gradient(circle at 50% 35%, #45454f, #1d1d23); box-shadow: inset 0 1px 1px rgba(255,255,255,.15); }
+  .jog .needle { position: absolute; top: 30px; left: 50%; width: 3px; height: 42px; background: linear-gradient(#ff5a68,#b3303c);
+    transform-origin: 50% 98px; transform: translateX(-50%) rotate(28deg); border-radius: 2px; z-index: 2; box-shadow: 0 0 8px rgba(255,90,104,.8); }
   .jog.r .needle { transform: translateX(-50%) rotate(-42deg); }
-  .jog .disp { position: absolute; inset: 104px; border-radius: 50%; background: radial-gradient(circle at 50% 40%, #16242e, #0a0e12); border: 1px solid #20323d; box-shadow: inset 0 0 12px #000, 0 0 0 3px #0a0a0c; z-index: 1; }
-  .jog .disp::after { content: ""; position: absolute; inset: 6px; border-radius: 50%; border: 2px solid #15333a; border-top-color: #2dd4bf; border-right-color: #2dd4bf; }
   .jog-side { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 
   .deck-bottom { display: flex; align-items: flex-end; gap: 14px; justify-content: center; padding-top: 2px; }
@@ -305,10 +311,10 @@
         <div class="gc-h">GROOVE CIRCUIT</div>
         <div class="gc-row">
           <div class="gc-seg"><div class="kn"><span class="ptr"></span></div><span class="silk">Gain</span></div>
-          <div class="gc-seg"><div class="swrow"><span class="sw"></span><span class="sw"></span><span class="sw"></span><span class="sw"></span></div><span class="silk">Drum Swap</span></div>
-          <div class="gc-seg"><div class="droll"><i class="lit"></i><i></i><i></i><i></i></div><span class="silk">Drum Roll</span></div>
-          <div class="gc-seg"><div class="kn" style="width:18px;height:18px"><span class="ptr" style="height:6px;transform-origin:50% 8px"></span></div><span class="silk">Capture</span></div>
-          <div class="gc-seg"><span class="release"></span><span class="silk o">Release</span></div>
+          <div class="gc-seg"><div class="gcpads"><span class="gcpad"></span><span class="gcpad lit"></span><span class="gcpad"></span><span class="gcpad"></span></div><span class="silk">Drum Swap</span></div>
+          <div class="gc-seg"><div class="capture lit"></div><span class="silk o">Capture</span></div>
+          <div class="gc-seg"><div class="gcpads"><span class="gcpad lit"></span><span class="gcpad"></span><span class="gcpad"></span><span class="gcpad"></span></div><span class="silk">Drum Roll</span></div>
+          <div class="gc-seg"><div class="lever"><span class="lcap"></span></div><span class="silk o">Drum Release</span></div>
         </div>
       </div>
       <div class="gc" style="box-shadow:none;background:linear-gradient(#101012,#0a0a0c)">
@@ -322,10 +328,10 @@
         <div class="gc-h">GROOVE CIRCUIT</div>
         <div class="gc-row">
           <div class="gc-seg"><div class="kn"><span class="ptr"></span></div><span class="silk">Gain</span></div>
-          <div class="gc-seg"><div class="swrow"><span class="sw"></span><span class="sw"></span><span class="sw"></span><span class="sw"></span></div><span class="silk">Drum Swap</span></div>
-          <div class="gc-seg"><div class="droll"><i></i><i></i><i></i><i></i></div><span class="silk">Drum Roll</span></div>
-          <div class="gc-seg"><div class="kn" style="width:18px;height:18px"><span class="ptr" style="height:6px;transform-origin:50% 8px"></span></div><span class="silk">Capture</span></div>
-          <div class="gc-seg"><span class="release"></span><span class="silk o">Release</span></div>
+          <div class="gc-seg"><div class="gcpads"><span class="gcpad"></span><span class="gcpad"></span><span class="gcpad"></span><span class="gcpad"></span></div><span class="silk">Drum Swap</span></div>
+          <div class="gc-seg"><div class="capture"></div><span class="silk o">Capture</span></div>
+          <div class="gc-seg"><div class="gcpads"><span class="gcpad"></span><span class="gcpad"></span><span class="gcpad"></span><span class="gcpad"></span></div><span class="silk">Drum Roll</span></div>
+          <div class="gc-seg"><div class="lever"><span class="lcap"></span></div><span class="silk o">Drum Release</span></div>
         </div>
       </div>
     </div>
@@ -344,7 +350,7 @@
           <div class="deck-sel"><span class="silk">Deck</span><span class="dnum on">3</span><span class="silk">Dual</span><span class="dnum">1</span></div>
         </div>
         <div class="jogzone">
-          <div class="jog"><div class="ring"></div><div class="platter"></div><div class="hub"></div><div class="disp"></div><span class="needle"></span></div>
+          <div class="jog"><div class="ring"></div><div class="platter"></div><div class="hub"></div><span class="needle"></span></div>
         </div>
         <div class="deck-bottom">
           <div class="transport">
@@ -431,7 +437,7 @@
           <div class="deck-sel"><span class="silk">Deck</span><span class="dnum">2</span><span class="silk">Dual</span><span class="dnum on">4</span></div>
         </div>
         <div class="jogzone">
-          <div class="jog r"><div class="ring"></div><div class="platter"></div><div class="hub"></div><div class="disp"></div><span class="needle"></span></div>
+          <div class="jog r"><div class="ring"></div><div class="platter"></div><div class="hub"></div><span class="needle"></span></div>
         </div>
         <div class="deck-bottom">
           <div class="tempocol">
