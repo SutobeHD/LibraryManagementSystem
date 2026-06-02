@@ -12,14 +12,11 @@
     --line: #2a3543;
     --ink: #e7edf5;
     --muted: #8a98ab;
-    --accent: #2dd4bf;     /* teal — record/active */
-    --amber: #f5b14c;      /* amber — controls / option A */
+    --accent: #2dd4bf;     /* teal — live audio levels / active transport */
+    --amber: #ffcf5c;      /* amber glow — control moving NOW (captured) */
+    --pad: #3f7dd6;        /* blue — performance pads (backlit) */
+    --groove: #ff8a3d;     /* orange — GROOVE CIRCUIT + STEM-ISO (GRV6 accent) */
     --rec: #ff4d5e;
-    --stem: #c084fc;       /* violet — stem-ISO (GRV6) */
-    --groove: #ff8a5b;     /* orange — GROOVE CIRCUIT (GRV6) */
-    --hi: #f5b14c;
-    --mid: #2dd4bf;
-    --lo: #6aa6ff;
     --radius: 12px;
     font-synthesis: none;
   }
@@ -29,9 +26,9 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     font-size: 14px; line-height: 1.45;
   }
-  .frame { max-width: 1220px; margin: 0 auto; padding: 18px 20px 40px; }
+  .frame { max-width: 1240px; margin: 0 auto; padding: 18px 20px 40px; }
 
-  /* window chrome hint (frameless Tauri) */
+  /* frameless window chrome */
   .chrome { display: flex; align-items: center; gap: 10px; padding: 6px 4px 14px; color: var(--muted); }
   .chrome .dots { display: flex; gap: 6px; }
   .chrome .dots i { width: 11px; height: 11px; border-radius: 50%; background: #33404f; display: inline-block; }
@@ -39,48 +36,42 @@
   .chrome .spacer { flex: 1; }
   .chrome .winbtns { display: flex; gap: 14px; font-size: 13px; }
 
-  /* top nav tabs */
   .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
   .tab { padding: 9px 14px; color: var(--muted); border-bottom: 2px solid transparent; cursor: default; white-space: nowrap; }
   .tab.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
 
-  .grid { display: grid; grid-template-columns: 268px 1fr 296px; gap: 16px; align-items: start; }
+  .grid { display: grid; grid-template-columns: 268px 1fr 300px; gap: 16px; align-items: start; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
   .card h3 { margin: 0 0 12px; font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); font-weight: 700; }
 
-  /* left: device pickers + record */
-  .field { margin-bottom: 14px; }
+  /* left: pickers + record */
+  .field { margin-bottom: 13px; }
   .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
-  .select {
-    width: 100%; background: var(--panel2); border: 1px solid var(--line); color: var(--ink);
-    border-radius: 8px; padding: 9px 10px; display: flex; align-items: center; justify-content: space-between;
-  }
+  .select { width: 100%; background: var(--panel2); border: 1px solid var(--line); color: var(--ink);
+    border-radius: 8px; padding: 9px 10px; display: flex; align-items: center; justify-content: space-between; }
   .select .chev { color: var(--muted); }
   .hint { font-size: 11.5px; color: var(--muted); margin-top: 5px; }
-
-  .recbtn {
-    margin-top: 4px; width: 100%; border: 0; border-radius: 10px; cursor: default;
+  .recbtn { margin-top: 4px; width: 100%; border: 0; border-radius: 10px; cursor: default;
     background: var(--rec); color: #fff; font-weight: 700; font-size: 15px; padding: 14px; letter-spacing: .3px;
-    display: flex; align-items: center; justify-content: center; gap: 9px;
-  }
+    display: flex; align-items: center; justify-content: center; gap: 9px; }
   .recbtn .dot { width: 11px; height: 11px; border-radius: 50%; background: #fff; animation: pulse 1.3s infinite ease-in-out; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
   .elapsed { text-align: center; font-variant-numeric: tabular-nums; font-size: 30px; font-weight: 700; margin: 14px 0 2px; letter-spacing: 1px; }
   .elapsed .ms { color: var(--muted); font-size: 18px; }
   .statusrow { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 8px; }
   .statusrow b { color: var(--accent); font-weight: 600; }
+  .statusrow b.gc { color: var(--groove); }
 
-  /* center */
-  .center { display: flex; flex-direction: column; gap: 16px; }
-  .meters { display: flex; gap: 14px; align-items: flex-end; }
+  /* center top: levels */
+  .meters { display: flex; gap: 14px; align-items: flex-end; height: 100%; }
   .meter { flex: 1; text-align: center; }
-  .bar { height: 120px; background: var(--panel2); border: 1px solid var(--line); border-radius: 7px; position: relative; overflow: hidden; }
-  .bar > span { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 0 0 6px 6px; }
+  .bar { height: 150px; background: var(--panel2); border: 1px solid var(--line); border-radius: 7px; position: relative; overflow: hidden; }
+  .bar > span { position: absolute; left: 0; right: 0; bottom: 0; }
   .bar .f1 { background: linear-gradient(0deg,#1f8f82,#2dd4bf); animation: m1 2.1s infinite alternate ease-in-out; }
   .bar .f2 { background: linear-gradient(0deg,#1f8f82,#2dd4bf); animation: m2 1.6s infinite alternate ease-in-out; }
   .bar .f3 { background: linear-gradient(0deg,#1f8f82,#2dd4bf); animation: m3 1.9s infinite alternate ease-in-out; }
   .bar .f4 { background: linear-gradient(0deg,#1f8f82,#2dd4bf); animation: m4 1.4s infinite alternate ease-in-out; }
-  .bar .fm { background: linear-gradient(0deg,#b8893a,#f5b14c); animation: m2 1.7s infinite alternate ease-in-out; }
+  .bar .fm { background: linear-gradient(0deg,#b8893a,#ffcf5c); animation: m2 1.7s infinite alternate ease-in-out; }
   @keyframes m1 { from { height: 45%; } to { height: 82%; } }
   @keyframes m2 { from { height: 30%; } to { height: 70%; } }
   @keyframes m3 { from { height: 52%; } to { height: 88%; } }
@@ -89,122 +80,153 @@
   .meter .val { font-size: 10.5px; color: var(--ink); font-variant-numeric: tabular-nums; }
   .meter.master .lbl { color: var(--amber); font-weight: 700; }
 
-  .stripnote { font-size: 11.5px; color: var(--muted); margin: 2px 0 12px; }
-
-  /* GROOVE CIRCUIT row (GRV6) */
-  .gcrow { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
-  .gc { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
-  .gc .gctitle { font-size: 10px; letter-spacing: .6px; color: var(--groove); font-weight: 700; margin-bottom: 8px; }
-  .gc .gcbody { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .minibtns { display: flex; gap: 4px; }
-  .minibtns i { width: 18px; height: 14px; border-radius: 3px; background: #1d2734; border: 1px solid var(--line); display: inline-block; }
-  .minibtns i.lit { background: var(--groove); border-color: var(--groove); }
-  .gclbl { font-size: 9px; color: var(--muted); }
-  .seg-sm { display: flex; flex-direction: column; align-items: center; gap: 3px; }
-
-  /* 4-channel mixer (GRV6) */
-  .mixer { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 14px 12px 12px; }
-  .strips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-  .strip { display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 0 2px; }
-  .strip .cnum { font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: .5px; }
-  .knob { text-align: center; }
-  .knob .dial { width: 34px; height: 34px; border-radius: 50%; background: #11161e; border: 2px solid var(--line); position: relative; margin: 0 auto; }
-  .knob .dial i { position: absolute; top: 3px; left: 50%; width: 2.5px; height: 11px; background: var(--muted); transform-origin: 50% 14px; transform: translateX(-50%) rotate(0deg); border-radius: 2px; }
-  .knob.lit .dial { border-color: var(--amber); box-shadow: 0 0 0 3px rgba(245,177,76,.16); }
-  .knob.lit .dial i { background: var(--amber); }
-  .knob .k { font-size: 9px; color: var(--muted); margin-top: 4px; letter-spacing: .3px; }
-  .knob.lit .k { color: var(--amber); font-weight: 700; }
-  .knob.hi-cut .dial i { transform: translateX(-50%) rotate(-125deg); }
-  .eqset { display: flex; gap: 8px; }
-  .stemiso { width: 100%; text-align: center; font-size: 9px; font-weight: 700; letter-spacing: .4px; color: var(--muted);
-             border: 1px solid var(--line); background: #11161e; border-radius: 5px; padding: 4px 0; }
-  .stemiso.lit { color: #1a0b29; background: var(--stem); border-color: var(--stem); }
-  .fader { width: 30px; height: 84px; background: #11161e; border: 1px solid var(--line); border-radius: 6px; position: relative; }
-  .fader .cap { position: absolute; left: -4px; right: -4px; height: 13px; background: var(--ink); border-radius: 4px; }
-  .xfader-wrap { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 12px; }
-  .xfader { width: 120px; height: 22px; background: #11161e; border: 1px solid var(--line); border-radius: 6px; position: relative; }
-  .xfader .cap { position: absolute; top: -4px; bottom: -4px; width: 15px; background: var(--ink); border-radius: 4px; left: 52px; }
-  .xlbl { font-size: 9px; color: var(--muted); letter-spacing: .4px; }
-
-  /* FX row */
-  .fxrow { display: grid; grid-template-columns: 1.3fr 1fr; gap: 12px; margin-top: 14px; }
-  .fxblk { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
-  .fxblk .fxt { font-size: 10px; letter-spacing: .6px; color: var(--muted); font-weight: 700; margin-bottom: 9px; }
-  .scfx { display: flex; gap: 12px; justify-content: space-around; }
-  .beatfx { display: flex; align-items: center; gap: 12px; }
-  .pill { font-size: 9px; color: var(--muted); border: 1px solid var(--line); border-radius: 12px; padding: 3px 8px; }
-  .pill.on { color: #06231f; background: var(--accent); border-color: var(--accent); font-weight: 700; }
-
-  /* decks row */
-  .decksrow { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
-  .deckblk { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; gap: 14px; align-items: center; }
-  .jog { width: 92px; height: 92px; border-radius: 50%; border: 3px solid var(--line); background:
-      radial-gradient(circle at 50% 38%, #243042 0%, #161d27 70%); position: relative; flex: 0 0 auto; }
-  .jog::after { content: ""; position: absolute; inset: 24px; border-radius: 50%; border: 1px dashed #33414f; }
-  .jog .tick { position: absolute; top: 5px; left: 50%; width: 3px; height: 15px; background: var(--amber); transform-origin: 50% 41px; transform: translateX(-50%) rotate(26deg); border-radius: 2px; }
-  .jog.r .tick { transform: translateX(-50%) rotate(-40deg); }
-  .deckright { flex: 1; min-width: 0; }
-  .dhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-  .dhead .dn { font-size: 11px; color: var(--muted); font-weight: 700; }
-  .transport b { font-size: 9px; color: var(--muted); padding: 3px 7px; border: 1px solid var(--line); border-radius: 5px; font-weight: 600; margin-left: 5px; }
-  .transport b.lit { color: #06231f; background: var(--accent); border-color: var(--accent); }
-  .pads { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
-  .pads i { height: 15px; border-radius: 4px; background: #1d2734; border: 1px solid var(--line); }
-  .pads i.lit { background: var(--accent); border-color: var(--accent); }
-  .pads i.lits { background: var(--stem); border-color: var(--stem); }
-
-  /* right: recordings list */
+  /* right: recordings */
   .rec { display: flex; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; margin-bottom: 9px; background: var(--panel2); }
   .rec .thumb { width: 42px; height: 42px; border-radius: 7px; background: linear-gradient(135deg,#22303f,#161d27); flex: 0 0 auto; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 16px; }
-  .rec .meta { min-width: 0; }
   .rec .nm { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .rec .sub { font-size: 11px; color: var(--muted); }
   .badges { display: flex; gap: 5px; margin-top: 5px; flex-wrap: wrap; }
   .badge { font-size: 10px; padding: 2px 7px; border-radius: 20px; border: 1px solid var(--line); color: var(--muted); }
   .badge.vid { color: var(--amber); border-color: #5a4a2a; }
   .badge.rc { color: var(--accent); border-color: #1f5a52; }
-  .badge.b { color: var(--lo); border-color: #2b3f63; }
+  .badge.b { color: var(--pad); border-color: #2b3f63; }
 
-  /* bottom: rendered output */
+  /* ===== GRV6 top-down controller outline ===== */
+  .outline-head { display:flex; align-items:center; gap:10px; margin: 22px 0 8px; }
+  .stripnote { font-size: 11.5px; color: var(--muted); margin: 0 0 12px; }
+  .grv6 {
+    background: linear-gradient(180deg,#171f2a 0%, #10151c 100%);
+    border: 1px solid #3a4654; border-radius: 16px; padding: 14px;
+    box-shadow: inset 0 1px 0 #ffffff12, 0 10px 34px #00000055;
+  }
+  .gc-top { display: grid; grid-template-columns: 1fr 0.78fr 1fr; gap: 12px; margin-bottom: 12px; }
+  .grv6-main { display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 12px; }
+  .sec { background: #1b232f; border: 1px solid var(--line); border-radius: 10px; padding: 11px; }
+  .sec-t { font-size: 9.5px; letter-spacing: .6px; font-weight: 700; color: var(--muted); margin-bottom: 9px; text-transform: uppercase; }
+  .sec-t.gcc { color: var(--groove); }
+
+  /* knobs */
+  .knob { text-align: center; }
+  .knob .dial { width: 34px; height: 34px; border-radius: 50%; background: radial-gradient(circle at 50% 35%, #2a3645, #11161e 75%); border: 2px solid var(--line); position: relative; margin: 0 auto; }
+  .knob .dial i { position: absolute; top: 3px; left: 50%; width: 2.5px; height: 11px; background: var(--muted); transform-origin: 50% 14px; transform: translateX(-50%) rotate(0deg); border-radius: 2px; }
+  .knob.lit .dial { border-color: var(--amber); box-shadow: 0 0 0 3px rgba(255,207,92,.18); }
+  .knob.lit .dial i { background: var(--amber); }
+  .knob .k { font-size: 9px; color: var(--muted); margin-top: 4px; letter-spacing: .3px; }
+  .knob.lit .k { color: var(--amber); font-weight: 700; }
+  .knob.hi-cut .dial i { transform: translateX(-50%) rotate(-125deg); }
+  .knob.sm .dial { width: 26px; height: 26px; }
+  .knob.sm .dial i { height: 8px; transform-origin: 50% 10px; }
+
+  /* GROOVE CIRCUIT */
+  .gc-body { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+  .gc-seg { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .gc-lbl { font-size: 8.5px; color: var(--muted); letter-spacing: .2px; }
+  .btnrow { display: flex; gap: 4px; }
+  .pbtn { width: 17px; height: 14px; border-radius: 3px; background: #1d2734; border: 1px solid var(--line); display: inline-block; }
+  .pbtn.g { background: #2a1d12; border-color: #4a3420; }
+  .pbtn.g.lit { background: var(--groove); border-color: var(--groove); box-shadow: 0 0 7px rgba(255,138,61,.6); }
+  .droll { display: grid; grid-template-columns: repeat(4,1fr); gap: 3px; }
+  .droll i { height: 17px; border-radius: 3px; background: #2a1d12; border: 1px solid #4a3420; }
+  .droll i.lit { background: var(--groove); border-color: var(--groove); box-shadow: 0 0 7px rgba(255,138,61,.6); }
+  .toggle { width: 16px; height: 26px; border-radius: 4px; background: #11161e; border: 1px solid var(--line); position: relative; }
+  .toggle::after { content:""; position:absolute; left:2px; right:2px; top:2px; height:9px; background: var(--groove); border-radius:2px; opacity:.8; }
+
+  /* browser (center top) */
+  .browser { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .bbtns { display: flex; gap: 5px; }
+  .bbtns b { font-size: 8.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; font-weight: 600; }
+  .browse-knob { width: 52px; height: 52px; border-radius: 50%; background: radial-gradient(circle at 50% 35%, #2a3645, #0e131a 78%); border: 3px solid var(--line); }
+  .loads { display: grid; grid-template-columns: repeat(4,1fr); gap: 5px; width: 100%; }
+  .loads b { font-size: 9px; text-align: center; color: var(--pad); border: 1px solid #2b3f63; border-radius: 5px; padding: 4px 0; font-weight: 700; }
+
+  /* deck */
+  .deckpanel { display: flex; flex-direction: column; gap: 11px; align-items: center; }
+  .deck-head { width: 100%; display: flex; justify-content: space-between; align-items: center; }
+  .deck-head .dn { font-size: 10px; color: var(--muted); font-weight: 700; letter-spacing: .4px; }
+  .dsel { display: flex; gap: 4px; }
+  .dsel b { width: 18px; height: 18px; border-radius: 50%; font-size: 9px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); color: var(--muted); }
+  .dsel b.a { border-color: var(--rec); color: var(--rec); font-weight: 700; }
+  .pads8 { display: grid; grid-template-columns: repeat(4,1fr); gap: 4px; width: 100%; }
+  .pads8 i { height: 16px; border-radius: 4px; background: #16243a; border: 1px solid #243a5c; }
+  .pads8 i.lit { background: var(--pad); border-color: var(--pad); box-shadow: 0 0 7px rgba(63,125,214,.6); }
+  .jogbig { width: 156px; height: 156px; border-radius: 50%; position: relative;
+    background: radial-gradient(circle at 50% 40%, #2b3949 0%, #1a2330 55%, #0e1219 100%);
+    border: 4px solid #28323f; box-shadow: inset 0 0 0 8px #131922, inset 0 0 24px #00000080; }
+  .jogbig::after { content:""; position:absolute; inset: 34px; border-radius:50%; border:1px dashed #36465a; }
+  .jogbig::before { content:""; position:absolute; inset: 54px; border-radius:50%; background: radial-gradient(circle at 50% 40%,#222d3b,#141a23); border:1px solid #2c3848; }
+  .jogbig .tick { position: absolute; top: 8px; left: 50%; width: 3px; height: 26px; background: var(--rec); transform-origin: 50% 70px; transform: translateX(-50%) rotate(32deg); border-radius: 2px; z-index:2; box-shadow: 0 0 6px rgba(255,77,94,.7); }
+  .jogbig.r .tick { transform: translateX(-50%) rotate(-44deg); }
+  .deck-bottom { display: flex; gap: 12px; align-items: flex-end; width: 100%; justify-content: center; }
+  .vfader { width: 26px; height: 70px; background: #11161e; border: 1px solid var(--line); border-radius: 5px; position: relative; }
+  .vfader .cap { position: absolute; left: -4px; right: -4px; height: 12px; background: var(--ink); border-radius: 3px; }
+  .colstack { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .clbl { font-size: 8.5px; color: var(--muted); letter-spacing: .3px; }
+  .tbtns { display: flex; flex-direction: column; gap: 5px; }
+  .tbtn { font-size: 9px; color: var(--muted); border: 1px solid var(--line); border-radius: 5px; padding: 4px 9px; font-weight: 600; text-align: center; }
+  .tbtn.play.lit { color: #06231f; background: var(--accent); border-color: var(--accent); }
+  .tbtn.cue.lit { color: #06231f; background: var(--accent); border-color: var(--accent); }
+  .tbtn.sync { font-size: 8px; padding: 3px 7px; }
+
+  /* mixer */
+  .mixer { display: flex; flex-direction: column; }
+  .mstrips { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; }
+  .mstrip { display: flex; flex-direction: column; align-items: center; gap: 7px; }
+  .mstrip .cnum { font-size: 10px; color: var(--muted); font-weight: 700; }
+  .stemiso { width: 100%; text-align: center; font-size: 8.5px; font-weight: 700; letter-spacing: .3px; color: var(--groove);
+    border: 1px solid #4a3420; background: #2a1d12; border-radius: 5px; padding: 4px 0; }
+  .stemiso.lit { color: #2a1405; background: var(--groove); border-color: var(--groove); box-shadow: 0 0 8px rgba(255,138,61,.55); }
+  .cfader { width: 28px; height: 66px; background: #11161e; border: 1px solid var(--line); border-radius: 5px; position: relative; }
+  .cfader .cap { position: absolute; left: -4px; right: -4px; height: 12px; background: var(--ink); border-radius: 3px; }
+  .mix-x { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 12px 0; }
+  .mix-x .xlbl { font-size: 9px; color: var(--muted); }
+  .xfader { width: 150px; height: 22px; background: #11161e; border: 1px solid var(--line); border-radius: 6px; position: relative; }
+  .xfader .cap { position: absolute; top: -4px; bottom: -4px; width: 16px; background: var(--ink); border-radius: 4px; left: 64px; }
+  .mix-fx { display: grid; grid-template-columns: 1.4fr 1fr; gap: 10px; }
+  .fxbox { background: #161d27; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .fxbox .fxt { font-size: 9px; letter-spacing: .5px; color: var(--muted); font-weight: 700; margin-bottom: 8px; }
+  .scfx { display: flex; justify-content: space-around; }
+  .beatfx { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .pill { font-size: 8.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 12px; padding: 3px 7px; }
+  .pill.on { color: #06231f; background: var(--accent); border-color: var(--accent); font-weight: 700; }
+
+  /* rendered output */
   .videowrap { margin-top: 18px; }
   .videohead { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
   .tag { font-size: 10.5px; padding: 3px 9px; border-radius: 20px; font-weight: 700; letter-spacing: .4px; }
-  .tag.a { color: #06231f; background: var(--amber); }
+  .tag.a { color: #2a1405; background: var(--amber); }
   .tag.b { color: var(--ink); background: #2b3a4d; }
-  .player { background: #0a0d12; border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
-  .scrub { height: 6px; background: #1d2734; border-radius: 4px; position: relative; margin: 16px 4px 6px; }
+  .player { background: #0a0d12; border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .scrub { height: 6px; background: #1d2734; border-radius: 4px; position: relative; margin: 10px 4px 6px; }
   .scrub .done { position: absolute; left: 0; top: 0; bottom: 0; width: 41%; background: var(--amber); border-radius: 4px; }
   .scrub .head { position: absolute; left: 41%; top: -5px; width: 16px; height: 16px; border-radius: 50%; background: #fff; }
   .timeline-row { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; padding: 0 4px; }
-  .lanes { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }
+  .lanes { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
   .lane { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--muted); }
-  .lane .ln { width: 64px; flex: 0 0 auto; text-align: right; }
+  .lane .ln { width: 70px; flex: 0 0 auto; text-align: right; }
   .lane .track { flex: 1; height: 16px; background: #11161e; border: 1px solid var(--line); border-radius: 5px; position: relative; overflow: hidden; }
-  .lane .seg { position: absolute; top: 0; bottom: 0; border-radius: 4px; opacity: .85; }
+  .seg { position: absolute; top: 0; bottom: 0; border-radius: 4px; opacity: .85; }
   .seg.t1 { left: 2%; width: 36%; background: #2b4a6e; }
   .seg.t2 { left: 40%; width: 58%; background: #345a83; }
-  .seg.ev { background: var(--amber); width: 2px; top: 2px; bottom: 2px; opacity: .9; }
-  .seg.evs { background: var(--stem); width: 2px; top: 2px; bottom: 2px; opacity: .9; }
-  .wave { position: absolute; inset: 0; background:
-     repeating-linear-gradient(90deg, #2dd4bf22 0 2px, transparent 2px 5px); }
+  .seg.ev { background: var(--amber); width: 2px; top: 2px; bottom: 2px; opacity: .95; }
+  .seg.evg { background: var(--groove); width: 2px; top: 2px; bottom: 2px; opacity: .95; }
+  .wave { position: absolute; inset: 0; background: repeating-linear-gradient(90deg, #2dd4bf22 0 2px, transparent 2px 5px); }
 
   .legend { margin-top: 20px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; font-size: 12.5px; color: var(--muted); }
   .legend b { color: var(--ink); }
   .legend .dotk { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: middle; margin: 0 4px 0 2px; }
   .note { font-size: 11.5px; color: var(--muted); margin-top: 6px; }
-  hr.sep { border: 0; border-top: 1px dashed var(--line); margin: 28px 0 18px; }
-  .secttitle { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); font-weight: 700; margin: 0 0 4px; }
+  hr.sep { border: 0; border-top: 1px dashed var(--line); margin: 26px 0 18px; }
+  .secttitle { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); font-weight: 700; margin: 0; }
 </style>
 </head>
 <body>
 <div class="frame">
 
-  <!-- frameless window chrome (matches UI-shell preference) -->
   <div class="chrome">
     <div class="dots"><i></i><i></i><i></i></div>
     <span class="title">Music Library Manager</span>
     <span class="spacer"></span>
-    <span class="winbtns" style="color:var(--muted)">&#8211; &#9633; &#10005;</span>
+    <span class="winbtns">&#8211; &#9633; &#10005;</span>
   </div>
 
   <div class="tabs">
@@ -216,9 +238,8 @@
     <div class="tab">Settings</div>
   </div>
 
+  <!-- TOP: setup | levels | recordings -->
   <div class="grid">
-
-    <!-- LEFT: device pickers + record -->
     <div class="card">
       <h3>Setup</h3>
       <div class="field">
@@ -229,172 +250,37 @@
       <div class="field">
         <label>Controller (MIDI)</label>
         <div class="select"><span>DDJ-GRV6</span><span class="chev">&#9662;</span></div>
-        <div class="hint">Co-read active alongside Rekordbox · 4-channel</div>
+        <div class="hint">Co-read alongside Rekordbox · 4-channel</div>
       </div>
       <div class="field">
         <label>Controller map</label>
         <div class="select"><span>ddj-grv6 · v1 (lead)</span><span class="chev">&#9662;</span></div>
         <div class="hint">+ ddj-flx4, ddj-400 (sibling stubs)</div>
       </div>
-
       <div class="elapsed">00:12:47<span class="ms">.318</span></div>
       <button class="recbtn"><span class="dot"></span> STOP RECORDING</button>
       <div class="statusrow"><span>Audio</span><b>capturing · 48 kHz</b></div>
       <div class="statusrow"><span>Controller</span><b>2,196 events · 4 ch</b></div>
-      <div class="statusrow"><span>GROOVE CIRCUIT</span><b>active</b></div>
+      <div class="statusrow"><span>GROOVE CIRCUIT</span><b class="gc">active</b></div>
       <div class="statusrow"><span>Writing</span><b>set.jsonl</b></div>
     </div>
 
-    <!-- CENTER: meters + live GRV6 activity -->
-    <div class="center">
-      <div class="card">
-        <h3>Live levels — 4 channel + master</h3>
-        <div class="meters">
-          <div class="meter"><div class="bar"><span class="f1"></span></div><div class="lbl">CH 3</div><div class="val">-12 dB</div></div>
-          <div class="meter"><div class="bar"><span class="f2"></span></div><div class="lbl">CH 1</div><div class="val">-8 dB</div></div>
-          <div class="meter"><div class="bar"><span class="f3"></span></div><div class="lbl">CH 2</div><div class="val">-5 dB</div></div>
-          <div class="meter"><div class="bar"><span class="f4"></span></div><div class="lbl">CH 4</div><div class="val">-18 dB</div></div>
-          <div class="meter master"><div class="bar"><span class="fm"></span></div><div class="lbl">MASTER</div><div class="val">-6.2 LUFS</div></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>Live controller activity — DDJ-GRV6</h3>
-        <div class="stripnote">Lit = control moving right now &rarr; written to the timeline (and animated in the video). Headline: CH&nbsp;3 Highs pulled down. STEM-ISO + GROOVE CIRCUIT are GRV6-specific captures.</div>
-
-        <!-- GROOVE CIRCUIT (both decks) -->
-        <div class="gcrow">
-          <div class="gc">
-            <div class="gctitle">GROOVE CIRCUIT &mdash; LEFT</div>
-            <div class="gcbody">
-              <div class="seg-sm"><div class="knob"><div class="dial"><i></i></div></div><span class="gclbl">GAIN</span></div>
-              <div class="seg-sm"><div class="minibtns"><i></i><i></i><i></i><i></i></div><span class="gclbl">DRUM SWAP</span></div>
-              <div class="seg-sm"><div class="minibtns"><i class="lit"></i><i></i><i></i><i></i></div><span class="gclbl">DRUM ROLL</span></div>
-              <div class="seg-sm"><div class="minibtns"><i></i></div><span class="gclbl">CAPT</span></div>
-              <div class="seg-sm"><div class="minibtns"><i></i></div><span class="gclbl">RELEASE</span></div>
-            </div>
-          </div>
-          <div class="gc">
-            <div class="gctitle">GROOVE CIRCUIT &mdash; RIGHT</div>
-            <div class="gcbody">
-              <div class="seg-sm"><div class="knob"><div class="dial"><i></i></div></div><span class="gclbl">GAIN</span></div>
-              <div class="seg-sm"><div class="minibtns"><i></i><i></i><i></i><i></i></div><span class="gclbl">DRUM SWAP</span></div>
-              <div class="seg-sm"><div class="minibtns"><i></i><i></i><i></i><i></i></div><span class="gclbl">DRUM ROLL</span></div>
-              <div class="seg-sm"><div class="minibtns"><i></i></div><span class="gclbl">CAPT</span></div>
-              <div class="seg-sm"><div class="minibtns"><i></i></div><span class="gclbl">RELEASE</span></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 4-channel mixer -->
-        <div class="mixer">
-          <div class="strips">
-            <!-- CH 3 (headline: Highs cut) -->
-            <div class="strip">
-              <div class="cnum">CH 3</div>
-              <div class="knob"><div class="dial"><i></i></div><div class="k">TRIM</div></div>
-              <div class="eqset">
-                <div class="knob lit hi-cut"><div class="dial"><i></i></div><div class="k">HI</div></div>
-                <div class="knob"><div class="dial"><i></i></div><div class="k">MID</div></div>
-                <div class="knob"><div class="dial"><i></i></div><div class="k">LOW</div></div>
-              </div>
-              <div class="stemiso lit">STEM ISO</div>
-              <div class="fader"><span class="cap" style="top:20px"></span></div>
-            </div>
-            <!-- CH 1 -->
-            <div class="strip">
-              <div class="cnum">CH 1</div>
-              <div class="knob"><div class="dial"><i></i></div><div class="k">TRIM</div></div>
-              <div class="eqset">
-                <div class="knob"><div class="dial"><i></i></div><div class="k">HI</div></div>
-                <div class="knob"><div class="dial"><i></i></div><div class="k">MID</div></div>
-                <div class="knob"><div class="dial"><i></i></div><div class="k">LOW</div></div>
-              </div>
-              <div class="stemiso">STEM ISO</div>
-              <div class="fader"><span class="cap" style="top:30px"></span></div>
-            </div>
-            <!-- CH 2 -->
-            <div class="strip">
-              <div class="cnum">CH 2</div>
-              <div class="knob"><div class="dial"><i></i></div><div class="k">TRIM</div></div>
-              <div class="eqset">
-                <div class="knob"><div class="dial"><i></i></div><div class="k">HI</div></div>
-                <div class="knob lit"><div class="dial"><i></i></div><div class="k">MID</div></div>
-                <div class="knob"><div class="dial"><i></i></div><div class="k">LOW</div></div>
-              </div>
-              <div class="stemiso">STEM ISO</div>
-              <div class="fader"><span class="cap" style="top:14px"></span></div>
-            </div>
-            <!-- CH 4 -->
-            <div class="strip">
-              <div class="cnum">CH 4</div>
-              <div class="knob"><div class="dial"><i></i></div><div class="k">TRIM</div></div>
-              <div class="eqset">
-                <div class="knob"><div class="dial"><i></i></div><div class="k">HI</div></div>
-                <div class="knob"><div class="dial"><i></i></div><div class="k">MID</div></div>
-                <div class="knob"><div class="dial"><i></i></div><div class="k">LOW</div></div>
-              </div>
-              <div class="stemiso">STEM ISO</div>
-              <div class="fader"><span class="cap" style="top:52px"></span></div>
-            </div>
-          </div>
-          <div class="xfader-wrap">
-            <span class="xlbl">crossfader</span>
-            <div class="xfader"><span class="cap"></span></div>
-          </div>
-        </div>
-
-        <!-- FX row -->
-        <div class="fxrow">
-          <div class="fxblk">
-            <div class="fxt">SOUND COLOR FX</div>
-            <div class="scfx">
-              <div class="knob"><div class="dial"><i></i></div><div class="k">CH3</div></div>
-              <div class="knob"><div class="dial"><i></i></div><div class="k">CH1</div></div>
-              <div class="knob"><div class="dial"><i></i></div><div class="k">CH2</div></div>
-              <div class="knob"><div class="dial"><i></i></div><div class="k">CH4</div></div>
-            </div>
-          </div>
-          <div class="fxblk">
-            <div class="fxt">BEAT FX</div>
-            <div class="beatfx">
-              <span class="pill">1/2</span>
-              <span class="pill">ECHO</span>
-              <div class="knob"><div class="dial"><i></i></div><div class="k">LVL/DEPTH</div></div>
-              <span class="pill on">ON</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- decks -->
-        <div class="decksrow">
-          <div class="deckblk">
-            <div class="jog"><span class="tick"></span></div>
-            <div class="deckright">
-              <div class="dhead"><span class="dn">DECK 3 / 1</span><span class="transport"><b class="lit">PLAY</b><b>CUE</b></span></div>
-              <div class="pads"><i class="lit"></i><i></i><i></i><i></i><i class="lits"></i><i></i><i></i><i></i></div>
-            </div>
-          </div>
-          <div class="deckblk">
-            <div class="jog r"><span class="tick"></span></div>
-            <div class="deckright">
-              <div class="dhead"><span class="dn">DECK 2 / 4</span><span class="transport"><b>PLAY</b><b class="lit">CUE</b></span></div>
-              <div class="pads"><i></i><i></i><i class="lit"></i><i></i><i></i><i></i><i></i><i></i></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="note" style="color:var(--amber)">EQ animation (the Highs-cut) depends on <b>spike 1c</b> &mdash; confirmed only if Hi/Mid/Lo (and stem-ISO / Sound-Color / GROOVE-CIRCUIT) are emitted as MIDI&nbsp;CC on the GRV6. If a control is hardware-DSP only, the rest still animate (Option&nbsp;A&prime;).</div>
-        <div class="note">Live preview reuses the existing canvas render pattern, fed by Tauri events (<code>recording-meter</code> / <code>recording-control</code>) &mdash; no WebSocket.</div>
+    <div class="card">
+      <h3>Live levels — 4 channel + master</h3>
+      <div class="meters">
+        <div class="meter"><div class="bar"><span class="f1"></span></div><div class="lbl">CH 3</div><div class="val">-12 dB</div></div>
+        <div class="meter"><div class="bar"><span class="f2"></span></div><div class="lbl">CH 1</div><div class="val">-8 dB</div></div>
+        <div class="meter"><div class="bar"><span class="f3"></span></div><div class="lbl">CH 2</div><div class="val">-5 dB</div></div>
+        <div class="meter"><div class="bar"><span class="f4"></span></div><div class="lbl">CH 4</div><div class="val">-18 dB</div></div>
+        <div class="meter master"><div class="bar"><span class="fm"></span></div><div class="lbl">MASTER</div><div class="val">-6.2 LUFS</div></div>
       </div>
     </div>
 
-    <!-- RIGHT: recordings list -->
     <div class="card">
       <h3>Recordings</h3>
       <div class="rec">
         <div class="thumb">&#9658;</div>
-        <div class="meta">
+        <div>
           <div class="nm">Friday Warmup</div>
           <div class="sub">2026-05-31 · 1:58:04 · GRV6</div>
           <div class="badges"><span class="badge vid">video</span><span class="badge rc">reconciled</span></div>
@@ -402,7 +288,7 @@
       </div>
       <div class="rec">
         <div class="thumb">&#9658;</div>
-        <div class="meta">
+        <div>
           <div class="nm">4-deck stem set</div>
           <div class="sub">2026-05-28 · 0:42:17 · GRV6</div>
           <div class="badges"><span class="badge b">audio + timeline</span><span class="badge rc">reconciled</span></div>
@@ -410,7 +296,7 @@
       </div>
       <div class="rec">
         <div class="thumb">&#9679;</div>
-        <div class="meta">
+        <div>
           <div class="nm">Sunday afters</div>
           <div class="sub">recording… 0:12:47 · GRV6</div>
           <div class="badges"><span class="badge">live</span></div>
@@ -419,6 +305,144 @@
     </div>
   </div>
 
+  <!-- FULL-WIDTH: GRV6 top-down outline -->
+  <div class="outline-head">
+    <span class="secttitle">Live controller activity — DDJ-GRV6 (top-down outline)</span>
+  </div>
+  <div class="stripnote">This is the controller outline the video animates. Lit = moving right now &rarr; written to <code>set.jsonl</code>. Headline gesture: <b>CH&nbsp;3 Highs pulled down</b>. <span style="color:var(--groove)">Orange = GROOVE CIRCUIT + STEM-ISO (GRV6-specific)</span>, <span style="color:var(--pad)">blue = performance pads</span>.</div>
+
+  <div class="grv6">
+    <!-- GROOVE CIRCUIT spans both decks (top) -->
+    <div class="gc-top">
+      <div class="sec">
+        <div class="sec-t gcc">GROOVE CIRCUIT — LEFT</div>
+        <div class="gc-body">
+          <div class="gc-seg"><div class="knob sm"><div class="dial"><i></i></div></div><span class="gc-lbl">GAIN</span></div>
+          <div class="gc-seg"><div class="btnrow"><span class="pbtn g"></span><span class="pbtn g"></span><span class="pbtn g"></span><span class="pbtn g"></span></div><span class="gc-lbl">DRUM SWAP</span></div>
+          <div class="gc-seg"><div class="droll"><i class="lit"></i><i></i><i></i><i></i></div><span class="gc-lbl">DRUM ROLL</span></div>
+          <div class="gc-seg"><span class="pbtn g"></span><span class="gc-lbl">CAPTURE</span></div>
+          <div class="gc-seg"><span class="toggle"></span><span class="gc-lbl">RELEASE</span></div>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="sec-t">Browse / Load</div>
+        <div class="browser">
+          <div class="bbtns"><b>BACK</b><b>VIEW</b><b>PREVIEW</b></div>
+          <div class="browse-knob"></div>
+          <div class="loads"><b>3</b><b>1</b><b>2</b><b>4</b></div>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="sec-t gcc">GROOVE CIRCUIT — RIGHT</div>
+        <div class="gc-body">
+          <div class="gc-seg"><div class="knob sm"><div class="dial"><i></i></div></div><span class="gc-lbl">GAIN</span></div>
+          <div class="gc-seg"><div class="btnrow"><span class="pbtn g"></span><span class="pbtn g"></span><span class="pbtn g"></span><span class="pbtn g"></span></div><span class="gc-lbl">DRUM SWAP</span></div>
+          <div class="gc-seg"><div class="droll"><i></i><i></i><i></i><i></i></div><span class="gc-lbl">DRUM ROLL</span></div>
+          <div class="gc-seg"><span class="pbtn g"></span><span class="gc-lbl">CAPTURE</span></div>
+          <div class="gc-seg"><span class="toggle"></span><span class="gc-lbl">RELEASE</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LEFT DECK | MIXER | RIGHT DECK -->
+    <div class="grv6-main">
+      <!-- LEFT DECK -->
+      <div class="sec">
+        <div class="deckpanel">
+          <div class="deck-head"><span class="dn">LEFT DECK</span><span class="dsel"><b class="a">3</b><b>1</b></span></div>
+          <div class="pads8"><i class="lit"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="jogbig"><span class="tick"></span></div>
+          <div class="deck-bottom">
+            <div class="colstack"><div class="vfader"><span class="cap" style="top:24px"></span></div><span class="clbl">TEMPO</span></div>
+            <div class="tbtns"><span class="tbtn cue">CUE</span><span class="tbtn play lit">&#9654; PLAY</span></div>
+            <div class="tbtns"><span class="tbtn sync">SYNC</span><span class="tbtn sync">KEY</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MIXER -->
+      <div class="sec">
+        <div class="mixer">
+          <div class="mstrips">
+            <div class="mstrip">
+              <span class="cnum">CH 3</span>
+              <div class="knob sm"><div class="dial"><i></i></div><div class="k">TRIM</div></div>
+              <div class="knob sm lit hi-cut"><div class="dial"><i></i></div><div class="k">HI</div></div>
+              <div class="knob sm"><div class="dial"><i></i></div><div class="k">MID</div></div>
+              <div class="knob sm"><div class="dial"><i></i></div><div class="k">LOW</div></div>
+              <div class="stemiso lit">STEM ISO</div>
+              <div class="cfader"><span class="cap" style="top:16px"></span></div>
+            </div>
+            <div class="mstrip">
+              <span class="cnum">CH 1</span>
+              <div class="knob sm"><div class="dial"><i></i></div><div class="k">TRIM</div></div>
+              <div class="knob sm"><div class="dial"><i></i></div><div class="k">HI</div></div>
+              <div class="knob sm"><div class="dial"><i></i></div><div class="k">MID</div></div>
+              <div class="knob sm"><div class="dial"><i></i></div><div class="k">LOW</div></div>
+              <div class="stemiso">STEM ISO</div>
+              <div class="cfader"><span class="cap" style="top:26px"></span></div>
+            </div>
+            <div class="mstrip">
+              <span class="cnum">CH 2</span>
+              <div class="knob sm"><div class="dial"><i></i></div><div class="k">TRIM</div></div>
+              <div class="knob sm"><div class="dial"><i></i></div><div class="k">HI</div></div>
+              <div class="knob sm lit"><div class="dial"><i></i></div><div class="k">MID</div></div>
+              <div class="knob sm"><div class="dial"><i></i></div><div class="k">LOW</div></div>
+              <div class="stemiso">STEM ISO</div>
+              <div class="cfader"><span class="cap" style="top:10px"></span></div>
+            </div>
+            <div class="mstrip">
+              <span class="cnum">CH 4</span>
+              <div class="knob sm"><div class="dial"><i></i></div><div class="k">TRIM</div></div>
+              <div class="knob sm"><div class="dial"><i></i></div><div class="k">HI</div></div>
+              <div class="knob sm"><div class="dial"><i></i></div><div class="k">MID</div></div>
+              <div class="knob sm"><div class="dial"><i></i></div><div class="k">LOW</div></div>
+              <div class="stemiso">STEM ISO</div>
+              <div class="cfader"><span class="cap" style="top:44px"></span></div>
+            </div>
+          </div>
+          <div class="mix-x"><span class="xlbl">crossfader</span><div class="xfader"><span class="cap"></span></div></div>
+          <div class="mix-fx">
+            <div class="fxbox">
+              <div class="fxt">SOUND COLOR FX</div>
+              <div class="scfx">
+                <div class="knob sm"><div class="dial"><i></i></div><div class="k">3</div></div>
+                <div class="knob sm"><div class="dial"><i></i></div><div class="k">1</div></div>
+                <div class="knob sm"><div class="dial"><i></i></div><div class="k">2</div></div>
+                <div class="knob sm"><div class="dial"><i></i></div><div class="k">4</div></div>
+              </div>
+            </div>
+            <div class="fxbox">
+              <div class="fxt">BEAT FX</div>
+              <div class="beatfx">
+                <span class="pill">1/2</span><span class="pill">ECHO</span>
+                <div class="knob sm"><div class="dial"><i></i></div><div class="k">DEPTH</div></div>
+                <span class="pill on">ON</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT DECK -->
+      <div class="sec">
+        <div class="deckpanel">
+          <div class="deck-head"><span class="dn">RIGHT DECK</span><span class="dsel"><b>2</b><b class="a">4</b></span></div>
+          <div class="pads8"><i></i><i></i><i class="lit"></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="jogbig r"><span class="tick"></span></div>
+          <div class="deck-bottom">
+            <div class="colstack"><div class="vfader"><span class="cap" style="top:34px"></span></div><span class="clbl">TEMPO</span></div>
+            <div class="tbtns"><span class="tbtn cue lit">CUE</span><span class="tbtn play">&#9654; PLAY</span></div>
+            <div class="tbtns"><span class="tbtn sync">SYNC</span><span class="tbtn sync">KEY</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note" style="color:var(--amber)">EQ animation (the Highs-cut) depends on <b>spike 1c</b> — confirmed only if Hi/Mid/Lo (and stem-ISO / Sound-Color / GROOVE-CIRCUIT) are emitted as MIDI&nbsp;CC on the GRV6. If a control is hardware-DSP only, the rest still animate (Option&nbsp;A&prime;).</div>
+  <div class="note">Live preview reuses the existing canvas render pattern, fed by Tauri events (<code>recording-meter</code> / <code>recording-control</code>) — no WebSocket.</div>
+
   <!-- BOTTOM: rendered output -->
   <div class="videowrap">
     <div class="videohead">
@@ -426,33 +450,19 @@
       <span class="tag a">OPTION A · if spikes pass</span>
     </div>
     <div class="player">
-      <div style="display:flex; gap:18px; align-items:center; flex-wrap:wrap">
-        <!-- mini GRV6 outline = the animated video frame -->
-        <div class="mixer" style="flex:0 0 auto; padding:10px">
-          <div class="strips" style="gap:8px">
-            <div class="strip" style="gap:6px"><div class="cnum">3</div><div class="eqset" style="gap:5px"><div class="knob lit hi-cut"><div class="dial" style="width:22px;height:22px"><i style="height:8px;transform-origin:50% 9px"></i></div></div><div class="knob"><div class="dial" style="width:22px;height:22px"><i style="height:8px;transform-origin:50% 9px"></i></div></div><div class="knob"><div class="dial" style="width:22px;height:22px"><i style="height:8px;transform-origin:50% 9px"></i></div></div></div><div class="stemiso lit" style="font-size:8px">ISO</div></div>
-            <div class="strip" style="gap:6px"><div class="cnum">1</div><div class="eqset" style="gap:5px"><div class="knob"><div class="dial" style="width:22px;height:22px"><i style="height:8px;transform-origin:50% 9px"></i></div></div><div class="knob"><div class="dial" style="width:22px;height:22px"><i style="height:8px;transform-origin:50% 9px"></i></div></div><div class="knob"><div class="dial" style="width:22px;height:22px"><i style="height:8px;transform-origin:50% 9px"></i></div></div></div><div class="stemiso" style="font-size:8px">ISO</div></div>
-            <div class="strip" style="gap:6px"><div class="cnum">2</div><div class="eqset" style="gap:5px"><div class="knob"><div class="dial" style="width:22px;height:22px"><i style="height:8px;transform-origin:50% 9px"></i></div></div><div class="knob lit"><div class="dial" style="width:22px;height:22px"><i style="height:8px;transform-origin:50% 9px"></i></div></div><div class="knob"><div class="dial" style="width:22px;height:22px"><i style="height:8px;transform-origin:50% 9px"></i></div></div></div><div class="stemiso" style="font-size:8px">ISO</div></div>
-            <div class="strip" style="gap:6px"><div class="cnum">4</div><div class="eqset" style="gap:5px"><div class="knob"><div class="dial" style="width:22px;height:22px"><i style="height:8px;transform-origin:50% 9px"></i></div></div><div class="knob"><div class="dial" style="width:22px;height:22px"><i style="height:8px;transform-origin:50% 9px"></i></div></div><div class="knob"><div class="dial" style="width:22px;height:22px"><i style="height:8px;transform-origin:50% 9px"></i></div></div></div><div class="stemiso" style="font-size:8px">ISO</div></div>
-          </div>
-        </div>
-        <div style="flex:1; min-width:280px">
-          <div class="scrub"><span class="done"></span><span class="head"></span></div>
-          <div class="timeline-row"><span>00:48:30</span><span>GRV6 controller-outline video · synced to master audio</span><span>1:58:04</span></div>
-          <div class="lanes">
-            <div class="lane"><span class="ln">CH 3</span><div class="track"><span class="seg t1"></span><span class="seg ev" style="left:30%"></span><span class="seg evs" style="left:36%"></span></div></div>
-            <div class="lane"><span class="ln">CH 2</span><div class="track"><span class="seg t2"></span><span class="seg ev" style="left:62%"></span></div></div>
-            <div class="lane"><span class="ln">GROOVE</span><div class="track"><span class="seg ev" style="left:18%;background:var(--groove)"></span><span class="seg ev" style="left:21%;background:var(--groove)"></span><span class="seg ev" style="left:55%;background:var(--groove)"></span></div></div>
-            <div class="lane"><span class="ln">Master</span><div class="track"><span class="wave"></span></div></div>
-          </div>
-        </div>
+      <div class="timeline-row"><span>00:48:30</span><span>the GRV6 outline above, animated &amp; muxed with the master audio</span><span>1:58:04</span></div>
+      <div class="scrub"><span class="done"></span><span class="head"></span></div>
+      <div class="lanes">
+        <div class="lane"><span class="ln">CH 3 EQ</span><div class="track"><span class="seg t1"></span><span class="seg ev" style="left:30%"></span><span class="seg ev" style="left:34%"></span></div></div>
+        <div class="lane"><span class="ln">CH 3 stem-ISO</span><div class="track"><span class="seg evg" style="left:31%"></span><span class="seg evg" style="left:33%"></span></div></div>
+        <div class="lane"><span class="ln">GROOVE</span><div class="track"><span class="seg evg" style="left:18%"></span><span class="seg evg" style="left:21%"></span><span class="seg evg" style="left:55%"></span></div></div>
+        <div class="lane"><span class="ln">Master</span><div class="track"><span class="wave"></span></div></div>
       </div>
     </div>
   </div>
 
   <hr class="sep" />
 
-  <!-- Option B fallback state -->
   <div class="videowrap" style="margin-top:0">
     <div class="videohead">
       <span class="secttitle">Fallback output</span>
@@ -471,13 +481,12 @@
   </div>
 
   <div class="legend">
-    <b>Reading this mockup (DDJ-GRV6).</b>
-    <span class="dotk" style="background:var(--amber)"></span>amber = EQ / faders / knobs captured from the controller.
-    <span class="dotk" style="background:var(--stem)"></span>violet = STEM-ISO (GRV6 stem isolation).
-    <span class="dotk" style="background:var(--groove)"></span>orange = GROOVE CIRCUIT (drum-sampler).
+    <b>Reading this mockup (DDJ-GRV6, top-down).</b>
+    <span class="dotk" style="background:var(--amber)"></span>amber glow = control moving now (EQ / fader / knob, captured).
+    <span class="dotk" style="background:var(--groove)"></span>orange = GROOVE CIRCUIT drum-sampler + STEM-ISO.
+    <span class="dotk" style="background:var(--pad)"></span>blue = performance pads.
     <span class="dotk" style="background:var(--accent)"></span>teal = live audio levels.
-    <div class="note">Headline gesture shown: CH&nbsp;3 <b>Highs knob pulled down</b> — visible in the live strip and reproduced in the rendered video, matching the Original Idea ("wenn er bei einem die Highs raus nimmt").</div>
-    <div class="note">GRV6 is 4-channel: faders/meters labelled by the hardware channel order (3 · 1 · 2 · 4). Stem-ISO + GROOVE CIRCUIT capture is GRV6-specific and spike-1c-gated for the video.</div>
+    <div class="note">Layout mirrors the real GRV6: GROOVE CIRCUIT across the top of both decks, two jog decks flanking the 4-channel mixer (fader order 3 · 1 · 2 · 4), Sound-Color + Beat-FX in the mixer. Headline gesture: CH&nbsp;3 <b>Highs pulled down</b> (Original Idea — "wenn er bei einem die Highs raus nimmt").</div>
     <div class="note">Static wireframe — inline CSS only, no JS, not wired into the app. Mirrors the plan; regenerated if the plan changes.</div>
   </div>
 
