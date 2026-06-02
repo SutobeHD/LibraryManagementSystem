@@ -118,7 +118,7 @@
   .led::after { content:""; position:absolute; inset:0; background: repeating-linear-gradient(0deg, rgba(0,0,0,.85) 0 1px, transparent 1px 5px); }
 
   /* buttons */
-  .pad { height: 19px; border-radius: 4px; background: linear-gradient(#16264a,#0f1a30); border: 1px solid #07101f;
+  .pad { height: 27px; border-radius: 5px; background: linear-gradient(#16264a,#0f1a30); border: 1px solid #07101f;
     box-shadow: inset 0 0 5px rgba(58,120,214,.25); }
   .pad.lit { background: linear-gradient(#4f8ce6,#2f63b8); box-shadow: inset 0 0 6px rgba(150,190,255,.7), 0 0 8px rgba(58,120,214,.6); }
   .sw { width: 15px; height: 22px; border-radius: 3px; background: linear-gradient(#2b2b31,#16161a); border: 1px solid #000; box-shadow: inset 0 1px 1px rgba(255,255,255,.12); }
@@ -152,7 +152,7 @@
   .load { font-size: 9px; font-weight: 800; color: #cfe0ff; border: 1px solid #18305a; border-radius: 4px; padding: 4px 7px; background: linear-gradient(#1a2c4e,#11203c); box-shadow: inset 0 0 5px rgba(58,120,214,.4); }
 
   /* main band */
-  .band-main { display: grid; grid-template-columns: 1fr 1.36fr 1fr; gap: 14px; }
+  .band-main { display: grid; grid-template-columns: 1.3fr 1fr 1.3fr; gap: 14px; align-items: start; }
   .deck { display: flex; flex-direction: column; gap: 11px; }
   .deck-top { display: grid; grid-template-columns: repeat(8,1fr); gap: 4px; }
   .deck-ctl { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
@@ -162,18 +162,18 @@
   .dnum { width: 19px; height: 19px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; border: 1px solid #000; color: var(--clbl); background: #16161a; }
   .dnum.on { color: #fff; border-color: var(--red); box-shadow: inset 0 0 6px rgba(226,59,75,.5); }
 
-  .jogzone { display: flex; gap: 10px; align-items: center; }
-  .jog { width: 196px; height: 196px; border-radius: 50%; position: relative; flex: 0 0 auto;
-    background: repeating-conic-gradient(from 0deg, #2a2a30 0deg 2.4deg, #131316 2.4deg 4.8deg);
-    box-shadow: 0 4px 10px rgba(0,0,0,.6), inset 0 0 0 1px #000; }
-  .jog .ring { position: absolute; inset: 13px; border-radius: 50%; background: #0d0d10; box-shadow: inset 0 0 0 2px #000; }
-  .jog .platter { position: absolute; inset: 19px; border-radius: 50%;
-    background: radial-gradient(circle at 50% 40%, #2c2c32 0%, #18181c 58%, #0d0d10 100%);
-    box-shadow: inset 0 0 26px rgba(0,0,0,.85), inset 0 2px 2px rgba(255,255,255,.04); }
-  .jog .hub { position: absolute; inset: 66px; border-radius: 50%; background: radial-gradient(circle at 50% 38%, #242429, #121215);
-    border: 1px solid #2c2c33; box-shadow: inset 0 0 14px #000; }
-  .jog .needle { position: absolute; top: 22px; left: 50%; width: 3px; height: 30px; background: linear-gradient(#ff5a68,#b3303c);
-    transform-origin: 50% 76px; transform: translateX(-50%) rotate(28deg); border-radius: 2px; z-index: 2; box-shadow: 0 0 7px rgba(255,90,104,.75); }
+  .jogzone { display: flex; gap: 10px; align-items: center; justify-content: center; }
+  .jog { width: 232px; height: 232px; border-radius: 50%; position: relative; flex: 0 0 auto;
+    background: repeating-conic-gradient(from 0deg, #2d2d34 0deg 2.2deg, #121215 2.2deg 4.4deg);
+    box-shadow: 0 5px 12px rgba(0,0,0,.65), inset 0 0 0 1px #000; }
+  .jog .ring { position: absolute; inset: 14px; border-radius: 50%; background: #0d0d10; box-shadow: inset 0 0 0 3px #000; }
+  .jog .platter { position: absolute; inset: 24px; border-radius: 50%;
+    background: radial-gradient(circle at 50% 38%, #30303a 0%, #1a1a1f 55%, #0c0c0f 100%);
+    box-shadow: inset 0 0 30px rgba(0,0,0,.85), inset 0 2px 3px rgba(255,255,255,.05); }
+  .jog .hub { position: absolute; inset: 80px; border-radius: 50%; background: radial-gradient(circle at 50% 36%, #2a2a31, #111114);
+    border: 1px solid #34343c; box-shadow: inset 0 0 16px #000, 0 0 0 6px rgba(0,0,0,.4); }
+  .jog .needle { position: absolute; top: 26px; left: 50%; width: 3px; height: 38px; background: linear-gradient(#ff5a68,#b3303c);
+    transform-origin: 50% 90px; transform: translateX(-50%) rotate(28deg); border-radius: 2px; z-index: 2; box-shadow: 0 0 8px rgba(255,90,104,.8); }
   .jog.r .needle { transform: translateX(-50%) rotate(-42deg); }
   .jog-side { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 
