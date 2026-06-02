@@ -33,10 +33,12 @@ class FakeContent:
 
 
 class FakeMasterDb:
-    def __init__(self, contents, playlists=None, fail_ids=None):
+    def __init__(self, contents, playlists=None, fail_ids=None, abort_ids=None):
         self._contents = contents
         self._playlists = playlists or {}
         self._fail_ids = set(fail_ids or [])
+        # abort_ids raise with the "Rekordbox is running" sentinel → engine aborts.
+        self._abort_ids = set(abort_ids or [])
         self.updated = []
 
     def get_contents(self):
@@ -49,6 +51,8 @@ class FakeMasterDb:
         return []
 
     def update_content(self, c):
+        if c.id in self._abort_ids:
+            raise RuntimeError("Rekordbox is running")
         if c.id in self._fail_ids:
             raise RuntimeError(f"simulated DB failure for {c.id}")
         self.updated.append((c.id, c.folder_path, c.file_type, c.file_size))
@@ -276,3 +280,38 @@ def test_rollback_rejects_path_traversal(env):
 def test_rollback_missing_manifest_raises(env):
     with pytest.raises(fc.FormatSwapError, match="not found"):
         env["engine"].rollback("manifest-nope.json")
+
+
+# ---------------------------------------------------------------------------
+# T-10 chaos drill — mid-run abort produces a partial manifest, then rollback
+# restores exactly the converted tracks (engine-level; real-audio variant needs
+# FFmpeg + Rekordbox export-XML, deferred).
+# ---------------------------------------------------------------------------
+
+
+def test_partial_abort_then_rollback_restores_only_converted(env):
+    eng, db, music, files = env["engine"], env["db"], env["music"], env["files"]
+    # 3rd track so order is deterministic: 1 converts, 2 aborts ("Rekordbox is
+    # running"), 3 is never reached.
+    p3 = music / "track3.m4a"
+    p3.write_bytes(b"FAKE-M4A-AUDIO" * 10)
+    db._contents.append(FakeContent(3, p3))
+    files[3] = p3
+    db._abort_ids = {2}
+
+    manifest = eng.run({"all_m4a": True}, "AIFF")
+
+    assert manifest["aborted"] is True
+    assert {t["id"] for t in manifest["tracks"]} == {1}, "only track1 landed before abort"
+    # track2 recovered per-track; track3 never processed
+    assert files[2].exists() and not (music / "track2.aiff").exists()
+    assert files[3].exists() and not (music / "track3.aiff").exists()
+    assert (music / "track1.aiff").exists()
+
+    # Corrupt the live DB, then roll back the PARTIAL manifest.
+    env["master_db"].write_bytes(b"CORRUPTED")
+    out = eng.rollback(f"manifest-{manifest['timestamp']}.json")
+
+    assert out["restored_tracks"] == 1
+    assert env["master_db"].read_bytes() == b"FAKE-MASTER-DB", "db restored from snapshot"
+    assert files[1].exists() and not (music / "track1.aiff").exists(), "track1 reverted"
