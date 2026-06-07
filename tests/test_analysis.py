@@ -431,6 +431,57 @@ def test_pssi_beat_anchoring():
     assert sb2 == 16
 
 
+def _pssi_entry_id(pssi: bytes, i: int) -> int:
+    """Decode phrase_id of entry i (header=32, entry=24, phrase_id at +4)."""
+    off = 32 + i * 24 + 4
+    return struct.unpack(">H", pssi[off : off + 2])[0]
+
+
+def _pssi_mood(pssi: bytes) -> int:
+    """Decode the mood field (header: 4sIII=16B, entry_count@16, mood@18)."""
+    return struct.unpack(">H", pssi[18:20])[0]
+
+
+def test_pssi_phrase_id_high_mood_bank():
+    from app.anlz_writer import _build_pssi
+
+    # All-high mood → bank 1: Chorus=5, Outro=6, Drop=5, Up=2, Intro=1
+    phrases = [
+        {"label": "Intro", "start_ms": 0, "end_ms": 4000, "mood": "high"},
+        {"label": "Up", "start_ms": 4000, "end_ms": 8000, "mood": "high"},
+        {"label": "Drop", "start_ms": 8000, "end_ms": 12000, "mood": "high"},
+        {"label": "Chorus", "start_ms": 12000, "end_ms": 16000, "mood": "high"},
+        {"label": "Outro", "start_ms": 16000, "end_ms": 20000, "mood": "high"},
+    ]
+    pssi = _build_pssi(phrases, 120.0, 20000)
+    assert _pssi_mood(pssi) == 1
+    assert [_pssi_entry_id(pssi, i) for i in range(5)] == [1, 2, 5, 5, 6]
+
+
+def test_pssi_phrase_id_mid_mood_bank():
+    from app.anlz_writer import _build_pssi
+
+    # All-mid mood → bank 2: Verse=2, Bridge=8, Chorus=9, Outro=10
+    phrases = [
+        {"label": "Intro", "start_ms": 0, "end_ms": 4000, "mood": "mid"},
+        {"label": "Verse", "start_ms": 4000, "end_ms": 8000, "mood": "mid"},
+        {"label": "Bridge", "start_ms": 8000, "end_ms": 12000, "mood": "mid"},
+        {"label": "Chorus", "start_ms": 12000, "end_ms": 16000, "mood": "mid"},
+        {"label": "Outro", "start_ms": 16000, "end_ms": 20000, "mood": "mid"},
+    ]
+    pssi = _build_pssi(phrases, 120.0, 20000)
+    assert _pssi_mood(pssi) == 2
+    assert [_pssi_entry_id(pssi, i) for i in range(5)] == [1, 2, 8, 9, 10]
+
+
+def test_pssi_phrase_id_helper_defaults_to_intro():
+    from app.anlz_writer import _pssi_phrase_id
+
+    # Unknown label → Intro (id 1, valid in every bank)
+    assert _pssi_phrase_id("Nonsense", 1) == 1
+    assert _pssi_phrase_id("Nonsense", 99) == 1  # unknown bank → mid default
+
+
 def test_pqt2_compact_format():
     from app.anlz_writer import _build_pqt2
 

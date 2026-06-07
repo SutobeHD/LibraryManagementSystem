@@ -476,6 +476,56 @@ def _build_pwvc() -> bytes:
     return buf
 
 
+# Rekordbox phrase "kind" ids are interpreted RELATIVE to the track mood bank
+# (Deep-Symmetry crate-digger rekordbox_anlz.ksy). An id valid in one bank is
+# invalid in another, so a phrase id must be drawn from the chosen mood's
+# vocabulary — otherwise Rekordbox / CDJ show a blank or wrong phrase label.
+#   high (1): intro=1, up=2, down=3, chorus=5, outro=6
+#   mid  (2): intro=1, verse_1..6=2..7, bridge=8, chorus=9, outro=10
+#   low  (3): intro=1, verse_1..2c=2..7, bridge=8, chorus=9, outro=10
+# Our internal labels (Intro/Verse/Up/Down/Drop/Chorus/Bridge/Outro) are mapped
+# to the nearest valid id within the bank (e.g. a "Drop" is the high-energy
+# chorus; high mood has no verse/bridge, so those fall back to up/down).
+_PSSI_PHRASE_ID: dict[int, dict[str, int]] = {
+    1: {  # high
+        "Intro": 1,
+        "Up": 2,
+        "Verse": 2,
+        "Down": 3,
+        "Bridge": 3,
+        "Drop": 5,
+        "Chorus": 5,
+        "Outro": 6,
+    },
+    2: {  # mid
+        "Intro": 1,
+        "Verse": 2,
+        "Up": 2,
+        "Down": 3,
+        "Bridge": 8,
+        "Drop": 9,
+        "Chorus": 9,
+        "Outro": 10,
+    },
+    3: {  # low
+        "Intro": 1,
+        "Verse": 2,
+        "Up": 2,
+        "Down": 3,
+        "Bridge": 8,
+        "Drop": 9,
+        "Chorus": 9,
+        "Outro": 10,
+    },
+}
+
+
+def _pssi_phrase_id(label: str, mood_val: int) -> int:
+    """Map an internal phrase label to a valid Rekordbox kind id for the mood bank."""
+    bank = _PSSI_PHRASE_ID.get(mood_val, _PSSI_PHRASE_ID[2])
+    return bank.get(label, 1)  # default to Intro (id 1, valid in every bank)
+
+
 def _build_pssi(
     phrases: list[dict[str, Any]],
     bpm: float,
@@ -537,7 +587,9 @@ def _build_pssi(
     for i, phrase in enumerate(phrases):
         start_beat = ms_to_beat(phrase.get("start_ms", 0))
         end_beat = ms_to_beat(phrase.get("end_ms", phrase.get("start_ms", 0)))
-        phrase_id = int(phrase.get("id", 1))
+        # Bank-correct id: derive from the label within the chosen mood bank,
+        # not the engine's raw id (which may be invalid for this bank).
+        phrase_id = _pssi_phrase_id(str(phrase.get("label", "")), mood_val)
         fill_val = int(phrase.get("fill", 0))
 
         # Entry layout: 24 bytes total
