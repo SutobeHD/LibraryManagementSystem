@@ -105,11 +105,16 @@ def synth_track(bpm: float, root: str, mode: str, dur: float = 24.0, sr: int = S
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Autonomous analysis accuracy self-test")
-    ap.add_argument("--dur", type=float, default=24.0, help="track length (s)")
+    ap.add_argument("--dur", type=float, default=20.0, help="track length (s)")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("-n", type=int, default=12, help="number of tracks (random sample)")
+    ap.add_argument("--bpm-min", type=float, default=75.0)
+    ap.add_argument("--bpm-max", type=float, default=210.0)
+    ap.add_argument(
+        "--full", action="store_true", help="use full pipeline (slow); else detect_* direct"
+    )
+    ap.add_argument("--verbose", action="store_true", help="print every track row")
     args = ap.parse_args(argv)
-
-    import soundfile as sf
 
     from app import analysis_engine as ae
 
@@ -117,50 +122,90 @@ def main(argv: list[str] | None = None) -> int:
     np.random.seed(args.seed)
     rng = np.random.default_rng(args.seed)
 
-    # Spread of tempos incl. the new high range, each with a random key.
-    bpms = [90, 100, 110, 124, 128, 140, 150, 160, 174, 186, 200, 210]
+    # Random (bpm, root, mode) cases across the requested tempo range.
     cases = []
-    for b in bpms:
+    for _ in range(args.n):
+        bpm = float(round(rng.uniform(args.bpm_min, args.bpm_max), 1))
         root = _SEMI[int(rng.integers(0, 12))]
         mode = "minor" if rng.random() < 0.5 else "major"
-        cases.append((float(b), root, mode))
+        cases.append((bpm, root, mode))
 
-    print(f"Self-test: {len(cases)} synthetic tracks, dur={args.dur}s, seed={args.seed}")
+    caps = ae.AnalysisEngine.capabilities()
     print(
-        f"BPM method: {ae.AnalysisEngine.capabilities()['beat_method']} | "
-        f"key: {ae.AnalysisEngine.capabilities()['key_method']}\n"
+        f"Self-test: {len(cases)} synthetic tracks, dur={args.dur}s, seed={args.seed}, "
+        f"bpm={args.bpm_min}-{args.bpm_max}, mode={'full' if args.full else 'direct'}"
     )
+    print(f"BPM method: {caps['beat_method']} | key: {caps['key_method']}\n")
 
     bpm_ok = key_exact = key_compat = 0
+    bpm_rel_tally: dict[str, int] = {}
+    # BPM accuracy per tempo band
+    bands = [(75, 100), (100, 140), (140, 180), (180, 210)]
+    band_tot: dict[str, int] = {f"{lo}-{hi}": 0 for lo, hi in bands}
+    band_ok: dict[str, int] = {f"{lo}-{hi}": 0 for lo, hi in bands}
     rows = []
+    fails = []
     for bpm, root, mode in cases:
         y = synth_track(bpm, root, mode, dur=args.dur)
-        fd, path = tempfile.mkstemp(suffix=".wav")
-        os.close(fd)
-        sf.write(path, y, SR)
-        try:
-            r = ae.run_full_analysis(path, use_cache=False)
-        finally:
-            os.unlink(path)
+        if args.full:
+            import soundfile as sf
+
+            fd, path = tempfile.mkstemp(suffix=".wav")
+            os.close(fd)
+            sf.write(path, y, SR)
+            try:
+                r = ae.run_full_analysis(path, use_cache=False)
+                our_bpm, our_cam, our_key = float(r["bpm"]), r.get("camelot", ""), r.get("key", "?")
+            finally:
+                os.unlink(path)
+        else:
+            beat = ae.detect_beats(y, SR)
+            key = ae.detect_key(y, SR)
+            our_bpm, our_cam, our_key = (
+                float(beat["bpm"]),
+                key.get("camelot", ""),
+                key.get("key", "?"),
+            )
+
         gt_cam = _camelot(root, mode)
-        rel, err = bpm_relation(bpm, float(r["bpm"]))
-        krel = key_relation(gt_cam, r.get("camelot", ""))
+        rel, err = bpm_relation(bpm, our_bpm)
+        krel = key_relation(gt_cam, our_cam)
         bpm_ok += rel == "match"
         key_exact += krel == "exact"
         key_compat += krel in ("exact", "relative", "fifth")
+        bpm_rel_tally[rel] = bpm_rel_tally.get(rel, 0) + 1
+        for lo, hi in bands:
+            if lo <= bpm < hi:
+                k = f"{lo}-{hi}"
+                band_tot[k] += 1
+                band_ok[k] += rel == "match"
+                break
         gt_key = f"{root}{'m' if mode == 'minor' else ''}"
-        rows.append(
-            f"  GT {bpm:>5.0f}/{gt_key:<3}({gt_cam:<3}) → "
-            f"ours {r['bpm']:>6}/{r.get('key', '?'):<3}({r.get('camelot', ''):<3})  "
-            f"BPM:{rel:<6}({err:>4.1f}%)  KEY:{krel}"
+        row = (
+            f"  GT {bpm:>6.1f}/{gt_key:<3}({gt_cam:<3}) → "
+            f"ours {our_bpm:>6.1f}/{our_key:<3}({our_cam:<3})  "
+            f"BPM:{rel:<6}({err:>5.1f}%)  KEY:{krel}"
         )
+        rows.append(row)
+        if rel != "match" or krel == "clash":
+            fails.append(row)
 
-    print("\n".join(rows))
+    if args.verbose:
+        print("\n".join(rows))
+    else:
+        print("Failures (BPM!=match or KEY clash):")
+        print("\n".join(fails) if fails else "  (none)")
+
     n = len(cases)
     print("\n=== Summary ===")
-    print(f"  BPM exact (<=1%, same octave): {bpm_ok}/{n}")
-    print(f"  KEY exact                    : {key_exact}/{n}")
-    print(f"  KEY harmonic-compatible      : {key_compat}/{n}")
+    print(f"  BPM exact (<=1%, same octave): {bpm_ok}/{n}  ({100 * bpm_ok // n}%)")
+    print(f"  BPM relation tally           : {dict(sorted(bpm_rel_tally.items()))}")
+    print(
+        "  BPM exact by tempo band      : "
+        + ", ".join(f"{k}:{band_ok[k]}/{band_tot[k]}" for k in band_tot if band_tot[k])
+    )
+    print(f"  KEY exact                    : {key_exact}/{n}  ({100 * key_exact // n}%)")
+    print(f"  KEY harmonic-compatible      : {key_compat}/{n}  ({100 * key_compat // n}%)")
     return 0
 
 
