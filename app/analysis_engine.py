@@ -32,8 +32,8 @@ import numpy as np
 
 from .analysis_settings import get_settings
 
-warnings.filterwarnings('ignore', category=UserWarning)
-warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,7 @@ def _ensure_libs():
     try:
         import librosa as _lr
         import scipy.signal as _sig
+
         librosa = _lr
         signal = _sig
         _LIBS_LOADED = True
@@ -76,6 +77,7 @@ def _ensure_libs():
     # Optional: madmom (RNN beat tracking -- significantly better than librosa)
     try:
         import madmom as _mm
+
         madmom = _mm
         _MADMOM_AVAILABLE = True
         logger.info("madmom available -- using RNN beat tracking")
@@ -86,6 +88,7 @@ def _ensure_libs():
     try:
         import essentia as _ess
         import essentia.standard as _ess_std
+
         essentia = _ess
         essentia_std = _ess_std
         _ESSENTIA_AVAILABLE = True
@@ -96,6 +99,7 @@ def _ensure_libs():
     # Optional: pyloudnorm (proper ITU-R BS.1770 LUFS with block gating)
     try:
         import pyloudnorm as _pln
+
         pyloudnorm = _pln
         _PYLOUDNORM_AVAILABLE = True
         logger.info("pyloudnorm available -- using ITU-R BS.1770 block-gated LUFS")
@@ -105,6 +109,7 @@ def _ensure_libs():
     # Optional: mutagen (audio metadata for format-aware encoder delay)
     try:
         import mutagen as _mtg
+
         mutagen = _mtg
         _MUTAGEN_AVAILABLE = True
     except ImportError:
@@ -118,7 +123,7 @@ def _ensure_libs():
 # --------------------------------------------------------------------------- #
 
 # Containers without encoder delay -- beat-grid is sample-accurate.
-_ZERO_DELAY_FORMATS = {'.flac', '.wav', '.aiff', '.aif', '.ogg', '.opus'}
+_ZERO_DELAY_FORMATS = {".flac", ".wav", ".aiff", ".aif", ".ogg", ".opus"}
 
 # Default MP3 encoder delay (LAME/Xing typical: 528 samples + ~470 padding @ 44.1kHz)
 # Rekordbox compensates ~22.5ms; we use exact value when LAME header is present.
@@ -141,34 +146,40 @@ def get_encoder_delay(file_path: str) -> float:
     if ext in _ZERO_DELAY_FORMATS:
         return 0.0
 
-    if ext == '.mp3':
+    if ext == ".mp3":
         if _MUTAGEN_AVAILABLE:
             try:
                 from mutagen.mp3 import MP3
+
                 mf = MP3(file_path)
                 # mutagen exposes encoder_delay (samples) when LAME tag present
-                delay_samples = getattr(mf.info, 'encoder_delay', 0) or 0
+                delay_samples = getattr(mf.info, "encoder_delay", 0) or 0
                 if delay_samples > 0:
-                    sr = getattr(mf.info, 'sample_rate', 44100) or 44100
+                    sr = getattr(mf.info, "sample_rate", 44100) or 44100
                     return float(delay_samples) / float(sr)
             except Exception:
                 pass
         return _MP3_DEFAULT_DELAY_S
 
-    if ext in ('.m4a', '.aac', '.mp4'):
+    if ext in (".m4a", ".aac", ".mp4"):
         if _MUTAGEN_AVAILABLE:
             try:
                 from mutagen.mp4 import MP4
+
                 mf = MP4(file_path)
                 # iTunSMPB atom encodes priming samples in hex
-                smpb = mf.tags.get('----:com.apple.iTunes:iTunSMPB') if mf.tags else None
+                smpb = mf.tags.get("----:com.apple.iTunes:iTunSMPB") if mf.tags else None
                 if smpb:
                     raw = smpb[0]
-                    s = raw.decode('ascii', errors='ignore') if isinstance(raw, (bytes, bytearray)) else str(raw)
+                    s = (
+                        raw.decode("ascii", errors="ignore")
+                        if isinstance(raw, (bytes, bytearray))
+                        else str(raw)
+                    )
                     parts = s.strip().split()
                     if len(parts) >= 2:
                         priming = int(parts[1], 16)
-                        sr = getattr(mf.info, 'sample_rate', 44100) or 44100
+                        sr = getattr(mf.info, "sample_rate", 44100) or 44100
                         return float(priming) / float(sr)
             except Exception:
                 pass
@@ -182,52 +193,97 @@ def get_encoder_delay(file_path: str) -> float:
 # =========================================================================== #
 
 # Krumhansl-Kessler (1982) profiles -- gold standard for correlation-based key
-_MAJOR_PROFILE = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09,
-                           2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
-_MINOR_PROFILE = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53,
-                           2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
+_MAJOR_PROFILE = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
+_MINOR_PROFILE = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
 
 # Temperley (2001) profiles -- better for pop/electronic music
-_TEMPERLEY_MAJOR = np.array([5.0, 2.0, 3.5, 2.0, 4.5, 4.0,
-                              2.0, 4.5, 2.0, 3.5, 1.5, 4.0])
-_TEMPERLEY_MINOR = np.array([5.0, 2.0, 3.5, 4.5, 2.0, 3.5,
-                              2.0, 4.5, 3.5, 2.0, 1.5, 4.0])
+_TEMPERLEY_MAJOR = np.array([5.0, 2.0, 3.5, 2.0, 4.5, 4.0, 2.0, 4.5, 2.0, 3.5, 1.5, 4.0])
+_TEMPERLEY_MINOR = np.array([5.0, 2.0, 3.5, 4.5, 2.0, 3.5, 2.0, 4.5, 3.5, 2.0, 1.5, 4.0])
 
-_PITCH_CLASSES = ['C', 'C#', 'D', 'D#', 'E', 'F',
-                  'F#', 'G', 'G#', 'A', 'A#', 'B']
+_PITCH_CLASSES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
 # Camelot wheel mapping for DJ-friendly key display
 _CAMELOT_MAP = {
-    'C major': '8B',  'G major': '9B',  'D major': '10B',
-    'A major': '11B', 'E major': '12B', 'B major': '1B',
-    'F# major': '2B', 'C# major': '3B', 'G# major': '4B',
-    'D# major': '5B', 'A# major': '6B', 'F major': '7B',
-    'A minor': '8A',  'E minor': '9A',  'B minor': '10A',
-    'F# minor': '11A','C# minor': '12A','G# minor': '1A',
-    'D# minor': '2A', 'A# minor': '3A', 'F minor': '4A',
-    'C minor': '5A',  'G minor': '6A',  'D minor': '7A',
+    "C major": "8B",
+    "G major": "9B",
+    "D major": "10B",
+    "A major": "11B",
+    "E major": "12B",
+    "B major": "1B",
+    "F# major": "2B",
+    "C# major": "3B",
+    "G# major": "4B",
+    "D# major": "5B",
+    "A# major": "6B",
+    "F major": "7B",
+    "A minor": "8A",
+    "E minor": "9A",
+    "B minor": "10A",
+    "F# minor": "11A",
+    "C# minor": "12A",
+    "G# minor": "1A",
+    "D# minor": "2A",
+    "A# minor": "3A",
+    "F minor": "4A",
+    "C minor": "5A",
+    "G minor": "6A",
+    "D minor": "7A",
 }
 
 # Open Key notation (alternative to Camelot)
 _OPENKEY_MAP = {
-    'C major': '1d',  'G major': '2d',  'D major': '3d',
-    'A major': '4d',  'E major': '5d',  'B major': '6d',
-    'F# major': '7d', 'C# major': '8d', 'G# major': '9d',
-    'D# major': '10d','A# major': '11d','F major': '12d',
-    'A minor': '1m',  'E minor': '2m',  'B minor': '3m',
-    'F# minor': '4m', 'C# minor': '5m', 'G# minor': '6m',
-    'D# minor': '7m', 'A# minor': '8m', 'F minor': '9m',
-    'C minor': '10m', 'G minor': '11m', 'D minor': '12m',
+    "C major": "1d",
+    "G major": "2d",
+    "D major": "3d",
+    "A major": "4d",
+    "E major": "5d",
+    "B major": "6d",
+    "F# major": "7d",
+    "C# major": "8d",
+    "G# major": "9d",
+    "D# major": "10d",
+    "A# major": "11d",
+    "F major": "12d",
+    "A minor": "1m",
+    "E minor": "2m",
+    "B minor": "3m",
+    "F# minor": "4m",
+    "C# minor": "5m",
+    "G# minor": "6m",
+    "D# minor": "7m",
+    "A# minor": "8m",
+    "F minor": "9m",
+    "C minor": "10m",
+    "G minor": "11m",
+    "D minor": "12m",
 }
 
 # Rekordbox KeyID mapping (for master.db djmdKey table)
 _REKORDBOX_KEY_ID = {
-    'C major': 1,   'C# major': 2,  'D major': 3,   'D# major': 4,
-    'E major': 5,   'F major': 6,   'F# major': 7,  'G major': 8,
-    'G# major': 9,  'A major': 10,  'A# major': 11, 'B major': 12,
-    'C minor': 13,  'C# minor': 14, 'D minor': 15,  'D# minor': 16,
-    'E minor': 17,  'F minor': 18,  'F# minor': 19, 'G minor': 20,
-    'G# minor': 21, 'A minor': 22,  'A# minor': 23, 'B minor': 24,
+    "C major": 1,
+    "C# major": 2,
+    "D major": 3,
+    "D# major": 4,
+    "E major": 5,
+    "F major": 6,
+    "F# major": 7,
+    "G major": 8,
+    "G# major": 9,
+    "A major": 10,
+    "A# major": 11,
+    "B major": 12,
+    "C minor": 13,
+    "C# minor": 14,
+    "D minor": 15,
+    "D# minor": 16,
+    "E minor": 17,
+    "F minor": 18,
+    "F# minor": 19,
+    "G minor": 20,
+    "G# minor": 21,
+    "A minor": 22,
+    "A# minor": 23,
+    "B minor": 24,
 }
 
 
@@ -239,12 +295,12 @@ def _correlate_key(chroma_vector: np.ndarray) -> tuple[str, str, float]:
     """
     norm = np.linalg.norm(chroma_vector)
     if norm < 1e-8:
-        return ('C', 'major', 0.0)
+        return ("C", "major", 0.0)
     chroma_norm = chroma_vector / norm
 
     best_corr = -2.0
-    best_key = 'C'
-    best_mode = 'major'
+    best_key = "C"
+    best_mode = "major"
 
     for shift in range(12):
         rotated = np.roll(chroma_norm, -shift)
@@ -259,7 +315,7 @@ def _correlate_key(chroma_vector: np.ndarray) -> tuple[str, str, float]:
         if major_corr > best_corr:
             best_corr = major_corr
             best_key = _PITCH_CLASSES[shift]
-            best_mode = 'major'
+            best_mode = "major"
 
         # -- Krumhansl-Kessler minor --
         kk_minor = float(np.corrcoef(rotated, _MINOR_PROFILE)[0, 1])
@@ -272,7 +328,7 @@ def _correlate_key(chroma_vector: np.ndarray) -> tuple[str, str, float]:
         if minor_corr > best_corr:
             best_corr = minor_corr
             best_key = _PITCH_CLASSES[shift]
-            best_mode = 'minor'
+            best_mode = "minor"
 
     return (best_key, best_mode, best_corr)
 
@@ -292,9 +348,7 @@ def detect_key_essentia(y: np.ndarray, sr: int) -> dict[str, str]:
             resampler = essentia_std.Resample(inputSampleRate=sr, outputSampleRate=44100)
             audio = resampler(audio)
 
-        key_extractor = essentia_std.KeyExtractor(
-            profileType='temperley'
-        )
+        key_extractor = essentia_std.KeyExtractor(profileType="temperley")
         key, scale, strength = key_extractor(audio)
 
         # Map to our standard format
@@ -308,7 +362,7 @@ def detect_key_essentia(y: np.ndarray, sr: int) -> dict[str, str]:
             "key_id": _REKORDBOX_KEY_ID.get(full_key, 0),
             "confidence": round(float(strength), 4),
             "tuning": 0.0,
-            "method": "essentia KeyExtractor (Temperley)"
+            "method": "essentia KeyExtractor (Temperley)",
         }
     except Exception as e:
         logger.warning(f"essentia key detection failed, falling back to K-S: {e}")
@@ -340,7 +394,7 @@ def detect_key(y: np.ndarray, sr: int) -> dict[str, str]:
         y_meat = np.concatenate(windows)
 
     # Band-pass 100 Hz - 3000 Hz to focus on melodic content
-    sos = signal.butter(4, [100.0, 3000.0], 'bp', fs=sr, output='sos')
+    sos = signal.butter(4, [100.0, 3000.0], "bp", fs=sr, output="sos")
     y_filtered = signal.sosfilt(sos, y_meat)
 
     # Aggressive harmonic isolation
@@ -376,9 +430,15 @@ def detect_key(y: np.ndarray, sr: int) -> dict[str, str]:
         pass
 
     if not chroma_all:
-        return {"key": "Unknown", "camelot": "", "openkey": "",
-                "key_id": 0, "confidence": 0.0, "tuning": 0.0,
-                "method": "none"}
+        return {
+            "key": "Unknown",
+            "camelot": "",
+            "openkey": "",
+            "key_id": 0,
+            "confidence": 0.0,
+            "tuning": 0.0,
+            "method": "none",
+        }
 
     # Average all chroma representations
     master_chroma = np.mean(chroma_all, axis=0)
@@ -399,7 +459,7 @@ def detect_key(y: np.ndarray, sr: int) -> dict[str, str]:
         "key_id": _REKORDBOX_KEY_ID.get(full_key, 0),
         "confidence": round(float(confidence), 4),
         "tuning": round(float(tuning), 3),
-        "method": "Ensemble K-S + Temperley (3x chroma)"
+        "method": "Ensemble K-S + Temperley (3x chroma)",
     }
 
 
@@ -468,16 +528,22 @@ def _onset_density_disambiguate(
     ratio = onset_rate / expected_beat_rate
 
     if ratio > _S.onset_density_high_ratio and bpm * 2.0 < _MAX_BPM:
-        logger.info(f"BPM disambiguate: {bpm:.1f} -> {bpm * 2:.1f} (ratio={ratio:.2f}, half-time misread)")
+        logger.info(
+            f"BPM disambiguate: {bpm:.1f} -> {bpm * 2:.1f} (ratio={ratio:.2f}, half-time misread)"
+        )
         return bpm * 2.0
     if ratio < _S.onset_density_low_ratio and bpm / 2.0 > _MIN_BPM:
-        logger.info(f"BPM disambiguate: {bpm:.1f} -> {bpm / 2:.1f} (ratio={ratio:.2f}, double-time misread)")
+        logger.info(
+            f"BPM disambiguate: {bpm:.1f} -> {bpm / 2:.1f} (ratio={ratio:.2f}, double-time misread)"
+        )
         return bpm / 2.0
     return bpm
 
 
 def _multi_band_onset_strength(
-    y: np.ndarray, sr: int, hop: int = 256,
+    y: np.ndarray,
+    sr: int,
+    hop: int = 256,
 ) -> np.ndarray:
     """
     Multi-band onset strength — robust across genres.
@@ -490,9 +556,9 @@ def _multi_band_onset_strength(
     mid is second-strongest, hi-hat lowest weight (mostly between-beats).
     Outperforms HPSS-only onset on sparse genres (DnB, Dub, Jazz, Acoustic).
     """
-    sos_lo = signal.butter(4, 200.0, 'low', fs=sr, output='sos')
-    sos_mi = signal.butter(4, [200.0, 2500.0], 'bp', fs=sr, output='sos')
-    sos_hi = signal.butter(4, 2500.0, 'high', fs=sr, output='sos')
+    sos_lo = signal.butter(4, 200.0, "low", fs=sr, output="sos")
+    sos_mi = signal.butter(4, [200.0, 2500.0], "bp", fs=sr, output="sos")
+    sos_hi = signal.butter(4, 2500.0, "high", fs=sr, output="sos")
 
     y_lo = signal.sosfilt(sos_lo, y)
     y_mi = signal.sosfilt(sos_mi, y)
@@ -546,7 +612,8 @@ def _compute_beat_confidence(
 
 
 def detect_beats_madmom(
-    y: np.ndarray, sr: int,
+    y: np.ndarray,
+    sr: int,
     encoder_delay: float = 0.0,
     first_signal_t: float = 0.0,
 ) -> dict[str, Any] | None:
@@ -561,7 +628,7 @@ def detect_beats_madmom(
         import soundfile as sf
 
         # madmom needs a file path -- write temp WAV
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp_path = tmp.name
             sf.write(tmp_path, y, sr)
 
@@ -616,12 +683,14 @@ def detect_beats_madmom(
                     continue
                 conf_idx = i + n_skipped
                 conf = raw_confidences[conf_idx] if conf_idx < len(raw_confidences) else 0.5
-                beats.append({
-                    "beat_number": (i % 4) + 1,
-                    "tempo": tempo_int,
-                    "time_ms": int(round(t * 1000)),
-                    "confidence": conf,
-                })
+                beats.append(
+                    {
+                        "beat_number": (i % 4) + 1,
+                        "tempo": tempo_int,
+                        "time_ms": int(round(t * 1000)),
+                        "confidence": conf,
+                    }
+                )
 
             # Downbeat detection
             downbeat_idx = _detect_downbeat(y, sr, beat_times)
@@ -639,7 +708,7 @@ def detect_beats_madmom(
                 "downbeat_index": downbeat_idx,
                 "beat_count": len(beats),
                 "grid_confidence": round(mean_conf, 3),
-                "method": "madmom RNN + DBN"
+                "method": "madmom RNN + DBN",
             }
         finally:
             try:
@@ -653,7 +722,8 @@ def detect_beats_madmom(
 
 
 def detect_beats(
-    y: np.ndarray, sr: int,
+    y: np.ndarray,
+    sr: int,
     encoder_delay: float = 0.0,
     first_signal_t: float = 0.0,
 ) -> dict[str, Any]:
@@ -682,14 +752,13 @@ def detect_beats(
 
     # 3. Coarse tempo estimate (biased towards dance music)
     tempo_estimate = librosa.feature.tempo(
-        onset_envelope=onset_env, sr=sr, hop_length=HOP,
-        start_bpm=145.0, ac_size=8.0
+        onset_envelope=onset_env, sr=sr, hop_length=HOP, start_bpm=145.0, ac_size=8.0
     )
     coarse_bpm = float(tempo_estimate[0]) if len(tempo_estimate) > 0 else 145.0
 
     # 4. Sub-bin refinement via parabolic interpolation on autocorrelation
-    max_lag = int((60 * sr) / (_MIN_BPM / 2.0 * HOP))   # half min for safety
-    min_lag = int((60 * sr) / (300 * HOP))              # ~34 frames (300 BPM)
+    max_lag = int((60 * sr) / (_MIN_BPM / 2.0 * HOP))  # half min for safety
+    min_lag = int((60 * sr) / (300 * HOP))  # ~34 frames (300 BPM)
 
     r = librosa.autocorrelate(onset_env, max_size=max_lag)
 
@@ -700,7 +769,7 @@ def detect_beats(
         # Parabolic interpolation for sub-frame precision
         if 0 < raw_peak_idx < len(r) - 1:
             y1, y2, y3 = r[raw_peak_idx - 1], r[raw_peak_idx], r[raw_peak_idx + 1]
-            denom = (y3 - 2 * y2 + y1)
+            denom = y3 - 2 * y2 + y1
             if abs(denom) > 1e-10:
                 refined_peak_idx = raw_peak_idx + 0.5 * (y1 - y3) / denom
             else:
@@ -720,8 +789,7 @@ def detect_beats(
 
     # 6. Beat tracking with refined BPM as prior
     tempo, beat_frames = librosa.beat.beat_track(
-        onset_envelope=onset_env, sr=sr, hop_length=HOP,
-        start_bpm=bpm_refined, tightness=300
+        onset_envelope=onset_env, sr=sr, hop_length=HOP, start_bpm=bpm_refined, tightness=300
     )
 
     # 7. BPM snapping (Pioneer style)
@@ -740,12 +808,14 @@ def detect_beats(
 
     # 9. Align to first strong transient in first 2 seconds (after silence)
     align_start = max(0, int(first_signal_t * sr))
-    first_two_sec = y_percussive[align_start:align_start + sr * 2]
+    first_two_sec = y_percussive[align_start : align_start + sr * 2]
     if len(first_two_sec) > 0:
         first_onsets = librosa.onset.onset_detect(
             y=first_two_sec, sr=sr, hop_length=HOP, backtrack=True
         )
-        first_onset_times = librosa.frames_to_time(first_onsets, sr=sr, hop_length=HOP) + first_signal_t
+        first_onset_times = (
+            librosa.frames_to_time(first_onsets, sr=sr, hop_length=HOP) + first_signal_t
+        )
 
         if len(first_onset_times) > 0 and len(beat_times) > 0:
             offset_shift = first_onset_times[0] - beat_times[0]
@@ -779,12 +849,14 @@ def detect_beats(
             continue
         conf_idx = i + n_skipped
         conf = raw_confidences[conf_idx] if conf_idx < len(raw_confidences) else 0.5
-        beats.append({
-            "beat_number": (i % 4) + 1,
-            "tempo": tempo_int,
-            "time_ms": int(round(t * 1000)),
-            "confidence": conf,
-        })
+        beats.append(
+            {
+                "beat_number": (i % 4) + 1,
+                "tempo": tempo_int,
+                "time_ms": int(round(t * 1000)),
+                "confidence": conf,
+            }
+        )
 
     # 12. Downbeat detection
     downbeat_idx = _detect_downbeat(y, sr, beat_times)
@@ -802,7 +874,7 @@ def detect_beats(
         "downbeat_index": downbeat_idx,
         "beat_count": len(beats),
         "grid_confidence": round(mean_conf, 3),
-        "method": "librosa + parabolic interpolation"
+        "method": "librosa + parabolic interpolation",
     }
 
 
@@ -838,7 +910,7 @@ def _detect_downbeat(y: np.ndarray, sr: int, beat_times: np.ndarray) -> int:
         return 0
 
     # Low-pass at 150 Hz to isolate kick drum energy
-    sos = signal.butter(4, 150.0, btype='low', fs=sr, output='sos')
+    sos = signal.butter(4, 150.0, btype="low", fs=sr, output="sos")
     y_low = signal.sosfilt(sos, y)
 
     hop = int(sr * 0.02)  # 20ms analysis window
@@ -876,14 +948,14 @@ def _detect_downbeat(y: np.ndarray, sr: int, beat_times: np.ndarray) -> int:
 # =========================================================================== #
 
 # Corrected crossover frequencies (per rekordbox_analysis_deep_dive.md)
-LOW_CUTOFF = 200.0     # Hz -- below this is "Low" (kick, sub-bass)  [was 180]
-HIGH_CUTOFF = 2500.0   # Hz -- above this is "High" (hi-hat, cymbals) [was 3000]
+LOW_CUTOFF = 200.0  # Hz -- below this is "Low" (kick, sub-bass)  [was 180]
+HIGH_CUTOFF = 2500.0  # Hz -- above this is "High" (hi-hat, cymbals) [was 3000]
 
 
 def generate_waveform_data(
     y: np.ndarray,
     sr: int,
-    detail_fps: int = 150  # Rekordbox: 150 entries per second
+    detail_fps: int = 150,  # Rekordbox: 150 entries per second
 ) -> dict[str, Any]:
     """
     Generate ALL waveform data required for Rekordbox ANLZ files:
@@ -903,9 +975,9 @@ def generate_waveform_data(
         return _empty_waveform()
 
     # -- 3-Band Filtering (4th-order Butterworth) -------------------------
-    sos_low = signal.butter(4, LOW_CUTOFF, btype='low', fs=sr, output='sos')
-    sos_mid = signal.butter(4, [LOW_CUTOFF, HIGH_CUTOFF], btype='band', fs=sr, output='sos')
-    sos_high = signal.butter(4, HIGH_CUTOFF, btype='high', fs=sr, output='sos')
+    sos_low = signal.butter(4, LOW_CUTOFF, btype="low", fs=sr, output="sos")
+    sos_mid = signal.butter(4, [LOW_CUTOFF, HIGH_CUTOFF], btype="band", fs=sr, output="sos")
+    sos_high = signal.butter(4, HIGH_CUTOFF, btype="high", fs=sr, output="sos")
 
     y_low = signal.sosfilt(sos_low, y)
     y_mid = signal.sosfilt(sos_mid, y)
@@ -918,8 +990,8 @@ def generate_waveform_data(
         n_frames = len(sig) // hop
         if n_frames < 1:
             return np.array([0.0])
-        trimmed = sig[:n_frames * hop].reshape(n_frames, hop)
-        return np.sqrt(np.mean(trimmed ** 2, axis=1))
+        trimmed = sig[: n_frames * hop].reshape(n_frames, hop)
+        return np.sqrt(np.mean(trimmed**2, axis=1))
 
     rms_low = rms_array(y_low)
     rms_mid = rms_array(y_mid)
@@ -943,7 +1015,7 @@ def generate_waveform_data(
         db = 20 * np.log10(arr + eps)
         db_norm = np.clip((db + 60.0) / 60.0, 0.0, 1.0)
         if gamma != 1.0:
-            db_norm = db_norm ** gamma
+            db_norm = db_norm**gamma
         return np.round(db_norm * max_val).astype(np.uint8)
 
     # Gamma curve for color channels (R/G/B): boosts mid-range so bands
@@ -976,9 +1048,7 @@ def generate_waveform_data(
     detail_heights = quantize_log(rms_full, 31)
     detail_bright = np.zeros(min_len, dtype=np.uint8)
     mask3 = rms_full > 1e-10
-    detail_bright[mask3] = np.clip(
-        (rms_high[mask3] / rms_full[mask3]) * 7.0, 0, 7
-    ).astype(np.uint8)
+    detail_bright[mask3] = np.clip((rms_high[mask3] / rms_full[mask3]) * 7.0, 0, 7).astype(np.uint8)
     pwv3 = ((detail_bright & 0x07) << 5) | (detail_heights & 0x1F)
 
     # -- PWV4: Color Preview (1200 entries, 6 bytes/entry) [NEW] ----------
@@ -992,25 +1062,29 @@ def generate_waveform_data(
     # Pack: 6 bytes per entry [R, G, B, height, R_low, B_low]
     pwv4 = []
     for i in range(pwv4_entries):
-        pwv4.append([
-            int(pwv4_high_band[i]),  # Red (high freq)
-            int(pwv4_mid[i]),        # Green (mid freq)
-            int(pwv4_low[i]),        # Blue (low freq)
-            int(pwv4_height[i]),     # Height
-            int(pwv4_mid[i] // 2),   # Lower half green (dimmer)
-            int(pwv4_low[i] // 2),   # Lower half blue (dimmer)
-        ])
+        pwv4.append(
+            [
+                int(pwv4_high_band[i]),  # Red (high freq)
+                int(pwv4_mid[i]),  # Green (mid freq)
+                int(pwv4_low[i]),  # Blue (low freq)
+                int(pwv4_height[i]),  # Height
+                int(pwv4_mid[i] // 2),  # Lower half green (dimmer)
+                int(pwv4_low[i] // 2),  # Lower half blue (dimmer)
+            ]
+        )
 
     # -- PWV5: Color Detail (2 bytes/entry, 150/sec) ----------------------
-    r_vals = quantize_log(rms_high, 7, gamma=COLOR_GAMMA)   # 3 bits: 0-7
-    g_vals = quantize_log(rms_mid, 7, gamma=COLOR_GAMMA)    # 3 bits: 0-7
-    b_vals = quantize_log(rms_low, 7, gamma=COLOR_GAMMA)    # 3 bits: 0-7
+    r_vals = quantize_log(rms_high, 7, gamma=COLOR_GAMMA)  # 3 bits: 0-7
+    g_vals = quantize_log(rms_mid, 7, gamma=COLOR_GAMMA)  # 3 bits: 0-7
+    b_vals = quantize_log(rms_low, 7, gamma=COLOR_GAMMA)  # 3 bits: 0-7
     h_vals = quantize_log(rms_full, 31)  # 5 bits: 0-31 (height stays linear-dB)
 
-    pwv5 = (r_vals.astype(np.uint16) << 13) | \
-           (g_vals.astype(np.uint16) << 10) | \
-           (b_vals.astype(np.uint16) << 7)  | \
-           (h_vals.astype(np.uint16) << 2)
+    pwv5 = (
+        (r_vals.astype(np.uint16) << 13)
+        | (g_vals.astype(np.uint16) << 10)
+        | (b_vals.astype(np.uint16) << 7)
+        | (h_vals.astype(np.uint16) << 2)
+    )
 
     # -- PWV6: 3-Band Preview (3 bytes/entry, ~1200 entries) [CDJ-3000 .2EX]
     # rbox reads as [low, mid, high] — byte order must match
@@ -1038,13 +1112,13 @@ def generate_waveform_data(
 
     return {
         # Rekordbox binary-compatible data
-        "pwav": pwav.tolist(),           # 400 bytes -- monochrome preview
-        "pwv2": pwv2.tolist(),           # 100 bytes -- tiny preview
-        "pwv3": pwv3.tolist(),           # N bytes -- monochrome detail
-        "pwv4": pwv4,                    # 1200 x 6 bytes -- color preview [NEW]
-        "pwv5": pwv5.tolist(),           # N x uint16 -- color detail
-        "pwv6": pwv6,                    # 1200 x [lo,mi,hi] -- 3-band preview
-        "pwv7": pwv7,                    # N x [lo,mi,hi] -- 3-band detail
+        "pwav": pwav.tolist(),  # 400 bytes -- monochrome preview
+        "pwv2": pwv2.tolist(),  # 100 bytes -- tiny preview
+        "pwv3": pwv3.tolist(),  # N bytes -- monochrome detail
+        "pwv4": pwv4,  # 1200 x 6 bytes -- color preview [NEW]
+        "pwv5": pwv5.tolist(),  # N x uint16 -- color detail
+        "pwv6": pwv6,  # 1200 x [lo,mi,hi] -- 3-band preview
+        "pwv7": pwv7,  # N x [lo,mi,hi] -- 3-band detail
         # Frontend float arrays
         "rgb_low": (rms_low / max_low).tolist(),
         "rgb_mid": (rms_mid / max_mid).tolist(),
@@ -1066,10 +1140,19 @@ def _resample_array(arr: np.ndarray, target_len: int) -> np.ndarray:
 
 def _empty_waveform() -> dict[str, Any]:
     return {
-        "pwav": [0] * 400, "pwv2": [0] * 100, "pwv3": [], "pwv4": [],
-        "pwv5": [], "pwv6": [], "pwv7": [],
-        "rgb_low": [], "rgb_mid": [], "rgb_high": [],
-        "detail_fps": 150, "detail_entries": 0, "duration": 0,
+        "pwav": [0] * 400,
+        "pwv2": [0] * 100,
+        "pwv3": [],
+        "pwv4": [],
+        "pwv5": [],
+        "pwv6": [],
+        "pwv7": [],
+        "rgb_low": [],
+        "rgb_mid": [],
+        "rgb_high": [],
+        "detail_fps": 150,
+        "detail_entries": 0,
+        "duration": 0,
     }
 
 
@@ -1080,14 +1163,12 @@ def _empty_waveform() -> dict[str, Any]:
 # Rekordbox phrase types per mood
 _PHRASE_LABELS = {
     "high": {1: "Intro", 2: "Up", 3: "Down", 5: "Chorus", 6: "Outro"},
-    "mid":  {1: "Intro", 2: "Verse", 3: "Verse", 5: "Bridge", 9: "Chorus", 10: "Outro"},
-    "low":  {1: "Intro", 2: "Verse", 5: "Verse", 8: "Bridge", 9: "Chorus", 10: "Outro"},
+    "mid": {1: "Intro", 2: "Verse", 3: "Verse", 5: "Bridge", 9: "Chorus", 10: "Outro"},
+    "low": {1: "Intro", 2: "Verse", 5: "Verse", 8: "Bridge", 9: "Chorus", 10: "Outro"},
 }
 
 
-def detect_phrases(
-    y: np.ndarray, sr: int, bpm: float, duration: float
-) -> list[dict[str, Any]]:
+def detect_phrases(y: np.ndarray, sr: int, bpm: float, duration: float) -> list[dict[str, Any]]:
     """
     Adaptive song-structure detection (Energy + MFCC timbre changes).
 
@@ -1126,7 +1207,7 @@ def detect_phrases(
                 phrase_mfccs.append(np.zeros(13, dtype=np.float32))
                 continue
             seg = y[start_sample:end_sample]
-            rms = float(np.sqrt(np.mean(seg ** 2)))
+            rms = float(np.sqrt(np.mean(seg**2)))
             phrase_energies.append(rms)
             try:
                 mfcc = librosa.feature.mfcc(y=seg, sr=sr, n_mfcc=13)
@@ -1175,8 +1256,12 @@ def detect_phrases(
             elif i == n_phrases - 1:
                 label, phrase_id, mood = "Outro", 10, "low"
             # Drop: large positive energy jump + timbre change after a low section
-            elif (energy_jump > 0.30 and mfcc_jump > mfcc_jump_threshold and
-                  i > 0 and norm_energies[i - 1] < p50):
+            elif (
+                energy_jump > 0.30
+                and mfcc_jump > mfcc_jump_threshold
+                and i > 0
+                and norm_energies[i - 1] < p50
+            ):
                 label, phrase_id, mood = "Drop", 5, "high"
             # Chorus: energy in top quintile
             elif e >= p80:
@@ -1192,20 +1277,22 @@ def detect_phrases(
                 else:
                     label, phrase_id, mood = "Verse", 2, "mid"
 
-            phrases.append({
-                "id": phrase_id,
-                "label": label,
-                "mood": mood,
-                "start_ms": int(start_time * 1000),
-                "end_ms": int(end_time * 1000),
-                "start_time": start_time,
-                "end_time": end_time,
-                "energy": round(float(e), 3),
-                "mfcc_jump": round(float(mfcc_jump), 4),
-                "bars": phrase_bars,
-                "fill": 0,
-                "beat": 1,
-            })
+            phrases.append(
+                {
+                    "id": phrase_id,
+                    "label": label,
+                    "mood": mood,
+                    "start_ms": int(start_time * 1000),
+                    "end_ms": int(end_time * 1000),
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "energy": round(float(e), 3),
+                    "mfcc_jump": round(float(mfcc_jump), 4),
+                    "bars": phrase_bars,
+                    "fill": 0,
+                    "beat": 1,
+                }
+            )
 
         # -- Merge consecutive same-label phrases (capped) ----------------
         # Cap at phrase_merge_max_bars: once a section is "long enough", we
@@ -1239,14 +1326,14 @@ def detect_phrases(
 # Rekordbox color codes for hot cues (4-bit + RGB hint)
 # These match the default rekordbox 7.x palette.
 _CUE_COLOR_BY_LABEL = {
-    "Intro":  {"id": 1,  "rgb": (0x40, 0xC0, 0xFF)},   # Cyan
-    "Verse":  {"id": 5,  "rgb": (0x40, 0xE0, 0x40)},   # Green
-    "Chorus": {"id": 7,  "rgb": (0xFF, 0x40, 0x90)},   # Pink
-    "Drop":   {"id": 2,  "rgb": (0xFF, 0x30, 0x30)},   # Red
-    "Bridge": {"id": 6,  "rgb": (0xA0, 0x60, 0xFF)},   # Purple
-    "Up":     {"id": 3,  "rgb": (0xFF, 0xA0, 0x40)},   # Orange
-    "Down":   {"id": 6,  "rgb": (0xA0, 0x60, 0xFF)},   # Purple
-    "Outro":  {"id": 4,  "rgb": (0xFF, 0xE0, 0x40)},   # Yellow
+    "Intro": {"id": 1, "rgb": (0x40, 0xC0, 0xFF)},  # Cyan
+    "Verse": {"id": 5, "rgb": (0x40, 0xE0, 0x40)},  # Green
+    "Chorus": {"id": 7, "rgb": (0xFF, 0x40, 0x90)},  # Pink
+    "Drop": {"id": 2, "rgb": (0xFF, 0x30, 0x30)},  # Red
+    "Bridge": {"id": 6, "rgb": (0xA0, 0x60, 0xFF)},  # Purple
+    "Up": {"id": 3, "rgb": (0xFF, 0xA0, 0x40)},  # Orange
+    "Down": {"id": 6, "rgb": (0xA0, 0x60, 0xFF)},  # Purple
+    "Outro": {"id": 4, "rgb": (0xFF, 0xE0, 0x40)},  # Yellow
 }
 
 _DEFAULT_CUE_COLOR = {"id": 0, "rgb": (0xFF, 0xFF, 0xFF)}
@@ -1289,6 +1376,7 @@ def generate_hot_cues(
             return t_ms
         # Binary-search nearest beat
         import bisect
+
         idx = bisect.bisect_left(beat_times_ms, t_ms)
         candidates = []
         if idx > 0:
@@ -1299,21 +1387,32 @@ def generate_hot_cues(
 
     # -- Cue A: Track Start (first beat or t=0) ---------------------------
     start_ms = beat_times_ms[0] if beat_times_ms else 0
-    cues.append({
-        "type": "hot_cue",
-        "number": 0,
-        "name": "Start",
-        "time_ms": int(start_ms),
-        "color_id": _CUE_COLOR_BY_LABEL["Intro"]["id"],
-        "color_rgb": _CUE_COLOR_BY_LABEL["Intro"]["rgb"],
-        "loop_len_ms": 0,
-    })
+    cues.append(
+        {
+            "type": "hot_cue",
+            "number": 0,
+            "name": "Start",
+            "time_ms": int(start_ms),
+            "color_id": _CUE_COLOR_BY_LABEL["Intro"]["id"],
+            "color_rgb": _CUE_COLOR_BY_LABEL["Intro"]["rgb"],
+            "loop_len_ms": 0,
+        }
+    )
 
     if not phrases or len(phrases) < 2:
         return cues
 
     # -- Score phrases by impact (energy delta + label priority) ----------
-    label_priority = {"Drop": 5, "Chorus": 4, "Bridge": 3, "Up": 3, "Outro": 2, "Verse": 1, "Down": 1, "Intro": 0}
+    label_priority = {
+        "Drop": 5,
+        "Chorus": 4,
+        "Bridge": 3,
+        "Up": 3,
+        "Outro": 2,
+        "Verse": 1,
+        "Down": 1,
+        "Intro": 0,
+    }
 
     scored: list[tuple[float, dict[str, Any]]] = []
     for i, p in enumerate(phrases):
@@ -1337,15 +1436,17 @@ def generate_hot_cues(
         label = p.get("label", "Verse")
         color = _CUE_COLOR_BY_LABEL.get(label, _DEFAULT_CUE_COLOR)
         time_ms = snap_to_beat(int(p.get("start_ms", 0)))
-        cues.append({
-            "type": "hot_cue",
-            "number": slot,
-            "name": label,
-            "time_ms": time_ms,
-            "color_id": color["id"],
-            "color_rgb": color["rgb"],
-            "loop_len_ms": 0,
-        })
+        cues.append(
+            {
+                "type": "hot_cue",
+                "number": slot,
+                "name": label,
+                "time_ms": time_ms,
+                "color_id": color["id"],
+                "color_rgb": color["rgb"],
+                "loop_len_ms": 0,
+            }
+        )
 
     return cues
 
@@ -1371,6 +1472,7 @@ def generate_memory_cues(
 
     def snap(t_ms: int) -> int:
         import bisect
+
         idx = bisect.bisect_left(beat_times_ms, t_ms)
         candidates = []
         if idx > 0:
@@ -1407,15 +1509,17 @@ def generate_memory_cues(
             continue
 
         color = _CUE_COLOR_BY_LABEL.get(label, _DEFAULT_CUE_COLOR)
-        cues.append({
-            "type": "memory_cue",
-            "number": len(cues),
-            "name": label,
-            "time_ms": snap(start_ms),
-            "color_id": color["id"],
-            "color_rgb": color["rgb"],
-            "loop_len_ms": 0,
-        })
+        cues.append(
+            {
+                "type": "memory_cue",
+                "number": len(cues),
+                "name": label,
+                "time_ms": snap(start_ms),
+                "color_id": color["id"],
+                "color_rgb": color["rgb"],
+                "loop_len_ms": 0,
+            }
+        )
         last_cue_ms = start_ms
 
         if len(cues) >= max_cues:
@@ -1428,6 +1532,7 @@ def generate_memory_cues(
 # 5. PVBR -- VBR INDEX GENERATION  [NEW]
 # =========================================================================== #
 
+
 def generate_pvbr(duration: float, file_path: str | None = None) -> list[int]:
     """
     Generate PVBR (VBR Index) -- 400 ms-positions for accurate seek in MP3.
@@ -1439,7 +1544,7 @@ def generate_pvbr(duration: float, file_path: str | None = None) -> list[int]:
         return [0] * 400
 
     # -- Try real VBR mapping for MP3 files ------------------------------
-    if file_path and _MUTAGEN_AVAILABLE and file_path.lower().endswith('.mp3'):
+    if file_path and _MUTAGEN_AVAILABLE and file_path.lower().endswith(".mp3"):
         toc = _read_mp3_xing_toc(file_path, duration)
         if toc is not None:
             return toc
@@ -1457,30 +1562,34 @@ def _read_mp3_xing_toc(file_path: str, duration: float) -> list[int] | None:
     """
     try:
         # mutagen does not expose the Xing TOC directly; raw-parse the file
-        with open(file_path, 'rb') as f:
+        with open(file_path, "rb") as f:
             # Skip ID3v2 if present (header at file start)
             head = f.read(10)
-            if head[:3] == b'ID3':
+            if head[:3] == b"ID3":
                 # ID3v2 size is 4 syncsafe bytes
-                size = ((head[6] & 0x7F) << 21) | ((head[7] & 0x7F) << 14) | \
-                       ((head[8] & 0x7F) << 7) | (head[9] & 0x7F)
+                size = (
+                    ((head[6] & 0x7F) << 21)
+                    | ((head[7] & 0x7F) << 14)
+                    | ((head[8] & 0x7F) << 7)
+                    | (head[9] & 0x7F)
+                )
                 f.seek(10 + size)
             else:
                 f.seek(0)
 
             # Read first MPEG frame to find Xing/Info marker
             chunk = f.read(2048)
-            xing_idx = chunk.find(b'Xing')
+            xing_idx = chunk.find(b"Xing")
             if xing_idx < 0:
-                xing_idx = chunk.find(b'Info')
+                xing_idx = chunk.find(b"Info")
             if xing_idx < 0:
                 return None
 
             # Xing header layout: "Xing"/"Info"(4) + flags(4) + frames(4)? + bytes(4)? + TOC(100)? + quality(4)?
-            flags_bytes = chunk[xing_idx + 4: xing_idx + 8]
+            flags_bytes = chunk[xing_idx + 4 : xing_idx + 8]
             if len(flags_bytes) < 4:
                 return None
-            flags = int.from_bytes(flags_bytes, 'big')
+            flags = int.from_bytes(flags_bytes, "big")
             cursor = xing_idx + 8
             if flags & 0x01:  # frames present
                 cursor += 4
@@ -1489,7 +1598,7 @@ def _read_mp3_xing_toc(file_path: str, duration: float) -> list[int] | None:
             if not (flags & 0x04):  # TOC absent
                 return None
 
-            toc = chunk[cursor: cursor + 100]
+            toc = chunk[cursor : cursor + 100]
             if len(toc) < 100:
                 return None
 
@@ -1498,7 +1607,7 @@ def _read_mp3_xing_toc(file_path: str, duration: float) -> list[int] | None:
         total_ms = duration * 1000.0
         result: list[int] = []
         for i in range(400):
-            pct = i / 400.0           # 0.0 .. 1.0
+            pct = i / 400.0  # 0.0 .. 1.0
             toc_idx = pct * 100.0
             lo = int(toc_idx)
             hi = min(lo + 1, 99)
@@ -1510,7 +1619,7 @@ def _read_mp3_xing_toc(file_path: str, duration: float) -> list[int] | None:
             # For VBR we want time given byte_pct -- but our caller wants ms positions
             # uniformly spaced in time (for waveform/seek display). Use byte_pct as
             # time proxy: result[i] is the millisecond position represented by byte i%.
-            t_ms = pct * total_ms     # uniform time sampling
+            t_ms = pct * total_ms  # uniform time sampling
             result.append(int(round(t_ms)))
         return result
 
@@ -1522,6 +1631,7 @@ def _read_mp3_xing_toc(file_path: str, duration: float) -> list[int] | None:
 # =========================================================================== #
 # 5b. STEREO FEATURES  [NEW]
 # =========================================================================== #
+
 
 def compute_stereo_features(y_stereo: np.ndarray, sr: int) -> dict[str, Any] | None:
     """
@@ -1542,14 +1652,14 @@ def compute_stereo_features(y_stereo: np.ndarray, sr: int) -> dict[str, Any] | N
 
     L, R = y_stereo[0], y_stereo[1]
 
-    M = (L + R) * 0.5     # mid (mono-summed)
-    S = (L - R) * 0.5     # side
-    m_rms = float(np.sqrt(np.mean(M ** 2)))
-    s_rms = float(np.sqrt(np.mean(S ** 2)))
+    M = (L + R) * 0.5  # mid (mono-summed)
+    S = (L - R) * 0.5  # side
+    m_rms = float(np.sqrt(np.mean(M**2)))
+    s_rms = float(np.sqrt(np.mean(S**2)))
     width = s_rms / (m_rms + 1e-10)
 
-    L_rms = float(np.sqrt(np.mean(L ** 2)))
-    R_rms = float(np.sqrt(np.mean(R ** 2)))
+    L_rms = float(np.sqrt(np.mean(L**2)))
+    R_rms = float(np.sqrt(np.mean(R**2)))
     balance = (R_rms - L_rms) / (R_rms + L_rms + 1e-10)
 
     if np.std(L) > 1e-10 and np.std(R) > 1e-10:
@@ -1568,6 +1678,7 @@ def compute_stereo_features(y_stereo: np.ndarray, sr: int) -> dict[str, Any] | N
 # =========================================================================== #
 # 6. LOUDNESS (LUFS) MEASUREMENT  [NEW]
 # =========================================================================== #
+
 
 def calculate_lufs(y: np.ndarray, sr: int) -> float:
     """
@@ -1604,17 +1715,17 @@ def calculate_lufs(y: np.ndarray, sr: int) -> float:
     # -- Fallback: K-weighted RMS approximation ---------------------------
     try:
         # Stage 1: High-shelf filter (boost above 1.5kHz -- head diffraction)
-        b_shelf, a_shelf = signal.butter(2, 1500.0 / (sr / 2), btype='high')
+        b_shelf, a_shelf = signal.butter(2, 1500.0 / (sr / 2), btype="high")
         y_shelf = signal.lfilter(b_shelf, a_shelf, y)
         # Mix: 4dB boost approximation
         y_weighted = y * 0.6 + y_shelf * 0.4
 
         # Stage 2: High-pass at 38Hz (remove DC & sub-bass rumble)
-        sos_hp = signal.butter(2, 38.0, btype='high', fs=sr, output='sos')
+        sos_hp = signal.butter(2, 38.0, btype="high", fs=sr, output="sos")
         y_weighted = signal.sosfilt(sos_hp, y_weighted)
 
         # Integrated loudness
-        mean_sq = float(np.mean(y_weighted ** 2))
+        mean_sq = float(np.mean(y_weighted**2))
         if mean_sq < 1e-12:
             return -100.0
 
@@ -1653,8 +1764,12 @@ def calculate_replay_gain(lufs: float, target: float | None = None) -> float:
 # 6c. MOOD / TEXTURE FEATURES  [NEW]
 # =========================================================================== #
 
+
 def detect_mood(
-    y: np.ndarray, sr: int, bpm: float, lufs: float,
+    y: np.ndarray,
+    sr: int,
+    bpm: float,
+    lufs: float,
 ) -> dict[str, Any]:
     """
     Heuristic mood/texture classification from spectral features.
@@ -1679,7 +1794,7 @@ def detect_mood(
         zcr = float(np.mean(librosa.feature.zero_crossing_rate(y=y)))
 
         nyquist = sr / 2.0
-        brightness = min(1.0, spec_cent / (nyquist * 0.5))   # 0..1 scale
+        brightness = min(1.0, spec_cent / (nyquist * 0.5))  # 0..1 scale
         warmth = 1.0 - min(1.0, spec_roll / nyquist)
 
         # Mood heuristic
@@ -1711,8 +1826,14 @@ def detect_mood(
         }
     except Exception as e:
         logger.warning(f"Mood detection failed: {e}")
-        return {"mood": "Unknown", "brightness": 0.0, "warmth": 0.0,
-                "texture": 0.0, "spectral_centroid": 0.0, "spectral_rolloff": 0.0}
+        return {
+            "mood": "Unknown",
+            "brightness": 0.0,
+            "warmth": 0.0,
+            "texture": 0.0,
+            "spectral_centroid": 0.0,
+            "spectral_rolloff": 0.0,
+        }
 
 
 def hint_genre(bpm: float, brightness: float, texture: float) -> str:
@@ -1750,8 +1871,11 @@ def hint_genre(bpm: float, brightness: float, texture: float) -> str:
 # 7. DYNAMIC TEMPO GRID  [NEW]
 # =========================================================================== #
 
+
 def detect_tempo_changes(
-    y: np.ndarray, sr: int, global_bpm: float,
+    y: np.ndarray,
+    sr: int,
+    global_bpm: float,
     change_threshold: float | None = None,
     min_anchor_spacing_s: float | None = None,
 ) -> list[dict[str, Any]]:
@@ -1790,20 +1914,17 @@ def detect_tempo_changes(
 
         if bpm_std < 0.5:
             # Static grid -- stable tempo
-            return [{
-                "time": 0.0,
-                "bpm": round(global_bpm, 3),
-                "beat": 1,
-                "metro": "4/4"
-            }]
+            return [{"time": 0.0, "bpm": round(global_bpm, 3), "beat": 1, "metro": "4/4"}]
 
         # -- Change-point detection --
-        anchors = [{
-            "time": 0.0,
-            "bpm": round(_octave_correct(float(bpm_curve[0])), 3),
-            "beat": 1,
-            "metro": "4/4",
-        }]
+        anchors = [
+            {
+                "time": 0.0,
+                "bpm": round(_octave_correct(float(bpm_curve[0])), 3),
+                "beat": 1,
+                "metro": "4/4",
+            }
+        ]
         last_anchor_bpm = float(bpm_curve[0])
         last_anchor_t = 0.0
         min_spacing_frames = int(min_anchor_spacing_s * sr / hop_length)
@@ -1812,14 +1933,18 @@ def detect_tempo_changes(
             local_bpm = _octave_correct(float(bpm_curve[i]))
             t_sec = i * hop_length / sr
             # Add anchor if BPM diverges enough AND spacing satisfied
-            if (abs(local_bpm - last_anchor_bpm) >= change_threshold and
-                    t_sec - last_anchor_t >= min_anchor_spacing_s):
-                anchors.append({
-                    "time": round(t_sec, 2),
-                    "bpm": round(local_bpm, 3),
-                    "beat": 1,
-                    "metro": "4/4",
-                })
+            if (
+                abs(local_bpm - last_anchor_bpm) >= change_threshold
+                and t_sec - last_anchor_t >= min_anchor_spacing_s
+            ):
+                anchors.append(
+                    {
+                        "time": round(t_sec, 2),
+                        "bpm": round(local_bpm, 3),
+                        "beat": 1,
+                        "metro": "4/4",
+                    }
+                )
                 last_anchor_bpm = local_bpm
                 last_anchor_t = t_sec
 
@@ -1833,6 +1958,7 @@ def detect_tempo_changes(
 # =========================================================================== #
 # 8. MAIN ANALYSIS PIPELINE
 # =========================================================================== #
+
 
 class AnalysisEngine:
     """
@@ -1879,8 +2005,13 @@ class AnalysisEngine:
             future = executor.submit(run_quick_analysis, file_path)
         else:
             future = executor.submit(
-                run_full_analysis, file_path, None, True, None,
-                auto_hot_cues, auto_memory_cues,
+                run_full_analysis,
+                file_path,
+                None,
+                True,
+                None,
+                auto_hot_cues,
+                auto_memory_cues,
             )
         cls._tasks[task_id] = future
         return {"task_id": task_id, "status": "processing", "pass": "quick" if quick else "full"}
@@ -1913,7 +2044,9 @@ class AnalysisEngine:
             "madmom": _MADMOM_AVAILABLE,
             "essentia": _ESSENTIA_AVAILABLE,
             "beat_method": "madmom RNN" if _MADMOM_AVAILABLE else "librosa + parabolic",
-            "key_method": "essentia KeyExtractor" if _ESSENTIA_AVAILABLE else "K-S + Temperley ensemble",
+            "key_method": "essentia KeyExtractor"
+            if _ESSENTIA_AVAILABLE
+            else "K-S + Temperley ensemble",
         }
 
 
@@ -1950,8 +2083,9 @@ def run_quick_analysis(
         first_signal_t = find_first_signal_onset(y, sr)
 
         emit("beats", 30)
-        beat_result = detect_beats(y, sr, encoder_delay=encoder_delay,
-                                   first_signal_t=first_signal_t)
+        beat_result = detect_beats(
+            y, sr, encoder_delay=encoder_delay, first_signal_t=first_signal_t
+        )
         emit("beats", 70)
 
         emit("key", 75)
@@ -2020,6 +2154,7 @@ def run_full_analysis(
 
     progress_callback(stage_name, percent_int) is invoked at stage boundaries.
     """
+
     def emit(stage: str, pct: int):
         if progress_callback:
             try:
@@ -2031,6 +2166,7 @@ def run_full_analysis(
     if use_cache and duration_cap_arg is None:
         try:
             from .analysis_cache import get_default_cache
+
             cached = get_default_cache().get(file_path)
             if cached is not None:
                 cached["cache_hit"] = True
@@ -2053,9 +2189,7 @@ def run_full_analysis(
         # -- Load Audio at native SR + stereo (preserves Hi-Res detail) ---
         # Native SR keeps high-frequency content for waveform rendering.
         # Down-conversion to 44.1k mono happens below for beat/key analyses.
-        y_native, sr_native = librosa.load(
-            file_path, sr=None, mono=False, duration=duration_cap
-        )
+        y_native, sr_native = librosa.load(file_path, sr=None, mono=False, duration=duration_cap)
 
         # Track stereo info before mono-down-mix
         stereo_features = None
@@ -2102,7 +2236,9 @@ def run_full_analysis(
 
         # -- Run Analysis Components --------------------------------------
         emit("beats", 20)
-        beat_result = detect_beats(y, sr, encoder_delay=encoder_delay, first_signal_t=first_signal_t)
+        beat_result = detect_beats(
+            y, sr, encoder_delay=encoder_delay, first_signal_t=first_signal_t
+        )
         emit("beats", 45)
 
         emit("key", 50)
@@ -2135,14 +2271,18 @@ def run_full_analysis(
 
         emit("mood", 94)
         mood_features = detect_mood(y, sr, beat_result["bpm"], lufs)
-        genre_hint = hint_genre(beat_result["bpm"], mood_features["brightness"], mood_features["texture"])
+        genre_hint = hint_genre(
+            beat_result["bpm"], mood_features["brightness"], mood_features["texture"]
+        )
 
         emit("cues", 95)
         # -- Auto-generate Hot + Memory Cues (respecting toggles) ---------
         s_live = get_settings()
         do_hot = s_live.auto_hot_cues if auto_hot_cues is None else auto_hot_cues
         do_mem = s_live.auto_memory_cues if auto_memory_cues is None else auto_memory_cues
-        hot_cues = generate_hot_cues(phrase_result, beat_result["beats"], duration) if do_hot else []
+        hot_cues = (
+            generate_hot_cues(phrase_result, beat_result["beats"], duration) if do_hot else []
+        )
         memory_cues = generate_memory_cues(phrase_result, beat_result["beats"]) if do_mem else []
 
         # Peak level
@@ -2204,6 +2344,7 @@ def run_full_analysis(
         if use_cache and duration_cap_arg is None:
             try:
                 from .analysis_cache import get_default_cache
+
                 get_default_cache().put(file_path, result)
             except Exception as e:
                 logger.debug(f"Cache put failed: {e}")
@@ -2219,21 +2360,45 @@ def run_full_analysis(
 def _fallback_result(file_path: str, error: str) -> dict[str, Any]:
     """Safe fallback -- never crash the batch pipeline."""
     return {
-        "file": file_path, "duration": 0, "sample_rate": 44100,
-        "sample_rate_native": 44100, "channels": 1,
-        "encoder_delay_ms": 0.0, "first_signal_ms": 0.0,
-        "bpm": 128.0, "bpm_raw": 128.0,
-        "beats": [], "beat_count": 0, "downbeat_index": 0,
-        "beat_method": "fallback", "grid_confidence": 0.0,
-        "key": "Unknown", "camelot": "", "openkey": "",
-        "key_id": 0, "key_confidence": 0.0, "key_method": "none",
+        "file": file_path,
+        "duration": 0,
+        "sample_rate": 44100,
+        "sample_rate_native": 44100,
+        "channels": 1,
+        "encoder_delay_ms": 0.0,
+        "first_signal_ms": 0.0,
+        "bpm": 128.0,
+        "bpm_raw": 128.0,
+        "beats": [],
+        "beat_count": 0,
+        "downbeat_index": 0,
+        "beat_method": "fallback",
+        "grid_confidence": 0.0,
+        "key": "Unknown",
+        "camelot": "",
+        "openkey": "",
+        "key_id": 0,
+        "key_confidence": 0.0,
+        "key_method": "none",
         "waveform": _empty_waveform(),
-        "phrases": [], "hot_cues": [], "memory_cues": [],
+        "phrases": [],
+        "hot_cues": [],
+        "memory_cues": [],
         "tempo_anchors": [],
-        "pvbr": [0] * 400, "lufs": -100.0, "replay_gain": 0.0, "peak": 0.0,
+        "pvbr": [0] * 400,
+        "lufs": -100.0,
+        "replay_gain": 0.0,
+        "peak": 0.0,
         "stereo": None,
-        "mood": {"mood": "Unknown", "brightness": 0.0, "warmth": 0.0,
-                 "texture": 0.0, "spectral_centroid": 0.0, "spectral_rolloff": 0.0},
+        "mood": {
+            "mood": "Unknown",
+            "brightness": 0.0,
+            "warmth": 0.0,
+            "texture": 0.0,
+            "spectral_centroid": 0.0,
+            "spectral_rolloff": 0.0,
+        },
         "genre_hint": "Unknown",
-        "status": "error", "error": error,
+        "status": "error",
+        "error": error,
     }
