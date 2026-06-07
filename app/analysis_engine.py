@@ -508,17 +508,34 @@ def _onset_density_disambiguate(
     typical 4/4 dance music has 2-4 strong onsets per beat (kick + hihat patterns).
     DnB / minimal genres can have 1-2.
 
-    Heuristic ratio = onsets_per_sec / (bpm/60):
+    ``ratio`` = discrete onset EVENTS per detected beat (onsets_per_sec /
+    (bpm/60)). Counting real onset events (peak-picked) instead of frames above
+    a percentile keeps the ratio physically meaningful: a clean four-on-the-floor
+    kick gives ~1.0, a kick+3-hat pattern ~4.0. The old frame-count metric
+    inflated sparse-but-sharp signals to ~6+, which falsely doubled correctly
+    detected slow tracks (e.g. 90 → 180).
+
         ratio > 5.5 → likely half-time misread, double the BPM
         ratio < 0.4 → likely double-time misread, halve the BPM
     """
     if bpm <= 0 or len(onset_strength) == 0:
         return bpm
 
-    threshold = float(np.percentile(onset_strength, 80))
-    n_strong = int(np.sum(onset_strength > threshold))
     duration_s = len(onset_strength) * hop / sr
     if duration_s < 5.0:
+        return bpm
+
+    # Count discrete onset events (peak-picked), not frames above a threshold.
+    try:
+        onset_events = librosa.onset.onset_detect(  # type: ignore[union-attr]
+            onset_envelope=onset_strength, sr=sr, hop_length=hop, backtrack=False
+        )
+        n_strong = len(onset_events)
+    except Exception:
+        # Fallback to the legacy frame-count metric if peak-picking fails.
+        threshold = float(np.percentile(onset_strength, 80))
+        n_strong = int(np.sum(onset_strength > threshold))
+    if n_strong == 0:
         return bpm
 
     onset_rate = n_strong / duration_s
