@@ -50,9 +50,9 @@ def _env_bool(name: str, default: bool) -> bool:
 class AnalysisSettings:
     # -- BPM detection / output range -------------------------------------
     bpm_detect_min: float = 60.0  # what madmom DBN / librosa may find
-    bpm_detect_max: float = 210.0
+    bpm_detect_max: float = 220.0
     bpm_output_min: float = 80.0  # Pioneer-style display sweet spot
-    bpm_output_max: float = 180.0
+    bpm_output_max: float = 215.0  # up to fast DnB / hardcore / footwork
 
     # -- Octave-disambiguation thresholds ---------------------------------
     onset_density_high_ratio: float = 5.5  # > → halve-time misread, double

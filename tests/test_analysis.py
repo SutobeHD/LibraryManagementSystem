@@ -118,7 +118,8 @@ def test_settings_defaults():
 
     s = get_settings()
     assert s.bpm_detect_min == 60.0
-    assert s.bpm_output_max == 180.0
+    assert s.bpm_output_max == 215.0
+    assert s.bpm_detect_max == 220.0
     assert s.color_gamma == 0.65
     assert s.cue_max_hot == 8
 
@@ -169,8 +170,11 @@ def test_encoder_delay_per_format(ext, expected):
         (80.0, 80.0),  # already in range
         (130.0, 130.0),
         (180.0, 180.0),
-        (181.0, 90.5),  # just over output max
-        (220.0, 110.0),  # double-time of 110
+        (200.0, 200.0),  # fast DnB preserved (was folded to 100 @ old max 180)
+        (210.0, 210.0),  # near upper bound preserved
+        (215.0, 215.0),  # exactly output max
+        (216.0, 108.0),  # just over output max → halved
+        (440.0, 110.0),  # 440 → 220 → 110 (two halvings)
     ],
 )
 def test_octave_correct(input_bpm, expected):
