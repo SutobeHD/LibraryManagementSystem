@@ -1528,6 +1528,59 @@ def generate_memory_cues(
     return cues
 
 
+def generate_grid_memory_cues(
+    beats: list[dict[str, Any]],
+    bars: int | None = None,
+    max_cues: int | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Fixed-interval memory cues on a regular N-bar grid (default 16 bars),
+    anchored to the first downbeat.
+
+    Unlike generate_memory_cues -- which only marks significant phrase
+    boundaries -- this emits evenly spaced cues so the DJ has reliable
+    beatmatch / loop reference points across the whole track. Enabled via the
+    memory_cue_grid setting (off by default).
+
+    Args:
+        beats:    PQTZ beat dicts ({beat_number, time_ms, ...}), any order.
+        bars:     Grid interval in 4/4 bars (default: settings.memory_cue_grid_bars).
+        max_cues: Cap (default: settings.cue_max_memory).
+    """
+    if bars is None:
+        bars = _S.memory_cue_grid_bars
+    if max_cues is None:
+        max_cues = _S.cue_max_memory
+    if not beats or bars <= 0 or max_cues <= 0:
+        return []
+
+    sorted_beats = sorted(beats, key=lambda b: b["time_ms"])
+    # Anchor to the first downbeat (beat_number == 1) so the grid lands on
+    # bar starts; fall back to the first beat if no downbeat is tagged.
+    anchor_idx = next((i for i, b in enumerate(sorted_beats) if b.get("beat_number") == 1), 0)
+    step = bars * 4  # beats per grid interval in 4/4
+
+    color = _CUE_COLOR_BY_LABEL.get("Intro", _DEFAULT_CUE_COLOR)
+    cues: list[dict[str, Any]] = []
+    for idx in range(anchor_idx, len(sorted_beats), step):
+        b = sorted_beats[idx]
+        cues.append(
+            {
+                "type": "memory_cue",
+                "number": len(cues),
+                "name": f"P{len(cues) + 1}",
+                "time_ms": int(b["time_ms"]),
+                "color_id": color["id"],
+                "color_rgb": color["rgb"],
+                "loop_len_ms": 0,
+            }
+        )
+        if len(cues) >= max_cues:
+            break
+
+    return cues
+
+
 # =========================================================================== #
 # 5. PVBR -- VBR INDEX GENERATION  [NEW]
 # =========================================================================== #
@@ -1993,12 +2046,14 @@ class AnalysisEngine:
         quick: bool = False,
         auto_hot_cues: bool | None = None,
         auto_memory_cues: bool | None = None,
+        memory_cue_grid: bool | None = None,
     ) -> dict[str, Any]:
         """
         Submit an analysis job to the background worker pool.
 
         quick=True runs only BPM+key (Pass 1) for fast UI response.
-        auto_hot_cues / auto_memory_cues = None → use settings defaults.
+        auto_hot_cues / auto_memory_cues / memory_cue_grid = None → use
+        settings defaults.
         """
         executor = cls.get_executor()
         if quick:
@@ -2012,6 +2067,7 @@ class AnalysisEngine:
                 None,
                 auto_hot_cues,
                 auto_memory_cues,
+                memory_cue_grid,
             )
         cls._tasks[task_id] = future
         return {"task_id": task_id, "status": "processing", "pass": "quick" if quick else "full"}
@@ -2130,6 +2186,7 @@ def run_full_analysis(
     progress_callback: Any | None = None,
     auto_hot_cues: bool | None = None,
     auto_memory_cues: bool | None = None,
+    memory_cue_grid: bool | None = None,
 ) -> dict[str, Any]:
     """
     Full analysis pipeline. Runs in a worker process.
@@ -2151,6 +2208,13 @@ def run_full_analysis(
         False → leave empty (PCOB tag still written, but with 0 entries —
                 Rekordbox will display no auto-cues; user-edited cues in
                 an existing ANLZ are overwritten — backups are kept)
+
+    memory_cue_grid:
+        None  → use settings (default False)
+        True  → memory cues on a regular N-bar grid (settings.memory_cue_grid_bars,
+                default 16) anchored to the first downbeat, for beatmatching —
+                instead of significant phrase boundaries
+        False → significant phrase-boundary memory cues (the default behaviour)
 
     progress_callback(stage_name, percent_int) is invoked at stage boundaries.
     """
@@ -2280,10 +2344,16 @@ def run_full_analysis(
         s_live = get_settings()
         do_hot = s_live.auto_hot_cues if auto_hot_cues is None else auto_hot_cues
         do_mem = s_live.auto_memory_cues if auto_memory_cues is None else auto_memory_cues
+        use_grid = s_live.memory_cue_grid if memory_cue_grid is None else memory_cue_grid
         hot_cues = (
             generate_hot_cues(phrase_result, beat_result["beats"], duration) if do_hot else []
         )
-        memory_cues = generate_memory_cues(phrase_result, beat_result["beats"]) if do_mem else []
+        if not do_mem:
+            memory_cues = []
+        elif use_grid:
+            memory_cues = generate_grid_memory_cues(beat_result["beats"])
+        else:
+            memory_cues = generate_memory_cues(phrase_result, beat_result["beats"])
 
         # Peak level
         peak = round(float(np.max(np.abs(y))), 4)

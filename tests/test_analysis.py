@@ -286,6 +286,109 @@ def test_hot_cues_color_assignment():
 
 
 # ---------------------------------------------------------------------------
+# Fixed-interval beatmatch grid (memory_cue_grid)
+# ---------------------------------------------------------------------------
+
+
+def _grid_beats(n: int = 256, beat_ms: int = 500, downbeat: int = 0):
+    """n beats at constant spacing; beat_number cycles 1..4 from `downbeat`."""
+    return [
+        {"beat_number": ((j - downbeat) % 4) + 1, "tempo": 12000, "time_ms": j * beat_ms}
+        for j in range(n)
+    ]
+
+
+def test_grid_cues_spacing_16_bars():
+    from app.analysis_engine import generate_grid_memory_cues
+
+    beats = _grid_beats(n=260, beat_ms=500)  # 64 beats = 16 bars = 32000 ms
+    cues = generate_grid_memory_cues(beats, bars=16, max_cues=99)
+    assert [c["time_ms"] for c in cues] == [0, 32000, 64000, 96000, 128000]
+    assert all(c["type"] == "memory_cue" for c in cues)
+    assert [c["name"] for c in cues] == ["P1", "P2", "P3", "P4", "P5"]
+
+
+def test_grid_cues_custom_bars():
+    from app.analysis_engine import generate_grid_memory_cues
+
+    beats = _grid_beats(n=128, beat_ms=500)
+    cues = generate_grid_memory_cues(beats, bars=8, max_cues=99)  # 8 bars = 16000 ms
+    assert [c["time_ms"] for c in cues] == [0, 16000, 32000, 48000]
+
+
+def test_grid_cues_anchors_to_downbeat():
+    from app.analysis_engine import generate_grid_memory_cues
+
+    # First downbeat (beat_number == 1) is at index 3 → 1500 ms
+    beats = _grid_beats(n=200, beat_ms=500, downbeat=3)
+    cues = generate_grid_memory_cues(beats, bars=16, max_cues=99)
+    assert cues[0]["time_ms"] == 1500
+    assert cues[1]["time_ms"] == 1500 + 32000
+
+
+def test_grid_cues_respects_max_cap():
+    from app.analysis_engine import generate_grid_memory_cues
+
+    beats = _grid_beats(n=2000, beat_ms=500)
+    cues = generate_grid_memory_cues(beats, bars=16, max_cues=4)
+    assert len(cues) == 4
+
+
+def test_grid_cues_empty_beats():
+    from app.analysis_engine import generate_grid_memory_cues
+
+    assert generate_grid_memory_cues([], bars=16) == []
+
+
+def test_grid_cues_invalid_bars():
+    from app.analysis_engine import generate_grid_memory_cues
+
+    beats = _grid_beats(n=64)
+    assert generate_grid_memory_cues(beats, bars=0) == []
+
+
+def test_grid_setting_default_off():
+    from app.analysis_settings import get_settings
+
+    s = get_settings()
+    assert s.memory_cue_grid is False
+    assert s.memory_cue_grid_bars == 16
+
+
+def test_grid_setting_env_override(monkeypatch):
+    monkeypatch.setenv("RB_ANALYSIS_MEMORY_CUE_GRID", "1")
+    monkeypatch.setenv("RB_ANALYSIS_MEMORY_CUE_GRID_BARS", "8")
+    from app.analysis_settings import reload_settings
+
+    s = reload_settings()
+    assert s.memory_cue_grid is True
+    assert s.memory_cue_grid_bars == 8
+
+
+@_requires_librosa
+def test_e2e_memory_cue_grid_kwarg():
+    """memory_cue_grid=True yields an evenly spaced grid in run_full_analysis."""
+    from app.analysis_engine import run_full_analysis
+
+    # 90 s @ 128 BPM → 16-bar grid (~30 s) yields >= 2 evenly spaced cues.
+    y, sr = _synth_track(bpm=128.0, duration_s=90.0)
+    path = _write_wav(y, sr)
+    try:
+        grid = run_full_analysis(path, use_cache=False, memory_cue_grid=True)
+        phrase = run_full_analysis(path, use_cache=False, memory_cue_grid=False)
+        assert grid["status"] == "ok"
+        gms = [c["time_ms"] for c in grid["memory_cues"]]
+        assert len(gms) >= 2
+        # Even spacing: gaps within 1 bar (~1875 ms @128bpm) of each other
+        gaps = [gms[i + 1] - gms[i] for i in range(len(gms) - 1)]
+        assert max(gaps) - min(gaps) < 2000
+        # Distinct from the phrase-boundary mode
+        assert gms != [c["time_ms"] for c in phrase["memory_cues"]]
+    finally:
+        os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
 # ANLZ binary structure
 # ---------------------------------------------------------------------------
 

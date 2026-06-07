@@ -77,6 +77,13 @@ class AnalysisSettings:
     cue_max_memory: int = 16
     memory_min_bar_spacing: int = 16
 
+    # -- Fixed-interval beatmatch grid -----------------------------------
+    # When True, memory cues are placed on a regular N-bar grid (anchored to
+    # the first downbeat) instead of at significant phrase boundaries. Gives
+    # the DJ evenly spaced reference points for beatmatching / loop building.
+    memory_cue_grid: bool = False
+    memory_cue_grid_bars: int = 16  # grid interval in 4/4 bars
+
     # -- Phrase detection -------------------------------------------------
     phrase_bars: int = 8  # window length for energy/MFCC analysis
     phrase_merge_max_bars: int = 16  # don't merge once phrase already large
