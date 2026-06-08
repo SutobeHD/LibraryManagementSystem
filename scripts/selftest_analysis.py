@@ -111,6 +111,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--bpm-min", type=float, default=75.0)
     ap.add_argument("--bpm-max", type=float, default=210.0)
     ap.add_argument(
+        "--tol", type=float, default=4.0, help="BPM tolerance %% (MIREX standard = 4.0)"
+    )
+    ap.add_argument(
         "--full", action="store_true", help="use full pipeline (slow); else detect_* direct"
     )
     ap.add_argument("--verbose", action="store_true", help="print every track row")
@@ -168,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         gt_cam = _camelot(root, mode)
-        rel, err = bpm_relation(bpm, our_bpm)
+        rel, err = bpm_relation(bpm, our_bpm, tol_pct=args.tol)
         krel = key_relation(gt_cam, our_cam)
         bpm_ok += rel == "match"
         key_exact += krel == "exact"
@@ -197,8 +200,15 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join(fails) if fails else "  (none)")
 
     n = len(cases)
+    # Octave-tolerant accuracy (MIREX "Accuracy 2"): half/double/third/triple
+    # count as correct — the beat grid is identical, only the displayed octave
+    # differs. This is the musically meaningful tempo-agreement measure.
+    octave_ok = sum(v for k, v in bpm_rel_tally.items() if k != "other")
     print("\n=== Summary ===")
-    print(f"  BPM exact (<=1%, same octave): {bpm_ok}/{n}  ({100 * bpm_ok // n}%)")
+    print(f"  BPM Acc-1 (<={args.tol:g}%, exact octave): {bpm_ok}/{n}  ({100 * bpm_ok // n}%)")
+    print(
+        f"  BPM Acc-2 (<={args.tol:g}%, octave-tolerant): {octave_ok}/{n}  ({100 * octave_ok // n}%)"
+    )
     print(f"  BPM relation tally           : {dict(sorted(bpm_rel_tally.items()))}")
     print(
         "  BPM exact by tempo band      : "
