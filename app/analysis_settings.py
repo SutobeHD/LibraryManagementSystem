@@ -59,7 +59,10 @@ class AnalysisSettings:
     onset_density_low_ratio: float = 0.4  # < → double-time misread, halve
 
     # -- Key detection ----------------------------------------------------
-    minor_bias: float = 1.10  # K-S fallback (1.0 = neutral)
+    # K-S fallback minor/major weighting. 1.0 = neutral. A >1 thumb on minor
+    # made major triads flip to their mediant minor (D major -> F# minor), a
+    # known chroma-correlation confusion; neutral avoids it. Override per-genre.
+    minor_bias: float = 1.0
 
     # -- Waveform colors --------------------------------------------------
     color_gamma: float = 0.65  # < 1 brightens mids in PWV4/5/6/7
