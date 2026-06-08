@@ -495,41 +495,6 @@ def _octave_correct(bpm: float) -> float:
     return bpm
 
 
-_SNAP_GUARD_PCT = 0.12  # snap only when the candidate lands within 12% of reference
-
-
-def _snap_to_octave(bpm: float, reference: float) -> float:
-    """Rescale bpm to the octave/metrical multiple nearest a robust reference.
-
-    The autocorrelation argmax can lock onto a sub-/super-harmonic of the true
-    tempo (e.g. a clean 174 BPM pulse read as 87, 200 as 66.7). librosa's
-    log-normal tempo prior (librosa.feature.tempo) tracks the octave robustly,
-    so we keep the precise sub-bin bpm but move it to the metrical multiple
-    nearest that reference.
-
-    Only octave (2x / half) and triple-metre (3x / third) factors are considered
-    -- the families the downstream octave correction also reasons in. Non-octave
-    (3:2) snaps are deliberately excluded: a wrong one is unrecoverable later.
-
-    The snap is applied ONLY when the chosen multiple lands within
-    _SNAP_GUARD_PCT of the reference; otherwise the reference is too noisy to
-    trust and the precise raw bpm is kept unchanged.
-    """
-    if bpm <= 0 or reference <= 0:
-        return bpm
-    best, best_err = bpm, abs(bpm - reference)
-    for f in (2.0, 0.5, 3.0, 1.0 / 3.0):
-        cand = bpm * f
-        err = abs(cand - reference)
-        if err < best_err:
-            best, best_err = cand, err
-    if best == bpm:
-        return bpm  # raw value already closest to the reference
-    if best_err > _SNAP_GUARD_PCT * reference:
-        return bpm  # reference disagrees with every multiple → don't trust it
-    return best
-
-
 def _onset_density_disambiguate(
     bpm: float,
     onset_strength: np.ndarray,
@@ -830,11 +795,6 @@ def detect_beats(
             refined_peak_idx = float(raw_peak_idx)
 
         bpm_refined = (60.0 * sr) / (refined_peak_idx * HOP)
-
-        # 4b. Octave-snap: the argmax can lock onto a sub-/super-harmonic
-        # (174→87, 200→66.7). Rescale the precise value to the octave of the
-        # robust coarse estimate (librosa's tempo prior), which tracks within ~1%.
-        bpm_refined = _snap_to_octave(bpm_refined, coarse_bpm)
     else:
         bpm_refined = coarse_bpm
 
