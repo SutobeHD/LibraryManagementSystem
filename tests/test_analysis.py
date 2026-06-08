@@ -183,6 +183,25 @@ def test_octave_correct(input_bpm, expected):
     assert _octave_correct(input_bpm) == expected
 
 
+@pytest.mark.parametrize(
+    "bpm,reference,expected",
+    [
+        (87.0, 175.2, 174.0),  # subharmonic ×2 → near coarse 175
+        (66.7, 198.8, 200.1),  # deep subharmonic ×3 → near coarse 199
+        (128.0, 128.0, 128.0),  # already matching → unchanged (factor 1.0)
+        (90.0, 89.9, 90.0),  # tiny diff → factor 1.0 wins, no change
+        (150.0, 149.8, 150.0),  # correct tempo preserved
+        (120.0, 300.0, 120.0),  # reference too far from any multiple → keep raw
+        (0.0, 120.0, 0.0),  # guard
+        (120.0, 0.0, 120.0),  # guard
+    ],
+)
+def test_snap_to_octave(bpm, reference, expected):
+    from app.analysis_engine import _snap_to_octave
+
+    assert _snap_to_octave(bpm, reference) == pytest.approx(expected, abs=0.05)
+
+
 # ---------------------------------------------------------------------------
 # Stereo features
 # ---------------------------------------------------------------------------
