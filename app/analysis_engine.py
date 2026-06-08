@@ -56,6 +56,50 @@ pyloudnorm = None
 mutagen = None
 
 
+def _apply_madmom_compat_shims() -> None:
+    """Restore symbols madmom 0.16.1 expects but newer runtimes removed.
+
+    madmom 0.16.1 (the pinned version) imports ``MutableSequence`` etc. directly
+    from ``collections`` (moved to ``collections.abc`` in Python 3.10) and uses
+    ``np.float`` / ``np.int`` aliases (removed in NumPy 1.24). Without this the
+    import raises and the engine silently falls back to librosa on its own
+    target Python (>=3.10) -- i.e. the RNN path was effectively dead code.
+
+    Each shim is additive and guarded: it only sets an attribute that is
+    missing, so it is a no-op on the runtimes where madmom was already importable.
+    """
+    import collections
+    import collections.abc
+
+    for _name in (
+        "MutableSequence",
+        "Iterable",
+        "MutableMapping",
+        "Mapping",
+        "Sequence",
+        "Callable",
+        "Hashable",
+        "MutableSet",
+    ):
+        if not hasattr(collections, _name):
+            setattr(collections, _name, getattr(collections.abc, _name))
+
+    try:
+        import numpy as _np
+
+        for _name, _builtin in (
+            ("float", float),
+            ("int", int),
+            ("bool", bool),
+            ("object", object),
+            ("complex", complex),
+        ):
+            if not hasattr(_np, _name):
+                setattr(_np, _name, _builtin)
+    except ImportError:
+        pass
+
+
 def _ensure_libs():
     """Lazy-load heavy libraries only when analysis is actually requested."""
     global _LIBS_LOADED, librosa, signal
@@ -76,6 +120,7 @@ def _ensure_libs():
 
     # Optional: madmom (RNN beat tracking -- significantly better than librosa)
     try:
+        _apply_madmom_compat_shims()
         import madmom as _mm
 
         madmom = _mm

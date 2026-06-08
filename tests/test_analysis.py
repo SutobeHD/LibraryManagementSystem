@@ -183,6 +183,18 @@ def test_octave_correct(input_bpm, expected):
     assert _octave_correct(input_bpm) == expected
 
 
+def test_madmom_compat_shims_idempotent():
+    """Shim restores pre-3.10 collections ABCs + NumPy aliases madmom needs."""
+    import collections
+
+    from app.analysis_engine import _apply_madmom_compat_shims
+
+    _apply_madmom_compat_shims()
+    _apply_madmom_compat_shims()  # idempotent — second call must not raise
+    assert hasattr(collections, "MutableSequence")
+    assert collections.MutableSequence is collections.abc.MutableSequence
+
+
 # ---------------------------------------------------------------------------
 # Stereo features
 # ---------------------------------------------------------------------------
