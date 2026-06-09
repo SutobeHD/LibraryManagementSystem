@@ -50,6 +50,7 @@ LibraryManagementSystem -- High-Accuracy Analysis Engine (v2.0)
 - `detect_phrases()` — Adaptive song-structure detection (Energy + MFCC timbre changes).
 - `generate_hot_cues()`
 - `generate_memory_cues()`
+- `generate_grid_memory_cues()` — Fixed-interval memory cues on a regular N-bar grid (default 16 bars),
 - `generate_pvbr()` — Generate PVBR (VBR Index) -- 400 ms-positions for accurate seek in MP3.
 - `compute_stereo_features()` — Stereo-image metrics.
 - `calculate_lufs()` — Integrated Loudness following ITU-R BS.1770-4 / EBU R128.
@@ -989,6 +990,52 @@ DawEngine — Web Audio API Playback Engine Manages AudioContext lifecycle, audi
 - `renderTimeline()` — ─── OFFLINE RENDERING (EXPORT) ──────────────────────────────────────────────── Render the timeline…
 - `audioBufferToWav()` — Convert an AudioBuffer to a 16-bit PCM WAV ArrayBuffer.
 
+### `frontend/src/audio/DawState.js`
+
+DawState — Central state management for the DJ Edit DAW.
+
+- `dawReducer()` — DAW state reducer.
+
+### `frontend/src/audio/RbepSerializer.js`
+
+RbepSerializer — .rbep XML Parser/Serializer Handles the critical Beat ↔ Seconds conversion for Rekordbox Edit Project files.
+
+- `buildTempoMap()` — RbepSerializer — .rbep XML Parser/Serializer Handles the critical Beat ↔ Seconds conversion for Rek…
+- `beatsToSeconds()` — Convert a beat index to seconds using a tempo map.
+- `secondsToBeats()` — Convert seconds to a beat index using a tempo map.
+- `parseRbep()` — ─── .rbep XML PARSER ────────────────────────────────────────────────────────── Parse a .rbep XML s…
+- `serializeRbep()` — ─── .rbep XML SERIALIZER ────────────────────────────────────────────────────── Serialize a runtime…
+- `loadRbepFile()` — ─── PROJECT FILE I/O ────────────────────────────────────────────────────────── Load a .rbep file f…
+- `saveRbepFile()` — Save a project to a .rbep file.
+
+### `frontend/src/audio/TimelineState.js`
+
+TimelineState - State management for the non-destructive audio editor Manages all timeline state including regions, playback, selection, pa…
+
+- `createTimelineState()` — Create initial timeline state @param {Object} options - Initial configuration @returns {TimelineSta…
+- `getSnapUnit()` — Calculate the beat duration based on BPM and division @param {number} bpm - Beats per minute @param…
+- `snapToGrid()` — Snap a time value to the nearest grid position @param {TimelineState} state - Current timeline stat…
+- `loadAudioSource()` — Load audio source into timeline and create initial region @param {TimelineState} state - Current st…
+- `addRegion()` — Add a region to the timeline @param {TimelineState} state @param {AudioRegion} region @returns {Tim…
+- `removeRegion()` — Remove a region from the timeline @param {TimelineState} state @param {string} regionId @returns {T…
+- `updateRegion()` — Update a region in the timeline @param {TimelineState} state @param {string} regionId @param {Parti…
+- `setSelection()` — Set selection range @param {TimelineState} state @param {number|null} start @param {number|null} en…
+- `selectRegions()` — Select regions by ID @param {TimelineState} state @param {string[]} regionIds @param {boolean} [add…
+- `clearSelection()` — Clear all selections @param {TimelineState} state @returns {TimelineState}
+- `setPaletteSlot()` — Add region to palette slot @param {TimelineState} state @param {number} slotIndex @param {AudioRegi…
+- `findEmptyPaletteSlot()` — Find first empty palette slot @param {TimelineState} state @returns {number} - Slot index or -1 if …
+- `setPlayhead()` — Set playhead position @param {TimelineState} state @param {number} position @returns {TimelineState}
+- `toggleSnap()` — Toggle snap to grid @param {TimelineState} state @returns {TimelineState}
+- `setSnapDivision()` — Set snap division @param {TimelineState} state @param {string} division @returns {TimelineState}
+- `setZoom()` — Set zoom level @param {TimelineState} state @param {number} zoom - Pixels per second @returns {Time…
+- `shiftGrid()` — Shift the entire beat grid by an offset @param {TimelineState} state @param {number} offsetSeconds …
+- `adjustBPM()` — Adjust BPM (stretch/contract grid) @param {TimelineState} state @param {number} newBpm @returns {Ti…
+- `pushHistory()` — Push to history for undo @param {TimelineState} state @param {Object} action @returns {TimelineStat…
+- `undo()` — Undo last action @param {TimelineState} state @returns {TimelineState}
+- `redo()` — Redo undone action @param {TimelineState} state @returns {TimelineState}
+- `getTimelineDuration()` — Get timeline duration (end of last region) @param {TimelineState} state @returns {number}
+- `getSortedRegions()` — Get sorted regions @param {TimelineState} state @returns {AudioRegion[]}
+
 ### `frontend/src/audio/dawState/cues.js`
 
 cuesReducer — hot cues, memory cues, and loops.
@@ -1036,52 +1083,6 @@ selectionReducer — region selection set and time-range selection.
 transportReducer — playhead, BPM, zoom/scroll, snap-grid, edit-mode, project metadata, and audio-source actions.
 
 - `transportReducer()` — transportReducer — playhead, BPM, zoom/scroll, snap-grid, edit-mode, project metadata, and audio-so…
-
-### `frontend/src/audio/DawState.js`
-
-DawState — Central state management for the DJ Edit DAW.
-
-- `dawReducer()` — DAW state reducer.
-
-### `frontend/src/audio/RbepSerializer.js`
-
-RbepSerializer — .rbep XML Parser/Serializer Handles the critical Beat ↔ Seconds conversion for Rekordbox Edit Project files.
-
-- `buildTempoMap()` — RbepSerializer — .rbep XML Parser/Serializer Handles the critical Beat ↔ Seconds conversion for Rek…
-- `beatsToSeconds()` — Convert a beat index to seconds using a tempo map.
-- `secondsToBeats()` — Convert seconds to a beat index using a tempo map.
-- `parseRbep()` — ─── .rbep XML PARSER ────────────────────────────────────────────────────────── Parse a .rbep XML s…
-- `serializeRbep()` — ─── .rbep XML SERIALIZER ────────────────────────────────────────────────────── Serialize a runtime…
-- `loadRbepFile()` — ─── PROJECT FILE I/O ────────────────────────────────────────────────────────── Load a .rbep file f…
-- `saveRbepFile()` — Save a project to a .rbep file.
-
-### `frontend/src/audio/TimelineState.js`
-
-TimelineState - State management for the non-destructive audio editor Manages all timeline state including regions, playback, selection, pa…
-
-- `createTimelineState()` — Create initial timeline state @param {Object} options - Initial configuration @returns {TimelineSta…
-- `getSnapUnit()` — Calculate the beat duration based on BPM and division @param {number} bpm - Beats per minute @param…
-- `snapToGrid()` — Snap a time value to the nearest grid position @param {TimelineState} state - Current timeline stat…
-- `loadAudioSource()` — Load audio source into timeline and create initial region @param {TimelineState} state - Current st…
-- `addRegion()` — Add a region to the timeline @param {TimelineState} state @param {AudioRegion} region @returns {Tim…
-- `removeRegion()` — Remove a region from the timeline @param {TimelineState} state @param {string} regionId @returns {T…
-- `updateRegion()` — Update a region in the timeline @param {TimelineState} state @param {string} regionId @param {Parti…
-- `setSelection()` — Set selection range @param {TimelineState} state @param {number|null} start @param {number|null} en…
-- `selectRegions()` — Select regions by ID @param {TimelineState} state @param {string[]} regionIds @param {boolean} [add…
-- `clearSelection()` — Clear all selections @param {TimelineState} state @returns {TimelineState}
-- `setPaletteSlot()` — Add region to palette slot @param {TimelineState} state @param {number} slotIndex @param {AudioRegi…
-- `findEmptyPaletteSlot()` — Find first empty palette slot @param {TimelineState} state @returns {number} - Slot index or -1 if …
-- `setPlayhead()` — Set playhead position @param {TimelineState} state @param {number} position @returns {TimelineState}
-- `toggleSnap()` — Toggle snap to grid @param {TimelineState} state @returns {TimelineState}
-- `setSnapDivision()` — Set snap division @param {TimelineState} state @param {string} division @returns {TimelineState}
-- `setZoom()` — Set zoom level @param {TimelineState} state @param {number} zoom - Pixels per second @returns {Time…
-- `shiftGrid()` — Shift the entire beat grid by an offset @param {TimelineState} state @param {number} offsetSeconds …
-- `adjustBPM()` — Adjust BPM (stretch/contract grid) @param {TimelineState} state @param {number} newBpm @returns {Ti…
-- `pushHistory()` — Push to history for undo @param {TimelineState} state @param {Object} action @returns {TimelineStat…
-- `undo()` — Undo last action @param {TimelineState} state @returns {TimelineState}
-- `redo()` — Redo undone action @param {TimelineState} state @returns {TimelineState}
-- `getTimelineDuration()` — Get timeline duration (end of last region) @param {TimelineState} state @returns {number}
-- `getSortedRegions()` — Get sorted regions @param {TimelineState} state @returns {AudioRegion[]}
 
 ### `frontend/src/components/daw/timeline/useTimelineEvents.js`
 
@@ -1208,17 +1209,17 @@ Debounced non-destructive preview rebuild — whenever cuts change, splice the A
 
 - `useVisualPreview()` — Debounced non-destructive preview rebuild — whenever cuts change, splice the AudioBuffer and reload…
 
-### `frontend/src/components/waveform/useWaveformInteractions.js`
-
-Imperative editing + hotkey wiring extracted from WaveformEditor.
-
-- `useWaveformInteractions()` — Imperative editing + hotkey wiring extracted from WaveformEditor.
-
 ### `frontend/src/components/waveform/useWaveSurfer.js`
 
 Owns the master WaveSurfer + Overview lifecycle:
 
 - `useWaveSurfer()` — Owns the master WaveSurfer + Overview lifecycle: - mount-once init (registers regions/timeline plug…
+
+### `frontend/src/components/waveform/useWaveformInteractions.js`
+
+Imperative editing + hotkey wiring extracted from WaveformEditor.
+
+- `useWaveformInteractions()` — Imperative editing + hotkey wiring extracted from WaveformEditor.
 
 ### `frontend/src/config/constants.js`
 
@@ -1264,44 +1265,6 @@ Module-level subscriber registry so a single mounted <ConfirmModalRoot />
 - `confirmModal()` — Promise-based replacement for window.confirm().
 - `ConfirmModalRoot()` — Singleton portal host.
 
-### `frontend/src/components/daw/DawBrowser.jsx`
-
-DawBrowser — Left panel file/library browser for the DJ Edit DAW Lists tracks from the library and recent .rbep projects.
-
-### `frontend/src/components/daw/DawControlStrip.jsx`
-
-DawControlStrip — Unified control bar below the timeline Layout: [Transport] | [Edit Tools] | [Hot Cues + Loop Controls] Merges functionali…
-
-### `frontend/src/components/daw/DawLayout.jsx`
-
-DawLayout — Slot-style layout shell for the DJ Edit DAW.
-
-- `DawLayout()`
-
-### `frontend/src/components/daw/DawScrollbar.jsx`
-
-DawScrollbar — Horizontal scrollbar synchronized with the timeline Critical: avoids the feedback loop where programmatically setting `scrol…
-
-### `frontend/src/components/daw/DawTimeline.jsx`
-
-DawTimeline — Layered Canvas Timeline with Path2D Smooth Waveform Architecture: 3 conceptual layers rendered to one canvas via OffscreenCan…
-
-### `frontend/src/components/daw/DawToolbar.jsx`
-
-DawToolbar — Top toolbar for the DJ Edit DAW Displays: Project name, save/open/export buttons, editing tools, undo/redo.
-
-### `frontend/src/components/daw/DjEditDaw.jsx`
-
-DjEditDaw — Root container for the DJ Edit DAW.
-
-### `frontend/src/components/daw/ExportModal.jsx`
-
-ExportModal — Project Export UI Features: - Reads the user's default export folder from /api/settings (Settings → Export tab) - Output fold…
-
-### `frontend/src/components/daw/WaveformOverview.jsx`
-
-WaveformOverview — Full-track mini-map with draggable viewport window Renders a downsampled mono/3-band waveform of the entire track via Wa…
-
 ### `frontend/src/components/DownloadManagerView.jsx`
 
 Stage pipeline (in execution order) — covers BOTH SC-DL and local-import
@@ -1309,34 +1272,6 @@ Stage pipeline (in execution order) — covers BOTH SC-DL and local-import
 ### `frontend/src/components/DuplicateView.jsx`
 
 DuplicateView — Acoustic Duplicate Finder & Merge UI Left panel: list of duplicate groups with similarity badge.
-
-### `frontend/src/components/editor/EditorBrowser.jsx`
-
-Ensure we have an array
-
-### `frontend/src/components/editor/EditorToolbar.jsx`
-
-EditorToolbar - Top toolbar + edit toolbar for NonDestructiveEditor.
-
-### `frontend/src/components/editor/EnvelopeOverlay.jsx`
-
-EnvelopeOverlay - Interactive envelope editor for audio regions Provides draggable nodes for: - Fade-in duration (left edge) - Fade-out dur…
-
-### `frontend/src/components/editor/NonDestructiveEditor.jsx`
-
-NonDestructiveEditor - Main component for the non-destructive audio editor Slim container: owns TimelineState + composes child components a…
-
-### `frontend/src/components/editor/Palette.jsx`
-
-Palette - Drag & Drop clipboard for audio regions A side panel with slots for storing region copies.
-
-### `frontend/src/components/editor/RegionBlock.jsx`
-
-RegionBlock - Visual representation of an audio region on the timeline Displays the waveform, envelope overlay, and handles for resize/move
-
-### `frontend/src/components/editor/TimelineCanvas.jsx`
-
-TimelineCanvas - Main editing canvas for the non-destructive audio editor Features: - Zoomable timeline with beat grid overlay - Region blo…
 
 ### `frontend/src/components/ImportProgressBanner.jsx`
 
@@ -1401,6 +1336,131 @@ Backend returns 'Children' (uppercase)
 
 *(no module docstring)*
 
+### `frontend/src/components/SettingsView.jsx`
+
+SettingsView — Tabbed preferences panel (container).
+
+### `frontend/src/components/SmartPlaylistEditor.jsx`
+
+*(no module docstring)*
+
+### `frontend/src/components/SoundCloudProgressModal.jsx`
+
+Listen to progress events from Rust
+
+- `SoundCloudProgressModal()`
+
+### `frontend/src/components/SoundCloudSyncView.jsx`
+
+*(no module docstring)*
+
+### `frontend/src/components/SoundCloudView.jsx`
+
+PRIVACY: do not hold the actual OAuth token in React state — the real
+
+### `frontend/src/components/ToastContext.jsx`
+
+*(no module docstring)*
+
+- `useToast()`
+- `ToastProvider()`
+
+### `frontend/src/components/ToolsView.jsx`
+
+Mirror of LibraryTools.smart_rename's token substitution + sanitisation,
+
+### `frontend/src/components/TrackTable.jsx`
+
+Camelot
+
+### `frontend/src/components/UsbSettingsView.jsx`
+
+UsbSettingsView — edit MYSETTING.DAT / MYSETTING2.DAT / DJMMYSETTING.DAT Per-stick CDJ + DJM hardware settings (auto-cue level, jog mode, f…
+
+- `UsbSettingsView()`
+
+### `frontend/src/components/UsbView.jsx`
+
+UsbView — Melodex-styled USB device manager (container).
+
+### `frontend/src/components/UtilitiesView.jsx`
+
+UtilitiesView — router for the Utilities workspace.
+
+### `frontend/src/components/WaveformEditor.jsx`
+
+*(no module docstring)*
+
+### `frontend/src/components/XmlCleanView.jsx`
+
+Using existing endpoint but improved backend logic
+
+### `frontend/src/components/daw/DawBrowser.jsx`
+
+DawBrowser — Left panel file/library browser for the DJ Edit DAW Lists tracks from the library and recent .rbep projects.
+
+### `frontend/src/components/daw/DawControlStrip.jsx`
+
+DawControlStrip — Unified control bar below the timeline Layout: [Transport] | [Edit Tools] | [Hot Cues + Loop Controls] Merges functionali…
+
+### `frontend/src/components/daw/DawLayout.jsx`
+
+DawLayout — Slot-style layout shell for the DJ Edit DAW.
+
+- `DawLayout()`
+
+### `frontend/src/components/daw/DawScrollbar.jsx`
+
+DawScrollbar — Horizontal scrollbar synchronized with the timeline Critical: avoids the feedback loop where programmatically setting `scrol…
+
+### `frontend/src/components/daw/DawTimeline.jsx`
+
+DawTimeline — Layered Canvas Timeline with Path2D Smooth Waveform Architecture: 3 conceptual layers rendered to one canvas via OffscreenCan…
+
+### `frontend/src/components/daw/DawToolbar.jsx`
+
+DawToolbar — Top toolbar for the DJ Edit DAW Displays: Project name, save/open/export buttons, editing tools, undo/redo.
+
+### `frontend/src/components/daw/DjEditDaw.jsx`
+
+DjEditDaw — Root container for the DJ Edit DAW.
+
+### `frontend/src/components/daw/ExportModal.jsx`
+
+ExportModal — Project Export UI Features: - Reads the user's default export folder from /api/settings (Settings → Export tab) - Output fold…
+
+### `frontend/src/components/daw/WaveformOverview.jsx`
+
+WaveformOverview — Full-track mini-map with draggable viewport window Renders a downsampled mono/3-band waveform of the entire track via Wa…
+
+### `frontend/src/components/editor/EditorBrowser.jsx`
+
+Ensure we have an array
+
+### `frontend/src/components/editor/EditorToolbar.jsx`
+
+EditorToolbar - Top toolbar + edit toolbar for NonDestructiveEditor.
+
+### `frontend/src/components/editor/EnvelopeOverlay.jsx`
+
+EnvelopeOverlay - Interactive envelope editor for audio regions Provides draggable nodes for: - Fade-in duration (left edge) - Fade-out dur…
+
+### `frontend/src/components/editor/NonDestructiveEditor.jsx`
+
+NonDestructiveEditor - Main component for the non-destructive audio editor Slim container: owns TimelineState + composes child components a…
+
+### `frontend/src/components/editor/Palette.jsx`
+
+Palette - Drag & Drop clipboard for audio regions A side panel with slots for storing region copies.
+
+### `frontend/src/components/editor/RegionBlock.jsx`
+
+RegionBlock - Visual representation of an audio region on the timeline Displays the waveform, envelope overlay, and handles for resize/move
+
+### `frontend/src/components/editor/TimelineCanvas.jsx`
+
+TimelineCanvas - Main editing canvas for the non-destructive audio editor Features: - Zoomable timeline with beat grid overlay - Region blo…
+
 ### `frontend/src/components/settings/SettingsAnalysis.jsx`
 
 SettingsAnalysis — Quality preset, ranking filter, library insight thresholds.
@@ -1440,46 +1500,9 @@ SettingsShortcuts — Configurable DAW keyboard shortcut bindings.
 
 SettingsUsb — Per-stick USB profile CRUD (label, type, audio format).
 
-### `frontend/src/components/SettingsView.jsx`
-
-SettingsView — Tabbed preferences panel (container).
-
 ### `frontend/src/components/shared/WaveformMiniCanvas.jsx`
 
 WaveformMiniCanvas — Reusable lightweight canvas waveform renderer Shared across WaveformOverview (DAW mini-map), track row previews, and a…
-
-### `frontend/src/components/SmartPlaylistEditor.jsx`
-
-*(no module docstring)*
-
-### `frontend/src/components/SoundCloudProgressModal.jsx`
-
-Listen to progress events from Rust
-
-- `SoundCloudProgressModal()`
-
-### `frontend/src/components/SoundCloudSyncView.jsx`
-
-*(no module docstring)*
-
-### `frontend/src/components/SoundCloudView.jsx`
-
-PRIVACY: do not hold the actual OAuth token in React state — the real
-
-### `frontend/src/components/ToastContext.jsx`
-
-*(no module docstring)*
-
-- `useToast()`
-- `ToastProvider()`
-
-### `frontend/src/components/ToolsView.jsx`
-
-Mirror of LibraryTools.smart_rename's token substitution + sanitisation,
-
-### `frontend/src/components/TrackTable.jsx`
-
-Camelot
 
 ### `frontend/src/components/usb/MetadataSyncPanel.jsx`
 
@@ -1515,20 +1538,6 @@ UsbSyncPanel — the right-hand main pane.
 - `UsbSyncControlsTail()` — The "bottom half" of the right pane: sync controls (preview + run), settings + drive actions + dang…
 - `UsbSettingsTail()` — The trailing settings + actions block.
 - `UsbStatsFooter()` — Last line of the right pane: a tiny font-mono diagnostic strip.
-
-### `frontend/src/components/UsbSettingsView.jsx`
-
-UsbSettingsView — edit MYSETTING.DAT / MYSETTING2.DAT / DJMMYSETTING.DAT Per-stick CDJ + DJM hardware settings (auto-cue level, jog mode, f…
-
-- `UsbSettingsView()`
-
-### `frontend/src/components/UsbView.jsx`
-
-UsbView — Melodex-styled USB device manager (container).
-
-### `frontend/src/components/UtilitiesView.jsx`
-
-UtilitiesView — router for the Utilities workspace.
 
 ### `frontend/src/components/waveform/ConfirmModal.jsx`
 
@@ -1572,14 +1581,6 @@ Stripped-down view used by RankingView (simpleMode=true) — only overview + mai
 Floating zoom controls overlay — sits absolutely positioned over the detail container.
 
 - `WaveformZoom()` — Floating zoom controls overlay — sits absolutely positioned over the detail container.
-
-### `frontend/src/components/WaveformEditor.jsx`
-
-*(no module docstring)*
-
-### `frontend/src/components/XmlCleanView.jsx`
-
-Using existing endpoint but improved backend logic
 
 ### `frontend/src/main.jsx`
 
@@ -1695,6 +1696,7 @@ Regression tests for the analysis pipeline.
 - `test_settings_env_override()`
 - `test_encoder_delay_per_format()`
 - `test_octave_correct()`
+- `test_madmom_compat_shims_idempotent()` — Shim restores pre-3.10 collections ABCs + NumPy aliases madmom needs.
 - `test_stereo_features_mono()`
 - `test_stereo_features_identical()`
 - `test_stereo_features_distinct()`
@@ -1703,8 +1705,20 @@ Regression tests for the analysis pipeline.
 - `test_replay_gain_quiet()`
 - `test_hot_cues_max_8()`
 - `test_hot_cues_color_assignment()`
+- `test_grid_cues_spacing_16_bars()`
+- `test_grid_cues_custom_bars()`
+- `test_grid_cues_anchors_to_downbeat()`
+- `test_grid_cues_respects_max_cap()`
+- `test_grid_cues_empty_beats()`
+- `test_grid_cues_invalid_bars()`
+- `test_grid_setting_default_off()`
+- `test_grid_setting_env_override()`
+- `test_e2e_memory_cue_grid_kwarg()` — memory_cue_grid=True yields an evenly spaced grid in run_full_analysis.
 - `test_pcpt_entry_size()`
 - `test_pssi_beat_anchoring()`
+- `test_pssi_phrase_id_high_mood_bank()`
+- `test_pssi_phrase_id_mid_mood_bank()`
+- `test_pssi_phrase_id_helper_defaults_to_intro()`
 - `test_pqt2_compact_format()`
 - `test_e2e_full_analysis_synth()`
 - `test_e2e_quick_analysis_faster()`
@@ -1768,6 +1782,28 @@ Tests for ``app/auth.py`` -- Bearer-token session authentication.
 - `  TestCaseM_OptionsPreflight.test_options_preflight_short_circuits_before_auth()`
 - `TestCaseN_UngatedAcceptsAuthHeader`
 - `  TestCaseN_UngatedAcceptsAuthHeader.test_heartbeat_with_bearer_header_still_2xx()`
+
+### `tests/test_compare_rekordbox.py`
+
+Unit tests for the pure comparison helpers in scripts/compare_rekordbox.py.
+
+- `test_parse_camelot_valid()`
+- `test_parse_camelot_invalid()`
+- `test_key_relation_exact()`
+- `test_key_relation_relative()`
+- `test_key_relation_fifth()`
+- `test_key_relation_clash()`
+- `test_key_relation_unknown()`
+- `test_compatible_relations_set()`
+- `test_bpm_relation_match()`
+- `test_bpm_relation_within_tolerance()`
+- `test_bpm_relation_double()`
+- `test_bpm_relation_half()`
+- `test_bpm_relation_other()`
+- `test_bpm_relation_zero()`
+- `test_beatgrid_metrics_aligned()`
+- `test_beatgrid_metrics_offset()`
+- `test_beatgrid_metrics_empty()`
 
 ### `tests/test_database.py`
 
@@ -2030,6 +2066,13 @@ Phase-2 require_session dual-acceptance tests (T3 — app/auth.py).
 - `test_missing_header_rejected()`
 - `test_child_process_empty_session_token_still_accepts_device()`
 
+### `tests/test_route_uniqueness.py`
+
+Routing-table invariant: no duplicate (method, path) registrations.
+
+- `test_no_duplicate_method_path()`
+- `test_deduplicated_path_has_single_handler()`
+
 ### `tests/test_security_compare.py`
 
 Tests for ``app/security_compare.py::safe_compare``.
@@ -2261,15 +2304,20 @@ variant_schema + variant_detector tests (analysis-remix-detector T-2, T-3).
 
 ## scripts/ — Dev/Build Utilities
 
+### `scripts/compare_rekordbox.py`
+
+compare_rekordbox.py — A/B accuracy harness: our engine vs Rekordbox.
+
+- `parse_camelot()` — Parse a Camelot code like '8A' / '12B' into (number 1..12, letter).
+- `key_relation()` — Classify the harmonic relation between two Camelot codes.
+- `bpm_relation()` — Classify our BPM vs Rekordbox's, accounting for octave (half/double) errors.
+- `beatgrid_metrics()` — Compare two beat-grids (lists of beat times in ms).
+- `compare_track()` — Read RB analysis for one track and re-run ours; return a comparison row.
+- `main()`
+
 ### `scripts/dev/phrase_spike.py`
 
 phrase_spike.py — manual P0 verification for the phrase memory-cue ANLZ write.
-
-- `main()`
-
-### `scripts/dev/rescan_unreadable.py`
-
-Re-scan only the rows marked unreadable in audio_report.json.
 
 - `main()`
 
@@ -2286,14 +2334,6 @@ safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist.
 - `convert_m4a_to_aiff()` — ffmpeg src -> dst.
 - `execute()`
 - `rollback()`
-- `main()`
-
-### `scripts/dev/scan_audio_quality.py`
-
-Scan an audio library with ffprobe, aggregate codec/bitrate/sample-rate.
-
-- `probe()`
-- `classify()` — Bucket per club-readiness tier.
 - `main()`
 
 ### `scripts/pipeline_dashboard.py`
@@ -2344,6 +2384,13 @@ Auto-generate tiered code maps from the actual source tree.
 *(no module docstring)*
 
 - `take_screenshot()`
+
+### `scripts/selftest_analysis.py`
+
+selftest_analysis.py — autonomous accuracy self-test (no Rekordbox needed).
+
+- `synth_track()` — Four-on-the-floor kick + offbeat hat + root bass + sustained triad pad.
+- `main()`
 
 ### `scripts/test_xml_sync.py`
 
