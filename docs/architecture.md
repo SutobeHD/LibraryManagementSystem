@@ -136,7 +136,9 @@ Track loaded
 Track imported
   → Frontend: POST /api/audio/analyze {path}
   → app/audio_analyzer.py: AudioAnalyzer.analyze_async()
-    → ProcessPoolExecutor → librosa.beat.beat_track()
+    → ProcessPoolExecutor → analysis_engine.detect_beats()
+      → madmom RNN beat tracking (primary; needs the py3.10+ compat shim)
+        with librosa.beat.beat_track() octave/onset fallback
   → Frontend polls GET /api/audio/analyze/{task_id}
   → Result stored, displayed in TrackTable
 ```

@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+- Analysis accuracy + engine fixes:
+  - Fixed: `madmom` RNN beat tracking was dead code on Python 3.10+ (the
+    project target) — `import madmom` raised on removed `collections`/`numpy`
+    symbols and was silently swallowed, so the librosa fallback always ran.
+    `_apply_madmom_compat_shims()` restores the symbols; RNN path now active.
+  - Fixed: octave disambiguation counted onset-envelope frames (inflated on
+    sharp signals → falsely doubled slow tracks); now counts discrete onset
+    events (true onsets-per-beat).
+  - Fixed: neutral `minor_bias` (1.10→1.0) — the minor thumb made major triads
+    read as their mediant minor (D major→F# minor).
+  - Fixed: PSSI phrase ids written per the track mood bank (crate-digger enum);
+    previously-invalid ids showed blank/wrong phrase labels on CDJ/Rekordbox.
+  - Added: optional 16-bar memory-cue grid for beatmatching
+    (`memory_cue_grid` setting / `RB_ANALYSIS_MEMORY_CUE_GRID`).
+  - Changed: BPM output range raised to 215 (fast DnB/footwork/hardcore no
+    longer octave-folded to half-time).
+  - Added: `scripts/compare_rekordbox.py` (A/B accuracy vs a real library) +
+    `scripts/selftest_analysis.py` (autonomous synthetic-ground-truth accuracy,
+    MIREX Acc-1/Acc-2). Self-test with RNN: BPM Acc-2 100%, KEY exact 100%.
 - Added: Phase-1 Bearer-token authentication on 84 mutation endpoints.
   New `app/auth.py` self-generates session token at sidecar boot, captured
   by Tauri stdout reader + dev-middleware fallback. Frontend attaches
