@@ -331,6 +331,9 @@ _REKORDBOX_KEY_ID = {
     "B minor": 24,
 }
 
+# essentia spells black keys as flats; our maps use sharps. Normalise on the way in.
+_FLAT_TO_SHARP = {"Db": "C#", "Eb": "D#", "Gb": "F#", "Ab": "G#", "Bb": "A#"}
+
 
 def _correlate_key(chroma_vector: np.ndarray) -> tuple[str, str, float]:
     """
@@ -395,6 +398,11 @@ def detect_key_essentia(y: np.ndarray, sr: int) -> dict[str, str]:
 
         key_extractor = essentia_std.KeyExtractor(profileType="temperley")
         key, scale, strength = key_extractor(audio)
+
+        # essentia spells black keys as flats (Eb, Ab, Bb, Db, Gb); our Camelot
+        # / OpenKey / Rekordbox-key-id maps are keyed on sharps. Normalise so the
+        # lookups don't silently return "" / 0 for ~5 of 12 pitch classes.
+        key = _FLAT_TO_SHARP.get(key, key)
 
         # Map to our standard format
         full_key = f"{key} {scale}"

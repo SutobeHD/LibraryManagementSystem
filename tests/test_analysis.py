@@ -183,6 +183,18 @@ def test_octave_correct(input_bpm, expected):
     assert _octave_correct(input_bpm) == expected
 
 
+def test_essentia_flat_to_sharp_maps_to_valid_keys():
+    """essentia spells black keys as flats; normalised sharps must hit our maps."""
+    from app.analysis_engine import _CAMELOT_MAP, _FLAT_TO_SHARP, _REKORDBOX_KEY_ID
+
+    assert _FLAT_TO_SHARP == {"Db": "C#", "Eb": "D#", "Gb": "F#", "Ab": "G#", "Bb": "A#"}
+    for sharp in _FLAT_TO_SHARP.values():
+        for scale in ("major", "minor"):
+            full = f"{sharp} {scale}"
+            assert _CAMELOT_MAP.get(full), f"no Camelot for {full}"
+            assert _REKORDBOX_KEY_ID.get(full), f"no key_id for {full}"
+
+
 def test_madmom_compat_shims_idempotent():
     """Shim restores pre-3.10 collections ABCs + NumPy aliases madmom needs."""
     import collections
