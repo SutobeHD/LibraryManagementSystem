@@ -1504,6 +1504,189 @@ def clean_titles(r: CleanTitlesReq):
     return LibraryTools.clean_track_titles(r.track_ids)
 
 
+# ── Library Format-Swap (Stage-4 of evaluated_library-format-converter) ────
+
+
+class _FormatSwapScope(BaseModel):
+    """Scope selector for /api/library/format-swap/*. One ``kind`` per request."""
+
+    kind: _Literal["track_ids", "playlist", "all_m4a", "path"]
+    ids: list[str] | None = None
+    playlist_id: int | None = None
+    path: str | None = None
+
+
+class FormatSwapDryRunReq(BaseModel):
+    target: _Literal["aiff", "flac", "wav", "mp3"] = "aiff"
+    scope: _FormatSwapScope
+
+
+class FormatSwapExecuteReq(BaseModel):
+    target: _Literal["aiff", "flac", "wav", "mp3"] = "aiff"
+    scope: _FormatSwapScope
+    trigger: _Literal["user_format_pick", "quality_verdict"] = "user_format_pick"
+
+
+class FormatSwapRollbackReq(BaseModel):
+    manifest_filename: str
+
+
+def _scope_to_dict(s: _FormatSwapScope) -> dict[str, Any]:
+    out: dict[str, Any] = {"kind": s.kind}
+    if s.ids is not None:
+        out["ids"] = s.ids
+    if s.playlist_id is not None:
+        out["playlist_id"] = s.playlist_id
+    if s.path is not None:
+        # Sandbox user-supplied path roots — must resolve to an allowed dir
+        # (or a known track-dir parent in db.tracks). validate_audio_path
+        # requires an existing audio file, which a dir-scope doesn't have, so
+        # we only confirm parent-of-paths lies under ALLOWED_AUDIO_ROOTS.
+        try:
+            requested = Path(s.path).resolve()
+        except (ValueError, OSError):
+            raise HTTPException(status_code=400, detail="Invalid scope.path")
+        if not any(requested.is_relative_to(root) for root in ALLOWED_AUDIO_ROOTS):
+            # Permit if every existing track under that prefix is db-known.
+            known_paths = (
+                {t.get("path", "") for t in db.tracks.values()} if hasattr(db, "tracks") else set()
+            )
+            requested_norm = str(requested).replace("\\", "/").lower()
+            if not any(
+                str(p).replace("\\", "/").lower().startswith(requested_norm) for p in known_paths
+            ):
+                logger.warning(
+                    "SECURITY: format-swap scope.path outside allowed roots: %s",
+                    requested,
+                )
+                raise HTTPException(
+                    status_code=403,
+                    detail="scope.path outside allowed directories",
+                )
+        out["path"] = str(requested)
+    return out
+
+
+@app.post("/api/library/format-swap/dry-run", dependencies=[Depends(require_session)])
+def format_swap_dry_run(r: FormatSwapDryRunReq):
+    """Preview a format swap without touching disk or master.db.
+
+    Returns: enumerated tracks, source/target MB estimate, drive_free check.
+    """
+    from app.library_format_swap import FormatSwapEngine
+
+    live = _require_live_db()
+    engine = FormatSwapEngine(live, r.target)
+    scope_d = _scope_to_dict(r.scope)
+    result = engine.dry_run(scope_d)
+    return {
+        "scope": result.scope,
+        "target": result.target,
+        "tracks": result.tracks,
+        "total_source_mb": result.total_source_mb,
+        "estimated_target_mb": result.estimated_target_mb,
+        "drive_free_mb": result.drive_free_mb,
+        "drive_check_pass": result.drive_check_pass,
+        "target_file_type": result.target_file_type,
+        "warning": result.warning,
+        "error": result.error,
+    }
+
+
+@app.post("/api/library/format-swap/execute", dependencies=[Depends(require_session)])
+def format_swap_execute(r: FormatSwapExecuteReq):
+    """Start the format swap in a background thread; return ``batch_id`` to
+    poll. Frontend polls ``GET /api/library/format-swap/batch/{batch_id}`` for
+    batch-level status and ``GET /api/import/progress`` for per-track progress.
+    """
+    from app.library_format_swap import FormatSwapEngine
+
+    live = _require_live_db()
+    engine = FormatSwapEngine(live, r.target)
+    scope_d = _scope_to_dict(r.scope)
+
+    batch_id = uuid.uuid4().hex[:12]
+
+    def _run() -> None:
+        try:
+            engine.execute(scope_d, batch_id=batch_id)
+        except RuntimeError as exc:
+            logger.error("format-swap batch %s failed: %s", batch_id, exc)
+            # Engine already stored an empty ExecuteResult under batch_id; mark
+            # finished so the frontend stops polling.
+            from app.library_format_swap import _store_batch, get_batch
+
+            existing = get_batch(batch_id)
+            if existing is not None:
+                existing.error = str(exc)
+                existing.finished = True
+                _store_batch(batch_id, existing)
+        except Exception as exc:  # rbox/MasterDbError + anything else
+            logger.exception("format-swap batch %s crashed", batch_id)
+            from app.library_format_swap import _store_batch, get_batch
+
+            existing = get_batch(batch_id)
+            if existing is not None:
+                existing.error = f"{type(exc).__name__}: {exc}"
+                existing.finished = True
+                _store_batch(batch_id, existing)
+
+    threading.Thread(target=_run, daemon=True, name=f"format-swap-{batch_id}").start()
+    return {
+        "batch_id": batch_id,
+        "status": "started",
+        "target": r.target,
+        "trigger": r.trigger,
+    }
+
+
+@app.get("/api/library/format-swap/batch/{batch_id}")
+def format_swap_batch_status(batch_id: str):
+    """Poll a running or finished batch."""
+    from app.library_format_swap import get_batch
+
+    result = get_batch(batch_id)
+    if result is None:
+        raise HTTPException(404, "Unknown batch_id")
+    return {
+        "batch_id": result.batch_id,
+        "manifest_path": result.manifest_path,
+        "tracks_planned": result.tracks_planned,
+        "tracks_converted": result.tracks_converted,
+        "tracks_failed": result.tracks_failed,
+        "failures": result.failures,
+        "aborted": result.aborted,
+        "finished": result.finished,
+        "timestamp": result.timestamp,
+        "task_ids": result.task_ids,
+        "error": result.error,
+    }
+
+
+@app.get("/api/library/format-swap/manifests")
+def format_swap_list_manifests():
+    """List available rollback manifests, newest first."""
+    from app.library_format_swap import FormatSwapEngine
+
+    return {"manifests": FormatSwapEngine.list_manifests()}
+
+
+@app.post("/api/library/format-swap/rollback", dependencies=[Depends(require_session)])
+def format_swap_rollback(r: FormatSwapRollbackReq):
+    """Restore from a manifest. Synchronous (small operation)."""
+    from app.library_format_swap import FormatSwapEngine
+
+    live = _require_live_db()
+    # target is irrelevant for rollback, but engine ctor requires one
+    engine = FormatSwapEngine(live, "aiff")
+    try:
+        return engine.rollback(r.manifest_filename)
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(409, str(e)) from e
+
+
 @app.get("/api/library/status")
 def get_lib_status():
     return {
