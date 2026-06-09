@@ -12,13 +12,41 @@ import sys
 
 block_cipher = None
 
+
+# madmom 0.16.1 imports `collections.MutableSequence` and uses `np.float` —
+# both removed on Python 3.10+/NumPy 1.24+. Without this shim `collect_all`
+# (and the runtime import) raise, so madmom would be silently dropped from the
+# bundle and the engine would fall back to librosa. Mirror of
+# app.analysis_engine._apply_madmom_compat_shims (additive + guarded).
+def _madmom_compat_shims():
+    import collections
+    import collections.abc
+
+    for _n in ('MutableSequence', 'Iterable', 'MutableMapping', 'Mapping',
+               'Sequence', 'Callable', 'Hashable', 'MutableSet'):
+        if not hasattr(collections, _n):
+            setattr(collections, _n, getattr(collections.abc, _n))
+    try:
+        import numpy as _np
+        for _n, _t in (('float', float), ('int', int), ('bool', bool),
+                       ('object', object), ('complex', complex)):
+            if not hasattr(_np, _n):
+                setattr(_np, _n, _t)
+    except ImportError:
+        pass
+
+
+_madmom_compat_shims()
+
 # --- Collect heavy scientific stack (audio analysis) ---
 # These libs use lazy imports + native code — PyInstaller misses parts without collect_all.
+# madmom ships its RNN/CNN model weights as package data — collect_all bundles them.
 hiddenimports = []
 datas = []
 binaries = []
 
-for pkg in ('librosa', 'numba', 'scipy', 'sklearn', 'soundfile', 'audioread', 'lazy_loader'):
+for pkg in ('librosa', 'numba', 'scipy', 'sklearn', 'soundfile', 'audioread',
+            'lazy_loader', 'madmom'):
     try:
         d, b, h = collect_all(pkg)
         datas += d
@@ -26,6 +54,22 @@ for pkg in ('librosa', 'numba', 'scipy', 'sklearn', 'soundfile', 'audioread', 'l
         hiddenimports += h
     except Exception:
         pass  # Package may not be installed on all platforms
+
+# madmom beat tracking is reached via attribute access
+# (madmom.features.beats.RNNBeatProcessor / DBNBeatTrackingProcessor), which
+# PyInstaller's static analysis misses. collect_submodules('madmom') is
+# unreliable for this package, so list the needed submodules explicitly.
+hiddenimports += [
+    'madmom',
+    'madmom.features',
+    'madmom.features.beats',
+    'madmom.audio',
+    'madmom.audio.signal',
+    'madmom.ml',
+    'madmom.ml.nn',
+    'madmom.processors',
+    'madmom.models',
+]
 
 # --- Uvicorn protocol implementations (loaded dynamically) ---
 hiddenimports += [
