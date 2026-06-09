@@ -45,8 +45,11 @@ hiddenimports = []
 datas = []
 binaries = []
 
+# 'essentia' (professional key detection) ships as a native wheel that is not
+# available on every platform (notably Windows) — the try/except skips it there
+# and the engine falls back to the Krumhansl-Schmuckler key detector.
 for pkg in ('librosa', 'numba', 'scipy', 'sklearn', 'soundfile', 'audioread',
-            'lazy_loader', 'madmom'):
+            'lazy_loader', 'madmom', 'essentia'):
     try:
         d, b, h = collect_all(pkg)
         datas += d
