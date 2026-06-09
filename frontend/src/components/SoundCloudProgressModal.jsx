@@ -58,7 +58,7 @@ export default function SoundCloudProgressModal({ isOpen, onClose }) {
                 {/* Header */}
                 <div className="flex items-center justify-between mb-6">
                     <h2 className="text-2xl font-bold text-white flex items-center gap-3">
-                        <div className="w-3 h-3 bg-orange-500 rounded-full animate-pulse"></div>
+                        <div className="w-3 h-3 bg-amber2 rounded-full animate-pulse"></div>
                         Exporting to SoundCloud
                     </h2>
                 </div>
@@ -78,7 +78,7 @@ export default function SoundCloudProgressModal({ isOpen, onClose }) {
                         </div>
                         <div className="h-3 bg-mx-hover rounded-full overflow-hidden">
                             <div
-                                className="h-full bg-gradient-to-r from-orange-600 to-orange-400 transition-all duration-300 ease-out"
+                                className="h-full bg-amber2 transition-all duration-300 ease-out"
                                 style={{ width: `${getProgressPercentage()}%` }}
                             ></div>
                         </div>
@@ -93,7 +93,7 @@ export default function SoundCloudProgressModal({ isOpen, onClose }) {
                 {/* Spinner for non-searching stages */}
                 {progress.stage !== 'searching' && (
                     <div className="flex justify-center py-4">
-                        <div className="w-12 h-12 border-4 border-line-default border-t-orange-500 rounded-full animate-spin"></div>
+                        <div className="w-12 h-12 border-4 border-line-default border-t-amber2 rounded-full animate-spin"></div>
                     </div>
                 )}
 
