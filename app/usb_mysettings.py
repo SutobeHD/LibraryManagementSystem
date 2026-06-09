@@ -1,6 +1,6 @@
 """USB MYSETTING / DJMMYSETTING file read/write + schema for frontend.
 
-These tiny binary files (148–160 bytes) live in `<USB>/PIONEER/` and tell
+These tiny binary files (148-160 bytes) live in `<USB>/PIONEER/` and tell
 CDJs / DJMs how the user wants their hardware to behave when this stick is
 inserted (auto-cue level, jog mode, fader curve, mic low-cut, …).
 
@@ -96,7 +96,7 @@ def _enum_options(enum_name: str) -> list[dict[str, str]]:
     # construct Enum stores its mapping in `.encmapping`
     members = getattr(enum_obj, "encmapping", None) or {}
     out: list[dict[str, str]] = []
-    for name in members.keys():
+    for name in members:
         # Python identifier suffix `_` is used to avoid keyword collisions
         clean = name.rstrip("_")
         out.append({"value": clean, "label": _humanize(clean)})
