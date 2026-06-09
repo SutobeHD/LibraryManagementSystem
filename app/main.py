@@ -639,6 +639,34 @@ class DBModeReq(BaseModel):
 from fastapi import Request
 
 
+def _content_disposition_inline(filename: str) -> str:
+    """Build an RFC 6266 ``Content-Disposition: inline`` value, latin-1 safe.
+
+    HTTP header values are latin-1 encoded by the ASGI server; a filename with a
+    non-latin-1 codepoint (e.g. "ANNĒ …" → U+0112) makes Starlette's
+    ``Response.init_headers`` raise ``UnicodeEncodeError`` → 500. Mirror
+    Starlette's ``FileResponse``: emit ``filename*=utf-8''…`` for non-ASCII names
+    plus an ASCII-stripped ``filename=`` fallback for legacy clients. The
+    ``filename=`` token is quoted-string-escaped and control-char-stripped so the
+    helper stays injection-safe if reused on DB/user-derived strings (track
+    titles, tags) rather than only OS-validated basenames.
+    """
+    from urllib.parse import quote
+
+    # Drop control / separator chars (header folding, garbled token).
+    visible = "".join(c for c in filename if c.isprintable())
+
+    def _quoted(token: str) -> str:
+        return token.replace("\\", "\\\\").replace('"', '\\"')
+
+    try:
+        visible.encode("ascii")
+        return f'inline; filename="{_quoted(visible)}"'
+    except UnicodeEncodeError:
+        ascii_fallback = visible.encode("ascii", "ignore").decode("ascii") or "audio"
+        return f"inline; filename=\"{_quoted(ascii_fallback)}\"; filename*=utf-8''{quote(filename)}"
+
+
 @app.get("/api/stream")
 async def stream_audio(path: str, request: Request):
     """Streams audio file with HTTP Range support — required for browser seeking."""
@@ -676,7 +704,7 @@ async def stream_audio(path: str, request: Request):
             headers={
                 "Accept-Ranges": "bytes",
                 "Content-Length": str(file_size),
-                "Content-Disposition": f'inline; filename="{file_path.name}"',
+                "Content-Disposition": _content_disposition_inline(file_path.name),
                 "Cache-Control": "no-cache",
             },
         )
@@ -721,7 +749,7 @@ async def stream_audio(path: str, request: Request):
             "Accept-Ranges": "bytes",
             "Content-Range": f"bytes {start}-{end}/{file_size}",
             "Content-Length": str(chunk_size),
-            "Content-Disposition": f'inline; filename="{file_path.name}"',
+            "Content-Disposition": _content_disposition_inline(file_path.name),
             "Cache-Control": "no-cache",
         },
     )
