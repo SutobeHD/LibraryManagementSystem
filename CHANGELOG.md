@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 - Analysis accuracy + engine fixes:
+  - Fixed: `requirements.txt` was missing `rbox==0.1.7` (the Rust-backed package
+    that `import rbox` resolves to across 10 modules — MasterDb/Anlz/OneLibrary).
+    Only `pyrekordbox==0.1.7` (a *different*, pure-Python package used solely for
+    my-settings structs) was pinned, so a clean install left live-DB / ANLZ /
+    USB-export features in their soft `rbox=None` fallback.
   - Fixed: produced ANLZ cue entries (PCPT) wrote two wrong constants
     (0x00100000 instead of 0x10000; zero instead of the u2 const 1000), so the
     `.DAT`/`.EXT` files diverged from the Rekordbox cue layout and were rejected
