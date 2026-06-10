@@ -1730,6 +1730,16 @@ Regression tests for the analysis pipeline.
 - `test_cue_toggles_kwarg_overrides_settings()` — Per-call kwarg overrides the global setting.
 - `test_e2e_anlz_write_roundtrip()`
 
+### `tests/test_analysis_db_writer.py`
+
+Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.db.
+
+- `test_key_id_to_name_inverts_engine_map()` — The master.db key write must invert analysis_engine's key_id map exactly.
+- `test_key_id_to_name_unknown()`
+- `test_anlz_subdir_rekordbox_convention()` — ANLZ folder = <md5[:3]>/<uuid-shaped md5> — deterministic per content id.
+- `test_update_cache_bpm_key_beatgrid_shape()` — _update_cache mirrors the master.db write: BPM float, Camelot key, and a
+- `test_master_db_bpm_is_centi_bpm_int()` — master.db stores BPM as int(round(bpm*100)) — guard the scaling contract.
+
 ### `tests/test_anlz_cue_patch.py`
 
 Round-trip tests for app/anlz_cue_patch.py.
@@ -1745,6 +1755,12 @@ Round-trip tests for app/anlz_cue_patch.py.
 - `test_missing_dat_raises()`
 - `test_read_beats_from_anlz_roundtrip()`
 - `test_read_beats_no_dat_returns_empty()`
+
+### `tests/test_anlz_reference_parse.py`
+
+Validate produced ANLZ files against an INDEPENDENT reference parser.
+
+- `test_produced_anlz_parses_with_reference_parser()`
 
 ### `tests/test_auth.py`
 
@@ -1960,6 +1976,7 @@ End-to-end regression test for OneLibraryUsbWriter — runs the FULL
 - `  FakeSource.get_track_anlz_paths()`
 - `make_tracks()`
 - `main()`
+- `test_onelibrary_wal_flushed()` — pytest entry point — produced exportLibrary.db has no unmerged WAL and
 
 ### `tests/test_pairing.py`
 
@@ -1994,6 +2011,7 @@ PDB writer structural test against F: drive Pioneer reference.
 
 - `make_synthetic_input()` — Mimic the data shape that OneLibraryUsbWriter._write_pdb_from_db
 - `main()`
+- `test_export_pdb_invariants()` — pytest entry point — all export.pdb byte invariants must hold.
 
 ### `tests/test_phrase_batch.py`
 
