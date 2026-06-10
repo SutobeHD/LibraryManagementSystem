@@ -14,6 +14,7 @@ Pass criteria after sync():
 
 Run from repo root: PYTHONIOENCODING=utf-8 python tests/test_onelibrary_wal_flush.py
 """
+
 from __future__ import annotations
 
 import shutil
@@ -43,7 +44,7 @@ class FakeSource:
                 "id": "pl1",
                 "name": "Test Playlist",
                 "parent_id": "ROOT",
-                "type": "1",   # 0=folder, 1=playlist, 4=smart
+                "type": "1",  # 0=folder, 1=playlist, 4=smart
                 "is_folder": False,
                 "track_ids": [int(t["id"]) for t in tracks],
             },
@@ -108,13 +109,15 @@ def main():
         # default in usb_manager.py since the PDB writer's empty_candidate
         # field still doesn't match Pioneer's F: drive reference and
         # triggers a corruption dialog in Rekordbox 7.
-        events = list(writer.sync(
-            source,
-            audio_copy=False,
-            copy_anlz=False,
-            playlist_filter=["pl1"],
-            write_pdb=False,
-        ))
+        events = list(
+            writer.sync(
+                source,
+                audio_copy=False,
+                copy_anlz=False,
+                playlist_filter=["pl1"],
+                write_pdb=False,
+            )
+        )
 
         for ev in events:
             stage = ev.get("stage", "")
@@ -134,12 +137,20 @@ def main():
 
         print()
         print("=== File state after sync ===")
-        print(f"  exportLibrary.db     : {db_path.stat().st_size if db_path.exists() else 'MISSING'} B")
-        print(f"  exportLibrary.db-wal : {wal_path.stat().st_size if wal_path.exists() else 'absent'} B")
-        print(f"  exportLibrary.db-shm : {shm_path.stat().st_size if shm_path.exists() else 'absent'} B")
+        print(
+            f"  exportLibrary.db     : {db_path.stat().st_size if db_path.exists() else 'MISSING'} B"
+        )
+        print(
+            f"  exportLibrary.db-wal : {wal_path.stat().st_size if wal_path.exists() else 'absent'} B"
+        )
+        print(
+            f"  exportLibrary.db-shm : {shm_path.stat().st_size if shm_path.exists() else 'absent'} B"
+        )
         # With write_pdb=False the writer must NOT leave a stale PDB file
         # on the stick — Rekordbox would still read the broken PDB.
-        print(f"  export.pdb           : {pdb_path.stat().st_size if pdb_path.exists() else 'absent (correct for write_pdb=False)'} B")
+        print(
+            f"  export.pdb           : {pdb_path.stat().st_size if pdb_path.exists() else 'absent (correct for write_pdb=False)'} B"
+        )
         pdb_absent = not pdb_path.exists()
 
         # Verify Rekordbox-readable: open the DB with rbox once more (this is what
@@ -150,7 +161,9 @@ def main():
         try:
             db = rbox.OneLibrary(str(db_path))
             contents = list(db.get_contents())
-            non_placeholder = [c for c in contents if not (c.title or "").startswith("__placeholder_")]
+            non_placeholder = [
+                c for c in contents if not (c.title or "").startswith("__placeholder_")
+            ]
             artists = list(db.get_artists())
             playlists = list(db.get_playlists())
             playlist_contents = []
@@ -165,7 +178,7 @@ def main():
             print(f"  Playlists          : {len(playlists)} (expect 1)")
             print(f"  Playlist contents  : {len(playlist_contents)} (expect 8)")
             for c in non_placeholder[:3]:
-                print(f"    - id={c.id} title={c.title!r} bpm={c.bpmx100/100}")
+                print(f"    - id={c.id} title={c.title!r} bpm={c.bpmx100 / 100}")
             del db
 
             # PASS criteria
@@ -190,6 +203,14 @@ def main():
             print()
             print("*** RESULT: FAIL — Rekordbox would also fail to read this DB ***")
             return 3
+
+
+def test_onelibrary_wal_flushed():
+    """pytest entry point — produced exportLibrary.db has no unmerged WAL and
+    re-opens cleanly. Module-level importorskip('rbox') skips this where the
+    Rust rbox wheel is absent. Wraps the script `main()` (0 == PASS).
+    """
+    assert main() == 0
 
 
 if __name__ == "__main__":
