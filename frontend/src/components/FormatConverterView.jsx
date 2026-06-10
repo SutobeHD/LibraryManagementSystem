@@ -23,6 +23,7 @@ import {
 import api from '../api/api';
 import { useToast } from './ToastContext';
 import { confirmModal } from './ConfirmModal';
+import ScopeBucketPicker from './format-swap/ScopeBucketPicker';
 
 const TARGETS = [
     { value: 'aiff', label: 'AIFF (uncompressed PCM)' },
@@ -31,20 +32,16 @@ const TARGETS = [
     { value: 'mp3', label: 'MP3 (LAME -q:a 0, lossy)' },
 ];
 
-const SCOPE_KINDS = [
-    { value: 'playlist', label: 'Single Playlist (by ID)' },
-    { value: 'all_m4a', label: 'ALL m4a in library' },
-    { value: 'path', label: 'Folder Path (recursive)' },
-];
-
 const FormatConverterView = () => {
     const toast = useToast();
 
     // ── Scope + target form ──────────────────────────────────────────────────
     const [target, setTarget] = useState('aiff');
-    const [scopeKind, setScopeKind] = useState('playlist');
-    const [playlistId, setPlaylistId] = useState('');
-    const [pathValue, setPathValue] = useState('');
+    // Scope picker owns its own state internally; this is the wire-ready payload
+    // (or null when invalid). bucket default = 'subset' since that matches the
+    // common case "convert a meaningful slice of the library" better than "find
+    // one track ID".
+    const [scopeValue, setScopeValue] = useState({ bucket: 'subset', scope: null, isValid: false });
 
     // ── Dry-run state ─────────────────────────────────────────────────────────
     const [dryLoading, setDryLoading] = useState(false);
@@ -59,28 +56,30 @@ const FormatConverterView = () => {
     const [rollbackTarget, setRollbackTarget] = useState('');
     const [rollbackLoading, setRollbackLoading] = useState(false);
 
-    const buildScope = useCallback(() => {
-        const s = { kind: scopeKind };
-        if (scopeKind === 'playlist') s.playlist_id = parseInt(playlistId, 10);
-        if (scopeKind === 'path') s.path = pathValue;
-        return s;
-    }, [scopeKind, playlistId, pathValue]);
+    // Stable callback — picker fires on every sub-change. We clear dryResult
+    // so the existing dry-run gating logic stays accurate without each picker
+    // needing to know about it.
+    const handleScopeChange = useCallback((next) => {
+        setScopeValue(next);
+        setDryResult(null);
+    }, []);
 
-    const scopeIsValid = (() => {
-        if (scopeKind === 'all_m4a') return true;
-        if (scopeKind === 'playlist') return /^\d+$/.test(playlistId);
-        if (scopeKind === 'path') return pathValue.trim().length > 3;
-        return false;
-    })();
+    const buildScope = useCallback(() => scopeValue?.scope || null, [scopeValue]);
+    const scopeIsValid = !!scopeValue?.isValid;
 
     // ── Dry-run ───────────────────────────────────────────────────────────────
     const runDryRun = async () => {
+        const scope = buildScope();
+        if (!scope) {
+            toast.error('Pick a scope first.');
+            return;
+        }
         setDryLoading(true);
         setDryResult(null);
         try {
             const res = await api.post('/api/library/format-swap/dry-run', {
                 target,
-                scope: buildScope(),
+                scope,
             });
             setDryResult(res.data);
             if (res.data.error) {
@@ -126,10 +125,15 @@ const FormatConverterView = () => {
         });
         if (!ok) return;
 
+        const scope = buildScope();
+        if (!scope) {
+            toast.error('Scope no longer valid — re-pick.');
+            return;
+        }
         try {
             const res = await api.post('/api/library/format-swap/execute', {
                 target,
-                scope: buildScope(),
+                scope,
                 trigger: 'user_format_pick',
             });
             setBatchId(res.data.batch_id);
@@ -255,60 +259,21 @@ const FormatConverterView = () => {
                 <div className="mx-card p-5 space-y-4">
                     <h2 className="text-[14px] font-semibold">Scope &amp; target</h2>
 
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-tiny text-ink-muted mb-1.5">Target format</label>
-                            <select
-                                className="input-glass w-full text-[13px]"
-                                value={target}
-                                onChange={e => { setTarget(e.target.value); setDryResult(null); }}
-                            >
-                                {TARGETS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-tiny text-ink-muted mb-1.5">Scope</label>
-                            <select
-                                className="input-glass w-full text-[13px]"
-                                value={scopeKind}
-                                onChange={e => { setScopeKind(e.target.value); setDryResult(null); }}
-                            >
-                                {SCOPE_KINDS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-                            </select>
-                        </div>
+                    <div>
+                        <label className="block text-tiny text-ink-muted mb-1.5">Target format</label>
+                        <select
+                            className="input-glass w-full text-[13px]"
+                            value={target}
+                            onChange={e => { setTarget(e.target.value); setDryResult(null); }}
+                        >
+                            {TARGETS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                        </select>
                     </div>
 
-                    {scopeKind === 'playlist' && (
-                        <div>
-                            <label className="block text-tiny text-ink-muted mb-1.5">Playlist ID</label>
-                            <input
-                                type="text"
-                                className="input-glass w-full text-[13px] font-mono"
-                                placeholder="e.g. 3978428860"
-                                value={playlistId}
-                                onChange={e => { setPlaylistId(e.target.value.replace(/\D/g, '')); setDryResult(null); }}
-                            />
-                            <p className="text-tiny text-ink-placeholder mt-1">
-                                Find the ID in the Playlists tab → right-click → Copy ID (or use the dev console).
-                            </p>
-                        </div>
-                    )}
-
-                    {scopeKind === 'path' && (
-                        <div>
-                            <label className="block text-tiny text-ink-muted mb-1.5">Folder path</label>
-                            <input
-                                type="text"
-                                className="input-glass w-full text-[13px] font-mono"
-                                placeholder="C:\Users\you\Music\Library\house"
-                                value={pathValue}
-                                onChange={e => { setPathValue(e.target.value); setDryResult(null); }}
-                            />
-                            <p className="text-tiny text-ink-placeholder mt-1">
-                                All tracks whose folder_path starts here (recursive).
-                            </p>
-                        </div>
-                    )}
+                    <div>
+                        <label className="block text-tiny text-ink-muted mb-1.5">Scope</label>
+                        <ScopeBucketPicker value={scopeValue} onChange={handleScopeChange} />
+                    </div>
 
                     <div className="flex gap-2 pt-2">
                         <button
