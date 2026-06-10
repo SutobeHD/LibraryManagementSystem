@@ -12,8 +12,8 @@ This is a guided scaffold, not blind insertion. Follow this order:
 2. **Check `docs/backend-index.md`** for the right grouping — routes are clustered by feature (system, library, playlist, usb, soundcloud, analysis, phrase, duplicates, …). Insert the new route in its cluster, not at the bottom.
 3. **Decide auth gate:**
    - Read-only library endpoints: no token required.
-   - Write to library / playlists / tracks: **must** acquire `_db_write_lock` (RLock) before any rbox/SQLAlchemy write.
-   - System / shutdown / process control: gated by `X-Session-Token` (see `POST /api/system/init-token`).
+   - Write to library / playlists / tracks: **must** acquire `_db_write_lock` (RLock from `app/database.py`, or the `db_lock()` context manager) before any rbox/SQLAlchemy write.
+   - Mutating endpoints: gated by `Depends(require_session)` (`app/auth.py`) — `Authorization: Bearer <token>` born at sidecar boot. No init-token endpoint exists.
 4. **Decide model:** if the request body has > 2 fields, create a Pydantic `BaseModel` next to existing models. Don't accept loose `dict`.
 5. **Error handling:** raise `HTTPException(status_code=..., detail=...)`. The global exception handler converts unexpected exceptions to 500 with sanitised messages — don't wrap in try/except just to re-raise.
 6. **After the edit:**

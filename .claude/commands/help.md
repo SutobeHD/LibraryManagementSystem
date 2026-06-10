@@ -57,7 +57,7 @@ Render a discovery view of all repo-local Claude Code capabilities.
 ## Rules (N total)
 | File | Scope (paths) | First line |
 |------|---------------|------------|
-| .claude/rules/git-workflow.md | (always-loaded) | ... |
+| .claude/rules/commit-and-git.md | (always-loaded) | ... |
 ...
 
 ## Hook / integration files
