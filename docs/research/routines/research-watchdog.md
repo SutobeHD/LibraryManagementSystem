@@ -22,7 +22,7 @@ Read `docs/research/README.md` first.
 Every commit you make (Lifecycle-line edits only) includes **two trailers** in the body:
 
 ```
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 X-Routine: research-watchdog
 ```
 
@@ -73,7 +73,7 @@ docs(research): watchdog re-check — <N> docs (<X> OK, <Y> WARN, <Z> FLAG)
 
 <one bullet per FLAG/WARN with the slug and reason>
 
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 X-Routine: research-watchdog
 ```
 `git push origin main`.

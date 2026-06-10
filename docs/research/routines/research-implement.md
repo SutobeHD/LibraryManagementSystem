@@ -21,7 +21,7 @@ Read `docs/research/README.md`, `docs/research/_TEMPLATE.md`, `.claude/rules/res
 Every commit you make includes **two trailers** in the body — on `main` doc-tracking commits **and** on `routine/*` branch code commits:
 
 ```
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 X-Routine: research-implement
 ```
 

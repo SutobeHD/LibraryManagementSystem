@@ -20,7 +20,7 @@ Read `docs/research/README.md`, `docs/research/_TEMPLATE.md`, and `.claude/rules
 Every commit you make includes **two trailers** in the body (Conventional-Commits compatible):
 
 ```
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 X-Routine: research-draft
 ```
 
@@ -100,7 +100,7 @@ Append the result to `## Idea Verification` as a dated `### YYYY-MM-DD — PASS|
    ```
    docs(research): draft <slug> → exploring_
 
-   Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+   Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
    X-Routine: research-draft
    ```
 6. `git push origin main`.

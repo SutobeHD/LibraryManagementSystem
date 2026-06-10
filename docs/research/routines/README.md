@@ -72,7 +72,7 @@ Every commit-writing routine (draft / explore / plan / implement / watchdog / cr
 ```
 docs(research): plan downloader-unified → approvalgate_ (mockup + summary)
 
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 X-Routine: research-plan
 ```
 
