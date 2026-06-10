@@ -188,8 +188,8 @@ def _build_pcpt_entry(cue: dict[str, Any]) -> bytes:
     PCPT — single cue point entry inside a PCOB list.
     Layout (56 bytes total):
         magic(4)='PCPT' + hdr_len(4)=0x1C + total_len(4)=0x38
-        + hot_cue(4) + status(4) + flags(4)=0x00100000
-        + order_first(2) + order_last(2) + type(1) + pad(3)
+        + hot_cue(4) + status(4) + const(4)=0x00010000
+        + order_first(2) + order_last(2) + type(1) + pad(1) + const(2)=1000
         + time_ms(4) + loop_time_ms(4) + 16 bytes padding
     """
     hot_cue = cue.get("number", 0)
@@ -212,13 +212,14 @@ def _build_pcpt_entry(cue: dict[str, Any]) -> bytes:
         ">III",
         cue_num,  # hot_cue (0=memory, 1..8=hot)
         4 if is_hot else 0,  # status: 4=active hot cue, 0=loaded memory
-        0x00100000,  # observed flags
+        0x00010000,  # const — "seems to always be 0x10000" (crate-digger cue_entry)
     )
     buf += struct.pack(
-        ">HHB3x",
+        ">HHBxH",
         0xFFFF,  # order_first
         0xFFFF,  # order_last
         cue_type_byte,  # 1=cue, 2=loop
+        1000,  # const — crate-digger cue_entry always 1000 (was zero-padded)
     )
     buf += struct.pack(
         ">II",

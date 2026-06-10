@@ -437,6 +437,24 @@ def test_pcpt_entry_size():
     assert entry[:4] == b"PCPT"
 
 
+def test_pcpt_entry_const_fields():
+    """Cue entry carries the two consts the Rekordbox format mandates.
+
+    crate-digger cue_entry: u1 const = 0x10000 (after status), u2 const = 1000
+    (after type+pad). We previously wrote 0x100000 and zero — which strict
+    parsers (pyrekordbox) reject and which diverge from real Rekordbox files.
+    """
+    from app.anlz_writer import _build_pcpt_entry
+
+    entry = _build_pcpt_entry({"type": "hot_cue", "number": 0, "time_ms": 1000, "loop_len_ms": 0})
+    # layout: PCPT(4) lh(4) lt(4) hot_cue(4) status(4) u1(4) ...
+    u1 = struct.unpack(">I", entry[20:24])[0]
+    assert u1 == 0x10000, f"u1 const must be 0x10000, got {u1:#x}"
+    # ... order_first(2) order_last(2) type(1) pad(1) u2(2)
+    u2 = struct.unpack(">H", entry[30:32])[0]
+    assert u2 == 1000, f"u2 const must be 1000, got {u2}"
+
+
 def test_pssi_beat_anchoring():
     from app.anlz_writer import _build_pssi
 
