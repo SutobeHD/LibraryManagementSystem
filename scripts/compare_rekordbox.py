@@ -14,8 +14,9 @@ BPM, musical key, and beat grid. This is the "verify what's better" tool:
   * Phrases (PSSI): count + nearest-boundary offset — Rekordbox phrases are a
     reference, not ground truth, so treat these as a comparison, not a score.
 
-This script reads the live Rekordbox DB via `rbox` (pyrekordbox, pinned
-0.1.7) — run it on the machine that has the library, with Rekordbox CLOSED.
+This script reads the live Rekordbox DB via `rbox` (the Rust-backed package,
+`pip install rbox==0.1.7` — distinct from pyrekordbox) — run it on the machine
+that has the library, with Rekordbox CLOSED.
 
 Usage:
     python scripts/compare_rekordbox.py --db "<path to master.db>" -n 10
@@ -212,7 +213,7 @@ def _collect_tracks(db, ids: list[str] | None, n: int, seed: int | None) -> list
     return analyzed[:n]
 
 
-def compare_track(db, tid: str) -> dict[str, Any]:
+def compare_track(db, tid: str, tol_pct: float = 4.0) -> dict[str, Any]:
     """Read RB analysis for one track and re-run ours; return a comparison row."""
     from app.analysis_engine import run_full_analysis
 
@@ -245,7 +246,7 @@ def compare_track(db, tid: str) -> dict[str, Any]:
     our_camelot = ours.get("camelot", "")
     our_beats = [float(b["time_ms"]) for b in ours.get("beats", [])]
 
-    bpm_rel, bpm_err = bpm_relation(rb_bpm, our_bpm)
+    bpm_rel, bpm_err = bpm_relation(rb_bpm, our_bpm, tol_pct=tol_pct)
     return {
         "id": tid,
         "status": "ok",
@@ -287,10 +288,10 @@ def _print_report(rows: list[dict[str, Any]]) -> None:
     key_exact = sum(1 for r in ok if r["key_relation"] == "exact")
     grid = [r["beatgrid"]["mean_abs_err_ms"] for r in ok if r["beatgrid"]["mean_abs_err_ms"] >= 0]
     print("\n=== Summary ===")
-    print(f"  tracks compared       : {len(ok)}")
-    print(f"  BPM exact match (<=1%): {bpm_match}/{len(ok)}")
-    print(f"  BPM octave/metrical   : {bpm_octave}/{len(ok)}  (half/double/third)")
-    print(f"  KEY exact             : {key_exact}/{len(ok)}")
+    print(f"  tracks compared        : {len(ok)}")
+    print(f"  BPM Acc-1 (exact octave): {bpm_match}/{len(ok)}")
+    print(f"  BPM Acc-2 (octave-tol.) : {bpm_match + bpm_octave}/{len(ok)}  (+half/double/third)")
+    print(f"  KEY exact              : {key_exact}/{len(ok)}")
     print(f"  KEY harmonic-compatible: {key_compatible}/{len(ok)}  (exact+relative+fifth)")
     if grid:
         print(
@@ -304,6 +305,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--ids", nargs="*", help="Explicit djmdContent ids (else random sample)")
     ap.add_argument("-n", type=int, default=10, help="Number of tracks to sample (default 10)")
     ap.add_argument("--seed", type=int, default=None, help="Random seed for reproducible sampling")
+    ap.add_argument("--tol", type=float, default=4.0, help="BPM tolerance %% (MIREX standard 4.0)")
     ap.add_argument("--json", help="Write full results to this JSON file (golden fixture)")
     args = ap.parse_args(argv)
 
@@ -311,7 +313,8 @@ def main(argv: list[str] | None = None) -> int:
         import rbox  # type: ignore
     except ImportError:
         print(
-            "ERROR: pyrekordbox (rbox) not installed — run locally where the library lives.",
+            "ERROR: `rbox` (the Rust-backed package — distinct from pyrekordbox) not "
+            "installed. `pip install rbox==0.1.7` and run locally where the library lives.",
             file=sys.stderr,
         )
         return 2
@@ -326,7 +329,7 @@ def main(argv: list[str] | None = None) -> int:
     rows = []
     for tid in tids:
         try:
-            rows.append(compare_track(db, tid))
+            rows.append(compare_track(db, tid, tol_pct=args.tol))
         except Exception as e:
             rows.append({"id": tid, "status": "error", "error": repr(e)})
 
