@@ -3,6 +3,13 @@
 ## [Unreleased]
 
 - Analysis accuracy + engine fixes:
+  - Fixed: produced ANLZ cue entries (PCPT) wrote two wrong constants
+    (0x00100000 instead of 0x10000; zero instead of the u2 const 1000), so the
+    `.DAT`/`.EXT` files diverged from the Rekordbox cue layout and were rejected
+    by strict ANLZ parsers. Now spec-conformant — independently verified by
+    pyrekordbox `AnlzFile.parse_file()` parsing all three produced files.
+  - Fixed: essentia key names normalized flats→sharps (Eb→D#, …); the active
+    essentia path otherwise returned empty Camelot/key_id for ~5 of 12 keys.
   - Fixed: `madmom` RNN beat tracking was dead code on Python 3.10+ (the
     project target) — `import madmom` raised on removed `collections`/`numpy`
     symbols and was silently swallowed, so the librosa fallback always ran.

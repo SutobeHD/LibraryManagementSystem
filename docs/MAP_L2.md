@@ -1696,6 +1696,7 @@ Regression tests for the analysis pipeline.
 - `test_settings_env_override()`
 - `test_encoder_delay_per_format()`
 - `test_octave_correct()`
+- `test_essentia_flat_to_sharp_maps_to_valid_keys()` — essentia spells black keys as flats; normalised sharps must hit our maps.
 - `test_madmom_compat_shims_idempotent()` — Shim restores pre-3.10 collections ABCs + NumPy aliases madmom needs.
 - `test_stereo_features_mono()`
 - `test_stereo_features_identical()`
@@ -1715,6 +1716,7 @@ Regression tests for the analysis pipeline.
 - `test_grid_setting_env_override()`
 - `test_e2e_memory_cue_grid_kwarg()` — memory_cue_grid=True yields an evenly spaced grid in run_full_analysis.
 - `test_pcpt_entry_size()`
+- `test_pcpt_entry_const_fields()` — Cue entry carries the two consts the Rekordbox format mandates.
 - `test_pssi_beat_anchoring()`
 - `test_pssi_phrase_id_high_mood_bank()`
 - `test_pssi_phrase_id_mid_mood_bank()`
