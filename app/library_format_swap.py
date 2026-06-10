@@ -372,6 +372,17 @@ class FormatSwapEngine:
 
     # — Scope resolution —
 
+    def _iter_live_contents(self) -> Any:
+        """Shared iterator: yields rbox Content rows that aren't soft-deleted.
+
+        Centralises the ``rb_local_deleted`` skip so the per-subset branches
+        below stay focused on their predicate.
+        """
+        for c in self.live_db.db.get_contents():
+            if getattr(c, "rb_local_deleted", False):
+                continue
+            yield c
+
     def _enumerate_by_track_ids(self, ids: list[str]) -> list[Any]:
         out: list[Any] = []
         for i in ids:
@@ -390,29 +401,144 @@ class FormatSwapEngine:
             return []
 
     def _enumerate_all_m4a(self) -> list[Any]:
-        out: list[Any] = []
-        for c in self.live_db.db.get_contents():
-            if getattr(c, "rb_local_deleted", False):
-                continue
-            try:
-                if int(getattr(c, "file_type", 0) or 0) == FILE_TYPE_M4A:
-                    out.append(c)
-            except (TypeError, ValueError):
-                continue
-        return out
+        # Legacy entry point kept for the backward-compat 'all_m4a' alias —
+        # see enumerate_scope. Implemented via _enumerate_by_subset to stay
+        # in sync with the new subset_kind dispatch.
+        return self._enumerate_by_subset(
+            {"subset_kind": "by_file_type", "file_type": FILE_TYPE_M4A}
+        )
 
     def _enumerate_by_path(self, base_path: str) -> list[Any]:
         norm = str(base_path).replace("\\", "/").rstrip("/").lower()
         if not norm:
             return []
         out: list[Any] = []
-        for c in self.live_db.db.get_contents():
-            if getattr(c, "rb_local_deleted", False):
-                continue
+        for c in self._iter_live_contents():
             fp = (getattr(c, "folder_path", "") or "").replace("\\", "/").lower()
             if fp.startswith(norm + "/") or fp == norm:
                 out.append(c)
         return out
+
+    def _enumerate_by_subset(self, scope: dict[str, Any]) -> list[Any]:
+        """Library-subset dispatcher.
+
+        Accepts a scope dict with ``subset_kind`` in:
+            all, all_lossy, all_lossless, ranked, unranked, by_color,
+            uncolored, by_mytag, by_file_type
+        Required extras:
+            by_color → color_id (0..8)
+            by_mytag → tag_id
+            by_file_type → file_type (Rekordbox FileType integer)
+        """
+        sub = scope.get("subset_kind")
+        if sub is None:
+            raise ValueError("library_subset requires subset_kind")
+
+        out: list[Any] = []
+
+        if sub == "all":
+            for c in self._iter_live_contents():
+                if getattr(c, "folder_path", "") or "":
+                    out.append(c)
+            return out
+
+        if sub in ("all_lossy", "all_lossless"):
+            allowed = LOSSY_SOURCE_EXTS if sub == "all_lossy" else LOSSLESS_SOURCE_EXTS
+            for c in self._iter_live_contents():
+                fp = (getattr(c, "folder_path", "") or "").lower()
+                if not fp:
+                    continue
+                # Match by extension suffix (frozenset of dotted exts)
+                if any(fp.endswith(ext) for ext in allowed):
+                    out.append(c)
+            return out
+
+        if sub == "by_file_type":
+            ft_raw = scope.get("file_type")
+            if ft_raw is None:
+                raise ValueError("subset_kind=by_file_type requires file_type")
+            try:
+                ft = int(ft_raw)
+            except (TypeError, ValueError) as e:
+                raise ValueError("subset_kind=by_file_type file_type must be int") from e
+            for c in self._iter_live_contents():
+                if not (getattr(c, "folder_path", "") or ""):
+                    continue
+                try:
+                    if int(getattr(c, "file_type", 0) or 0) == ft:
+                        out.append(c)
+                except (TypeError, ValueError):
+                    continue
+            return out
+
+        if sub == "ranked":
+            for c in self._iter_live_contents():
+                if not (getattr(c, "folder_path", "") or ""):
+                    continue
+                try:
+                    if int(getattr(c, "rating", 0) or 0) > 0:
+                        out.append(c)
+                except (TypeError, ValueError):
+                    continue
+            return out
+
+        if sub == "unranked":
+            for c in self._iter_live_contents():
+                if not (getattr(c, "folder_path", "") or ""):
+                    continue
+                try:
+                    if int(getattr(c, "rating", 0) or 0) == 0:
+                        out.append(c)
+                except (TypeError, ValueError):
+                    continue
+            return out
+
+        if sub == "by_color":
+            cid_raw = scope.get("color_id")
+            if cid_raw is None:
+                raise ValueError("subset_kind=by_color requires color_id")
+            try:
+                cid = int(cid_raw)
+            except (TypeError, ValueError) as e:
+                raise ValueError("subset_kind=by_color color_id must be int") from e
+            for c in self._iter_live_contents():
+                if not (getattr(c, "folder_path", "") or ""):
+                    continue
+                try:
+                    if int(getattr(c, "color_id", 0) or 0) == cid:
+                        out.append(c)
+                except (TypeError, ValueError):
+                    continue
+            return out
+
+        if sub == "uncolored":
+            for c in self._iter_live_contents():
+                if not (getattr(c, "folder_path", "") or ""):
+                    continue
+                try:
+                    if int(getattr(c, "color_id", 0) or 0) == 0:
+                        out.append(c)
+                except (TypeError, ValueError):
+                    continue
+            return out
+
+        if sub == "by_mytag":
+            tag_raw = scope.get("tag_id")
+            if tag_raw is None:
+                raise ValueError("subset_kind=by_mytag requires tag_id")
+            tag_id_str = str(tag_raw)
+            # live_db.track_to_tag_ids keys are str(track_id), values list[str]
+            mapping = getattr(self.live_db, "track_to_tag_ids", {}) or {}
+            for c in self._iter_live_contents():
+                if not (getattr(c, "folder_path", "") or ""):
+                    continue
+                cid_str = str(getattr(c, "id", ""))
+                tag_ids = mapping.get(cid_str) or []
+                if tag_id_str in (str(t) for t in tag_ids):
+                    out.append(c)
+            return out
+
+        raise ValueError(f"Unknown subset_kind: {sub!r}")
 
     def enumerate_scope(self, scope: dict[str, Any]) -> list[Any]:
         """Resolve a scope dict to rbox Content rows.
@@ -421,7 +547,9 @@ class FormatSwapEngine:
 
             {"kind": "track_ids", "ids": ["123", "456"]}
             {"kind": "playlist", "playlist_id": 12345}
-            {"kind": "all_m4a"}
+            {"kind": "all_m4a"}   # legacy alias kept for backward compat
+            {"kind": "library_subset", "subset_kind": "...",
+             "color_id": int?, "tag_id": int?, "file_type": int?}
             {"kind": "path", "path": "C:/Users/.../Music/sub"}
         """
         kind = scope.get("kind")
@@ -433,7 +561,12 @@ class FormatSwapEngine:
                 raise ValueError("scope.playlist_id required")
             return self._enumerate_by_playlist(pid)
         if kind == "all_m4a":
+            # Legacy alias — shim to library_subset/by_file_type. Manifest
+            # writers keep scope.kind=='all_m4a' verbatim (no normalisation),
+            # so old assertions + old API callers stay valid.
             return self._enumerate_all_m4a()
+        if kind == "library_subset":
+            return self._enumerate_by_subset(scope)
         if kind == "path":
             p = scope.get("path") or ""
             if not p:

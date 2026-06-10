@@ -1508,12 +1508,36 @@ def clean_titles(r: CleanTitlesReq):
 
 
 class _FormatSwapScope(BaseModel):
-    """Scope selector for /api/library/format-swap/*. One ``kind`` per request."""
+    """Scope selector for /api/library/format-swap/*. One ``kind`` per request.
 
-    kind: _Literal["track_ids", "playlist", "all_m4a", "path"]
+    Backward-compat note: ``all_m4a`` is kept as a legacy alias of
+    ``library_subset`` + ``subset_kind='by_file_type'`` + ``file_type=4`` so
+    older API callers + manifest assertions keep working. New callers should
+    use ``library_subset``.
+    """
+
+    kind: _Literal["track_ids", "playlist", "library_subset", "all_m4a", "path"]
     ids: list[str] | None = None
     playlist_id: int | None = None
     path: str | None = None
+    # library_subset extras
+    subset_kind: (
+        _Literal[
+            "all",
+            "all_lossy",
+            "all_lossless",
+            "ranked",
+            "unranked",
+            "by_color",
+            "uncolored",
+            "by_mytag",
+            "by_file_type",
+        ]
+        | None
+    ) = None
+    color_id: int | None = None
+    tag_id: int | None = None
+    file_type: int | None = None
 
 
 class FormatSwapDryRunReq(BaseModel):
@@ -1537,6 +1561,22 @@ def _scope_to_dict(s: _FormatSwapScope) -> dict[str, Any]:
         out["ids"] = s.ids
     if s.playlist_id is not None:
         out["playlist_id"] = s.playlist_id
+    if s.kind == "library_subset":
+        if s.subset_kind is None:
+            raise HTTPException(422, "scope.subset_kind required for library_subset")
+        out["subset_kind"] = s.subset_kind
+        if s.subset_kind == "by_color":
+            if s.color_id is None or not (0 <= int(s.color_id) <= 8):
+                raise HTTPException(422, "subset_kind=by_color requires color_id (0..8)")
+            out["color_id"] = int(s.color_id)
+        elif s.subset_kind == "by_mytag":
+            if s.tag_id is None:
+                raise HTTPException(422, "subset_kind=by_mytag requires tag_id")
+            out["tag_id"] = int(s.tag_id)
+        elif s.subset_kind == "by_file_type":
+            if s.file_type is None:
+                raise HTTPException(422, "subset_kind=by_file_type requires file_type")
+            out["file_type"] = int(s.file_type)
     if s.path is not None:
         # Sandbox user-supplied path roots — must resolve to an allowed dir
         # (or a known track-dir parent in db.tracks). validate_audio_path
@@ -1685,6 +1725,172 @@ def format_swap_rollback(r: FormatSwapRollbackReq):
         raise HTTPException(404, str(e)) from e
     except RuntimeError as e:
         raise HTTPException(409, str(e)) from e
+
+
+# ── Format-swap scope picker helpers (read-only, mirror /api/playlists/tree) ──
+
+
+@app.get("/api/library/format-swap/playlists")
+def format_swap_picker_playlists():
+    """Flat user-playlist list for the Playlist bucket dropdown.
+
+    Filters to Type in ('1','4') — normal + smart playlists, drops folders
+    (Type='0') and system playlists. Counts come from the live playlists_tracks
+    map when available, else 0.
+    """
+    if not db.active_db:
+        return []
+    tree = db.get_playlist_tree() or []
+    playlists_tracks = getattr(db.active_db, "playlists_tracks", {}) or {}
+
+    out: list[dict[str, Any]] = []
+
+    def walk(nodes: list[dict[str, Any]], parent_id: str = "ROOT") -> None:
+        for n in nodes or []:
+            t = str(n.get("Type", ""))
+            pid = str(n.get("ID", ""))
+            if t in ("1", "4"):
+                cids = (
+                    playlists_tracks.get(pid)
+                    or playlists_tracks.get(int(pid) if pid.isdigit() else pid)
+                    or []
+                )
+                out.append(
+                    {
+                        "id": pid,
+                        "name": str(n.get("Name", "")),
+                        "type": t,
+                        "parent_id": parent_id,
+                        "track_count": len(cids) if cids else 0,
+                    }
+                )
+            if n.get("Children"):
+                walk(n["Children"], pid)
+
+    walk(tree)
+    return out
+
+
+# Pioneer ColorID semantic labels (None + 8 colours = 9 entries, IDs 0..8).
+# Front-end has its own hex palette; backend only ships id/name/count to keep
+# label rendering one-sided.
+_FORMAT_SWAP_COLOR_LABELS = {
+    0: "None",
+    1: "Pink",
+    2: "Red",
+    3: "Orange",
+    4: "Yellow",
+    5: "Green",
+    6: "Aqua",
+    7: "Blue",
+    8: "Purple",
+}
+
+
+@app.get("/api/library/format-swap/colors")
+def format_swap_picker_colors():
+    """Pioneer Colors with track counts. Always returns all 9 IDs (0..8)."""
+    if not db.active_db:
+        return [
+            {"color_id": cid, "label": label, "count": 0}
+            for cid, label in _FORMAT_SWAP_COLOR_LABELS.items()
+        ]
+    counts: dict[int, int] = dict.fromkeys(range(9), 0)
+    try:
+        for t in db.active_db.get_all_tracks():
+            try:
+                cid = int(t.get("ColorID", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= cid <= 8:
+                counts[cid] += 1
+    except (AttributeError, RuntimeError) as e:
+        logger.warning("format-swap colors: count failed (%s)", e)
+    return [
+        {"color_id": cid, "label": _FORMAT_SWAP_COLOR_LABELS[cid], "count": counts[cid]}
+        for cid in range(9)
+    ]
+
+
+@app.get("/api/library/format-swap/mytags")
+def format_swap_picker_mytags():
+    """MyTag list with track counts. Returns [] when MyTag isn't available."""
+    if not db.active_db or not hasattr(db.active_db, "list_mytags"):
+        return []
+    mapping = getattr(db.active_db, "track_to_tag_ids", {}) or {}
+    # Reverse-index: tag_id -> count
+    counts: dict[str, int] = {}
+    for _cid, tag_ids in mapping.items():
+        for tid_ in tag_ids or []:
+            key = str(tid_)
+            counts[key] = counts.get(key, 0) + 1
+    out: list[dict[str, Any]] = []
+    try:
+        for entry in db.active_db.list_mytags():
+            tid_str = str(entry.get("id", ""))
+            try:
+                tag_id_int = int(tid_str)
+            except (TypeError, ValueError):
+                continue
+            out.append(
+                {
+                    "tag_id": tag_id_int,
+                    "name": str(entry.get("name", "")),
+                    "count": counts.get(tid_str, 0),
+                }
+            )
+    except (AttributeError, RuntimeError) as e:
+        logger.warning("format-swap mytags: list failed (%s)", e)
+    return out
+
+
+@app.get("/api/library/format-swap/subset-counts", dependencies=[Depends(require_session)])
+def format_swap_picker_subset_counts(
+    subset_kind: str,
+    color_id: int | None = None,
+    tag_id: int | None = None,
+    file_type: int | None = None,
+):
+    """Cheap pre-dry-run count + total source MB for a library subset.
+
+    Mirrors the validation in ``_scope_to_dict`` so the picker badge sees the
+    same 422s as the dry-run endpoint.
+    """
+    from app.library_format_swap import FormatSwapEngine
+
+    scope: dict[str, Any] = {"kind": "library_subset", "subset_kind": subset_kind}
+    if subset_kind == "by_color":
+        if color_id is None or not (0 <= int(color_id) <= 8):
+            raise HTTPException(422, "subset_kind=by_color requires color_id (0..8)")
+        scope["color_id"] = int(color_id)
+    elif subset_kind == "by_mytag":
+        if tag_id is None:
+            raise HTTPException(422, "subset_kind=by_mytag requires tag_id")
+        scope["tag_id"] = int(tag_id)
+    elif subset_kind == "by_file_type":
+        if file_type is None:
+            raise HTTPException(422, "subset_kind=by_file_type requires file_type")
+        scope["file_type"] = int(file_type)
+
+    live = _require_live_db()
+    # target is irrelevant for enumeration-only — pick aiff to satisfy ctor
+    engine = FormatSwapEngine(live, "aiff")
+    try:
+        rows = engine._enumerate_by_subset(scope)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+
+    total_bytes = 0
+    for c in rows:
+        try:
+            total_bytes += int(getattr(c, "file_size", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+    return {
+        "subset_kind": subset_kind,
+        "count": len(rows),
+        "total_source_mb": round(total_bytes / 1024 / 1024, 1),
+    }
 
 
 @app.get("/api/library/status")

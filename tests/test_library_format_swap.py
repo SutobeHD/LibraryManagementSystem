@@ -304,3 +304,160 @@ class TestBatchTracking:
         from app.library_format_swap import get_batch
 
         assert get_batch("nonexistent-batch-id") is None
+
+
+# ── Library-subset enumeration ──────────────────────────────────────────────
+
+
+def _make_content(
+    cid: str,
+    *,
+    folder_path: str = "/m/track.m4a",
+    file_type: int = FILE_TYPE_M4A,
+    file_size: int = 100,
+    rating: int = 0,
+    color_id: int = 0,
+    deleted: bool = False,
+):
+    """Build a MagicMock that quacks like an rbox Content row."""
+    c = MagicMock()
+    c.id = cid
+    c.folder_path = folder_path
+    c.file_type = file_type
+    c.file_size = file_size
+    c.rating = rating
+    c.color_id = color_id
+    c.rb_local_deleted = deleted
+    return c
+
+
+def _build_live_db(contents, *, track_to_tag_ids=None):
+    live = MagicMock()
+    live.db.get_contents.return_value = contents
+    live.track_to_tag_ids = track_to_tag_ids or {}
+    return live
+
+
+class TestEnumerateLibrarySubset:
+    """One assertion per subset_kind branch in _enumerate_by_subset."""
+
+    def _fixture(self):
+        # Mixed contents across every dimension exercised by the dispatcher
+        return [
+            _make_content("1", folder_path="/m/a.m4a", file_type=4, rating=0, color_id=0),
+            _make_content("2", folder_path="/m/b.mp3", file_type=1, rating=4, color_id=1),
+            _make_content("3", folder_path="/m/c.flac", file_type=11, rating=0, color_id=2),
+            _make_content("4", folder_path="/m/d.aiff", file_type=6, rating=5, color_id=0),
+            _make_content("5", folder_path="/m/e.wav", file_type=5, rating=3, color_id=3),
+            _make_content("6", folder_path="/m/del.m4a", file_type=4, deleted=True),
+        ]
+
+    def test_subset_all_skips_deleted(self):
+        live = _build_live_db(self._fixture())
+        engine = FormatSwapEngine(live, "aiff")
+        ids = [c.id for c in engine._enumerate_by_subset({"subset_kind": "all"})]
+        assert ids == ["1", "2", "3", "4", "5"]
+
+    def test_subset_all_lossy(self):
+        live = _build_live_db(self._fixture())
+        engine = FormatSwapEngine(live, "aiff")
+        ids = [c.id for c in engine._enumerate_by_subset({"subset_kind": "all_lossy"})]
+        assert set(ids) == {"1", "2"}  # .m4a + .mp3
+
+    def test_subset_all_lossless(self):
+        live = _build_live_db(self._fixture())
+        engine = FormatSwapEngine(live, "aiff")
+        ids = [c.id for c in engine._enumerate_by_subset({"subset_kind": "all_lossless"})]
+        assert set(ids) == {"3", "4", "5"}  # .flac + .aiff + .wav
+
+    def test_subset_by_file_type_m4a(self):
+        live = _build_live_db(self._fixture())
+        engine = FormatSwapEngine(live, "aiff")
+        ids = [
+            c.id
+            for c in engine._enumerate_by_subset(
+                {"subset_kind": "by_file_type", "file_type": FILE_TYPE_M4A}
+            )
+        ]
+        assert ids == ["1"]
+
+    def test_subset_ranked(self):
+        live = _build_live_db(self._fixture())
+        engine = FormatSwapEngine(live, "aiff")
+        ids = [c.id for c in engine._enumerate_by_subset({"subset_kind": "ranked"})]
+        assert set(ids) == {"2", "4", "5"}
+
+    def test_subset_unranked(self):
+        live = _build_live_db(self._fixture())
+        engine = FormatSwapEngine(live, "aiff")
+        ids = [c.id for c in engine._enumerate_by_subset({"subset_kind": "unranked"})]
+        assert set(ids) == {"1", "3"}
+
+    def test_subset_by_color(self):
+        live = _build_live_db(self._fixture())
+        engine = FormatSwapEngine(live, "aiff")
+        ids = [
+            c.id for c in engine._enumerate_by_subset({"subset_kind": "by_color", "color_id": 1})
+        ]
+        assert ids == ["2"]
+
+    def test_subset_uncolored(self):
+        live = _build_live_db(self._fixture())
+        engine = FormatSwapEngine(live, "aiff")
+        ids = [c.id for c in engine._enumerate_by_subset({"subset_kind": "uncolored"})]
+        assert set(ids) == {"1", "4"}
+
+    def test_subset_by_mytag(self):
+        # tag-id 99 is on tracks 2 + 4
+        mapping = {"2": ["99"], "3": ["7"], "4": ["99", "12"]}
+        live = _build_live_db(self._fixture(), track_to_tag_ids=mapping)
+        engine = FormatSwapEngine(live, "aiff")
+        ids = [c.id for c in engine._enumerate_by_subset({"subset_kind": "by_mytag", "tag_id": 99})]
+        assert set(ids) == {"2", "4"}
+
+
+class TestAllM4aBackwardCompat:
+    def test_all_m4a_matches_by_file_type_4(self):
+        contents = [
+            _make_content("1", folder_path="/m/a.m4a", file_type=4),
+            _make_content("2", folder_path="/m/b.mp3", file_type=1),
+            _make_content("3", folder_path="/m/c.m4a", file_type=4),
+        ]
+        live = _build_live_db(contents)
+        engine = FormatSwapEngine(live, "aiff")
+        legacy = engine.enumerate_scope({"kind": "all_m4a"})
+        new = engine.enumerate_scope(
+            {
+                "kind": "library_subset",
+                "subset_kind": "by_file_type",
+                "file_type": FILE_TYPE_M4A,
+            }
+        )
+        assert [c.id for c in legacy] == [c.id for c in new] == ["1", "3"]
+
+
+class TestLibrarySubsetMissingRequiredParam:
+    def test_by_color_without_color_id(self):
+        engine = FormatSwapEngine(_build_live_db([]), "aiff")
+        with pytest.raises(ValueError, match="color_id"):
+            engine.enumerate_scope({"kind": "library_subset", "subset_kind": "by_color"})
+
+    def test_by_mytag_without_tag_id(self):
+        engine = FormatSwapEngine(_build_live_db([]), "aiff")
+        with pytest.raises(ValueError, match="tag_id"):
+            engine.enumerate_scope({"kind": "library_subset", "subset_kind": "by_mytag"})
+
+    def test_by_file_type_without_file_type(self):
+        engine = FormatSwapEngine(_build_live_db([]), "aiff")
+        with pytest.raises(ValueError, match="file_type"):
+            engine.enumerate_scope({"kind": "library_subset", "subset_kind": "by_file_type"})
+
+    def test_library_subset_without_subset_kind(self):
+        engine = FormatSwapEngine(_build_live_db([]), "aiff")
+        with pytest.raises(ValueError, match="subset_kind"):
+            engine.enumerate_scope({"kind": "library_subset"})
+
+    def test_unknown_subset_kind_raises(self):
+        engine = FormatSwapEngine(_build_live_db([]), "aiff")
+        with pytest.raises(ValueError, match="subset_kind"):
+            engine.enumerate_scope({"kind": "library_subset", "subset_kind": "nonsense"})
