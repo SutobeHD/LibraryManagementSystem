@@ -13,6 +13,11 @@ Broad permission to act locally. `.claude/settings.json` allowlist reflects this
 - `gh pr/issue view`, `gh pr list`, `gh run list` — read-only GitHub queries.
 - **Advance research-pipeline docs in a work-state** (draft / explore / plan / implement) — follow the stage logic in `docs/research/routines/`. Stop at every `*gate_` — those are user-only. Run `/pipeline` to see state.
 
+## Branch & scope discipline — confirm at task start
+
+- Confirm the target branch before non-trivial work — feature branch vs directly on `main` is the user's call; don't assume. Don't commit feature code where the user didn't intend.
+- **"Scan / review / check first" = produce the review, implement NOTHING** until an explicit go-ahead. Recurring friction: don't jump straight to edits when asked to look.
+
 ## Streamlining bias — default ON
 
 Repo culture is **maximum AI autonomy + minimum manual steps**. When you spot a recurring manual ritual (state moves, doc syncs, lifecycle bookkeeping, multi-step PR flow), propose automating it — slash-command, hook, routine, or marker-driven worker. Don't ask "may I automate this?" — show the diff and let the user decline. Defaults favor scripted over hand-typed, marker-driven over per-prompt instruction, idempotent re-runs over one-shot artisan work.
@@ -20,6 +25,7 @@ Repo culture is **maximum AI autonomy + minimum manual steps**. When you spot a 
 ## Confirm first
 
 - `git push --force` (never to `main`). Plain `git push` is auto-fired by hook — see `commit-and-git.md`.
+- Plain `git pull` / `git pull origin` (non-ff). `git pull --ff-only` is auto-allowed; a non-ff pull rewrites local history on a drifted base → needs sign-off.
 - `git reset --hard`, `git clean -fd`, branch deletion, history rewrites.
 - `gh pr create/merge/close`, `gh issue close`.
 - `npm/pip/cargo` install of new dep — security decision.

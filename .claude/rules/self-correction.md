@@ -26,7 +26,7 @@ Not the entire suite unless cross-cutting.
 
 **Fallback:** `npm run dev:full` + manual verify.
 
-**Type-check passing ≠ feature working.** If you can't launch a browser, say so explicitly.
+**Type-check passing ≠ feature working.** Either produce real proof (screenshot + console check via `e2e-tester`) or state plainly you could not visually verify — never imply a UI change works off a green type-check alone. If the user needs to see it, hand a paste-ready `cd <worktree-path> && npm run dev:full` rather than waiting to be asked.
 
 ## 4. FILE_MAP / index docs
 
