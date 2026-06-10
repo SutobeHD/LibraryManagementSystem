@@ -83,7 +83,7 @@ git commit -m "<subject>"        # HEREDOC for multi-line body
 git log -1 --oneline             # verify
 ```
 
-Multi-line body: HEREDOC with `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>` trailer.
+Multi-line body: HEREDOC with `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>` trailer.
 
 ### Anti-patterns
 

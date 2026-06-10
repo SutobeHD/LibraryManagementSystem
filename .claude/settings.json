@@ -147,7 +147,6 @@
     ],
     "ask": [
       "Bash(git merge*)",
-      "Bash(git rebase -i*)",
       "Bash(git rebase main*)",
       "Bash(git rebase origin/*)",
       "Bash(git cherry-pick*)",
