@@ -113,9 +113,9 @@ const buildWorkspaces = (libraryStatus) => [
     id: 'soundcloud',
     label: 'SoundCloud',
     items: [
-      { tab: 'soundcloud', label: 'SoundCloud', icon: Cloud },
+      { tab: 'soundcloud', label: 'Download', icon: Cloud },
       { tab: 'sc-sync', label: 'Library', icon: Library },
-      { tab: 'downloads', label: 'Downloads', icon: Download },
+      { tab: 'downloads', label: 'DownloadManager', icon: Download },
     ],
   },
   {
