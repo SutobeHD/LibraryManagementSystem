@@ -118,7 +118,12 @@ def test_stream_non_latin1_filename(sandbox_root: Path) -> None:
     full = _get(url)
     assert full.status_code == 200, full.text
     assert "filename*=utf-8''" in full.headers["content-disposition"]
+    # The actual response header — not just the helper — must survive the ASGI
+    # latin-1 header encoding that originally raised UnicodeEncodeError → 500.
+    full.headers["content-disposition"].encode("latin-1")
 
     ranged = _get(url, headers={"Range": "bytes=0-15"})
     assert ranged.status_code == 206, ranged.text
     assert "filename*=utf-8''" in ranged.headers["content-disposition"]
+    # Ranged path is the dominant one (browser audio seeking) — same invariant.
+    ranged.headers["content-disposition"].encode("latin-1")
