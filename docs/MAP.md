@@ -207,7 +207,7 @@
 | `tests/test_analysis.py` | Regression tests for the analysis pipeline. |
 | `tests/test_analysis_db_writer.py` | Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.db. |
 | `tests/test_anlz_cue_patch.py` | Round-trip tests for app/anlz_cue_patch.py. |
-| `tests/test_anlz_reference_parse.py` | Validate produced ANLZ files against an INDEPENDENT reference parser. |
+| `tests/test_anlz_reference_parse.py` | Validate the produced ANLZ files (.DAT/.EXT/.2EX). |
 | `tests/test_auth.py` | Tests for ``app/auth.py`` -- Bearer-token session authentication. |
 | `tests/test_compare_rekordbox.py` | Unit tests for the pure comparison helpers in scripts/compare_rekordbox.py. |
 | `tests/test_database.py` | Tests for `app/database.py`. |

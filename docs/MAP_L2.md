@@ -1758,8 +1758,9 @@ Round-trip tests for app/anlz_cue_patch.py.
 
 ### `tests/test_anlz_reference_parse.py`
 
-Validate produced ANLZ files against an INDEPENDENT reference parser.
+Validate the produced ANLZ files (.DAT/.EXT/.2EX).
 
+- `test_produced_anlz_structure()` — Byte-level structural validation — runs in CI (librosa only, no pyrekordbox).
 - `test_produced_anlz_parses_with_reference_parser()`
 
 ### `tests/test_auth.py`
