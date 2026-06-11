@@ -1,26 +1,26 @@
-"""Validate produced ANLZ files against an INDEPENDENT reference parser.
+"""Validate the produced ANLZ files (.DAT/.EXT/.2EX).
 
-`write_anlz_files` output (.DAT/.EXT/.2EX) is parsed back with
-`pyrekordbox.AnlzFile` — a pure-Python implementation of the Deep-Symmetry
-ANLZ spec by a different author. If our byte layout drifts from the format
-(as the PCPT cue-entry constants once did), this parser raises and the test
-fails. Catches cue/waveform/beatgrid format regressions automatically.
-
-Skips unless both the heavy analysis stack (librosa) and pyrekordbox are
-installed — i.e. it runs locally / in any env with the audio deps, and is a
-no-op on minimal CI runners.
+Two layers:
+  * test_produced_anlz_structure — pure byte tag-walk (PMAI header, every tag's
+    length sane, len_file == file size, expected tag set per file). Needs only
+    librosa, so it runs in CI and catches structural/length regressions.
+  * test_produced_anlz_parses_with_reference_parser — parses with the INDEPENDENT
+    `pyrekordbox.AnlzFile` (pure-Python Deep-Symmetry impl by another author),
+    which also checks the spec CONSTANTS (it caught the PCPT cue-const drift).
+    Needs pyrekordbox, so it runs locally / in the analysis-accuracy-watchdog
+    routine and skips on minimal CI.
 """
 
 from __future__ import annotations
 
 import os
+import struct
 import sys
 import tempfile
 
 import pytest
 
 pytest.importorskip("librosa", reason="heavy audio stack not installed")
-pytest.importorskip("pyrekordbox", reason="reference ANLZ parser not installed")
 pytest.importorskip("soundfile", reason="soundfile not installed")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -30,6 +30,33 @@ import numpy as np  # noqa: E402
 import soundfile as sf  # noqa: E402
 
 SR = 44100
+
+# Tag sets the writer documents per file (anlz_writer module docstring).
+_EXPECTED_TAGS = {
+    "dat": {"PPTH", "PVBR", "PQTZ", "PWAV", "PWV2", "PCOB"},
+    "ext": {"PPTH", "PWV3", "PCOB", "PCO2", "PQT2", "PWV5", "PWV4"},
+    "2ex": {"PPTH", "PWV7", "PWV6", "PWVC"},
+}
+
+
+def _walk_tags(path: str) -> list[tuple[str, int, int]]:
+    """Independent ANLZ tag walk → [(fourcc, len_header, len_tag)]. Asserts the
+    PMAI root + that len_file matches the actual size and no tag length loops."""
+    data = open(path, "rb").read()  # noqa: SIM115
+    assert data[:4] == b"PMAI", f"{path}: bad root magic {data[:4]!r}"
+    len_header = struct.unpack(">I", data[4:8])[0]
+    len_file = struct.unpack(">I", data[8:12])[0]
+    assert len_file == len(data), f"{path}: len_file {len_file} != actual {len(data)}"
+    tags: list[tuple[str, int, int]] = []
+    pos = len_header
+    while pos + 12 <= len(data):
+        fourcc = data[pos : pos + 4].decode("ascii", "replace")
+        lh = struct.unpack(">I", data[pos + 4 : pos + 8])[0]
+        lt = struct.unpack(">I", data[pos + 8 : pos + 12])[0]
+        assert lt > 0, f"{path}: tag {fourcc} has non-positive total_len {lt} (parser would loop)"
+        tags.append((fourcc, lh, lt))
+        pos += lt
+    return tags
 
 
 def _energy_track(bpm: float = 128.0, dur: float = 60.0) -> np.ndarray:
@@ -59,7 +86,34 @@ def _energy_track(bpm: float = 128.0, dur: float = 60.0) -> np.ndarray:
     return (y * 0.9).astype(np.float32)
 
 
+def test_produced_anlz_structure():
+    """Byte-level structural validation — runs in CI (librosa only, no pyrekordbox)."""
+    from app.analysis_engine import run_full_analysis
+    from app.anlz_writer import write_anlz_files
+
+    fd, wav = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
+    out = tempfile.mkdtemp()
+    try:
+        sf.write(wav, _energy_track(), SR)
+        res = run_full_analysis(wav, use_cache=False)
+        assert res["status"] == "ok"
+        paths = write_anlz_files(out, wav, res)
+        for kind, expected in _EXPECTED_TAGS.items():
+            assert kind in paths, f"missing {kind}"
+            tags = _walk_tags(paths[kind])
+            present = {fourcc for fourcc, _, _ in tags}
+            missing = expected - present
+            assert not missing, f"{kind}: missing tags {missing} (have {present})"
+    finally:
+        os.unlink(wav)
+        import shutil
+
+        shutil.rmtree(out, ignore_errors=True)
+
+
 def test_produced_anlz_parses_with_reference_parser():
+    pytest.importorskip("pyrekordbox", reason="reference ANLZ parser not installed")
     from pyrekordbox import AnlzFile
 
     from app.analysis_engine import run_full_analysis
