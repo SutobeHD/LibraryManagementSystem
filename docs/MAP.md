@@ -75,6 +75,9 @@
 | `frontend/src/api/api.js` | ─── EC2: Runtime detection of Tauri context ─────────────────────────────────── |
 | `frontend/src/audio/AudioRegion.js` | AudioRegion - Core data structure for non-destructive audio editing Each region represents a reference to a p… |
 | `frontend/src/audio/DawEngine.js` | DawEngine — Web Audio API Playback Engine Manages AudioContext lifecycle, audio loading, and region-based pla… |
+| `frontend/src/audio/DawState.js` | DawState — Central state management for the DJ Edit DAW. |
+| `frontend/src/audio/RbepSerializer.js` | RbepSerializer — .rbep XML Parser/Serializer Handles the critical Beat ↔ Seconds conversion for Rekordbox Edi… |
+| `frontend/src/audio/TimelineState.js` | TimelineState - State management for the non-destructive audio editor Manages all timeline state including re… |
 | `frontend/src/audio/dawState/cues.js` | cuesReducer — hot cues, memory cues, and loops. |
 | `frontend/src/audio/dawState/dawReducer.test.js` | Tests for the composed dawReducer (DawState.js barrel) — Phase 4B split. |
 | `frontend/src/audio/dawState/helpers.js` | DawState helpers — pure utilities and the initial-state factory. |
@@ -82,9 +85,6 @@
 | `frontend/src/audio/dawState/regions.js` | regionsReducer — region create / split / move / delete / resize / clipboard. |
 | `frontend/src/audio/dawState/selection.js` | selectionReducer — region selection set and time-range selection. |
 | `frontend/src/audio/dawState/transport.js` | transportReducer — playhead, BPM, zoom/scroll, snap-grid, edit-mode, project metadata, and audio-source actio… |
-| `frontend/src/audio/DawState.js` | DawState — Central state management for the DJ Edit DAW. |
-| `frontend/src/audio/RbepSerializer.js` | RbepSerializer — .rbep XML Parser/Serializer Handles the critical Beat ↔ Seconds conversion for Rekordbox Edi… |
-| `frontend/src/audio/TimelineState.js` | TimelineState - State management for the non-destructive audio editor Manages all timeline state including re… |
 | `frontend/src/components/daw/timeline/useTimelineEvents.js` | useTimelineEvents — Event-handler layer for DawTimeline Owns: - Hit-testing for cue flags (hot + memory) - Mo… |
 | `frontend/src/components/daw/timeline/useTimelineLayout.js` | useTimelineLayout — Layout / sizing layer for DawTimeline Owns: - ResizeObserver subscription on the containe… |
 | `frontend/src/components/daw/timeline/useTimelineRender.js` | useTimelineRender — Rendering layer for DawTimeline Owns: - State-sync effect (React state → mutable ds.curre… |
@@ -105,33 +105,16 @@
 | `frontend/src/components/waveform/useEditPersistence.js` | localStorage auto-save + restore for per-track edits (cuts + hot cues). |
 | `frontend/src/components/waveform/useMultibandLayers.js` | Owns the slave WaveSurfer instances that render the LOW/MID/HIGH bands, plus the RAF sync |
 | `frontend/src/components/waveform/useVisualPreview.js` | Debounced non-destructive preview rebuild — whenever cuts change, splice the AudioBuffer |
-| `frontend/src/components/waveform/useWaveformInteractions.js` | Imperative editing + hotkey wiring extracted from WaveformEditor. |
 | `frontend/src/components/waveform/useWaveSurfer.js` | Owns the master WaveSurfer + Overview lifecycle: |
+| `frontend/src/components/waveform/useWaveformInteractions.js` | Imperative editing + hotkey wiring extracted from WaveformEditor. |
 | `frontend/src/config/constants.js` | Frontend-wide constants. |
 | `frontend/src/store/authStore.js` | Tiny module-level auth state shared across the frontend. |
 | `frontend/src/utils/AudioBandAnalyzer.js` | AudioBandAnalyzer Splits an AudioBuffer into 3 frequency bands (Rekordbox-style): - Low: < 400 Hz (Bass / Kic… |
 | `frontend/src/utils/log.js` | Dev-only logging utility. |
 | `frontend/src/components/BatchEditBar.jsx` | *(no module docstring)* |
 | `frontend/src/components/ConfirmModal.jsx` | Module-level subscriber registry so a single mounted <ConfirmModalRoot /> |
-| `frontend/src/components/daw/DawBrowser.jsx` | DawBrowser — Left panel file/library browser for the DJ Edit DAW Lists tracks from the library and recent .rb… |
-| `frontend/src/components/daw/DawControlStrip.jsx` | DawControlStrip — Unified control bar below the timeline Layout: [Transport] | [Edit Tools] | [Hot Cues + Loo… |
-| `frontend/src/components/daw/DawLayout.jsx` | DawLayout — Slot-style layout shell for the DJ Edit DAW. |
-| `frontend/src/components/daw/DawScrollbar.jsx` | DawScrollbar — Horizontal scrollbar synchronized with the timeline Critical: avoids the feedback loop where p… |
-| `frontend/src/components/daw/DawTimeline.jsx` | DawTimeline — Layered Canvas Timeline with Path2D Smooth Waveform Architecture: 3 conceptual layers rendered … |
-| `frontend/src/components/daw/DawToolbar.jsx` | DawToolbar — Top toolbar for the DJ Edit DAW Displays: Project name, save/open/export buttons, editing tools,… |
-| `frontend/src/components/daw/DjEditDaw.jsx` | DjEditDaw — Root container for the DJ Edit DAW. |
-| `frontend/src/components/daw/ExportModal.jsx` | ExportModal — Project Export UI Features: - Reads the user's default export folder from /api/settings (Settin… |
-| `frontend/src/components/daw/WaveformOverview.jsx` | WaveformOverview — Full-track mini-map with draggable viewport window Renders a downsampled mono/3-band wavef… |
 | `frontend/src/components/DownloadManagerView.jsx` | Stage pipeline (in execution order) — covers BOTH SC-DL and local-import |
 | `frontend/src/components/DuplicateView.jsx` | DuplicateView — Acoustic Duplicate Finder & Merge UI Left panel: list of duplicate groups with similarity bad… |
-| `frontend/src/components/editor/EditorBrowser.jsx` | Ensure we have an array |
-| `frontend/src/components/editor/EditorToolbar.jsx` | EditorToolbar - Top toolbar + edit toolbar for NonDestructiveEditor. |
-| `frontend/src/components/editor/EnvelopeOverlay.jsx` | EnvelopeOverlay - Interactive envelope editor for audio regions Provides draggable nodes for: - Fade-in durat… |
-| `frontend/src/components/editor/NonDestructiveEditor.jsx` | NonDestructiveEditor - Main component for the non-destructive audio editor Slim container: owns TimelineState… |
-| `frontend/src/components/editor/Palette.jsx` | Palette - Drag & Drop clipboard for audio regions A side panel with slots for storing region copies. |
-| `frontend/src/components/editor/RegionBlock.jsx` | RegionBlock - Visual representation of an audio region on the timeline Displays the waveform, envelope overla… |
-| `frontend/src/components/editor/TimelineCanvas.jsx` | TimelineCanvas - Main editing canvas for the non-destructive audio editor Features: - Zoomable timeline with … |
-| `frontend/src/components/format-swap/ScopeBucketPicker.jsx` | ScopeBucketPicker — 4-bucket scope chooser for the Format Converter. |
 | `frontend/src/components/FormatConverterView.jsx` | FormatConverterView — Library-wide audio format converter UI. |
 | `frontend/src/components/ImportProgressBanner.jsx` | Sticky progress banner — visible on every screen while local-file or SoundCloud imports are running. |
 | `frontend/src/components/ImportView.jsx` | Recursively walk a DataTransferItemList, returning every File inside any dropped folder. |
@@ -147,6 +130,36 @@
 | `frontend/src/components/PromptModal.jsx` | Module-level subscriber registry so a single mounted <PromptModalRoot /> |
 | `frontend/src/components/RankingView.jsx` | Backend returns 'Children' (uppercase) |
 | `frontend/src/components/RenameModal.jsx` | *(no module docstring)* |
+| `frontend/src/components/SettingsView.jsx` | SettingsView — Tabbed preferences panel (container). |
+| `frontend/src/components/SmartPlaylistEditor.jsx` | *(no module docstring)* |
+| `frontend/src/components/SoundCloudProgressModal.jsx` | Listen to progress events from Rust |
+| `frontend/src/components/SoundCloudSyncView.jsx` | *(no module docstring)* |
+| `frontend/src/components/SoundCloudView.jsx` | PRIVACY: do not hold the actual OAuth token in React state — the real |
+| `frontend/src/components/ToastContext.jsx` | *(no module docstring)* |
+| `frontend/src/components/ToolsView.jsx` | Mirror of LibraryTools.smart_rename's token substitution + sanitisation, |
+| `frontend/src/components/TrackTable.jsx` | Camelot |
+| `frontend/src/components/UsbSettingsView.jsx` | UsbSettingsView — edit MYSETTING.DAT / MYSETTING2.DAT / DJMMYSETTING.DAT Per-stick CDJ + DJM hardware setting… |
+| `frontend/src/components/UsbView.jsx` | UsbView — Melodex-styled USB device manager (container). |
+| `frontend/src/components/UtilitiesView.jsx` | UtilitiesView — router for the Utilities workspace. |
+| `frontend/src/components/WaveformEditor.jsx` | *(no module docstring)* |
+| `frontend/src/components/XmlCleanView.jsx` | Using existing endpoint but improved backend logic |
+| `frontend/src/components/daw/DawBrowser.jsx` | DawBrowser — Left panel file/library browser for the DJ Edit DAW Lists tracks from the library and recent .rb… |
+| `frontend/src/components/daw/DawControlStrip.jsx` | DawControlStrip — Unified control bar below the timeline Layout: [Transport] | [Edit Tools] | [Hot Cues + Loo… |
+| `frontend/src/components/daw/DawLayout.jsx` | DawLayout — Slot-style layout shell for the DJ Edit DAW. |
+| `frontend/src/components/daw/DawScrollbar.jsx` | DawScrollbar — Horizontal scrollbar synchronized with the timeline Critical: avoids the feedback loop where p… |
+| `frontend/src/components/daw/DawTimeline.jsx` | DawTimeline — Layered Canvas Timeline with Path2D Smooth Waveform Architecture: 3 conceptual layers rendered … |
+| `frontend/src/components/daw/DawToolbar.jsx` | DawToolbar — Top toolbar for the DJ Edit DAW Displays: Project name, save/open/export buttons, editing tools,… |
+| `frontend/src/components/daw/DjEditDaw.jsx` | DjEditDaw — Root container for the DJ Edit DAW. |
+| `frontend/src/components/daw/ExportModal.jsx` | ExportModal — Project Export UI Features: - Reads the user's default export folder from /api/settings (Settin… |
+| `frontend/src/components/daw/WaveformOverview.jsx` | WaveformOverview — Full-track mini-map with draggable viewport window Renders a downsampled mono/3-band wavef… |
+| `frontend/src/components/editor/EditorBrowser.jsx` | Ensure we have an array |
+| `frontend/src/components/editor/EditorToolbar.jsx` | EditorToolbar - Top toolbar + edit toolbar for NonDestructiveEditor. |
+| `frontend/src/components/editor/EnvelopeOverlay.jsx` | EnvelopeOverlay - Interactive envelope editor for audio regions Provides draggable nodes for: - Fade-in durat… |
+| `frontend/src/components/editor/NonDestructiveEditor.jsx` | NonDestructiveEditor - Main component for the non-destructive audio editor Slim container: owns TimelineState… |
+| `frontend/src/components/editor/Palette.jsx` | Palette - Drag & Drop clipboard for audio regions A side panel with slots for storing region copies. |
+| `frontend/src/components/editor/RegionBlock.jsx` | RegionBlock - Visual representation of an audio region on the timeline Displays the waveform, envelope overla… |
+| `frontend/src/components/editor/TimelineCanvas.jsx` | TimelineCanvas - Main editing canvas for the non-destructive audio editor Features: - Zoomable timeline with … |
+| `frontend/src/components/format-swap/ScopeBucketPicker.jsx` | ScopeBucketPicker — 4-bucket scope chooser for the Format Converter. |
 | `frontend/src/components/settings/SettingsAnalysis.jsx` | SettingsAnalysis — Quality preset, ranking filter, library insight thresholds. |
 | `frontend/src/components/settings/SettingsAppearance.jsx` | SettingsAppearance — Waveform band colours, locale picker. |
 | `frontend/src/components/settings/SettingsAudio.jsx` | SettingsAudio — CPAL output device picker (Tauri-only enumeration). |
@@ -156,15 +169,7 @@
 | `frontend/src/components/settings/SettingsNetwork.jsx` | SettingsNetwork — HTTP proxy, SoundCloud sync target, backend restart. |
 | `frontend/src/components/settings/SettingsShortcuts.jsx` | SettingsShortcuts — Configurable DAW keyboard shortcut bindings. |
 | `frontend/src/components/settings/SettingsUsb.jsx` | SettingsUsb — Per-stick USB profile CRUD (label, type, audio format). |
-| `frontend/src/components/SettingsView.jsx` | SettingsView — Tabbed preferences panel (container). |
 | `frontend/src/components/shared/WaveformMiniCanvas.jsx` | WaveformMiniCanvas — Reusable lightweight canvas waveform renderer Shared across WaveformOverview (DAW mini-m… |
-| `frontend/src/components/SmartPlaylistEditor.jsx` | *(no module docstring)* |
-| `frontend/src/components/SoundCloudProgressModal.jsx` | Listen to progress events from Rust |
-| `frontend/src/components/SoundCloudSyncView.jsx` | *(no module docstring)* |
-| `frontend/src/components/SoundCloudView.jsx` | PRIVACY: do not hold the actual OAuth token in React state — the real |
-| `frontend/src/components/ToastContext.jsx` | *(no module docstring)* |
-| `frontend/src/components/ToolsView.jsx` | Mirror of LibraryTools.smart_rename's token substitution + sanitisation, |
-| `frontend/src/components/TrackTable.jsx` | Camelot |
 | `frontend/src/components/usb/MetadataSyncPanel.jsx` | MetadataSyncPanel — collapsible per-device metadata sync controls. |
 | `frontend/src/components/usb/PlayCountSync.jsx` | PlayCountSync — collapsible section inside UsbView. |
 | `frontend/src/components/usb/UsbControls.jsx` | UsbControls — shared helpers used across the USB sub-components. |
@@ -172,9 +177,6 @@
 | `frontend/src/components/usb/UsbFormatWizard.jsx` | UsbFormatWizard — destructive FAT32 / exFAT re-format modal. |
 | `frontend/src/components/usb/UsbProfileEditor.jsx` | UsbProfileEditor — playlist selection + USB-library contents browser. |
 | `frontend/src/components/usb/UsbSyncPanel.jsx` | UsbSyncPanel — the right-hand main pane. |
-| `frontend/src/components/UsbSettingsView.jsx` | UsbSettingsView — edit MYSETTING.DAT / MYSETTING2.DAT / DJMMYSETTING.DAT Per-stick CDJ + DJM hardware setting… |
-| `frontend/src/components/UsbView.jsx` | UsbView — Melodex-styled USB device manager (container). |
-| `frontend/src/components/UtilitiesView.jsx` | UtilitiesView — router for the Utilities workspace. |
 | `frontend/src/components/waveform/ConfirmModal.jsx` | Replaces native window.confirm with a themed dialog. |
 | `frontend/src/components/waveform/WaveformCanvas.jsx` | Canvas-based beatgrid renderer + WaveSurfer mount points (main + overview + 3-band layers). |
 | `frontend/src/components/waveform/WaveformControls.jsx` | Top toolbars — header, project select, hot-cue strip, transport, volume, viz toggle, |
@@ -182,8 +184,6 @@
 | `frontend/src/components/waveform/WaveformOverlays.jsx` | Renders cue markers, beat-selection region, cut/insert/delete regions, drop marker, and loop |
 | `frontend/src/components/waveform/WaveformSimpleView.jsx` | Stripped-down view used by RankingView (simpleMode=true) — only overview + main waveform + |
 | `frontend/src/components/waveform/WaveformZoom.jsx` | Floating zoom controls overlay — sits absolutely positioned over the detail container. |
-| `frontend/src/components/WaveformEditor.jsx` | *(no module docstring)* |
-| `frontend/src/components/XmlCleanView.jsx` | Using existing endpoint but improved backend logic |
 | `frontend/src/main.jsx` | SPEED: Lazy-load heavy views — only the active view is loaded into the bundle |
 
 ## src-tauri/src/ — Rust Desktop Wrapper

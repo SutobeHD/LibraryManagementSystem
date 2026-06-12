@@ -350,9 +350,14 @@ def _collect() -> dict[str, list[FileEntry]]:
         "scripts/ — Dev/Build Utilities": [],
     }
 
+    # Sort on the POSIX string, not Path objects — WindowsPath comparison is
+    # case-insensitive, so mixed-case names order differently than on Linux
+    # and the CI drift check fails on maps generated under Windows.
+    sort_key = Path.as_posix
+
     # Python
     for root in PYTHON_ROOTS:
-        for path in sorted((REPO_ROOT / root).rglob("*.py")):
+        for path in sorted((REPO_ROOT / root).rglob("*.py"), key=sort_key):
             if _skip(path):
                 continue
             entry = _parse_python(path)
@@ -365,7 +370,7 @@ def _collect() -> dict[str, list[FileEntry]]:
 
     # Rust
     for root in RUST_ROOTS:
-        for path in sorted((REPO_ROOT / root).rglob("*.rs")):
+        for path in sorted((REPO_ROOT / root).rglob("*.rs"), key=sort_key):
             if _skip(path):
                 continue
             out["src-tauri/src/ — Rust Desktop Wrapper"].append(_parse_rust(path))
@@ -373,7 +378,7 @@ def _collect() -> dict[str, list[FileEntry]]:
     # JS/JSX
     for root in JS_ROOTS:
         for ext in ("js", "jsx", "mjs", "cjs"):
-            for path in sorted((REPO_ROOT / root).rglob(f"*.{ext}")):
+            for path in sorted((REPO_ROOT / root).rglob(f"*.{ext}"), key=sort_key):
                 if _skip(path):
                     continue
                 out["frontend/src/ — React Frontend"].append(_parse_js(path))
