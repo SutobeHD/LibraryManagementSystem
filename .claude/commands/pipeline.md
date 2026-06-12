@@ -18,7 +18,7 @@ Show the current state of the multi-agent research pipeline.
 
 3. If an approval is open, add a one-line nudge below it:
    - "Approve: `/approve <slug>` · Reject: `/reject <slug> \"<reason>\"`"
-   - For open `routine/*` PRs: "Test the branch locally, then merge it yourself — routines never merge to `main`."
+   - For open `routine/*` PRs: "Test the branch locally, then merge (yourself, or tell me to — `gh pr merge`). The remote routines never merge to `main`."
 
 4. If nothing is open, say so in one line: "Pipeline idle — no approvals, no routine PRs waiting."
 

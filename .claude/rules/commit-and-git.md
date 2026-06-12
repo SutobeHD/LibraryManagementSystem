@@ -137,9 +137,9 @@ Every push must be revertable via future `git revert`. No public-history rewrite
 - Wrong commit → `git revert <sha>` → new commit → push. History grows, never shrinks.
 - Sequence to undo → revert in reverse order.
 
-### NOT covered by auto-push (still `ask`)
+### NOT auto-fired by the hook
 
-Tags (`git tag`), merges (`git merge`), cherry-pick, `gh pr create` — workflow decisions stay manual.
+The push hook only fires after `git commit`. Merges (`git merge`, `gh pr merge`), rebase, and cherry-pick are **allowed without a prompt on the user's explicit instruction** (see `agentic-mode.md` "Just do these") but the agent runs them deliberately — they are never triggered automatically. Tags (`git tag`) and `gh pr create` still prompt — workflow decisions stay manual.
 
 ---
 

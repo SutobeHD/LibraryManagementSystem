@@ -66,6 +66,10 @@
       "Bash(git rebase origin/main --exec *)",
       "Bash(git config user.email *)",
       "Bash(git config user.name *)",
+      "Bash(git merge*)",
+      "Bash(git rebase main*)",
+      "Bash(git rebase origin/*)",
+      "Bash(git cherry-pick*)",
 
       "Bash(gh pr view*)",
       "Bash(gh pr list*)",
@@ -79,6 +83,7 @@
       "Bash(gh repo view*)",
       "Bash(gh release list*)",
       "Bash(gh release view*)",
+      "Bash(gh pr merge*)",
 
       "Bash(ls*)",
       "Bash(pwd)",
@@ -146,10 +151,6 @@
       "Write(**/master.db)"
     ],
     "ask": [
-      "Bash(git merge*)",
-      "Bash(git rebase main*)",
-      "Bash(git rebase origin/*)",
-      "Bash(git cherry-pick*)",
       "Bash(git tag*)",
       "Bash(git pull)",
       "Bash(git pull origin*)",
@@ -159,7 +160,6 @@
       "Bash(cargo add*)",
       "Bash(cargo remove*)",
       "Bash(gh pr create*)",
-      "Bash(gh pr merge*)",
       "Bash(gh issue create*)"
     ]
   },

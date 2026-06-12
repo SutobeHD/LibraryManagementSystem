@@ -146,7 +146,7 @@ Defined in `.claude/commands/`:
 
 ## AI autonomy & remote routines — streamlining bias
 
-This repo runs a **multi-agent research pipeline**: **8 remote routines** (claude.ai/code) advance `docs/research/` docs autonomously while the user is afk. Daily routines trigger on a doc's **state** (folder + filename prefix); cross-cutting routines maintain pipeline health (idea generation, re-validation, conflict detection). Each routine spawns multiple specialist sub-agents in parallel; verification agents gate every stage. The user signs off **once** — at the single approval gate (`approvalgate_`: idea summary + mockup + change list) — then tests + merges the finished branch.
+This repo runs a **multi-agent research pipeline**: **8 remote routines** (claude.ai/code) advance `docs/research/` docs autonomously while the user is afk. Daily routines trigger on a doc's **state** (folder + filename prefix); cross-cutting routines maintain pipeline health (idea generation, re-validation, conflict detection). Each routine spawns multiple specialist sub-agents in parallel; verification agents gate every stage. The user signs off **once** — at the single approval gate (`approvalgate_`: idea summary + mockup + change list). The finished branch is then tested + merged — by the user, or by the interactive agent on the user's instruction (`gh pr merge` is autonomous for it; the **remote routines** never merge).
 
 ### Daily work-state routines
 
@@ -166,7 +166,7 @@ This repo runs a **multi-agent research pipeline**: **8 remote routines** (claud
 | `research-watchdog` | 1st-of-month 04:00 | 5 oldest unchecked `archived/implemented_*` | parallel probes (code refs / deps / external invariants / library health) → `## Lifecycle` line + follow-up proposals into Idea Backlog |
 | `research-cross-linker` | Tue 04:30 | all active docs | per-doc Extractors + Overlap-Analyser → `related:` frontmatter + `## Cross-links` block; CONFLICT notifications |
 
-`research-implement` may write code — bounded to `inprogress_` docs, `routine/*` branches, approval-gate-approved Task Queue items (no new research). It never merges/rebases to `main` — the user tests the branch + merges. `research-watchdog` and `research-cross-linker` write narrow doc edits only (Lifecycle lines / frontmatter / Cross-links block). `research-spawn` never creates `idea_*.md` — only proposals in the Idea Backlog issue (user authors the real Original Idea).
+`research-implement` may write code — bounded to `inprogress_` docs, `routine/*` branches, approval-gate-approved Task Queue items (no new research). It never merges/rebases to `main` — the user (or the interactive agent on request) tests the branch + merges. `research-watchdog` and `research-cross-linker` write narrow doc edits only (Lifecycle lines / frontmatter / Cross-links block). `research-spawn` never creates `idea_*.md` — only proposals in the Idea Backlog issue (user authors the real Original Idea).
 
 Full rules: `.claude/rules/research-pipeline.md` + `docs/research/README.md`. Routine prompts versioned in `docs/research/routines/`.
 
