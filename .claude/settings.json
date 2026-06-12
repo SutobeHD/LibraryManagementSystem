@@ -41,7 +41,7 @@
       "Bash(git show*)",
       "Bash(git branch*)",
       "Bash(git add *)",
-      "Bash(git restore *)",
+      "Bash(git restore --staged *)",
       "Bash(git stash*)",
       "Bash(git remote -v)",
       "Bash(git rev-parse*)",
