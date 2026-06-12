@@ -145,7 +145,7 @@ Defined in `.claude/commands/`:
 
 ## AI autonomy & remote routines — streamlining bias
 
-This repo runs a **multi-agent research pipeline**: **9 remote routines** (claude.ai/code) advance `docs/research/` docs autonomously while the user is afk. Daily routines trigger on a doc's **state** (folder + filename prefix); cross-cutting routines maintain pipeline health (idea generation, re-validation, conflict detection). Each routine spawns multiple specialist sub-agents in parallel; verification agents gate every stage. The user signs off **once** — at the single approval gate (`approvalgate_`: idea summary + mockup + change list) — then tests + merges the finished branch.
+This repo runs a **multi-agent research pipeline**: **11 remote routines** (claude.ai/code) advance `docs/research/` docs autonomously while the user is afk. Daily routines trigger on a doc's **state** (folder + filename prefix); cross-cutting routines maintain pipeline health (idea generation, re-validation, conflict detection). Each routine spawns multiple specialist sub-agents in parallel; verification agents gate every stage. The user signs off **once** — at the single approval gate (`approvalgate_`: idea summary + mockup + change list) — then tests + merges the finished branch.
 
 ### Daily work-state routines
 
@@ -165,6 +165,8 @@ This repo runs a **multi-agent research pipeline**: **9 remote routines** (claud
 | `research-watchdog` | 1st-of-month 04:00 | 5 oldest unchecked `archived/implemented_*` | parallel probes (code refs / deps / external invariants / library health) → `## Lifecycle` line + follow-up proposals into Idea Backlog |
 | `research-cross-linker` | Tue 04:30 | all active docs | per-doc Extractors + Overlap-Analyser → `related:` frontmatter + `## Cross-links` block; CONFLICT notifications |
 | `analysis-accuracy-watchdog` | Wed 04:30 | analysis stack (read-only) | full py3.10 native stack (madmom+essentia+rbox) → accuracy self-test vs baseline + produced-file validation → `Analysis Accuracy Watchdog` issue |
+| `analysis-explore` | Thu 06:00 | analysis `exploring_` docs | builds native stack, runs real before/after `selftest_analysis.py` experiments → measured evidence into the doc → `evaluated_` |
+| `analysis-implement` | Fri 03:00 | approved analysis Task-Queue items | native stack + self-test before/after gate (revert if no gain / band regression) → `routine/analysis-*` PR |
 
 `research-implement` may write code — bounded to `inprogress_` docs, `routine/*` branches, approval-gate-approved Task Queue items (no new research). It never merges/rebases to `main` — the user tests the branch + merges. `research-watchdog` and `research-cross-linker` write narrow doc edits only (Lifecycle lines / frontmatter / Cross-links block). `research-spawn` never creates `idea_*.md` — only proposals in the Idea Backlog issue (user authors the real Original Idea).
 

@@ -6,7 +6,7 @@ Files are never deleted — closed topics live in `archived/` forever as histori
 
 Doc style: **Caveman+** (fragments, bullets, no prose). Per-section **soft** word caps in `_TEMPLATE.md` (recommendations, not hard blocks). Full rule + bad/good example in `.claude/rules/research-pipeline.md`.
 
-**Multi-agent workflow.** **9 remote routines** advance docs autonomously: 5 daily work-state routines move docs forward through the pipeline; 4 cross-cutting routines feed new ideas (`research-spawn`), re-validate shipped features (`research-watchdog`), detect inter-doc conflicts (`research-cross-linker`), and guard analysis accuracy + produced-file formats (`analysis-accuracy-watchdog`). Routines trigger on a doc's **state** — no manual marker needed. Each routine spawns multiple sub-agents in parallel; specialist verifiers gate each stage. The user is asked **once** — a single sign-off gate (`approvalgate_`: idea summary + mockup + change list) — then again only to merge the finished branch. See "Stages", "The One Gate", "The 9 routines" below.
+**Multi-agent workflow.** **11 remote routines** advance docs autonomously: 5 daily work-state routines move docs forward through the pipeline; 6 cross-cutting routines feed new ideas (`research-spawn`), re-validate shipped features (`research-watchdog`), detect inter-doc conflicts (`research-cross-linker`), and guard analysis accuracy + produced-file formats (`analysis-accuracy-watchdog`). Routines trigger on a doc's **state** — no manual marker needed. Each routine spawns multiple sub-agents in parallel; specialist verifiers gate each stage. The user is asked **once** — a single sign-off gate (`approvalgate_`: idea summary + mockup + change list) — then again only to merge the finished branch. See "Stages", "The One Gate", "The 11 routines" below.
 
 ---
 
@@ -106,7 +106,7 @@ User runs `/approve <slug>` or `/reject <slug> "<reason>"`. After `/approve`, th
 
 ---
 
-## The 9 routines
+## The 11 routines
 
 Remote routines (claude.ai/code, cron in Berlin time). Each reads one trigger condition, spawns multiple sub-agents in parallel, early-exits if there is no work. Prompts versioned in `routines/` — deploy per `routines/README.md`.
 
@@ -128,6 +128,8 @@ Remote routines (claude.ai/code, cron in Berlin time). Each reads one trigger co
 | `research-watchdog` | 1st of month 04:00 | 5 oldest unchecked `archived/implemented_` | 5 parallel Probe-Agents | `## Lifecycle` line on each (OK / WARN / FLAG) + follow-up proposals into Idea Backlog issue |
 | `research-cross-linker` | Tuesdays 04:30 | all active docs in `research/` + `implement/` | per-doc Extractors + Overlap-Analyser | `related:` frontmatter + `## Cross-links (auto-managed)` block on overlapping docs; CONFLICT notification on Pipeline Digest |
 | `analysis-accuracy-watchdog` | Wednesdays 04:30 | analysis engine + produced Rekordbox file formats (read-only) | single session: full py3.10 native-stack venv (madmom RNN + essentia + rbox + pyrekordbox) | run `scripts/selftest_analysis.py` vs recorded baseline (BPM Acc-2 100 %, KEY 100 %) + produced-file pytest gates incl. the pyrekordbox reference-parser test CI skips → verdict comment on `Analysis Accuracy Watchdog` issue |
+| `analysis-explore` | Thursdays 06:00 | analysis-tagged `exploring_` docs | native-stack venv + Experiment-runner + Adversarial | measured before/after (`selftest_analysis.py`, fixed seeds, per-band) written into the doc → `evaluated_` (docs-only) |
+| `analysis-implement` | Fridays 03:00 | approved analysis Task-Queue items (`inprogress_`, `area: analysis`) | native-stack venv + audio-stack-reviewer | implements one task, self-test before/after gate (revert on no-gain/band-regression), PR on `routine/analysis-*` |
 
 Phase 1 vs phase 2: `research-explore` checks the doc — no `## Findings` yet → phase 1 (tiered per-OQ research); Findings present but no `## Research Verification` PASS → phase 2 (deepen + Adversarial + Citation + Research-Verifier + Options-Synthesis). **Both run without a user stop** (one long run, or split across cron runs); the Research-Verifier — not the user — decides when the doc reaches `evaluated_`.
 
