@@ -6,7 +6,21 @@ Files are never deleted — closed topics live in `archived/` forever as histori
 
 Doc style: **Caveman+** (fragments, bullets, no prose). Per-section **soft** word caps in `_TEMPLATE.md` (recommendations, not hard blocks). Full rule + bad/good example in `.claude/rules/research-pipeline.md`.
 
-**Multi-agent workflow.** **11 remote routines** advance docs autonomously: 5 daily work-state routines move docs forward through the pipeline; 6 cross-cutting routines feed new ideas (`research-spawn`), re-validate shipped features (`research-watchdog`), detect inter-doc conflicts (`research-cross-linker`), and guard analysis accuracy + produced-file formats (`analysis-accuracy-watchdog`). Routines trigger on a doc's **state** — no manual marker needed. Each routine spawns multiple sub-agents in parallel; specialist verifiers gate each stage. The user is asked **once** — a single sign-off gate (`approvalgate_`: idea summary + mockup + change list) — then again only to merge the finished branch. See "Stages", "The One Gate", "The 11 routines" below.
+**Multi-agent workflow.** **12 remote routines** advance docs autonomously: 5 daily work-state routines move docs forward through the pipeline; 7 cross-cutting routines feed new ideas (`research-spawn`, now an aggressive opportunity scanner), re-validate shipped features (`research-watchdog`), detect inter-doc conflicts (`research-cross-linker`), guard analysis accuracy (`analysis-accuracy-watchdog` + `analysis-explore` + `analysis-implement`), and continuously audit correctness + test coverage (`verification-sweep`). Routines trigger on a doc's **state** — no manual marker needed. Each routine spawns multiple sub-agents in parallel; specialist verifiers gate each stage. The user is asked **once** — a single sign-off gate (`approvalgate_`: idea summary + mockup + change list) — then again only to merge the finished branch. See "Stages", "The One Gate", "The 12 routines" below.
+
+---
+
+## Routine Effectiveness Standard (the Charter)
+
+**Every routine reads and obeys this section at the start of its run.** It exists because routines were finding too little and verifying too little. Two non-negotiable habits:
+
+**FIND aggressively — before any early-exit, actively look for work.** A routine must never end with "nothing to do" until it has genuinely scanned its domain for *anything an AI could still take further*: half-finished features (stubs, `pass`-only bodies, `NotImplementedError`, "TODO: implement", disabled/commented code), thin or missing tests, undocumented behaviour, doc↔code drift, unhandled error paths, obvious UX/polish gaps, dead code, and anything a `## Original Idea` or plan started but didn't finish. "Could this be elaborated further?" is the default question. Surface findings as proposals/notes — never silently drop them.
+
+**VERIFY hard — every output must be checked, not assumed.** A routine that produces anything (doc claim, code, proposal) verifies it before declaring done: do the cited files/symbols still exist? do the tests it relies on **actually run and pass** (run them, don't trust the name)? do those tests **assert something meaningful** (not just "imports without error")? does the produced artifact validate against its spec/reference? A claim with no verification step behind it is a defect, not a deliverable.
+
+**Plus:** dedupe rigorously (never re-surface what is already in-flight or done), prioritise (P0…P3), and early-exit **honestly** only after the FIND scan genuinely came up empty.
+
+**The one boundary:** routines **research, explore, verify, and report freely**, but **implementation (writing merged code) stays behind the single approval gate** — only `research-implement` / `analysis-implement` write code, only for user-approved Task-Queue items, only on `routine/*` branches, never to `main`. Finding and verifying is automatic; shipping is the user's call.
 
 ---
 
@@ -106,7 +120,7 @@ User runs `/approve <slug>` or `/reject <slug> "<reason>"`. After `/approve`, th
 
 ---
 
-## The 11 routines
+## The 12 routines
 
 Remote routines (claude.ai/code, cron in Berlin time). Each reads one trigger condition, spawns multiple sub-agents in parallel, early-exits if there is no work. Prompts versioned in `routines/` — deploy per `routines/README.md`.
 
@@ -124,12 +138,13 @@ Remote routines (claude.ai/code, cron in Berlin time). Each reads one trigger co
 
 | Routine | Cron | Reads | Sub-agents | Output |
 |---|---|---|---|---|
-| `research-spawn` | Sundays 05:00 | TODO/FIXME, CHANGELOG, GH issues, MAP smells, dep majors (read-only) | 5 parallel scouts + Synthesiser | GitHub Issue "Idea Backlog": prioritised idea proposals. User authors `## Original Idea`. |
 | `research-watchdog` | 1st of month 04:00 | 5 oldest unchecked `archived/implemented_` | 5 parallel Probe-Agents | `## Lifecycle` line on each (OK / WARN / FLAG) + follow-up proposals into Idea Backlog issue |
 | `research-cross-linker` | Tuesdays 04:30 | all active docs in `research/` + `implement/` | per-doc Extractors + Overlap-Analyser | `related:` frontmatter + `## Cross-links (auto-managed)` block on overlapping docs; CONFLICT notification on Pipeline Digest |
 | `analysis-accuracy-watchdog` | Wednesdays 04:30 | analysis engine + produced Rekordbox file formats (read-only) | single session: full py3.10 native-stack venv (madmom RNN + essentia + rbox + pyrekordbox) | run `scripts/selftest_analysis.py` vs recorded baseline (BPM Acc-2 100 %, KEY 100 %) + produced-file pytest gates incl. the pyrekordbox reference-parser test CI skips → verdict comment on `Analysis Accuracy Watchdog` issue |
 | `analysis-explore` | Thursdays 06:00 | analysis-tagged `exploring_` docs | native-stack venv + Experiment-runner + Adversarial | measured before/after (`selftest_analysis.py`, fixed seeds, per-band) written into the doc → `evaluated_` (docs-only) |
 | `analysis-implement` | Fridays 03:00 | approved analysis Task-Queue items (`inprogress_`, `area: analysis`) | native-stack venv + audio-stack-reviewer | implements one task, self-test before/after gate (revert on no-gain/band-regression), PR on `routine/analysis-*` |
+| `research-spawn` | Sundays + Wednesdays 04:00 | whole repo (read-only) | 7 parallel scouts (TODO · CHANGELOG · issues · MAP-smells · deps · **incomplete/stub** · **test-gap/elaboration**) + Synthesiser | `Idea Backlog` issue: prioritised proposals (the Charter's "find more" engine) |
+| `verification-sweep` | Mondays + Thursdays 05:00 | whole repo (read-only) | parallel: run-the-suite · coverage-gap · weak-test · drift · debt-trend + Synthesiser | `Verification Sweep` issue: real suite run + where correctness/tests are thin (the Charter's "verify more" engine) |
 
 Phase 1 vs phase 2: `research-explore` checks the doc — no `## Findings` yet → phase 1 (tiered per-OQ research); Findings present but no `## Research Verification` PASS → phase 2 (deepen + Adversarial + Citation + Research-Verifier + Options-Synthesis). **Both run without a user stop** (one long run, or split across cron runs); the Research-Verifier — not the user — decides when the doc reaches `evaluated_`.
 
