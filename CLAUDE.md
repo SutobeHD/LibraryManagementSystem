@@ -97,6 +97,7 @@ Regenerate L1/L2: `python scripts/regen_maps.py` or `/regen-maps`.
 ### Reference docs
 
 - **`docs/SECURITY.md`** — Schicht-A pinning, threat model, accepted risks.
+- **`docs/ANALYSIS_HANDOVER.md`** — **start here to improve the analysis engine**: measured baseline (branch vs main), py3.10 native-stack setup recipe, measurement tools, what's already fixed, open problems + prioritised next steps.
 - **`docs/PROJECT_OVERVIEW.md`** — high-level overview.
 - **`docs/NAMING_MAP.md`** — v0.0.2 rename refactor audit trail.
 - **`CHANGELOG.md`** — what shipped when.
