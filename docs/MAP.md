@@ -35,6 +35,7 @@
 | `app/external_track_match.py` | external_track_match — shared title/version parsing + fuzzy-match + fingerprint. |
 | `app/folder_watcher.py` | FolderWatcher — auto-import audio files from user-configured folders. |
 | `app/import_tracker.py` | Per-file import-progress tracker — gives the frontend a live transparent |
+| `app/library_format_swap.py` | Library-wide audio format conversion engine. |
 | `app/library_source.py` | LibrarySource — uniform abstraction over Live (master.db) and XML modes. |
 | `app/live_database.py` | *(no module docstring)* |
 | `app/logging_utils.py` | Log redaction helpers — scrub absolute paths from log lines + tracebacks. |
@@ -130,6 +131,8 @@
 | `frontend/src/components/editor/Palette.jsx` | Palette - Drag & Drop clipboard for audio regions A side panel with slots for storing region copies. |
 | `frontend/src/components/editor/RegionBlock.jsx` | RegionBlock - Visual representation of an audio region on the timeline Displays the waveform, envelope overla… |
 | `frontend/src/components/editor/TimelineCanvas.jsx` | TimelineCanvas - Main editing canvas for the non-destructive audio editor Features: - Zoomable timeline with … |
+| `frontend/src/components/format-swap/ScopeBucketPicker.jsx` | ScopeBucketPicker — 4-bucket scope chooser for the Format Converter. |
+| `frontend/src/components/FormatConverterView.jsx` | FormatConverterView — Library-wide audio format converter UI. |
 | `frontend/src/components/ImportProgressBanner.jsx` | Sticky progress banner — visible on every screen while local-file or SoundCloud imports are running. |
 | `frontend/src/components/ImportView.jsx` | Recursively walk a DataTransferItemList, returning every File inside any dropped folder. |
 | `frontend/src/components/InsightsView.jsx` | InsightsView — DJ-Style Analytics Dashboard Datenbasierte Einblicke in den eigenen DJ-Stil und die Library: •… |
@@ -210,6 +213,7 @@
 | `tests/test_database.py` | Tests for `app/database.py`. |
 | `tests/test_db_taste.py` | taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py). |
 | `tests/test_external_track_match.py` | external_track_match unit tests (external-track-match-unified-module T-3..T-9). |
+| `tests/test_library_format_swap.py` | Tests for app.library_format_swap. |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
 | `tests/test_main_security.py` | Regression tests for ``POST /api/file/reveal`` sandbox. |
 | `tests/test_metadata_fixer_applier.py` | metadata-fixer apply/revert tests (T5 — app/metadata_fixer/applier.py). |
@@ -223,6 +227,7 @@
 | `tests/test_popularity_engine.py` | PopularityStore tests (underground-mainstream-classifier T1-T3). |
 | `tests/test_rate_limit.py` | Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter. |
 | `tests/test_require_session.py` | Phase-2 require_session dual-acceptance tests (T3 — app/auth.py). |
+| `tests/test_route_uniqueness.py` | Routing-table invariant: no duplicate (method, path) registrations. |
 | `tests/test_security_compare.py` | Tests for ``app/security_compare.py::safe_compare``. |
 | `tests/test_security_hotfixes.py` | Regression tests for the 5 security hotfixes in commit e3a5ae8. |
 | `tests/test_services.py` | Tests for `app/services.py`. |
@@ -230,6 +235,7 @@
 | `tests/test_soundcloud_api.py` | Tests for `app/soundcloud_api.py`. |
 | `tests/test_soundcloud_auth_status.py` | Tests for GET /api/soundcloud/auth-status. |
 | `tests/test_soundcloud_downloader_security.py` | Security regression tests for app/soundcloud_downloader. |
+| `tests/test_stream_unicode_filename.py` | Regression: GET /api/stream 500 on non-latin-1 filenames. |
 | `tests/test_usb_manager.py` | Tests for `app/usb_manager.py`. |
 | `tests/test_variant_detector.py` | variant_schema + variant_detector tests (analysis-remix-detector T-2, T-3). |
 
@@ -238,9 +244,7 @@
 | File | Purpose |
 |------|---------|
 | `scripts/dev/phrase_spike.py` | phrase_spike.py — manual P0 verification for the phrase memory-cue ANLZ write. |
-| `scripts/dev/rescan_unreadable.py` | Re-scan only the rows marked unreadable in audio_report.json. |
 | `scripts/dev/safe_format_swap.py` | safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist. |
-| `scripts/dev/scan_audio_quality.py` | Scan an audio library with ffprobe, aggregate codec/bitrate/sample-rate. |
 | `scripts/pipeline_dashboard.py` | Local web dashboard for the research pipeline. |
 | `scripts/pipeline_status.py` | Show the research pipeline state at a glance. |
 | `scripts/print_routine.py` | Extract the deploy-ready prompt from a routine .md file. |

@@ -321,6 +321,22 @@ Per-file import-progress tracker — gives the frontend a live transparent
 - `get()`
 - `clear_finished()` — Remove all Completed/Failed/Skipped rows.
 
+### `app/library_format_swap.py`
+
+Library-wide audio format conversion engine.
+
+- `TrackPlan`
+- `DryRunResult`
+- `ExecuteResult`
+- `get_batch()`
+- `FormatSwapEngine` — Resolve a scope to a list of ``TrackPlan``s, dry-run or execute the
+- `  FormatSwapEngine.enumerate_scope()` — Resolve a scope dict to rbox Content rows.
+- `  FormatSwapEngine.build_plans()`
+- `  FormatSwapEngine.dry_run()`
+- `  FormatSwapEngine.execute()` — Run the batch.
+- `  FormatSwapEngine.rollback()` — Restore from a manifest.
+- `  FormatSwapEngine.list_manifests()`
+
 ### `app/library_source.py`
 
 LibrarySource — uniform abstraction over Live (master.db) and XML modes.
@@ -491,6 +507,18 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `BatchCommentReq`
 - `batch_comment()`
 - `clean_titles()`
+- `FormatSwapDryRunReq`
+- `FormatSwapExecuteReq`
+- `FormatSwapRollbackReq`
+- `format_swap_dry_run()` — Preview a format swap without touching disk or master.db.
+- `format_swap_execute()` — Start the format swap in a background thread; return ``batch_id`` to
+- `format_swap_batch_status()` — Poll a running or finished batch.
+- `format_swap_list_manifests()` — List available rollback manifests, newest first.
+- `format_swap_rollback()` — Restore from a manifest.
+- `format_swap_picker_playlists()` — Flat user-playlist list for the Playlist bucket dropdown.
+- `format_swap_picker_colors()` — Pioneer Colors with track counts.
+- `format_swap_picker_mytags()` — MyTag list with track counts.
+- `format_swap_picker_subset_counts()` — Cheap pre-dry-run count + total source MB for a library subset.
 - `get_lib_status()`
 - `set_lib_mode()`
 - `sync_lib()` — Persist the in-memory library.
@@ -1338,6 +1366,16 @@ RegionBlock - Visual representation of an audio region on the timeline Displays 
 
 TimelineCanvas - Main editing canvas for the non-destructive audio editor Features: - Zoomable timeline with beat grid overlay - Region blo…
 
+### `frontend/src/components/format-swap/ScopeBucketPicker.jsx`
+
+ScopeBucketPicker — 4-bucket scope chooser for the Format Converter.
+
+- `ScopeBucketPicker()` — ─── Main picker ──────────────────────────────────────────────────────────
+
+### `frontend/src/components/FormatConverterView.jsx`
+
+FormatConverterView — Library-wide audio format converter UI.
+
 ### `frontend/src/components/ImportProgressBanner.jsx`
 
 Sticky progress banner — visible on every screen while local-file or SoundCloud imports are running.
@@ -1841,6 +1879,67 @@ external_track_match unit tests (external-track-match-unified-module T-3..T-9).
 - `test_fingerprint_rejects_path_outside_roots()`
 - `test_module_has_no_db_writer_imports()`
 
+### `tests/test_library_format_swap.py`
+
+Tests for app.library_format_swap.
+
+- `TestTargetConfig`
+- `  TestTargetConfig.test_all_four_targets_present()`
+- `  TestTargetConfig.test_each_target_has_required_keys()`
+- `  TestTargetConfig.test_file_type_codes()`
+- `  TestTargetConfig.test_expansion_ratios_plausible()`
+- `TestConstants`
+- `  TestConstants.test_timeout_above_rule_default_with_documented_reason()`
+- `  TestConstants.test_disk_thresholds_from_oq4()`
+- `  TestConstants.test_watchdog_interval()`
+- `  TestConstants.test_filetype_m4a_is_4()`
+- `TestFfmpegCommand`
+- `  TestFfmpegCommand.test_ffmpeg_cmd_codec_for_target()`
+- `  TestFfmpegCommand.test_ffmpeg_cmd_has_vn_to_drop_cover_art()`
+- `  TestFfmpegCommand.test_ffmpeg_cmd_locks_sample_rate_to_source()`
+- `  TestFfmpegCommand.test_ffmpeg_cmd_overwrite_flag()`
+- `  TestFfmpegCommand.test_ffmpeg_cmd_preserves_metadata()`
+- `  TestFfmpegCommand.test_mp3_target_includes_quality_arg()`
+- `TestEngineConstructor`
+- `  TestEngineConstructor.test_rejects_unknown_target()`
+- `  TestEngineConstructor.test_accepts_all_four_targets()`
+- `TestScopeEnumeration`
+- `  TestScopeEnumeration.test_unknown_scope_kind_raises()`
+- `  TestScopeEnumeration.test_track_ids_scope_with_empty_list()`
+- `  TestScopeEnumeration.test_playlist_scope_requires_id()`
+- `  TestScopeEnumeration.test_path_scope_requires_path()`
+- `  TestScopeEnumeration.test_skips_already_target_ext()`
+- `TestDryRun`
+- `  TestDryRun.test_empty_scope_returns_zero()`
+- `  TestDryRun.test_invalid_scope_returns_error()`
+- `TestManifestListing`
+- `  TestManifestListing.test_empty_backup_dir_returns_empty()`
+- `  TestManifestListing.test_lists_manifests_newest_first()`
+- `TestRollback`
+- `  TestRollback.test_rejects_missing_manifest()`
+- `  TestRollback.test_rejects_when_rekordbox_running()`
+- `  TestRollback.test_restores_audio_files_from_manifest()`
+- `TestBatchTracking`
+- `  TestBatchTracking.test_get_batch_returns_none_for_unknown_id()`
+- `TestEnumerateLibrarySubset` — One assertion per subset_kind branch in _enumerate_by_subset.
+- `  TestEnumerateLibrarySubset.test_subset_all_skips_deleted()`
+- `  TestEnumerateLibrarySubset.test_subset_all_lossy()`
+- `  TestEnumerateLibrarySubset.test_subset_all_lossless()`
+- `  TestEnumerateLibrarySubset.test_subset_by_file_type_m4a()`
+- `  TestEnumerateLibrarySubset.test_subset_ranked()`
+- `  TestEnumerateLibrarySubset.test_subset_unranked()`
+- `  TestEnumerateLibrarySubset.test_subset_by_color()`
+- `  TestEnumerateLibrarySubset.test_subset_uncolored()`
+- `  TestEnumerateLibrarySubset.test_subset_by_mytag()`
+- `TestAllM4aBackwardCompat`
+- `  TestAllM4aBackwardCompat.test_all_m4a_matches_by_file_type_4()`
+- `TestLibrarySubsetMissingRequiredParam`
+- `  TestLibrarySubsetMissingRequiredParam.test_by_color_without_color_id()`
+- `  TestLibrarySubsetMissingRequiredParam.test_by_mytag_without_tag_id()`
+- `  TestLibrarySubsetMissingRequiredParam.test_by_file_type_without_file_type()`
+- `  TestLibrarySubsetMissingRequiredParam.test_library_subset_without_subset_kind()`
+- `  TestLibrarySubsetMissingRequiredParam.test_unknown_subset_kind_raises()`
+
 ### `tests/test_logging_redaction.py`
 
 Unit tests for `app.logging_utils.RedactingFormatter`.
@@ -2030,6 +2129,13 @@ Phase-2 require_session dual-acceptance tests (T3 — app/auth.py).
 - `test_missing_header_rejected()`
 - `test_child_process_empty_session_token_still_accepts_device()`
 
+### `tests/test_route_uniqueness.py`
+
+Routing-table invariant: no duplicate (method, path) registrations.
+
+- `test_no_duplicate_method_path()`
+- `test_deduplicated_path_has_single_handler()`
+
 ### `tests/test_security_compare.py`
 
 Tests for ``app/security_compare.py::safe_compare``.
@@ -2205,6 +2311,19 @@ Security regression tests for app/soundcloud_downloader.
 - `  TestSizeLimits.test_budget_is_at_least_500_mib()`
 - `  TestSizeLimits.test_budget_is_at_most_4_gib()`
 
+### `tests/test_stream_unicode_filename.py`
+
+Regression: GET /api/stream 500 on non-latin-1 filenames.
+
+- `sandbox_root()`
+- `test_content_disposition_always_latin1_encodable()`
+- `test_content_disposition_ascii_simple_form()`
+- `test_content_disposition_non_ascii_uses_rfc6266()`
+- `test_content_disposition_all_non_ascii_falls_back_to_audio()`
+- `test_content_disposition_escapes_quoted_string_specials()`
+- `test_content_disposition_strips_control_chars()`
+- `test_stream_non_latin1_filename()`
+
 ### `tests/test_usb_manager.py`
 
 Tests for `app/usb_manager.py`.
@@ -2267,12 +2386,6 @@ phrase_spike.py — manual P0 verification for the phrase memory-cue ANLZ write.
 
 - `main()`
 
-### `scripts/dev/rescan_unreadable.py`
-
-Re-scan only the rows marked unreadable in audio_report.json.
-
-- `main()`
-
 ### `scripts/dev/safe_format_swap.py`
 
 safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist.
@@ -2286,14 +2399,6 @@ safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist.
 - `convert_m4a_to_aiff()` — ffmpeg src -> dst.
 - `execute()`
 - `rollback()`
-- `main()`
-
-### `scripts/dev/scan_audio_quality.py`
-
-Scan an audio library with ffprobe, aggregate codec/bitrate/sample-rate.
-
-- `probe()`
-- `classify()` — Bucket per club-readiness tier.
 - `main()`
 
 ### `scripts/pipeline_dashboard.py`
