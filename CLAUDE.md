@@ -108,7 +108,7 @@ Regenerate L1/L2: `python scripts/regen_maps.py` or `/regen-maps`.
 - **Python:** `pyproject.toml` — ruff / black / mypy / pytest
 - **Frontend:** `frontend/.eslintrc.cjs`, `frontend/.prettierrc`, `frontend/jsconfig.json`
 - **CI:** `.github/workflows/ci.yml` (lint+test), `release.yml`
-- **Hooks:** `.claude/hooks/format-on-edit.py` (PostToolUse), `.pre-commit-config.yaml` (manual install)
+- **Hooks:** `.claude/hooks/format-on-edit.py` (PostToolUse Edit|Write), `.claude/hooks/auto-push-after-commit.py` (PostToolUse Bash), `.pre-commit-config.yaml` (manual install)
 - **MCP / preview servers:** `.claude/launch.json`, `.mcp.json`
 
 ---

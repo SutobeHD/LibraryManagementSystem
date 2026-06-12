@@ -58,7 +58,7 @@ The old "routines are docs-only" rule is relaxed. `research-implement` may write
 Research docs are **persistent files**, not user output. Apply Caveman+ per `working-style.md`:
 
 - Bullets > prose. Fragments OK. Drop articles/filler/hedges.
-- Respect per-section **soft** word caps in `_TEMPLATE.md` (Problem ≤60, Findings ≤150, Threat Model ≤300, etc. — recommendations, exceedable when topic complexity demands).
+- Respect per-section **soft** word caps in `_TEMPLATE.md` (Problem ≤60, Findings ≤150 per entry, Approval Summary ≤200, etc. — recommendations, exceedable when topic complexity demands).
 - No "we considered", "it appears that", "in order to", "it should be noted", "after investigation". Direct subject + verb + object.
 - No section meta-prose ("This section captures..."). The heading carries the meaning.
 

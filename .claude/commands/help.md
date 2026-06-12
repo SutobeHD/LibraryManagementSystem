@@ -32,8 +32,9 @@ Render a discovery view of all repo-local Claude Code capabilities.
    Show file path + first ~80 chars of body so the user knows what's there.
 
 4. **Print quick reference for hooks and integration files:**
-   - `.claude/settings.json` — permission allowlist
-   - `.claude/hooks/format-on-edit.py` — PostToolUse auto-format
+   - `.claude/settings.json` — permission allow/deny/ask lists + hook wiring
+   - `.claude/hooks/format-on-edit.py` — PostToolUse auto-format on Edit/Write
+   - `.claude/hooks/auto-push-after-commit.py` — PostToolUse auto-push after `git commit`
    - `.pre-commit-config.yaml` — pre-commit hooks (manual install: `pre-commit install`)
    - `scripts/regen_maps.py` — auto-gen MAP.md + MAP_L2.md
    - `scripts/pipeline_status.py` — research pipeline state (slash: /pipeline)
@@ -61,8 +62,9 @@ Render a discovery view of all repo-local Claude Code capabilities.
 ...
 
 ## Hook / integration files
-- .claude/settings.json — permission allowlist
+- .claude/settings.json — permission allow/deny/ask lists + hook wiring
 - .claude/hooks/format-on-edit.py — PostToolUse auto-format on Edit/Write
+- .claude/hooks/auto-push-after-commit.py — PostToolUse auto-push after `git commit`
 - .pre-commit-config.yaml — pre-commit hooks (install: `pip install pre-commit && pre-commit install`)
 - scripts/regen_maps.py — regenerate docs/MAP.md + MAP_L2.md (slash: /regen-maps)
 - scripts/pipeline_status.py — research pipeline state + open gates (slash: /pipeline)

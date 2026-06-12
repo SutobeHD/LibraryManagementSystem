@@ -63,6 +63,7 @@ Open a pull request for the current work. Args: $ARGUMENTS
    ```bash
    git switch main
    ```
+   **Warning:** if the PR commits were originally made on local `main`, it is still N ahead of `origin/main` after the switch. Say so explicitly and don't push `main` — after the PR merges, the user reconciles (`git pull --ff-only` if fast-forwardable; squash/merge-commit strategies need a manual decision).
 
 ## Don'ts
 

@@ -6,7 +6,7 @@ Broad permission to act locally. `.claude/settings.json` allowlist reflects this
 
 - Any `npm run …`, `python -m app.main`, `pytest`, `cargo check/fmt/build`.
 - Read/Grep/Glob freely. Edit/create/delete files in working tree.
-- `git status/diff/log/branch/add/stash`, `git restore` (staging-area only).
+- `git status/diff/log/branch/add/stash`, `git restore --staged` (unstage only — worktree-discarding `git restore <file>` prompts).
 - **`git commit`** — atomically, intensely, per logical unit (see `commit-and-git.md`).
 - `git fetch`, `git pull --ff-only`.
 - `git checkout -b`, `git switch -c` (new branches).
@@ -26,11 +26,11 @@ Repo culture is **maximum AI autonomy + minimum manual steps**. When you spot a 
 
 - `git push --force` (never to `main`). Plain `git push` is auto-fired by hook — see `commit-and-git.md`.
 - Plain `git pull` / `git pull origin` (non-ff). `git pull --ff-only` is auto-allowed; a non-ff pull rewrites local history on a drifted base → needs sign-off.
-- `git reset --hard`, `git clean -fd`, branch deletion, history rewrites.
+- `git reset --hard`, `git clean -fd`, history rewrites. (Branch deletion: `git branch -d` merged-branch cleanup after a PR merge is autonomous; `-D` force-delete is deny-listed.)
 - `gh pr create/merge/close`, `gh issue close`.
 - `npm/pip/cargo` install of new dep — security decision.
 - Version bumps in `requirements.txt`, `Cargo.toml`, `package.json` `dependencies`.
-- Write to `.env*` (read OK).
+- Write to `.env.*` variants not covered by the deny list. (`./.env` / `./.env.local` are read- **and** write-denied in settings.json — hand the user a paste-ready block instead, see troubleshooting #13. `.env.example` is freely editable.)
 - Delete files outside `tmp/`, `temp/`, `scratch/`, `work/`, `build/`, `dist/`, `target/`.
 
 ## Don't

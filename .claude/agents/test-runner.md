@@ -50,7 +50,7 @@ Known test files:
 ### E2E — Tauri WebDriver
 
 ```bash
-cd tests/e2e && npm run e2e:test
+npm run e2e:test    # from repo root (delegates to `npm test --prefix tests/e2e`)
 ```
 
 **Pre-flight check first:** is `tauri-driver` running on `127.0.0.1:4444`? If not, flag explicitly — the agent should not start the driver itself; the user runs `npm run e2e:driver` in a separate terminal because it blocks.
