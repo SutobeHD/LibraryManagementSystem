@@ -44,9 +44,9 @@ cargo test   --manifest-path src-tauri/Cargo.toml
 
 ## CI (`.github/workflows/`)
 
-- **`ci.yml`** — lint+test on push+PR. Jobs: `python-lint-test` (ruff+pytest), `rust-lint-test` (clippy+test), `frontend-lint` (eslint).
+- **`ci.yml`** — lint+test on push+PR. Jobs: `python-lint-test` (ruff+pytest+map-drift), `rust-lint-test` (clippy+test), `frontend-lint` (eslint).
 - **`release.yml`** — release builds.
-- `regen_maps.py --check` exists for drift detection but is **not wired into CI** — run it manually (or `/regen-maps`) after structural changes.
+- `regen_maps.py --check` runs in `python-lint-test` — MAP.md/MAP_L2.md drift fails CI. After structural changes, regen via `python scripts/regen_maps.py` (or `/regen-maps`) and commit the maps with the code.
 
 ## Auto-format hook (`PostToolUse` on `Edit|Write`)
 
