@@ -135,7 +135,7 @@ Track loaded
 ```
 Track imported
   → Frontend: POST /api/audio/analyze {path}
-  → app/audio_analyzer.py: AudioAnalyzer.analyze_async()
+  → app/audio_analyzer.py: AudioAnalyzer.analyze_track()  (analyze_sync() for blocking callers)
     → ProcessPoolExecutor → analysis_engine.detect_beats()
       → madmom RNN beat tracking (primary; needs the py3.10+ compat shim)
         with librosa.beat.beat_track() octave/onset fallback
@@ -184,11 +184,11 @@ User confirms sync + download
 ### 7. USB Sync
 ```
 User clicks sync to USB
-  → Frontend: GET /api/usb/detect
+  → Frontend: GET /api/usb/devices
   → app/usb_manager.py: UsbDetector.scan_drives()
   → User selects drive + playlists
   → POST /api/usb/sync {drive, playlists, profile}
-  → UsbSyncEngine.run_sync()
+  → UsbSyncEngine.sync_collection() / sync_playlists()
     → Lock file prevents concurrent syncs
     → Incremental diff — only copies changed tracks
     → Updates USB Rekordbox library DB

@@ -74,7 +74,7 @@ Full tooling reference in `.claude/rules/tooling.md`.
 
 - **L1 — `docs/MAP.md`** — auto-generated file → 1-line purpose. **First stop** when looking for where logic lives.
 - **L2 — `docs/MAP_L2.md`** — auto-generated L1 + public classes/functions/methods. For finding a specific symbol.
-- **L3 — `docs/backend-index.md`** — all 147 FastAPI routes grouped by feature.
+- **L3 — `docs/backend-index.md`** — all 140 FastAPI routes grouped by feature.
 - **L3 — `docs/frontend-index.md`** — React components with props, IPC calls.
 - **L3 — `docs/rust-index.md`** — Tauri commands, modules, crates.
 - **`docs/FILE_MAP.md`** — manually curated map (predates MAP.md/MAP_L2.md). Has narrative invariants per file.
