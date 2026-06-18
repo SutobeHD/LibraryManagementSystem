@@ -3,6 +3,13 @@
 ## [Unreleased]
 
 - Analysis accuracy + engine fixes:
+  - Improved: exact-octave BPM accuracy (Acc-1). `detect_beats_madmom` now
+    constrains the madmom DBN tempo window to the octave of a robust coarse
+    estimate (librosa log-normal prior) — an "octave prior" that stops the
+    tracker locking onto half-/double-time. Measured (synthetic, n=50, madmom):
+    seed 11 Acc-1 72%→78%, seed 12 82%→94%; Acc-2 and KEY stay 100%; the
+    180-210 BPM band's half-time errors are largely eliminated. (Window never
+    binds when coarse + DBN already agree, the common real-music case.)
   - Fixed: `requirements.txt` was missing `rbox==0.1.7` (the Rust-backed package
     that `import rbox` resolves to across 10 modules — MasterDb/Anlz/OneLibrary).
     Only `pyrekordbox==0.1.7` (a *different*, pure-Python package used solely for

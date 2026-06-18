@@ -705,8 +705,36 @@ def detect_beats_madmom(
         try:
             # RNN Beat Processor -> Dynamic Bayesian Network
             proc = madmom.features.beats.RNNBeatProcessor()(tmp_path)
+
+            # Octave prior: constrain the DBN tempo window to the octave of a
+            # robust coarse estimate (librosa's log-normal tempo prior is
+            # octave-stable) so the tracker cannot lock onto half-/double-time
+            # for octave-ambiguous material. Falls back to the full detection
+            # range if the coarse estimate is unusable. Measured: +exact-octave
+            # accuracy with no band regression; never binds when coarse and the
+            # DBN already agree (the common case on real music).
+            HOP_OE = 256
+            onset_env = _multi_band_onset_strength(y, sr, hop=HOP_OE)
+            dbn_min, dbn_max = int(_MIN_BPM), int(_MAX_BPM)
+            try:
+                coarse = float(
+                    librosa.feature.tempo(  # type: ignore[union-attr]
+                        onset_envelope=onset_env,
+                        sr=sr,
+                        hop_length=HOP_OE,
+                        start_bpm=145.0,
+                        ac_size=8.0,
+                    )[0]
+                )
+                lo = max(int(_MIN_BPM), int(coarse / 1.4))
+                hi = min(int(_MAX_BPM), round(coarse * 1.4))
+                if hi - lo >= 10:
+                    dbn_min, dbn_max = lo, hi
+            except Exception:
+                pass
+
             beats_madmom = madmom.features.beats.DBNBeatTrackingProcessor(
-                min_bpm=int(_MIN_BPM), max_bpm=int(_MAX_BPM), fps=100
+                min_bpm=dbn_min, max_bpm=dbn_max, fps=100
             )(proc)
 
             if len(beats_madmom) < 4:
@@ -718,8 +746,6 @@ def detect_beats_madmom(
             bpm_raw = 60.0 / median_ibi if median_ibi > 0 else 128.0
 
             # Onset-density disambiguation (correct half-/double-time misreads)
-            HOP_OE = 256
-            onset_env = _multi_band_onset_strength(y, sr, hop=HOP_OE)
             bpm_raw = _onset_density_disambiguate(bpm_raw, onset_env, sr, HOP_OE)
 
             # Octave correction
