@@ -150,6 +150,7 @@ auth_db — sidecar-local store for per-device paired tokens (Phase-2 auth).
 
 Setup logging
 
+- `compute_new_comment()` — Pure comment transform for one track — mirrors the four batch actions.
 - `run_batch_update()`
 
 ### `app/config.py`
@@ -1822,6 +1823,16 @@ Tests for ``app/auth.py`` -- Bearer-token session authentication.
 - `  TestCaseM_OptionsPreflight.test_options_preflight_short_circuits_before_auth()`
 - `TestCaseN_UngatedAcceptsAuthHeader`
 - `  TestCaseN_UngatedAcceptsAuthHeader.test_heartbeat_with_bearer_header_still_2xx()`
+
+### `tests/test_batch_worker.py`
+
+Tests for app/batch_worker.py — pure comment-transform logic.
+
+- `test_set_overwrites()`
+- `test_append_adds_when_absent_and_skips_when_present()`
+- `test_remove_strips_substring()`
+- `test_replace_swaps_substring()`
+- `test_unknown_action_and_none_original()`
 
 ### `tests/test_compare_rekordbox.py`
 
