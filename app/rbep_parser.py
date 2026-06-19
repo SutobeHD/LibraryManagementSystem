@@ -21,7 +21,12 @@ class RbepProject:
     def __init__(self, filepath: str):
         self.filepath = Path(filepath)
         self.name = self.filepath.stem
-        self.tracks = []
+        self.tracks: list[dict] = []
+        # Set before _parse so a ParseError (corrupt .rbep) leaves a usable
+        # object: _parse's except branch never reaches the info block, and
+        # to_dict() would otherwise AttributeError on self.app/self.version.
+        self.app = ""
+        self.version = "1"
         self._parse()
 
     def _parse(self):
@@ -80,7 +85,11 @@ class RbepProject:
 
         # Parse edit data — <edit> is a direct child of <track> in real .rbep files.
         # The legacy/test layout placed it under <song>; check both for compatibility.
-        edit_el = track_el.find("edit") or song_el.find("edit")
+        # Use explicit `is None` — an empty <edit/> element is falsy in ElementTree
+        # (no children), so `a or b` would wrongly drop a present-but-empty edit.
+        edit_el = track_el.find("edit")
+        if edit_el is None:
+            edit_el = song_el.find("edit")
         if edit_el is not None:
             track["edit"] = self._parse_edit(edit_el)
 
@@ -95,30 +104,39 @@ class RbepProject:
                 if data_el is not None:
                     for sec in data_el.findall("section"):
                         try:
-                            position_sections.append({
-                                "start": float(sec.get("start", 0) or 0),
-                                "end": float(sec.get("end", 0) or 0),
-                                "songStart": float(sec.get("songstart", 0) or 0),
-                                "songEnd": float(sec.get("songend", 0) or 0),
-                            })
+                            position_sections.append(
+                                {
+                                    "start": float(sec.get("start", 0) or 0),
+                                    "end": float(sec.get("end", 0) or 0),
+                                    "songStart": float(sec.get("songstart", 0) or 0),
+                                    "songEnd": float(sec.get("songend", 0) or 0),
+                                }
+                            )
                         except (TypeError, ValueError) as exc:
                             logger.warning(
                                 "rbep: bad position section attrs %r: %s",
-                                sec.attrib, exc,
+                                sec.attrib,
+                                exc,
                             )
         # Legacy fallback: <position> directly under <song> with a single <section>
         if not position_sections:
             legacy_pos = song_el.find("position")
             if legacy_pos is not None:
-                section = legacy_pos.find("section") or legacy_pos.find("data/section")
+                # `a or b` is unsafe: a childless <section> is falsy in ElementTree
+                # and would be discarded for the data/section fallback (None).
+                section = legacy_pos.find("section")
+                if section is None:
+                    section = legacy_pos.find("data/section")
                 if section is not None:
                     try:
-                        position_sections.append({
-                            "start": float(section.get("start", 0) or 0),
-                            "end": float(section.get("end", 0) or 0),
-                            "songStart": float(section.get("songstart", 0) or 0),
-                            "songEnd": float(section.get("songend", 0) or 0),
-                        })
+                        position_sections.append(
+                            {
+                                "start": float(section.get("start", 0) or 0),
+                                "end": float(section.get("end", 0) or 0),
+                                "songStart": float(section.get("songstart", 0) or 0),
+                                "songEnd": float(section.get("songend", 0) or 0),
+                            }
+                        )
                     except (TypeError, ValueError) as exc:
                         logger.warning("rbep: bad legacy position section: %s", exc)
         track["positions"] = position_sections
@@ -137,7 +155,7 @@ class RbepProject:
 
     def _parse_edit(self, edit_el) -> dict:
         """Parse <edit> element containing volume, BPM, hotcue, memorycue, activecensor data."""
-        edit = {
+        edit: dict[str, list] = {
             "volume": [],
             "bpm": [],
             "hotcues": [],
@@ -151,11 +169,13 @@ class RbepProject:
             data_el = vol_el.find("data")
             if data_el is not None:
                 for sec in data_el.findall("section"):
-                    edit["volume"].append({
-                        "start": float(sec.get("start", 0)),
-                        "end": float(sec.get("end", 0)),
-                        "vol": float(sec.get("vol", 1.0)),
-                    })
+                    edit["volume"].append(
+                        {
+                            "start": float(sec.get("start", 0)),
+                            "end": float(sec.get("end", 0)),
+                            "vol": float(sec.get("vol", 1.0)),
+                        }
+                    )
 
         # BPM map
         bpm_el = edit_el.find("bpm")
@@ -163,11 +183,13 @@ class RbepProject:
             data_el = bpm_el.find("data")
             if data_el is not None:
                 for sec in data_el.findall("section"):
-                    edit["bpm"].append({
-                        "start": float(sec.get("start", 0)),
-                        "end": float(sec.get("end", 0)),
-                        "bpm": float(sec.get("bpm", 0)),
-                    })
+                    edit["bpm"].append(
+                        {
+                            "start": float(sec.get("start", 0)),
+                            "end": float(sec.get("end", 0)),
+                            "bpm": float(sec.get("bpm", 0)),
+                        }
+                    )
 
         # Hot cues
         hc_el = edit_el.find("prepared/hotcue")
@@ -175,12 +197,14 @@ class RbepProject:
             data_el = hc_el.find("data")
             if data_el is not None:
                 for cue in data_el.findall("cue"):
-                    edit["hotcues"].append({
-                        "index": int(cue.get("index", 0)),
-                        "name": cue.get("name", ""),
-                        "position": float(cue.get("position", 0)),
-                        "color": cue.get("color", ""),
-                    })
+                    edit["hotcues"].append(
+                        {
+                            "index": int(cue.get("index", 0)),
+                            "name": cue.get("name", ""),
+                            "position": float(cue.get("position", 0)),
+                            "color": cue.get("color", ""),
+                        }
+                    )
 
         # Memory cues
         mc_el = edit_el.find("prepared/memorycue")
@@ -188,11 +212,13 @@ class RbepProject:
             data_el = mc_el.find("data")
             if data_el is not None:
                 for cue in data_el.findall("cue"):
-                    edit["memoryCues"].append({
-                        "index": int(cue.get("index", 0)),
-                        "name": cue.get("name", ""),
-                        "position": float(cue.get("position", 0)),
-                    })
+                    edit["memoryCues"].append(
+                        {
+                            "index": int(cue.get("index", 0)),
+                            "name": cue.get("name", ""),
+                            "position": float(cue.get("position", 0)),
+                        }
+                    )
 
         # Active censors
         ac_el = edit_el.find("prepared/activecensor")
@@ -200,10 +226,12 @@ class RbepProject:
             data_el = ac_el.find("data")
             if data_el is not None:
                 for sec in data_el.findall("section"):
-                    edit["activeCensors"].append({
-                        "start": float(sec.get("start", 0)),
-                        "end": float(sec.get("end", 0)),
-                    })
+                    edit["activeCensors"].append(
+                        {
+                            "start": float(sec.get("start", 0)),
+                            "end": float(sec.get("end", 0)),
+                        }
+                    )
 
         return edit
 
@@ -215,11 +243,13 @@ class RbepProject:
             data_el = orggrid.find("data")
             if data_el is not None:
                 for beat in data_el.findall("beat"):
-                    beats.append({
-                        "index": int(beat.get("index", 0)),
-                        "bpm": float(beat.get("bpm", 0)),
-                        "position": float(beat.get("position", 0)),
-                    })
+                    beats.append(
+                        {
+                            "index": int(beat.get("index", 0)),
+                            "bpm": float(beat.get("bpm", 0)),
+                            "position": float(beat.get("position", 0)),
+                        }
+                    )
         return beats
 
     def to_dict(self) -> dict:
@@ -233,7 +263,7 @@ class RbepProject:
         }
 
 
-def list_projects(prj_dir: str = None) -> list[dict]:
+def list_projects(prj_dir: str | None = None) -> list[dict]:
     """List all available .rbep project files."""
     directory = Path(prj_dir) if prj_dir else DEFAULT_PRJ_DIR
     if not directory.exists():
@@ -243,18 +273,20 @@ def list_projects(prj_dir: str = None) -> list[dict]:
     for f in sorted(directory.glob("*.rbep")):
         try:
             stat = f.stat()
-            projects.append({
-                "name": f.stem,
-                "filename": f.name,
-                "size": stat.st_size,
-                "modified": stat.st_mtime,
-            })
+            projects.append(
+                {
+                    "name": f.stem,
+                    "filename": f.name,
+                    "size": stat.st_size,
+                    "modified": stat.st_mtime,
+                }
+            )
         except Exception:
             pass
     return projects
 
 
-def parse_project(name: str, prj_dir: str = None) -> dict | None:
+def parse_project(name: str, prj_dir: str | None = None) -> dict | None:
     """Parse a specific .rbep project file by name."""
     directory = Path(prj_dir) if prj_dir else DEFAULT_PRJ_DIR
     filepath = directory / f"{name}.rbep"
