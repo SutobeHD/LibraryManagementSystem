@@ -12,6 +12,7 @@ Cache layout:
     <cache_dir>/index.json           -- map file_path → {mtime, size, cache_id, version}
     <cache_dir>/<cache_id>.json.gz   -- per-file analysis result (gzipped)
 """
+
 from __future__ import annotations
 
 import gzip
@@ -79,7 +80,10 @@ class AnalysisCache:
             if current != entry.get("hash"):
                 return None
 
-        cache_file = self.cache_dir / entry["cache_id"]
+        cache_id = entry.get("cache_id")
+        if not cache_id:
+            return None
+        cache_file = self.cache_dir / cache_id
         if not cache_file.exists():
             return None
 
@@ -136,11 +140,12 @@ class AnalysisCache:
         with self._lock:
             entry = self._index.pop(abs_path, None)
             if entry:
-                cache_file = self.cache_dir / entry["cache_id"]
-                try:
-                    cache_file.unlink()
-                except OSError:
-                    pass
+                cache_id = entry.get("cache_id")
+                if cache_id:
+                    try:
+                        (self.cache_dir / cache_id).unlink()
+                    except OSError:
+                        pass
                 self._save_index()
 
     def clear(self) -> int:
@@ -148,8 +153,11 @@ class AnalysisCache:
         with self._lock:
             count = len(self._index)
             for entry in self._index.values():
+                cache_id = entry.get("cache_id")
+                if not cache_id:
+                    continue
                 try:
-                    (self.cache_dir / entry["cache_id"]).unlink()
+                    (self.cache_dir / cache_id).unlink()
                 except OSError:
                     pass
             self._index = {}
@@ -158,10 +166,7 @@ class AnalysisCache:
 
     def stats(self) -> dict[str, Any]:
         """Return cache size + entry count."""
-        total_bytes = sum(
-            f.stat().st_size for f in self.cache_dir.glob("*.json.gz")
-            if f.is_file()
-        )
+        total_bytes = sum(f.stat().st_size for f in self.cache_dir.glob("*.json.gz") if f.is_file())
         return {
             "entries": len(self._index),
             "bytes": total_bytes,
@@ -198,6 +203,7 @@ class AnalysisCache:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _quick_content_hash(file_path: str, sample_bytes: int = 1024 * 1024) -> str:
     """Quick md5 over first+last MB. Good enough to catch most edits."""
     h = hashlib.md5()
@@ -218,6 +224,7 @@ def _json_default(obj):
     """JSON serializer that handles numpy types."""
     try:
         import numpy as np
+
         if isinstance(obj, (np.integer,)):
             return int(obj)
         if isinstance(obj, (np.floating,)):
