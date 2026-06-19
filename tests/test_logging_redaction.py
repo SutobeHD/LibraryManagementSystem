@@ -20,7 +20,7 @@ import os
 
 import pytest
 
-from app.logging_utils import RedactingFormatter
+from app.logging_utils import RedactingFormatter, safe_error_message_str
 
 _APP_DIR = os.path.dirname(os.path.abspath(__import__("app").__file__))
 _FMT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -91,6 +91,23 @@ def test_args_interpolation_scrubbed(stream_logger: tuple[logging.Logger, io.Str
     out = buf.getvalue()
     assert _APP_DIR not in out, f"args path leaked: {out!r}"
     assert "path=[...]" in out, f"expected scrubbed path interpolation in {out!r}"
+
+
+def test_data_dir_prefixes_scrubbed() -> None:
+    """EXPORT/MUSIC/TEMP dirs (resolved once at import) must also be scrubbed,
+    not just the app dir — a leaked export path discloses the user's library."""
+    from app.config import EXPORT_DIR, MUSIC_DIR
+
+    for root in (EXPORT_DIR, MUSIC_DIR):
+        leaked = f"failed to write {root.resolve()}/sub/file.dat"
+        out = safe_error_message_str(leaked)
+        assert str(root.resolve()) not in out, f"data dir leaked: {out!r}"
+        assert "[...]" in out
+
+
+def test_safe_error_message_str_noop_on_clean_input() -> None:
+    assert safe_error_message_str("no paths here") == "no paths here"
+    assert safe_error_message_str("") == ""
 
 
 def test_non_exception_log_format_unchanged() -> None:

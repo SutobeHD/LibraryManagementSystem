@@ -30,6 +30,23 @@ from .config import EXPORT_DIR, MUSIC_DIR, TEMP_DIR
 # helpers strip the same install-layout prefix.
 _APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Resolved ONCE at import — the prefix set is process-stable, and these
+# `.resolve()` calls hit the filesystem. Rebuilding the list per call meant a
+# syscall per log line (RedactingFormatter.format runs for every record); a
+# resolve() failure there would throw inside the log handler and drop the line.
+_SENSITIVE_PREFIXES = [
+    p
+    for p in (
+        _APP_DIR,
+        str(Path.home()),
+        os.environ.get("APPDATA", ""),
+        str(EXPORT_DIR.resolve()),
+        str(MUSIC_DIR.resolve()),
+        str(TEMP_DIR.resolve()),
+    )
+    if p
+]
+
 
 def safe_error_message_str(msg: str) -> str:
     """Strip absolute paths from a rendered log/error string.
@@ -40,16 +57,8 @@ def safe_error_message_str(msg: str) -> str:
     """
     if not msg:
         return msg
-    for sensitive in [
-        _APP_DIR,
-        str(Path.home()),
-        os.environ.get("APPDATA", ""),
-        str(EXPORT_DIR.resolve()),
-        str(MUSIC_DIR.resolve()),
-        str(TEMP_DIR.resolve()),
-    ]:
-        if sensitive:
-            msg = msg.replace(sensitive, "[...]")
+    for sensitive in _SENSITIVE_PREFIXES:
+        msg = msg.replace(sensitive, "[...]")
     return msg
 
 
