@@ -1930,6 +1930,18 @@ external_track_match unit tests (external-track-match-unified-module T-3..T-9).
 - `test_fingerprint_rejects_path_outside_roots()`
 - `test_module_has_no_db_writer_imports()`
 
+### `tests/test_folder_watcher.py`
+
+Tests for app/folder_watcher.py — auto-import folder watcher.
+
+- `test_is_audio()`
+- `test_stable_file_is_ready()`
+- `test_growing_file_is_not_ready()` — Regression: a file still being copied (size changes every read) must
+- `test_empty_file_is_not_ready()`
+- `test_vanished_file_is_not_ready()`
+- `test_add_after_stop_returns_false()`
+- `test_normalize_resolves_to_absolute()`
+
 ### `tests/test_library_source.py`
 
 Tests for app/library_source.py — the Live/XML normalization layer.
