@@ -183,6 +183,32 @@ def test_octave_correct(input_bpm, expected):
     assert _octave_correct(input_bpm) == expected
 
 
+def test_octave_window_constrains_to_coarse_octave():
+    """The madmom octave-prior: window centred on coarse, clamped to range."""
+    from app.analysis_engine import _octave_window
+
+    # fast track: coarse 196 → window excludes the half (98) so the DBN can't pick it
+    lo, hi = _octave_window(196.0, 60, 220)
+    assert lo == 140 and hi == 220  # 196/1.4=140, 196*1.4=274→clamp 220
+    assert not (lo <= 98 <= hi)
+    # slow track: coarse 79 → window excludes the double (158)
+    lo, hi = _octave_window(79.0, 60, 220)
+    assert lo == 60 and hi == 111  # 79/1.4=56→clamp 60, round(79*1.4)=111
+    assert not (lo <= 158 <= hi)
+
+
+def test_octave_window_fallbacks():
+    """Unusable coarse / too-narrow span → full detection range, never a bad window."""
+    from app.analysis_engine import _octave_window
+
+    assert _octave_window(0.0, 60, 220) == (60, 220)  # coarse unusable
+    assert _octave_window(-5.0, 60, 220) == (60, 220)  # negative
+    # a window narrower than min_span collapses back to the full range
+    assert _octave_window(100.0, 60, 220, min_span=200) == (60, 220)
+    # a valid mid window stays put
+    assert _octave_window(128.0, 60, 220) == (91, 179)
+
+
 def test_essentia_flat_to_sharp_maps_to_valid_keys():
     """essentia spells black keys as flats; normalised sharps must hit our maps."""
     from app.analysis_engine import _CAMELOT_MAP, _FLAT_TO_SHARP, _REKORDBOX_KEY_ID

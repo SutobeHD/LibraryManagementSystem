@@ -548,6 +548,31 @@ def _octave_correct(bpm: float) -> float:
     return bpm
 
 
+def _octave_window(
+    coarse: float,
+    min_bpm: int,
+    max_bpm: int,
+    factor: float = 1.4,
+    min_span: int = 10,
+) -> tuple[int, int]:
+    """Constrain a beat-tracker tempo window to the octave of a coarse estimate.
+
+    Returns ``(lo, hi)`` bounded to ``[min_bpm, max_bpm]`` and centred on
+    ``coarse`` (``coarse/factor .. coarse*factor``). Falls back to the full
+    ``(min_bpm, max_bpm)`` range when ``coarse`` is unusable (<=0) or the
+    resulting window would be narrower than ``min_span`` BPM. Pure helper so the
+    octave-prior used by the madmom path is unit-testable without madmom.
+    """
+    lo_full, hi_full = int(min_bpm), int(max_bpm)
+    if coarse <= 0:
+        return lo_full, hi_full
+    lo = max(lo_full, int(coarse / factor))
+    hi = min(hi_full, round(coarse * factor))
+    if hi - lo < min_span:
+        return lo_full, hi_full
+    return lo, hi
+
+
 def _onset_density_disambiguate(
     bpm: float,
     onset_strength: np.ndarray,
@@ -726,10 +751,7 @@ def detect_beats_madmom(
                         ac_size=8.0,
                     )[0]
                 )
-                lo = max(int(_MIN_BPM), int(coarse / 1.4))
-                hi = min(int(_MAX_BPM), round(coarse * 1.4))
-                if hi - lo >= 10:
-                    dbn_min, dbn_max = lo, hi
+                dbn_min, dbn_max = _octave_window(coarse, int(_MIN_BPM), int(_MAX_BPM))
             except Exception:
                 pass
 
