@@ -1732,6 +1732,16 @@ Regression tests for the analysis pipeline.
 - `test_cue_toggles_kwarg_overrides_settings()` — Per-call kwarg overrides the global setting.
 - `test_e2e_anlz_write_roundtrip()`
 
+### `tests/test_analysis_cache.py`
+
+Tests for app/analysis_cache.py — persistent analysis-result cache.
+
+- `test_put_get_roundtrip()`
+- `test_get_miss_after_file_changes()`
+- `test_corrupt_index_entry_does_not_crash()` — Regression: an entry without 'cache_id' must not KeyError.
+- `test_unreadable_index_starts_fresh()`
+- `test_json_default_handles_numpy()`
+
 ### `tests/test_analysis_db_writer.py`
 
 Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.db.
@@ -1876,6 +1886,19 @@ taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py).
 - `test_empty_profile_id_rejected()`
 - `test_list_and_delete_profile()`
 
+### `tests/test_download_registry.py`
+
+Tests for app/download_registry.py — SoundCloud download dedup/history DB.
+
+- `registry()`
+- `test_register_and_dedup()`
+- `test_upsert_updates_status_keeps_metadata()`
+- `test_update_analysis_and_persistence()`
+- `test_find_by_hash_and_mark_failed()`
+- `test_delete_entry_commits()`
+- `test_history_search_and_stats()`
+- `test_many_calls_persist_no_corruption()` — A burst of open/commit/close cycles must all land (proves _conn closes
+
 ### `tests/test_external_track_match.py`
 
 external_track_match unit tests (external-track-match-unified-module T-3..T-9).
@@ -1907,6 +1930,19 @@ external_track_match unit tests (external-track-match-unified-module T-3..T-9).
 - `test_fingerprint_rejects_path_outside_roots()`
 - `test_module_has_no_db_writer_imports()`
 
+### `tests/test_library_source.py`
+
+Tests for app/library_source.py — the Live/XML normalization layer.
+
+- `test_to_float_tolerates_garbage()`
+- `test_to_int_tolerates_garbage()`
+- `test_xml_normalize_basic_and_duration_seconds()`
+- `test_xml_normalize_does_not_crash_on_garbage()` — Regression: a non-numeric BPM/Rating must not raise (aborts the sync).
+- `test_live_normalize_duration_from_total_time_seconds()`
+- `test_live_normalize_duration_ms_only_not_multiplied()` — Regression: a duration_ms-only track must NOT be x1000 (was 240_000_000).
+- `test_live_normalize_lowercase_and_fallback_keys()`
+- `test_live_normalize_garbage_does_not_crash()`
+
 ### `tests/test_logging_redaction.py`
 
 Unit tests for `app.logging_utils.RedactingFormatter`.
@@ -1915,6 +1951,8 @@ Unit tests for `app.logging_utils.RedactingFormatter`.
 - `test_exc_info_traceback_scrubbed()`
 - `test_chained_exception_preserves_chain_marker()`
 - `test_args_interpolation_scrubbed()`
+- `test_data_dir_prefixes_scrubbed()` — EXPORT/MUSIC/TEMP dirs (resolved once at import) must also be scrubbed,
+- `test_safe_error_message_str_noop_on_clean_input()`
 - `test_non_exception_log_format_unchanged()` — A path-free `logger.info("hello")` must be byte-identical via
 
 ### `tests/test_main_security.py`
