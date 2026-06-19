@@ -1696,6 +1696,8 @@ Regression tests for the analysis pipeline.
 - `test_settings_env_override()`
 - `test_encoder_delay_per_format()`
 - `test_octave_correct()`
+- `test_octave_window_constrains_to_coarse_octave()` — The madmom octave-prior: window centred on coarse, clamped to range.
+- `test_octave_window_fallbacks()` — Unusable coarse / too-narrow span → full detection range, never a bad window.
 - `test_essentia_flat_to_sharp_maps_to_valid_keys()` — essentia spells black keys as flats; normalised sharps must hit our maps.
 - `test_madmom_compat_shims_idempotent()` — Shim restores pre-3.10 collections ABCs + NumPy aliases madmom needs.
 - `test_stereo_features_mono()`
@@ -1762,6 +1764,15 @@ Validate the produced ANLZ files (.DAT/.EXT/.2EX).
 
 - `test_produced_anlz_structure()` — Byte-level structural validation — runs in CI (librosa only, no pyrekordbox).
 - `test_produced_anlz_parses_with_reference_parser()`
+
+### `tests/test_audio_tags.py`
+
+Tests for app/audio_tags.py — native tag write-back (mutates user files → HIGH risk).
+
+- `test_rating_to_popm_scale()`
+- `test_normalize_fields_drops_none_and_unknown()`
+- `test_write_tags_unsupported_and_missing()`
+- `test_flac_tag_roundtrip()`
 
 ### `tests/test_auth.py`
 
@@ -2321,6 +2332,15 @@ variant_schema + variant_detector tests (analysis-remix-detector T-2, T-3).
 - `db_path()`
 - `test_scan_persists_and_reads_back()`
 - `test_upsert_replaces_in_place()`
+
+### `tests/test_xml_generator.py`
+
+Tests for app/xml_generator.py — Rekordbox collection XML export.
+
+- `test_hostile_titles_produce_valid_xml()` — Ampersands / angle brackets / quotes / unicode must not break the XML.
+- `test_beatgrid_and_cues_exported()`
+- `test_generate_does_not_mutate_input_positionmarks()` — Regression: DROP append must copy, not mutate the caller's list.
+- `test_missing_path_does_not_crash()` — A track dict without 'path' must not raise KeyError.
 
 
 ## scripts/ — Dev/Build Utilities
