@@ -2095,6 +2095,30 @@ Tests for the phrase-batch backend (app/main.py):
 - `test_cancel_unknown_404()`
 - `test_cancel_sets_flag()`
 
+### `tests/test_playcount_sync.py`
+
+Tests for app/playcount_sync.py — USB <-> PC play-count sync engine.
+
+- `test_apply_strategy_all_modes()`
+- `test_diff_equal_counts_auto_equal()`
+- `test_diff_only_pc_changed_takes_pc()`
+- `test_diff_only_usb_changed_takes_usb()`
+- `test_diff_both_changed_is_conflict()`
+- `test_diff_track_not_on_usb_skipped()`
+- `test_diff_track_without_id_skipped()`
+- `test_diff_first_sync_mismatch_is_conflict()` — Documented policy: with no baseline (ts=0) a count mismatch where both
+- `test_read_usb_xml_playcounts()`
+- `test_read_usb_xml_missing_and_malformed()`
+- `test_sync_meta_roundtrip()`
+- `test_sync_meta_missing_returns_default()`
+- `test_sync_meta_corrupt_returns_default()`
+- `test_sync_meta_invalid_root()`
+- `test_resolve_patches_usb_xml()` — The USB XML PlayCount is patched even when rbox/PC-DB is unavailable.
+- `test_resolve_missing_xml_reports_error()`
+- `test_resolve_rejects_non_list()`
+- `test_save_meta_invalid_inputs_raise()`
+- `test_roundtrip_meta_is_json_serializable()`
+
 ### `tests/test_popularity_engine.py`
 
 PopularityStore tests (underground-mainstream-classifier T1-T3).

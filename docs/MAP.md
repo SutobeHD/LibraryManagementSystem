@@ -227,6 +227,7 @@
 | `tests/test_pairing_store.py` | Phase-2 pairing-code store tests (T2 — app/pairing_store.py). |
 | `tests/test_pdb_structure.py` | PDB writer structural test against F: drive Pioneer reference. |
 | `tests/test_phrase_batch.py` | Tests for the phrase-batch backend (app/main.py): |
+| `tests/test_playcount_sync.py` | Tests for app/playcount_sync.py — USB <-> PC play-count sync engine. |
 | `tests/test_popularity_engine.py` | PopularityStore tests (underground-mainstream-classifier T1-T3). |
 | `tests/test_rate_limit.py` | Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter. |
 | `tests/test_rbep_parser.py` | Tests for app/rbep_parser.py — Rekordbox Editor Project (.rbep) XML parser. |
