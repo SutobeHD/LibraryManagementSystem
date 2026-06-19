@@ -23,7 +23,7 @@ class RekordboxXML:
             track.set("Kind", data.get("Kind", "WAV File"))
             track.set("TotalTime", str(int(data.get("TotalTime", 0))))
 
-            abs_path = str(Path(data["path"]).absolute()).replace("\\", "/")
+            abs_path = str(Path(data.get("path", "")).absolute()).replace("\\", "/")
             location = f"file://localhost/{abs_path}"
             track.set("Location", location)
             track.set("DateAdded", datetime.now().strftime("%Y-%m-%d"))
@@ -55,11 +55,15 @@ class RekordboxXML:
             # Rekordbox XML POSITION_MARK attributes:
             # Type: 0=Cue/HotCue/MemoryCue, 1=FadeIn, 2=FadeOut, 3=Load, 4=Loop
             # Num: -1=MemoryCue/Loop, 0-7=HotCue A-H
-            cues = data.get("positionMarks", [])
+            # Copy — never mutate the caller's positionMarks list (appending the
+            # DROP below would otherwise leak into the input + duplicate on re-run).
+            cues = list(data.get("positionMarks") or [])
 
             # Add detected drop as a specific Memory Cue if available
             if "dropTime" in data:
-                cues.append({"Name": "DROP", "Type": "0", "Start": str(data["dropTime"]), "Num": "-1"})
+                cues.append(
+                    {"Name": "DROP", "Type": "0", "Start": str(data["dropTime"]), "Num": "-1"}
+                )
 
             for cue in cues:
                 mark = ET.SubElement(track, "POSITION_MARK")
