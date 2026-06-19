@@ -2085,6 +2085,18 @@ Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter.
 - `test_ttl_purge()`
 - `test_auth_before_ratelimit()` — Unauth + over-limit MUST surface as 401, not 429.
 
+### `tests/test_rbep_parser.py`
+
+Tests for app/rbep_parser.py — Rekordbox Editor Project (.rbep) XML parser.
+
+- `test_parses_real_layout()`
+- `test_legacy_layout_fallbacks()`
+- `test_corrupt_file_degrades_gracefully()` — Regression: a ParseError must not leave app/version unset (to_dict crash).
+- `test_track_without_song_is_skipped()`
+- `test_to_dict_shape()`
+- `test_list_projects_empty_for_missing_dir()`
+- `test_list_and_parse_project_by_name()`
+
 ### `tests/test_require_session.py`
 
 Phase-2 require_session dual-acceptance tests (T3 — app/auth.py).
@@ -2226,6 +2238,25 @@ Tests for `SetReq` payload caps + `SettingsManager.load` sanitizer.
 - `  TestSettingsManagerLoadSanitizer.test_oversize_value_dropped_on_load()`
 - `  TestSettingsManagerLoadSanitizer.test_oversize_list_dropped_on_load()`
 - `  TestSettingsManagerLoadSanitizer.test_load_legacy_clean_file_unchanged()`
+
+### `tests/test_smart_playlist_engine.py`
+
+Tests for app/smart_playlist_engine.py — the smart-playlist rule evaluator.
+
+- `test_numeric_equals_and_range()`
+- `test_numeric_greater_and_less()`
+- `test_rating_field_is_numeric()`
+- `test_string_contains_starts_ends_equals()`
+- `test_string_not_contains()`
+- `test_logical_all_vs_any()`
+- `test_empty_criteria_returns_all()`
+- `test_unknown_field_matches_nothing()`
+- `test_missing_track_value_is_not_a_match()`
+- `test_non_numeric_value_does_not_crash()`
+- `test_date_newer_and_older_than_days()`
+- `test_from_xml_node_parses_conditions()`
+- `test_from_xml_node_none_returns_empty()`
+- `test_to_xml_attrs_roundtrips_root_flags()`
 
 ### `tests/test_soundcloud_api.py`
 
