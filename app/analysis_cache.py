@@ -166,9 +166,19 @@ class AnalysisCache:
 
     def stats(self) -> dict[str, Any]:
         """Return cache size + entry count."""
-        total_bytes = sum(f.stat().st_size for f in self.cache_dir.glob("*.json.gz") if f.is_file())
+        with self._lock:
+            entries = len(self._index)
+        # glob+stat outside the lock: a concurrent invalidate()/clear() can
+        # unlink a file between glob and stat (is_file() is a TOCTOU), raising
+        # FileNotFoundError. Tolerate it per-file instead of failing the call.
+        total_bytes = 0
+        for f in self.cache_dir.glob("*.json.gz"):
+            try:
+                total_bytes += f.stat().st_size
+            except OSError:
+                continue
         return {
-            "entries": len(self._index),
+            "entries": entries,
             "bytes": total_bytes,
             "version": ANALYSIS_VERSION,
             "dir": str(self.cache_dir),

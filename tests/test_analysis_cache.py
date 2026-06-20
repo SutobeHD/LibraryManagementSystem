@@ -62,6 +62,34 @@ def test_unreadable_index_starts_fresh(tmp_path):
     assert c._index == {}
 
 
+def test_stats_reports_entries_and_bytes(tmp_path):
+    src = tmp_path / "s.wav"
+    src.write_bytes(b"\x00" * 1024)
+    c = _make(tmp_path)
+    c.put(str(src), {"bpm": 120})
+    st = c.stats()
+    assert st["entries"] == 1
+    assert st["bytes"] > 0
+    assert st["version"] == c.stats()["version"]
+
+
+def test_stats_tolerates_file_vanishing_mid_scan(tmp_path):
+    """Regression: a *.json.gz that stat() can't read (here a broken symlink,
+    standing in for a file unlinked by a concurrent clear/invalidate between
+    glob and stat) must be skipped, not raise FileNotFoundError out of stats()."""
+    src = tmp_path / "s.wav"
+    src.write_bytes(b"\x00" * 1024)
+    c = _make(tmp_path)
+    c.put(str(src), {"bpm": 120})  # one real cache file
+    # a dangling cache file: matches the glob, but stat() raises FileNotFoundError
+    broken = c.cache_dir / "broken.json.gz"
+    broken.symlink_to(tmp_path / "does_not_exist")
+
+    st = c.stats()  # must not raise
+    assert st["bytes"] > 0  # the real file still counted
+    assert st["entries"] == 1  # index count taken under the lock
+
+
 def test_json_default_handles_numpy():
     np = __import__("numpy")
     assert _json_default(np.int64(5)) == 5
