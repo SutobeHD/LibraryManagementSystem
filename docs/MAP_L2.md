@@ -2464,6 +2464,16 @@ variant_schema + variant_detector tests (analysis-remix-detector T-2, T-3).
 - `test_scan_persists_and_reads_back()`
 - `test_upsert_replaces_in_place()`
 
+### `tests/test_variant_schema.py`
+
+Tests for app/variant_schema.py — variants.db DDL + migration runner.
+
+- `test_fresh_db_creates_and_stamps()`
+- `test_migrate_is_idempotent()`
+- `test_tables_and_indexes_exist()`
+- `test_schema_accepts_a_variant_row()`
+- `test_newer_schema_left_untouched()`
+
 ### `tests/test_xml_generator.py`
 
 Tests for app/xml_generator.py — Rekordbox collection XML export.
