@@ -1741,6 +1741,8 @@ Tests for app/analysis_cache.py — persistent analysis-result cache.
 - `test_get_miss_after_file_changes()`
 - `test_corrupt_index_entry_does_not_crash()` — Regression: an entry without 'cache_id' must not KeyError.
 - `test_unreadable_index_starts_fresh()`
+- `test_stats_reports_entries_and_bytes()`
+- `test_stats_tolerates_file_vanishing_mid_scan()` — Regression: a *.json.gz that stat() can't read (here a broken symlink,
 - `test_json_default_handles_numpy()`
 
 ### `tests/test_analysis_db_writer.py`
@@ -2196,6 +2198,14 @@ Tests for app/rbep_parser.py — Rekordbox Editor Project (.rbep) XML parser.
 - `test_to_dict_shape()`
 - `test_list_projects_empty_for_missing_dir()`
 - `test_list_and_parse_project_by_name()`
+
+### `tests/test_rekordbox_bridge.py`
+
+Tests for app/rekordbox_bridge.py — Rekordbox XML <-> local DB import.
+
+- `test_import_updates_existing_and_adds_new()`
+- `test_import_no_collection_raises()`
+- `test_import_parses_beatgrid()`
 
 ### `tests/test_require_session.py`
 
