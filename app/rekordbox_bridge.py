@@ -1,11 +1,13 @@
 import logging
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import Any
 
 from .database import db
 from .xml_generator import RekordboxXML
 
 logger = logging.getLogger(__name__)
+
 
 class RekordboxBridge:
     @staticmethod
@@ -25,7 +27,7 @@ class RekordboxBridge:
     @staticmethod
     def import_library(xml_path: str) -> dict:
         """Imports data from a Rekordbox XML and updates the local database."""
-        results = {"added": 0, "updated": 0, "errors": []}
+        results: dict[str, Any] = {"added": 0, "updated": 0, "errors": []}
         try:
             tree = ET.parse(xml_path)
             root = tree.getroot()
@@ -40,34 +42,41 @@ class RekordboxBridge:
                     # Convert file://localhost/C:/... to C:/...
                     clean_path = location.replace("file://localhost/", "").replace("/", "\\")
 
-                    track_data = {
+                    track_data: dict[str, Any] = {
                         "Title": track_el.get("Name"),
                         "Artist": track_el.get("Artist"),
                         "Album": track_el.get("Album"),
-                        "BPM": float(track_el.get("AverageBpm", 120)),
+                        # `or default`, not get(name, default): a present-but-empty
+                        # attr (common on un-analyzed Rekordbox tracks) returns ""
+                        # which float("") would reject and drop the whole track.
+                        "BPM": float(track_el.get("AverageBpm") or 120),
                         "path": clean_path,
-                        "TotalTime": float(track_el.get("TotalTime", 0)),
+                        "TotalTime": float(track_el.get("TotalTime") or 0),
                         "beatGrid": [],
-                        "positionMarks": []
+                        "positionMarks": [],
                     }
 
                     # Extract Beatgrid
                     for tempo in track_el.findall("TEMPO"):
-                        track_data["beatGrid"].append({
-                            "time": float(tempo.get("Inizio", 0)),
-                            "bpm": float(tempo.get("Bpm", 0)),
-                            "beat": int(tempo.get("Battuta", 1)),
-                            "metro": tempo.get("Metro", "4/4")
-                        })
+                        track_data["beatGrid"].append(
+                            {
+                                "time": float(tempo.get("Inizio") or 0),
+                                "bpm": float(tempo.get("Bpm") or 0),
+                                "beat": int(tempo.get("Battuta") or 1),
+                                "metro": tempo.get("Metro", "4/4"),
+                            }
+                        )
 
                     # Extract Cues
                     for mark in track_el.findall("POSITION_MARK"):
-                        track_data["positionMarks"].append({
-                            "Name": mark.get("Name", ""),
-                            "Type": mark.get("Type", "0"),
-                            "Start": mark.get("Start", "0"),
-                            "Num": mark.get("Num", "-1")
-                        })
+                        track_data["positionMarks"].append(
+                            {
+                                "Name": mark.get("Name", ""),
+                                "Type": mark.get("Type", "0"),
+                                "Start": mark.get("Start", "0"),
+                                "Num": mark.get("Num", "-1"),
+                            }
+                        )
 
                     # Update or Add to local DB
                     # We match by path as the primary key for external sync
@@ -78,7 +87,10 @@ class RekordboxBridge:
                             break
 
                     if existing_id:
-                        db.update_track(existing_id, track_data)
+                        # RekordboxDB has no update_track(); the real merge API is
+                        # update_tracks_metadata (XML mode merges the dict, live
+                        # mode delegates to update_track_metadata).
+                        db.update_tracks_metadata([existing_id], track_data)
                         results["updated"] += 1
                     else:
                         db.add_track(track_data)
