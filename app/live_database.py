@@ -114,11 +114,21 @@ class LiveRekordboxDB:
     def _load_metadata_maps(self):
         """Creates ID -> Name maps for joined tables."""
         logger.info("Caching metadata maps (artists, genres, etc.)...")
-        self.artist_map = {a.id: a.name for a in self.db.get_artists()}
-        self.genre_map = {g.id: g.name for g in self.db.get_genres()}
-        self.album_map = {a.id: a.name for a in self.db.get_albums()}
-        self.label_map = {l.id: l.name for l in self.db.get_labels()}
-        self.key_map = {k.id: k.name for k in self.db.get_keys()}
+
+        def _safe_map(name, accessor):
+            # One rbox accessor raising must not abort the whole library load
+            # (it propagates to load()'s except → zero tracks). Degrade to {}.
+            try:
+                return {row.id: row.name for row in accessor()}
+            except Exception as exc:
+                logger.warning("metadata map %s failed, using empty: %s", name, exc)
+                return {}
+
+        self.artist_map = _safe_map("artists", self.db.get_artists)
+        self.genre_map = _safe_map("genres", self.db.get_genres)
+        self.album_map = _safe_map("albums", self.db.get_albums)
+        self.label_map = _safe_map("labels", self.db.get_labels)
+        self.key_map = _safe_map("keys", self.db.get_keys)
 
         # Extended metadata maps with graceful fallback. rbox versions older
         # than 0.1.5 don't expose composer/remixer/lyricist accessors at all,
@@ -591,7 +601,8 @@ class LiveRekordboxDB:
             )
 
             # Smart Unwrap: Hoist children if root is a generic container
-            if root["Name"].lower() in ["root", "library", "collection", "playlists"]:
+            # (root.get("Name") may be None for an unnamed playlist → guard .lower)
+            if (root.get("Name") or "").lower() in ["root", "library", "collection", "playlists"]:
                 if root["Children"]:
                     logger.info(f"Hoisting children of generic root: {root['Name']}")
                     return root["Children"]
