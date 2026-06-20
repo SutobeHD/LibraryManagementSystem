@@ -1953,6 +1953,21 @@ Tests for app/folder_watcher.py — auto-import folder watcher.
 - `test_add_after_stop_returns_false()`
 - `test_normalize_resolves_to_absolute()`
 
+### `tests/test_import_tracker.py`
+
+Tests for app/import_tracker.py — live import-progress tracker.
+
+- `test_basename_unix_windows_and_bare()`
+- `test_register_creates_queued_task()`
+- `test_get_returns_copy_not_reference()`
+- `test_get_all_returns_copies()`
+- `test_get_unknown_returns_none()`
+- `test_update_appends_stage_history_on_change()`
+- `test_update_unknown_or_empty_is_noop()`
+- `test_clear_finished_removes_only_terminal()`
+- `test_prune_drops_oldest_finished_first()`
+- `test_prune_keeps_inflight_over_cap()` — Soft cap by design: active (non-terminal) tasks are never dropped, even
+
 ### `tests/test_library_source.py`
 
 Tests for app/library_source.py — the Live/XML normalization layer.
