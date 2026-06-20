@@ -27,7 +27,9 @@ def sidecar_dir_for(file_path: Path) -> Path:
     return file_path.parent / ".lms_anlz" / h
 
 
-def write_companion_anlz(file_path: Path, analysis_result: dict[str, Any] | None = None) -> Path | None:
+def write_companion_anlz(
+    file_path: Path, analysis_result: dict[str, Any] | None = None
+) -> Path | None:
     """
     Write DAT/EXT/2EX next to file_path. Returns the sidecar directory on
     success, None on failure.
@@ -46,11 +48,13 @@ def write_companion_anlz(file_path: Path, analysis_result: dict[str, Any] | None
     try:
         if analysis_result is None:
             from .analysis_engine import run_full_analysis
-            analysis_result = run_full_analysis(str(file_path))
+
+            analysis_result = run_full_analysis(str(file_path)) or {}
             if analysis_result.get("status") != "ok":
                 logger.warning(
                     "anlz_sidecar: analysis returned status=%s for %s",
-                    analysis_result.get("status"), file_path.name,
+                    analysis_result.get("status"),
+                    file_path.name,
                 )
                 return None
     except Exception as exc:
@@ -59,6 +63,7 @@ def write_companion_anlz(file_path: Path, analysis_result: dict[str, Any] | None
 
     try:
         from .anlz_writer import write_anlz_files
+
         target = sidecar_dir_for(file_path)
         target.mkdir(parents=True, exist_ok=True)
         write_anlz_files(
@@ -73,24 +78,32 @@ def write_companion_anlz(file_path: Path, analysis_result: dict[str, Any] | None
         wf = analysis_result.get("waveform", {}) or {}
         pwv6 = wf.get("pwv6") or []
         if pwv6:
-            nonzero = sum(1 for e in pwv6 if any(e) if isinstance(e, (list, tuple)))
+            # isinstance MUST come first: comprehension `if` clauses run
+            # left-to-right, so `any(e)` ahead of the guard would raise TypeError
+            # on a non-iterable element and (since the ANLZ files are already
+            # written above) make a successful write report failure.
+            nonzero = sum(1 for e in pwv6 if isinstance(e, (list, tuple)) and any(e))
             ratio = nonzero / max(len(pwv6), 1)
             if ratio < 0.5:
                 logger.warning(
                     "anlz_sidecar: %s — only %.0f%% of pwv6 entries non-zero "
                     "(suspect stub waveform)",
-                    file_path.name, ratio * 100,
+                    file_path.name,
+                    ratio * 100,
                 )
             else:
                 logger.info(
-                    "anlz_sidecar: %s → %s (color-waveform: %d/%d entries, "
-                    "%d hd-detail)",
-                    file_path.name, target.name,
-                    nonzero, len(pwv6), len(wf.get("pwv7") or []),
+                    "anlz_sidecar: %s → %s (color-waveform: %d/%d entries, %d hd-detail)",
+                    file_path.name,
+                    target.name,
+                    nonzero,
+                    len(pwv6),
+                    len(wf.get("pwv7") or []),
                 )
         else:
-            logger.info("anlz_sidecar: %s → %s (no color waveform data)",
-                        file_path.name, target.name)
+            logger.info(
+                "anlz_sidecar: %s → %s (no color waveform data)", file_path.name, target.name
+            )
         return target
     except Exception as exc:
         logger.warning("anlz_sidecar: write failed for %s: %s", file_path.name, exc)
