@@ -40,6 +40,35 @@
   - Added: `scripts/compare_rekordbox.py` (A/B accuracy vs a real library) +
     `scripts/selftest_analysis.py` (autonomous synthetic-ground-truth accuracy,
     MIREX Acc-1/Acc-2). Self-test with RNN: BPM Acc-2 100%, KEY exact 100%.
+- Reliability hardening (codebase-wide bug-hunt — 16 fixes + 15 new test files,
+  full pytest suite 658 passing):
+  - Fixed: Rekordbox XML import called a non-existent `db.update_track`, so every
+    already-present track silently failed to update. Now uses the real
+    `update_tracks_metadata`; empty `AverageBpm`/`TotalTime` on un-analyzed
+    tracks no longer drop the track (was `float("")` → ValueError).
+  - Fixed: live (master.db) load aborted entirely — zero tracks — if any single
+    rbox metadata accessor (artists/genres/albums/labels/keys) raised; now each
+    map degrades independently. An unnamed playlist (name `None`) no longer
+    crashes the playlist tree.
+  - Fixed: folder auto-import imported half-copied files (the stability check
+    returned "ready" on timeout) and could `RuntimeError` on a stop()/submit
+    race; both closed.
+  - Fixed: a corrupt `.rbep` project file crashed `to_dict()` (attrs unset after
+    ParseError); childless `<edit>`/`<section>` elements were silently dropped
+    (ElementTree truthiness misuse).
+  - Fixed: library normalization crashed the whole USB sync on one non-numeric
+    tag (e.g. `BPM="n/a"`); Live `duration_ms`-only tracks had their duration
+    multiplied by 1000.
+  - Fixed: analysis cache crashed on a legacy/corrupt index entry (missing
+    `cache_id`); `stats()` could raise `FileNotFoundError` under a concurrent
+    cache clear (TOCTOU).
+  - Fixed: download registry leaked a SQLite connection on every call (now
+    closed via context manager); audio-analysis worker-pool creation race +
+    `os.cpu_count()` edge + malformed-beat crash all guarded.
+  - Fixed: produced ANLZ sidecar reported failure on a *successful* write
+    (sanity-check evaluation-order bug — `any()` before its `isinstance` guard).
+  - Perf: log redaction resolves the data-dir prefixes once at import instead of
+    on every log line (3 filesystem calls per line removed).
 - Added: Phase-1 Bearer-token authentication on 84 mutation endpoints.
   New `app/auth.py` self-generates session token at sidecar boot, captured
   by Tauri stdout reader + dev-middleware fallback. Frontend attaches
