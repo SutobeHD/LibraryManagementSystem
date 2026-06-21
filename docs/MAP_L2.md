@@ -2453,6 +2453,20 @@ Tests for `app/usb_manager.py`.
 - `  TestLockedSync.test_lock_released_after_exception()` — Even if the body raises, the lock file must be cleaned up.
 - `  TestLockedSync.test_stale_lock_is_replaced()` — A lock file older than 10 minutes is treated as stale and replaced
 
+### `tests/test_usb_mysettings.py`
+
+Tests for app/usb_mysettings.py — Pioneer MYSETTING file schema + I/O.
+
+- `test_humanize_db_values()`
+- `test_humanize_number_words()`
+- `test_humanize_fractions()`
+- `test_humanize_general_titlecase()`
+- `test_schema_file_ids_match_get_schema_classes()` — get_schema() indexes file_classes by SCHEMA key; an extra SCHEMA file_id
+- `test_every_schema_file_id_resolves_in_maps()`
+- `test_every_field_has_required_keys_and_unique()`
+- `test_io_degrades_without_pyrekordbox()`
+- `test_enum_options_empty_without_pyrekordbox()`
+
 ### `tests/test_variant_detector.py`
 
 variant_schema + variant_detector tests (analysis-remix-detector T-2, T-3).
