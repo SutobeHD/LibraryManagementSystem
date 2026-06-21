@@ -1778,6 +1778,15 @@ Validate the produced ANLZ files (.DAT/.EXT/.2EX).
 - `test_produced_anlz_structure()` — Byte-level structural validation — runs in CI (librosa only, no pyrekordbox).
 - `test_produced_anlz_parses_with_reference_parser()`
 
+### `tests/test_anlz_writer_guards.py`
+
+Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout).
+
+- `test_pwav_valid_values_byte_identical()`
+- `test_pwav_out_of_range_does_not_crash()` — Regression: bytes([300]) / bytes([-1]) would raise ValueError; the
+- `test_pwv2_out_of_range_clamped()`
+- `test_pwv3_out_of_range_clamped_preserves_count()`
+
 ### `tests/test_audio_analyzer.py`
 
 Tests for app/audio_analyzer.py — the pure _normalize_result mapping.
