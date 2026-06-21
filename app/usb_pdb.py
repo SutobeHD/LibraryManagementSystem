@@ -51,6 +51,7 @@ DEVICE-SQL STRINGS:
                       Bit 7=endian, bit 6=ASCII, bit 5=UTF-8, bit 4=UTF-16,
                       bit 0=0 (long). We use 0x90 = UTF-16-LE.
 """
+
 from __future__ import annotations
 
 import logging
@@ -67,33 +68,56 @@ PDB_TABLE_DESC_LEN = 16
 PDB_PAGE_HEADER_LEN = 0x28  # 32 base + 8 data extension; heap starts here
 
 # Table type ids — matches spec
-T_TRACKS    = 0x00
-T_GENRES    = 0x01
-T_ARTISTS   = 0x02
-T_ALBUMS    = 0x03
-T_LABELS    = 0x04
-T_KEYS      = 0x05
-T_COLORS    = 0x06
+T_TRACKS = 0x00
+T_GENRES = 0x01
+T_ARTISTS = 0x02
+T_ALBUMS = 0x03
+T_LABELS = 0x04
+T_KEYS = 0x05
+T_COLORS = 0x06
 T_PLAYLISTS = 0x07
 T_PL_ENTRIES = 0x08
-T_ARTWORK   = 0x0D
-T_COLUMNS   = 0x10
-T_HIST_PL   = 0x11
-T_HIST_E    = 0x12
-T_HIST      = 0x13
+T_ARTWORK = 0x0D
+T_COLUMNS = 0x10
+T_HIST_PL = 0x11
+T_HIST_E = 0x12
+T_HIST = 0x13
 
 # Order tables appear in the file header — matches what Rekordbox writes
 TABLE_ORDER = [
-    T_TRACKS, T_GENRES, T_ARTISTS, T_ALBUMS, T_LABELS, T_KEYS, T_COLORS,
-    T_PLAYLISTS, T_PL_ENTRIES, 0x09, 0x0A, 0x0B, 0x0C,
-    T_ARTWORK, 0x0E, 0x0F, T_COLUMNS, T_HIST_PL, T_HIST_E, T_HIST,
+    T_TRACKS,
+    T_GENRES,
+    T_ARTISTS,
+    T_ALBUMS,
+    T_LABELS,
+    T_KEYS,
+    T_COLORS,
+    T_PLAYLISTS,
+    T_PL_ENTRIES,
+    0x09,
+    0x0A,
+    0x0B,
+    0x0C,
+    T_ARTWORK,
+    0x0E,
+    0x0F,
+    T_COLUMNS,
+    T_HIST_PL,
+    T_HIST_E,
+    T_HIST,
 ]
 
 # ─── Pre-populated colour rows (Rekordbox built-in 8 colours) ─────────────
 # Color id 0 = none, 1=Pink, 2=Red, …
 DEFAULT_COLORS = [
-    (1, "Pink"), (2, "Red"), (3, "Orange"), (4, "Yellow"),
-    (5, "Green"), (6, "Aqua"), (7, "Blue"), (8, "Purple"),
+    (1, "Pink"),
+    (2, "Red"),
+    (3, "Orange"),
+    (4, "Yellow"),
+    (5, "Green"),
+    (6, "Aqua"),
+    (7, "Blue"),
+    (8, "Purple"),
 ]
 
 # Set of "real" key names — copied from a real Rekordbox export so the
@@ -104,6 +128,7 @@ DEFAULT_COLORS = [
 
 
 # ─── DeviceSQL strings ────────────────────────────────────────────────────
+
 
 def encode_devicesql_string(s: str) -> bytes:
     """Encode a string as DeviceSQL.
@@ -123,14 +148,14 @@ def encode_devicesql_string(s: str) -> bytes:
 
     # Try short ASCII path
     if len(s) < 64 and all(ord(c) < 0x80 for c in s):
-        total = 1 + len(s)            # lk byte + payload
-        lk = (total << 1) | 1         # bit 0 set, (lk>>1)=total
+        total = 1 + len(s)  # lk byte + payload
+        lk = (total << 1) | 1  # bit 0 set, (lk>>1)=total
         if lk < 0x100:
             return bytes([lk]) + s.encode("ascii")
 
     # Long UTF-16-LE
     payload = s.encode("utf-16-le") + b"\x00\x00"  # null-terminated
-    total_len = 4 + len(payload)                    # header + payload
+    total_len = 4 + len(payload)  # header + payload
     return struct.pack("<BHB", 0x90, total_len, 0x00) + payload
 
 
@@ -141,6 +166,7 @@ def _aligned(b: bytes, align: int = 2) -> bytes:
 
 
 # ─── Page assembly ────────────────────────────────────────────────────────
+
 
 @dataclass
 class _Page:
@@ -207,8 +233,13 @@ class _Page:
             num_entries = 0  # Our writer never emits B-tree entries
             page_header = struct.pack(
                 "<IIIIIII",
-                0, self.page_index, self.table_type,
-                self.next_page, self.seqpage, 0, 0,
+                0,
+                self.page_index,
+                self.table_type,
+                self.next_page,
+                self.seqpage,
+                0,
+                0,
             )
             row_counts_bytes = (0).to_bytes(3, "little")
             page_header = page_header[:0x18] + row_counts_bytes + bytes([self.page_flags])
@@ -223,17 +254,17 @@ class _Page:
             heap_struct = struct.pack(
                 "<IIIIHH",
                 self.page_index,
-                self.next_btree,    # first_data_page when chain follows, else 0x03FFFFFF
-                0x03FFFFFF,         # const observed in every F: index page
-                0,                  # const observed in every F: index page
-                num_entries,        # num B-tree entries (0)
-                0x1FFF,             # sentinel
+                self.next_btree,  # first_data_page when chain follows, else 0x03FFFFFF
+                0x03FFFFFF,  # const observed in every F: index page
+                0,  # const observed in every F: index page
+                num_entries,  # num B-tree entries (0)
+                0x1FFF,  # sentinel
             )
             heap_size = PDB_PAGE_SIZE - PDB_PAGE_HEADER_LEN
             sentinel = b"\xf8\xff\xff\x1f"
             pad_bytes = heap_size - len(heap_struct)
-            body[PDB_PAGE_HEADER_LEN:PDB_PAGE_HEADER_LEN + len(heap_struct)] = heap_struct
-            body[PDB_PAGE_HEADER_LEN + len(heap_struct):] = sentinel * (pad_bytes // 4)
+            body[PDB_PAGE_HEADER_LEN : PDB_PAGE_HEADER_LEN + len(heap_struct)] = heap_struct
+            body[PDB_PAGE_HEADER_LEN + len(heap_struct) :] = sentinel * (pad_bytes // 4)
             return bytes(body)
 
         heap = bytearray()
@@ -265,9 +296,7 @@ class _Page:
 
             block = bytearray(36)
             for i in range(16):
-                block[30 - 2 * i : 30 - 2 * i + 2] = struct.pack(
-                    "<H", g_offsets[i] & 0xFFFF
-                )
+                block[30 - 2 * i : 30 - 2 * i + 2] = struct.pack("<H", g_offsets[i] & 0xFFFF)
             struct.pack_into("<H", block, 32, present_flags)
             struct.pack_into("<H", block, 34, last_row_bit)
             groups.append(bytes(block))
@@ -289,7 +318,7 @@ class _Page:
         # validate page accounting. Setting free_size from len(index_bytes)
         # made every multi-group page look ~30 bytes too small.
         if num_rows == 0:
-            effective_footer = 4   # one empty group header (slot 0 + flags)
+            effective_footer = 4  # one empty group header (slot 0 + flags)
         else:
             full_groups = num_rows // 16
             partial = num_rows % 16
@@ -309,8 +338,13 @@ class _Page:
 
         page_header = struct.pack(
             "<IIIIIII",
-            0, self.page_index, self.table_type,
-            self.next_page, self.seqpage, 0, 0,
+            0,
+            self.page_index,
+            self.table_type,
+            self.next_page,
+            self.seqpage,
+            0,
+            0,
         )
         page_header = page_header[:0x18] + row_counts_bytes + bytes([self.page_flags])
         page_header += struct.pack("<HH", free_size & 0xFFFF, used_size & 0xFFFF)
@@ -334,11 +368,12 @@ class _Page:
         body = bytearray(PDB_PAGE_SIZE)
         body[0:PDB_PAGE_HEADER_LEN] = page_header
         body[PDB_PAGE_HEADER_LEN : PDB_PAGE_HEADER_LEN + used_size] = heap
-        body[PDB_PAGE_SIZE - len(index_bytes):] = index_bytes
+        body[PDB_PAGE_SIZE - len(index_bytes) :] = index_bytes
         return bytes(body)
 
 
 # ─── Row encoders ─────────────────────────────────────────────────────────
+
 
 def encode_artist_row(artist_id: int, name: str) -> bytes:
     """Artist row — subtype 0x0060 (far name).
@@ -378,8 +413,7 @@ def encode_album_row(album_id: int, name: str, artist_id: int = 0) -> bytes:
     header — Rekordbox rejects.
     """
     name_str = encode_devicesql_string(name)
-    header = struct.pack("<HHIIIIBB",
-        0x0080, 0, 0, artist_id, album_id, 0, 0x03, 22)
+    header = struct.pack("<HHIIIIBB", 0x0080, 0, 0, artist_id, album_id, 0, 0x03, 22)
     return _aligned(header + name_str)
 
 
@@ -413,11 +447,13 @@ def encode_color_row(color_id: int, name: str) -> bytes:
     for the mirror — both wrong.
     """
     name_str = encode_devicesql_string(name)
-    header = struct.pack("<IBBH",
-        0,                       # u32 padding
-        color_id & 0xFF,         # u8 color_id
-        color_id & 0xFF,         # u8 color_id mirror
-        0)                       # u16 padding
+    header = struct.pack(
+        "<IBBH",
+        0,  # u32 padding
+        color_id & 0xFF,  # u8 color_id
+        color_id & 0xFF,  # u8 color_id mirror
+        0,
+    )  # u16 padding
     return _aligned(header + name_str)
 
 
@@ -489,12 +525,12 @@ def encode_track_row(track: dict[str, Any]) -> bytes:
         file_name (str), date_added (str e.g. "2024-12-13"), comment (str),
         sample_rate, year, rating, file_type, isrc.
     """
-    title       = track.get("title") or ""
-    file_path   = track.get("file_path") or ""
-    file_name   = track.get("file_name") or ""
-    date_added  = track.get("date_added") or ""
-    comment     = track.get("comment") or ""
-    isrc        = track.get("isrc") or ""
+    title = track.get("title") or ""
+    file_path = track.get("file_path") or ""
+    file_name = track.get("file_name") or ""
+    date_added = track.get("date_added") or ""
+    comment = track.get("comment") or ""
+    isrc = track.get("isrc") or ""
     analyze_path = track.get("analyze_path") or ""
     analyze_date = track.get("analyze_date") or ""
 
@@ -566,36 +602,36 @@ def encode_track_row(track: dict[str, Any]) -> bytes:
     # u32 at 0x14 is master_content_id (also previously hardcoded to 0).
     fixed = struct.pack(
         "<HHIIIIIIIIIIIIIIIIIIHHHHHHBBHH",
-        0x0024,                                        # 0x00 subtype
-        int(track.get("index_shift") or 0),            # 0x02 index_shift
-        u32(track.get("bitmask") or 0),                # 0x04 bitmask
-        int(track.get("sample_rate") or 0),            # 0x08 sample_rate
-        0,                                             # 0x0C composer_id
-        int(track.get("file_size") or 0),              # 0x10 file_size
-        u32(track.get("master_content_id") or 0),      # 0x14 master_content_id
-        u32(track.get("master_db_id") or 0),           # 0x18 master_db_id
-        int(track.get("artwork_id") or 0),             # 0x1C artwork_id
-        int(track.get("key_id") or 0),                 # 0x20 key_id
-        0,                                             # 0x24 original_artist_id
-        int(track.get("label_id") or 0),               # 0x28 label_id
-        0,                                             # 0x2C remixer_id
-        int(track.get("bitrate") or 0),                # 0x30 bitrate
-        int(track.get("track_number") or 0),           # 0x34 track_number
-        bpm_x100,                                      # 0x38 tempo
-        int(track.get("genre_id") or 0),               # 0x3C genre_id
-        int(track.get("album_id") or 0),               # 0x40 album_id
-        int(track.get("artist_id") or 0),              # 0x44 artist_id
-        int(track.get("id") or 0),                     # 0x48 id
-        int(track.get("disc_number") or 0),            # 0x4C disc_number
-        int(track.get("play_count") or 0),             # 0x4E play_count
-        int(track.get("year") or 0),                   # 0x50 year
-        int(track.get("sample_depth") or 0),           # 0x52 sample_depth
-        duration,                                      # 0x54 duration
-        0x0029,                                        # 0x56 u5 magic
-        int(track.get("color_id") or 0),               # 0x58 color_id
-        int(track.get("rating") or 0),                 # 0x59 rating
-        file_type,                                     # 0x5A file_type
-        0x0003,                                        # 0x5C u7 magic
+        0x0024,  # 0x00 subtype
+        int(track.get("index_shift") or 0),  # 0x02 index_shift
+        u32(track.get("bitmask") or 0),  # 0x04 bitmask
+        int(track.get("sample_rate") or 0),  # 0x08 sample_rate
+        0,  # 0x0C composer_id
+        int(track.get("file_size") or 0),  # 0x10 file_size
+        u32(track.get("master_content_id") or 0),  # 0x14 master_content_id
+        u32(track.get("master_db_id") or 0),  # 0x18 master_db_id
+        int(track.get("artwork_id") or 0),  # 0x1C artwork_id
+        int(track.get("key_id") or 0),  # 0x20 key_id
+        0,  # 0x24 original_artist_id
+        int(track.get("label_id") or 0),  # 0x28 label_id
+        0,  # 0x2C remixer_id
+        int(track.get("bitrate") or 0),  # 0x30 bitrate
+        int(track.get("track_number") or 0),  # 0x34 track_number
+        bpm_x100,  # 0x38 tempo
+        int(track.get("genre_id") or 0),  # 0x3C genre_id
+        int(track.get("album_id") or 0),  # 0x40 album_id
+        int(track.get("artist_id") or 0),  # 0x44 artist_id
+        int(track.get("id") or 0),  # 0x48 id
+        int(track.get("disc_number") or 0),  # 0x4C disc_number
+        int(track.get("play_count") or 0),  # 0x4E play_count
+        int(track.get("year") or 0),  # 0x50 year
+        int(track.get("sample_depth") or 0),  # 0x52 sample_depth
+        duration,  # 0x54 duration
+        0x0029,  # 0x56 u5 magic
+        int(track.get("color_id") or 0),  # 0x58 color_id
+        int(track.get("rating") or 0),  # 0x59 rating
+        file_type,  # 0x5A file_type
+        0x0003,  # 0x5C u7 magic
     )
     assert len(fixed) == 0x5E, f"track fixed header size {len(fixed)} != 0x5E"
 
@@ -614,12 +650,14 @@ def encode_playlist_row(
     name: str,
 ) -> bytes:
     """djmdPlaylist tree row — table 0x07."""
-    fixed = struct.pack("<IIIII",
+    fixed = struct.pack(
+        "<IIIII",
         parent_id,
-        0,                  # unknown1
+        0,  # unknown1
         sort_order,
         playlist_id,
-        1 if is_folder else 0)
+        1 if is_folder else 0,
+    )
     return _aligned(fixed + encode_devicesql_string(name))
 
 
@@ -629,6 +667,7 @@ def encode_playlist_entry_row(entry_index: int, track_id: int, playlist_id: int)
 
 
 # ─── Top-level builder ────────────────────────────────────────────────────
+
 
 class PdbBuilder:
     """Assembles a complete export.pdb from per-table row collections.
@@ -654,9 +693,7 @@ class PdbBuilder:
         self.artworks: list[bytes] = []
         # Pre-populate static colour rows so PCOB-color FKs from track rows
         # have someone to point at.
-        self.colors: list[bytes] = [
-            encode_color_row(cid, name) for cid, name in DEFAULT_COLORS
-        ]
+        self.colors: list[bytes] = [encode_color_row(cid, name) for cid, name in DEFAULT_COLORS]
 
     # --- public adders ----------------------------------------------------
 
@@ -679,17 +716,17 @@ class PdbBuilder:
         self.labels.append(encode_label_row(label_id, name))
 
     def add_playlist(
-        self, pl_id: int, parent_id: int, name: str,
-        sort_order: int = 0, is_folder: bool = False,
+        self,
+        pl_id: int,
+        parent_id: int,
+        name: str,
+        sort_order: int = 0,
+        is_folder: bool = False,
     ) -> None:
-        self.playlists.append(
-            encode_playlist_row(pl_id, parent_id, sort_order, is_folder, name)
-        )
+        self.playlists.append(encode_playlist_row(pl_id, parent_id, sort_order, is_folder, name))
 
     def add_playlist_entry(self, entry_index: int, track_id: int, playlist_id: int) -> None:
-        self.playlist_entries.append(
-            encode_playlist_entry_row(entry_index, track_id, playlist_id)
-        )
+        self.playlist_entries.append(encode_playlist_entry_row(entry_index, track_id, playlist_id))
 
     def add_artwork(self, artwork_id: int, path: str) -> None:
         self.artworks.append(encode_artwork_row(artwork_id, path))
@@ -717,7 +754,7 @@ class PdbBuilder:
         pages: list[_Page] = []
         current = _Page(page_index=0, table_type=table_type)
         used = 0
-        index_overhead = 4   # at least one group's flags
+        index_overhead = 4  # at least one group's flags
 
         for r in rows:
             r_size = len(r) + (len(r) & 1)  # pad to even
@@ -761,16 +798,16 @@ class PdbBuilder:
 
         for table_type in TABLE_ORDER:
             rows = {
-                T_TRACKS:    self.tracks,
-                T_GENRES:    self.genres,
-                T_ARTISTS:   self.artists,
-                T_ALBUMS:    self.albums,
-                T_LABELS:    self.labels,
-                T_KEYS:      self.keys,
-                T_COLORS:    self.colors,
+                T_TRACKS: self.tracks,
+                T_GENRES: self.genres,
+                T_ARTISTS: self.artists,
+                T_ALBUMS: self.albums,
+                T_LABELS: self.labels,
+                T_KEYS: self.keys,
+                T_COLORS: self.colors,
                 T_PLAYLISTS: self.playlists,
                 T_PL_ENTRIES: self.playlist_entries,
-                T_ARTWORK:   self.artworks,
+                T_ARTWORK: self.artworks,
             }.get(table_type, [])
 
             data_pages = self._pages_for_rows(rows, table_type)
@@ -787,10 +824,10 @@ class PdbBuilder:
             # first_page in table descriptor to point at an index, not raw
             # data. Even tables with zero rows get an index page.
             index_page = _Page(
-                page_index=0,        # patched below
+                page_index=0,  # patched below
                 table_type=table_type,
-                next_page=0,         # patched below if data follows
-                page_flags=0x64,     # I-bit set (index page)
+                next_page=0,  # patched below if data follows
+                page_flags=0x64,  # I-bit set (index page)
                 rows_data=[],
             )
 
@@ -869,13 +906,14 @@ class PdbBuilder:
         # smaller than that.
         header = struct.pack(
             "<IIIIIIII",
-            0,                       # 0x00 magic
-            PDB_PAGE_SIZE,           # 0x04 page_size
-            num_tables,              # 0x08 num_tables
-            next_unused,             # 0x0C next_unused_page
-            4,                       # 0x10 unknown — F: drive observed 4
-            page_seq + 1,            # 0x14 next sequence to allocate
-            0, 0,                    # 0x18, 0x1C
+            0,  # 0x00 magic
+            PDB_PAGE_SIZE,  # 0x04 page_size
+            num_tables,  # 0x08 num_tables
+            next_unused,  # 0x0C next_unused_page
+            4,  # 0x10 unknown — F: drive observed 4
+            page_seq + 1,  # 0x14 next sequence to allocate
+            0,
+            0,  # 0x18, 0x1C
         )
         header = header[:0x1C]
 
@@ -902,6 +940,7 @@ class PdbBuilder:
 
 
 # ─── Public sync-time API ─────────────────────────────────────────────────
+
 
 def write_export_pdb(
     usb_root: Path,
@@ -935,40 +974,43 @@ def write_export_pdb(
 
     builder = PdbBuilder()
 
-    for tr in (contents or []):
-        builder.add_track(tr)
-    for aid, name in (artists or {}).items():
-        builder.add_artist(int(aid), name)
-    for aid, payload in (albums or {}).items():
-        if isinstance(payload, tuple):
-            name, artist_id = payload
-        else:
-            name, artist_id = payload, 0
-        builder.add_album(int(aid), name, int(artist_id))
-    for kid, name in (keys or {}).items():
-        builder.add_key(int(kid), name)
-    for gid, name in (genres or {}).items():
-        builder.add_genre(int(gid), name)
-    for lid, name in (labels or {}).items():
-        builder.add_label(int(lid), name)
-    for pl in (playlists or []):
-        builder.add_playlist(
-            int(pl["id"]),
-            int(pl.get("parent_id") or 0),
-            pl.get("name") or "",
-            int(pl.get("sort_order") or 0),
-            bool(pl.get("is_folder")),
-        )
-    for entry in (playlist_entries or []):
-        builder.add_playlist_entry(*entry)
-    for art_id, path in (artworks or {}).items():
-        builder.add_artwork(int(art_id), path)
-
+    # Marshalling is inside the try so malformed input (e.g. a playlist dict
+    # missing "id", or a wrong-arity playlist_entries tuple) returns None per
+    # the documented contract instead of raising past it — never write a
+    # half-marshalled / corrupt stick. Byte output for valid input is unchanged.
     try:
+        for tr in contents or []:
+            builder.add_track(tr)
+        for aid, name in (artists or {}).items():
+            builder.add_artist(int(aid), name)
+        for aid, payload in (albums or {}).items():
+            if isinstance(payload, tuple):
+                name, artist_id = payload
+            else:
+                name, artist_id = payload, 0
+            builder.add_album(int(aid), name, int(artist_id))
+        for kid, name in (keys or {}).items():
+            builder.add_key(int(kid), name)
+        for gid, name in (genres or {}).items():
+            builder.add_genre(int(gid), name)
+        for lid, name in (labels or {}).items():
+            builder.add_label(int(lid), name)
+        for pl in playlists or []:
+            builder.add_playlist(
+                int(pl["id"]),
+                int(pl.get("parent_id") or 0),
+                pl.get("name") or "",
+                int(pl.get("sort_order") or 0),
+                bool(pl.get("is_folder")),
+            )
+        for entry in playlist_entries or []:
+            builder.add_playlist_entry(*entry)
+        for art_id, path in (artworks or {}).items():
+            builder.add_artwork(int(art_id), path)
+
         data = builder.build()
         target.write_bytes(data)
-        logger.info("[PDB] wrote %s (%d B, %d tracks)",
-                    target, len(data), len(contents or []))
+        logger.info("[PDB] wrote %s (%d B, %d tracks)", target, len(data), len(contents or []))
         return target
     except Exception as exc:
         logger.error("[PDB] write failed: %s", exc, exc_info=True)
@@ -986,8 +1028,9 @@ Tables 0..2 exist as placeholders for forward-compat — Rekordbox
 allocates them but leaves them empty on libraries with no MyTags."""
 
 
-def encode_tag_row(tag_id: int, name: str, category_id: int = 0,
-                   category_pos: int = 0, is_category: bool = False) -> bytes:
+def encode_tag_row(
+    tag_id: int, name: str, category_id: int = 0, category_pos: int = 0, is_category: bool = False
+) -> bytes:
     """Tag row (subtype 0x0684 — far name).
 
     Layout (from Crate Digger spec):
@@ -1005,6 +1048,7 @@ def encode_tag_row(tag_id: int, name: str, category_id: int = 0,
     """
     name_str = encode_devicesql_string(name)
     empty_str = encode_devicesql_string("")
+
     # u32 fields are unsigned — mask negatives just in case (rbox tag IDs
     # can be in the high u32 range).
     def u32(v: int) -> int:
@@ -1023,17 +1067,17 @@ def encode_tag_row(tag_id: int, name: str, category_id: int = 0,
     ofs_unknown = ofs_name + len(name_str)
     header = struct.pack(
         "<HHIIIIIIHHH",
-        0x0684,                       # 0x00 subtype
-        0,                            # 0x02 tag_index
-        0,                            # 0x04 unknown1
-        0,                            # 0x08 unknown2
-        u32(category_id),             # 0x0C category_id
-        u32(category_pos),            # 0x10 category_pos
-        u32(tag_id),                  # 0x14 id
-        1 if is_category else 0,      # 0x18 raw_is_category
-        0x0003,                       # 0x1C unknown3 (Rekordbox always 0x0003)
-        ofs_name,                     # 0x1E ofs_name_far
-        ofs_unknown,                  # 0x20 ofs_unknown_far
+        0x0684,  # 0x00 subtype
+        0,  # 0x02 tag_index
+        0,  # 0x04 unknown1
+        0,  # 0x08 unknown2
+        u32(category_id),  # 0x0C category_id
+        u32(category_pos),  # 0x10 category_pos
+        u32(tag_id),  # 0x14 id
+        1 if is_category else 0,  # 0x18 raw_is_category
+        0x0003,  # 0x1C unknown3 (Rekordbox always 0x0003)
+        ofs_name,  # 0x1E ofs_name_far
+        ofs_unknown,  # 0x20 ofs_unknown_far
     )
     assert len(header) == header_size, f"tag header size {len(header)} != {header_size}"
     return _aligned(header + name_str + empty_str)
@@ -1057,12 +1101,15 @@ class PdbExtBuilder:
         self.tags: list[bytes] = []
         self.tag_tracks: list[bytes] = []
 
-    def add_tag(self, tag_id: int, name: str,
-                category_id: int = 0, category_pos: int = 0,
-                is_category: bool = False) -> None:
-        self.tags.append(
-            encode_tag_row(tag_id, name, category_id, category_pos, is_category)
-        )
+    def add_tag(
+        self,
+        tag_id: int,
+        name: str,
+        category_id: int = 0,
+        category_pos: int = 0,
+        is_category: bool = False,
+    ) -> None:
+        self.tags.append(encode_tag_row(tag_id, name, category_id, category_pos, is_category))
 
     def add_tag_track(self, track_id: int, tag_id: int) -> None:
         self.tag_tracks.append(encode_tag_track_row(track_id, tag_id))
@@ -1080,8 +1127,11 @@ class PdbExtBuilder:
             data_pages = PdbBuilder._pages_for_rows(rows, table_type)
 
             index_page = _Page(
-                page_index=0, table_type=table_type, next_page=0,
-                page_flags=0x64, rows_data=[],
+                page_index=0,
+                table_type=table_type,
+                next_page=0,
+                page_flags=0x64,
+                rows_data=[],
             )
             first_idx = len(all_pages) + 1
             index_page.page_index = first_idx
@@ -1122,13 +1172,14 @@ class PdbExtBuilder:
 
         header = struct.pack(
             "<IIIIIIII",
-            0,                       # magic
+            0,  # magic
             PDB_PAGE_SIZE,
             num_tables,
             next_unused,
-            5,                       # 0x10 unknown
-            page_seq + 1,            # 0x14 next sequence to allocate
-            0, 0,
+            5,  # 0x10 unknown
+            page_seq + 1,  # 0x14 next sequence to allocate
+            0,
+            0,
         )[:0x1C]
         for table_type in EXT_TABLE_ORDER:
             first = first_page_per_type.get(table_type, 0)
@@ -1170,21 +1221,28 @@ def write_export_ext_pdb(
     target = rb_dir / "exportExt.pdb"
     builder = PdbExtBuilder()
 
-    # Categories first (they get IDs in the same id space as tags)
-    for cat_id, name in (tag_categories or {}).items():
-        builder.add_tag(int(cat_id), name, is_category=True)
-    pos = 0
-    for tag_id, name in (tags or {}).items():
-        builder.add_tag(int(tag_id), name, category_id=0, category_pos=pos)
-        pos += 1
-    for track_id, tag_id in (tag_track_links or []):
-        builder.add_tag_track(int(track_id), int(tag_id))
-
+    # Marshalling inside the try for the same reason as write_export_pdb:
+    # malformed tags/links return None per contract instead of raising past it.
     try:
-        target.write_bytes(builder.build())
+        # Categories first (they get IDs in the same id space as tags)
+        for cat_id, name in (tag_categories or {}).items():
+            builder.add_tag(int(cat_id), name, is_category=True)
+        pos = 0
+        for tag_id, name in (tags or {}).items():
+            builder.add_tag(int(tag_id), name, category_id=0, category_pos=pos)
+            pos += 1
+        for track_id, tag_id in tag_track_links or []:
+            builder.add_tag_track(int(track_id), int(tag_id))
+
+        data = builder.build()
+        target.write_bytes(data)
+        # Log len(data), not a second target.stat(): a stat failure (file
+        # locked/removed after a successful write) would otherwise fall to the
+        # except and return None despite the write having succeeded.
         logger.info(
             "[PDB-Ext] wrote %s (%d B, %d tags, %d links)",
-            target, target.stat().st_size,
+            target,
+            len(data),
             len(tags or {}) + len(tag_categories or {}),
             len(tag_track_links or []),
         )
