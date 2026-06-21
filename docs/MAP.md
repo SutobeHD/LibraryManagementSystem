@@ -209,6 +209,7 @@
 | `tests/test_analysis_db_writer.py` | Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.db. |
 | `tests/test_anlz_cue_patch.py` | Round-trip tests for app/anlz_cue_patch.py. |
 | `tests/test_anlz_reference_parse.py` | Validate the produced ANLZ files (.DAT/.EXT/.2EX). |
+| `tests/test_audio_analyzer.py` | Tests for app/audio_analyzer.py — the pure _normalize_result mapping. |
 | `tests/test_audio_tags.py` | Tests for app/audio_tags.py — native tag write-back (mutates user files → HIGH risk). |
 | `tests/test_auth.py` | Tests for ``app/auth.py`` -- Bearer-token session authentication. |
 | `tests/test_batch_worker.py` | Tests for app/batch_worker.py — pure comment-transform logic. |

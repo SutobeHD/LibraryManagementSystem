@@ -1778,6 +1778,18 @@ Validate the produced ANLZ files (.DAT/.EXT/.2EX).
 - `test_produced_anlz_structure()` — Byte-level structural validation — runs in CI (librosa only, no pyrekordbox).
 - `test_produced_anlz_parses_with_reference_parser()`
 
+### `tests/test_audio_analyzer.py`
+
+Tests for app/audio_analyzer.py — the pure _normalize_result mapping.
+
+- `test_beats_to_beatgrid_seconds()`
+- `test_malformed_beats_are_skipped_not_fatal()` — Regression: non-dict entries / dicts without time_ms must be skipped,
+- `test_empty_result_passthrough()`
+- `test_existing_beatgrid_not_overwritten()`
+- `test_no_beats_key_adds_no_beatgrid()`
+- `test_legacy_default_fields_added()`
+- `test_does_not_mutate_input()`
+
 ### `tests/test_audio_tags.py`
 
 Tests for app/audio_tags.py — native tag write-back (mutates user files → HIGH risk).
