@@ -727,16 +727,10 @@ class LiveRekordboxDB:
 
         # AND (LogicalOperator=1)
         if logical_op == 1:
-            for cond in conditions:
-                if not self._check_condition(track, cond):
-                    return False
-            return True
+            return all(self._check_condition(track, cond) for cond in conditions)
         # OR (LogicalOperator=0)
         else:
-            for cond in conditions:
-                if self._check_condition(track, cond):
-                    return True
-            return False
+            return any(self._check_condition(track, cond) for cond in conditions)
 
     def _check_condition(self, track, cond):
         rule_id = cond["RuleId"]

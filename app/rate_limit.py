@@ -36,7 +36,8 @@ import hashlib
 import logging
 import threading
 import time
-from typing import Any, Awaitable, Callable, Literal
+from collections.abc import Awaitable, Callable
+from typing import Any, Literal
 
 from fastapi import HTTPException, Request
 
@@ -51,7 +52,7 @@ _PURGE_TTL_S = 600.0  # drop fully-refilled buckets idle this long
 class TokenBucket:
     """Single-key token bucket with monotonic-clock refill."""
 
-    __slots__ = ("steady_per_sec", "capacity", "tokens", "last_refill")
+    __slots__ = ("capacity", "last_refill", "steady_per_sec", "tokens")
 
     def __init__(self, steady_per_min: float, burst: int) -> None:
         self.steady_per_sec: float = steady_per_min / 60.0
@@ -63,9 +64,7 @@ class TokenBucket:
         """Add tokens earned since ``last_refill`` (caller holds the lock)."""
         elapsed = now - self.last_refill
         if elapsed > 0:
-            self.tokens = min(
-                float(self.capacity), self.tokens + elapsed * self.steady_per_sec
-            )
+            self.tokens = min(float(self.capacity), self.tokens + elapsed * self.steady_per_sec)
             self.last_refill = now
 
     def take(self) -> tuple[bool, float]:
@@ -157,9 +156,7 @@ def rate_limit(
                         break
             if request is None:
                 # No Request injected - fail-open rather than 500 the route.
-                logger.warning(
-                    "rate_limit: no Request param on %s; skipping limit", func.__name__
-                )
+                logger.warning("rate_limit: no Request param on %s; skipping limit", func.__name__)
                 return await func(*args, **kwargs)
 
             key = make_key(request, mode=key_mode)

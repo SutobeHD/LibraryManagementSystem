@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 try:
     import rbox
+
     RBOX_AVAILABLE = True
 except Exception as e:
     rbox = None
@@ -81,6 +82,7 @@ class OneLibraryUsbWriter:
         #   row encoders aren't implemented — see app/usb_pdb.py.
         try:
             from .services import SettingsManager
+
             stub_enabled = SettingsManager.load().get("legacy_pdb_stub", False)
         except Exception:
             stub_enabled = False
@@ -138,7 +140,11 @@ class OneLibraryUsbWriter:
         their folder ancestors. None / empty list = full library.
         """
         if not RBOX_AVAILABLE:
-            yield {"stage": "error", "message": "rbox library missing — cannot write OneLibrary", "progress": -1}
+            yield {
+                "stage": "error",
+                "message": "rbox library missing — cannot write OneLibrary",
+                "progress": -1,
+            }
             return
 
         if not self.TEMPLATE_DB.exists():
@@ -169,8 +175,9 @@ class OneLibraryUsbWriter:
             dst.unlink(missing_ok=True)
             if src.exists():
                 shutil.copy2(str(src), str(dst))
-        logger.info("[OneLibrary] Copied template to %s (%d B)",
-                    self.db_path, self.db_path.stat().st_size)
+        logger.info(
+            "[OneLibrary] Copied template to %s (%d B)", self.db_path, self.db_path.stat().st_size
+        )
 
         try:
             db = rbox.OneLibrary(str(self.db_path))
@@ -182,10 +189,10 @@ class OneLibraryUsbWriter:
         # Set our device-unique my_tag_master_dbid so different sticks have
         # distinct Property records (CDJ behaviour expectation).
         try:
-            mytag_dbid = int(
-                hashlib.sha1(str(self.usb_root).encode()).hexdigest()[:8], 16
-            ) & 0x7FFFFFFF
-            prop = list(db.get_properties())[0]
+            mytag_dbid = (
+                int(hashlib.sha1(str(self.usb_root).encode()).hexdigest()[:8], 16) & 0x7FFFFFFF
+            )
+            prop = next(iter(db.get_properties()))
             prop.my_tag_master_dbid = mytag_dbid
             try:
                 db.update_property(prop)
@@ -235,18 +242,20 @@ class OneLibraryUsbWriter:
             target_ids = set()
             for pid in playlist_filter:
                 try:
-                    target_ids.update(
-                        str(tid) for tid in source.get_playlist_track_ids(pid)
-                    )
+                    target_ids.update(str(tid) for tid in source.get_playlist_track_ids(pid))
                 except Exception as exc:
                     logger.warning(
-                        "[OneLibrary] couldn't resolve playlist %s: %s", pid, exc,
+                        "[OneLibrary] couldn't resolve playlist %s: %s",
+                        pid,
+                        exc,
                     )
             before = len(all_tracks)
             all_tracks = [t for t in all_tracks if str(t.get("id")) in target_ids]
             logger.info(
                 "[OneLibrary] Playlist filter: %d/%d tracks kept (%d playlists)",
-                len(all_tracks), before, len(playlist_filter),
+                len(all_tracks),
+                before,
+                len(playlist_filter),
             )
 
         total = len(all_tracks)
@@ -263,7 +272,9 @@ class OneLibraryUsbWriter:
 
                 # Resolve refs
                 artist_id = self._get_or_create_artist(db, artist_cache, t.get("artist") or "")
-                album_id = self._get_or_create_album(db, album_cache, t.get("album") or "", artist_id)
+                album_id = self._get_or_create_album(
+                    db, album_cache, t.get("album") or "", artist_id
+                )
                 genre_id = self._get_or_create_genre(db, genre_cache, t.get("genre") or "")
                 key_id = self._get_or_create_key(db, key_cache, t.get("key") or "")
                 label_id = self._get_or_create_label(db, label_cache, t.get("label") or "")
@@ -282,7 +293,9 @@ class OneLibraryUsbWriter:
                     if not dest_path.exists():
                         dest_path.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(str(src_path), str(dest_path))
-                    usb_rel_path = "/" + str(dest_path.relative_to(self.usb_root)).replace("\\", "/")
+                    usb_rel_path = "/" + str(dest_path.relative_to(self.usb_root)).replace(
+                        "\\", "/"
+                    )
                 else:
                     usb_rel_path = ""
 
@@ -291,7 +304,7 @@ class OneLibraryUsbWriter:
                 slot.title_for_search = (t.get("title") or "").lower()
                 slot.subtitle = ""
                 slot.path = usb_rel_path
-                slot.file_name = (src_path.name if src_path else "")
+                slot.file_name = src_path.name if src_path else ""
                 slot.dj_comment = t.get("comment") or ""
                 slot.bpmx100 = int((t.get("bpm") or 0) * 100)
                 slot.length = int((t.get("duration_ms") or 0) / 1000)
@@ -339,12 +352,14 @@ class OneLibraryUsbWriter:
                 if i % 5 == 0 or i == slot_count - 1:
                     yield {
                         "stage": "tracks",
-                        "message": f"Slot {i+1}/{slot_count}: {(t.get('title') or '?')[:40]}",
+                        "message": f"Slot {i + 1}/{slot_count}: {(t.get('title') or '?')[:40]}",
                         "progress": 5 + int(70 * (i + 1) / max(slot_count, 1)),
                     }
             except Exception as e:
-                logger.warning(f"[OneLibrary] Slot {i} update failed for track {t.get('id')}: {e}",
-                               exc_info=False)
+                logger.warning(
+                    f"[OneLibrary] Slot {i} update failed for track {t.get('id')}: {e}",
+                    exc_info=False,
+                )
 
         # Stage 3 — delete unused placeholder rows so the CDJ menu doesn't
         # show "__placeholder_X__" entries
@@ -614,13 +629,10 @@ class OneLibraryUsbWriter:
         # placeholders instead of cover art (Rekordbox 7 native view
         # falls back to OneLibrary so it isn't affected).
         artworks = {
-            int(img.id): (img.path or "")
-            for img in db.get_images()
-            if (img.path or "").strip()
+            int(img.id): (img.path or "") for img in db.get_images() if (img.path or "").strip()
         }
         albums = {
-            int(a.id): (a.name or "", int(getattr(a, "artist_id", 0) or 0))
-            for a in db.get_albums()
+            int(a.id): (a.name or "", int(getattr(a, "artist_id", 0) or 0)) for a in db.get_albums()
         }
         keys = {int(k.id): (k.name or "") for k in db.get_keys()}
         genres = {int(g.id): (g.name or "") for g in db.get_genres()}
@@ -658,49 +670,51 @@ class OneLibraryUsbWriter:
             # without it the PDB row has no link to the .DAT sidecar and
             # Rekordbox flags the device library as corrupted.
             analyze_path_str = getattr(c, "analysis_data_file_path", "") or ""
-            contents_data.append({
-                "id":        int(c.id),
-                "title":     title,
-                "artist_id": int(getattr(c, "artist_id", 0) or 0),
-                "album_id":  int(getattr(c, "album_id", 0) or 0),
-                "genre_id":  int(getattr(c, "genre_id", 0) or 0),
-                "key_id":    int(getattr(c, "key_id", 0) or 0),
-                "label_id":  int(getattr(c, "label_id", 0) or 0),
-                "color_id":  int(getattr(c, "color_id", 0) or 0),
-                "artwork_id": int(getattr(c, "image_id", 0) or 0),
-                "bpm":       (int(getattr(c, "bpmx100", 0) or 0)) / 100.0,
-                "length_seconds": int(getattr(c, "length", 0) or 0),
-                "bitrate":   int(getattr(c, "bitrate", 0) or 0),
-                "year":      int(getattr(c, "release_year", 0) or 0),
-                "rating":    int(getattr(c, "rating", 0) or 0),
-                "sample_rate": int(getattr(c, "sampling_rate", 0) or 0),
-                "sample_depth": int(getattr(c, "bit_depth", 0) or 0),
-                "file_size": int(getattr(c, "file_size", 0) or 0),
-                "file_path": getattr(c, "path", "") or "",
-                "file_name": getattr(c, "file_name", "") or "",
-                "comment":   getattr(c, "dj_comment", "") or "",
-                "isrc":      getattr(c, "isrc", "") or "",
-                # See date semantics comment above — slots are swapped on F: drive.
-                "date_added": date_created_str,    # PDB slot 10 ← OneLibrary date_created
-                "analyze_path": analyze_path_str,
-                "analyze_date": date_added_str,    # PDB slot 15 ← OneLibrary date_added
-                "file_type": int(getattr(c, "file_type", 0) or 0),
-                "play_count": int(getattr(c, "play_count", 0) or 0),
-                # FK back into the PC-side rekordbox masterdb. Real
-                # Rekordbox embeds these in every PDB track row so the
-                # CDJ can match a played track back to the desktop
-                # library when sticks rejoin. Without them present (the
-                # "magic constant" path the writer used previously),
-                # Rekordbox flags the PDB as corrupt on import.
-                "master_db_id":      int(getattr(c, "master_db_id", 0) or 0),
-                "master_content_id": int(getattr(c, "master_content_id", 0) or 0),
-                # Bitmask + index_shift are observed non-zero on real
-                # exports (analysis-state flags). 0x000C0700 is the
-                # "fully analysed" bitmask seen on F: drive — safe
-                # default that doesn't claim missing analysis we lack.
-                "bitmask":           int(getattr(c, "bitmask", 0x000C0700) or 0x000C0700),
-                "index_shift":       int(getattr(c, "index_shift", 0) or 0),
-            })
+            contents_data.append(
+                {
+                    "id": int(c.id),
+                    "title": title,
+                    "artist_id": int(getattr(c, "artist_id", 0) or 0),
+                    "album_id": int(getattr(c, "album_id", 0) or 0),
+                    "genre_id": int(getattr(c, "genre_id", 0) or 0),
+                    "key_id": int(getattr(c, "key_id", 0) or 0),
+                    "label_id": int(getattr(c, "label_id", 0) or 0),
+                    "color_id": int(getattr(c, "color_id", 0) or 0),
+                    "artwork_id": int(getattr(c, "image_id", 0) or 0),
+                    "bpm": (int(getattr(c, "bpmx100", 0) or 0)) / 100.0,
+                    "length_seconds": int(getattr(c, "length", 0) or 0),
+                    "bitrate": int(getattr(c, "bitrate", 0) or 0),
+                    "year": int(getattr(c, "release_year", 0) or 0),
+                    "rating": int(getattr(c, "rating", 0) or 0),
+                    "sample_rate": int(getattr(c, "sampling_rate", 0) or 0),
+                    "sample_depth": int(getattr(c, "bit_depth", 0) or 0),
+                    "file_size": int(getattr(c, "file_size", 0) or 0),
+                    "file_path": getattr(c, "path", "") or "",
+                    "file_name": getattr(c, "file_name", "") or "",
+                    "comment": getattr(c, "dj_comment", "") or "",
+                    "isrc": getattr(c, "isrc", "") or "",
+                    # See date semantics comment above — slots are swapped on F: drive.
+                    "date_added": date_created_str,  # PDB slot 10 ← OneLibrary date_created
+                    "analyze_path": analyze_path_str,
+                    "analyze_date": date_added_str,  # PDB slot 15 ← OneLibrary date_added
+                    "file_type": int(getattr(c, "file_type", 0) or 0),
+                    "play_count": int(getattr(c, "play_count", 0) or 0),
+                    # FK back into the PC-side rekordbox masterdb. Real
+                    # Rekordbox embeds these in every PDB track row so the
+                    # CDJ can match a played track back to the desktop
+                    # library when sticks rejoin. Without them present (the
+                    # "magic constant" path the writer used previously),
+                    # Rekordbox flags the PDB as corrupt on import.
+                    "master_db_id": int(getattr(c, "master_db_id", 0) or 0),
+                    "master_content_id": int(getattr(c, "master_content_id", 0) or 0),
+                    # Bitmask + index_shift are observed non-zero on real
+                    # exports (analysis-state flags). 0x000C0700 is the
+                    # "fully analysed" bitmask seen on F: drive — safe
+                    # default that doesn't claim missing analysis we lack.
+                    "bitmask": int(getattr(c, "bitmask", 0x000C0700) or 0x000C0700),
+                    "index_shift": int(getattr(c, "index_shift", 0) or 0),
+                }
+            )
 
         # Playlist tree — preserve folder hierarchy + per-sibling sort order.
         # rbox 0.1.7 returns `attribute` as a `PlaylistType` enum (unhashable),
@@ -730,14 +744,16 @@ class OneLibraryUsbWriter:
                 pname = p.name or ""
                 if _is_excluded_playlist(pname):
                     continue
-                is_folder = (_attr_int(p) == 1)
-                playlists_pdb.append({
-                    "id": int(p.id),
-                    "parent_id": parent_id,
-                    "sort_order": sort_idx,  # 0-based within siblings
-                    "is_folder": is_folder,
-                    "name": pname,
-                })
+                is_folder = _attr_int(p) == 1
+                playlists_pdb.append(
+                    {
+                        "id": int(p.id),
+                        "parent_id": parent_id,
+                        "sort_order": sort_idx,  # 0-based within siblings
+                        "is_folder": is_folder,
+                        "name": pname,
+                    }
+                )
                 if not is_folder:
                     try:
                         # rbox quirk: `get_playlist_contents` returns the
@@ -749,13 +765,12 @@ class OneLibraryUsbWriter:
                         for entry_idx, pc in enumerate(contents):
                             cid = int(getattr(pc, "id", 0) or 0)
                             if cid:
-                                playlist_entries_pdb.append(
-                                    (entry_idx, cid, int(p.id))
-                                )
+                                playlist_entries_pdb.append((entry_idx, cid, int(p.id)))
                     except Exception as exc:
                         logger.debug(
                             "[OneLibrary] PDB playlist_contents skipped for %s: %s",
-                            p.id, exc,
+                            p.id,
+                            exc,
                         )
 
         # ── Write ──────────────────────────────────────────────────────
@@ -806,10 +821,12 @@ class OneLibraryUsbWriter:
             tag_track_links=tag_track_links,
         )
         logger.info(
-            "[OneLibrary] PDB written: %d tracks, %d artists, %d albums, "
-            "%d playlists, %d entries",
-            len(contents_data), len(artists), len(albums),
-            len(playlists_pdb), len(playlist_entries_pdb),
+            "[OneLibrary] PDB written: %d tracks, %d artists, %d albums, %d playlists, %d entries",
+            len(contents_data),
+            len(artists),
+            len(albums),
+            len(playlists_pdb),
+            len(playlist_entries_pdb),
         )
 
     def _write_track_artwork(self, db, slot, audio_path: Path) -> None:
@@ -894,7 +911,10 @@ class OneLibraryUsbWriter:
         return bucket, inner
 
     def _generate_or_copy_anlz_for(
-        self, track: dict, content_id: str, source,
+        self,
+        track: dict,
+        content_id: str,
+        source,
     ) -> str | None:
         """Drop the per-track ANLZ sidecar trio into PIONEER/USBANLZ/.
 
@@ -923,6 +943,7 @@ class OneLibraryUsbWriter:
                 return None
             try:
                 from . import anlz_sidecar
+
                 sidecar_dir = anlz_sidecar.write_companion_anlz(audio_path)
             except Exception as exc:
                 logger.debug("[ANLZ] generation failed for %s: %s", audio_path.name, exc)
@@ -978,9 +999,9 @@ class OneLibraryUsbWriter:
         CDJ menu clean when the user picks a subset to push.
         """
         from .usb_manager import _is_excluded_playlist
+
         playlists = [
-            p for p in source.iter_playlists()
-            if not _is_excluded_playlist(p.get("name", ""))
+            p for p in source.iter_playlists() if not _is_excluded_playlist(p.get("name", ""))
         ]
 
         # Prune to selected playlists + folder ancestors. We walk parent_id
@@ -1005,7 +1026,9 @@ class OneLibraryUsbWriter:
             playlists = [p for p in playlists if str(p["id"]) in keep]
             logger.info(
                 "[OneLibrary] Playlist filter: %d/%d playlists kept (incl. %d ancestor folders)",
-                len(playlists), before, len(ancestors),
+                len(playlists),
+                before,
+                len(ancestors),
             )
         # Build parent → children map
         by_parent: dict[str, list[dict]] = {}
@@ -1020,9 +1043,11 @@ class OneLibraryUsbWriter:
             for seq, child in enumerate(children):
                 try:
                     if child["type"] == "0":
-                        obj = db.create_playlist_folder(child["name"], parent_one_id, seq) \
-                            if hasattr(db, "create_playlist_folder") \
+                        obj = (
+                            db.create_playlist_folder(child["name"], parent_one_id, seq)
+                            if hasattr(db, "create_playlist_folder")
                             else db.create_playlist(child["name"], parent_one_id, seq)
+                        )
                     else:
                         obj = db.create_playlist(child["name"], parent_one_id, seq)
                     one_id = int(getattr(obj, "id", 0)) or None
@@ -1037,18 +1062,24 @@ class OneLibraryUsbWriter:
                                 continue
                             try:
                                 db.create_playlist_content(
-                                    int(one_id), int(content_id_str), ti,
+                                    int(one_id),
+                                    int(content_id_str),
+                                    ti,
                                 )
                                 linked += 1
                             except Exception as e:
                                 logger.warning(
                                     "[OneLibrary] playlist_content link failed "
                                     "(pl=%s,content=%s): %s",
-                                    one_id, content_id_str, e,
+                                    one_id,
+                                    content_id_str,
+                                    e,
                                 )
                         logger.info(
                             "[OneLibrary] playlist '%s' linked %d/%d tracks",
-                            child["name"], linked, len(child["track_ids"]),
+                            child["name"],
+                            linked,
+                            len(child["track_ids"]),
                         )
                     _emit(child["id"], one_id)
                 except Exception as e:

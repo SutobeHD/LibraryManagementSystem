@@ -24,6 +24,7 @@ _SYNC_META_FILENAME = "PIONEER/RB_EDITOR_SYNC.json"
 #  Sync metadata persistence
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def load_usb_sync_meta(usb_root: str) -> dict:
     """
     Load the LibraryManagementSystem sync metadata from a USB drive.
@@ -62,7 +63,8 @@ def load_usb_sync_meta(usb_root: str) -> dict:
         data.setdefault("tracks", {})
         logger.info(
             "load_usb_sync_meta: loaded meta — last_sync=%s, %d track snapshots",
-            data["last_sync_ts"], len(data["tracks"]),
+            data["last_sync_ts"],
+            len(data["tracks"]),
         )
         return data
     except (json.JSONDecodeError, ValueError, OSError) as exc:
@@ -108,6 +110,7 @@ def save_usb_sync_meta(usb_root: str, meta: dict) -> None:
 #  Conflict detection
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def diff_playcounts(
     pc_tracks: list[dict],
     usb_tracks: list[dict],
@@ -140,7 +143,9 @@ def diff_playcounts(
     """
     logger.info(
         "diff_playcounts: pc=%d tracks, usb=%d tracks, last_sync_ts=%.0f",
-        len(pc_tracks), len(usb_tracks), last_sync_ts,
+        len(pc_tracks),
+        len(usb_tracks),
+        last_sync_ts,
     )
 
     # Index USB tracks by track_id for O(1) lookup
@@ -175,14 +180,16 @@ def diff_playcounts(
 
         if pc_count == usb_count:
             # Counts are equal — nothing to do
-            auto.append({
-                "track_id": tid,
-                "title": title,
-                "artist": artist,
-                "resolved_count": pc_count,
-                "resolved_last_played": max(pc_lp, usb_lp),
-                "source": "equal",
-            })
+            auto.append(
+                {
+                    "track_id": tid,
+                    "title": title,
+                    "artist": artist,
+                    "resolved_count": pc_count,
+                    "resolved_last_played": max(pc_lp, usb_lp),
+                    "source": "equal",
+                }
+            )
             continue
 
         # Determine which sides changed since last sync
@@ -193,41 +200,50 @@ def diff_playcounts(
             # Both played since last sync — real conflict
             logger.info(
                 "diff_playcounts: CONFLICT track=%s pc=%d usb=%d",
-                tid, pc_count, usb_count,
+                tid,
+                pc_count,
+                usb_count,
             )
-            conflicts.append({
-                "track_id": tid,
-                "title": title,
-                "artist": artist,
-                "pc_count": pc_count,
-                "usb_count": usb_count,
-                "pc_last_played": pc_lp,
-                "usb_last_played": usb_lp,
-            })
+            conflicts.append(
+                {
+                    "track_id": tid,
+                    "title": title,
+                    "artist": artist,
+                    "pc_count": pc_count,
+                    "usb_count": usb_count,
+                    "pc_last_played": pc_lp,
+                    "usb_last_played": usb_lp,
+                }
+            )
         elif pc_changed:
             # Only PC changed → take PC
-            auto.append({
-                "track_id": tid,
-                "title": title,
-                "artist": artist,
-                "resolved_count": pc_count,
-                "resolved_last_played": pc_lp,
-                "source": "pc",
-            })
+            auto.append(
+                {
+                    "track_id": tid,
+                    "title": title,
+                    "artist": artist,
+                    "resolved_count": pc_count,
+                    "resolved_last_played": pc_lp,
+                    "source": "pc",
+                }
+            )
         else:
             # Only USB changed → take USB
-            auto.append({
-                "track_id": tid,
-                "title": title,
-                "artist": artist,
-                "resolved_count": usb_count,
-                "resolved_last_played": usb_lp,
-                "source": "usb",
-            })
+            auto.append(
+                {
+                    "track_id": tid,
+                    "title": title,
+                    "artist": artist,
+                    "resolved_count": usb_count,
+                    "resolved_last_played": usb_lp,
+                    "source": "usb",
+                }
+            )
 
     logger.info(
         "diff_playcounts: %d auto-resolved, %d conflicts",
-        len(auto), len(conflicts),
+        len(auto),
+        len(conflicts),
     )
     return {"auto": auto, "conflicts": conflicts}
 
@@ -235,6 +251,7 @@ def diff_playcounts(
 # ─────────────────────────────────────────────────────────────────────────────
 #  Resolution & commit
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _apply_strategy(
     strategy: str,
@@ -297,7 +314,9 @@ def resolve_playcounts(
     """
     logger.info(
         "resolve_playcounts: %d resolutions, db=%s, xml=%s",
-        len(resolutions), pc_db_path, usb_xml_path,
+        len(resolutions),
+        pc_db_path,
+        usb_xml_path,
     )
 
     if not isinstance(resolutions, list):
@@ -326,7 +345,10 @@ def resolve_playcounts(
         finals[tid] = (final_count, final_lp)
         logger.debug(
             "resolve_playcounts: track=%s strategy=%s → count=%d lp=%.0f",
-            tid, strategy, final_count, final_lp,
+            tid,
+            strategy,
+            final_count,
+            final_lp,
         )
 
     # ── 1. Update PC database via rbox ─────────────────────────────────────
@@ -360,9 +382,7 @@ def resolve_playcounts(
                 errors.append(msg)
 
     except ImportError:
-        logger.warning(
-            "resolve_playcounts: rbox not installed — PC DB will not be updated"
-        )
+        logger.warning("resolve_playcounts: rbox not installed — PC DB will not be updated")
         errors.append("rbox library not installed; PC database not updated")
     except FileNotFoundError as exc:
         logger.error("resolve_playcounts: %s", exc)
@@ -398,6 +418,7 @@ def resolve_playcounts(
                 # is not a standard field but we store it as a custom attribute.
                 if final_lp > 0:
                     from datetime import datetime, timezone
+
                     dt = datetime.fromtimestamp(final_lp, tz=timezone.utc)
                     track_elem.set("LastPlayed", dt.strftime("%Y-%m-%d"))
                 updated_in_xml += 1
@@ -406,9 +427,7 @@ def resolve_playcounts(
         tmp_xml = usb_path.with_suffix(".tmp")
         tree.write(str(tmp_xml), encoding="utf-8", xml_declaration=True)
         tmp_xml.replace(usb_path)
-        logger.info(
-            "resolve_playcounts: USB XML updated — %d tracks patched", updated_in_xml
-        )
+        logger.info("resolve_playcounts: USB XML updated — %d tracks patched", updated_in_xml)
 
     except (ET.ParseError, ValueError, OSError) as exc:
         msg = f"USB XML update failed: {exc}"
@@ -421,6 +440,7 @@ def resolve_playcounts(
 # ─────────────────────────────────────────────────────────────────────────────
 #  USB XML reader (helper used by API layer)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def read_usb_xml_playcounts(usb_xml_path: str) -> list[dict]:
     """
@@ -465,18 +485,21 @@ def read_usb_xml_playcounts(usb_xml_path: str) -> list[dict]:
             if lp_str:
                 try:
                     from datetime import datetime, timezone
+
                     dt = datetime.strptime(lp_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
                     last_played = dt.timestamp()
                 except ValueError:
                     pass
 
-            tracks.append({
-                "track_id": tid,
-                "title": elem.get("Name", ""),
-                "artist": elem.get("Artist", ""),
-                "play_count": play_count,
-                "last_played": last_played,
-            })
+            tracks.append(
+                {
+                    "track_id": tid,
+                    "title": elem.get("Name", ""),
+                    "artist": elem.get("Artist", ""),
+                    "play_count": play_count,
+                    "last_played": last_played,
+                }
+            )
 
         logger.info("read_usb_xml_playcounts: parsed %d tracks from %s", len(tracks), path)
         return tracks

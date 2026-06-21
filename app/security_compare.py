@@ -32,9 +32,7 @@ def safe_compare(
     bytes pair. Untrusted side is ``presented``; canonical side is
     ``expected``.
     """
-    if not isinstance(presented, (str, bytes)) or not isinstance(
-        expected, (str, bytes)
-    ):
+    if not isinstance(presented, (str, bytes)) or not isinstance(expected, (str, bytes)):
         return False
 
     if isinstance(presented, str):

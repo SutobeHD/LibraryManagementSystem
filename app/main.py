@@ -2388,7 +2388,7 @@ async def restart(request: Request):
         if getattr(sys, "frozen", False):
             os.execv(sys.executable, sys.argv)
         else:
-            os.execv(sys.executable, [sys.executable] + sys.argv)
+            os.execv(sys.executable, [sys.executable, *sys.argv])
 
     threading.Thread(target=restart_proc, daemon=True).start()
     return {"message": "Restarting backend..."}

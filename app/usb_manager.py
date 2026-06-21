@@ -1199,14 +1199,13 @@ class UsbSyncEngine:
             # regression.
             settings = UsbProfileManager.get_settings() or {}
             write_pdb = bool(settings.get("usb_write_legacy_pdb", True))
-            for ev in writer.sync(
+            yield from writer.sync(
                 source,
                 audio_copy=True,
                 copy_anlz=True,
                 playlist_filter=playlist_ids or None,
                 write_pdb=write_pdb,
-            ):
-                yield ev
+            )
         except Exception as e:
             logger.error(f"OneLibrary sync failed: {e}", exc_info=True)
             yield {"stage": "error", "message": f"OneLibrary: {e}", "progress": -1}
@@ -1218,7 +1217,7 @@ class UsbSyncEngine:
         library_types: list[str] = ["library_one", "library_legacy"],
     ) -> Generator[dict, None, None]:
         if profile.get("sync_mirrored"):
-            library_types = list(set(library_types + ["library_one", "library_legacy"]))
+            library_types = list(set([*library_types, "library_one", "library_legacy"]))
             logger.info(f"Mirrored sync enabled. Syncing both formats for {profile.get('drive')}")
 
         yield {"stage": "preparing", "message": "Preparing playlist sync...", "progress": 0}
@@ -1531,8 +1530,8 @@ class UsbSyncEngine:
                 # — they store a URI scheme in folder_path instead of a real path.
                 if (
                     ":" in local_path_str[:12]
-                    and not local_path_str[1:3] == ":\\"
-                    and not local_path_str[1:3] == ":/"
+                    and local_path_str[1:3] != ":\\"
+                    and local_path_str[1:3] != ":/"
                 ):
                     # Matches soundcloud:tracks:123, spotify:track:abc, etc.
                     # but NOT Windows drive letters like "C:/" or "C:\"
@@ -1906,7 +1905,7 @@ class UsbSyncEngine:
                     "progress": 50,
                 }
                 if "library_legacy" not in library_types:
-                    library_types = list(library_types) + ["library_legacy"]
+                    library_types = [*list(library_types), "library_legacy"]
 
             if "library_legacy" in library_types or profile.get("sync_mirrored"):
                 yield {

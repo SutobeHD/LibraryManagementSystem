@@ -18,6 +18,7 @@ Extraction order:
 Returned image is always JPEG so the CDJ is happy regardless of the source
 format (PNG, BMP, etc. all converted via Pillow).
 """
+
 from __future__ import annotations
 
 import io
@@ -28,9 +29,9 @@ logger = logging.getLogger(__name__)
 
 # CDJ-displayed thumbnail sizes — chosen empirically against F: drive's
 # Rekordbox-exported artwork (~80x80 small, ~500x500 medium).
-SMALL_SIZE  = (80,  80)
+SMALL_SIZE = (80, 80)
 MEDIUM_SIZE = (500, 500)
-JPEG_QUALITY_SMALL  = 80
+JPEG_QUALITY_SMALL = 80
 JPEG_QUALITY_MEDIUM = 85
 
 
@@ -49,6 +50,7 @@ def _extract_embedded(audio_path: Path) -> bytes | None:
     try:
         if suffix == ".mp3":
             from mutagen.id3 import ID3
+
             try:
                 tags = ID3(str(audio_path))
             except Exception:
@@ -60,6 +62,7 @@ def _extract_embedded(audio_path: Path) -> bytes | None:
 
         if suffix == ".flac":
             from mutagen.flac import FLAC
+
             f = FLAC(str(audio_path))
             if f.pictures:
                 return f.pictures[0].data
@@ -67,6 +70,7 @@ def _extract_embedded(audio_path: Path) -> bytes | None:
 
         if suffix in (".m4a", ".mp4", ".aac", ".alac"):
             from mutagen.mp4 import MP4
+
             f = MP4(str(audio_path))
             covers = f.tags.get("covr") if f.tags else None
             if covers:
@@ -81,6 +85,7 @@ def _extract_embedded(audio_path: Path) -> bytes | None:
         if suffix in (".wav", ".aiff", ".aif"):
             # ID3 in RIFF/AIFF container — try ID3 reader
             from mutagen.id3 import ID3
+
             try:
                 tags = ID3(str(audio_path))
             except Exception:
@@ -170,7 +175,7 @@ def write_artwork_pair(
     bucket = _bucket_for(image_id)
     target_dir = pioneer_dir / "Artwork" / bucket
     target_dir.mkdir(parents=True, exist_ok=True)
-    small_path  = target_dir / f"a{image_id}.jpg"
+    small_path = target_dir / f"a{image_id}.jpg"
     medium_path = target_dir / f"a{image_id}_m.jpg"
 
     if small_path.exists() and medium_path.exists():

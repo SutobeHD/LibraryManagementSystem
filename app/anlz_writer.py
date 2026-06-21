@@ -569,7 +569,7 @@ def _build_pssi(
     dominant_mood = max(mood_counts, key=mood_counts.get) if mood_counts else "mid"
     mood_val = mood_map.get(dominant_mood, 2)
 
-    end_beat_total = int(round((duration_ms / 1000.0) * (bpm / 60.0)))
+    end_beat_total = round((duration_ms / 1000.0) * (bpm / 60.0))
 
     buf = struct.pack(
         ">4sIII",
@@ -588,7 +588,7 @@ def _build_pssi(
     buf += b"\x00" * 8  # reserved padding (header is 32 bytes)
 
     def ms_to_beat(ms: int) -> int:
-        return max(0, int(round((ms / 1000.0) * (bpm / 60.0))))
+        return max(0, round((ms / 1000.0) * (bpm / 60.0)))
 
     for i, phrase in enumerate(phrases):
         start_beat = ms_to_beat(phrase.get("start_ms", 0))
@@ -645,7 +645,7 @@ def _build_pqt2(beats: list[dict[str, Any]], bpm: float) -> bytes:
     if not beats:
         return b""
 
-    base_tempo_int = int(round(bpm * 100))  # BPM × 100
+    base_tempo_int = round(bpm * 100)  # BPM × 100
     first_beat_time = beats[0].get("time_ms", 0)
     last_beat_time = beats[-1].get("time_ms", 0)
 

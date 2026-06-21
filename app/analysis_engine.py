@@ -693,7 +693,7 @@ def _compute_beat_confidence(
 
     confidences: list[float] = []
     for t in beat_times:
-        frame = int(round(t * sr / hop))
+        frame = round(t * sr / hop)
         # Look at ±2 frames around beat for max onset (sub-frame jitter tolerant)
         lo = max(0, frame - 2)
         hi = min(len(onset_strength), frame + 3)
@@ -795,7 +795,7 @@ def detect_beats_madmom(
 
             # Build PQTZ-format beat grid
             beats = []
-            tempo_int = int(round(bpm * 100))
+            tempo_int = round(bpm * 100)
             for i, t in enumerate(beat_times):
                 if t < 0:
                     continue
@@ -805,7 +805,7 @@ def detect_beats_madmom(
                     {
                         "beat_number": (i % 4) + 1,
                         "tempo": tempo_int,
-                        "time_ms": int(round(t * 1000)),
+                        "time_ms": round(t * 1000),
                         "confidence": conf,
                     }
                 )
@@ -906,7 +906,7 @@ def detect_beats(
     bpm_refined = _octave_correct(bpm_refined)
 
     # 6. Beat tracking with refined BPM as prior
-    tempo, beat_frames = librosa.beat.beat_track(
+    _tempo, beat_frames = librosa.beat.beat_track(
         onset_envelope=onset_env, sr=sr, hop_length=HOP, start_bpm=bpm_refined, tightness=300
     )
 
@@ -961,7 +961,7 @@ def detect_beats(
 
     # 11. Build PQTZ-format beat grid
     beats = []
-    tempo_int = int(round(bpm * 100))
+    tempo_int = round(bpm * 100)
     for i, t in enumerate(beat_times):
         if t < 0:
             continue
@@ -971,7 +971,7 @@ def detect_beats(
             {
                 "beat_number": (i % 4) + 1,
                 "tempo": tempo_int,
-                "time_ms": int(round(t * 1000)),
+                "time_ms": round(t * 1000),
                 "confidence": conf,
             }
         )
@@ -1721,7 +1721,7 @@ def generate_pvbr(duration: float, file_path: str | None = None) -> list[int]:
             return toc
 
     # Linear fallback (CBR, FLAC, WAV, AAC, or no Xing header)
-    return [int(round(i * (duration * 1000) / 400)) for i in range(400)]
+    return [round(i * (duration * 1000) / 400) for i in range(400)]
 
 
 def _read_mp3_xing_toc(file_path: str, duration: float) -> list[int] | None:
@@ -1791,7 +1791,7 @@ def _read_mp3_xing_toc(file_path: str, duration: float) -> list[int] | None:
             # uniformly spaced in time (for waveform/seek display). Use byte_pct as
             # time proxy: result[i] is the millisecond position represented by byte i%.
             t_ms = pct * total_ms  # uniform time sampling
-            result.append(int(round(t_ms)))
+            result.append(round(t_ms))
         return result
 
     except Exception as e:

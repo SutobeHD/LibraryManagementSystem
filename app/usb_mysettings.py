@@ -18,6 +18,7 @@ Read/write via `pyrekordbox.MySettingFile` & friends. We expose a
 JSON-serializable schema so the frontend can render labelled dropdowns
 without hardcoding the enum tables.
 """
+
 from __future__ import annotations
 
 import logging
@@ -35,6 +36,7 @@ try:
         MySettingFile,
     )
     from pyrekordbox.mysettings import structs as _ms_structs
+
     _PYRB_AVAILABLE = True
 except Exception as exc:
     logger.warning("pyrekordbox unavailable for MYSETTING I/O: %s", exc)
@@ -69,10 +71,24 @@ def _humanize(value: str) -> str:
         return f"-{m.group(1)} dB"
     # Numeric words read better as digits in the dropdown
     word_to_digit = {
-        "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
-        "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
-        "eleven": "11", "twelve": "12", "thirteen": "13", "fourteen": "14",
-        "fifteen": "15", "sixteen": "16", "thirtytwo": "32", "sixtyfour": "64",
+        "one": "1",
+        "two": "2",
+        "three": "3",
+        "four": "4",
+        "five": "5",
+        "six": "6",
+        "seven": "7",
+        "eight": "8",
+        "nine": "9",
+        "ten": "10",
+        "eleven": "11",
+        "twelve": "12",
+        "thirteen": "13",
+        "fourteen": "14",
+        "fifteen": "15",
+        "sixteen": "16",
+        "thirtytwo": "32",
+        "sixtyfour": "64",
     }
     if value in word_to_digit:
         return word_to_digit[value]
@@ -96,7 +112,7 @@ def _enum_options(enum_name: str) -> list[dict[str, str]]:
     # construct Enum stores its mapping in `.encmapping`
     members = getattr(enum_obj, "encmapping", None) or {}
     out: list[dict[str, str]] = []
-    for name in members.keys():
+    for name in members:
         # Python identifier suffix `_` is used to avoid keyword collisions
         clean = name.rstrip("_")
         out.append({"value": clean, "label": _humanize(clean)})
@@ -107,62 +123,314 @@ def _enum_options(enum_name: str) -> list[dict[str, str]]:
 SCHEMA: dict[str, list[dict[str, Any]]] = {
     "MYSETTING": [
         # Auto-Cue + Memory
-        {"key": "auto_cue",            "label": "Auto Cue",            "enum": "AutoCue",            "group": "Auto Cue",  "help": "Automatically place a cue point at the first audible peak."},
-        {"key": "auto_cue_level",      "label": "Auto Cue Level",      "enum": "AutoCueLevel",       "group": "Auto Cue",  "help": "Threshold level for auto-cue detection."},
-        {"key": "hotcue_autoload",     "label": "Hot Cue Auto-Load",   "enum": "HotCueAutoLoad",     "group": "Cues",      "help": "Whether to auto-load saved hot cues when the track loads."},
-        {"key": "hotcue_color",        "label": "Hot Cue Colour",      "enum": "HotCueColor",        "group": "Cues",      "help": "Colour-code hot cue buttons."},
+        {
+            "key": "auto_cue",
+            "label": "Auto Cue",
+            "enum": "AutoCue",
+            "group": "Auto Cue",
+            "help": "Automatically place a cue point at the first audible peak.",
+        },
+        {
+            "key": "auto_cue_level",
+            "label": "Auto Cue Level",
+            "enum": "AutoCueLevel",
+            "group": "Auto Cue",
+            "help": "Threshold level for auto-cue detection.",
+        },
+        {
+            "key": "hotcue_autoload",
+            "label": "Hot Cue Auto-Load",
+            "enum": "HotCueAutoLoad",
+            "group": "Cues",
+            "help": "Whether to auto-load saved hot cues when the track loads.",
+        },
+        {
+            "key": "hotcue_color",
+            "label": "Hot Cue Colour",
+            "enum": "HotCueColor",
+            "group": "Cues",
+            "help": "Colour-code hot cue buttons.",
+        },
         # Quantize
-        {"key": "quantize",            "label": "Quantize",            "enum": "Quantize",           "group": "Quantize",  "help": "Snap cues, loops and beat jumps to the beatgrid."},
-        {"key": "quantize_beat_value", "label": "Quantize Beat Value", "enum": "QuantizeBeatValue",  "group": "Quantize",  "help": "Resolution at which quantize snaps."},
+        {
+            "key": "quantize",
+            "label": "Quantize",
+            "enum": "Quantize",
+            "group": "Quantize",
+            "help": "Snap cues, loops and beat jumps to the beatgrid.",
+        },
+        {
+            "key": "quantize_beat_value",
+            "label": "Quantize Beat Value",
+            "enum": "QuantizeBeatValue",
+            "group": "Quantize",
+            "help": "Resolution at which quantize snaps.",
+        },
         # Tempo / Sync
-        {"key": "tempo_range",         "label": "Tempo Range",         "enum": "TempoRange",         "group": "Tempo",     "help": "Pitch fader range."},
-        {"key": "master_tempo",        "label": "Master Tempo",        "enum": "MasterTempo",        "group": "Tempo",     "help": "Lock pitch when changing tempo."},
-        {"key": "sync",                "label": "Sync",                "enum": "Sync",               "group": "Tempo",     "help": "Tempo / phase sync to the master deck."},
+        {
+            "key": "tempo_range",
+            "label": "Tempo Range",
+            "enum": "TempoRange",
+            "group": "Tempo",
+            "help": "Pitch fader range.",
+        },
+        {
+            "key": "master_tempo",
+            "label": "Master Tempo",
+            "enum": "MasterTempo",
+            "group": "Tempo",
+            "help": "Lock pitch when changing tempo.",
+        },
+        {
+            "key": "sync",
+            "label": "Sync",
+            "enum": "Sync",
+            "group": "Tempo",
+            "help": "Tempo / phase sync to the master deck.",
+        },
         # Display
-        {"key": "language",            "label": "Language",            "enum": "Language",           "group": "Display",   "help": "On-deck UI language."},
-        {"key": "lcd_brightness",      "label": "LCD Brightness",      "enum": "LCDBrightness",      "group": "Display",   "help": "Brightness level of the player LCD."},
-        {"key": "phase_meter",         "label": "Phase Meter",         "enum": "PhaseMeter",         "group": "Display",   "help": "Style of the on-deck phase meter."},
-        {"key": "time_mode",           "label": "Time Display",        "enum": "TimeMode",           "group": "Display",   "help": "Show elapsed or remaining time."},
-        {"key": "on_air_display",      "label": "On Air Display",      "enum": "OnAirDisplay",       "group": "Display",   "help": "Highlight the active deck."},
-        {"key": "slip_flashing",       "label": "Slip Flashing",       "enum": "SlipFlashing",       "group": "Display",   "help": "Flash the slip indicator while engaged."},
+        {
+            "key": "language",
+            "label": "Language",
+            "enum": "Language",
+            "group": "Display",
+            "help": "On-deck UI language.",
+        },
+        {
+            "key": "lcd_brightness",
+            "label": "LCD Brightness",
+            "enum": "LCDBrightness",
+            "group": "Display",
+            "help": "Brightness level of the player LCD.",
+        },
+        {
+            "key": "phase_meter",
+            "label": "Phase Meter",
+            "enum": "PhaseMeter",
+            "group": "Display",
+            "help": "Style of the on-deck phase meter.",
+        },
+        {
+            "key": "time_mode",
+            "label": "Time Display",
+            "enum": "TimeMode",
+            "group": "Display",
+            "help": "Show elapsed or remaining time.",
+        },
+        {
+            "key": "on_air_display",
+            "label": "On Air Display",
+            "enum": "OnAirDisplay",
+            "group": "Display",
+            "help": "Highlight the active deck.",
+        },
+        {
+            "key": "slip_flashing",
+            "label": "Slip Flashing",
+            "enum": "SlipFlashing",
+            "group": "Display",
+            "help": "Flash the slip indicator while engaged.",
+        },
         # Jog
-        {"key": "jog_mode",            "label": "Jog Mode",            "enum": "JogMode",            "group": "Jog",       "help": "Vinyl scratch behaviour vs. CDJ resume-from-pause."},
-        {"key": "jog_ring_brightness", "label": "Jog Ring Brightness", "enum": "JogRingBrightness",  "group": "Jog",       "help": "Brightness of the jog wheel ring LEDs."},
-        {"key": "jog_ring_indicator",  "label": "Jog Ring Indicator",  "enum": "JogRingIndicator",   "group": "Jog",       "help": "Show the rotation indicator on the jog ring."},
+        {
+            "key": "jog_mode",
+            "label": "Jog Mode",
+            "enum": "JogMode",
+            "group": "Jog",
+            "help": "Vinyl scratch behaviour vs. CDJ resume-from-pause.",
+        },
+        {
+            "key": "jog_ring_brightness",
+            "label": "Jog Ring Brightness",
+            "enum": "JogRingBrightness",
+            "group": "Jog",
+            "help": "Brightness of the jog wheel ring LEDs.",
+        },
+        {
+            "key": "jog_ring_indicator",
+            "label": "Jog Ring Indicator",
+            "enum": "JogRingIndicator",
+            "group": "Jog",
+            "help": "Show the rotation indicator on the jog ring.",
+        },
         # Misc
-        {"key": "play_mode",           "label": "Play Mode",           "enum": "PlayMode",           "group": "Playback",  "help": "Continue to the next track or stop after each."},
-        {"key": "needle_lock",         "label": "Needle Lock",         "enum": "NeedleLock",         "group": "Playback",  "help": "Lock needle search during playback."},
-        {"key": "eject_lock",          "label": "Eject Lock",          "enum": "EjectLock",          "group": "Playback",  "help": "Disable the eject button during playback."},
-        {"key": "disc_slot_illumination", "label": "Disc Slot Illumination", "enum": "DiscSlotIllumination", "group": "Display", "help": "Illumination of the disc slot."},
+        {
+            "key": "play_mode",
+            "label": "Play Mode",
+            "enum": "PlayMode",
+            "group": "Playback",
+            "help": "Continue to the next track or stop after each.",
+        },
+        {
+            "key": "needle_lock",
+            "label": "Needle Lock",
+            "enum": "NeedleLock",
+            "group": "Playback",
+            "help": "Lock needle search during playback.",
+        },
+        {
+            "key": "eject_lock",
+            "label": "Eject Lock",
+            "enum": "EjectLock",
+            "group": "Playback",
+            "help": "Disable the eject button during playback.",
+        },
+        {
+            "key": "disc_slot_illumination",
+            "label": "Disc Slot Illumination",
+            "enum": "DiscSlotIllumination",
+            "group": "Display",
+            "help": "Illumination of the disc slot.",
+        },
     ],
     "MYSETTING2": [
-        {"key": "vinyl_speed_adjust",   "label": "Vinyl Speed Adjust",   "enum": "VinylSpeedAdjust",   "group": "Vinyl",  "help": "When to apply the vinyl-mode speed brake."},
-        {"key": "jog_display_mode",     "label": "Jog Display Mode",     "enum": "JogDisplayMode",     "group": "Display","help": "Information shown on the jog wheel display."},
-        {"key": "pad_button_brightness","label": "Pad Button Brightness","enum": "PadButtonBrightness","group": "Display","help": "Brightness of the performance pads."},
-        {"key": "jog_lcd_brightness",   "label": "Jog LCD Brightness",   "enum": "JogLCDBrightness",   "group": "Display","help": "Brightness of the jog wheel LCD."},
-        {"key": "waveform_divisions",   "label": "Waveform Divisions",   "enum": "WaveformDivisions",  "group": "Display","help": "Time-scale or phrase-marker overlay on the waveform."},
-        {"key": "waveform",             "label": "Waveform Display",     "enum": "Waveform",           "group": "Display","help": "Show waveform or phase meter."},
-        {"key": "beat_jump_beat_value", "label": "Beat Jump Value",      "enum": "BeatJumpBeatValue",  "group": "Quantize","help": "How many beats one Beat Jump press jumps."},
+        {
+            "key": "vinyl_speed_adjust",
+            "label": "Vinyl Speed Adjust",
+            "enum": "VinylSpeedAdjust",
+            "group": "Vinyl",
+            "help": "When to apply the vinyl-mode speed brake.",
+        },
+        {
+            "key": "jog_display_mode",
+            "label": "Jog Display Mode",
+            "enum": "JogDisplayMode",
+            "group": "Display",
+            "help": "Information shown on the jog wheel display.",
+        },
+        {
+            "key": "pad_button_brightness",
+            "label": "Pad Button Brightness",
+            "enum": "PadButtonBrightness",
+            "group": "Display",
+            "help": "Brightness of the performance pads.",
+        },
+        {
+            "key": "jog_lcd_brightness",
+            "label": "Jog LCD Brightness",
+            "enum": "JogLCDBrightness",
+            "group": "Display",
+            "help": "Brightness of the jog wheel LCD.",
+        },
+        {
+            "key": "waveform_divisions",
+            "label": "Waveform Divisions",
+            "enum": "WaveformDivisions",
+            "group": "Display",
+            "help": "Time-scale or phrase-marker overlay on the waveform.",
+        },
+        {
+            "key": "waveform",
+            "label": "Waveform Display",
+            "enum": "Waveform",
+            "group": "Display",
+            "help": "Show waveform or phase meter.",
+        },
+        {
+            "key": "beat_jump_beat_value",
+            "label": "Beat Jump Value",
+            "enum": "BeatJumpBeatValue",
+            "group": "Quantize",
+            "help": "How many beats one Beat Jump press jumps.",
+        },
     ],
     "DJMMYSETTING": [
         # Faders
-        {"key": "channel_fader_curve",      "label": "Channel Fader Curve",       "enum": "ChannelFaderCurve",      "group": "Faders", "help": "Response curve of the per-channel fader."},
-        {"key": "channel_fader_curve_long", "label": "Channel Fader Curve (Long)","enum": "ChannelFaderCurveLong",  "group": "Faders", "help": "Curve for long-throw channel faders on flagship DJMs."},
-        {"key": "cross_fader_curve",        "label": "Crossfader Curve",          "enum": "CrossfaderCurve",        "group": "Faders", "help": "Response curve of the crossfader."},
+        {
+            "key": "channel_fader_curve",
+            "label": "Channel Fader Curve",
+            "enum": "ChannelFaderCurve",
+            "group": "Faders",
+            "help": "Response curve of the per-channel fader.",
+        },
+        {
+            "key": "channel_fader_curve_long",
+            "label": "Channel Fader Curve (Long)",
+            "enum": "ChannelFaderCurveLong",
+            "group": "Faders",
+            "help": "Curve for long-throw channel faders on flagship DJMs.",
+        },
+        {
+            "key": "cross_fader_curve",
+            "label": "Crossfader Curve",
+            "enum": "CrossfaderCurve",
+            "group": "Faders",
+            "help": "Response curve of the crossfader.",
+        },
         # Headphones
-        {"key": "headphones_pre_eq",     "label": "Headphones Pre EQ",     "enum": "HeadphonesPreEQ",        "group": "Headphones", "help": "Whether headphone cue picks up the signal pre or post EQ."},
-        {"key": "headphones_mono_split", "label": "Headphones Mono Split", "enum": "HeadphonesMonoSplit",    "group": "Headphones", "help": "Split cue and master to separate L/R headphone channels."},
+        {
+            "key": "headphones_pre_eq",
+            "label": "Headphones Pre EQ",
+            "enum": "HeadphonesPreEQ",
+            "group": "Headphones",
+            "help": "Whether headphone cue picks up the signal pre or post EQ.",
+        },
+        {
+            "key": "headphones_mono_split",
+            "label": "Headphones Mono Split",
+            "enum": "HeadphonesMonoSplit",
+            "group": "Headphones",
+            "help": "Split cue and master to separate L/R headphone channels.",
+        },
         # Mic
-        {"key": "mic_low_cut",           "label": "Mic Low Cut",           "enum": "MicLowCut",              "group": "Mic",        "help": "High-pass filter on the mic input."},
-        {"key": "talk_over_mode",        "label": "Talk-Over Mode",        "enum": "TalkOverMode",           "group": "Mic",        "help": "How aggressively talk-over ducks the music."},
-        {"key": "talk_over_level",       "label": "Talk-Over Level",       "enum": "TalkOverLevel",          "group": "Mic",        "help": "Amount of attenuation applied during talk-over."},
+        {
+            "key": "mic_low_cut",
+            "label": "Mic Low Cut",
+            "enum": "MicLowCut",
+            "group": "Mic",
+            "help": "High-pass filter on the mic input.",
+        },
+        {
+            "key": "talk_over_mode",
+            "label": "Talk-Over Mode",
+            "enum": "TalkOverMode",
+            "group": "Mic",
+            "help": "How aggressively talk-over ducks the music.",
+        },
+        {
+            "key": "talk_over_level",
+            "label": "Talk-Over Level",
+            "enum": "TalkOverLevel",
+            "group": "Mic",
+            "help": "Amount of attenuation applied during talk-over.",
+        },
         # FX / MIDI
-        {"key": "beat_fx_quantize",      "label": "Beat FX Quantize",      "enum": "BeatFXQuantize",         "group": "FX",         "help": "Snap Beat FX engagement to the beatgrid."},
-        {"key": "midi_channel",          "label": "MIDI Channel",          "enum": "MidiChannel",            "group": "MIDI",       "help": "Outgoing MIDI channel for performance data."},
-        {"key": "midi_button_type",      "label": "MIDI Button Type",      "enum": "MidiButtonType",         "group": "MIDI",       "help": "Toggle vs. trigger behaviour for MIDI buttons."},
+        {
+            "key": "beat_fx_quantize",
+            "label": "Beat FX Quantize",
+            "enum": "BeatFXQuantize",
+            "group": "FX",
+            "help": "Snap Beat FX engagement to the beatgrid.",
+        },
+        {
+            "key": "midi_channel",
+            "label": "MIDI Channel",
+            "enum": "MidiChannel",
+            "group": "MIDI",
+            "help": "Outgoing MIDI channel for performance data.",
+        },
+        {
+            "key": "midi_button_type",
+            "label": "MIDI Button Type",
+            "enum": "MidiButtonType",
+            "group": "MIDI",
+            "help": "Toggle vs. trigger behaviour for MIDI buttons.",
+        },
         # Display
-        {"key": "display_brightness",    "label": "Display Brightness",    "enum": "MixerDisplayBrightness", "group": "Display",    "help": "Brightness of the mixer display."},
-        {"key": "indicator_brightness",  "label": "Indicator Brightness",  "enum": "MixerIndicatorBrightness","group": "Display",    "help": "Brightness of LED indicators."},
+        {
+            "key": "display_brightness",
+            "label": "Display Brightness",
+            "enum": "MixerDisplayBrightness",
+            "group": "Display",
+            "help": "Brightness of the mixer display.",
+        },
+        {
+            "key": "indicator_brightness",
+            "label": "Indicator Brightness",
+            "enum": "MixerIndicatorBrightness",
+            "group": "Display",
+            "help": "Brightness of LED indicators.",
+        },
     ],
 }
 
@@ -174,9 +442,9 @@ def get_schema() -> dict[str, Any]:
         return {"available": False, "error": "pyrekordbox not installed"}
 
     file_classes = {
-        "MYSETTING":     MySettingFile,
-        "MYSETTING2":    MySetting2File,
-        "DJMMYSETTING":  DjmMySettingFile,
+        "MYSETTING": MySettingFile,
+        "MYSETTING2": MySetting2File,
+        "DJMMYSETTING": DjmMySettingFile,
     }
     out: dict[str, Any] = {"available": True, "files": {}}
     for file_id, fields in SCHEMA.items():
@@ -187,11 +455,13 @@ def get_schema() -> dict[str, Any]:
             options = _enum_options(f["enum"])
             default_raw = defaults_inst.get(f["key"])
             default_value = str(default_raw) if default_raw is not None else None
-            out_fields.append({
-                **{k: v for k, v in f.items() if k != "enum"},
-                "options": options,
-                "default": default_value,
-            })
+            out_fields.append(
+                {
+                    **{k: v for k, v in f.items() if k != "enum"},
+                    "options": options,
+                    "default": default_value,
+                }
+            )
         out["files"][file_id] = {
             "filename": _file_filename(file_id),
             "fields": out_fields,
@@ -201,19 +471,19 @@ def get_schema() -> dict[str, Any]:
 
 def _file_filename(file_id: str) -> str:
     return {
-        "MYSETTING":    "MYSETTING.DAT",
-        "MYSETTING2":   "MYSETTING2.DAT",
+        "MYSETTING": "MYSETTING.DAT",
+        "MYSETTING2": "MYSETTING2.DAT",
         "DJMMYSETTING": "DJMMYSETTING.DAT",
-        "DEVSETTING":   "DEVSETTING.DAT",
+        "DEVSETTING": "DEVSETTING.DAT",
     }[file_id]
 
 
 def _file_class(file_id: str):
     return {
-        "MYSETTING":    MySettingFile,
-        "MYSETTING2":   MySetting2File,
+        "MYSETTING": MySettingFile,
+        "MYSETTING2": MySetting2File,
         "DJMMYSETTING": DjmMySettingFile,
-        "DEVSETTING":   DevSettingFile,
+        "DEVSETTING": DevSettingFile,
     }[file_id]
 
 
@@ -285,7 +555,10 @@ def write_settings(
             except Exception as exc:
                 logger.warning(
                     "[mysettings] %s.%s = %r rejected: %s — keeping default",
-                    file_id, key, val, exc,
+                    file_id,
+                    key,
+                    val,
+                    exc,
                 )
 
         try:

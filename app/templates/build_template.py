@@ -25,6 +25,7 @@ is no way to construct a `NewContent` builder from Python. The only working
 write path is `update_content(existing_row)`, which means we MUST start from
 a template that already contains content slot rows.
 """
+
 import gc
 import logging
 import shutil
@@ -67,8 +68,7 @@ def build_template(stick_root: Path, out_template: Path) -> int:
     pre_artists = len(list(db.get_artists()))
     pre_playlists = len(list(db.get_playlists()))
 
-    print(f"Source has {pre_contents} contents, {pre_artists} artists, "
-          f"{pre_playlists} playlists")
+    print(f"Source has {pre_contents} contents, {pre_artists} artists, {pre_playlists} playlists")
 
     # CRITICAL ORDER: playlist_content children first, then playlists, then
     # contents (so they release their FKs to image/album/artist), then the

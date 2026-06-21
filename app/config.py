@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-REKORDBOX_ROOT = Path(os.environ.get('APPDATA', '')) / "Pioneer" / "rekordbox"
+REKORDBOX_ROOT = Path(os.environ.get("APPDATA", "")) / "Pioneer" / "rekordbox"
 DB_FILENAME = "master.db"
 FFMPEG_BIN = "ffmpeg"
 EXPORT_DIR = Path("./exports")

@@ -212,11 +212,13 @@ def from_xml_node(node) -> dict:
         "conditions": [],
     }
     for c in node.findall("CONDITION"):
-        out["conditions"].append({
-            "Field": c.get("Field", ""),
-            "Operator": c.get("Operator", "1"),
-            "ValueLeft": c.get("ValueLeft", ""),
-            "ValueRight": c.get("ValueRight", ""),
-            "ValueUnit": c.get("ValueUnit", "0"),
-        })
+        out["conditions"].append(
+            {
+                "Field": c.get("Field", ""),
+                "Operator": c.get("Operator", "1"),
+                "ValueLeft": c.get("ValueLeft", ""),
+                "ValueRight": c.get("ValueRight", ""),
+                "ValueUnit": c.get("ValueUnit", "0"),
+            }
+        )
     return out
