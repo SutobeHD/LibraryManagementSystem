@@ -154,7 +154,9 @@ def _build_pwav(waveform_data: list[int]) -> bytes:
         1,  # bytes per entry
         0,  # reserved
     )
-    buf += bytes(entries)
+    # Clamp to 0..255 like PWV4/6/7 — bytes() raises on out-of-range; for valid
+    # waveform values this is the identity, so produced bytes are unchanged.
+    buf += bytes(max(0, min(255, v)) for v in entries)
     return buf
 
 
@@ -179,7 +181,9 @@ def _build_pwv2(waveform_data: list[int]) -> bytes:
         1,  # bytes per entry
         0,  # reserved
     )
-    buf += bytes(entries)
+    # Clamp to 0..255 like PWV4/6/7 — bytes() raises on out-of-range; for valid
+    # waveform values this is the identity, so produced bytes are unchanged.
+    buf += bytes(max(0, min(255, v)) for v in entries)
     return buf
 
 
@@ -351,7 +355,8 @@ def _build_pwv3(waveform_data: list[int], fps: int = 150) -> bytes:
         fps,
         0,  # reserved
     )
-    buf += bytes(waveform_data)
+    # Clamp to 0..255 (see PWAV) — identity for valid values, byte-unchanged.
+    buf += bytes(max(0, min(255, v)) for v in waveform_data)
     return buf
 
 
@@ -820,8 +825,8 @@ def _prune_anlz_backups(anlz_dir: str, keep: int = _DEFAULT_BACKUP_KEEP) -> int:
             try:
                 os.unlink(stale)
                 removed += 1
-            except OSError:
-                pass
+            except OSError as e:
+                logger.warning("ANLZ backup prune failed for %s: %s", stale, e)
     return removed
 
 
@@ -881,7 +886,7 @@ def write_anlz_files(
         paths["dat"] = dat_path
         logger.info(f"Wrote .DAT: {dat_path} ({len(dat_data)} bytes)")
     except Exception as e:
-        logger.error(f"Failed to write .DAT: {e}")
+        logger.error(f"Failed to write .DAT: {e}", exc_info=True)
 
     # --- .EXT ---
     try:
@@ -903,7 +908,7 @@ def write_anlz_files(
         paths["ext"] = ext_path
         logger.info(f"Wrote .EXT: {ext_path} ({len(ext_data)} bytes)")
     except Exception as e:
-        logger.error(f"Failed to write .EXT: {e}")
+        logger.error(f"Failed to write .EXT: {e}", exc_info=True)
 
     # --- .2EX ---
     try:
@@ -921,6 +926,6 @@ def write_anlz_files(
             paths["2ex"] = ex2_path
             logger.info(f"Wrote .2EX: {ex2_path} ({len(ex2_data)} bytes)")
     except Exception as e:
-        logger.error(f"Failed to write .2EX: {e}")
+        logger.error(f"Failed to write .2EX: {e}", exc_info=True)
 
     return paths
