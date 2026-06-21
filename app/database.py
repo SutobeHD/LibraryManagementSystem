@@ -353,48 +353,6 @@ class RekordboxXMLDB:
             return []
         return [t for t in self.tracks.values() if t.get("Album") == album_name]
 
-    def get_tracks_by_label(self, aid):
-        label_name = next((l["name"] for l in self.get_all_labels() if l["id"] == aid), None)
-        if not label_name:
-            return []
-        return [
-            t
-            for t in self.tracks.values()
-            if self._normalize_artist_name(t.get("Label", "")) == label_name
-        ]
-
-    def get_tracks_by_album(self, aid):
-        album_name = next((a["name"] for a in self.get_all_albums() if a["id"] == aid), None)
-        if not album_name:
-            return []
-        return [t for t in self.tracks.values() if t.get("Album") == album_name]
-
-    def get_tracks_by_artist(self, aid):
-        artist_name = next((a["name"] for a in self.artists if a["id"] == aid), None)
-        if not artist_name:
-            return []
-        return [
-            t
-            for t in self.tracks.values()
-            if artist_name in self._split_artists(t.get("Artist", ""))
-        ]
-
-    def get_tracks_by_label(self, aid):
-        label_name = next((l["name"] for l in self.get_all_labels() if l["id"] == aid), None)
-        if not label_name:
-            return []
-        return [
-            t
-            for t in self.tracks.values()
-            if self._normalize_artist_name(t.get("Label", "")) == label_name
-        ]
-
-    def get_tracks_by_album(self, aid):
-        album_name = next((a["name"] for a in self.get_all_albums() if a["id"] == aid), None)
-        if not album_name:
-            return []
-        return [t for t in self.tracks.values() if t.get("Album") == album_name]
-
     def add_track(self, track_data):
         tid = track_data.get("TrackID") or str(int(time.time() * 1000))
         track_data["id"] = tid

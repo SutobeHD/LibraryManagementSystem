@@ -179,7 +179,7 @@ def _get_proxy() -> dict | None:
 
 
 def _sc_get(
-    url: str, headers: dict, params: dict = None, max_retries: int = 3, timeout: int = 15
+    url: str, headers: dict, params: dict | None = None, max_retries: int = 3, timeout: int = 15
 ) -> requests.Response:
     """
     Perform a GET request against the SoundCloud API with automatic 429 backoff.
@@ -213,7 +213,7 @@ def _sc_get(
         if resp.status_code == 200:
             # EC10: Catch malformed/non-JSON responses from SoundCloud
             try:
-                resp_json = resp.json()  # Validate JSON parsability before returning
+                resp.json()  # Validate JSON parsability before returning
                 # logger.debug(f"[SC] JSON Response snippet: {str(resp_json)[:200]}...")
                 return resp
             except ValueError as json_err:

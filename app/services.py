@@ -1,3 +1,4 @@
+import contextlib
 import datetime
 import json
 import logging
@@ -5,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 import wave
 import xml.etree.ElementTree as ET
@@ -399,10 +401,8 @@ class AudioEngine:
                 mp3_data += encoder.flush()
                 with open(str(final_path), "wb") as f:
                     f.write(mp3_data)
-                try:
+                with contextlib.suppress(OSError):
                     os.remove(str(wav_path))
-                except OSError:
-                    pass
                 logger.info(f"Encoded MP3 via lameenc: {final_path} ({len(mp3_data) // 1024} KB)")
             elif output_ext == ".flac":
                 if not _HAS_SOUNDFILE:
@@ -410,10 +410,8 @@ class AudioEngine:
                 # Read WAV via soundfile and re-encode as FLAC (lossless)
                 data, sample_rate = sf.read(str(wav_path), dtype="int16")
                 sf.write(str(final_path), data, sample_rate, subtype="PCM_16", format="FLAC")
-                try:
+                with contextlib.suppress(OSError):
                     os.remove(str(wav_path))
-                except OSError:
-                    pass
                 logger.info(f"Encoded FLAC via soundfile: {final_path}")
             else:
                 logger.info(f"Exported WAV: {final_path}")
@@ -878,10 +876,8 @@ class SettingsManager:
                 "services.SettingsManager.save: write failed err=%s",
                 e,
             )
-            try:
+            with contextlib.suppress(OSError):
                 tmp_path.unlink()
-            except OSError:
-                pass
             raise
 
 
@@ -1042,7 +1038,7 @@ class BeatAnalyzer:
             onset_env = librosa.onset.onset_strength(y=y, sr=sr)
             hop_length = 512
             win_length_sec = 8.0
-            win_length_frames = int(win_length_sec * sr / hop_length)
+            int(win_length_sec * sr / hop_length)
 
             candidates = [None, 140, 150, 160]
             best_bpm, best_beats, max_score = 0, [], -1
@@ -1265,7 +1261,6 @@ class ImportManager:
                 # Each import re-extracts cover art rather than hash-matching against existing
                 # cover files; the disk hit is negligible vs. the cost of the surrounding
                 # mutagen probe, and dedup would need a SHA index we don't currently maintain.
-                has_art = False
                 art_data = None
 
                 if file_path.suffix.lower() == ".mp3":

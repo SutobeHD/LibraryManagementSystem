@@ -261,7 +261,7 @@ class AnalysisDBWriter:
             # Update key via dedicated method (handles djmdKey join table)
             key_id = analysis.get("key_id", 0)
             if key_id > 0:
-                key_name = analysis.get("key", "")
+                analysis.get("key", "")
                 full_key = self._key_id_to_name(key_id)
                 if full_key:
                     try:

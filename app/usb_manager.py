@@ -1082,7 +1082,7 @@ class UsbSyncEngine:
         for h, local_id in local_hashes.items():
             if h not in usb_hashes:
                 lt = local_tracks[local_id]
-                for uid, ut in usb_tracks.items():
+                for _uid, ut in usb_tracks.items():
                     if (
                         lt.get("Title", "").lower() == ut.get("Title", "").lower()
                         and lt.get("ArtistName", "").lower() == ut.get("ArtistName", "").lower()
@@ -1117,8 +1117,10 @@ class UsbSyncEngine:
         }
 
     def sync_collection(
-        self, profile: dict, library_types: list[str] = ["library_one", "library_legacy"]
+        self, profile: dict, library_types: list[str] | None = None
     ) -> Generator[dict, None, None]:
+        if library_types is None:
+            library_types = ["library_one", "library_legacy"]
         yield {"stage": "preparing", "message": "Preparing full sync...", "progress": 0}
         self._ensure_usb_structure()
 
@@ -1162,7 +1164,7 @@ class UsbSyncEngine:
             yield {"stage": "error", "message": str(e), "progress": -1}
 
     def _sync_library_one(
-        self, profile: dict, playlist_ids: list[str] = None
+        self, profile: dict, playlist_ids: list[str] | None = None
     ) -> Generator[dict, None, None]:
         """Sync via rbox.OneLibrary → exportLibrary.db + ANLZ + audio copy.
 
@@ -1214,8 +1216,10 @@ class UsbSyncEngine:
         self,
         profile: dict,
         playlist_ids: list[str],
-        library_types: list[str] = ["library_one", "library_legacy"],
+        library_types: list[str] | None = None,
     ) -> Generator[dict, None, None]:
+        if library_types is None:
+            library_types = ["library_one", "library_legacy"]
         if profile.get("sync_mirrored"):
             library_types = list(set([*library_types, "library_one", "library_legacy"]))
             logger.info(f"Mirrored sync enabled. Syncing both formats for {profile.get('drive')}")
@@ -1411,7 +1415,7 @@ class UsbSyncEngine:
         return re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", str(value or ""))
 
     def _sync_library_legacy(
-        self, profile: dict, playlist_ids: list[str] = None
+        self, profile: dict, playlist_ids: list[str] | None = None
     ) -> Generator[dict, None, None]:
         """Legacy Sync (Library Legacy): Exports library and audio to USB."""
         yield {
@@ -1559,7 +1563,7 @@ class UsbSyncEngine:
                     usb_dest_path = self._get_safe_dest_path(artist_name, title, local_file)
                     try:
                         # Copy the file to USB with chunk streaming progress
-                        for event in self._copy_file_stream(local_path, usb_dest_path):
+                        for _event in self._copy_file_stream(local_path, usb_dest_path):
                             # Ignore fine-grained chunk progress for now to keep UI simpler,
                             # but it's physically chunked and safe.
                             pass
@@ -1888,8 +1892,10 @@ class UsbSyncEngine:
         }
 
     def sync_metadata(
-        self, profile: dict, library_types: list[str] = ["library_legacy"]
+        self, profile: dict, library_types: list[str] | None = None
     ) -> Generator[dict, None, None]:
+        if library_types is None:
+            library_types = ["library_legacy"]
         yield {"stage": "preparing", "message": "Syncing metadata...", "progress": 0}
 
         try:
@@ -2159,7 +2165,7 @@ class UsbActions:
     def update_all(local_db_path: str) -> Generator[dict, None, None]:
         # ... (unchanged) ...
         """Sync all connected USB devices according to their profiles."""
-        devices = UsbDetector.scan()
+        UsbDetector.scan()
         profiles = UsbProfileManager.get_profiles()
         connected_profiles = [p for p in profiles if p.get("connected")]
 

@@ -15,6 +15,7 @@ Cache layout:
 
 from __future__ import annotations
 
+import contextlib
 import gzip
 import hashlib
 import json
@@ -142,10 +143,8 @@ class AnalysisCache:
             if entry:
                 cache_id = entry.get("cache_id")
                 if cache_id:
-                    try:
+                    with contextlib.suppress(OSError):
                         (self.cache_dir / cache_id).unlink()
-                    except OSError:
-                        pass
                 self._save_index()
 
     def clear(self) -> int:
@@ -156,10 +155,8 @@ class AnalysisCache:
                 cache_id = entry.get("cache_id")
                 if not cache_id:
                     continue
-                try:
+                with contextlib.suppress(OSError):
                     (self.cache_dir / cache_id).unlink()
-                except OSError:
-                    pass
             self._index = {}
             self._save_index()
         return count
@@ -203,10 +200,8 @@ class AnalysisCache:
             os.replace(tmp, self.index_file)
         except Exception as e:
             logger.warning(f"Cache index write failed: {e}")
-            try:
+            with contextlib.suppress(OSError):
                 tmp.unlink()
-            except OSError:
-                pass
 
 
 # ---------------------------------------------------------------------------

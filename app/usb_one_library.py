@@ -13,6 +13,7 @@ Workflow:
 
 from __future__ import annotations
 
+import contextlib
 import gc
 import hashlib
 import logging
@@ -481,10 +482,8 @@ class OneLibraryUsbWriter:
         except Exception as e:
             logger.warning("[OneLibrary] Reopen for WAL flush failed: %s", e)
             return
-        try:
+        with contextlib.suppress(Exception):
             list(db2.get_contents())
-        except Exception:
-            pass
         del db2
         gc.collect()
         time.sleep(0.5)

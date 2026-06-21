@@ -20,6 +20,7 @@ Public surface:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 import time
@@ -116,10 +117,8 @@ class FolderWatcher:
                 except Exception as exc:
                     logger.warning("Observer stop failed for %s: %s", path, exc)
             for obs in self._observers.values():
-                try:
+                with contextlib.suppress(Exception):
                     obs.join(timeout=2.0)
-                except Exception:
-                    pass
             self._observers.clear()
             for timer in self._timers.values():
                 timer.cancel()

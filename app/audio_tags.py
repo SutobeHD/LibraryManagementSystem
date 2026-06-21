@@ -19,6 +19,7 @@ format the function logs and returns False; the DB write still stands.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -194,10 +195,8 @@ def _write_mp4(path: Path, fields: dict[str, Any], artwork: bytes | None) -> boo
             if src in fields:
                 m[atom] = [str(fields[src])]
         if "bpm" in fields:
-            try:
+            with contextlib.suppress(TypeError, ValueError):
                 m["tmpo"] = [round(float(fields["bpm"]))]
-            except (TypeError, ValueError):
-                pass
         if "rating" in fields:
             # MP4 uses 0-100 in iTunes "rate" atom (custom freeform).
             try:

@@ -686,7 +686,7 @@ class LiveRekordboxDB:
 
         logger.debug(f"Filtering with rules: {rules}")
         filtered = []
-        for tid, track in self.tracks.items():
+        for _tid, track in self.tracks.items():
             if self._apply_smart_rules(track, rules):
                 filtered.append(track)
 

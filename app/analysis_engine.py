@@ -22,6 +22,7 @@ Dependencies: librosa, scipy, numpy (required)
 Optional:     madmom (better beats), essentia (better key)
 """
 
+import contextlib
 import logging
 import os
 import warnings
@@ -829,10 +830,8 @@ def detect_beats_madmom(
                 "method": "madmom RNN + DBN",
             }
         finally:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass
 
     except Exception as e:
         logger.warning(f"madmom beat tracking failed: {e}")
@@ -1604,7 +1603,7 @@ def generate_memory_cues(
 
     # Min spacing: 16 bars at 120 BPM = 32 seconds; scale by phrase bar count
     # We use first phrase's bar duration as proxy
-    first_bars = phrases[0].get("bars", 8) if phrases else 8
+    phrases[0].get("bars", 8) if phrases else 8
     bar_to_ms = (60.0 / 120.0) * 4 * 1000  # rough fallback
     if beat_times_ms and len(beat_times_ms) >= 5:
         # Estimate one-beat-ms from beat spacing → bar = 4 beats
@@ -1615,7 +1614,7 @@ def generate_memory_cues(
 
     cues: list[dict[str, Any]] = []
     last_cue_ms = -1e18
-    for i, p in enumerate(phrases):
+    for _i, p in enumerate(phrases):
         label = p.get("label", "Verse")
         start_ms = int(p.get("start_ms", 0))
 
@@ -1784,7 +1783,7 @@ def _read_mp3_xing_toc(file_path: str, duration: float) -> list[int] | None:
             hi = min(lo + 1, 99)
             frac = toc_idx - lo
             # toc value 0-255 maps to 0..total_ms (linear time scale within VBR distribution)
-            byte_pct = (toc[lo] * (1 - frac) + toc[hi] * frac) / 255.0
+            (toc[lo] * (1 - frac) + toc[hi] * frac) / 255.0
             # Convert byte percentage back to time: invert by sampling pct uniformly
             # (Xing TOC stores byte_pct at uniform time intervals, so byte_pct ≈ pct for CBR)
             # For VBR we want time given byte_pct -- but our caller wants ms positions
@@ -2081,7 +2080,7 @@ def detect_tempo_changes(
         bpm_curve = gaussian_filter1d(tg_vbr, sigma=max(1, win_frames))
         bpm_std = float(np.std(bpm_curve))
 
-        duration = len(y) / sr
+        len(y) / sr
 
         if bpm_std < 0.5:
             # Static grid -- stable tempo
@@ -2242,10 +2241,8 @@ def run_quick_analysis(
 
     def emit(stage: str, pct: int):
         if progress_callback:
-            try:
+            with contextlib.suppress(Exception):
                 progress_callback(stage, pct)
-            except Exception:
-                pass
 
     try:
         emit("load", 5)
@@ -2339,10 +2336,8 @@ def run_full_analysis(
 
     def emit(stage: str, pct: int):
         if progress_callback:
-            try:
+            with contextlib.suppress(Exception):
                 progress_callback(stage, pct)
-            except Exception:
-                pass
 
     # -- Cache lookup (skip if explicitly disabled) -----------------------
     if use_cache and duration_cap_arg is None:

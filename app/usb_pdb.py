@@ -754,7 +754,6 @@ class PdbBuilder:
         pages: list[_Page] = []
         current = _Page(page_index=0, table_type=table_type)
         used = 0
-        index_overhead = 4  # at least one group's flags
 
         for r in rows:
             r_size = len(r) + (len(r) & 1)  # pad to even
@@ -768,7 +767,7 @@ class PdbBuilder:
                 used = 0
             current.rows_data.append(r)
             used += r_size
-            index_overhead = ((len(current.rows_data) + 15) // 16) * 36
+            ((len(current.rows_data) + 15) // 16) * 36
 
         pages.append(current)
         return pages

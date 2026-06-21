@@ -636,6 +636,8 @@ class DBModeReq(BaseModel):
 
 # --- ENDPOINTS ---
 
+import contextlib
+
 from fastapi import Request
 
 
@@ -1547,7 +1549,7 @@ def load_lib(r: LoadLibReq = Body(default=None)):
 
 @app.post("/api/library/unload", dependencies=[Depends(require_session)])
 def unload_lib():
-    success = db.unload_library()
+    db.unload_library()
     return {"status": "success", "message": "Library unloaded."}
 
 
@@ -1777,10 +1779,8 @@ async def import_paths(r: ImportPathsReq):
             import_tracker.update(tid, status="Failed", progress=100, error=str(exc))
             counters["skipped"] += 1
         finally:
-            try:
+            with contextlib.suppress(AttributeError):
                 del threading.current_thread()._lms_import_tid
-            except AttributeError:
-                pass
 
     def _bundle_into_playlist():
         """After all files are processed, drop them into a single playlist."""
@@ -2043,10 +2043,8 @@ def _run_import_analysis(dest: Path, track_task_id: str) -> None:
         logger.error(f"Background import failed for {dest}: {exc}")
         import_tracker.update(track_task_id, status="Failed", progress=100, error=str(exc))
     finally:
-        try:
+        with contextlib.suppress(AttributeError):
             del threading.current_thread()._lms_import_tid
-        except AttributeError:
-            pass
 
 
 @app.post("/api/audio/import", dependencies=[Depends(require_session)])
@@ -2106,10 +2104,8 @@ def import_audio(files: list[UploadFile] = File(...), wait: bool = False):
                     import_tracker.update(track_task_id, status="Analyzing", progress=30)
                     tid, analysis = ImportManager.process_import(dest)
                 finally:
-                    try:
+                    with contextlib.suppress(AttributeError):
                         del threading.current_thread()._lms_import_tid
-                    except AttributeError:
-                        pass
 
                 import_tracker.update(
                     track_task_id,
@@ -2326,10 +2322,8 @@ async def startup_event():
             pass
 
     for stale_file in MUSIC_DIR.glob("*.tmp"):
-        try:
+        with contextlib.suppress(OSError):
             os.remove(stale_file)
-        except OSError:
-            pass
 
     # Req 29: Timeout Handling - Prevent infinite hangs on DB locks during boot
     try:
@@ -2886,7 +2880,6 @@ def merge_duplicates(r: DupMergeReq):
 
         # Transfer playlist memberships
         if hasattr(db.active_db, "db"):
-            rbox = db.active_db.db
             for rid in remove_ids:
                 # Find all playlists containing the track to remove
                 for pl in db.playlists:
@@ -2894,10 +2887,8 @@ def merge_duplicates(r: DupMergeReq):
                     track_ids = [str(t.get("id", t.get("ID", ""))) for t in pl_tracks]
                     if str(rid) in track_ids and str(keep_id) not in track_ids:
                         # Add the kept track to this playlist
-                        try:
+                        with contextlib.suppress(Exception):
                             db.add_track_to_playlist(str(pl.get("ID", "")), str(keep_id))
-                        except Exception:
-                            pass
 
                 # Delete the duplicate track
                 try:
@@ -2940,10 +2931,8 @@ def merge_all_duplicates():
 
             # Transfer memberships and delete
             for rid in remove_ids:
-                try:
+                with contextlib.suppress(Exception):
                     db.delete_track(str(rid))
-                except Exception:
-                    pass
 
             merged += 1
 
@@ -3061,7 +3050,7 @@ async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
     import json
 
     async def stream_progress():
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
         for progress in writer.analyze_batch(track_ids, force=req.force):
             yield json.dumps(progress) + "\n"
             await asyncio.sleep(0)  # Yield control to event loop
@@ -3449,10 +3438,8 @@ async def set_soundcloud_auth_token(request: Request, r: ScAuthTokenReq):
         logger.info("[SC] Auth token stored in OS keyring.")
     else:
         # Empty token → clear credentials (logout)
-        try:
+        with contextlib.suppress(Exception):
             keyring.delete_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
-        except Exception:
-            pass
         logger.info("[SC] Auth token cleared from keyring (logout).")
 
     return {"status": "success"}
