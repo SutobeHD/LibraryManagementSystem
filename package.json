@@ -26,10 +26,10 @@
   "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
-    "@tauri-apps/cli": "2.11.2",
-    "concurrently": "9.2.1"
+    "@tauri-apps/cli": "2.11.3",
+    "concurrently": "9.2.3"
   },
   "dependencies": {
-    "@tauri-apps/api": "2.11.0"
+    "@tauri-apps/api": "2.11.1"
   }
 }
