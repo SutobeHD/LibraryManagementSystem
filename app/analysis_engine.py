@@ -2410,6 +2410,13 @@ def run_full_analysis(
         else:
             y = y_mono
             sr = sr_native
+
+        # Empty / unreadable audio (zero-byte or a corrupt decode that returned
+        # no samples without raising): bail with an error result so the writer
+        # skips the track instead of persisting a 0-beat / default-BPM grid.
+        if y is None or len(y) == 0:
+            return _fallback_result(file_path, "empty or unreadable audio")
+
         duration = len(y) / sr
 
         # Waveform analysis stays at native SR (capped at config value --
