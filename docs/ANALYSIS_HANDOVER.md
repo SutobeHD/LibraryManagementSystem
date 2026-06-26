@@ -60,7 +60,7 @@ Verifizieren: `python -c "import sys;sys.path.insert(0,'.');from app import anal
 
 | Tool | Zweck | Lauf |
 |---|---|---|
-| `scripts/selftest_analysis.py` | Autonome Accuracy gg. synthetische Ground-Truth, MIREX Acc-1/Acc-2 + BPM-Band-Breakdown | `-n 100 --seed N [--full]` |
+| `scripts/selftest_analysis.py` | Autonome Accuracy gg. synthetische Ground-Truth, MIREX Acc-1/Acc-2 + BPM-Band-Breakdown + **Beat-F-Measure/Phase-Error** (Grid-Qualität) | `-n 100 --seed N [--full]` |
 | `scripts/compare_rekordbox.py` | **A/B gegen echte Library** (BPM/Key/Beatgrid vs. Rekordbox' gespeicherte Werte) | `--db <master.db> -n 10` — **nur lokal beim User** |
 | `tests/test_anlz_reference_parse.py` | Produziertes ANLZ vs. unabhängigem pyrekordbox-Parser + Byte-Struktur-Walk | pytest |
 | `tests/test_analysis_db_writer.py` | master.db-Schreibwerte (Key-Map, BPM-Centi-Int, Beatgrid-Shape) | pytest |
@@ -82,6 +82,13 @@ Volle Suite: `pytest tests/` (537 passed / 1 skip in 3.11; 538 / 0 im venv).
 8. **`rbox==0.1.7` fehlte in requirements.txt** (nur pyrekordbox war gepinnt — Clean-Installs waren für Live-DB/ANLZ/USB kaputt).
 9. **16-Takt-Memory-Cue-Grid** (Feature, `memory_cue_grid`-Setting).
 10. **Verworfen** (Lehre): `octave-snap` gg. coarse-tempo — half hohe BPM, regredierte aber ~80-BPM-Tracks; Autokorrelations-Stützung trennt die Fälle nicht. Synthetik-Tuning ohne echte Tracks ist eine Sackgasse.
+
+### 4b. Gemessen & verworfen — NICHT erneut versuchen (Synthetik, v310-Stack)
+Zwei naheliegende Grid-Hypothesen empirisch widerlegt (madmom RNN, seeds 7/11/21, n=40):
+11. **Even-Grid-Regularisierung** (madmom-Beats durch gleichmäßiges Raster ersetzen: robuste Periode + Zirkulär-Median-Phase). **Schlechter**: Beat-F 0.921→0.900, Phase-|err| 4.5→18.6 ms. madmom-Rohbeats sitzen bereits besser als ein global gleichmäßiges Raster (lokale Platzierung > globale Phase). Rohbeats behalten.
+12. **Octave-Window deaktivieren** (DBN auf volle Range statt coarse-Oktave). **Schlechter**: Acc-1 seed11 31→28, seed21 36→34 (seed7 unverändert), Acc-2 bleibt 100 %. Das Window aus `_octave_window` ist netto-positiv und bestätigt — nicht entfernen.
+
+**Konsequenz**: Engine ist auf der Synthetik an der Decke (BPM Acc-2 100 %, KEY 100 %, Grid-Phase signed-median ~0…−4 ms, kein systematischer Offset). Restlicher Acc-1-Gap = irreduzible Halb/Doppel-Oktav-Ambiguität auf synthetischem Material. **Weitere BPM-Genauigkeit braucht echte Tracks (5.3), nicht mehr Synthetik-Tuning.**
 
 ---
 
