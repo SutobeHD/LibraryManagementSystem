@@ -382,7 +382,7 @@ def _correlate_key(chroma_vector: np.ndarray) -> tuple[str, str, float]:
     return (best_key, best_mode, best_corr)
 
 
-def detect_key_essentia(y: np.ndarray, sr: int) -> dict[str, str]:
+def detect_key_essentia(y: np.ndarray, sr: int) -> dict[str, Any]:
     """
     Professional key detection using essentia's KeyExtractor.
     Equivalent to Mixed In Key quality. Uses the HPCP-based algorithm
@@ -423,11 +423,23 @@ def detect_key_essentia(y: np.ndarray, sr: int) -> dict[str, str]:
         return None
 
 
-def detect_key(y: np.ndarray, sr: int) -> dict[str, str]:
+def detect_key(y: np.ndarray, sr: int) -> dict[str, Any]:
     """
     Detect musical key. Tries essentia first (if available), falls back
     to improved Krumhansl-Schmuckler with multi-profile ensemble.
     """
+    # Empty input — essentia + the sosfilt fallback both raise on 0-length audio.
+    if y is None or len(y) == 0:
+        return {
+            "key": "Unknown",
+            "camelot": "",
+            "openkey": "",
+            "key_id": 0,
+            "confidence": 0.0,
+            "tuning": 0.0,
+            "method": "empty-input",
+        }
+
     # -- Strategy A: essentia (professional quality) --
     if _ESSENTIA_AVAILABLE:
         result = detect_key_essentia(y, sr)
@@ -852,6 +864,20 @@ def detect_beats(
         encoder_delay: Format-specific compensation in seconds (MP3 ~22.5ms, FLAC 0)
         first_signal_t: Time of first non-silent audio (skip leading silence beats)
     """
+    # Empty input (zero-byte / corrupt-decode file) — scipy sosfilt in the
+    # onset/filter paths raises on a 0-length array. Return an empty grid so the
+    # caller can detect "no beats" instead of crashing the pipeline.
+    if y is None or len(y) == 0:
+        return {
+            "bpm": 0.0,
+            "bpm_raw": 0.0,
+            "beats": [],
+            "downbeat_index": 0,
+            "beat_count": 0,
+            "grid_confidence": 0.0,
+            "method": "empty-input",
+        }
+
     # -- Strategy A: madmom RNN (best accuracy) --
     if _MADMOM_AVAILABLE:
         result = detect_beats_madmom(y, sr, encoder_delay, first_signal_t)
