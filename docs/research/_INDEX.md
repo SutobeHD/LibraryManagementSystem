@@ -25,6 +25,7 @@ _(none)_
 ### evaluated
 - [evaluated_library-format-converter.md](research/evaluated_library-format-converter.md) — Library-wide format converter; wave 2 closed all 3 blockers (proof script `fdb461c`, AAC priming empirical A/B sample-identical, path-write via direct rbox `update_content`), 6 adversarial concerns addressed/carried-forward, citation MIXED non-load-bearing, V-PASS round 2, 3 options (A/B/C) + Recommendation = Option A (full engine, sister-doc unblocks) with 4 commit-blockers for draftplan_ (2026-05-30)
 - [evaluated_soundcloud-persistent-login.md](research/evaluated_soundcloud-persistent-login.md) — Persistent SoundCloud login; explore done, Research-Verifier PASS (adversarial + citation PASS); Recommendation = Option A (backend-owned silent refresh, no new dep); plan-blockers: backend single-flight + atomic keyring store, browser-dev refresh path (2026-05-31)
+- [evaluated_metadata-genre-normalization.md](research/evaluated_metadata-genre-normalization.md) — Unify genre spelling/case variants; today genre = free string, exact+case-sensitive dedup (`database.py:223-248`), no normalisation. Recommendation = Option B: canonical vocab + runtime fuzzy (`rapidfuzz==3.14.5`) + growing alias map (NOT pre-stored variants — ~15-30KB + 1 FK/track, generalises). Reuses metadata-name-fixer safety infra; phased M0 detect-only → M1 merge+undo → M2 write-back + opt-in Discogs-CC0 seed. Guardrails: subgenres first-class, non-destructive, multi-genre policy (OQ3). MB genres NOT CC0 → Discogs/ID3v1 bundle-clean (2026-06-26)
 
 ### parked
 _(none)_
