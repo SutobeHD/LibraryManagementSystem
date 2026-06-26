@@ -98,8 +98,14 @@ Zwei naheliegende Grid-Hypothesen empirisch widerlegt (madmom RNN, seeds 7/11/21
 BPM Acc-1 bleibt bei ~86 % (voller Stack), weil ~12 % der Tracks auf der falschen Oktave (×2/÷2) landen. **Bewiesen unentscheidbar** aus reiner Periodizität auf Synthetik — sogar madmom-RNN scheitert daran. Echte Musik hat timbrale/melodische Cues, die das lösen.
 **Richtung**: (a) Genre-/Spektral-Prior (Bass-Energie, Onset-Muster) als Oktav-Tiebreaker; (b) madmom liefert auch `key_cnn`/Downbeat-Modelle — evtl. nutzbar; (c) ehrlich akzeptieren, dass Acc-2 (oktav-tolerant) das richtige Ziel ist und nur an den Rändern (≤85, ≥190) nachschärfen. **Verifizieren NUR mit echten Tracks (5.3), nicht Synthetik.**
 
-### 5.2 — Synthetischer Test ist als Oktav-Maßstab unfair
-`scripts/selftest_analysis.py:synth_track` nutzt sustained Pad + Kick/Bass auf jeder Zählzeit → künstlich oktav-mehrdeutig. **Richtung**: realistischeres Material (rhythmische Stabs statt Drone, variierende Onset-Dichte), ODER ein kleines Korpus echter, frei lizenzierter Tracks mit bekannter BPM/Key als Fixture.
+### 5.2 — Synthetischer Test ist als Oktav-Maßstab unfair  ✅ realistic-Generator gebaut
+`synth_track` (drone) nutzt Kick/Bass auf jeder Zählzeit → künstlich oktav-mehrdeutig. **Erledigt**: `synth_track_realistic` + `--style realistic` (Backbeat-Snare 2&4, 8th-Hats, 16th-Ghosts, Humanize ~4ms, Noise-Floor).
+
+**Gemessen (madmom RNN, n=40, seeds 7/11/21):** realistic ist HÄRTER, nicht leichter:
+- Acc-1: drone 90/78/90 % → realistic **75/52/67 %**; Acc-2 bleibt **100 %**; KEY **100 %**; Grid-Phase **~5 ms**.
+- Band-Breakdown: 100–180 BPM nahezu perfekt; alle Fehler an den Rändern — 75–100 → verdoppelt, 180–210 → halbiert.
+- **Ursache**: dichte 8th-/16th-Subdivision erzeugt starke Periodizität bei Double-Time → zieht langsame Tracks hoch (echte Eigenschaft busy-elektronischer Musik). **Grid ist immer korrekt** (Acc-2 100 %, 5 ms) — nur das Oktav-LABEL kippt an den Rändern.
+- **Lehre/Warnung**: Threshold-Tuning (`onset_density_*`, coarse-Prior) auf DIESEN Generator wäre Overfit auf meine willkürliche Subdivisionsdichte → **nicht tun**. Der realistic-Generator ist ein Stress-Test/Benchmark, kein Tuning-Target. Oktav-Fix braucht echte Tracks + timbrale/Genre-Modelle (5.1).
 
 ### 5.3 — Echte-Library-Validierung (NUR beim User möglich)
 `compare_rekordbox.py` über ~10–50 echte Tracks laufen lassen (Rekordbox geschlossen). Bestätigt, ob die synthetischen Zahlen auf echter Musik halten. **Bitte den User um die Summary-Ausgabe** — erst diese Daten rechtfertigen weiteres BPM-Heuristik-Tuning. Attribut-Zugriffe sind gegen die echte rbox-0.1.7-API verifiziert.
