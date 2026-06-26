@@ -134,6 +134,87 @@ def synth_track(bpm: float, root: str, mode: str, dur: float = 24.0, sr: int = S
     return (y * 0.9).astype(np.float32)
 
 
+def synth_track_realistic(
+    bpm: float, root: str, mode: str, dur: float = 24.0, sr: int = SR
+) -> np.ndarray:
+    """Fairer benchmark than the drone synth (handover §5.2).
+
+    Adds the cues real music has that resolve octave ambiguity: a BACKBEAT
+    (snare on 2 & 4 → the true beat period is unambiguous, unlike a symmetric
+    kick-only track), realistic onset density (~3-4 onsets/beat: kick + snare +
+    8th hats + occasional 16th ghost), per-hit timing humanization (±~4 ms), and
+    a low broadband noise floor. Deterministic per (bpm, root) for reproducible
+    runs. GT beats remain the quantized beat positions (0, bp, 2bp, …).
+    """
+    rng = np.random.default_rng((round(bpm * 100) * 31 + _SEMI.index(root)) & 0xFFFFFFFF)
+    n = int(sr * dur)
+    t = np.arange(n) / sr
+    y = np.zeros(n, dtype=np.float32)
+    bp = 60.0 / bpm
+
+    def kick() -> np.ndarray:
+        m = int(0.14 * sr)
+        env = np.exp(-np.linspace(0, 9, m))
+        sweep = np.linspace(110, 45, m)
+        return (np.sin(2 * np.pi * np.cumsum(sweep) / sr) * env).astype(np.float32)
+
+    def snare() -> np.ndarray:
+        m = int(0.10 * sr)
+        env = np.exp(-np.linspace(0, 14, m))
+        tone = np.sin(2 * np.pi * 190 * np.arange(m) / sr)
+        return ((0.6 * rng.standard_normal(m) + 0.4 * tone) * env).astype(np.float32)
+
+    def hat(length: float = 0.03) -> np.ndarray:
+        m = int(length * sr)
+        env = np.exp(-np.linspace(0, 34, m))
+        return (rng.standard_normal(m) * env).astype(np.float32)
+
+    def place(time_s: float, samp: np.ndarray, gain: float) -> None:
+        s = int(max(0.0, time_s) * sr)
+        if s < n:
+            seg = samp[: max(0, n - s)]
+            y[s : s + len(seg)] += seg * gain
+
+    def jit() -> float:
+        return float(rng.normal(0.0, 0.004))  # ~4ms humanization
+
+    beat = 0
+    tt = 0.0
+    while tt < dur - 0.2:
+        place(tt + jit(), kick(), 0.9)
+        if beat % 2 == 1:  # snare on beats 2 & 4 (the backbeat)
+            place(tt + jit(), snare(), 0.7)
+        for k in range(2):  # 8th-note hats with velocity variation
+            place(tt + k * bp / 2 + jit(), hat(), 0.18 + 0.12 * rng.random())
+        if rng.random() < 0.3:  # occasional 16th ghost snare
+            place(tt + bp * 0.75 + jit(), snare(), 0.12)
+        tt += bp
+        beat += 1
+
+    # Harmony: root bass on each beat + quiet sustained triad.
+    r = _SEMI.index(root)
+    third = 4 if mode == "major" else 3
+    triad = [r, (r + third) % 12, (r + 7) % 12]
+    bass_hz = _NOTE_HZ[_SEMI[r]] / 2.0
+    pad = np.zeros(n, dtype=np.float32)
+    for semi in triad:
+        f = _NOTE_HZ[_SEMI[semi]]
+        for h_, amp in [(1, 0.5), (2, 0.25)]:
+            pad += (amp * np.sin(2 * np.pi * f * h_ * t)).astype(np.float32)
+    pad *= 0.18
+    tt = 0.0
+    while tt < dur - 0.2:
+        m = int(min(bp * 0.9, 0.4) * sr)
+        env = np.exp(-np.linspace(0, 4, m))
+        seg = (np.sin(2 * np.pi * bass_hz * np.arange(m) / sr) * env * 0.5).astype(np.float32)
+        place(tt, seg, 1.0)
+        tt += bp
+    y += pad
+    y += rng.normal(0.0, 0.003, n).astype(np.float32)  # broadband noise floor
+    y /= np.max(np.abs(y)) + 1e-9
+    return (y * 0.9).astype(np.float32)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Autonomous analysis accuracy self-test")
     ap.add_argument("--dur", type=float, default=20.0, help="track length (s)")
@@ -148,6 +229,13 @@ def main(argv: list[str] | None = None) -> int:
         "--full", action="store_true", help="use full pipeline (slow); else detect_* direct"
     )
     ap.add_argument("--verbose", action="store_true", help="print every track row")
+    ap.add_argument(
+        "--style",
+        choices=["drone", "realistic"],
+        default="drone",
+        help="synthetic material: 'drone' (legacy, octave-ambiguous) or "
+        "'realistic' (backbeat + varied onsets + humanize, fairer benchmark)",
+    )
     args = ap.parse_args(argv)
 
     from app import analysis_engine as ae
@@ -182,8 +270,9 @@ def main(argv: list[str] | None = None) -> int:
     # Beat-grid quality (phase/F-measure) accumulators.
     grid_f_tally: list[float] = []
     phase_err_tally: list[float] = []  # only over octave-correct (Acc-1) tracks
+    _synth = synth_track_realistic if args.style == "realistic" else synth_track
     for bpm, root, mode in cases:
-        y = synth_track(bpm, root, mode, dur=args.dur)
+        y = _synth(bpm, root, mode, dur=args.dur)
         det_beats_s: list[float] = []
         if args.full:
             import soundfile as sf
