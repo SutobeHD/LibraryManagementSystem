@@ -207,6 +207,7 @@
 | `tests/test_analysis.py` | Regression tests for the analysis pipeline. |
 | `tests/test_analysis_cache.py` | Tests for app/analysis_cache.py — persistent analysis-result cache. |
 | `tests/test_analysis_db_writer.py` | Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.db. |
+| `tests/test_analysis_edge.py` | Edge-case robustness for the analysis engine entry points. |
 | `tests/test_anlz_cue_patch.py` | Round-trip tests for app/anlz_cue_patch.py. |
 | `tests/test_anlz_reference_parse.py` | Validate the produced ANLZ files (.DAT/.EXT/.2EX). |
 | `tests/test_anlz_writer_guards.py` | Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout). |

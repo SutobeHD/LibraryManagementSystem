@@ -171,11 +171,6 @@ Setup logging
 - `  RekordboxXMLDB.get_tracks_by_artist()`
 - `  RekordboxXMLDB.get_tracks_by_label()`
 - `  RekordboxXMLDB.get_tracks_by_album()`
-- `  RekordboxXMLDB.get_tracks_by_label()`
-- `  RekordboxXMLDB.get_tracks_by_album()`
-- `  RekordboxXMLDB.get_tracks_by_artist()`
-- `  RekordboxXMLDB.get_tracks_by_label()`
-- `  RekordboxXMLDB.get_tracks_by_album()`
 - `  RekordboxXMLDB.add_track()`
 - `  RekordboxXMLDB.create_playlist()` — Create a new playlist node in the XML library.
 - `  RekordboxXMLDB.add_track_to_playlist()` — Append track tid to playlist pid in the XML library.
@@ -1755,6 +1750,16 @@ Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.d
 - `test_update_cache_bpm_key_beatgrid_shape()` — _update_cache mirrors the master.db write: BPM float, Camelot key, and a
 - `test_master_db_bpm_is_centi_bpm_int()` — master.db stores BPM as int(round(bpm*100)) — guard the scaling contract.
 
+### `tests/test_analysis_edge.py`
+
+Edge-case robustness for the analysis engine entry points.
+
+- `test_detect_beats_empty_input_no_crash()`
+- `test_detect_key_empty_input_no_crash()`
+- `test_detect_beats_none_input_no_crash()`
+- `test_detect_key_none_input_no_crash()`
+- `test_empty_returns_have_consistent_shape()` — The empty-input dicts must carry the same keys as a normal result so
+
 ### `tests/test_anlz_cue_patch.py`
 
 Round-trip tests for app/anlz_cue_patch.py.
@@ -2616,7 +2621,9 @@ Auto-generate tiered code maps from the actual source tree.
 
 selftest_analysis.py — autonomous accuracy self-test (no Rekordbox needed).
 
+- `beat_grid_metrics()` — MIREX-style beat F-measure + median phase error (ms).
 - `synth_track()` — Four-on-the-floor kick + offbeat hat + root bass + sustained triad pad.
+- `synth_track_realistic()` — Fairer benchmark than the drone synth (handover §5.2).
 - `main()`
 
 ### `scripts/test_xml_sync.py`
