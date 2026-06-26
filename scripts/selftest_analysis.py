@@ -46,6 +46,37 @@ def _camelot(root: str, mode: str) -> str:
     return _CAMELOT_MAP.get(f"{root} {mode}", "")
 
 
+def beat_grid_metrics(
+    gt_beats: np.ndarray, det_beats: np.ndarray, tol: float = 0.07
+) -> tuple[float, float]:
+    """MIREX-style beat F-measure + median phase error (ms).
+
+    Greedy 1:1 match of detected beats to GT beats within ``tol`` s (70ms is the
+    MIREX standard). Returns (f_measure, median_abs_phase_err_ms). F-measure
+    captures both phase and octave (a doubled grid halves precision); the phase
+    error, computed only over matched pairs, isolates grid alignment.
+    """
+    gt = np.asarray(sorted(gt_beats), dtype=float)
+    det = np.asarray(sorted(det_beats), dtype=float)
+    if len(gt) == 0 or len(det) == 0:
+        return 0.0, 999.0
+    used = np.zeros(len(det), dtype=bool)
+    offsets = []
+    for g in gt:
+        diffs = np.abs(det - g)
+        diffs[used] = np.inf
+        j = int(np.argmin(diffs))
+        if diffs[j] <= tol:
+            used[j] = True
+            offsets.append(det[j] - g)
+    tp = len(offsets)
+    precision = tp / len(det)
+    recall = tp / len(gt)
+    f = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    phase_err_ms = float(np.median(np.abs(offsets)) * 1000) if offsets else 999.0
+    return f, phase_err_ms
+
+
 def synth_track(bpm: float, root: str, mode: str, dur: float = 24.0, sr: int = SR) -> np.ndarray:
     """Four-on-the-floor kick + offbeat hat + root bass + sustained triad pad."""
     n = int(sr * dur)
@@ -148,8 +179,12 @@ def main(argv: list[str] | None = None) -> int:
     band_ok: dict[str, int] = {f"{lo}-{hi}": 0 for lo, hi in bands}
     rows = []
     fails = []
+    # Beat-grid quality (phase/F-measure) accumulators.
+    grid_f_tally: list[float] = []
+    phase_err_tally: list[float] = []  # only over octave-correct (Acc-1) tracks
     for bpm, root, mode in cases:
         y = synth_track(bpm, root, mode, dur=args.dur)
+        det_beats_s: list[float] = []
         if args.full:
             import soundfile as sf
 
@@ -159,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 r = ae.run_full_analysis(path, use_cache=False)
                 our_bpm, our_cam, our_key = float(r["bpm"]), r.get("camelot", ""), r.get("key", "?")
+                det_beats_s = [b["time_ms"] / 1000.0 for b in (r.get("beats") or [])]
             finally:
                 os.unlink(path)
         else:
@@ -169,10 +205,18 @@ def main(argv: list[str] | None = None) -> int:
                 key.get("camelot", ""),
                 key.get("key", "?"),
             )
+            det_beats_s = [b["time_ms"] / 1000.0 for b in (beat.get("beats") or [])]
+
+        # Ground-truth beats: synth_track lays kicks at 0, bp, 2bp, ... < dur-0.2.
+        gt_beats = np.arange(0.0, args.dur - 0.2, 60.0 / bpm)
+        grid_f, phase_ms = beat_grid_metrics(gt_beats, np.asarray(det_beats_s))
+        grid_f_tally.append(grid_f)
 
         gt_cam = _camelot(root, mode)
         rel, err = bpm_relation(bpm, our_bpm, tol_pct=args.tol)
         krel = key_relation(gt_cam, our_cam)
+        if rel == "match":
+            phase_err_tally.append(phase_ms)  # phase only meaningful at right octave
         bpm_ok += rel == "match"
         key_exact += krel == "exact"
         key_compat += krel in ("exact", "relative", "fifth")
@@ -216,6 +260,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"  KEY exact                    : {key_exact}/{n}  ({100 * key_exact // n}%)")
     print(f"  KEY harmonic-compatible      : {key_compat}/{n}  ({100 * key_compat // n}%)")
+    mean_f = float(np.mean(grid_f_tally)) if grid_f_tally else 0.0
+    mean_phase = float(np.mean(phase_err_tally)) if phase_err_tally else 0.0
+    print(
+        f"  Beat F-measure (+-70ms)      : {mean_f:.3f}  "
+        f"(phase err on octave-correct: {mean_phase:.1f} ms, n={len(phase_err_tally)})"
+    )
     return 0
 
 
