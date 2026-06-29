@@ -3,12 +3,38 @@ import argparse
 # Setup logging
 import logging
 
-from rbox import MasterDb
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("BatchWorker")
 
+
+def compute_new_comment(action: str, original: str, find_text: str, replace_text: str) -> str:
+    """Pure comment transform for one track — mirrors the four batch actions.
+
+    Returns the new comment string (equal to ``original`` when the action is a
+    no-op or unknown). Extracted so the action semantics are unit-testable
+    without rbox / a real master.db.
+    """
+    original = original or ""
+    if action == "set":
+        return replace_text
+    if action == "append":
+        if replace_text and replace_text not in original:
+            return f"{original} {replace_text}".strip()
+        return original
+    if action == "remove":
+        if find_text:
+            return original.replace(find_text, "").strip()
+        return original
+    if action == "replace":
+        if find_text:
+            return original.replace(find_text, replace_text).strip()
+        return original
+    return original
+
+
 def run_batch_update(db_path, source_id, action, find_text, replace_text):
+    from rbox import MasterDb  # lazy: keeps the module importable without rbox
+
     logger.info(f"Connecting to DB: {db_path}")
     try:
         db = MasterDb(db_path)
@@ -36,22 +62,11 @@ def run_batch_update(db_path, source_id, action, find_text, replace_text):
     for tid in target_ids:
         try:
             item = db.get_content_by_id(int(tid))
-            if not item: continue
+            if not item:
+                continue
 
-            original_comment = getattr(item, 'commnt', '') or ""
-            new_comment = original_comment
-
-            if action == "set":
-                new_comment = replace_text
-            elif action == "append":
-                if replace_text and replace_text not in original_comment:
-                    new_comment = f"{original_comment} {replace_text}".strip()
-            elif action == "remove":
-                if find_text:
-                    new_comment = original_comment.replace(find_text, "").strip()
-            elif action == "replace":
-                if find_text:
-                    new_comment = original_comment.replace(find_text, replace_text).strip()
+            original_comment = getattr(item, "commnt", "") or ""
+            new_comment = compute_new_comment(action, original_comment, find_text, replace_text)
 
             if new_comment != original_comment:
                 item.commnt = new_comment
@@ -63,6 +78,7 @@ def run_batch_update(db_path, source_id, action, find_text, replace_text):
 
     logger.info(f"Updated {count} tracks.")
     print(f"COUNT:{count}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

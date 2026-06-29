@@ -1,10 +1,10 @@
 # Routine prompts — multi-agent research pipeline
 
-Versioned prompts for the 8 remote routines that run the research pipeline. Each `<name>.md` here holds a routine prompt; everything below its `---` divider is the text to paste into a claude.ai/code routine.
+Versioned prompts for the 12 remote routines that run the research pipeline. Each `<name>.md` here holds a routine prompt; everything below its `---` divider is the text to paste into a claude.ai/code routine.
 
 Keeping the prompts in the repo means they are reviewable, diffable, and survive a routine being recreated. **The repo file is the source of truth — edit it here, then re-paste into claude.ai/code.**
 
-## The 8 routines
+## The 12 routines
 
 ### Daily work-state routines (advance docs through the pipeline)
 
@@ -20,9 +20,13 @@ Keeping the prompts in the repo means they are reviewable, diffable, and survive
 
 | File | Routine | Cron (Berlin) | Cron expression | Writes |
 |---|---|---|---|---|
-| `research-spawn.md` | `research-spawn` | Sundays 04:00 | `0 4 * * 0` | nothing — read-only, `Idea Backlog` issue |
+| `research-spawn.md` | `research-spawn` | Sun + Wed 04:00 | `0 4 * * 0,3` | nothing — read-only, `Idea Backlog` issue |
 | `research-watchdog.md` | `research-watchdog` | 1st of month 04:00 | `0 4 1 * *` | `## Lifecycle` lines on `archived/implemented_*` + `Idea Backlog` issue |
 | `research-cross-linker.md` | `research-cross-linker` | Tuesdays 04:30 | `30 4 * * 2` | `related:` frontmatter + `## Cross-links` block on active docs |
+| `analysis-accuracy-watchdog.md` | `analysis-accuracy-watchdog` | Wednesdays 04:30 | `30 4 * * 3` | nothing — read-only, `Analysis Accuracy Watchdog` issue |
+| `analysis-explore.md` | `analysis-explore` | Thursdays 06:00 | `0 6 * * 4` | analysis `exploring_` docs → `main` (measured evidence) |
+| `analysis-implement.md` | `analysis-implement` | Fridays 03:00 | `0 3 * * 5` | analysis code → `routine/analysis-*` branches + PRs |
+| `verification-sweep.md` | `verification-sweep` | Mon + Thu 05:00 | `0 5 * * 1,4` | nothing — read-only, `Verification Sweep` issue |
 
 Cron is evaluated in the routine's configured timezone — set it to **Europe/Berlin** on claude.ai/code. Daily slots are staggered so a doc can flow draft → explore → plan across a day and pause only at the single approval gate (then implement once approved). The cross-cutting routines run on lower-frequency schedules so they don't compete with the work routines for `main`-branch commits.
 

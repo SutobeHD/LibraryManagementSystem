@@ -19,6 +19,7 @@ format the function logs and returns False; the DB write still stands.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -30,15 +31,28 @@ logger = logging.getLogger("AUDIO_TAGS")
 # Map app-level field names → format-agnostic keys we know how to write.
 # The "rating" channel is special (POPM in ID3, "rating" Vorbis tag).
 _FIELD_ALIASES = {
-    "Title": "title", "Name": "title", "title": "title",
-    "Artist": "artist", "ArtistName": "artist", "artist": "artist",
-    "Album": "album", "album": "album",
-    "Genre": "genre", "genre": "genre",
-    "Comment": "comment", "Comments": "comment", "comment": "comment",
-    "Rating": "rating", "rating": "rating",  # 0-5 stars in our DB
-    "Year": "year", "year": "year",
-    "Bpm": "bpm", "BPM": "bpm", "bpm": "bpm",
-    "Key": "key", "key": "key",
+    "Title": "title",
+    "Name": "title",
+    "title": "title",
+    "Artist": "artist",
+    "ArtistName": "artist",
+    "artist": "artist",
+    "Album": "album",
+    "album": "album",
+    "Genre": "genre",
+    "genre": "genre",
+    "Comment": "comment",
+    "Comments": "comment",
+    "comment": "comment",
+    "Rating": "rating",
+    "rating": "rating",  # 0-5 stars in our DB
+    "Year": "year",
+    "year": "year",
+    "Bpm": "bpm",
+    "BPM": "bpm",
+    "bpm": "bpm",
+    "Key": "key",
+    "key": "key",
 }
 
 
@@ -78,25 +92,42 @@ def _write_mp3(path: Path, fields: dict[str, Any], artwork: bytes | None) -> boo
         TYER,
         ID3NoHeaderError,
     )
+
     try:
         try:
             tags = ID3(str(path))
         except ID3NoHeaderError:
             tags = ID3()
 
-        if "title" in fields:    tags.delall("TIT2"); tags.add(TIT2(encoding=3, text=str(fields["title"])))
-        if "artist" in fields:   tags.delall("TPE1"); tags.add(TPE1(encoding=3, text=str(fields["artist"])))
-        if "album" in fields:    tags.delall("TALB"); tags.add(TALB(encoding=3, text=str(fields["album"])))
-        if "genre" in fields:    tags.delall("TCON"); tags.add(TCON(encoding=3, text=str(fields["genre"])))
-        if "year" in fields:     tags.delall("TYER"); tags.add(TYER(encoding=3, text=str(fields["year"])))
-        if "bpm" in fields:      tags.delall("TBPM"); tags.add(TBPM(encoding=3, text=str(fields["bpm"])))
-        if "key" in fields:      tags.delall("TKEY"); tags.add(TKEY(encoding=3, text=str(fields["key"])))
+        if "title" in fields:
+            tags.delall("TIT2")
+            tags.add(TIT2(encoding=3, text=str(fields["title"])))
+        if "artist" in fields:
+            tags.delall("TPE1")
+            tags.add(TPE1(encoding=3, text=str(fields["artist"])))
+        if "album" in fields:
+            tags.delall("TALB")
+            tags.add(TALB(encoding=3, text=str(fields["album"])))
+        if "genre" in fields:
+            tags.delall("TCON")
+            tags.add(TCON(encoding=3, text=str(fields["genre"])))
+        if "year" in fields:
+            tags.delall("TYER")
+            tags.add(TYER(encoding=3, text=str(fields["year"])))
+        if "bpm" in fields:
+            tags.delall("TBPM")
+            tags.add(TBPM(encoding=3, text=str(fields["bpm"])))
+        if "key" in fields:
+            tags.delall("TKEY")
+            tags.add(TKEY(encoding=3, text=str(fields["key"])))
         if "comment" in fields:
             tags.delall("COMM")
             tags.add(COMM(encoding=3, lang="eng", desc="", text=str(fields["comment"])))
         if "rating" in fields:
             tags.delall("POPM")
-            tags.add(POPM(email="rating@rb-editor", rating=_rating_to_popm(fields["rating"]), count=0))
+            tags.add(
+                POPM(email="rating@rb-editor", rating=_rating_to_popm(fields["rating"]), count=0)
+            )
         if artwork:
             tags.delall("APIC")
             tags.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="Cover", data=artwork))
@@ -110,12 +141,18 @@ def _write_mp3(path: Path, fields: dict[str, Any], artwork: bytes | None) -> boo
 
 def _write_flac(path: Path, fields: dict[str, Any], artwork: bytes | None) -> bool:
     from mutagen.flac import FLAC, Picture
+
     try:
         f = FLAC(str(path))
         for src, dst in (
-            ("title", "title"), ("artist", "artist"), ("album", "album"),
-            ("genre", "genre"), ("year", "date"), ("bpm", "bpm"),
-            ("key", "initialkey"), ("comment", "comment"),
+            ("title", "title"),
+            ("artist", "artist"),
+            ("album", "album"),
+            ("genre", "genre"),
+            ("year", "date"),
+            ("bpm", "bpm"),
+            ("key", "initialkey"),
+            ("comment", "comment"),
         ):
             if src in fields:
                 f[dst] = str(fields[src])
@@ -143,20 +180,23 @@ def _write_flac(path: Path, fields: dict[str, Any], artwork: bytes | None) -> bo
 
 def _write_mp4(path: Path, fields: dict[str, Any], artwork: bytes | None) -> bool:
     from mutagen.mp4 import MP4, MP4Cover
+
     try:
         m = MP4(str(path))
         atom_map = {
-            "title": "\xa9nam", "artist": "\xa9ART", "album": "\xa9alb",
-            "genre": "\xa9gen", "year": "\xa9day", "comment": "\xa9cmt",
+            "title": "\xa9nam",
+            "artist": "\xa9ART",
+            "album": "\xa9alb",
+            "genre": "\xa9gen",
+            "year": "\xa9day",
+            "comment": "\xa9cmt",
         }
         for src, atom in atom_map.items():
             if src in fields:
                 m[atom] = [str(fields[src])]
         if "bpm" in fields:
-            try:
-                m["tmpo"] = [int(round(float(fields["bpm"])))]
-            except (TypeError, ValueError):
-                pass
+            with contextlib.suppress(TypeError, ValueError):
+                m["tmpo"] = [round(float(fields["bpm"]))]
         if "rating" in fields:
             # MP4 uses 0-100 in iTunes "rate" atom (custom freeform).
             try:
@@ -182,9 +222,14 @@ def _write_ogg(path: Path, fields: dict[str, Any], artwork: bytes | None) -> boo
             from mutagen.oggvorbis import OggVorbis as Ogg
         f = Ogg(str(path))
         for src, dst in (
-            ("title", "title"), ("artist", "artist"), ("album", "album"),
-            ("genre", "genre"), ("year", "date"), ("bpm", "bpm"),
-            ("key", "initialkey"), ("comment", "comment"),
+            ("title", "title"),
+            ("artist", "artist"),
+            ("album", "album"),
+            ("genre", "genre"),
+            ("year", "date"),
+            ("bpm", "bpm"),
+            ("key", "initialkey"),
+            ("comment", "comment"),
         ):
             if src in fields:
                 f[dst] = str(fields[src])
@@ -218,20 +263,37 @@ def _write_aiff_wav(path: Path, fields: dict[str, Any], artwork: bytes | None) -
             TPE1,
             TYER,
         )
+
         tags = c.tags
-        if "title" in fields:    tags.delall("TIT2"); tags.add(TIT2(encoding=3, text=str(fields["title"])))
-        if "artist" in fields:   tags.delall("TPE1"); tags.add(TPE1(encoding=3, text=str(fields["artist"])))
-        if "album" in fields:    tags.delall("TALB"); tags.add(TALB(encoding=3, text=str(fields["album"])))
-        if "genre" in fields:    tags.delall("TCON"); tags.add(TCON(encoding=3, text=str(fields["genre"])))
-        if "year" in fields:     tags.delall("TYER"); tags.add(TYER(encoding=3, text=str(fields["year"])))
-        if "bpm" in fields:      tags.delall("TBPM"); tags.add(TBPM(encoding=3, text=str(fields["bpm"])))
-        if "key" in fields:      tags.delall("TKEY"); tags.add(TKEY(encoding=3, text=str(fields["key"])))
+        if "title" in fields:
+            tags.delall("TIT2")
+            tags.add(TIT2(encoding=3, text=str(fields["title"])))
+        if "artist" in fields:
+            tags.delall("TPE1")
+            tags.add(TPE1(encoding=3, text=str(fields["artist"])))
+        if "album" in fields:
+            tags.delall("TALB")
+            tags.add(TALB(encoding=3, text=str(fields["album"])))
+        if "genre" in fields:
+            tags.delall("TCON")
+            tags.add(TCON(encoding=3, text=str(fields["genre"])))
+        if "year" in fields:
+            tags.delall("TYER")
+            tags.add(TYER(encoding=3, text=str(fields["year"])))
+        if "bpm" in fields:
+            tags.delall("TBPM")
+            tags.add(TBPM(encoding=3, text=str(fields["bpm"])))
+        if "key" in fields:
+            tags.delall("TKEY")
+            tags.add(TKEY(encoding=3, text=str(fields["key"])))
         if "comment" in fields:
             tags.delall("COMM")
             tags.add(COMM(encoding=3, lang="eng", desc="", text=str(fields["comment"])))
         if "rating" in fields:
             tags.delall("POPM")
-            tags.add(POPM(email="rating@rb-editor", rating=_rating_to_popm(fields["rating"]), count=0))
+            tags.add(
+                POPM(email="rating@rb-editor", rating=_rating_to_popm(fields["rating"]), count=0)
+            )
         if artwork:
             tags.delall("APIC")
             tags.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="Cover", data=artwork))
@@ -243,11 +305,17 @@ def _write_aiff_wav(path: Path, fields: dict[str, Any], artwork: bytes | None) -
 
 
 _DISPATCH = {
-    ".mp3":  _write_mp3,
+    ".mp3": _write_mp3,
     ".flac": _write_flac,
-    ".m4a":  _write_mp4, ".mp4": _write_mp4, ".aac": _write_mp4, ".alac": _write_mp4,
-    ".ogg":  _write_ogg, ".opus": _write_ogg,
-    ".aiff": _write_aiff_wav, ".aif": _write_aiff_wav, ".wav": _write_aiff_wav,
+    ".m4a": _write_mp4,
+    ".mp4": _write_mp4,
+    ".aac": _write_mp4,
+    ".alac": _write_mp4,
+    ".ogg": _write_ogg,
+    ".opus": _write_ogg,
+    ".aiff": _write_aiff_wav,
+    ".aif": _write_aiff_wav,
+    ".wav": _write_aiff_wav,
 }
 
 
@@ -307,16 +375,16 @@ def load_artwork(image_path: str | Path) -> bytes | None:
 # strategy is "try each known key, take the first hit". The lists below are the
 # canonical-first / legacy-last fallback chains.
 _READ_KEYS = {
-    "title":   ["TIT2", "title", "\xa9nam", "Title", "TITLE"],
-    "artist":  ["TPE1", "artist", "\xa9ART", "Artist", "ARTIST", "TPE2"],
-    "album":   ["TALB", "album", "\xa9alb", "Album", "ALBUM"],
+    "title": ["TIT2", "title", "\xa9nam", "Title", "TITLE"],
+    "artist": ["TPE1", "artist", "\xa9ART", "Artist", "ARTIST", "TPE2"],
+    "album": ["TALB", "album", "\xa9alb", "Album", "ALBUM"],
     "albumartist": ["TPE2", "albumartist", "aART", "AlbumArtist"],
-    "genre":   ["TCON", "genre", "\xa9gen", "Genre", "GENRE"],
-    "year":    ["TDRC", "TYER", "date", "\xa9day", "Year", "YEAR", "DATE"],
+    "genre": ["TCON", "genre", "\xa9gen", "Genre", "GENRE"],
+    "year": ["TDRC", "TYER", "date", "\xa9day", "Year", "YEAR", "DATE"],
     "comment": ["COMM::eng", "COMM", "comment", "\xa9cmt", "Comment", "COMMENT"],
-    "bpm":     ["TBPM", "bpm", "tmpo", "BPM"],
-    "key":     ["TKEY", "initialkey", "----:com.apple.iTunes:initialkey", "Key", "INITIALKEY"],
-    "isrc":    ["TSRC", "isrc", "----:com.apple.iTunes:ISRC", "ISRC"],
+    "bpm": ["TBPM", "bpm", "tmpo", "BPM"],
+    "key": ["TKEY", "initialkey", "----:com.apple.iTunes:initialkey", "Key", "INITIALKEY"],
+    "isrc": ["TSRC", "isrc", "----:com.apple.iTunes:ISRC", "ISRC"],
 }
 
 
@@ -346,6 +414,7 @@ def _parse_filename(stem: str) -> dict[str, str]:
     `{"artist": "...", "title": "..."}` or `{"title": stem}` if no separator.
     """
     import re
+
     parts = re.split(r"\s+[-–—]\s+", stem, maxsplit=1)
     if len(parts) == 2 and parts[0].strip() and parts[1].strip():
         return {"artist": parts[0].strip(), "title": parts[1].strip()}

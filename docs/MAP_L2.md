@@ -50,6 +50,7 @@ LibraryManagementSystem -- High-Accuracy Analysis Engine (v2.0)
 - `detect_phrases()` — Adaptive song-structure detection (Energy + MFCC timbre changes).
 - `generate_hot_cues()`
 - `generate_memory_cues()`
+- `generate_grid_memory_cues()` — Fixed-interval memory cues on a regular N-bar grid (default 16 bars),
 - `generate_pvbr()` — Generate PVBR (VBR Index) -- 400 ms-positions for accurate seek in MP3.
 - `compute_stereo_features()` — Stereo-image metrics.
 - `calculate_lufs()` — Integrated Loudness following ITU-R BS.1770-4 / EBU R128.
@@ -149,6 +150,7 @@ auth_db — sidecar-local store for per-device paired tokens (Phase-2 auth).
 
 Setup logging
 
+- `compute_new_comment()` — Pure comment transform for one track — mirrors the four batch actions.
 - `run_batch_update()`
 
 ### `app/config.py`
@@ -166,11 +168,6 @@ Setup logging
 - `  RekordboxXMLDB.get_track_details()`
 - `  RekordboxXMLDB.get_all_labels()`
 - `  RekordboxXMLDB.get_all_albums()`
-- `  RekordboxXMLDB.get_tracks_by_artist()`
-- `  RekordboxXMLDB.get_tracks_by_label()`
-- `  RekordboxXMLDB.get_tracks_by_album()`
-- `  RekordboxXMLDB.get_tracks_by_label()`
-- `  RekordboxXMLDB.get_tracks_by_album()`
 - `  RekordboxXMLDB.get_tracks_by_artist()`
 - `  RekordboxXMLDB.get_tracks_by_label()`
 - `  RekordboxXMLDB.get_tracks_by_album()`
@@ -1733,6 +1730,10 @@ Regression tests for the analysis pipeline.
 - `test_settings_env_override()`
 - `test_encoder_delay_per_format()`
 - `test_octave_correct()`
+- `test_octave_window_constrains_to_coarse_octave()` — The madmom octave-prior: window centred on coarse, clamped to range.
+- `test_octave_window_fallbacks()` — Unusable coarse / too-narrow span → full detection range, never a bad window.
+- `test_essentia_flat_to_sharp_maps_to_valid_keys()` — essentia spells black keys as flats; normalised sharps must hit our maps.
+- `test_madmom_compat_shims_idempotent()` — Shim restores pre-3.10 collections ABCs + NumPy aliases madmom needs.
 - `test_stereo_features_mono()`
 - `test_stereo_features_identical()`
 - `test_stereo_features_distinct()`
@@ -1741,8 +1742,21 @@ Regression tests for the analysis pipeline.
 - `test_replay_gain_quiet()`
 - `test_hot_cues_max_8()`
 - `test_hot_cues_color_assignment()`
+- `test_grid_cues_spacing_16_bars()`
+- `test_grid_cues_custom_bars()`
+- `test_grid_cues_anchors_to_downbeat()`
+- `test_grid_cues_respects_max_cap()`
+- `test_grid_cues_empty_beats()`
+- `test_grid_cues_invalid_bars()`
+- `test_grid_setting_default_off()`
+- `test_grid_setting_env_override()`
+- `test_e2e_memory_cue_grid_kwarg()` — memory_cue_grid=True yields an evenly spaced grid in run_full_analysis.
 - `test_pcpt_entry_size()`
+- `test_pcpt_entry_const_fields()` — Cue entry carries the two consts the Rekordbox format mandates.
 - `test_pssi_beat_anchoring()`
+- `test_pssi_phrase_id_high_mood_bank()`
+- `test_pssi_phrase_id_mid_mood_bank()`
+- `test_pssi_phrase_id_helper_defaults_to_intro()`
 - `test_pqt2_compact_format()`
 - `test_e2e_full_analysis_synth()`
 - `test_e2e_quick_analysis_faster()`
@@ -1751,6 +1765,38 @@ Regression tests for the analysis pipeline.
 - `test_cue_toggles_via_settings()` — Setting RB_ANALYSIS_AUTO_HOT_CUES=0 disables hot cues globally.
 - `test_cue_toggles_kwarg_overrides_settings()` — Per-call kwarg overrides the global setting.
 - `test_e2e_anlz_write_roundtrip()`
+
+### `tests/test_analysis_cache.py`
+
+Tests for app/analysis_cache.py — persistent analysis-result cache.
+
+- `test_put_get_roundtrip()`
+- `test_get_miss_after_file_changes()`
+- `test_corrupt_index_entry_does_not_crash()` — Regression: an entry without 'cache_id' must not KeyError.
+- `test_unreadable_index_starts_fresh()`
+- `test_stats_reports_entries_and_bytes()`
+- `test_stats_tolerates_file_vanishing_mid_scan()` — Regression: a *.json.gz that stat() can't read (here a broken symlink,
+- `test_json_default_handles_numpy()`
+
+### `tests/test_analysis_db_writer.py`
+
+Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.db.
+
+- `test_key_id_to_name_inverts_engine_map()` — The master.db key write must invert analysis_engine's key_id map exactly.
+- `test_key_id_to_name_unknown()`
+- `test_anlz_subdir_rekordbox_convention()` — ANLZ folder = <md5[:3]>/<uuid-shaped md5> — deterministic per content id.
+- `test_update_cache_bpm_key_beatgrid_shape()` — _update_cache mirrors the master.db write: BPM float, Camelot key, and a
+- `test_master_db_bpm_is_centi_bpm_int()` — master.db stores BPM as int(round(bpm*100)) — guard the scaling contract.
+
+### `tests/test_analysis_edge.py`
+
+Edge-case robustness for the analysis engine entry points.
+
+- `test_detect_beats_empty_input_no_crash()`
+- `test_detect_key_empty_input_no_crash()`
+- `test_detect_beats_none_input_no_crash()`
+- `test_detect_key_none_input_no_crash()`
+- `test_empty_returns_have_consistent_shape()` — The empty-input dicts must carry the same keys as a normal result so
 
 ### `tests/test_anlz_cue_patch.py`
 
@@ -1767,6 +1813,43 @@ Round-trip tests for app/anlz_cue_patch.py.
 - `test_missing_dat_raises()`
 - `test_read_beats_from_anlz_roundtrip()`
 - `test_read_beats_no_dat_returns_empty()`
+
+### `tests/test_anlz_reference_parse.py`
+
+Validate the produced ANLZ files (.DAT/.EXT/.2EX).
+
+- `test_produced_anlz_structure()` — Byte-level structural validation — runs in CI (librosa only, no pyrekordbox).
+- `test_produced_anlz_parses_with_reference_parser()`
+
+### `tests/test_anlz_writer_guards.py`
+
+Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout).
+
+- `test_pwav_valid_values_byte_identical()`
+- `test_pwav_out_of_range_does_not_crash()` — Regression: bytes([300]) / bytes([-1]) would raise ValueError; the
+- `test_pwv2_out_of_range_clamped()`
+- `test_pwv3_out_of_range_clamped_preserves_count()`
+
+### `tests/test_audio_analyzer.py`
+
+Tests for app/audio_analyzer.py — the pure _normalize_result mapping.
+
+- `test_beats_to_beatgrid_seconds()`
+- `test_malformed_beats_are_skipped_not_fatal()` — Regression: non-dict entries / dicts without time_ms must be skipped,
+- `test_empty_result_passthrough()`
+- `test_existing_beatgrid_not_overwritten()`
+- `test_no_beats_key_adds_no_beatgrid()`
+- `test_legacy_default_fields_added()`
+- `test_does_not_mutate_input()`
+
+### `tests/test_audio_tags.py`
+
+Tests for app/audio_tags.py — native tag write-back (mutates user files → HIGH risk).
+
+- `test_rating_to_popm_scale()`
+- `test_normalize_fields_drops_none_and_unknown()`
+- `test_write_tags_unsupported_and_missing()`
+- `test_flac_tag_roundtrip()`
 
 ### `tests/test_auth.py`
 
@@ -1806,6 +1889,38 @@ Tests for ``app/auth.py`` -- Bearer-token session authentication.
 - `  TestCaseM_OptionsPreflight.test_options_preflight_short_circuits_before_auth()`
 - `TestCaseN_UngatedAcceptsAuthHeader`
 - `  TestCaseN_UngatedAcceptsAuthHeader.test_heartbeat_with_bearer_header_still_2xx()`
+
+### `tests/test_batch_worker.py`
+
+Tests for app/batch_worker.py — pure comment-transform logic.
+
+- `test_set_overwrites()`
+- `test_append_adds_when_absent_and_skips_when_present()`
+- `test_remove_strips_substring()`
+- `test_replace_swaps_substring()`
+- `test_unknown_action_and_none_original()`
+
+### `tests/test_compare_rekordbox.py`
+
+Unit tests for the pure comparison helpers in scripts/compare_rekordbox.py.
+
+- `test_parse_camelot_valid()`
+- `test_parse_camelot_invalid()`
+- `test_key_relation_exact()`
+- `test_key_relation_relative()`
+- `test_key_relation_fifth()`
+- `test_key_relation_clash()`
+- `test_key_relation_unknown()`
+- `test_compatible_relations_set()`
+- `test_bpm_relation_match()`
+- `test_bpm_relation_within_tolerance()`
+- `test_bpm_relation_double()`
+- `test_bpm_relation_half()`
+- `test_bpm_relation_other()`
+- `test_bpm_relation_zero()`
+- `test_beatgrid_metrics_aligned()`
+- `test_beatgrid_metrics_offset()`
+- `test_beatgrid_metrics_empty()`
 
 ### `tests/test_database.py`
 
@@ -1848,6 +1963,19 @@ taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py).
 - `test_empty_profile_id_rejected()`
 - `test_list_and_delete_profile()`
 
+### `tests/test_download_registry.py`
+
+Tests for app/download_registry.py — SoundCloud download dedup/history DB.
+
+- `registry()`
+- `test_register_and_dedup()`
+- `test_upsert_updates_status_keeps_metadata()`
+- `test_update_analysis_and_persistence()`
+- `test_find_by_hash_and_mark_failed()`
+- `test_delete_entry_commits()`
+- `test_history_search_and_stats()`
+- `test_many_calls_persist_no_corruption()` — A burst of open/commit/close cycles must all land (proves _conn closes
+
 ### `tests/test_external_track_match.py`
 
 external_track_match unit tests (external-track-match-unified-module T-3..T-9).
@@ -1878,6 +2006,33 @@ external_track_match unit tests (external-track-match-unified-module T-3..T-9).
 - `test_fingerprint_unavailable_when_binary_missing()`
 - `test_fingerprint_rejects_path_outside_roots()`
 - `test_module_has_no_db_writer_imports()`
+
+### `tests/test_folder_watcher.py`
+
+Tests for app/folder_watcher.py — auto-import folder watcher.
+
+- `test_is_audio()`
+- `test_stable_file_is_ready()`
+- `test_growing_file_is_not_ready()` — Regression: a file still being copied (size changes every read) must
+- `test_empty_file_is_not_ready()`
+- `test_vanished_file_is_not_ready()`
+- `test_add_after_stop_returns_false()`
+- `test_normalize_resolves_to_absolute()`
+
+### `tests/test_import_tracker.py`
+
+Tests for app/import_tracker.py — live import-progress tracker.
+
+- `test_basename_unix_windows_and_bare()`
+- `test_register_creates_queued_task()`
+- `test_get_returns_copy_not_reference()`
+- `test_get_all_returns_copies()`
+- `test_get_unknown_returns_none()`
+- `test_update_appends_stage_history_on_change()`
+- `test_update_unknown_or_empty_is_noop()`
+- `test_clear_finished_removes_only_terminal()`
+- `test_prune_drops_oldest_finished_first()`
+- `test_prune_keeps_inflight_over_cap()` — Soft cap by design: active (non-terminal) tasks are never dropped, even
 
 ### `tests/test_library_format_swap.py`
 
@@ -1940,6 +2095,19 @@ Tests for app.library_format_swap.
 - `  TestLibrarySubsetMissingRequiredParam.test_library_subset_without_subset_kind()`
 - `  TestLibrarySubsetMissingRequiredParam.test_unknown_subset_kind_raises()`
 
+### `tests/test_library_source.py`
+
+Tests for app/library_source.py — the Live/XML normalization layer.
+
+- `test_to_float_tolerates_garbage()`
+- `test_to_int_tolerates_garbage()`
+- `test_xml_normalize_basic_and_duration_seconds()`
+- `test_xml_normalize_does_not_crash_on_garbage()` — Regression: a non-numeric BPM/Rating must not raise (aborts the sync).
+- `test_live_normalize_duration_from_total_time_seconds()`
+- `test_live_normalize_duration_ms_only_not_multiplied()` — Regression: a duration_ms-only track must NOT be x1000 (was 240_000_000).
+- `test_live_normalize_lowercase_and_fallback_keys()`
+- `test_live_normalize_garbage_does_not_crash()`
+
 ### `tests/test_logging_redaction.py`
 
 Unit tests for `app.logging_utils.RedactingFormatter`.
@@ -1948,6 +2116,8 @@ Unit tests for `app.logging_utils.RedactingFormatter`.
 - `test_exc_info_traceback_scrubbed()`
 - `test_chained_exception_preserves_chain_marker()`
 - `test_args_interpolation_scrubbed()`
+- `test_data_dir_prefixes_scrubbed()` — EXPORT/MUSIC/TEMP dirs (resolved once at import) must also be scrubbed,
+- `test_safe_error_message_str_noop_on_clean_input()`
 - `test_non_exception_log_format_unchanged()` — A path-free `logger.info("hello")` must be byte-identical via
 
 ### `tests/test_main_security.py`
@@ -2021,6 +2191,7 @@ End-to-end regression test for OneLibraryUsbWriter — runs the FULL
 - `  FakeSource.get_track_anlz_paths()`
 - `make_tracks()`
 - `main()`
+- `test_onelibrary_wal_flushed()` — pytest entry point — produced exportLibrary.db has no unmerged WAL and
 
 ### `tests/test_pairing.py`
 
@@ -2055,6 +2226,7 @@ PDB writer structural test against F: drive Pioneer reference.
 
 - `make_synthetic_input()` — Mimic the data shape that OneLibraryUsbWriter._write_pdb_from_db
 - `main()`
+- `test_export_pdb_invariants()` — pytest entry point — all export.pdb byte invariants must hold.
 
 ### `tests/test_phrase_batch.py`
 
@@ -2088,6 +2260,30 @@ Tests for the phrase-batch backend (app/main.py):
 - `test_cancel_unknown_404()`
 - `test_cancel_sets_flag()`
 
+### `tests/test_playcount_sync.py`
+
+Tests for app/playcount_sync.py — USB <-> PC play-count sync engine.
+
+- `test_apply_strategy_all_modes()`
+- `test_diff_equal_counts_auto_equal()`
+- `test_diff_only_pc_changed_takes_pc()`
+- `test_diff_only_usb_changed_takes_usb()`
+- `test_diff_both_changed_is_conflict()`
+- `test_diff_track_not_on_usb_skipped()`
+- `test_diff_track_without_id_skipped()`
+- `test_diff_first_sync_mismatch_is_conflict()` — Documented policy: with no baseline (ts=0) a count mismatch where both
+- `test_read_usb_xml_playcounts()`
+- `test_read_usb_xml_missing_and_malformed()`
+- `test_sync_meta_roundtrip()`
+- `test_sync_meta_missing_returns_default()`
+- `test_sync_meta_corrupt_returns_default()`
+- `test_sync_meta_invalid_root()`
+- `test_resolve_patches_usb_xml()` — The USB XML PlayCount is patched even when rbox/PC-DB is unavailable.
+- `test_resolve_missing_xml_reports_error()`
+- `test_resolve_rejects_non_list()`
+- `test_save_meta_invalid_inputs_raise()`
+- `test_roundtrip_meta_is_json_serializable()`
+
 ### `tests/test_popularity_engine.py`
 
 PopularityStore tests (underground-mainstream-classifier T1-T3).
@@ -2115,6 +2311,26 @@ Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter.
 - `test_concurrent_take()`
 - `test_ttl_purge()`
 - `test_auth_before_ratelimit()` — Unauth + over-limit MUST surface as 401, not 429.
+
+### `tests/test_rbep_parser.py`
+
+Tests for app/rbep_parser.py — Rekordbox Editor Project (.rbep) XML parser.
+
+- `test_parses_real_layout()`
+- `test_legacy_layout_fallbacks()`
+- `test_corrupt_file_degrades_gracefully()` — Regression: a ParseError must not leave app/version unset (to_dict crash).
+- `test_track_without_song_is_skipped()`
+- `test_to_dict_shape()`
+- `test_list_projects_empty_for_missing_dir()`
+- `test_list_and_parse_project_by_name()`
+
+### `tests/test_rekordbox_bridge.py`
+
+Tests for app/rekordbox_bridge.py — Rekordbox XML <-> local DB import.
+
+- `test_import_updates_existing_and_adds_new()`
+- `test_import_no_collection_raises()`
+- `test_import_parses_beatgrid()`
 
 ### `tests/test_require_session.py`
 
@@ -2258,6 +2474,25 @@ Tests for `SetReq` payload caps + `SettingsManager.load` sanitizer.
 - `  TestSettingsManagerLoadSanitizer.test_oversize_list_dropped_on_load()`
 - `  TestSettingsManagerLoadSanitizer.test_load_legacy_clean_file_unchanged()`
 
+### `tests/test_smart_playlist_engine.py`
+
+Tests for app/smart_playlist_engine.py — the smart-playlist rule evaluator.
+
+- `test_numeric_equals_and_range()`
+- `test_numeric_greater_and_less()`
+- `test_rating_field_is_numeric()`
+- `test_string_contains_starts_ends_equals()`
+- `test_string_not_contains()`
+- `test_logical_all_vs_any()`
+- `test_empty_criteria_returns_all()`
+- `test_unknown_field_matches_nothing()`
+- `test_missing_track_value_is_not_a_match()`
+- `test_non_numeric_value_does_not_crash()`
+- `test_date_newer_and_older_than_days()`
+- `test_from_xml_node_parses_conditions()`
+- `test_from_xml_node_none_returns_empty()`
+- `test_to_xml_attrs_roundtrips_root_flags()`
+
 ### `tests/test_soundcloud_api.py`
 
 Tests for `app/soundcloud_api.py`.
@@ -2356,6 +2591,20 @@ Tests for `app/usb_manager.py`.
 - `  TestLockedSync.test_lock_released_after_exception()` — Even if the body raises, the lock file must be cleaned up.
 - `  TestLockedSync.test_stale_lock_is_replaced()` — A lock file older than 10 minutes is treated as stale and replaced
 
+### `tests/test_usb_mysettings.py`
+
+Tests for app/usb_mysettings.py — Pioneer MYSETTING file schema + I/O.
+
+- `test_humanize_db_values()`
+- `test_humanize_number_words()`
+- `test_humanize_fractions()`
+- `test_humanize_general_titlecase()`
+- `test_schema_file_ids_match_get_schema_classes()` — get_schema() indexes file_classes by SCHEMA key; an extra SCHEMA file_id
+- `test_every_schema_file_id_resolves_in_maps()`
+- `test_every_field_has_required_keys_and_unique()`
+- `test_io_degrades_without_pyrekordbox()`
+- `test_enum_options_empty_without_pyrekordbox()`
+
 ### `tests/test_variant_detector.py`
 
 variant_schema + variant_detector tests (analysis-remix-detector T-2, T-3).
@@ -2377,8 +2626,38 @@ variant_schema + variant_detector tests (analysis-remix-detector T-2, T-3).
 - `test_scan_persists_and_reads_back()`
 - `test_upsert_replaces_in_place()`
 
+### `tests/test_variant_schema.py`
+
+Tests for app/variant_schema.py — variants.db DDL + migration runner.
+
+- `test_fresh_db_creates_and_stamps()`
+- `test_migrate_is_idempotent()`
+- `test_tables_and_indexes_exist()`
+- `test_schema_accepts_a_variant_row()`
+- `test_newer_schema_left_untouched()`
+
+### `tests/test_xml_generator.py`
+
+Tests for app/xml_generator.py — Rekordbox collection XML export.
+
+- `test_hostile_titles_produce_valid_xml()` — Ampersands / angle brackets / quotes / unicode must not break the XML.
+- `test_beatgrid_and_cues_exported()`
+- `test_generate_does_not_mutate_input_positionmarks()` — Regression: DROP append must copy, not mutate the caller's list.
+- `test_missing_path_does_not_crash()` — A track dict without 'path' must not raise KeyError.
+
 
 ## scripts/ — Dev/Build Utilities
+
+### `scripts/compare_rekordbox.py`
+
+compare_rekordbox.py — A/B accuracy harness: our engine vs Rekordbox.
+
+- `parse_camelot()` — Parse a Camelot code like '8A' / '12B' into (number 1..12, letter).
+- `key_relation()` — Classify the harmonic relation between two Camelot codes.
+- `bpm_relation()` — Classify our BPM vs Rekordbox's, accounting for octave (half/double) errors.
+- `beatgrid_metrics()` — Compare two beat-grids (lists of beat times in ms).
+- `compare_track()` — Read RB analysis for one track and re-run ours; return a comparison row.
+- `main()`
 
 ### `scripts/dev/phrase_spike.py`
 
@@ -2449,6 +2728,15 @@ Auto-generate tiered code maps from the actual source tree.
 *(no module docstring)*
 
 - `take_screenshot()`
+
+### `scripts/selftest_analysis.py`
+
+selftest_analysis.py — autonomous accuracy self-test (no Rekordbox needed).
+
+- `beat_grid_metrics()` — MIREX-style beat F-measure + median phase error (ms).
+- `synth_track()` — Four-on-the-floor kick + offbeat hat + root bass + sustained triad pad.
+- `synth_track_realistic()` — Fairer benchmark than the drone synth (handover §5.2).
+- `main()`
 
 ### `scripts/test_xml_sync.py`
 

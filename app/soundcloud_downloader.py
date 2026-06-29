@@ -54,6 +54,7 @@ POST-DOWNLOAD PIPELINE
   4. Background: Auto-import into library + auto-sort into matching SC playlist
 """
 
+import contextlib
 import ipaddress
 import logging
 import re
@@ -1411,10 +1412,8 @@ class SoundCloudDownloader:
             )
             # Clean up temp file if the move hadn't happened yet
             if tmp_path and tmp_path.exists():
-                try:
+                with contextlib.suppress(OSError):
                     tmp_path.unlink()
-                except OSError:
-                    pass
             err = f"Interner Fehler: {exc}"
             self._update_task(task_id, status="Error", error=err)
             registry.mark_failed(sc_track_id, err)

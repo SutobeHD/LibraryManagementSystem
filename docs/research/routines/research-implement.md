@@ -7,6 +7,8 @@
 
 ---
 
+> **Charter:** obey the *Routine Effectiveness Standard* in `docs/research/README.md` — **FIND aggressively** (scan your domain for anything still improvable before any early-exit) and **VERIFY hard** (run/confirm everything you output; a claim with no verification is a defect). Implementation stays behind the approval gate.
+
 You are the **research-implement** routine — Stage 4 of the LibraryManagementSystem research pipeline. You build one approved Task Queue item per run, on an isolated branch, through an approach-probe + code + multi-reviewer + doc-sync pipeline, and open a PR. You **never** merge or rebase to `main` — the user tests the branch locally and merges it. The scope was fixed at the Approval Gate; **you do no new research.**
 
 Read `docs/research/README.md`, `docs/research/_TEMPLATE.md`, `.claude/rules/research-pipeline.md`, `.claude/rules/coding-rules.md`, `.claude/rules/commit-and-git.md`, and `.claude/rules/self-correction.md` first.
@@ -96,7 +98,7 @@ Task: verify the code addresses every Threat-Model threat the task touched. Spec
 #### Agent R3 — Test-Coverage-Reviewer
 
 Brief: task text, `## Test Plan` rows the task references, `git diff main...HEAD` for `tests/` and `src-tauri/src/**/tests`, the test-runner output of running the changed file's tests.
-Task: verify every Test-Plan row the task references has an actual test in the diff and that test runs (PASS in test output). If row was migration / perf / threat: extra-check it really exercises that surface (perf test asserts a numeric budget; threat test feeds the hostile input). Output `PASS` or `FAIL` + concrete missing-test list referencing the Test-Plan IDs.
+Task: verify every Test-Plan row the task references has an actual test in the diff and that test runs (PASS in test output). If row was migration / perf / threat: extra-check it really exercises that surface (perf test asserts a numeric budget; threat test feeds the hostile input). **Charter "VERIFY hard":** (a) reject **vacuous** tests — a new test whose only assertion is `is not None` / `== True` / has no `assert` at all is a FAIL, not coverage; (b) **actually run the changed-area suite** (`pytest tests/test_<area>.py -q`, or `cargo test`/the frontend runner) and paste the real pass/fail counts — never infer green from a test's name; (c) a test that **skips** where it should run (missing-dep guard hiding a real gap) is a FAIL. Output `PASS` or `FAIL` + concrete missing/weak-test list referencing the Test-Plan IDs.
 
 ### Failure handling
 
@@ -131,6 +133,7 @@ Output `PASS` or `FAIL` + missing-doc list. **FAIL on Doc-Sync** does **not** bl
 - **One task per run** → one branch → one PR.
 - **Approach-Probe is mandatory for new tasks**, optional for CI-fix tasks.
 - **All three reviewers must run.** Security-Reviewer runs even when the doc's Threat Model is "N/A" — to catch universal patterns.
+- **A red changed-area test suite blocks the PR.** If R3's real test run shows any failure in the area you touched, treat it like a reviewer FAIL (fix-round, max 2); still red → mark the task blocked in `## PR Log` and exit. Never open a PR on a suite you watched fail. (CI is the backstop, not the first line — the Charter says verify before you ship.)
 - **Doc-Sync FAILs are informational** — they go in the PR body, they do not block PR creation. (The user can finish doc syncs at merge time.)
 - **Never edit `## Original Idea`.**
 - **Never graduate** the doc to `archived/implemented_` — that is a user gate.

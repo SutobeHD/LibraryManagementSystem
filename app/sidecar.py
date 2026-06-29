@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 DATA_FILE = Path("app_data.json")
 
+
 class SidecarStorage:
     def __init__(self):
         self.data = self._load()
@@ -18,7 +19,9 @@ class SidecarStorage:
                 return json.load(f)
         except (OSError, json.JSONDecodeError) as e:
             logger.warning(
-                "sidecar: failed to load %s — returning empty data (%s)", DATA_FILE, e,
+                "sidecar: failed to load %s — returning empty data (%s)",
+                DATA_FILE,
+                e,
             )
             return {"artists": {}}
 
@@ -30,9 +33,12 @@ class SidecarStorage:
         return self.data.get("artists", {}).get(artist_name, {}).get("soundcloud", "")
 
     def set_artist_link(self, artist_name: str, link: str):
-        if "artists" not in self.data: self.data["artists"] = {}
-        if artist_name not in self.data["artists"]: self.data["artists"][artist_name] = {}
+        if "artists" not in self.data:
+            self.data["artists"] = {}
+        if artist_name not in self.data["artists"]:
+            self.data["artists"][artist_name] = {}
         self.data["artists"][artist_name]["soundcloud"] = link
         self._save()
+
 
 storage = SidecarStorage()

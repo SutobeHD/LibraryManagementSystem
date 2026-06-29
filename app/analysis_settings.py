@@ -6,6 +6,7 @@ Centralized tunables for the analysis pipeline.
 Defaults match Rekordbox conventions. Override via environment variables
 prefixed with RB_ANALYSIS_ (e.g. RB_ANALYSIS_BPM_OUTPUT_MIN=70).
 """
+
 from __future__ import annotations
 
 import logging
@@ -48,20 +49,23 @@ def _env_bool(name: str, default: bool) -> bool:
 @dataclass(frozen=True)
 class AnalysisSettings:
     # -- BPM detection / output range -------------------------------------
-    bpm_detect_min: float = 60.0       # what madmom DBN / librosa may find
-    bpm_detect_max: float = 210.0
-    bpm_output_min: float = 80.0       # Pioneer-style display sweet spot
-    bpm_output_max: float = 180.0
+    bpm_detect_min: float = 60.0  # what madmom DBN / librosa may find
+    bpm_detect_max: float = 220.0
+    bpm_output_min: float = 80.0  # Pioneer-style display sweet spot
+    bpm_output_max: float = 215.0  # up to fast DnB / hardcore / footwork
 
     # -- Octave-disambiguation thresholds ---------------------------------
-    onset_density_high_ratio: float = 5.5   # > → halve-time misread, double
-    onset_density_low_ratio: float = 0.4    # < → double-time misread, halve
+    onset_density_high_ratio: float = 5.5  # > → halve-time misread, double
+    onset_density_low_ratio: float = 0.4  # < → double-time misread, halve
 
     # -- Key detection ----------------------------------------------------
-    minor_bias: float = 1.10           # K-S fallback (1.0 = neutral)
+    # K-S fallback minor/major weighting. 1.0 = neutral. A >1 thumb on minor
+    # made major triads flip to their mediant minor (D major -> F# minor), a
+    # known chroma-correlation confusion; neutral avoids it. Override per-genre.
+    minor_bias: float = 1.0
 
     # -- Waveform colors --------------------------------------------------
-    color_gamma: float = 0.65          # < 1 brightens mids in PWV4/5/6/7
+    color_gamma: float = 0.65  # < 1 brightens mids in PWV4/5/6/7
 
     # -- Cue generation toggles ------------------------------------------
     # When False, the corresponding cue list is left empty in the result
@@ -72,13 +76,20 @@ class AnalysisSettings:
     auto_memory_cues: bool = True
 
     # -- Cue limits -------------------------------------------------------
-    cue_max_hot: int = 8               # Rekordbox hot cue slots A..H
+    cue_max_hot: int = 8  # Rekordbox hot cue slots A..H
     cue_max_memory: int = 16
     memory_min_bar_spacing: int = 16
 
+    # -- Fixed-interval beatmatch grid -----------------------------------
+    # When True, memory cues are placed on a regular N-bar grid (anchored to
+    # the first downbeat) instead of at significant phrase boundaries. Gives
+    # the DJ evenly spaced reference points for beatmatching / loop building.
+    memory_cue_grid: bool = False
+    memory_cue_grid_bars: int = 16  # grid interval in 4/4 bars
+
     # -- Phrase detection -------------------------------------------------
-    phrase_bars: int = 8               # window length for energy/MFCC analysis
-    phrase_merge_max_bars: int = 16    # don't merge once phrase already large
+    phrase_bars: int = 8  # window length for energy/MFCC analysis
+    phrase_merge_max_bars: int = 16  # don't merge once phrase already large
 
     # -- Dynamic tempo grid -----------------------------------------------
     tempo_change_threshold_bpm: float = 1.5
@@ -88,8 +99,8 @@ class AnalysisSettings:
     replay_gain_target_lufs: float = -18.0
 
     # -- Sample-rate handling ---------------------------------------------
-    waveform_sr_cap: int = 96000       # downsample masters above this for waveforms
-    analysis_sr: int = 44100           # beat / key / phrase analysis SR
+    waveform_sr_cap: int = 96000  # downsample masters above this for waveforms
+    analysis_sr: int = 44100  # beat / key / phrase analysis SR
 
     # ---------------------------------------------------------------------
     @classmethod

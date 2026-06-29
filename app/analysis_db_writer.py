@@ -34,7 +34,7 @@ def _compute_anlz_subdir(content_id: str) -> str:
     # We compute a hash prefix from the content_id for the first level.
     h = hashlib.md5(content_id.encode()).hexdigest()
     prefix = h[:3]
-    subfolder = h[:8] + '-' + h[8:12] + '-' + h[12:16] + '-' + h[16:20] + '-' + h[20:32]
+    subfolder = h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
     return f"{prefix}/{subfolder}"
 
 
@@ -97,11 +97,17 @@ class AnalysisDBWriter:
                 # Check if ANLZ files exist
                 try:
                     paths = self.live_db.db.get_content_anlz_paths(str(track_id))
-                    if paths and paths.get('DAT'):
-                        dat_path = str(paths['DAT'])
+                    if paths and paths.get("DAT"):
+                        dat_path = str(paths["DAT"])
                         if os.path.exists(dat_path):
-                            logger.info(f"Track {track_id} already analyzed (BPM={existing_bpm}), skipping. Use force=True to re-analyze.")
-                            return {"status": "skipped", "reason": "already_analyzed", "bpm": existing_bpm}
+                            logger.info(
+                                f"Track {track_id} already analyzed (BPM={existing_bpm}), skipping. Use force=True to re-analyze."
+                            )
+                            return {
+                                "status": "skipped",
+                                "reason": "already_analyzed",
+                                "bpm": existing_bpm,
+                            }
                 except Exception:
                     pass  # No ANLZ paths yet — proceed with analysis
 
@@ -116,6 +122,7 @@ class AnalysisDBWriter:
         # 4. Run analysis
         try:
             from .analysis_engine import run_full_analysis
+
             analysis = run_full_analysis(file_path)
         except Exception as e:
             logger.error(f"Analysis failed for track {track_id}: {e}")
@@ -125,7 +132,9 @@ class AnalysisDBWriter:
             return {"status": "error", "error": analysis.get("error", "Unknown analysis error")}
 
         elapsed_analysis = time.time() - start_time
-        logger.info(f"Analysis complete for {track_id}: BPM={analysis['bpm']}, Key={analysis['key']} ({elapsed_analysis:.1f}s)")
+        logger.info(
+            f"Analysis complete for {track_id}: BPM={analysis['bpm']}, Key={analysis['key']} ({elapsed_analysis:.1f}s)"
+        )
 
         # 5. Write ANLZ binary files
         anlz_paths = self._write_anlz(track_id, file_path, analysis)
@@ -157,7 +166,9 @@ class AnalysisDBWriter:
             "elapsed": round(elapsed_total, 2),
         }
 
-    def _write_anlz(self, track_id: str, file_path: str, analysis: dict[str, Any]) -> dict[str, str]:
+    def _write_anlz(
+        self, track_id: str, file_path: str, analysis: dict[str, Any]
+    ) -> dict[str, str]:
         """Write ANLZ binary files to the Rekordbox ANLZ directory."""
         try:
             from .anlz_writer import write_anlz_files
@@ -165,7 +176,9 @@ class AnalysisDBWriter:
             # Determine ANLZ directory
             anlz_dir = self._resolve_anlz_dir(track_id)
             if not anlz_dir:
-                logger.warning(f"Could not determine ANLZ directory for track {track_id}, creating new one")
+                logger.warning(
+                    f"Could not determine ANLZ directory for track {track_id}, creating new one"
+                )
                 anlz_dir = self._create_anlz_dir(track_id)
 
             return write_anlz_files(
@@ -200,7 +213,7 @@ class AnalysisDBWriter:
         try:
             paths = self.live_db.db.get_content_anlz_paths(str(track_id))
             if paths:
-                for key in ('DAT', 'EXT', '2EX'):
+                for key in ("DAT", "EXT", "2EX"):
                     p = paths.get(key)
                     if p:
                         return str(Path(str(p)).parent)
@@ -233,7 +246,7 @@ class AnalysisDBWriter:
                 return False
 
             # BPM: stored as integer (bpm × 100)
-            bpm_int = int(round(analysis["bpm"] * 100))
+            bpm_int = round(analysis["bpm"] * 100)
             item.bpm = bpm_int
 
             # Analysed flag (Rekordbox uses this to know the track has been analyzed)
@@ -248,7 +261,7 @@ class AnalysisDBWriter:
             # Update key via dedicated method (handles djmdKey join table)
             key_id = analysis.get("key_id", 0)
             if key_id > 0:
-                key_name = analysis.get("key", "")
+                analysis.get("key", "")
                 full_key = self._key_id_to_name(key_id)
                 if full_key:
                     try:
@@ -292,12 +305,30 @@ class AnalysisDBWriter:
         """Convert Rekordbox key_id to the full key name (e.g., 'Am' or 'Cmaj')."""
         # Reverse of _REKORDBOX_KEY_ID from analysis_engine
         _ID_TO_KEY = {
-            1: 'C major', 2: 'C# major', 3: 'D major', 4: 'D# major',
-            5: 'E major', 6: 'F major', 7: 'F# major', 8: 'G major',
-            9: 'G# major', 10: 'A major', 11: 'A# major', 12: 'B major',
-            13: 'C minor', 14: 'C# minor', 15: 'D minor', 16: 'D# minor',
-            17: 'E minor', 18: 'F minor', 19: 'F# minor', 20: 'G minor',
-            21: 'G# minor', 22: 'A minor', 23: 'A# minor', 24: 'B minor',
+            1: "C major",
+            2: "C# major",
+            3: "D major",
+            4: "D# major",
+            5: "E major",
+            6: "F major",
+            7: "F# major",
+            8: "G major",
+            9: "G# major",
+            10: "A major",
+            11: "A# major",
+            12: "B major",
+            13: "C minor",
+            14: "C# minor",
+            15: "D minor",
+            16: "D# minor",
+            17: "E minor",
+            18: "F minor",
+            19: "F# minor",
+            20: "G minor",
+            21: "G# minor",
+            22: "A minor",
+            23: "A# minor",
+            24: "B minor",
         }
         return _ID_TO_KEY.get(key_id)
 
@@ -358,7 +389,9 @@ class AnalysisDBWriter:
                     "error": str(e),
                 }
 
-        logger.info(f"Batch analysis complete: {analyzed} analyzed, {skipped} skipped, {errors} errors")
+        logger.info(
+            f"Batch analysis complete: {analyzed} analyzed, {skipped} skipped, {errors} errors"
+        )
 
     def get_unanalyzed_tracks(self) -> list[str]:
         """
@@ -377,10 +410,10 @@ class AnalysisDBWriter:
             # Also check if ANLZ files exist
             try:
                 paths = self.live_db.db.get_content_anlz_paths(tid)
-                if not paths or not paths.get('DAT'):
+                if not paths or not paths.get("DAT"):
                     unanalyzed.append(tid)
                     continue
-                dat_path = str(paths['DAT'])
+                dat_path = str(paths["DAT"])
                 if not os.path.exists(dat_path):
                     unanalyzed.append(tid)
             except Exception:

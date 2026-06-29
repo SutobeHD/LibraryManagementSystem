@@ -29,13 +29,14 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-PMAI_MAGIC = b'PMAI'
-PMAI_HEADER_LEN = 28   # Fixed file header size
+PMAI_MAGIC = b"PMAI"
+PMAI_HEADER_LEN = 28  # Fixed file header size
 
 
 # ---------------------------------------------------------------------------
 # Low-level tag builders (all return bytes)
 # ---------------------------------------------------------------------------
+
 
 def _build_file_header(total_file_len: int) -> bytes:
     """
@@ -43,14 +44,15 @@ def _build_file_header(total_file_len: int) -> bytes:
     Layout: magic(4) + hdr_len(4) + file_len(4) + version(4) + flags(4) + flags2(4) + pad(4)
     Matches real Rekordbox 7.x files.
     """
-    return struct.pack('>4sIIIIII',
+    return struct.pack(
+        ">4sIIIIII",
         PMAI_MAGIC,
         PMAI_HEADER_LEN,
         total_file_len,
-        1,       # version
+        1,  # version
         0x00010000,  # flags (observed in real files)
         0x00010000,  # flags2
-        0,           # padding
+        0,  # padding
     )
 
 
@@ -61,16 +63,17 @@ def _build_ppth(track_path: str) -> bytes:
     """
     # Rekordbox uses forward slashes and UTF-16BE with null terminator.
     # rbox validates: (string_len + 1) * 2 == path_len_field
-    path_normalized = track_path.replace('\\', '/')
+    path_normalized = track_path.replace("\\", "/")
     # Encode with null terminator (rbox expects it)
-    path_bytes = (path_normalized + '\0').encode('utf-16-be')
+    path_bytes = (path_normalized + "\0").encode("utf-16-be")
     path_len = len(path_bytes)
 
     hdr_len = 16
     total_len = hdr_len + path_len
 
-    buf = struct.pack('>4sIII',
-        b'PPTH',
+    buf = struct.pack(
+        ">4sIII",
+        b"PPTH",
         hdr_len,
         total_len,
         path_len,
@@ -88,8 +91,9 @@ def _build_pvbr(pvbr_data: list[int]) -> bytes:
     data_len = 400 * 4
     total_len = hdr_len + data_len
 
-    buf = struct.pack('>4sIII',
-        b'PVBR',
+    buf = struct.pack(
+        ">4sIII",
+        b"PVBR",
         hdr_len,
         total_len,
         0,  # reserved
@@ -97,7 +101,7 @@ def _build_pvbr(pvbr_data: list[int]) -> bytes:
     # VBR entries as big-endian u32 (millisecond offsets)
     for i in range(400):
         val = pvbr_data[i] if i < len(pvbr_data) else 0
-        buf += struct.pack('>I', val)
+        buf += struct.pack(">I", val)
     return buf
 
 
@@ -111,19 +115,20 @@ def _build_pqtz(beats: list[dict[str, Any]]) -> bytes:
     hdr_len = 24
     total_len = hdr_len + entry_count * 8
 
-    buf = struct.pack('>4sIIIII',
-        b'PQTZ',
+    buf = struct.pack(
+        ">4sIIIII",
+        b"PQTZ",
         hdr_len,
         total_len,
-        0,          # reserved
-        0x00080000, # flags (rbox validates u2 == 0x80000)
+        0,  # reserved
+        0x00080000,  # flags (rbox validates u2 == 0x80000)
         entry_count,
     )
     for b in beats:
-        beat_num = b.get('beat_number', 1)
-        tempo = b.get('tempo', 12800)       # BPM × 100
-        time_ms = b.get('time_ms', 0)
-        buf += struct.pack('>HHI', beat_num, tempo, time_ms)
+        beat_num = b.get("beat_number", 1)
+        tempo = b.get("tempo", 12800)  # BPM × 100
+        time_ms = b.get("time_ms", 0)
+        buf += struct.pack(">HHI", beat_num, tempo, time_ms)
     return buf
 
 
@@ -132,19 +137,26 @@ def _build_pwav(waveform_data: list[int]) -> bytes:
     PWAV — Monochrome waveform preview (400 entries, 1 byte each).
     Header (20 bytes): tag(4) + hdr_len(4) + total_len(4) + entry_count(4) + entry_size_and_reserved(4)
     """
-    entries = waveform_data[:400] if len(waveform_data) >= 400 else waveform_data + [0] * (400 - len(waveform_data))
+    entries = (
+        waveform_data[:400]
+        if len(waveform_data) >= 400
+        else waveform_data + [0] * (400 - len(waveform_data))
+    )
     hdr_len = 20
     total_len = hdr_len + 400
 
-    buf = struct.pack('>4sIIIHH',
-        b'PWAV',
+    buf = struct.pack(
+        ">4sIIIHH",
+        b"PWAV",
         hdr_len,
         total_len,
-        400,    # entry count
-        1,      # bytes per entry
-        0,      # reserved
+        400,  # entry count
+        1,  # bytes per entry
+        0,  # reserved
     )
-    buf += bytes(entries)
+    # Clamp to 0..255 like PWV4/6/7 — bytes() raises on out-of-range; for valid
+    # waveform values this is the identity, so produced bytes are unchanged.
+    buf += bytes(max(0, min(255, v)) for v in entries)
     return buf
 
 
@@ -152,19 +164,26 @@ def _build_pwv2(waveform_data: list[int]) -> bytes:
     """
     PWV2 — Tiny waveform preview (100 entries, 1 byte each).
     """
-    entries = waveform_data[:100] if len(waveform_data) >= 100 else waveform_data + [0] * (100 - len(waveform_data))
+    entries = (
+        waveform_data[:100]
+        if len(waveform_data) >= 100
+        else waveform_data + [0] * (100 - len(waveform_data))
+    )
     hdr_len = 20
     total_len = hdr_len + 100
 
-    buf = struct.pack('>4sIIIHH',
-        b'PWV2',
+    buf = struct.pack(
+        ">4sIIIHH",
+        b"PWV2",
         hdr_len,
         total_len,
-        100,    # entry count
-        1,      # bytes per entry
-        0,      # reserved
+        100,  # entry count
+        1,  # bytes per entry
+        0,  # reserved
     )
-    buf += bytes(entries)
+    # Clamp to 0..255 like PWV4/6/7 — bytes() raises on out-of-range; for valid
+    # waveform values this is the identity, so produced bytes are unchanged.
+    buf += bytes(max(0, min(255, v)) for v in entries)
     return buf
 
 
@@ -173,8 +192,8 @@ def _build_pcpt_entry(cue: dict[str, Any]) -> bytes:
     PCPT — single cue point entry inside a PCOB list.
     Layout (56 bytes total):
         magic(4)='PCPT' + hdr_len(4)=0x1C + total_len(4)=0x38
-        + hot_cue(4) + status(4) + flags(4)=0x00100000
-        + order_first(2) + order_last(2) + type(1) + pad(3)
+        + hot_cue(4) + status(4) + const(4)=0x00010000
+        + order_first(2) + order_last(2) + type(1) + pad(1) + const(2)=1000
         + time_ms(4) + loop_time_ms(4) + 16 bytes padding
     """
     hot_cue = cue.get("number", 0)
@@ -187,26 +206,31 @@ def _build_pcpt_entry(cue: dict[str, Any]) -> bytes:
     time_ms = int(cue.get("time_ms", 0))
     loop_end = (time_ms + int(cue.get("loop_len_ms", 0))) if is_loop else 0xFFFFFFFF
 
-    buf = struct.pack('>4sII',
-        b'PCPT',
-        0x1C,           # header_length
-        0x38,           # total_length
+    buf = struct.pack(
+        ">4sII",
+        b"PCPT",
+        0x1C,  # header_length
+        0x38,  # total_length
     )
-    buf += struct.pack('>III',
-        cue_num,        # hot_cue (0=memory, 1..8=hot)
-        4 if is_hot else 0,   # status: 4=active hot cue, 0=loaded memory
-        0x00100000,     # observed flags
+    buf += struct.pack(
+        ">III",
+        cue_num,  # hot_cue (0=memory, 1..8=hot)
+        4 if is_hot else 0,  # status: 4=active hot cue, 0=loaded memory
+        0x00010000,  # const — "seems to always be 0x10000" (crate-digger cue_entry)
     )
-    buf += struct.pack('>HHB3x',
-        0xFFFF,         # order_first
-        0xFFFF,         # order_last
+    buf += struct.pack(
+        ">HHBxH",
+        0xFFFF,  # order_first
+        0xFFFF,  # order_last
         cue_type_byte,  # 1=cue, 2=loop
+        1000,  # const — crate-digger cue_entry always 1000 (was zero-padded)
     )
-    buf += struct.pack('>II',
+    buf += struct.pack(
+        ">II",
         time_ms,
         loop_end & 0xFFFFFFFF,
     )
-    buf += b'\x00' * 16  # trailing padding
+    buf += b"\x00" * 16  # trailing padding
     return buf
 
 
@@ -225,19 +249,20 @@ def _build_pcob(cue_type: int, cues: list[dict[str, Any]] | None = None) -> byte
         # Memory cue list
         entries = [c for c in cues if c.get("type", "hot_cue") == "memory_cue"]
 
-    entry_data = b''.join(_build_pcpt_entry(c) for c in entries)
+    entry_data = b"".join(_build_pcpt_entry(c) for c in entries)
     entry_count = len(entries)
     hdr_len = 24
     total_len = hdr_len + len(entry_data)
 
-    buf = struct.pack('>4sIIIHHI',
-        b'PCOB',
+    buf = struct.pack(
+        ">4sIIIHHI",
+        b"PCOB",
         hdr_len,
         total_len,
         cue_type,
         entry_count,
-        entry_count if cue_type == 0 else 0,   # memory_count only set for memory list
-        0xFFFFFFFF,     # sentinel
+        entry_count if cue_type == 0 else 0,  # memory_count only set for memory list
+        0xFFFFFFFF,  # sentinel
     )
     buf += entry_data
     return buf
@@ -256,29 +281,33 @@ def _build_pcp2_entry(cue: dict[str, Any]) -> bytes:
     loop_end = (time_ms + int(cue.get("loop_len_ms", 0))) if is_loop else 0xFFFFFFFF
 
     name = cue.get("name", "") or ""
-    name_bytes = (name + '\0').encode('utf-16-be')
+    name_bytes = (name + "\0").encode("utf-16-be")
 
     color_id = int(cue.get("color_id", 0)) & 0xFF
     rgb = cue.get("color_rgb", (0, 0, 0))
     r, g, b = (int(x) & 0xFF for x in rgb)
 
-    body = struct.pack('>IIIBBBB',
-        cue_num,            # hot_cue
+    body = struct.pack(
+        ">IIIBBBB",
+        cue_num,  # hot_cue
         time_ms,
         loop_end & 0xFFFFFFFF,
-        color_id,           # color id (palette index)
-        r, g, b,            # explicit RGB
+        color_id,  # color id (palette index)
+        r,
+        g,
+        b,  # explicit RGB
     )
-    body += struct.pack('>II',
-        0,                  # loop numerator
-        0,                  # loop denominator
+    body += struct.pack(
+        ">II",
+        0,  # loop numerator
+        0,  # loop denominator
     )
-    body += struct.pack('>I', len(name_bytes))
+    body += struct.pack(">I", len(name_bytes))
     body += name_bytes
 
     hdr_len = 0x10
     total_len = hdr_len + len(body)
-    return struct.pack('>4sII', b'PCP2', hdr_len, total_len) + body
+    return struct.pack(">4sII", b"PCP2", hdr_len, total_len) + body
 
 
 def _build_pco2(cue_type: int, cues: list[dict[str, Any]] | None = None) -> bytes:
@@ -291,12 +320,13 @@ def _build_pco2(cue_type: int, cues: list[dict[str, Any]] | None = None) -> byte
     else:
         entries = [c for c in cues if c.get("type", "hot_cue") == "memory_cue"]
 
-    entry_data = b''.join(_build_pcp2_entry(c) for c in entries)
+    entry_data = b"".join(_build_pcp2_entry(c) for c in entries)
     hdr_len = 20
     total_len = hdr_len + len(entry_data)
 
-    buf = struct.pack('>4sIIII',
-        b'PCO2',
+    buf = struct.pack(
+        ">4sIIII",
+        b"PCO2",
         hdr_len,
         total_len,
         cue_type,
@@ -315,16 +345,18 @@ def _build_pwv3(waveform_data: list[int], fps: int = 150) -> bytes:
     hdr_len = 24
     total_len = hdr_len + entry_count
 
-    buf = struct.pack('>4sIIIIHH',
-        b'PWV3',
+    buf = struct.pack(
+        ">4sIIIIHH",
+        b"PWV3",
         hdr_len,
         total_len,
-        1,              # 1 byte per entry
+        1,  # 1 byte per entry
         entry_count,
         fps,
-        0,              # reserved
+        0,  # reserved
     )
-    buf += bytes(waveform_data)
+    # Clamp to 0..255 (see PWAV) — identity for valid values, byte-unchanged.
+    buf += bytes(max(0, min(255, v)) for v in waveform_data)
     return buf
 
 
@@ -339,16 +371,17 @@ def _build_pwv5(waveform_u16: list[int], fps: int = 150) -> bytes:
 
     # rbox validates the last 4 header bytes as u32 == 0x00960305
     # This encodes fps (0x0096=150) + format flags (0x0305)
-    buf = struct.pack('>4sIIIII',
-        b'PWV5',
+    buf = struct.pack(
+        ">4sIIIII",
+        b"PWV5",
         hdr_len,
         total_len,
-        2,              # 2 bytes per entry
+        2,  # 2 bytes per entry
         entry_count,
-        0x00960305,     # fps + color-detail flags (rbox-validated)
+        0x00960305,  # fps + color-detail flags (rbox-validated)
     )
     for val in waveform_u16:
-        buf += struct.pack('>H', val & 0xFFFF)
+        buf += struct.pack(">H", val & 0xFFFF)
     return buf
 
 
@@ -365,18 +398,19 @@ def _build_pwv4(color_preview: list[list[int]]) -> bytes:
     hdr_len = 24
     total_len = hdr_len + entry_count * 6
 
-    buf = struct.pack('>4sIIIIHH',
-        b'PWV4',
+    buf = struct.pack(
+        ">4sIIIIHH",
+        b"PWV4",
         hdr_len,
         total_len,
-        6,              # 6 bytes per entry
+        6,  # 6 bytes per entry
         entry_count,
-        0,              # no fps for preview
+        0,  # no fps for preview
         0,
     )
     for entry in color_preview:
         for val in entry[:6]:
-            buf += struct.pack('B', max(0, min(255, val)))
+            buf += struct.pack("B", max(0, min(255, val)))
     return buf
 
 
@@ -390,16 +424,17 @@ def _build_pwv6(hd_preview: list[list[int]]) -> bytes:
     hdr_len = 20
     total_len = hdr_len + entry_count * 3
 
-    buf = struct.pack('>4sIIII',
-        b'PWV6',
-        hdr_len,        # rbox asserts header_size == 20
+    buf = struct.pack(
+        ">4sIIII",
+        b"PWV6",
+        hdr_len,  # rbox asserts header_size == 20
         total_len,
-        3,              # 3 bytes per entry (rbox asserts len_entry_bytes == 3)
+        3,  # 3 bytes per entry (rbox asserts len_entry_bytes == 3)
         entry_count,
     )
     for entry in hd_preview:
         for val in entry[:3]:
-            buf += struct.pack('B', max(0, min(255, val)))
+            buf += struct.pack("B", max(0, min(255, val)))
     return buf
 
 
@@ -412,18 +447,19 @@ def _build_pwv7(hd_detail: list[list[int]], fps: int = 150) -> bytes:
     hdr_len = 24
     total_len = hdr_len + entry_count * 3
 
-    buf = struct.pack('>4sIIIIHH',
-        b'PWV7',
+    buf = struct.pack(
+        ">4sIIIIHH",
+        b"PWV7",
         hdr_len,
         total_len,
-        3,              # 3 bytes per entry (rbox asserts len_entry_bytes == 3)
+        3,  # 3 bytes per entry (rbox asserts len_entry_bytes == 3)
         entry_count,
         fps,
         0,
     )
     for entry in hd_detail:
         for val in entry[:3]:
-            buf += struct.pack('B', max(0, min(255, val)))
+            buf += struct.pack("B", max(0, min(255, val)))
     return buf
 
 
@@ -435,14 +471,65 @@ def _build_pwvc() -> bytes:
     """
     hdr_len = 14
     total_len = 20
-    buf = struct.pack('>4sIII',
-        b'PWVC',
+    buf = struct.pack(
+        ">4sIII",
+        b"PWVC",
         hdr_len,
         total_len,
         0,
     )
-    buf += b'\x00' * (total_len - 16)
+    buf += b"\x00" * (total_len - 16)
     return buf
+
+
+# Rekordbox phrase "kind" ids are interpreted RELATIVE to the track mood bank
+# (Deep-Symmetry crate-digger rekordbox_anlz.ksy). An id valid in one bank is
+# invalid in another, so a phrase id must be drawn from the chosen mood's
+# vocabulary — otherwise Rekordbox / CDJ show a blank or wrong phrase label.
+#   high (1): intro=1, up=2, down=3, chorus=5, outro=6
+#   mid  (2): intro=1, verse_1..6=2..7, bridge=8, chorus=9, outro=10
+#   low  (3): intro=1, verse_1..2c=2..7, bridge=8, chorus=9, outro=10
+# Our internal labels (Intro/Verse/Up/Down/Drop/Chorus/Bridge/Outro) are mapped
+# to the nearest valid id within the bank (e.g. a "Drop" is the high-energy
+# chorus; high mood has no verse/bridge, so those fall back to up/down).
+_PSSI_PHRASE_ID: dict[int, dict[str, int]] = {
+    1: {  # high
+        "Intro": 1,
+        "Up": 2,
+        "Verse": 2,
+        "Down": 3,
+        "Bridge": 3,
+        "Drop": 5,
+        "Chorus": 5,
+        "Outro": 6,
+    },
+    2: {  # mid
+        "Intro": 1,
+        "Verse": 2,
+        "Up": 2,
+        "Down": 3,
+        "Bridge": 8,
+        "Drop": 9,
+        "Chorus": 9,
+        "Outro": 10,
+    },
+    3: {  # low
+        "Intro": 1,
+        "Verse": 2,
+        "Up": 2,
+        "Down": 3,
+        "Bridge": 8,
+        "Drop": 9,
+        "Chorus": 9,
+        "Outro": 10,
+    },
+}
+
+
+def _pssi_phrase_id(label: str, mood_val: int) -> int:
+    """Map an internal phrase label to a valid Rekordbox kind id for the mood bank."""
+    bank = _PSSI_PHRASE_ID.get(mood_val, _PSSI_PHRASE_ID[2])
+    return bank.get(label, 1)  # default to Intro (id 1, valid in every bank)
 
 
 def _build_pssi(
@@ -466,7 +553,7 @@ def _build_pssi(
     Beat-count anchoring (NOT ms): phrase position = ms * bpm / 60000.
     """
     if not phrases or bpm <= 0:
-        return b''
+        return b""
 
     entry_count = len(phrases)
     entry_size = 24
@@ -482,51 +569,59 @@ def _build_pssi(
     dominant_mood = max(mood_counts, key=mood_counts.get) if mood_counts else "mid"
     mood_val = mood_map.get(dominant_mood, 2)
 
-    end_beat_total = int(round((duration_ms / 1000.0) * (bpm / 60.0)))
+    end_beat_total = round((duration_ms / 1000.0) * (bpm / 60.0))
 
-    buf = struct.pack('>4sIII',
-        b'PSSI',
+    buf = struct.pack(
+        ">4sIII",
+        b"PSSI",
         hdr_len,
         total_len,
         entry_size,
     )
-    buf += struct.pack('>HHHH',
+    buf += struct.pack(
+        ">HHHH",
         entry_count,
         mood_val,
-        0,                          # bank (reserved)
+        0,  # bank (reserved)
         end_beat_total & 0xFFFF,
     )
-    buf += b'\x00' * 8              # reserved padding (header is 32 bytes)
+    buf += b"\x00" * 8  # reserved padding (header is 32 bytes)
 
     def ms_to_beat(ms: int) -> int:
-        return max(0, int(round((ms / 1000.0) * (bpm / 60.0))))
+        return max(0, round((ms / 1000.0) * (bpm / 60.0)))
 
     for i, phrase in enumerate(phrases):
         start_beat = ms_to_beat(phrase.get("start_ms", 0))
         end_beat = ms_to_beat(phrase.get("end_ms", phrase.get("start_ms", 0)))
-        phrase_id = int(phrase.get("id", 1))
+        # Bank-correct id: derive from the label within the chosen mood bank,
+        # not the engine's raw id (which may be invalid for this bank).
+        phrase_id = _pssi_phrase_id(str(phrase.get("label", "")), mood_val)
         fill_val = int(phrase.get("fill", 0))
 
         # Entry layout: 24 bytes total
-        buf += struct.pack('>HHHH',
-            (i + 1) & 0xFFFF,           # phrase index (1-based)
-            start_beat & 0xFFFF,        # start_beat (u16)
-            phrase_id & 0xFFFF,         # phrase_id
-            0,                          # reserved
-        )                                # +8
-        buf += struct.pack('>BBH',
-            fill_val & 0xFF,            # fill flag
-            0,                          # fill_beat
-            0,                          # reserved
-        )                                # +4 (=12)
-        buf += struct.pack('>HH',
-            0,                          # bank
-            0,                          # reserved
-        )                                # +4 (=16)
-        buf += struct.pack('>II',
-            end_beat & 0xFFFFFFFF,      # end_beat (u32)
-            0,                          # trailing reserved
-        )                                # +8 (=24)
+        buf += struct.pack(
+            ">HHHH",
+            (i + 1) & 0xFFFF,  # phrase index (1-based)
+            start_beat & 0xFFFF,  # start_beat (u16)
+            phrase_id & 0xFFFF,  # phrase_id
+            0,  # reserved
+        )  # +8
+        buf += struct.pack(
+            ">BBH",
+            fill_val & 0xFF,  # fill flag
+            0,  # fill_beat
+            0,  # reserved
+        )  # +4 (=12)
+        buf += struct.pack(
+            ">HH",
+            0,  # bank
+            0,  # reserved
+        )  # +4 (=16)
+        buf += struct.pack(
+            ">II",
+            end_beat & 0xFFFFFFFF,  # end_beat (u32)
+            0,  # trailing reserved
+        )  # +8 (=24)
 
     return buf
 
@@ -548,34 +643,34 @@ def _build_pqt2(beats: list[dict[str, Any]], bpm: float) -> bytes:
     deviation in 0.01 BPM steps (range ±1.27 BPM per beat).
     """
     if not beats:
-        return b''
+        return b""
 
-    base_tempo_int = int(round(bpm * 100))    # BPM × 100
-    first_beat_time = beats[0].get('time_ms', 0)
-    last_beat_time = beats[-1].get('time_ms', 0)
+    base_tempo_int = round(bpm * 100)  # BPM × 100
+    first_beat_time = beats[0].get("time_ms", 0)
+    last_beat_time = beats[-1].get("time_ms", 0)
 
     hdr_len = 56
     total_len = hdr_len + len(beats) * 2
 
-    buf = struct.pack('>4sII', b'PQT2', hdr_len, total_len)
-    buf += struct.pack('>I', 0)                 # reserved
-    buf += struct.pack('>I', 0x01000002)        # observed flags
-    buf += struct.pack('>I', 0)                 # reserved
-    buf += struct.pack('>HH', 1, base_tempo_int & 0xFFFF)   # first anchor: beat 1, tempo
-    buf += struct.pack('>I', first_beat_time)
-    buf += struct.pack('>HH', 1, base_tempo_int & 0xFFFF)   # last anchor
-    buf += struct.pack('>I', last_beat_time)
-    buf += struct.pack('>I', len(beats))
-    buf += b'\x00' * 12                         # padding to 56-byte header
+    buf = struct.pack(">4sII", b"PQT2", hdr_len, total_len)
+    buf += struct.pack(">I", 0)  # reserved
+    buf += struct.pack(">I", 0x01000002)  # observed flags
+    buf += struct.pack(">I", 0)  # reserved
+    buf += struct.pack(">HH", 1, base_tempo_int & 0xFFFF)  # first anchor: beat 1, tempo
+    buf += struct.pack(">I", first_beat_time)
+    buf += struct.pack(">HH", 1, base_tempo_int & 0xFFFF)  # last anchor
+    buf += struct.pack(">I", last_beat_time)
+    buf += struct.pack(">I", len(beats))
+    buf += b"\x00" * 12  # padding to 56-byte header
 
     for b in beats:
-        beat_num = (b.get('beat_number', 1) & 0xFF)
-        local_tempo = b.get('tempo', base_tempo_int)
+        beat_num = b.get("beat_number", 1) & 0xFF
+        local_tempo = b.get("tempo", base_tempo_int)
         offset = local_tempo - base_tempo_int
         # Saturate to signed byte range -- variable-BPM beyond ±1.27 BPM
         # per beat is unrealistic (would mean tempo drift > 76 BPM/min).
         offset = max(-127, min(127, offset))
-        buf += struct.pack('>Bb', beat_num, offset)
+        buf += struct.pack(">Bb", beat_num, offset)
 
     return buf
 
@@ -583,6 +678,7 @@ def _build_pqt2(beats: list[dict[str, Any]], bpm: float) -> bytes:
 # ---------------------------------------------------------------------------
 # High-level file builders
 # ---------------------------------------------------------------------------
+
 
 def build_dat(
     track_path: str,
@@ -608,13 +704,13 @@ def build_dat(
     Returns:
         Complete .DAT file as bytes
     """
-    tags = b''
+    tags = b""
     tags += _build_ppth(track_path)
     tags += _build_pvbr(pvbr)
     tags += _build_pqtz(beats)
     tags += _build_pwav(pwav)
     tags += _build_pwv2(pwv2)
-    tags += _build_pcob(1, hot_cues)     # hot cues
+    tags += _build_pcob(1, hot_cues)  # hot cues
     tags += _build_pcob(0, memory_cues)  # memory cues
 
     total_len = PMAI_HEADER_LEN + len(tags)
@@ -641,7 +737,7 @@ def build_ext(
       PPTH → PWV3 → PCOB(hot) → PCOB(mem) → PCO2(hot) → PCO2(mem)
       → PQT2 (extended grid, CDJ-3000) → PWV5 → PWV4 → PSSI (phrase struct)
     """
-    tags = b''
+    tags = b""
     tags += _build_ppth(track_path)
     tags += _build_pwv3(pwv3)
     tags += _build_pcob(1, hot_cues)
@@ -668,7 +764,7 @@ def build_2ex(
     """
     Build a complete .2EX ANLZ file (CDJ-3000 HD waveforms).
     """
-    tags = b''
+    tags = b""
     tags += _build_ppth(track_path)
     tags += _build_pwv7(pwv7)
     tags += _build_pwv6(pwv6)
@@ -729,8 +825,8 @@ def _prune_anlz_backups(anlz_dir: str, keep: int = _DEFAULT_BACKUP_KEEP) -> int:
             try:
                 os.unlink(stale)
                 removed += 1
-            except OSError:
-                pass
+            except OSError as e:
+                logger.warning("ANLZ backup prune failed for %s: %s", stale, e)
     return removed
 
 
@@ -785,12 +881,12 @@ def write_anlz_files(
             memory_cues=memory_cues,
         )
         dat_path = str(Path(anlz_dir) / f"{filename_base}.DAT")
-        with open(dat_path, 'wb') as f:
+        with open(dat_path, "wb") as f:
             f.write(dat_data)
         paths["dat"] = dat_path
         logger.info(f"Wrote .DAT: {dat_path} ({len(dat_data)} bytes)")
     except Exception as e:
-        logger.error(f"Failed to write .DAT: {e}")
+        logger.error(f"Failed to write .DAT: {e}", exc_info=True)
 
     # --- .EXT ---
     try:
@@ -807,12 +903,12 @@ def write_anlz_files(
             bpm=bpm,
         )
         ext_path = str(Path(anlz_dir) / f"{filename_base}.EXT")
-        with open(ext_path, 'wb') as f:
+        with open(ext_path, "wb") as f:
             f.write(ext_data)
         paths["ext"] = ext_path
         logger.info(f"Wrote .EXT: {ext_path} ({len(ext_data)} bytes)")
     except Exception as e:
-        logger.error(f"Failed to write .EXT: {e}")
+        logger.error(f"Failed to write .EXT: {e}", exc_info=True)
 
     # --- .2EX ---
     try:
@@ -825,11 +921,11 @@ def write_anlz_files(
                 pwv6=pwv6,
             )
             ex2_path = str(Path(anlz_dir) / f"{filename_base}.2EX")
-            with open(ex2_path, 'wb') as f:
+            with open(ex2_path, "wb") as f:
                 f.write(ex2_data)
             paths["2ex"] = ex2_path
             logger.info(f"Wrote .2EX: {ex2_path} ({len(ex2_data)} bytes)")
     except Exception as e:
-        logger.error(f"Failed to write .2EX: {e}")
+        logger.error(f"Failed to write .2EX: {e}", exc_info=True)
 
     return paths

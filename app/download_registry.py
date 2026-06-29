@@ -20,6 +20,8 @@ import hashlib
 import logging
 import sqlite3
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -34,21 +36,34 @@ def _registry_path() -> Path:
     global _REGISTRY_DB
     if _REGISTRY_DB is None:
         from .config import MUSIC_DIR
+
         MUSIC_DIR.mkdir(parents=True, exist_ok=True)
         _REGISTRY_DB = MUSIC_DIR / "download_registry.db"
     return _REGISTRY_DB
 
 
-def _conn() -> sqlite3.Connection:
-    """Open a WAL-mode connection with Row factory enabled."""
+@contextmanager
+def _conn() -> Iterator[sqlite3.Connection]:
+    """WAL-mode connection with Row factory. Commits on clean exit, rolls back on
+    error, and ALWAYS closes — a plain `sqlite3.connect` used as a context manager
+    commits the transaction but never closes the handle, leaking a connection (and
+    a WAL file handle) on every call under bulk-download load."""
     c = sqlite3.connect(str(_registry_path()), check_same_thread=False)
     c.row_factory = sqlite3.Row
-    c.execute("PRAGMA journal_mode=WAL")    # safe concurrent reads while writing
+    c.execute("PRAGMA journal_mode=WAL")  # safe concurrent reads while writing
     c.execute("PRAGMA synchronous=NORMAL")  # balance durability vs. speed
-    return c
+    try:
+        yield c
+        c.commit()
+    except Exception:
+        c.rollback()
+        raise
+    finally:
+        c.close()
 
 
 # ── Schema ────────────────────────────────────────────────────────────────────
+
 
 def init_registry() -> None:
     """Create DB schema if it doesn't exist. Safe to call multiple times on startup."""
@@ -103,6 +118,7 @@ def init_registry() -> None:
 
 # ── Device ID ─────────────────────────────────────────────────────────────────
 
+
 def _device_id() -> str:
     """
     Stable per-device UUID. Persisted as a plaintext file next to the registry DB.
@@ -133,6 +149,7 @@ def get_current_device_id() -> str:
 
 # ── Deduplication ─────────────────────────────────────────────────────────────
 
+
 def get_record(sc_track_id: str) -> dict | None:
     """Return full DB row for a SoundCloud track ID, or None if not present."""
     if not sc_track_id:
@@ -140,8 +157,7 @@ def get_record(sc_track_id: str) -> dict | None:
     try:
         with _conn() as db:
             row = db.execute(
-                "SELECT * FROM download_history WHERE sc_track_id = ? LIMIT 1",
-                (str(sc_track_id),)
+                "SELECT * FROM download_history WHERE sc_track_id = ? LIMIT 1", (str(sc_track_id),)
             ).fetchone()
         return dict(row) if row else None
     except sqlite3.Error as exc:
@@ -163,7 +179,7 @@ def is_already_downloaded(sc_track_id: str) -> bool:
         with _conn() as db:
             row = db.execute(
                 "SELECT status FROM download_history WHERE sc_track_id = ? LIMIT 1",
-                (str(sc_track_id),)
+                (str(sc_track_id),),
             ).fetchone()
         if row and row["status"] not in ("failed",):
             logger.debug("[Registry] Dedup hit: sc_id=%s (status=%s)", sc_track_id, row["status"])
@@ -185,8 +201,7 @@ def find_by_hash(sha256: str) -> dict | None:
     try:
         with _conn() as db:
             row = db.execute(
-                "SELECT * FROM download_history WHERE sha256_hash = ? LIMIT 1",
-                (sha256,)
+                "SELECT * FROM download_history WHERE sha256_hash = ? LIMIT 1", (sha256,)
             ).fetchone()
         return dict(row) if row else None
     except sqlite3.Error as exc:
@@ -195,6 +210,7 @@ def find_by_hash(sha256: str) -> dict | None:
 
 
 # ── Write operations ───────────────────────────────────────────────────────────
+
 
 def register_download(
     *,
@@ -239,12 +255,21 @@ def register_download(
                     error_message    = excluded.error_message
                 """,
                 (
-                    str(sc_track_id), title, artist, duration_ms, sc_permalink_url,
+                    str(sc_track_id),
+                    title,
+                    artist,
+                    duration_ms,
+                    sc_permalink_url,
                     sc_playlist_title,
                     str(file_path) if file_path else None,
-                    file_format, file_size_bytes, sha256_hash,
-                    now, status, error_message, _device_id(),
-                )
+                    file_format,
+                    file_size_bytes,
+                    sha256_hash,
+                    now,
+                    status,
+                    error_message,
+                    _device_id(),
+                ),
             )
         logger.info("[Registry] Registered: sc_id=%s status=%s", sc_track_id, status)
         return True
@@ -272,11 +297,13 @@ def update_analysis(
                     status='analyzed', local_track_id=?
                 WHERE sc_track_id=?
                 """,
-                (bpm, key_str, confidence, now, local_track_id, str(sc_track_id))
+                (bpm, key_str, confidence, now, local_track_id, str(sc_track_id)),
             )
         logger.info(
             "[Registry] Analysis saved: sc_id=%s bpm=%.1f key=%s",
-            sc_track_id, bpm or 0, key_str or "?"
+            sc_track_id,
+            bpm or 0,
+            key_str or "?",
         )
         return True
     except sqlite3.Error as exc:
@@ -290,7 +317,7 @@ def mark_failed(sc_track_id: str, error: str) -> None:
         with _conn() as db:
             db.execute(
                 "UPDATE download_history SET status='failed', error_message=? WHERE sc_track_id=?",
-                (error[:500], str(sc_track_id))
+                (error[:500], str(sc_track_id)),
             )
         logger.warning("[Registry] Marked failed: sc_id=%s error=%s", sc_track_id, error[:120])
     except sqlite3.Error as exc:
@@ -304,10 +331,7 @@ def delete_entry(sc_track_id: str) -> bool:
     """
     try:
         with _conn() as db:
-            db.execute(
-                "DELETE FROM download_history WHERE sc_track_id=?",
-                (str(sc_track_id),)
-            )
+            db.execute("DELETE FROM download_history WHERE sc_track_id=?", (str(sc_track_id),))
         logger.info("[Registry] Deleted entry: sc_id=%s", sc_track_id)
         return True
     except sqlite3.Error as exc:
@@ -316,6 +340,7 @@ def delete_entry(sc_track_id: str) -> bool:
 
 
 # ── Query operations ───────────────────────────────────────────────────────────
+
 
 def get_history(
     *,
@@ -357,7 +382,7 @@ def get_history(
                 ORDER BY downloaded_at DESC
                 LIMIT ? OFFSET ?
                 """,
-                (*params, limit, offset)
+                (*params, limit, offset),
             ).fetchall()
         return [dict(r) for r in rows]
     except sqlite3.Error as exc:
@@ -388,6 +413,7 @@ def get_stats() -> dict:
 
 
 # ── File hashing ──────────────────────────────────────────────────────────────
+
 
 def compute_sha256(path: Path, chunk_size: int = 65_536) -> str | None:
     """

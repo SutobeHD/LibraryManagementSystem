@@ -25,6 +25,8 @@ is no way to construct a `NewContent` builder from Python. The only working
 write path is `update_content(existing_row)`, which means we MUST start from
 a template that already contains content slot rows.
 """
+
+import contextlib
 import gc
 import logging
 import shutil
@@ -67,8 +69,7 @@ def build_template(stick_root: Path, out_template: Path) -> int:
     pre_artists = len(list(db.get_artists()))
     pre_playlists = len(list(db.get_playlists()))
 
-    print(f"Source has {pre_contents} contents, {pre_artists} artists, "
-          f"{pre_playlists} playlists")
+    print(f"Source has {pre_contents} contents, {pre_artists} artists, {pre_playlists} playlists")
 
     # CRITICAL ORDER: playlist_content children first, then playlists, then
     # contents (so they release their FKs to image/album/artist), then the
@@ -76,10 +77,8 @@ def build_template(stick_root: Path, out_template: Path) -> int:
     # step gets stuck.
     print("Wiping playlists…")
     for pl in list(db.get_playlists()):
-        try:
+        with contextlib.suppress(Exception):
             db.delete_playlist(pl.id)
-        except Exception:
-            pass
 
     print("Mutating contents into placeholder slots (preserved for sync)…")
     # Keep the content rows — they are our placeholder slots — but reset
@@ -148,10 +147,8 @@ def build_template(stick_root: Path, out_template: Path) -> int:
 
     print("Wiping my_tags…")
     for t in list(db.get_my_tags()):
-        try:
+        with contextlib.suppress(Exception):
             db.delete_my_tag(t.id)
-        except Exception:
-            pass
 
     # Final state report
     after = {

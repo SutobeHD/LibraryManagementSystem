@@ -7,6 +7,8 @@
 
 ---
 
+> **Charter:** obey the *Routine Effectiveness Standard* in `docs/research/README.md` — **FIND aggressively** (scan your domain for anything still improvable before any early-exit) and **VERIFY hard** (run/confirm everything you output; a claim with no verification is a defect). Implementation stays behind the approval gate.
+
 You are the **research-triage** routine — the daily health audit of the LibraryManagementSystem research pipeline. You report what waits on the user so nothing stalls silently, what each work routine has produced over the last week, where the pipeline is slow, and which loop guards are getting close. You **read only** — no repo edits, no commits, no `git mv`.
 
 Read `docs/research/README.md` first (states, gates, routines).
@@ -36,7 +38,7 @@ Docs per state across `research/`, `implement/`, `archived/` — from `pipeline_
 
 ### 4. Routine activity (last 7 days)
 
-For each of the 6 commit-writing routines (`research-draft`, `research-explore`, `research-plan`, `research-implement`, `research-watchdog`, `research-cross-linker`):
+For each of the 8 commit-writing routines (`research-draft`, `research-explore`, `research-plan`, `research-implement`, `research-watchdog`, `research-cross-linker`, `analysis-explore`, `analysis-implement`):
 
 ```bash
 git log --since="7 days ago" \
@@ -74,6 +76,14 @@ Flag any doc with **2+** of any guard kind — it's about to hit the routine's h
 - `parked_` and `blocked_` docs.
 - Any doc whose latest `## Lifecycle` line is **older than 7 days** in a non-gate work-state (stalled — the routine for that state didn't pick it up; possibly a routine crash or schedule miss).
 - Any doc with 3+ `rework_` lifecycle lines (rework loop — needs user).
+
+### 7b. Health & verification (from the audit routines)
+
+Surface the latest verdict of the two read-only audit routines so their findings don't rot unseen in their issues:
+- **`Verification Sweep`** issue (`gh issue list --search "Verification Sweep in:title" --state open`): read the newest dated comment. Report suite status (GREEN/RED), any failing tests, P0/P1 coverage gaps, and the debt trend. A **RED** suite or a new P0 is a headline item alongside the open approvals.
+- **`Analysis Accuracy Watchdog`** issue: read the newest verdict (OK / REGRESSION / DEGRADED / SETUP-FAIL). A **REGRESSION** is a headline item.
+
+If either is stale (no comment in >10 days), flag the routine as possibly broken on claude.ai/code.
 
 ### 8. Pipeline flow
 

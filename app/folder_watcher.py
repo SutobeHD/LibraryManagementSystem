@@ -20,6 +20,7 @@ Public surface:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 import time
@@ -33,8 +34,17 @@ from watchdog.observers import Observer
 logger = logging.getLogger("FOLDER_WATCHER")
 
 AUDIO_EXTENSIONS = {
-    ".mp3", ".wav", ".flac", ".aiff", ".aif",
-    ".ogg", ".opus", ".m4a", ".aac", ".wma", ".alac",
+    ".mp3",
+    ".wav",
+    ".flac",
+    ".aiff",
+    ".aif",
+    ".ogg",
+    ".opus",
+    ".m4a",
+    ".aac",
+    ".wma",
+    ".alac",
 }
 
 # Wait this long after the last filesystem event for a path before importing —
@@ -107,10 +117,8 @@ class FolderWatcher:
                 except Exception as exc:
                     logger.warning("Observer stop failed for %s: %s", path, exc)
             for obs in self._observers.values():
-                try:
+                with contextlib.suppress(Exception):
                     obs.join(timeout=2.0)
-                except Exception:
-                    pass
             self._observers.clear()
             for timer in self._timers.values():
                 timer.cancel()
@@ -154,9 +162,11 @@ class FolderWatcher:
                 return False
             self._observers[norm] = observer
             logger.info("Watching folder: %s", path)
-
-        # Initial scan on a worker thread so the API call returns instantly.
-        self._executor.submit(self._initial_scan, path)
+            # Initial scan on a worker thread so the API call returns instantly.
+            # Submit INSIDE the lock: stop() can only shut the executor down
+            # after acquiring+releasing this same lock, so holding it here makes
+            # a submit-after-shutdown RuntimeError impossible.
+            self._executor.submit(self._initial_scan, path)
         return True
 
     def remove(self, folder: str) -> bool:
@@ -180,8 +190,7 @@ class FolderWatcher:
             return {
                 "running": not self._stopped,
                 "folders": [
-                    {"path": p, "alive": obs.is_alive()}
-                    for p, obs in self._observers.items()
+                    {"path": p, "alive": obs.is_alive()} for p, obs in self._observers.items()
                 ],
                 "pending_imports": len(self._timers),
             }
@@ -208,9 +217,7 @@ class FolderWatcher:
             existing = self._timers.pop(key, None)
             if existing is not None:
                 existing.cancel()
-            timer = threading.Timer(
-                DEBOUNCE_SECONDS, self._submit_after_debounce, args=(key,)
-            )
+            timer = threading.Timer(DEBOUNCE_SECONDS, self._submit_after_debounce, args=(key,))
             timer.daemon = True
             self._timers[key] = timer
             timer.start()
@@ -221,7 +228,9 @@ class FolderWatcher:
             if self._stopped or key in self._inflight:
                 return
             self._inflight.add(key)
-        self._executor.submit(self._run_import, key)
+            # Submit inside the lock — see add(): prevents a submit racing with
+            # stop()'s executor shutdown.
+            self._executor.submit(self._run_import, key)
 
     def _run_import(self, key: str) -> None:
         path = Path(key)
@@ -255,7 +264,11 @@ class FolderWatcher:
                 return True
             last = size
             time.sleep(STABILITY_INTERVAL)
-        return last > 0
+        # Loop exhausted = size never settled (still being copied) or empty.
+        # Returning True here would import a half-written file — the exact
+        # thing this guard exists to prevent. Treat a never-stable file as
+        # not-ready.
+        return False
 
     def _initial_scan(self, root: Path) -> None:
         imported = 0
@@ -274,7 +287,9 @@ class FolderWatcher:
                 skipped += 1
         logger.info(
             "Initial scan complete: root=%s imported=%d skipped=%d",
-            root, imported, skipped,
+            root,
+            imported,
+            skipped,
         )
 
 

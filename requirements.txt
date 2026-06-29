@@ -24,7 +24,14 @@ psutil==5.9.8
 sqlalchemy==2.0.49
 
 # --- Rekordbox library access (master.db, ANLZ, my-tags) ---
-# pyrekordbox is the Python package; runtime symbols import as `rbox`.
+# Two DISTINCT packages (both pinned 0.1.7):
+#   rbox         — Rust-backed; the `import rbox` used across 10 modules for
+#                  MasterDb / Anlz / OneLibrary (live DB, ANLZ, USB export).
+#   pyrekordbox  — pure-Python; only app/usb_mysettings.py needs its
+#                  `mysettings` construct structs (DEV/DJM/MY setting files).
+# Without rbox, every `import rbox` falls back to None and live-DB / ANLZ /
+# USB-export features silently degrade.
+rbox==0.1.7
 pyrekordbox==0.1.7
 
 # --- Numerical / Audio Analysis (heavy stack — required for beatgrid/key detection) ---

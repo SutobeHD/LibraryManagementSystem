@@ -208,12 +208,25 @@
 | `tests/__init__.py` | *(no module docstring)* |
 | `tests/conftest.py` | Pytest fixtures shared across the suite. |
 | `tests/test_analysis.py` | Regression tests for the analysis pipeline. |
+| `tests/test_analysis_cache.py` | Tests for app/analysis_cache.py — persistent analysis-result cache. |
+| `tests/test_analysis_db_writer.py` | Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.db. |
+| `tests/test_analysis_edge.py` | Edge-case robustness for the analysis engine entry points. |
 | `tests/test_anlz_cue_patch.py` | Round-trip tests for app/anlz_cue_patch.py. |
+| `tests/test_anlz_reference_parse.py` | Validate the produced ANLZ files (.DAT/.EXT/.2EX). |
+| `tests/test_anlz_writer_guards.py` | Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout). |
+| `tests/test_audio_analyzer.py` | Tests for app/audio_analyzer.py — the pure _normalize_result mapping. |
+| `tests/test_audio_tags.py` | Tests for app/audio_tags.py — native tag write-back (mutates user files → HIGH risk). |
 | `tests/test_auth.py` | Tests for ``app/auth.py`` -- Bearer-token session authentication. |
+| `tests/test_batch_worker.py` | Tests for app/batch_worker.py — pure comment-transform logic. |
+| `tests/test_compare_rekordbox.py` | Unit tests for the pure comparison helpers in scripts/compare_rekordbox.py. |
 | `tests/test_database.py` | Tests for `app/database.py`. |
 | `tests/test_db_taste.py` | taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py). |
+| `tests/test_download_registry.py` | Tests for app/download_registry.py — SoundCloud download dedup/history DB. |
 | `tests/test_external_track_match.py` | external_track_match unit tests (external-track-match-unified-module T-3..T-9). |
+| `tests/test_folder_watcher.py` | Tests for app/folder_watcher.py — auto-import folder watcher. |
+| `tests/test_import_tracker.py` | Tests for app/import_tracker.py — live import-progress tracker. |
 | `tests/test_library_format_swap.py` | Tests for app.library_format_swap. |
+| `tests/test_library_source.py` | Tests for app/library_source.py — the Live/XML normalization layer. |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
 | `tests/test_main_security.py` | Regression tests for ``POST /api/file/reveal`` sandbox. |
 | `tests/test_metadata_fixer_applier.py` | metadata-fixer apply/revert tests (T5 — app/metadata_fixer/applier.py). |
@@ -224,25 +237,33 @@
 | `tests/test_pairing_store.py` | Phase-2 pairing-code store tests (T2 — app/pairing_store.py). |
 | `tests/test_pdb_structure.py` | PDB writer structural test against F: drive Pioneer reference. |
 | `tests/test_phrase_batch.py` | Tests for the phrase-batch backend (app/main.py): |
+| `tests/test_playcount_sync.py` | Tests for app/playcount_sync.py — USB <-> PC play-count sync engine. |
 | `tests/test_popularity_engine.py` | PopularityStore tests (underground-mainstream-classifier T1-T3). |
 | `tests/test_rate_limit.py` | Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter. |
+| `tests/test_rbep_parser.py` | Tests for app/rbep_parser.py — Rekordbox Editor Project (.rbep) XML parser. |
+| `tests/test_rekordbox_bridge.py` | Tests for app/rekordbox_bridge.py — Rekordbox XML <-> local DB import. |
 | `tests/test_require_session.py` | Phase-2 require_session dual-acceptance tests (T3 — app/auth.py). |
 | `tests/test_route_uniqueness.py` | Routing-table invariant: no duplicate (method, path) registrations. |
 | `tests/test_security_compare.py` | Tests for ``app/security_compare.py::safe_compare``. |
 | `tests/test_security_hotfixes.py` | Regression tests for the 5 security hotfixes in commit e3a5ae8. |
 | `tests/test_services.py` | Tests for `app/services.py`. |
 | `tests/test_settings_caps.py` | Tests for `SetReq` payload caps + `SettingsManager.load` sanitizer. |
+| `tests/test_smart_playlist_engine.py` | Tests for app/smart_playlist_engine.py — the smart-playlist rule evaluator. |
 | `tests/test_soundcloud_api.py` | Tests for `app/soundcloud_api.py`. |
 | `tests/test_soundcloud_auth_status.py` | Tests for GET /api/soundcloud/auth-status. |
 | `tests/test_soundcloud_downloader_security.py` | Security regression tests for app/soundcloud_downloader. |
 | `tests/test_stream_unicode_filename.py` | Regression: GET /api/stream 500 on non-latin-1 filenames. |
 | `tests/test_usb_manager.py` | Tests for `app/usb_manager.py`. |
+| `tests/test_usb_mysettings.py` | Tests for app/usb_mysettings.py — Pioneer MYSETTING file schema + I/O. |
 | `tests/test_variant_detector.py` | variant_schema + variant_detector tests (analysis-remix-detector T-2, T-3). |
+| `tests/test_variant_schema.py` | Tests for app/variant_schema.py — variants.db DDL + migration runner. |
+| `tests/test_xml_generator.py` | Tests for app/xml_generator.py — Rekordbox collection XML export. |
 
 ## scripts/ — Dev/Build Utilities
 
 | File | Purpose |
 |------|---------|
+| `scripts/compare_rekordbox.py` | compare_rekordbox.py — A/B accuracy harness: our engine vs Rekordbox. |
 | `scripts/dev/phrase_spike.py` | phrase_spike.py — manual P0 verification for the phrase memory-cue ANLZ write. |
 | `scripts/dev/safe_format_swap.py` | safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist. |
 | `scripts/pipeline_dashboard.py` | Local web dashboard for the research pipeline. |
@@ -250,5 +271,6 @@
 | `scripts/print_routine.py` | Extract the deploy-ready prompt from a routine .md file. |
 | `scripts/regen_maps.py` | Auto-generate tiered code maps from the actual source tree. |
 | `scripts/screenshot.py` | *(no module docstring)* |
+| `scripts/selftest_analysis.py` | selftest_analysis.py — autonomous accuracy self-test (no Rekordbox needed). |
 | `scripts/test_xml_sync.py` | Add app to path |
 | `scripts/validate_research_docs.py` | Validate every doc under docs/research/{research,implement,archived}/. |

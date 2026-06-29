@@ -12,8 +12,9 @@ Endpoints that use this:
 
 import logging
 import os
+import threading
 from concurrent.futures import Future, ProcessPoolExecutor
-from typing import Any
+from typing import Any, ClassVar
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +23,15 @@ LIBROSA_AVAILABLE = False
 try:
     import librosa
     import numpy as np
+
     LIBROSA_AVAILABLE = True
 except ImportError:
     logger.warning("librosa not found. Audio analysis will use mock fallback.")
 
 # Import the production engine (lazy -- won't load heavy libs until needed)
 try:
-    from .analysis_engine import AnalysisEngine, _ensure_libs, run_full_analysis
+    from .analysis_engine import AnalysisEngine, run_full_analysis
+
     _ENGINE_AVAILABLE = True
 except ImportError:
     _ENGINE_AVAILABLE = False
@@ -45,21 +48,31 @@ class AudioAnalyzer:
       - "speed": Lighter analysis (still uses AnalysisEngine but with duration cap)
     """
 
-    _executor: ProcessPoolExecutor | None = None
-    _tasks: dict[str, Future] = {}
+    _executor: ClassVar[ProcessPoolExecutor | None] = None
+    _tasks: ClassVar[dict[str, Future]] = {}
+    _executor_lock = threading.Lock()
 
     @classmethod
     def get_executor(cls):
+        # Double-checked locking: FastAPI serves requests on a threadpool, so an
+        # unguarded check-then-create could spawn two pools (one leaking its
+        # worker processes). cpu_count() is read once — a second call could
+        # return None and make `None - 1` raise.
         if cls._executor is None:
-            cores = max(1, os.cpu_count() - 1) if os.cpu_count() else 2
-            cls._executor = ProcessPoolExecutor(max_workers=cores)
+            with cls._executor_lock:
+                if cls._executor is None:
+                    n = os.cpu_count()
+                    cores = max(1, n - 1) if n else 2
+                    cls._executor = ProcessPoolExecutor(max_workers=cores)
         return cls._executor
 
     @classmethod
     def shutdown(cls):
-        if cls._executor:
-            cls._executor.shutdown(wait=False)
-            cls._executor = None
+        with cls._executor_lock:
+            if cls._executor:
+                cls._executor.shutdown(wait=False)
+                cls._executor = None
+            cls._tasks.clear()
 
     @classmethod
     def analyze_track(cls, task_id: str, file_path: str, mode: str = "accuracy") -> dict[str, Any]:
@@ -129,10 +142,14 @@ class AudioAnalyzer:
         # The new engine already provides all fields. Add legacy aliases:
         normalized = dict(result)
 
-        # Legacy field: "beatgrid" (list of times in seconds)
+        # Legacy field: "beatgrid" (list of times in seconds). Guard the entry
+        # shape — the engine emits {"time_ms": ...} dicts, but a malformed/legacy
+        # beat list must skip bad entries, not crash an otherwise-good analysis.
         if "beats" in result and "beatgrid" not in result:
             normalized["beatgrid"] = [
-                b["time_ms"] / 1000.0 for b in result["beats"]
+                b["time_ms"] / 1000.0
+                for b in result["beats"]
+                if isinstance(b, dict) and "time_ms" in b
             ]
 
         # Legacy field: "mode"
@@ -151,13 +168,17 @@ class AudioAnalyzer:
         """
         if not LIBROSA_AVAILABLE:
             return {
-                "bpm": 128.0, "key": "Unknown", "beatgrid": [],
-                "mode": mode, "error": "librosa not installed"
+                "bpm": 128.0,
+                "key": "Unknown",
+                "beatgrid": [],
+                "mode": mode,
+                "error": "librosa not installed",
             }
 
         try:
             import warnings
-            warnings.filterwarnings('ignore')
+
+            warnings.filterwarnings("ignore")
 
             file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
             duration = None
@@ -168,9 +189,7 @@ class AudioAnalyzer:
 
             # BPM
             onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-            tempo, beat_frames = librosa.beat.beat_track(
-                onset_envelope=onset_env, sr=sr
-            )
+            tempo, beat_frames = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
             bpm = float(tempo[0] if isinstance(tempo, np.ndarray) else tempo)
 
             # Snap
@@ -193,6 +212,10 @@ class AudioAnalyzer:
         except Exception as e:
             logger.error(f"Legacy analysis failed for '{file_path}': {e}")
             return {
-                "bpm": 128.0, "key": "Unknown", "beatgrid": [],
-                "mode": mode, "error": str(e), "status": "error"
+                "bpm": 128.0,
+                "key": "Unknown",
+                "beatgrid": [],
+                "mode": mode,
+                "error": str(e),
+                "status": "error",
             }

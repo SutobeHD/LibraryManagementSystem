@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 _TASKS: dict[str, dict] = {}
 _LOCK = threading.Lock()
-_MAX_KEEP = 500   # cap retention so memory stays bounded over a long session
+_MAX_KEEP = 500  # cap retention so memory stays bounded over a long session
 
 
 def _prune_locked():
@@ -36,8 +36,7 @@ def _prune_locked():
         return
     # drop the oldest completed/failed/skipped first
     finished = [
-        (k, v) for k, v in _TASKS.items()
-        if v.get("status") in ("Completed", "Failed", "Skipped")
+        (k, v) for k, v in _TASKS.items() if v.get("status") in ("Completed", "Failed", "Skipped")
     ]
     finished.sort(key=lambda kv: kv[1].get("start_time") or 0)
     for k, _ in finished[: len(_TASKS) - _MAX_KEEP]:
@@ -59,7 +58,8 @@ def register(file_path: str, source: str = "drag-drop") -> str:
             "error": None,
             "start_time": now,
             "stage_history": [{"stage": "Queued", "ts": now}],
-            "bpm": None, "key": None,
+            "bpm": None,
+            "key": None,
             "local_track_id": None,
         }
         _prune_locked()

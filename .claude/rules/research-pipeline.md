@@ -11,11 +11,11 @@
    Everything `drafting_` → `review_` runs **autonomously** — verification agents gate each hop, no user stop. The **single** user gate is `approvalgate_` (idea summary + mockup + change list). After `/approve` the build runs autonomously to PRs; you test the `routine/*` branch locally and merge it yourself.
 4. **Skip pipeline for:** one-off bug fixes, single-file refactors, plain questions, doc edits.
 
-Full stage/prefix cheat-sheet + 8 routines + branch flow: `docs/research/README.md`.
+Full stage/prefix cheat-sheet + 12 routines + branch flow: `docs/research/README.md`.
 
-## The 8 routines — quick map
+## The 12 routines — quick map
 
-5 daily work-state routines move docs forward; 3 cross-cutting routines maintain pipeline health.
+5 daily work-state routines move docs forward; 7 cross-cutting routines maintain pipeline health (find + verify + analysis).
 
 | Routine | Schedule (Berlin) | Trigger | Touches |
 |---|---|---|---|
@@ -27,6 +27,10 @@ Full stage/prefix cheat-sheet + 8 routines + branch flow: `docs/research/README.
 | `research-spawn` | Sundays 04:00 | TODO/FIXME, CHANGELOG, GH issues, etc. | `Idea Backlog` GitHub Issue |
 | `research-watchdog` | 1st of month 04:00 | archived/implemented_ unchecked 30+ days | `## Lifecycle` line + `Idea Backlog` follow-ups |
 | `research-cross-linker` | Tuesdays 04:30 | active docs with footprint overlap | `related:` frontmatter + `## Cross-links` block |
+| `analysis-accuracy-watchdog` | Wednesdays 04:30 | analysis engine + produced Rekordbox files (read-only) | `Analysis Accuracy Watchdog` GitHub Issue |
+| `analysis-explore` | Thursdays 06:00 | analysis `exploring_` docs | measured before/after evidence into the doc (docs-only) |
+| `analysis-implement` | Fridays 03:00 | approved analysis Task-Queue items | code on `routine/analysis-*` branches + PRs, self-test-gated |
+| `verification-sweep` | Mondays + Thursdays 05:00 | whole repo (read-only) | `Verification Sweep` GitHub Issue (suite run + coverage/weak-test/drift/debt audit) |
 
 Every work routine spawns specialist sub-agents (Scout / Prior-Art / Risk-Surface; Codebase + Web + Synthesis per OQ; Threat-Modeller / Migration / Perf-Budget / Test-Plan; Approach-Probe + multi-reviewer). Full per-routine agent chain: `docs/research/README.md` "Multi-agent mechanics".
 

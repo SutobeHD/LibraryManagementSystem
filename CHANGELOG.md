@@ -2,6 +2,73 @@
 
 ## [Unreleased]
 
+- Analysis accuracy + engine fixes:
+  - Improved: exact-octave BPM accuracy (Acc-1). `detect_beats_madmom` now
+    constrains the madmom DBN tempo window to the octave of a robust coarse
+    estimate (librosa log-normal prior) — an "octave prior" that stops the
+    tracker locking onto half-/double-time. Measured (synthetic, n=50, madmom):
+    seed 11 Acc-1 72%→78%, seed 12 82%→94%; Acc-2 and KEY stay 100%; the
+    180-210 BPM band's half-time errors are largely eliminated. (Window never
+    binds when coarse + DBN already agree, the common real-music case.)
+  - Fixed: `requirements.txt` was missing `rbox==0.1.7` (the Rust-backed package
+    that `import rbox` resolves to across 10 modules — MasterDb/Anlz/OneLibrary).
+    Only `pyrekordbox==0.1.7` (a *different*, pure-Python package used solely for
+    my-settings structs) was pinned, so a clean install left live-DB / ANLZ /
+    USB-export features in their soft `rbox=None` fallback.
+  - Fixed: produced ANLZ cue entries (PCPT) wrote two wrong constants
+    (0x00100000 instead of 0x10000; zero instead of the u2 const 1000), so the
+    `.DAT`/`.EXT` files diverged from the Rekordbox cue layout and were rejected
+    by strict ANLZ parsers. Now spec-conformant — independently verified by
+    pyrekordbox `AnlzFile.parse_file()` parsing all three produced files.
+  - Fixed: essentia key names normalized flats→sharps (Eb→D#, …); the active
+    essentia path otherwise returned empty Camelot/key_id for ~5 of 12 keys.
+  - Fixed: `madmom` RNN beat tracking was dead code on Python 3.10+ (the
+    project target) — `import madmom` raised on removed `collections`/`numpy`
+    symbols and was silently swallowed, so the librosa fallback always ran.
+    `_apply_madmom_compat_shims()` restores the symbols; RNN path now active.
+  - Fixed: octave disambiguation counted onset-envelope frames (inflated on
+    sharp signals → falsely doubled slow tracks); now counts discrete onset
+    events (true onsets-per-beat).
+  - Fixed: neutral `minor_bias` (1.10→1.0) — the minor thumb made major triads
+    read as their mediant minor (D major→F# minor).
+  - Fixed: PSSI phrase ids written per the track mood bank (crate-digger enum);
+    previously-invalid ids showed blank/wrong phrase labels on CDJ/Rekordbox.
+  - Added: optional 16-bar memory-cue grid for beatmatching
+    (`memory_cue_grid` setting / `RB_ANALYSIS_MEMORY_CUE_GRID`).
+  - Changed: BPM output range raised to 215 (fast DnB/footwork/hardcore no
+    longer octave-folded to half-time).
+  - Added: `scripts/compare_rekordbox.py` (A/B accuracy vs a real library) +
+    `scripts/selftest_analysis.py` (autonomous synthetic-ground-truth accuracy,
+    MIREX Acc-1/Acc-2). Self-test with RNN: BPM Acc-2 100%, KEY exact 100%.
+- Reliability hardening (codebase-wide bug-hunt — 16 fixes + 15 new test files,
+  full pytest suite 658 passing):
+  - Fixed: Rekordbox XML import called a non-existent `db.update_track`, so every
+    already-present track silently failed to update. Now uses the real
+    `update_tracks_metadata`; empty `AverageBpm`/`TotalTime` on un-analyzed
+    tracks no longer drop the track (was `float("")` → ValueError).
+  - Fixed: live (master.db) load aborted entirely — zero tracks — if any single
+    rbox metadata accessor (artists/genres/albums/labels/keys) raised; now each
+    map degrades independently. An unnamed playlist (name `None`) no longer
+    crashes the playlist tree.
+  - Fixed: folder auto-import imported half-copied files (the stability check
+    returned "ready" on timeout) and could `RuntimeError` on a stop()/submit
+    race; both closed.
+  - Fixed: a corrupt `.rbep` project file crashed `to_dict()` (attrs unset after
+    ParseError); childless `<edit>`/`<section>` elements were silently dropped
+    (ElementTree truthiness misuse).
+  - Fixed: library normalization crashed the whole USB sync on one non-numeric
+    tag (e.g. `BPM="n/a"`); Live `duration_ms`-only tracks had their duration
+    multiplied by 1000.
+  - Fixed: analysis cache crashed on a legacy/corrupt index entry (missing
+    `cache_id`); `stats()` could raise `FileNotFoundError` under a concurrent
+    cache clear (TOCTOU).
+  - Fixed: download registry leaked a SQLite connection on every call (now
+    closed via context manager); audio-analysis worker-pool creation race +
+    `os.cpu_count()` edge + malformed-beat crash all guarded.
+  - Fixed: produced ANLZ sidecar reported failure on a *successful* write
+    (sanity-check evaluation-order bug — `any()` before its `isinstance` guard).
+  - Perf: log redaction resolves the data-dir prefixes once at import instead of
+    on every log line (3 filesystem calls per line removed).
 - Added: Phase-1 Bearer-token authentication on 84 mutation endpoints.
   New `app/auth.py` self-generates session token at sidecar boot, captured
   by Tauri stdout reader + dev-middleware fallback. Frontend attaches

@@ -38,6 +38,7 @@ when iterating `get_content_anlz_paths` over a row with a stale ANLZ
 pointer). When the upstream fix lands, swap `SafeAnlzParser` for direct
 `rbox.Anlz` calls and remove `ProcessPoolExecutor` overhead.
 """
+
 from __future__ import annotations
 
 import logging
@@ -149,9 +150,7 @@ def _parse_pqtz_in_worker(dat_path: str) -> list[dict] | None:
     ]
 
 
-def _load_beatgrids_batch_in_worker(
-    db_path: str, track_ids: list[str]
-) -> dict[str, list[dict]]:
+def _load_beatgrids_batch_in_worker(db_path: str, track_ids: list[str]) -> dict[str, list[dict]]:
     """Batch PQTZ load.
 
     Opens its own `MasterDb` connection, iterates `track_ids`, and
@@ -277,9 +276,7 @@ class SafeAnlzParser:
         # FIFO of chunks waiting to be processed. Chunks are bisected
         # on worker crash, so we may push smaller chunks back to the
         # front of the queue.
-        queue: list[list[str]] = [
-            ids[i : i + chunk_size] for i in range(0, len(ids), chunk_size)
-        ]
+        queue: list[list[str]] = [ids[i : i + chunk_size] for i in range(0, len(ids), chunk_size)]
         results: dict[str, list[dict]] = {}
         scanned = 0
 
@@ -291,9 +288,7 @@ class SafeAnlzParser:
 
             executor = self._ensure_executor()
             try:
-                future = executor.submit(
-                    _load_beatgrids_batch_in_worker, db_path, chunk
-                )
+                future = executor.submit(_load_beatgrids_batch_in_worker, db_path, chunk)
                 partial = future.result(timeout=PER_CHUNK_TIMEOUT_S)
                 results.update(partial)
                 scanned += len(chunk)
@@ -317,8 +312,7 @@ class SafeAnlzParser:
                     bad = chunk[0]
                     self._bad_ids.add(bad)
                     logger.warning(
-                        "SafeAnlzParser: track id %s blacklisted "
-                        "(rbox panic #%d)",
+                        "SafeAnlzParser: track id %s blacklisted (rbox panic #%d)",
                         bad,
                         self._panic_count,
                     )
@@ -329,16 +323,14 @@ class SafeAnlzParser:
                     queue.insert(0, chunk[mid:])
                     queue.insert(0, chunk[:mid])
                     logger.info(
-                        "SafeAnlzParser: bisecting chunk of %d after "
-                        "panic #%d",
+                        "SafeAnlzParser: bisecting chunk of %d after panic #%d",
                         len(chunk),
                         self._panic_count,
                     )
 
             except FuturesTimeout:
                 logger.warning(
-                    "SafeAnlzParser: chunk timeout (%ss, %d tracks) — "
-                    "skipping chunk",
+                    "SafeAnlzParser: chunk timeout (%ss, %d tracks) — skipping chunk",
                     PER_CHUNK_TIMEOUT_S,
                     len(chunk),
                 )
@@ -365,9 +357,7 @@ class SafeAnlzParser:
     # ------------------------------------------------------------------
     # Single-file API — kept for ad-hoc callers
     # ------------------------------------------------------------------
-    def parse_pqtz(
-        self, track_id: str, dat_path: str
-    ) -> list[dict] | None:
+    def parse_pqtz(self, track_id: str, dat_path: str) -> list[dict] | None:
         """Parse PQTZ entries from one ANLZ DAT file.
 
         Returns ``None`` on any failure (invalid track id, header check
@@ -390,8 +380,7 @@ class SafeAnlzParser:
         except BrokenExecutor:
             self._panic_count += 1
             logger.warning(
-                "SafeAnlzParser: rbox worker crashed on track=%s "
-                "(panic #%d) — blacklisting",
+                "SafeAnlzParser: rbox worker crashed on track=%s (panic #%d) — blacklisting",
                 track_id,
                 self._panic_count,
             )

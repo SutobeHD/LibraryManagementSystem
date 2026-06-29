@@ -12,8 +12,10 @@ Cache layout:
     <cache_dir>/index.json           -- map file_path → {mtime, size, cache_id, version}
     <cache_dir>/<cache_id>.json.gz   -- per-file analysis result (gzipped)
 """
+
 from __future__ import annotations
 
+import contextlib
 import gzip
 import hashlib
 import json
@@ -79,7 +81,10 @@ class AnalysisCache:
             if current != entry.get("hash"):
                 return None
 
-        cache_file = self.cache_dir / entry["cache_id"]
+        cache_id = entry.get("cache_id")
+        if not cache_id:
+            return None
+        cache_file = self.cache_dir / cache_id
         if not cache_file.exists():
             return None
 
@@ -136,11 +141,10 @@ class AnalysisCache:
         with self._lock:
             entry = self._index.pop(abs_path, None)
             if entry:
-                cache_file = self.cache_dir / entry["cache_id"]
-                try:
-                    cache_file.unlink()
-                except OSError:
-                    pass
+                cache_id = entry.get("cache_id")
+                if cache_id:
+                    with contextlib.suppress(OSError):
+                        (self.cache_dir / cache_id).unlink()
                 self._save_index()
 
     def clear(self) -> int:
@@ -148,22 +152,30 @@ class AnalysisCache:
         with self._lock:
             count = len(self._index)
             for entry in self._index.values():
-                try:
-                    (self.cache_dir / entry["cache_id"]).unlink()
-                except OSError:
-                    pass
+                cache_id = entry.get("cache_id")
+                if not cache_id:
+                    continue
+                with contextlib.suppress(OSError):
+                    (self.cache_dir / cache_id).unlink()
             self._index = {}
             self._save_index()
         return count
 
     def stats(self) -> dict[str, Any]:
         """Return cache size + entry count."""
-        total_bytes = sum(
-            f.stat().st_size for f in self.cache_dir.glob("*.json.gz")
-            if f.is_file()
-        )
+        with self._lock:
+            entries = len(self._index)
+        # glob+stat outside the lock: a concurrent invalidate()/clear() can
+        # unlink a file between glob and stat (is_file() is a TOCTOU), raising
+        # FileNotFoundError. Tolerate it per-file instead of failing the call.
+        total_bytes = 0
+        for f in self.cache_dir.glob("*.json.gz"):
+            try:
+                total_bytes += f.stat().st_size
+            except OSError:
+                continue
         return {
-            "entries": len(self._index),
+            "entries": entries,
             "bytes": total_bytes,
             "version": ANALYSIS_VERSION,
             "dir": str(self.cache_dir),
@@ -188,15 +200,14 @@ class AnalysisCache:
             os.replace(tmp, self.index_file)
         except Exception as e:
             logger.warning(f"Cache index write failed: {e}")
-            try:
+            with contextlib.suppress(OSError):
                 tmp.unlink()
-            except OSError:
-                pass
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _quick_content_hash(file_path: str, sample_bytes: int = 1024 * 1024) -> str:
     """Quick md5 over first+last MB. Good enough to catch most edits."""
@@ -218,6 +229,7 @@ def _json_default(obj):
     """JSON serializer that handles numpy types."""
     try:
         import numpy as np
+
         if isinstance(obj, (np.integer,)):
             return int(obj)
         if isinstance(obj, (np.floating,)):

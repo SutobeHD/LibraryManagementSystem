@@ -13,8 +13,26 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def _to_float(v, default: float = 0.0) -> float:
+    """Best-effort float. Tolerates None/'' and non-numeric strings — a single
+    malformed tag (e.g. BPM='n/a') must not raise and abort the whole
+    iter_tracks() sync."""
+    if v is None or v == "":
+        return default
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _to_int(v, default: int = 0) -> int:
+    """Best-effort int via _to_float (handles '5', '5.0', None, garbage)."""
+    return int(_to_float(v, default))
+
+
 class LibrarySource:
     """Common interface."""
+
     mode: str = ""
 
     def iter_tracks(self) -> Iterable[dict]:
@@ -36,6 +54,7 @@ class LibrarySource:
         if not path:
             return None
         import hashlib
+
         p = Path(path)
         sidecar_root = p.parent / ".lms_anlz"
         if not sidecar_root.exists():
@@ -47,6 +66,7 @@ class LibrarySource:
 
 class XmlLibrarySource(LibrarySource):
     """Reads from RekordboxXMLDB."""
+
     mode = "xml"
 
     def __init__(self, xml_db):
@@ -64,8 +84,7 @@ class XmlLibrarySource(LibrarySource):
         for p in self.db.playlists:
             pid = str(p.get("ID"))
             t_ids = [
-                str(t.get("id") or t.get("TrackID"))
-                for t in self.db.playlists_tracks.get(pid, [])
+                str(t.get("id") or t.get("TrackID")) for t in self.db.playlists_tracks.get(pid, [])
             ]
             yield {
                 "id": pid,
@@ -78,10 +97,7 @@ class XmlLibrarySource(LibrarySource):
 
     def get_playlist_track_ids(self, pid) -> list[str]:
         pid = str(pid)
-        return [
-            str(t.get("id") or t.get("TrackID"))
-            for t in self.db.playlists_tracks.get(pid, [])
-        ]
+        return [str(t.get("id") or t.get("TrackID")) for t in self.db.playlists_tracks.get(pid, [])]
 
     @staticmethod
     def _normalize(tid: str, t: dict) -> dict:
@@ -93,15 +109,15 @@ class XmlLibrarySource(LibrarySource):
             "genre": t.get("Genre") or "",
             "label": t.get("Label") or "",
             "key": t.get("Key") or "",
-            "bpm": float(t.get("BPM") or 0),
+            "bpm": _to_float(t.get("BPM")),
             "path": t.get("path") or "",
-            "duration_ms": int(float(t.get("TotalTime") or 0) * 1000),
-            "rating": int(t.get("Rating") or 0),
+            "duration_ms": int(_to_float(t.get("TotalTime")) * 1000),
+            "rating": _to_int(t.get("Rating")),
             "color_id": t.get("ColorID") or "",
             "comment": t.get("Comment") or "",
-            "bitrate": int(t.get("Bitrate") or 0),
-            "play_count": int(t.get("PlayCount") or 0),
-            "release_year": int(t.get("ReleaseYear") or 0),
+            "bitrate": _to_int(t.get("Bitrate")),
+            "play_count": _to_int(t.get("PlayCount")),
+            "release_year": _to_int(t.get("ReleaseYear")),
             "artwork": t.get("Artwork") or "",
             "beats": t.get("beatGrid") or [],
             "position_marks": t.get("positionMarks") or [],
@@ -110,6 +126,7 @@ class XmlLibrarySource(LibrarySource):
 
 class LiveLibrarySource(LibrarySource):
     """Reads from rbox.MasterDb (Live mode)."""
+
     mode = "live"
 
     def __init__(self, live_db):
@@ -126,7 +143,11 @@ class LiveLibrarySource(LibrarySource):
     def iter_playlists(self) -> Iterable[dict]:
         for p in self.live_db.playlists:
             pid = str(p.get("ID"))
-            tracks = self.live_db.get_playlist_tracks(pid) if hasattr(self.live_db, "get_playlist_tracks") else []
+            tracks = (
+                self.live_db.get_playlist_tracks(pid)
+                if hasattr(self.live_db, "get_playlist_tracks")
+                else []
+            )
             yield {
                 "id": pid,
                 "name": p.get("Name", ""),
@@ -138,11 +159,19 @@ class LiveLibrarySource(LibrarySource):
 
     def get_playlist_track_ids(self, pid) -> list[str]:
         if hasattr(self.live_db, "get_playlist_tracks"):
-            return [str(t.get("id") or t.get("ID")) for t in self.live_db.get_playlist_tracks(str(pid))]
+            return [
+                str(t.get("id") or t.get("ID")) for t in self.live_db.get_playlist_tracks(str(pid))
+            ]
         return []
 
     @staticmethod
     def _normalize(tid: str, t: dict) -> dict:
+        # TotalTime in seconds (<10000) → ms; an already-ms value (TotalTime in
+        # ms, or duration_ms) is kept as-is. The 10000 threshold is applied to the
+        # RESOLVED duration so a duration_ms-only track is no longer multiplied by
+        # 1000 (the guard previously tested TotalTime, which was None -> x1000 bug).
+        dur = _to_float(t.get("TotalTime")) or _to_float(t.get("duration_ms"))
+        dur_ms = int(dur * 1000) if dur < 10000 else int(dur)
         return {
             "id": tid,
             "title": t.get("Title") or t.get("title") or "",
@@ -151,15 +180,15 @@ class LiveLibrarySource(LibrarySource):
             "genre": t.get("Genre") or t.get("genre") or "",
             "label": t.get("Label") or t.get("label") or "",
             "key": t.get("Key") or t.get("key") or "",
-            "bpm": float(t.get("BPM") or t.get("bpm") or 0),
+            "bpm": _to_float(t.get("BPM") or t.get("bpm")),
             "path": t.get("path") or t.get("folder_path") or "",
-            "duration_ms": int(float(t.get("TotalTime") or t.get("duration_ms") or 0) * (1000 if (t.get("TotalTime") or 0) < 10000 else 1)),
-            "rating": int(t.get("Rating") or 0),
+            "duration_ms": dur_ms,
+            "rating": _to_int(t.get("Rating")),
             "color_id": t.get("ColorID") or "",
             "comment": t.get("Comment") or "",
-            "bitrate": int(t.get("Bitrate") or t.get("BitRate") or 0),
-            "play_count": int(t.get("PlayCount") or 0),
-            "release_year": int(t.get("ReleaseYear") or 0),
+            "bitrate": _to_int(t.get("Bitrate") or t.get("BitRate")),
+            "play_count": _to_int(t.get("PlayCount")),
+            "release_year": _to_int(t.get("ReleaseYear")),
             "artwork": t.get("Artwork") or "",
             "beats": t.get("beatGrid") or [],
             "position_marks": t.get("positionMarks") or [],
