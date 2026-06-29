@@ -3,7 +3,8 @@
   "version": "0.0.1",
   "configurations": [
     { "name": "frontend", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev", "--prefix", "frontend"], "port": 5173 },
-    { "name": "backend", "runtimeExecutable": "python", "runtimeArgs": ["-m", "app.main"], "port": 8000 }
+    { "name": "backend", "runtimeExecutable": "python", "runtimeArgs": ["-m", "app.main"], "port": 8000 },
+    { "name": "mockups", "runtimeExecutable": "python", "runtimeArgs": ["-m", "http.server", "8090", "--directory", "docs/research/mockups"], "port": 8090 }
   ],
   "servers": [
     {
@@ -29,6 +30,14 @@
       "env": {
         "BROWSER": "none"
       }
+    },
+    {
+      "name": "mockups",
+      "command": "python",
+      "args": ["-m", "http.server", "8090", "--directory", "docs/research/mockups"],
+      "cwd": ".",
+      "url": "http://localhost:8090/recording-booth.html",
+      "readyTimeoutMs": 15000
     }
   ]
 }

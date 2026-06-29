@@ -50,7 +50,7 @@ const DownloadQueueWidget = () => {
     return (
         <div className="fixed bottom-4 right-4 w-72 bg-mx-shell border border-white/10 rounded-2xl shadow-2xl p-4 z-40 overflow-hidden">
             <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-2">
-                <Download size={12} className="text-orange-400" /> Downloads
+                <Download size={12} className="text-amber2" /> Downloads
             </h3>
             <div className="space-y-3 max-h-48 overflow-y-auto pr-1">
                 {activeTasks.map(t => (
@@ -62,11 +62,11 @@ const DownloadQueueWidget = () => {
                             <span className="text-[9px] text-ink-muted uppercase">{t.status}</span>
                         </div>
                         {t.status === 'Error' || t.status === 'Failed' ? (
-                            <div className="text-[10px] text-red-400 mt-1">{t.error}</div>
+                            <div className="text-[10px] text-bad mt-1">{t.error}</div>
                         ) : (
                             <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
                                 <div
-                                    className={`h-full ${t.status === 'Completed' ? 'bg-emerald-500' : 'bg-orange-500'}`}
+                                    className={`h-full ${t.status === 'Completed' ? 'bg-ok' : 'bg-amber2'}`}
                                     style={{ width: `${t.progress || 0}%` }}
                                 />
                             </div>
@@ -84,7 +84,7 @@ const PlaylistCard = ({ playlist, selected, onToggle, onSync, onDownload, onInsp
     const artworkUrl = playlist.artwork_url?.replace('-large', '-t300x300') || null;
 
     return (
-        <div className={`glass-panel rounded-2xl border transition-all ${selected ? 'border-orange-500/40 bg-orange-500/5 ring-1 ring-orange-500/20' : 'border-white/5 hover:border-white/10'
+        <div className={`glass-panel rounded-2xl border transition-all ${selected ? 'border-amber2/40 bg-amber2/5 ring-1 ring-amber2/20' : 'border-white/5 hover:border-white/10'
             }`}>
             <div className="p-4">
                 <div className="flex items-start gap-4">
@@ -94,7 +94,7 @@ const PlaylistCard = ({ playlist, selected, onToggle, onSync, onDownload, onInsp
                             <img src={artworkUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
                         ) : (
                             <div className="w-full h-full flex items-center justify-center">
-                                {isLikes ? <Heart size={28} className="text-red-400" /> : <ListMusic size={28} className="text-orange-400/40" />}
+                                {isLikes ? <Heart size={28} className="text-red-400" /> : <ListMusic size={28} className="text-amber2/40" />}
                             </div>
                         )}
                         <button
@@ -102,7 +102,7 @@ const PlaylistCard = ({ playlist, selected, onToggle, onSync, onDownload, onInsp
                             className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
                         >
                             {selected ? (
-                                <Check size={24} className="text-orange-400" />
+                                <Check size={24} className="text-amber2" />
                             ) : (
                                 <Square size={24} className="text-white/60" />
                             )}
@@ -131,7 +131,7 @@ const PlaylistCard = ({ playlist, selected, onToggle, onSync, onDownload, onInsp
                             <button
                                 onClick={() => onToggle(playlist.id)}
                                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all ${selected
-                                    ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30'
+                                    ? 'bg-amber2/20 text-amber2 border border-amber2/30'
                                     : 'bg-white/5 text-ink-secondary border border-white/10 hover:bg-white/10'
                                     }`}
                             >
@@ -151,7 +151,7 @@ const PlaylistCard = ({ playlist, selected, onToggle, onSync, onDownload, onInsp
                             <button
                                 onClick={() => onDownload(playlist)}
                                 disabled={downloading}
-                                className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 rounded-lg text-[10px] font-bold border border-orange-500/30 transition-all disabled:opacity-30"
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber2/10 hover:bg-amber2/20 text-amber2 rounded-lg text-[10px] font-bold border border-amber2/30 transition-all disabled:opacity-30"
                                 title="Download all tracks of this playlist"
                             >
                                 {downloading ? <Loader2 size={10} className="animate-spin" /> : <Download size={10} />}
@@ -160,7 +160,7 @@ const PlaylistCard = ({ playlist, selected, onToggle, onSync, onDownload, onInsp
 
                             <button
                                 onClick={() => onInspect(playlist)}
-                                className="flex items-center gap-1 px-2 py-1.5 text-ink-muted hover:text-amber-400 text-[10px] transition-colors"
+                                className="flex items-center gap-1 px-2 py-1.5 text-ink-muted hover:text-amber2 text-[10px] transition-colors"
                                 title="Match Inspector"
                             >
                                 <Search size={10} /> Inspect
@@ -497,8 +497,8 @@ const SoundCloudSyncView = () => {
             <div className="p-6 pb-4 border-b border-white/5">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
-                        <div className="p-3 bg-orange-500/20 rounded-xl border border-orange-500/30">
-                            <Cloud size={28} className="text-orange-400" />
+                        <div className="p-3 bg-amber2/20 rounded-xl border border-amber2/30">
+                            <Cloud size={28} className="text-amber2" />
                         </div>
                         <div>
                             <h1 className="text-2xl font-bold tracking-tight">SoundCloud Manager</h1>
@@ -513,7 +513,7 @@ const SoundCloudSyncView = () => {
                         <button
                             onClick={handleSyncAll}
                             disabled={syncing || allPlaylists.length === 0}
-                            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-500/20 to-red-500/20 hover:from-orange-500/30 hover:to-red-500/30 text-orange-400 rounded-xl text-sm font-bold border border-orange-500/30 transition-all disabled:opacity-30"
+                            className="flex items-center gap-2 px-4 py-2 bg-amber2/15 hover:bg-amber2/25 text-amber2 rounded-xl text-sm font-bold border border-amber2/30 transition-all disabled:opacity-30"
                         >
                             {syncing ? <Loader2 size={16} className="animate-spin" /> : <ArrowUpDown size={16} />}
                             Alle Synchronisieren
@@ -538,7 +538,7 @@ const SoundCloudSyncView = () => {
                             placeholder="Playlisten suchen..."
                             value={filter}
                             onChange={(e) => setFilter(e.target.value)}
-                            className="w-full pl-9 pr-3 py-2 bg-white/5 border border-white/10 rounded-xl text-sm text-white placeholder:text-ink-placeholder focus:outline-none focus:border-orange-500/30"
+                            className="w-full pl-9 pr-3 py-2 bg-white/5 border border-white/10 rounded-xl text-sm text-white placeholder:text-ink-placeholder focus:outline-none focus:border-amber2/30"
                         />
                     </div>
 
@@ -557,7 +557,7 @@ const SoundCloudSyncView = () => {
                                     toast.error('Konnte Einstellung nicht speichern');
                                 }
                             }}
-                            className="text-[10px] bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-ink-primary focus:outline-none focus:border-orange-500/30 max-w-[160px] truncate"
+                            className="text-[10px] bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-ink-primary focus:outline-none focus:border-amber2/30 max-w-[160px] truncate"
                             title="Zielordner für synchronisierte Playlisten"
                         >
                             <option value="">📁 Root (kein Ordner)</option>
@@ -586,7 +586,7 @@ const SoundCloudSyncView = () => {
                     {/* Selected actions */}
                     {selectedIds.size > 0 && (
                         <div className="flex items-center gap-2 pl-2 border-l border-white/10">
-                            <span className="text-[10px] text-orange-400 font-bold">{selectedIds.size} ausgewählt</span>
+                            <span className="text-[10px] text-amber2 font-bold">{selectedIds.size} ausgewählt</span>
                             <button
                                 onClick={() => handleSync()}
                                 disabled={syncing}
@@ -641,7 +641,7 @@ const SoundCloudSyncView = () => {
                             </span>
                         </label>
                         {deleteOriginals && (
-                            <p className="text-[9px] text-amber-500/80 leading-relaxed pl-5">
+                            <p className="text-[9px] text-amber2/80 leading-relaxed pl-5">
                                 ⚠️ Löschen erfolgt nur, wenn <strong>alle</strong> gematchten Tracks sicher in der neuen Playlist vorhanden sind.
                             </p>
                         )}
@@ -653,7 +653,7 @@ const SoundCloudSyncView = () => {
             <div className="flex-1 overflow-y-auto p-6">
                 {loading && allPlaylists.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full">
-                        <Loader2 size={32} className="animate-spin text-orange-400 mb-4" />
+                        <Loader2 size={32} className="animate-spin text-amber2 mb-4" />
                         <span className="text-ink-muted text-sm">Lade SoundCloud Playlisten...</span>
                     </div>
                 ) : authRequired ? (
@@ -667,14 +667,14 @@ const SoundCloudSyncView = () => {
                         <button
                             onClick={handleLogin}
                             disabled={isLoggingIn}
-                            className={`flex flex-col items-center justify-center gap-2 px-10 py-4 ${isLoggingIn ? 'bg-orange-500/20' : 'bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-400 hover:to-red-400'} rounded-2xl text-white font-black uppercase tracking-tight shadow-xl shadow-orange-500/10 transition-all`}
+                            className={`flex flex-col items-center justify-center gap-2 px-10 py-4 ${isLoggingIn ? 'bg-amber2/20' : 'bg-amber2 hover:bg-amber2-hover'} rounded-2xl text-white font-black uppercase tracking-tight shadow-xl shadow-amber2/10 transition-all`}
                         >
                             <div className="flex items-center gap-3">
                                 {isLoggingIn ? <Loader2 size={20} className="animate-spin" /> : <LogIn size={20} />}
                                 {isLoggingIn ? 'Authenticating...' : 'Login with SoundCloud'}
                             </div>
                             {isLoggingIn && loginMessage && (
-                                <span className="text-[10px] text-orange-200 uppercase tracking-widest">{loginMessage}</span>
+                                <span className="text-[10px] text-amber2-hover uppercase tracking-widest">{loginMessage}</span>
                             )}
                         </button>
                     </div>
@@ -682,8 +682,8 @@ const SoundCloudSyncView = () => {
                     <>
                         {/* Sync Results */}
                         {syncResults && (
-                            <div className="mb-6 glass-panel rounded-2xl p-4 border border-emerald-500/20 bg-emerald-500/5">
-                                <h3 className="text-sm font-bold text-emerald-400 mb-3 flex items-center gap-2">
+                            <div className="mb-6 glass-panel rounded-2xl p-4 border border-ok/20 bg-ok/5">
+                                <h3 className="text-sm font-bold text-ok mb-3 flex items-center gap-2">
                                     <Check size={16} /> Sync Ergebnisse
                                 </h3>
                                 <div className="space-y-2">
@@ -691,7 +691,7 @@ const SoundCloudSyncView = () => {
                                         <div key={i} className="flex items-center justify-between text-xs py-1.5 border-b border-white/5 last:border-0">
                                             <span className="text-ink-primary font-medium truncate mr-4">{r.playlist_title}</span>
                                             <div className="flex items-center gap-3 shrink-0">
-                                                <span className="text-emerald-400">+{r.added} hinzugefügt</span>
+                                                <span className="text-ok">+{r.added} hinzugefügt</span>
                                                 <span className="text-amber2">{r.matched} erkannt</span>
                                                 <span className="text-ink-placeholder">{r.unmatched} nicht gefunden</span>
                                             </div>

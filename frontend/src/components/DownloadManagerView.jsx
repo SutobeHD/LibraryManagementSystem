@@ -11,13 +11,13 @@ const STAGES = [
     { key: 'Queued',           label: 'Queued',     icon: Clock,        color: 'text-ink-muted',    },
     { key: 'Starting',         label: 'Queued',     icon: Clock,        color: 'text-ink-muted',    },
     { key: 'Resolving',        label: 'Resolve',    icon: Activity,     color: 'text-cyan-400',     },
-    { key: 'Downloading',      label: 'Download',   icon: Download,     color: 'text-orange-400',   },
-    { key: 'Downloaded',       label: 'Downloaded', icon: CheckCircle,  color: 'text-orange-300',   },
+    { key: 'Downloading',      label: 'Download',   icon: Download,     color: 'text-amber2',       },
+    { key: 'Downloaded',       label: 'Downloaded', icon: CheckCircle,  color: 'text-amber2-hover', },
     { key: 'Analyzing',        label: 'Analyse',    icon: BarChart3,    color: 'text-purple-400',   },
     { key: 'Importing',        label: 'Library',    icon: FolderInput,  color: 'text-blue-400',     },
     { key: 'ANLZ',             label: 'ANLZ',       icon: Sparkles,     color: 'text-cyan-300',     },
     { key: 'Sorting',          label: 'Playlist',   icon: ListMusic,    color: 'text-amber2',       },
-    { key: 'Completed',        label: 'Fertig',     icon: CheckCircle,  color: 'text-emerald-400',  },
+    { key: 'Completed',        label: 'Fertig',     icon: CheckCircle,  color: 'text-ok',           },
 ];
 
 const FAILURE_STATES = new Set(['Failed', 'Error', 'Analysis Failed']);
@@ -114,16 +114,16 @@ const TaskCard = ({ task }) => {
 
     return (
         <div className={`p-4 rounded-2xl border transition-all
-            ${isFailed ? 'bg-red-500/5 border-red-500/30'
-                : isDone ? 'bg-emerald-500/5 border-emerald-500/20'
+            ${isFailed ? 'bg-bad/5 border-bad/30'
+                : isDone ? 'bg-ok/5 border-ok/20'
                 : 'bg-mx-card border-white/5 hover:border-white/10'}
         `}>
             <div className="flex items-start gap-3">
                 <div className={`shrink-0 w-10 h-10 rounded-xl flex items-center justify-center
-                    ${isFailed ? 'bg-red-500/10' : isDone ? 'bg-emerald-500/10' : 'bg-orange-500/10'}`}>
-                    {isFailed ? <AlertTriangle size={18} className="text-red-400" />
-                        : isDone ? <CheckCircle size={18} className="text-emerald-400" />
-                        : <Loader2 size={18} className="text-orange-400 animate-spin" />}
+                    ${isFailed ? 'bg-bad/10' : isDone ? 'bg-ok/10' : 'bg-amber2/10'}`}>
+                    {isFailed ? <AlertTriangle size={18} className="text-bad" />
+                        : isDone ? <CheckCircle size={18} className="text-ok" />
+                        : <Loader2 size={18} className="text-amber2 animate-spin" />}
                 </div>
                 <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
@@ -132,7 +132,7 @@ const TaskCard = ({ task }) => {
                                 {task._src === 'import' ? (
                                     <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider bg-blue-500/20 text-blue-300 border border-blue-500/30">Lokal</span>
                                 ) : (
-                                    <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider bg-orange-500/20 text-orange-300 border border-orange-500/30">SC</span>
+                                    <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider bg-amber2/20 text-amber2-hover border border-amber2/30">SC</span>
                                 )}
                                 <h3 className="text-sm font-bold text-white truncate flex-1" title={task.title}>
                                     {task.title || '(unbekannt)'}
@@ -158,8 +158,8 @@ const TaskCard = ({ task }) => {
                         </div>
                         <div className="text-right text-[10px] text-ink-muted shrink-0 flex flex-col items-end gap-0.5">
                             <span className={`font-bold uppercase tracking-wider ${
-                                isFailed ? 'text-red-400'
-                                    : task.status === 'Completed' ? 'text-emerald-400'
+                                isFailed ? 'text-bad'
+                                    : task.status === 'Completed' ? 'text-ok'
                                     : isSkip ? 'text-cyan-400'
                                     : 'text-amber2'
                             }`}>
@@ -174,7 +174,7 @@ const TaskCard = ({ task }) => {
                     {!isFailed && (
                         <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden mt-2.5">
                             <div
-                                className={`h-full transition-all ${isDone ? 'bg-emerald-500' : 'bg-gradient-to-r from-orange-500 to-amber-400'}`}
+                                className={`h-full transition-all ${isDone ? 'bg-ok' : 'bg-amber2'}`}
                                 style={{ width: `${task.progress || 0}%` }}
                             />
                         </div>
@@ -203,7 +203,7 @@ const TaskCard = ({ task }) => {
 
                     {/* Error message */}
                     {isFailed && task.error && (
-                        <div className="mt-2 text-[11px] text-red-300 bg-red-500/10 border border-red-500/20 rounded-lg px-2 py-1.5">
+                        <div className="mt-2 text-[11px] text-bad bg-bad/10 border border-bad/20 rounded-lg px-2 py-1.5">
                             {task.error}
                         </div>
                     )}
@@ -296,8 +296,8 @@ const DownloadManagerView = () => {
             <div className="px-6 pt-6 pb-3 border-b border-white/5">
                 <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-3">
-                        <div className="p-2.5 rounded-xl bg-orange-500/15">
-                            <Download size={22} className="text-orange-400" />
+                        <div className="p-2.5 rounded-xl bg-amber2/15">
+                            <Download size={22} className="text-amber2" />
                         </div>
                         <div>
                             <h1 className="text-2xl font-bold tracking-tight">Import Manager</h1>
@@ -309,7 +309,7 @@ const DownloadManagerView = () => {
                             onClick={() => setAutoRefresh(v => !v)}
                             className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
                                 autoRefresh
-                                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                    ? 'bg-ok/15 text-ok border-ok/30'
                                     : 'bg-mx-card border-white/10 text-ink-muted hover:bg-white/5'
                             }`}
                         >
@@ -328,9 +328,9 @@ const DownloadManagerView = () => {
                 {/* Stats */}
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
                     <StatCard icon={BarChart3}     label="Gesamt"   value={stats.total}  color="text-amber2" />
-                    <StatCard icon={Loader2}       label="Aktiv"    value={stats.active} color="text-orange-400" />
-                    <StatCard icon={CheckCircle}   label="Fertig"   value={stats.done}   color="text-emerald-400" />
-                    <StatCard icon={AlertTriangle} label="Fehler"   value={stats.failed} color="text-red-400" />
+                    <StatCard icon={Loader2}       label="Aktiv"    value={stats.active} color="text-amber2" />
+                    <StatCard icon={CheckCircle}   label="Fertig"   value={stats.done}   color="text-ok" />
+                    <StatCard icon={AlertTriangle} label="Fehler"   value={stats.failed} color="text-bad" />
                     <StatCard icon={TrendingUp}    label="Ø Dauer"  value={`${stats.avgDoneSec}s`} color="text-purple-400" />
                 </div>
 

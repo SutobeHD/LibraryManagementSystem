@@ -24,7 +24,7 @@ Read `docs/research/README.md` first.
 Every commit you make includes **two trailers** in the body:
 
 ```
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 X-Routine: research-cross-linker
 ```
 
@@ -113,7 +113,7 @@ docs(research): cross-linker — <N> docs scanned, <C> conflicts, <O> overlaps, 
 
 <one bullet per CONFLICT: slug-A ↔ slug-B (shared file count)>
 
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 X-Routine: research-cross-linker
 ```
 `git push origin main`.

@@ -10,7 +10,7 @@
 
 import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
 import {
-    RefreshCw, Loader2, TrendingDown, PlayCircle, ImageOff, Search, AlertCircle, Music,
+    Loader2, TrendingDown, PlayCircle, ImageOff, Search, AlertCircle, Music,
 } from 'lucide-react';
 import api from '../api/api';
 import TrackTable from './TrackTable';
@@ -18,6 +18,7 @@ import TrackTable from './TrackTable';
 const PhraseGeneratorView = lazy(() => import('./PhraseGeneratorView'));
 const DuplicateView = lazy(() => import('./DuplicateView'));
 const XmlCleanView = lazy(() => import('./XmlCleanView'));
+const FormatConverterView = lazy(() => import('./FormatConverterView'));
 
 const HEALTH_META = {
     low_quality: { label: 'Low Quality', icon: TrendingDown, color: 'text-amber-400', tip: 'Replace these with high-quality AIFF or FLAC for better sound system performance.' },
@@ -59,7 +60,7 @@ const UtilitiesView = ({ mode = 'phrase', onSelectTrack, onEditTrack, onPlayTrac
                     {mode === 'phrase' && <PhraseGeneratorView />}
                     {mode === 'duplicates' && <DuplicateView />}
                     {mode === 'xml' && <XmlCleanView />}
-                    {mode === 'converter' && <ConverterPlaceholder />}
+                    {mode === 'converter' && <FormatConverterView />}
                 </Suspense>
             </div>
         );
@@ -127,15 +128,5 @@ const UtilitiesView = ({ mode = 'phrase', onSelectTrack, onEditTrack, onPlayTrac
         </div>
     );
 };
-
-const ConverterPlaceholder = () => (
-    <div className="flex items-center justify-center h-full text-ink-muted">
-        <div className="text-center">
-            <RefreshCw size={40} className="mx-auto mb-3 text-ink-placeholder" />
-            <p className="text-[13px] font-medium">Mass Format Converter</p>
-            <p className="text-tiny text-ink-muted mt-1">Coming in a future update</p>
-        </div>
-    </div>
-);
 
 export default UtilitiesView;

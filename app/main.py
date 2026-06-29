@@ -641,6 +641,34 @@ import contextlib
 from fastapi import Request
 
 
+def _content_disposition_inline(filename: str) -> str:
+    """Build an RFC 6266 ``Content-Disposition: inline`` value, latin-1 safe.
+
+    HTTP header values are latin-1 encoded by the ASGI server; a filename with a
+    non-latin-1 codepoint (e.g. "ANNĒ …" → U+0112) makes Starlette's
+    ``Response.init_headers`` raise ``UnicodeEncodeError`` → 500. Mirror
+    Starlette's ``FileResponse``: emit ``filename*=utf-8''…`` for non-ASCII names
+    plus an ASCII-stripped ``filename=`` fallback for legacy clients. The
+    ``filename=`` token is quoted-string-escaped and control-char-stripped so the
+    helper stays injection-safe if reused on DB/user-derived strings (track
+    titles, tags) rather than only OS-validated basenames.
+    """
+    from urllib.parse import quote
+
+    # Drop control / separator chars (header folding, garbled token).
+    visible = "".join(c for c in filename if c.isprintable())
+
+    def _quoted(token: str) -> str:
+        return token.replace("\\", "\\\\").replace('"', '\\"')
+
+    try:
+        visible.encode("ascii")
+        return f'inline; filename="{_quoted(visible)}"'
+    except UnicodeEncodeError:
+        ascii_fallback = visible.encode("ascii", "ignore").decode("ascii") or "audio"
+        return f"inline; filename=\"{_quoted(ascii_fallback)}\"; filename*=utf-8''{quote(filename)}"
+
+
 @app.get("/api/stream")
 async def stream_audio(path: str, request: Request):
     """Streams audio file with HTTP Range support — required for browser seeking."""
@@ -678,7 +706,7 @@ async def stream_audio(path: str, request: Request):
             headers={
                 "Accept-Ranges": "bytes",
                 "Content-Length": str(file_size),
-                "Content-Disposition": f'inline; filename="{file_path.name}"',
+                "Content-Disposition": _content_disposition_inline(file_path.name),
                 "Cache-Control": "no-cache",
             },
         )
@@ -723,7 +751,7 @@ async def stream_audio(path: str, request: Request):
             "Accept-Ranges": "bytes",
             "Content-Range": f"bytes {start}-{end}/{file_size}",
             "Content-Length": str(chunk_size),
-            "Content-Disposition": f'inline; filename="{file_path.name}"',
+            "Content-Disposition": _content_disposition_inline(file_path.name),
             "Cache-Control": "no-cache",
         },
     )
@@ -1476,6 +1504,395 @@ async def batch_comment(r: BatchCommentReq):
 @app.post("/api/library/clean-titles", dependencies=[Depends(require_session)])
 def clean_titles(r: CleanTitlesReq):
     return LibraryTools.clean_track_titles(r.track_ids)
+
+
+# ── Library Format-Swap (Stage-4 of evaluated_library-format-converter) ────
+
+
+class _FormatSwapScope(BaseModel):
+    """Scope selector for /api/library/format-swap/*. One ``kind`` per request.
+
+    Backward-compat note: ``all_m4a`` is kept as a legacy alias of
+    ``library_subset`` + ``subset_kind='by_file_type'`` + ``file_type=4`` so
+    older API callers + manifest assertions keep working. New callers should
+    use ``library_subset``.
+    """
+
+    kind: _Literal["track_ids", "playlist", "library_subset", "all_m4a", "path"]
+    ids: list[str] | None = None
+    playlist_id: int | None = None
+    path: str | None = None
+    # library_subset extras
+    subset_kind: (
+        _Literal[
+            "all",
+            "all_lossy",
+            "all_lossless",
+            "ranked",
+            "unranked",
+            "by_color",
+            "uncolored",
+            "by_mytag",
+            "by_file_type",
+        ]
+        | None
+    ) = None
+    color_id: int | None = None
+    tag_id: int | None = None
+    file_type: int | None = None
+
+
+class FormatSwapDryRunReq(BaseModel):
+    target: _Literal["aiff", "flac", "wav", "mp3"] = "aiff"
+    scope: _FormatSwapScope
+
+
+class FormatSwapExecuteReq(BaseModel):
+    target: _Literal["aiff", "flac", "wav", "mp3"] = "aiff"
+    scope: _FormatSwapScope
+    trigger: _Literal["user_format_pick", "quality_verdict"] = "user_format_pick"
+
+
+class FormatSwapRollbackReq(BaseModel):
+    manifest_filename: str
+
+
+def _scope_to_dict(s: _FormatSwapScope) -> dict[str, Any]:
+    out: dict[str, Any] = {"kind": s.kind}
+    if s.ids is not None:
+        out["ids"] = s.ids
+    if s.playlist_id is not None:
+        out["playlist_id"] = s.playlist_id
+    if s.kind == "library_subset":
+        if s.subset_kind is None:
+            raise HTTPException(422, "scope.subset_kind required for library_subset")
+        out["subset_kind"] = s.subset_kind
+        if s.subset_kind == "by_color":
+            if s.color_id is None or not (0 <= int(s.color_id) <= 8):
+                raise HTTPException(422, "subset_kind=by_color requires color_id (0..8)")
+            out["color_id"] = int(s.color_id)
+        elif s.subset_kind == "by_mytag":
+            if s.tag_id is None:
+                raise HTTPException(422, "subset_kind=by_mytag requires tag_id")
+            out["tag_id"] = int(s.tag_id)
+        elif s.subset_kind == "by_file_type":
+            if s.file_type is None:
+                raise HTTPException(422, "subset_kind=by_file_type requires file_type")
+            out["file_type"] = int(s.file_type)
+    if s.path is not None:
+        # Sandbox user-supplied path roots — must resolve to an allowed dir
+        # (or a known track-dir parent in db.tracks). validate_audio_path
+        # requires an existing audio file, which a dir-scope doesn't have, so
+        # we only confirm parent-of-paths lies under ALLOWED_AUDIO_ROOTS.
+        try:
+            requested = Path(s.path).resolve()
+        except (ValueError, OSError):
+            raise HTTPException(status_code=400, detail="Invalid scope.path")
+        if not any(requested.is_relative_to(root) for root in ALLOWED_AUDIO_ROOTS):
+            # Permit if every existing track under that prefix is db-known.
+            known_paths = (
+                {t.get("path", "") for t in db.tracks.values()} if hasattr(db, "tracks") else set()
+            )
+            requested_norm = str(requested).replace("\\", "/").lower()
+            if not any(
+                str(p).replace("\\", "/").lower().startswith(requested_norm) for p in known_paths
+            ):
+                logger.warning(
+                    "SECURITY: format-swap scope.path outside allowed roots: %s",
+                    requested,
+                )
+                raise HTTPException(
+                    status_code=403,
+                    detail="scope.path outside allowed directories",
+                )
+        out["path"] = str(requested)
+    return out
+
+
+@app.post("/api/library/format-swap/dry-run", dependencies=[Depends(require_session)])
+def format_swap_dry_run(r: FormatSwapDryRunReq):
+    """Preview a format swap without touching disk or master.db.
+
+    Returns: enumerated tracks, source/target MB estimate, drive_free check.
+    """
+    from app.library_format_swap import FormatSwapEngine
+
+    live = _require_live_db()
+    engine = FormatSwapEngine(live, r.target)
+    scope_d = _scope_to_dict(r.scope)
+    result = engine.dry_run(scope_d)
+    return {
+        "scope": result.scope,
+        "target": result.target,
+        "tracks": result.tracks,
+        "total_source_mb": result.total_source_mb,
+        "estimated_target_mb": result.estimated_target_mb,
+        "drive_free_mb": result.drive_free_mb,
+        "drive_check_pass": result.drive_check_pass,
+        "target_file_type": result.target_file_type,
+        "warning": result.warning,
+        "error": result.error,
+    }
+
+
+@app.post("/api/library/format-swap/execute", dependencies=[Depends(require_session)])
+def format_swap_execute(r: FormatSwapExecuteReq):
+    """Start the format swap in a background thread; return ``batch_id`` to
+    poll. Frontend polls ``GET /api/library/format-swap/batch/{batch_id}`` for
+    batch-level status and ``GET /api/import/progress`` for per-track progress.
+    """
+    from app.library_format_swap import FormatSwapEngine
+
+    live = _require_live_db()
+    engine = FormatSwapEngine(live, r.target)
+    scope_d = _scope_to_dict(r.scope)
+
+    batch_id = uuid.uuid4().hex[:12]
+
+    def _run() -> None:
+        try:
+            engine.execute(scope_d, batch_id=batch_id)
+        except RuntimeError as exc:
+            logger.error("format-swap batch %s failed: %s", batch_id, exc)
+            # Engine already stored an empty ExecuteResult under batch_id; mark
+            # finished so the frontend stops polling.
+            from app.library_format_swap import _store_batch, get_batch
+
+            existing = get_batch(batch_id)
+            if existing is not None:
+                existing.error = str(exc)
+                existing.finished = True
+                _store_batch(batch_id, existing)
+        except Exception as exc:  # rbox/MasterDbError + anything else
+            logger.exception("format-swap batch %s crashed", batch_id)
+            from app.library_format_swap import _store_batch, get_batch
+
+            existing = get_batch(batch_id)
+            if existing is not None:
+                existing.error = f"{type(exc).__name__}: {exc}"
+                existing.finished = True
+                _store_batch(batch_id, existing)
+
+    threading.Thread(target=_run, daemon=True, name=f"format-swap-{batch_id}").start()
+    return {
+        "batch_id": batch_id,
+        "status": "started",
+        "target": r.target,
+        "trigger": r.trigger,
+    }
+
+
+@app.get("/api/library/format-swap/batch/{batch_id}")
+def format_swap_batch_status(batch_id: str):
+    """Poll a running or finished batch."""
+    from app.library_format_swap import get_batch
+
+    result = get_batch(batch_id)
+    if result is None:
+        raise HTTPException(404, "Unknown batch_id")
+    return {
+        "batch_id": result.batch_id,
+        "manifest_path": result.manifest_path,
+        "tracks_planned": result.tracks_planned,
+        "tracks_converted": result.tracks_converted,
+        "tracks_failed": result.tracks_failed,
+        "failures": result.failures,
+        "aborted": result.aborted,
+        "finished": result.finished,
+        "timestamp": result.timestamp,
+        "task_ids": result.task_ids,
+        "error": result.error,
+    }
+
+
+@app.get("/api/library/format-swap/manifests")
+def format_swap_list_manifests():
+    """List available rollback manifests, newest first."""
+    from app.library_format_swap import FormatSwapEngine
+
+    return {"manifests": FormatSwapEngine.list_manifests()}
+
+
+@app.post("/api/library/format-swap/rollback", dependencies=[Depends(require_session)])
+def format_swap_rollback(r: FormatSwapRollbackReq):
+    """Restore from a manifest. Synchronous (small operation)."""
+    from app.library_format_swap import FormatSwapEngine
+
+    live = _require_live_db()
+    # target is irrelevant for rollback, but engine ctor requires one
+    engine = FormatSwapEngine(live, "aiff")
+    try:
+        return engine.rollback(r.manifest_filename)
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+# ── Format-swap scope picker helpers (read-only, mirror /api/playlists/tree) ──
+
+
+@app.get("/api/library/format-swap/playlists")
+def format_swap_picker_playlists():
+    """Flat user-playlist list for the Playlist bucket dropdown.
+
+    Filters to Type in ('1','4') — normal + smart playlists, drops folders
+    (Type='0') and system playlists. Counts come from the live playlists_tracks
+    map when available, else 0.
+    """
+    if not db.active_db:
+        return []
+    tree = db.get_playlist_tree() or []
+    playlists_tracks = getattr(db.active_db, "playlists_tracks", {}) or {}
+
+    out: list[dict[str, Any]] = []
+
+    def walk(nodes: list[dict[str, Any]], parent_id: str = "ROOT") -> None:
+        for n in nodes or []:
+            t = str(n.get("Type", ""))
+            pid = str(n.get("ID", ""))
+            if t in ("1", "4"):
+                cids = (
+                    playlists_tracks.get(pid)
+                    or playlists_tracks.get(int(pid) if pid.isdigit() else pid)
+                    or []
+                )
+                out.append(
+                    {
+                        "id": pid,
+                        "name": str(n.get("Name", "")),
+                        "type": t,
+                        "parent_id": parent_id,
+                        "track_count": len(cids) if cids else 0,
+                    }
+                )
+            if n.get("Children"):
+                walk(n["Children"], pid)
+
+    walk(tree)
+    return out
+
+
+# Pioneer ColorID semantic labels (None + 8 colours = 9 entries, IDs 0..8).
+# Front-end has its own hex palette; backend only ships id/name/count to keep
+# label rendering one-sided.
+_FORMAT_SWAP_COLOR_LABELS = {
+    0: "None",
+    1: "Pink",
+    2: "Red",
+    3: "Orange",
+    4: "Yellow",
+    5: "Green",
+    6: "Aqua",
+    7: "Blue",
+    8: "Purple",
+}
+
+
+@app.get("/api/library/format-swap/colors")
+def format_swap_picker_colors():
+    """Pioneer Colors with track counts. Always returns all 9 IDs (0..8)."""
+    if not db.active_db:
+        return [
+            {"color_id": cid, "label": label, "count": 0}
+            for cid, label in _FORMAT_SWAP_COLOR_LABELS.items()
+        ]
+    counts: dict[int, int] = dict.fromkeys(range(9), 0)
+    try:
+        for t in db.active_db.get_all_tracks():
+            try:
+                cid = int(t.get("ColorID", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= cid <= 8:
+                counts[cid] += 1
+    except (AttributeError, RuntimeError) as e:
+        logger.warning("format-swap colors: count failed (%s)", e)
+    return [
+        {"color_id": cid, "label": _FORMAT_SWAP_COLOR_LABELS[cid], "count": counts[cid]}
+        for cid in range(9)
+    ]
+
+
+@app.get("/api/library/format-swap/mytags")
+def format_swap_picker_mytags():
+    """MyTag list with track counts. Returns [] when MyTag isn't available."""
+    if not db.active_db or not hasattr(db.active_db, "list_mytags"):
+        return []
+    mapping = getattr(db.active_db, "track_to_tag_ids", {}) or {}
+    # Reverse-index: tag_id -> count
+    counts: dict[str, int] = {}
+    for _cid, tag_ids in mapping.items():
+        for tid_ in tag_ids or []:
+            key = str(tid_)
+            counts[key] = counts.get(key, 0) + 1
+    out: list[dict[str, Any]] = []
+    try:
+        for entry in db.active_db.list_mytags():
+            tid_str = str(entry.get("id", ""))
+            try:
+                tag_id_int = int(tid_str)
+            except (TypeError, ValueError):
+                continue
+            out.append(
+                {
+                    "tag_id": tag_id_int,
+                    "name": str(entry.get("name", "")),
+                    "count": counts.get(tid_str, 0),
+                }
+            )
+    except (AttributeError, RuntimeError) as e:
+        logger.warning("format-swap mytags: list failed (%s)", e)
+    return out
+
+
+@app.get("/api/library/format-swap/subset-counts", dependencies=[Depends(require_session)])
+def format_swap_picker_subset_counts(
+    subset_kind: str,
+    color_id: int | None = None,
+    tag_id: int | None = None,
+    file_type: int | None = None,
+):
+    """Cheap pre-dry-run count + total source MB for a library subset.
+
+    Mirrors the validation in ``_scope_to_dict`` so the picker badge sees the
+    same 422s as the dry-run endpoint.
+    """
+    from app.library_format_swap import FormatSwapEngine
+
+    scope: dict[str, Any] = {"kind": "library_subset", "subset_kind": subset_kind}
+    if subset_kind == "by_color":
+        if color_id is None or not (0 <= int(color_id) <= 8):
+            raise HTTPException(422, "subset_kind=by_color requires color_id (0..8)")
+        scope["color_id"] = int(color_id)
+    elif subset_kind == "by_mytag":
+        if tag_id is None:
+            raise HTTPException(422, "subset_kind=by_mytag requires tag_id")
+        scope["tag_id"] = int(tag_id)
+    elif subset_kind == "by_file_type":
+        if file_type is None:
+            raise HTTPException(422, "subset_kind=by_file_type requires file_type")
+        scope["file_type"] = int(file_type)
+
+    live = _require_live_db()
+    # target is irrelevant for enumeration-only — pick aiff to satisfy ctor
+    engine = FormatSwapEngine(live, "aiff")
+    try:
+        rows = engine._enumerate_by_subset(scope)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+
+    total_bytes = 0
+    for c in rows:
+        try:
+            total_bytes += int(getattr(c, "file_size", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+    return {
+        "subset_kind": subset_kind,
+        "count": len(rows),
+        "total_source_mb": round(total_bytes / 1024 / 1024, 1),
+    }
 
 
 @app.get("/api/library/status")

@@ -64,6 +64,8 @@ npx eslint frontend/src   # Frontend
 npm run cleanup           # kill anything on :8000 / :5173
 ```
 
+**Fresh clone / new worktree — install deps FIRST.** `tauri` and `vite` live in `node_modules/.bin`; a fresh tree has none → "command not found". Run `npm install` (root) **and** `npm install --prefix frontend` before any dev/build. For UI verification prefer `npm run dev:full` (browser, no build) — `npm run tauri dev` / `tauri build` additionally need the bundled Python sidecar binary. When a change needs in-app checking, hand the user a paste-ready `cd <path> && npm run dev:full` instead of waiting to be asked.
+
 Full tooling reference in `.claude/rules/tooling.md`.
 
 ---
@@ -74,7 +76,7 @@ Full tooling reference in `.claude/rules/tooling.md`.
 
 - **L1 — `docs/MAP.md`** — auto-generated file → 1-line purpose. **First stop** when looking for where logic lives.
 - **L2 — `docs/MAP_L2.md`** — auto-generated L1 + public classes/functions/methods. For finding a specific symbol.
-- **L3 — `docs/backend-index.md`** — all 140 FastAPI routes grouped by feature.
+- **L3 — `docs/backend-index.md`** — ~140 FastAPI routes grouped by feature.
 - **L3 — `docs/frontend-index.md`** — React components with props, IPC calls.
 - **L3 — `docs/rust-index.md`** — Tauri commands, modules, crates.
 - **`docs/FILE_MAP.md`** — manually curated map (predates MAP.md/MAP_L2.md). Has narrative invariants per file.
@@ -97,7 +99,6 @@ Regenerate L1/L2: `python scripts/regen_maps.py` or `/regen-maps`.
 ### Reference docs
 
 - **`docs/SECURITY.md`** — Schicht-A pinning, threat model, accepted risks.
-- **`docs/ANALYSIS_HANDOVER.md`** — **start here to improve the analysis engine**: measured baseline (branch vs main), py3.10 native-stack setup recipe, measurement tools, what's already fixed, open problems + prioritised next steps.
 - **`docs/PROJECT_OVERVIEW.md`** — high-level overview.
 - **`docs/NAMING_MAP.md`** — v0.0.2 rename refactor audit trail.
 - **`CHANGELOG.md`** — what shipped when.
@@ -107,7 +108,7 @@ Regenerate L1/L2: `python scripts/regen_maps.py` or `/regen-maps`.
 - **Python:** `pyproject.toml` — ruff / black / mypy / pytest
 - **Frontend:** `frontend/.eslintrc.cjs`, `frontend/.prettierrc`, `frontend/jsconfig.json`
 - **CI:** `.github/workflows/ci.yml` (lint+test), `release.yml`
-- **Hooks:** `.claude/hooks/format-on-edit.py` (PostToolUse), `.pre-commit-config.yaml` (manual install)
+- **Hooks:** `.claude/hooks/format-on-edit.py` (PostToolUse Edit|Write), `.claude/hooks/auto-push-after-commit.py` (PostToolUse Bash), `.pre-commit-config.yaml` (manual install)
 - **MCP / preview servers:** `.claude/launch.json`, `.mcp.json`
 
 ---
@@ -145,7 +146,7 @@ Defined in `.claude/commands/`:
 
 ## AI autonomy & remote routines — streamlining bias
 
-This repo runs a **multi-agent research pipeline**: **12 remote routines** (claude.ai/code) advance `docs/research/` docs autonomously while the user is afk. Daily routines trigger on a doc's **state** (folder + filename prefix); cross-cutting routines maintain pipeline health (idea generation, re-validation, conflict detection). Each routine spawns multiple specialist sub-agents in parallel; verification agents gate every stage. The user signs off **once** — at the single approval gate (`approvalgate_`: idea summary + mockup + change list) — then tests + merges the finished branch.
+This repo runs a **multi-agent research pipeline**: **8 remote routines** (claude.ai/code) advance `docs/research/` docs autonomously while the user is afk. Daily routines trigger on a doc's **state** (folder + filename prefix); cross-cutting routines maintain pipeline health (idea generation, re-validation, conflict detection). Each routine spawns multiple specialist sub-agents in parallel; verification agents gate every stage. The user signs off **once** — at the single approval gate (`approvalgate_`: idea summary + mockup + change list). The finished branch is then tested + merged — by the user, or by the interactive agent on the user's instruction (`gh pr merge` is autonomous for it; the **remote routines** never merge).
 
 ### Daily work-state routines
 
@@ -164,12 +165,8 @@ This repo runs a **multi-agent research pipeline**: **12 remote routines** (clau
 | `research-spawn` | Sun 04:00 | TODO/FIXME, CHANGELOG, GH issues, MAP smells, deps (read-only) | 5 parallel scouts → Idea Backlog issue with prioritised proposals. **User authors `## Original Idea`.** |
 | `research-watchdog` | 1st-of-month 04:00 | 5 oldest unchecked `archived/implemented_*` | parallel probes (code refs / deps / external invariants / library health) → `## Lifecycle` line + follow-up proposals into Idea Backlog |
 | `research-cross-linker` | Tue 04:30 | all active docs | per-doc Extractors + Overlap-Analyser → `related:` frontmatter + `## Cross-links` block; CONFLICT notifications |
-| `analysis-accuracy-watchdog` | Wed 04:30 | analysis stack (read-only) | full py3.10 native stack (madmom+essentia+rbox) → accuracy self-test vs baseline + produced-file validation → `Analysis Accuracy Watchdog` issue |
-| `analysis-explore` | Thu 06:00 | analysis `exploring_` docs | builds native stack, runs real before/after `selftest_analysis.py` experiments → measured evidence into the doc → `evaluated_` |
-| `analysis-implement` | Fri 03:00 | approved analysis Task-Queue items | native stack + self-test before/after gate (revert if no gain / band regression) → `routine/analysis-*` PR |
-| `verification-sweep` | Mon+Thu 05:00 | whole repo (read-only) | runs the suite for real + audits coverage/weak-tests/drift/debt-trend → `Verification Sweep` issue |
 
-`research-implement` may write code — bounded to `inprogress_` docs, `routine/*` branches, approval-gate-approved Task Queue items (no new research). It never merges/rebases to `main` — the user tests the branch + merges. `research-watchdog` and `research-cross-linker` write narrow doc edits only (Lifecycle lines / frontmatter / Cross-links block). `research-spawn` never creates `idea_*.md` — only proposals in the Idea Backlog issue (user authors the real Original Idea).
+`research-implement` may write code — bounded to `inprogress_` docs, `routine/*` branches, approval-gate-approved Task Queue items (no new research). It never merges/rebases to `main` — the user (or the interactive agent on request) tests the branch + merges. `research-watchdog` and `research-cross-linker` write narrow doc edits only (Lifecycle lines / frontmatter / Cross-links block). `research-spawn` never creates `idea_*.md` — only proposals in the Idea Backlog issue (user authors the real Original Idea).
 
 Full rules: `.claude/rules/research-pipeline.md` + `docs/research/README.md`. Routine prompts versioned in `docs/research/routines/`.
 

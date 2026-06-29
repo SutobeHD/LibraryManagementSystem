@@ -52,6 +52,9 @@ jobs:
       - name: Run pytest
         run: pytest tests/ -v --tb=short   # all 194 tests must pass — Phase 6 baseline
 
+      - name: Check MAP.md / MAP_L2.md drift
+        run: python scripts/regen_maps.py --check   # pure AST/regex, no runtime deps — regen via scripts/regen_maps.py
+
   rust-lint-test:
     name: Rust — clippy + cargo test
     runs-on: windows-latest

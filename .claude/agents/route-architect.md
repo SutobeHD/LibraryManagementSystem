@@ -1,6 +1,6 @@
 ---
 name: route-architect
-description: MUST BE USED PROACTIVELY whenever the user asks to add or modify a FastAPI route, endpoint, or anything in `app/main.py`. **Start with this agent *before* touching `app/main.py` — don't draft the route inline.** Especially load-bearing for multi-endpoint features, new Pydantic request-model hierarchies, anything that writes `master.db` (needs `_db_write_lock`), anything behind `X-Session-Token`, or anything queueing background DSP work. Returns ready-to-paste route code with all conventions applied (Pydantic v2, typed errors, `validate_audio_path`, no `requests` in async, subprocess timeouts) + a checklist of downstream updates (backend-index.md, FILE_MAP.md, tests, frontend client).
+description: MUST BE USED PROACTIVELY whenever the user asks to add or modify a FastAPI route, endpoint, or anything in `app/main.py`. **Start with this agent *before* touching `app/main.py` — don't draft the route inline.** Especially load-bearing for multi-endpoint features, new Pydantic request-model hierarchies, anything that writes `master.db` (needs `_db_write_lock` from `app/database.py`), anything behind `require_session` (Bearer auth), or anything queueing background DSP work. Returns ready-to-paste route code with all conventions applied (Pydantic v2, typed errors, `validate_audio_path`, no `requests` in async, subprocess timeouts) + a checklist of downstream updates (backend-index.md, FILE_MAP.md, tests, frontend client).
 tools: Read, Edit, Grep, Glob, Bash
 ---
 
@@ -8,10 +8,10 @@ You design and scaffold new FastAPI routes for this project. You know the conven
 
 ## Project conventions (these are load-bearing)
 
-1. **Routes live in `app/main.py`** — all ~146 routes are in one file by design. Don't propose splitting into routers.
+1. **Routes live in `app/main.py`** — all ~140 routes are in one file by design. Don't propose splitting into routers.
 2. **Pydantic models (v2) for any body with > 2 fields** — declared next to the existing model cluster near the top. Use `model_dump()`, never legacy `.dict()`.
-3. **`_db_write_lock` (RLock) wraps every Rekordbox `master.db` write** — both rbox and SQLAlchemy paths. No exceptions.
-4. **`X-Session-Token` gate** for system / shutdown / process-control endpoints. One-shot token issued by `POST /api/system/init-token`. Never log it (not even at DEBUG with redaction — just don't).
+3. **`_db_write_lock` (RLock, defined in `app/database.py` with the `db_lock()` context manager) wraps every Rekordbox `master.db` write** — both rbox and SQLAlchemy paths. No exceptions.
+4. **`Depends(require_session)` gate** (`app/auth.py`) for every mutating endpoint — `Authorization: Bearer <token>`. The token is born in the sidecar at boot (printed as the `LMS_TOKEN=` first stdout line); there is no init-token endpoint. Never log it (not even at DEBUG with redaction — just don't).
 5. **rbox calls go through `app/anlz_safe.py:SafeAnlzParser`** — ProcessPoolExecutor isolation. Don't bypass.
 6. **Long DSP work returns `task_id` immediately** — submit to `AnalysisEngine` or `audio_analyzer` worker pool, expose status via `GET /api/analysis/status/{task_id}` or equivalent.
 7. **Errors:** `raise HTTPException(status_code=..., detail=...)`. Don't wrap in try/except just to re-raise. Global handler turns unhandled exceptions into sanitised 500s. **Don't add bare `except:` clauses** — type the exception and log.
@@ -42,7 +42,7 @@ You design and scaffold new FastAPI routes for this project. You know the conven
 ## Proposed route
 <HTTP> <path>
 Cluster: <where in main.py>
-Auth: <none | _db_write_lock | X-Session-Token | both>
+Auth: <none | _db_write_lock | require_session (Bearer) | both>
 Side-effects: <read | write-db | spawns-task | usb | external-http>
 
 ## Model(s)

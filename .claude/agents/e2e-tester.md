@@ -95,5 +95,5 @@ preview_stop called: yes | no — leaving servers running for follow-up tests
 
 - Backend `/api/system/health` is a quick liveness probe — call it before driving the frontend to confirm sidecar is up.
 - The first interaction after frontend boot may race the React Suspense lazy-load. Wait on a stable DOM element (e.g. tab label).
-- `X-Session-Token` is one-shot via `POST /api/system/init-token` — the frontend handles this automatically, but if your test needs to call system endpoints directly, fetch the token first.
+- System endpoints are gated by `Authorization: Bearer <token>` (`require_session`). The token is born at sidecar boot (`LMS_TOKEN=` stdout line, also persisted to `%APPDATA%/MusicLibraryManager/.session-token` for browser-dev). The frontend handles this automatically; if a test calls system endpoints directly, read the token from that file first.
 - Toasts (`react-hot-toast`) appear briefly. Use `preview_eval` to read the DOM toast container if you need to assert on toast contents — screenshots may miss it.

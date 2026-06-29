@@ -18,7 +18,7 @@ pytest tests/
 
 ### Excluded files (`pyproject.toml`)
 
-Dev/debug scripts under `app/` aren't lint-clean by design: `brute_force_*`, `inspect_*`, `debug_*`, `diag_*`, `check_*`, `verify_*`, `find_*`, `fix_*`, `calibrate_*`, `final_*`, `mass_verify*`, `analysis_inspector.py`. Staged for relocation to `scripts/dev/` (`HANDOVER.md` Phase 5.3).
+Relocation to `scripts/dev/` (`HANDOVER.md` Phase 5.3) is done — only `app/analysis_inspector.py` remains excluded. `pyproject.toml` still carries the old `brute_force_*`/`inspect_*`/… exclude patterns (dead, harmless). New dev/debug one-offs go straight to `scripts/dev/`, never `app/`.
 
 ## Frontend
 
@@ -44,9 +44,9 @@ cargo test   --manifest-path src-tauri/Cargo.toml
 
 ## CI (`.github/workflows/`)
 
-- **`ci.yml`** — lint+test on push+PR. Jobs: `python-lint-test` (ruff+pytest), `rust-lint-test` (clippy+test), `frontend-lint` (eslint).
+- **`ci.yml`** — lint+test on push+PR. Jobs: `python-lint-test` (ruff+pytest+map-drift), `rust-lint-test` (clippy+test), `frontend-lint` (eslint).
 - **`release.yml`** — release builds.
-- `regen_maps.py --check` fails CI on `docs/MAP.md`/`MAP_L2.md` drift.
+- `regen_maps.py --check` runs in `python-lint-test` — MAP.md/MAP_L2.md drift fails CI. After structural changes, regen via `python scripts/regen_maps.py` (or `/regen-maps`) and commit the maps with the code.
 
 ## Auto-format hook (`PostToolUse` on `Edit|Write`)
 
@@ -71,6 +71,7 @@ Every `git commit` runs:
 - `mypy` on `app/`
 - `cargo fmt --check` on `src-tauri/`
 - `prettier` + `eslint` on `frontend/src/`
+- `validate-research-docs` + `routine-divider-check` — research-pipeline doc hygiene
 - `forbid-env-files` / `forbid-master-db` — fail if staged
 
 **`--no-verify` denied by `.claude/settings.json`.** Hook failure → fix + recommit.

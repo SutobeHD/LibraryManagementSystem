@@ -17,7 +17,7 @@ If this index drifts from the file system, the file system wins — re-derive wi
 _(none)_
 
 ### drafting
-_(none)_
+- [drafting_performance-overhaul.md](research/drafting_performance-overhaul.md) — Speed & efficiency overhaul; Stage-1 pre-filled from 9-agent perf investigation (48 hotspots: no list virtualization, unpaginated `/api/library/tracks`, unmemoized always-mounted views, blocking USB export+scan, event-loop waveform, 30s blocking startup); 16 OQs + 8-agent research plan queued for research-explore (2026-06-09)
 
 ### exploring
 - [exploring_db-write-lock-retrofit.md](research/exploring_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps; Option B (auto-wrap) committed; wave-2 verify → GAPS (3rd gap: `AnalysisDBWriter` rbox-direct write uncovered by class decorator; circular drift guard); stays exploring_ (2026-05-29)
@@ -40,7 +40,7 @@ _(none)_
 _(none)_
 
 ### approvalgate ⛔ THE GATE
-_(none)_
+- [approvalgate_recording-booth.md](implement/approvalgate_recording-booth.md) — ⛔ **AWAITING /approve** (re-planned) — DJ-set recorder; **lead model now DDJ-GRV6** (4-channel / STEMS-native / GROOVE CIRCUIT + Sound-Color/Beat-FX + 4 decks) after gate-reject 2026-06-02. Plan re-scoped: GRV6 outline + full control map (stem-ISO/drum/FX), spike 1c extended (EQ + stem-ISO/sound-color/GROOVE-CIRCUIT on-the-wire), 4-deck timeline, 4-channel meters; mockup rebuilt 4-channel GRV6; 16 tasks (3 spikes + 10 core + 3 video); capture unchanged (class-MIDI → `midir`); live track-id unmet (PDL=Export-only) → post-hoc reconcile (2026-06-02)
 
 ### rework
 _(none)_

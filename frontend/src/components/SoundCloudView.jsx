@@ -118,114 +118,122 @@ const SoundCloudView = () => {
     };
 
     return (
-        <div className="p-8 max-w-6xl mx-auto animate-fade-in">
-            <div className="flex items-center gap-4 mb-8">
-                <div className="w-12 h-12 bg-orange-500 rounded-2xl flex items-center justify-center shadow-lg shadow-orange-500/20">
-                    <Cloud className="text-white" size={28} />
-                </div>
-                <div>
-                    <h1 className="text-3xl font-bold text-white tracking-tight">SoundCloud Downloader</h1>
-                    <p className="text-ink-secondary">High-Quality (Go+) & Original Lossless Downloads</p>
-                </div>
-            </div>
+        <div className="h-full w-full overflow-y-auto p-4 md:p-8 relative animate-slide-up">
+            {/* Ambient brand glow — matches SettingsView */}
+            <div className="absolute top-[-20%] right-[-10%] w-[600px] h-[600px] bg-amber2/10 rounded-full blur-[120px] pointer-events-none" />
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Download Section */}
-                <div className="lg:col-span-2 space-y-8">
-                    <div className="glass-panel p-8 rounded-3xl border border-white/10 bg-black/40 backdrop-blur-xl">
-                        <label className="block text-[10px] font-black text-ink-muted uppercase tracking-[0.2em] mb-4">Paste URL (Track or Playlist)</label>
-                        <div className="flex gap-4">
-                            <input
-                                value={url}
-                                onChange={(e) => setUrl(e.target.value)}
-                                placeholder="https://soundcloud.com/artist/track..."
-                                className="input-glass flex-1 text-lg py-4 px-6"
-                            />
+            <div className="max-w-6xl mx-auto relative z-10">
+                {/* Header */}
+                <div className="glass-panel px-8 py-6 rounded-3xl shadow-2xl mb-6">
+                    <div className="flex items-center gap-5">
+                        <div className="p-3.5 bg-amber2/20 rounded-2xl shadow-lg shadow-amber2/10">
+                            <Cloud size={36} className="text-amber2" />
+                        </div>
+                        <div>
+                            <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">SoundCloud Downloader</h1>
+                            <p className="text-ink-secondary mt-0.5 text-sm">High-Quality (Go+) & Original Lossless Downloads</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Download Section */}
+                    <div className="lg:col-span-2 space-y-6">
+                        <div className="glass-panel p-6 rounded-2xl shadow-2xl">
+                            <label className="mx-caption block mb-3">Paste URL (Track or Playlist)</label>
+                            <div className="flex gap-3">
+                                <input
+                                    value={url}
+                                    onChange={(e) => setUrl(e.target.value)}
+                                    placeholder="https://soundcloud.com/artist/track..."
+                                    className="input-glass flex-1 text-base py-3 px-4"
+                                />
+                                <button
+                                    onClick={handleDownload}
+                                    disabled={isDownloading || !url}
+                                    className="btn-primary flex items-center gap-2 px-6 rounded-xl shadow-lg shadow-amber2/20 disabled:opacity-50"
+                                >
+                                    {isDownloading ? <Loader2 className="animate-spin" size={18} /> : <Download size={18} />}
+                                    Download
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Task List */}
+                        <div className="space-y-3">
+                            <h2 className="mx-caption px-1">Active & Recent Tasks</h2>
+                            {Object.keys(tasks).length === 0 ? (
+                                <div className="glass-panel p-12 rounded-2xl border-dashed flex flex-col items-center justify-center text-ink-placeholder">
+                                    <Cloud size={40} className="mb-4 opacity-20" />
+                                    <p className="text-sm">No recent downloads</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-3">
+                                    {Object.values(tasks).sort((a, b) => b.startTime - a.startTime).map(task => (
+                                        <div key={task.id} className="glass-panel p-4 rounded-2xl flex items-center gap-4 group hover:border-line-interactive transition-colors">
+                                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${task.status === 'Completed' ? 'bg-ok/10 text-ok' : task.status === 'Failed' ? 'bg-bad/10 text-bad' : 'bg-amber2/10 text-amber2'}`}>
+                                                {task.status === 'Completed' ? <CheckCircle size={20} /> : task.status === 'Failed' ? <XCircle size={20} /> : <Loader2 className="animate-spin" size={20} />}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex justify-between items-center mb-1">
+                                                    <span className="text-sm font-medium text-ink-primary truncate pr-4">{task.url}</span>
+                                                    <span className="mx-caption">{task.status}</span>
+                                                </div>
+                                                <div className="w-full h-1.5 bg-mx-input rounded-full overflow-hidden">
+                                                    <div
+                                                        className={`h-full transition-all duration-500 ${task.status === 'Completed' ? 'bg-ok' : task.status === 'Failed' ? 'bg-bad' : 'bg-amber2'}`}
+                                                        style={{ width: `${task.progress}%` }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Settings & Auth Section */}
+                    <div className="space-y-6">
+                        <div className="glass-panel p-6 rounded-2xl shadow-2xl">
+                            <div className="flex items-center justify-between mb-5">
+                                <div className="flex items-center gap-3">
+                                    <ShieldCheck className={hasToken ? "text-ok" : "text-amber2"} size={20} />
+                                    <h2 className="font-bold text-ink-primary">Go+ Authentication</h2>
+                                </div>
+                                {hasToken && <span className="text-[10px] font-bold text-ok uppercase flex items-center gap-1"><CheckCircle size={10} /> Authenticated</span>}
+                            </div>
+
+                            <p className="text-xs text-ink-secondary mb-6 leading-relaxed">
+                                {hasToken ? "Your SoundCloud account is connected. You can download high-quality tracks and playlists." : "Log in to your SoundCloud account to download full tracks in 256kbps AAC or original lossless files."}
+                            </p>
+
                             <button
-                                onClick={handleDownload}
-                                disabled={isDownloading || !url}
-                                className={`px-8 rounded-2xl font-bold flex items-center gap-3 transition-all ${isDownloading || !url ? 'bg-mx-card text-ink-muted' : 'bg-orange-500 hover:bg-orange-400 text-white shadow-lg shadow-orange-500/40 transform hover:-translate-y-1'}`}
+                                onClick={handleLogin}
+                                disabled={isLoggingIn}
+                                className={`w-full flex flex-col items-center justify-center gap-2 py-4 rounded-xl font-bold transition-colors ${isLoggingIn ? 'bg-amber2/20 text-amber2-hover' : 'bg-amber2 hover:bg-amber2-hover text-mx-deepest'}`}
                             >
-                                {isDownloading ? <Loader2 className="animate-spin" size={20} /> : <Download size={20} />}
-                                Download
+                                <div className="flex items-center gap-2">
+                                    {isLoggingIn ? <Loader2 size={16} className="animate-spin" /> : (hasToken ? <RefreshCw size={16} /> : <LogIn size={16} />)}
+                                    {isLoggingIn ? 'Authenticating...' : (hasToken ? 'Reconnect Account' : 'Login with SoundCloud')}
+                                </div>
+                                {isLoggingIn && loginMessage && (
+                                    <span className="text-[10px] uppercase tracking-widest opacity-80">{loginMessage}</span>
+                                )}
                             </button>
                         </div>
-                    </div>
 
-                    {/* Task List */}
-                    <div className="space-y-4">
-                        <h2 className="text-sm font-bold text-ink-secondary uppercase tracking-widest px-2">Active & Recent Tasks</h2>
-                        {Object.keys(tasks).length === 0 ? (
-                            <div className="glass-panel p-12 rounded-3xl border border-dashed border-white/5 flex flex-col items-center justify-center text-ink-placeholder">
-                                <Cloud size={40} className="mb-4 opacity-20" />
-                                <p>No recent downloads</p>
-                            </div>
-                        ) : (
-                            <div className="space-y-3">
-                                {Object.values(tasks).sort((a, b) => b.startTime - a.startTime).map(task => (
-                                    <div key={task.id} className="glass-panel p-4 rounded-2xl border border-white/5 flex items-center gap-4 group hover:border-white/10 transition-colors">
-                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${task.status === 'Completed' ? 'bg-green-500/10 text-green-500' : task.status === 'Failed' ? 'bg-red-500/10 text-red-500' : 'bg-orange-500/10 text-orange-500'}`}>
-                                            {task.status === 'Completed' ? <CheckCircle size={20} /> : task.status === 'Failed' ? <XCircle size={20} /> : <Loader2 className="animate-spin" size={20} />}
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex justify-between items-center mb-1">
-                                                <span className="text-sm font-medium text-ink-primary truncate pr-4">{task.url}</span>
-                                                <span className="text-[10px] font-bold uppercase tracking-wider text-ink-muted">{task.status}</span>
-                                            </div>
-                                            <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-                                                <div
-                                                    className={`h-full transition-all duration-500 ${task.status === 'Completed' ? 'bg-green-500' : task.status === 'Failed' ? 'bg-red-500' : 'bg-orange-500'}`}
-                                                    style={{ width: `${task.progress}%` }}
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* Settings & Auth Section */}
-                <div className="space-y-6">
-                    <div className="glass-panel p-6 rounded-3xl border border-white/10 bg-white/5 backdrop-blur-md">
-                        <div className="flex items-center justify-between mb-6">
-                            <div className="flex items-center gap-3">
-                                <ShieldCheck className={hasToken ? "text-emerald-400" : "text-amber2"} size={20} />
-                                <h2 className="font-bold text-white">Go+ Authentication</h2>
-                            </div>
-                            {hasToken && <span className="text-[10px] font-bold text-emerald-500 uppercase flex items-center gap-1"><CheckCircle size={10} /> Authenticated</span>}
+                        <div className="glass-panel p-6 rounded-2xl text-center">
+                            <p className="mx-caption mb-4">Quick Links</p>
+                            <a
+                                href="https://soundcloud.com"
+                                target="_blank"
+                                rel="noreferrer"
+                                className="flex items-center justify-center gap-2 text-xs font-bold text-ink-primary hover:text-amber2 transition-colors"
+                            >
+                                Open SoundCloud <ExternalLink size={12} />
+                            </a>
                         </div>
-
-                        <p className="text-xs text-ink-secondary mb-6 leading-relaxed">
-                            {hasToken ? "Your SoundCloud account is connected. You can download high-quality tracks and playlists." : "Log in to your SoundCloud account to download full tracks in 256kbps AAC or original lossless files."}
-                        </p>
-
-                        <button
-                            onClick={handleLogin}
-                            disabled={isLoggingIn}
-                            className={`w-full flex flex-col items-center justify-center gap-2 py-4 ${isLoggingIn ? 'bg-orange-500/20 text-orange-400' : 'bg-orange-500 hover:bg-orange-400 text-white'} rounded-xl font-bold transition-colors`}
-                        >
-                            <div className="flex items-center gap-2">
-                                {isLoggingIn ? <Loader2 size={16} className="animate-spin" /> : (hasToken ? <RefreshCw size={16} /> : <LogIn size={16} />)}
-                                {isLoggingIn ? 'Authenticating...' : (hasToken ? 'Reconnect Account' : 'Login with SoundCloud')}
-                            </div>
-                            {isLoggingIn && loginMessage && (
-                                <span className="text-[10px] uppercase tracking-widest opacity-80">{loginMessage}</span>
-                            )}
-                        </button>
-                    </div>
-
-                    <div className="glass-panel p-6 rounded-3xl border border-white/5 bg-black/20 text-center">
-                        <p className="text-[10px] text-ink-muted mb-4 uppercase tracking-[0.2em] font-black">Quick Links</p>
-                        <a
-                            href="https://soundcloud.com"
-                            target="_blank"
-                            rel="noreferrer"
-                            className="flex items-center justify-center gap-2 text-xs font-bold text-ink-primary hover:text-white transition-colors"
-                        >
-                            Open SoundCloud <ExternalLink size={12} />
-                        </a>
                     </div>
                 </div>
             </div>

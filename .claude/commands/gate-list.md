@@ -37,6 +37,6 @@ Show everything in the pipeline currently waiting on you: the single approval ga
 
 ## Don'ts
 
-- Don't run `gh pr merge` automatically — you test the branch first, then merge. Print the PR list; you merge.
+- Don't merge while just listing — `/gate-list` is read-only. Merging is a separate, explicit step: the user does it, or instructs the agent to (`gh pr merge` is autonomous on request). Test the branch first when practical.
 - Don't include closed approvals or merged PRs.
 - Don't expand to per-doc detail — that's `/gate-status <slug>`.

@@ -113,9 +113,9 @@ const buildWorkspaces = (libraryStatus) => [
     id: 'soundcloud',
     label: 'SoundCloud',
     items: [
-      { tab: 'soundcloud', label: 'SoundCloud', icon: Cloud },
+      { tab: 'soundcloud', label: 'Download', icon: Cloud },
       { tab: 'sc-sync', label: 'Library', icon: Library },
-      { tab: 'downloads', label: 'Downloads', icon: Download },
+      { tab: 'downloads', label: 'DownloadManager', icon: Download },
     ],
   },
   {
@@ -200,9 +200,30 @@ const TopBar = ({
     }
   };
 
+  // Frameless drag handle. `data-tauri-drag-region` proved unreliable on
+  // Windows WebView2 when the draggable strip is split by interactive children,
+  // so we call startDragging() explicitly on a primary-button press that did not
+  // land on a control. Double-click toggles maximize, matching a native bar.
+  const isBarControl = (el) =>
+    el?.closest?.('button, a, input, select, textarea, [role="button"]');
+  const onBarMouseDown = async (e) => {
+    if (e.button !== 0 || isBarControl(e.target) || !isTauri) return;
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      await getCurrentWindow().startDragging();
+    } catch (err) {
+      log.debug('startDragging failed', err);
+    }
+  };
+  const onBarDoubleClick = (e) => {
+    if (isBarControl(e.target)) return;
+    winCtl('max');
+  };
+
   return (
     <div
-      data-tauri-drag-region
+      onMouseDown={onBarMouseDown}
+      onDoubleClick={onBarDoubleClick}
       className="flex items-stretch h-10 bg-mx-shell border-b border-line-subtle shrink-0 select-none relative z-20"
     >
       {/* Brand */}
@@ -234,7 +255,7 @@ const TopBar = ({
         )
       })}
 
-      <div className="flex-1 min-w-[12px]" data-tauri-drag-region />
+      <div className="flex-1 min-w-[12px]" />
 
       {/* Library status */}
       <div className="flex items-center gap-2 px-3 border-l border-line-subtle shrink-0">

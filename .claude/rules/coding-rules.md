@@ -13,7 +13,7 @@ Load-bearing constraints, not style preferences. Violating them breaks the proje
 - `.env` never committed. `.env.example` is the only template. Required: `SOUNDCLOUD_CLIENT_ID`, `SOUNDCLOUD_CLIENT_SECRET`.
 - `ALLOWED_AUDIO_ROOTS` sandboxes filesystem. Never bypass via `os.path.normpath` tricks. Use `Path.is_relative_to(resolved_root)` — canonical pattern in `app/main.py:validate_audio_path`.
 - All mutating endpoints (POST/PUT/PATCH/DELETE) behind `Depends(require_session)` (`app/auth.py`). Bearer token in `Authorization: Bearer <SESSION_TOKEN>`. Token born in sidecar at boot, printed as first stdout line `LMS_TOKEN=<value>`, captured + scrubbed by Tauri Rust supervisor, also persisted to `%APPDATA%/MusicLibraryManager/.session-token` for browser-dev fallback. Never log the token — not at INFO, not at DEBUG, not even redacted.
-- Bearer-in-header is the only authenticated transport; no `response.set_cookie(...)` carrying an auth secret. Future PRs introducing cookie-auth MUST be rejected; the CORS `allow_credentials=True` flag exists only for the SC sentinel cookie (write-only marker, no auth value), which is itself scheduled for deletion in Phase B of security-cors-allow-credentials-tightening.
+- Bearer-in-header is the only authenticated transport; no `response.set_cookie(...)` carrying an auth secret. CORS is `allow_credentials=False` (`app/main.py`) — no auth cookie exists (the old SC sentinel cookie was removed). Future PRs introducing cookie-auth MUST be rejected.
 - **Paired device-tokens (Phase 2, `app/auth_db.py`) follow the same never-log rule as `SESSION_TOKEN`.** Plaintext device-token is returned to the phone exactly once at pairing and never persisted — `auth.db` stores only the `sha256` hash. Never log a device-token or a pairing-code at any level. `paired_token_valid` takes the candidate by value and never echoes it; the pairing-code store (`app/pairing_store.py`) keeps codes in-memory only.
 
 ## Stack boundaries
@@ -25,8 +25,8 @@ Load-bearing constraints, not style preferences. Violating them breaks the proje
 
 ## Backend concurrency
 
-- `app/main.py:_db_write_lock` (RLock) serialises **all** Rekordbox `master.db` writers. Any new `rbox`/`pyrekordbox` write path MUST acquire it.
-- `app/anlz_safe.py:SafeAnlzParser` (ProcessPoolExecutor, `max_workers=1`) quarantines rbox calls — rbox 0.1.5/0.1.7 has known `unwrap()` panics. Never call rbox parsing directly from main process.
+- `app/database.py:_db_write_lock` (RLock) + the `db_lock()` context manager serialise **all** Rekordbox `master.db` writers. Any new `rbox`/`pyrekordbox` write path MUST acquire it — import from `app/database.py`, not `app/main.py`.
+- `app/anlz_safe.py:SafeAnlzParser` (ProcessPoolExecutor, `max_workers=1`) quarantines rbox calls — rbox 0.1.7 has known `unwrap()` panics. Never call rbox parsing directly from main process.
 
 ## Python style (slopcode-cleanup targets — see `docs/HANDOVER.md`)
 
@@ -34,7 +34,7 @@ Load-bearing constraints, not style preferences. Violating them breaks the proje
 - **No bare `except:` / `except: pass`** — type exception, log it. `except (sqlite3.Error, OSError) as e: logger.warning("op=X table=Y err=%s", e)`.
 - **No `requests.get()` in `async def`** — `httpx.AsyncClient` + timeout + retry (`tenacity` or hand-rolled).
 - **Subprocess always has `timeout=`** — FFmpeg 30s default, PowerShell 10s. Log start/end + elapsed.
-- **No raw f-string SQL** — SQLAlchemy ORM or parameterised. Concatenation needs explicit allowlist (see `app/backup_engine.py:ALLOWED_TABLES`).
+- **No raw f-string SQL** — SQLAlchemy ORM or parameterised. If a table/column identifier must be interpolated, validate it against a hardcoded allowlist constant first; never interpolate caller input directly.
 - **Type hints required** for new code. `mypy app/<module>.py` clean before commit.
 - **`pathlib` over `os.path.join`** throughout.
 
@@ -54,6 +54,8 @@ Load-bearing constraints, not style preferences. Violating them breaks the proje
 - **No raw `fetch()` with `localhost:8000`** — axios via `frontend/src/api/api.js`. Tauri-context → `invoke()`.
 - **No empty `catch {}`** — minimum `console.error('[Component] op failed', err)` + toast.
 - **No magic numbers** — `frontend/src/config/constants.js`.
+- **New views match the existing Library view** — reuse its layout / styling / components, don't reinvent per page. Read the Library page first ("überall gleich darstellen").
+- **Hardware-faithful mockups** (CDJ/DDJ/controller layouts) — verify the real device against authoritative sources *before* drawing; never guess jog / pad-row / tempo / fader placement. Guessing from memory is a recurring rework source.
 
 ## rbox version quirks
 

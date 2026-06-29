@@ -1,6 +1,6 @@
 """USB MYSETTING / DJMMYSETTING file read/write + schema for frontend.
 
-These tiny binary files (148–160 bytes) live in `<USB>/PIONEER/` and tell
+These tiny binary files (148-160 bytes) live in `<USB>/PIONEER/` and tell
 CDJs / DJMs how the user wants their hardware to behave when this stick is
 inserted (auto-cue level, jog mode, fader curve, mic low-cut, …).
 
@@ -407,14 +407,14 @@ SCHEMA: dict[str, list[dict[str, Any]]] = {
             "label": "MIDI Channel",
             "enum": "MidiChannel",
             "group": "MIDI",
-            "help": "Outgoing MIDI channel for performance data.",
+            "help": "Standalone DJM only: which MIDI channel the mixer sends its fader / EQ / button moves on to DJ software. No effect on DDJ-style controllers.",
         },
         {
             "key": "midi_button_type",
             "label": "MIDI Button Type",
             "enum": "MidiButtonType",
             "group": "MIDI",
-            "help": "Toggle vs. trigger behaviour for MIDI buttons.",
+            "help": "Standalone DJM only: whether the mixer's MIDI buttons send Toggle (latching on/off) or Trigger (momentary press) messages.",
         },
         # Display
         {

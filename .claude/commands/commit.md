@@ -46,10 +46,11 @@ User hint: $ARGUMENTS
 
    <optional body — why this change is needed>
 
-   Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+   Co-Authored-By: Claude <current model> <noreply@anthropic.com>
    EOF
    )"
    ```
+   Use the model name the harness states for this session (e.g. "Claude Fable 5") — don't copy a hardcoded name from docs.
 
 7. **Verify:**
    ```bash
@@ -57,7 +58,7 @@ User hint: $ARGUMENTS
    git status -sb
    ```
 
-8. **Don't push.** Push is always user-confirmed. Mention if drift vs origin requires attention.
+8. **Push fires automatically.** The `auto-push-after-commit.py` hook pushes each commit to `origin/<branch>` (it fetches + checks drift first). To hold a commit back, put `[skip-push]` / `[no-push]` in its message. Mention if drift vs origin blocked the push.
 
 ## Output (1-3 lines max)
 

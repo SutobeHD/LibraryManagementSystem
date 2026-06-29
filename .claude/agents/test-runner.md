@@ -18,7 +18,6 @@ Edited file → relevant pytest target:
 |---|---|
 | `app/database.py`, `app/live_database.py` | `pytest tests/test_database.py -v` |
 | `app/services.py` | `pytest tests/test_services.py -v` |
-| `app/backup_engine.py` | `pytest tests/test_backup_engine.py -v` |
 | `app/usb_manager.py`, `app/usb_*.py` | `pytest tests/test_usb_manager.py -v` |
 | `app/usb_pdb.py` | `pytest tests/test_pdb_structure.py -v` |
 | `app/usb_one_library.py` | `pytest tests/test_onelibrary_wal_flush.py -v` |
@@ -51,7 +50,7 @@ Known test files:
 ### E2E — Tauri WebDriver
 
 ```bash
-cd tests/e2e && npm run e2e:test
+npm run e2e:test    # from repo root (delegates to `npm test --prefix tests/e2e`)
 ```
 
 **Pre-flight check first:** is `tauri-driver` running on `127.0.0.1:4444`? If not, flag explicitly — the agent should not start the driver itself; the user runs `npm run e2e:driver` in a separate terminal because it blocks.
@@ -121,7 +120,7 @@ production code you saw>
 
 ## Useful invariants to remember
 
-- `_db_write_lock` in `app/main.py` serialises all `master.db` writes — concurrency tests must hold it.
+- `_db_write_lock` in `app/database.py` serialises all `master.db` writes — concurrency tests must hold it.
 - `SafeAnlzParser` runs in `ProcessPoolExecutor(max_workers=1)` — tests that exercise rbox may need subprocess setup.
 - `validate_audio_path` uses `Path.is_relative_to(resolved_root)` — path-traversal tests should cover symlink + `..` cases.
 - USB tests with real drive letters are usually marked `@pytest.mark.integration` — skip in default runs (`pytest -m "not integration"`).
