@@ -29,15 +29,36 @@ the commit message body. The hook reads HEAD's message and respects it.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
+from pathlib import Path
+
+
+def _repo_root() -> Path:
+    """Resolve the repo root regardless of the tool call's working directory.
+
+    The Bash tool's cwd persists across calls, so after a single
+    `cd frontend` every git call below would run against whatever
+    directory the agent happened to leave behind. Anchor on this file's
+    location (`.claude/hooks/<file>` → two parents up) instead.
+    """
+    anchored = Path(__file__).resolve().parents[2]
+    if (anchored / ".git").exists():
+        return anchored
+    return Path(os.getcwd()).resolve()
+
+
+REPO_ROOT = _repo_root()
 
 
 def _run(cmd: list[str], timeout: int = 30) -> tuple[int, str, str]:
-    """Run a subprocess. Return (rc, stdout, stderr)."""
+    """Run a subprocess in the repo root. Return (rc, stdout, stderr)."""
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run(
+            cmd, cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout
+        )
         return r.returncode, r.stdout, r.stderr
     except subprocess.TimeoutExpired:
         return 124, "", f"timeout after {timeout}s running: {' '.join(cmd)}"

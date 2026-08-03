@@ -29,6 +29,22 @@ import sys
 from pathlib import Path
 
 
+def _repo_root(payload_cwd: str | None) -> Path:
+    """Resolve the repo root regardless of the tool call's working directory.
+
+    The hook fires for every Edit/Write, and the Bash tool's cwd persists
+    across calls — after a single `cd frontend`, the payload cwd is a
+    subdirectory and every `relative_to()` below would raise, silently
+    disabling the formatter. Anchor on this file's location instead
+    (`.claude/hooks/<file>` → two parents up) and only fall back to the
+    payload/process cwd if that layout ever changes.
+    """
+    anchored = Path(__file__).resolve().parents[2]
+    if (anchored / ".claude").is_dir():
+        return anchored
+    return Path(payload_cwd or os.getcwd()).resolve()
+
+
 def _which(cmd: str) -> str | None:
     """Cross-platform `which`."""
     found = shutil.which(cmd)
@@ -71,9 +87,9 @@ def main() -> int:
     if not file_path:
         return 0
 
-    repo_root = Path(payload.get("cwd") or os.getcwd())
+    repo_root = _repo_root(payload.get("cwd"))
     try:
-        rel = Path(file_path).resolve().relative_to(repo_root.resolve()).as_posix()
+        rel = Path(file_path).resolve().relative_to(repo_root).as_posix()
     except (ValueError, OSError):
         # File outside the repo or unresolvable — skip.
         return 0

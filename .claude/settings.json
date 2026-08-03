@@ -175,8 +175,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python",
-            "args": [".claude/hooks/format-on-edit.py"]
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/format-on-edit.py\""
           }
         ]
       },
@@ -185,8 +184,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python",
-            "args": [".claude/hooks/auto-push-after-commit.py"]
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/auto-push-after-commit.py\""
           }
         ]
       }
