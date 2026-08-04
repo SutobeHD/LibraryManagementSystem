@@ -28,7 +28,12 @@ jobs:
       - name: Install build deps
         run: |
           python -m pip install --upgrade pip
-          pip install ruff mypy httpx
+          # Pinned, same as .pre-commit-config.yaml. The ruff/mypy steps below
+          # are blocking now, so an unpinned install would let an upstream
+          # release turn CI red with no change to this repo — and would let the
+          # pre-commit hook disagree with CI about what "clean" means.
+          # Bump both files together, in one commit, after re-clearing the gate.
+          pip install ruff==0.15.8 mypy==1.19.1 httpx
           # Backend deps come straight from requirements.txt, minus the heavy
           # native deps (madmom, essentia, pyrekordbox) that aren't
           # pip-resolvable on Linux runners — those get `ignore_missing_imports`
@@ -40,17 +45,21 @@ jobs:
             | grep -vE '^(madmom|essentia|pyrekordbox)==' \
             | pip install -r /dev/stdin
 
+      # All three gates below are blocking. They were `|| true` until the
+      # baseline reached zero — see docs/QUALITY_GATES.md for the numbers and
+      # what was found on the way. Do not re-add `|| true`: fix the finding,
+      # or record the exemption in the tool's own config with a reason.
       - name: Lint with ruff
-        run: ruff check app/ tests/ || true   # 385 errors remain (mostly style); promoted to strict once cleanup follow-up lands
+        run: ruff check app/ tests/ scripts/
 
       - name: Check formatting with ruff
-        run: ruff format --check app/ tests/ || true   # paired with ruff check — strict mode arrives together
+        run: ruff format --check app/ tests/ scripts/
 
       - name: Type-check with mypy
-        run: mypy app/ || true   # gradual typing — non-blocking until type-hint pass completes
+        run: mypy app/
 
       - name: Run pytest
-        run: pytest tests/ -v --tb=short   # all 194 tests must pass — Phase 6 baseline
+        run: pytest tests/ -v --tb=short   # 730 passed / 1 skipped at time of writing
 
       - name: Check MAP.md / MAP_L2.md drift
         run: python scripts/regen_maps.py --check   # pure AST/regex, no runtime deps — regen via scripts/regen_maps.py
@@ -89,8 +98,20 @@ jobs:
           New-Item -ItemType Directory -Force -Path src-tauri/binaries | Out-Null
           New-Item -ItemType File -Force -Path src-tauri/binaries/RB_Backend-x86_64-pc-windows-msvc.exe | Out-Null
 
+      - name: Rustfmt
+        # Blocking. `cargo fmt --check` needs no build, so unlike clippy it can
+        # be verified on any platform. Baseline cleared — see
+        # docs/QUALITY_GATES.md.
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+
       - name: Clippy
-        # 20 pre-existing warnings in metadata.rs / fingerprint.rs / etc. — strict mode promoted once cleared.
+        # STILL NON-BLOCKING — the only gate in this repo that is.
+        # Not for lack of will: clippy needs a full build, and the Tauri build
+        # pulls gdk-3.0 / webkit2gtk, which are Windows-runner-only here. That
+        # makes the warning list unverifiable outside CI itself, so nobody can
+        # clear it before flipping the switch. First person with a Windows
+        # checkout: run the command below, fix what it prints, drop the
+        # `|| true`, and add `-- -D warnings`.
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --no-default-features || true
 
       - name: Tests
@@ -113,11 +134,13 @@ jobs:
       - name: Install frontend deps
         run: npm ci --prefix frontend
 
+      # Blocking. `npm run lint` runs eslint with --max-warnings=0, so a new
+      # warning fails the build — see docs/QUALITY_GATES.md.
       - name: ESLint
-        run: npm run lint --prefix frontend || true   # not yet zero-warning baseline; promoted once cleanup hits steady-state
+        run: npm run lint --prefix frontend
 
       - name: Prettier check
-        run: npm run format:check --prefix frontend || true
+        run: npm run format:check --prefix frontend
 
       - name: Build (smoke)
         run: npm run build --prefix frontend

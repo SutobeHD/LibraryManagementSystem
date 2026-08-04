@@ -117,7 +117,7 @@
 | `frontend/src/components/DuplicateView.jsx` | DuplicateView — Acoustic Duplicate Finder & Merge UI Left panel: list of duplicate groups with similarity bad… |
 | `frontend/src/components/FormatConverterView.jsx` | FormatConverterView — Library-wide audio format converter UI. |
 | `frontend/src/components/ImportProgressBanner.jsx` | Sticky progress banner — visible on every screen while local-file or SoundCloud imports are running. |
-| `frontend/src/components/ImportView.jsx` | Recursively walk a DataTransferItemList, returning every File inside any dropped folder. |
+| `frontend/src/components/ImportView.jsx` | *(no module docstring)* |
 | `frontend/src/components/InsightsView.jsx` | InsightsView — DJ-Style Analytics Dashboard Datenbasierte Einblicke in den eigenen DJ-Stil und die Library: •… |
 | `frontend/src/components/LibraryView.jsx` | *(no module docstring)* |
 | `frontend/src/components/MatchInspectorModal.jsx` | *(no module docstring)* |
@@ -128,21 +128,21 @@
 | `frontend/src/components/Player.jsx` | Three staggered equalizer bars — shown next to the title while playing. |
 | `frontend/src/components/PlaylistBrowser.jsx` | *(no module docstring)* |
 | `frontend/src/components/PromptModal.jsx` | Module-level subscriber registry so a single mounted <PromptModalRoot /> |
-| `frontend/src/components/RankingView.jsx` | Backend returns 'Children' (uppercase) |
+| `frontend/src/components/RankingView.jsx` | *(no module docstring)* |
 | `frontend/src/components/RenameModal.jsx` | *(no module docstring)* |
 | `frontend/src/components/SettingsView.jsx` | SettingsView — Tabbed preferences panel (container). |
 | `frontend/src/components/SmartPlaylistEditor.jsx` | *(no module docstring)* |
 | `frontend/src/components/SoundCloudProgressModal.jsx` | Listen to progress events from Rust |
 | `frontend/src/components/SoundCloudSyncView.jsx` | *(no module docstring)* |
 | `frontend/src/components/SoundCloudView.jsx` | PRIVACY: do not hold the actual OAuth token in React state — the real |
-| `frontend/src/components/ToastContext.jsx` | *(no module docstring)* |
+| `frontend/src/components/ToastContext.jsx` | Declared before addToast: it used to sit below and be closed over from |
 | `frontend/src/components/ToolsView.jsx` | Mirror of LibraryTools.smart_rename's token substitution + sanitisation, |
-| `frontend/src/components/TrackTable.jsx` | Camelot |
+| `frontend/src/components/TrackTable.jsx` | *(no module docstring)* |
 | `frontend/src/components/UsbSettingsView.jsx` | UsbSettingsView — edit MYSETTING.DAT / MYSETTING2.DAT / DJMMYSETTING.DAT Per-stick CDJ + DJM hardware setting… |
 | `frontend/src/components/UsbView.jsx` | UsbView — Melodex-styled USB device manager (container). |
 | `frontend/src/components/UtilitiesView.jsx` | UtilitiesView — router for the Utilities workspace. |
 | `frontend/src/components/WaveformEditor.jsx` | *(no module docstring)* |
-| `frontend/src/components/XmlCleanView.jsx` | Using existing endpoint but improved backend logic |
+| `frontend/src/components/XmlCleanView.jsx` | *(no module docstring)* |
 | `frontend/src/components/daw/DawBrowser.jsx` | DawBrowser — Left panel file/library browser for the DJ Edit DAW Lists tracks from the library and recent .rb… |
 | `frontend/src/components/daw/DawControlStrip.jsx` | DawControlStrip — Unified control bar below the timeline Layout: [Transport] | [Edit Tools] | [Hot Cues + Loo… |
 | `frontend/src/components/daw/DawLayout.jsx` | DawLayout — Slot-style layout shell for the DJ Edit DAW. |
@@ -184,7 +184,7 @@
 | `frontend/src/components/waveform/WaveformOverlays.jsx` | Renders cue markers, beat-selection region, cut/insert/delete regions, drop marker, and loop |
 | `frontend/src/components/waveform/WaveformSimpleView.jsx` | Stripped-down view used by RankingView (simpleMode=true) — only overview + main waveform + |
 | `frontend/src/components/waveform/WaveformZoom.jsx` | Floating zoom controls overlay — sits absolutely positioned over the detail container. |
-| `frontend/src/main.jsx` | SPEED: Lazy-load heavy views — only the active view is loaded into the bundle |
+| `frontend/src/main.jsx` | *(no module docstring)* |
 
 ## src-tauri/src/ — Rust Desktop Wrapper
 

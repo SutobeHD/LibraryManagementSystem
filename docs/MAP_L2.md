@@ -207,6 +207,14 @@ Setup logging
 - `  RekordboxDB.create_new_library()`
 - `  RekordboxDB.refresh_metadata()`
 - `  RekordboxDB.get_all_tracks()`
+- `  RekordboxDB.load_xml()` — Load a Rekordbox XML.
+- `  RekordboxDB.save_xml()` — Persist the in-memory XML library.
+- `  RekordboxDB.get_track_cues()` — Cue points for one track.
+- `  RekordboxDB.get_track_beatgrid()` — Beatgrid entries for one track.
+- `  RekordboxDB.save_track_cues()` — Persist cue points.
+- `  RekordboxDB.save_track_beatgrid()` — Persist the beatgrid.
+- `  RekordboxDB.get_analysis_writer()` — AnalysisDBWriter for the live master.db.
+- `  RekordboxDB.get_unanalyzed_track_ids()` — Track IDs with no analysis rows yet.
 - `  RekordboxDB.get_all_artists()`
 - `  RekordboxDB.get_all_genres()`
 - `  RekordboxDB.get_all_labels()`
@@ -317,6 +325,9 @@ Per-file import-progress tracker — gives the frontend a live transparent
 - `get_all()` — Return a shallow copy of all current tasks (for the API).
 - `get()`
 - `clear_finished()` — Remove all Completed/Failed/Skipped rows.
+- `bind_current_task()` — Bind `task_id` to the calling thread for the duration of an import.
+- `unbind_current_task()` — Clear the calling thread's task binding.
+- `current_task()` — The task_id bound to this thread, or None.
 
 ### `app/library_format_swap.py`
 
@@ -418,11 +429,6 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `GridReq`
 - `SetReq`
 - `SmartPlReq`
-- `PlCreateReq`
-- `PlRenameReq`
-- `PlDeleteReq`
-- `PlMoveReq`
-- `PlRemoveTrackReq`
 - `CleanTitlesReq`
 - `DeleteTrackReq`
 - `CreatePlReq`
@@ -437,10 +443,6 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `MergeReq`
 - `RbxSyncReq`
 - `RbxImportReq`
-- `PlCreateReq`
-- `PlRenameReq`
-- `PlDeleteReq`
-- `PlMoveReq`
 - `PlReorderReq`
 - `PlRemoveTrackReq`
 - `ProjectReq`
@@ -467,7 +469,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `get_cues()`
 - `get_beatgrid()`
 - `analyze_track()` — Analyzes a track to detect BPM and beat grid if missing from XML
-- `stream_audio()` — Streams an audio file from the local filesystem
+- `stream_audio_whole_file()` — Streams an audio file from the local filesystem.
 - `MyTagCreateReq`
 - `TrackMyTagsReq`
 - `list_mytags()`
@@ -1307,7 +1309,7 @@ Sticky progress banner — visible on every screen while local-file or SoundClou
 
 ### `frontend/src/components/ImportView.jsx`
 
-Recursively walk a DataTransferItemList, returning every File inside any dropped folder.
+*(no module docstring)*
 
 ### `frontend/src/components/InsightsView.jsx`
 
@@ -1358,7 +1360,7 @@ Module-level subscriber registry so a single mounted <PromptModalRoot />
 
 ### `frontend/src/components/RankingView.jsx`
 
-Backend returns 'Children' (uppercase)
+*(no module docstring)*
 
 ### `frontend/src/components/RenameModal.jsx`
 
@@ -1388,7 +1390,7 @@ PRIVACY: do not hold the actual OAuth token in React state — the real
 
 ### `frontend/src/components/ToastContext.jsx`
 
-*(no module docstring)*
+Declared before addToast: it used to sit below and be closed over from
 
 - `useToast()`
 - `ToastProvider()`
@@ -1399,7 +1401,7 @@ Mirror of LibraryTools.smart_rename's token substitution + sanitisation,
 
 ### `frontend/src/components/TrackTable.jsx`
 
-Camelot
+*(no module docstring)*
 
 ### `frontend/src/components/UsbSettingsView.jsx`
 
@@ -1421,7 +1423,7 @@ UtilitiesView — router for the Utilities workspace.
 
 ### `frontend/src/components/XmlCleanView.jsx`
 
-Using existing endpoint but improved backend logic
+*(no module docstring)*
 
 ### `frontend/src/components/daw/DawBrowser.jsx`
 
@@ -1618,7 +1620,7 @@ Floating zoom controls overlay — sits absolutely positioned over the detail co
 
 ### `frontend/src/main.jsx`
 
-SPEED: Lazy-load heavy views — only the active view is loaded into the bundle
+*(no module docstring)*
 
 
 ## src-tauri/src/ — Rust Desktop Wrapper

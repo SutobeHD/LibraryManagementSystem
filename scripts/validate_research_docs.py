@@ -54,8 +54,12 @@ REQUIRED_FRONTMATTER = ("slug", "title", "created")
 
 _DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 _LIFECYCLE_LINE_RE = re.compile(
-    r"(\d{4}-\d{2}-\d{2})\s*[—\-]+\s*"
-    r"(?:`?(research|implement|archived)/)?"
+    # The opening backtick sits OUTSIDE the optional folder group. It used to be
+    # inside it, so a line written as `` `drafting_` `` — state in backticks with
+    # no `research/` prefix, which is the majority form — never matched, and the
+    # doc looked like it had never left the state before that line.
+    r"(\d{4}-\d{2}-\d{2})\s*[—\-]+\s*`?"
+    r"(?:(research|implement|archived)/)?"
     r"(idea|drafting|exploring|evaluated|parked|"
     r"draftplan|review|approvalgate|rework|accepted|inprogress|blocked|"
     r"implemented|superseded|abandoned|watchdog|"
