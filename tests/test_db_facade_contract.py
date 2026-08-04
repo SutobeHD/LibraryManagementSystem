@@ -182,3 +182,59 @@ def test_get_tracks_is_not_reintroduced() -> None:
         "delete this test — but check first that callers are not relying on "
         "it to mean `get_all_tracks`."
     )
+
+
+# ---------------------------------------------------------------------------
+# The same bug class, generalised beyond the db singleton
+# ---------------------------------------------------------------------------
+#
+# `db.update_track_title` was found by the AST scan above. `AudioEngine.
+# get_duration` — a `hasattr()`-guarded call to a method that has never
+# existed, so the branch was permanently dead — was found by generalising it.
+# This test keeps both classes covered for every module-level app.* object
+# reached by attribute in the caller modules.
+
+
+def _module_level_attribute_uses(module_path: Path) -> set[tuple[str, str, int]]:
+    """Every ``<Name>.<attr>`` access, as (base, attr, lineno)."""
+    tree = ast.parse(module_path.read_text(encoding="utf-8"))
+    return {
+        (node.value.id, node.attr, node.lineno)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+    }
+
+
+@pytest.mark.parametrize("module", CALLER_MODULES)
+def test_app_owned_objects_expose_every_attribute_used(module: str) -> None:
+    """No caller may reach for a method an app.* class does not define.
+
+    Scoped to objects whose ``__module__`` starts with ``app.`` — third-party
+    and stdlib names are someone else's contract, and dynamic attributes on
+    them would only produce noise.
+    """
+    import importlib
+
+    mod = importlib.import_module(module.replace("/", ".").removesuffix(".py"))
+
+    missing: list[tuple[str, str, int]] = []
+    for base, attr, lineno in _module_level_attribute_uses(REPO_ROOT / module):
+        if attr.startswith("_"):
+            continue
+        obj = getattr(mod, base, None)
+        if obj is None:
+            continue
+        owner = getattr(obj, "__module__", None) or getattr(type(obj), "__module__", "")
+        if not str(owner).startswith("app."):
+            continue
+        if base == "db":
+            continue  # covered in full by the dedicated scan above
+        if not hasattr(obj, attr):
+            missing.append((base, attr, lineno))
+
+    assert not missing, (
+        f"{module} uses attributes that do not exist on app.* objects:\n"
+        + "\n".join(f"  {module}:{ln}  {base}.{attr}" for base, attr, ln in sorted(missing, key=lambda t: t[2]))
+        + "\nA `hasattr()` guard around one of these does not make it correct — "
+        "it makes the branch permanently dead."
+    )

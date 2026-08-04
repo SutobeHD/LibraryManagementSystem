@@ -12,7 +12,7 @@ sweep found when the gates were first driven to zero.
 | Python lint | `ruff check app/ tests/ scripts/` | blocking | 139 (+15 unlinted in `scripts/`) | 0 |
 | Python format | `ruff format --check app/ tests/ scripts/` | blocking | 8 files | 0 |
 | Python types | `mypy app/` | blocking | 154 | 0 |
-| Python tests | `pytest tests/` | blocking | 730 pass / 1 skip | 775 pass / 1 skip |
+| Python tests | `pytest tests/` | blocking | 730 pass / 1 skip | 777 pass / 1 skip |
 | Map drift | `python scripts/regen_maps.py --check` | blocking | clean | clean |
 | Rust format | `cargo fmt --manifest-path src-tauri/Cargo.toml --check` | blocking (new) | 9 files | 0 |
 | Rust lint | `cargo clippy …` | **NOT blocking** | unknown | unknown |
@@ -132,6 +132,11 @@ untyped function body. Live-mode `update_track_metadata()` did not handle a
 - `db.get_tracks()` (4 sites) does not exist anywhere; the method is
   `get_all_tracks()`. One site hid it behind `hasattr()` and quietly processed
   an empty list.
+- `AudioEngine.get_duration()` has never existed either. `render_segment()`
+  called it behind `hasattr(AudioEngine, "get_duration")`, so the branch was
+  permanently dead and ffprobe was always the path taken. A `hasattr()` guard
+  around a method that does not exist is not defensive — it is a silent
+  no-op. Found by generalising the facade scan to every `app.*` object.
 - `PlaylistBrowser` had two byte-identical `useEffect`s loading the playlist
   tree, one keyed on `libraryStatus?.loaded` and one on `[]` — every mount with
   a loaded library fetched the tree and all tracks twice.
@@ -176,6 +181,9 @@ None of the bugs above had a test. They do now:
   `db.<attr>` in `app/main.py` and `app/services.py` against `RekordboxDB`, plus
   named pins for the nine methods that shipped missing and one that asserts
   `get_tracks` is not reintroduced as a confusing alias of `get_all_tracks`.
+  A second scan generalises this to every module-level `app.*` object reached
+  by attribute in those two modules — that one caught
+  `AudioEngine.get_duration`.
 - **`tests/test_regression_gate_sweep.py`** — one pin per specific fault: the
   `uuid` import, the `delete_track` string-indexing, `TimelineCanvas`'s
   `onRegionDrop` prop, `PlaylistBrowser`'s duplicate effect, the `lru_cache`
@@ -185,7 +193,7 @@ None of the bugs above had a test. They do now:
   drive letters, `$CLAUDE_PROJECT_DIR` in the hook wiring, and the lifecycle
   regex against both backtick forms.
 
-Suite: 730 → 775 tests.
+Suite: 730 → 777 tests.
 
 ## Judgement calls worth knowing about
 

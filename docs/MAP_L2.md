@@ -1962,6 +1962,7 @@ Facade invariant: every ``db.<method>`` a caller uses must exist.
 - `test_instance_attrs_are_set_by_init()` — Every INSTANCE_ATTRS entry must actually be assigned in ``__init__``.
 - `test_previously_missing_methods_are_present()` — Named regression pins for the nine that shipped missing.
 - `test_get_tracks_is_not_reintroduced()` — ``db.get_tracks()`` never existed; the method is ``get_all_tracks``.
+- `test_app_owned_objects_expose_every_attribute_used()` — No caller may reach for a method an app.* class does not define.
 
 ### `tests/test_db_taste.py`
 

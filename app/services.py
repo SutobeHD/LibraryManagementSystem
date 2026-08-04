@@ -192,35 +192,33 @@ class AudioEngine:
             # Anything not explicitly an insert/delete is treated as a literal slice
             # (legacy "make-section" mode — preserves backwards compatibility).
 
+            # Source duration via ffprobe. There used to be a
+            # `AudioEngine.get_duration(...) if hasattr(AudioEngine,
+            # "get_duration") else None` probe in front of this — AudioEngine
+            # has never defined that method, so the probe always fell through
+            # and ffprobe was always the path taken.
             try:
-                src_dur = (
-                    AudioEngine.get_duration(source_path)
-                    if hasattr(AudioEngine, "get_duration")
-                    else None
+                pr = subprocess.run(
+                    [
+                        FFMPEG_BIN.replace("ffmpeg", "ffprobe"),
+                        "-v",
+                        "error",
+                        "-show_entries",
+                        "format=duration",
+                        "-of",
+                        "default=noprint_wrappers=1:nokey=1",
+                        source_path,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
                 )
-            except Exception:
-                src_dur = None
-            if src_dur is None:
-                # ffprobe fallback
-                try:
-                    pr = subprocess.run(
-                        [
-                            FFMPEG_BIN.replace("ffmpeg", "ffprobe"),
-                            "-v",
-                            "error",
-                            "-show_entries",
-                            "format=duration",
-                            "-of",
-                            "default=noprint_wrappers=1:nokey=1",
-                            source_path,
-                        ],
-                        capture_output=True,
-                        text=True,
-                        timeout=10,
-                    )
-                    src_dur = float(pr.stdout.strip()) if pr.returncode == 0 else 0
-                except Exception:
-                    src_dur = 0
+                src_dur = float(pr.stdout.strip()) if pr.returncode == 0 else 0
+            except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                logger.warning(
+                    "render_segment: ffprobe duration failed for %s: %s", source_path, exc
+                )
+                src_dur = 0
 
             has_modes = any(c.get("type") in ("insert", "delete", "cut") for c in cuts)
             timeline = []  # ordered (src, t_start, t_end)

@@ -61,7 +61,10 @@
     `app/main.py` and `app/services.py` against `RekordboxDB` so a missing
     facade delegation fails the suite instead of a request. Plus
     `tests/test_regression_gate_sweep.py`, one named pin per bug listed above.
-    Suite 730 → 775.
+    A generalised variant of the scan covers every module-level `app.*` object
+    and caught `AudioEngine.get_duration()` — called behind a `hasattr()` guard
+    in `render_segment()` for a method that has never existed, leaving the
+    branch permanently dead. Suite 730 → 777.
   - Changed: `scripts/` is now covered by ruff in CI and pre-commit.
 
 - Analysis accuracy + engine fixes:
