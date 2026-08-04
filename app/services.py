@@ -1452,7 +1452,7 @@ class ProjectManager:
         ProjectManager.PROJECTS_DIR.mkdir(exist_ok=True)
 
     @staticmethod
-    def save_project(name: str, data: dict[str, Any]) -> str:
+    def save_project(name: str, data: dict[str, Any]) -> bool:
         ProjectManager.ensure_dir()
         filename = ProjectManager.PROJECTS_DIR / f"{name}.prj"
         try:
@@ -1480,7 +1480,7 @@ class ProjectManager:
             raise e
 
     @staticmethod
-    def list_projects() -> list[str]:
+    def list_projects() -> list[dict[str, Any]]:
         ProjectManager.ensure_dir()
         projects = []
         for f in ProjectManager.PROJECTS_DIR.glob("*.prj"):

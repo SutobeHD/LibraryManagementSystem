@@ -25,13 +25,15 @@ class LiveRekordboxDB:
     def __init__(self, db_path: str):
         self.db_path = Path(db_path)
         self._local = threading.local()
-        self.tracks = {}
-        self.playlists = []
-        self.playlists_tracks = defaultdict(list)
-        self.artists = []
-        self.genres = []
+        self.tracks: dict[str, dict[str, Any]] = {}
+        self.playlists: list[dict[str, Any]] = []
+        # Content IDs, not track dicts — see _load_playlist_tracks (append(str(...)))
+        self.playlists_tracks: defaultdict[str, list[str]] = defaultdict(list)
+        self.artists: list[dict[str, Any]] = []
+        self.genres: list[dict[str, Any]] = []
         self.loaded = False
         self.loading_status = "Idle"
+        self._beatgrid_thread: threading.Thread | None = None
 
     @property
     def db(self):
@@ -93,7 +95,7 @@ class LiveRekordboxDB:
 
     def _start_beatgrid_background_load(self) -> None:
         """Spawn a daemon thread to populate ANLZ beatgrids out of band."""
-        if getattr(self, "_beatgrid_thread", None) and self._beatgrid_thread.is_alive():
+        if self._beatgrid_thread is not None and self._beatgrid_thread.is_alive():
             logger.debug("Beatgrid loader already running; skipping new spawn")
             return
 
@@ -455,7 +457,7 @@ class LiveRekordboxDB:
         ]
 
     def get_all_labels(self) -> list[dict[str, Any]]:
-        label_counts = defaultdict(int)
+        label_counts: defaultdict[str, int] = defaultdict(int)
         label_artworks = {}
         for t in self.tracks.values():
             label = t.get("Label")
@@ -479,7 +481,7 @@ class LiveRekordboxDB:
         ]
 
     def get_all_albums(self) -> list[dict[str, Any]]:
-        album_counts = defaultdict(int)
+        album_counts: defaultdict[str, int] = defaultdict(int)
         album_artworks = {}
         for t in self.tracks.values():
             album = t.get("Album")
@@ -658,7 +660,7 @@ class LiveRekordboxDB:
                 return list(all_tracks.values())
 
             # 3. Intelligent Playlist (Type 4)
-            if str(node.get("Type")) == "4":
+            if node and str(node.get("Type")) == "4":
                 xml_rules = node.get("smart_list")
                 logger.info(f"Generating dynamic content for Intelligent Playlist: {node['Name']}")
                 return self._get_smart_playlist_tracks(xml_rules)
@@ -895,9 +897,12 @@ class LiveRekordboxDB:
 
         # 2. Remove from all playlists (internal cache)
         for pid, tracks in self.playlists_tracks.items():
-            if tid in [str(t.id) if hasattr(t, "id") else str(t["ID"]) for t in tracks]:
-                # This is tricky because we store objects or dicts.
-                # Ideally we call remove_track_from_playlist
+            # `tracks` is a list of content-ID strings (see
+            # _load_playlist_tracks). It used to be read as if it held row
+            # objects or dicts — `str(t["ID"])` on a str raises TypeError,
+            # outside the try below, so deleting a track in live mode blew up
+            # on the first non-empty playlist.
+            if tid in tracks:
                 try:
                     self.remove_track_from_playlist(pid, tid)
                 except Exception as e:

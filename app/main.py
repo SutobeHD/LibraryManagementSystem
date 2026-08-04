@@ -1944,7 +1944,7 @@ def unload_lib():
 async def rbx_export(r: RbxSyncReq):
     """Exports specified tracks to a Rekordbox XML file."""
     try:
-        output_path = EXPORT_DIR / r.filename
+        output_path = EXPORT_DIR / (r.filename or "rekordbox_export.xml")
         xml_path = RekordboxBridge.export_collection(r.track_ids, output_path)
         return {
             "status": "success",
@@ -4440,7 +4440,7 @@ async def phrase_generate(body: PhraseGenerateRequest):
         # Try to detect downbeat to align the phrase grid
         track_path = ""
         try:
-            track_details = db.get_track_details(str(body.track_id))
+            track_details = db.get_track_details(str(body.track_id)) or {}
             track_path = track_details.get("Location") or track_details.get("path") or ""
         except Exception:
             pass

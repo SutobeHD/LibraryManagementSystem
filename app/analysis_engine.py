@@ -42,19 +42,25 @@ logger = logging.getLogger(__name__)
 # Lazy imports (heavy libs)
 # --------------------------------------------------------------------------- #
 _LIBS_LOADED = False
-librosa = None
-signal = None
+
+# Deliberately typed `Any`, not `Module | None`: these are populated by
+# _ensure_libs() and every use site sits behind a `_LIBS_LOADED` /
+# `_<LIB>_AVAILABLE` guard. Without the annotation mypy infers `Any | None`
+# and reports an "Item None has no attribute …" on all 58 call sites,
+# which drowns out the errors that do mean something.
+librosa: Any = None
+signal: Any = None
 
 # Optional high-accuracy backends
 _MADMOM_AVAILABLE = False
 _ESSENTIA_AVAILABLE = False
 _PYLOUDNORM_AVAILABLE = False
 _MUTAGEN_AVAILABLE = False
-madmom = None
-essentia = None
-essentia_std = None
-pyloudnorm = None
-mutagen = None
+madmom: Any = None
+essentia: Any = None
+essentia_std: Any = None
+pyloudnorm: Any = None
+mutagen: Any = None
 
 
 def _apply_madmom_compat_shims() -> None:
@@ -382,7 +388,7 @@ def _correlate_key(chroma_vector: np.ndarray) -> tuple[str, str, float]:
     return (best_key, best_mode, best_corr)
 
 
-def detect_key_essentia(y: np.ndarray, sr: int) -> dict[str, Any]:
+def detect_key_essentia(y: np.ndarray, sr: int) -> dict[str, Any] | None:
     """
     Professional key detection using essentia's KeyExtractor.
     Equivalent to Mixed In Key quality. Uses the HPCP-based algorithm

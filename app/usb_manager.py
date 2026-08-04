@@ -19,7 +19,7 @@ from contextlib import contextmanager, suppress
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 # `ctypes.windll` and `ctypes.GetLastError` exist only on Windows. The whole
 # USB module is Windows-only at runtime, but ruff/mypy/pytest all run on Linux
@@ -109,7 +109,7 @@ class UsbDetector:
     # near-simultaneous callers (devices endpoint, profile auto-create,
     # settings view); a per-drive probe timeout skips one bad drive instead
     # of stalling the whole scan.
-    _scan_cache = None  # (monotonic_ts, list[dict]) | None
+    _scan_cache: ClassVar[tuple[float, list[dict]] | None] = None
     _SCAN_TTL_SEC = 3.0
     _PROBE_TIMEOUT_SEC = 4.0
 
@@ -198,7 +198,7 @@ class UsbDetector:
         return (Path(drive) / cls.PIONEER_MARKER).is_dir()
 
     @staticmethod
-    def _get_bus_types() -> dict[str, str]:
+    def _get_bus_types() -> dict[str, str | None]:
         """Fetch Windows bus types (USB, NVMe, SATA) for each drive letter."""
         import json
         import subprocess

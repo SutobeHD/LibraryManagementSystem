@@ -21,8 +21,8 @@ import secrets
 
 
 def safe_compare(
-    presented: str | bytes,
-    expected: str | bytes,
+    presented: object,
+    expected: object,
 ) -> bool:
     """Constant-time equality for tokens/secrets/HMAC outputs.
 

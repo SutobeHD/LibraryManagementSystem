@@ -945,7 +945,7 @@ def write_export_pdb(
     usb_root: Path,
     contents: list[dict[str, Any]] | None = None,
     artists: dict[int, str] | None = None,
-    albums: dict[int, tuple[str, int]] | None = None,
+    albums: dict[int, tuple[str, int] | str] | None = None,
     keys: dict[int, str] | None = None,
     genres: dict[int, str] | None = None,
     labels: dict[int, str] | None = None,

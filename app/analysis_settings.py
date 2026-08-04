@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, fields
+from typing import Any
 from dataclasses import replace as dataclass_replace
 
 logger = logging.getLogger(__name__)
@@ -107,7 +108,7 @@ class AnalysisSettings:
     def from_env(cls) -> AnalysisSettings:
         """Build settings, overriding fields from environment variables."""
         defaults = cls()
-        kwargs = {}
+        kwargs: dict[str, Any] = {}
         for f in fields(cls):
             env_name = f"RB_ANALYSIS_{f.name.upper()}"
             if env_name not in os.environ:
