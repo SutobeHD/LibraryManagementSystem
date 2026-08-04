@@ -566,7 +566,7 @@ def _build_pssi(
     for p in phrases:
         m = p.get("mood", "mid")
         mood_counts[m] = mood_counts.get(m, 0) + 1
-    dominant_mood = max(mood_counts, key=mood_counts.get) if mood_counts else "mid"
+    dominant_mood = max(mood_counts, key=lambda k: mood_counts[k]) if mood_counts else "mid"
     mood_val = mood_map.get(dominant_mood, 2)
 
     end_beat_total = round((duration_ms / 1000.0) * (bpm / 60.0))

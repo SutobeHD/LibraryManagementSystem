@@ -655,7 +655,7 @@ class UsbProfileManager:
         cls._save_all(data)
 
     @classmethod
-    def get_usb_contents(cls, device_id: str) -> dict[str, list[dict]]:
+    def get_usb_contents(cls, device_id: str) -> dict[str, Any]:
         """Fetches tracks from both Library One (DeviceSQL) and Library Legacy (Legacy PDB/XML)."""
         devices = UsbDetector.scan()
         device = next((d for d in devices if d["device_id"] == device_id), None)
@@ -672,7 +672,7 @@ class UsbProfileManager:
         l_xml_path = drive / "PIONEER" / "rekordbox.xml"
         l_pdb_path = drive / "PIONEER" / "rekordbox" / "export.pdb"
 
-        results = {"library_one": [], "library_legacy": []}
+        results: dict[str, Any] = {"library_one": [], "library_legacy": []}
         statuses = {"library_one_status": "empty", "library_legacy_status": "empty"}
 
         # --- Library One (modern OneLibrary, SQLCipher-encrypted) ---
@@ -706,7 +706,7 @@ class UsbProfileManager:
                     )
                 # Walk playlist tree (ordered by parent → seq)
                 pls_by_id = {p.id: p for p in onedb.get_playlists()}
-                children_by_parent = {}
+                children_by_parent: dict[Any, list[Any]] = {}
                 for p in pls_by_id.values():
                     pid = getattr(p, "parent_id", 0) or 0
                     children_by_parent.setdefault(pid, []).append(p)
@@ -991,7 +991,7 @@ class UsbSyncEngine:
 
     def _read_usb_tracks(self) -> dict[str, dict]:
         """Read all tracks from the USB database."""
-        tracks = {}
+        tracks: dict[str, Any] = {}
         if not self.usb_db_path.exists():
             return tracks
         try:
@@ -1021,7 +1021,7 @@ class UsbSyncEngine:
         """Read tracks directly from pyrekordbox MasterDb."""
         import rbox
 
-        tracks = {}
+        tracks: dict[str, Any] = {}
         try:
             db = rbox.MasterDb(str(self.local_path))
             for c in db.get_contents():
@@ -1062,7 +1062,7 @@ class UsbSyncEngine:
         return tracks
 
     def _read_usb_playlists(self) -> dict[str, dict]:
-        playlists = {}
+        playlists: dict[str, Any] = {}
         if not self.usb_db_path.exists():
             return playlists
         try:
@@ -1081,7 +1081,7 @@ class UsbSyncEngine:
     def _read_local_playlists(self) -> dict[str, dict]:
         import rbox
 
-        playlists = {}
+        playlists: dict[str, Any] = {}
         try:
             db = rbox.MasterDb(str(self.local_path))
             for p in db.get_playlists():
@@ -1729,7 +1729,7 @@ class UsbSyncEngine:
 
     def _sync_library_legacy_from_xml(
         self,
-        playlist_ids: list[str],
+        playlist_ids: list[str] | None,
         target: Path,
     ) -> Generator[dict, None, None]:
         """Legacy XML sync sourced from RekordboxXMLDB (Standalone mode).

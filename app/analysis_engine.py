@@ -624,7 +624,7 @@ def _onset_density_disambiguate(
 
     # Count discrete onset events (peak-picked), not frames above a threshold.
     try:
-        onset_events = librosa.onset.onset_detect(  # type: ignore[union-attr]
+        onset_events = librosa.onset.onset_detect(
             onset_envelope=onset_strength, sr=sr, hop_length=hop, backtrack=False
         )
         n_strong = len(onset_events)
@@ -762,7 +762,7 @@ def detect_beats_madmom(
             dbn_min, dbn_max = int(_MIN_BPM), int(_MAX_BPM)
             try:
                 coarse = float(
-                    librosa.feature.tempo(  # type: ignore[union-attr]
+                    librosa.feature.tempo(
                         onset_envelope=onset_env,
                         sr=sr,
                         hop_length=HOP_OE,

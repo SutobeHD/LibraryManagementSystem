@@ -12,8 +12,8 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, fields
-from typing import Any
 from dataclasses import replace as dataclass_replace
+from typing import Any
 
 logger = logging.getLogger(__name__)
 

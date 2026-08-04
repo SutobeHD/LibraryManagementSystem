@@ -149,6 +149,10 @@ exclude = [
 [[tool.mypy.overrides]]
 module = [
     "rbox.*",
+    # `requests` ships stubs on PyPI (types-requests), but adding a stub-only
+    # package to the pinned requirements.txt is a dependency decision, not a
+    # typing one. Treated as untyped until that call is made.
+    "requests.*",
     "madmom.*",
     "essentia.*",
     "librosa.*",

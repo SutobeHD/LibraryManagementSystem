@@ -966,7 +966,7 @@ class BeatAnalyzer:
                     )
 
                     # Convert beats to legacy format for frontend
-                    full_beat_list = []
+                    full_beat_list: list[dict[str, Any]] = []
                     for b in result.get("beats", []):
                         full_beat_list.append(
                             {
@@ -1039,7 +1039,7 @@ class BeatAnalyzer:
             int(win_length_sec * sr / hop_length)
 
             candidates = [None, 140, 150, 160]
-            best_bpm, best_beats, max_score = 0, [], -1
+            best_bpm, best_beats, max_score = 0.0, [], -1.0
 
             for start_bpm in candidates:
                 kw = {"onset_envelope": onset_env, "sr": sr}
@@ -1068,7 +1068,7 @@ class BeatAnalyzer:
             )
             beat_duration = 60.0 / bpm_global if bpm_global > 0 else 0.5
 
-            full_beat_list = []
+            full_beat_list: list[dict[str, Any]] = []
             curr_time = float(beat_times[0]) if len(beat_times) > 0 else 0.0
             while curr_time < duration:
                 full_beat_list.append(
@@ -1396,7 +1396,9 @@ class ImportManager:
                     # For now, just pick one.
                 target_pl = import_playlists[0]
 
-            if target_pl:
+            # `tid` is None when db.add_track() above declined the insert —
+            # there is nothing to file into the Import playlist then.
+            if target_pl and tid:
                 pid = target_pl["ID"]
                 # Check if track is already in playlist to avoid duplicates
                 current_tracks = db.get_playlist_tracks(pid)
@@ -1482,7 +1484,7 @@ class ProjectManager:
     @staticmethod
     def list_projects() -> list[dict[str, Any]]:
         ProjectManager.ensure_dir()
-        projects = []
+        projects: list[dict[str, Any]] = []
         for f in ProjectManager.PROJECTS_DIR.glob("*.prj"):
             projects.append({"name": f.stem, "updated": os.path.getmtime(f)})
         # Sort by newest

@@ -37,13 +37,10 @@ def analysis_to_xml_track(
         "Kind",
         "MP3 File" if analysis_result.get("file", "").lower().endswith(".mp3") else "WAV File",
     )
+    src_file = analysis_result.get("file") or ""
     track.set(
         "Size",
-        str(
-            os.path.getsize(analysis_result.get("file", ""))
-            if analysis_result.get("file") and os.path.exists(analysis_result.get("file"))
-            else 0
-        ),
+        str(os.path.getsize(src_file) if src_file and os.path.exists(src_file) else 0),
     )
     track.set("TotalTime", str(int(analysis_result.get("duration", 0))))
     track.set("DiscNumber", "0")

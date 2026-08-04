@@ -11,6 +11,7 @@ import time
 import traceback
 import urllib.parse
 import uuid
+from functools import partial
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -2252,7 +2253,7 @@ async def get_artwork(path: str):
         raise HTTPException(404, "No path provided")
 
     # Try resolving Rekordbox relative paths (e.g. /PIONEER/Artwork/...)
-    p_path = path
+    p_path: str | Path = path
     if path.startswith("/PIONEER/"):
         app_data = os.environ.get("APPDATA")
         if app_data:
@@ -2275,10 +2276,8 @@ async def get_artwork(path: str):
     is_allowed = False
     if str(file_path).startswith(str(COVERS_DIR.resolve())):
         is_allowed = True
-    elif os.environ.get("APPDATA"):
-        rb_share_dir = (
-            Path(os.environ.get("APPDATA")) / "Pioneer" / "rekordbox" / "share"
-        ).resolve()
+    elif appdata := os.environ.get("APPDATA"):
+        rb_share_dir = (Path(appdata) / "Pioneer" / "rekordbox" / "share").resolve()
         if str(file_path).startswith(str(rb_share_dir)):
             is_allowed = True
 
@@ -2962,7 +2961,7 @@ def usb_sync(r: UsbSyncReq):
         for event in engine.sync_collection(profile, libs):
             results.append(event)
     elif r.sync_type == "playlists":
-        for event in engine.sync_playlists(profile, r.playlist_ids, libs):
+        for event in engine.sync_playlists(profile, r.playlist_ids or [], libs):
             results.append(event)
     elif r.sync_type == "metadata":
         for event in engine.sync_metadata(profile, libs):
@@ -3130,7 +3129,7 @@ def usb_format_preview(r: UsbFormatPreviewReq):
         raise HTTPException(404, f"Drive not found: {drive}")
 
     # Pull volume info if we can; non-fatal otherwise.
-    info = {"label": "", "filesystem": "Unknown", "total": 0, "free": 0}
+    info: dict[str, Any] = {"label": "", "filesystem": "Unknown", "total": 0, "free": 0}
     try:
         if hasattr(UsbDetector, "_get_volume_info"):
             info.update(UsbDetector._get_volume_info(drive))
@@ -4046,6 +4045,7 @@ async def preview_soundcloud_matches(r: ScPreviewReq, request: Request):
     try:
         engine = SoundCloudSyncEngine(db)
 
+        playlist_data: dict[str, Any] | None
         if r.is_likes:
             playlist_data = await asyncio.to_thread(SoundCloudPlaylistAPI.get_likes, auth_token)
         else:
@@ -4053,6 +4053,9 @@ async def preview_soundcloud_matches(r: ScPreviewReq, request: Request):
             playlist_data = next((pl for pl in all_pls if pl["id"] == r.playlist_id), None)
             if not playlist_data:
                 raise HTTPException(404, f"Playlist {r.playlist_id} not found")
+
+        if playlist_data is None:
+            raise HTTPException(404, "SoundCloud returned no playlist data")
 
         matches = await asyncio.to_thread(engine.preview_matches, playlist_data, auth_token)
         matched = sum(1 for m in matches if m["status"] == "matched")
@@ -4346,7 +4349,7 @@ async def usb_playcount_resolve(body: PlayCountResolveRequest):
         from .config import DB_FILENAME
 
         rb_root = str(Path(_os.environ.get("APPDATA", "")) / "Pioneer" / "rekordbox")
-        pc_db_path = str(Path(rb_root) / DB_FILENAME) if hasattr(Path(rb_root), "__str__") else ""
+        pc_db_path = str(Path(rb_root) / DB_FILENAME)
 
         resolutions_dicts = [r.model_dump() for r in body.resolutions]
         result = await asyncio.get_event_loop().run_in_executor(
@@ -4673,7 +4676,7 @@ async def _run_phrase_batch(
 
             try:
                 beats = await loop.run_in_executor(
-                    None, lambda t=tid: extract_beats_from_db(t, db_path)
+                    None, partial(extract_beats_from_db, tid, db_path)
                 )
                 if not beats:
                     job["skipped"] += 1
@@ -4682,7 +4685,7 @@ async def _run_phrase_batch(
 
                 if align_downbeat and path:
                     downbeat_t = await loop.run_in_executor(
-                        None, lambda p=path, b=beats: detect_first_downbeat(p, b)
+                        None, partial(detect_first_downbeat, path, beats)
                     )
                     beats = [b for b in beats if b >= downbeat_t - 0.01]
 
@@ -4694,8 +4697,12 @@ async def _run_phrase_batch(
 
                 await loop.run_in_executor(
                     None,
-                    lambda t=tid, c=cues: commit_phrase_cues(
-                        t, c, db_path, include_bar_markers=include_bar_markers
+                    partial(
+                        commit_phrase_cues,
+                        tid,
+                        cues,
+                        db_path,
+                        include_bar_markers=include_bar_markers,
                     ),
                 )
                 job["succeeded"] += 1
@@ -4879,7 +4886,7 @@ def _fingerprint_python_fallback(path: str) -> bytes | None:
     try:
         # Try librosa first for actual PCM decoding
         try:
-            import librosa  # type: ignore
+            import librosa
 
             y, _ = librosa.load(path, sr=11025, mono=True, duration=30.0)
             raw = (y * 32768).astype("int16").tobytes()
@@ -4981,7 +4988,7 @@ async def _run_duplicate_scan(job_id: str, track_paths: list[str]) -> None:
         for idx, path in enumerate(track_paths):
             fp = await asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda p=path: _fingerprint_python_fallback(p),
+                partial(_fingerprint_python_fallback, path),
             )
             if fp is not None:
                 fingerprints[path] = fp

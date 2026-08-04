@@ -110,7 +110,7 @@ def detect_first_downbeat(audio_path: str, beats: list[float]) -> float:
     logger.debug("detect_first_downbeat: analysing %s, %d beats", audio_file, len(beats))
 
     try:
-        import librosa  # type: ignore  # soft-dependency
+        import librosa  # soft-dependency
 
         # Only analyse the first 8 beats — enough to find the downbeat
         candidates = beats[:8]
@@ -317,7 +317,7 @@ def resolve_anlz_dir(track_id: int, db_path: str) -> str | None:
     explicit ANLZ file paths.
     """
     try:
-        import rbox  # type: ignore
+        import rbox
     except ImportError:
         logger.warning("resolve_anlz_dir: rbox not installed")
         return None

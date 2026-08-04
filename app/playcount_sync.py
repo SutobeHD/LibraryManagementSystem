@@ -319,8 +319,13 @@ def resolve_playcounts(
         usb_xml_path,
     )
 
+    # Annotation says list, but this function writes play counts into
+    # master.db — a bad caller must fail loudly, not half-commit. mypy proves
+    # the branch dead against the signature; it is kept as a runtime contract.
     if not isinstance(resolutions, list):
-        logger.error("resolve_playcounts: resolutions must be list, got %s", type(resolutions))
+        logger.error(  # type: ignore[unreachable]
+            "resolve_playcounts: resolutions must be list, got %s", type(resolutions)
+        )
         return {"committed": 0, "errors": ["resolutions must be a list"]}
 
     errors: list[str] = []
@@ -330,7 +335,7 @@ def resolve_playcounts(
     finals: dict[str, tuple[int, float]] = {}
     for r in resolutions:
         if not isinstance(r, dict):
-            errors.append(f"invalid resolution item (not a dict): {r!r}")
+            errors.append(f"invalid resolution item (not a dict): {r!r}")  # type: ignore[unreachable]
             continue
         tid = str(r.get("track_id", ""))
         if not tid:
@@ -353,7 +358,7 @@ def resolve_playcounts(
 
     # ── 1. Update PC database via rbox ─────────────────────────────────────
     try:
-        import rbox  # type: ignore  # soft-dependency: rbox wheel
+        import rbox  # soft-dependency: rbox wheel
 
         db_path = Path(pc_db_path)
         if not db_path.exists():

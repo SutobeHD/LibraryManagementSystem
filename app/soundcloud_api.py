@@ -16,6 +16,7 @@ import re
 import time
 from difflib import SequenceMatcher
 from functools import lru_cache
+from typing import Any
 
 import requests
 
@@ -412,7 +413,7 @@ class SoundCloudPlaylistAPI:
 
         playlists: list[dict] = []
         url: str | None = f"{SC_API_BASE}/users/{user_id}/playlists"
-        params = {"limit": 50, "offset": 0}
+        params: dict[str, Any] = {"limit": 50, "offset": 0}
         if not auth_token:
             params["client_id"] = get_sc_client_id()
 
@@ -436,8 +437,9 @@ class SoundCloudPlaylistAPI:
                     f"[SC] Fetched {len(collection)} playlists from current page. Next page: {url}"
                 )
 
+            # Guards live SoundCloud JSON, which the annotation cannot promise.
             if not isinstance(collection, list):
-                logger.warning(
+                logger.warning(  # type: ignore[unreachable]
                     f"[SC] get_playlists: unexpected collection format (type: {type(collection)}), stopping pagination."
                 )
                 break
@@ -485,7 +487,7 @@ class SoundCloudPlaylistAPI:
 
         tracks: list[dict] = []
         url: str | None = f"{SC_API_BASE}/users/{user_id}/favorites"
-        params = {"limit": 50, "offset": 0}
+        params: dict[str, Any] = {"limit": 50, "offset": 0}
         if not auth_token:
             params["client_id"] = get_sc_client_id()
 
@@ -503,8 +505,11 @@ class SoundCloudPlaylistAPI:
                 logger.warning("[SC] get_likes: unexpected response format, stopping.")
                 break
 
+            # Guards live SoundCloud JSON, which the annotation cannot promise.
             if not isinstance(collection, list):
-                logger.warning("[SC] get_likes: collection is not a list, stopping.")
+                logger.warning(  # type: ignore[unreachable]
+                    "[SC] get_likes: collection is not a list, stopping."
+                )
                 break
 
             for item in collection:
@@ -514,6 +519,8 @@ class SoundCloudPlaylistAPI:
                 raw_track = (
                     item.get("track") if isinstance(item, dict) and "track" in item else item
                 )
+                if not isinstance(raw_track, dict):
+                    continue
                 normalized = SoundCloudPlaylistAPI._normalize_track(raw_track)
                 if normalized:
                     tracks.append(normalized)

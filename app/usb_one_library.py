@@ -240,7 +240,7 @@ class OneLibraryUsbWriter:
         # tracks of the entire library — playlist selection in the UI was a
         # no-op for everything except SetSticks.
         if playlist_filter:
-            target_ids = set()
+            target_ids: set[str] = set()
             for pid in playlist_filter:
                 try:
                     target_ids.update(str(tid) for tid in source.get_playlist_track_ids(pid))
@@ -630,7 +630,7 @@ class OneLibraryUsbWriter:
         artworks = {
             int(img.id): (img.path or "") for img in db.get_images() if (img.path or "").strip()
         }
-        albums = {
+        albums: dict[int, tuple[str, int] | str] = {
             int(a.id): (a.name or "", int(getattr(a, "artist_id", 0) or 0)) for a in db.get_albums()
         }
         keys = {int(k.id): (k.name or "") for k in db.get_keys()}
@@ -848,15 +848,19 @@ class OneLibraryUsbWriter:
                 logger.debug("[OneLibrary] create_image failed: %s", exc)
                 return
 
-        result = usb_artwork.write_artwork_pair(audio_path, int(image_id), self.pioneer)
+        if image_id is None:
+            return
+        image_id = int(image_id)
+
+        result = usb_artwork.write_artwork_pair(audio_path, image_id, self.pioneer)
         if not result:
             return  # no embedded art — leave existing image FK in place
 
         # Point the image record at our small JPEG so CDJ list-view can find it
         try:
-            img_row = db.get_image_by_id(int(image_id))
+            img_row = db.get_image_by_id(image_id)
             if img_row is not None:
-                img_row.path = usb_artwork.usb_relative_path(int(image_id))
+                img_row.path = usb_artwork.usb_relative_path(image_id)
                 db.update_image(img_row)
         except Exception as exc:
             logger.debug("[OneLibrary] update_image path skipped: %s", exc)
