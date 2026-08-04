@@ -126,8 +126,8 @@ def main():
         descriptors = []
         for i in range(n_tab):
             off = 0x1C + i * 16
-            t, e, f, l = struct.unpack("<IIII", data[off : off + 16])
-            descriptors.append({"type": t, "empty": e, "first": f, "last": l})
+            t, e, first, last = struct.unpack("<IIII", data[off : off + 16])
+            descriptors.append({"type": t, "empty": e, "first": first, "last": last})
 
         # 1. empty_candidate uniqueness (the fix)
         empties = [d["empty"] for d in descriptors]
@@ -177,7 +177,7 @@ def main():
             page = data[pg * page_size : (pg + 1) * page_size]
             if len(page) < 20:
                 continue
-            page_idx, ptype, pnext, pseq = struct.unpack("<IIII", page[4:20])
+            page_idx, _ptype, _pnext, pseq = struct.unpack("<IIII", page[4:20])
             if page_idx == pg and pseq > max_seqpage:
                 max_seqpage = pseq
         results.append((f"header seq ({seq}) >= max page seq ({max_seqpage})", seq >= max_seqpage))

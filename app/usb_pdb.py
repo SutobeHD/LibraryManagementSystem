@@ -1226,10 +1226,8 @@ def write_export_ext_pdb(
         # Categories first (they get IDs in the same id space as tags)
         for cat_id, name in (tag_categories or {}).items():
             builder.add_tag(int(cat_id), name, is_category=True)
-        pos = 0
-        for tag_id, name in (tags or {}).items():
+        for pos, (tag_id, name) in enumerate((tags or {}).items()):
             builder.add_tag(int(tag_id), name, category_id=0, category_pos=pos)
-            pos += 1
         for track_id, tag_id in tag_track_links or []:
             builder.add_tag_track(int(track_id), int(tag_id))
 

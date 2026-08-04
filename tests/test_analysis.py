@@ -13,14 +13,13 @@ import struct
 import sys
 import tempfile
 from pathlib import Path
-from typing import Tuple
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-import numpy as np
+import numpy as np  # noqa: E402
 
 # E2E pipeline tests need librosa (and friends). CI Linux runners don't
 # install the heavy audio stack, so the e2e/kwarg tests skip there. The
@@ -599,7 +598,7 @@ def test_e2e_quick_analysis_faster():
         import time
 
         t0 = time.time()
-        full = run_full_analysis(path)
+        run_full_analysis(path)
         t_full = time.time() - t0
 
         t0 = time.time()

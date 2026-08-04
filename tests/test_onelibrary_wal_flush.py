@@ -17,6 +17,7 @@ Run from repo root: PYTHONIOENCODING=utf-8 python tests/test_onelibrary_wal_flus
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 import sys
 import tempfile
@@ -168,10 +169,8 @@ def main():
             playlists = list(db.get_playlists())
             playlist_contents = []
             for pl in playlists:
-                try:
+                with contextlib.suppress(Exception):
                     playlist_contents.extend(db.get_playlist_contents(pl.id))
-                except Exception:
-                    pass
             print(f"  Total content rows : {len(contents)}")
             print(f"  Non-placeholder    : {len(non_placeholder)}")
             print(f"  Artists            : {len(artists)}")

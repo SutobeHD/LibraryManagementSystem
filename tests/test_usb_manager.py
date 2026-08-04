@@ -231,9 +231,12 @@ class TestLockedSync:
     def test_concurrent_acquire_raises(self, tmp_path: Path) -> None:
         """A second `locked_sync` over the same root while the first
         is still active must raise — that's the whole point."""
-        with locked_sync(tmp_path), pytest.raises(Exception, match="locked"):
-            with locked_sync(tmp_path):
-                pass
+        with (
+            locked_sync(tmp_path),
+            pytest.raises(Exception, match="locked"),
+            locked_sync(tmp_path),
+        ):
+            pass
 
     def test_lock_released_after_exception(self, tmp_path: Path) -> None:
         """Even if the body raises, the lock file must be cleaned up."""

@@ -14,6 +14,7 @@ finding #2 without monkey-patching the route.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -62,10 +63,8 @@ def sandbox_root(tmp_path: Path) -> Iterator[Path]:
         yield root
     finally:
         # Pop the exact instance we added (don't disturb the module's defaults).
-        try:
+        with contextlib.suppress(ValueError):
             ALLOWED_AUDIO_ROOTS.remove(root)
-        except ValueError:
-            pass
 
 
 # ---------------------------------------------------------------------------

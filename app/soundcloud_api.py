@@ -222,7 +222,7 @@ def _sc_get(
                 )
                 raise ValueError(
                     f"SoundCloud returned non-JSON (status 200). Raw: {resp.text[:120]}"
-                )
+                ) from json_err
 
         if resp.status_code in (401, 403):
             logger.error(

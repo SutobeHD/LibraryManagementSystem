@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 import multiprocessing as _mp
 import os
@@ -9,8 +10,9 @@ import threading
 import time
 import traceback
 import urllib.parse
+import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import uvicorn
 from fastapi import (
@@ -25,8 +27,9 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -53,7 +56,7 @@ except ImportError:
     class _KeyringShim:
         """No-op shim when the `keyring` package is unavailable."""
 
-        _store: dict = {}
+        _store: ClassVar[dict] = {}
 
         def get_password(self, service, username):
             return self._store.get(f"{service}:{username}")
@@ -77,28 +80,35 @@ KEYRING_SERVICE = "library_management_system"
 # Keyring entry name for the SoundCloud OAuth bearer token.
 KEYRING_SC_TOKEN = "sc_token"
 
-from . import audio_tags, download_registry, folder_watcher
-from .audio_analyzer import LIBROSA_AVAILABLE, AudioAnalyzer
-from .config import EXPORT_DIR, LOG_DIR, MUSIC_DIR, TEMP_DIR
-from .database import db
-from .phrase_generator import (
+# ── Order-dependent imports (hence the per-line E402 suppressions) ───────────
+# `app.config` reads os.environ at import time (REKORDBOX_ROOT, DB_KEY) and
+# mkdir()s EXPORT_DIR / LOG_DIR / TEMP_DIR / MUSIC_DIR as a side effect. It must
+# therefore be imported *after* the load_dotenv() call above, or a repo-local
+# `.env` is ignored and the directories land relative to the wrong root. Every
+# app-internal import below pulls app.config in transitively, so the whole block
+# stays here. Do not "tidy" these to the top of the file.
+from . import audio_tags, download_registry, folder_watcher  # noqa: E402
+from .audio_analyzer import LIBROSA_AVAILABLE, AudioAnalyzer  # noqa: E402
+from .config import EXPORT_DIR, LOG_DIR, MUSIC_DIR, TEMP_DIR  # noqa: E402
+from .database import db  # noqa: E402
+from .phrase_generator import (  # noqa: E402
     PhraseNotAnalysedError,
     commit_phrase_cues,
     detect_first_downbeat,
     extract_beats_from_db,
     generate_phrase_cues,
 )
-from .playcount_sync import (
+from .playcount_sync import (  # noqa: E402
     diff_playcounts,
     load_usb_sync_meta,
     read_usb_xml_playcounts,
     resolve_playcounts,
     save_usb_sync_meta,
 )
-from .rbep_parser import list_projects as rbep_list_projects
-from .rbep_parser import parse_project as rbep_parse_project
-from .rekordbox_bridge import RekordboxBridge
-from .services import (
+from .rbep_parser import list_projects as rbep_list_projects  # noqa: E402
+from .rbep_parser import parse_project as rbep_parse_project  # noqa: E402
+from .rekordbox_bridge import RekordboxBridge  # noqa: E402
+from .services import (  # noqa: E402
     AudioEngine,
     BeatAnalyzer,
     ImportManager,
@@ -106,14 +116,14 @@ from .services import (
     ProjectManager,
     SettingsManager,
 )
-from .soundcloud_api import (
+from .soundcloud_api import (  # noqa: E402
     AuthExpiredError,
     RateLimitError,
     SoundCloudPlaylistAPI,
     SoundCloudSyncEngine,
 )
-from .soundcloud_downloader import sc_downloader
-from .usb_manager import UsbActions, UsbDetector, UsbProfileManager, UsbSyncEngine
+from .soundcloud_downloader import sc_downloader  # noqa: E402
+from .usb_manager import UsbActions, UsbDetector, UsbProfileManager, UsbSyncEngine  # noqa: E402
 
 # Per-operation lock — prevents race conditions on concurrent sync requests (Criterion 10)
 _sync_lock = asyncio.Lock()
@@ -124,7 +134,7 @@ _sync_lock = asyncio.Lock()
 # leaves our scrubbing formatter intact. Same instance on both handlers
 # guarantees the exc_text cache is scrubbed before any handler emits,
 # regardless of callHandlers iteration order.
-from .logging_utils import RedactingFormatter, safe_error_message_str
+from .logging_utils import RedactingFormatter, safe_error_message_str  # noqa: E402
 
 _log_formatter = RedactingFormatter(fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 _log_file_handler = logging.FileHandler(LOG_DIR / "app.log", encoding="utf-8")
@@ -190,8 +200,8 @@ def validate_audio_path(path_str: str) -> Path:
     """
     try:
         file_path = Path(path_str).resolve()
-    except (ValueError, OSError):
-        raise HTTPException(status_code=400, detail="Invalid file path")
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid file path") from exc
 
     # Check extension
     if file_path.suffix.lower() not in ALLOWED_AUDIO_EXTENSIONS:
@@ -251,9 +261,6 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-Session-Token", "Authorization"],
 )
-
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
 
 
 @app.exception_handler(RequestValidationError)
@@ -355,7 +362,8 @@ class GridReq(BaseModel):
 # Settings-POST hardening — see docs/research/research/evaluated_security-pydantic-extra-allow-blob-write.md
 # Imports are local to this block so the format hook's `ruff check --fix` cannot
 # strip them as "unused" between successive edits.
-import json as _json_caps  # noqa: E402  (kept here to bind the validator's serializer)
+# Kept here to bind the validator's serializer.
+import json as _json_caps  # noqa: E402
 from typing import Annotated as _Annotated  # noqa: E402
 from typing import Literal as _Literal  # noqa: E402
 
@@ -492,33 +500,6 @@ class SmartPlReq(BaseModel):
     label_threshold: int = 3
 
 
-class PlCreateReq(BaseModel):
-    name: str
-    parent_id: str = "ROOT"
-    type: str = "1"  # 0=folder, 1=playlist
-
-
-class PlRenameReq(BaseModel):
-    pid: str
-    name: str
-
-
-class PlDeleteReq(BaseModel):
-    pid: str
-
-
-class PlMoveReq(BaseModel):
-    pid: str
-    parent_id: str = "ROOT"
-    target_id: str | None = None
-    position: str | None = "inside"
-
-
-class PlRemoveTrackReq(BaseModel):
-    pid: str
-    track_id: str
-
-
 class CleanTitlesReq(BaseModel):
     track_ids: list[str]
 
@@ -588,28 +569,10 @@ class RbxImportReq(BaseModel):
     xml_path: str
 
 
-class PlCreateReq(BaseModel):
-    name: str
-    parent_id: str = "ROOT"
-    type: str = "1"  # 0=Folder, 1=Playlist
-
-
-class PlRenameReq(BaseModel):
-    pid: str
-    name: str
-
-
-class PlDeleteReq(BaseModel):
-    pid: str
-
-
-class PlMoveReq(BaseModel):
-    pid: str
-    parent_id: str
-    target_id: str | None = None
-    position: str = "inside"
-
-
+# The live playlist routes bind CreatePlReq / RenamePlReq / DeletePlReq /
+# MovePlReq (defined above). The mirror-image PlCreateReq / PlRenameReq /
+# PlDeleteReq / PlMoveReq family was never wired to a route and is gone;
+# only PlReorderReq + PlRemoveTrackReq from this block are in use.
 class PlReorderReq(BaseModel):
     pid: str
     track_id: str
@@ -635,10 +598,6 @@ class DBModeReq(BaseModel):
 # Removed — do not add another startup handler here.
 
 # --- ENDPOINTS ---
-
-import contextlib
-
-from fastapi import Request
 
 
 def _content_disposition_inline(filename: str) -> str:
@@ -765,7 +724,7 @@ async def get_multiband_waveform(path: str, pps: int = 50):
         return AudioEngine.generate_multiband_waveform(str(file_path), pixels_per_second=pps)
     except Exception as e:
         logger.error(f"Waveform generation failed: {e}")
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
 
 
 class FileRevealReq(BaseModel):
@@ -796,7 +755,7 @@ def file_reveal(r: FileRevealReq):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
 
 
 _FILE_WRITE_EXTENSIONS = {".rbep", ".json", ".txt", ".cue", ".m3u", ".m3u8"}
@@ -821,7 +780,7 @@ async def file_write(r: FileWriteReq):
         try:
             resolved = path.resolve()
         except (ValueError, OSError) as e:
-            raise HTTPException(status_code=400, detail=f"Invalid path: {e}")
+            raise HTTPException(status_code=400, detail=f"Invalid path: {e}") from e
 
         if resolved.suffix.lower() not in _FILE_WRITE_EXTENSIONS:
             raise HTTPException(
@@ -848,7 +807,7 @@ async def file_write(r: FileWriteReq):
         raise
     except Exception as e:
         logger.error(f"File write error: {e}")
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
 
 
 @app.post("/api/xml/clean", dependencies=[Depends(require_session)])
@@ -880,7 +839,7 @@ async def clean_xml(
         raise
     except Exception as e:
         logger.error(f"XML Error: {e}")
-        raise HTTPException(400, safe_error_message(e))
+        raise HTTPException(400, safe_error_message(e)) from e
 
 
 @app.get("/api/genres")
@@ -976,7 +935,7 @@ def merge_metadata(r: MergeReq):
         db.refresh_metadata()
         return {"status": "success"}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, str(e)) from e
 
 
 @app.get("/api/artists")
@@ -1066,12 +1025,20 @@ async def analyze_track(tid: str):
         return result
     except Exception as e:
         logger.error(f"Analysis error: {e}")
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
 
 
 @app.get("/api/audio/stream")
-async def stream_audio(path: str):
-    """Streams an audio file from the local filesystem"""
+async def stream_audio_whole_file(path: str):
+    """Streams an audio file from the local filesystem.
+
+    Distinct from ``GET /api/stream``: that one implements HTTP Range itself
+    for wavesurfer seeking, this one hands the whole file to Starlette's
+    ``FileResponse``. Both are live — ``DawEngine.js`` fetches this one, the
+    waveform components fetch ``/api/stream``. The name used to collide with
+    ``stream_audio`` above, leaving the first definition shadowed at module
+    level (both routes still worked; only the Python symbol was lost).
+    """
     logger.info(f"Stream request for: {path}")
 
     # SECURITY: Validate against allowed audio roots to prevent path traversal
@@ -1112,7 +1079,7 @@ def create_mytag(r: MyTagCreateReq):
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(500, f"Could not create MyTag: {exc}")
+        raise HTTPException(500, f"Could not create MyTag: {exc}") from exc
 
 
 @app.delete("/api/mytags/{tag_id}", dependencies=[Depends(require_session)])
@@ -1123,7 +1090,7 @@ def delete_mytag(tag_id: str):
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(500, f"Could not delete MyTag: {exc}")
+        raise HTTPException(500, f"Could not delete MyTag: {exc}") from exc
 
 
 @app.get("/api/track/{tid}/mytags")
@@ -1139,7 +1106,7 @@ def set_track_mytags(tid: str, r: TrackMyTagsReq):
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(500, f"Could not update MyTags: {exc}")
+        raise HTTPException(500, f"Could not update MyTags: {exc}") from exc
 
 
 @app.post("/api/track/cues/save", dependencies=[Depends(require_session)])
@@ -1185,7 +1152,7 @@ def update_track(tid: str, r: TrackUpdateReq):
         raise
     except Exception as e:
         logger.error(f"Update failed for {tid}: {e}")
-        raise HTTPException(500, f"Update failed: {e!s}")
+        raise HTTPException(500, f"Update failed: {e!s}") from e
 
 
 @app.patch("/api/tracks/batch", dependencies=[Depends(require_session)])
@@ -1283,7 +1250,7 @@ def remove_track_pl(r: PlRemoveTrackReq):
         return {"status": "success"}
     except Exception as e:
         logger.error(f"Failed to remove track {r.track_id} from PL {r.pid}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.delete("/api/track/{tid}", dependencies=[Depends(require_session)])
@@ -1305,7 +1272,7 @@ def reorder_pl_track(r: PlReorderReq):
         raise
     except Exception as e:
         logger.error(f"Reorder error: {e}")
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
 
 
 # ─── Smart Playlist Endpoints ─────────────────────────────────────────────
@@ -1333,7 +1300,7 @@ def create_smart_pl(r: SmartPlaylistCreateReq):
         raise
     except Exception as e:
         logger.error(f"Smart playlist create failed: {e}")
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
 
 
 @app.post("/api/playlists/smart/update", dependencies=[Depends(require_session)])
@@ -1342,7 +1309,7 @@ def update_smart_pl(r: SmartPlaylistUpdateReq):
         ok = db.update_smart_playlist(r.pid, r.criteria)
         return {"status": "success" if ok else "error"}
     except Exception as e:
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
 
 
 @app.get("/api/playlists/smart/{pid}/evaluate")
@@ -1352,7 +1319,7 @@ def evaluate_smart_pl(pid: str):
         return db.evaluate_smart_playlist(pid)
     except Exception as e:
         logger.error(f"Smart eval failed: {e}")
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
 
 
 class UsbHistoryReq(BaseModel):
@@ -1400,7 +1367,7 @@ def read_usb_history(r: UsbHistoryReq):
         raise
     except Exception as e:
         logger.error(f"USB history read failed: {e}")
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
 
 
 @app.post("/api/playlists/folder/create", dependencies=[Depends(require_session)])
@@ -1421,7 +1388,7 @@ def create_folder_pl(r: CreatePlReq):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
 
 
 # --- RESTORED ENDPOINTS ---
@@ -1495,10 +1462,10 @@ async def batch_comment(r: BatchCommentReq):
         raise HTTPException(504, detail="Batch worker timed out after 600s") from e
     except subprocess.CalledProcessError as e:
         logger.error(f"Batch worker failed: {e.output}")
-        raise HTTPException(500, "Batch processing failed. Check logs for details.")
+        raise HTTPException(500, "Batch processing failed. Check logs for details.") from e
     except Exception as e:
         logger.error(f"Batch comment error: {e}")
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
 
 
 @app.post("/api/library/clean-titles", dependencies=[Depends(require_session)])
@@ -1586,8 +1553,8 @@ def _scope_to_dict(s: _FormatSwapScope) -> dict[str, Any]:
         # we only confirm parent-of-paths lies under ALLOWED_AUDIO_ROOTS.
         try:
             requested = Path(s.path).resolve()
-        except (ValueError, OSError):
-            raise HTTPException(status_code=400, detail="Invalid scope.path")
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=400, detail="Invalid scope.path") from exc
         if not any(requested.is_relative_to(root) for root in ALLOWED_AUDIO_ROOTS):
             # Permit if every existing track under that prefix is db-known.
             known_paths = (
@@ -1986,7 +1953,7 @@ async def rbx_export(r: RbxSyncReq):
         }
     except Exception as e:
         logger.error(f"Rekordbox export failed: {e}")
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
 
 
 @app.post("/api/rekordbox/import", dependencies=[Depends(require_session)])
@@ -2004,7 +1971,7 @@ async def rbx_import(r: RbxImportReq):
         }
     except Exception as e:
         logger.error(f"Rekordbox import failed: {e}")
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
 
 
 @app.post("/api/library/smart-playlists", dependencies=[Depends(require_session)])
@@ -2369,7 +2336,7 @@ def save_project(r: ProjectReq):
         ProjectManager.save_project(r.name, r.data)
         return {"status": "success"}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, str(e)) from e
 
 
 @app.get("/api/projects/{name}")
@@ -2377,11 +2344,11 @@ def load_project_endpoint(name: str):
     try:
         data = ProjectManager.load_project(name)
         return data
-    except FileNotFoundError:
-        raise HTTPException(404, "Project not found")
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project not found") from exc
     except Exception as e:
         logger.error(f"Project load error: {e}")
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
 
 
 @app.post("/api/artist/soundcloud", dependencies=[Depends(require_session)])
@@ -2408,7 +2375,7 @@ async def slice_endpoint(r: SliceReq):
         raise
     except Exception as e:
         logger.error(f"Slice endpoint error: {e}")
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
 
 
 @app.post("/api/audio/render", dependencies=[Depends(require_session)])
@@ -2434,7 +2401,7 @@ async def render(r: ExportRequest):
         raise
     except Exception as e:
         logger.error(f"Render failed: {e}")
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
 
 
 def _run_import_analysis(dest: Path, track_task_id: str) -> None:
@@ -3316,7 +3283,7 @@ def merge_duplicates(r: DupMergeReq):
         return {"status": "success", "kept": keep_id, "removed": len(remove_ids)}
     except Exception as e:
         logger.error(f"Merge failed: {e}")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, str(e)) from e
 
 
 @app.post("/api/tools/duplicates/merge-all", dependencies=[Depends(require_session)])
@@ -3356,7 +3323,7 @@ def merge_all_duplicates():
         return {"status": "success", "groups_merged": merged}
     except Exception as e:
         logger.error(f"Merge all failed: {e}")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, str(e)) from e
 
 
 # ─── RBEP Project API ──────────────────────────────────────────────────────────
@@ -3438,7 +3405,7 @@ async def analyze_track_full(tid: str, req: AnalyzeFullReq = AnalyzeFullReq()):
         raise
     except Exception as e:
         logger.error(f"analyze-full failed for {tid}: {e}", exc_info=True)
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
 
 
 @app.post("/api/library/analyze-batch", dependencies=[Depends(require_session)])
@@ -3597,11 +3564,11 @@ async def soundcloud_download(data: ScDownloadRequest, request: Request):
                 permalink_url,
                 auth_token,
             )
-        except AuthExpiredError:
-            raise HTTPException(status_code=401, detail="SoundCloud auth token expired.")
+        except AuthExpiredError as exc:
+            raise HTTPException(status_code=401, detail="SoundCloud auth token expired.") from exc
         except Exception as exc:
             logger.error("[SC-DL API] resolve_track_from_url failed: %s", exc)
-            raise HTTPException(status_code=502, detail=f"Could not resolve SC URL: {exc}")
+            raise HTTPException(status_code=502, detail=f"Could not resolve SC URL: {exc}") from exc
 
         if not track_meta:
             raise HTTPException(
@@ -3666,11 +3633,11 @@ async def soundcloud_download_playlist(r: ScDownloadPlaylistReq):
                 r.playlist_id,
                 auth_token,
             )
-    except AuthExpiredError:
-        raise HTTPException(401, "auth_expired")
+    except AuthExpiredError as exc:
+        raise HTTPException(401, "auth_expired") from exc
     except Exception as e:
         logger.error(f"[SC-DL-PL] Failed to fetch tracks: {e}")
-        raise HTTPException(502, f"Could not fetch playlist tracks: {e}")
+        raise HTTPException(502, f"Could not fetch playlist tracks: {e}") from e
 
     if not sc_tracks:
         return {
@@ -3779,7 +3746,7 @@ async def get_download_history(
         return {"status": "ok", "data": rows}
     except Exception as exc:
         logger.error("[SC History] get_history failed: %s", exc)
-        raise HTTPException(status_code=500, detail="Failed to load history.")
+        raise HTTPException(status_code=500, detail="Failed to load history.") from exc
 
 
 @app.get("/api/soundcloud/history/stats")
@@ -3791,7 +3758,7 @@ async def get_download_stats():
         return {"status": "ok", "data": stats}
     except Exception as exc:
         logger.error("[SC History] get_stats failed: %s", exc)
-        raise HTTPException(status_code=500, detail="Failed to load stats.")
+        raise HTTPException(status_code=500, detail="Failed to load stats.") from exc
 
 
 @app.get("/api/soundcloud/check/{sc_track_id}")
@@ -3972,15 +3939,17 @@ async def get_soundcloud_playlists(request: Request):
 
     except AuthExpiredError as e:
         logger.warning(f"[SC] Auth expired / invalid token on playlists fetch: {e}")
-        raise HTTPException(401, detail="auth_expired")
+        raise HTTPException(401, detail="auth_expired") from e
 
     except RateLimitError as e:
         logger.warning(f"[SC] Rate limited on playlists fetch: {e}")
-        raise HTTPException(429, detail="SoundCloud rate limit hit. Please wait and try again.")
+        raise HTTPException(
+            429, detail="SoundCloud rate limit hit. Please wait and try again."
+        ) from e
 
     except Exception as e:
         logger.error(f"[SC] Failed to fetch playlists: {e}", exc_info=True)
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
 
 
 @app.get("/api/soundcloud/me")
@@ -4004,11 +3973,11 @@ async def get_soundcloud_me(request: Request):
 
     except AuthExpiredError as e:
         logger.warning(f"[SC] Auth expired on /me fetch: {e}")
-        raise HTTPException(401, detail="auth_expired")
+        raise HTTPException(401, detail="auth_expired") from e
 
     except Exception as e:
         logger.error(f"[SC] Failed to fetch user profile: {e}", exc_info=True)
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
 
 
 class ScSyncReq(BaseModel):
@@ -4053,10 +4022,10 @@ async def sync_soundcloud_playlists(r: ScSyncReq, request: Request):
             }
         except AuthExpiredError as e:
             logger.warning(f"[SC] Auth expired during sync: {e}")
-            raise HTTPException(401, detail="auth_expired")
+            raise HTTPException(401, detail="auth_expired") from e
         except Exception as e:
             logger.error(f"[SC] Sync failed: {e}")
-            raise HTTPException(500, safe_error_message(e))
+            raise HTTPException(500, safe_error_message(e)) from e
 
 
 class ScPreviewReq(BaseModel):
@@ -4103,11 +4072,11 @@ async def preview_soundcloud_matches(r: ScPreviewReq, request: Request):
         }
     except HTTPException:
         raise
-    except AuthExpiredError:
-        raise HTTPException(401, detail="auth_expired")
+    except AuthExpiredError as exc:
+        raise HTTPException(401, detail="auth_expired") from exc
     except Exception as e:
         logger.error(f"[SC] preview-matches failed: {e}", exc_info=True)
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
 
 
 @app.post("/api/soundcloud/sync-all", dependencies=[Depends(require_session)])
@@ -4139,10 +4108,10 @@ async def sync_all_soundcloud(request: Request):
             }
         except AuthExpiredError as e:
             logger.warning(f"[SC] Auth expired during sync-all: {e}")
-            raise HTTPException(401, detail="auth_expired")
+            raise HTTPException(401, detail="auth_expired") from e
         except Exception as e:
             logger.error(f"[SC] Sync-all failed: {e}")
-            raise HTTPException(500, safe_error_message(e))
+            raise HTTPException(500, safe_error_message(e)) from e
 
 
 class ScMergeReq(BaseModel):
@@ -4283,7 +4252,7 @@ async def merge_soundcloud_playlists(r: ScMergeReq, request: Request):
         raise
     except Exception as e:
         logger.error(f"[SC] Merge failed: {e}", exc_info=True)
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -4355,7 +4324,7 @@ async def usb_playcount_diff(usb_root: str, usb_xml_path: str):
         raise
     except Exception as exc:
         logger.error("[USB-PC] playcount diff error: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/api/usb/playcount/resolve", dependencies=[Depends(require_session)])
@@ -4402,7 +4371,7 @@ async def usb_playcount_resolve(body: PlayCountResolveRequest):
         raise
     except Exception as exc:
         logger.error("[USB-PC] playcount resolve error: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -4495,7 +4464,7 @@ async def phrase_generate(body: PhraseGenerateRequest):
         raise
     except Exception as exc:
         logger.error("[PHRASE] generate error: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/api/phrase/commit", dependencies=[Depends(require_session)])
@@ -4535,12 +4504,12 @@ async def phrase_commit(body: PhraseCommitRequest):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except RuntimeError as exc:
         logger.error("[PHRASE] commit runtime error: %s", exc)
-        raise HTTPException(status_code=503, detail=str(exc))
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("[PHRASE] commit error: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 # ── Phrase batch (background job over many tracks) ──────────────────────────────
@@ -4787,8 +4756,6 @@ async def phrase_batch_start(body: PhraseBatchStartRequest, background_tasks: Ba
     Request body: {scope, phrase_length?, align_downbeat?, include_bar_markers?}
     Returns: {status, data: {job_id, total}}
     """
-    import uuid
-
     if not db.loaded:
         raise HTTPException(status_code=400, detail="Library not loaded")
 
@@ -4916,7 +4883,6 @@ def _fingerprint_python_fallback(path: str) -> bytes | None:
         # Try librosa first for actual PCM decoding
         try:
             import librosa  # type: ignore
-            import numpy as np
 
             y, _ = librosa.load(path, sr=11025, mono=True, duration=30.0)
             raw = (y * 32768).astype("int16").tobytes()
@@ -4959,7 +4925,7 @@ def _group_duplicates(
         length = min(len(a), len(b))
         if length < 4:
             return 0.0
-        diff = sum(bin(x ^ y).count("1") for x, y in zip(a[:length], b[:length]))
+        diff = sum(bin(x ^ y).count("1") for x, y in zip(a[:length], b[:length], strict=True))
         return 1.0 - diff / (length * 32)
 
     for i, p1 in enumerate(paths):
@@ -5103,8 +5069,6 @@ async def duplicates_scan(body: DuplicateScanRequest, background_tasks: Backgrou
     Request body: {track_paths: [...]}
     Returns: {status, data: {job_id, total}}
     """
-    import uuid
-
     if not isinstance(body.track_paths, list) or len(body.track_paths) == 0:
         raise HTTPException(status_code=400, detail="track_paths must be a non-empty list")
 
@@ -5216,8 +5180,8 @@ async def duplicates_merge(body: DuplicateMergeRequest):
             if master_id:
                 try:
                     db.save_xml()  # persist deletions first
-                except Exception:
-                    pass
+                except (OSError, RuntimeError, ValueError) as exc:
+                    logger.warning("[DUP] save_xml after merge failed: %s", exc)
 
         logger.info(
             "[DUP] merge complete: removed=%d merged_play_count=%d",
@@ -5236,7 +5200,7 @@ async def duplicates_merge(body: DuplicateMergeRequest):
         raise
     except Exception as exc:
         logger.error("[DUP] merge error: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 if __name__ == "__main__":

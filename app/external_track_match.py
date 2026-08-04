@@ -196,7 +196,7 @@ _NON_WORD_RE = re.compile(r"[^\w\s]")
 _FEAT_RE = re.compile(r"\s+(feat\.?|ft\.?|featuring|with)\s+.*$", re.IGNORECASE)
 _TAIL_PAREN_RE = re.compile(r"\s*[(\[][^()\[\]]*[)\]]\s*$")
 _TRAILING_DASH_VARIANT_RE = re.compile(
-    r"\s[-–—]\s.*$",  # noqa: RUF001 - en/em dashes are real title separators
+    r"\s[-–—]\s.*$",  # en/em dashes are real title separators
 )
 
 
@@ -258,7 +258,7 @@ _COMPOUND_RE = re.compile(
     re.IGNORECASE,
 )
 _TRAILING_DASH_TAG_RE = re.compile(
-    r"\s[-–—]\s(?P<v>Extended|Radio|Club|Dub|Instrumental|Acapella|VIP|Original)"  # noqa: RUF001
+    r"\s[-–—]\s(?P<v>Extended|Radio|Club|Dub|Instrumental|Acapella|VIP|Original)"
     r"(?:\s+(?:Mix|Edit|Version))?\s*$",
     re.IGNORECASE,
 )

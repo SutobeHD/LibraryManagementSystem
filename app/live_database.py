@@ -147,7 +147,7 @@ class LiveRekordboxDB:
 
         self.lyricist_map = {}
         try:
-            self.lyricist_map = {l.id: l.name for l in self.db.get_lyricists()}
+            self.lyricist_map = {lyr.id: lyr.name for lyr in self.db.get_lyricists()}
         except Exception as e:
             logger.debug("live_database: lyricist map unavailable (%s)", e)
 
@@ -555,7 +555,7 @@ class LiveRekordboxDB:
         ]
 
     def get_tracks_by_label(self, aid: str) -> list[dict[str, Any]]:
-        label_name = next((l["name"] for l in self.get_all_labels() if l["id"] == aid), None)
+        label_name = next((lb["name"] for lb in self.get_all_labels() if lb["id"] == aid), None)
         if not label_name:
             return []
         return [
@@ -602,10 +602,14 @@ class LiveRekordboxDB:
 
             # Smart Unwrap: Hoist children if root is a generic container
             # (root.get("Name") may be None for an unnamed playlist → guard .lower)
-            if (root.get("Name") or "").lower() in ["root", "library", "collection", "playlists"]:
-                if root["Children"]:
-                    logger.info(f"Hoisting children of generic root: {root['Name']}")
-                    return root["Children"]
+            if (root.get("Name") or "").lower() in [
+                "root",
+                "library",
+                "collection",
+                "playlists",
+            ] and root["Children"]:
+                logger.info(f"Hoisting children of generic root: {root['Name']}")
+                return root["Children"]
 
         return tree
 
@@ -875,7 +879,9 @@ class LiveRekordboxDB:
             error_msg = str(e)
             if "Path is not unique" in error_msg:
                 logger.warning(f"Duplicate track path: {path}")
-                raise ValueError(f"Track already exists in Rekordbox: {os.path.basename(path)}")
+                raise ValueError(
+                    f"Track already exists in Rekordbox: {os.path.basename(path)}"
+                ) from e
 
             logger.error(f"Failed to add track to live DB: {e}")
             raise e

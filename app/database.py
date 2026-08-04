@@ -6,7 +6,7 @@ import time
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from contextlib import contextmanager
-from functools import lru_cache, wraps
+from functools import wraps
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
@@ -64,12 +64,17 @@ class RekordboxXMLDB:
         self.artists = []
         self.genres = []
         self.loaded = False
+        self._labels_cache: list[dict] | None = None
+        self._albums_cache: list[dict] | None = None
 
     def load_xml(self, path: str):
         try:
             tree = ET.parse(path)
             root = tree.getroot()
             self.xml_path = Path(path)
+            # Reloading a different XML into a live instance must not serve
+            # the previous library's label/album rollups.
+            self._invalidate_group_caches()
 
             # PARSE COLLECTION
             collection = root.find("COLLECTION")
@@ -262,30 +267,44 @@ class RekordboxXMLDB:
             for i, (name, count) in enumerate(sorted(genre_counts.items()))
         ]
 
-    @lru_cache(maxsize=1)
+    # Per-instance memoisation, deliberately NOT functools.lru_cache: an
+    # lru_cache on a method keys on `self`, so the cache holds a strong
+    # reference to every library object it ever saw. The sidecar swaps
+    # RekordboxDB instances on every library reload, so each swapped-out
+    # library stayed alive for the process lifetime.
+    def _invalidate_group_caches(self) -> None:
+        """Drop memoised label/album rollups after a track mutation."""
+        self._labels_cache = None
+        self._albums_cache = None
+
     def get_all_labels(self):
+        if self._labels_cache is not None:
+            return self._labels_cache
         label_counts = defaultdict(int)
         for t in self.tracks.values():
             label = t.get("Label")
             if label:
                 normalized = self._normalize_artist_name(label)
                 label_counts[normalized] += 1
-        return [
+        self._labels_cache = [
             {"id": f"lbl_{i}", "name": name, "track_count": count}
             for i, (name, count) in enumerate(sorted(label_counts.items()))
         ]
+        return self._labels_cache
 
-    @lru_cache(maxsize=1)
     def get_all_albums(self):
+        if self._albums_cache is not None:
+            return self._albums_cache
         album_counts = defaultdict(int)
         for t in self.tracks.values():
             album = t.get("Album")
             if album:
                 album_counts[album] += 1
-        return [
+        self._albums_cache = [
             {"id": f"alb_{i}", "name": name, "track_count": count}
             for i, (name, count) in enumerate(sorted(album_counts.items()))
         ]
+        return self._albums_cache
 
     def _split_artists(self, artist_str):
         if not artist_str:
@@ -338,7 +357,7 @@ class RekordboxXMLDB:
         ]
 
     def get_tracks_by_label(self, aid):
-        label_name = next((l["name"] for l in self.get_all_labels() if l["id"] == aid), None)
+        label_name = next((lb["name"] for lb in self.get_all_labels() if lb["id"] == aid), None)
         if not label_name:
             return []
         return [
@@ -358,8 +377,7 @@ class RekordboxXMLDB:
         track_data["id"] = tid
         self.tracks[tid] = track_data
         self.save_xml()
-        self.get_all_labels.cache_clear()
-        self.get_all_albums.cache_clear()
+        self._invalidate_group_caches()
         logger.info(f"Added track {tid} to XML library.")
         return tid
 
@@ -629,8 +647,7 @@ class RekordboxXMLDB:
                     if str(t.get("id") or t.get("TrackID")) != tid
                 ]
             self.save_xml()
-            self.get_all_labels.cache_clear()
-            self.get_all_albums.cache_clear()
+            self._invalidate_group_caches()
             logger.info(f"Deleted track {tid} from XML library.")
             return True
         return False
@@ -648,9 +665,10 @@ class RekordboxXMLDB:
                 t_node.set("AverageBpm", str(track.get("BPM") or 0))
                 p = track.get("path", "")
                 safe_path = p.replace(os.sep, "/").replace(" ", "%20")
-                if not safe_path.startswith("file://") and not safe_path.startswith("http"):
-                    if ":" in safe_path or safe_path.startswith("/"):
-                        safe_path = "file://localhost/" + safe_path.lstrip("/")
+                if not safe_path.startswith(("file://", "http")) and (
+                    ":" in safe_path or safe_path.startswith("/")
+                ):
+                    safe_path = "file://localhost/" + safe_path.lstrip("/")
                 t_node.set("Location", safe_path)
                 t_node.set("Tonality", track.get("Key") or "")
                 t_node.set("Genre", track.get("Genre") or "")
@@ -850,13 +868,16 @@ class RekordboxDB:
     def set_mode(self, mode: str) -> bool:
         if mode not in ["xml", "live"]:
             return False
-        if mode == "live" and not self.live_db_path.exists():
-            # auto-create our private standalone master.db so Live works without Rekordbox
-            if not self.ensure_standalone_master_db():
-                logger.error(
-                    "Cannot switch to live mode: master.db unavailable and standalone creation failed"
-                )
-                return False
+        # auto-create our private standalone master.db so Live works without Rekordbox
+        if (
+            mode == "live"
+            and not self.live_db_path.exists()
+            and not self.ensure_standalone_master_db()
+        ):
+            logger.error(
+                "Cannot switch to live mode: master.db unavailable and standalone creation failed"
+            )
+            return False
         self.mode = mode
         logger.info(f"Switched to mode: {self.mode}")
         return True

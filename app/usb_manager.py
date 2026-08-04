@@ -42,6 +42,24 @@ def _is_excluded_playlist(name: str) -> bool:
     return (name or "").strip().lower() in EXCLUDED_USB_PLAYLISTS
 
 
+# Streaming-service pseudo-tracks store a URI scheme in folder_path instead of
+# a real filesystem path; there is no file to copy onto the stick.
+STREAMING_URI_SCHEMES: frozenset = frozenset(
+    {"soundcloud", "spotify", "tidal", "beatport", "http", "https"}
+)
+
+
+def _is_streaming_pseudo_path(path: str) -> bool:
+    """True for ``soundcloud:tracks:123`` / ``https://…`` style pseudo-paths.
+
+    Deliberately does NOT match Windows drive letters (``C:/``, ``C:\\``):
+    the scheme is only read when the colon is not in drive-letter position.
+    """
+    if ":" not in path[:12] or path[1:3] in (":\\", ":/"):
+        return False
+    return path.split(":", 1)[0].lower() in STREAMING_URI_SCHEMES
+
+
 @contextmanager
 def locked_sync(usb_root: Path):
     """Req 24: Prevent concurrent access via explicit lock file."""
@@ -1530,25 +1548,9 @@ class UsbSyncEngine:
                 local_path_str = getattr(t, "folder_path", "") or ""
                 local_file = getattr(t, "file_name_l", "") or os.path.basename(local_path_str)
 
-                # Skip streaming-service pseudo-tracks (SoundCloud, Spotify, etc.)
-                # — they store a URI scheme in folder_path instead of a real path.
-                if (
-                    ":" in local_path_str[:12]
-                    and local_path_str[1:3] != ":\\"
-                    and local_path_str[1:3] != ":/"
-                ):
-                    # Matches soundcloud:tracks:123, spotify:track:abc, etc.
-                    # but NOT Windows drive letters like "C:/" or "C:\"
-                    if local_path_str.split(":", 1)[0].lower() in (
-                        "soundcloud",
-                        "spotify",
-                        "tidal",
-                        "beatport",
-                        "http",
-                        "https",
-                    ):
-                        skipped_streaming += 1
-                        continue
+                if _is_streaming_pseudo_path(local_path_str):
+                    skipped_streaming += 1
+                    continue
 
                 # Req 30: Resolve symlinks to avoid infinite loops and get absolute real paths
                 try:
@@ -1575,7 +1577,7 @@ class UsbSyncEngine:
 
                         # Req 16: ENOSPC / Disk Full (Win: 112, 39, Unix: 28)
                         if err_code in (112, 39, 28) or "No space left" in str(e):
-                            raise Exception("Device is full (ENOSPC). Sync aborted.")
+                            raise Exception("Device is full (ENOSPC). Sync aborted.") from e
 
                         # Req 22: Disconnect detection — ENOENT (errno 2) alone is
                         # ambiguous: it fires for illegal filenames (Windows strips
@@ -1594,7 +1596,9 @@ class UsbSyncEngine:
                         except Exception:
                             drive_gone = True
                         if err_code in disconnect_codes or drive_gone:
-                            raise Exception("USB Drive disconnected or inaccessible. Sync aborted.")
+                            raise Exception(
+                                "USB Drive disconnected or inaccessible. Sync aborted."
+                            ) from e
 
                         # Req 25: OS File Locks
                         if isinstance(e, PermissionError) or err_code in (5, 32):
@@ -1763,18 +1767,9 @@ class UsbSyncEngine:
                 skipped_missing += 1
                 continue
 
-            # Skip streaming pseudo-paths
-            if ":" in local_path_str[:12] and local_path_str[1:3] not in (":\\", ":/"):
-                if local_path_str.split(":", 1)[0].lower() in (
-                    "soundcloud",
-                    "spotify",
-                    "tidal",
-                    "beatport",
-                    "http",
-                    "https",
-                ):
-                    skipped_streaming += 1
-                    continue
+            if _is_streaming_pseudo_path(local_path_str):
+                skipped_streaming += 1
+                continue
 
             try:
                 local_path = Path(local_path_str).resolve(strict=False)
@@ -1796,9 +1791,9 @@ class UsbSyncEngine:
                     logger.warning(f"[USB-Legacy-XML] Copy failed for {local_file}: {e}")
                     err_code = getattr(e, "winerror", None) or getattr(e, "errno", None)
                     if err_code in (112, 39, 28) or "No space left" in str(e):
-                        raise Exception("Device is full (ENOSPC). Sync aborted.")
+                        raise Exception("Device is full (ENOSPC). Sync aborted.") from e
                     if (err_code in (21, 31, 1167, 3)) or not self.usb_root.exists():
-                        raise Exception("USB Drive disconnected. Sync aborted.")
+                        raise Exception("USB Drive disconnected. Sync aborted.") from e
                     continue
             else:
                 skipped_missing += 1

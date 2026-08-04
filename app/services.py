@@ -12,7 +12,7 @@ import wave
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import psutil
 from mutagen.flac import FLAC
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 
 class XMLProcessor:
-    REMOVE_STRINGS = ["(Original Mix)", "(Extended Mix)", "Original Mix"]
+    REMOVE_STRINGS: ClassVar[list[str]] = ["(Original Mix)", "(Extended Mix)", "Original Mix"]
     MIN_TRACKS_THRESHOLD = 5
     MISSING_ARTIST_NAME = "!!SERVICE!!"
     MISSING_ARTIST_COLOR_ID = "8"
@@ -456,7 +456,7 @@ class AudioEngine:
             return new_tid
         except Exception as e:
             logger.error(f"Render failed: {e}")
-            raise RuntimeError(f"Render failed: {e}")
+            raise RuntimeError(f"Render failed: {e}") from e
         finally:
             # STABILITY: Always clean up temp files, even on error
             for tf in temp_files:
@@ -622,7 +622,7 @@ class LibraryTools:
             counts[key].append(tid)
 
         duplicates = []
-        for key, ids in counts.items():
+        for ids in counts.values():
             if len(ids) > 1:
                 duplicates.append(
                     {
@@ -771,7 +771,7 @@ class LibraryTools:
 
 class SettingsManager:
     CONFIG = Path("settings.json")
-    DEFAULT = {
+    DEFAULT: ClassVar[dict[str, Any]] = {
         "default_export_format": "wav",
         "default_export_dir": "",  # If empty, falls back to EXPORT_DIR (./exports). User can pick any folder.
         "theme": "dark",
@@ -1027,9 +1027,8 @@ class BeatAnalyzer:
         try:
             import librosa
             import numpy as np
-            from scipy.ndimage import gaussian_filter1d
-        except ImportError:
-            raise RuntimeError("Audio analysis dependencies missing (librosa, scipy).")
+        except ImportError as exc:
+            raise RuntimeError("Audio analysis dependencies missing (librosa, numpy).") from exc
 
         try:
             y, sr = librosa.load(path, sr=None)
@@ -1102,7 +1101,7 @@ class BeatAnalyzer:
             }
         except Exception as e:
             logger.error(f"Legacy analysis failed for {path}: {e}", exc_info=True)
-            raise RuntimeError(f"Audio analysis failed: {e!s}")
+            raise RuntimeError(f"Audio analysis failed: {e!s}") from e
 
     @staticmethod
     def detect_key(y, sr):

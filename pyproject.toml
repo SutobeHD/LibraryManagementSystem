@@ -71,6 +71,17 @@ ignore = [
     "UP007",  # Optional[X] vs X | None — keep Optional for clarity on 3.10
 ]
 
+# RUF001/002/003 (ambiguous unicode) stay ON — a Cyrillic `а` smuggled into an
+# identifier or a path string is exactly the bug they exist to catch. These
+# three confusables are load-bearing here and are allowed explicitly rather
+# than by muting the whole rule:
+#   –  EN DASH   — a real "Artist – Title" filename/tag delimiter the parsers
+#                  split on (app/audio_tags.py, app/services.py), plus prose
+#                  ranges like "10–2048"
+#   —  EM DASH   — the house comment style throughout app/ and docs/
+#   ×  MULT SIGN — dimension notation in comments ("512×512", "2× oversample")
+allowed-confusables = ["–", "—", "×"]
+
 [tool.ruff.lint.per-file-ignores]
 # Tests can be relaxed — fixtures shadow imports, asserts are bare, etc.
 "tests/**/*.py" = ["B011", "F401", "F811"]

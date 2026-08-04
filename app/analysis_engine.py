@@ -27,7 +27,7 @@ import logging
 import os
 import warnings
 from concurrent.futures import Future, ProcessPoolExecutor
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 
@@ -2166,7 +2166,7 @@ class AnalysisEngine:
     """
 
     _executor: ProcessPoolExecutor | None = None
-    _tasks: dict[str, Future] = {}
+    _tasks: ClassVar[dict[str, Future]] = {}
 
     @classmethod
     def get_executor(cls):
