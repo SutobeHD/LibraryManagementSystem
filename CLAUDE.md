@@ -54,17 +54,26 @@ cargo test --manifest-path src-tauri/Cargo.toml     # Rust
 node --experimental-vm-modules <test_file>          # frontend Mocha
 
 # Audit / lint
-npm run audit             # npm audit + signatures
-npm run lint:lockfile     # lockfile-lint
-ruff check app/ tests/    # Python
-cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings  # Rust
-npx eslint frontend/src   # Frontend
+npm run audit                          # npm audit + signatures
+npm run lint:lockfile                  # lockfile-lint
+ruff check app/ tests/ scripts/        # Python lint
+ruff format --check app/ tests/ scripts/
+mypy app/                              # Python types
+cargo fmt --manifest-path src-tauri/Cargo.toml --check
+cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings  # Rust (needs a Windows checkout)
+npm run lint --prefix frontend         # eslint, --max-warnings=0
+npm run format:check --prefix frontend
 
 # Cleanup
 npm run cleanup           # kill anything on :8000 / :5173
 ```
 
 **Fresh clone / new worktree — install deps FIRST.** `tauri` and `vite` live in `node_modules/.bin`; a fresh tree has none → "command not found". Run `npm install` (root) **and** `npm install --prefix frontend` before any dev/build. For UI verification prefer `npm run dev:full` (browser, no build) — `npm run tauri dev` / `tauri build` additionally need the bundled Python sidecar binary. When a change needs in-app checking, hand the user a paste-ready `cd <path> && npm run dev:full` instead of waiting to be asked.
+
+**Every gate above is blocking in CI except `cargo clippy`** (it needs a full
+Tauri build, which only the Windows runner can do — see `docs/QUALITY_GATES.md`).
+Baselines are zero. If you need to skip a finding, suppress it *at the site* with
+a stated reason; never re-add `|| true` to `ci.yml`.
 
 Full tooling reference in `.claude/rules/tooling.md`.
 
@@ -99,6 +108,7 @@ Regenerate L1/L2: `python scripts/regen_maps.py` or `/regen-maps`.
 ### Reference docs
 
 - **`docs/SECURITY.md`** — Schicht-A pinning, threat model, accepted risks.
+- **`docs/QUALITY_GATES.md`** — what CI enforces and why clippy is the one exemption. **Read before touching `ci.yml`, `pyproject.toml` lint config, or adding any lint suppression.**
 - **`docs/PROJECT_OVERVIEW.md`** — high-level overview.
 - **`docs/NAMING_MAP.md`** — v0.0.2 rename refactor audit trail.
 - **`CHANGELOG.md`** — what shipped when.

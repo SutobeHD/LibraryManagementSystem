@@ -2,6 +2,58 @@
 
 ## [Unreleased]
 
+- Quality-gate sweep — every CI gate driven to zero and made blocking.
+  Full write-up incl. baselines and judgement calls: `docs/QUALITY_GATES.md`.
+  - **CI:** `ruff check`, `ruff format --check`, `mypy`, eslint and prettier all
+    ran with `|| true` and could never fail a build. Baselines: ruff 139
+    (+15 in `scripts/`, which was linted by nothing at all), ruff-format 8
+    files, mypy 154, eslint 5 errors + 195 warnings, prettier 111 files,
+    `cargo fmt` 9 files. All now 0 and blocking. `cargo fmt --check` added as a
+    step. `cargo clippy` stays non-blocking — it needs a full Tauri build
+    (gdk-3.0/webkit2gtk), so its warnings cannot be cleared from a Linux
+    checkout; the comment in `ci.yml` now says so instead of implying neglect.
+  - **Pinning:** CI installed `ruff`/`mypy` unpinned while `.pre-commit-config.yaml`
+    pinned ruff v0.8.6 — the hook and CI disagreed about "clean", and any
+    upstream release could redden a now-blocking build. Both pinned to
+    `ruff==0.15.8` / `mypy==1.19.1`.
+  - Fixed: `POST /api/library/format-swap/execute` raised `NameError` on every
+    call — `uuid.uuid4()` with `uuid` imported only inside two other functions.
+  - Fixed: eight methods were called on the `RekordboxDB` facade that it never
+    defined. It has no `__getattr__`, so each was an `AttributeError` at the
+    call site. Hot-cue save (`POST /api/track/cues/save`) and beatgrid save
+    (`POST /api/track/grid/save`) — both called by the waveform/region editors —
+    returned 500 on every use, as did XML upload, the analysis-to-DB writer and
+    both cue/beatgrid reads. Reads and XML-mode writes are implemented;
+    live-mode cue writes report `{"status": "error"}` (they need ANLZ sidecar
+    rewrites, which do not exist yet).
+  - Fixed: `LiveRekordboxDB.delete_track()` indexed `playlists_tracks` entries
+    as dicts while they are content-ID strings — `TypeError` outside the
+    surrounding `try`, so `DELETE /api/track/{tid}` failed on the first
+    non-empty playlist.
+  - Fixed: dragging a region from the palette onto the editor timeline never
+    worked — `TimelineCanvas` did not destructure the `onRegionDrop` its parent
+    passes, and `onRegionDrop?.()` on an undeclared name throws.
+  - Fixed: `RekordboxBridge.export_xml()` (auto-export after import) and
+    `db.get_tracks()` (4 sites) named methods that do not exist anywhere.
+  - Fixed: `@lru_cache` on `RekordboxDB.get_all_labels/get_all_albums` keyed on
+    `self`, pinning every library the sidecar ever loaded for the process
+    lifetime; `load_xml()` also never invalidated, so a second XML served the
+    first library's label/album rollups.
+  - Fixed: `PlaylistBrowser` ran two identical `useEffect`s, fetching the
+    playlist tree and all tracks twice on mount.
+  - Fixed: `ToastContext` re-rendered every `useToast()` consumer on every toast
+    (unmemoised context value); `UsbProfileEditor` invalidated both of its
+    `useMemo`s every render via a `|| []` fallback array.
+  - Fixed: both `.claude` PostToolUse hooks broke after any `cd` in a Bash call —
+    auto-push died with ENOENT, format-on-edit silently stopped formatting.
+  - Fixed: `scripts/validate_research_docs.py` failed on a valid document; its
+    lifecycle regex could not parse a state in backticks without a folder prefix.
+  - Changed: thread-bound import task moved from an attribute monkey-patched
+    onto `threading.current_thread()` to a real `threading.local()` in
+    `app/import_tracker.py` (`bind_current_task` / `unbind_current_task` /
+    `current_task`).
+  - Changed: `scripts/` is now covered by ruff in CI and pre-commit.
+
 - Analysis accuracy + engine fixes:
   - Improved: exact-octave BPM accuracy (Acc-1). `detect_beats_madmom` now
     constrains the madmom DBN tempo window to the octave of a robust coarse

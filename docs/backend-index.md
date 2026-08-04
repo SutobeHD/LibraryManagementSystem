@@ -20,13 +20,13 @@ Marker convention in the route tables below:
 | GET | `/api/library/tracks` | All tracks with full metadata (XML or live DB depending on mode) |
 | GET | `/api/playlist/{pid}/tracks` | Tracks in a specific playlist |
 | GET | `/api/track/{tid}` | Single track full detail |
-| GET | `/api/track/{tid}/cues` | Hot cues + memory cues for a track |
-| GET | `/api/track/{tid}/beatgrid` | Beatgrid data for a track |
+| GET | `/api/track/{tid}/cues` | Hot cues + memory cues for a track. Reads the loaded track dict — `positionMarks` in XML mode, `Cues` in live mode. |
+| GET | `/api/track/{tid}/beatgrid` | Beatgrid data for a track (`beatGrid` key, same in both modes). |
 | POST | `/api/track/{tid}` `[AUTH]` | Update track metadata fields |
 | DELETE | `/api/track/{tid}` `[AUTH]` | Delete a track |
 | POST | `/api/track/delete` `[AUTH]` | Delete track by body param |
-| POST | `/api/track/cues/save` `[AUTH]` | Save cue points for a track |
-| POST | `/api/track/grid/save` `[AUTH]` | Save beatgrid for a track |
+| POST | `/api/track/cues/save` `[AUTH]` | Save cue points. **XML mode only** — live mode returns `{"status": "error"}` because persisting cues into `master.db` needs ANLZ sidecar rewrites and no such path exists yet. |
+| POST | `/api/track/grid/save` `[AUTH]` | Save beatgrid. **XML mode only** — same constraint as cue save above. |
 | PATCH | `/api/tracks/batch` `[AUTH]` | Batch update metadata on multiple tracks |
 | POST | `/api/tracks/move` `[AUTH]` | Move tracks between playlists |
 | GET | `/api/artists` | All artists (normalized) |
@@ -58,7 +58,7 @@ Marker convention in the route tables below:
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/stream` | Stream audio file (range-request, sandboxed, query param `path`) |
-| GET | `/api/audio/stream` | Alias for stream endpoint |
+| GET | `/api/audio/stream` | Whole-file stream via `FileResponse` — **not** an alias: `/api/stream` implements HTTP Range itself for wavesurfer seeking, this one does not. Handler `stream_audio_whole_file` (renamed 2026-08-04; both handlers were called `stream_audio`, so the first was shadowed at module level). Consumed by `frontend/src/audio/DawEngine.js`. |
 | GET | `/api/audio/waveform` | Multiband waveform data (pps param controls points-per-second) |
 | POST | `/api/audio/analyze` `[AUTH]` | Start async BPM/key analysis → returns `{ task_id }` |
 | GET | `/api/audio/analyze/{task_id}` | Poll analysis result: `{ status, bpm, key, confidence }` |

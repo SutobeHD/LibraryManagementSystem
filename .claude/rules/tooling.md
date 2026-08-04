@@ -7,14 +7,25 @@
 - **`mypy`** — gradual, `check_untyped_defs=false`. Tightened as type-hint coverage grows.
 - **`pytest`** — markers: `slow`, `integration`. Default: `pytest tests/ -v`.
 
-CI enforces all four green on push + PR.
+CI enforces all four green on push + PR — **blocking**, baseline zero. `scripts/`
+is in scope too. Never re-add `|| true` to `ci.yml`; suppress at the site with a
+stated reason instead. Baselines + what the first zeroing pass found:
+`docs/QUALITY_GATES.md`.
 
 ```bash
-ruff check app/ tests/
-ruff format app/ tests/
+ruff check app/ tests/ scripts/
+ruff format app/ tests/ scripts/
 mypy app/
 pytest tests/
 ```
+
+`ruff` and `mypy` are version-pinned identically in `ci.yml` and
+`.pre-commit-config.yaml` (`ruff==0.15.8`, `mypy==1.19.1`). Bump both in one
+commit, after re-clearing the gate.
+
+**Never run `ruff check --select X --fix`.** Under a narrowed `--select`, every
+`# noqa` for a rule outside the selection reads as unused and `RUF100` strips it.
+This deleted 50 valid directives in one command during the gate sweep.
 
 ### Excluded files (`pyproject.toml`)
 

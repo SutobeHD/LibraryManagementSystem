@@ -84,7 +84,7 @@ Non-lazy components used by feature views.
 
 | File | Purpose |
 |------|---------|
-| `components/ToastContext.jsx` | **Toast notification provider** — wraps app, exposes `useToast()` → `toast.success()`, `toast.error()`, `toast.info()`. Used alongside `react-hot-toast`. Never use `alert()`. |
+| `components/ToastContext.jsx` | **Toast notification provider** — wraps app, exposes `useToast()` → `toast.success()`, `toast.error()`, `toast.info()`. Used alongside `react-hot-toast`. Never use `alert()`. Context value is memoised: an inline literal re-rendered every consumer whenever any toast appeared or expired. Carries a file-level `react-refresh/only-export-components` disable (hook + provider in one file is the intended context pattern). |
 | `components/ConfirmModal.jsx` | Promise-based replacement for `window.confirm()`. Renders `<ConfirmModalRoot />` once in `main.jsx`; call `confirmModal({ title, message, confirmLabel, danger })` from anywhere → resolves `true` on confirm, `false` on cancel/Escape/click-outside. |
 | `components/PromptModal.jsx` | Promise-based replacement for `window.prompt()`. Renders `<PromptModalRoot />` once in `main.jsx`; call `promptModal({ title, message, defaultValue, placeholder })` → resolves to entered string or `null`. |
 | `components/RenameModal.jsx` | Inline rename dialog modal. Props: `isOpen`, `onClose`, `onConfirm(newName)`, `initialValue`, `title`. |
@@ -126,7 +126,7 @@ Non-lazy components used by feature views.
 
 | File | Purpose |
 |------|---------|
-| `components/usb/UsbControls.jsx` | **Shared helpers + compatibility tables** — `FS_COMPAT`, `FS_NOTES`, `CDJ_TARGETS`, `USB_TYPES`, plus `normalizeFs` / `worstCdjStatus` / `formatBytes` / `formatDate`, plus visual primitives (`StatusIcon`, `Toggle`, `PillBtn`, `PillTab`, `Row`, `SpaceBar`) and playlist helpers (`PlaylistTreeNode`, `UsbLibraryTree`, `getDescendantIds`). |
+| `components/usb/UsbControls.jsx` | **Shared helpers + compatibility tables** (file-level `react-refresh/only-export-components` disable — the co-location is deliberate, see the file header) — `FS_COMPAT`, `FS_NOTES`, `CDJ_TARGETS`, `USB_TYPES`, plus `normalizeFs` / `worstCdjStatus` / `formatBytes` / `formatDate`, plus visual primitives (`StatusIcon`, `Toggle`, `PillBtn`, `PillTab`, `Row`, `SpaceBar`) and playlist helpers (`PlaylistTreeNode`, `UsbLibraryTree`, `getDescendantIds`). |
 | `components/usb/UsbDeviceList.jsx` | Left-rail list of registered + connected USB drives — each card shows a disk-usage bar. Selection state owned by container. |
 | `components/usb/UsbSyncPanel.jsx` | Main right-pane: header, compat matrix (PC + CDJ-3000/NXS2/NXS/older), Non-Rekordbox empty state, storage bar, sync source toggle, ecosystem picker, sync controls + progress, settings card, drive actions, danger zone (delete profile, reset, format wizard), stats footer. |
 | `components/usb/UsbProfileEditor.jsx` | Playlist picker (checkbox tree from PC playlist tree) + USB-library viewer (newer `library_one` / legacy `library_legacy` formats). Owns its expanded-node + selected-playlist + search state. |
@@ -142,7 +142,7 @@ Non-lazy components used by feature views.
 |------|---------|
 | `components/editor/NonDestructiveEditor.jsx` | Slim container — owns TimelineState + composes child components and hooks. |
 | `components/editor/EditorToolbar.jsx` | Top + edit toolbars (h-12 header: track info, BPM/key/LUFS badges, save/load, time; h-10 edit row: transport, edit tools, snap, grid mode, zoom, undo/redo, render). Pure presentation. |
-| `components/editor/TimelineCanvas.jsx` | Canvas renderer — waveform, beat grid, regions (`RegionBlock`), playhead with smooth RAF animation. Debounces resize at 150ms. |
+| `components/editor/TimelineCanvas.jsx` | Canvas renderer — waveform, beat grid, regions (`RegionBlock`), playhead with smooth RAF animation. Debounces resize at 150ms. Props include `onRegionDrop` (palette drop → timeline); it was missing from the destructuring until 2026-08-04 while `handleDrop` already called it, so every drop threw a `ReferenceError` that the surrounding catch reduced to a console line. |
 | `components/editor/RegionBlock.jsx` | Individual region UI block — waveform thumbnail, envelope overlay, drag/resize/edit handle interactions. |
 | `components/editor/EnvelopeOverlay.jsx` | Interactive envelope editor — draggable nodes for fade-in (left), fade-out (right), gain level (centre). |
 | `components/editor/EditorBrowser.jsx` | File browser sidebar — searchable library list for loading audio source files. |

@@ -1,0 +1,179 @@
+# Quality gates
+
+What CI enforces, what it costs to keep it enforced, and what the 2026-08-04
+sweep found when the gates were first driven to zero.
+
+---
+
+## Current state
+
+| Gate | Command | CI | Baseline before sweep | After |
+|---|---|---|---|---|
+| Python lint | `ruff check app/ tests/ scripts/` | blocking | 139 (+15 unlinted in `scripts/`) | 0 |
+| Python format | `ruff format --check app/ tests/ scripts/` | blocking | 8 files | 0 |
+| Python types | `mypy app/` | blocking | 154 | 0 |
+| Python tests | `pytest tests/` | blocking | 730 pass / 1 skip | unchanged |
+| Map drift | `python scripts/regen_maps.py --check` | blocking | clean | clean |
+| Rust format | `cargo fmt --manifest-path src-tauri/Cargo.toml --check` | blocking (new) | 9 files | 0 |
+| Rust lint | `cargo clippy …` | **NOT blocking** | unknown | unknown |
+| Rust tests | `cargo test …` | blocking | — | — |
+| Frontend lint | `npm run lint --prefix frontend` (`--max-warnings=0`) | blocking | 5 errors + 195 warnings | 0 |
+| Frontend format | `npm run format:check --prefix frontend` | blocking | 111 files | 0 |
+| Frontend build | `npm run build --prefix frontend` | blocking | green | green |
+
+Everything except clippy ran with `|| true` before this sweep, i.e. no gate
+could fail a build.
+
+### Why clippy is still exempt
+
+Not an oversight. `cargo clippy` needs a full compile, and the Tauri target
+pulls `gdk-3.0` / `webkit2gtk`, which are unavailable on the Linux images used
+for development containers — the build dies in `gdk-sys`'s build script before
+clippy sees a single lint. Its warning list therefore cannot be read, let alone
+cleared, from a Linux checkout, and flipping the switch blind would just break
+`main`.
+
+To close it: on a Windows checkout run
+
+```
+cargo clippy --manifest-path src-tauri/Cargo.toml --no-default-features --all-targets
+```
+
+fix what it prints, then in `.github/workflows/ci.yml` drop the `|| true` and
+append `-- -D warnings`.
+
+### Tool versions are pinned
+
+`.github/workflows/ci.yml` and `.pre-commit-config.yaml` both pin
+`ruff==0.15.8` and `mypy==1.19.1`. This matters more now that the gates block:
+
+- unpinned, a new ruff release turns CI red with no change to this repo;
+- unpinned, the pre-commit hook and CI disagree about what "clean" means. They
+  already did — CI installed latest while pre-commit pinned ruff v0.8.6.
+
+Bump both files in the same commit, after re-clearing the gate locally.
+
+---
+
+## Rules for keeping them green
+
+1. **Never re-add `|| true`.** Fix the finding, or record the exemption where
+   the tool itself will show it — `pyproject.toml`, `.eslintrc.cjs`, or an
+   inline `# noqa` / `eslint-disable-next-line` that states the reason.
+2. **An inline suppression needs a reason.** `# type: ignore[unreachable]` with
+   no explanation is indistinguishable from a bug.
+3. **Never run `ruff check --select X --fix`.** With a narrowed `--select`,
+   every `# noqa` for a rule outside the selection counts as unused, and
+   `RUF100` strips them all. This deleted 50 legitimate directives during the
+   sweep before it was caught.
+4. **`ruff --statistics` over-counts.** It includes violations already
+   suppressed by `# noqa`. The authoritative number is the concise output.
+
+---
+
+## What the sweep found
+
+Roughly a third of the findings were live bugs, not style. Listed because the
+same classes will recur.
+
+### Endpoints calling methods that do not exist
+
+`RekordboxDB` (`app/database.py`) is a hand-written facade over
+`RekordboxXMLDB` and `LiveRekordboxDB` with **no `__getattr__`**. Anything
+missing from it is an `AttributeError` at the call site, and mypy's
+`attr-defined` is the only thing that sees it. Eight were missing while being
+called:
+
+| Call | Route | Effect |
+|---|---|---|
+| `db.save_track_cues()` | `POST /api/track/cues/save` | hot-cue save from the waveform editor always 500'd |
+| `db.save_track_beatgrid()` | `POST /api/track/grid/save` | beatgrid save from the region editor always 500'd |
+| `db.get_track_cues()` | `GET /api/track/{tid}/cues` | always 500 |
+| `db.get_track_beatgrid()` | `GET /api/track/{tid}/beatgrid` | always 500 |
+| `db.load_xml()` | `POST /api/library/upload-xml` | XML upload failed after writing the file |
+| `db.save_xml()` | analysis save, duplicate merge | silent no-op / 500 |
+| `db.get_analysis_writer()` | `POST /api/analysis/write-to-db` | always failed |
+| `db.get_unanalyzed_track_ids()` | `POST /api/analysis/write-to-db` | always failed |
+
+Reads and the XML-mode writes are implemented now. Live-mode cue/beatgrid
+writes return `{"status": "error"}` — persisting them means rewriting ANLZ
+sidecars and no such path exists in the codebase yet.
+
+> **If you add a method to `RekordboxXMLDB` or `LiveRekordboxDB` and want it
+> reachable from a route, add it to the facade too.** mypy is now the guard.
+
+### Other live faults
+
+- `app/main.py` `POST /api/library/format-swap/execute` called `uuid.uuid4()`
+  with `uuid` imported only inside two *other* functions → `NameError` on every
+  request. (ruff `F821`.)
+- `LiveRekordboxDB.delete_track()` read `playlists_tracks` as if it held row
+  objects (`str(t["ID"])`) while it holds content-ID strings. Indexing a `str`
+  raises `TypeError`, outside the `try` right below it, so `DELETE
+  /api/track/{tid}` blew up on the first non-empty playlist. (mypy `index`.)
+- `TimelineCanvas` never destructured `onRegionDrop` although its parent passes
+  it and `handleDrop` called it. `onRegionDrop?.()` on an *undeclared* name
+  throws `ReferenceError` — optional chaining does not guard that — so every
+  palette drop onto the timeline failed, swallowed as a console line. (eslint
+  `no-undef`.)
+- `RekordboxBridge.export_xml()` does not exist; the method is
+  `export_collection()`. Auto-export after import was dead.
+- `db.get_tracks()` (4 sites) does not exist anywhere; the method is
+  `get_all_tracks()`. One site hid it behind `hasattr()` and quietly processed
+  an empty list.
+- `PlaylistBrowser` had two byte-identical `useEffect`s loading the playlist
+  tree, one keyed on `libraryStatus?.loaded` and one on `[]` — every mount with
+  a loaded library fetched the tree and all tracks twice.
+- `ToastContext` built its context value as a fresh object literal per render,
+  so every `useToast()` consumer re-rendered whenever any toast appeared or
+  expired. `addToast` also closed over a `removeToast` declared below it from an
+  empty-dep `useCallback`, which worked only because `const` resolves at call
+  time.
+- `UsbProfileEditor` passed `usbTracks[flatKey] || []` into two `useMemo`s. The
+  fallback minted a new array every render, so both memos recomputed every
+  render.
+- `RekordboxDB.get_all_labels/get_all_albums` used `@lru_cache` on instance
+  methods. The cache keys on `self`, so every library the sidecar ever loaded
+  stayed reachable for the process lifetime; and `load_xml()` never invalidated,
+  so reloading a second XML into a live instance served the first library's
+  rollups.
+- `.claude/hooks/*.py`: both PostToolUse hooks were invoked by relative path, so
+  a single `cd frontend` in a Bash call broke them — auto-push died with ENOENT
+  and format-on-edit silently no-op'd (its `relative_to()` raised and was caught
+  as "file outside the repo").
+- `scripts/validate_research_docs.py`: the opening backtick sat inside the
+  optional `research/` group, so a lifecycle line written as `` `drafting_` ``
+  never parsed and the doc read as still being in its previous state. The
+  pre-commit hook was failing on a correct document.
+
+### Known-broken, left alone
+
+- **`SoundCloudProgressModal` is unreachable.** `PlaylistBrowser` declares
+  `const [showScProgress, setShowScProgress] = useState(false)` and never calls
+  the setter, so the modal never opens. It also has no dismiss control of its
+  own — no close button, no backdrop handler — and ignores the `onClose` its
+  parent passes. Wiring it up is a feature decision, not a lint fix.
+- **Live-mode cue/beatgrid persistence.** See the facade table above.
+
+---
+
+## Judgement calls worth knowing about
+
+- **`allowed-confusables = ["–", "—", "×"]`** in `pyproject.toml` rather than
+  muting `RUF001/002/003`. The en dash is a real `Artist – Title` delimiter the
+  tag parsers split on (`app/audio_tags.py`, `app/services.py`); the rules stay
+  live for genuine homoglyphs like a Cyrillic `а`.
+- **`# noqa: E402` on 14 imports in `app/main.py`** rather than moving them.
+  `app.config` reads `os.environ` and `mkdir()`s at import time, so it must load
+  *after* `load_dotenv()`. Reordering them would make a repo-local `.env` stop
+  working. The block says so in place.
+- **4 frontend modules carry a file-level `react-refresh/only-export-components`
+  disable** (`UsbControls`, `ConfirmModal`, `PromptModal`, `ToastContext`).
+  Each deliberately co-exports helpers with components — `UsbControls`' header
+  says "Kept in one file on purpose" — and the rule only costs HMR granularity.
+- **7 dependency arrays carry an `eslint-disable-next-line` with a reason**
+  (polling keyed on `batchId`, load-once-per-track, a guard flag the effect
+  itself sets). Silent narrow deps became explicit reviewed ones.
+- **`requests` sits in the mypy overrides.** `types-requests` would fix it
+  properly, but adding a stub-only package to the pinned `requirements.txt` is a
+  dependency decision, not a typing one.
