@@ -23,6 +23,12 @@ pytest tests/
 `.pre-commit-config.yaml` (`ruff==0.15.8`, `mypy==1.19.1`). Bump both in one
 commit, after re-clearing the gate.
 
+**Verify with `--no-cache`.** Ruff's cache serves stale results and silently
+shrinks the file count while doing so. A cached run reported "All checks passed"
+on a tree with an unsorted import block during the gate sweep, and a cached
+`ruff format` declined to rewrite a drifted file. CI starts cold; a cached local
+green proves nothing.
+
 **Never run `ruff check --select X --fix`.** Under a narrowed `--select`, every
 `# noqa` for a rule outside the selection reads as unused and `RUF100` strips it.
 This deleted 50 valid directives in one command during the gate sweep.
@@ -55,7 +61,7 @@ cargo test   --manifest-path src-tauri/Cargo.toml
 
 ## CI (`.github/workflows/`)
 
-- **`ci.yml`** — lint+test on push+PR. Jobs: `python-lint-test` (ruff+pytest+map-drift), `rust-lint-test` (clippy+test), `frontend-lint` (eslint).
+- **`ci.yml`** — lint+test on push+PR. Jobs: `python-lint-test` (ruff+ruff-format+mypy+pytest+map-drift), `rust-lint-test` (rustfmt+clippy+test), `frontend-lint` (eslint+prettier+build). Every step is blocking except clippy — see `docs/QUALITY_GATES.md`.
 - **`release.yml`** — release builds.
 - `regen_maps.py --check` runs in `python-lint-test` — MAP.md/MAP_L2.md drift fails CI. After structural changes, regen via `python scripts/regen_maps.py` (or `/regen-maps`) and commit the maps with the code.
 
@@ -78,7 +84,7 @@ pre-commit install
 
 Every `git commit` runs:
 - `trailing-whitespace`, `end-of-file-fixer`, `check-yaml/json/toml`, `check-added-large-files (>500kb)`, `check-merge-conflict`, `detect-private-key`, `mixed-line-ending`
-- `ruff` + `ruff-format` on `app/`, `tests/`
+- `ruff` + `ruff-format` on `app/`, `tests/`, `scripts/`
 - `mypy` on `app/`
 - `cargo fmt --check` on `src-tauri/`
 - `prettier` + `eslint` on `frontend/src/`

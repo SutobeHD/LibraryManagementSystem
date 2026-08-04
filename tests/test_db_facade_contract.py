@@ -234,7 +234,10 @@ def test_app_owned_objects_expose_every_attribute_used(module: str) -> None:
 
     assert not missing, (
         f"{module} uses attributes that do not exist on app.* objects:\n"
-        + "\n".join(f"  {module}:{ln}  {base}.{attr}" for base, attr, ln in sorted(missing, key=lambda t: t[2]))
+        + "\n".join(
+            f"  {module}:{ln}  {base}.{attr}"
+            for base, attr, ln in sorted(missing, key=lambda t: t[2])
+        )
         + "\nA `hasattr()` guard around one of these does not make it correct — "
         "it makes the branch permanently dead."
     )

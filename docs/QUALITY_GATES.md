@@ -68,6 +68,12 @@ Bump both files in the same commit, after re-clearing the gate locally.
    sweep before it was caught.
 4. **`ruff --statistics` over-counts.** It includes violations already
    suppressed by `# noqa`. The authoritative number is the concise output.
+5. **Verify with `--no-cache`.** Ruff's cache reports a stale result for a file
+   whose mtime it has already seen, and it under-reports the file count while
+   doing so (`65 files already formatted` against a tree of 119). During this
+   sweep a cached run said "All checks passed" on a tree that had an unsorted
+   import block, and a cached `ruff format` refused to rewrite a drifted file.
+   CI always starts cold, so a cached local green is not evidence.
 
 ---
 

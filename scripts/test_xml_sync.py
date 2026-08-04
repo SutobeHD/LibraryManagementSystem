@@ -1,6 +1,6 @@
 import sys
-from pathlib import Path
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 # Add app to path
 sys.path.append(str(Path(__file__).parent.parent))
