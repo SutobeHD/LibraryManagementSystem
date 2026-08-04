@@ -34,11 +34,7 @@ _CRON_RE = re.compile(r"\*\*Cron:\*\*\s*`([^`]+)`\s*\(([^)]+)\)")
 
 def list_routines() -> list[Path]:
     """All routine prompt files, sorted alphabetically. Excludes the README."""
-    return sorted(
-        p
-        for p in ROUTINES_DIR.glob("*.md")
-        if p.stem.lower() != "readme"
-    )
+    return sorted(p for p in ROUTINES_DIR.glob("*.md") if p.stem.lower() != "readme")
 
 
 def split_prompt(path: Path) -> tuple[str, str] | None:

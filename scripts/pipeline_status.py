@@ -39,7 +39,15 @@ RESEARCH_DIR = REPO_ROOT / "docs" / "research"
 # State order per stage (pipeline order).
 STAGE_STATES: dict[str, list[str]] = {
     "research": ["idea", "drafting", "exploring", "evaluated", "parked"],
-    "implement": ["draftplan", "review", "approvalgate", "rework", "accepted", "inprogress", "blocked"],
+    "implement": [
+        "draftplan",
+        "review",
+        "approvalgate",
+        "rework",
+        "accepted",
+        "inprogress",
+        "blocked",
+    ],
     "archived": ["implemented", "superseded", "abandoned"],
 }
 
@@ -292,7 +300,7 @@ def print_gates(docs: list[Doc]) -> None:
         label = GATE_STATES[d.state]
         print(
             f"  {label.upper()}  {d.state}_  {d.slug}  ({_age_str(d)})"
-            f"  ->  /approve {d.slug}   |   /reject {d.slug} \"<reason>\""
+            f'  ->  /approve {d.slug}   |   /reject {d.slug} "<reason>"'
         )
 
 

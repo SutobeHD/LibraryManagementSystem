@@ -39,7 +39,15 @@ RESEARCH_DIR = REPO_ROOT / "docs" / "research"
 # historical lines on archived/active docs still parse.)
 STATES_PER_STAGE: dict[str, set[str]] = {
     "research": {"idea", "drafting", "exploring", "evaluated", "parked"},
-    "implement": {"draftplan", "review", "approvalgate", "rework", "accepted", "inprogress", "blocked"},
+    "implement": {
+        "draftplan",
+        "review",
+        "approvalgate",
+        "rework",
+        "accepted",
+        "inprogress",
+        "blocked",
+    },
     "archived": {"implemented", "superseded", "abandoned"},
 }
 REQUIRED_FRONTMATTER = ("slug", "title", "created")

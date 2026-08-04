@@ -36,9 +36,9 @@ from pathlib import Path
 # Make `app` importable when run as a plain script from the repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from app.anlz_cue_patch import _walk_tags  # noqa: E402
-from app.config import DB_FILENAME  # noqa: E402
-from app.phrase_generator import (  # noqa: E402
+from app.anlz_cue_patch import _walk_tags
+from app.config import DB_FILENAME
+from app.phrase_generator import (
     commit_phrase_cues,
     extract_beats_from_db,
     generate_phrase_cues,

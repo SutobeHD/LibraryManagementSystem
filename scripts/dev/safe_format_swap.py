@@ -24,6 +24,7 @@ After --execute: open Rekordbox, verify the playlist. If broken -> --rollback.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import shutil
@@ -42,7 +43,7 @@ if hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-import rbox  # noqa: E402 -- imported after stdout reconfigure for clean tracebacks
+import rbox
 
 REKORDBOX_DIR = Path(os.environ["APPDATA"]) / "Pioneer" / "rekordbox"
 REKORDBOX_DB = REKORDBOX_DIR / "master.db"
@@ -80,14 +81,22 @@ def kill_rekordbox_if_present() -> bool:
     error. Returns True if it actually killed something."""
     try:
         result = subprocess.run(
-            ["tasklist"], capture_output=True, text=True, timeout=10,
+            ["tasklist"],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if "rekordbox.exe" not in result.stdout.lower():
             return False
         subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             "Get-Process | Where-Object { $_.Name -match 'rekordbox|Upmgr' } | Stop-Process -Force"],
-            capture_output=True, timeout=15,
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "Get-Process | Where-Object { $_.Name -match 'rekordbox|Upmgr' } | Stop-Process -Force",
+            ],
+            capture_output=True,
+            timeout=15,
         )
         return True
     except Exception:
@@ -107,7 +116,7 @@ def backup_master_db(timestamp: str) -> dict[str, str]:
     return backups
 
 
-def detect_aiff_filetype(db: "rbox.MasterDb") -> int:
+def detect_aiff_filetype(db: rbox.MasterDb) -> int:
     """Look up the FileType integer Rekordbox uses for existing AIFF rows."""
     for c in db.get_contents():
         try:
@@ -123,7 +132,7 @@ def detect_aiff_filetype(db: "rbox.MasterDb") -> int:
     return FILE_TYPE_AIFF_FALLBACK
 
 
-def find_playlist(db: "rbox.MasterDb", name: str):
+def find_playlist(db: rbox.MasterDb, name: str):
     for pl in db.get_playlists():
         if pl.name == name and not getattr(pl, "rb_local_deleted", False):
             return pl
@@ -134,13 +143,21 @@ def probe_sample_rate(audio_path: Path) -> int:
     """Return the source sample rate via ffprobe. Locks AIFF output to same SR."""
     result = subprocess.run(
         [
-            "ffprobe", "-v", "error",
-            "-select_streams", "a:0",
-            "-show_entries", "stream=sample_rate",
-            "-of", "csv=p=0",
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=sample_rate",
+            "-of",
+            "csv=p=0",
             str(audio_path),
         ],
-        capture_output=True, text=True, timeout=30, check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
     )
     return int(result.stdout.strip())
 
@@ -160,10 +177,14 @@ def convert_m4a_to_aiff(src: Path, dst: Path, sample_rate: int) -> None:
         cmd += ["-ss", f"{AAC_PRIMING_SAMPLES / sample_rate:.9f}"]
     cmd += [
         "-vn",
-        "-c:a", "pcm_s16le",
-        "-ar", str(sample_rate),
-        "-map_metadata", "0",
-        "-write_id3v2", "1",
+        "-c:a",
+        "pcm_s16le",
+        "-ar",
+        str(sample_rate),
+        "-map_metadata",
+        "0",
+        "-write_id3v2",
+        "1",
         "-y",
         str(dst),
     ]
@@ -172,8 +193,13 @@ def convert_m4a_to_aiff(src: Path, dst: Path, sample_rate: int) -> None:
         raise RuntimeError(f"ffmpeg failed for {src.name}: {result.stderr.strip()}")
 
 
-def execute(playlist_name: str | None, dry_run: bool, limit: int | None = None,
-            all_m4a: bool = False, path_scope: str | None = None) -> None:
+def execute(
+    playlist_name: str | None,
+    dry_run: bool,
+    limit: int | None = None,
+    all_m4a: bool = False,
+    path_scope: str | None = None,
+) -> None:
     # Dry-run only reads, but rbox still has to load+decrypt master.db -- it
     # can do that fine while Rekordbox is open (own connection). Writes are
     # blocked because we don't want to race against RB's writer.
@@ -185,10 +211,7 @@ def execute(playlist_name: str | None, dry_run: bool, limit: int | None = None,
 
     if all_m4a:
         # Whole-library scan: every undeleted m4a row.
-        items = [
-            c for c in db.get_contents()
-            if not getattr(c, "rb_local_deleted", False)
-        ]
+        items = [c for c in db.get_contents() if not getattr(c, "rb_local_deleted", False)]
         scope_label = "ALL m4a in library"
     elif path_scope:
         # Folder-scope: every undeleted track whose folder_path starts under
@@ -226,12 +249,10 @@ def execute(playlist_name: str | None, dry_run: bool, limit: int | None = None,
     # Storage forecast (m4a source size sum)
     total_src_bytes = 0
     for c in m4a_items:
-        try:
+        with contextlib.suppress(Exception):
             total_src_bytes += int(getattr(c, "file_size", 0) or 0)
-        except Exception:
-            pass
-    print(f"Source size:        {total_src_bytes/1024/1024:.1f} MB m4a")
-    print(f"Estimated AIFF:     ~{total_src_bytes*5/1024/1024:.0f} MB (x5 expansion)")
+    print(f"Source size:        {total_src_bytes / 1024 / 1024:.1f} MB m4a")
+    print(f"Estimated AIFF:     ~{total_src_bytes * 5 / 1024 / 1024:.0f} MB (x5 expansion)")
 
     print("\n=== Plan ===")
     PREVIEW = 8 if len(m4a_items) > 20 else len(m4a_items)
@@ -255,7 +276,7 @@ def execute(playlist_name: str | None, dry_run: bool, limit: int | None = None,
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     db_backups = backup_master_db(timestamp)
-    print(f"\n[OK] DB backups:")
+    print("\n[OK] DB backups:")
     for orig, bk in db_backups.items():
         print(f"     {orig}  ->  {bk}")
 
@@ -347,28 +368,32 @@ def execute(playlist_name: str | None, dry_run: bool, limit: int | None = None,
                 break
             continue
 
-        manifest["tracks"].append({
-            "id": c.id,
-            "original": {
-                "folder_path": old_path,
-                "file_name_l": old_filename,
-                "file_type": FILE_TYPE_M4A,
-                "file_size": old_size,
-                "audio_backup": str(backup_audio),
-            },
-            "new": {
-                "folder_path": str(dst),
-                "file_name_l": dst.name,
-                "file_type": aiff_file_type,
-                "file_size": new_size,
-            },
-        })
+        manifest["tracks"].append(
+            {
+                "id": c.id,
+                "original": {
+                    "folder_path": old_path,
+                    "file_name_l": old_filename,
+                    "file_type": FILE_TYPE_M4A,
+                    "file_size": old_size,
+                    "audio_backup": str(backup_audio),
+                },
+                "new": {
+                    "folder_path": str(dst),
+                    "file_name_l": dst.name,
+                    "file_type": aiff_file_type,
+                    "file_size": new_size,
+                },
+            }
+        )
         save_manifest()
 
     save_manifest()
     print(f"\n[OK] Manifest: {manifest_path}")
     if aborted:
-        print(f"\nAborted early. {len(manifest['tracks'])} tracks converted (out of {len(m4a_items)} planned).")
+        print(
+            f"\nAborted early. {len(manifest['tracks'])} tracks converted (out of {len(m4a_items)} planned)."
+        )
         print("Re-run --execute later to continue, or --rollback to revert what already landed.")
     else:
         print(f"\nDone. {len(manifest['tracks'])} tracks converted.")
@@ -418,20 +443,26 @@ def main() -> None:
     group.add_argument("--dry-run", action="store_true", help="Show plan, change nothing.")
     group.add_argument("--execute", action="store_true", help="Run the swap.")
     group.add_argument(
-        "--rollback", metavar="MANIFEST",
+        "--rollback",
+        metavar="MANIFEST",
         help="Restore from a manifest file (path or filename inside backups/).",
     )
     parser.add_argument("--playlist", help="Playlist name (for --dry-run / --execute).")
     parser.add_argument(
-        "--all-m4a", action="store_true",
+        "--all-m4a",
+        action="store_true",
         help="Scope: every undeleted m4a row in master.db (library-wide).",
     )
     parser.add_argument(
-        "--path", metavar="PATH", default=None,
+        "--path",
+        metavar="PATH",
+        default=None,
         help="Scope: all m4a tracks whose folder_path starts with PATH (recursive).",
     )
     parser.add_argument(
-        "--limit", type=int, default=None,
+        "--limit",
+        type=int,
+        default=None,
         help="Process only the first N m4a tracks (cautious first runs).",
     )
     args = parser.parse_args()
@@ -444,8 +475,13 @@ def main() -> None:
         parser.error("one of --playlist NAME / --all-m4a / --path PATH is required")
     if sum(scopes) > 1:
         parser.error("--playlist / --all-m4a / --path are mutually exclusive")
-    execute(args.playlist, dry_run=args.dry_run, limit=args.limit,
-            all_m4a=args.all_m4a, path_scope=args.path)
+    execute(
+        args.playlist,
+        dry_run=args.dry_run,
+        limit=args.limit,
+        all_m4a=args.all_m4a,
+        path_scope=args.path,
+    )
 
 
 if __name__ == "__main__":

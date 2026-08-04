@@ -1,17 +1,19 @@
 # Python tooling config for the FastAPI backend.
 #
 # Run from the repo root:
-#   ruff check app/ tests/        # lint
-#   ruff format app/ tests/       # format (replaces black for new code)
-#   black app/ tests/             # legacy formatter — same defaults as ruff format
-#   mypy app/                     # type-check
-#   pytest tests/                 # tests
+#   ruff check app/ tests/ scripts/     # lint
+#   ruff format app/ tests/ scripts/    # format (replaces black for new code)
+#   black app/ tests/                   # legacy formatter — same defaults as ruff format
+#   mypy app/                           # type-check
+#   pytest tests/                       # tests
 #
-# CI enforces:
-#   - `ruff check` clean
-#   - `ruff format --check` clean
+# CI enforces (all blocking — see .github/workflows/ci.yml):
+#   - `ruff check app/ tests/ scripts/` clean
+#   - `ruff format --check app/ tests/ scripts/` clean
 #   - `mypy app/` clean (exclusions documented below)
 #   - `pytest tests/` green
+#
+# Baseline history: docs/QUALITY_GATES.md
 
 [build-system]
 requires = ["setuptools>=68"]

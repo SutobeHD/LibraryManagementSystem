@@ -233,10 +233,10 @@ def _render_trends(docs: list) -> str:
             )
     foot = (
         f'<div class="trend-foot">Throughput: {t["throughput_30"]} docs '
-        f'&rarr; implemented_ in last 30 days, {t["throughput_90"]} in last 90'
+        f"&rarr; implemented_ in last 30 days, {t['throughput_90']} in last 90"
     )
     if slowest:
-        foot += f' &middot; slowest work state: <strong>{_esc(slowest)}</strong> ({t["slowest_avg"]:.1f}d avg)'
+        foot += f" &middot; slowest work state: <strong>{_esc(slowest)}</strong> ({t['slowest_avg']:.1f}d avg)"
     foot += "</div>"
     return f'<div class="trend-row">{"".join(tiles)}</div>{foot}'
 
@@ -247,9 +247,7 @@ def _render_blockers(docs: list) -> str:
         if d.state in ("parked", "blocked"):
             items.append((d, f"{d.state}_"))
         elif (
-            d.stage != "archived"
-            and d.state not in GATE_STATES
-            and (d.age_days or 0) > STALE_DAYS
+            d.stage != "archived" and d.state not in GATE_STATES and (d.age_days or 0) > STALE_DAYS
         ):
             items.append((d, f"stale {d.age_days}d in {d.state}_"))
     if not items:
@@ -273,8 +271,7 @@ def render_html() -> str:
         by_state.setdefault(d.state, []).append(d)
 
     lanes = "".join(
-        _render_lane(f"{stage}/", states, by_state)
-        for stage, states in STAGE_STATES.items()
+        _render_lane(f"{stage}/", states, by_state) for stage, states in STAGE_STATES.items()
     )
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     total = len(docs)
@@ -289,14 +286,21 @@ def render_html() -> str:
         "<header><h1>Research Pipeline</h1>"
         f"<span class='meta'>{total} docs &middot; updated {now} "
         f"&middot; auto-refresh {REFRESH_SECONDS}s</span></header>"
-        "<h2>Waiting on you</h2>" + _render_gates(docs)
-        + "<h2>Pipeline</h2>" + lanes
-        + "<h2>Trends (avg days per state, completed visits)</h2>" + _render_trends(docs)
-        + "<h2>Open routine PRs (test + merge)</h2>" + _render_prs(prs)
-        + "<h2>Blockers</h2>" + _render_blockers(docs)
+        "<h2>Waiting on you</h2>"
+        + _render_gates(docs)
+        + "<h2>Pipeline</h2>"
+        + lanes
+        + "<h2>Trends (avg days per state, completed visits)</h2>"
+        + _render_trends(docs)
+        + "<h2>Open routine PRs (test + merge)</h2>"
+        + _render_prs(prs)
+        + "<h2>Blockers</h2>"
+        + _render_blockers(docs)
         + "<footer>Read-only view of docs/research/. Approve docs with "
         "<code>/approve</code> / <code>/reject</code>; routines never "
-        "merge to main &mdash; you test the branch, then merge.<br>Routines: " + _ROUTINES + "</footer>"
+        "merge to main &mdash; you test the branch, then merge.<br>Routines: "
+        + _ROUTINES
+        + "</footer>"
         "</div></body></html>"
     )
 

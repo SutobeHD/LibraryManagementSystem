@@ -75,6 +75,7 @@ SKIP_PATTERNS = [
 @dataclass
 class Symbol:
     """A class or function entry."""
+
     name: str
     kind: str  # "class" | "func" | "method"
     summary: str  # one-line
@@ -483,7 +484,9 @@ def main() -> int:
         for path, expected in [(OUT_L1, l1), (OUT_L2, l2)]:
             actual = path.read_text(encoding="utf-8") if path.exists() else ""
             if actual != expected:
-                print(f"::error::{path.relative_to(REPO_ROOT)} is out of date — run scripts/regen_maps.py")
+                print(
+                    f"::error::{path.relative_to(REPO_ROOT)} is out of date — run scripts/regen_maps.py"
+                )
                 rc = 1
         return rc
 
