@@ -65,7 +65,19 @@
     and caught `AudioEngine.get_duration()` — called behind a `hasattr()` guard
     in `render_segment()` for a method that has never existed, leaving the
     branch permanently dead. Suite 730 → 777.
-  - Changed: `scripts/` is now covered by ruff in CI and pre-commit.
+  - Fixed: the ruff gate was checking two thirds of the tree and reporting
+    success. Passing several paths silently drops some of them —
+    `ruff format --check app tests` sees 108 files, `tests app` sees 55, same
+    tree — so `ruff check app/ tests/ scripts/` looked at 65 of 118 files.
+    Both commands now take a single root path and let `extend-exclude` in
+    `pyproject.toml` govern scope, which also brought `backend_entry.py` and
+    `.claude/hooks/` into the gate for the first time (3 lint errors + 1
+    formatting drift there). The pre-commit path allowlist is gone for the
+    same reason.
+  - Changed: ruff must be verified with `--no-cache`. Its cache served a stale
+    "All checks passed" over an unsorted import block, and a cached
+    `ruff format` refused to rewrite a drifted file — CI starts cold, so a
+    cached local green is not evidence.
 
 - Analysis accuracy + engine fixes:
   - Improved: exact-octave BPM accuracy (Acc-1). `detect_beats_madmom` now

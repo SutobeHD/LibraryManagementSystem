@@ -37,11 +37,12 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.8
     hooks:
+      # No `files:` filter — pre-commit passes the staged filenames through,
+      # and ruff's own `extend-exclude` in pyproject.toml decides scope. A
+      # path allowlist here left backend_entry.py and .claude/hooks/ unlinted.
       - id: ruff
         args: ["--fix", "--exit-non-zero-on-fix"]
-        files: '^(app|tests|scripts)/'
       - id: ruff-format
-        files: '^(app|tests|scripts)/'
 
   # ── Python — mypy (type-check) ───────────────────────────────────────────
   - repo: https://github.com/pre-commit/mirrors-mypy

@@ -13,11 +13,18 @@ stated reason instead. Baselines + what the first zeroing pass found:
 `docs/QUALITY_GATES.md`.
 
 ```bash
-ruff check app/ tests/ scripts/
-ruff format app/ tests/ scripts/
+ruff check .          # one path — see the warning below
+ruff format .
 mypy app/
 pytest tests/
 ```
+
+**Give ruff exactly one path.** Passing several silently drops some of them:
+`ruff format --check app tests` reports 108 files, `tests app` reports 55 — same
+tree, one argument order apart. The old `ruff check app/ tests/ scripts/` looked
+at 65 of 118 files and exited 0. `.` plus `extend-exclude` in `pyproject.toml` is
+the only form that covers everything, including `backend_entry.py` and
+`.claude/hooks/`, which no invocation had ever reached.
 
 `ruff` and `mypy` are version-pinned identically in `ci.yml` and
 `.pre-commit-config.yaml` (`ruff==0.15.8`, `mypy==1.19.1`). Bump both in one
@@ -84,7 +91,7 @@ pre-commit install
 
 Every `git commit` runs:
 - `trailing-whitespace`, `end-of-file-fixer`, `check-yaml/json/toml`, `check-added-large-files (>500kb)`, `check-merge-conflict`, `detect-private-key`, `mixed-line-ending`
-- `ruff` + `ruff-format` on `app/`, `tests/`, `scripts/`
+- `ruff` + `ruff-format` on every staged Python file (no path allowlist — `extend-exclude` in `pyproject.toml` decides scope)
 - `mypy` on `app/`
 - `cargo fmt --check` on `src-tauri/`
 - `prettier` + `eslint` on `frontend/src/`

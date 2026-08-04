@@ -1,15 +1,20 @@
 # Python tooling config for the FastAPI backend.
 #
 # Run from the repo root:
-#   ruff check app/ tests/ scripts/     # lint
-#   ruff format app/ tests/ scripts/    # format (replaces black for new code)
-#   black app/ tests/                   # legacy formatter — same defaults as ruff format
-#   mypy app/                           # type-check
-#   pytest tests/                       # tests
+#   ruff check .          # lint
+#   ruff format .         # format (replaces black for new code)
+#   black app/ tests/     # legacy formatter — same defaults as ruff format
+#   mypy app/             # type-check
+#   pytest tests/         # tests
+#
+# Ruff takes ONE path — the repo root — and lets `extend-exclude` below decide
+# scope. Do not list directories: passing several paths silently drops some of
+# them (`ruff format --check app tests` → 108 files, `tests app` → 55, same
+# tree). `app/ tests/ scripts/` checked 65 of 118 and still exited 0.
 #
 # CI enforces (all blocking — see .github/workflows/ci.yml):
-#   - `ruff check app/ tests/ scripts/` clean
-#   - `ruff format --check app/ tests/ scripts/` clean
+#   - `ruff check .` clean
+#   - `ruff format --check .` clean
 #   - `mypy app/` clean (exclusions documented below)
 #   - `pytest tests/` green
 #

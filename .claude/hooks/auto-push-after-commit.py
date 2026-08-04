@@ -56,9 +56,7 @@ REPO_ROOT = _repo_root()
 def _run(cmd: list[str], timeout: int = 30) -> tuple[int, str, str]:
     """Run a subprocess in the repo root. Return (rc, stdout, stderr)."""
     try:
-        r = subprocess.run(
-            cmd, cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout
-        )
+        r = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout)
         return r.returncode, r.stdout, r.stderr
     except subprocess.TimeoutExpired:
         return 124, "", f"timeout after {timeout}s running: {' '.join(cmd)}"
@@ -118,7 +116,9 @@ def main() -> int:
     if rc != 0:
         # Network/auth failure on fetch. Don't push blindly without knowing
         # the remote state; will retry on next commit.
-        print("[hook] git fetch failed — skipping auto-push (will retry next commit)", file=sys.stderr)
+        print(
+            "[hook] git fetch failed — skipping auto-push (will retry next commit)", file=sys.stderr
+        )
         return 1
 
     # Read ahead/behind.

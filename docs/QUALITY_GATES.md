@@ -9,8 +9,8 @@ sweep found when the gates were first driven to zero.
 
 | Gate | Command | CI | Baseline before sweep | After |
 |---|---|---|---|---|
-| Python lint | `ruff check app/ tests/ scripts/` | blocking | 139 (+15 unlinted in `scripts/`) | 0 |
-| Python format | `ruff format --check app/ tests/ scripts/` | blocking | 8 files | 0 |
+| Python lint | `ruff check .` | blocking | 139 (+15 unlinted in `scripts/`, +3 in `backend_entry.py`) | 0 |
+| Python format | `ruff format --check .` | blocking | 8 files (+1 never reached) | 0 |
 | Python types | `mypy app/` | blocking | 154 | 0 |
 | Python tests | `pytest tests/` | blocking | 730 pass / 1 skip | 777 pass / 1 skip |
 | Map drift | `python scripts/regen_maps.py --check` | blocking | clean | clean |
@@ -68,7 +68,15 @@ Bump both files in the same commit, after re-clearing the gate locally.
    sweep before it was caught.
 4. **`ruff --statistics` over-counts.** It includes violations already
    suppressed by `# noqa`. The authoritative number is the concise output.
-5. **Verify with `--no-cache`.** Ruff's cache reports a stale result for a file
+5. **Give ruff exactly one path, `.`** — never a list of directories. Passing
+   several silently drops some: `ruff format --check app tests` reports 108
+   files, `tests app` reports 55, on the same tree. The gate this sweep
+   originally shipped (`ruff check app/ tests/ scripts/`) looked at 65 of 118
+   files and exited 0. `extend-exclude` in `pyproject.toml` governs scope; a
+   root path also reaches `backend_entry.py` and `.claude/hooks/`, which no
+   invocation had ever covered — and which held 3 lint errors and a formatting
+   drift when first checked.
+6. **Verify with `--no-cache`.** Ruff's cache reports a stale result for a file
    whose mtime it has already seen, and it under-reports the file count while
    doing so (`65 files already formatted` against a tree of 119). During this
    sweep a cached run said "All checks passed" on a tree that had an unsorted

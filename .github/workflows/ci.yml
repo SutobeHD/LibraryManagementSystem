@@ -49,11 +49,19 @@ jobs:
       # baseline reached zero — see docs/QUALITY_GATES.md for the numbers and
       # what was found on the way. Do not re-add `|| true`: fix the finding,
       # or record the exemption in the tool's own config with a reason.
+      #
+      # Ruff is invoked on `.`, NOT on `app/ tests/ scripts/`. Passing several
+      # paths silently drops some of them: `ruff format --check app tests` sees
+      # 108 files, `tests app` sees 55 — the same tree, one argument order
+      # apart. `app/ tests/ scripts/` checked 65 of 118 and reported success.
+      # A single root path also covers backend_entry.py and .claude/hooks/,
+      # which no invocation ever reached; scope is governed by
+      # `extend-exclude` in pyproject.toml.
       - name: Lint with ruff
-        run: ruff check app/ tests/ scripts/
+        run: ruff check .
 
       - name: Check formatting with ruff
-        run: ruff format --check app/ tests/ scripts/
+        run: ruff format --check .
 
       - name: Type-check with mypy
         run: mypy app/

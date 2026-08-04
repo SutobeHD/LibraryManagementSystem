@@ -7,7 +7,6 @@ This wrapper loads `app.main` as a module so the relative imports resolve,
 then hands off to uvicorn with the same host/port the dev workflow uses.
 """
 
-import sys
 import multiprocessing
 
 
@@ -17,6 +16,7 @@ def main():
     multiprocessing.freeze_support()
 
     import uvicorn
+
     from app.main import app
 
     uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
