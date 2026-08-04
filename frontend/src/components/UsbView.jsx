@@ -16,9 +16,7 @@
  *   • ./usb/PlayCountSync.jsx     — collapsible playcount diff
  */
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import {
-    HardDrive, RefreshCw, ArrowUpDown,
-} from 'lucide-react';
+import { HardDrive, RefreshCw, ArrowUpDown } from 'lucide-react';
 import api from '../api/api';
 import toast from 'react-hot-toast';
 import { confirmModal } from './ConfirmModal';
@@ -26,7 +24,11 @@ import { promptModal } from './PromptModal';
 
 import { getDescendantIds } from './usb/UsbControls';
 import UsbDeviceList from './usb/UsbDeviceList';
-import UsbSyncPanel, { UsbSyncControlsTail, UsbSettingsTail, UsbStatsFooter } from './usb/UsbSyncPanel';
+import UsbSyncPanel, {
+    UsbSyncControlsTail,
+    UsbSettingsTail,
+    UsbStatsFooter,
+} from './usb/UsbSyncPanel';
 import UsbProfileEditor from './usb/UsbProfileEditor';
 import UsbFormatWizard from './usb/UsbFormatWizard';
 import MetadataSyncPanel from './usb/MetadataSyncPanel';
@@ -75,10 +77,11 @@ const UsbView = () => {
                 api.get('/api/usb/profiles'),
             ]);
             const allDrives = devRes.data;
-            const filtered = allDrives.filter(d =>
-                d.is_removable !== false &&
-                d.drive_type !== 'fixed' &&
-                !['C:\\', 'C:/', 'C:'].includes(d.drive)
+            const filtered = allDrives.filter(
+                (d) =>
+                    d.is_removable !== false &&
+                    d.drive_type !== 'fixed' &&
+                    !['C:\\', 'C:/', 'C:'].includes(d.drive)
             );
             setHiddenCount(allDrives.length - filtered.length);
             setDevices(filtered);
@@ -96,48 +99,63 @@ const UsbView = () => {
         try {
             const res = await api.get('/api/playlists/tree');
             setPlaylistTree(res.data || []);
-        } catch { /* noop */ }
+        } catch {
+            /* noop */
+        }
     }, []);
 
     useEffect(() => {
         scanDevices();
         loadPlaylists();
-    }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
         if (selectedDeviceId) loadUsbContents(selectedDeviceId);
     }, [selectedDeviceId, loadUsbContents]);
 
     // ── Derived ──────────────────────────────────────────────────
-    const allDevices = useMemo(() => [
-        ...profiles.map(p => {
-            const dev = devices.find(d => d.device_id === p.device_id);
-            return dev ? { ...p, ...dev } : { ...p, connected: false };
-        }),
-        ...devices.filter(d => !profiles.some(p => p.device_id === d.device_id)),
-    ], [devices, profiles]);
+    const allDevices = useMemo(
+        () => [
+            ...profiles.map((p) => {
+                const dev = devices.find((d) => d.device_id === p.device_id);
+                return dev ? { ...p, ...dev } : { ...p, connected: false };
+            }),
+            ...devices.filter((d) => !profiles.some((p) => p.device_id === d.device_id)),
+        ],
+        [devices, profiles]
+    );
 
     const sel = useMemo(
-        () => allDevices.find(d => d.device_id === selectedDeviceId),
+        () => allDevices.find((d) => d.device_id === selectedDeviceId),
         [allDevices, selectedDeviceId]
     );
 
     const isConnected = useCallback(
-        (device) => devices.some(d => d.device_id === device?.device_id),
+        (device) => devices.some((d) => d.device_id === device?.device_id),
         [devices]
     );
 
     // ── Mutations ────────────────────────────────────────────────
     const saveProfile = async (updates) => {
-        const device = allDevices.find(d => d.device_id === selectedDeviceId);
+        const device = allDevices.find((d) => d.device_id === selectedDeviceId);
         if (!device) return;
-        const profile = { device_id: device.device_id, label: device.label, drive: device.drive, ...device, ...updates };
+        const profile = {
+            device_id: device.device_id,
+            label: device.label,
+            drive: device.drive,
+            ...device,
+            ...updates,
+        };
         try {
             const res = await api.post('/api/usb/profiles', profile);
             const saved = res.data.profile;
-            setProfiles(prev => {
-                const idx = prev.findIndex(p => p.device_id === saved.device_id);
-                if (idx >= 0) { const n = [...prev]; n[idx] = saved; return n; }
+            setProfiles((prev) => {
+                const idx = prev.findIndex((p) => p.device_id === saved.device_id);
+                if (idx >= 0) {
+                    const n = [...prev];
+                    n[idx] = saved;
+                    return n;
+                }
                 return [...prev, saved];
             });
             toast.success('Profile saved');
@@ -147,15 +165,18 @@ const UsbView = () => {
     };
 
     const deleteProfile = async (deviceId) => {
-        if (!(await confirmModal({
-            title: 'Delete device profile?',
-            message: 'Delete this device profile? This cannot be undone.',
-            confirmLabel: 'Delete',
-            danger: true,
-        }))) return;
+        if (
+            !(await confirmModal({
+                title: 'Delete device profile?',
+                message: 'Delete this device profile? This cannot be undone.',
+                confirmLabel: 'Delete',
+                danger: true,
+            }))
+        )
+            return;
         try {
             await api.delete(`/api/usb/profiles/${deviceId}`);
-            setProfiles(prev => prev.filter(p => p.device_id !== deviceId));
+            setProfiles((prev) => prev.filter((p) => p.device_id !== deviceId));
             toast.success('Profile deleted');
         } catch {
             toast.error('Failed to delete profile');
@@ -175,14 +196,18 @@ const UsbView = () => {
         setSyncing(sel.device_id);
         setSyncProgress({ stage: 'starting', message: 'Preparing…', progress: 0 });
         try {
-            const res = await api.post('/api/usb/sync', {
-                device_id: sel.device_id,
-                sync_type: 'playlists',
-                playlist_ids: playlistIds,
-                // Always export both formats — Rekordbox auto-detects via
-                // exportLibrary.db, older CDJs / manual import use rekordbox.xml.
-                library_types: ['library_one', 'library_legacy'],
-            }, { timeout: 0 });
+            const res = await api.post(
+                '/api/usb/sync',
+                {
+                    device_id: sel.device_id,
+                    sync_type: 'playlists',
+                    playlist_ids: playlistIds,
+                    // Always export both formats — Rekordbox auto-detects via
+                    // exportLibrary.db, older CDJs / manual import use rekordbox.xml.
+                    library_types: ['library_one', 'library_legacy'],
+                },
+                { timeout: 0 }
+            );
             const result = res.data.result;
             setSyncProgress({ ...result, progress: 100 });
             if (res.data.status === 'success') {
@@ -195,7 +220,10 @@ const UsbView = () => {
         } catch (e) {
             toast.error('Sync failed: ' + (e.response?.data?.detail || e.message));
         }
-        setTimeout(() => { setSyncing(null); setSyncProgress(null); }, 2000);
+        setTimeout(() => {
+            setSyncing(null);
+            setSyncProgress(null);
+        }, 2000);
     };
 
     const syncAll = async () => {
@@ -208,7 +236,10 @@ const UsbView = () => {
         } catch {
             toast.error('Sync all failed');
         }
-        setTimeout(() => { setSyncing(null); setSyncProgress(null); }, 2000);
+        setTimeout(() => {
+            setSyncing(null);
+            setSyncProgress(null);
+        }, 2000);
     };
 
     const loadDiff = async () => {
@@ -224,14 +255,19 @@ const UsbView = () => {
 
     const ejectDrive = async () => {
         if (!sel?.drive) return;
-        if (!(await confirmModal({
-            title: 'Eject drive',
-            message: `Safely eject ${sel.drive}?`,
-            confirmLabel: 'Eject',
-        }))) return;
+        if (
+            !(await confirmModal({
+                title: 'Eject drive',
+                message: `Safely eject ${sel.drive}?`,
+                confirmLabel: 'Eject',
+            }))
+        )
+            return;
         try {
             const res = await api.post('/api/usb/eject', { drive: sel.drive });
-            res.data.status === 'success' ? toast.success(res.data.message) : toast.error(res.data.message);
+            res.data.status === 'success'
+                ? toast.success(res.data.message)
+                : toast.error(res.data.message);
             scanDevices();
         } catch {
             toast.error('Eject failed');
@@ -240,15 +276,20 @@ const UsbView = () => {
 
     const resetUsb = async () => {
         if (!sel?.device_id) return;
-        if (!(await confirmModal({
-            title: 'Reset USB?',
-            message: 'This will DELETE all Rekordbox data on this USB. Continue?',
-            confirmLabel: 'Delete data',
-            danger: true,
-        }))) return;
+        if (
+            !(await confirmModal({
+                title: 'Reset USB?',
+                message: 'This will DELETE all Rekordbox data on this USB. Continue?',
+                confirmLabel: 'Delete data',
+                danger: true,
+            }))
+        )
+            return;
         try {
             const res = await api.post('/api/usb/reset', { device_id: sel.device_id });
-            res.data.status === 'success' ? toast.success(res.data.message) : toast.error(res.data.message);
+            res.data.status === 'success'
+                ? toast.success(res.data.message)
+                : toast.error(res.data.message);
             scanDevices();
         } catch {
             toast.error('Reset failed');
@@ -264,8 +305,13 @@ const UsbView = () => {
         });
         if (!newLabel || newLabel === sel.label) return;
         try {
-            const res = await api.post('/api/usb/rename', { drive: sel.drive, new_label: newLabel });
-            res.data.status === 'success' ? toast.success(res.data.message) : toast.error(res.data.message);
+            const res = await api.post('/api/usb/rename', {
+                drive: sel.drive,
+                new_label: newLabel,
+            });
+            res.data.status === 'success'
+                ? toast.success(res.data.message)
+                : toast.error(res.data.message);
             setTimeout(scanDevices, 1000);
         } catch (e) {
             toast.error(e.response?.data?.detail || 'Rename failed');
@@ -276,9 +322,11 @@ const UsbView = () => {
         if (!sel) return;
         const current = new Set(sel.sync_playlists || []);
         const targetIds = getDescendantIds(node);
-        const allSelected = targetIds.length > 0 && targetIds.every(id => current.has(id));
+        const allSelected = targetIds.length > 0 && targetIds.every((id) => current.has(id));
         const next = new Set(current);
-        targetIds.forEach(id => { allSelected ? next.delete(id) : next.add(id); });
+        targetIds.forEach((id) => {
+            allSelected ? next.delete(id) : next.add(id);
+        });
         saveProfile({ sync_playlists: Array.from(next) });
     };
 
@@ -319,12 +367,15 @@ const UsbView = () => {
     const submitFormat = useCallback(async () => {
         if (!formatModal) return;
         const { preview, fs, label, ack, typed } = formatModal;
-        if (!ack) { toast.error('Please confirm you understand the data will be erased.'); return; }
+        if (!ack) {
+            toast.error('Please confirm you understand the data will be erased.');
+            return;
+        }
         if (typed.trim() !== preview.confirm_phrase) {
             toast.error(`Type exactly: ${preview.confirm_phrase}`);
             return;
         }
-        setFormatModal(m => ({ ...m, busy: true }));
+        setFormatModal((m) => ({ ...m, busy: true }));
         try {
             const res = await api.post('/api/usb/format/confirm', {
                 drive: preview.drive,
@@ -338,7 +389,7 @@ const UsbView = () => {
             setTimeout(scanDevices, 1500);
         } catch (err) {
             toast.error(err?.response?.data?.detail || 'Format failed');
-            setFormatModal(m => m && { ...m, busy: false });
+            setFormatModal((m) => m && { ...m, busy: false });
         }
     }, [formatModal, scanDevices]);
 
@@ -387,7 +438,10 @@ const UsbView = () => {
                     syncing={syncing}
                     hiddenCount={hiddenCount}
                     isConnected={isConnected}
-                    onSelect={(id) => { setSelectedDeviceId(id); setDiff(null); }}
+                    onSelect={(id) => {
+                        setSelectedDeviceId(id);
+                        setDiff(null);
+                    }}
                 />
 
                 {/* Detail */}
@@ -395,7 +449,9 @@ const UsbView = () => {
                     {!sel ? (
                         <div className="flex flex-col items-center justify-center h-full text-center">
                             <HardDrive size={40} className="text-ink-placeholder mb-3" />
-                            <p className="text-ink-muted text-[13px]">Select a device from the list</p>
+                            <p className="text-ink-muted text-[13px]">
+                                Select a device from the list
+                            </p>
                         </div>
                     ) : (
                         <div className="space-y-5 max-w-3xl">
@@ -456,7 +512,8 @@ const UsbView = () => {
                                                 usbRoot={sel.path || sel.mount_point || ''}
                                                 usbXmlPath={
                                                     sel.rekordbox_xml_path ||
-                                                    ((sel.path || sel.mount_point || '') + '/PIONEER/rekordbox/export.xml')
+                                                    (sel.path || sel.mount_point || '') +
+                                                        '/PIONEER/rekordbox/export.xml'
                                                 }
                                             />
                                             <MetadataSyncPanel device={sel} />
@@ -499,7 +556,7 @@ const UsbView = () => {
             {formatModal && (
                 <UsbFormatWizard
                     state={formatModal}
-                    onChange={(patch) => setFormatModal(m => m && { ...m, ...patch })}
+                    onChange={(patch) => setFormatModal((m) => m && { ...m, ...patch })}
                     onClose={closeFormatWizard}
                     onSubmit={submitFormat}
                 />

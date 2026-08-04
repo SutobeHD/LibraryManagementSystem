@@ -10,32 +10,45 @@ const XmlCleanView = () => {
     const [scanResult, setScanResult] = useState(null);
     const [error, setError] = useState(null);
 
-    const handleDrag = (e) => { e.preventDefault(); e.stopPropagation(); setDragActive(e.type === "dragenter" || e.type === "dragover"); };
-    const handleDrop = (e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); if (e.dataTransfer.files?.[0]) setFile(e.dataTransfer.files[0]); };
-    const handleChange = (e) => { if (e.target.files?.[0]) setFile(e.target.files[0]); };
+    const handleDrag = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setDragActive(e.type === 'dragenter' || e.type === 'dragover');
+    };
+    const handleDrop = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setDragActive(false);
+        if (e.dataTransfer.files?.[0]) setFile(e.dataTransfer.files[0]);
+    };
+    const handleChange = (e) => {
+        if (e.target.files?.[0]) setFile(e.target.files[0]);
+    };
 
     const startScan = async () => {
         if (!file) return;
-        setScanning(true); setError(null); setScanResult(null);
+        setScanning(true);
+        setError(null);
+        setScanResult(null);
 
         const formData = new FormData();
-        formData.append("file", file);
-        formData.append("artist_folder", "_AUTO_ARTISTS");
-        formData.append("label_folder", "_AUTO_LABELS");
+        formData.append('file', file);
+        formData.append('artist_folder', '_AUTO_ARTISTS');
+        formData.append('label_folder', '_AUTO_LABELS');
 
         try {
             // Using existing endpoint but improved backend logic
             const res = await api.post('/api/xml/clean', formData);
             // Expected response: { status: "success", tracks: 1234, playlists: 50, ... }
-            if (res.data.status === "success" || res.data.tracks !== undefined) {
+            if (res.data.status === 'success' || res.data.tracks !== undefined) {
                 setScanResult(res.data);
             } else {
                 // Fallback for file download response (old behavior compatibility)
-                setScanResult({ tracks: "?", playlists: "?" });
+                setScanResult({ tracks: '?', playlists: '?' });
             }
         } catch (err) {
             console.error(err);
-            setError("Scan failed. Is the backend running?");
+            setError('Scan failed. Is the backend running?');
         } finally {
             setScanning(false);
         }
@@ -46,10 +59,13 @@ const XmlCleanView = () => {
             <div className="text-center mb-10">
                 <h1 className="text-5xl font-bold mb-4 flex items-center justify-center gap-4 drop-shadow-lg">
                     <Server size={48} className="text-amber2" />
-                    <span className="bg-gradient-to-r from-amber2 to-amber2-press bg-clip-text text-transparent">Library Manager</span>
+                    <span className="bg-gradient-to-r from-amber2 to-amber2-press bg-clip-text text-transparent">
+                        Library Manager
+                    </span>
                 </h1>
                 <p className="text-ink-secondary text-lg max-w-xl mx-auto leading-relaxed">
-                    Import your <code>rekordbox.xml</code> to load your library.<br />
+                    Import your <code>rekordbox.xml</code> to load your library.
+                    <br />
                     We will scan for tracks, playlists, and metadata.
                 </p>
             </div>
@@ -59,10 +75,20 @@ const XmlCleanView = () => {
                     <div
                         className={`w-full h-64 border-2 border-dashed rounded-3xl flex flex-col items-center justify-center transition-all duration-300 cursor-pointer shadow-xl backdrop-blur-sm 
                             ${dragActive ? 'border-amber2 bg-amber2/10 scale-105' : 'border-line-default bg-mx-shell/50 hover:border-amber2/50 hover:bg-mx-card/80'}`}
-                        onDragEnter={handleDrag} onDragLeave={handleDrag} onDragOver={handleDrag} onDrop={handleDrop}
+                        onDragEnter={handleDrag}
+                        onDragLeave={handleDrag}
+                        onDragOver={handleDrag}
+                        onDrop={handleDrop}
                         onClick={() => !scanning && document.getElementById('fileUpload').click()}
                     >
-                        <input type="file" id="fileUpload" className="hidden" onChange={handleChange} accept=".xml" disabled={scanning} />
+                        <input
+                            type="file"
+                            id="fileUpload"
+                            className="hidden"
+                            onChange={handleChange}
+                            accept=".xml"
+                            disabled={scanning}
+                        />
 
                         {file ? (
                             <div className="text-center animate-fade-in">
@@ -70,7 +96,9 @@ const XmlCleanView = () => {
                                     <FileCode size={32} className="text-blue-400" />
                                 </div>
                                 <p className="font-bold text-xl text-white mb-1">{file.name}</p>
-                                <p className="text-sm font-mono text-amber2">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                                <p className="text-sm font-mono text-amber2">
+                                    {(file.size / 1024 / 1024).toFixed(2)} MB
+                                </p>
                             </div>
                         ) : (
                             <div className="text-center text-ink-muted">
@@ -132,16 +160,30 @@ const XmlCleanView = () => {
 
                     <div className="grid grid-cols-2 gap-4 mb-8">
                         <div className="bg-mx-deepest/50 rounded-xl p-4 border border-white/5">
-                            <div className="text-ink-secondary text-xs uppercase font-bold tracking-widest mb-1">Tracks</div>
-                            <div className="text-2xl font-mono text-amber2">{scanResult.tracks || 0}</div>
+                            <div className="text-ink-secondary text-xs uppercase font-bold tracking-widest mb-1">
+                                Tracks
+                            </div>
+                            <div className="text-2xl font-mono text-amber2">
+                                {scanResult.tracks || 0}
+                            </div>
                         </div>
                         <div className="bg-mx-deepest/50 rounded-xl p-4 border border-white/5">
-                            <div className="text-ink-secondary text-xs uppercase font-bold tracking-widest mb-1">Playlists</div>
-                            <div className="text-2xl font-mono text-purple-400">{scanResult.playlists || 0}</div>
+                            <div className="text-ink-secondary text-xs uppercase font-bold tracking-widest mb-1">
+                                Playlists
+                            </div>
+                            <div className="text-2xl font-mono text-purple-400">
+                                {scanResult.playlists || 0}
+                            </div>
                         </div>
                     </div>
 
-                    <button onClick={() => { setFile(null); setScanResult(null); }} className="text-sm text-ink-muted hover:text-white underline decoration-slate-700 hover:decoration-white transition-all">
+                    <button
+                        onClick={() => {
+                            setFile(null);
+                            setScanResult(null);
+                        }}
+                        className="text-sm text-ink-muted hover:text-white underline decoration-slate-700 hover:decoration-white transition-all"
+                    >
                         Load a different file
                     </button>
                 </div>

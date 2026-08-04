@@ -9,9 +9,7 @@
  */
 
 import { useState } from 'react';
-import {
-    Loader2, Check, X, AlertTriangle, ChevronDown, ChevronRight, Ban,
-} from 'lucide-react';
+import { Loader2, Check, X, AlertTriangle, ChevronDown, ChevronRight, Ban } from 'lucide-react';
 
 function fmtEta(s) {
     if (s == null || !isFinite(s) || s <= 0) return '—';
@@ -85,8 +83,16 @@ export default function PhraseBatchProgress({ progress, running, onCancel }) {
             <div className="flex items-center justify-center divide-x divide-line-subtle">
                 <Counter label="Written" value={succeeded} color="text-ok" />
                 <Counter label="Skipped" value={skipped} color="text-ink-secondary" />
-                <Counter label="Failed" value={failed} color={failed ? 'text-bad' : 'text-ink-muted'} />
-                <Counter label="ETA" value={running ? fmtEta(eta) : '—'} color="text-ink-secondary" />
+                <Counter
+                    label="Failed"
+                    value={failed}
+                    color={failed ? 'text-bad' : 'text-ink-muted'}
+                />
+                <Counter
+                    label="ETA"
+                    value={running ? fmtEta(eta) : '—'}
+                    color="text-ink-secondary"
+                />
             </div>
 
             {/* Current track + cancel */}
@@ -127,7 +133,9 @@ export default function PhraseBatchProgress({ progress, running, onCancel }) {
                                     <span className="text-ink-secondary truncate flex-1">
                                         {e.title || `Track ${e.track_id}`}
                                     </span>
-                                    <span className="text-ink-muted font-mono shrink-0">{e.reason}</span>
+                                    <span className="text-ink-muted font-mono shrink-0">
+                                        {e.reason}
+                                    </span>
                                 </div>
                             ))}
                         </div>

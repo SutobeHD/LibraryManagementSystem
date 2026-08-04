@@ -54,8 +54,10 @@ export default function useWaveSurfer({
     useEffect(() => {
         const initWaveSurfer = async () => {
             const WaveSurfer = (await import('wavesurfer.js')).default;
-            const RegionsPlugin = (await import('wavesurfer.js/dist/plugins/regions.esm.js')).default;
-            const TimelinePlugin = (await import('wavesurfer.js/dist/plugins/timeline.esm.js')).default;
+            const RegionsPlugin = (await import('wavesurfer.js/dist/plugins/regions.esm.js'))
+                .default;
+            const TimelinePlugin = (await import('wavesurfer.js/dist/plugins/timeline.esm.js'))
+                .default;
 
             if (!isMountedRef.current || wavesurfer.current) return; // Prevent double init
             if (streaming) return; // Don't init WS for streaming tracks
@@ -69,7 +71,13 @@ export default function useWaveSurfer({
                 interact: true,
                 cursorWidth: 1,
                 cursorColor: '#fff',
-                plugins: [TimelinePlugin.create({ container: overviewRef.current, height: 10, fontSize: 8 })]
+                plugins: [
+                    TimelinePlugin.create({
+                        container: overviewRef.current,
+                        height: 10,
+                        fontSize: 8,
+                    }),
+                ],
             });
 
             // 2. Detailed Waveform
@@ -86,7 +94,7 @@ export default function useWaveSurfer({
                 fillParent: false,
                 hideScrollbar: true,
                 normalize: true,
-                backend: 'WebAudio'
+                backend: 'WebAudio',
             });
 
             // Initialize Plugins
@@ -100,7 +108,7 @@ export default function useWaveSurfer({
                 setLoading(false);
                 // Check if we should auto-play (use ref to get current value, not stale closure)
                 if (isPlayingExternalRef.current) {
-                    wavesurfer.current.play().catch(e => console.warn('Autoplay blocked:', e));
+                    wavesurfer.current.play().catch((e) => console.warn('Autoplay blocked:', e));
                 }
                 // Capture Original Buffer + reset multiband state for new track
                 const buffer = wavesurfer.current.getDecodedData();
@@ -131,7 +139,11 @@ export default function useWaveSurfer({
                 }
 
                 // LOOP PLAYBACK LOGIC (every frame for accuracy)
-                if (isLoopingRef.current && loopInRef.current !== null && loopOutRef.current !== null) {
+                if (
+                    isLoopingRef.current &&
+                    loopInRef.current !== null &&
+                    loopOutRef.current !== null
+                ) {
                     if (time >= loopOutRef.current) {
                         wavesurfer.current.setTime(loopInRef.current);
                     }
@@ -209,7 +221,9 @@ export default function useWaveSurfer({
                     wavesurfer.current.destroy();
                 }
                 if (overviewWs.current) overviewWs.current.destroy();
-            } catch (e) { console.warn('WaveSurfer cleanup error', e); }
+            } catch (e) {
+                console.warn('WaveSurfer cleanup error', e);
+            }
             wavesurfer.current = null;
             overviewWs.current = null;
         };
@@ -238,7 +252,7 @@ export default function useWaveSurfer({
         setMultibandBuffers(null);
         originalBufferRef.current = null; // CRITICAL: reset stale buffer ref
         // Clear Regions/Cues from previous track
-        const regions = wavesurfer.current.plugins.find(p => p.getRegions);
+        const regions = wavesurfer.current.plugins.find((p) => p.getRegions);
         if (regions) regions.clearRegions();
 
         // Revoke blob URLs from previous track's preview rebuilds
@@ -262,7 +276,28 @@ export default function useWaveSurfer({
         setClipboard(null);
 
         return () => controller.abort();
-    }, [fullTrack?.path, blobUrl, streaming, isVisible, revokeAllBlobUrls, wavesurfer, overviewWs, originalBufferRef, setLoading, setBufferReady, setMultibandBuffers, setLoopIn, setLoopOut, setIsLooping, setCuts, setHotCues, setBeatGrid, setHistory, setHistoryIdx, setClipboard]);
+    }, [
+        fullTrack?.path,
+        blobUrl,
+        streaming,
+        isVisible,
+        revokeAllBlobUrls,
+        wavesurfer,
+        overviewWs,
+        originalBufferRef,
+        setLoading,
+        setBufferReady,
+        setMultibandBuffers,
+        setLoopIn,
+        setLoopOut,
+        setIsLooping,
+        setCuts,
+        setHotCues,
+        setBeatGrid,
+        setHistory,
+        setHistoryIdx,
+        setClipboard,
+    ]);
 
     // Master playback sync (used when isPlaying is local state)
     useEffect(() => {
@@ -283,7 +318,7 @@ export default function useWaveSurfer({
     useEffect(() => {
         if (!wavesurfer.current) return;
         if (isPlayingExternal === true) {
-            wavesurfer.current.play().catch(() => { });
+            wavesurfer.current.play().catch(() => {});
         } else if (isPlayingExternal === false) {
             wavesurfer.current.pause();
         }

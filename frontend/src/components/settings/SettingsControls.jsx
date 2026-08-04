@@ -25,7 +25,9 @@ export const Toggle = ({ checked, onChange, label, sub }) => (
             onClick={() => onChange(!checked)}
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${checked ? 'bg-amber2' : 'bg-mx-hover'}`}
         >
-            <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-6' : 'translate-x-1'}`} />
+            <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-6' : 'translate-x-1'}`}
+            />
         </button>
     </div>
 );
@@ -34,7 +36,8 @@ export const Toggle = ({ checked, onChange, label, sub }) => (
 export const Section = ({ title, icon: Icon, children }) => (
     <div className="bg-mx-deepest/50 rounded-2xl p-6 border border-white/5 space-y-5">
         <h2 className="text-xs font-bold text-amber2 uppercase tracking-widest flex items-center gap-2">
-            {Icon && <Icon size={14} />}{title}
+            {Icon && <Icon size={14} />}
+            {title}
         </h2>
         {children}
     </div>
@@ -43,7 +46,9 @@ export const Section = ({ title, icon: Icon, children }) => (
 /** Label + select/input row */
 export const Field = ({ label, children }) => (
     <div>
-        <label className="text-xs text-ink-secondary mb-2 block font-bold uppercase tracking-wide">{label}</label>
+        <label className="text-xs text-ink-secondary mb-2 block font-bold uppercase tracking-wide">
+            {label}
+        </label>
         {children}
     </div>
 );
@@ -53,10 +58,12 @@ export const Select = ({ value, onChange, options }) => (
     <select
         className="input-glass text-tiny w-full"
         value={value}
-        onChange={e => onChange(e.target.value)}
+        onChange={(e) => onChange(e.target.value)}
     >
-        {options.map(o => (
-            <option key={o.id} value={o.id}>{o.label}</option>
+        {options.map((o) => (
+            <option key={o.id} value={o.id}>
+                {o.label}
+            </option>
         ))}
     </select>
 );
@@ -79,16 +86,19 @@ export const KeyCapture = ({ binding, onCapture }) => {
         if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
 
         // Escape cancels capture
-        if (e.key === 'Escape') { setCapturing(false); return; }
+        if (e.key === 'Escape') {
+            setCapturing(false);
+            return;
+        }
 
         let combo = '';
-        if (e.ctrlKey)  combo += 'Ctrl+';
+        if (e.ctrlKey) combo += 'Ctrl+';
         if (e.shiftKey) combo += 'Shift+';
-        if (e.altKey)   combo += 'Alt+';
+        if (e.altKey) combo += 'Alt+';
 
-        if (e.code === 'Space')        combo += 'Space';
-        else if (e.key.length === 1)   combo += e.key.toUpperCase();
-        else                           combo += e.key;
+        if (e.code === 'Space') combo += 'Space';
+        else if (e.key.length === 1) combo += e.key.toUpperCase();
+        else combo += e.key;
 
         onCapture(combo);
         setCapturing(false);
@@ -103,15 +113,21 @@ export const KeyCapture = ({ binding, onCapture }) => {
                 onClick={start}
                 className={`
                     px-3 py-1.5 rounded-lg text-xs font-mono border transition-all min-w-[120px] text-center
-                    ${capturing
-                        ? 'bg-amber2/20 border-amber2 text-amber2-hover animate-pulse'
-                        : 'bg-mx-card border-white/10 text-ink-primary hover:border-amber2/50 hover:text-white'}
+                    ${
+                        capturing
+                            ? 'bg-amber2/20 border-amber2 text-amber2-hover animate-pulse'
+                            : 'bg-mx-card border-white/10 text-ink-primary hover:border-amber2/50 hover:text-white'
+                    }
                 `}
             >
-                {capturing ? 'Press a key…' : (binding || '—')}
+                {capturing ? 'Press a key…' : binding || '—'}
             </button>
             {!capturing && (
-                <button onClick={start} title="Edit shortcut" className="text-ink-muted hover:text-amber2 transition-colors">
+                <button
+                    onClick={start}
+                    title="Edit shortcut"
+                    className="text-ink-muted hover:text-amber2 transition-colors"
+                >
                     <ChevronRight size={12} />
                 </button>
             )}

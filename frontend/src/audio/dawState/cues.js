@@ -16,10 +16,9 @@
  */
 export function cuesReducer(state, action) {
     switch (action.type) {
-
         // ── Cue Points ───────────────────────
         case 'SET_HOT_CUE': {
-            const { index, cue } = action.payload;  // index: 0-7
+            const { index, cue } = action.payload; // index: 0-7
             const newHotCues = [...state.hotCues];
             newHotCues[index] = cue;
             return {
@@ -42,8 +41,7 @@ export function cuesReducer(state, action) {
         case 'ADD_MEMORY_CUE':
             return {
                 ...state,
-                memoryCues: [...state.memoryCues, action.payload]
-                    .sort((a, b) => a.time - b.time),
+                memoryCues: [...state.memoryCues, action.payload].sort((a, b) => a.time - b.time),
                 project: { ...state.project, dirty: true },
             };
 
@@ -66,7 +64,8 @@ export function cuesReducer(state, action) {
             return {
                 ...state,
                 loops: state.loops.filter((_, i) => i !== action.payload),
-                activeLoopIndex: state.activeLoopIndex === action.payload ? -1 : state.activeLoopIndex,
+                activeLoopIndex:
+                    state.activeLoopIndex === action.payload ? -1 : state.activeLoopIndex,
                 project: { ...state.project, dirty: true },
             };
 

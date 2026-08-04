@@ -25,11 +25,20 @@ export default function WaveformSimpleView({
                 {(visualMode === 'rgb' || visualMode === '3band') && (
                     <>
                         {/* High Band (Top) */}
-                        <div ref={waveHighRef} className={`absolute inset-0 z-30 pointer-events-none opacity-100 ${visualMode === 'rgb' ? 'mix-blend-screen' : 'mix-blend-normal'}`} />
+                        <div
+                            ref={waveHighRef}
+                            className={`absolute inset-0 z-30 pointer-events-none opacity-100 ${visualMode === 'rgb' ? 'mix-blend-screen' : 'mix-blend-normal'}`}
+                        />
                         {/* Mid Band (Middle) */}
-                        <div ref={waveMidRef} className={`absolute inset-0 z-20 pointer-events-none opacity-100 ${visualMode === 'rgb' ? 'mix-blend-screen' : 'mix-blend-normal'}`} />
+                        <div
+                            ref={waveMidRef}
+                            className={`absolute inset-0 z-20 pointer-events-none opacity-100 ${visualMode === 'rgb' ? 'mix-blend-screen' : 'mix-blend-normal'}`}
+                        />
                         {/* Low Band (Bottom) */}
-                        <div ref={waveLowRef} className={`absolute inset-0 z-10 pointer-events-none opacity-100 ${visualMode === 'rgb' ? 'mix-blend-screen' : 'mix-blend-normal'}`} />
+                        <div
+                            ref={waveLowRef}
+                            className={`absolute inset-0 z-10 pointer-events-none opacity-100 ${visualMode === 'rgb' ? 'mix-blend-screen' : 'mix-blend-normal'}`}
+                        />
                     </>
                 )}
                 {/* Master Layer (Audio/Interaction) - Keep on top for interaction but transparent */}
@@ -37,7 +46,9 @@ export default function WaveformSimpleView({
 
                 {analyzing && (
                     <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                        <span className="text-xs font-bold text-amber2 animate-pulse">ANALYZING 3-BAND...</span>
+                        <span className="text-xs font-bold text-amber2 animate-pulse">
+                            ANALYZING 3-BAND...
+                        </span>
                     </div>
                 )}
             </div>

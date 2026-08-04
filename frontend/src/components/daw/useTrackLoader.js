@@ -25,17 +25,21 @@ import { log } from '../../utils/log';
  * client-side BiquadFilter.
  */
 function convertBackendWaveform(data) {
-    const toPeaks = (arr) =>
-        arr.map(v => ({ min: -Math.abs(v), max: Math.abs(v) }));
+    const toPeaks = (arr) => arr.map((v) => ({ min: -Math.abs(v), max: Math.abs(v) }));
 
     return {
-        low:  toPeaks(data.low),
-        mid:  toPeaks(data.mid),
+        low: toPeaks(data.low),
+        mid: toPeaks(data.mid),
         high: toPeaks(data.high),
     };
 }
 
-export default function useTrackLoader({ activeTrack, dispatch, skipNextAutoLoad, hasInitialized }) {
+export default function useTrackLoader({
+    activeTrack,
+    dispatch,
+    skipNextAutoLoad,
+    hasInitialized,
+}) {
     useEffect(() => {
         if (!activeTrack) return;
 
@@ -73,7 +77,7 @@ export default function useTrackLoader({ activeTrack, dispatch, skipNextAutoLoad
                         album: track.Album || track.album || '',
                         filepath,
                         id: track.TrackID || track.ID || track.id || '',
-                    }
+                    },
                 });
 
                 dispatch({
@@ -82,7 +86,7 @@ export default function useTrackLoader({ activeTrack, dispatch, skipNextAutoLoad
                         name: `${track.Title || track.title || 'Untitled'} (Edit)`,
                         filepath: '',
                         dirty: false,
-                    }
+                    },
                 });
 
                 // Load and decode audio
@@ -123,7 +127,7 @@ export default function useTrackLoader({ activeTrack, dispatch, skipNextAutoLoad
                 // band chains over a 408s buffer (~18M samples * 3) hung the
                 // main thread for too long. The LOD pyramid below decimates
                 // this base into r2/r4 for zoomed-out views.
-                const targetPeaks   = 16000;
+                const targetPeaks = 16000;
                 const samplesPerPixel = Math.ceil(audioBuffer.length / targetPeaks);
 
                 // 1. Always generate mono fallback peaks first (instant, guaranteed)
@@ -153,13 +157,13 @@ export default function useTrackLoader({ activeTrack, dispatch, skipNextAutoLoad
                         bandPeaks.lod = {
                             r1: { low: bandPeaks.low, mid: bandPeaks.mid, high: bandPeaks.high },
                             r2: {
-                                low:  AudioBandAnalyzer._decimatePeaks(bandPeaks.low,  2),
-                                mid:  AudioBandAnalyzer._decimatePeaks(bandPeaks.mid,  2),
+                                low: AudioBandAnalyzer._decimatePeaks(bandPeaks.low, 2),
+                                mid: AudioBandAnalyzer._decimatePeaks(bandPeaks.mid, 2),
                                 high: AudioBandAnalyzer._decimatePeaks(bandPeaks.high, 2),
                             },
                             r4: {
-                                low:  AudioBandAnalyzer._decimatePeaks(bandPeaks.low,  4),
-                                mid:  AudioBandAnalyzer._decimatePeaks(bandPeaks.mid,  4),
+                                low: AudioBandAnalyzer._decimatePeaks(bandPeaks.low, 4),
+                                mid: AudioBandAnalyzer._decimatePeaks(bandPeaks.mid, 4),
                                 high: AudioBandAnalyzer._decimatePeaks(bandPeaks.high, 4),
                             },
                         };
@@ -167,7 +171,10 @@ export default function useTrackLoader({ activeTrack, dispatch, skipNextAutoLoad
                         usedBackendWaveform = true;
                     }
                 } catch (err) {
-                    console.warn('[DjEditDaw] Backend waveform unavailable, falling back to client-side:', err.message);
+                    console.warn(
+                        '[DjEditDaw] Backend waveform unavailable, falling back to client-side:',
+                        err.message
+                    );
                 }
 
                 // 3. Fallback: client-side band splitting with multi-resolution
@@ -177,7 +184,7 @@ export default function useTrackLoader({ activeTrack, dispatch, skipNextAutoLoad
                     try {
                         const bandPeaks = await AudioBandAnalyzer.generateMultiResolutionPeaks(
                             audioBuffer,
-                            samplesPerPixel,
+                            samplesPerPixel
                         );
                         dispatch({ type: 'SET_BAND_PEAKS', payload: bandPeaks });
                     } catch (err) {
@@ -187,7 +194,6 @@ export default function useTrackLoader({ activeTrack, dispatch, skipNextAutoLoad
 
                 toast.success('Track loaded', { id: 'daw-load' });
                 hasInitialized.current = true;
-
             } catch (err) {
                 console.error('[DjEditDaw] Load failed:', err);
                 toast.error(`Failed to load: ${err.message}`, { id: 'daw-load' });

@@ -50,17 +50,23 @@ const DATE_UNITS = [
 ];
 
 const newCondition = () => ({
-    Field: '8', Operator: '0', ValueLeft: '120', ValueRight: '130', ValueUnit: '0',
+    Field: '8',
+    Operator: '0',
+    ValueLeft: '120',
+    ValueRight: '130',
+    ValueUnit: '0',
 });
 
 const SmartPlaylistEditor = ({ parentId = 'ROOT', existing = null, onClose, onSaved }) => {
     const [name, setName] = useState(existing?.name || '');
     const [logical, setLogical] = useState(existing?.criteria?.LogicalOperator || 'all');
-    const [conditions, setConditions] = useState(existing?.criteria?.conditions || [newCondition()]);
+    const [conditions, setConditions] = useState(
+        existing?.criteria?.conditions || [newCondition()]
+    );
     const [preview, setPreview] = useState(null);
     const [saving, setSaving] = useState(false);
 
-    const fieldKindFor = (fid) => FIELDS.find(f => f.id === fid)?.kind || 'string';
+    const fieldKindFor = (fid) => FIELDS.find((f) => f.id === fid)?.kind || 'string';
 
     const opsFor = (fid) => {
         const k = fieldKindFor(fid);
@@ -70,14 +76,14 @@ const SmartPlaylistEditor = ({ parentId = 'ROOT', existing = null, onClose, onSa
     };
 
     const updateCondition = (idx, patch) => {
-        setConditions(prev => prev.map((c, i) => i === idx ? { ...c, ...patch } : c));
+        setConditions((prev) => prev.map((c, i) => (i === idx ? { ...c, ...patch } : c)));
     };
 
     const removeCondition = (idx) => {
-        setConditions(prev => prev.filter((_, i) => i !== idx));
+        setConditions((prev) => prev.filter((_, i) => i !== idx));
     };
 
-    const addCondition = () => setConditions(prev => [...prev, newCondition()]);
+    const addCondition = () => setConditions((prev) => [...prev, newCondition()]);
 
     const buildCriteria = () => ({
         LogicalOperator: logical,
@@ -86,15 +92,28 @@ const SmartPlaylistEditor = ({ parentId = 'ROOT', existing = null, onClose, onSa
     });
 
     const save = async () => {
-        if (!name.trim()) { toast.error('Name fehlt'); return; }
-        if (!conditions.length) { toast.error('Mindestens eine Bedingung'); return; }
+        if (!name.trim()) {
+            toast.error('Name fehlt');
+            return;
+        }
+        if (!conditions.length) {
+            toast.error('Mindestens eine Bedingung');
+            return;
+        }
         setSaving(true);
         try {
             if (existing?.id) {
-                await api.post('/api/playlists/smart/update', { pid: existing.id, criteria: buildCriteria() });
+                await api.post('/api/playlists/smart/update', {
+                    pid: existing.id,
+                    criteria: buildCriteria(),
+                });
                 toast.success('Smart-Playlist aktualisiert');
             } else {
-                await api.post('/api/playlists/smart/create', { name, parent_id: parentId, criteria: buildCriteria() });
+                await api.post('/api/playlists/smart/create', {
+                    name,
+                    parent_id: parentId,
+                    criteria: buildCriteria(),
+                });
                 toast.success('Smart-Playlist erstellt');
             }
             onSaved && onSaved();
@@ -115,7 +134,9 @@ const SmartPlaylistEditor = ({ parentId = 'ROOT', existing = null, onClose, onSa
             } else {
                 toast('Vorschau nach Speichern verfügbar.');
             }
-        } catch (e) { toast.error('Preview fehlgeschlagen'); }
+        } catch (e) {
+            toast.error('Preview fehlgeschlagen');
+        }
     };
 
     return (
@@ -124,9 +145,14 @@ const SmartPlaylistEditor = ({ parentId = 'ROOT', existing = null, onClose, onSa
                 <div className="flex items-center justify-between p-5 border-b border-white/5">
                     <div className="flex items-center gap-3">
                         <Sparkles size={20} className="text-purple-400" />
-                        <h2 className="text-lg font-bold text-white">{existing ? 'Smart Playlist bearbeiten' : 'Neue Smart Playlist'}</h2>
+                        <h2 className="text-lg font-bold text-white">
+                            {existing ? 'Smart Playlist bearbeiten' : 'Neue Smart Playlist'}
+                        </h2>
                     </div>
-                    <button onClick={onClose} className="p-1.5 hover:bg-white/5 rounded text-ink-muted">
+                    <button
+                        onClick={onClose}
+                        className="p-1.5 hover:bg-white/5 rounded text-ink-muted"
+                    >
                         <X size={18} />
                     </button>
                 </div>
@@ -134,10 +160,12 @@ const SmartPlaylistEditor = ({ parentId = 'ROOT', existing = null, onClose, onSa
                 <div className="p-5 space-y-5">
                     {!existing && (
                         <div>
-                            <label className="text-xs uppercase tracking-wider text-ink-muted">Name</label>
+                            <label className="text-xs uppercase tracking-wider text-ink-muted">
+                                Name
+                            </label>
                             <input
                                 value={name}
-                                onChange={e => setName(e.target.value)}
+                                onChange={(e) => setName(e.target.value)}
                                 placeholder="z.B. Peak-Time Tech-House"
                                 className="w-full mt-1 bg-mx-card border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-purple-400/50"
                             />
@@ -145,9 +173,11 @@ const SmartPlaylistEditor = ({ parentId = 'ROOT', existing = null, onClose, onSa
                     )}
 
                     <div>
-                        <label className="text-xs uppercase tracking-wider text-ink-muted">Verknüpfung</label>
+                        <label className="text-xs uppercase tracking-wider text-ink-muted">
+                            Verknüpfung
+                        </label>
                         <div className="flex gap-2 mt-1">
-                            {['all', 'any'].map(v => (
+                            {['all', 'any'].map((v) => (
                                 <button
                                     key={v}
                                     onClick={() => setLogical(v)}
@@ -164,37 +194,60 @@ const SmartPlaylistEditor = ({ parentId = 'ROOT', existing = null, onClose, onSa
                     </div>
 
                     <div>
-                        <label className="text-xs uppercase tracking-wider text-ink-muted">Bedingungen</label>
+                        <label className="text-xs uppercase tracking-wider text-ink-muted">
+                            Bedingungen
+                        </label>
                         <div className="space-y-2 mt-2">
                             {conditions.map((c, i) => {
                                 const ops = opsFor(c.Field);
                                 const k = fieldKindFor(c.Field);
                                 return (
-                                    <div key={i} className="flex items-center gap-2 bg-mx-card border border-white/5 rounded-lg p-2">
+                                    <div
+                                        key={i}
+                                        className="flex items-center gap-2 bg-mx-card border border-white/5 rounded-lg p-2"
+                                    >
                                         <select
                                             value={c.Field}
-                                            onChange={e => updateCondition(i, { Field: e.target.value })}
+                                            onChange={(e) =>
+                                                updateCondition(i, { Field: e.target.value })
+                                            }
                                             className="bg-mx-shell border border-white/10 rounded px-2 py-1 text-xs"
                                         >
-                                            {FIELDS.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                                            {FIELDS.map((f) => (
+                                                <option key={f.id} value={f.id}>
+                                                    {f.name}
+                                                </option>
+                                            ))}
                                         </select>
                                         <select
                                             value={c.Operator}
-                                            onChange={e => updateCondition(i, { Operator: e.target.value })}
+                                            onChange={(e) =>
+                                                updateCondition(i, { Operator: e.target.value })
+                                            }
                                             className="bg-mx-shell border border-white/10 rounded px-2 py-1 text-xs"
                                         >
-                                            {ops.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                                            {ops.map((o) => (
+                                                <option key={o.id} value={o.id}>
+                                                    {o.name}
+                                                </option>
+                                            ))}
                                         </select>
                                         <input
                                             value={c.ValueLeft}
-                                            onChange={e => updateCondition(i, { ValueLeft: e.target.value })}
+                                            onChange={(e) =>
+                                                updateCondition(i, { ValueLeft: e.target.value })
+                                            }
                                             placeholder={k === 'date' ? '7' : 'Wert'}
                                             className="flex-1 bg-mx-shell border border-white/10 rounded px-2 py-1 text-xs"
                                         />
                                         {c.Operator === '0' && (
                                             <input
                                                 value={c.ValueRight}
-                                                onChange={e => updateCondition(i, { ValueRight: e.target.value })}
+                                                onChange={(e) =>
+                                                    updateCondition(i, {
+                                                        ValueRight: e.target.value,
+                                                    })
+                                                }
                                                 placeholder="bis"
                                                 className="w-20 bg-mx-shell border border-white/10 rounded px-2 py-1 text-xs"
                                             />
@@ -202,10 +255,18 @@ const SmartPlaylistEditor = ({ parentId = 'ROOT', existing = null, onClose, onSa
                                         {k === 'date' && (
                                             <select
                                                 value={c.ValueUnit}
-                                                onChange={e => updateCondition(i, { ValueUnit: e.target.value })}
+                                                onChange={(e) =>
+                                                    updateCondition(i, {
+                                                        ValueUnit: e.target.value,
+                                                    })
+                                                }
                                                 className="bg-mx-shell border border-white/10 rounded px-2 py-1 text-xs"
                                             >
-                                                {DATE_UNITS.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                                                {DATE_UNITS.map((u) => (
+                                                    <option key={u.id} value={u.id}>
+                                                        {u.name}
+                                                    </option>
+                                                ))}
                                             </select>
                                         )}
                                         <button
@@ -229,7 +290,9 @@ const SmartPlaylistEditor = ({ parentId = 'ROOT', existing = null, onClose, onSa
 
                     {preview && (
                         <div className="bg-mx-card border border-white/5 rounded-lg p-3">
-                            <div className="text-xs text-ink-muted mb-2">{preview.length} Treffer</div>
+                            <div className="text-xs text-ink-muted mb-2">
+                                {preview.length} Treffer
+                            </div>
                             <div className="max-h-32 overflow-y-auto text-xs space-y-1">
                                 {preview.slice(0, 30).map((t, i) => (
                                     <div key={i} className="text-ink-secondary truncate">

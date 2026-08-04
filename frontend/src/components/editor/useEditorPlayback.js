@@ -23,8 +23,14 @@ function bufferToWave(abuffer, len) {
     let offset = 0;
     let pos = 0;
 
-    function setUint16(data) { view.setUint16(pos, data, true); pos += 2; }
-    function setUint32(data) { view.setUint32(pos, data, true); pos += 4; }
+    function setUint16(data) {
+        view.setUint16(pos, data, true);
+        pos += 2;
+    }
+    function setUint32(data) {
+        view.setUint32(pos, data, true);
+        pos += 4;
+    }
 
     setUint32(0x46464952); // "RIFF"
     setUint32(length - 8);
@@ -40,8 +46,7 @@ function bufferToWave(abuffer, len) {
     setUint32(0x61746164); // "data"
     setUint32(length - pos - 4);
 
-    for (let i = 0; i < abuffer.numberOfChannels; i++)
-        channels.push(abuffer.getChannelData(i));
+    for (let i = 0; i < abuffer.numberOfChannels; i++) channels.push(abuffer.getChannelData(i));
 
     while (pos < len) {
         for (let i = 0; i < numOfChan; i++) {
@@ -91,7 +96,7 @@ export default function useEditorPlayback({
 
                 sourceBufferRef.current = audioBuffer;
 
-                setState(prev => loadAudioSource(prev, audioBuffer, sourcePath));
+                setState((prev) => loadAudioSource(prev, audioBuffer, sourcePath));
                 setIsLoading(false);
             } catch (error) {
                 console.error('Failed to load audio:', error);
@@ -125,20 +130,20 @@ export default function useEditorPlayback({
         playerRef.current = source;
 
         setIsPlaying(true);
-        setState(prev => ({ ...prev, isPlaying: true }));
+        setState((prev) => ({ ...prev, isPlaying: true }));
 
         // Update playhead during playback
         const updatePlayhead = () => {
             if (!isPlaying) return;
             const currentTime = ctx.currentTime - startTimeRef.current;
-            setState(prev => ({ ...prev, playhead: currentTime }));
+            setState((prev) => ({ ...prev, playhead: currentTime }));
             requestAnimationFrame(updatePlayhead);
         };
         requestAnimationFrame(updatePlayhead);
 
         source.onended = () => {
             setIsPlaying(false);
-            setState(prev => ({ ...prev, isPlaying: false }));
+            setState((prev) => ({ ...prev, isPlaying: false }));
         };
     }, [state.playhead, isPlaying, setState]);
 
@@ -148,7 +153,7 @@ export default function useEditorPlayback({
             pauseTimeRef.current = audioContextRef.current.currentTime - startTimeRef.current;
         }
         setIsPlaying(false);
-        setState(prev => ({ ...prev, isPlaying: false }));
+        setState((prev) => ({ ...prev, isPlaying: false }));
     }, [setState]);
 
     const handleStop = useCallback(() => {
@@ -157,38 +162,48 @@ export default function useEditorPlayback({
         }
         pauseTimeRef.current = 0;
         setIsPlaying(false);
-        setState(prev => ({ ...prev, isPlaying: false, playhead: 0 }));
+        setState((prev) => ({ ...prev, isPlaying: false, playhead: 0 }));
     }, [setState]);
 
     // Playhead change with seamless-seek if playing
-    const handlePlayheadChange = useCallback((time) => {
-        pauseTimeRef.current = time;
-        setState(prev => ({ ...prev, playhead: time }));
+    const handlePlayheadChange = useCallback(
+        (time) => {
+            pauseTimeRef.current = time;
+            setState((prev) => ({ ...prev, playhead: time }));
 
-        // Seamless-seek if playing
-        if (isPlaying && playerRef.current && audioContextRef.current && sourceBufferRef.current) {
-            try {
-                // Prevent onended from stopping playback during seek
-                playerRef.current.onended = null;
-                playerRef.current.stop();
-            } catch (e) { /* Ignore if already stopped */ }
+            // Seamless-seek if playing
+            if (
+                isPlaying &&
+                playerRef.current &&
+                audioContextRef.current &&
+                sourceBufferRef.current
+            ) {
+                try {
+                    // Prevent onended from stopping playback during seek
+                    playerRef.current.onended = null;
+                    playerRef.current.stop();
+                } catch (e) {
+                    /* Ignore if already stopped */
+                }
 
-            const ctx = audioContextRef.current;
-            const source = ctx.createBufferSource();
-            source.buffer = sourceBufferRef.current;
-            source.connect(ctx.destination);
+                const ctx = audioContextRef.current;
+                const source = ctx.createBufferSource();
+                source.buffer = sourceBufferRef.current;
+                source.connect(ctx.destination);
 
-            source.start(0, time);
-            startTimeRef.current = ctx.currentTime - time;
-            playerRef.current = source;
+                source.start(0, time);
+                startTimeRef.current = ctx.currentTime - time;
+                playerRef.current = source;
 
-            // Restore onended
-            source.onended = () => {
-                setIsPlaying(false);
-                setState(prev => ({ ...prev, isPlaying: false }));
-            };
-        }
-    }, [isPlaying, setState]);
+                // Restore onended
+                source.onended = () => {
+                    setIsPlaying(false);
+                    setState((prev) => ({ ...prev, isPlaying: false }));
+                };
+            }
+        },
+        [isPlaying, setState]
+    );
 
     // Render / Export
     const handleRender = useCallback(async () => {
@@ -203,7 +218,7 @@ export default function useEditorPlayback({
             );
 
             const totalDuration = Math.max(
-                ...sortedRegions.map(r => r.timelineStart + (r.sourceEnd - r.sourceStart))
+                ...sortedRegions.map((r) => r.timelineStart + (r.sourceEnd - r.sourceStart))
             );
 
             const sampleRate = sourceBufferRef.current.sampleRate;
@@ -235,10 +250,7 @@ export default function useEditorPlayback({
                 );
 
                 // Steady gain
-                gainNode.gain.setValueAtTime(
-                    region.gain,
-                    regionEnd - region.fadeOutDuration
-                );
+                gainNode.gain.setValueAtTime(region.gain, regionEnd - region.fadeOutDuration);
 
                 // Fade-out
                 gainNode.gain.linearRampToValueAtTime(0, regionEnd);

@@ -106,11 +106,7 @@ const ConfirmDialog = ({ request, onDone }) => {
                     >
                         {request.cancelLabel}
                     </button>
-                    <button
-                        ref={confirmBtnRef}
-                        onClick={handleConfirm}
-                        className={confirmClasses}
-                    >
+                    <button ref={confirmBtnRef} onClick={handleConfirm} className={confirmClasses}>
                         <Check size={16} /> {request.confirmLabel}
                     </button>
                 </div>
@@ -133,7 +129,9 @@ export const ConfirmModalRoot = () => {
         if (pendingQueue.length) {
             setQueue((q) => [...q, ...pendingQueue.splice(0)]);
         }
-        return () => { pushRequest = null; };
+        return () => {
+            pushRequest = null;
+        };
     }, []);
 
     if (queue.length === 0) return null;

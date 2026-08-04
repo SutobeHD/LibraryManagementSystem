@@ -22,7 +22,7 @@ export function hashSeed(input) {
         h ^= str.charCodeAt(i);
         h = Math.imul(h, 16777619);
     }
-    return (h >>> 0) || 1;
+    return h >>> 0 || 1;
 }
 
 /** Deterministic { rms, peak } amplitude arrays for a seed. Cached per seed+n. */
@@ -54,8 +54,7 @@ export function waveAmps(seed, n = 180) {
     });
     for (let p = 0; p < 4; p++)
         for (let i = 2; i < rms.length - 2; i++)
-            rms[i] =
-                (rms[i - 2] + rms[i - 1] * 2 + rms[i] * 3 + rms[i + 1] * 2 + rms[i + 2]) / 10;
+            rms[i] = (rms[i - 2] + rms[i - 1] * 2 + rms[i] * 3 + rms[i + 1] * 2 + rms[i + 2]) / 10;
 
     const peak = rms.map((v) => {
         const transient = rng() < 0.08 ? 0.18 + 0.22 * rng() : 0.04 + 0.08 * rng();

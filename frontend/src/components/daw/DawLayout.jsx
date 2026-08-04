@@ -52,16 +52,16 @@ export default function DawLayout({
                     <div className="flex-1 relative min-h-0">
                         {timeline}
                         {/* Scrollbar Overlay at bottom of timeline area */}
-                        <div className="absolute bottom-0 left-0 right-0 z-10">
-                            {scrollbar}
-                        </div>
+                        <div className="absolute bottom-0 left-0 right-0 z-10">{scrollbar}</div>
                     </div>
                 ) : (
                     /* Empty State */
                     <div className="flex-1 flex flex-col items-center justify-center bg-mx-deepest/50">
                         <Music size={48} className="text-slate-800 mb-4" />
                         <h2 className="text-lg font-semibold text-ink-muted">No Project Loaded</h2>
-                        <p className="text-sm text-ink-placeholder mt-2 mb-6">Select a track from the library below to start editing</p>
+                        <p className="text-sm text-ink-placeholder mt-2 mb-6">
+                            Select a track from the library below to start editing
+                        </p>
                         <div className="flex gap-3">
                             <button
                                 onClick={onOpen}
@@ -79,12 +79,11 @@ export default function DawLayout({
 
             {/* Bottom: Library Browser (Collapsible/Resizable) */}
             <div
-                className={`border-t border-white/10 relative z-20 transition-all duration-300 ease-in-out shrink-0 overflow-hidden ${isLibraryCollapsed ? 'h-[32px]' : 'h-[240px]'
-                    }`}
+                className={`border-t border-white/10 relative z-20 transition-all duration-300 ease-in-out shrink-0 overflow-hidden ${
+                    isLibraryCollapsed ? 'h-[32px]' : 'h-[240px]'
+                }`}
             >
-                <div className="h-full w-full">
-                    {browser}
-                </div>
+                <div className="h-full w-full">{browser}</div>
             </div>
 
             {/* Export Modal */}

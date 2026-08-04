@@ -15,16 +15,16 @@
 //   log.warn("retrying after 500", { attempt });
 //   log.error("API call failed", { endpoint, status });
 
-const isDev = typeof import.meta !== "undefined" && import.meta.env && import.meta.env.DEV;
+const isDev = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV;
 
 function noop() {}
 
 export const log = {
-  debug: isDev ? console.debug.bind(console) : noop,
-  info: isDev ? console.info.bind(console) : noop,
-  // warn/error are always on — they're production-relevant signals.
-  warn: console.warn.bind(console),
-  error: console.error.bind(console),
+    debug: isDev ? console.debug.bind(console) : noop,
+    info: isDev ? console.info.bind(console) : noop,
+    // warn/error are always on — they're production-relevant signals.
+    warn: console.warn.bind(console),
+    error: console.error.bind(console),
 };
 
 export default log;

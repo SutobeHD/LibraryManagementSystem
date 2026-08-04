@@ -17,14 +17,7 @@ const WaveformOverview = React.memo(({ state, dispatch }) => {
     const containerRef = useRef(null);
     const isDragging = useRef(false);
 
-    const {
-        fallbackPeaks,
-        bandPeaks,
-        totalDuration,
-        zoom,
-        scrollX,
-        playhead,
-    } = state;
+    const { fallbackPeaks, bandPeaks, totalDuration, zoom, scrollX, playhead } = state;
 
     // ── Viewport window calculation ────────────────────────────────────────────
     // Convert scroll/zoom from DAW pixel space to time-space for WaveformMiniCanvas
@@ -41,45 +34,60 @@ const WaveformOverview = React.memo(({ state, dispatch }) => {
     const { start: viewportStart, end: viewportEnd } = getViewportTimes();
 
     // ── Click/drag → scroll main timeline ─────────────────────────────────────
-    const timeFromClientX = useCallback((clientX) => {
-        const container = containerRef.current;
-        if (!container || totalDuration <= 0) return 0;
-        const rect = container.getBoundingClientRect();
-        const relX = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-        return relX * totalDuration;
-    }, [totalDuration]);
+    const timeFromClientX = useCallback(
+        (clientX) => {
+            const container = containerRef.current;
+            if (!container || totalDuration <= 0) return 0;
+            const rect = container.getBoundingClientRect();
+            const relX = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+            return relX * totalDuration;
+        },
+        [totalDuration]
+    );
 
-    const scrollToTime = useCallback((centerTimeSec) => {
-        const container = containerRef.current;
-        if (!container) return;
-        const w = container.clientWidth;
-        const secondsVisible = w / zoom;
-        const newScrollX = centerTimeSec * zoom - (secondsVisible / 2) * zoom;
-        dispatch({ type: 'SET_SCROLL_X', payload: Math.max(0, newScrollX) });
-    }, [zoom, dispatch]);
+    const scrollToTime = useCallback(
+        (centerTimeSec) => {
+            const container = containerRef.current;
+            if (!container) return;
+            const w = container.clientWidth;
+            const secondsVisible = w / zoom;
+            const newScrollX = centerTimeSec * zoom - (secondsVisible / 2) * zoom;
+            dispatch({ type: 'SET_SCROLL_X', payload: Math.max(0, newScrollX) });
+        },
+        [zoom, dispatch]
+    );
 
-    const handleClick = useCallback((e) => {
-        const clickTime = timeFromClientX(e.clientX);
-        // Scroll viewport AND move playhead so the middle timeline stays in sync
-        dispatch({ type: 'SET_PLAYHEAD', payload: clickTime });
-        scrollToTime(clickTime);
-    }, [timeFromClientX, scrollToTime, dispatch]);
+    const handleClick = useCallback(
+        (e) => {
+            const clickTime = timeFromClientX(e.clientX);
+            // Scroll viewport AND move playhead so the middle timeline stays in sync
+            dispatch({ type: 'SET_PLAYHEAD', payload: clickTime });
+            scrollToTime(clickTime);
+        },
+        [timeFromClientX, scrollToTime, dispatch]
+    );
 
-    const handleMouseDown = useCallback((e) => {
-        e.preventDefault();
-        isDragging.current = true;
-        const clickTime = timeFromClientX(e.clientX);
-        dispatch({ type: 'SET_PLAYHEAD', payload: clickTime });
-        scrollToTime(clickTime);
-    }, [timeFromClientX, scrollToTime, dispatch]);
+    const handleMouseDown = useCallback(
+        (e) => {
+            e.preventDefault();
+            isDragging.current = true;
+            const clickTime = timeFromClientX(e.clientX);
+            dispatch({ type: 'SET_PLAYHEAD', payload: clickTime });
+            scrollToTime(clickTime);
+        },
+        [timeFromClientX, scrollToTime, dispatch]
+    );
 
-    const handleMouseMove = useCallback((e) => {
-        if (!isDragging.current) return;
-        e.preventDefault();
-        const clickTime = timeFromClientX(e.clientX);
-        dispatch({ type: 'SET_PLAYHEAD', payload: clickTime });
-        scrollToTime(clickTime);
-    }, [timeFromClientX, scrollToTime, dispatch]);
+    const handleMouseMove = useCallback(
+        (e) => {
+            if (!isDragging.current) return;
+            e.preventDefault();
+            const clickTime = timeFromClientX(e.clientX);
+            dispatch({ type: 'SET_PLAYHEAD', payload: clickTime });
+            scrollToTime(clickTime);
+        },
+        [timeFromClientX, scrollToTime, dispatch]
+    );
 
     const handleMouseUp = useCallback(() => {
         isDragging.current = false;
@@ -104,7 +112,11 @@ const WaveformOverview = React.memo(({ state, dispatch }) => {
         <div
             ref={containerRef}
             className="w-full shrink-0 relative select-none overflow-hidden"
-            style={{ height: OVERVIEW_HEIGHT, borderBottom: '1px solid rgba(255,255,255,0.06)', cursor: 'crosshair' }}
+            style={{
+                height: OVERVIEW_HEIGHT,
+                borderBottom: '1px solid rgba(255,255,255,0.06)',
+                cursor: 'crosshair',
+            }}
             onMouseDown={handleMouseDown}
         >
             <WaveformMiniCanvas

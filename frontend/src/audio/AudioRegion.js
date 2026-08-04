@@ -1,6 +1,6 @@
 /**
  * AudioRegion - Core data structure for non-destructive audio editing
- * 
+ *
  * Each region represents a reference to a portion of the original audio file.
  * The original file is never modified - all edits are stored as region metadata.
  */
@@ -16,7 +16,7 @@ export function generateRegionId() {
 
 /**
  * Create a new AudioRegion
- * 
+ *
  * @param {Object} params - Region parameters
  * @param {AudioBuffer} params.sourceBuffer - Reference to original AudioBuffer
  * @param {string} params.sourcePath - Path to original audio file
@@ -36,7 +36,7 @@ export function createRegion({
     timelineStart,
     id = null,
     name = null,
-    color = null
+    color = null,
 }) {
     const duration = sourceEnd - sourceStart;
 
@@ -58,22 +58,22 @@ export function createRegion({
         timelineEnd: timelineStart + duration,
 
         // Envelope settings
-        fadeInDuration: 0,      // seconds
-        fadeOutDuration: 0,     // seconds
-        gain: 1.0,              // 0.0 - 2.0
+        fadeInDuration: 0, // seconds
+        fadeOutDuration: 0, // seconds
+        gain: 1.0, // 0.0 - 2.0
 
         // UI state
-        color: color || '#3b82f6',  // Default blue
+        color: color || '#3b82f6', // Default blue
         isSelected: false,
         isMuted: false,
-        isLocked: false
+        isLocked: false,
     };
 }
 
 /**
  * Clone a region (for copy/paste operations)
  * Creates a new region with same source reference but new ID
- * 
+ *
  * @param {AudioRegion} region - Region to clone
  * @param {number} [newTimelineStart] - Optional new timeline position
  * @returns {AudioRegion}
@@ -86,14 +86,14 @@ export function cloneRegion(region, newTimelineStart = null) {
         name: `${region.name} (Copy)`,
         timelineStart: start,
         timelineEnd: start + region.duration,
-        isSelected: false
+        isSelected: false,
     };
 }
 
 /**
  * Split a region at a given time position
  * Returns two new regions that together represent the original
- * 
+ *
  * @param {AudioRegion} region - Region to split
  * @param {number} splitTime - Timeline position to split at
  * @returns {[AudioRegion, AudioRegion]} - Left and right regions
@@ -118,8 +118,8 @@ export function splitRegion(region, splitTime) {
         sourceEnd: sourceSplitPoint,
         duration: leftDuration,
         timelineEnd: region.timelineStart + leftDuration,
-        fadeOutDuration: 0,  // Reset fade-out on left
-        isSelected: false
+        fadeOutDuration: 0, // Reset fade-out on left
+        isSelected: false,
     };
 
     // Create right region (inherits fade-out)
@@ -132,8 +132,8 @@ export function splitRegion(region, splitTime) {
         timelineStart: splitTime,
         duration: rightDuration,
         timelineEnd: splitTime + rightDuration,
-        fadeInDuration: 0,  // Reset fade-in on right
-        isSelected: false
+        fadeInDuration: 0, // Reset fade-in on right
+        isSelected: false,
     };
 
     return [leftRegion, rightRegion];
@@ -141,7 +141,7 @@ export function splitRegion(region, splitTime) {
 
 /**
  * Trim a region's start or end
- * 
+ *
  * @param {AudioRegion} region - Region to trim
  * @param {number} newSourceStart - New source start time
  * @param {number} newSourceEnd - New source end time
@@ -173,7 +173,7 @@ export function trimRegion(region, newSourceStart = null, newSourceEnd = null) {
 
 /**
  * Move a region to a new timeline position
- * 
+ *
  * @param {AudioRegion} region - Region to move
  * @param {number} newTimelineStart - New timeline start position
  * @returns {AudioRegion}
@@ -183,13 +183,13 @@ export function moveRegion(region, newTimelineStart) {
     return {
         ...region,
         timelineStart: start,
-        timelineEnd: start + region.duration
+        timelineEnd: start + region.duration,
     };
 }
 
 /**
  * Set envelope for a region
- * 
+ *
  * @param {AudioRegion} region - Region to modify
  * @param {number} [fadeIn] - Fade-in duration in seconds
  * @param {number} [fadeOut] - Fade-out duration in seconds
@@ -214,20 +214,21 @@ export function setEnvelope(region, fadeIn = null, fadeOut = null, gain = null) 
 
 /**
  * Check if two regions overlap on the timeline
- * 
- * @param {AudioRegion} regionA 
- * @param {AudioRegion} regionB 
+ *
+ * @param {AudioRegion} regionA
+ * @param {AudioRegion} regionB
  * @returns {boolean}
  */
 export function regionsOverlap(regionA, regionB) {
-    return !(regionA.timelineEnd <= regionB.timelineStart ||
-        regionB.timelineEnd <= regionA.timelineStart);
+    return !(
+        regionA.timelineEnd <= regionB.timelineStart || regionB.timelineEnd <= regionA.timelineStart
+    );
 }
 
 /**
  * Sort regions by timeline position
- * 
- * @param {AudioRegion[]} regions 
+ *
+ * @param {AudioRegion[]} regions
  * @returns {AudioRegion[]}
  */
 export function sortRegionsByPosition(regions) {
@@ -236,13 +237,13 @@ export function sortRegionsByPosition(regions) {
 
 /**
  * Calculate total timeline duration based on regions
- * 
- * @param {AudioRegion[]} regions 
+ *
+ * @param {AudioRegion[]} regions
  * @returns {number}
  */
 export function calculateTimelineDuration(regions) {
     if (regions.length === 0) return 0;
-    return Math.max(...regions.map(r => r.timelineEnd));
+    return Math.max(...regions.map((r) => r.timelineEnd));
 }
 
 export default {
@@ -255,5 +256,5 @@ export default {
     regionsOverlap,
     sortRegionsByPosition,
     calculateTimelineDuration,
-    generateRegionId
+    generateRegionId,
 };

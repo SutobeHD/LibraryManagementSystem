@@ -4,7 +4,15 @@ import { loadEditsForTrack, saveEditsForTrack, clearEditsForTrack } from './pers
 // localStorage auto-save + restore for per-track edits (cuts + hot cues).
 //  - auto-save debounced 500ms after cuts/hotCues change
 //  - restore on track-id change after the buffer is ready (so we don't clobber the initial load)
-export default function useEditPersistence({ fullTrack, bufferReady, cuts, hotCues, setCuts, setHotCues, toast }) {
+export default function useEditPersistence({
+    fullTrack,
+    bufferReady,
+    cuts,
+    hotCues,
+    setCuts,
+    setHotCues,
+    toast,
+}) {
     // Auto-save edits to localStorage (debounced 500ms)
     useEffect(() => {
         if (!fullTrack?.id) return;
@@ -24,7 +32,9 @@ export default function useEditPersistence({ fullTrack, bufferReady, cuts, hotCu
             if (cuts.length === 0 && hotCues.length === 0) {
                 if (saved.cuts?.length) setCuts(saved.cuts);
                 if (saved.hotCues?.length) setHotCues(saved.hotCues);
-                toast.info(`Restored ${saved.cuts?.length || 0} edits + ${saved.hotCues?.length || 0} cues from auto-save`);
+                toast.info(
+                    `Restored ${saved.cuts?.length || 0} edits + ${saved.hotCues?.length || 0} cues from auto-save`
+                );
             }
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps

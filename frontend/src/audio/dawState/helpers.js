@@ -33,16 +33,16 @@ export function createInitialState(overrides = {}) {
         },
 
         // Audio
-        sourceBuffer: null,  // AudioBuffer (not serialized)
-        bandPeaks: null,     // { low, mid, high } peak arrays (not serialized)
+        sourceBuffer: null, // AudioBuffer (not serialized)
+        bandPeaks: null, // { low, mid, high } peak arrays (not serialized)
         fallbackPeaks: null, // Simple mono peaks array (fallback when band splitting fails)
-        totalDuration: 0,    // Source track duration in seconds
+        totalDuration: 0, // Source track duration in seconds
 
         // Tempo
         bpm: 128,
-        tempoMap: [],        // [{index, bpm, positionMs}] from song grid
-        gridOffsetSec: 0,    // Manual grid shift (seconds)
-        masterTempoMap: [],  // [{index, bpm, positionMs}] for the edit timeline
+        tempoMap: [], // [{index, bpm, positionMs}] from song grid
+        gridOffsetSec: 0, // Manual grid shift (seconds)
+        masterTempoMap: [], // [{index, bpm, positionMs}] for the edit timeline
         firstBeatMs: 0,
 
         // Regions (the core edit data)
@@ -53,16 +53,16 @@ export function createInitialState(overrides = {}) {
 
         // Selection
         selectedRegionIds: new Set(),
-        selectionRange: null,  // { start, end } in seconds
+        selectionRange: null, // { start, end } in seconds
 
         // Cue Points & Loops
-        hotCues: Array(16).fill(null),  // [A-P], each: { name, time, red, green, blue } or null
-        memoryCues: [],                // [{ name, time, red, green, blue }]
-        loops: [],                     // [{ name, startTime, endTime, active, red, green, blue }]
-        activeLoopIndex: -1,           // Index of the active loop in loops array
+        hotCues: Array(16).fill(null), // [A-P], each: { name, time, red, green, blue } or null
+        memoryCues: [], // [{ name, time, red, green, blue }]
+        loops: [], // [{ name, startTime, endTime, active, red, green, blue }]
+        activeLoopIndex: -1, // Index of the active loop in loops array
 
         // Transport / Playback
-        playhead: 0,       // Current playhead position (seconds)
+        playhead: 0, // Current playhead position (seconds)
         isPlaying: false,
         loopEnabled: false,
         loopStart: 0,
@@ -70,27 +70,27 @@ export function createInitialState(overrides = {}) {
 
         // Dead Reckoning — interpolate playhead between IPC sync frames
         deadReckoning: {
-            lastSyncWallClock: 0,   // performance.now() at last Tauri sync
-            lastSyncAudioTime: 0,   // audio time (seconds) at last sync
+            lastSyncWallClock: 0, // performance.now() at last Tauri sync
+            lastSyncAudioTime: 0, // audio time (seconds) at last sync
         },
 
         // View state
-        zoom: 100,         // Pixels per second
-        scrollX: 0,        // Horizontal scroll offset in pixels
+        zoom: 100, // Pixels per second
+        scrollX: 0, // Horizontal scroll offset in pixels
         snapEnabled: true,
-        snapDivision: '1/4',  // '1/4' | '1/8' | '1/16' | '1/32'
-        slipMode: false,      // When true, snap is temporarily disabled
+        snapDivision: '1/4', // '1/4' | '1/8' | '1/16' | '1/32'
+        slipMode: false, // When true, snap is temporarily disabled
         waveformStyle: '3band', // '3band' (Rekordbox CDJ) | 'mono' | 'bass'
 
         // History (undo/redo)
-        undoStack: [],     // Array of { regions, hotCues, memoryCues, loops, label }
+        undoStack: [], // Array of { regions, hotCues, memoryCues, loops, label }
         redoStack: [],
         maxHistory: 50,
 
         // UI state
-        activeTool: 'select',  // 'select' | 'split' | 'trim'
-        clipboard: [],         // Array of regions to paste
-        clipboardSpan: 0,      // Total span of last copy (selection-range width)
+        activeTool: 'select', // 'select' | 'split' | 'trim'
+        clipboard: [], // Array of regions to paste
+        clipboardSpan: 0, // Total span of last copy (selection-range width)
 
         ...overrides,
     };
@@ -123,7 +123,7 @@ export function createInitialState(overrides = {}) {
 export function normalizeRegion(r) {
     if (!r) return r;
     const duration = Math.max(0, r.duration || 0);
-    if (duration === 0) return null;  // caller will filter
+    if (duration === 0) return null; // caller will filter
     const timelineStart = Math.max(0, r.timelineStart || 0);
     const sourceStart = Math.max(0, r.sourceStart || 0);
     let sourceDuration = r.sourceDuration;
@@ -139,10 +139,12 @@ export function normalizeRegion(r) {
     // > 1ms), let it through but log so we can see this in the console
     // when debugging weird playback. Cut/paste produces match.
     if (Math.abs(sourceDuration - duration) > 0.001) {
-        console.warn(
-            '[normalizeRegion] sourceDuration != duration — keeping as time-stretch',
-            { id: r.id, timelineStart, duration, sourceDuration }
-        );
+        console.warn('[normalizeRegion] sourceDuration != duration — keeping as time-stretch', {
+            id: r.id,
+            timelineStart,
+            duration,
+            sourceDuration,
+        });
     }
     return {
         ...r,
@@ -177,16 +179,23 @@ export function normalizeRegions(regions) {
 export function getSnapUnit(bpm, division = '1/4') {
     if (!bpm || bpm <= 0) return 0.5;
 
-    const beatDuration = 60 / bpm;  // One quarter note
+    const beatDuration = 60 / bpm; // One quarter note
 
     switch (division) {
-        case '1/1': return beatDuration * 4;   // Whole bar
-        case '1/2': return beatDuration * 2;   // Half
-        case '1/4': return beatDuration;       // Quarter
-        case '1/8': return beatDuration / 2;   // Eighth
-        case '1/16': return beatDuration / 4;  // Sixteenth
-        case '1/32': return beatDuration / 8;  // Thirty-second
-        default: return beatDuration;
+        case '1/1':
+            return beatDuration * 4; // Whole bar
+        case '1/2':
+            return beatDuration * 2; // Half
+        case '1/4':
+            return beatDuration; // Quarter
+        case '1/8':
+            return beatDuration / 2; // Eighth
+        case '1/16':
+            return beatDuration / 4; // Sixteenth
+        case '1/32':
+            return beatDuration / 8; // Thirty-second
+        default:
+            return beatDuration;
     }
 }
 
@@ -236,23 +245,23 @@ export function getPositionInfo(time, bpm, offset = 0) {
  * Default hot cue colors (matching Rekordbox CDJ color scheme)
  */
 export const HOT_CUE_COLORS = [
-    { red: 40, green: 255, blue: 0, label: 'Green' },       // A
-    { red: 0, green: 200, blue: 255, label: 'Cyan' },       // B
-    { red: 60, green: 100, blue: 255, label: 'Blue' },      // C
-    { red: 200, green: 100, blue: 255, label: 'Purple' },   // D
-    { red: 255, green: 50, blue: 120, label: 'Pink' },      // E
-    { red: 255, green: 100, blue: 0, label: 'Orange' },     // F
-    { red: 255, green: 220, blue: 0, label: 'Yellow' },     // G
-    { red: 255, green: 0, blue: 0, label: 'Red' },          // H
+    { red: 40, green: 255, blue: 0, label: 'Green' }, // A
+    { red: 0, green: 200, blue: 255, label: 'Cyan' }, // B
+    { red: 60, green: 100, blue: 255, label: 'Blue' }, // C
+    { red: 200, green: 100, blue: 255, label: 'Purple' }, // D
+    { red: 255, green: 50, blue: 120, label: 'Pink' }, // E
+    { red: 255, green: 100, blue: 0, label: 'Orange' }, // F
+    { red: 255, green: 220, blue: 0, label: 'Yellow' }, // G
+    { red: 255, green: 0, blue: 0, label: 'Red' }, // H
     // Second bank (I–P) — distinct hues so 9–16 stay readable.
-    { red: 0, green: 230, blue: 160, label: 'Teal' },       // I
-    { red: 150, green: 230, blue: 0, label: 'Lime' },       // J
-    { red: 0, green: 150, blue: 255, label: 'Sky' },        // K
-    { red: 150, green: 80, blue: 255, label: 'Violet' },    // L
-    { red: 255, green: 0, blue: 200, label: 'Magenta' },    // M
-    { red: 255, green: 160, blue: 60, label: 'Amber' },     // N
-    { red: 120, green: 200, blue: 255, label: 'Ice' },      // O
-    { red: 230, green: 230, blue: 230, label: 'White' },    // P
+    { red: 0, green: 230, blue: 160, label: 'Teal' }, // I
+    { red: 150, green: 230, blue: 0, label: 'Lime' }, // J
+    { red: 0, green: 150, blue: 255, label: 'Sky' }, // K
+    { red: 150, green: 80, blue: 255, label: 'Violet' }, // L
+    { red: 255, green: 0, blue: 200, label: 'Magenta' }, // M
+    { red: 255, green: 160, blue: 60, label: 'Amber' }, // N
+    { red: 120, green: 200, blue: 255, label: 'Ice' }, // O
+    { red: 230, green: 230, blue: 230, label: 'White' }, // P
 ];
 
 /**

@@ -26,13 +26,10 @@ import { historyReducer } from '../dawState/history.js';
 function dawReducer(state, action) {
     return regionsReducer(
         transportReducer(
-            selectionReducer(
-                cuesReducer(historyReducer(state, action), action),
-                action,
-            ),
-            action,
+            selectionReducer(cuesReducer(historyReducer(state, action), action), action),
+            action
         ),
-        action,
+        action
     );
 }
 
@@ -46,7 +43,10 @@ test('createInitialState returns the expected shape', () => {
     // Collections start empty / default
     assert.deepEqual(s.regions, []);
     assert.equal(s.hotCues.length, 16);
-    assert.ok(s.hotCues.every(c => c === null), 'hotCues should be all null');
+    assert.ok(
+        s.hotCues.every((c) => c === null),
+        'hotCues should be all null'
+    );
     assert.deepEqual(s.memoryCues, []);
     assert.deepEqual(s.loops, []);
     assert.ok(s.selectedRegionIds instanceof Set, 'selectedRegionIds is a Set');

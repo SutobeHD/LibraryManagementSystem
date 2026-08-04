@@ -24,7 +24,7 @@ import { useEffect, useRef } from 'react';
  */
 export function useTimelineLayout({ containerRef, canvasRef, ds, canvasHeight, minCanvasHeight }) {
     const resizeTimerRef = useRef(null);
-    const roRef          = useRef(null);
+    const roRef = useRef(null);
 
     useEffect(() => {
         const container = containerRef.current;
@@ -33,7 +33,7 @@ export function useTimelineLayout({ containerRef, canvasRef, ds, canvasHeight, m
         const apply = () => {
             const rect = container.getBoundingClientRect();
             const d = ds.current;
-            d.dpr   = window.devicePixelRatio || 1;
+            d.dpr = window.devicePixelRatio || 1;
             d.width = rect.width;
             // Dynamic-height mode: derive from container so the timeline
             // expands into whatever vertical space DjEditDaw's flex layout
@@ -43,9 +43,9 @@ export function useTimelineLayout({ containerRef, canvasRef, ds, canvasHeight, m
             d.height = canvasHeight ?? Math.max(minCanvasHeight, rect.height);
             const canvas = canvasRef.current;
             if (canvas) {
-                canvas.width  = Math.round(d.width  * d.dpr);
+                canvas.width = Math.round(d.width * d.dpr);
                 canvas.height = Math.round(d.height * d.dpr);
-                canvas.style.width  = `${d.width}px`;
+                canvas.style.width = `${d.width}px`;
                 canvas.style.height = `${d.height}px`;
             }
             d.needsWaveformRebuild = true;

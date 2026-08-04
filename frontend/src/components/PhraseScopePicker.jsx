@@ -15,7 +15,14 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-    Music, Search, ListMusic, Library, CheckSquare, Square, Loader2, ChevronRight,
+    Music,
+    Search,
+    ListMusic,
+    Library,
+    CheckSquare,
+    Square,
+    Loader2,
+    ChevronRight,
 } from 'lucide-react';
 import api from '../api/api';
 
@@ -47,7 +54,7 @@ function filterTracks(list, q) {
     if (!q.trim()) return list;
     const s = q.toLowerCase();
     return list.filter(
-        (t) => tname(t).toLowerCase().includes(s) || tartist(t).toLowerCase().includes(s),
+        (t) => tname(t).toLowerCase().includes(s) || tartist(t).toLowerCase().includes(s)
     );
 }
 
@@ -92,18 +99,16 @@ export default function PhraseScopePicker({ onScopeChange }) {
     // ── Load collection + playlist tree once ────────────────────────────────
     useEffect(() => {
         setTracksLoading(true);
-        api
-            .get('/api/library/tracks')
+        api.get('/api/library/tracks')
             .then((res) => {
                 const list = Array.isArray(res.data)
                     ? res.data
-                    : res.data?.tracks ?? res.data?.data ?? [];
+                    : (res.data?.tracks ?? res.data?.data ?? []);
                 setAllTracks(Array.isArray(list) ? list : []);
             })
             .catch((e) => log('error', 'load tracks failed', e))
             .finally(() => setTracksLoading(false));
-        api
-            .get('/api/playlists/tree')
+        api.get('/api/playlists/tree')
             .then((res) => {
                 if (Array.isArray(res.data)) setPlaylists(flattenPlaylists(res.data));
             })
@@ -114,8 +119,7 @@ export default function PhraseScopePicker({ onScopeChange }) {
     useEffect(() => {
         if (!(mode === 'selection' && selSource === 'playlist' && selPlaylistId)) return;
         setSelPlLoading(true);
-        api
-            .get(`/api/playlist/${selPlaylistId}/tracks?_=${Date.now()}`)
+        api.get(`/api/playlist/${selPlaylistId}/tracks?_=${Date.now()}`)
             .then((res) => setSelPlTracks(Array.isArray(res.data) ? res.data : []))
             .catch((e) => {
                 log('error', 'load playlist tracks failed', e);
@@ -128,7 +132,7 @@ export default function PhraseScopePicker({ onScopeChange }) {
     const filteredSel = useMemo(() => filterTracks(selPool, selSearch), [selPool, selSearch]);
     const filteredSingle = useMemo(
         () => filterTracks(allTracks, singleSearch).slice(0, RENDER_CAP),
-        [allTracks, singleSearch],
+        [allTracks, singleSearch]
     );
     const filteredPlaylists = useMemo(() => {
         if (!plSearch.trim()) return playlists;
@@ -219,8 +223,12 @@ export default function PhraseScopePicker({ onScopeChange }) {
                     {singleTrack ? (
                         <div className="flex items-center justify-between p-3 bg-amber2/5 border border-amber2/25 rounded-mx-sm">
                             <div className="min-w-0">
-                                <p className="text-[13px] font-semibold text-ink-primary truncate">{tname(singleTrack)}</p>
-                                <p className="text-ink-muted text-tiny truncate">{tartist(singleTrack)}</p>
+                                <p className="text-[13px] font-semibold text-ink-primary truncate">
+                                    {tname(singleTrack)}
+                                </p>
+                                <p className="text-ink-muted text-tiny truncate">
+                                    {tartist(singleTrack)}
+                                </p>
                             </div>
                             <button
                                 onClick={() => setSingleTrack(null)}
@@ -231,7 +239,12 @@ export default function PhraseScopePicker({ onScopeChange }) {
                         </div>
                     ) : (
                         <div className="border border-line-subtle rounded-mx-sm overflow-hidden">
-                            <SearchBox value={singleSearch} onChange={setSingleSearch} placeholder="Search title or artist…" loading={tracksLoading} />
+                            <SearchBox
+                                value={singleSearch}
+                                onChange={setSingleSearch}
+                                placeholder="Search title or artist…"
+                                loading={tracksLoading}
+                            />
                             <div className="max-h-56 overflow-y-auto divide-y divide-line-subtle">
                                 {filteredSingle.length === 0 ? (
                                     <div className="p-4 text-center text-ink-muted text-tiny">
@@ -241,11 +254,18 @@ export default function PhraseScopePicker({ onScopeChange }) {
                                     filteredSingle.map((t, i) => (
                                         <button
                                             key={tid(t) ?? i}
-                                            onClick={() => { setSingleTrack(t); setSingleSearch(''); }}
+                                            onClick={() => {
+                                                setSingleTrack(t);
+                                                setSingleSearch('');
+                                            }}
                                             className="w-full text-left px-3 py-2 hover:bg-mx-hover transition-colors"
                                         >
-                                            <p className="text-[12px] text-ink-primary truncate">{tname(t)}</p>
-                                            <p className="text-[10px] text-ink-muted truncate">{tartist(t)}</p>
+                                            <p className="text-[12px] text-ink-primary truncate">
+                                                {tname(t)}
+                                            </p>
+                                            <p className="text-[10px] text-ink-muted truncate">
+                                                {tartist(t)}
+                                            </p>
                                         </button>
                                     ))
                                 )}
@@ -258,23 +278,33 @@ export default function PhraseScopePicker({ onScopeChange }) {
             {/* PLAYLIST (whole) */}
             {mode === 'playlist' && (
                 <div className="border border-line-subtle rounded-mx-sm overflow-hidden">
-                    <SearchBox value={plSearch} onChange={setPlSearch} placeholder="Search playlists…" />
+                    <SearchBox
+                        value={plSearch}
+                        onChange={setPlSearch}
+                        placeholder="Search playlists…"
+                    />
                     <div className="max-h-56 overflow-y-auto divide-y divide-line-subtle">
                         {filteredPlaylists.length === 0 ? (
-                            <div className="p-4 text-center text-ink-muted text-tiny">No playlists</div>
+                            <div className="p-4 text-center text-ink-muted text-tiny">
+                                No playlists
+                            </div>
                         ) : (
                             filteredPlaylists.map((p) => (
                                 <button
                                     key={p.id}
                                     onClick={() => setPlaylistId(p.id)}
                                     className={`w-full flex items-center gap-2 text-left px-3 py-2 transition-colors ${
-                                        playlistId === p.id ? 'bg-amber2/10 text-amber2' : 'hover:bg-mx-hover text-ink-primary'
+                                        playlistId === p.id
+                                            ? 'bg-amber2/10 text-amber2'
+                                            : 'hover:bg-mx-hover text-ink-primary'
                                     }`}
                                     style={{ paddingLeft: `${12 + p.depth * 14}px` }}
                                 >
                                     <ListMusic size={12} className="shrink-0 opacity-70" />
                                     <span className="text-[12px] truncate">{p.name}</span>
-                                    {playlistId === p.id && <ChevronRight size={12} className="ml-auto" />}
+                                    {playlistId === p.id && (
+                                        <ChevronRight size={12} className="ml-auto" />
+                                    )}
                                 </button>
                             ))
                         )}
@@ -315,7 +345,8 @@ export default function PhraseScopePicker({ onScopeChange }) {
                             <option value="">Select a playlist…</option>
                             {playlists.map((p) => (
                                 <option key={p.id} value={p.id}>
-                                    {' '.repeat(p.depth * 2)}{p.name}
+                                    {' '.repeat(p.depth * 2)}
+                                    {p.name}
                                 </option>
                             ))}
                         </select>
@@ -334,10 +365,17 @@ export default function PhraseScopePicker({ onScopeChange }) {
                                 onClick={toggleAllFiltered}
                                 className="flex items-center gap-1.5 text-[10px] text-ink-secondary hover:text-amber2"
                             >
-                                {allFilteredSelected ? <CheckSquare size={12} /> : <Square size={12} />}
-                                {allFilteredSelected ? 'Deselect' : 'Select'} shown ({filteredSel.length})
+                                {allFilteredSelected ? (
+                                    <CheckSquare size={12} />
+                                ) : (
+                                    <Square size={12} />
+                                )}
+                                {allFilteredSelected ? 'Deselect' : 'Select'} shown (
+                                {filteredSel.length})
                             </button>
-                            <span className="text-[10px] font-mono text-amber2">{selectedIds.size} selected</span>
+                            <span className="text-[10px] font-mono text-amber2">
+                                {selectedIds.size} selected
+                            </span>
                         </div>
                         <div className="max-h-56 overflow-y-auto divide-y divide-line-subtle">
                             {filteredSel.length === 0 ? (
@@ -355,13 +393,23 @@ export default function PhraseScopePicker({ onScopeChange }) {
                                             className="w-full flex items-center gap-2.5 text-left px-3 py-2 hover:bg-mx-hover transition-colors"
                                         >
                                             {checked ? (
-                                                <CheckSquare size={14} className="text-amber2 shrink-0" />
+                                                <CheckSquare
+                                                    size={14}
+                                                    className="text-amber2 shrink-0"
+                                                />
                                             ) : (
-                                                <Square size={14} className="text-ink-muted shrink-0" />
+                                                <Square
+                                                    size={14}
+                                                    className="text-ink-muted shrink-0"
+                                                />
                                             )}
                                             <div className="min-w-0">
-                                                <p className="text-[12px] text-ink-primary truncate">{tname(t)}</p>
-                                                <p className="text-[10px] text-ink-muted truncate">{tartist(t)}</p>
+                                                <p className="text-[12px] text-ink-primary truncate">
+                                                    {tname(t)}
+                                                </p>
+                                                <p className="text-[10px] text-ink-muted truncate">
+                                                    {tartist(t)}
+                                                </p>
                                             </div>
                                         </button>
                                     );
@@ -369,7 +417,8 @@ export default function PhraseScopePicker({ onScopeChange }) {
                             )}
                             {filteredSel.length > RENDER_CAP && (
                                 <div className="px-3 py-2 text-center text-[10px] text-ink-muted">
-                                    Showing first {RENDER_CAP} of {filteredSel.length} — search to narrow
+                                    Showing first {RENDER_CAP} of {filteredSel.length} — search to
+                                    narrow
                                 </div>
                             )}
                         </div>
@@ -382,9 +431,13 @@ export default function PhraseScopePicker({ onScopeChange }) {
                 <div className="flex items-center gap-3 p-3 bg-amber2/5 border border-amber2/25 rounded-mx-sm">
                     <Library size={18} className="text-amber2 shrink-0" />
                     <div>
-                        <p className="text-[13px] font-semibold text-ink-primary">Entire collection</p>
+                        <p className="text-[13px] font-semibold text-ink-primary">
+                            Entire collection
+                        </p>
                         <p className="text-ink-muted text-tiny">
-                            {tracksLoading ? 'Loading…' : `${allTracks.length} track(s) will be processed`}
+                            {tracksLoading
+                                ? 'Loading…'
+                                : `${allTracks.length} track(s) will be processed`}
                         </p>
                     </div>
                 </div>

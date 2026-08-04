@@ -10,22 +10,26 @@
  */
 import React, { useState } from 'react';
 import {
-    ArrowUpDown, RefreshCw, Loader2, AlertTriangle, ChevronDown, ChevronRight,
+    ArrowUpDown,
+    RefreshCw,
+    Loader2,
+    AlertTriangle,
+    ChevronDown,
+    ChevronRight,
 } from 'lucide-react';
 import api from '../../api/api';
 
 const PlayCountSync = ({ usbRoot, usbXmlPath }) => {
     const [open, setOpen] = useState(false);
     const [loading, setLoading] = useState(false);
-    const [diffData, setDiffData] = useState(null);  // {auto, conflicts, last_sync_ts}
+    const [diffData, setDiffData] = useState(null); // {auto, conflicts, last_sync_ts}
     const [error, setError] = useState(null);
-    const [strategies, setStrategies] = useState({});  // {track_id: strategy}
+    const [strategies, setStrategies] = useState({}); // {track_id: strategy}
     const [committing, setCommitting] = useState(false);
     const [commitResult, setCommitResult] = useState(null);
-    const [confirmStep, setConfirmStep] = useState(0);  // 0=idle 1=confirm 2=confirmed
+    const [confirmStep, setConfirmStep] = useState(0); // 0=idle 1=confirm 2=confirmed
 
-    const log = (level, msg, data) =>
-        console[level]?.(`[PlayCountSync] ${msg}`, data ?? '');
+    const log = (level, msg, data) => console[level]?.(`[PlayCountSync] ${msg}`, data ?? '');
 
     const fetchDiff = async () => {
         if (!usbRoot || !usbXmlPath) {
@@ -47,9 +51,14 @@ const PlayCountSync = ({ usbRoot, usbXmlPath }) => {
             setDiffData(data);
             // Default strategy for every conflict: take_max
             const initStrategies = {};
-            (data.conflicts || []).forEach(c => { initStrategies[c.track_id] = 'take_max'; });
+            (data.conflicts || []).forEach((c) => {
+                initStrategies[c.track_id] = 'take_max';
+            });
             setStrategies(initStrategies);
-            log('info', 'diff loaded', { auto: data.auto?.length, conflicts: data.conflicts?.length });
+            log('info', 'diff loaded', {
+                auto: data.auto?.length,
+                conflicts: data.conflicts?.length,
+            });
         } catch (e) {
             log('error', 'fetchDiff failed', e);
             setError(e.message || 'Failed to load diff');
@@ -60,20 +69,28 @@ const PlayCountSync = ({ usbRoot, usbXmlPath }) => {
 
     const setAllMax = () => {
         const next = {};
-        (diffData?.conflicts || []).forEach(c => { next[c.track_id] = 'take_max'; });
+        (diffData?.conflicts || []).forEach((c) => {
+            next[c.track_id] = 'take_max';
+        });
         setStrategies(next);
     };
 
     const handleCommit = async () => {
-        if (confirmStep === 0) { setConfirmStep(1); return; }
-        if (confirmStep === 1) { setConfirmStep(2); return; }
+        if (confirmStep === 0) {
+            setConfirmStep(1);
+            return;
+        }
+        if (confirmStep === 1) {
+            setConfirmStep(2);
+            return;
+        }
 
         // Step 2 — actually commit
         setCommitting(true);
         setError(null);
         log('info', 'committing resolutions');
         try {
-            const resolutions = (diffData?.conflicts || []).map(c => ({
+            const resolutions = (diffData?.conflicts || []).map((c) => ({
                 track_id: c.track_id,
                 strategy: strategies[c.track_id] || 'take_max',
                 pc_count: c.pc_count,
@@ -109,14 +126,20 @@ const PlayCountSync = ({ usbRoot, usbXmlPath }) => {
             {/* Header toggle */}
             <button
                 className="w-full flex items-center justify-between px-4 py-3 hover:bg-mx-hover rounded-mx-md transition-colors"
-                onClick={() => setOpen(o => !o)}
+                onClick={() => setOpen((o) => !o)}
                 aria-expanded={open}
             >
                 <div className="flex items-center gap-2">
                     <ArrowUpDown size={14} className="text-amber2" />
-                    <span className="text-[12px] font-semibold text-ink-primary">Play Count Sync</span>
+                    <span className="text-[12px] font-semibold text-ink-primary">
+                        Play Count Sync
+                    </span>
                 </div>
-                {open ? <ChevronDown size={14} className="text-ink-muted" /> : <ChevronRight size={14} className="text-ink-muted" />}
+                {open ? (
+                    <ChevronDown size={14} className="text-ink-muted" />
+                ) : (
+                    <ChevronRight size={14} className="text-ink-muted" />
+                )}
             </button>
 
             {open && (
@@ -128,7 +151,11 @@ const PlayCountSync = ({ usbRoot, usbXmlPath }) => {
                             disabled={loading}
                             className="btn-primary text-[11px] py-1.5 px-3 flex items-center gap-1.5"
                         >
-                            {loading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+                            {loading ? (
+                                <Loader2 size={11} className="animate-spin" />
+                            ) : (
+                                <RefreshCw size={11} />
+                            )}
                             Analyse Counts
                         </button>
                         {diffData?.last_sync_ts !== undefined && (
@@ -150,7 +177,9 @@ const PlayCountSync = ({ usbRoot, usbXmlPath }) => {
                         <div className="text-ok text-[11px] bg-ok/5 border border-ok/20 rounded-mx-sm px-3 py-2">
                             Sync written — {commitResult.committed} track(s) updated.
                             {(commitResult.errors || []).length > 0 && (
-                                <span className="text-amber2 ml-2">{commitResult.errors.length} warning(s)</span>
+                                <span className="text-amber2 ml-2">
+                                    {commitResult.errors.length} warning(s)
+                                </span>
                             )}
                         </div>
                     )}
@@ -160,10 +189,20 @@ const PlayCountSync = ({ usbRoot, usbXmlPath }) => {
                             {/* Auto-resolved summary */}
                             <div className="flex items-center gap-4 text-[11px] font-mono">
                                 <span className="text-ink-secondary">
-                                    Auto: <span className="text-ok font-semibold">{(diffData.auto || []).length}</span>
+                                    Auto:{' '}
+                                    <span className="text-ok font-semibold">
+                                        {(diffData.auto || []).length}
+                                    </span>
                                 </span>
                                 <span className="text-ink-secondary">
-                                    Conflicts: <span className={diffData.conflicts?.length > 0 ? 'text-amber2 font-semibold' : 'text-ok font-semibold'}>
+                                    Conflicts:{' '}
+                                    <span
+                                        className={
+                                            diffData.conflicts?.length > 0
+                                                ? 'text-amber2 font-semibold'
+                                                : 'text-ok font-semibold'
+                                        }
+                                    >
                                         {(diffData.conflicts || []).length}
                                     </span>
                                 </span>
@@ -173,7 +212,9 @@ const PlayCountSync = ({ usbRoot, usbXmlPath }) => {
                             {(diffData.conflicts || []).length > 0 && (
                                 <div className="space-y-2">
                                     <div className="flex items-center justify-between">
-                                        <span className="text-[10px] uppercase tracking-wider text-ink-muted font-semibold">Conflicts</span>
+                                        <span className="text-[10px] uppercase tracking-wider text-ink-muted font-semibold">
+                                            Conflicts
+                                        </span>
                                         <button
                                             onClick={setAllMax}
                                             className="text-[10px] text-amber2 hover:underline"
@@ -192,20 +233,35 @@ const PlayCountSync = ({ usbRoot, usbXmlPath }) => {
                                         </div>
                                         {/* Rows */}
                                         <div className="max-h-56 overflow-y-auto divide-y divide-line-subtle">
-                                            {diffData.conflicts.map(c => (
+                                            {diffData.conflicts.map((c) => (
                                                 <div
                                                     key={c.track_id}
                                                     className="grid grid-cols-[1fr_72px_72px_120px] gap-1 px-3 py-2 items-center hover:bg-mx-hover"
                                                 >
                                                     <div className="min-w-0">
-                                                        <p className="text-[11px] text-ink-primary truncate">{c.title || c.track_id}</p>
-                                                        {c.artist && <p className="text-[10px] text-ink-muted truncate">{c.artist}</p>}
+                                                        <p className="text-[11px] text-ink-primary truncate">
+                                                            {c.title || c.track_id}
+                                                        </p>
+                                                        {c.artist && (
+                                                            <p className="text-[10px] text-ink-muted truncate">
+                                                                {c.artist}
+                                                            </p>
+                                                        )}
                                                     </div>
-                                                    <span className="text-right text-[11px] font-mono text-info">{c.pc_count}</span>
-                                                    <span className="text-right text-[11px] font-mono text-amber2">{c.usb_count}</span>
+                                                    <span className="text-right text-[11px] font-mono text-info">
+                                                        {c.pc_count}
+                                                    </span>
+                                                    <span className="text-right text-[11px] font-mono text-amber2">
+                                                        {c.usb_count}
+                                                    </span>
                                                     <select
                                                         value={strategies[c.track_id] || 'take_max'}
-                                                        onChange={e => setStrategies(s => ({ ...s, [c.track_id]: e.target.value }))}
+                                                        onChange={(e) =>
+                                                            setStrategies((s) => ({
+                                                                ...s,
+                                                                [c.track_id]: e.target.value,
+                                                            }))
+                                                        }
                                                         className="input-glass text-[10px] py-0.5 px-1.5 rounded-mx-xs"
                                                     >
                                                         <option value="take_max">Take MAX</option>
@@ -221,29 +277,54 @@ const PlayCountSync = ({ usbRoot, usbXmlPath }) => {
                                     {/* Commit button — double-confirm */}
                                     <div className="flex items-center gap-2 pt-1">
                                         {confirmStep === 0 && (
-                                            <button onClick={handleCommit} className="btn-secondary text-[11px] py-1.5 px-3">
+                                            <button
+                                                onClick={handleCommit}
+                                                className="btn-secondary text-[11px] py-1.5 px-3"
+                                            >
                                                 Write Sync
                                             </button>
                                         )}
                                         {confirmStep === 1 && (
                                             <>
-                                                <span className="text-amber2 text-[11px]">This will modify both PC DB and USB XML.</span>
-                                                <button onClick={handleCommit} className="btn-secondary text-[11px] py-1.5 px-3">
+                                                <span className="text-amber2 text-[11px]">
+                                                    This will modify both PC DB and USB XML.
+                                                </span>
+                                                <button
+                                                    onClick={handleCommit}
+                                                    className="btn-secondary text-[11px] py-1.5 px-3"
+                                                >
                                                     Confirm
                                                 </button>
-                                                <button onClick={() => setConfirmStep(0)} className="text-[10px] text-ink-muted hover:text-ink-secondary">
+                                                <button
+                                                    onClick={() => setConfirmStep(0)}
+                                                    className="text-[10px] text-ink-muted hover:text-ink-secondary"
+                                                >
                                                     Cancel
                                                 </button>
                                             </>
                                         )}
                                         {confirmStep === 2 && (
                                             <>
-                                                <span className="text-bad text-[11px] font-semibold">Last chance — this cannot be undone.</span>
-                                                <button onClick={handleCommit} disabled={committing} className="btn-primary text-[11px] py-1.5 px-3 flex items-center gap-1.5">
-                                                    {committing ? <Loader2 size={11} className="animate-spin" /> : null}
+                                                <span className="text-bad text-[11px] font-semibold">
+                                                    Last chance — this cannot be undone.
+                                                </span>
+                                                <button
+                                                    onClick={handleCommit}
+                                                    disabled={committing}
+                                                    className="btn-primary text-[11px] py-1.5 px-3 flex items-center gap-1.5"
+                                                >
+                                                    {committing ? (
+                                                        <Loader2
+                                                            size={11}
+                                                            className="animate-spin"
+                                                        />
+                                                    ) : null}
                                                     Write Now
                                                 </button>
-                                                <button onClick={() => setConfirmStep(0)} className="text-[10px] text-ink-muted hover:text-ink-secondary">
+                                                <button
+                                                    onClick={() => setConfirmStep(0)}
+                                                    className="text-[10px] text-ink-muted hover:text-ink-secondary"
+                                                >
                                                     Cancel
                                                 </button>
                                             </>
@@ -253,7 +334,9 @@ const PlayCountSync = ({ usbRoot, usbXmlPath }) => {
                             )}
 
                             {(diffData.conflicts || []).length === 0 && (
-                                <p className="text-ok text-[11px]">No conflicts — all play counts auto-resolved.</p>
+                                <p className="text-ok text-[11px]">
+                                    No conflicts — all play counts auto-resolved.
+                                </p>
                             )}
                         </>
                     )}

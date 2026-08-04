@@ -1,12 +1,12 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{OutputCallbackInfo, StreamError};
-use ringbuf::{SharedRb, consumer::Consumer};
+use ringbuf::{consumer::Consumer, SharedRb};
 
 /// Audio output engine.
 ///

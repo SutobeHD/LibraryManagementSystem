@@ -135,7 +135,11 @@ export default function WaveformCanvas({
             clearTimeout(t2);
             scrollEl.removeEventListener('scroll', scheduleDraw);
             ro.disconnect();
-            try { wavesurfer.current?.un('zoom', zoomHandler); } catch (e) { log.debug('WaveformEditor zoom listener cleanup failed', e); }
+            try {
+                wavesurfer.current?.un('zoom', zoomHandler);
+            } catch (e) {
+                log.debug('WaveformEditor zoom listener cleanup failed', e);
+            }
         };
     }, [beats, zoom, duration, bpm, wavesurfer, beatCanvasRef]);
 
@@ -159,9 +163,12 @@ export default function WaveformCanvas({
                                 <Music size={32} className="text-amber-500" />
                             </div>
                             <div className="text-center">
-                                <h3 className="text-lg font-bold text-white mb-1 tracking-tight">Stream Not Supported</h3>
+                                <h3 className="text-lg font-bold text-white mb-1 tracking-tight">
+                                    Stream Not Supported
+                                </h3>
                                 <p className="text-sm text-ink-secondary max-w-[240px] leading-relaxed">
-                                    Cloud and subscription tracks (SoundCloud, Spotify, etc.) cannot be analyzed or edited directly.
+                                    Cloud and subscription tracks (SoundCloud, Spotify, etc.) cannot
+                                    be analyzed or edited directly.
                                 </p>
                             </div>
                             <div className="flex gap-2 mt-2">
@@ -175,20 +182,30 @@ export default function WaveformCanvas({
                     loading && (
                         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/60 backdrop-blur-md">
                             <Loader2 className="w-12 h-12 text-amber2 animate-spin mb-4" />
-                            <div className="text-amber2 font-bold uppercase tracking-widest text-xs animate-pulse">Loading Audio...</div>
-                            <div className="text-[10px] text-ink-muted mt-2">Decoding high-fidelity waveform buffer</div>
+                            <div className="text-amber2 font-bold uppercase tracking-widest text-xs animate-pulse">
+                                Loading Audio...
+                            </div>
+                            <div className="text-[10px] text-ink-muted mt-2">
+                                Decoding high-fidelity waveform buffer
+                            </div>
                         </div>
                     )
                 )}
 
-                <div ref={waveformRef} className={`w-full h-full ws-wave-freq relative z-40
+                <div
+                    ref={waveformRef}
+                    className={`w-full h-full ws-wave-freq relative z-40
                     ${visualMode === 'blue' ? 'filter grayscale-[1] sepia-[1] hue-rotate-[190deg] saturate-[3] brightness-[0.8]' : ''}
                     ${streaming ? 'opacity-20 pointer-events-none' : ''}
-                `} />
+                `}
+                />
 
                 {/* Canvas-based Beat Grid (replaces 1000+ Region DOM nodes) */}
                 {!streaming && (
-                    <canvas ref={beatCanvasRef} className="absolute top-0 left-0 z-[45] pointer-events-none" />
+                    <canvas
+                        ref={beatCanvasRef}
+                        className="absolute top-0 left-0 z-[45] pointer-events-none"
+                    />
                 )}
 
                 {/* Multi-Band Layers (Real Waveforms) */}
@@ -196,11 +213,20 @@ export default function WaveformCanvas({
                     <>
                         {/* Stacking: High (Top) > Mid > Low (Bottom) */}
                         {/* High Band (Highs) */}
-                        <div ref={waveHighRef} className={`absolute inset-0 z-30 pointer-events-none opacity-100 ${visualMode === 'rgb' ? 'mix-blend-screen' : 'mix-blend-normal'}`} />
+                        <div
+                            ref={waveHighRef}
+                            className={`absolute inset-0 z-30 pointer-events-none opacity-100 ${visualMode === 'rgb' ? 'mix-blend-screen' : 'mix-blend-normal'}`}
+                        />
                         {/* Mid Band (Mids) */}
-                        <div ref={waveMidRef} className={`absolute inset-0 z-20 pointer-events-none opacity-100 ${visualMode === 'rgb' ? 'mix-blend-screen' : 'mix-blend-normal'}`} />
+                        <div
+                            ref={waveMidRef}
+                            className={`absolute inset-0 z-20 pointer-events-none opacity-100 ${visualMode === 'rgb' ? 'mix-blend-screen' : 'mix-blend-normal'}`}
+                        />
                         {/* Low Band (Bass) */}
-                        <div ref={waveLowRef} className={`absolute inset-0 z-10 pointer-events-none opacity-100 ${visualMode === 'rgb' ? 'mix-blend-screen' : 'mix-blend-normal'}`} />
+                        <div
+                            ref={waveLowRef}
+                            className={`absolute inset-0 z-10 pointer-events-none opacity-100 ${visualMode === 'rgb' ? 'mix-blend-screen' : 'mix-blend-normal'}`}
+                        />
                     </>
                 )}
 
@@ -209,8 +235,12 @@ export default function WaveformCanvas({
                     <div className="absolute inset-0 z-[80] flex items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-none">
                         <div className="flex flex-col items-center gap-3 p-6 border-2 border-dashed border-amber2 rounded-2xl bg-amber2/10">
                             <Upload size={48} className="text-amber2 animate-bounce" />
-                            <div className="text-amber2 font-bold uppercase tracking-widest text-sm">Drop audio file to load</div>
-                            <div className="text-[10px] text-ink-muted">.wav  .mp3  .flac  .aac  .ogg  .m4a</div>
+                            <div className="text-amber2 font-bold uppercase tracking-widest text-sm">
+                                Drop audio file to load
+                            </div>
+                            <div className="text-[10px] text-ink-muted">
+                                .wav .mp3 .flac .aac .ogg .m4a
+                            </div>
                         </div>
                     </div>
                 )}

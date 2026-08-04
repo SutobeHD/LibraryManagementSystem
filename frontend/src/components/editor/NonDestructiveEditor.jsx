@@ -37,7 +37,7 @@ const NonDestructiveEditor = ({
     beatGrid = [],
     phrases = [],
     onRenderComplete,
-    className = ''
+    className = '',
 }) => {
     const [state, setState] = useState(() =>
         createTimelineState({ bpm, beatGrid, phrases, zoom: 50 })
@@ -154,27 +154,38 @@ const NonDestructiveEditor = ({
                                 <FolderOpen size={18} className="text-amber2" />
                                 Open RBEP Project
                             </h3>
-                            <button onClick={() => setShowLoadModal(false)} className="p-1 hover:bg-white/10 rounded text-ink-secondary">
+                            <button
+                                onClick={() => setShowLoadModal(false)}
+                                className="p-1 hover:bg-white/10 rounded text-ink-secondary"
+                            >
                                 <X size={16} />
                             </button>
                         </div>
                         <div className="flex-1 overflow-y-auto p-2">
                             {projectList.length === 0 ? (
-                                <p className="text-ink-muted text-sm text-center py-8">No .rbep projects found</p>
-                            ) : projectList.map(prj => (
-                                <button
-                                    key={prj.name}
-                                    onClick={() => loadProject(prj.name)}
-                                    className="w-full text-left p-3 rounded-xl hover:bg-white/5 border border-transparent hover:border-amber2/20 transition-all group"
-                                >
-                                    <div className="font-bold text-sm text-white group-hover:text-amber2 transition-colors">{prj.name}</div>
-                                    <div className="text-[10px] text-ink-muted mt-0.5 flex items-center gap-3">
-                                        <span>{(prj.size / 1024).toFixed(1)} KB</span>
-                                        <span>·</span>
-                                        <span>{new Date(prj.modified * 1000).toLocaleDateString()}</span>
-                                    </div>
-                                </button>
-                            ))}
+                                <p className="text-ink-muted text-sm text-center py-8">
+                                    No .rbep projects found
+                                </p>
+                            ) : (
+                                projectList.map((prj) => (
+                                    <button
+                                        key={prj.name}
+                                        onClick={() => loadProject(prj.name)}
+                                        className="w-full text-left p-3 rounded-xl hover:bg-white/5 border border-transparent hover:border-amber2/20 transition-all group"
+                                    >
+                                        <div className="font-bold text-sm text-white group-hover:text-amber2 transition-colors">
+                                            {prj.name}
+                                        </div>
+                                        <div className="text-[10px] text-ink-muted mt-0.5 flex items-center gap-3">
+                                            <span>{(prj.size / 1024).toFixed(1)} KB</span>
+                                            <span>·</span>
+                                            <span>
+                                                {new Date(prj.modified * 1000).toLocaleDateString()}
+                                            </span>
+                                        </div>
+                                    </button>
+                                ))
+                            )}
                         </div>
                     </div>
                 </div>
@@ -186,14 +197,18 @@ const NonDestructiveEditor = ({
                     <div className="w-80 p-8 rounded-2xl bg-mx-shell/80 border border-amber2/20 flex flex-col items-center">
                         <Loader2 size={48} className="text-amber2 animate-spin mb-6" />
                         <h3 className="text-xl font-bold mb-2">Rendering Audio</h3>
-                        <p className="text-ink-secondary text-sm mb-6">Applying edits and effects...</p>
+                        <p className="text-ink-secondary text-sm mb-6">
+                            Applying edits and effects...
+                        </p>
                         <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden mb-2">
                             <div
                                 className="h-full bg-gradient-to-r from-amber2 to-amber2-press transition-all duration-300"
                                 style={{ width: `${renderProgress}%` }}
                             />
                         </div>
-                        <div className="text-xs font-mono text-amber2">{renderProgress}% COMPLETE</div>
+                        <div className="text-xs font-mono text-amber2">
+                            {renderProgress}% COMPLETE
+                        </div>
                     </div>
                 </div>
             )}

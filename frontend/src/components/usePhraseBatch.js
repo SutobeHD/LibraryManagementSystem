@@ -80,7 +80,7 @@ export default function usePhraseBatch() {
                             toast(`Cancelled — ${data.succeeded} written`);
                         } else {
                             toast.success(
-                                `Done: ${data.succeeded} written · ${data.skipped} skipped · ${data.failed} failed`,
+                                `Done: ${data.succeeded} written · ${data.skipped} skipped · ${data.failed} failed`
                             );
                         }
                     }
@@ -90,7 +90,7 @@ export default function usePhraseBatch() {
                 }
             }, POLL_MS);
         },
-        [stopPoll],
+        [stopPoll]
     );
 
     const cancel = useCallback(async () => {

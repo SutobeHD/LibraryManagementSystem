@@ -19,14 +19,36 @@
  */
 import React from 'react';
 import {
-    HardDrive, Power, Edit2, AlertTriangle, Database, Usb, Check,
-    ChevronRight, Trash2, Eraser, Download, Loader2, Clock,
-    ShieldCheck, ShieldAlert, Info,
+    HardDrive,
+    Power,
+    Edit2,
+    AlertTriangle,
+    Database,
+    Usb,
+    Check,
+    ChevronRight,
+    Trash2,
+    Eraser,
+    Download,
+    Loader2,
+    Clock,
+    ShieldCheck,
+    ShieldAlert,
+    Info,
 } from 'lucide-react';
 import {
-    FS_COMPAT, FS_NOTES, CDJ_TARGETS, USB_TYPES,
-    normalizeFs, worstCdjStatus, formatBytes,
-    StatusIcon, SpaceBar, Toggle, PillBtn, Row,
+    FS_COMPAT,
+    FS_NOTES,
+    CDJ_TARGETS,
+    USB_TYPES,
+    normalizeFs,
+    worstCdjStatus,
+    formatBytes,
+    StatusIcon,
+    SpaceBar,
+    Toggle,
+    PillBtn,
+    Row,
 } from './UsbControls';
 
 // ────────────────────────────────────────────────────────────────────
@@ -40,9 +62,9 @@ const CompatibilityPanel = ({ filesystem }) => {
     const worst = worstCdjStatus(compat);
 
     const headline = {
-        ok:      { tone: 'ok',     icon: ShieldCheck,  label: 'Compatible with all Pioneer CDJs' },
-        warn:    { tone: 'amber2', icon: ShieldAlert,  label: 'Works on most CDJs — see warnings' },
-        partial: { tone: 'amber2', icon: ShieldAlert,  label: 'Works on PC but limited on CDJs' },
+        ok: { tone: 'ok', icon: ShieldCheck, label: 'Compatible with all Pioneer CDJs' },
+        warn: { tone: 'amber2', icon: ShieldAlert, label: 'Works on most CDJs — see warnings' },
+        partial: { tone: 'amber2', icon: ShieldAlert, label: 'Works on PC but limited on CDJs' },
     }[worst] || { tone: 'amber2', icon: Info, label: 'Compatibility unknown' };
 
     const Hdr = headline.icon;
@@ -65,19 +87,21 @@ const CompatibilityPanel = ({ filesystem }) => {
 
             {/* Per-target matrix */}
             <div className="grid grid-cols-5 gap-1.5">
-                {CDJ_TARGETS.map(t => {
+                {CDJ_TARGETS.map((t) => {
                     const status = compat[t.id] || 'warn';
                     const ringColor = status === 'ok' ? 'ok' : status === 'warn' ? 'amber2' : 'bad';
-                    const bgClass = status === 'ok'
-                        ? 'bg-ok/5 border-ok/30'
-                        : status === 'warn'
-                            ? 'bg-amber2/5 border-amber2/30'
-                            : 'bg-bad/5 border-bad/30';
-                    const titleText = status === 'ok'
-                        ? `${t.label}: fully supported`
-                        : status === 'warn'
-                            ? `${t.label}: limited — ${note || 'check firmware'}`
-                            : `${t.label}: NOT supported by ${fsKey}`;
+                    const bgClass =
+                        status === 'ok'
+                            ? 'bg-ok/5 border-ok/30'
+                            : status === 'warn'
+                              ? 'bg-amber2/5 border-amber2/30'
+                              : 'bg-bad/5 border-bad/30';
+                    const titleText =
+                        status === 'ok'
+                            ? `${t.label}: fully supported`
+                            : status === 'warn'
+                              ? `${t.label}: limited — ${note || 'check firmware'}`
+                              : `${t.label}: NOT supported by ${fsKey}`;
                     return (
                         <div
                             key={t.id}
@@ -85,7 +109,9 @@ const CompatibilityPanel = ({ filesystem }) => {
                             className={`flex flex-col items-center gap-1.5 p-2 rounded-mx-sm border ${bgClass}`}
                         >
                             <StatusIcon status={status} size={14} />
-                            <span className={`text-[10px] font-mono text-${ringColor} text-center leading-tight`}>
+                            <span
+                                className={`text-[10px] font-mono text-${ringColor} text-center leading-tight`}
+                            >
                                 {t.short}
                             </span>
                         </div>
@@ -104,9 +130,11 @@ const DeviceHeader = ({ sel, isConnected, onRename, onEject }) => (
     <div className="flex items-start justify-between">
         <div>
             <h2 className="text-[18px] font-semibold tracking-tight flex items-center gap-2.5">
-                <div className={`w-2 h-2 rounded-full ${
-                    isConnected ? 'bg-ok shadow-[0_0_6px_#3DD68C]' : 'bg-bad'
-                }`} />
+                <div
+                    className={`w-2 h-2 rounded-full ${
+                        isConnected ? 'bg-ok shadow-[0_0_6px_#3DD68C]' : 'bg-bad'
+                    }`}
+                />
                 {sel.label || 'USB Drive'}
                 <button
                     onClick={onRename}
@@ -117,7 +145,8 @@ const DeviceHeader = ({ sel, isConnected, onRename, onEject }) => (
                 </button>
             </h2>
             <p className="text-[13px] text-ink-secondary font-mono mt-1">
-                {sel.drive} · <span className="text-teal-400">{normalizeFs(sel.filesystem)}</span> · {formatBytes(sel.total_space)} total · {formatBytes(sel.free_space)} free
+                {sel.drive} · <span className="text-teal-400">{normalizeFs(sel.filesystem)}</span> ·{' '}
+                {formatBytes(sel.total_space)} total · {formatBytes(sel.free_space)} free
             </p>
         </div>
         <button
@@ -174,7 +203,7 @@ const TargetEcosystemCard = ({ sel, onSave }) => (
     <div className="mx-card p-4">
         <div className="mx-caption mb-3">Target Ecosystem</div>
         <div className="grid grid-cols-2 gap-2">
-            {USB_TYPES.map(type => {
+            {USB_TYPES.map((type) => {
                 const Icon = type.icon;
                 const active = sel.type === type.id;
                 return (
@@ -211,7 +240,7 @@ const SyncControls = ({ sel, syncing, syncProgress, diff, isConnected, onLoadDif
             <span className="text-[10px] text-ink-muted">
                 {sel.type === 'SetStick'
                     ? `${(sel.sync_playlists || []).length} playlists selected`
-                    : `Full ${USB_TYPES.find(t => t.id === sel.type)?.label || 'collection'}`}
+                    : `Full ${USB_TYPES.find((t) => t.id === sel.type)?.label || 'collection'}`}
             </span>
         </div>
 
@@ -227,12 +256,20 @@ const SyncControls = ({ sel, syncing, syncProgress, diff, isConnected, onLoadDif
 
         {diff && (
             <div className="mb-3 p-3 bg-mx-input rounded-mx-sm border border-line-subtle text-tiny font-mono space-y-1">
-                <Row label="Tracks add"    value={`+${diff.tracks?.to_add || 0}`}    color="ok" />
-                <Row label="Tracks update" value={`~${diff.tracks?.to_update || 0}`} color="amber2" />
+                <Row label="Tracks add" value={`+${diff.tracks?.to_add || 0}`} color="ok" />
+                <Row
+                    label="Tracks update"
+                    value={`~${diff.tracks?.to_update || 0}`}
+                    color="amber2"
+                />
                 <Row label="Tracks remove" value={`-${diff.tracks?.to_remove || 0}`} color="bad" />
-                <Row label="Unchanged"     value={diff.tracks?.unchanged || 0} muted />
+                <Row label="Unchanged" value={diff.tracks?.unchanged || 0} muted />
                 <div className="border-t border-line-subtle pt-1 mt-1">
-                    <Row label="Playlists add" value={`+${diff.playlists?.to_add || 0}`} color="ok" />
+                    <Row
+                        label="Playlists add"
+                        value={`+${diff.playlists?.to_add || 0}`}
+                        color="ok"
+                    />
                 </div>
                 {diff.space_estimate > 0 && (
                     <div className="border-t border-line-subtle pt-1 mt-1">
@@ -252,16 +289,24 @@ const SyncControls = ({ sel, syncing, syncProgress, diff, isConnected, onLoadDif
             title={(sel.sync_playlists || []).length ? '' : 'Select at least one playlist'}
             className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed"
         >
-            {syncing === sel.device_id
-                ? <><Loader2 size={14} className="animate-spin" /> Syncing…</>
-                : <><Download size={14} /> Sync Now</>}
+            {syncing === sel.device_id ? (
+                <>
+                    <Loader2 size={14} className="animate-spin" /> Syncing…
+                </>
+            ) : (
+                <>
+                    <Download size={14} /> Sync Now
+                </>
+            )}
         </button>
 
         {syncing === sel.device_id && syncProgress && (
             <div className="mt-3 space-y-1.5">
                 <div className="flex items-center justify-between text-tiny">
                     <span className="text-ink-secondary">{syncProgress.message}</span>
-                    <span className="font-mono text-amber2">{Math.max(0, syncProgress.progress)}%</span>
+                    <span className="font-mono text-amber2">
+                        {Math.max(0, syncProgress.progress)}%
+                    </span>
                 </div>
                 <div className="w-full h-1 bg-line-subtle rounded-full overflow-hidden">
                     <div
@@ -303,11 +348,15 @@ const SettingsCard = ({ sel, onSave }) => (
                     <PillBtn
                         active={sel.sync_primary !== 'library_legacy'}
                         onClick={() => onSave({ sync_primary: 'library_one' })}
-                    >Newer</PillBtn>
+                    >
+                        Newer
+                    </PillBtn>
                     <PillBtn
                         active={sel.sync_primary === 'library_legacy'}
                         onClick={() => onSave({ sync_primary: 'library_legacy' })}
-                    >Legacy</PillBtn>
+                    >
+                        Legacy
+                    </PillBtn>
                 </div>
             </div>
         )}
@@ -316,13 +365,23 @@ const SettingsCard = ({ sel, onSave }) => (
             <div className="mx-caption mb-2">Target Libraries</div>
             <div className="px-3 py-2 rounded-md bg-mx-input/40 border border-line-subtle text-tiny leading-snug text-ink-muted">
                 Both formats are written automatically:
-                <span className="block mt-1 text-ink-secondary">• <strong>exportLibrary.db</strong> — Rekordbox 6/7 + CDJ-3000 auto-detect</span>
-                <span className="block text-ink-secondary">• <strong>rekordbox.xml</strong> — older Rekordbox / manual import (Preferences → Advanced → Database)</span>
+                <span className="block mt-1 text-ink-secondary">
+                    • <strong>exportLibrary.db</strong> — Rekordbox 6/7 + CDJ-3000 auto-detect
+                </span>
+                <span className="block text-ink-secondary">
+                    • <strong>rekordbox.xml</strong> — older Rekordbox / manual import (Preferences
+                    → Advanced → Database)
+                </span>
             </div>
             <div className="mt-2 px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-300 text-tiny leading-snug">
-                <strong>Stick nicht erkannt?</strong> Aktuell ist die OneLibrary-Erstellung
-                durch einen rbox-Library-Bug eingeschränkt. Workaround:
-                <span className="block mt-1">In Rekordbox → <strong>Preferences → Advanced → Database</strong> → "rekordbox xml" → File-Picker → die <code className="bg-black/30 px-1 rounded">PIONEER/rekordbox.xml</code> auf dem Stick auswählen → Import.</span>
+                <strong>Stick nicht erkannt?</strong> Aktuell ist die OneLibrary-Erstellung durch
+                einen rbox-Library-Bug eingeschränkt. Workaround:
+                <span className="block mt-1">
+                    In Rekordbox → <strong>Preferences → Advanced → Database</strong> → "rekordbox
+                    xml" → File-Picker → die{' '}
+                    <code className="bg-black/30 px-1 rounded">PIONEER/rekordbox.xml</code> auf dem
+                    Stick auswählen → Import.
+                </span>
             </div>
         </div>
     </div>
@@ -354,7 +413,12 @@ const UsbSyncPanel = ({
     return (
         <>
             {/* Device header */}
-            <DeviceHeader sel={sel} isConnected={isConnected} onRename={onRename} onEject={onEject} />
+            <DeviceHeader
+                sel={sel}
+                isConnected={isConnected}
+                onRename={onRename}
+                onEject={onEject}
+            />
 
             {/* Compatibility — always shown, all FS types supported */}
             <CompatibilityPanel filesystem={sel.filesystem} />
@@ -367,12 +431,18 @@ const UsbSyncPanel = ({
                 >
                     <AlertTriangle size={28} className="text-amber2" />
                     <div>
-                        <div className="text-[14px] font-semibold text-ink-primary">No Rekordbox library detected</div>
+                        <div className="text-[14px] font-semibold text-ink-primary">
+                            No Rekordbox library detected
+                        </div>
                         <p className="text-tiny text-ink-secondary mt-1 max-w-md">
-                            This drive doesn't have the <code className="font-mono text-amber2">PIONEER</code> folder structure.
+                            This drive doesn't have the{' '}
+                            <code className="font-mono text-amber2">PIONEER</code> folder structure.
                         </p>
                     </div>
-                    <button onClick={onInitLibrary} className="btn-primary flex items-center gap-2 mt-2">
+                    <button
+                        onClick={onInitLibrary}
+                        className="btn-primary flex items-center gap-2 mt-2"
+                    >
                         <Database size={14} /> Initialize Library
                     </button>
                 </div>
@@ -474,7 +544,9 @@ export const UsbSettingsTail = ({
 
             {/* Danger zone — destructive only */}
             <div className="mx-card p-4" style={{ borderColor: 'rgba(232, 92, 74, 0.20)' }}>
-                <div className="mx-caption mb-3" style={{ color: 'var(--bad)' }}>Danger Zone</div>
+                <div className="mx-caption mb-3" style={{ color: 'var(--bad)' }}>
+                    Danger Zone
+                </div>
                 <div className="flex items-center gap-2 flex-wrap">
                     <button
                         onClick={() => onDeleteProfile(sel.device_id)}

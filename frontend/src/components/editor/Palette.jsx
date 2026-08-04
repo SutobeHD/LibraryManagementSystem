@@ -1,6 +1,6 @@
 /**
  * Palette - Drag & Drop clipboard for audio regions
- * 
+ *
  * A side panel with slots for storing region copies.
  * Drag from timeline to palette to store.
  * Drag from palette to timeline to clone.
@@ -9,13 +9,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Clipboard, X, Volume2 } from 'lucide-react';
 
-const PaletteSlot = ({
-    region,
-    slotIndex,
-    onDrop,
-    onDragStart,
-    onClear
-}) => {
+const PaletteSlot = ({ region, slotIndex, onDrop, onDragStart, onClear }) => {
     const canvasRef = useRef(null);
     const [isDragOver, setIsDragOver] = useState(false);
 
@@ -41,13 +35,17 @@ const PaletteSlot = ({
 
         ctx.fillStyle = region.color || '#3b82f6';
         const centerY = h / 2;
-        const maxAmplitude = h / 2 * 0.9;
+        const maxAmplitude = (h / 2) * 0.9;
 
         for (let x = 0; x < w; x++) {
             const sampleStart = startSample + Math.floor(x * samplesPerPixel);
-            const sampleEnd = Math.min(sampleStart + Math.floor(samplesPerPixel), channelData.length);
+            const sampleEnd = Math.min(
+                sampleStart + Math.floor(samplesPerPixel),
+                channelData.length
+            );
 
-            let min = 0, max = 0;
+            let min = 0,
+                max = 0;
             for (let i = sampleStart; i < sampleEnd; i++) {
                 const sample = channelData[i] || 0;
                 if (sample < min) min = sample;
@@ -90,9 +88,10 @@ const PaletteSlot = ({
         <div
             className={`
                 relative aspect-square rounded-lg border-2 transition-all duration-200
-                ${region
-                    ? 'bg-mx-card/50 border-white/10 cursor-grab'
-                    : 'bg-mx-shell/30 border-dashed border-white/5'
+                ${
+                    region
+                        ? 'bg-mx-card/50 border-white/10 cursor-grab'
+                        : 'bg-mx-shell/30 border-dashed border-white/5'
                 }
                 ${isDragOver ? 'border-amber2 bg-amber2/10 scale-105' : ''}
                 hover:border-white/20
@@ -148,7 +147,7 @@ const Palette = ({
     onSlotDrop,
     onSlotDragStart,
     onSlotClear,
-    className = ''
+    className = '',
 }) => {
     return (
         <div className={`flex flex-col gap-3 p-3 ${className}`}>

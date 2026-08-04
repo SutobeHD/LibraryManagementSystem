@@ -1,11 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { X, Check, AlertTriangle, Skull, Search, ChevronRight, Download, Loader2 } from 'lucide-react';
+import {
+    X,
+    Check,
+    AlertTriangle,
+    Skull,
+    Search,
+    ChevronRight,
+    Download,
+    Loader2,
+} from 'lucide-react';
 import api from '../api/api';
 import toast from 'react-hot-toast';
 
 const ScoreBar = ({ score }) => {
     const pct = Math.round(score * 100);
-    const color = score >= 0.9 ? 'bg-emerald-500' : score >= 0.75 ? 'bg-amber-500' : 'bg-orange-500';
+    const color =
+        score >= 0.9 ? 'bg-emerald-500' : score >= 0.75 ? 'bg-amber-500' : 'bg-orange-500';
     return (
         <div className="flex items-center gap-1.5 shrink-0">
             <div className="w-16 h-1.5 bg-white/10 rounded-full overflow-hidden">
@@ -17,15 +27,15 @@ const ScoreBar = ({ score }) => {
 };
 
 const STATUS_ICON = {
-    matched:   <Check size={10} className="text-emerald-400 shrink-0" />,
+    matched: <Check size={10} className="text-emerald-400 shrink-0" />,
     unmatched: <AlertTriangle size={10} className="text-amber-400 shrink-0" />,
-    dead:      <Skull size={10} className="text-ink-placeholder shrink-0" />,
+    dead: <Skull size={10} className="text-ink-placeholder shrink-0" />,
 };
 
 const STATUS_LABEL = {
-    matched:   'Erkannt',
+    matched: 'Erkannt',
     unmatched: 'Nicht gefunden',
-    dead:      'Gelöscht / Privat',
+    dead: 'Gelöscht / Privat',
 };
 
 /**
@@ -40,8 +50,8 @@ const STATUS_LABEL = {
  */
 const MatchInspectorModal = ({ playlist, onClose, onSync }) => {
     const [loading, setLoading] = useState(true);
-    const [data, setData]       = useState(null);
-    const [filter, setFilter]   = useState('');
+    const [data, setData] = useState(null);
+    const [filter, setFilter] = useState('');
     const [statusFilter, setStatusFilter] = useState('all'); // all | matched | unmatched | dead
     const [downloadingUrl, setDownloadingUrl] = useState(null);
 
@@ -64,9 +74,15 @@ const MatchInspectorModal = ({ playlist, onClose, onSync }) => {
             playlist_id: playlist.id === 'likes' ? 0 : playlist.id,
             is_likes: !!playlist.is_likes,
         })
-            .then(r => { setData(r.data); setLoading(false); })
-            .catch(e => {
-                toast.error('Inspector konnte Matches nicht laden: ' + (e.response?.data?.detail || e.message));
+            .then((r) => {
+                setData(r.data);
+                setLoading(false);
+            })
+            .catch((e) => {
+                toast.error(
+                    'Inspector konnte Matches nicht laden: ' +
+                        (e.response?.data?.detail || e.message)
+                );
                 setLoading(false);
             });
     }, [playlist]);
@@ -74,7 +90,7 @@ const MatchInspectorModal = ({ playlist, onClose, onSync }) => {
     if (!playlist) return null;
 
     const matches = data?.matches || [];
-    const visible = matches.filter(m => {
+    const visible = matches.filter((m) => {
         if (statusFilter !== 'all' && m.status !== statusFilter) return false;
         if (!filter) return true;
         const q = filter.toLowerCase();
@@ -93,7 +109,6 @@ const MatchInspectorModal = ({ playlist, onClose, onSync }) => {
             onClick={(e) => e.target === e.currentTarget && onClose()}
         >
             <div className="w-full max-w-3xl max-h-[85vh] flex flex-col bg-mx-deepest border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
-
                 {/* Header */}
                 <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
                     <div>
@@ -104,7 +119,10 @@ const MatchInspectorModal = ({ playlist, onClose, onSync }) => {
                             {playlist.title}
                         </p>
                     </div>
-                    <button onClick={onClose} className="p-1.5 hover:bg-white/5 rounded-lg text-ink-muted hover:text-white transition-colors">
+                    <button
+                        onClick={onClose}
+                        className="p-1.5 hover:bg-white/5 rounded-lg text-ink-muted hover:text-white transition-colors"
+                    >
                         <X size={16} />
                     </button>
                 </div>
@@ -121,7 +139,9 @@ const MatchInspectorModal = ({ playlist, onClose, onSync }) => {
                         {/* Stats bar */}
                         {data && (
                             <div className="flex items-center gap-4 px-5 py-3 border-b border-white/5 bg-white/2">
-                                <span className="text-[10px] text-ink-muted">{data.total} Tracks</span>
+                                <span className="text-[10px] text-ink-muted">
+                                    {data.total} Tracks
+                                </span>
                                 <span className="flex items-center gap-1 text-[10px] text-emerald-400">
                                     <Check size={10} /> {data.matched} erkannt
                                 </span>
@@ -135,7 +155,10 @@ const MatchInspectorModal = ({ playlist, onClose, onSync }) => {
                                 )}
                                 <div className="flex-1" />
                                 <button
-                                    onClick={() => { onSync([playlist]); onClose(); }}
+                                    onClick={() => {
+                                        onSync([playlist]);
+                                        onClose();
+                                    }}
                                     className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-400 hover:to-red-400 text-white rounded-lg text-[10px] font-bold transition-all"
                                 >
                                     <Check size={10} /> Jetzt Syncen
@@ -146,16 +169,19 @@ const MatchInspectorModal = ({ playlist, onClose, onSync }) => {
                         {/* Filter row */}
                         <div className="flex items-center gap-2 px-5 py-2 border-b border-white/5">
                             <div className="relative flex-1">
-                                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-muted" />
+                                <Search
+                                    size={12}
+                                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-muted"
+                                />
                                 <input
                                     type="text"
                                     placeholder="Track suchen..."
                                     value={filter}
-                                    onChange={e => setFilter(e.target.value)}
+                                    onChange={(e) => setFilter(e.target.value)}
                                     className="w-full pl-8 pr-3 py-1.5 bg-white/4 border border-white/10 rounded-lg text-[11px] text-white placeholder:text-ink-placeholder focus:outline-none focus:border-orange-500/30"
                                 />
                             </div>
-                            {['all', 'matched', 'unmatched', 'dead'].map(s => (
+                            {['all', 'matched', 'unmatched', 'dead'].map((s) => (
                                 <button
                                     key={s}
                                     onClick={() => setStatusFilter(s)}
@@ -198,25 +224,38 @@ const MatchInspectorModal = ({ playlist, onClose, onSync }) => {
                                                 >
                                                     {m.sc_title || '—'}
                                                 </a>
-                                                <span className="text-[9px] text-ink-muted truncate">{m.sc_artist}</span>
+                                                <span className="text-[9px] text-ink-muted truncate">
+                                                    {m.sc_artist}
+                                                </span>
                                             </div>
 
                                             {/* Arrow + Score */}
                                             <div className="flex flex-col items-center gap-0.5 shrink-0">
-                                                <ChevronRight size={10} className="text-ink-placeholder" />
-                                                {m.status === 'matched' && <ScoreBar score={m.score} />}
+                                                <ChevronRight
+                                                    size={10}
+                                                    className="text-ink-placeholder"
+                                                />
+                                                {m.status === 'matched' && (
+                                                    <ScoreBar score={m.score} />
+                                                )}
                                             </div>
 
                                             {/* Local track */}
                                             <div className="min-w-0">
                                                 {m.local_title ? (
                                                     <>
-                                                        <div className="text-[11px] text-emerald-300 truncate">{m.local_title}</div>
-                                                        <div className="text-[9px] text-ink-muted truncate">{m.local_artist}</div>
+                                                        <div className="text-[11px] text-emerald-300 truncate">
+                                                            {m.local_title}
+                                                        </div>
+                                                        <div className="text-[9px] text-ink-muted truncate">
+                                                            {m.local_artist}
+                                                        </div>
                                                     </>
                                                 ) : (
                                                     <span className="text-[10px] text-ink-placeholder italic">
-                                                        {m.status === 'dead' ? 'Gelöscht / Privat' : 'Nicht in Library'}
+                                                        {m.status === 'dead'
+                                                            ? 'Gelöscht / Privat'
+                                                            : 'Nicht in Library'}
                                                     </span>
                                                 )}
                                             </div>
@@ -224,17 +263,24 @@ const MatchInspectorModal = ({ playlist, onClose, onSync }) => {
                                             {/* Local ID badge or Download button */}
                                             <div className="shrink-0 flex items-center justify-end min-w-[60px]">
                                                 {m.local_id && (
-                                                    <span className="text-[8px] text-ink-placeholder font-mono shrink-0">#{m.local_id}</span>
+                                                    <span className="text-[8px] text-ink-placeholder font-mono shrink-0">
+                                                        #{m.local_id}
+                                                    </span>
                                                 )}
                                                 {m.status === 'unmatched' && m.sc_url && (
                                                     <button
-                                                        onClick={() => handleDownload(m.sc_url, m.sc_title)}
+                                                        onClick={() =>
+                                                            handleDownload(m.sc_url, m.sc_title)
+                                                        }
                                                         disabled={downloadingUrl === m.sc_url}
                                                         className="p-1.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 rounded-lg transition-colors border border-orange-500/20 disabled:opacity-50"
                                                         title="Track herunterladen"
                                                     >
                                                         {downloadingUrl === m.sc_url ? (
-                                                            <Loader2 size={12} className="animate-spin" />
+                                                            <Loader2
+                                                                size={12}
+                                                                className="animate-spin"
+                                                            />
                                                         ) : (
                                                             <Download size={12} />
                                                         )}

@@ -1,6 +1,6 @@
 /**
  * TimelineCanvas - Main editing canvas for the non-destructive audio editor
- * 
+ *
  * Features:
  * - Zoomable timeline with beat grid overlay
  * - Region blocks with waveform and envelope
@@ -14,7 +14,7 @@ import RegionBlock from './RegionBlock';
 import { snapToGrid } from '../../audio/TimelineState';
 
 const TimelineCanvas = ({
-    state,                    // TimelineState object
+    state, // TimelineState object
     onRegionSelect,
     onRegionMove,
     onRegionResize,
@@ -24,7 +24,7 @@ const TimelineCanvas = ({
     onSelectionChange,
     onPlayheadChange,
     onZoomChange,
-    containerHeight = 240
+    containerHeight = 240,
 }) => {
     const containerRef = useRef(null);
     const gridCanvasRef = useRef(null);
@@ -49,13 +49,13 @@ const TimelineCanvas = ({
         snapEnabled,
         snapDivision,
         gridOffset,
-        phrases
+        phrases,
     } = state;
 
     // Calculate timeline dimensions
     const totalDuration = useMemo(() => {
         if (regions.length === 0) return 60; // Default 60s
-        return Math.max(60, ...regions.map(r => r.timelineStart + r.duration)) + 10;
+        return Math.max(60, ...regions.map((r) => r.timelineStart + r.duration)) + 10;
     }, [regions]);
 
     const timelineWidth = totalDuration * zoom;
@@ -129,7 +129,7 @@ const TimelineCanvas = ({
             const numBeats = Math.ceil(totalDuration / beatDuration);
 
             for (let i = 0; i < numBeats; i++) {
-                const time = gridOffset + (i * beatDuration);
+                const time = gridOffset + i * beatDuration;
                 const x = time * zoom;
                 if (x < 0 || x > timelineWidth) continue;
 
@@ -230,54 +230,71 @@ const TimelineCanvas = ({
     }, [isPlaying, zoom, state.playhead]);
 
     // Snap helper
-    const snapTime = useCallback((time) => {
-        return snapToGrid(state, time);
-    }, [state]);
+    const snapTime = useCallback(
+        (time) => {
+            return snapToGrid(state, time);
+        },
+        [state]
+    );
 
     // Mouse handlers for selection and playhead
-    const handleMouseDown = useCallback((e) => {
-        if (e.button !== 0) return;
+    const handleMouseDown = useCallback(
+        (e) => {
+            if (e.button !== 0) return;
 
-        const rect = containerRef.current.getBoundingClientRect();
-        const scrollLeft = containerRef.current.scrollLeft;
-        const x = e.clientX - rect.left + scrollLeft;
-        const time = x / zoom;
-
-        // Check if shift is held for selection
-        if (e.shiftKey) {
-            setIsSelecting(true);
-            setSelectionStart(time);
-        } else if (state.editMode === 'grid') {
-            setIsDraggingGrid(true);
-            setGridDragStart(time);
-        } else {
-            // Click to set playhead
-            const snappedTime = snapEnabled ? snapTime(time) : time;
-            onPlayheadChange?.(snappedTime);
-        }
-    }, [zoom, snapEnabled, snapTime, onPlayheadChange, state.editMode]);
-
-    const handleMouseMove = useCallback((e) => {
-        if (isDraggingGrid) {
             const rect = containerRef.current.getBoundingClientRect();
             const scrollLeft = containerRef.current.scrollLeft;
             const x = e.clientX - rect.left + scrollLeft;
             const time = x / zoom;
-            const delta = time - gridDragStart;
-            onGridAdjust?.(delta);
-            setGridDragStart(time);
-            return;
-        }
 
-        if (!isSelecting || selectionStart === null) return;
+            // Check if shift is held for selection
+            if (e.shiftKey) {
+                setIsSelecting(true);
+                setSelectionStart(time);
+            } else if (state.editMode === 'grid') {
+                setIsDraggingGrid(true);
+                setGridDragStart(time);
+            } else {
+                // Click to set playhead
+                const snappedTime = snapEnabled ? snapTime(time) : time;
+                onPlayheadChange?.(snappedTime);
+            }
+        },
+        [zoom, snapEnabled, snapTime, onPlayheadChange, state.editMode]
+    );
 
-        const rect = containerRef.current.getBoundingClientRect();
-        const scrollLeft = containerRef.current.scrollLeft;
-        const x = e.clientX - rect.left + scrollLeft;
-        const time = x / zoom;
+    const handleMouseMove = useCallback(
+        (e) => {
+            if (isDraggingGrid) {
+                const rect = containerRef.current.getBoundingClientRect();
+                const scrollLeft = containerRef.current.scrollLeft;
+                const x = e.clientX - rect.left + scrollLeft;
+                const time = x / zoom;
+                const delta = time - gridDragStart;
+                onGridAdjust?.(delta);
+                setGridDragStart(time);
+                return;
+            }
 
-        onSelectionChange?.(selectionStart, time);
-    }, [isSelecting, selectionStart, zoom, onSelectionChange, isDraggingGrid, gridDragStart, onGridAdjust]);
+            if (!isSelecting || selectionStart === null) return;
+
+            const rect = containerRef.current.getBoundingClientRect();
+            const scrollLeft = containerRef.current.scrollLeft;
+            const x = e.clientX - rect.left + scrollLeft;
+            const time = x / zoom;
+
+            onSelectionChange?.(selectionStart, time);
+        },
+        [
+            isSelecting,
+            selectionStart,
+            zoom,
+            onSelectionChange,
+            isDraggingGrid,
+            gridDragStart,
+            onGridAdjust,
+        ]
+    );
 
     const handleMouseUp = useCallback(() => {
         setIsSelecting(false);
@@ -290,65 +307,68 @@ const TimelineCanvas = ({
         e.dataTransfer.dropEffect = 'copy';
     }, []);
 
-    const handleDrop = useCallback((e) => {
-        e.preventDefault();
-        const regionAndSource = e.dataTransfer.getData('application/region');
-        if (!regionAndSource) return;
+    const handleDrop = useCallback(
+        (e) => {
+            e.preventDefault();
+            const regionAndSource = e.dataTransfer.getData('application/region');
+            if (!regionAndSource) return;
 
-        try {
-            const regionData = JSON.parse(regionAndSource);
+            try {
+                const regionData = JSON.parse(regionAndSource);
 
-            // Calculate drop time
-            const rect = containerRef.current.getBoundingClientRect();
-            const scrollLeft = containerRef.current.scrollLeft;
-            const x = e.clientX - rect.left + scrollLeft;
-            const time = x / zoom;
+                // Calculate drop time
+                const rect = containerRef.current.getBoundingClientRect();
+                const scrollLeft = containerRef.current.scrollLeft;
+                const x = e.clientX - rect.left + scrollLeft;
+                const time = x / zoom;
 
-            // Snap if enabled
-            const snappedTime = snapEnabled ? snapTime(time) : time;
+                // Snap if enabled
+                const snappedTime = snapEnabled ? snapTime(time) : time;
 
-            onRegionDrop?.(regionData, snappedTime);
-        } catch (err) {
-            console.error("Drop failed", err);
-        }
-    }, [zoom, snapEnabled, snapTime, onRegionDrop]);
+                onRegionDrop?.(regionData, snappedTime);
+            } catch (err) {
+                console.error('Drop failed', err);
+            }
+        },
+        [zoom, snapEnabled, snapTime, onRegionDrop]
+    );
 
     // Wheel for zoom
-    const handleWheel = useCallback((e) => {
-        if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
+    const handleWheel = useCallback(
+        (e) => {
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
 
-            const rect = containerRef.current.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const scrollLeft = containerRef.current.scrollLeft;
-            const mouseTime = (mouseX + scrollLeft) / zoom;
+                const rect = containerRef.current.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const scrollLeft = containerRef.current.scrollLeft;
+                const mouseTime = (mouseX + scrollLeft) / zoom;
 
-            // Geometric zoom for smoother experience
-            const factor = e.deltaY > 0 ? 0.85 : 1.17;
-            const newZoom = Math.max(10, Math.min(2000, zoom * factor));
+                // Geometric zoom for smoother experience
+                const factor = e.deltaY > 0 ? 0.85 : 1.17;
+                const newZoom = Math.max(10, Math.min(2000, zoom * factor));
 
-            // Calculate new scroll position to keep mouseTime at the same mouseX
-            const newScrollLeft = (mouseTime * newZoom) - mouseX;
+                // Calculate new scroll position to keep mouseTime at the same mouseX
+                const newScrollLeft = mouseTime * newZoom - mouseX;
 
-            onZoomChange?.(newZoom);
+                onZoomChange?.(newZoom);
 
-            // Directly adjust scroll to keep it smooth
-            requestAnimationFrame(() => {
-                if (containerRef.current) {
-                    containerRef.current.scrollLeft = newScrollLeft;
-                }
-            });
-        }
-    }, [zoom, onZoomChange]);
+                // Directly adjust scroll to keep it smooth
+                requestAnimationFrame(() => {
+                    if (containerRef.current) {
+                        containerRef.current.scrollLeft = newScrollLeft;
+                    }
+                });
+            }
+        },
+        [zoom, onZoomChange]
+    );
 
     return (
         <div className="flex flex-col w-full h-full bg-[#0a0a0a] select-none">
             {/* Time Ruler */}
             <div className="relative h-6 overflow-hidden border-b border-white/5">
-                <div
-                    className="absolute h-full"
-                    style={{ width: `${timelineWidth}px` }}
-                >
+                <div className="absolute h-full" style={{ width: `${timelineWidth}px` }}>
                     <canvas ref={rulerCanvasRef} className="absolute inset-0" />
                 </div>
             </div>
@@ -369,14 +389,11 @@ const TimelineCanvas = ({
                     className="relative h-full"
                     style={{
                         width: `${timelineWidth}px`,
-                        minWidth: '100%'
+                        minWidth: '100%',
                     }}
                 >
                     {/* Beat Grid Canvas */}
-                    <canvas
-                        ref={gridCanvasRef}
-                        className="absolute inset-0 pointer-events-none"
-                    />
+                    <canvas ref={gridCanvasRef} className="absolute inset-0 pointer-events-none" />
 
                     {/* Selection Highlight */}
                     {selection && (
@@ -384,7 +401,7 @@ const TimelineCanvas = ({
                             className="absolute top-0 bottom-0 bg-amber2/20 border-l-2 border-r-2 border-amber2/50 pointer-events-none"
                             style={{
                                 left: `${selection.start * zoom}px`,
-                                width: `${(selection.end - selection.start) * zoom}px`
+                                width: `${(selection.end - selection.start) * zoom}px`,
                             }}
                         />
                     )}
@@ -411,7 +428,7 @@ const TimelineCanvas = ({
                         const x = marker.Start * zoom;
                         if (x < 0 || x > timelineWidth) return null;
 
-                        const isLoop = String(marker.Type) === "4";
+                        const isLoop = String(marker.Type) === '4';
                         const isHotCue = marker.Num >= 0 && marker.Num <= 7;
 
                         if (isLoop && marker.End) {
@@ -422,14 +439,16 @@ const TimelineCanvas = ({
                                     className="absolute top-0 bottom-0 bg-green-500/20 border-l-2 border-r-2 border-green-400 overflow-hidden pointer-events-none"
                                     style={{ left: `${x}px`, width: `${width}px` }}
                                 >
-                                    <div className="absolute top-0 left-0 p-1 text-[8px] font-bold text-green-400 bg-black/60">LOOP</div>
+                                    <div className="absolute top-0 left-0 p-1 text-[8px] font-bold text-green-400 bg-black/60">
+                                        LOOP
+                                    </div>
                                 </div>
                             );
                         }
 
                         // Standard Cue or Hot Cue
-                        const color = isHotCue ? "#f59e0b" : "#ef4444";
-                        const label = isHotCue ? `H${String.fromCharCode(65 + marker.Num)}` : "M";
+                        const color = isHotCue ? '#f59e0b' : '#ef4444';
+                        const label = isHotCue ? `H${String.fromCharCode(65 + marker.Num)}` : 'M';
 
                         return (
                             <div
@@ -442,11 +461,17 @@ const TimelineCanvas = ({
                                     style={{
                                         borderLeft: '6px solid transparent',
                                         borderRight: '6px solid transparent',
-                                        borderTop: `8px solid ${color}`
+                                        borderTop: `8px solid ${color}`,
                                     }}
                                 />
-                                <div className="absolute h-full w-px" style={{ backgroundColor: color, opacity: 0.3 }} />
-                                <div className="absolute top-8 left-1 px-1 bg-black/80 text-[8px] font-bold rounded" style={{ color: color }}>
+                                <div
+                                    className="absolute h-full w-px"
+                                    style={{ backgroundColor: color, opacity: 0.3 }}
+                                />
+                                <div
+                                    className="absolute top-8 left-1 px-1 bg-black/80 text-[8px] font-bold rounded"
+                                    style={{ color: color }}
+                                >
                                     {label}
                                 </div>
                             </div>
@@ -459,7 +484,7 @@ const TimelineCanvas = ({
                         className="absolute top-0 bottom-0 w-0.5 bg-amber2 z-30 pointer-events-none"
                         style={{
                             left: `${playhead * zoom}px`,
-                            boxShadow: '0 0 10px rgba(34, 211, 238, 0.5)'
+                            boxShadow: '0 0 10px rgba(34, 211, 238, 0.5)',
                         }}
                     >
                         {/* Playhead triangle */}
@@ -468,7 +493,7 @@ const TimelineCanvas = ({
                             style={{
                                 borderLeft: '6px solid transparent',
                                 borderRight: '6px solid transparent',
-                                borderTop: '8px solid #22d3ee'
+                                borderTop: '8px solid #22d3ee',
                             }}
                         />
                     </div>
@@ -485,7 +510,7 @@ const TimelineCanvas = ({
                                     style={{
                                         left: `${x}px`,
                                         width: `${w}px`,
-                                        backgroundColor: `${phrase.color || '#3b82f6'}10`
+                                        backgroundColor: `${phrase.color || '#3b82f6'}10`,
                                     }}
                                     title={`${phrase.name} (${phrase.start.toFixed(2)}s - ${phrase.end.toFixed(2)}s)`}
                                 >
@@ -510,7 +535,7 @@ const TimelineCanvas = ({
                         className="absolute inset-y-0 right-0 bg-black/30 pointer-events-none"
                         style={{
                             left: `${selection.end * zoom}px`,
-                            right: 0
+                            right: 0,
                         }}
                     />
                 </>

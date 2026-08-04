@@ -7,7 +7,7 @@ export default function SoundCloudProgressModal({ isOpen, onClose }) {
         message: 'Initializing...',
         current: 0,
         total: 0,
-        trackName: ''
+        trackName: '',
     });
 
     useEffect(() => {
@@ -73,7 +73,9 @@ export default function SoundCloudProgressModal({ isOpen, onClose }) {
                 {progress.stage === 'searching' && progress.total > 0 && (
                     <div className="mb-4">
                         <div className="flex justify-between text-xs text-ink-secondary mb-2">
-                            <span>Track {progress.current} of {progress.total}</span>
+                            <span>
+                                Track {progress.current} of {progress.total}
+                            </span>
                             <span>{getProgressPercentage()}%</span>
                         </div>
                         <div className="h-3 bg-mx-hover rounded-full overflow-hidden">
@@ -100,7 +102,8 @@ export default function SoundCloudProgressModal({ isOpen, onClose }) {
                 {/* Info */}
                 <div className="mt-6 p-3 bg-mx-shell/50 rounded-lg border border-white/5">
                     <p className="text-xs text-ink-secondary text-center">
-                        Please keep this window open. This process may take several minutes for large playlists.
+                        Please keep this window open. This process may take several minutes for
+                        large playlists.
                     </p>
                 </div>
             </div>

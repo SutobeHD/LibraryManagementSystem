@@ -136,7 +136,9 @@ export const PromptModalRoot = () => {
         if (pendingQueue.length) {
             setQueue((q) => [...q, ...pendingQueue.splice(0)]);
         }
-        return () => { pushRequest = null; };
+        return () => {
+            pushRequest = null;
+        };
     }, []);
 
     if (queue.length === 0) return null;

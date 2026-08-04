@@ -6,9 +6,7 @@
  * which categories of metadata to push.
  */
 import React, { useState } from 'react';
-import {
-    ChevronDown, ChevronRight, ArrowUpDown, Zap, Database, Usb,
-} from 'lucide-react';
+import { ChevronDown, ChevronRight, ArrowUpDown, Zap, Database, Usb } from 'lucide-react';
 
 const METADATA_CATEGORIES = [
     { id: 'play_counts', label: 'Play Counts', desc: 'Play count and last played date' },
@@ -29,20 +27,26 @@ const MetadataSyncPanel = ({ device }) => {
     );
 
     const toggleCategory = (id) => {
-        setCategories(prev => ({ ...prev, [id]: !prev[id] }));
+        setCategories((prev) => ({ ...prev, [id]: !prev[id] }));
     };
 
     return (
         <div className="mx-card rounded-mx-md">
             <button
                 className="w-full flex items-center justify-between px-4 py-3 hover:bg-mx-hover rounded-mx-md transition-colors"
-                onClick={() => setOpen(o => !o)}
+                onClick={() => setOpen((o) => !o)}
             >
                 <div className="flex items-center gap-2">
                     <ArrowUpDown size={14} className="text-teal-400" />
-                    <span className="text-[12px] font-semibold text-ink-primary">Metadata Sync</span>
+                    <span className="text-[12px] font-semibold text-ink-primary">
+                        Metadata Sync
+                    </span>
                 </div>
-                {open ? <ChevronDown size={14} className="text-ink-muted" /> : <ChevronRight size={14} className="text-ink-muted" />}
+                {open ? (
+                    <ChevronDown size={14} className="text-ink-muted" />
+                ) : (
+                    <ChevronRight size={14} className="text-ink-muted" />
+                )}
             </button>
 
             {open && (
@@ -85,7 +89,9 @@ const MetadataSyncPanel = ({ device }) => {
                             <button
                                 onClick={() => setMainSource('pc')}
                                 className={`flex items-center gap-2 p-2 rounded-mx-xs border transition-all text-[11px] font-medium ${
-                                    mainSource === 'pc' ? 'bg-teal-400/10 border-teal-400/50 text-teal-400' : 'border-line-subtle text-ink-muted hover:bg-mx-hover'
+                                    mainSource === 'pc'
+                                        ? 'bg-teal-400/10 border-teal-400/50 text-teal-400'
+                                        : 'border-line-subtle text-ink-muted hover:bg-mx-hover'
                                 }`}
                             >
                                 <Database size={12} /> PC is Main
@@ -93,7 +99,9 @@ const MetadataSyncPanel = ({ device }) => {
                             <button
                                 onClick={() => setMainSource('usb')}
                                 className={`flex items-center gap-2 p-2 rounded-mx-xs border transition-all text-[11px] font-medium ${
-                                    mainSource === 'usb' ? 'bg-teal-400/10 border-teal-400/50 text-teal-400' : 'border-line-subtle text-ink-muted hover:bg-mx-hover'
+                                    mainSource === 'usb'
+                                        ? 'bg-teal-400/10 border-teal-400/50 text-teal-400'
+                                        : 'border-line-subtle text-ink-muted hover:bg-mx-hover'
                                 }`}
                             >
                                 <Usb size={12} /> USB is Main
@@ -103,14 +111,18 @@ const MetadataSyncPanel = ({ device }) => {
 
                     {/* Categories */}
                     <div className="space-y-0.5">
-                        <div className="text-[10px] text-ink-muted uppercase tracking-wider font-semibold mb-1.5">Sync Categories</div>
-                        {METADATA_CATEGORIES.map(cat => (
+                        <div className="text-[10px] text-ink-muted uppercase tracking-wider font-semibold mb-1.5">
+                            Sync Categories
+                        </div>
+                        {METADATA_CATEGORIES.map((cat) => (
                             <label
                                 key={cat.id}
                                 className="flex items-center justify-between p-1.5 rounded-mx-xs hover:bg-mx-hover cursor-pointer transition-all"
                             >
                                 <div className="flex flex-col">
-                                    <span className="text-[11px] text-ink-primary">{cat.label}</span>
+                                    <span className="text-[11px] text-ink-primary">
+                                        {cat.label}
+                                    </span>
                                     <span className="text-[9px] text-ink-muted">{cat.desc}</span>
                                 </div>
                                 <input

@@ -1,7 +1,7 @@
-use tauri::{command, Emitter};
 use crate::audio::analysis;
 use crate::audio::engine::AudioController;
 use std::sync::Mutex;
+use tauri::{command, Emitter};
 
 // Global state holding the playback controller
 pub struct AudioCommandState(pub Mutex<AudioController>);
@@ -54,11 +54,16 @@ pub async fn get_3band_waveform(path: String) -> Result<serde_json::Value, Strin
         let mut sample_buf: Option<symphonia::core::audio::SampleBuffer<f32>> = None;
 
         while let Ok(packet) = format.next_packet() {
-            if packet.track_id() != track_id { continue; }
+            if packet.track_id() != track_id {
+                continue;
+            }
             if let Ok(decoded) = decoder.decode(&packet) {
                 if sample_buf.is_none() {
                     use symphonia::core::audio::Signal;
-                    sample_buf = Some(symphonia::core::audio::SampleBuffer::<f32>::new(decoded.capacity() as u64, *decoded.spec()));
+                    sample_buf = Some(symphonia::core::audio::SampleBuffer::<f32>::new(
+                        decoded.capacity() as u64,
+                        *decoded.spec(),
+                    ));
                 }
                 if let Some(buf) = &mut sample_buf {
                     buf.copy_interleaved_ref(decoded);
@@ -76,7 +81,9 @@ pub async fn get_3band_waveform(path: String) -> Result<serde_json::Value, Strin
             "bpm": bpm,
             "key": key
         }))
-    }).await.map_err(|e| e.to_string())?
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// List all available audio output device names on this machine.
@@ -109,7 +116,7 @@ pub async fn list_audio_devices() -> Result<Vec<String>, String> {
     .map_err(|e| e.to_string())?
 }
 
-use crate::audio::export::{ProjectState, render_project};
+use crate::audio::export::{render_project, ProjectState};
 
 /// Render a non-destructive DAW project to disk asynchronously.
 ///
@@ -132,10 +139,13 @@ pub async fn start_project_export(
     // Req 8: Async Export
     tokio::task::spawn_blocking(move || {
         let res = render_project(project_state, |p, msg| {
-            let _ = app.emit("export-progress", serde_json::json!({ 
-                "progress": p, 
-                "message": msg 
-            }));
+            let _ = app.emit(
+                "export-progress",
+                serde_json::json!({
+                    "progress": p,
+                    "message": msg
+                }),
+            );
         });
 
         match res {

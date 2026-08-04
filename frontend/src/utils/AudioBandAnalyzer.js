@@ -1,4 +1,3 @@
-
 /**
  * AudioBandAnalyzer
  * Splits an AudioBuffer into 3 frequency bands (Rekordbox-style):
@@ -20,7 +19,7 @@ class AudioBandAnalyzer {
         const lowConfig = [{ type: 'lowpass', freq: 400 }];
         const midConfig = [
             { type: 'highpass', freq: 400 },
-            { type: 'lowpass', freq: 2000 }
+            { type: 'lowpass', freq: 2000 },
         ];
         const highConfig = [{ type: 'highpass', freq: 2000 }];
 
@@ -34,11 +33,15 @@ class AudioBandAnalyzer {
     }
 
     static async renderFilteredBuffer(buffer, filterConfigs) {
-        const ctx = new OfflineAudioContext(buffer.numberOfChannels, buffer.length, buffer.sampleRate);
+        const ctx = new OfflineAudioContext(
+            buffer.numberOfChannels,
+            buffer.length,
+            buffer.sampleRate
+        );
         const source = ctx.createBufferSource();
         source.buffer = buffer;
         let lastNode = source;
-        filterConfigs.forEach(config => {
+        filterConfigs.forEach((config) => {
             const filter = ctx.createBiquadFilter();
             filter.type = config.type;
             filter.frequency.value = config.freq;
@@ -174,7 +177,8 @@ class AudioBandAnalyzer {
         if (!peaks || peaks.length === 0) return [];
         const out = [];
         for (let i = 0; i < peaks.length; i += factor) {
-            let min = 0, max = 0;
+            let min = 0,
+                max = 0;
             for (let j = i; j < Math.min(i + factor, peaks.length); j++) {
                 if (peaks[j].min < min) min = peaks[j].min;
                 if (peaks[j].max > max) max = peaks[j].max;
@@ -209,8 +213,14 @@ class AudioBandAnalyzer {
                 view.setUint8(offset++, str.charCodeAt(i));
             }
         };
-        const writeU32 = (val) => { view.setUint32(offset, val, true); offset += 4; };
-        const writeU16 = (val) => { view.setUint16(offset, val, true); offset += 2; };
+        const writeU32 = (val) => {
+            view.setUint32(offset, val, true);
+            offset += 4;
+        };
+        const writeU16 = (val) => {
+            view.setUint16(offset, val, true);
+            offset += 2;
+        };
 
         // RIFF header
         writeStr('RIFF');
@@ -220,7 +230,7 @@ class AudioBandAnalyzer {
         // fmt chunk
         writeStr('fmt ');
         writeU32(16);
-        writeU16(1);  // PCM
+        writeU16(1); // PCM
         writeU16(numOfChan);
         writeU32(sampleRate);
         writeU32(sampleRate * blockAlign);
@@ -242,7 +252,7 @@ class AudioBandAnalyzer {
             for (let ch = 0; ch < numOfChan; ch++) {
                 let s = channels[ch][i];
                 s = Math.max(-1, Math.min(1, s));
-                s = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                s = s < 0 ? s * 0x8000 : s * 0x7fff;
                 view.setInt16(offset, s, true);
                 offset += 2;
             }

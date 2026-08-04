@@ -12,17 +12,28 @@ export const loadEditsForTrack = (trackId) => {
         const parsed = JSON.parse(raw);
         if (parsed.version !== STORAGE_VERSION) return null;
         return parsed;
-    } catch (e) { return null; }
+    } catch (e) {
+        return null;
+    }
 };
 
 export const saveEditsForTrack = (trackId, data) => {
     if (!trackId) return;
     try {
-        localStorage.setItem(STORAGE_KEY_PREFIX + trackId, JSON.stringify({ version: STORAGE_VERSION, ...data, savedAt: Date.now() }));
-    } catch (e) { /* quota or disabled */ }
+        localStorage.setItem(
+            STORAGE_KEY_PREFIX + trackId,
+            JSON.stringify({ version: STORAGE_VERSION, ...data, savedAt: Date.now() })
+        );
+    } catch (e) {
+        /* quota or disabled */
+    }
 };
 
 export const clearEditsForTrack = (trackId) => {
     if (!trackId) return;
-    try { localStorage.removeItem(STORAGE_KEY_PREFIX + trackId); } catch (e) { log.debug('WaveformEditor clearEditsForTrack failed', e); }
+    try {
+        localStorage.removeItem(STORAGE_KEY_PREFIX + trackId);
+    } catch (e) {
+        log.debug('WaveformEditor clearEditsForTrack failed', e);
+    }
 };

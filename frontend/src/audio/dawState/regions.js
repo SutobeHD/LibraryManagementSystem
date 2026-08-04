@@ -20,7 +20,6 @@ import { normalizeRegion, normalizeRegions } from './helpers';
  */
 export function regionsReducer(state, action) {
     switch (action.type) {
-
         // ── Regions ──────────────────────────
         case 'SET_REGIONS':
             return {
@@ -32,8 +31,9 @@ export function regionsReducer(state, action) {
         case 'ADD_REGION': {
             const normalized = normalizeRegion(action.payload);
             if (!normalized) return state;
-            const newRegions = [...state.regions, normalized]
-                .sort((a, b) => a.timelineStart - b.timelineStart);
+            const newRegions = [...state.regions, normalized].sort(
+                (a, b) => a.timelineStart - b.timelineStart
+            );
             return {
                 ...state,
                 regions: newRegions,
@@ -42,7 +42,7 @@ export function regionsReducer(state, action) {
         }
 
         case 'REMOVE_REGION': {
-            const filtered = state.regions.filter(r => r.id !== action.payload);
+            const filtered = state.regions.filter((r) => r.id !== action.payload);
             return {
                 ...state,
                 regions: filtered,
@@ -57,8 +57,8 @@ export function regionsReducer(state, action) {
 
         case 'UPDATE_REGION': {
             const { id, updates } = action.payload;
-            const updatedRegions = state.regions.map(r =>
-                r.id === id ? (normalizeRegion({ ...r, ...updates }) || r) : r
+            const updatedRegions = state.regions.map((r) =>
+                r.id === id ? normalizeRegion({ ...r, ...updates }) || r : r
             );
             return {
                 ...state,
@@ -69,11 +69,14 @@ export function regionsReducer(state, action) {
 
         case 'SPLIT_REGION_AT': {
             const { regionId, splitTime } = action.payload;
-            const region = state.regions.find(r => r.id === regionId);
+            const region = state.regions.find((r) => r.id === regionId);
             if (!region) return state;
 
             // Validate split point
-            if (splitTime <= region.timelineStart || splitTime >= region.timelineStart + region.duration) {
+            if (
+                splitTime <= region.timelineStart ||
+                splitTime >= region.timelineStart + region.duration
+            ) {
                 return state;
             }
 
@@ -104,9 +107,7 @@ export function regionsReducer(state, action) {
             };
 
             const newRegions = normalizeRegions(
-                state.regions
-                    .filter(r => r.id !== regionId)
-                    .concat([leftRegion, rightRegion])
+                state.regions.filter((r) => r.id !== regionId).concat([leftRegion, rightRegion])
             ).sort((a, b) => a.timelineStart - b.timelineStart);
 
             return {
@@ -119,20 +120,20 @@ export function regionsReducer(state, action) {
 
         case 'RIPPLE_DELETE': {
             const deleteId = action.payload;
-            const deleteRegion = state.regions.find(r => r.id === deleteId);
+            const deleteRegion = state.regions.find((r) => r.id === deleteId);
             if (!deleteRegion) return state;
 
             const gap = deleteRegion.duration;
             const deleteStart = deleteRegion.timelineStart;
 
             const newRegions = state.regions
-                .filter(r => r.id !== deleteId)
-                .map(r => {
+                .filter((r) => r.id !== deleteId)
+                .map((r) => {
                     if (r.timelineStart > deleteStart) {
                         return {
                             ...r,
                             timelineStart: r.timelineStart - gap,
-                            timelineEnd: (r.timelineStart - gap) + r.duration,
+                            timelineEnd: r.timelineStart - gap + r.duration,
                             _beatStart: undefined,
                             _beatEnd: undefined,
                         };
@@ -152,7 +153,7 @@ export function regionsReducer(state, action) {
         case 'COPY_SELECTION': {
             log.debug('Reducer: COPY_SELECTION', {
                 selectedIds: Array.from(state.selectedRegionIds),
-                range: state.selectionRange
+                range: state.selectionRange,
             });
 
             let regionsToCopy = [];
@@ -167,17 +168,20 @@ export function regionsReducer(state, action) {
             let clipboardSpan = 0;
 
             // 1. Check for Time Selection Range
-            if (state.selectionRange && Math.abs(state.selectionRange.end - state.selectionRange.start) > 0.001) {
+            if (
+                state.selectionRange &&
+                Math.abs(state.selectionRange.end - state.selectionRange.start) > 0.001
+            ) {
                 const { start, end } = state.selectionRange;
                 copyStart = start;
                 clipboardSpan = end - start;
 
                 // Find regions intersecting the selection range
-                const intersecting = state.regions.filter(r =>
-                    r.timelineStart < end && (r.timelineStart + r.duration) > start
+                const intersecting = state.regions.filter(
+                    (r) => r.timelineStart < end && r.timelineStart + r.duration > start
                 );
 
-                regionsToCopy = intersecting.map(r => {
+                regionsToCopy = intersecting.map((r) => {
                     const intersectStart = Math.max(r.timelineStart, start);
                     const intersectEnd = Math.min(r.timelineStart + r.duration, end);
                     const newDuration = intersectEnd - intersectStart;
@@ -203,12 +207,13 @@ export function regionsReducer(state, action) {
                         // ghost content beyond the displayed waveform).
                         sourceEnd: newSourceStart + newDuration,
                         sourceDuration: newDuration,
-                        _beatStart: undefined, _beatEnd: undefined
+                        _beatStart: undefined,
+                        _beatEnd: undefined,
                     };
                 });
             } else {
                 // 2. Fallback: Copy whole selected regions
-                regionsToCopy = state.regions.filter(r => state.selectedRegionIds.has(r.id));
+                regionsToCopy = state.regions.filter((r) => state.selectedRegionIds.has(r.id));
                 if (regionsToCopy.length > 0) {
                     regionsToCopy.sort((a, b) => a.timelineStart - b.timelineStart);
                     copyStart = regionsToCopy[0].timelineStart;
@@ -227,9 +232,9 @@ export function regionsReducer(state, action) {
             regionsToCopy.sort((a, b) => a.timelineStart - b.timelineStart);
 
             // Normalize to 0 offset relative to copy start
-            const clipboardData = regionsToCopy.map(r => ({
+            const clipboardData = regionsToCopy.map((r) => ({
                 ...r,
-                _offset: r.timelineStart - copyStart
+                _offset: r.timelineStart - copyStart,
             }));
 
             return { ...state, clipboard: clipboardData, clipboardSpan };
@@ -252,9 +257,10 @@ export function regionsReducer(state, action) {
             const sortedExisting = [...state.regions].sort(
                 (a, b) => a.timelineStart - b.timelineStart
             );
-            const containing = sortedExisting.find(r =>
-                rawInsertTime > r.timelineStart - EPSILON &&
-                rawInsertTime < r.timelineStart + r.duration - EPSILON
+            const containing = sortedExisting.find(
+                (r) =>
+                    rawInsertTime > r.timelineStart - EPSILON &&
+                    rawInsertTime < r.timelineStart + r.duration - EPSILON
             );
             let insertTime = rawInsertTime;
             if (!containing) {
@@ -273,9 +279,10 @@ export function regionsReducer(state, action) {
             let tempRegions = [...state.regions];
 
             // 1. Check if we need to split a region at insertTime
-            const intersectIdx = tempRegions.findIndex(r =>
-                insertTime > r.timelineStart + EPSILON &&
-                insertTime < r.timelineStart + r.duration - EPSILON
+            const intersectIdx = tempRegions.findIndex(
+                (r) =>
+                    insertTime > r.timelineStart + EPSILON &&
+                    insertTime < r.timelineStart + r.duration - EPSILON
             );
 
             if (intersectIdx !== -1) {
@@ -290,7 +297,8 @@ export function regionsReducer(state, action) {
                     duration: relativeOffset,
                     sourceDuration: relativeOffset,
                     sourceEnd: sourceSplitPoint,
-                    _beatStart: undefined, _beatEnd: undefined // Invalidate beat cache
+                    _beatStart: undefined,
+                    _beatEnd: undefined, // Invalidate beat cache
                 };
 
                 // Create Right Part (starts at insertTime)
@@ -301,7 +309,8 @@ export function regionsReducer(state, action) {
                     sourceStart: sourceSplitPoint,
                     duration: r.duration - relativeOffset,
                     sourceDuration: r.duration - relativeOffset,
-                    _beatStart: undefined, _beatEnd: undefined
+                    _beatStart: undefined,
+                    _beatEnd: undefined,
                 };
 
                 // Replace original with Left and Right
@@ -318,7 +327,7 @@ export function regionsReducer(state, action) {
                 (a, b) => (a._offset ?? 0) - (b._offset ?? 0)
             );
             let cursor = insertTime;
-            const pastedRegions = sortedClip.map(r => {
+            const pastedRegions = sortedClip.map((r) => {
                 const placed = {
                     ...r,
                     id: crypto.randomUUID(),
@@ -343,50 +352,51 @@ export function regionsReducer(state, action) {
             //    by EXACTLY the packed paste span. Using pastedSpan rather
             //    than the original clipboardSpan keeps the next region
             //    flush against the last pasted item.
-            const shiftedRegions = tempRegions.map(r => {
+            const shiftedRegions = tempRegions.map((r) => {
                 if (r.timelineStart >= insertTime - 0.0001) {
                     return { ...r, timelineStart: r.timelineStart + pastedSpan };
                 }
                 return r;
             });
 
-            const finalRegions = normalizeRegions(
-                [...shiftedRegions, ...pastedRegions]
-            ).sort((a, b) => a.timelineStart - b.timelineStart);
+            const finalRegions = normalizeRegions([...shiftedRegions, ...pastedRegions]).sort(
+                (a, b) => a.timelineStart - b.timelineStart
+            );
 
             return {
                 ...state,
                 regions: finalRegions,
-                selectedRegionIds: new Set(pastedRegions.map(r => r.id)),
+                selectedRegionIds: new Set(pastedRegions.map((r) => r.id)),
                 project: { ...state.project, dirty: true },
             };
         }
 
         case 'DUPLICATE_SELECTION': {
             log.debug('Reducer: DUPLICATE_SELECTION', state.selectedRegionIds);
-            const selectedRegions = state.regions.filter(r => state.selectedRegionIds.has(r.id));
+            const selectedRegions = state.regions.filter((r) => state.selectedRegionIds.has(r.id));
             if (selectedRegions.length === 0) return state;
 
             const sorted = [...selectedRegions].sort((a, b) => a.timelineStart - b.timelineStart);
             const startT = sorted[0].timelineStart;
-            const endT = sorted[sorted.length - 1].timelineStart + sorted[sorted.length - 1].duration;
+            const endT =
+                sorted[sorted.length - 1].timelineStart + sorted[sorted.length - 1].duration;
             const duration = endT - startT;
 
-            const duplicates = selectedRegions.map(r => ({
+            const duplicates = selectedRegions.map((r) => ({
                 ...r,
                 id: crypto.randomUUID(),
                 timelineStart: r.timelineStart + duration,
-                timelineEnd: r.timelineStart + duration + r.duration
+                timelineEnd: r.timelineStart + duration + r.duration,
             }));
 
-            const finalRegions = normalizeRegions(
-                [...state.regions, ...duplicates]
-            ).sort((a, b) => a.timelineStart - b.timelineStart);
+            const finalRegions = normalizeRegions([...state.regions, ...duplicates]).sort(
+                (a, b) => a.timelineStart - b.timelineStart
+            );
 
             return {
                 ...state,
                 regions: finalRegions,
-                selectedRegionIds: new Set(duplicates.map(r => r.id)),
+                selectedRegionIds: new Set(duplicates.map((r) => r.id)),
                 project: { ...state.project, dirty: true },
             };
         }

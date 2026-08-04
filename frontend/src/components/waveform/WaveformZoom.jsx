@@ -8,14 +8,14 @@ export default function WaveformZoom({ zoom, setZoom }) {
     return (
         <div className="absolute bottom-4 left-4 flex gap-2 z-50">
             <button
-                onClick={() => setZoom(prev => Math.max(ZOOM_MIN, prev - ZOOM_STEP))}
+                onClick={() => setZoom((prev) => Math.max(ZOOM_MIN, prev - ZOOM_STEP))}
                 className="p-1 bg-black/60 border border-white/10 rounded pointer-events-auto"
                 title="Zoom Out"
             >
                 <ZoomOut size={12} />
             </button>
             <button
-                onClick={() => setZoom(prev => Math.min(ZOOM_MAX, prev + ZOOM_STEP))}
+                onClick={() => setZoom((prev) => Math.min(ZOOM_MAX, prev + ZOOM_STEP))}
                 className="p-1 bg-black/60 border border-white/10 rounded pointer-events-auto"
                 title="Zoom In"
             >

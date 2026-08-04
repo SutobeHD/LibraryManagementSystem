@@ -26,23 +26,57 @@ export default function useEditorKeyboard({
             if (e.target.tagName === 'INPUT') return;
 
             switch (e.key.toLowerCase()) {
-                case 'm': addMarker(0, -1); break; // Memory Cue
-                case 'l': addMarker(4, -1); break; // Loop
-                case '1': addMarker(0, 0); break;  // Hot Cue A
-                case '2': addMarker(0, 1); break;  // Hot Cue B
-                case '3': addMarker(0, 2); break;
-                case '4': addMarker(0, 3); break;
-                case '5': addMarker(0, 4); break;
-                case '6': addMarker(0, 5); break;
-                case '7': addMarker(0, 6); break;
-                case '8': addMarker(0, 7); break;
-                case 'f': addMarker(1, -1); break; // Fade In
-                case 'o': addMarker(2, -1); break; // Fade Out
-                case 's': handleSplit(); break;
-                case 'c': handleCopy(); break;
-                case 'delete': handleDelete(); break;
-                case 'q': handleToggleSnap(); break;
-                case 'g': toggleGridMode(); break; // Toggle Grid Edit Mode
+                case 'm':
+                    addMarker(0, -1);
+                    break; // Memory Cue
+                case 'l':
+                    addMarker(4, -1);
+                    break; // Loop
+                case '1':
+                    addMarker(0, 0);
+                    break; // Hot Cue A
+                case '2':
+                    addMarker(0, 1);
+                    break; // Hot Cue B
+                case '3':
+                    addMarker(0, 2);
+                    break;
+                case '4':
+                    addMarker(0, 3);
+                    break;
+                case '5':
+                    addMarker(0, 4);
+                    break;
+                case '6':
+                    addMarker(0, 5);
+                    break;
+                case '7':
+                    addMarker(0, 6);
+                    break;
+                case '8':
+                    addMarker(0, 7);
+                    break;
+                case 'f':
+                    addMarker(1, -1);
+                    break; // Fade In
+                case 'o':
+                    addMarker(2, -1);
+                    break; // Fade Out
+                case 's':
+                    handleSplit();
+                    break;
+                case 'c':
+                    handleCopy();
+                    break;
+                case 'delete':
+                    handleDelete();
+                    break;
+                case 'q':
+                    handleToggleSnap();
+                    break;
+                case 'g':
+                    toggleGridMode();
+                    break; // Toggle Grid Edit Mode
             }
         };
 

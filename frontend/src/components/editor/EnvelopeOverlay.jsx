@@ -1,6 +1,6 @@
 /**
  * EnvelopeOverlay - Interactive envelope editor for audio regions
- * 
+ *
  * Provides draggable nodes for:
  * - Fade-in duration (left edge)
  * - Fade-out duration (right edge)
@@ -15,7 +15,7 @@ const EnvelopeOverlay = ({
     height = 200,
     onFadeInChange,
     onFadeOutChange,
-    onGainChange
+    onGainChange,
 }) => {
     const containerRef = useRef(null);
     const [activeNode, setActiveNode] = useState(null);
@@ -28,40 +28,46 @@ const EnvelopeOverlay = ({
     const fadeOutPx = (fadeOutDuration / duration) * width;
     const gainY = 20 + (1 - gain) * 40; // Gain line Y position (higher gain = lower Y)
 
-    const handleMouseDown = useCallback((e, node) => {
-        e.stopPropagation();
-        setActiveNode(node);
-        setIsDragging(true);
+    const handleMouseDown = useCallback(
+        (e, node) => {
+            e.stopPropagation();
+            setActiveNode(node);
+            setIsDragging(true);
 
-        const handleMouseMove = (e) => {
-            if (!containerRef.current) return;
+            const handleMouseMove = (e) => {
+                if (!containerRef.current) return;
 
-            const rect = containerRef.current.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+                const rect = containerRef.current.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
 
-            if (node === 'fadeIn') {
-                const newFadeIn = Math.max(0, Math.min(duration / 2, (x / width) * duration));
-                onFadeInChange?.(newFadeIn);
-            } else if (node === 'fadeOut') {
-                const newFadeOut = Math.max(0, Math.min(duration / 2, ((width - x) / width) * duration));
-                onFadeOutChange?.(newFadeOut);
-            } else if (node === 'gain') {
-                const newGain = Math.max(0, Math.min(2, 1 - (y - 20) / 40));
-                onGainChange?.(newGain);
-            }
-        };
+                if (node === 'fadeIn') {
+                    const newFadeIn = Math.max(0, Math.min(duration / 2, (x / width) * duration));
+                    onFadeInChange?.(newFadeIn);
+                } else if (node === 'fadeOut') {
+                    const newFadeOut = Math.max(
+                        0,
+                        Math.min(duration / 2, ((width - x) / width) * duration)
+                    );
+                    onFadeOutChange?.(newFadeOut);
+                } else if (node === 'gain') {
+                    const newGain = Math.max(0, Math.min(2, 1 - (y - 20) / 40));
+                    onGainChange?.(newGain);
+                }
+            };
 
-        const handleMouseUp = () => {
-            setIsDragging(false);
-            setActiveNode(null);
-            window.removeEventListener('mousemove', handleMouseMove);
-            window.removeEventListener('mouseup', handleMouseUp);
-        };
+            const handleMouseUp = () => {
+                setIsDragging(false);
+                setActiveNode(null);
+                window.removeEventListener('mousemove', handleMouseMove);
+                window.removeEventListener('mouseup', handleMouseUp);
+            };
 
-        window.addEventListener('mousemove', handleMouseMove);
-        window.addEventListener('mouseup', handleMouseUp);
-    }, [duration, width, onFadeInChange, onFadeOutChange, onGainChange]);
+            window.addEventListener('mousemove', handleMouseMove);
+            window.addEventListener('mouseup', handleMouseUp);
+        },
+        [duration, width, onFadeInChange, onFadeOutChange, onGainChange]
+    );
 
     return (
         <div
@@ -118,14 +124,15 @@ const EnvelopeOverlay = ({
                     absolute pointer-events-auto cursor-ew-resize
                     w-4 h-4 rounded-full border-2 
                     transition-all duration-150
-                    ${activeNode === 'fadeIn'
-                        ? 'bg-amber2 border-white scale-125'
-                        : 'bg-white/80 border-amber2 hover:bg-amber2'
+                    ${
+                        activeNode === 'fadeIn'
+                            ? 'bg-amber2 border-white scale-125'
+                            : 'bg-white/80 border-amber2 hover:bg-amber2'
                     }
                 `}
                 style={{
                     left: `${fadeInPx - 8}px`,
-                    top: `${gainY - 8}px`
+                    top: `${gainY - 8}px`,
                 }}
                 onMouseDown={(e) => handleMouseDown(e, 'fadeIn')}
             />
@@ -136,14 +143,15 @@ const EnvelopeOverlay = ({
                     absolute pointer-events-auto cursor-ns-resize
                     w-5 h-5 rounded-full border-2 
                     transition-all duration-150
-                    ${activeNode === 'gain'
-                        ? 'bg-yellow-400 border-white scale-125'
-                        : 'bg-yellow-400/80 border-yellow-300 hover:bg-yellow-400'
+                    ${
+                        activeNode === 'gain'
+                            ? 'bg-yellow-400 border-white scale-125'
+                            : 'bg-yellow-400/80 border-yellow-300 hover:bg-yellow-400'
                     }
                 `}
                 style={{
                     left: `${width / 2 - 10}px`,
-                    top: `${gainY - 10}px`
+                    top: `${gainY - 10}px`,
                 }}
                 onMouseDown={(e) => handleMouseDown(e, 'gain')}
             >
@@ -158,14 +166,15 @@ const EnvelopeOverlay = ({
                     absolute pointer-events-auto cursor-ew-resize
                     w-4 h-4 rounded-full border-2 
                     transition-all duration-150
-                    ${activeNode === 'fadeOut'
-                        ? 'bg-amber2 border-white scale-125'
-                        : 'bg-white/80 border-amber2 hover:bg-amber2'
+                    ${
+                        activeNode === 'fadeOut'
+                            ? 'bg-amber2 border-white scale-125'
+                            : 'bg-white/80 border-amber2 hover:bg-amber2'
                     }
                 `}
                 style={{
                     left: `${width - fadeOutPx - 8}px`,
-                    top: `${gainY - 8}px`
+                    top: `${gainY - 8}px`,
                 }}
                 onMouseDown={(e) => handleMouseDown(e, 'fadeOut')}
             />

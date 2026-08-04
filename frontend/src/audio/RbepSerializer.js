@@ -1,10 +1,10 @@
 /**
  * RbepSerializer — .rbep XML Parser/Serializer
- * 
+ *
  * Handles the critical Beat ↔ Seconds conversion for Rekordbox Edit Project files.
  * The .rbep format stores section positions as BEAT INDICES, not seconds.
  * This module converts between the two using a tempo map.
- * 
+ *
  * Also handles POSITION_MARK nodes for cue points and loops (standard Rekordbox XML schema).
  */
 
@@ -13,7 +13,7 @@
 /**
  * Build a tempo map for a constant-BPM track.
  * Each entry: { index, bpm, positionMs }
- * 
+ *
  * @param {number} bpm - Track BPM
  * @param {number} firstBeatMs - Position of the first beat in milliseconds
  * @param {number} durationMs - Total track duration in milliseconds
@@ -37,7 +37,7 @@ export function buildTempoMap(bpm, firstBeatMs, durationMs) {
 /**
  * Convert a beat index to seconds using a tempo map.
  * Handles variable BPM by interpolating between tempo map entries.
- * 
+ *
  * @param {number} beatIndex - Beat index (can be fractional)
  * @param {Array<{index: number, bpm: number, positionMs: number}>} tempoMap
  * @returns {number} Time in seconds
@@ -61,14 +61,14 @@ export function beatsToSeconds(beatIndex, tempoMap) {
     // Interpolate from the lower entry
     const msPerBeat = 60000 / lower.bpm;
     const beatOffset = beatIndex - lower.index;
-    const posMs = lower.positionMs + (beatOffset * msPerBeat);
+    const posMs = lower.positionMs + beatOffset * msPerBeat;
 
     return posMs / 1000;
 }
 
 /**
  * Convert seconds to a beat index using a tempo map.
- * 
+ *
  * @param {number} seconds - Time in seconds
  * @param {Array<{index: number, bpm: number, positionMs: number}>} tempoMap
  * @returns {number} Beat index (can be fractional)
@@ -101,7 +101,7 @@ export function secondsToBeats(seconds, tempoMap) {
 /**
  * Parse a .rbep XML string into a runtime project object.
  * Converts beat-indexed sections to seconds using the embedded tempo map.
- * 
+ *
  * @param {string} xmlString - Raw .rbep XML content
  * @returns {Object} Runtime project structure
  */
@@ -180,7 +180,9 @@ function parseTrack(trackEl, mastergrid) {
     let songTempoMap = [];
     if (songgridEl) {
         const orgGridEl = songgridEl.querySelector('orggrid');
-        const gridData = orgGridEl ? orgGridEl.querySelector('data') : songgridEl.querySelector('data');
+        const gridData = orgGridEl
+            ? orgGridEl.querySelector('data')
+            : songgridEl.querySelector('data');
         songTempoMap = parseBeatData(gridData);
     }
 
@@ -260,11 +262,13 @@ function parseTrack(trackEl, mastergrid) {
         volume,
         bpm,
         songTempoMap,
-        songGridInfo: songgridEl ? {
-            length: parseInt(songgridEl.getAttribute('length') || '0'),
-            bpm: parseFloat(songgridEl.getAttribute('bpm') || '0'),
-            indexOffset: parseInt(songgridEl.getAttribute('indexoffset') || '1'),
-        } : null,
+        songGridInfo: songgridEl
+            ? {
+                  length: parseInt(songgridEl.getAttribute('length') || '0'),
+                  bpm: parseFloat(songgridEl.getAttribute('bpm') || '0'),
+                  indexOffset: parseInt(songgridEl.getAttribute('indexoffset') || '1'),
+              }
+            : null,
     };
 }
 
@@ -290,7 +294,7 @@ function parseBeatData(dataEl) {
 /**
  * Serialize a runtime project object to .rbep XML string.
  * Converts seconds back to beat indices using the tempo map.
- * 
+ *
  * @param {Object} project - Runtime project
  * @returns {string} .rbep XML string
  */
@@ -308,7 +312,7 @@ export function serializeRbep(project) {
 
     // Tracks
     lines.push('  <tracks>');
-    for (const track of (project.tracks || [])) {
+    for (const track of project.tracks || []) {
         serializeTrack(lines, track, project.mastergrid);
     }
     lines.push('  </tracks>');
@@ -317,8 +321,10 @@ export function serializeRbep(project) {
     if (project.mastergrid) {
         lines.push(`  <mastergrid indexoffset="${project.mastergrid.indexOffset || 1}">`);
         lines.push('    <data>');
-        for (const b of (project.mastergrid.beats || [])) {
-            lines.push(`      <beat index="${b.index}" bpm="${b.bpm}" position="${b.positionMs}"/>`);
+        for (const b of project.mastergrid.beats || []) {
+            lines.push(
+                `      <beat index="${b.index}" bpm="${b.bpm}" position="${b.positionMs}"/>`
+            );
         }
         lines.push('    </data>');
         lines.push('  </mastergrid>');
@@ -343,7 +349,7 @@ function serializeTrack(lines, track, mastergrid) {
     lines.push(`        <filepath>${escXml(track.song.filepath)}</filepath>`);
 
     // Cue points (POSITION_MARK)
-    for (const cue of (track.cuePoints || [])) {
+    for (const cue of track.cuePoints || []) {
         let attrs = `Name="${escXml(cue.name)}" Type="${cue.type}" Start="${cue.start.toFixed(3)}"`;
         if (cue.end !== null && cue.end !== undefined) {
             attrs += ` End="${cue.end.toFixed(3)}"`;
@@ -360,14 +366,18 @@ function serializeTrack(lines, track, mastergrid) {
     // Position sections (seconds → beats)
     lines.push('        <position>');
     lines.push('          <data>');
-    for (const region of (track.regions || [])) {
+    for (const region of track.regions || []) {
         // Use stored beat values if available (round-trip fidelity), else convert
-        const startBeat = region._beatStart ?? secondsToBeats(region.timelineStart, timelineTempoMap);
+        const startBeat =
+            region._beatStart ?? secondsToBeats(region.timelineStart, timelineTempoMap);
         const endBeat = region._beatEnd ?? secondsToBeats(region.timelineEnd, timelineTempoMap);
-        const songStartBeat = region._songBeatStart ?? secondsToBeats(region.sourceStart, songTempoMap);
+        const songStartBeat =
+            region._songBeatStart ?? secondsToBeats(region.sourceStart, songTempoMap);
         const songEndBeat = region._songBeatEnd ?? secondsToBeats(region.sourceEnd, songTempoMap);
 
-        lines.push(`            <section start="${startBeat.toFixed(1)}" end="${endBeat.toFixed(1)}" songstart="${songStartBeat.toFixed(1)}" songend="${songEndBeat.toFixed(1)}"/>`);
+        lines.push(
+            `            <section start="${startBeat.toFixed(1)}" end="${endBeat.toFixed(1)}" songstart="${songStartBeat.toFixed(1)}" songend="${songEndBeat.toFixed(1)}"/>`
+        );
     }
     lines.push('          </data>');
     lines.push('        </position>');
@@ -377,13 +387,20 @@ function serializeTrack(lines, track, mastergrid) {
     lines.push('          <data>');
     if (track.volume && track.volume.length > 0) {
         for (const v of track.volume) {
-            lines.push(`            <section start="${v.startBeat.toFixed(1)}" end="${v.endBeat.toFixed(1)}" vol="${v.vol.toFixed(1)}"/>`);
+            lines.push(
+                `            <section start="${v.startBeat.toFixed(1)}" end="${v.endBeat.toFixed(1)}" vol="${v.vol.toFixed(1)}"/>`
+            );
         }
     } else {
         // Default: full volume for entire duration
-        const totalBeats = track.regions.length > 0
-            ? (track.regions[track.regions.length - 1]._beatEnd ?? secondsToBeats(track.regions[track.regions.length - 1].timelineEnd, timelineTempoMap))
-            : 0;
+        const totalBeats =
+            track.regions.length > 0
+                ? (track.regions[track.regions.length - 1]._beatEnd ??
+                  secondsToBeats(
+                      track.regions[track.regions.length - 1].timelineEnd,
+                      timelineTempoMap
+                  ))
+                : 0;
         lines.push(`            <section start="0.0" end="${totalBeats.toFixed(1)}" vol="1.0"/>`);
     }
     lines.push('          </data>');
@@ -392,10 +409,14 @@ function serializeTrack(lines, track, mastergrid) {
     // BPM
     lines.push('        <bpm>');
     lines.push('          <data>');
-    const totalBeats = track.regions.length > 0
-        ? (track.regions[track.regions.length - 1]._beatEnd ?? secondsToBeats(track.regions[track.regions.length - 1].timelineEnd, timelineTempoMap))
-        : 0;
-    lines.push(`            <section start="0.0" end="${totalBeats.toFixed(1)}" bpm="${(track.bpm || 128).toFixed(2)}"/>`);
+    const totalBeats =
+        track.regions.length > 0
+            ? (track.regions[track.regions.length - 1]._beatEnd ??
+              secondsToBeats(track.regions[track.regions.length - 1].timelineEnd, timelineTempoMap))
+            : 0;
+    lines.push(
+        `            <section start="0.0" end="${totalBeats.toFixed(1)}" bpm="${(track.bpm || 128).toFixed(2)}"/>`
+    );
     lines.push('          </data>');
     lines.push('        </bpm>');
 
@@ -416,11 +437,15 @@ function serializeTrack(lines, track, mastergrid) {
 
     // Song grid
     if (track.songGridInfo && songTempoMap.length > 0) {
-        lines.push(`      <songgrid length="${track.songGridInfo.length}" bpm="${track.songGridInfo.bpm}" indexoffset="${track.songGridInfo.indexOffset}">`);
+        lines.push(
+            `      <songgrid length="${track.songGridInfo.length}" bpm="${track.songGridInfo.bpm}" indexoffset="${track.songGridInfo.indexOffset}">`
+        );
         lines.push(`        <orggrid indexoffset="0">`);
         lines.push('          <data>');
         for (const b of songTempoMap) {
-            lines.push(`            <beat index="${b.index}" bpm="${b.bpm}" position="${b.positionMs}"/>`);
+            lines.push(
+                `            <beat index="${b.index}" bpm="${b.bpm}" position="${b.positionMs}"/>`
+            );
         }
         lines.push('          </data>');
         lines.push('        </orggrid>');
@@ -444,7 +469,7 @@ function escXml(str) {
 
 /**
  * Load a .rbep file from disk via fetch (Tauri asset protocol or local file).
- * 
+ *
  * @param {string} filepath - Path to .rbep file
  * @returns {Promise<Object>} Parsed project
  */
@@ -463,7 +488,7 @@ export async function loadRbepFile(filepath) {
         const res = await api.get('/api/file/read', {
             params: { path: filepath },
             responseType: 'text',
-            transformResponse: [(d) => d],  // keep the raw XML string
+            transformResponse: [(d) => d], // keep the raw XML string
         });
         return parseRbep(res.data);
     }
@@ -471,7 +496,7 @@ export async function loadRbepFile(filepath) {
 
 /**
  * Save a project to a .rbep file.
- * 
+ *
  * @param {Object} project - Runtime project object
  * @param {string} filepath - Target file path
  * @returns {Promise<void>}

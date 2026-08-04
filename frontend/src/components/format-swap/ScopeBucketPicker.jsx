@@ -22,8 +22,20 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-    Music, ListMusic, Library, FolderTree, Search, Loader2, Palette, Tag, Star,
-    StarOff, FileAudio, Archive, ChevronRight, Sparkles,
+    Music,
+    ListMusic,
+    Library,
+    FolderTree,
+    Search,
+    Loader2,
+    Palette,
+    Tag,
+    Star,
+    StarOff,
+    FileAudio,
+    Archive,
+    ChevronRight,
+    Sparkles,
 } from 'lucide-react';
 import api from '../../api/api';
 import { useToast } from '../ToastContext';
@@ -71,7 +83,7 @@ function filterTracks(list, q) {
     if (!q.trim()) return list;
     const s = q.toLowerCase();
     return list.filter(
-        (t) => tname(t).toLowerCase().includes(s) || tartist(t).toLowerCase().includes(s),
+        (t) => tname(t).toLowerCase().includes(s) || tartist(t).toLowerCase().includes(s)
     );
 }
 
@@ -97,8 +109,7 @@ function SingleTrackPicker({ track, onPick }) {
 
     useEffect(() => {
         setLoading(true);
-        api
-            .get('/api/library/tracks')
+        api.get('/api/library/tracks')
             .then((res) => {
                 const list = Array.isArray(res.data) ? res.data : (res.data?.tracks ?? []);
                 setTracks(Array.isArray(list) ? list : []);
@@ -113,7 +124,9 @@ function SingleTrackPicker({ track, onPick }) {
         return (
             <div className="flex items-center justify-between p-3 bg-amber2/5 border border-amber2/25 rounded-mx-sm">
                 <div className="min-w-0">
-                    <p className="text-[13px] font-semibold text-ink-primary truncate">{tname(track)}</p>
+                    <p className="text-[13px] font-semibold text-ink-primary truncate">
+                        {tname(track)}
+                    </p>
                     <p className="text-ink-muted text-tiny truncate">{tartist(track)}</p>
                 </div>
                 <button
@@ -128,7 +141,12 @@ function SingleTrackPicker({ track, onPick }) {
 
     return (
         <div className="border border-line-subtle rounded-mx-sm overflow-hidden">
-            <SearchBox value={q} onChange={setQ} placeholder="Search title or artist…" loading={loading} />
+            <SearchBox
+                value={q}
+                onChange={setQ}
+                placeholder="Search title or artist…"
+                loading={loading}
+            />
             <div className="max-h-56 overflow-y-auto divide-y divide-line-subtle">
                 {filtered.length === 0 ? (
                     <div className="p-4 text-center text-ink-muted text-tiny">
@@ -138,7 +156,10 @@ function SingleTrackPicker({ track, onPick }) {
                     filtered.map((t, i) => (
                         <button
                             key={tid(t) ?? i}
-                            onClick={() => { onPick(t); setQ(''); }}
+                            onClick={() => {
+                                onPick(t);
+                                setQ('');
+                            }}
                             className="w-full text-left px-3 py-2 hover:bg-mx-hover transition-colors grid grid-cols-[1fr_auto_auto] gap-2 items-center"
                         >
                             <div className="min-w-0">
@@ -167,8 +188,7 @@ function PlaylistDropdown({ playlistId, onPick }) {
 
     useEffect(() => {
         setLoading(true);
-        api
-            .get('/api/library/format-swap/playlists')
+        api.get('/api/library/format-swap/playlists')
             .then((res) => setPlaylists(Array.isArray(res.data) ? res.data : []))
             .catch((e) => console.error('[ScopeBucketPicker] playlists load failed', e))
             .finally(() => setLoading(false));
@@ -192,7 +212,9 @@ function PlaylistDropdown({ playlistId, onPick }) {
                         <ListMusic size={14} className="text-amber2 shrink-0" />
                     )}
                     <div className="min-w-0">
-                        <p className="text-[13px] font-semibold text-ink-primary truncate">{selected.name}</p>
+                        <p className="text-[13px] font-semibold text-ink-primary truncate">
+                            {selected.name}
+                        </p>
                         <p className="text-ink-muted text-tiny">{selected.track_count} tracks</p>
                     </div>
                 </div>
@@ -208,7 +230,12 @@ function PlaylistDropdown({ playlistId, onPick }) {
 
     return (
         <div className="border border-line-subtle rounded-mx-sm overflow-hidden">
-            <SearchBox value={q} onChange={setQ} placeholder="Search playlists…" loading={loading} />
+            <SearchBox
+                value={q}
+                onChange={setQ}
+                placeholder="Search playlists…"
+                loading={loading}
+            />
             <div className="max-h-56 overflow-y-auto divide-y divide-line-subtle">
                 {filtered.length === 0 ? (
                     <div className="p-4 text-center text-ink-muted text-tiny">
@@ -227,7 +254,9 @@ function PlaylistDropdown({ playlistId, onPick }) {
                                 ) : (
                                     <ListMusic size={12} className="text-ink-muted shrink-0" />
                                 )}
-                                <span className="text-[12px] text-ink-primary truncate">{p.name}</span>
+                                <span className="text-[12px] text-ink-primary truncate">
+                                    {p.name}
+                                </span>
                             </div>
                             <span className="font-mono text-[10px] text-ink-muted whitespace-nowrap shrink-0">
                                 {p.track_count}
@@ -249,38 +278,39 @@ function LibrarySubsetPicker({ subset, onPick, onCountChange }) {
     const [pendingKey, setPendingKey] = useState(null);
 
     useEffect(() => {
-        api
-            .get('/api/library/format-swap/colors')
+        api.get('/api/library/format-swap/colors')
             .then((res) => setColors(Array.isArray(res.data) ? res.data : []))
             .catch((e) => console.error('[ScopeBucketPicker] colors load failed', e));
-        api
-            .get('/api/library/format-swap/mytags')
+        api.get('/api/library/format-swap/mytags')
             .then((res) => setMytags(Array.isArray(res.data) ? res.data : []))
             .catch((e) => console.error('[ScopeBucketPicker] mytags load failed', e));
     }, []);
 
     // ── Count fetcher (cached, debounced via simple key check) ─────────────
-    const fetchCount = useCallback((scope) => {
-        const key = JSON.stringify(scope);
-        if (counts[key] !== undefined) return Promise.resolve(counts[key]);
-        if (pendingKey === key) return Promise.resolve(null);
-        setPendingKey(key);
-        const params = { subset_kind: scope.subset_kind };
-        if (scope.color_id !== undefined) params.color_id = scope.color_id;
-        if (scope.tag_id !== undefined) params.tag_id = scope.tag_id;
-        if (scope.file_type !== undefined) params.file_type = scope.file_type;
-        return api
-            .get('/api/library/format-swap/subset-counts', { params })
-            .then((res) => {
-                setCounts((prev) => ({ ...prev, [key]: res.data }));
-                return res.data;
-            })
-            .catch((e) => {
-                console.error('[ScopeBucketPicker] subset-counts failed', e);
-                return null;
-            })
-            .finally(() => setPendingKey(null));
-    }, [counts, pendingKey]);
+    const fetchCount = useCallback(
+        (scope) => {
+            const key = JSON.stringify(scope);
+            if (counts[key] !== undefined) return Promise.resolve(counts[key]);
+            if (pendingKey === key) return Promise.resolve(null);
+            setPendingKey(key);
+            const params = { subset_kind: scope.subset_kind };
+            if (scope.color_id !== undefined) params.color_id = scope.color_id;
+            if (scope.tag_id !== undefined) params.tag_id = scope.tag_id;
+            if (scope.file_type !== undefined) params.file_type = scope.file_type;
+            return api
+                .get('/api/library/format-swap/subset-counts', { params })
+                .then((res) => {
+                    setCounts((prev) => ({ ...prev, [key]: res.data }));
+                    return res.data;
+                })
+                .catch((e) => {
+                    console.error('[ScopeBucketPicker] subset-counts failed', e);
+                    return null;
+                })
+                .finally(() => setPendingKey(null));
+        },
+        [counts, pendingKey]
+    );
 
     // ── When a subset is fully resolved, fetch its count + bubble up ───────
     useEffect(() => {
@@ -333,9 +363,13 @@ function LibrarySubsetPicker({ subset, onPick, onCountChange }) {
                             }`}
                         >
                             <Icon size={15} />
-                            <span className="text-[11px] font-semibold leading-tight">{chip.label}</span>
+                            <span className="text-[11px] font-semibold leading-tight">
+                                {chip.label}
+                            </span>
                             {cached && cached.count !== undefined ? (
-                                <span className="font-mono text-[10px] opacity-70">{cached.count}</span>
+                                <span className="font-mono text-[10px] opacity-70">
+                                    {cached.count}
+                                </span>
                             ) : null}
                         </button>
                     );
@@ -388,11 +422,15 @@ function LibrarySubsetPicker({ subset, onPick, onCountChange }) {
                                         key={t.tag_id}
                                         onClick={() => pickTag(t.tag_id)}
                                         className={`w-full text-left px-2 py-1.5 flex items-center justify-between gap-2 transition-colors ${
-                                            sel ? 'bg-amber2/10 text-amber2' : 'hover:bg-mx-hover text-ink-secondary'
+                                            sel
+                                                ? 'bg-amber2/10 text-amber2'
+                                                : 'hover:bg-mx-hover text-ink-secondary'
                                         }`}
                                     >
                                         <span className="text-[12px] truncate">{t.name}</span>
-                                        <span className="font-mono text-[10px] opacity-70 shrink-0">{t.count}</span>
+                                        <span className="font-mono text-[10px] opacity-70 shrink-0">
+                                            {t.count}
+                                        </span>
                                     </button>
                                 );
                             })}
@@ -440,50 +478,47 @@ export default function ScopeBucketPicker({ value, onChange }) {
     const [subsetCount, setSubsetCount] = useState(null);
 
     // ── Build the scope payload for the current bucket ────────────────────
-    const buildPayload = useCallback(
-        (b, st, pid, sub, pth) => {
-            if (b === 'single') {
-                const ok = !!st;
-                return {
-                    bucket: b,
-                    scope: ok ? { kind: 'track_ids', ids: [String(tid(st))] } : null,
-                    isValid: ok,
-                };
+    const buildPayload = useCallback((b, st, pid, sub, pth) => {
+        if (b === 'single') {
+            const ok = !!st;
+            return {
+                bucket: b,
+                scope: ok ? { kind: 'track_ids', ids: [String(tid(st))] } : null,
+                isValid: ok,
+            };
+        }
+        if (b === 'playlist') {
+            const ok = pid != null;
+            return {
+                bucket: b,
+                scope: ok ? { kind: 'playlist', playlist_id: Number(pid) } : null,
+                isValid: ok,
+            };
+        }
+        if (b === 'subset') {
+            if (!sub?.subset_kind) return { bucket: b, scope: null, isValid: false };
+            if (sub.subset_kind === 'by_color' && sub.color_id === undefined) {
+                return { bucket: b, scope: null, isValid: false };
             }
-            if (b === 'playlist') {
-                const ok = pid != null;
-                return {
-                    bucket: b,
-                    scope: ok ? { kind: 'playlist', playlist_id: Number(pid) } : null,
-                    isValid: ok,
-                };
+            if (sub.subset_kind === 'by_mytag' && sub.tag_id === undefined) {
+                return { bucket: b, scope: null, isValid: false };
             }
-            if (b === 'subset') {
-                if (!sub?.subset_kind) return { bucket: b, scope: null, isValid: false };
-                if (sub.subset_kind === 'by_color' && sub.color_id === undefined) {
-                    return { bucket: b, scope: null, isValid: false };
-                }
-                if (sub.subset_kind === 'by_mytag' && sub.tag_id === undefined) {
-                    return { bucket: b, scope: null, isValid: false };
-                }
-                return {
-                    bucket: b,
-                    scope: { kind: 'library_subset', ...sub },
-                    isValid: true,
-                };
-            }
-            if (b === 'path') {
-                const ok = (pth || '').trim().length > 3;
-                return {
-                    bucket: b,
-                    scope: ok ? { kind: 'path', path: pth.trim() } : null,
-                    isValid: ok,
-                };
-            }
-            return { bucket: b, scope: null, isValid: false };
-        },
-        [],
-    );
+            return {
+                bucket: b,
+                scope: { kind: 'library_subset', ...sub },
+                isValid: true,
+            };
+        }
+        if (b === 'path') {
+            const ok = (pth || '').trim().length > 3;
+            return {
+                bucket: b,
+                scope: ok ? { kind: 'path', path: pth.trim() } : null,
+                isValid: ok,
+            };
+        }
+        return { bucket: b, scope: null, isValid: false };
+    }, []);
 
     // ── Emit on any sub-picker change ─────────────────────────────────────
     useEffect(() => {
@@ -527,7 +562,9 @@ export default function ScopeBucketPicker({ value, onChange }) {
                             }`}
                         >
                             <Icon size={16} />
-                            <span className="text-[12px] font-semibold leading-tight">{b.label}</span>
+                            <span className="text-[12px] font-semibold leading-tight">
+                                {b.label}
+                            </span>
                             <span className="text-[10px] opacity-70 leading-tight">{b.desc}</span>
                         </button>
                     );
@@ -550,7 +587,9 @@ export default function ScopeBucketPicker({ value, onChange }) {
                     />
                     {subsetCount && subsetCount.count !== undefined && (
                         <div className="text-tiny text-ink-muted">
-                            <span className="font-mono text-ink-secondary">{subsetCount.count}</span>{' '}
+                            <span className="font-mono text-ink-secondary">
+                                {subsetCount.count}
+                            </span>{' '}
                             tracks · {subsetCount.total_source_mb} MB source
                         </div>
                     )}

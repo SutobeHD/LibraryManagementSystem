@@ -1,23 +1,35 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import api from '../api/api';
 import {
-    Download, CheckCircle, AlertTriangle, Loader2, Music, Sparkles,
-    FolderInput, Activity, ListMusic, Clock, Trash2, Filter, TrendingUp,
-    BarChart3, Zap,
+    Download,
+    CheckCircle,
+    AlertTriangle,
+    Loader2,
+    Music,
+    Sparkles,
+    FolderInput,
+    Activity,
+    ListMusic,
+    Clock,
+    Trash2,
+    Filter,
+    TrendingUp,
+    BarChart3,
+    Zap,
 } from 'lucide-react';
 
 // Stage pipeline (in execution order) — covers BOTH SC-DL and local-import
 const STAGES = [
-    { key: 'Queued',           label: 'Queued',     icon: Clock,        color: 'text-ink-muted',    },
-    { key: 'Starting',         label: 'Queued',     icon: Clock,        color: 'text-ink-muted',    },
-    { key: 'Resolving',        label: 'Resolve',    icon: Activity,     color: 'text-cyan-400',     },
-    { key: 'Downloading',      label: 'Download',   icon: Download,     color: 'text-amber2',       },
-    { key: 'Downloaded',       label: 'Downloaded', icon: CheckCircle,  color: 'text-amber2-hover', },
-    { key: 'Analyzing',        label: 'Analyse',    icon: BarChart3,    color: 'text-purple-400',   },
-    { key: 'Importing',        label: 'Library',    icon: FolderInput,  color: 'text-blue-400',     },
-    { key: 'ANLZ',             label: 'ANLZ',       icon: Sparkles,     color: 'text-cyan-300',     },
-    { key: 'Sorting',          label: 'Playlist',   icon: ListMusic,    color: 'text-amber2',       },
-    { key: 'Completed',        label: 'Fertig',     icon: CheckCircle,  color: 'text-ok',           },
+    { key: 'Queued', label: 'Queued', icon: Clock, color: 'text-ink-muted' },
+    { key: 'Starting', label: 'Queued', icon: Clock, color: 'text-ink-muted' },
+    { key: 'Resolving', label: 'Resolve', icon: Activity, color: 'text-cyan-400' },
+    { key: 'Downloading', label: 'Download', icon: Download, color: 'text-amber2' },
+    { key: 'Downloaded', label: 'Downloaded', icon: CheckCircle, color: 'text-amber2-hover' },
+    { key: 'Analyzing', label: 'Analyse', icon: BarChart3, color: 'text-purple-400' },
+    { key: 'Importing', label: 'Library', icon: FolderInput, color: 'text-blue-400' },
+    { key: 'ANLZ', label: 'ANLZ', icon: Sparkles, color: 'text-cyan-300' },
+    { key: 'Sorting', label: 'Playlist', icon: ListMusic, color: 'text-amber2' },
+    { key: 'Completed', label: 'Fertig', icon: CheckCircle, color: 'text-ok' },
 ];
 
 const FAILURE_STATES = new Set(['Failed', 'Error', 'Analysis Failed']);
@@ -45,11 +57,11 @@ const STATUS_LABELS = {
 };
 
 const stageIndex = (status) => {
-    const i = STAGES.findIndex(s => s.key === status);
+    const i = STAGES.findIndex((s) => s.key === status);
     if (i >= 0) return i;
     // Skip-states map onto the playlist-link stage so the timeline still reads
     // "this got into a playlist" without a noisy 0-fallback.
-    if (SKIP_STATES.has(status)) return STAGES.findIndex(s => s.key === 'Sorting');
+    if (SKIP_STATES.has(status)) return STAGES.findIndex((s) => s.key === 'Sorting');
     return 0;
 };
 
@@ -68,7 +80,9 @@ const StagePipeline = ({ task }) => {
 
     const stageMap = useMemo(() => {
         const m = {};
-        (task.stage_history || []).forEach(h => { m[h.stage] = h.ts; });
+        (task.stage_history || []).forEach((h) => {
+            m[h.stage] = h.ts;
+        });
         return m;
     }, [task.stage_history]);
 
@@ -91,12 +105,18 @@ const StagePipeline = ({ task }) => {
                             size={12}
                             className={`${reached ? s.color : 'text-ink-placeholder'} ${active ? 'animate-pulse' : ''}`}
                         />
-                        <span className={`text-[8px] uppercase tracking-wide ${reached ? 'text-ink-secondary' : 'text-ink-placeholder'}`}>
+                        <span
+                            className={`text-[8px] uppercase tracking-wide ${reached ? 'text-ink-secondary' : 'text-ink-placeholder'}`}
+                        >
                             {s.label}
                         </span>
                         {ts && (
                             <span className="text-[7px] text-ink-placeholder font-mono">
-                                {new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                {new Date(ts * 1000).toLocaleTimeString([], {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    second: '2-digit',
+                                })}
                             </span>
                         )}
                     </div>
@@ -113,36 +133,63 @@ const TaskCard = ({ task }) => {
     const elapsed = task.start_time ? (Date.now() / 1000 - task.start_time) * 1000 : 0;
 
     return (
-        <div className={`p-4 rounded-2xl border transition-all
-            ${isFailed ? 'bg-bad/5 border-bad/30'
-                : isDone ? 'bg-ok/5 border-ok/20'
-                : 'bg-mx-card border-white/5 hover:border-white/10'}
-        `}>
+        <div
+            className={`p-4 rounded-2xl border transition-all
+            ${
+                isFailed
+                    ? 'bg-bad/5 border-bad/30'
+                    : isDone
+                      ? 'bg-ok/5 border-ok/20'
+                      : 'bg-mx-card border-white/5 hover:border-white/10'
+            }
+        `}
+        >
             <div className="flex items-start gap-3">
-                <div className={`shrink-0 w-10 h-10 rounded-xl flex items-center justify-center
-                    ${isFailed ? 'bg-bad/10' : isDone ? 'bg-ok/10' : 'bg-amber2/10'}`}>
-                    {isFailed ? <AlertTriangle size={18} className="text-bad" />
-                        : isDone ? <CheckCircle size={18} className="text-ok" />
-                        : <Loader2 size={18} className="text-amber2 animate-spin" />}
+                <div
+                    className={`shrink-0 w-10 h-10 rounded-xl flex items-center justify-center
+                    ${isFailed ? 'bg-bad/10' : isDone ? 'bg-ok/10' : 'bg-amber2/10'}`}
+                >
+                    {isFailed ? (
+                        <AlertTriangle size={18} className="text-bad" />
+                    ) : isDone ? (
+                        <CheckCircle size={18} className="text-ok" />
+                    ) : (
+                        <Loader2 size={18} className="text-amber2 animate-spin" />
+                    )}
                 </div>
                 <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2 mb-0.5">
                                 {task._src === 'import' ? (
-                                    <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider bg-blue-500/20 text-blue-300 border border-blue-500/30">Lokal</span>
+                                    <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                                        Lokal
+                                    </span>
                                 ) : (
-                                    <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider bg-amber2/20 text-amber2-hover border border-amber2/30">SC</span>
+                                    <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider bg-amber2/20 text-amber2-hover border border-amber2/30">
+                                        SC
+                                    </span>
                                 )}
-                                <h3 className="text-sm font-bold text-white truncate flex-1" title={task.title}>
+                                <h3
+                                    className="text-sm font-bold text-white truncate flex-1"
+                                    title={task.title}
+                                >
                                     {task.title || '(unbekannt)'}
                                 </h3>
                             </div>
                             <div className="flex items-center gap-2 text-[11px] text-ink-muted">
-                                {task.artist && <span className="truncate max-w-[180px]">{task.artist}</span>}
+                                {task.artist && (
+                                    <span className="truncate max-w-[180px]">{task.artist}</span>
+                                )}
                                 {task.file_path && task._src === 'import' && (
-                                    <span className="truncate max-w-[260px] font-mono text-[10px]" title={task.file_path}>
-                                        {task.file_path.split(/[\\\/]/).slice(-2).join('/')}
+                                    <span
+                                        className="truncate max-w-[260px] font-mono text-[10px]"
+                                        title={task.file_path}
+                                    >
+                                        {task.file_path
+                                            .split(/[\\\/]/)
+                                            .slice(-2)
+                                            .join('/')}
                                     </span>
                                 )}
                                 {task.playlist_title && (
@@ -157,16 +204,23 @@ const TaskCard = ({ task }) => {
                             </div>
                         </div>
                         <div className="text-right text-[10px] text-ink-muted shrink-0 flex flex-col items-end gap-0.5">
-                            <span className={`font-bold uppercase tracking-wider ${
-                                isFailed ? 'text-bad'
-                                    : task.status === 'Completed' ? 'text-ok'
-                                    : isSkip ? 'text-cyan-400'
-                                    : 'text-amber2'
-                            }`}>
+                            <span
+                                className={`font-bold uppercase tracking-wider ${
+                                    isFailed
+                                        ? 'text-bad'
+                                        : task.status === 'Completed'
+                                          ? 'text-ok'
+                                          : isSkip
+                                            ? 'text-cyan-400'
+                                            : 'text-amber2'
+                                }`}
+                            >
                                 {STATUS_LABELS[task.status] || task.status}
                             </span>
                             <span className="font-mono">{task.progress || 0}%</span>
-                            <span className="font-mono text-ink-placeholder">{fmtDuration(elapsed)}</span>
+                            <span className="font-mono text-ink-placeholder">
+                                {fmtDuration(elapsed)}
+                            </span>
                         </div>
                     </div>
 
@@ -240,7 +294,9 @@ const DownloadManagerView = () => {
             ]);
             setScTasks(sc.data || {});
             setImportTasks(imp.data || {});
-        } catch (e) { /* backend offline */ }
+        } catch (e) {
+            /* backend offline */
+        }
     };
 
     useEffect(() => {
@@ -251,8 +307,8 @@ const DownloadManagerView = () => {
     }, [autoRefresh]);
 
     const merged = useMemo(() => {
-        const sc = Object.values(scTasks).map(t => ({ ...t, _src: 'soundcloud' }));
-        const imp = Object.values(importTasks).map(t => ({ ...t, _src: 'import' }));
+        const sc = Object.values(scTasks).map((t) => ({ ...t, _src: 'soundcloud' }));
+        const imp = Object.values(importTasks).map((t) => ({ ...t, _src: 'import' }));
         let combined = [];
         if (source === 'all' || source === 'soundcloud') combined = combined.concat(sc);
         if (source === 'all' || source === 'import') combined = combined.concat(imp);
@@ -262,14 +318,17 @@ const DownloadManagerView = () => {
     const allTasks = merged;
 
     const stats = useMemo(() => {
-        const active = allTasks.filter(t =>
-            !FAILURE_STATES.has(t.status) && t.status !== 'Completed' && !SKIP_STATES.has(t.status)
+        const active = allTasks.filter(
+            (t) =>
+                !FAILURE_STATES.has(t.status) &&
+                t.status !== 'Completed' &&
+                !SKIP_STATES.has(t.status)
         );
-        const done = allTasks.filter(t => t.status === 'Completed' || SKIP_STATES.has(t.status));
-        const failed = allTasks.filter(t => FAILURE_STATES.has(t.status));
+        const done = allTasks.filter((t) => t.status === 'Completed' || SKIP_STATES.has(t.status));
+        const failed = allTasks.filter((t) => FAILURE_STATES.has(t.status));
         const totalSec = done.reduce((acc, t) => {
             const last = (t.stage_history || []).slice(-1)[0]?.ts;
-            return acc + ((last && t.start_time) ? (last - t.start_time) : 0);
+            return acc + (last && t.start_time ? last - t.start_time : 0);
         }, 0);
         return {
             total: allTasks.length,
@@ -282,11 +341,21 @@ const DownloadManagerView = () => {
 
     const visible = useMemo(() => {
         switch (filter) {
-            case 'active':    return allTasks.filter(t =>
-                !FAILURE_STATES.has(t.status) && t.status !== 'Completed' && !SKIP_STATES.has(t.status));
-            case 'completed': return allTasks.filter(t => t.status === 'Completed' || SKIP_STATES.has(t.status));
-            case 'failed':    return allTasks.filter(t => FAILURE_STATES.has(t.status));
-            default:          return allTasks;
+            case 'active':
+                return allTasks.filter(
+                    (t) =>
+                        !FAILURE_STATES.has(t.status) &&
+                        t.status !== 'Completed' &&
+                        !SKIP_STATES.has(t.status)
+                );
+            case 'completed':
+                return allTasks.filter(
+                    (t) => t.status === 'Completed' || SKIP_STATES.has(t.status)
+                );
+            case 'failed':
+                return allTasks.filter((t) => FAILURE_STATES.has(t.status));
+            default:
+                return allTasks;
         }
     }, [allTasks, filter]);
 
@@ -301,19 +370,24 @@ const DownloadManagerView = () => {
                         </div>
                         <div>
                             <h1 className="text-2xl font-bold tracking-tight">Import Manager</h1>
-                            <p className="text-xs text-ink-muted mt-0.5 font-mono">SoundCloud · Lokal → Analyse → Library → ANLZ</p>
+                            <p className="text-xs text-ink-muted mt-0.5 font-mono">
+                                SoundCloud · Lokal → Analyse → Library → ANLZ
+                            </p>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
                         <button
-                            onClick={() => setAutoRefresh(v => !v)}
+                            onClick={() => setAutoRefresh((v) => !v)}
                             className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
                                 autoRefresh
                                     ? 'bg-ok/15 text-ok border-ok/30'
                                     : 'bg-mx-card border-white/10 text-ink-muted hover:bg-white/5'
                             }`}
                         >
-                            <Loader2 size={11} className={autoRefresh ? 'inline animate-spin mr-1' : 'inline mr-1'} />
+                            <Loader2
+                                size={11}
+                                className={autoRefresh ? 'inline animate-spin mr-1' : 'inline mr-1'}
+                            />
                             {autoRefresh ? 'Live' : 'Pausiert'}
                         </button>
                         <button
@@ -327,21 +401,48 @@ const DownloadManagerView = () => {
 
                 {/* Stats */}
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                    <StatCard icon={BarChart3}     label="Gesamt"   value={stats.total}  color="text-amber2" />
-                    <StatCard icon={Loader2}       label="Aktiv"    value={stats.active} color="text-amber2" />
-                    <StatCard icon={CheckCircle}   label="Fertig"   value={stats.done}   color="text-ok" />
-                    <StatCard icon={AlertTriangle} label="Fehler"   value={stats.failed} color="text-bad" />
-                    <StatCard icon={TrendingUp}    label="Ø Dauer"  value={`${stats.avgDoneSec}s`} color="text-purple-400" />
+                    <StatCard
+                        icon={BarChart3}
+                        label="Gesamt"
+                        value={stats.total}
+                        color="text-amber2"
+                    />
+                    <StatCard
+                        icon={Loader2}
+                        label="Aktiv"
+                        value={stats.active}
+                        color="text-amber2"
+                    />
+                    <StatCard
+                        icon={CheckCircle}
+                        label="Fertig"
+                        value={stats.done}
+                        color="text-ok"
+                    />
+                    <StatCard
+                        icon={AlertTriangle}
+                        label="Fehler"
+                        value={stats.failed}
+                        color="text-bad"
+                    />
+                    <StatCard
+                        icon={TrendingUp}
+                        label="Ø Dauer"
+                        value={`${stats.avgDoneSec}s`}
+                        color="text-purple-400"
+                    />
                 </div>
 
                 {/* Source + Filter pills */}
                 <div className="flex flex-wrap items-center gap-2 mt-4">
-                    <span className="text-[10px] uppercase tracking-wider text-ink-muted mr-1">Quelle</span>
+                    <span className="text-[10px] uppercase tracking-wider text-ink-muted mr-1">
+                        Quelle
+                    </span>
                     {[
-                        { id: 'all',        label: 'Alle' },
+                        { id: 'all', label: 'Alle' },
                         { id: 'soundcloud', label: 'SoundCloud' },
-                        { id: 'import',     label: 'Lokal' },
-                    ].map(s => (
+                        { id: 'import', label: 'Lokal' },
+                    ].map((s) => (
                         <button
                             key={s.id}
                             onClick={() => setSource(s.id)}
@@ -356,11 +457,11 @@ const DownloadManagerView = () => {
                     ))}
                     <Filter size={12} className="text-ink-muted ml-3" />
                     {[
-                        { id: 'all',       label: 'Alle' },
-                        { id: 'active',    label: 'Aktiv' },
+                        { id: 'all', label: 'Alle' },
+                        { id: 'active', label: 'Aktiv' },
                         { id: 'completed', label: 'Fertig' },
-                        { id: 'failed',    label: 'Fehler' },
-                    ].map(f => (
+                        { id: 'failed', label: 'Fehler' },
+                    ].map((f) => (
                         <button
                             key={f.id}
                             onClick={() => setFilter(f.id)}
@@ -381,13 +482,16 @@ const DownloadManagerView = () => {
                 {visible.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-center">
                         <Sparkles size={40} className="text-ink-placeholder mb-3" />
-                        <h3 className="text-lg font-bold text-ink-secondary">Keine {filter === 'all' ? '' : filter + ' '}Downloads</h3>
+                        <h3 className="text-lg font-bold text-ink-secondary">
+                            Keine {filter === 'all' ? '' : filter + ' '}Downloads
+                        </h3>
                         <p className="text-sm text-ink-muted mt-1 max-w-md">
-                            Starte einen Download in der SoundCloud-Ansicht — er taucht hier mit Live-Pipeline-Tracking auf.
+                            Starte einen Download in der SoundCloud-Ansicht — er taucht hier mit
+                            Live-Pipeline-Tracking auf.
                         </p>
                     </div>
                 ) : (
-                    visible.map(t => <TaskCard key={t.id || t.sc_track_id} task={t} />)
+                    visible.map((t) => <TaskCard key={t.id || t.sc_track_id} task={t} />)
                 )}
             </div>
         </div>

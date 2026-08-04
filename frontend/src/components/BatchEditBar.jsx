@@ -4,17 +4,21 @@ import api from '../api/api';
 import { Star, Palette, Save, X } from 'lucide-react';
 
 const COLORS = [
-    { id: 0, hex: 'transparent', name: 'None' }, { id: 1, hex: '#db2777', name: 'Pink' },
-    { id: 2, hex: '#dc2626', name: 'Red' }, { id: 3, hex: '#ea580c', name: 'Orange' },
-    { id: 4, hex: '#ca8a04', name: 'Yellow' }, { id: 5, hex: '#16a34a', name: 'Green' },
-    { id: 6, hex: '#06b6d4', name: 'Aqua' }, { id: 7, hex: '#2563eb', name: 'Blue' },
-    { id: 8, hex: '#7c3aed', name: 'Purple' }
+    { id: 0, hex: 'transparent', name: 'None' },
+    { id: 1, hex: '#db2777', name: 'Pink' },
+    { id: 2, hex: '#dc2626', name: 'Red' },
+    { id: 3, hex: '#ea580c', name: 'Orange' },
+    { id: 4, hex: '#ca8a04', name: 'Yellow' },
+    { id: 5, hex: '#16a34a', name: 'Green' },
+    { id: 6, hex: '#06b6d4', name: 'Aqua' },
+    { id: 7, hex: '#2563eb', name: 'Blue' },
+    { id: 8, hex: '#7c3aed', name: 'Purple' },
 ];
 
 const BatchEditBar = ({ selectedTracks, onClearSelection, onUpdateComplete }) => {
     const [rating, setRating] = useState(0);
     const [colorId, setColorId] = useState(0);
-    const [genre, setGenre] = useState("");
+    const [genre, setGenre] = useState('');
     const [saving, setSaving] = useState(false);
 
     if (selectedTracks.length === 0) return null;
@@ -28,14 +32,14 @@ const BatchEditBar = ({ selectedTracks, onClearSelection, onUpdateComplete }) =>
 
         try {
             await api.patch('/api/tracks/batch', {
-                track_ids: selectedTracks.map(t => t.id),
-                updates: updates
+                track_ids: selectedTracks.map((t) => t.id),
+                updates: updates,
             });
             onUpdateComplete();
             onClearSelection();
         } catch (err) {
             console.error(err);
-            toast.error("Failed to update tracks");
+            toast.error('Failed to update tracks');
         } finally {
             setSaving(false);
         }
@@ -44,12 +48,14 @@ const BatchEditBar = ({ selectedTracks, onClearSelection, onUpdateComplete }) =>
     return (
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 min-w-[600px] glass-panel rounded-full p-4 flex items-center justify-between z-30 animate-slide-in shadow-[0_10px_40px_rgba(0,0,0,0.5)] bg-gray-900/90 hover:shadow-[0_10px_50px_rgba(168,85,247,0.3)] transition-all">
             <div className="flex items-center gap-6 px-4">
-                <span className="text-neon-blue font-bold font-mono tracking-wider">{selectedTracks.length} Selected</span>
+                <span className="text-neon-blue font-bold font-mono tracking-wider">
+                    {selectedTracks.length} Selected
+                </span>
 
                 {/* Rating */}
                 <div className="flex items-center gap-3 border-l border-white/10 pl-4">
                     <div className="flex gap-1">
-                        {[1, 2, 3, 4, 5].map(s => (
+                        {[1, 2, 3, 4, 5].map((s) => (
                             <Star
                                 key={s}
                                 size={20}
@@ -64,7 +70,7 @@ const BatchEditBar = ({ selectedTracks, onClearSelection, onUpdateComplete }) =>
                 <div className="flex items-center gap-2 border-l border-white/10 pl-4">
                     <Palette size={18} className="text-gray-400" />
                     <div className="flex gap-1">
-                        {COLORS.map(c => (
+                        {COLORS.map((c) => (
                             <button
                                 key={c.id}
                                 onClick={() => setColorId(colorId === c.id ? '' : c.id)}

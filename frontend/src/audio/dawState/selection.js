@@ -19,7 +19,6 @@
  */
 export function selectionReducer(state, action) {
     switch (action.type) {
-
         // ── Selection ────────────────────────
         case 'SELECT_REGION':
             return {

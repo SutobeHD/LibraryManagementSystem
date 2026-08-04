@@ -1,7 +1,7 @@
-use lofty::prelude::*;
-use lofty::file::{AudioFile, TaggedFileExt};
-use lofty::tag::{Tag, TagExt, ItemKey, TagType};
 use lofty::config::WriteOptions;
+use lofty::file::{AudioFile, TaggedFileExt};
+use lofty::prelude::*;
+use lofty::tag::{ItemKey, Tag, TagExt, TagType};
 
 pub fn copy_metadata(source_path: &str, dest_path: &str) -> Result<(), String> {
     // 1. Read source file tags
@@ -10,7 +10,8 @@ pub fn copy_metadata(source_path: &str, dest_path: &str) -> Result<(), String> {
         .read()
         .map_err(|e| format!("Lofty read error: {}", e))?;
 
-    let source_tag = source_tagged_file.primary_tag()
+    let source_tag = source_tagged_file
+        .primary_tag()
         .or_else(|| source_tagged_file.first_tag())
         .ok_or("No tags found in source file")?;
 
@@ -42,7 +43,8 @@ pub fn copy_metadata(source_path: &str, dest_path: &str) -> Result<(), String> {
     }
 
     // 6. Save back to the WAV file
-    dest_tag.save_to(&mut dest_file, WriteOptions::default())
+    dest_tag
+        .save_to(&mut dest_file, WriteOptions::default())
         .map_err(|e| format!("Could not save tags to WAV: {}", e))?;
 
     Ok(())

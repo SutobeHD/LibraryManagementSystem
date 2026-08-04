@@ -14,7 +14,9 @@ import { formatBytes } from './UsbControls';
 
 const InfoField = ({ label, children }) => (
     <div className="bg-mx-input border border-line-subtle rounded-lg px-3 py-2">
-        <div className="text-[9px] uppercase tracking-wide text-ink-muted font-semibold">{label}</div>
+        <div className="text-[9px] uppercase tracking-wide text-ink-muted font-semibold">
+            {label}
+        </div>
         <div className="text-[12px] font-mono text-ink-primary mt-0.5">{children}</div>
     </div>
 );
@@ -40,7 +42,9 @@ const UsbFormatWizard = ({ state, onChange, onClose, onSubmit }) => {
                     </div>
                     <div>
                         <h2 className="text-[15px] font-bold text-bad">Format USB drive</h2>
-                        <p className="text-[11px] text-ink-muted font-mono mt-0.5">DESTRUCTIVE — all data on this drive will be erased</p>
+                        <p className="text-[11px] text-ink-muted font-mono mt-0.5">
+                            DESTRUCTIVE — all data on this drive will be erased
+                        </p>
                     </div>
                 </div>
 
@@ -50,10 +54,26 @@ const UsbFormatWizard = ({ state, onChange, onClose, onSubmit }) => {
                     <div className="bg-bad/5 border border-bad/20 rounded-xl p-4 space-y-2">
                         <p className="text-[12px] font-semibold text-bad">What will happen</p>
                         <ul className="text-[11px] text-ink-secondary space-y-1 list-disc list-inside">
-                            <li>Every file on <span className="font-mono text-bad">{preview.drive}</span> will be permanently deleted.</li>
-                            <li>The drive is reformatted as <span className="font-mono text-amber2">{fs}</span> with label <span className="font-mono text-amber2">"{label || 'CDJ'}"</span>.</li>
-                            <li>The Pioneer skeleton (<span className="font-mono">/PIONEER/rekordbox</span>) and the <span className="font-mono">DEVICE.PIONEER</span> marker are recreated, so the stick is immediately CDJ-ready.</li>
-                            <li>This action cannot be undone. Make a backup first if you have anything valuable on it.</li>
+                            <li>
+                                Every file on{' '}
+                                <span className="font-mono text-bad">{preview.drive}</span> will be
+                                permanently deleted.
+                            </li>
+                            <li>
+                                The drive is reformatted as{' '}
+                                <span className="font-mono text-amber2">{fs}</span> with label{' '}
+                                <span className="font-mono text-amber2">"{label || 'CDJ'}"</span>.
+                            </li>
+                            <li>
+                                The Pioneer skeleton (
+                                <span className="font-mono">/PIONEER/rekordbox</span>) and the{' '}
+                                <span className="font-mono">DEVICE.PIONEER</span> marker are
+                                recreated, so the stick is immediately CDJ-ready.
+                            </li>
+                            <li>
+                                This action cannot be undone. Make a backup first if you have
+                                anything valuable on it.
+                            </li>
                         </ul>
                     </div>
 
@@ -62,30 +82,40 @@ const UsbFormatWizard = ({ state, onChange, onClose, onSubmit }) => {
                         <InfoField label="Drive">{preview.drive}</InfoField>
                         <InfoField label="Current label">{preview.label || '(none)'}</InfoField>
                         <InfoField label="Current FS">{preview.filesystem}</InfoField>
-                        <InfoField label="Total size">{formatBytes(preview.total_bytes || 0)}</InfoField>
+                        <InfoField label="Total size">
+                            {formatBytes(preview.total_bytes || 0)}
+                        </InfoField>
                     </div>
 
                     {/* Choices */}
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="text-[10px] uppercase tracking-wide text-ink-muted font-semibold block mb-1">Filesystem</label>
+                            <label className="text-[10px] uppercase tracking-wide text-ink-muted font-semibold block mb-1">
+                                Filesystem
+                            </label>
                             <select
                                 value={fs}
                                 onChange={(e) => onChange({ fs: e.target.value })}
                                 disabled={busy}
                                 className="input-glass w-full text-[12px]"
                             >
-                                <option value="FAT32">FAT32 — CDJ-2000NXS2 + CDJ-3000 (max 4GB/file)</option>
+                                <option value="FAT32">
+                                    FAT32 — CDJ-2000NXS2 + CDJ-3000 (max 4GB/file)
+                                </option>
                                 <option value="exFAT">exFAT — CDJ-3000 only (no 4GB limit)</option>
                             </select>
                         </div>
                         <div>
-                            <label className="text-[10px] uppercase tracking-wide text-ink-muted font-semibold block mb-1">New label (max 11 chars)</label>
+                            <label className="text-[10px] uppercase tracking-wide text-ink-muted font-semibold block mb-1">
+                                New label (max 11 chars)
+                            </label>
                             <input
                                 type="text"
                                 maxLength={11}
                                 value={label}
-                                onChange={(e) => onChange({ label: e.target.value.toUpperCase().slice(0, 11) })}
+                                onChange={(e) =>
+                                    onChange({ label: e.target.value.toUpperCase().slice(0, 11) })
+                                }
                                 disabled={busy}
                                 className="input-glass w-full text-[12px] font-mono"
                                 placeholder="CDJ"
@@ -104,12 +134,18 @@ const UsbFormatWizard = ({ state, onChange, onClose, onSubmit }) => {
                                 className="mt-0.5 accent-bad w-4 h-4 shrink-0"
                             />
                             <span className="text-[12px] text-ink-primary">
-                                I understand that <strong className="text-bad">every file</strong> on <span className="font-mono">{preview.drive}</span> will be permanently lost and that this cannot be undone.
+                                I understand that <strong className="text-bad">every file</strong>{' '}
+                                on <span className="font-mono">{preview.drive}</span> will be
+                                permanently lost and that this cannot be undone.
                             </span>
                         </label>
                         <div>
                             <label className="text-[10px] uppercase tracking-wide text-ink-muted font-semibold block mb-1">
-                                Type <span className="font-mono text-bad bg-bad/10 px-1.5 py-0.5 rounded">{preview.confirm_phrase}</span> to enable the format button
+                                Type{' '}
+                                <span className="font-mono text-bad bg-bad/10 px-1.5 py-0.5 rounded">
+                                    {preview.confirm_phrase}
+                                </span>{' '}
+                                to enable the format button
                             </label>
                             <input
                                 type="text"
@@ -138,7 +174,11 @@ const UsbFormatWizard = ({ state, onChange, onClose, onSubmit }) => {
                         disabled={!canSubmit}
                         className="px-4 py-2 rounded-lg text-tiny font-bold flex items-center gap-2 bg-bad/20 hover:bg-bad/30 text-bad border border-bad/50 disabled:opacity-30 disabled:cursor-not-allowed"
                     >
-                        {busy ? <Loader2 size={12} className="animate-spin" /> : <Eraser size={12} />}
+                        {busy ? (
+                            <Loader2 size={12} className="animate-spin" />
+                        ) : (
+                            <Eraser size={12} />
+                        )}
                         {busy ? 'Formatting…' : `Format ${preview.drive} now`}
                     </button>
                 </div>

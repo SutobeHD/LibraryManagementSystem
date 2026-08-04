@@ -24,7 +24,6 @@ import { normalizeRegions } from './helpers';
  */
 export function historyReducer(state, action) {
     switch (action.type) {
-
         // ── History (Undo/Redo) ──────────────
         case 'PUSH_UNDO': {
             const snapshot = {
@@ -41,7 +40,7 @@ export function historyReducer(state, action) {
             return {
                 ...state,
                 undoStack: newUndoStack,
-                redoStack: [],  // Clear redo on new action
+                redoStack: [], // Clear redo on new action
             };
         }
 

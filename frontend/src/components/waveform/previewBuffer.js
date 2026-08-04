@@ -24,18 +24,28 @@ const cacheSlice = (key, buffer) => {
 // --- Utility: Build Preview Buffer (Async with Splicing) ---
 export const buildPreviewBuffer = async (originalBuffer, cuts, originalDuration, originalPath) => {
     // 1. Build Base Segments (Handle Deletes)
-    const deleteCuts = cuts.filter(c => c.type === 'delete').sort((a, b) => a.start - b.start);
+    const deleteCuts = cuts.filter((c) => c.type === 'delete').sort((a, b) => a.start - b.start);
     let baseSegments = [];
     let lastPos = 0;
 
-    deleteCuts.forEach(cut => {
+    deleteCuts.forEach((cut) => {
         if (cut.start > lastPos) {
-            baseSegments.push({ src: 'ORIGINAL', start: lastPos, end: cut.start, duration: cut.start - lastPos });
+            baseSegments.push({
+                src: 'ORIGINAL',
+                start: lastPos,
+                end: cut.start,
+                duration: cut.start - lastPos,
+            });
         }
         lastPos = Math.max(lastPos, cut.end);
     });
     if (lastPos < originalDuration) {
-        baseSegments.push({ src: 'ORIGINAL', start: lastPos, end: originalDuration, duration: originalDuration - lastPos });
+        baseSegments.push({
+            src: 'ORIGINAL',
+            start: lastPos,
+            end: originalDuration,
+            duration: originalDuration - lastPos,
+        });
     }
 
     const baseTotalLen = baseSegments.reduce((sum, s) => sum + s.duration, 0);
@@ -64,7 +74,7 @@ export const buildPreviewBuffer = async (originalBuffer, cuts, originalDuration,
     }
 
     // 2. Inject Inserts (sorted DESC by insertAt to avoid index invalidation)
-    const inserts = cuts.filter(c => c.type === 'insert').sort((a, b) => b.insertAt - a.insertAt);
+    const inserts = cuts.filter((c) => c.type === 'insert').sort((a, b) => b.insertAt - a.insertAt);
     let currentBuf = baseBuf;
 
     for (let ins of inserts) {
@@ -75,13 +85,19 @@ export const buildPreviewBuffer = async (originalBuffer, cuts, originalDuration,
                 insBuf = insertSliceCache.get(cacheKey);
             } else {
                 try {
-                    const sliceRes = await api.post('/api/audio/slice', { source_path: ins.src, start: ins.start, end: ins.end });
+                    const sliceRes = await api.post('/api/audio/slice', {
+                        source_path: ins.src,
+                        start: ins.start,
+                        end: ins.end,
+                    });
                     const arrayBuf = await (await fetch(sliceRes.data.url)).arrayBuffer();
                     // Reuse shared decode context (avoids hitting browser's AudioContext limit ~6)
                     const ctx = getSharedDecodeContext();
                     insBuf = await ctx.decodeAudioData(arrayBuf);
                     cacheSlice(cacheKey, insBuf);
-                } catch (e) { console.error('Slice fetch failed', e); }
+                } catch (e) {
+                    console.error('Slice fetch failed', e);
+                }
             }
         }
 
@@ -122,33 +138,35 @@ export const bufferToWave = (abuffer, len) => {
         length = len * numOfChan * 2 + 44,
         buffer = new ArrayBuffer(length),
         view = new DataView(buffer),
-        channels = [], i, sample,
+        channels = [],
+        i,
+        sample,
         offset = 0,
         pos = 0;
 
     // write WAVE header
-    setUint32(0x46464952);                         // "RIFF"
-    setUint32(length - 8);                         // file length - 8
-    setUint32(0x45564157);                         // "WAVE"
+    setUint32(0x46464952); // "RIFF"
+    setUint32(length - 8); // file length - 8
+    setUint32(0x45564157); // "WAVE"
 
-    setUint32(0x20746d66);                         // "fmt " chunk
-    setUint32(16);                                 // length = 16
-    setUint16(1);                                  // PCM (uncompressed)
+    setUint32(0x20746d66); // "fmt " chunk
+    setUint32(16); // length = 16
+    setUint16(1); // PCM (uncompressed)
     setUint16(numOfChan);
     setUint32(abuffer.sampleRate);
     setUint32(abuffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
-    setUint16(numOfChan * 2);                      // block-align
-    setUint16(16);                                 // 16-bit (hardcoded in this parser)
+    setUint16(numOfChan * 2); // block-align
+    setUint16(16); // 16-bit (hardcoded in this parser)
 
-    setUint32(0x61746164);                         // "data" - chunk
-    setUint32(length - pos - 4);                   // chunk length
+    setUint32(0x61746164); // "data" - chunk
+    setUint32(length - pos - 4); // chunk length
 
     // write interleaved data
-    for (i = 0; i < abuffer.numberOfChannels; i++)
-        channels.push(abuffer.getChannelData(i));
+    for (i = 0; i < abuffer.numberOfChannels; i++) channels.push(abuffer.getChannelData(i));
 
     while (pos < len) {
-        for (i = 0; i < numOfChan; i++) {             // interleave channels
+        for (i = 0; i < numOfChan; i++) {
+            // interleave channels
             sample = Math.max(-1, Math.min(1, channels[i][pos])); // clamp
             sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0; // scale to 16-bit signed int
             view.setInt16(44 + offset, sample, true); // write 16-bit sample
@@ -159,6 +177,12 @@ export const bufferToWave = (abuffer, len) => {
 
     return new Blob([buffer], { type: 'audio/wav' });
 
-    function setUint16(data) { view.setUint16(pos, data, true); pos += 2; }
-    function setUint32(data) { view.setUint32(pos, data, true); pos += 4; }
+    function setUint16(data) {
+        view.setUint16(pos, data, true);
+        pos += 2;
+    }
+    function setUint32(data) {
+        view.setUint32(pos, data, true);
+        pos += 4;
+    }
 };

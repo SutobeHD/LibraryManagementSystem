@@ -12,9 +12,19 @@
  */
 import React, { useState } from 'react';
 import {
-    Check, X, AlertTriangle, ChevronRight, ChevronDown,
-    Folder, FolderOpen, Music, Zap, HardDrive, Database,
-    ListMusic, PlayCircle,
+    Check,
+    X,
+    AlertTriangle,
+    ChevronRight,
+    ChevronDown,
+    Folder,
+    FolderOpen,
+    Music,
+    Zap,
+    HardDrive,
+    Database,
+    ListMusic,
+    PlayCircle,
 } from 'lucide-react';
 
 // ────────────────────────────────────────────────────────────────────
@@ -32,49 +42,120 @@ import {
  *   • PC (rekordbox):  every filesystem the OS can mount
  */
 export const FS_COMPAT = {
-    FAT32:    { pc: 'ok',     cdj3000: 'ok',     cdj2000nxs2: 'ok',     cdj2000nxs: 'ok',       cdjOlder: 'ok' },
-    EXFAT:    { pc: 'ok',     cdj3000: 'ok',     cdj2000nxs2: 'warn',   cdj2000nxs: 'incompat', cdjOlder: 'incompat' },
-    'HFS+':   { pc: 'warn',   cdj3000: 'ok',     cdj2000nxs2: 'warn',   cdj2000nxs: 'incompat', cdjOlder: 'incompat' },
-    HFSPLUS:  { pc: 'warn',   cdj3000: 'ok',     cdj2000nxs2: 'warn',   cdj2000nxs: 'incompat', cdjOlder: 'incompat' },
-    NTFS:     { pc: 'ok',     cdj3000: 'incompat', cdj2000nxs2: 'incompat', cdj2000nxs: 'incompat', cdjOlder: 'incompat' },
-    REFS:     { pc: 'ok',     cdj3000: 'incompat', cdj2000nxs2: 'incompat', cdj2000nxs: 'incompat', cdjOlder: 'incompat' },
-    EXT2:     { pc: 'warn',   cdj3000: 'incompat', cdj2000nxs2: 'incompat', cdj2000nxs: 'incompat', cdjOlder: 'incompat' },
-    EXT3:     { pc: 'warn',   cdj3000: 'incompat', cdj2000nxs2: 'incompat', cdj2000nxs: 'incompat', cdjOlder: 'incompat' },
-    EXT4:     { pc: 'warn',   cdj3000: 'incompat', cdj2000nxs2: 'incompat', cdj2000nxs: 'incompat', cdjOlder: 'incompat' },
-    BTRFS:    { pc: 'warn',   cdj3000: 'incompat', cdj2000nxs2: 'incompat', cdj2000nxs: 'incompat', cdjOlder: 'incompat' },
-    APFS:     { pc: 'warn',   cdj3000: 'incompat', cdj2000nxs2: 'incompat', cdj2000nxs: 'incompat', cdjOlder: 'incompat' },
-    UNKNOWN:  { pc: 'warn',   cdj3000: 'warn',   cdj2000nxs2: 'warn',   cdj2000nxs: 'warn',     cdjOlder: 'warn' },
+    FAT32: { pc: 'ok', cdj3000: 'ok', cdj2000nxs2: 'ok', cdj2000nxs: 'ok', cdjOlder: 'ok' },
+    EXFAT: {
+        pc: 'ok',
+        cdj3000: 'ok',
+        cdj2000nxs2: 'warn',
+        cdj2000nxs: 'incompat',
+        cdjOlder: 'incompat',
+    },
+    'HFS+': {
+        pc: 'warn',
+        cdj3000: 'ok',
+        cdj2000nxs2: 'warn',
+        cdj2000nxs: 'incompat',
+        cdjOlder: 'incompat',
+    },
+    HFSPLUS: {
+        pc: 'warn',
+        cdj3000: 'ok',
+        cdj2000nxs2: 'warn',
+        cdj2000nxs: 'incompat',
+        cdjOlder: 'incompat',
+    },
+    NTFS: {
+        pc: 'ok',
+        cdj3000: 'incompat',
+        cdj2000nxs2: 'incompat',
+        cdj2000nxs: 'incompat',
+        cdjOlder: 'incompat',
+    },
+    REFS: {
+        pc: 'ok',
+        cdj3000: 'incompat',
+        cdj2000nxs2: 'incompat',
+        cdj2000nxs: 'incompat',
+        cdjOlder: 'incompat',
+    },
+    EXT2: {
+        pc: 'warn',
+        cdj3000: 'incompat',
+        cdj2000nxs2: 'incompat',
+        cdj2000nxs: 'incompat',
+        cdjOlder: 'incompat',
+    },
+    EXT3: {
+        pc: 'warn',
+        cdj3000: 'incompat',
+        cdj2000nxs2: 'incompat',
+        cdj2000nxs: 'incompat',
+        cdjOlder: 'incompat',
+    },
+    EXT4: {
+        pc: 'warn',
+        cdj3000: 'incompat',
+        cdj2000nxs2: 'incompat',
+        cdj2000nxs: 'incompat',
+        cdjOlder: 'incompat',
+    },
+    BTRFS: {
+        pc: 'warn',
+        cdj3000: 'incompat',
+        cdj2000nxs2: 'incompat',
+        cdj2000nxs: 'incompat',
+        cdjOlder: 'incompat',
+    },
+    APFS: {
+        pc: 'warn',
+        cdj3000: 'incompat',
+        cdj2000nxs2: 'incompat',
+        cdj2000nxs: 'incompat',
+        cdjOlder: 'incompat',
+    },
+    UNKNOWN: {
+        pc: 'warn',
+        cdj3000: 'warn',
+        cdj2000nxs2: 'warn',
+        cdj2000nxs: 'warn',
+        cdjOlder: 'warn',
+    },
 };
 
 /** Friendly notes shown next to warn/incompat statuses. */
 export const FS_NOTES = {
-    FAT32:   '4 GB max file size · widest support',
-    EXFAT:   'CDJ-2000NXS2 needs firmware ≥ 1.40 · older CDJs cannot read',
-    'HFS+':  'Mac-formatted · only readable on CDJ-3000 & NXS2 (FW ≥ 1.40)',
+    FAT32: '4 GB max file size · widest support',
+    EXFAT: 'CDJ-2000NXS2 needs firmware ≥ 1.40 · older CDJs cannot read',
+    'HFS+': 'Mac-formatted · only readable on CDJ-3000 & NXS2 (FW ≥ 1.40)',
     HFSPLUS: 'Mac-formatted · only readable on CDJ-3000 & NXS2 (FW ≥ 1.40)',
-    NTFS:    'Windows-only · no Pioneer CDJ supports NTFS',
-    REFS:    'Modern Windows filesystem · no Pioneer CDJ support',
-    EXT4:    'Linux-only · no Pioneer CDJ support',
-    EXT3:    'Linux-only · no Pioneer CDJ support',
-    EXT2:    'Linux-only · no Pioneer CDJ support',
-    BTRFS:   'Linux-only · no Pioneer CDJ support',
-    APFS:    'macOS-only · no Pioneer CDJ support',
+    NTFS: 'Windows-only · no Pioneer CDJ supports NTFS',
+    REFS: 'Modern Windows filesystem · no Pioneer CDJ support',
+    EXT4: 'Linux-only · no Pioneer CDJ support',
+    EXT3: 'Linux-only · no Pioneer CDJ support',
+    EXT2: 'Linux-only · no Pioneer CDJ support',
+    BTRFS: 'Linux-only · no Pioneer CDJ support',
+    APFS: 'macOS-only · no Pioneer CDJ support',
     UNKNOWN: 'Filesystem could not be detected — please check manually',
 };
 
 export const CDJ_TARGETS = [
-    { id: 'pc',         label: 'PC / rekordbox',  short: 'PC' },
-    { id: 'cdj3000',    label: 'CDJ-3000',        short: '3000' },
-    { id: 'cdj2000nxs2',label: 'CDJ-2000NXS2',    short: 'NXS2' },
-    { id: 'cdj2000nxs', label: 'CDJ-2000NXS',     short: 'NXS' },
-    { id: 'cdjOlder',   label: 'Older CDJ',       short: 'Older' },
+    { id: 'pc', label: 'PC / rekordbox', short: 'PC' },
+    { id: 'cdj3000', label: 'CDJ-3000', short: '3000' },
+    { id: 'cdj2000nxs2', label: 'CDJ-2000NXS2', short: 'NXS2' },
+    { id: 'cdj2000nxs', label: 'CDJ-2000NXS', short: 'NXS' },
+    { id: 'cdjOlder', label: 'Older CDJ', short: 'Older' },
 ];
 
 export const USB_TYPES = [
-    { id: 'MainCollection', label: 'Main Collection',  desc: 'Primary DJ library',         icon: Database },
-    { id: 'Collection',     label: 'Collection',       desc: 'Full library copy',          icon: HardDrive },
-    { id: 'PartCollection', label: 'Part Collection',  desc: 'Selected genres / folders',  icon: ListMusic },
-    { id: 'SetStick',       label: 'Set Stick',        desc: 'Playlists only (<500 tracks)', icon: PlayCircle },
+    { id: 'MainCollection', label: 'Main Collection', desc: 'Primary DJ library', icon: Database },
+    { id: 'Collection', label: 'Collection', desc: 'Full library copy', icon: HardDrive },
+    {
+        id: 'PartCollection',
+        label: 'Part Collection',
+        desc: 'Selected genres / folders',
+        icon: ListMusic,
+    },
+    { id: 'SetStick', label: 'Set Stick', desc: 'Playlists only (<500 tracks)', icon: PlayCircle },
 ];
 
 /** Normalize the raw filesystem string into a key into FS_COMPAT. */
@@ -97,8 +178,8 @@ export const normalizeFs = (raw) => {
 /** Compute the worst status across all CDJs (for the headline summary). */
 export const worstCdjStatus = (compat) => {
     const cdjOnly = ['cdj3000', 'cdj2000nxs2', 'cdj2000nxs', 'cdjOlder'];
-    if (cdjOnly.some(k => compat[k] === 'incompat')) return 'partial';
-    if (cdjOnly.some(k => compat[k] === 'warn')) return 'warn';
+    if (cdjOnly.some((k) => compat[k] === 'incompat')) return 'partial';
+    if (cdjOnly.some((k) => compat[k] === 'warn')) return 'warn';
     return 'ok';
 };
 
@@ -107,8 +188,8 @@ export const worstCdjStatus = (compat) => {
 // ────────────────────────────────────────────────────────────────────
 
 export const StatusIcon = ({ status, size = 12 }) => {
-    if (status === 'ok')       return <Check size={size} className="text-ok" />;
-    if (status === 'warn')     return <AlertTriangle size={size} className="text-amber2" />;
+    if (status === 'ok') return <Check size={size} className="text-ok" />;
+    if (status === 'warn') return <AlertTriangle size={size} className="text-amber2" />;
     if (status === 'incompat') return <X size={size} className="text-bad" />;
     return null;
 };
@@ -125,10 +206,10 @@ export const formatDate = (iso) => {
     if (!iso) return 'Never';
     const d = new Date(iso);
     const diff = new Date() - d;
-    if (diff < 60000)    return 'Just now';
-    if (diff < 3600000)  return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 60000) return 'Just now';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
     if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-    if (diff < 604800000)return `${Math.floor(diff / 86400000)}d ago`;
+    if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`;
     return d.toLocaleDateString();
 };
 
@@ -139,7 +220,10 @@ export const formatDate = (iso) => {
 export const getDescendantIds = (node) => {
     let ids = [];
     if (node.Type !== '0') ids.push(node.ID);
-    if (node.Children) node.Children.forEach(c => { ids = ids.concat(getDescendantIds(c)); });
+    if (node.Children)
+        node.Children.forEach((c) => {
+            ids = ids.concat(getDescendantIds(c));
+        });
     return ids;
 };
 
@@ -150,7 +234,7 @@ export const PlaylistTreeNode = ({ node, depth = 0, selectedIds, onToggle }) => 
 
     if (isFolder) {
         const descendantIds = getDescendantIds(node);
-        const selectedCount = descendantIds.filter(id => selectedIds.includes(id)).length;
+        const selectedCount = descendantIds.filter((id) => selectedIds.includes(id)).length;
         const isAll = descendantIds.length > 0 && selectedCount === descendantIds.length;
         const isPartial = selectedCount > 0 && !isAll;
 
@@ -160,9 +244,20 @@ export const PlaylistTreeNode = ({ node, depth = 0, selectedIds, onToggle }) => 
                     className="w-full flex items-center gap-2 px-3 py-1 text-[12px] hover:bg-mx-hover transition-all text-left text-ink-primary group"
                     style={{ paddingLeft: `${depth * 14 + 12}px` }}
                 >
-                    <button onClick={() => setOpen(!open)} className="flex items-center gap-1.5 outline-none">
-                        {open ? <ChevronDown size={10} className="text-amber2" /> : <ChevronRight size={10} className="text-amber2/60" />}
-                        {open ? <FolderOpen size={12} className="text-amber2" /> : <Folder size={12} className="text-amber2/60" />}
+                    <button
+                        onClick={() => setOpen(!open)}
+                        className="flex items-center gap-1.5 outline-none"
+                    >
+                        {open ? (
+                            <ChevronDown size={10} className="text-amber2" />
+                        ) : (
+                            <ChevronRight size={10} className="text-amber2/60" />
+                        )}
+                        {open ? (
+                            <FolderOpen size={12} className="text-amber2" />
+                        ) : (
+                            <Folder size={12} className="text-amber2/60" />
+                        )}
                     </button>
                     <button
                         onClick={() => onToggle(node)}
@@ -170,19 +265,33 @@ export const PlaylistTreeNode = ({ node, depth = 0, selectedIds, onToggle }) => 
                             isAll
                                 ? 'bg-amber2 border-amber2'
                                 : isPartial
-                                    ? 'bg-amber2/50 border-amber2'
-                                    : 'border-line-default hover:border-line-interactive'
+                                  ? 'bg-amber2/50 border-amber2'
+                                  : 'border-line-default hover:border-line-interactive'
                         }`}
                     >
                         {isAll && <Check size={8} className="text-mx-deepest" />}
                         {isPartial && <div className="w-1.5 h-0.5 bg-mx-deepest rounded-full" />}
                     </button>
-                    <span className="font-medium cursor-pointer truncate" onClick={() => setOpen(!open)}>{node.Name}</span>
-                    <span className="font-mono text-[10px] text-ink-muted ml-auto">{children.filter(c => c.Type !== '0').length}</span>
+                    <span
+                        className="font-medium cursor-pointer truncate"
+                        onClick={() => setOpen(!open)}
+                    >
+                        {node.Name}
+                    </span>
+                    <span className="font-mono text-[10px] text-ink-muted ml-auto">
+                        {children.filter((c) => c.Type !== '0').length}
+                    </span>
                 </div>
-                {open && children.map(child => (
-                    <PlaylistTreeNode key={child.ID} node={child} depth={depth + 1} selectedIds={selectedIds} onToggle={onToggle} />
-                ))}
+                {open &&
+                    children.map((child) => (
+                        <PlaylistTreeNode
+                            key={child.ID}
+                            node={child}
+                            depth={depth + 1}
+                            selectedIds={selectedIds}
+                            onToggle={onToggle}
+                        />
+                    ))}
             </div>
         );
     }
@@ -198,9 +307,11 @@ export const PlaylistTreeNode = ({ node, depth = 0, selectedIds, onToggle }) => 
             }`}
             style={{ paddingLeft: `${depth * 14 + 12}px` }}
         >
-            <div className={`w-3.5 h-3.5 rounded-mx-xs border flex items-center justify-center shrink-0 ${
-                isSelected ? 'bg-amber2 border-amber2' : 'border-line-default'
-            }`}>
+            <div
+                className={`w-3.5 h-3.5 rounded-mx-xs border flex items-center justify-center shrink-0 ${
+                    isSelected ? 'bg-amber2 border-amber2' : 'border-line-default'
+                }`}
+            >
                 {isSelected && <Check size={9} className="text-mx-deepest" />}
             </div>
             {node.Type === '4' ? <Zap size={11} className="text-amber2" /> : <Music size={11} />}
@@ -224,9 +335,20 @@ export const UsbLibraryTree = ({ item, level = 0 }) => {
                     className="flex items-center gap-2 px-3 py-1 hover:bg-mx-hover cursor-pointer transition-all group"
                     style={{ paddingLeft: `${level * 12 + 12}px` }}
                 >
-                    {isExpanded ? <ChevronDown size={12} className="text-ink-muted" /> : <ChevronRight size={12} className="text-ink-muted" />}
-                    <Folder size={13} className={isExpanded ? 'text-amber2' : 'text-ink-secondary'} />
-                    <span className={`text-[12px] ${isExpanded ? 'text-ink-primary font-medium' : 'text-ink-secondary'}`}>{item.name}</span>
+                    {isExpanded ? (
+                        <ChevronDown size={12} className="text-ink-muted" />
+                    ) : (
+                        <ChevronRight size={12} className="text-ink-muted" />
+                    )}
+                    <Folder
+                        size={13}
+                        className={isExpanded ? 'text-amber2' : 'text-ink-secondary'}
+                    />
+                    <span
+                        className={`text-[12px] ${isExpanded ? 'text-ink-primary font-medium' : 'text-ink-secondary'}`}
+                    >
+                        {item.name}
+                    </span>
                     <span className="text-[10px] font-mono text-ink-muted opacity-0 group-hover:opacity-100 ml-auto">
                         {item.children.length}
                     </span>
@@ -248,8 +370,12 @@ export const UsbLibraryTree = ({ item, level = 0 }) => {
             style={{ paddingLeft: `${level * 12 + 28}px` }}
         >
             <div className="flex-1 min-w-0">
-                <div className="text-[12px] font-medium text-ink-primary truncate">{item.Title}</div>
-                <div className="text-[10px] text-ink-muted truncate">{item.ArtistName || 'Unknown Artist'}</div>
+                <div className="text-[12px] font-medium text-ink-primary truncate">
+                    {item.Title}
+                </div>
+                <div className="text-[10px] text-ink-muted truncate">
+                    {item.ArtistName || 'Unknown Artist'}
+                </div>
             </div>
             <div className="text-[10px] text-ink-muted font-mono opacity-0 group-hover:opacity-100 transition-opacity">
                 {item.BPM ? (item.BPM / 100).toFixed(2) : '—'}
@@ -298,15 +424,21 @@ export const SpaceBar = ({ total, free, estimatedUsage }) => {
             </div>
             <div className="flex items-center gap-3 text-[10px] text-ink-muted">
                 <span className="flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: usedColor }} /> Used {formatBytes(used)}
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: usedColor }} />{' '}
+                    Used {formatBytes(used)}
                 </span>
                 {estimatedUsage > 0 && (
                     <span className="flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--amber)' }} /> Sync ~{formatBytes(estimatedUsage)}
+                        <span
+                            className="w-1.5 h-1.5 rounded-full"
+                            style={{ background: 'var(--amber)' }}
+                        />{' '}
+                        Sync ~{formatBytes(estimatedUsage)}
                     </span>
                 )}
                 <span className="flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-mx-input border border-line-subtle" /> Free {formatBytes(free)}
+                    <span className="w-1.5 h-1.5 rounded-full bg-mx-input border border-line-subtle" />{' '}
+                    Free {formatBytes(free)}
                 </span>
             </div>
         </div>
@@ -320,7 +452,17 @@ export const SpaceBar = ({ total, free, estimatedUsage }) => {
 export const Row = ({ label, value, color, muted }) => (
     <div className="flex justify-between">
         <span className="text-ink-secondary">{label}</span>
-        <span className={muted ? 'text-ink-muted' : color === 'ok' ? 'text-ok' : color === 'bad' ? 'text-bad' : 'text-amber2'}>
+        <span
+            className={
+                muted
+                    ? 'text-ink-muted'
+                    : color === 'ok'
+                      ? 'text-ok'
+                      : color === 'bad'
+                        ? 'text-bad'
+                        : 'text-amber2'
+            }
+        >
             {value}
         </span>
     </div>
@@ -345,7 +487,9 @@ export const PillBtn = ({ active, onClick, children }) => (
     <button
         onClick={onClick}
         className={`py-1.5 text-[11px] font-medium rounded-mx-sm border transition-all ${
-            active ? 'bg-amber2/10 border-amber2/50 text-amber2' : 'border-line-subtle text-ink-muted hover:bg-mx-hover'
+            active
+                ? 'bg-amber2/10 border-amber2/50 text-amber2'
+                : 'border-line-subtle text-ink-muted hover:bg-mx-hover'
         }`}
     >
         {children}

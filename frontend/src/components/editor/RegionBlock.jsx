@@ -1,6 +1,6 @@
 /**
  * RegionBlock - Visual representation of an audio region on the timeline
- * 
+ *
  * Displays the waveform, envelope overlay, and handles for resize/move
  */
 
@@ -10,7 +10,7 @@ import api from '../../api/api';
 
 const RegionBlock = ({
     region,
-    zoom,                    // pixels per second
+    zoom, // pixels per second
     containerHeight = 200,
     onSelect,
     onMove,
@@ -19,7 +19,7 @@ const RegionBlock = ({
     onGainChange,
     isSelected = false,
     snapToGrid = (t) => t,
-    pixelsPerSecond = 50
+    pixelsPerSecond = 50,
 }) => {
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
@@ -43,7 +43,7 @@ const RegionBlock = ({
                 });
                 setMultibandData(response.data);
             } catch (err) {
-                console.error("Failed to fetch multiband waveform:", err);
+                console.error('Failed to fetch multiband waveform:', err);
             }
             setIsProcessing(false);
         };
@@ -81,13 +81,11 @@ const RegionBlock = ({
             ctx.fillStyle = '#1a1a1a';
             ctx.fillRect(0, 0, width, containerHeight);
             ctx.fillStyle = '#333';
-            ctx.fillText("No Audio Buffer", 10, 20);
+            ctx.fillText('No Audio Buffer', 10, 20);
             return;
         }
 
-        const hasMultiband = multibandData &&
-            multibandData.low &&
-            multibandData.low.length > 0;
+        const hasMultiband = multibandData && multibandData.low && multibandData.low.length > 0;
 
         if (hasMultiband) {
             drawMultibandWaveform(ctx, width, containerHeight, region, multibandData);
@@ -97,7 +95,6 @@ const RegionBlock = ({
 
         // Draw envelope line
         drawEnvelope(ctx, width, containerHeight, region);
-
     }, [region, width, containerHeight, zoom, multibandData]);
 
     // Standard single-band waveform
@@ -125,29 +122,49 @@ const RegionBlock = ({
         ctx.beginPath();
         for (let x = 0; x < width; x++) {
             const sampleStart = startSample + Math.floor(x * samplesPerPixel);
-            const sampleEnd = Math.min(sampleStart + Math.floor(samplesPerPixel), channelData.length);
+            const sampleEnd = Math.min(
+                sampleStart + Math.floor(samplesPerPixel),
+                channelData.length
+            );
 
-            let min = 0, max = 0;
+            let min = 0,
+                max = 0;
             for (let i = sampleStart; i < sampleEnd; i++) {
                 const sample = channelData[i] || 0;
                 if (sample < min) min = sample;
                 if (sample > max) max = sample;
             }
 
-            const envelopeGain = calculateEnvelopeGain(x / width * region.duration, region.duration, region.fadeInDuration, region.fadeOutDuration, region.gain);
+            const envelopeGain = calculateEnvelopeGain(
+                (x / width) * region.duration,
+                region.duration,
+                region.fadeInDuration,
+                region.fadeOutDuration,
+                region.gain
+            );
             const yTop = centerY - max * envelopeGain * maxAmplitude;
-            if (x === 0) ctx.moveTo(x, yTop); else ctx.lineTo(x, yTop);
+            if (x === 0) ctx.moveTo(x, yTop);
+            else ctx.lineTo(x, yTop);
         }
 
         for (let x = width - 1; x >= 0; x--) {
             const sampleStart = startSample + Math.floor(x * samplesPerPixel);
-            const sampleEnd = Math.min(sampleStart + Math.floor(samplesPerPixel), channelData.length);
+            const sampleEnd = Math.min(
+                sampleStart + Math.floor(samplesPerPixel),
+                channelData.length
+            );
             let min = 0;
             for (let i = sampleStart; i < sampleEnd; i++) {
                 const sample = channelData[i] || 0;
                 if (sample < min) min = sample;
             }
-            const envelopeGain = calculateEnvelopeGain(x / width * region.duration, region.duration, region.fadeInDuration, region.fadeOutDuration, region.gain);
+            const envelopeGain = calculateEnvelopeGain(
+                (x / width) * region.duration,
+                region.duration,
+                region.fadeInDuration,
+                region.fadeOutDuration,
+                region.gain
+            );
             const yBottom = centerY - min * envelopeGain * maxAmplitude;
             ctx.lineTo(x, yBottom);
         }
@@ -181,7 +198,13 @@ const RegionBlock = ({
             const m = mid[dataIdx] || 0;
             const h = high[dataIdx] || 0;
 
-            const envelopeGain = calculateEnvelopeGain(x / width * region.duration, region.duration, region.fadeInDuration, region.fadeOutDuration, region.gain);
+            const envelopeGain = calculateEnvelopeGain(
+                (x / width) * region.duration,
+                region.duration,
+                region.fadeInDuration,
+                region.fadeOutDuration,
+                region.gain
+            );
 
             // RGB Mix: Red (Low), Yellow/Green (Mid), Cyan/Blue (High)
             // Composite amplitude
@@ -236,10 +259,10 @@ const RegionBlock = ({
         const fadeInPx = (fadeInDuration / duration) * w;
         const fadeOutPx = (fadeOutDuration / duration) * w;
 
-        ctx.moveTo(0, envelopeY + 20);  // Start at 0 for fade-in
-        ctx.lineTo(fadeInPx, lineY);    // Ramp up
+        ctx.moveTo(0, envelopeY + 20); // Start at 0 for fade-in
+        ctx.lineTo(fadeInPx, lineY); // Ramp up
         ctx.lineTo(w - fadeOutPx, lineY); // Steady
-        ctx.lineTo(w, envelopeY + 20);  // Ramp down
+        ctx.lineTo(w, envelopeY + 20); // Ramp down
 
         ctx.stroke();
 
@@ -251,7 +274,7 @@ const RegionBlock = ({
         ctx.arc(fadeInPx, lineY, 5, 0, Math.PI * 2);
         ctx.fill();
 
-        // Fade out node  
+        // Fade out node
         ctx.beginPath();
         ctx.arc(w - fadeOutPx, lineY, 5, 0, Math.PI * 2);
         ctx.fill();
@@ -267,52 +290,58 @@ const RegionBlock = ({
     function adjustColor(hex, amount) {
         const num = parseInt(hex.replace('#', ''), 16);
         const r = Math.min(255, Math.max(0, (num >> 16) + amount));
-        const g = Math.min(255, Math.max(0, ((num >> 8) & 0x00FF) + amount));
-        const b = Math.min(255, Math.max(0, (num & 0x0000FF) + amount));
-        return `#${(r << 16 | g << 8 | b).toString(16).padStart(6, '0')}`;
+        const g = Math.min(255, Math.max(0, ((num >> 8) & 0x00ff) + amount));
+        const b = Math.min(255, Math.max(0, (num & 0x0000ff) + amount));
+        return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
     }
 
     // Mouse handlers for drag/resize
-    const handleMouseDown = useCallback((e) => {
-        // Remove stopPropagation to allow playhead placement on regions
-        // e.stopPropagation(); 
-        onSelect?.(region.id);
+    const handleMouseDown = useCallback(
+        (e) => {
+            // Remove stopPropagation to allow playhead placement on regions
+            // e.stopPropagation();
+            onSelect?.(region.id);
 
-        const rect = containerRef.current.getBoundingClientRect();
-        const relX = e.clientX - rect.left;
+            const rect = containerRef.current.getBoundingClientRect();
+            const relX = e.clientX - rect.left;
 
-        // Check if clicking on resize handles
-        if (relX < 10) {
-            resizeMode.current = 'left';
-        } else if (relX > width - 10) {
-            resizeMode.current = 'right';
-        } else {
-            resizeMode.current = null;
-        }
+            // Check if clicking on resize handles
+            if (relX < 10) {
+                resizeMode.current = 'left';
+            } else if (relX > width - 10) {
+                resizeMode.current = 'right';
+            } else {
+                resizeMode.current = null;
+            }
 
-        isDragging.current = true;
-        dragStartX.current = e.clientX;
-        dragStartTime.current = region.timelineStart;
+            isDragging.current = true;
+            dragStartX.current = e.clientX;
+            dragStartTime.current = region.timelineStart;
 
-        window.addEventListener('mousemove', handleMouseMove);
-        window.addEventListener('mouseup', handleMouseUp);
-    }, [region, width, onSelect]);
+            window.addEventListener('mousemove', handleMouseMove);
+            window.addEventListener('mouseup', handleMouseUp);
+        },
+        [region, width, onSelect]
+    );
 
-    const handleMouseMove = useCallback((e) => {
-        if (!isDragging.current) return;
+    const handleMouseMove = useCallback(
+        (e) => {
+            if (!isDragging.current) return;
 
-        const deltaX = e.clientX - dragStartX.current;
-        const deltaTime = deltaX / zoom;
+            const deltaX = e.clientX - dragStartX.current;
+            const deltaTime = deltaX / zoom;
 
-        if (resizeMode.current === 'left') {
-            onResize?.(region.id, 'left', snapToGrid(deltaTime));
-        } else if (resizeMode.current === 'right') {
-            onResize?.(region.id, 'right', snapToGrid(deltaTime));
-        } else {
-            const newStart = snapToGrid(dragStartTime.current + deltaTime);
-            onMove?.(region.id, newStart);
-        }
-    }, [region, zoom, onMove, onResize, snapToGrid]);
+            if (resizeMode.current === 'left') {
+                onResize?.(region.id, 'left', snapToGrid(deltaTime));
+            } else if (resizeMode.current === 'right') {
+                onResize?.(region.id, 'right', snapToGrid(deltaTime));
+            } else {
+                const newStart = snapToGrid(dragStartTime.current + deltaTime);
+                onMove?.(region.id, newStart);
+            }
+        },
+        [region, zoom, onMove, onResize, snapToGrid]
+    );
 
     const handleMouseUp = useCallback(() => {
         isDragging.current = false;
@@ -327,24 +356,22 @@ const RegionBlock = ({
             className={`
                 absolute top-0 h-full rounded-lg overflow-hidden cursor-grab
                 border-2 transition-all duration-150
-                ${isSelected
-                    ? 'border-amber2 shadow-lg shadow-amber2/30 z-20'
-                    : 'border-white/10 hover:border-white/30 z-10'
+                ${
+                    isSelected
+                        ? 'border-amber2 shadow-lg shadow-amber2/30 z-20'
+                        : 'border-white/10 hover:border-white/30 z-10'
                 }
                 ${region.isMuted ? 'opacity-40' : 'opacity-100'}
             `}
             style={{
                 left: `${left}px`,
                 width: `${Math.max(width, 20)}px`,
-                background: `linear-gradient(180deg, ${region.color}20 0%, ${region.color}10 100%)`
+                background: `linear-gradient(180deg, ${region.color}20 0%, ${region.color}10 100%)`,
             }}
             onMouseDown={handleMouseDown}
         >
             {/* Waveform canvas */}
-            <canvas
-                ref={canvasRef}
-                className="absolute inset-0"
-            />
+            <canvas ref={canvasRef} className="absolute inset-0" />
 
             {/* Region name */}
             <div className="absolute top-1 left-2 text-[10px] font-bold text-white/80 truncate max-w-[calc(100%-16px)]">

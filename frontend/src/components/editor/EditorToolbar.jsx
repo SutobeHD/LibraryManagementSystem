@@ -10,8 +10,21 @@
 
 import React from 'react';
 import {
-    Play, Pause, SkipBack, Scissors, Copy, ZoomIn, ZoomOut, Magnet,
-    Trash2, Download, Undo2, Redo2, Music, Save, FolderOpen,
+    Play,
+    Pause,
+    SkipBack,
+    Scissors,
+    Copy,
+    ZoomIn,
+    ZoomOut,
+    Magnet,
+    Trash2,
+    Download,
+    Undo2,
+    Redo2,
+    Music,
+    Save,
+    FolderOpen,
 } from 'lucide-react';
 import { setSnapDivision } from '../../audio/TimelineState';
 
@@ -64,7 +77,9 @@ const EditorToolbar = ({
                     <div className="flex gap-1">
                         <div className="text-xs bg-black/30 px-2 py-1 rounded border border-white/5">
                             <span className="text-ink-muted">BPM</span>
-                            <span className="ml-2 text-amber2 font-mono">{state.bpm.toFixed(1)}</span>
+                            <span className="ml-2 text-amber2 font-mono">
+                                {state.bpm.toFixed(1)}
+                            </span>
                         </div>
                         {camelot && (
                             <div className="text-xs bg-black/30 px-2 py-1 rounded border border-white/5">
@@ -73,9 +88,14 @@ const EditorToolbar = ({
                             </div>
                         )}
                         {loudness !== 0 && (
-                            <div className="text-xs bg-black/30 px-2 py-1 rounded border border-white/5 flex items-center gap-2 group cursor-help" title={`Peak: ${(20 * Math.log10(peak || 1e-6)).toFixed(1)} dBFS`}>
+                            <div
+                                className="text-xs bg-black/30 px-2 py-1 rounded border border-white/5 flex items-center gap-2 group cursor-help"
+                                title={`Peak: ${(20 * Math.log10(peak || 1e-6)).toFixed(1)} dBFS`}
+                            >
                                 <span className="text-ink-muted">LUFS</span>
-                                <span className={`font-mono ${loudness > -9 ? 'text-red-400' : 'text-emerald-400'}`}>
+                                <span
+                                    className={`font-mono ${loudness > -9 ? 'text-red-400' : 'text-emerald-400'}`}
+                                >
                                     {loudness.toFixed(1)}
                                 </span>
                                 <button
@@ -91,10 +111,18 @@ const EditorToolbar = ({
 
                 {/* Project Controls */}
                 <div className="flex items-center gap-1 mr-4 border-r border-white/10 pr-4">
-                    <button onClick={handleSaveProject} className="p-2 hover:bg-white/5 rounded text-ink-secondary hover:text-green-400" title="Save Project">
+                    <button
+                        onClick={handleSaveProject}
+                        className="p-2 hover:bg-white/5 rounded text-ink-secondary hover:text-green-400"
+                        title="Save Project"
+                    >
                         <Save size={16} />
                     </button>
-                    <button onClick={handleLoadClick} className="p-2 hover:bg-white/5 rounded text-ink-secondary hover:text-amber2" title="Open Project">
+                    <button
+                        onClick={handleLoadClick}
+                        className="p-2 hover:bg-white/5 rounded text-ink-secondary hover:text-amber2"
+                        title="Open Project"
+                    >
                         <FolderOpen size={16} />
                     </button>
                 </div>
@@ -153,10 +181,11 @@ const EditorToolbar = ({
                 {/* Snap toggle */}
                 <button
                     onClick={handleToggleSnap}
-                    className={`p-2 rounded transition-all ${state.snapEnabled
-                        ? 'bg-amber2/20 text-amber2'
-                        : 'hover:bg-white/5 text-ink-muted'
-                        }`}
+                    className={`p-2 rounded transition-all ${
+                        state.snapEnabled
+                            ? 'bg-amber2/20 text-amber2'
+                            : 'hover:bg-white/5 text-ink-muted'
+                    }`}
                     title="Snap to grid (Q)"
                 >
                     <Magnet size={16} />
@@ -166,9 +195,7 @@ const EditorToolbar = ({
                 {state.snapEnabled && (
                     <select
                         value={state.snapDivision}
-                        onChange={(e) => setState(prev =>
-                            setSnapDivision(prev, e.target.value)
-                        )}
+                        onChange={(e) => setState((prev) => setSnapDivision(prev, e.target.value))}
                         className="bg-black/30 text-xs text-ink-primary border border-white/10 rounded px-2 py-1"
                     >
                         <option value="1/1">1 Bar</option>
@@ -186,8 +213,18 @@ const EditorToolbar = ({
                         className={`p-1.5 rounded transition-all ${state.editMode === 'grid' ? 'bg-amber2/20 text-amber2' : 'text-ink-secondary hover:text-white'}`}
                         title="Grid Editing Mode"
                     >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+                        <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                        >
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"
+                            />
                         </svg>
                     </button>
                     {state.editMode === 'grid' && (
@@ -208,9 +245,7 @@ const EditorToolbar = ({
                 >
                     <ZoomOut size={16} />
                 </button>
-                <div className="text-xs text-ink-muted w-12 text-center">
-                    {state.zoom}x
-                </div>
+                <div className="text-xs text-ink-muted w-12 text-center">{state.zoom}x</div>
                 <button
                     onClick={handleZoomIn}
                     className="p-2 hover:bg-white/5 rounded text-ink-secondary hover:text-white"

@@ -20,7 +20,6 @@
  */
 export function transportReducer(state, action) {
     switch (action.type) {
-
         // ── Project ──────────────────────────
         case 'SET_PROJECT':
             return { ...state, project: { ...state.project, ...action.payload } };
@@ -95,7 +94,7 @@ export function transportReducer(state, action) {
             return {
                 ...state,
                 gridOffsetSec: (state.gridOffsetSec || 0) + delta,
-                project: { ...state.project, dirty: true }
+                project: { ...state.project, dirty: true },
             };
         }
 
@@ -104,7 +103,7 @@ export function transportReducer(state, action) {
             return {
                 ...state,
                 bpm: Math.max(1, (state.bpm || 120) + delta),
-                project: { ...state.project, dirty: true }
+                project: { ...state.project, dirty: true },
             };
         }
 

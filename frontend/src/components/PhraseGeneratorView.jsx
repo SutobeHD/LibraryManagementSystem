@@ -76,7 +76,11 @@ const PhraseGeneratorView = () => {
     };
 
     const countLabel =
-        scopeState.count == null ? '' : scopeState.count === 1 ? ' (1 track)' : ` (${scopeState.count} tracks)`;
+        scopeState.count == null
+            ? ''
+            : scopeState.count === 1
+              ? ' (1 track)'
+              : ` (${scopeState.count} tracks)`;
     const bigScope =
         scopeState.mode === 'collection' || (scopeState.count != null && scopeState.count > 200);
 
@@ -94,7 +98,8 @@ const PhraseGeneratorView = () => {
                     <div>
                         <h1 className="text-lg font-semibold text-ink-primary">Phrase Generator</h1>
                         <p className="text-ink-muted text-tiny">
-                            Write phrase memory cues across tracks, playlists or the whole collection
+                            Write phrase memory cues across tracks, playlists or the whole
+                            collection
                         </p>
                     </div>
                 </div>
@@ -141,8 +146,8 @@ const PhraseGeneratorView = () => {
                     {alignDownbeat && bigScope && (
                         <div className="flex items-start gap-2 text-amber2 text-[10px] bg-amber2/5 border border-amber2/20 rounded-mx-sm px-3 py-2">
                             <Info size={12} className="mt-0.5 shrink-0" />
-                            Downbeat alignment loads audio per track — this can take a while over a large
-                            collection.
+                            Downbeat alignment loads audio per track — this can take a while over a
+                            large collection.
                         </div>
                     )}
                 </div>
