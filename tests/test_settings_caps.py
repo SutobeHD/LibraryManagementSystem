@@ -16,6 +16,7 @@ Covers Recommendation in
 Direct Pydantic instantiation is used (not the FastAPI route) because
 that's where the validator runs; the route handler is unchanged.
 """
+
 from __future__ import annotations
 
 import json
@@ -143,7 +144,8 @@ class TestSetReqStrictMode:
 
 class TestSetReqLoggingRedaction:
     def test_warning_logged_with_key_and_reason_not_value(
-        self, caplog: pytest.LogCaptureFixture,
+        self,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         oversized = "y" * (MAX_VALUE_BYTES + 1)
         with (
@@ -163,7 +165,10 @@ class TestSettingsManagerLoadSanitizer:
     """`load` strips now-rejected keys silently + logs `info`."""
 
     def test_oversize_key_dropped_on_load(
-        self, tmp_path: Path, monkeypatch, caplog: pytest.LogCaptureFixture,
+        self,
+        tmp_path: Path,
+        monkeypatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         cfg = tmp_path / "settings.json"
         long_key = "x" * (MAX_KEY_LEN + 5)
@@ -176,7 +181,10 @@ class TestSettingsManagerLoadSanitizer:
         assert any("dropped key=" in rec.message for rec in caplog.records)
 
     def test_oversize_value_dropped_on_load(
-        self, tmp_path: Path, monkeypatch, caplog: pytest.LogCaptureFixture,
+        self,
+        tmp_path: Path,
+        monkeypatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         cfg = tmp_path / "settings.json"
         big = "z" * (MAX_VALUE_BYTES + 100)
@@ -188,12 +196,15 @@ class TestSettingsManagerLoadSanitizer:
         assert result["theme"] == "dark"
 
     def test_oversize_list_dropped_on_load(
-        self, tmp_path: Path, monkeypatch,
+        self,
+        tmp_path: Path,
+        monkeypatch,
     ) -> None:
         cfg = tmp_path / "settings.json"
         big_list = [f"/p/{i}" for i in range(MAX_LIST_ITEMS + 5)]
         cfg.write_text(
-            json.dumps({"old_paths": big_list, "theme": "dark"}), encoding="utf-8",
+            json.dumps({"old_paths": big_list, "theme": "dark"}),
+            encoding="utf-8",
         )
         monkeypatch.setattr(SettingsManager, "CONFIG", cfg)
         result = SettingsManager.load()
@@ -201,7 +212,9 @@ class TestSettingsManagerLoadSanitizer:
         assert result["theme"] == "dark"
 
     def test_load_legacy_clean_file_unchanged(
-        self, tmp_path: Path, monkeypatch,
+        self,
+        tmp_path: Path,
+        monkeypatch,
     ) -> None:
         cfg = tmp_path / "settings.json"
         clean = {"theme": "light", "auto_snap": False, "scan_folders": []}

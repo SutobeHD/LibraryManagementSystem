@@ -2140,7 +2140,7 @@ async def import_paths(r: ImportPathsReq):
             if local_id and group_into_playlist:
                 collected_track_ids.append(local_id)
             return
-        threading.current_thread()._lms_import_tid = tid
+        import_tracker.bind_current_task(tid)
         try:
             import_tracker.update(tid, status="Analyzing", progress=20)
             result = ImportManager.process_import(f)
@@ -2163,8 +2163,7 @@ async def import_paths(r: ImportPathsReq):
             import_tracker.update(tid, status="Failed", progress=100, error=str(exc))
             counters["skipped"] += 1
         finally:
-            with contextlib.suppress(AttributeError):
-                del threading.current_thread()._lms_import_tid
+            import_tracker.unbind_current_task()
 
     def _bundle_into_playlist():
         """After all files are processed, drop them into a single playlist."""
@@ -2410,7 +2409,7 @@ def _run_import_analysis(dest: Path, track_task_id: str) -> None:
     frontend can pick it up via /api/import/tasks."""
     from . import import_tracker
 
-    threading.current_thread()._lms_import_tid = track_task_id
+    import_tracker.bind_current_task(track_task_id)
     try:
         import_tracker.update(track_task_id, status="Analyzing", progress=30)
         tid, analysis = ImportManager.process_import(dest)
@@ -2427,8 +2426,7 @@ def _run_import_analysis(dest: Path, track_task_id: str) -> None:
         logger.error(f"Background import failed for {dest}: {exc}")
         import_tracker.update(track_task_id, status="Failed", progress=100, error=str(exc))
     finally:
-        with contextlib.suppress(AttributeError):
-            del threading.current_thread()._lms_import_tid
+        import_tracker.unbind_current_task()
 
 
 @app.post("/api/audio/import", dependencies=[Depends(require_session)])
@@ -2483,13 +2481,12 @@ def import_audio(files: list[UploadFile] = File(...), wait: bool = False):
             if wait:
                 # Synchronous path — preserve the legacy response shape so any
                 # CLI / test that still expects {id, bpm, totalTime} keeps working.
-                threading.current_thread()._lms_import_tid = track_task_id
+                import_tracker.bind_current_task(track_task_id)
                 try:
                     import_tracker.update(track_task_id, status="Analyzing", progress=30)
                     tid, analysis = ImportManager.process_import(dest)
                 finally:
-                    with contextlib.suppress(AttributeError):
-                        del threading.current_thread()._lms_import_tid
+                    import_tracker.unbind_current_task()
 
                 import_tracker.update(
                     track_task_id,
@@ -4304,7 +4301,7 @@ async def usb_playcount_diff(usb_root: str, usb_xml_path: str):
         if not db.loaded:
             raise HTTPException(status_code=400, detail="Library not loaded")
 
-        pc_tracks_raw = db.get_tracks() if hasattr(db, "get_tracks") else []
+        pc_tracks_raw = db.get_all_tracks()
         pc_tracks = []
         for t in pc_tracks_raw:
             pc_tracks.append(
@@ -5023,7 +5020,7 @@ async def _run_duplicate_scan(job_id: str, track_paths: list[str]) -> None:
                 # Try to enrich from library db
                 if db.loaded:
                     try:
-                        for t in db.get_tracks() or []:
+                        for t in db.get_all_tracks() or []:
                             loc = t.get("Location") or t.get("path") or ""
                             if loc and (loc == p or Path(loc) == Path(p)):
                                 track_meta["title"] = t.get("Name") or t.get("title") or ""
@@ -5143,7 +5140,7 @@ async def duplicates_merge(body: DuplicateMergeRequest):
 
         # Find master track
         master_track = None
-        for t in db.get_tracks() or []:
+        for t in db.get_all_tracks() or []:
             loc = t.get("Location") or t.get("path") or ""
             if loc and Path(loc) == Path(body.keep_path):
                 master_track = t
@@ -5157,7 +5154,7 @@ async def duplicates_merge(body: DuplicateMergeRequest):
 
         # Remove duplicate library entries and accumulate play counts
         for path in body.remove_paths:
-            for t in db.get_tracks() or []:
+            for t in db.get_all_tracks() or []:
                 loc = t.get("Location") or t.get("path") or ""
                 if not (loc and Path(loc) == Path(path)):
                     continue

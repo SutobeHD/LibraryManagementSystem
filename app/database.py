@@ -932,6 +932,85 @@ class RekordboxDB:
     def get_all_tracks(self) -> list[dict[str, Any]]:
         return list(self.tracks.values())
 
+    # ── XML-mode passthroughs ────────────────────────────────────────────
+    # This facade has no __getattr__, so anything not listed here raises
+    # AttributeError at the call site. These four were being called on the
+    # facade from app/main.py and app/services.py without ever existing on
+    # it — see docs/QUALITY_GATES.md for how they were found.
+
+    def load_xml(self, path: str) -> bool:
+        """Load a Rekordbox XML. XML mode only — no-op returning False in live mode."""
+        if hasattr(self.active_db, "load_xml"):
+            return self.active_db.load_xml(path)
+        logger.warning("load_xml called in %s mode — ignored", self.mode)
+        return False
+
+    def save_xml(self) -> bool:
+        """Persist the in-memory XML library. XML mode only."""
+        if hasattr(self.active_db, "save_xml"):
+            return self.active_db.save_xml()
+        logger.warning("save_xml called in %s mode — ignored", self.mode)
+        return False
+
+    # ── Per-track cues + beatgrid ────────────────────────────────────────
+    # Backing the four /api/track/{cues,beatgrid} routes. Reads work in both
+    # modes; writes only in XML mode, because the live path would have to
+    # rewrite ANLZ sidecars (app/anlz_writer.py) and no such write path
+    # exists yet — the routes' own {"status": "error"} contract carries that.
+
+    def get_track_cues(self, tid: str) -> list[dict[str, Any]]:
+        """Cue points for one track. XML mode stores them under
+        ``positionMarks``, live mode under ``Cues``."""
+        track = self.tracks.get(str(tid))
+        if not track:
+            return []
+        return track.get("positionMarks") or track.get("Cues") or []
+
+    def get_track_beatgrid(self, tid: str) -> list[dict[str, Any]]:
+        """Beatgrid entries for one track. Same key in both modes."""
+        track = self.tracks.get(str(tid))
+        if not track:
+            return []
+        return track.get("beatGrid") or []
+
+    def save_track_cues(self, tid: str, cues: list[dict[str, Any]]) -> bool:
+        """Persist cue points. XML mode only — see the note above."""
+        if self.mode != "xml":
+            logger.warning("save_track_cues: not supported in %s mode", self.mode)
+            return False
+        track = self.active_db.tracks.get(str(tid))
+        if not track:
+            logger.warning("save_track_cues: unknown track %s", tid)
+            return False
+        track["positionMarks"] = cues
+        return bool(self.save_xml())
+
+    def save_track_beatgrid(self, tid: str, beat_grid: list[dict[str, Any]]) -> bool:
+        """Persist the beatgrid. XML mode only — see the note above."""
+        if self.mode != "xml":
+            logger.warning("save_track_beatgrid: not supported in %s mode", self.mode)
+            return False
+        track = self.active_db.tracks.get(str(tid))
+        if not track:
+            logger.warning("save_track_beatgrid: unknown track %s", tid)
+            return False
+        track["beatGrid"] = beat_grid
+        return bool(self.save_xml())
+
+    # ── Live-mode passthroughs ───────────────────────────────────────────
+
+    def get_analysis_writer(self):
+        """AnalysisDBWriter for the live master.db. Live mode only."""
+        if hasattr(self.active_db, "get_analysis_writer"):
+            return self.active_db.get_analysis_writer()
+        raise RuntimeError("Analysis writing requires live database mode.")
+
+    def get_unanalyzed_track_ids(self) -> list:
+        """Track IDs with no analysis rows yet. Live mode only."""
+        if hasattr(self.active_db, "get_unanalyzed_track_ids"):
+            return self.active_db.get_unanalyzed_track_ids()
+        return []
+
     def get_all_artists(self) -> list[dict[str, Any]]:
         return self.active_db.artists
 

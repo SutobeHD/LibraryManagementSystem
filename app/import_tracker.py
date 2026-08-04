@@ -107,3 +107,29 @@ def clear_finished() -> int:
 def _basename(p: str) -> str:
     s = str(p).replace("\\", "/").rsplit("/", 1)[-1]
     return s
+
+
+# ── Current-task binding for worker threads ──────────────────────────────
+# Deep in the import pipeline (services.write_companion_anlz) there is no
+# task_id in scope, but the ANLZ stage still needs to report progress. The
+# import worker binds its task here on entry and clears it on exit.
+#
+# This used to be an attribute monkey-patched onto threading.current_thread()
+# (`._lms_import_tid`), which no type checker can see and which mutates a
+# stdlib object shared with every other library in the process.
+_CTX = threading.local()
+
+
+def bind_current_task(task_id: str) -> None:
+    """Bind `task_id` to the calling thread for the duration of an import."""
+    _CTX.task_id = task_id
+
+
+def unbind_current_task() -> None:
+    """Clear the calling thread's task binding. Safe to call when unbound."""
+    _CTX.task_id = None
+
+
+def current_task() -> str | None:
+    """The task_id bound to this thread, or None."""
+    return getattr(_CTX, "task_id", None)

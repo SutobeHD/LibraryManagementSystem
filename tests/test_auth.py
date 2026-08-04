@@ -64,9 +64,7 @@ def _request(
 
     async def _go() -> httpx.Response:
         transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
-        async with httpx.AsyncClient(
-            transport=transport, base_url="http://testserver"
-        ) as ac:
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as ac:
             return await ac.request(method, url, headers=headers, json=json)
 
     return asyncio.run(_go())
@@ -80,9 +78,7 @@ class TestCaseA_NoHeader:
 
 
 class TestCaseB_WrongToken:
-    def test_post_with_wrong_bearer_is_401(
-        self, auth_token: dict[str, str]
-    ) -> None:
+    def test_post_with_wrong_bearer_is_401(self, auth_token: dict[str, str]) -> None:
         wrong = "X" * len(_auth.SESSION_TOKEN)
         r = _request(
             _gated_app(),
@@ -92,9 +88,7 @@ class TestCaseB_WrongToken:
         )
         assert r.status_code == 401
 
-    def test_post_with_wrong_length_is_401(
-        self, auth_token: dict[str, str]
-    ) -> None:
+    def test_post_with_wrong_length_is_401(self, auth_token: dict[str, str]) -> None:
         r = _request(
             _gated_app(),
             "POST",
@@ -105,12 +99,8 @@ class TestCaseB_WrongToken:
 
 
 class TestCaseC_HappyPath:
-    def test_post_with_correct_bearer_is_2xx(
-        self, auth_token: dict[str, str]
-    ) -> None:
-        r = _request(
-            _gated_app(), "POST", "/gated", headers=auth_token
-        )
+    def test_post_with_correct_bearer_is_2xx(self, auth_token: dict[str, str]) -> None:
+        r = _request(_gated_app(), "POST", "/gated", headers=auth_token)
         assert r.status_code == 200
         assert r.json() == {"status": "ok"}
 
@@ -164,9 +154,7 @@ class TestCaseH_BearerWhitespace:
         )
         assert r.status_code == 200
 
-    def test_leading_whitespace_between_scheme_and_token(
-        self, auth_token: dict[str, str]
-    ) -> None:
+    def test_leading_whitespace_between_scheme_and_token(self, auth_token: dict[str, str]) -> None:
         token = _auth.SESSION_TOKEN
         r = _request(
             _gated_app(),
@@ -179,9 +167,7 @@ class TestCaseH_BearerWhitespace:
 
 class TestCaseI_SchemeCaseInsensitive:
     @pytest.mark.parametrize("scheme", ["bearer", "BEARER", "BeArEr"])
-    def test_scheme_case_insensitive(
-        self, scheme: str, auth_token: dict[str, str]
-    ) -> None:
+    def test_scheme_case_insensitive(self, scheme: str, auth_token: dict[str, str]) -> None:
         token = _auth.SESSION_TOKEN
         r = _request(
             _gated_app(),
@@ -222,9 +208,7 @@ class TestCaseJ_EmptyAuthorizationHeader:
 
 
 class TestCaseK_ControlCharsRejected:
-    def test_vtab_in_token_is_401(
-        self, auth_token: dict[str, str]
-    ) -> None:
+    def test_vtab_in_token_is_401(self, auth_token: dict[str, str]) -> None:
         token = "A" * (len(_auth.SESSION_TOKEN) - 1) + "\x0b"
         r = _request(
             _gated_app(),
@@ -234,9 +218,7 @@ class TestCaseK_ControlCharsRejected:
         )
         assert r.status_code == 401
 
-    def test_del_char_in_token_is_401(
-        self, auth_token: dict[str, str]
-    ) -> None:
+    def test_del_char_in_token_is_401(self, auth_token: dict[str, str]) -> None:
         token = "A" * (len(_auth.SESSION_TOKEN) - 1) + "\x7f"
         r = _request(
             _gated_app(),
@@ -257,9 +239,7 @@ class TestCaseL_WrongScheme:
             "Bear abc123",
         ],
     )
-    def test_non_bearer_scheme_is_401(
-        self, header: str, auth_token: dict[str, str]
-    ) -> None:
+    def test_non_bearer_scheme_is_401(self, header: str, auth_token: dict[str, str]) -> None:
         r = _request(
             _gated_app(),
             "POST",
@@ -291,16 +271,10 @@ class TestCaseM_OptionsPreflight:
             },
         )
         assert r.status_code == 200
-        assert "access-control-allow-origin" in {
-            k.lower() for k in r.headers
-        }
+        assert "access-control-allow-origin" in {k.lower() for k in r.headers}
 
 
 class TestCaseN_UngatedAcceptsAuthHeader:
-    def test_heartbeat_with_bearer_header_still_2xx(
-        self, auth_token: dict[str, str]
-    ) -> None:
-        r = _request(
-            real_app, "POST", "/api/system/heartbeat", headers=auth_token
-        )
+    def test_heartbeat_with_bearer_header_still_2xx(self, auth_token: dict[str, str]) -> None:
+        r = _request(real_app, "POST", "/api/system/heartbeat", headers=auth_token)
         assert r.status_code == 200

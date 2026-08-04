@@ -7,6 +7,7 @@ the per-drive lock-file context manager. No real USB needed; every
 test scopes its filesystem state to `tmp_path` and monkeypatches the
 module-level `PROFILES_FILE` Path.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -23,6 +24,7 @@ from app.usb_manager import (
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def isolated_profiles(tmp_path: Path, monkeypatch):
@@ -51,6 +53,7 @@ def sync_engine(tmp_path: Path):
 # UsbProfileManager roundtrip
 # ---------------------------------------------------------------------------
 
+
 class TestProfileRoundtrip:
     """save_profile / get_profile must persist and read back the same dict."""
 
@@ -76,12 +79,8 @@ class TestProfileRoundtrip:
 
     def test_save_profile_updates_existing(self, isolated_profiles) -> None:
         """A second save for the same device_id should MERGE, not replace."""
-        UsbProfileManager.save_profile(
-            {"device_id": "x", "drive": "E:\\", "label": "L1"}
-        )
-        UsbProfileManager.save_profile(
-            {"device_id": "x", "label": "L1-renamed"}
-        )
+        UsbProfileManager.save_profile({"device_id": "x", "drive": "E:\\", "label": "L1"})
+        UsbProfileManager.save_profile({"device_id": "x", "label": "L1-renamed"})
         loaded = UsbProfileManager.get_profile("x")
         # The previously-stored "drive" should still be there (merge).
         assert loaded["drive"] == "E:\\"
@@ -92,9 +91,7 @@ class TestProfileRoundtrip:
         # Default when file missing:
         assert UsbProfileManager.get_settings() == {"auto_sync_on_startup": False}
 
-        UsbProfileManager.save_settings(
-            {"auto_sync_on_startup": True, "feature_flag": "exp"}
-        )
+        UsbProfileManager.save_settings({"auto_sync_on_startup": True, "feature_flag": "exp"})
         out = UsbProfileManager.get_settings()
         assert out["auto_sync_on_startup"] is True
         assert out["feature_flag"] == "exp"
@@ -104,6 +101,7 @@ class TestProfileRoundtrip:
         UsbProfileManager.save_profile({"device_id": "fs_test", "drive": "F:\\"})
         assert isolated_profiles.exists()
         import json
+
         data = json.loads(isolated_profiles.read_text(encoding="utf-8"))
         assert "fs_test" in data["profiles"]
 
@@ -111,6 +109,7 @@ class TestProfileRoundtrip:
 # ---------------------------------------------------------------------------
 # _xml_safe
 # ---------------------------------------------------------------------------
+
 
 class TestXmlSafe:
     """ASCII control chars below 0x20 (except \\t \\n \\r) are illegal in
@@ -144,12 +143,13 @@ class TestXmlSafe:
 
     def test_del_char_stripped(self) -> None:
         """ASCII 0x7F (DEL) is in the disallowed range."""
-        assert UsbSyncEngine._xml_safe("front\x7Fback") == "frontback"
+        assert UsbSyncEngine._xml_safe("front\x7fback") == "frontback"
 
 
 # ---------------------------------------------------------------------------
 # _clean_filename — Windows reserved + trailing dots
 # ---------------------------------------------------------------------------
+
 
 class TestCleanFilename:
     """Reserved Windows device names and trailing dots/spaces must be neutralised."""
@@ -157,11 +157,20 @@ class TestCleanFilename:
     @pytest.mark.parametrize(
         "reserved",
         [
-            "CON", "PRN", "AUX", "NUL",
-            "COM1", "COM2", "COM9",
-            "LPT1", "LPT5", "LPT9",
+            "CON",
+            "PRN",
+            "AUX",
+            "NUL",
+            "COM1",
+            "COM2",
+            "COM9",
+            "LPT1",
+            "LPT5",
+            "LPT9",
             # Case insensitivity — the check is on .upper():
-            "con", "Prn", "lpt3",
+            "con",
+            "Prn",
+            "lpt3",
         ],
     )
     def test_reserved_names_prefixed(self, sync_engine, reserved: str) -> None:
@@ -188,15 +197,15 @@ class TestCleanFilename:
     @pytest.mark.parametrize(
         "raw, banned",
         [
-            ('foo/bar', '/'),
-            ('foo\\bar', '\\'),
-            ('foo:bar', ':'),
-            ('foo*bar', '*'),
-            ('foo?bar', '?'),
+            ("foo/bar", "/"),
+            ("foo\\bar", "\\"),
+            ("foo:bar", ":"),
+            ("foo*bar", "*"),
+            ("foo?bar", "?"),
             ('foo"bar', '"'),
-            ('foo<bar', '<'),
-            ('foo>bar', '>'),
-            ('foo|bar', '|'),
+            ("foo<bar", "<"),
+            ("foo>bar", ">"),
+            ("foo|bar", "|"),
         ],
     )
     def test_illegal_path_chars_replaced(self, sync_engine, raw, banned) -> None:
@@ -212,6 +221,7 @@ class TestCleanFilename:
 # ---------------------------------------------------------------------------
 # locked_sync context manager
 # ---------------------------------------------------------------------------
+
 
 class TestLockedSync:
     """Creates `.rbep_sync_lock`; refuses re-entry; releases on exit."""
@@ -251,6 +261,7 @@ class TestLockedSync:
         cleanup. We forge an old mtime and verify re-acquire succeeds."""
         import os
         import time
+
         lock = tmp_path / ".rbep_sync_lock"
         lock.touch()
         # Backdate by 15 minutes:

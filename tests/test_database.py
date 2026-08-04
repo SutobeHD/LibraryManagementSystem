@@ -6,6 +6,7 @@ and the thin `update_track_comment` wrapper. We deliberately avoid
 loading any real XML or live SQLite — every test mocks the underlying
 `xml_db` / `active_db` so the surface under test is the facade itself.
 """
+
 from __future__ import annotations
 
 import threading
@@ -28,6 +29,7 @@ from app.database import (
 # Lock primitives
 # ---------------------------------------------------------------------------
 
+
 class TestLockPrimitives:
     """Phase 1.4 promised: every mutator goes through a reentrant lock."""
 
@@ -35,9 +37,9 @@ class TestLockPrimitives:
         # RLock instances expose `_is_owned` (CPython >=3.10); plain Lock
         # does not. We assert on type identity via the public factory's
         # repr because `threading.RLock` is a factory function, not a class.
-        assert "RLock" in repr(type(_db_write_lock)) or "_thread" in repr(
-            type(_db_write_lock)
-        ), f"expected an RLock — got {type(_db_write_lock)!r}"
+        assert "RLock" in repr(type(_db_write_lock)) or "_thread" in repr(type(_db_write_lock)), (
+            f"expected an RLock — got {type(_db_write_lock)!r}"
+        )
 
     def test_rlock_is_reentrant(self) -> None:
         # The contract: db_lock() can re-acquire from the same thread
@@ -61,18 +63,33 @@ class TestLockPrimitives:
 # _serialised decorator
 # ---------------------------------------------------------------------------
 
+
 class TestSerialisedDecorator:
     """Every mutating method on RekordboxDB must be wrapped."""
 
     @pytest.mark.parametrize(
         "method_name",
         [
-            "set_mode", "load_library", "unload_library", "create_new_library",
-            "refresh_metadata", "add_track", "delete_track", "rename_playlist",
-            "move_playlist", "delete_playlist", "reorder_playlist_track",
-            "create_folder", "create_smart_playlist", "update_smart_playlist",
-            "create_playlist", "add_track_to_playlist", "remove_track_from_playlist",
-            "save", "update_tracks_metadata", "update_track_comment",
+            "set_mode",
+            "load_library",
+            "unload_library",
+            "create_new_library",
+            "refresh_metadata",
+            "add_track",
+            "delete_track",
+            "rename_playlist",
+            "move_playlist",
+            "delete_playlist",
+            "reorder_playlist_track",
+            "create_folder",
+            "create_smart_playlist",
+            "update_smart_playlist",
+            "create_playlist",
+            "add_track_to_playlist",
+            "remove_track_from_playlist",
+            "save",
+            "update_tracks_metadata",
+            "update_track_comment",
         ],
     )
     def test_method_is_wrapped(self, method_name: str) -> None:
@@ -82,12 +99,12 @@ class TestSerialisedDecorator:
         `__wrapped__` so we can detect the decoration."""
         method = getattr(RekordboxDB, method_name)
         assert hasattr(method, "__wrapped__"), (
-            f"{method_name} is not decorated with @_serialised — "
-            "concurrent mutations could race."
+            f"{method_name} is not decorated with @_serialised — concurrent mutations could race."
         )
 
     def test_decorator_releases_after_call(self) -> None:
         """`_serialised` must release the lock when the wrapped method returns."""
+
         @_serialised
         def stub(self):
             return "ok"
@@ -113,6 +130,7 @@ class TestSerialisedDecorator:
 # ---------------------------------------------------------------------------
 # set_mode validation
 # ---------------------------------------------------------------------------
+
 
 class TestSetMode:
     """`set_mode` rejects unknown values and lazily creates standalone master.db."""
@@ -140,11 +158,14 @@ class TestSetMode:
         # Force the path to point at a non-existent location and stub
         # the creator to fail.
         monkeypatch.setattr(
-            db, "live_db_path",
+            db,
+            "live_db_path",
             __import__("pathlib").Path("/nonexistent/never/master.db"),
         )
         monkeypatch.setattr(
-            db, "ensure_standalone_master_db", lambda: False,
+            db,
+            "ensure_standalone_master_db",
+            lambda: False,
         )
         assert db.set_mode("live") is False
 
@@ -152,6 +173,7 @@ class TestSetMode:
 # ---------------------------------------------------------------------------
 # update_track_comment thin-wrap
 # ---------------------------------------------------------------------------
+
 
 class TestUpdateTrackComment:
     """`update_track_comment` is a 1-line wrapper around update_tracks_metadata."""
@@ -169,6 +191,7 @@ class TestUpdateTrackComment:
 # ---------------------------------------------------------------------------
 # _filter_tracks streaming URL filter
 # ---------------------------------------------------------------------------
+
 
 class TestFilterTracks:
     """`_filter_tracks` drops soundcloud:/spotify:/tidal:/beatport: paths

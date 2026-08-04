@@ -6,7 +6,6 @@ import os
 import re
 import shutil
 import subprocess
-import threading
 import time
 import wave
 import xml.etree.ElementTree as ET
@@ -1293,13 +1292,9 @@ class ImportManager:
                     bg_path = COVERS_DIR / bg_name
                     with open(bg_path, "wb") as f:
                         f.write(art_data)
-                    artwork_path = str(
-                        bg_path.relative_to(
-                            Path(REKORDBOX_ROOT).parent_path
-                            if hasattr(Path(REKORDBOX_ROOT), "parent_path")
-                            else Path(REKORDBOX_ROOT).parent
-                        )
-                    )
+                    # pathlib.Path has no `parent_path`; the hasattr branch
+                    # never fired and `.parent` was always the real path taken.
+                    artwork_path = str(bg_path.relative_to(Path(REKORDBOX_ROOT).parent))
                     # Fix path for frontend: absolute or relative strictly?
                     # Let's use absolute path for internally managed, but relative for portability?
                     # Rekordbox uses absolute. Let's stick to absolute for now to be safe with serving.
@@ -1416,7 +1411,7 @@ class ImportManager:
                             export_path = (
                                 Path(REKORDBOX_ROOT).parent / "exports" / "rekordbox_export.xml"
                             )
-                            RekordboxBridge.export_xml([str(tid)], export_path)
+                            RekordboxBridge.export_collection([str(tid)], export_path)
                             logger.info(f"Auto-export triggered for track {tid} to {export_path}")
                         except Exception as exp_err:
                             logger.warning(f"Auto-export failed: {exp_err}")
@@ -1434,12 +1429,9 @@ class ImportManager:
                 try:
                     from . import import_tracker
 
-                    if hasattr(threading.current_thread(), "_lms_import_tid"):
-                        import_tracker.update(
-                            threading.current_thread()._lms_import_tid,
-                            status="ANLZ",
-                            progress=85,
-                        )
+                    bound_task = import_tracker.current_task()
+                    if bound_task:
+                        import_tracker.update(bound_task, status="ANLZ", progress=85)
                 except Exception:
                     pass
                 write_companion_anlz(file_path, full_result)

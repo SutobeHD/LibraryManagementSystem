@@ -6,6 +6,7 @@ behaviour, and the `_fuzzy_match_track` similarity gate. We mock
 `responses` package — the surface is small enough that a fake
 Response class is cheaper than a new dev dependency.
 """
+
 from __future__ import annotations
 
 import time
@@ -24,6 +25,7 @@ from app.soundcloud_api import (
 # ---------------------------------------------------------------------------
 # Helpers — a minimal fake of the requests.Response surface _sc_get uses
 # ---------------------------------------------------------------------------
+
 
 class _FakeResponse:
     def __init__(
@@ -73,6 +75,7 @@ def _suppress_sleep(monkeypatch):
 # ---------------------------------------------------------------------------
 # _sc_get — status-code handling
 # ---------------------------------------------------------------------------
+
 
 class TestSCGetStatus:
     """The HTTP helper's job is to translate SC's status codes into our
@@ -134,13 +137,9 @@ class TestSCGetStatus:
         with pytest.raises(RateLimitError):
             _sc_get("http://api/x", headers={}, max_retries=1)
 
-    def test_200_with_malformed_json_raises_value_error(
-        self, monkeypatch
-    ) -> None:
+    def test_200_with_malformed_json_raises_value_error(self, monkeypatch) -> None:
         """Status 200 but body isn't JSON → ValueError, not silent success."""
-        stub = _make_get_stub(
-            [_FakeResponse(200, json_data=None, text="<html>SC down</html>")]
-        )
+        stub = _make_get_stub([_FakeResponse(200, json_data=None, text="<html>SC down</html>")])
         monkeypatch.setattr("app.soundcloud_api.requests.get", stub)
         with pytest.raises(ValueError, match="non-JSON"):
             _sc_get("http://api/x", headers={})
@@ -149,6 +148,7 @@ class TestSCGetStatus:
 # ---------------------------------------------------------------------------
 # SoundCloudSyncEngine._fuzzy_match_track
 # ---------------------------------------------------------------------------
+
 
 class TestFuzzyMatch:
     """The matcher uses SequenceMatcher >=0.65 with an early-exit on
@@ -191,9 +191,7 @@ class TestFuzzyMatch:
         local = {
             "t1": {"Title": "Velvet Shuffle", "Artist": "Some DJ"},
         }
-        matched = engine._fuzzy_match_track(
-            "Completely Unrelated Banger", "Other Person", local
-        )
+        matched = engine._fuzzy_match_track("Completely Unrelated Banger", "Other Person", local)
         assert matched is None
 
     def test_empty_local_returns_none(self, engine) -> None:
