@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- promptModal() is the imperative entry point for the dialog rendered by this same module — splitting them would separate an API from the component that implements it */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { X, Check } from 'lucide-react';

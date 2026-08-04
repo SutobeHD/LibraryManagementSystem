@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- this module deliberately co-locates the USB compatibility tables and format helpers with the small visual primitives that consume them (see the header note); the only cost is coarser HMR granularity for this one file */
 /**
  * UsbControls — shared helpers used across the USB sub-components.
  *

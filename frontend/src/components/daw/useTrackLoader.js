@@ -201,5 +201,6 @@ export default function useTrackLoader({
         };
 
         loadTrack();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- loads once per track; the refs and dispatch are stable and adding them would reload the buffer mid-edit
     }, [activeTrack]);
 }

@@ -193,6 +193,7 @@ const FormatConverterView = () => {
             cancelled = true;
             clearInterval(id);
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- polling loop is keyed on batchId only; fetchManifests/toast identities change every render and would restart the interval
     }, [batchId]);
 
     // ── Manifest list + rollback ──────────────────────────────────────────────

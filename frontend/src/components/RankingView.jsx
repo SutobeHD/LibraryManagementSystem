@@ -115,12 +115,15 @@ const RankingView = ({ libraryStatus, appMode }) => {
         // Let's just create a DOM event to pause others?
         const audioElements = document.querySelectorAll('audio');
         audioElements.forEach((a) => a.pause());
+        const wsRef = wavesurferRef;
         return () => {
             isMountedRef.current = false;
-            // Force stop
-            if (wavesurferRef.current && wavesurferRef.current.stop) {
+            // Force stop — read through the captured ref object so the
+            // cleanup targets whatever instance is live at unmount.
+            const ws = wsRef.current;
+            if (ws && ws.stop) {
                 try {
-                    wavesurferRef.current.stop();
+                    ws.stop();
                 } catch (e) {
                     log.debug('RankingView wavesurfer stop on unmount failed', e);
                 }

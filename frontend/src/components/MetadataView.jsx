@@ -58,6 +58,7 @@ const MetadataView = ({
         setSelectedItem(null);
         setSearchTerm('');
         setTrackFilter('');
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately keyed on tab/library only; loadItems is redefined each render and adding it would refetch on every keystroke
     }, [activeTab, libraryStatus?.loaded]);
 
     const handleSelect = (item) => {

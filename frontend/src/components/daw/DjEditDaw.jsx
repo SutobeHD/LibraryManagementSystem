@@ -149,6 +149,7 @@ const DjEditDaw = ({ track: initialTrack }) => {
             () => dispatch({ type: 'SET_PLAYING', payload: false })
         );
         dispatch({ type: 'SET_PLAYING', payload: true });
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- resumes playback only when the region list changes; loop/buffer state is read at resume time on purpose so toggling loop mid-playback does not restart audio
     }, [state.regions]);
 
     // ── AUTO CUE ──

@@ -97,7 +97,7 @@ export default function useEditorRegions({ state, setState, sourcePath, sourceBu
         if (slotIndex === -1) return; // All slots full
 
         setState((prev) => setPaletteSlot(prev, slotIndex, cloneRegion(region)));
-    }, [state.selectedRegionIds, state.regions, state, setState]);
+    }, [state, setState]);
 
     const handleDelete = useCallback(() => {
         const selectedId = state.selectedRegionIds[0];

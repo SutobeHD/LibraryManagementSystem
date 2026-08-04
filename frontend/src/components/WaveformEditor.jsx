@@ -187,6 +187,7 @@ const WaveformEditorInner = forwardRef(
                 }
             };
             analyze();
+            // eslint-disable-next-line react-hooks/exhaustive-deps -- `analyzing` is the guard this effect *sets*; including it would re-enter the analysis it just started
         }, [visualMode, multibandBuffers, bufferReady]);
 
         // Slave-band lifecycle + RAF sync loop

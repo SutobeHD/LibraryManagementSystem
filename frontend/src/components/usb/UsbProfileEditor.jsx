@@ -87,9 +87,14 @@ const UsbLibraryPanel = ({ usbTracks, activeLibrary, setActiveLibrary, loadingCo
     const [search, setSearch] = useState('');
 
     const flatKey = activeLibrary === 'library_one' ? 'library_one_flat' : 'library_legacy_flat';
-    const allTracks = usbTracks[flatKey] || [];
-    const playlists =
-        activeLibrary === 'library_legacy' ? usbTracks.library_legacy_playlists || [] : [];
+    // Memoised: the `|| []` fallbacks minted a fresh array on every render,
+    // which invalidated the filteredTracks / playlistTree useMemos below on
+    // every render — i.e. they memoised nothing.
+    const allTracks = useMemo(() => usbTracks[flatKey] || [], [usbTracks, flatKey]);
+    const playlists = useMemo(
+        () => (activeLibrary === 'library_legacy' ? usbTracks.library_legacy_playlists || [] : []),
+        [activeLibrary, usbTracks]
+    );
 
     // Build minimal id-set from selected playlist (track_keys point at TrackID)
     const filteredTracks = useMemo(() => {

@@ -126,9 +126,13 @@ export default function WaveformCanvas({
         const ro = new ResizeObserver(scheduleDraw);
         ro.observe(scrollEl);
 
-        // Listen to WaveSurfer zoom event for accurate redraw timing
+        // Listen to WaveSurfer zoom event for accurate redraw timing.
+        // Captured into a local: by cleanup time wavesurfer.current may
+        // already point at the *next* instance (or null), so unsubscribing
+        // through the ref could leave this listener attached forever.
+        const ws = wavesurfer.current;
         const zoomHandler = () => scheduleDraw();
-        wavesurfer.current.on('zoom', zoomHandler);
+        ws.on('zoom', zoomHandler);
 
         return () => {
             clearTimeout(t1);
@@ -136,7 +140,7 @@ export default function WaveformCanvas({
             scrollEl.removeEventListener('scroll', scheduleDraw);
             ro.disconnect();
             try {
-                wavesurfer.current?.un('zoom', zoomHandler);
+                ws?.un('zoom', zoomHandler);
             } catch (e) {
                 log.debug('WaveformEditor zoom listener cleanup failed', e);
             }

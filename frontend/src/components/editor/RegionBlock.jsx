@@ -94,6 +94,7 @@ const RegionBlock = ({
 
         // Draw envelope line
         drawEnvelope(ctx, width, containerHeight, region);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- draw helpers are defined below and are pure functions of the listed inputs
     }, [region, width, containerHeight, zoom, multibandData]);
 
     // Standard single-band waveform
@@ -320,6 +321,7 @@ const RegionBlock = ({
             window.addEventListener('mousemove', handleMouseMove);
             window.addEventListener('mouseup', handleMouseUp);
         },
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- handleMouseMove/handleMouseUp are declared below and resolved at call time; listing them would recreate this handler on every drag frame
         [region, width, onSelect]
     );
 

@@ -253,19 +253,17 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
             .catch((err) => console.error('Failed to load all tracks', err));
     };
 
+    // Reload the tree whenever the library finishes loading. This also covers
+    // the mount case, so the byte-identical `[]` effect that used to sit here
+    // was pure duplication — it fired loadTree() + loadAllTracks() a second
+    // time on every mount where the library was already loaded.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadTree/loadAllTracks are stable per render and re-running on their identity would refetch the whole library
     useEffect(() => {
         if (libraryStatus?.loaded) {
             loadTree();
             loadAllTracks();
         }
     }, [libraryStatus?.loaded]);
-
-    useEffect(() => {
-        if (libraryStatus?.loaded) {
-            loadTree();
-            loadAllTracks();
-        }
-    }, []);
 
     const handleSelectCollection = () => {
         setSelectedPlaylist(null);
