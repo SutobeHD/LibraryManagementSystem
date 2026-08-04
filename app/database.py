@@ -1194,6 +1194,15 @@ class RekordboxDB:
 
         return success
 
+    def update_track_title(self, tid: str, title: str) -> bool:
+        """Rename one track. Backs LibraryTools.clean_track_titles.
+
+        Was missing from this facade entirely while services.py called it,
+        so POST /api/library/clean-titles raised AttributeError on every
+        request — see tests/test_db_facade_contract.py.
+        """
+        return self.update_tracks_metadata([tid], {"Title": title})
+
     def update_track_comment(self, tid: str, comment: str) -> bool:
         return self.update_tracks_metadata([tid], {"Comment": comment})
 

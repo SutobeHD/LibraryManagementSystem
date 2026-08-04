@@ -12,7 +12,7 @@ sweep found when the gates were first driven to zero.
 | Python lint | `ruff check app/ tests/ scripts/` | blocking | 139 (+15 unlinted in `scripts/`) | 0 |
 | Python format | `ruff format --check app/ tests/ scripts/` | blocking | 8 files | 0 |
 | Python types | `mypy app/` | blocking | 154 | 0 |
-| Python tests | `pytest tests/` | blocking | 730 pass / 1 skip | unchanged |
+| Python tests | `pytest tests/` | blocking | 730 pass / 1 skip | 775 pass / 1 skip |
 | Map drift | `python scripts/regen_maps.py --check` | blocking | clean | clean |
 | Rust format | `cargo fmt --manifest-path src-tauri/Cargo.toml --check` | blocking (new) | 9 files | 0 |
 | Rust lint | `cargo clippy …` | **NOT blocking** | unknown | unknown |
@@ -81,7 +81,7 @@ same classes will recur.
 `RekordboxDB` (`app/database.py`) is a hand-written facade over
 `RekordboxXMLDB` and `LiveRekordboxDB` with **no `__getattr__`**. Anything
 missing from it is an `AttributeError` at the call site, and mypy's
-`attr-defined` is the only thing that sees it. Eight were missing while being
+`attr-defined` is the only thing that sees it. Nine were missing while being
 called:
 
 | Call | Route | Effect |
@@ -94,13 +94,24 @@ called:
 | `db.save_xml()` | analysis save, duplicate merge | silent no-op / 500 |
 | `db.get_analysis_writer()` | `POST /api/analysis/write-to-db` | always failed |
 | `db.get_unanalyzed_track_ids()` | `POST /api/analysis/write-to-db` | always failed |
+| `db.update_track_title()` | `POST /api/library/clean-titles` | always 500'd |
 
 Reads and the XML-mode writes are implemented now. Live-mode cue/beatgrid
 writes return `{"status": "error"}` — persisting them means rewriting ANLZ
 sidecars and no such path exists in the codebase yet.
 
+The ninth, `db.update_track_title()`, exists on no class at all and was found
+*after* the mypy pass, by `tests/test_db_facade_contract.py` — mypy missed it
+because `check_untyped_defs = false` and `LibraryTools.clean_track_titles` is an
+untyped function body. Live-mode `update_track_metadata()` did not handle a
+`Title` key either, so the fix covers both halves.
+
 > **If you add a method to `RekordboxXMLDB` or `LiveRekordboxDB` and want it
-> reachable from a route, add it to the facade too.** mypy is now the guard.
+> reachable from a route, add it to the facade too.** Two things guard this
+> now: `mypy app/`, and `tests/test_db_facade_contract.py`, which AST-scans
+> `app/main.py` + `app/services.py` for every `db.<attr>` and checks it against
+> the facade. The test catches what mypy cannot — untyped function bodies —
+> and names the offending file and line.
 
 ### Other live faults
 
@@ -156,6 +167,25 @@ sidecars and no such path exists in the codebase yet.
 - **Live-mode cue/beatgrid persistence.** See the facade table above.
 
 ---
+
+## Regression cover
+
+None of the bugs above had a test. They do now:
+
+- **`tests/test_db_facade_contract.py`** — the general guard. AST-scans every
+  `db.<attr>` in `app/main.py` and `app/services.py` against `RekordboxDB`, plus
+  named pins for the nine methods that shipped missing and one that asserts
+  `get_tracks` is not reintroduced as a confusing alias of `get_all_tracks`.
+- **`tests/test_regression_gate_sweep.py`** — one pin per specific fault: the
+  `uuid` import, the `delete_track` string-indexing, `TimelineCanvas`'s
+  `onRegionDrop` prop, `PlaylistBrowser`'s duplicate effect, the `lru_cache`
+  removal and `load_xml` invalidation, the thread-local import binding
+  (including that a fresh thread does not inherit a task and unbinding twice
+  does not raise), `_is_streaming_pseudo_path` against 13 inputs incl. Windows
+  drive letters, `$CLAUDE_PROJECT_DIR` in the hook wiring, and the lifecycle
+  regex against both backtick forms.
+
+Suite: 730 → 775 tests.
 
 ## Judgement calls worth knowing about
 

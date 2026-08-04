@@ -933,6 +933,9 @@ class LiveRekordboxDB:
 
             changed = False
             # 1. Direct fields
+            if "Title" in updates:
+                item.title = str(updates["Title"])
+                changed = True
             if "Comment" in updates:
                 item.commnt = str(updates["Comment"])
                 changed = True
@@ -978,6 +981,8 @@ class LiveRekordboxDB:
 
                 # Update in-memory cache
                 if tid in self.tracks:
+                    if "Title" in updates:
+                        self.tracks[tid]["Title"] = updates["Title"]
                     if "Comment" in updates:
                         self.tracks[tid]["Comment"] = updates["Comment"]
                     if "Rating" in updates:

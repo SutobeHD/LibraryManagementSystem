@@ -18,7 +18,7 @@
     `ruff==0.15.8` / `mypy==1.19.1`.
   - Fixed: `POST /api/library/format-swap/execute` raised `NameError` on every
     call — `uuid.uuid4()` with `uuid` imported only inside two other functions.
-  - Fixed: eight methods were called on the `RekordboxDB` facade that it never
+  - Fixed: nine methods were called on the `RekordboxDB` facade that it never
     defined. It has no `__getattr__`, so each was an `AttributeError` at the
     call site. Hot-cue save (`POST /api/track/cues/save`) and beatgrid save
     (`POST /api/track/grid/save`) — both called by the waveform/region editors —
@@ -52,6 +52,16 @@
     onto `threading.current_thread()` to a real `threading.local()` in
     `app/import_tracker.py` (`bind_current_task` / `unbind_current_task` /
     `current_task`).
+  - Fixed: `POST /api/library/clean-titles` raised `AttributeError` on every
+    call — `db.update_track_title()` exists on no class. Found by the new
+    facade-contract test, not by mypy (`check_untyped_defs = false` hides it).
+    Live-mode `update_track_metadata()` also ignored a `Title` key; both halves
+    are implemented now.
+  - Added: `tests/test_db_facade_contract.py` — AST-scans every `db.<attr>` in
+    `app/main.py` and `app/services.py` against `RekordboxDB` so a missing
+    facade delegation fails the suite instead of a request. Plus
+    `tests/test_regression_gate_sweep.py`, one named pin per bug listed above.
+    Suite 730 → 775.
   - Changed: `scripts/` is now covered by ruff in CI and pre-commit.
 
 - Analysis accuracy + engine fixes:

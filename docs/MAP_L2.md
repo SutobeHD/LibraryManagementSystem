@@ -241,6 +241,7 @@ Setup logging
 - `  RekordboxDB.remove_track_from_playlist()`
 - `  RekordboxDB.save()`
 - `  RekordboxDB.update_tracks_metadata()`
+- `  RekordboxDB.update_track_title()` — Rename one track.
 - `  RekordboxDB.update_track_comment()`
 - `  RekordboxDB.update_track_path()` — Update the on-disk file path of a track after a rename operation.
 
@@ -1952,6 +1953,16 @@ Tests for `app/database.py`.
 - `  TestFilterTracks.test_unknown_scheme_preserved()` — Only the four explicit prefixes are filtered.
 - `  TestFilterTracks.test_unknown_input_type_passed_through()` — If the caller hands a non-dict / non-list we just return it.
 
+### `tests/test_db_facade_contract.py`
+
+Facade invariant: every ``db.<method>`` a caller uses must exist.
+
+- `test_every_db_attribute_exists_on_the_facade()` — No caller may reach for something RekordboxDB does not define.
+- `test_class_level_attrs_still_resolve()` — Keeps the allowlist above honest as the facade evolves.
+- `test_instance_attrs_are_set_by_init()` — Every INSTANCE_ATTRS entry must actually be assigned in ``__init__``.
+- `test_previously_missing_methods_are_present()` — Named regression pins for the nine that shipped missing.
+- `test_get_tracks_is_not_reintroduced()` — ``db.get_tracks()`` never existed; the method is ``get_all_tracks``.
+
 ### `tests/test_db_taste.py`
 
 taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py).
@@ -2325,6 +2336,24 @@ Tests for app/rbep_parser.py — Rekordbox Editor Project (.rbep) XML parser.
 - `test_to_dict_shape()`
 - `test_list_projects_empty_for_missing_dir()`
 - `test_list_and_parse_project_by_name()`
+
+### `tests/test_regression_gate_sweep.py`
+
+Named regression pins for the bugs the 2026-08-04 quality-gate sweep found.
+
+- `test_format_swap_can_reach_uuid()` — ``uuid`` must be importable at ``app.main`` module scope.
+- `test_live_delete_track_treats_playlist_entries_as_ids()` — ``playlists_tracks`` holds content-ID strings, not row objects.
+- `test_live_playlists_tracks_stores_ids_not_dicts()` — Pins the assumption the fix above rests on.
+- `test_timeline_canvas_declares_on_region_drop()` — ``handleDrop`` calls ``onRegionDrop``; the props list must declare it.
+- `test_playlist_browser_loads_tree_once()` — Only one effect may fetch the playlist tree.
+- `test_group_rollups_are_not_lru_cached()` — ``@lru_cache`` on a method keys on ``self`` and leaks the instance.
+- `test_load_xml_invalidates_group_caches()` — Reloading must not serve the previous library's rollups.
+- `test_import_task_binding_is_thread_local()`
+- `test_thread_object_is_not_monkey_patched()`
+- `test_streaming_pseudo_path_detection()` — One helper now backs both sync sites that used to inline this.
+- `test_hooks_are_invoked_by_absolute_path()` — settings.json must not reference the hooks relatively.
+- `test_hooks_anchor_on_their_own_location()`
+- `test_lifecycle_regex_parses_both_backtick_forms()` — The backtick must be optional independently of the folder prefix.
 
 ### `tests/test_rekordbox_bridge.py`
 

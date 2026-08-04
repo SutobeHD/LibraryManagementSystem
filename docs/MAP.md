@@ -220,6 +220,7 @@
 | `tests/test_batch_worker.py` | Tests for app/batch_worker.py — pure comment-transform logic. |
 | `tests/test_compare_rekordbox.py` | Unit tests for the pure comparison helpers in scripts/compare_rekordbox.py. |
 | `tests/test_database.py` | Tests for `app/database.py`. |
+| `tests/test_db_facade_contract.py` | Facade invariant: every ``db.<method>`` a caller uses must exist. |
 | `tests/test_db_taste.py` | taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py). |
 | `tests/test_download_registry.py` | Tests for app/download_registry.py — SoundCloud download dedup/history DB. |
 | `tests/test_external_track_match.py` | external_track_match unit tests (external-track-match-unified-module T-3..T-9). |
@@ -241,6 +242,7 @@
 | `tests/test_popularity_engine.py` | PopularityStore tests (underground-mainstream-classifier T1-T3). |
 | `tests/test_rate_limit.py` | Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter. |
 | `tests/test_rbep_parser.py` | Tests for app/rbep_parser.py — Rekordbox Editor Project (.rbep) XML parser. |
+| `tests/test_regression_gate_sweep.py` | Named regression pins for the bugs the 2026-08-04 quality-gate sweep found. |
 | `tests/test_rekordbox_bridge.py` | Tests for app/rekordbox_bridge.py — Rekordbox XML <-> local DB import. |
 | `tests/test_require_session.py` | Phase-2 require_session dual-acceptance tests (T3 — app/auth.py). |
 | `tests/test_route_uniqueness.py` | Routing-table invariant: no duplicate (method, path) registrations. |
