@@ -19,7 +19,6 @@
  * Pure presentational. Receives nodes as props (slot pattern) — does NOT
  * render any DAW-specific logic, ref, or state.
  */
-import React from 'react';
 import { Music } from 'lucide-react';
 
 export default function DawLayout({

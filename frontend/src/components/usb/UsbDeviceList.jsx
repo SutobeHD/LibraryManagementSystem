@@ -4,12 +4,11 @@
  * Renders the list of registered + connected USB drives. Selection state
  * is owned by the parent container (UsbView) and passed in via props.
  */
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { HardDrive, Usb, AlertTriangle, Loader2, Clock } from 'lucide-react';
 import { FS_COMPAT, normalizeFs, worstCdjStatus, formatDate, formatBytes } from './UsbControls';
 
 const UsbDeviceList = ({
-    devices,
     allDevices,
     selectedDeviceId,
     scanning,

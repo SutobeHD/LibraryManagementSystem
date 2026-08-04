@@ -2,7 +2,7 @@
  * SettingsAnalysis — Quality preset, ranking filter, library insight thresholds.
  */
 
-import React, { useCallback } from 'react';
+import { useCallback } from 'react';
 import { Sliders, Power, Info, User } from 'lucide-react';
 import { Section, Field } from './SettingsControls';
 

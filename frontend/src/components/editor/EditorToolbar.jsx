@@ -8,7 +8,6 @@
  * Pure presentation; all state/handlers come in via props.
  */
 
-import React from 'react';
 import {
     Play,
     Pause,

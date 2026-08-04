@@ -1,4 +1,4 @@
-import React, {
+import {
     useRef,
     useEffect,
     useState,
@@ -606,6 +606,8 @@ const WaveformEditorInner = forwardRef(
     }
 );
 
+WaveformEditorInner.displayName = 'WaveformEditorInner';
+
 // Public export wraps the inner component in an ErrorBoundary so a WaveSurfer
 // or decode crash doesn't take the whole app down.
 const WaveformEditor = forwardRef((props, ref) => (
@@ -613,5 +615,7 @@ const WaveformEditor = forwardRef((props, ref) => (
         <WaveformEditorInner {...props} ref={ref} />
     </WaveformErrorBoundary>
 ));
+
+WaveformEditor.displayName = 'WaveformEditor';
 
 export default WaveformEditor;

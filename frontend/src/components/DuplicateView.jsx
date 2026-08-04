@@ -16,20 +16,8 @@
  * Design: Melodex tokens (mx-*, ink-*, amber2, bad/ok).
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import {
-    Copy,
-    Check,
-    AlertTriangle,
-    Loader2,
-    Music,
-    ChevronRight,
-    Trash2,
-    Zap,
-    RefreshCw,
-    HardDrive,
-    Activity,
-} from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Copy, Check, AlertTriangle, Loader2, Trash2, Zap, RefreshCw } from 'lucide-react';
 import api from '../api/api';
 import toast from 'react-hot-toast';
 

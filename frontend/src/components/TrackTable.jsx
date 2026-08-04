@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
-    Music,
     Star,
     X,
     Check,
@@ -15,7 +14,6 @@ import {
     ListMusic,
     FolderOpen,
     Copy,
-    Info,
     Tag,
 } from 'lucide-react';
 import api from '../api/api';

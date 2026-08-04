@@ -10,7 +10,7 @@
  * Kept in one file on purpose: every sub-panel pulls a handful of these,
  * and re-importing from N scattered files was getting noisy.
  */
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
     Check,
     X,

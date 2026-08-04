@@ -13,7 +13,7 @@
  *     configurable shortcut loading to useDawShortcuts.
  *   • Renders <DawLayout> with the panel children wired up.
  */
-import React, { useState, useReducer, useCallback, useEffect, useRef, lazy } from 'react';
+import { useState, useReducer, useCallback, useEffect, useRef, lazy } from 'react';
 import toast from 'react-hot-toast';
 
 // Engine imports

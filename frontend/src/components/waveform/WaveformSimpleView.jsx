@@ -1,5 +1,3 @@
-import React from 'react';
-
 // Stripped-down view used by RankingView (simpleMode=true) — only overview + main waveform +
 // 3-band layers + mode-toggle button. No toolbar/controls/panels.
 export default function WaveformSimpleView({

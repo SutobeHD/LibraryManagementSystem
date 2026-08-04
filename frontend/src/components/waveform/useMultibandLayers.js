@@ -123,7 +123,7 @@ export default function useMultibandLayers({
             if (wsHigh.current) loadBlob(wsHigh.current, multibandBuffers.high);
 
             // Initial Sync (Might be too early, but good backup)
-            const t = wavesurfer.current.getCurrentTime();
+            const _t = wavesurfer.current.getCurrentTime();
             [wsLow, wsMid, wsHigh].forEach((ws) => {
                 if (ws.current) {
                     // ws.current.setTime(t); // Removed here, moved to ready

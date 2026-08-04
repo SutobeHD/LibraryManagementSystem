@@ -108,7 +108,7 @@ export function snapToGrid(state, time) {
             }
         }
 
-        const beatDuration = 60 / closestBeat.bpm;
+        const _beatDuration = 60 / closestBeat.bpm;
         const division = state.snapDivision || '1/4';
         const snapUnit = getSnapUnit(closestBeat.bpm, division);
 

@@ -57,7 +57,7 @@ const WaveformOverview = React.memo(({ state, dispatch }) => {
         [zoom, dispatch]
     );
 
-    const handleClick = useCallback(
+    const _handleClick = useCallback(
         (e) => {
             const clickTime = timeFromClientX(e.clientX);
             // Scroll viewport AND move playhead so the middle timeline stays in sync

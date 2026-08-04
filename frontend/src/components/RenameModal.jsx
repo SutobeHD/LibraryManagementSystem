@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Check } from 'lucide-react';
 
 const RenameModal = ({ isOpen, onClose, onConfirm, initialValue, title = 'Rename' }) => {

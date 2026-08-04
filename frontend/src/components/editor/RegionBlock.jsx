@@ -4,8 +4,8 @@
  * Displays the waveform, envelope overlay, and handles for resize/move
  */
 
-import React, { useRef, useEffect, useMemo, useCallback } from 'react';
-import { GripVertical, Volume2, VolumeX } from 'lucide-react';
+import React, { useRef, useEffect, useCallback } from 'react';
+import { VolumeX } from 'lucide-react';
 import api from '../../api/api';
 
 const RegionBlock = ({
@@ -15,8 +15,7 @@ const RegionBlock = ({
     onSelect,
     onMove,
     onResize,
-    onFadeChange,
-    onGainChange,
+
     isSelected = false,
     snapToGrid = (t) => t,
     pixelsPerSecond = 50,
@@ -29,7 +28,7 @@ const RegionBlock = ({
     const resizeMode = useRef(null); // 'left', 'right', null
 
     const [multibandData, setMultibandData] = React.useState(null);
-    const [isProcessing, setIsProcessing] = React.useState(false);
+    const [_isProcessing, setIsProcessing] = React.useState(false);
 
     // Fetch multi-band waveform data
     useEffect(() => {

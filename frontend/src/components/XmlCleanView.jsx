@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import api from '../api/api';
 import { confirmModal } from './ConfirmModal';
 import { Upload, FileCode, CheckCircle, AlertTriangle, Zap, Server } from 'lucide-react';
@@ -139,7 +139,7 @@ const XmlCleanView = () => {
                                         confirmLabel: 'Create',
                                     });
                                     if (ok) {
-                                        const res = await api.post('/api/library/new');
+                                        const _res = await api.post('/api/library/new');
                                         setScanResult({ tracks: 0, playlists: 0 });
                                     }
                                 }}

@@ -47,7 +47,7 @@ const DawControlStrip = React.memo(
             zoom,
             snapEnabled,
             snapDivision,
-            slipMode,
+
             loopEnabled,
             hotCues,
             loops,
@@ -56,7 +56,7 @@ const DawControlStrip = React.memo(
             redoStack,
             selectedRegionIds,
             waveformStyle,
-            clipboard,
+
             gridOffsetSec,
         } = state;
         const firstBeatSec = (state.tempoMap?.[0]?.positionMs || 0) / 1000 + (gridOffsetSec || 0);

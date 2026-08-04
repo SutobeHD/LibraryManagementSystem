@@ -5,7 +5,7 @@
  * (smart vs. manual), the main source (PC vs. USB) when manual, and
  * which categories of metadata to push.
  */
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { ChevronDown, ChevronRight, ArrowUpDown, Zap, Database, Usb } from 'lucide-react';
 
 const METADATA_CATEGORIES = [

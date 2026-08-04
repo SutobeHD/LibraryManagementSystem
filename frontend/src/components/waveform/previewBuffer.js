@@ -22,7 +22,7 @@ const cacheSlice = (key, buffer) => {
 };
 
 // --- Utility: Build Preview Buffer (Async with Splicing) ---
-export const buildPreviewBuffer = async (originalBuffer, cuts, originalDuration, originalPath) => {
+export const buildPreviewBuffer = async (originalBuffer, cuts, originalDuration, _originalPath) => {
     // 1. Build Base Segments (Handle Deletes)
     const deleteCuts = cuts.filter((c) => c.type === 'delete').sort((a, b) => a.start - b.start);
     let baseSegments = [];

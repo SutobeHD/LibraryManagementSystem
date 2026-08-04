@@ -2,7 +2,7 @@
  * SettingsShortcuts — Configurable DAW keyboard shortcut bindings.
  */
 
-import React, { useCallback } from 'react';
+import { useCallback } from 'react';
 import { Keyboard } from 'lucide-react';
 import { Section, KeyCapture } from './SettingsControls';
 

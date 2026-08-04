@@ -33,7 +33,7 @@ const DawTimeline = React.memo(
         dispatch,
         canvasHeight = null, // null = fill container (preferred). Number = fixed pixel height
         minCanvasHeight = 200, // floor when filling container (avoid degenerate state during layout)
-        onRegionClick,
+
         onContextMenu,
     }) => {
         const canvasRef = useRef(null);

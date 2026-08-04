@@ -13,7 +13,7 @@
  * - Palette             : clip storage sidebar
  */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Loader2, FolderOpen, X } from 'lucide-react';
 
 import TimelineCanvas from './TimelineCanvas';

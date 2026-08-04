@@ -6,8 +6,8 @@
  * Drag from palette to timeline to clone.
  */
 
-import React, { useRef, useEffect, useState } from 'react';
-import { Clipboard, X, Volume2 } from 'lucide-react';
+import { useRef, useEffect, useState } from 'react';
+import { Clipboard, X } from 'lucide-react';
 
 const PaletteSlot = ({ region, slotIndex, onDrop, onDragStart, onClear }) => {
     const canvasRef = useRef(null);

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { Loader2, Music, Upload } from 'lucide-react';
 import { log } from '../../utils/log';
 

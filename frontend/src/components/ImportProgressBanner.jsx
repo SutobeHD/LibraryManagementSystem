@@ -7,8 +7,8 @@
  *   • current track filename + per-task stage
  *   • click → Sidebar → Sync → Downloads (full Import Manager view)
  */
-import React, { useEffect, useMemo, useState } from 'react';
-import { Loader2, CheckCircle, AlertTriangle, X, ChevronRight } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Loader2, X, ChevronRight } from 'lucide-react';
 import api from '../api/api';
 
 const ACTIVE_STATES = new Set([

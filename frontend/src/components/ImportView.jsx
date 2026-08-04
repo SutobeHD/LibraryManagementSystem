@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
     Upload,
     FileAudio,
@@ -36,7 +36,7 @@ const isAudioFile = (file) => {
     return file.type.startsWith('audio/') || AUDIO_EXTENSIONS.some((ext) => name.endsWith(ext));
 };
 
-const hasAudioExtension = (name) => {
+const _hasAudioExtension = (name) => {
     const lower = (name || '').toLowerCase();
     return AUDIO_EXTENSIONS.some((ext) => lower.endsWith(ext));
 };

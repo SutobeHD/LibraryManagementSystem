@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Music, Disc, User, Play, Plus, X, ListMusic } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Search, Disc, User, Play, Plus, X, ListMusic } from 'lucide-react';
 import api from '../../api/api';
 
 const EditorBrowser = ({ onLoadTrack, onClose }) => {

@@ -1,5 +1,3 @@
-import React from 'react';
-
 // Replaces native window.confirm with a themed dialog. Click backdrop to dismiss.
 export default function ConfirmModal({ modal, setModal }) {
     if (!modal) return null;

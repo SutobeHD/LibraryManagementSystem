@@ -12,13 +12,12 @@ import { log } from '../utils/log';
 // ─── ENGINE STATE ──────────────────────────────────────────────────────────────
 
 let audioContext = null;
-let isResumed = false;
 let activeSourceNodes = [];
 let playbackStartTime = 0; // audioContext.currentTime when playback started
 let playbackOffset = 0; // timeline offset where playback started (seconds)
 let _isPlaying = false;
 let _onPlaybackEnd = null;
-let animFrameId = null;
+let _animFrameId = null;
 
 // ─── AUDIO CONTEXT LIFECYCLE ───────────────────────────────────────────────────
 
@@ -42,7 +41,6 @@ export async function resumeContext() {
     const ctx = getAudioContext();
     if (ctx.state === 'suspended') {
         await ctx.resume();
-        isResumed = true;
         log.info('[DawEngine] AudioContext resumed');
     }
 }
@@ -54,7 +52,6 @@ async function ensureContext() {
     const ctx = getAudioContext();
     if (ctx.state === 'suspended') {
         await ctx.resume();
-        isResumed = true;
     }
     return ctx;
 }
@@ -70,7 +67,6 @@ export async function dispose() {
             await audioContext.close();
         }
         audioContext = null;
-        isResumed = false;
         log.info('[DawEngine] AudioContext closed and disposed');
     }
     clearCache();
@@ -211,7 +207,7 @@ export async function playRegions(regions, sourceBuffer, fromTime, toTime = null
     const sorted = [...regions].sort((a, b) => a.timelineStart - b.timelineStart);
 
     // Calculate the total timeline duration
-    const timelineEnd = toTime || Math.max(...sorted.map((r) => r.timelineStart + r.duration));
+    const _timelineEnd = toTime || Math.max(...sorted.map((r) => r.timelineStart + r.duration));
 
     // Schedule each region that falls within the playback range
     let lastScheduledEnd = 0;

@@ -1,7 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
-export default function SoundCloudProgressModal({ isOpen, onClose }) {
+export default function SoundCloudProgressModal({ isOpen }) {
     const [progress, setProgress] = useState({
         stage: 'auth',
         message: 'Initializing...',

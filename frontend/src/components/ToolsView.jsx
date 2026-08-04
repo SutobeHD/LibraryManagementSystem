@@ -1,17 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import api from '../api/api';
 import toast from 'react-hot-toast';
 import { confirmModal } from './ConfirmModal';
 import { log } from '../utils/log';
 import {
-    Download,
     RefreshCw,
     Scissors,
     Copy,
     Wand2,
     Search,
     Check,
-    X,
     Merge,
     Sparkles,
     Loader2,

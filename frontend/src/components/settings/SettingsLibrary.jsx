@@ -5,12 +5,12 @@
  * but persists everything through the parent's `setSettings` / `save` plumbing.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import api from '../../api/api';
 import toast from 'react-hot-toast';
 import { HEARTBEAT_INTERVAL_MS } from '../../config/constants';
-import { Database, Shield, Folder, Plus, X, FolderOpen } from 'lucide-react';
-import { Toggle, Section, Field } from './SettingsControls';
+import { Database, Shield, Plus, X, FolderOpen } from 'lucide-react';
+import { Toggle, Section } from './SettingsControls';
 
 const SettingsLibrary = ({ settings, setSettings }) => {
     const [libStatus, setLibStatus] = useState({ mode: 'xml', loaded: false });

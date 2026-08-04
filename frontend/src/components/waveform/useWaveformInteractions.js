@@ -34,7 +34,7 @@ export default function useWaveformInteractions({
     setHotCues,
     loopIn,
     setLoopIn,
-    loopOut,
+
     setLoopOut,
     setIsLooping,
     beatGrid,
@@ -60,7 +60,6 @@ export default function useWaveformInteractions({
     setRenderProgress,
     simpleMode,
     toast,
-    setIsDragOver,
 }) {
     // --- File drop (load local audio) ---
     const handleFileDrop = useCallback(

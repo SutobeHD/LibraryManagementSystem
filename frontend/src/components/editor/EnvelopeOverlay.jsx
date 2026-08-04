@@ -7,7 +7,7 @@
  * - Gain level (center line)
  */
 
-import React, { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback } from 'react';
 
 const EnvelopeOverlay = ({
     region,
@@ -19,7 +19,7 @@ const EnvelopeOverlay = ({
 }) => {
     const containerRef = useRef(null);
     const [activeNode, setActiveNode] = useState(null);
-    const [isDragging, setIsDragging] = useState(false);
+    const [_isDragging, setIsDragging] = useState(false);
 
     const { fadeInDuration, fadeOutDuration, gain, duration } = region;
 

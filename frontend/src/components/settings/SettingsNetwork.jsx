@@ -5,7 +5,7 @@
  * the aggressive-download switch — same as before).
  */
 
-import React, { useCallback } from 'react';
+import { useCallback } from 'react';
 import api from '../../api/api';
 import toast from 'react-hot-toast';
 import { Wifi, Globe, RefreshCw, Power } from 'lucide-react';

@@ -8,7 +8,7 @@
  *   usbRoot     — root path of the mounted USB drive (e.g. "E:\")
  *   usbXmlPath  — path to the Rekordbox XML on the USB
  */
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
     ArrowUpDown,
     RefreshCw,

@@ -18,7 +18,7 @@
  *   │ [Reset to Defaults]            [Save] ──┤  sticky footer
  *   └──────────────────────────────────────────┘
  */
-import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Save, RotateCcw, Sliders, HardDrive, Info, Loader2, AlertTriangle } from 'lucide-react';
 import api from '../api/api';

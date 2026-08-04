@@ -19,7 +19,7 @@
  *  GET /api/insights/composition
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import api from '../api/api';
 import {
     BarChart3,
@@ -31,7 +31,6 @@ import {
     AlertCircle,
     TrendingUp,
     Hash,
-    Calendar,
     Volume2,
 } from 'lucide-react';
 

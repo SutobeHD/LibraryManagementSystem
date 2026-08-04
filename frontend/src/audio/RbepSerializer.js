@@ -47,12 +47,10 @@ export function beatsToSeconds(beatIndex, tempoMap) {
 
     // Find the surrounding tempo map entries
     let lower = tempoMap[0];
-    let upper = null;
 
     for (let i = 0; i < tempoMap.length; i++) {
         if (tempoMap[i].index <= beatIndex) {
             lower = tempoMap[i];
-            upper = tempoMap[i + 1] || null;
         } else {
             break;
         }
@@ -195,8 +193,6 @@ function parseTrack(trackEl, mastergrid) {
         const positionData = editEl.querySelector('position > data');
         if (positionData) {
             const sections = positionData.querySelectorAll('section');
-            let timelinePos = 0;
-
             for (const section of sections) {
                 const startBeat = parseFloat(section.getAttribute('start') || '0');
                 const endBeat = parseFloat(section.getAttribute('end') || '0');
@@ -224,8 +220,6 @@ function parseTrack(trackEl, mastergrid) {
                     _songBeatStart: songStartBeat,
                     _songBeatEnd: songEndBeat,
                 });
-
-                timelinePos = timelineEnd;
             }
         }
     }

@@ -652,7 +652,7 @@ function drawMixxxFilteredWaveform(
         ctx,
         sX,
         n,
-        (i) => centerY,
+        (_i) => centerY,
         (i) => centerY - sLT[i],
         colLow
     );
@@ -680,7 +680,7 @@ function drawMixxxFilteredWaveform(
         ctx,
         sX,
         n,
-        (i) => centerY,
+        (_i) => centerY,
         (i) => centerY + sLB[i],
         colLow
     );
@@ -773,8 +773,8 @@ function drawSmoothBandPath(
     centerY,
     maxAmp,
     lodLevel,
-    width,
-    height
+    _width,
+    _height
 ) {
     const widthPx = Math.max(1, Math.ceil(rEndPx) - Math.floor(rStartPx));
     // Sample density. Cap step so even narrow regions get >= 3 samples —
@@ -1035,7 +1035,7 @@ function drawPhraseMarkers(ctx, d, startTime, endTime) {
 // ─── REGION BOUNDARIES ──────────────────────────────────────────────────────────
 
 function drawRegionBoundaries(ctx, d, startTime, endTime) {
-    const { width, height, zoom, scrollX, regions, selectedIds } = d;
+    const { height, zoom, scrollX, regions, selectedIds } = d;
     const waveBot = height - PHASE_METER_HEIGHT;
 
     for (const region of regions) {
@@ -1087,7 +1087,7 @@ function drawSelectionRange(ctx, d, startTime, endTime) {
 
 // ─── CUE MARKERS (EC5 collision) ────────────────────────────────────────────────
 
-function drawCueMarkers(ctx, d, startTime, endTime) {
+function drawCueMarkers(ctx, d, _startTime, _endTime) {
     const { width, height, zoom, scrollX, hotCues, memoryCues, ghostCueX } = d;
     const waveBot = height - PHASE_METER_HEIGHT;
 
@@ -1185,7 +1185,7 @@ function drawCueMarkers(ctx, d, startTime, endTime) {
 
 // ─── LOOPS ───────────────────────────────────────────────────────────────────────
 
-function drawLoops(ctx, d, startTime, endTime) {
+function drawLoops(ctx, d, _startTime, _endTime) {
     const { width, height, zoom, scrollX, loops, activeLoopIndex } = d;
     const waveBot = height - PHASE_METER_HEIGHT;
 
@@ -1272,7 +1272,7 @@ function drawPlayhead(ctx, d) {
 // 8px strip at canvas bottom showing beat phase — pulses every beat
 
 function drawPhaseMeter(ctx, d) {
-    const { width, height, zoom, bpm, playhead } = d;
+    const { width, height, bpm, playhead } = d;
     if (!bpm || bpm <= 0) return;
 
     const y = height - PHASE_METER_HEIGHT;
@@ -1285,8 +1285,8 @@ function drawPhaseMeter(ctx, d) {
     const phase = (playhead % beatDur) / beatDur; // 0..1
 
     // Fill color: cyan → orange as approaching next beat
-    const r = Math.round(phase * 255);
-    const g = Math.round((1 - phase) * 229);
+    const _r = Math.round(phase * 255);
+    const _g = Math.round((1 - phase) * 229);
     const fillColor = phase < 0.75 ? COLORS.phaseMeterFill : COLORS.phaseMeterLate;
 
     ctx.fillStyle = fillColor;

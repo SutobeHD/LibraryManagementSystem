@@ -5,7 +5,7 @@
  * tab is active) and writes through to /api/usb/profiles.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import api from '../../api/api';
 import toast from 'react-hot-toast';
 import { confirmModal } from '../ConfirmModal';

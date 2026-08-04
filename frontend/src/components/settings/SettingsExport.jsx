@@ -2,7 +2,7 @@
  * SettingsExport — Default export folder, format defaults, Rekordbox bridge.
  */
 
-import React, { useCallback } from 'react';
+import { useCallback } from 'react';
 import api from '../../api/api';
 import toast from 'react-hot-toast';
 import { promptModal } from '../PromptModal';

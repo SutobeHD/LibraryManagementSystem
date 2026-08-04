@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '../api/api';
 import { Star, Palette, Save, X } from 'lucide-react';

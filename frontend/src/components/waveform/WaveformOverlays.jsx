@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { Scissors, X } from 'lucide-react';
 import { HOT_CUE_COLORS } from './useWaveformInteractions';
 

@@ -17,9 +17,7 @@
  * All API calls live in the container; we only call back into the
  * handler props provided.
  */
-import React from 'react';
 import {
-    HardDrive,
     Power,
     Edit2,
     AlertTriangle,
@@ -401,14 +399,11 @@ const UsbSyncPanel = ({
     sel,
     isConnected,
     diff,
-    syncing,
-    syncProgress,
+
     onRename,
     onEject,
     onInitLibrary,
     onSaveProfile,
-    onLoadDiff,
-    onRunSync,
 }) => {
     return (
         <>
@@ -487,13 +482,9 @@ export const UsbSyncControlsTail = ({
     diff,
     syncing,
     syncProgress,
-    onSaveProfile,
+
     onLoadDiff,
     onRunSync,
-    onRename,
-    onDeleteProfile,
-    onResetUsb,
-    onOpenFormatWizard,
 }) => {
     return (
         <>

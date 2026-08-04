@@ -160,7 +160,7 @@ export default function useEditorRegions({ state, setState, sourcePath, sourceBu
         [sourcePath, sourceBufferRef, setState]
     );
 
-    const handlePaletteDragStart = useCallback((slotIndex, region) => {
+    const handlePaletteDragStart = useCallback((_slotIndex, _region) => {
         // Could track which slot is being dragged
     }, []);
 

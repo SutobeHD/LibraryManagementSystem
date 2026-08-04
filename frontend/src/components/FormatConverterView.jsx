@@ -15,7 +15,7 @@
  *   5. Manifests panel allows rollback of any prior batch.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
     RefreshCw,
     Loader2,

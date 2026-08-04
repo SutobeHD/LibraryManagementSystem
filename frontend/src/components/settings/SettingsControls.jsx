@@ -9,7 +9,7 @@
  *   KeyCapture  — keyboard-shortcut capture button
  */
 
-import React, { useState, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { ChevronRight } from 'lucide-react';
 
 /** Render a toggle switch */

@@ -17,7 +17,7 @@
  * All mutations (toggling a sync_playlists entry, switching active library)
  * fan up to the container via callbacks.
  */
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Database, ChevronDown, ChevronRight, ListMusic, Loader2, Music } from 'lucide-react';
 import { PlaylistTreeNode, PillTab } from './UsbControls';
 

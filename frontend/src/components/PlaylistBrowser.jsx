@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import api from '../api/api';
 import { log } from '../utils/log';
@@ -8,24 +8,14 @@ import {
     ListMusic,
     ChevronRight,
     ChevronDown,
-    Music,
     Database,
-    Settings,
     Plus,
     Sparkles,
     RotateCw,
-    MoreVertical,
     Edit2,
     Trash2,
     FolderPlus,
-    ArrowRightLeft,
-    X,
     Upload,
-    Star,
-    Tag,
-    GripVertical,
-    Library,
-    Disc,
 } from 'lucide-react';
 import TrackTable from './TrackTable';
 import SoundCloudProgressModal from './SoundCloudProgressModal';
@@ -47,7 +37,7 @@ const PlaylistNode = ({
     const [dragOver, setDragOver] = useState(null); // "top", "center", "bottom"
     const isFolder = node.Type === '0';
     const isIntelligent = node.Type === '4';
-    const isRegularPlaylist = node.Type === '1';
+    const _isRegularPlaylist = node.Type === '1';
 
     const handleContextMenu = (e) => {
         e.preventDefault();
@@ -294,7 +284,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
         });
     };
 
-    const handleSmartPlaylists = async () => {
+    const _handleSmartPlaylists = async () => {
         setIsProcessing(true);
         try {
             await api.post('/api/library/smart-playlists', {
@@ -533,7 +523,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
         }
     };
 
-    const handleSync = async () => {
+    const _handleSync = async () => {
         setIsProcessing(true);
         try {
             await api.post('/api/library/sync');

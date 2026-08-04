@@ -1,4 +1,3 @@
-import React from 'react';
 import {
     Play,
     Pause,
@@ -41,7 +40,7 @@ export default function WaveformControls({
     projectList,
     hotCues,
     handleSetHotCue,
-    handleJumpHotCue,
+
     handleDeleteHotCue,
     jumpToCue,
     formatTime,

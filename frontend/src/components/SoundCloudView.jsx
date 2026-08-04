@@ -3,8 +3,6 @@ import api from '../api/api';
 import {
     Download,
     Cloud,
-    Key,
-    Info,
     CheckCircle,
     XCircle,
     Loader2,

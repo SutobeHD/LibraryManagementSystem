@@ -8,7 +8,6 @@
  * The container owns the preview/submit calls; this component is purely
  * presentational and pushes state changes back via `onChange`.
  */
-import React from 'react';
 import { AlertTriangle, Loader2, Eraser } from 'lucide-react';
 import { formatBytes } from './UsbControls';
 

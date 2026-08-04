@@ -2,7 +2,7 @@
  * SettingsAudio — CPAL output device picker (Tauri-only enumeration).
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Music } from 'lucide-react';
 import { Section, Field } from './SettingsControls';
 

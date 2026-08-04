@@ -1,4 +1,3 @@
-import React from 'react';
 import { ZoomIn, ZoomOut } from 'lucide-react';
 import { ZOOM_MIN, ZOOM_MAX, ZOOM_STEP } from './useWaveformInteractions';
 

@@ -15,7 +15,7 @@
  *   • ./usb/MetadataSyncPanel.jsx — collapsible metadata sync
  *   • ./usb/PlayCountSync.jsx     — collapsible playcount diff
  */
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { HardDrive, RefreshCw, ArrowUpDown } from 'lucide-react';
 import api from '../api/api';
 import toast from 'react-hot-toast';

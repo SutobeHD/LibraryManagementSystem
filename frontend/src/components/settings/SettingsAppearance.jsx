@@ -2,7 +2,7 @@
  * SettingsAppearance — Waveform band colours, locale picker.
  */
 
-import React, { useCallback } from 'react';
+import { useCallback } from 'react';
 import { Palette, Globe } from 'lucide-react';
 import { Section, Field } from './SettingsControls';
 

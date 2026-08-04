@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import api from '../api/api';
 import {
     Download,
@@ -11,7 +11,6 @@ import {
     Activity,
     ListMusic,
     Clock,
-    Trash2,
     Filter,
     TrendingUp,
     BarChart3,
@@ -186,10 +185,7 @@ const TaskCard = ({ task }) => {
                                         className="truncate max-w-[260px] font-mono text-[10px]"
                                         title={task.file_path}
                                     >
-                                        {task.file_path
-                                            .split(/[\\\/]/)
-                                            .slice(-2)
-                                            .join('/')}
+                                        {task.file_path.split(/[\\/]/).slice(-2).join('/')}
                                     </span>
                                 )}
                                 {task.playlist_title && (

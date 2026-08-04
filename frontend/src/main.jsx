@@ -1,13 +1,10 @@
-import React, { useState, useMemo, Component, useEffect, useCallback, Suspense, lazy } from 'react';
+import { useState, useMemo, Component, useEffect, useCallback, Suspense, lazy } from 'react';
 import { invoke } from '@tauri-apps/api/core'; // Tauri Invoke
 import ReactDOM from 'react-dom/client';
 import {
-    Music,
     Cloud,
     Download,
     Settings,
-    Folder,
-    Wrench,
     Zap,
     FileCode,
     AlertTriangle,
@@ -16,8 +13,6 @@ import {
     Minus,
     Square,
     Unplug,
-    ArrowRightLeft,
-    RotateCw,
     Activity,
     BarChart3,
     HardDrive,
@@ -51,7 +46,7 @@ import { HEARTBEAT_INTERVAL_MS, LIBRARY_STATUS_INTERVAL_MS } from './config/cons
 // SPEED: Lazy-load heavy views — only the active view is loaded into the bundle
 // const WaveformEditor = lazy(() => import('./components/WaveformEditor')); // Replaced by DjEditDaw
 const DjEditDaw = lazy(() => import('./components/daw/DjEditDaw'));
-const ToolsView = lazy(() => import('./components/ToolsView'));
+const _ToolsView = lazy(() => import('./components/ToolsView'));
 const SettingsView = lazy(() => import('./components/SettingsView'));
 const RankingView = lazy(() => import('./components/RankingView'));
 const XmlCleanView = lazy(() => import('./components/XmlCleanView'));
@@ -63,8 +58,8 @@ const SoundCloudView = lazy(() => import('./components/SoundCloudView'));
 const SoundCloudSyncView = lazy(() => import('./components/SoundCloudSyncView'));
 const DownloadManagerView = lazy(() => import('./components/DownloadManagerView'));
 import ImportProgressBanner from './components/ImportProgressBanner';
-const PhraseGeneratorView = lazy(() => import('./components/PhraseGeneratorView'));
-const DuplicateView = lazy(() => import('./components/DuplicateView'));
+const _PhraseGeneratorView = lazy(() => import('./components/PhraseGeneratorView'));
+const _DuplicateView = lazy(() => import('./components/DuplicateView'));
 const UtilitiesView = lazy(() => import('./components/UtilitiesView'));
 const InsightsView = lazy(() => import('./components/InsightsView'));
 

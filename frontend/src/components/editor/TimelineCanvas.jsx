@@ -9,7 +9,7 @@
  * - Snap to grid
  */
 
-import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import RegionBlock from './RegionBlock';
 import { snapToGrid } from '../../audio/TimelineState';
 
@@ -18,12 +18,16 @@ const TimelineCanvas = ({
     onRegionSelect,
     onRegionMove,
     onRegionResize,
-    onRegionSplit,
-    onVolumeChange,
+
     onGridAdjust,
     onSelectionChange,
     onPlayheadChange,
     onZoomChange,
+    // Passed by NonDestructiveEditor as handleTimelineDrop. Was missing from
+    // this list while handleDrop below already called it, so every palette
+    // drop threw a ReferenceError into the surrounding try/catch and only
+    // surfaced as a "Drop failed" console line.
+    onRegionDrop,
     containerHeight = 240,
 }) => {
     const containerRef = useRef(null);
@@ -32,7 +36,7 @@ const TimelineCanvas = ({
     const playheadRef = useRef(null);
     const animationRef = useRef(null);
 
-    const [viewportWidth, setViewportWidth] = useState(0);
+    const [_viewportWidth, setViewportWidth] = useState(0);
     const [isSelecting, setIsSelecting] = useState(false);
     const [selectionStart, setSelectionStart] = useState(0);
     const [isDraggingGrid, setIsDraggingGrid] = useState(false);
@@ -47,7 +51,7 @@ const TimelineCanvas = ({
         isPlaying,
         selection,
         snapEnabled,
-        snapDivision,
+
         gridOffset,
         phrases,
     } = state;
