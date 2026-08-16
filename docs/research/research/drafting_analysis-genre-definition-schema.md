@@ -21,6 +21,7 @@ superseded_by: []
 ## Lifecycle
 
 - 2026-08-16 — `research/idea_` — created from template
+- 2026-08-16 — `research/drafting_` — Stage 1 pre-filled by interactive agent (Prior Art, Problem, Goals, Constraints, Dependencies, 11 OQs, Research Plan); Idea-Verifier pass pending → `research-draft`
 
 ## Original Idea (verbatim — never edit)
 
@@ -38,71 +39,79 @@ ich möchte Genres und ähnliches so definieren das man Algorithmen schreiben ka
 
 ## Prior Art
 
-Stage 1 Prior-Art-Agent. Adjacent shipped / explored / abandoned work. ≤120 words. Link by slug (relative path).
-
-- **Shipped:** [implemented_<slug>_<date>](../archived/implemented_<slug>_<date>.md) — what it covers, what it doesn't
-- **Active research:** [<state>_<slug>](../research/<state>_<slug>.md) — overlap, conflict?
-- **Superseded / abandoned:** [<archived>](../archived/…) — why it didn't ship; lessons
-- **External precedent:** rekordbox/serato/traktor/library-manager behavior — cite source
-
-If no prior art: **"None — greenfield."**
+- **Shipped (code, no research doc):** `hint_genre()` `app/analysis_engine.py:2035` — hardcoded if/elif over `(bpm, brightness, texture)` → 10 fixed labels, no confidence, no subgenres, untunable; result persisted as `genre_hint`. `detect_mood()` `:1964` — same shape for mood: 6 labels + 5 spectral scalars.
+- **Active research:** [accepted_recommender-rules-baseline](../implement/accepted_recommender-rules-baseline.md) — dual-track genre decision (Rekordbox `Genre` = user truth locally, `genre_hint` for SC candidates); this doc changes what `genre_hint` is worth. [accepted_recommender-similar-tracks](../implement/accepted_recommender-similar-tracks.md) — planned 46-dim feature vector (MFCC, chroma, bandwidth, flatness, tempo_variability), extraction **not yet shipped** → share ONE extraction pass, don't decode twice. [inprogress_recommender-taste-llm-audio](../implement/inprogress_recommender-taste-llm-audio.md) — consumes same scalars. [inprogress_analysis-underground-mainstream-classifier](../implement/inprogress_analysis-underground-mainstream-classifier.md) — derived-label precedent (sidecar store + migrate framework, `app/popularity_engine.py`); orthogonal axis, reusable store pattern.
+- **Superseded / abandoned:** none.
+- **External precedent:** Rekordbox / Serato / Traktor carry genre as free-text ID3 tag only — no audio-side detection. Beatport / Discogs taxonomies are editorial, not feature-derived. Essentia ships pretrained genre models (Discogs-EffNet, MusiCNN) — Stage 2 evaluates; `essentia==2.1b6.dev1110` already pinned (`requirements.txt:48`, optional import).
 
 ## Problem
 
-Stage 1 Worker. ≤60 words (soft). What / why / cost-of-not-doing.
+Genre in library = free-text ID3 / Rekordbox field: missing, inconsistent, or wrong on large parts of collection. Only audio-side detector = 10-branch if/elif (`hint_genre`), no confidence, no subgenres, not user-editable, accuracy never measured. DJ-relevant styles (peak-time techno vs melodic house) unreachable. Cost of not doing: manual per-track tagging, weak input for recommender + smart playlists + USB export.
 
 ## Goals / Non-goals
 
 **Goals**
-- …
+- Definition format for genres **and adjacent attributes** (style, mood, energy, era, vocal/instrumental) — data, not code
+- Detector evaluates definitions vs per-track features → label(s) + confidence + **which rule fired** (explainable)
+- User adds/edits definitions without code change; invalid definition fails safe (skip + log, never crash analysis)
+- Measured accuracy vs ground truth + regression test in repo (repo rule: no claim without measurement — `docs/ANALYSIS_HANDOVER.md` §0)
+- Hierarchy (parent genre → subgenre) + multi-label output
 
 **Non-goals**
-- …
+- Overwriting user `Genre` in `master.db` / ID3 without explicit user action
+- Cloud / API genre lookup (local-first)
+- Duplicating recommender similarity work — this feeds it
+- Deciding rules-vs-ML now — Stage 2 decides on measured evidence
 
 ## Constraints
 
-Stage 1 Worker + Risk-Surface-Agent. External facts bounding solution. Cite source per bullet.
-
-- **External APIs / rate limits:** …
-- **Data shape (`master.db`, ANLZ, USB PDB):** … (cite `file:line` invariant if applicable)
-- **Schicht-A pinning / library version:** … (cite `requirements.txt:N` or `Cargo.toml:N`)
-- **Perf / capacity:** … (latency budget, memory ceiling)
-- **Legal / compliance:** … (license, GDPR, region)
-- **Concurrency invariants:** `_db_write_lock`, `validate_audio_path`, `SafeAnlzParser` if relevant
+- **Feature inventory today** (`accepted_recommender-similar-tracks.md:74`, re-verify Stage 2): persisted = `bpm`, `bpm_raw`, `key`/`camelot`/`key_id`/`key_confidence`, `lufs`, `replay_gain`, `peak`, `stereo{}`, `mood{brightness,warmth,texture,spectral_centroid,spectral_rolloff}`, `genre_hint`, `grid_confidence` ≈ 12–15 scalars. NOT persisted: MFCC/chroma aggregates, `spectral_bandwidth`, `spectral_flatness`, `tempo_variability`, any rhythm-pattern descriptor.
+- **Perf:** existing `detect_mood` librosa pass ≈ 0.15 s/track; MFCC + chroma_cqt + bandwidth + flatness ≈ +0.3–0.5 s/track on already-decoded `y` (`accepted_recommender-similar-tracks.md:75`). Full analysis today 15–30 s/track.
+- **Cache:** `ANALYSIS_VERSION = 3` (`app/analysis_cache.py:32`) — new persisted features force a bump → full library re-analysis. Budget that migration.
+- **DB:** Rekordbox `Genre` = user truth. Any `master.db` write acquires `_db_write_lock` (`app/database.py`); `/api/genres` (`app/main.py:886`) reads master.db genres only. Derived-label sidecar-DB precedent: `app/popularity_engine.py`, `app/db_taste.py`, `app/variant_schema.py`.
+- **USB export:** PDB genre table `0x01` byte layout (`app/usb_pdb.py`) — writing detected genres into an export changes rows the CDJ reads; byte invariants must hold.
+- **Stack:** madmom/essentia build only on py3.10; CI + container run py3.11 → librosa fallback (`docs/ANALYSIS_HANDOVER.md` §2). Any essentia-model path must degrade cleanly and be capability-gated (`AnalysisEngine.capabilities()`).
+- **Schicht-A pinning:** new dep = `==X.Y.Z` + license/CVE audit (`.claude/rules/coding-rules.md`). No PyYAML in `requirements.txt` today → JSON is the zero-dep format.
+- **Legal:** pretrained model weights carry own licenses (Discogs-EffNet family often non-commercial) — verify before any bundling.
 
 ## Dependencies
 
-Stage 1 Risk-Surface-Agent. New libs / external services / hardware required. Each row sized for a Schicht-A audit decision.
+Undecided — depends on OQ5 (rules vs ML). Rules-only path adds **none**.
 
 | Dep | Kind | Version | License | Schicht-A audit needed? | Why |
 |---|---|---|---|---|---|
-| <name> | py / npm / cargo / system | X.Y.Z | MIT/BSD/… | yes/no | <one-line reason> |
-
-If none: **"None — uses existing stack only."**
+| _(rules-only path)_ | — | — | — | no | JSON + stdlib only; `numpy`/`librosa` already pinned |
+| `essentia` pretrained models | py + model weights | `2.1b6.dev1110` (pinned) + weights TBD | AGPL (lib) / weights TBD | yes (weights) | OQ5 ML path; py3.10-only build |
+| `scikit-learn` (fallback classifier) | py | TBD | BSD-3 | yes | only if OQ5 picks a trained-local model |
 
 ## Open Questions
 
-Stage 1 Worker. Numbered. Each resolvable (yes/no or X vs Y), not philosophy. Each becomes a parallel research agent in Stage 2.
-
-1. …
+1. **Format** — JSON rule file (zero dep) vs YAML (new dep) vs SQLite table (UI-editable) vs Python DSL? Must be user-editable + schema-validatable + diffable in git.
+2. **Rule semantics** — hard feature ranges vs weighted scoring vs decision tree? How is confidence derived, and how are ties/overlaps between two matching definitions resolved?
+3. **Separability** — can the 12–15 already-persisted scalars separate the top ~20 DJ-relevant genres at useful accuracy, or is that mathematically hopeless without new features? Measure, don't guess.
+4. **New features worth their compute** — which of MFCC, chroma, `spectral_bandwidth`, `spectral_flatness`, `tempo_variability`, onset/rhythm periodicity, percussive/harmonic ratio actually raise separability? Coordinate with `recommender-similar-tracks` 46-dim vector — one extraction, two consumers.
+5. **Rules vs ML vs hybrid** — hand-written definitions vs essentia pretrained (Discogs-EffNet) vs rules-over-embeddings. Trade: explainability + user-editability (goal) vs accuracy vs py3.10-only stack vs weight licensing.
+6. **Ground truth** — where from? user library ID3 genres as noisy labels, hand-labelled subset, or synthetic like `scripts/selftest_analysis.py`? Which metric (top-1 / top-3 / per-genre recall) and what counts as "good enough"?
+7. **Taxonomy** — whose vocabulary (Beatport / Discogs / user-defined), how deep the hierarchy, how are user-invented styles ("peak-time techno") expressed?
+8. **Storage + write-back** — sidecar DB (popularity_engine pattern) vs `master.db` `Genre` write vs MyTag. Multi-label + confidence need a shape `master.db` doesn't have. Opt-in write-back to ID3 / Rekordbox / USB export?
+9. **Relation to existing code** — replace `hint_genre()` outright, or wrap it as one built-in definition set? What breaks in `accepted_recommender-rules-baseline` which consumes `genre_hint` today?
+10. **"und ähnliches" scope** — which adjacent attributes get the same definition mechanism in M1 (mood/energy) vs later (era, vocal/instrumental, danceability)? `detect_mood()` becomes a definition set too?
+11. **Editing UX + safety** — file in app data dir vs in-app editor; validation on load, versioning of definition sets, fallback when a user definition is broken or matches everything.
 
 ## Research Plan
 
-Stage 1 Worker. ≤120 words (soft). Which aspects Stage 2 researches in parallel — one bullet per agent. Drives the autonomous explore stage; phrase each bullet so two parallel agents (codebase + web) could split it.
-
-- Agent 1 (codebase + web): …
-- Agent 2 (codebase + web): …
+- Agent 1 (codebase + web): definition-format survey — JSON-schema-validated rules, existing OSS genre-rule engines, MusicBrainz/Discogs taxonomy shapes → OQ1, OQ7
+- Agent 2 (codebase): full feature inventory + extraction cost re-measurement in `analysis_engine.py`; what a shared extraction pass with `recommender-similar-tracks` looks like → OQ3, OQ4
+- Agent 3 (web + codebase): separability evidence — published per-feature genre-discrimination results (BPM/spectral/MFCC/rhythm), essentia model accuracy + weight licenses → OQ3, OQ5
+- Agent 4 (codebase): storage + write-back paths — sidecar-DB precedent, `master.db` `Genre` semantics, MyTag, USB PDB genre table → OQ8
+- Agent 5 (codebase + web): ground-truth + metric design; reuse of `scripts/selftest_analysis.py` harness for a genre benchmark → OQ6
+- Agent 6 (codebase): blast radius on `genre_hint` consumers + `ANALYSIS_VERSION` bump / re-analysis migration → OQ9, OQ10, OQ11
 
 ## Idea Verification
 
-Stage 1 Verifier. Dated entries, append-only. PASS / FAIL + ≤40-word reason (checked vs `## Original Idea` + `## Prior Art`).
-
-### YYYY-MM-DD — <PASS|FAIL>
-- …
-
----
-
-> ↓ Stage 2 — `exploring_` (autonomous; no user gate). On Idea-Verifier PASS, `research-draft` advances `drafting_` → `exploring_` directly. `research-explore` runs parallel tiered agents (codebase + web + synthesis per OQ), an Adversarial agent, a Citation-Quality verifier, and a Research-Verifier — one autonomous pass to `evaluated_`.
+### 2026-08-16 — PENDING
+- Stage 1 pre-filled by interactive agent (not by `research-draft`). Prior Art / Constraints cites drawn from sister docs + code, **not yet re-verified line-by-line**.
+- Awaiting `research-draft` Idea-Verifier pass before `drafting_` → `exploring_`.
 
 ## Findings / Investigation
 
