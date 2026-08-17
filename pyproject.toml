@@ -120,8 +120,17 @@ extend-exclude = '''
 [tool.mypy]
 python_version = "3.10"
 files = ["app"]
-# Forgiving defaults — tighten once the codebase is fully annotated.
-check_untyped_defs = false
+# `check_untyped_defs` is ON. It is the setting that decides whether mypy looks
+# inside functions that have no annotations — which is most of this codebase.
+# With it off, `db.update_track_title()` (a method defined on no class at all,
+# reached from an unannotated LibraryTools body) sat in a live route for as long
+# as it existed; a test had to find it instead. Turning it on cost 19 fixes,
+# among them a dead `cls._run_engine` assignment nothing read and a Path/str
+# variable reused across two loops.
+#
+# `disallow_untyped_defs` stays off — that one demands annotations everywhere
+# and is a much larger job. Turn it on when the annotation coverage is there.
+check_untyped_defs = true
 disallow_untyped_defs = false
 warn_unused_ignores = true
 warn_redundant_casts = true

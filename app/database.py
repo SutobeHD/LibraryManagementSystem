@@ -237,8 +237,8 @@ class RekordboxXMLDB:
         return self.tracks.get(str(tid))
 
     def _extract_metadata(self):
-        artist_counts = defaultdict(int)
-        genre_counts = defaultdict(int)
+        artist_counts: defaultdict[str, int] = defaultdict(int)
+        genre_counts: defaultdict[str, int] = defaultdict(int)
         for t in self.tracks.values():
             if t.get("Artist"):
                 track_artists = self._split_artists(t["Artist"])
@@ -280,7 +280,7 @@ class RekordboxXMLDB:
     def get_all_labels(self):
         if self._labels_cache is not None:
             return self._labels_cache
-        label_counts = defaultdict(int)
+        label_counts: defaultdict[str, int] = defaultdict(int)
         for t in self.tracks.values():
             label = t.get("Label")
             if label:
@@ -295,7 +295,7 @@ class RekordboxXMLDB:
     def get_all_albums(self):
         if self._albums_cache is not None:
             return self._albums_cache
-        album_counts = defaultdict(int)
+        album_counts: defaultdict[str, int] = defaultdict(int)
         for t in self.tracks.values():
             album = t.get("Album")
             if album:

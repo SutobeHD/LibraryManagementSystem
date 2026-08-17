@@ -861,7 +861,7 @@ class UsbProfileManager:
 
         # --- Helper: Transform to Tree ---
         def build_tree(tracks):
-            tree = {"name": "root", "type": "folder", "children": []}
+            tree: dict[str, Any] = {"name": "root", "type": "folder", "children": []}
             for t in tracks:
                 path_parts = t.get("FolderPath", "").strip("/").split("/")
                 current = tree

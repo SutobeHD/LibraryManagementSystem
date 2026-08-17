@@ -132,7 +132,10 @@ class XMLProcessor:
                 pl = XMLProcessor.create_node(target_art, art, "1")
                 pl.set("Entries", str(len(tids)))
                 for t in tids:
-                    ET.SubElement(pl, "TRACK").set("Key", t)
+                    # TrackID can be absent on a malformed <TRACK>; "" keeps
+                    # the reference syntactically valid instead of crashing
+                    # the whole export.
+                    ET.SubElement(pl, "TRACK").set("Key", t or "")
 
         # Labels
         target_lbl = XMLProcessor.get_or_create_path(root_node, label_folder)
@@ -141,7 +144,7 @@ class XMLProcessor:
                 pl = XMLProcessor.create_node(target_lbl, lbl, "1")
                 pl.set("Entries", str(len(tids)))
                 for t in tids:
-                    ET.SubElement(pl, "TRACK").set("Key", t)
+                    ET.SubElement(pl, "TRACK").set("Key", t or "")
 
         tree.write(output_path, encoding="utf-8", xml_declaration=True)
         return output_path
@@ -634,7 +637,7 @@ class LibraryTools:
     @staticmethod
     def clean_track_titles(track_ids):
         """Removes artist name from track title if redundant."""
-        results = {"success": [], "errors": []}
+        results: dict[str, list[Any]] = {"success": [], "errors": []}
         for tid in track_ids:
             track = db.get_track_details(tid)
             if not track:
@@ -741,7 +744,7 @@ class LibraryTools:
 
     @staticmethod
     def smart_rename(track_ids, pattern):
-        results = {"success": [], "errors": []}
+        results: dict[str, list[Any]] = {"success": [], "errors": []}
         for tid in track_ids:
             track = db.get_track_details(tid)
             if not track:
@@ -931,9 +934,12 @@ class BeatAnalyzer:
             return cls._engine_available
         cls._engine_checked = True
         try:
-            from .analysis_engine import run_full_analysis as _rfa
+            # Import only as an availability probe — the actual call site
+            # below imports run_full_analysis directly. This used to also
+            # stash `cls._run_engine = staticmethod(_rfa)`, which nothing
+            # ever read.
+            import app.analysis_engine  # noqa: F401
 
-            cls._run_engine = staticmethod(_rfa)
             cls._engine_available = True
         except ImportError:
             cls._engine_available = False

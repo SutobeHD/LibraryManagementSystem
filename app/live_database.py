@@ -34,6 +34,7 @@ class LiveRekordboxDB:
         self.loaded = False
         self.loading_status = "Idle"
         self._beatgrid_thread: threading.Thread | None = None
+        self._analysis_writer: Any = None
 
     @property
     def db(self):
@@ -414,8 +415,8 @@ class LiveRekordboxDB:
             logger.error(f"Failed to load playlist tracks via rbox: {e}")
 
     def _finalize_ui_metadata(self):
-        artist_counts = defaultdict(int)
-        genre_counts = defaultdict(int)
+        artist_counts: defaultdict[str, int] = defaultdict(int)
+        genre_counts: defaultdict[str, int] = defaultdict(int)
         artist_artworks = {}
         for t in self.tracks.values():
             if t.get("Artist"):

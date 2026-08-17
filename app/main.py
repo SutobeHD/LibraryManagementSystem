@@ -129,6 +129,14 @@ from .usb_manager import UsbActions, UsbDetector, UsbProfileManager, UsbSyncEngi
 # Per-operation lock — prevents race conditions on concurrent sync requests (Criterion 10)
 _sync_lock = asyncio.Lock()
 
+# Written by POST /api/system/heartbeat. Declared here because the route
+# uses `global last_heartbeat` and nothing else creates the name — without
+# this the module attribute only springs into existence after the first
+# request. Nothing reads it yet: the frontend polls every 5 s (see the
+# HEARTBEAT_INTERVAL_MS effect in frontend/src/main.jsx) but no idle-shutdown
+# watchdog consumes the timestamp.
+last_heartbeat: float = 0.0
+
 # CONFIG LOGGING
 # Pre-set RedactingFormatter on each handler BEFORE basicConfig so the
 # `if h.formatter is None` guard (CPython 3.13 Lib/logging/__init__.py L110)
@@ -2701,9 +2709,11 @@ async def startup_event():
         except OSError:
             pass
 
-    for stale_file in MUSIC_DIR.glob("*.tmp"):
+    # Distinct name from the glob.glob() loop above — that one yields str,
+    # this one yields Path.
+    for stale_tmp in MUSIC_DIR.glob("*.tmp"):
         with contextlib.suppress(OSError):
-            os.remove(stale_file)
+            os.remove(stale_tmp)
 
     # Req 29: Timeout Handling - Prevent infinite hangs on DB locks during boot
     try:
