@@ -225,6 +225,7 @@
 | `tests/test_download_registry.py` | Tests for app/download_registry.py — SoundCloud download dedup/history DB. |
 | `tests/test_external_track_match.py` | external_track_match unit tests (external-track-match-unified-module T-3..T-9). |
 | `tests/test_folder_watcher.py` | Tests for app/folder_watcher.py — auto-import folder watcher. |
+| `tests/test_frontend_test_wiring.py` | Every frontend test file must actually be run by `npm test`. |
 | `tests/test_import_tracker.py` | Tests for app/import_tracker.py — live import-progress tracker. |
 | `tests/test_library_format_swap.py` | Tests for app.library_format_swap. |
 | `tests/test_library_source.py` | Tests for app/library_source.py — the Live/XML normalization layer. |

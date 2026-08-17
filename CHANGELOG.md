@@ -64,7 +64,20 @@
     A generalised variant of the scan covers every module-level `app.*` object
     and caught `AudioEngine.get_duration()` — called behind a `hasattr()` guard
     in `render_segment()` for a method that has never existed, leaving the
-    branch permanently dead. Suite 730 → 777.
+    branch permanently dead. Suite 730 → 779.
+  - Added: `npm test --prefix frontend` + a blocking CI step. The dawReducer
+    suite (10 assertions on the composed reducer) existed with no npm script
+    and no CI step and had never run. `tests/test_frontend_test_wiring.py`
+    fails the build if another `*.test.js` appears under `frontend/src`
+    without being wired in — Node's `--test` takes globs only from v21 (CI is
+    on 20) and the resolver hook breaks directory discovery, so the script
+    must name files explicitly.
+  - Changed: mypy `check_untyped_defs` is ON. It was off, which is why
+    `db.update_track_title()` survived — the call sits in an unannotated
+    function body, and most of this codebase is unannotated. Cost 19 fixes,
+    incl. a dead `cls._run_engine` assignment nothing read, an undeclared
+    `last_heartbeat` global nothing reads, and a `TrackID` that could reach
+    `Element.set()` as None and take down a whole XML export.
   - Fixed: the ruff gate was checking two thirds of the tree and reporting
     success. Passing several paths silently drops some of them —
     `ruff format --check app tests` sees 108 files, `tests app` sees 55, same

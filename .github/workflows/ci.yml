@@ -67,7 +67,7 @@ jobs:
         run: mypy app/
 
       - name: Run pytest
-        run: pytest tests/ -v --tb=short   # 730 passed / 1 skipped at time of writing
+        run: pytest tests/ -v --tb=short   # 779 passed / 1 skipped at time of writing
 
       - name: Check MAP.md / MAP_L2.md drift
         run: python scripts/regen_maps.py --check   # pure AST/regex, no runtime deps — regen via scripts/regen_maps.py
@@ -126,7 +126,7 @@ jobs:
         run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --no-fail-fast
 
   frontend-lint:
-    name: Frontend — eslint + prettier + build
+    name: Frontend — eslint + prettier + test + build
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -149,6 +149,13 @@ jobs:
 
       - name: Prettier check
         run: npm run format:check --prefix frontend
+
+      # The dawReducer suite (10 assertions on the composed reducer) existed
+      # with no npm script and no CI step, so it had never run here.
+      # tests/test_frontend_test_wiring.py fails if a new *.test.js appears
+      # under frontend/src without being added to the `test` script.
+      - name: Frontend tests
+        run: npm test --prefix frontend
 
       - name: Build (smoke)
         run: npm run build --prefix frontend

@@ -2033,6 +2033,13 @@ Tests for app/folder_watcher.py — auto-import folder watcher.
 - `test_add_after_stop_returns_false()`
 - `test_normalize_resolves_to_absolute()`
 
+### `tests/test_frontend_test_wiring.py`
+
+Every frontend test file must actually be run by `npm test`.
+
+- `test_every_frontend_test_file_is_in_the_test_script()`
+- `test_ci_runs_the_frontend_suite()`
+
 ### `tests/test_import_tracker.py`
 
 Tests for app/import_tracker.py — live import-progress tracker.

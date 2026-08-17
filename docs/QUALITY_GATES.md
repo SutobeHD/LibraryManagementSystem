@@ -12,13 +12,14 @@ sweep found when the gates were first driven to zero.
 | Python lint | `ruff check .` | blocking | 139 (+15 unlinted in `scripts/`, +3 in `backend_entry.py`) | 0 |
 | Python format | `ruff format --check .` | blocking | 8 files (+1 never reached) | 0 |
 | Python types | `mypy app/` | blocking | 154 | 0 |
-| Python tests | `pytest tests/` | blocking | 730 pass / 1 skip | 777 pass / 1 skip |
+| Python tests | `pytest tests/` | blocking | 730 pass / 1 skip | 779 pass / 1 skip |
 | Map drift | `python scripts/regen_maps.py --check` | blocking | clean | clean |
 | Rust format | `cargo fmt --manifest-path src-tauri/Cargo.toml --check` | blocking (new) | 9 files | 0 |
 | Rust lint | `cargo clippy …` | **NOT blocking** | unknown | unknown |
 | Rust tests | `cargo test …` | blocking | — | — |
 | Frontend lint | `npm run lint --prefix frontend` (`--max-warnings=0`) | blocking | 5 errors + 195 warnings | 0 |
 | Frontend format | `npm run format:check --prefix frontend` | blocking | 111 files | 0 |
+| Frontend tests | `npm test --prefix frontend` | blocking (new) | never ran | 10 pass |
 | Frontend build | `npm run build --prefix frontend` | blocking | green | green |
 
 Everything except clippy ran with `|| true` before this sweep, i.e. no gate
@@ -207,7 +208,15 @@ None of the bugs above had a test. They do now:
   drive letters, `$CLAUDE_PROJECT_DIR` in the hook wiring, and the lifecycle
   regex against both backtick forms.
 
-Suite: 730 → 777 tests.
+Suite: 730 → 779 tests.
+
+The frontend had a test suite too — `frontend/src/audio/dawState/dawReducer.test.js`,
+10 assertions on the composed reducer — with no `test` script in
+`frontend/package.json` and no CI step. It had never run here. Wired now, and
+`tests/test_frontend_test_wiring.py` fails the build if another `*.test.js`
+appears under `frontend/src` without being added: Node's `--test` takes glob
+patterns only from v21 (CI is on 20), and directory discovery breaks on the ESM
+resolver hook the suite needs, so the script has to name files explicitly.
 
 ## Judgement calls worth knowing about
 
