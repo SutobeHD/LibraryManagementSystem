@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import string
 import subprocess
@@ -36,6 +37,20 @@ except Exception:
 # created by ImportManager for every locally imported file — it's a working-
 # memory bucket and would just clutter the CDJ playlist menu.
 EXCLUDED_USB_PLAYLISTS: frozenset = frozenset({"import"})
+
+
+def _drive_letter(drive: str) -> str | None:
+    """Single drive letter from a caller-supplied drive string, or ``None``.
+
+    Both Windows drive paths get spliced into PowerShell command strings, so a
+    lenient strip is not enough — quotes, semicolons and ``#`` survive
+    ``rstrip`` and turn ``ParseName('{d}:')`` into arbitrary code execution.
+    Anything that is not exactly one ASCII letter is rejected outright.
+    """
+    if not drive:
+        return None
+    candidate = drive.strip().rstrip("\\").rstrip("/").rstrip(":")
+    return candidate.upper() if re.fullmatch(r"[A-Za-z]", candidate) else None
 
 
 def _is_excluded_playlist(name: str) -> bool:
@@ -1965,7 +1980,9 @@ class UsbActions:
     @staticmethod
     def eject(drive: str) -> dict:
         """Safely eject a USB drive on Windows with timeout/verification (Req 23)."""
-        drive_letter = drive.rstrip("\\").rstrip(":")
+        drive_letter = _drive_letter(drive)
+        if drive_letter is None:
+            return {"status": "error", "message": "Invalid drive."}
         try:
             # Use PowerShell to eject
             ps_cmd = (
@@ -2049,8 +2066,8 @@ class UsbActions:
         system = platform.system()
         try:
             if system == "Windows":
-                drive_letter = drive.rstrip("\\").rstrip("/").rstrip(":")
-                if not drive_letter:
+                drive_letter = _drive_letter(drive)
+                if drive_letter is None:
                     return {"status": "error", "message": "Invalid drive."}
                 ps_fs = "FAT32" if fs == "FAT32" else "exFAT"
                 # -Confirm:$false suppresses interactive prompt; -Force overrides
