@@ -45,8 +45,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from app import import_tracker
+from app import ffmpeg_resolver, import_tracker
 from app.config import FFMPEG_BIN
+from app.database import db_lock
 
 logger = logging.getLogger("LIBRARY_FORMAT_SWAP")
 
@@ -69,24 +70,28 @@ TARGET_CONFIG: dict[str, dict[str, Any]] = {
         "codec_args": ["-c:a", "pcm_s16le"],
         "file_type": FILE_TYPE_AIFF,
         "expansion_ratio": 5.0,
+        "required_encoder": "pcm_s16le",
     },
     "flac": {
         "ext": ".flac",
         "codec_args": ["-c:a", "flac"],
         "file_type": FILE_TYPE_FLAC,
         "expansion_ratio": 2.5,
+        "required_encoder": "flac",
     },
     "wav": {
         "ext": ".wav",
         "codec_args": ["-c:a", "pcm_s16le"],
         "file_type": FILE_TYPE_WAV,
         "expansion_ratio": 5.0,
+        "required_encoder": "pcm_s16le",
     },
     "mp3": {
         "ext": ".mp3",
         "codec_args": ["-c:a", "libmp3lame", "-q:a", "0"],
         "file_type": FILE_TYPE_MP3,
         "expansion_ratio": 0.4,
+        "required_encoder": "libmp3lame",
     },
 }
 
@@ -98,9 +103,12 @@ WATCHDOG_INTERVAL = 50
 DISK_HARD_ABORT_FACTOR = 1.5
 DISK_WARN_FACTOR = 1.2
 
-# Engine-write lock — serialises every rbox.MasterDb mutation across the
-# FastAPI worker thread pool. Single-process FastAPI per Gap 4 in the research
-# doc; threading.RLock therefore suffices (no cross-process concerns).
+# Batch lock — serialises format-swap batches against each other ONLY. It does
+# NOT serialise against the rest of the app: every other master.db writer takes
+# `_db_write_lock` from app/database.py, a different lock object. Each actual DB
+# mutation below therefore also takes `db_lock()`, narrowly — holding the global
+# write lock for a whole multi-hour batch would freeze every other DB write.
+# Lock order is always _engine_lock -> db_lock; never the reverse.
 _engine_lock = threading.RLock()
 
 
@@ -115,12 +123,9 @@ def _rekordbox_dir() -> Path:
 
 
 def _ffprobe_bin() -> str:
-    # Mirror app.config.FFMPEG_BIN convention but for ffprobe sibling.
-    if FFMPEG_BIN.lower().endswith("ffmpeg.exe"):
-        return FFMPEG_BIN[:-10] + "ffprobe.exe"
-    if FFMPEG_BIN.lower().endswith("ffmpeg"):
-        return FFMPEG_BIN[:-6] + "ffprobe"
-    return "ffprobe"
+    # ffprobe stays independent of per-encoder ffmpeg resolution — see
+    # app/ffmpeg_resolver.py docstring (Electron bundles ship no ffprobe).
+    return ffmpeg_resolver.resolve_ffprobe()
 
 
 # ── Plan + result types ───────────────────────────────────────────────────
@@ -133,6 +138,7 @@ class TrackPlan:
     target_path: Path
     source_file_type: int
     source_file_size: int
+    copy_only: bool = False
 
 
 @dataclass
@@ -147,6 +153,14 @@ class DryRunResult:
     target_file_type: int
     warning: str | None
     error: str | None
+    # Export-mode extras (hand-serialised in main.py — new fields must also
+    # land in the dry-run route dict or they never reach the frontend).
+    mode: str = "in_place"
+    dest_dir: str | None = None
+    copy_only_tracks: int = 0
+    encoder_available: bool = True
+    encoder_binary: str | None = None
+    encoder_reason: str | None = None
 
 
 @dataclass
@@ -162,6 +176,7 @@ class ExecuteResult:
     finished: bool
     error: str | None = None
     task_ids: list[str] = field(default_factory=list)
+    mode: str = "in_place"
 
 
 # In-memory batch registry — keyed by batch_id, polled via GET /batch/{id}.
@@ -296,10 +311,19 @@ def _probe_sample_rate(audio_path: Path) -> int | None:
         return None
 
 
-def _build_ffmpeg_cmd(src: Path, dst: Path, sample_rate: int, target: str) -> list[str]:
+def _build_ffmpeg_cmd(
+    src: Path,
+    dst: Path,
+    sample_rate: int,
+    target: str,
+    ffmpeg_bin: str | None = None,
+) -> list[str]:
     cfg = TARGET_CONFIG[target]
+    if ffmpeg_bin is None:
+        resolved = ffmpeg_resolver.resolve_for_encoder(str(cfg["required_encoder"]))
+        ffmpeg_bin = resolved.binary or FFMPEG_BIN
     cmd: list[str] = [
-        FFMPEG_BIN,
+        ffmpeg_bin,
         "-hide_banner",
         "-loglevel",
         "error",
@@ -323,9 +347,29 @@ def _build_ffmpeg_cmd(src: Path, dst: Path, sample_rate: int, target: str) -> li
     return cmd
 
 
-def _run_ffmpeg_convert(src: Path, dst: Path, sample_rate: int, target: str) -> None:
+def _build_export_ffmpeg_cmd(
+    src: Path,
+    dst: Path,
+    sample_rate: int,
+    target: str,
+    keep_cover: bool,
+    ffmpeg_bin: str | None,
+) -> list[str]:
+    """Export variant: mp3/flac can carry embedded cover art via stream copy.
+
+    ``-map 0:v:0?`` — the ``?`` makes the video map optional so cover-less
+    sources don't error. aiff/wav muxers can't carry attached pics; they keep
+    the plain ``-vn`` command.
+    """
+    cmd = _build_ffmpeg_cmd(src, dst, sample_rate, target, ffmpeg_bin)
+    if keep_cover and target in ("mp3", "flac"):
+        idx = cmd.index("-vn")
+        cmd[idx : idx + 1] = ["-map", "0:a:0", "-map", "0:v:0?", "-c:v", "copy"]
+    return cmd
+
+
+def _exec_ffmpeg(cmd: list[str], dst: Path) -> None:
     """Raises ``RuntimeError`` on failure."""
-    cmd = _build_ffmpeg_cmd(src, dst, sample_rate, target)
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=PER_TRACK_TIMEOUT_SEC)
     except subprocess.TimeoutExpired as e:
@@ -335,6 +379,41 @@ def _run_ffmpeg_convert(src: Path, dst: Path, sample_rate: int, target: str) -> 
     if r.returncode != 0 or not dst.exists() or dst.stat().st_size < 1024:
         msg = (r.stderr or "").strip()[:300] or f"rc={r.returncode}"
         raise RuntimeError(f"ffmpeg failed: {msg}")
+
+
+def _run_ffmpeg_convert(
+    src: Path,
+    dst: Path,
+    sample_rate: int,
+    target: str,
+    ffmpeg_bin: str | None = None,
+) -> None:
+    """Raises ``RuntimeError`` on failure."""
+    _exec_ffmpeg(_build_ffmpeg_cmd(src, dst, sample_rate, target, ffmpeg_bin), dst)
+
+
+def _run_export_convert(
+    src: Path,
+    dst: Path,
+    sample_rate: int,
+    target: str,
+    keep_cover: bool,
+    ffmpeg_bin: str | None,
+) -> None:
+    """Cover-preserving convert with a single ``-vn`` retry on failure."""
+    cmd_a = _build_export_ffmpeg_cmd(src, dst, sample_rate, target, keep_cover, ffmpeg_bin)
+    cmd_plain = _build_ffmpeg_cmd(src, dst, sample_rate, target, ffmpeg_bin)
+    try:
+        _exec_ffmpeg(cmd_a, dst)
+        return
+    except RuntimeError:
+        if cmd_a == cmd_plain:
+            raise
+        logger.warning(
+            "export convert: cover-map attempt failed for %s — retrying with -vn",
+            src.name,
+        )
+    _exec_ffmpeg(cmd_plain, dst)
 
 
 def _backup_master_db(timestamp: str) -> dict[str, str]:
@@ -610,6 +689,52 @@ class FormatSwapEngine:
                 continue
         return plans
 
+    def _build_export_plans(self, scope: dict[str, Any], dest_dir: Path) -> list[TrackPlan]:
+        """Export-mode plans: flat layout into ``dest_dir``, no skip on
+        already-at-target sources — those become ``copy_only`` plans instead.
+
+        Collision handling is case-insensitive (Windows FS): second claimant
+        of a name gets ``<stem> [<content_id>]<ext>``; a further collision
+        (defensive — enumerate_scope can't yield the same content twice)
+        appends a counter.
+        """
+        plans: list[TrackPlan] = []
+        claimed: set[str] = set()
+        for c in self.enumerate_scope(scope):
+            try:
+                fp = getattr(c, "folder_path", "") or ""
+                if not fp:
+                    continue
+                src = Path(fp)
+                if not src.exists():
+                    continue
+            except (TypeError, ValueError, OSError):
+                continue
+            content_id = str(c.id)
+            copy_only = src.suffix.lower() == self.target_ext.lower()
+            name = f"{src.stem}{self.target_ext}"
+            if name.casefold() in claimed or (dest_dir / name).exists():
+                name = f"{src.stem} [{content_id}]{self.target_ext}"
+                counter = 2
+                while name.casefold() in claimed or (dest_dir / name).exists():
+                    name = f"{src.stem} [{content_id}]-{counter}{self.target_ext}"
+                    counter += 1
+            claimed.add(name.casefold())
+            try:
+                plans.append(
+                    TrackPlan(
+                        content_id=content_id,
+                        source_path=src,
+                        target_path=dest_dir / name,
+                        source_file_type=int(getattr(c, "file_type", 0) or 0),
+                        source_file_size=int(getattr(c, "file_size", 0) or 0),
+                        copy_only=copy_only,
+                    )
+                )
+            except (TypeError, ValueError):
+                continue
+        return plans
+
     # — Dry-run —
 
     def dry_run(self, scope: dict[str, Any]) -> DryRunResult:
@@ -682,13 +807,115 @@ class FormatSwapEngine:
             ),
         )
 
+    def export_dry_run(self, scope: dict[str, Any], dest_dir: Path) -> DryRunResult:
+        """Preview an export-copies run. Disk check runs against the
+        DESTINATION volume (nearest existing ancestor of ``dest_dir``), not
+        the source volume like the in-place ``dry_run``.
+        """
+        target_file_type = _detect_filetype_for_target(self.live_db, self.target)
+        try:
+            plans = self._build_export_plans(scope, dest_dir)
+        except ValueError as e:
+            return DryRunResult(
+                scope=scope,
+                target=self.target,
+                tracks=[],
+                total_source_mb=0.0,
+                estimated_target_mb=0.0,
+                drive_free_mb=0.0,
+                drive_check_pass=False,
+                target_file_type=target_file_type,
+                warning=None,
+                error=str(e),
+                mode="export_copies",
+                dest_dir=str(dest_dir),
+            )
+
+        expansion = float(TARGET_CONFIG[self.target]["expansion_ratio"])
+        total_src = sum(p.source_file_size for p in plans)
+        estimated_target = sum(
+            p.source_file_size * (1.0 if p.copy_only else expansion) for p in plans
+        )
+        copy_only_tracks = sum(1 for p in plans if p.copy_only)
+
+        drive_free = 0
+        drive_check_pass = True
+        warning: str | None = None
+        if plans:
+            try:
+                probe = dest_dir
+                while not probe.exists() and probe.parent != probe:
+                    probe = probe.parent
+                usage = shutil.disk_usage(str(probe))
+                drive_free = int(usage.free)
+                required_hard = int(estimated_target * DISK_HARD_ABORT_FACTOR)
+                required_warn = int(estimated_target * DISK_WARN_FACTOR)
+                if drive_free < required_hard:
+                    drive_check_pass = False
+                elif drive_free < required_warn:
+                    warning = (
+                        f"Disk free {drive_free / 1024 / 1024:.0f} MB is borderline "
+                        f"(need ~{required_warn / 1024 / 1024:.0f} MB at 1.2x margin)"
+                    )
+            except OSError as e:
+                warning = f"Disk-free check failed: {e}"
+
+        encoder_available = True
+        encoder_binary: str | None = None
+        encoder_reason: str | None = None
+        if any(not p.copy_only for p in plans):
+            resolved = ffmpeg_resolver.resolve_for_encoder(
+                str(TARGET_CONFIG[self.target]["required_encoder"])
+            )
+            encoder_available = resolved.available
+            encoder_binary = resolved.binary
+            encoder_reason = resolved.reason
+
+        return DryRunResult(
+            scope=scope,
+            target=self.target,
+            tracks=[
+                {
+                    "content_id": p.content_id,
+                    "source": str(p.source_path),
+                    "target": str(p.target_path),
+                    "source_size": p.source_file_size,
+                    "copy_only": p.copy_only,
+                }
+                for p in plans
+            ],
+            total_source_mb=round(total_src / 1024 / 1024, 1),
+            estimated_target_mb=round(estimated_target / 1024 / 1024, 1),
+            drive_free_mb=round(drive_free / 1024 / 1024, 1),
+            drive_check_pass=drive_check_pass,
+            target_file_type=target_file_type,
+            warning=warning,
+            error=(
+                None
+                if drive_check_pass
+                else (
+                    f"Insufficient disk on export target: need ~"
+                    f"{(estimated_target * DISK_HARD_ABORT_FACTOR) / 1024 / 1024:.0f} MB at "
+                    f"1.5x margin, free {drive_free / 1024 / 1024:.0f} MB"
+                )
+            ),
+            mode="export_copies",
+            dest_dir=str(dest_dir),
+            copy_only_tracks=copy_only_tracks,
+            encoder_available=encoder_available,
+            encoder_binary=encoder_binary,
+            encoder_reason=encoder_reason,
+        )
+
     # — Execute —
 
     def execute(self, scope: dict[str, Any], batch_id: str | None = None) -> ExecuteResult:
         """Run the batch. Reports per-track progress via ``import_tracker``.
 
         Holds ``_engine_lock`` for the entire batch — serialises any other
-        format-swap call. Raises ``RuntimeError`` if Rekordbox is running.
+        format-swap call — and takes ``db_lock()`` narrowly around the
+        master.db snapshot and each per-track ``update_content``.
+        Raises ``RuntimeError`` if Rekordbox is running.
         """
         if _check_rekordbox_running():
             raise RuntimeError("Rekordbox is running — close it before format-swap.")
@@ -722,7 +949,11 @@ class FormatSwapEngine:
         result.manifest_path = str(manifest_path)
         _store_batch(bid, result)
 
-        db_backups = _backup_master_db(timestamp)
+        # Snapshot copies master.db + -wal + -shm one after another; a
+        # concurrent write between the copies yields a torn backup, and this
+        # is the only restore path after a batch renames thousands of files.
+        with db_lock():
+            db_backups = _backup_master_db(timestamp)
         manifest: dict[str, Any] = {
             "timestamp": timestamp,
             "batch_id": bid,
@@ -791,6 +1022,24 @@ class FormatSwapEngine:
 
                 import_tracker.update(task_id, status="Importing", progress=70)
                 backup_audio = src.with_name(src.name + f".backup-{timestamp}")
+                # Provisional entry FIRST: the rename below is the point of no
+                # return for this track. A hard abort (power loss, kill -9)
+                # between rename and the manifest append further down would
+                # otherwise orphan the .backup-<ts> file with nothing pointing
+                # at it. `new` is filled in once the DB row is updated.
+                track_idx = len(manifest["tracks"])
+                manifest["tracks"].append(
+                    {
+                        "id": plan.content_id,
+                        "original": {
+                            "folder_path": str(src),
+                            "file_name_l": src.name,
+                            "audio_backup": str(backup_audio),
+                        },
+                        "new": None,
+                    }
+                )
+                save_manifest()
                 try:
                     src.rename(backup_audio)
                 except OSError as e:
@@ -817,11 +1066,12 @@ class FormatSwapEngine:
                     old_file_size = int(c.file_size or 0)
                     new_size = dst.stat().st_size
 
-                    c.folder_path = str(dst)
-                    c.file_name_l = dst.name
-                    c.file_type = target_file_type
-                    c.file_size = new_size
-                    rbox_db.update_content(c)
+                    with db_lock():
+                        c.folder_path = str(dst)
+                        c.file_name_l = dst.name
+                        c.file_type = target_file_type
+                        c.file_size = new_size
+                        rbox_db.update_content(c)
                 except Exception as e:  # pyrekordbox raises generic MasterDbError
                     logger.error("DB update failed for %s: %s", plan.content_id, e)
                     try:
@@ -849,30 +1099,187 @@ class FormatSwapEngine:
                     _store_batch(bid, result)
                     continue
 
-                manifest["tracks"].append(
-                    {
-                        "id": plan.content_id,
-                        "original": {
-                            "folder_path": old_folder_path,
-                            "file_name_l": old_file_name_l,
-                            "file_type": old_file_type,
-                            "file_size": old_file_size,
-                            "audio_backup": str(backup_audio),
-                        },
-                        "new": {
-                            "folder_path": str(dst),
-                            "file_name_l": dst.name,
-                            "file_type": target_file_type,
-                            "file_size": new_size,
-                        },
-                    }
-                )
+                manifest["tracks"][track_idx] = {
+                    "id": plan.content_id,
+                    "original": {
+                        "folder_path": old_folder_path,
+                        "file_name_l": old_file_name_l,
+                        "file_type": old_file_type,
+                        "file_size": old_file_size,
+                        "audio_backup": str(backup_audio),
+                    },
+                    "new": {
+                        "folder_path": str(dst),
+                        "file_name_l": dst.name,
+                        "file_type": target_file_type,
+                        "file_size": new_size,
+                    },
+                }
                 save_manifest()
                 result.tracks_converted += 1
                 import_tracker.update(task_id, status="Completed", progress=100)
                 _store_batch(bid, result)
 
         save_manifest()
+        result.finished = True
+        _store_batch(bid, result)
+        return result
+
+    # — Export copies —
+
+    def export_copies(
+        self,
+        scope: dict[str, Any],
+        dest_dir: Path,
+        batch_id: str | None = None,
+        keep_cover: bool = True,
+    ) -> ExecuteResult:
+        """Copy/convert scope tracks into ``dest_dir`` — read-only wrt the
+        library. No Rekordbox gate, no master.db backup, no source rename, no
+        db writes of any kind. Writes an export report (NOT a rollback
+        manifest — originals are untouched, rollback stays an in-place-only
+        concept) into ``dest_dir`` after every track.
+        """
+        bid = batch_id or uuid.uuid4().hex[:12]
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        plans = self._build_export_plans(scope, dest_dir)
+
+        result = ExecuteResult(
+            batch_id=bid,
+            manifest_path="",
+            tracks_planned=len(plans),
+            tracks_converted=0,
+            tracks_failed=0,
+            failures=[],
+            aborted=False,
+            timestamp=timestamp,
+            finished=False,
+            mode="export_copies",
+        )
+        _store_batch(bid, result)
+
+        if not plans:
+            result.finished = True
+            _store_batch(bid, result)
+            return result
+
+        # Resolve a capable ffmpeg ONCE up front — but only when a convert
+        # plan exists (all-copy batches need no ffmpeg at all). Defense in
+        # depth behind the route preflight.
+        ffmpeg_bin: str | None = None
+        if any(not p.copy_only for p in plans):
+            resolved = ffmpeg_resolver.resolve_for_encoder(
+                str(TARGET_CONFIG[self.target]["required_encoder"])
+            )
+            if not resolved.available:
+                result.error = resolved.reason or "no capable ffmpeg binary found"
+                result.finished = True
+                _store_batch(bid, result)
+                return result
+            ffmpeg_bin = resolved.binary
+
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        # Disk preflight (hard-abort factor) against the DESTINATION volume.
+        expansion = float(TARGET_CONFIG[self.target]["expansion_ratio"])
+        estimated_target = sum(
+            p.source_file_size * (1.0 if p.copy_only else expansion) for p in plans
+        )
+        try:
+            usage = shutil.disk_usage(str(dest_dir))
+            required_hard = int(estimated_target * DISK_HARD_ABORT_FACTOR)
+            if usage.free < required_hard:
+                result.error = (
+                    f"Insufficient disk on export target: need ~"
+                    f"{required_hard / 1024 / 1024:.0f} MB at 1.5x margin, "
+                    f"free {usage.free / 1024 / 1024:.0f} MB"
+                )
+                result.finished = True
+                _store_batch(bid, result)
+                return result
+        except OSError as e:
+            logger.warning("export_copies: disk-free check failed (%s) — continuing", e)
+
+        report_path = dest_dir / f"export-report-{bid}.json"
+        result.manifest_path = str(report_path)
+        _store_batch(bid, result)
+
+        report: dict[str, Any] = {
+            "batch_id": bid,
+            "timestamp": timestamp,
+            "mode": "export_copies",
+            "target": self.target,
+            "scope": scope,
+            "dest_dir": str(dest_dir),
+            "ffmpeg_binary": ffmpeg_bin,
+            "keep_cover": keep_cover,
+            "totals": {"planned": len(plans), "converted": 0, "copied": 0, "failed": 0},
+            "tracks": [],
+        }
+
+        def save_report() -> None:
+            tmp = report_path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+            os.replace(tmp, report_path)
+
+        save_report()
+
+        with _engine_lock:
+            for i, plan in enumerate(plans, 1):
+                if i > 1 and i % WATCHDOG_INTERVAL == 0:
+                    logger.info("export_copies: progress %d/%d (batch %s)", i, len(plans), bid)
+
+                task_id = import_tracker.register(
+                    str(plan.source_path), source="format-swap-export"
+                )
+                result.task_ids.append(task_id)
+
+                src = plan.source_path
+                dst = plan.target_path
+                entry: dict[str, Any] = {
+                    "content_id": plan.content_id,
+                    "source_path": str(src),
+                    "dest_path": str(dst),
+                    "action": "copied" if plan.copy_only else "converted",
+                    "status": "ok",
+                    "error": None,
+                }
+                try:
+                    if not src.exists():
+                        raise RuntimeError("source missing")
+                    if plan.copy_only:
+                        import_tracker.update(task_id, status="Importing", progress=40)
+                        shutil.copy2(src, dst)
+                    else:
+                        import_tracker.update(task_id, status="Analyzing", progress=10)
+                        sample_rate = _probe_sample_rate(src)
+                        if not sample_rate:
+                            raise RuntimeError("ffprobe SR failed")
+                        import_tracker.update(task_id, status="Analyzing", progress=30)
+                        _run_export_convert(
+                            src, dst, sample_rate, self.target, keep_cover, ffmpeg_bin
+                        )
+                except (RuntimeError, OSError) as e:
+                    logger.error("export failed for %s: %s", src.name, e)
+                    entry["status"] = "failed"
+                    entry["error"] = str(e)
+                    report["totals"]["failed"] += 1
+                    report["tracks"].append(entry)
+                    save_report()
+                    import_tracker.update(task_id, status="Failed", progress=100, error=str(e))
+                    result.tracks_failed += 1
+                    result.failures.append({"id": plan.content_id, "error": str(e)})
+                    _store_batch(bid, result)
+                    continue
+
+                report["totals"]["copied" if plan.copy_only else "converted"] += 1
+                report["tracks"].append(entry)
+                save_report()
+                result.tracks_converted += 1
+                import_tracker.update(task_id, status="Completed", progress=100)
+                _store_batch(bid, result)
+
+        save_report()
         result.finished = True
         _store_batch(bid, result)
         return result
@@ -910,14 +1317,16 @@ class FormatSwapEngine:
             raise RuntimeError(f"manifest parse error: {e}") from e
 
         with _engine_lock:
-            for orig_str, bk_str in (manifest.get("db_backups") or {}).items():
-                bk = Path(bk_str)
-                orig = Path(orig_str)
-                if bk.exists():
-                    try:
-                        shutil.copy2(bk, orig)
-                    except OSError as e:
-                        logger.warning("rollback: DB restore failed for %s: %s", orig, e)
+            # Wholesale master.db overwrite — must exclude every other writer.
+            with db_lock():
+                for orig_str, bk_str in (manifest.get("db_backups") or {}).items():
+                    bk = Path(bk_str)
+                    orig = Path(orig_str)
+                    if bk.exists():
+                        try:
+                            shutil.copy2(bk, orig)
+                        except OSError as e:
+                            logger.warning("rollback: DB restore failed for %s: %s", orig, e)
 
             restored_audio = 0
             deleted_target = 0
@@ -925,9 +1334,15 @@ class FormatSwapEngine:
                 try:
                     backup_audio = Path(track["original"]["audio_backup"])
                     original_audio = Path(track["original"]["folder_path"])
-                    new_audio = Path(track["new"]["folder_path"])
                 except (KeyError, TypeError):
                     continue
+                # Separate extraction: a provisional entry (rename recorded,
+                # DB update never reached) carries `new: None`. Folding this
+                # into the try above would `continue` past it and leave the
+                # user's audio sitting in a .backup-<ts> file forever.
+                new_audio = None
+                with contextlib.suppress(KeyError, TypeError):
+                    new_audio = Path(track["new"]["folder_path"])
                 if backup_audio.exists():
                     try:
                         backup_audio.rename(original_audio)
@@ -938,7 +1353,7 @@ class FormatSwapEngine:
                             backup_audio,
                             e,
                         )
-                if new_audio.exists():
+                if new_audio is not None and new_audio.exists():
                     try:
                         new_audio.unlink()
                         deleted_target += 1

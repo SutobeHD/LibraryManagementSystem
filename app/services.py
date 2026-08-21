@@ -774,6 +774,7 @@ class SettingsManager:
     DEFAULT = {
         "default_export_format": "wav",
         "default_export_dir": "",  # If empty, falls back to EXPORT_DIR (./exports). User can pick any folder.
+        "ffmpeg_path": "",  # Full-build FFmpeg override for format-swap; empty = auto-detect
         "theme": "dark",
         "auto_snap": True,
         "db_path": "",

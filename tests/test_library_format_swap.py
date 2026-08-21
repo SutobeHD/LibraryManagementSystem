@@ -7,12 +7,18 @@ backup tree, and rollback against a hand-crafted manifest.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app import ffmpeg_resolver as resolver_mod
+from app.ffmpeg_resolver import ResolvedFfmpeg
 from app.library_format_swap import (
     DISK_HARD_ABORT_FACTOR,
     DISK_WARN_FACTOR,
@@ -25,7 +31,12 @@ from app.library_format_swap import (
     TARGET_CONFIG,
     WATCHDOG_INTERVAL,
     FormatSwapEngine,
+    _build_export_ffmpeg_cmd,
     _build_ffmpeg_cmd,
+    _run_export_convert,
+)
+from app.library_format_swap import (
+    get_batch as _get_batch,
 )
 
 
@@ -39,10 +50,21 @@ class TestTargetConfig:
             assert "codec_args" in cfg, f"{name} missing codec_args"
             assert "file_type" in cfg, f"{name} missing file_type"
             assert "expansion_ratio" in cfg, f"{name} missing expansion_ratio"
+            assert "required_encoder" in cfg, f"{name} missing required_encoder"
             assert cfg["ext"].startswith("."), f"{name} ext must start with dot"
             assert isinstance(cfg["codec_args"], list), f"{name} codec_args not list"
             assert cfg["codec_args"][0] == "-c:a", f"{name} codec_args[0] not -c:a"
             assert isinstance(cfg["file_type"], int), f"{name} file_type not int"
+
+    def test_required_encoder_matches_codec_args(self):
+        # required_encoder is the capability contract — must name the same
+        # encoder codec_args actually invoke.
+        for name, cfg in TARGET_CONFIG.items():
+            assert cfg["required_encoder"] == cfg["codec_args"][1], name
+        assert TARGET_CONFIG["aiff"]["required_encoder"] == "pcm_s16le"
+        assert TARGET_CONFIG["wav"]["required_encoder"] == "pcm_s16le"
+        assert TARGET_CONFIG["flac"]["required_encoder"] == "flac"
+        assert TARGET_CONFIG["mp3"]["required_encoder"] == "libmp3lame"
 
     def test_file_type_codes(self):
         assert TARGET_CONFIG["aiff"]["file_type"] == FILE_TYPE_AIFF
@@ -461,3 +483,99 @@ class TestLibrarySubsetMissingRequiredParam:
         engine = FormatSwapEngine(_build_live_db([]), "aiff")
         with pytest.raises(ValueError, match="subset_kind"):
             engine.enumerate_scope({"kind": "library_subset", "subset_kind": "nonsense"})
+
+
+class TestMasterDbWriteLock:
+    """`master.db` writers must hold `_db_write_lock` from app.database.
+
+    The engine shipped with a private `_engine_lock` and a comment claiming it
+    "serialises every rbox.MasterDb mutation" — it did not: every other writer
+    in the app takes a different lock object, so a concurrent comment/MyTag
+    edit could clobber the new `folder_path` and leave master.db pointing at a
+    file that had just been renamed to `.backup-<ts>`.
+
+    Checked structurally rather than with an allowlist of method names — an
+    allowlist drifts the moment someone adds a write path.
+    """
+
+    MUTATION_SITES = {
+        "update_content": "per-track path/type/size rewrite",
+        "_backup_master_db": "torn 3-file snapshot of a live WAL database",
+    }
+
+    @staticmethod
+    def _module_tree():
+        import ast
+        from pathlib import Path
+
+        import app.library_format_swap as mod
+
+        return ast.parse(Path(mod.__file__).read_text(encoding="utf-8"))
+
+    @staticmethod
+    def _guarded_by_db_lock(tree, target_line: int) -> bool:
+        """True if `target_line` sits inside a `with db_lock():` block."""
+        import ast
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.With):
+                continue
+            takes_db_lock = any(
+                isinstance(item.context_expr, ast.Call)
+                and getattr(item.context_expr.func, "id", None) == "db_lock"
+                for item in node.items
+            )
+            if not takes_db_lock:
+                continue
+            end = getattr(node, "end_lineno", node.lineno)
+            if node.lineno <= target_line <= end:
+                return True
+        return False
+
+    def test_db_lock_is_the_global_write_lock(self):
+        """Not a second private RLock that only serialises this module."""
+        import app.database as db_mod
+        import app.library_format_swap as mod
+
+        assert mod.db_lock is db_mod.db_lock
+        with mod.db_lock():
+            assert db_mod._db_write_lock._is_owned()
+
+    @pytest.mark.parametrize("callee", sorted(MUTATION_SITES))
+    def test_every_master_db_mutation_holds_the_lock(self, callee):
+        import ast
+
+        tree = self._module_tree()
+        sites = [
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Call)
+            and (
+                getattr(n.func, "attr", None) == callee or getattr(n.func, "id", None) == callee
+            )
+        ]
+        assert sites, f"no call site found for {callee} — did it get renamed?"
+        unguarded = [n.lineno for n in sites if not self._guarded_by_db_lock(tree, n.lineno)]
+        assert not unguarded, (
+            f"{callee} ({self.MUTATION_SITES[callee]}) called outside `with db_lock():` "
+            f"at line(s) {unguarded}"
+        )
+
+    def test_rollback_db_restore_holds_the_lock(self):
+        """rollback() overwrites master.db wholesale via shutil.copy2."""
+        import ast
+
+        tree = self._module_tree()
+        rollback = next(
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "rollback"
+        )
+        copies = [
+            n.lineno
+            for n in ast.walk(rollback)
+            if isinstance(n, ast.Call) and getattr(n.func, "attr", None) == "copy2"
+        ]
+        assert copies, "rollback no longer restores master.db by copy2 — update this test"
+        unguarded = [ln for ln in copies if not self._guarded_by_db_lock(tree, ln)]
+        assert not unguarded, f"rollback copy2 outside db_lock at line(s) {unguarded}"

@@ -9,6 +9,7 @@ import threading
 import time
 import traceback
 import urllib.parse
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -390,6 +391,7 @@ class SetReq(BaseModel):
     default_export_dir: _PathStr = (
         ""  # User-selectable default folder for audio exports; empty = backend EXPORT_DIR
     )
+    ffmpeg_path: _PathStr = ""  # Full-build FFmpeg override; empty = auto-detect (ffmpeg_resolver)
     theme: _PathStr = "dark"
     auto_snap: bool = True
     db_path: _PathStr = ""
@@ -1545,6 +1547,8 @@ class _FormatSwapScope(BaseModel):
 class FormatSwapDryRunReq(BaseModel):
     target: _Literal["aiff", "flac", "wav", "mp3"] = "aiff"
     scope: _FormatSwapScope
+    mode: _Literal["in_place", "export_copies"] = "in_place"
+    dest_dir: _PathStr | None = None
 
 
 class FormatSwapExecuteReq(BaseModel):
@@ -1553,8 +1557,98 @@ class FormatSwapExecuteReq(BaseModel):
     trigger: _Literal["user_format_pick", "quality_verdict"] = "user_format_pick"
 
 
+class FormatSwapExportReq(BaseModel):
+    target: _Literal["aiff", "flac", "wav", "mp3"] = "aiff"
+    scope: _FormatSwapScope
+    dest_dir: _PathStr
+    keep_cover: bool = True
+
+
 class FormatSwapRollbackReq(BaseModel):
     manifest_filename: str
+
+
+# Local-drive-letter check for export destinations (Windows). UNC paths
+# resolve to a '\\\\server\\share' drive and fail this. Import is local to
+# the assignment so the format hook can't strip it between edits.
+import re as _re_export  # noqa: E402
+
+_re_drive = _re_export.compile(r"^[A-Za-z]:$")
+
+
+def _validate_export_dir(raw: str) -> Path:
+    """Validate + resolve a format-swap export destination directory.
+
+    Sandbox decision (deny-list, not allow-list): an export copy is user data
+    going where the user points — any absolute path on a LOCAL drive letter is
+    allowed, including removable USB drives and paths outside
+    ``ALLOWED_AUDIO_ROOTS``. The write-side risk is corrupting APP/LIBRARY
+    state, hence protected-dir refusals. UNC/network shares refused in v1
+    (flaky ``disk_usage`` + 600s converts over SMB). Destinations inside a
+    watched ``scan_folders`` entry are refused — folder_watcher would
+    auto-reimport the exported copies as new library tracks.
+    """
+    from app import library_format_swap as _lfs
+
+    if not raw or not str(raw).strip():
+        raise HTTPException(422, "dest_dir required")
+    try:
+        expanded = Path(str(raw)).expanduser()
+    except (ValueError, OSError) as e:
+        raise HTTPException(422, f"Invalid dest_dir: {e}") from e
+    # Absoluteness checked BEFORE resolve() — resolve() anchors relative paths
+    # to the sidecar CWD, which would silently accept them.
+    if not expanded.is_absolute():
+        raise HTTPException(422, "dest_dir must be an absolute path")
+    try:
+        # Junction/symlink escape is validated on the resolved path.
+        resolved = expanded.resolve()
+    except (ValueError, OSError) as e:
+        raise HTTPException(422, f"Invalid dest_dir: {e}") from e
+
+    protected: list[Path] = [_lfs._rekordbox_dir()]
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        protected.append(Path(appdata) / "MusicLibraryManager")
+    protected.extend(
+        [
+            Path("C:/Windows"),
+            Path("C:/Program Files"),
+            Path("C:/Program Files (x86)"),
+            Path("C:/ProgramData"),
+        ]
+    )
+    for prot in protected:
+        try:
+            if resolved.is_relative_to(prot.resolve()):
+                logger.warning(
+                    "SECURITY: format-swap export dest_dir inside protected dir: %s",
+                    resolved,
+                )
+                raise HTTPException(403, "dest_dir inside a protected directory")
+        except OSError:
+            continue
+
+    if os.name == "nt" and not _re_drive.match(resolved.drive):
+        raise HTTPException(422, "dest_dir must be on a local drive letter (no UNC/network paths)")
+
+    try:
+        scan_folders = SettingsManager.load().get("scan_folders") or []
+    except (OSError, ValueError, AttributeError):
+        scan_folders = []
+    for sf in scan_folders:
+        try:
+            sfp = Path(str(sf)).expanduser().resolve()
+        except (ValueError, OSError):
+            continue
+        if resolved.is_relative_to(sfp):
+            raise HTTPException(
+                409,
+                "dest_dir is inside a watched scan folder — exported copies would be "
+                "auto-imported into the library as new tracks. Pick a folder outside "
+                "your scan folders.",
+            )
+    return resolved
 
 
 def _scope_to_dict(s: _FormatSwapScope) -> dict[str, Any]:
@@ -1614,13 +1708,21 @@ def format_swap_dry_run(r: FormatSwapDryRunReq):
     """Preview a format swap without touching disk or master.db.
 
     Returns: enumerated tracks, source/target MB estimate, drive_free check.
+    ``mode='export_copies'`` previews an export into ``dest_dir`` instead
+    (disk check against the destination volume, encoder preflight included).
     """
     from app.library_format_swap import FormatSwapEngine
 
     live = _require_live_db()
     engine = FormatSwapEngine(live, r.target)
     scope_d = _scope_to_dict(r.scope)
-    result = engine.dry_run(scope_d)
+    if r.mode == "export_copies":
+        if not r.dest_dir or not str(r.dest_dir).strip():
+            raise HTTPException(422, "dest_dir required for export_copies")
+        dest = _validate_export_dir(r.dest_dir)
+        result = engine.export_dry_run(scope_d, dest)
+    else:
+        result = engine.dry_run(scope_d)
     return {
         "scope": result.scope,
         "target": result.target,
@@ -1632,6 +1734,12 @@ def format_swap_dry_run(r: FormatSwapDryRunReq):
         "target_file_type": result.target_file_type,
         "warning": result.warning,
         "error": result.error,
+        "mode": result.mode,
+        "dest_dir": result.dest_dir,
+        "copy_only_tracks": result.copy_only_tracks,
+        "encoder_available": result.encoder_available,
+        "encoder_binary": result.encoder_binary,
+        "encoder_reason": result.encoder_reason,
     }
 
 
@@ -1641,11 +1749,18 @@ def format_swap_execute(r: FormatSwapExecuteReq):
     poll. Frontend polls ``GET /api/library/format-swap/batch/{batch_id}`` for
     batch-level status and ``GET /api/import/progress`` for per-track progress.
     """
-    from app.library_format_swap import FormatSwapEngine
+    from app import ffmpeg_resolver
+    from app.library_format_swap import TARGET_CONFIG, FormatSwapEngine
 
     live = _require_live_db()
     engine = FormatSwapEngine(live, r.target)
     scope_d = _scope_to_dict(r.scope)
+
+    # Encoder preflight (cached probe) — turns a 100%-per-track-failure run
+    # into one synchronous error before the thread starts.
+    resolved = ffmpeg_resolver.resolve_for_encoder(str(TARGET_CONFIG[r.target]["required_encoder"]))
+    if not resolved.available:
+        raise HTTPException(409, resolved.reason or f"no capable ffmpeg for target {r.target}")
 
     batch_id = uuid.uuid4().hex[:12]
 
@@ -1682,6 +1797,161 @@ def format_swap_execute(r: FormatSwapExecuteReq):
     }
 
 
+@app.post("/api/library/format-swap/export", dependencies=[Depends(require_session)])
+def format_swap_export(r: FormatSwapExportReq):
+    """Start an export-copies batch in a background thread.
+
+    Read-only wrt the library: copies/converts into ``dest_dir``, no source
+    rename, no master.db writes, no rollback manifest (an export report lands
+    in ``dest_dir`` instead). Poll the same batch endpoint as execute.
+    """
+    from app import ffmpeg_resolver
+    from app.library_format_swap import TARGET_CONFIG, FormatSwapEngine
+
+    live = _require_live_db()
+    engine = FormatSwapEngine(live, r.target)
+    scope_d = _scope_to_dict(r.scope)
+    dest = _validate_export_dir(r.dest_dir)
+
+    # Server backstop for the frontend's capabilities-driven target disabling.
+    # Whether the scope is all-copy is unknowable cheaply — gate on the
+    # encoder; the engine re-checks and all-copy batches skip ffmpeg entirely.
+    resolved = ffmpeg_resolver.resolve_for_encoder(str(TARGET_CONFIG[r.target]["required_encoder"]))
+    if not resolved.available:
+        raise HTTPException(409, resolved.reason or f"no capable ffmpeg for target {r.target}")
+
+    batch_id = uuid.uuid4().hex[:12]
+
+    def _run() -> None:
+        try:
+            engine.export_copies(scope_d, dest, batch_id=batch_id, keep_cover=r.keep_cover)
+        except RuntimeError as exc:
+            logger.error("format-swap export batch %s failed: %s", batch_id, exc)
+            from app.library_format_swap import _store_batch, get_batch
+
+            existing = get_batch(batch_id)
+            if existing is not None:
+                existing.error = str(exc)
+                existing.finished = True
+                _store_batch(batch_id, existing)
+        except Exception as exc:  # rbox/MasterDbError + anything else
+            logger.exception("format-swap export batch %s crashed", batch_id)
+            from app.library_format_swap import _store_batch, get_batch
+
+            existing = get_batch(batch_id)
+            if existing is not None:
+                existing.error = f"{type(exc).__name__}: {exc}"
+                existing.finished = True
+                _store_batch(batch_id, existing)
+
+    threading.Thread(target=_run, daemon=True, name=f"format-swap-export-{batch_id}").start()
+    return {
+        "batch_id": batch_id,
+        "status": "started",
+        "target": r.target,
+        "mode": "export_copies",
+        "dest_dir": str(dest),
+    }
+
+
+@app.get("/api/library/format-swap/capabilities", dependencies=[Depends(require_session)])
+def format_swap_capabilities(refresh: bool = False):
+    """Per-target ffmpeg encoder availability. Session-gated (shells out to
+    subprocesses). ``refresh=1`` clears the probe cache first. Never raises —
+    probe failures degrade to ``available: false``.
+    """
+    import subprocess
+
+    from app import ffmpeg_resolver
+    from app.library_format_swap import TARGET_CONFIG
+
+    try:
+        if refresh:
+            ffmpeg_resolver.clear_probe_cache()
+
+        candidates = ffmpeg_resolver.candidate_binaries()
+        binaries_probed: list[dict[str, Any]] = []
+        for path, source in candidates:
+            encoders = ffmpeg_resolver.probe_audio_encoders(path)
+            binaries_probed.append(
+                {
+                    "path": path,
+                    "source": source,
+                    "ok": encoders is not None,
+                    "audio_encoder_count": len(encoders) if encoders else 0,
+                }
+            )
+        # Configured-but-missing settings path never enters candidates — still
+        # surface it so the user sees why their override isn't used.
+        configured = ffmpeg_resolver.configured_settings_ffmpeg()
+        if configured and not Path(configured).exists():
+            binaries_probed.append(
+                {
+                    "path": configured,
+                    "source": "settings",
+                    "ok": False,
+                    "audio_encoder_count": 0,
+                    "reason": "configured path not found",
+                }
+            )
+
+        targets: dict[str, Any] = {}
+        any_unavailable = False
+        for name, cfg in TARGET_CONFIG.items():
+            required = str(cfg["required_encoder"])
+            resolved = ffmpeg_resolver.resolve_for_encoder(required)
+            if not resolved.available:
+                any_unavailable = True
+            targets[name] = {
+                "available": resolved.available,
+                "binary": resolved.binary,
+                "source": resolved.source,
+                "required_encoder": required,
+                "reason": resolved.reason,
+            }
+
+        ffprobe_path = ffmpeg_resolver.resolve_ffprobe()
+        try:
+            pr = subprocess.run([ffprobe_path, "-version"], capture_output=True, timeout=10)
+            ffprobe_ok = pr.returncode == 0
+        except (subprocess.SubprocessError, OSError):
+            ffprobe_ok = False
+
+        return {
+            "targets": targets,
+            "binaries_probed": binaries_probed,
+            "ffprobe": {"path": ffprobe_path, "ok": ffprobe_ok},
+            "hint": (
+                "Install a full FFmpeg build (winget install Gyan.FFmpeg) or set "
+                "'ffmpeg_path' in Settings > Export."
+                if any_unavailable
+                else None
+            ),
+        }
+    except Exception as exc:  # degrade, never 5xx — capabilities is advisory
+        logger.exception("format-swap capabilities failed: %s", exc)
+        from app.library_format_swap import TARGET_CONFIG as _tc
+
+        return {
+            "targets": {
+                name: {
+                    "available": False,
+                    "binary": None,
+                    "source": None,
+                    "required_encoder": str(cfg.get("required_encoder", "")),
+                    "reason": f"capability probe crashed: {type(exc).__name__}",
+                }
+                for name, cfg in _tc.items()
+            },
+            "binaries_probed": [],
+            "ffprobe": {"path": "ffprobe", "ok": False},
+            "hint": (
+                "Install a full FFmpeg build (winget install Gyan.FFmpeg) or set "
+                "'ffmpeg_path' in Settings > Export."
+            ),
+        }
+
+
 @app.get("/api/library/format-swap/batch/{batch_id}")
 def format_swap_batch_status(batch_id: str):
     """Poll a running or finished batch."""
@@ -1702,6 +1972,7 @@ def format_swap_batch_status(batch_id: str):
         "timestamp": result.timestamp,
         "task_ids": result.task_ids,
         "error": result.error,
+        "mode": result.mode,
     }
 
 
