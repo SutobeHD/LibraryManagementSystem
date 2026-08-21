@@ -11,6 +11,9 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
+/// A decoded-audio session: `(format_reader, decoder, track_id, sample_rate, channels)`.
+pub type DecodeSession = (Box<dyn FormatReader>, Box<dyn Decoder>, u32, u32, usize);
+
 /// Namespace for the audio loader helpers. Unit struct rather than an
 /// instance type because `load_file` is a stateless static method —
 /// callers do `AudioEngine::load_file(...)` directly.
@@ -24,21 +27,22 @@ impl AudioEngine {
     /// falls back to 2 (stereo) — see the inline default. Mono / 5.1 / 7.1
     /// files now report their actual channel count instead of being
     /// silently treated as stereo by downstream analysis + export.
-    pub fn load_file<P: AsRef<Path>>(path: P) -> Result<(Box<dyn FormatReader>, Box<dyn Decoder>, u32, u32, usize), String> {
+    pub fn load_file<P: AsRef<Path>>(path: P) -> Result<DecodeSession, String> {
         let file_path = path.as_ref();
-        
+
         // 1. Open the file
-        let file = File::open(file_path).map_err(|e| format!("Failed to open file (Permissions/Exists): {}", e))?;
-        
+        let file = File::open(file_path)
+            .map_err(|e| format!("Failed to open file (Permissions/Exists): {}", e))?;
+
         // 2. Memory map the file for zero-copy loading (Req 3)
         // Safety: Mmap represents a live view of the file. It is generally safe unless
         // another process truncates the file while we are reading it.
-        let mmap = unsafe { 
+        let mmap = unsafe {
             MmapOptions::new()
                 .map(&file)
-                .map_err(|e| format!("Failed to mmap file: {}", e))? 
+                .map_err(|e| format!("Failed to mmap file: {}", e))?
         };
-        
+
         // 3. Wrap mmap in a Cursor to satisfy Read + Seek
         // We use Arc to enable easy sharing or keeping the mmap alive if needed,
         // but MediaSourceStream takes ownership of the source. Symphonia expects a `MediaSource`.
@@ -71,9 +75,7 @@ impl AudioEngine {
 
         let track_id = track.id;
         let sample_rate = track.codec_params.sample_rate.unwrap_or(44100);
-        let channels = track.codec_params.channels
-            .map(|c| c.count())
-            .unwrap_or(2);
+        let channels = track.codec_params.channels.map(|c| c.count()).unwrap_or(2);
 
         let dec_opts: DecoderOptions = Default::default();
         let decoder = symphonia::default::get_codecs()
@@ -86,8 +88,8 @@ impl AudioEngine {
 
 use crate::audio::playback::PlaybackEngine;
 use ringbuf::HeapRb;
-use std::thread;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
 
 pub struct AudioController {
     playback: PlaybackEngine,
@@ -107,7 +109,8 @@ impl AudioController {
         self.stop_signal.store(true, Ordering::SeqCst);
         self.playback.pause();
 
-        let (mut format, mut decoder, track_id, sample_rate, channels) = AudioEngine::load_file(path)?;
+        let (mut format, mut decoder, track_id, sample_rate, channels) =
+            AudioEngine::load_file(path)?;
 
         // Create ringbuffer for ~1 second of interleaved audio. Sized off the
         // actual channel count so mono and multi-channel files don't over- or
@@ -124,7 +127,11 @@ impl AudioController {
         // Cargo.toml in Phase 2.12; when proper resampling lands, pull it
         // back in and replace this warn! with the actual conversion.
         if sample_rate != device_sr {
-            log::warn!("File SR {} != Device SR {}. Resampling needed.", sample_rate, device_sr);
+            log::warn!(
+                "File SR {} != Device SR {}. Resampling needed.",
+                sample_rate,
+                device_sr
+            );
         }
 
         self.stop_signal = Arc::new(AtomicBool::new(false));
@@ -135,7 +142,7 @@ impl AudioController {
             use symphonia::core::audio::SampleBuffer;
             // Default 2 channels, f32
             let mut sample_buf: Option<SampleBuffer<f32>> = None;
-            
+
             loop {
                 if stop_signal.load(Ordering::SeqCst) {
                     break; // User requested stop or new file loaded
@@ -149,7 +156,9 @@ impl AudioController {
 
                 let packet = match format.next_packet() {
                     Ok(p) => p,
-                    Err(SymphoniaError::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    Err(SymphoniaError::IoError(e))
+                        if e.kind() == std::io::ErrorKind::UnexpectedEof =>
+                    {
                         log::info!("End of stream reached.");
                         break;
                     }
@@ -159,7 +168,9 @@ impl AudioController {
                     }
                 };
 
-                if packet.track_id() != track_id { continue; }
+                if packet.track_id() != track_id {
+                    continue;
+                }
 
                 match decoder.decode(&packet) {
                     Ok(decoded) => {
@@ -180,7 +191,9 @@ impl AudioController {
                                 written += pushed;
                                 if pushed == 0 {
                                     // Ringbuf full, back off
-                                    if stop_signal.load(Ordering::SeqCst) { break; }
+                                    if stop_signal.load(Ordering::SeqCst) {
+                                        break;
+                                    }
                                     thread::sleep(std::time::Duration::from_millis(2));
                                 }
                             }
@@ -195,6 +208,4 @@ impl AudioController {
 
         Ok(())
     }
-
 }
-

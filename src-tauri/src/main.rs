@@ -13,8 +13,6 @@ use soundcloud_client::Track;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
-use tauri_plugin_shell::process::CommandEvent;
-use tauri_plugin_shell::ShellExt;
 
 /// Shared boot-time session token captured from the Python sidecar's stdout.
 ///
@@ -218,7 +216,7 @@ fn spawn_child(
                 let lbl = label;
                 let capture = token_capture.clone();
                 std::thread::spawn(move || {
-                    for line in BufReader::new(stdout).lines().flatten() {
+                    for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                         // Token-capture path: if this is the LMS_TOKEN=
                         // banner line, swallow it (do NOT log::info!) so
                         // the token value can't reach the Tauri log file.
@@ -234,7 +232,7 @@ fn spawn_child(
             if let Some(stderr) = child.stderr.take() {
                 let lbl = label;
                 std::thread::spawn(move || {
-                    for line in BufReader::new(stderr).lines().flatten() {
+                    for line in BufReader::new(stderr).lines().map_while(Result::ok) {
                         log::warn!("[{}-err] {}", lbl, line);
                     }
                 });
@@ -569,7 +567,7 @@ fn main() {
 
             #[cfg(debug_assertions)]
             {
-                spawn_dev_backend(&app.handle(), token_handle);
+                spawn_dev_backend(app.handle(), token_handle);
             }
 
             Ok(())

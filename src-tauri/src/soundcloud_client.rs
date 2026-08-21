@@ -5,7 +5,6 @@
 // Error type alias for convenience — uses Send + Sync so errors can cross
 // thread boundaries (required by tokio::task::spawn_blocking).
 
-
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use rand::RngCore;
@@ -14,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
-use url::Url;
 use tauri::Emitter;
+use url::Url;
 
 /// Typed error enum for the SoundCloud client.
 ///
@@ -120,6 +119,7 @@ struct TokenResponse {
 struct SearchResultItem {
     id: u64,
     duration: u64,
+    #[allow(dead_code)] // part of the API response shape; not consumed yet
     title: Option<String>,
 }
 
@@ -207,10 +207,7 @@ pub fn get_auth_url() -> Result<(String, String), String> {
 ///
 /// # Returns
 /// The access token string on success.
-pub async fn exchange_code_for_token(
-    code: &str,
-    code_verifier: &str,
-) -> Result<String, ScError> {
+pub async fn exchange_code_for_token(code: &str, code_verifier: &str) -> Result<String, ScError> {
     let client = Client::new();
     let cid = get_client_id().map_err(|e| -> ScError { e.into() })?;
     let csec = get_client_secret().map_err(|e| -> ScError { e.into() })?;
@@ -225,11 +222,7 @@ pub async fn exchange_code_for_token(
         ("code_verifier", code_verifier),
     ];
 
-    let resp = client
-        .post(TOKEN_URL)
-        .form(&params)
-        .send()
-        .await?;
+    let resp = client.post(TOKEN_URL).form(&params).send().await?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -267,17 +260,13 @@ pub async fn search_track(
     }
 
     let results: Vec<SearchResultItem> = resp.json().await?;
-    
+
     // Find the best match by duration
     let mut best_match: Option<(u64, u64)> = None; // (id, abs_diff)
     let threshold_ms = 10000; // 10 seconds
 
     for item in results {
-        let diff = if item.duration > target_duration_ms {
-            item.duration - target_duration_ms
-        } else {
-            target_duration_ms - item.duration
-        };
+        let diff = item.duration.abs_diff(target_duration_ms);
 
         if diff <= threshold_ms {
             match best_match {
@@ -316,16 +305,19 @@ pub async fn search_and_create_playlist(
         let query = format!("{} {}", track.artist, track.title);
         let progress_msg = format!("Searching ({}/{}): {}", i + 1, tracks.len(), query);
         log::info!("[SoundCloud] {}", progress_msg);
-        
+
         // Emit progress event
         if let Some(ref app) = app_handle {
-            let _ = app.emit("sc-export-progress", serde_json::json!({
-                "stage": "searching",
-                "current": i + 1,
-                "total": tracks.len(),
-                "message": progress_msg,
-                "trackName": format!("{} - {}", track.artist, track.title)
-            }));
+            let _ = app.emit(
+                "sc-export-progress",
+                serde_json::json!({
+                    "stage": "searching",
+                    "current": i + 1,
+                    "total": tracks.len(),
+                    "message": progress_msg,
+                    "trackName": format!("{} - {}", track.artist, track.title)
+                }),
+            );
         }
 
         match search_track(token, &query, track.duration_ms).await {
@@ -351,16 +343,23 @@ pub async fn search_and_create_playlist(
         return Err("No tracks were found on SoundCloud.".into());
     }
 
-    let create_msg = format!("Creating playlist '{}' with {} tracks...", playlist_name, found_ids.len());
+    let create_msg = format!(
+        "Creating playlist '{}' with {} tracks...",
+        playlist_name,
+        found_ids.len()
+    );
     log::info!("[SoundCloud] {}", create_msg);
-    
+
     // Emit progress event for playlist creation
     if let Some(ref app) = app_handle {
-        let _ = app.emit("sc-export-progress", serde_json::json!({
-            "stage": "creating",
-            "message": create_msg,
-            "trackCount": found_ids.len()
-        }));
+        let _ = app.emit(
+            "sc-export-progress",
+            serde_json::json!({
+                "stage": "creating",
+                "message": create_msg,
+                "trackCount": found_ids.len()
+            }),
+        );
     }
 
     // Build request body: Wrapper + Objects with String IDs
@@ -378,7 +377,7 @@ pub async fn search_and_create_playlist(
     let client = Client::builder()
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         .build()?;
-        
+
     let url = format!("{}/playlists", API_BASE);
     let resp = client
         .post(&url)
@@ -394,7 +393,10 @@ pub async fn search_and_create_playlist(
         return Err(format!("Playlist creation failed ({}): {}", status, body_text).into());
     }
 
-    log::info!("[SoundCloud] ✓ Playlist '{}' created successfully!", playlist_name);
+    log::info!(
+        "[SoundCloud] ✓ Playlist '{}' created successfully!",
+        playlist_name
+    );
     Ok(ExportResult {
         success_count: found_ids.len(),
         failed_tracks,
@@ -470,7 +472,7 @@ pub fn wait_for_callback() -> Result<String, ScError> {
 </html>"#;
     let response = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        response_body.as_bytes().len(),
+        response_body.len(),
         response_body
     );
     stream.write_all(response.as_bytes())?;
@@ -478,4 +480,3 @@ pub fn wait_for_callback() -> Result<String, ScError> {
     log::info!("[SoundCloud] ✓ Received authorization code.");
     Ok(code)
 }
-

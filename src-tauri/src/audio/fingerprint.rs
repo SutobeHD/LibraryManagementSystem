@@ -17,16 +17,16 @@
 //! - `fingerprint_batch(paths, window)` → `HashMap<String, Vec<u32>>`
 //!   Emits `"fingerprint_progress"` events: `{done: usize, total: usize}`
 
-use std::collections::HashMap;
 use log::{debug, error, info, warn};
 use serde::Serialize;
-use tauri::Emitter;
+use std::collections::HashMap;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
+use tauri::Emitter;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Constants
@@ -45,6 +45,9 @@ const FRAME_SIZE: usize = 1408; // ≈ 128 ms @ 11025 Hz
 const HOP_SIZE: usize = FRAME_SIZE / 2;
 
 /// Minimum fingerprint length to consider two fingerprints comparable.
+// Unwired: no Tauri command exposes the Rust fingerprint engine yet — matching
+// currently runs in Python (app/external_track_match.py).
+#[allow(dead_code)]
 const MIN_FP_LEN: usize = 4;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -69,7 +72,10 @@ fn decode_to_mono_11k(path: &str) -> Result<Vec<f32>, String> {
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
     let mut hint = Hint::new();
-    if let Some(ext) = std::path::Path::new(path).extension().and_then(|s| s.to_str()) {
+    if let Some(ext) = std::path::Path::new(path)
+        .extension()
+        .and_then(|s| s.to_str())
+    {
         hint.with_extension(ext);
     }
 
@@ -99,11 +105,8 @@ fn decode_to_mono_11k(path: &str) -> Result<Vec<f32>, String> {
     let mut raw_samples: Vec<f32> = Vec::with_capacity(source_sr * 30); // pre-alloc 30s
 
     // Decode packets
-    loop {
-        let packet = match format.next_packet() {
-            Ok(p) => p,
-            Err(_) => break, // end of stream or decode error — stop gracefully
-        };
+    // Err from next_packet is EOF (or an unrecoverable read) end of stream or decode error — stop gracefully
+    while let Ok(packet) = format.next_packet() {
         if packet.track_id() != track_id {
             continue;
         }
@@ -117,8 +120,7 @@ fn decode_to_mono_11k(path: &str) -> Result<Vec<f32>, String> {
 
         // Convert to f32 sample buffer
         let spec = *decoded.spec();
-        let mut sample_buf: SampleBuffer<f32> =
-            SampleBuffer::new(decoded.capacity() as u64, spec);
+        let mut sample_buf: SampleBuffer<f32> = SampleBuffer::new(decoded.capacity() as u64, spec);
         sample_buf.copy_interleaved_ref(decoded);
 
         // Mix down to mono: average across channels
@@ -284,6 +286,7 @@ fn samples_to_fingerprint(samples: &[f32]) -> Vec<u32> {
 ///
 /// # Returns
 /// `None` if either fingerprint is too short to compare reliably.
+#[allow(dead_code)] // see MIN_FP_LEN — engine implemented but not yet wired to a command
 pub fn hamming_similarity(a: &[u32], b: &[u32]) -> Option<f32> {
     let len = a.len().min(b.len());
     if len < MIN_FP_LEN {
@@ -393,6 +396,10 @@ pub async fn fingerprint_batch(
         },
     );
 
-    info!("fingerprint_batch: completed {}/{} files", results.len(), total);
+    info!(
+        "fingerprint_batch: completed {}/{} files",
+        results.len(),
+        total
+    );
     Ok(results)
 }

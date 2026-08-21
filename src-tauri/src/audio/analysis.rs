@@ -1,13 +1,13 @@
-use rustfft::{num_complex::Complex, FftPlanner};
 use crate::audio::engine::AudioEngine;
-use symphonia::core::audio::SampleBuffer;
+use rustfft::{num_complex::Complex, FftPlanner};
 use std::path::Path;
+use symphonia::core::audio::SampleBuffer;
 
 // Fixed 3-band frequency boundaries in Hz. Same convention as the Python
 // analysis engine and the rust-index docs.
-const BAND_LOW_HZ_MIN: f32  = 20.0;
-const BAND_LOW_HZ_MAX: f32  = 250.0;
-const BAND_MID_HZ_MAX: f32  = 4000.0;
+const BAND_LOW_HZ_MIN: f32 = 20.0;
+const BAND_LOW_HZ_MAX: f32 = 250.0;
+const BAND_MID_HZ_MAX: f32 = 4000.0;
 const BAND_HIGH_HZ_MAX: f32 = 20000.0;
 
 /// Map an audio frequency in Hz to the matching FFT bin index for the given
@@ -42,26 +42,27 @@ pub fn compute_waveform<P: AsRef<Path>>(path: P) -> Result<Vec<u8>, String> {
     // `.max()` chains keep band ordering valid even on pathologically low
     // sample rates where the upper bound falls below the lower bound.
     let low_start = hz_to_bin(BAND_LOW_HZ_MIN, frame_size, sample_rate).max(1);
-    let low_end   = hz_to_bin(BAND_LOW_HZ_MAX, frame_size, sample_rate).max(low_start);
-    let mid_end   = hz_to_bin(BAND_MID_HZ_MAX, frame_size, sample_rate).max(low_end);
-    let high_end  = hz_to_bin(BAND_HIGH_HZ_MAX, frame_size, sample_rate).max(mid_end);
+    let low_end = hz_to_bin(BAND_LOW_HZ_MAX, frame_size, sample_rate).max(low_start);
+    let mid_end = hz_to_bin(BAND_MID_HZ_MAX, frame_size, sample_rate).max(low_end);
+    let high_end = hz_to_bin(BAND_HIGH_HZ_MAX, frame_size, sample_rate).max(mid_end);
 
     let mut binary_payload = Vec::new();
     let mut sample_buf: Option<SampleBuffer<f32>> = None;
     let mut chunk_buffer = Vec::with_capacity(frame_size);
 
-    loop {
-        let packet = match format.next_packet() {
-            Ok(p) => p,
-            Err(_) => break, // Reached end of file
-        };
-
-        if packet.track_id() != track_id { continue; }
+    // Err from next_packet is EOF (or an unrecoverable read) Reached end of file
+    while let Ok(packet) = format.next_packet() {
+        if packet.track_id() != track_id {
+            continue;
+        }
 
         match decoder.decode(&packet) {
             Ok(decoded) => {
                 if sample_buf.is_none() {
-                    sample_buf = Some(SampleBuffer::<f32>::new(decoded.capacity() as u64, *decoded.spec()));
+                    sample_buf = Some(SampleBuffer::<f32>::new(
+                        decoded.capacity() as u64,
+                        *decoded.spec(),
+                    ));
                 }
 
                 if let Some(buf) = &mut sample_buf {
@@ -80,8 +81,8 @@ pub fn compute_waveform<P: AsRef<Path>>(path: P) -> Result<Vec<u8>, String> {
 
                             // Compute Low / Mid / High band RMS energy using
                             // Hz-derived bin slices.
-                            let low_energy  = calculate_energy(&buffer[low_start..low_end]);
-                            let mid_energy  = calculate_energy(&buffer[low_end..mid_end]);
+                            let low_energy = calculate_energy(&buffer[low_start..low_end]);
+                            let mid_energy = calculate_energy(&buffer[low_end..mid_end]);
                             let high_energy = calculate_energy(&buffer[mid_end..high_end]);
 
                             // Compress into u8 (0-255) to save space
@@ -128,24 +129,32 @@ pub fn estimate_bpm(samples: &[f32], sample_rate: u32, channels: usize) -> f32 {
 
     // Identify peaks in energy
     let mut peaks = Vec::new();
-    for i in 1..energies.len()-1 {
-        if energies[i] > energies[i-1] && energies[i] > energies[i+1] {
+    for i in 1..energies.len() - 1 {
+        if energies[i] > energies[i - 1] && energies[i] > energies[i + 1] {
             peaks.push(i);
         }
     }
 
     // Rough estimate of average peak distance
-    if peaks.len() < 2 { return 120.0; }
+    if peaks.len() < 2 {
+        return 120.0;
+    }
     let mut sum_diff = 0;
     for i in 1..peaks.len() {
-        sum_diff += peaks[i] - peaks[i-1];
+        sum_diff += peaks[i] - peaks[i - 1];
     }
     let avg_diff_windows = sum_diff as f32 / (peaks.len() - 1) as f32;
     let avg_diff_seconds = avg_diff_windows * 0.05;
-    
+
     let bpm = 60.0 / avg_diff_seconds;
     // Snap to sensible range
-    if bpm < 60.0 { bpm * 2.0 } else if bpm > 180.0 { bpm / 2.0 } else { bpm }
+    if bpm < 60.0 {
+        bpm * 2.0
+    } else if bpm > 180.0 {
+        bpm / 2.0
+    } else {
+        bpm
+    }
 }
 
 /// Krumhansl-Kessler major-key profile (C-rooted, pitch classes 0..11).
@@ -249,8 +258,7 @@ pub fn detect_key(samples: &[f32], sample_rate: u32) -> String {
             let s = samples[start + i];
             // Hann window: 0.5 * (1 - cos(2 pi n / (N - 1)))
             let w = 0.5
-                * (1.0
-                    - (2.0 * std::f32::consts::PI * i as f32 / (FRAME_SIZE as f32 - 1.0)).cos());
+                * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (FRAME_SIZE as f32 - 1.0)).cos());
             *slot = Complex { re: s * w, im: 0.0 };
         }
         fft_plan.process(&mut frame_buf);
@@ -463,7 +471,11 @@ mod tests {
     #[test]
     fn detect_key_pure_a_minor_arpeggio() {
         // A3 = 220.00 Hz, C4 = 261.63 Hz, E4 = 329.63 Hz. A minor triad.
-        let buf = pure_tone_chord(&[220.00, 261.63, 329.63, 440.00, 523.25, 659.25], 44100, 2.0);
+        let buf = pure_tone_chord(
+            &[220.00, 261.63, 329.63, 440.00, 523.25, 659.25],
+            44100,
+            2.0,
+        );
         assert_eq!(detect_key(&buf, 44100), "8A");
     }
 
@@ -487,7 +499,10 @@ mod tests {
                 2.0,
             );
             let got = detect_key(&buf, 44100);
-            assert_eq!(got, expected, "key for {name} major: expected {expected}, got {got}");
+            assert_eq!(
+                got, expected,
+                "key for {name} major: expected {expected}, got {got}"
+            );
         }
     }
 }

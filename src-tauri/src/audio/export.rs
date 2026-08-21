@@ -2,19 +2,19 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Fade {
-    pub start: f32, // Fade start time relative to the region (in seconds)
-    pub end: f32,   // Fade end time relative to the region (in seconds)
+    pub start: f32,    // Fade start time relative to the region (in seconds)
+    pub end: f32,      // Fade end time relative to the region (in seconds)
     pub shape: String, // e.g., "linear", "exponential"
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AudioRegion {
     pub id: String,
-    pub start: f32,        // Start of the region in the source file (seconds)
-    pub end: f32,          // End of the region in the source file (seconds)
-    pub track_start: f32,  // Where this region is placed on the timeline (seconds)
-    pub track_end: f32,    // Where this region ends on the timeline (seconds)
-    pub gain: f32,         // Gain applied to this specific region (multiplier)
+    pub start: f32,       // Start of the region in the source file (seconds)
+    pub end: f32,         // End of the region in the source file (seconds)
+    pub track_start: f32, // Where this region is placed on the timeline (seconds)
+    pub track_end: f32,   // Where this region ends on the timeline (seconds)
+    pub gain: f32,        // Gain applied to this specific region (multiplier)
     pub fade_in: Option<Fade>,
     pub fade_out: Option<Fade>,
 }
@@ -31,8 +31,10 @@ pub struct ProjectState {
 use crate::audio::engine::AudioEngine;
 use symphonia::core::audio::SampleBuffer;
 
-pub fn render_project<F>(state: ProjectState, progress: F) -> Result<String, String> 
-where F: Fn(f32, &str) {
+pub fn render_project<F>(state: ProjectState, progress: F) -> Result<String, String>
+where
+    F: Fn(f32, &str),
+{
     progress(0.05, "Decoding source file...");
     // 1. Decode original file into memory (f32)
     let (mut format, mut decoder, track_id, sample_rate, channels) =
@@ -43,16 +45,18 @@ where F: Fn(f32, &str) {
     let mut source_samples: Vec<f32> = Vec::new();
     let mut sample_buf: Option<SampleBuffer<f32>> = None;
 
-    loop {
-        let packet = match format.next_packet() {
-            Ok(p) => p,
-            Err(_) => break, // EOF
-        };
-        if packet.track_id() != track_id { continue; }
+    // Err from next_packet is EOF (or an unrecoverable read) EOF
+    while let Ok(packet) = format.next_packet() {
+        if packet.track_id() != track_id {
+            continue;
+        }
 
         if let Ok(decoded) = decoder.decode(&packet) {
             if sample_buf.is_none() {
-                sample_buf = Some(SampleBuffer::<f32>::new(decoded.capacity() as u64, *decoded.spec()));
+                sample_buf = Some(SampleBuffer::<f32>::new(
+                    decoded.capacity() as u64,
+                    *decoded.spec(),
+                ));
             }
             if let Some(buf) = &mut sample_buf {
                 buf.copy_interleaved_ref(decoded);
@@ -74,22 +78,22 @@ where F: Fn(f32, &str) {
     // do the f32→usize cast through `i64` + `usize::try_from` so an
     // attacker-controlled or runaway project state can't crash the
     // exporter with a UB cast on 32-bit hosts.
-    let max_timeline_end = state.regions
+    let max_timeline_end = state
+        .regions
         .iter()
         .map(|r| r.track_end.max(0.0))
         .fold(0.0_f32, f32::max);
 
     if !max_timeline_end.is_finite() {
         return Err(format!(
-            "timeline contains non-finite track_end: {}", max_timeline_end,
+            "timeline contains non-finite track_end: {}",
+            max_timeline_end,
         ));
     }
 
     // f64 for the multiplication so we don't lose precision on long
     // (>>16.7 M sample) timelines.
-    let total_samples_f = (max_timeline_end as f64)
-        * (sample_rate as f64)
-        * (channels as f64);
+    let total_samples_f = (max_timeline_end as f64) * (sample_rate as f64) * (channels as f64);
     let total_samples = usize::try_from(total_samples_f.round() as i64)
         .map_err(|_| format!(
             "total_samples out of usize range: {} (max_timeline_end={}, sample_rate={}, channels={})",
@@ -136,8 +140,14 @@ where F: Fn(f32, &str) {
         .min()
         .unwrap_or(0);
 
-        let fade_in_samples = region.fade_in.as_ref().map_or(0, |f| (f.end * sample_rate as f32) as usize * channels);
-        let fade_out_samples = region.fade_out.as_ref().map_or(0, |f| (f.end * sample_rate as f32) as usize * channels);
+        let fade_in_samples = region
+            .fade_in
+            .as_ref()
+            .map_or(0, |f| (f.end * sample_rate as f32) as usize * channels);
+        let fade_out_samples = region
+            .fade_out
+            .as_ref()
+            .map_or(0, |f| (f.end * sample_rate as f32) as usize * channels);
 
         for i in (0..slice_len).step_by(channels) {
             let mut region_gain = region.gain;
@@ -156,7 +166,7 @@ where F: Fn(f32, &str) {
             // Add to timeline
             let t_idx = ts_samples + i;
             let s_idx = rs_samples + i;
-            
+
             for ch in 0..channels {
                 if t_idx + ch < mix_buffer.len() && s_idx + ch < source_samples.len() {
                     mix_buffer[t_idx + ch] += source_samples[s_idx + ch] * region_gain;
@@ -186,7 +196,7 @@ where F: Fn(f32, &str) {
     // 7. WAV Encoding (Hound)
     let spec = hound::WavSpec {
         channels: channels as u16,
-        sample_rate: sample_rate,
+        sample_rate,
         bits_per_sample: 32,
         sample_format: hound::SampleFormat::Float,
     };
@@ -202,9 +212,13 @@ where F: Fn(f32, &str) {
         }
         // hard-clipping prevention
         let clamped = sample.clamp(-1.0, 1.0);
-        writer.write_sample(clamped).map_err(|e| format!("Sample write: {}", e))?;
+        writer
+            .write_sample(clamped)
+            .map_err(|e| format!("Sample write: {}", e))?;
     }
-    writer.finalize().map_err(|e| format!("WAV finalize: {}", e))?;
+    writer
+        .finalize()
+        .map_err(|e| format!("WAV finalize: {}", e))?;
 
     // 8. Metadata Injection (Req 2)
     progress(0.98, "Injecting metadata...");
@@ -231,8 +245,8 @@ mod tests {
     //! validation messages we reference in comments below become
     //! reachable and should be asserted on directly.
     use super::*;
-    use std::path::PathBuf;
     use std::env;
+    use std::path::PathBuf;
     fn nonexistent_source() -> String {
         // Cross-platform "definitely-not-a-file" — uses the OS temp dir
         // so we don't accidentally clash with something on the project
@@ -243,13 +257,7 @@ mod tests {
         let _ = std::fs::remove_file(&p);
         p.to_string_lossy().to_string()
     }
-    fn region(
-        id: &str,
-        start: f32,
-        end: f32,
-        track_start: f32,
-        track_end: f32,
-    ) -> AudioRegion {
+    fn region(id: &str, start: f32, end: f32, track_start: f32, track_end: f32) -> AudioRegion {
         AudioRegion {
             id: id.to_string(),
             start,

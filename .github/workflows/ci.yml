@@ -90,8 +90,10 @@ jobs:
           New-Item -ItemType File -Force -Path src-tauri/binaries/RB_Backend-x86_64-pc-windows-msvc.exe | Out-Null
 
       - name: Clippy
-        # 20 pre-existing warnings in metadata.rs / fingerprint.rs / etc. — strict mode promoted once cleared.
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --no-default-features || true
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --no-default-features -- -D warnings
+
+      - name: Check formatting with cargo fmt
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
 
       - name: Tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --no-fail-fast

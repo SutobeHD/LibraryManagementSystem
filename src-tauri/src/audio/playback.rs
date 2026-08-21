@@ -1,12 +1,15 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{OutputCallbackInfo, StreamError};
-use ringbuf::{SharedRb, consumer::Consumer};
+use ringbuf::{consumer::Consumer, SharedRb};
+
+/// Receiving half of the decode -> output ring buffer.
+pub type SampleConsumer = Consumer<f32, Arc<SharedRb<f32, Vec<std::mem::MaybeUninit<f32>>>>>;
 
 /// Audio output engine.
 ///
@@ -39,10 +42,7 @@ impl PlaybackEngine {
     /// The actual `cpal::Stream` is built and driven on a dedicated audio
     /// thread; this function blocks only long enough for the spawned
     /// thread to report success or failure through a one-shot channel.
-    pub fn start_stream(
-        &mut self,
-        consumer: Consumer<f32, Arc<SharedRb<f32, Vec<std::mem::MaybeUninit<f32>>>>>,
-    ) -> Result<u32, String> {
+    pub fn start_stream(&mut self, consumer: SampleConsumer) -> Result<u32, String> {
         // Stop any previous audio thread before starting a new one.
         self.stop_audio_thread();
 
@@ -161,6 +161,7 @@ impl PlaybackEngine {
         self.is_playing.store(false, Ordering::SeqCst);
     }
 
+    #[allow(dead_code)] // counterpart to pause(); no command calls it yet
     pub fn resume(&self) {
         self.is_playing.store(true, Ordering::SeqCst);
     }
