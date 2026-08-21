@@ -13,6 +13,7 @@ import re
 import shutil
 import string
 import subprocess
+import sys
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Generator
@@ -20,6 +21,10 @@ from contextlib import contextmanager, suppress
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+
+if sys.platform == "win32":
+    _windll = ctypes.windll
+    _get_last_error = ctypes.GetLastError
 
 logger = logging.getLogger(__name__)
 # Req 28: Dedicated rotating file handler for USB module to prevent unbounded log growth
@@ -127,12 +132,12 @@ class UsbDetector:
         """Get all removable drive letters on Windows."""
         drives = []
         try:
-            bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+            bitmask = _windll.kernel32.GetLogicalDrives()
             for i, letter in enumerate(string.ascii_uppercase):
                 if bitmask & (1 << i):
                     drive = f"{letter}:\\"
                     try:
-                        drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive)
+                        drive_type = _windll.kernel32.GetDriveTypeW(drive)
                         # 2 = REMOVABLE, 3 = FIXED
                         # Modern USB/SD can be 3. We filter internal disks in scan().
                         if drive_type in [2, 3]:
@@ -152,7 +157,7 @@ class UsbDetector:
             max_len = ctypes.c_ulong()
             flags = ctypes.c_ulong()
             fs_name = ctypes.create_unicode_buffer(1024)
-            ctypes.windll.kernel32.GetVolumeInformationW(
+            _windll.kernel32.GetVolumeInformationW(
                 drive,
                 vol_name,
                 1024,
@@ -301,9 +306,9 @@ class UsbDetector:
         """
         # SEM_FAILCRITICALERRORS = 0x0001 — no "insert disk" dialog/wait.
         with suppress(Exception):
-            ctypes.windll.kernel32.SetThreadErrorMode(0x0001, None)
+            _windll.kernel32.SetThreadErrorMode(0x0001, None)
 
-        drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive)
+        drive_type = _windll.kernel32.GetDriveTypeW(drive)
         is_rb = cls.is_rekordbox_usb(drive)
         bus_type = bus_types.get(drive, "Unknown")
 
@@ -2029,8 +2034,8 @@ class UsbActions:
         """Sets the volume label for a drive."""
         try:
             drive_root = f"{drive.rstrip(os.sep)}{os.sep}"  # Ensure X:\ format
-            if not ctypes.windll.kernel32.SetVolumeLabelW(drive_root, new_label):
-                error = ctypes.GetLastError()
+            if not _windll.kernel32.SetVolumeLabelW(drive_root, new_label):
+                error = _get_last_error()
                 return {"status": "error", "message": f"Failed to rename (Error {error})"}
             return {"status": "success", "message": f"Renamed to {new_label}"}
         except Exception as e:

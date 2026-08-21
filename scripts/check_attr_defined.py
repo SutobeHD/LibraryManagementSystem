@@ -35,27 +35,38 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-def main() -> int:
+def _run_mypy(platform: str | None) -> str | None:
+    """mypy output for one target platform, or None if mypy is unavailable."""
+    cmd = [sys.executable, "-m", "mypy", "app/", "--no-error-summary"]
+    if platform:
+        cmd += ["--platform", platform]
     try:
-        proc = subprocess.run(
-            [sys.executable, "-m", "mypy", "app/", "--no-error-summary"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            timeout=300,
-        )
-    except FileNotFoundError:
-        print("check_attr_defined: mypy not found — skipping (CI still gates this)")
-        return 0
-    except subprocess.TimeoutExpired:
-        print("check_attr_defined: mypy timed out after 300s — skipping")
-        return 0
+        proc = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, timeout=300)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    out = proc.stdout.decode("utf-8", "replace") + proc.stderr.decode("utf-8", "replace")
+    return None if "No module named mypy" in out else out
 
-    output = proc.stdout.decode("utf-8", "replace") + proc.stderr.decode("utf-8", "replace")
-    if "No module named mypy" in output:
-        print("check_attr_defined: mypy not installed — skipping (CI still gates this)")
-        return 0
 
-    offenders = [ln for ln in output.splitlines() if "attr-defined" in ln]
+def main() -> int:
+    # Both the native platform AND linux: ctypes.windll type-checks fine on
+    # Windows and does not exist at all on linux, so a Windows-only run passes
+    # while CI (ubuntu) fails. Checking both catches that before the push.
+    targets = ["linux"] if sys.platform.startswith("linux") else [None, "linux"]
+
+    offenders: list[str] = []
+    ran = False
+    for target in targets:
+        output = _run_mypy(target)
+        if output is None:
+            continue
+        ran = True
+        label = target or sys.platform
+        offenders += [f"[{label}] {ln}" for ln in output.splitlines() if "attr-defined" in ln]
+
+    if not ran:
+        print("check_attr_defined: mypy unavailable — skipping (CI still gates this)")
+        return 0
     if not offenders:
         return 0
 

@@ -56,19 +56,7 @@ jobs:
       # mypy had flagged every one of them while this step ran with `|| true`.
       # The count is 0; anything above that fails the build.
       - name: Type-check — no missing attributes
-        shell: bash
-        run: |
-          mypy app/ --no-error-summary > mypy-out.txt || true
-          if grep -q 'attr-defined' mypy-out.txt; then
-            echo "::error::mypy found missing-attribute errors (attr-defined):"
-            grep 'attr-defined' mypy-out.txt
-            echo ""
-            echo "Either the attribute is genuinely missing (a runtime AttributeError"
-            echo "waiting to happen — fix it) or it is a third-party stub gap, in which"
-            echo "case add: # type: ignore[attr-defined]  # <reason>"
-            exit 1
-          fi
-          echo "no attr-defined errors"
+        run: python scripts/check_attr_defined.py
 
       - name: Run pytest
         run: pytest tests/ -v --tb=short   # all 194 tests must pass — Phase 6 baseline
