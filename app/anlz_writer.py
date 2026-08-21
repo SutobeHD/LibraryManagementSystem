@@ -84,11 +84,15 @@ def _build_ppth(track_path: str) -> bytes:
 
 def _build_pvbr(pvbr_data: list[int]) -> bytes:
     """
-    PVBR — VBR index (400 × 4-byte entries = 1600 bytes data).
-    Layout: tag(4) + hdr_len(4) + total_len(4) + reserved(4) + data(1600)
+    PVBR — VBR index.
+    Layout: tag(4) + hdr_len(4) + total_len(4) + u1(4) + idx(400*4) + u2(4)
+
+    total_len is 1620, not 1616: the reference struct closes with a trailing
+    u32 after the 400 index entries, and every PVBR tag in a real Rekordbox
+    export carries it. Omitting it made readers log a len_tag mismatch.
     """
     hdr_len = 16
-    data_len = 400 * 4
+    data_len = 400 * 4 + 4  # idx entries + trailing u2
     total_len = hdr_len + data_len
 
     buf = struct.pack(
@@ -96,12 +100,13 @@ def _build_pvbr(pvbr_data: list[int]) -> bytes:
         b"PVBR",
         hdr_len,
         total_len,
-        0,  # reserved
+        0,  # u1
     )
     # VBR entries as big-endian u32 (millisecond offsets)
     for i in range(400):
         val = pvbr_data[i] if i < len(pvbr_data) else 0
         buf += struct.pack(">I", val)
+    buf += struct.pack(">I", 0)  # u2
     return buf
 
 
@@ -239,7 +244,15 @@ def _build_pcob(cue_type: int, cues: list[dict[str, Any]] | None = None) -> byte
     PCOB — Cue list container.
     cue_type: 0 = memory cues, 1 = hot cues
     Header (24 bytes): tag(4) + hdr_len(4) + total_len(4) + cue_list_type(4)
-                     + count(2) + memory_count(2) + reserved(4)
+                     + unknown(2) + len_cues(2) + memory_count(4)
+
+    Field order is load-bearing and was wrong until 2026-08-22: the entry
+    count belongs in ``len_cues``, the SECOND u16. Writing it into
+    ``unknown`` left ``len_cues`` at 0 for every hot-cue list, so a
+    conformant reader parsed zero entries no matter how many PCPT records
+    followed. Memory lists happened to survive because the old code wrote
+    the count into both slots when cue_type == 0. rbox additionally
+    asserts ``unknown == 0`` and refused the whole file.
     """
     cues = cues or []
     if cue_type == 1:
@@ -260,9 +273,9 @@ def _build_pcob(cue_type: int, cues: list[dict[str, Any]] | None = None) -> byte
         hdr_len,
         total_len,
         cue_type,
-        entry_count,
-        entry_count if cue_type == 0 else 0,  # memory_count only set for memory list
-        0xFFFFFFFF,  # sentinel
+        0,  # unknown — 0 in every real export; rbox hard-asserts this
+        entry_count,  # len_cues — drives the reader's entry Array
+        0xFFFFFFFF,  # memory_count sentinel, as seen in real exports
     )
     buf += entry_data
     return buf
@@ -287,32 +300,53 @@ def _build_pcp2_entry(cue: dict[str, Any]) -> bytes:
     rgb = cue.get("color_rgb", (0, 0, 0))
     r, g, b = (int(x) & 0xFF for x in rgb)
 
+    cue_type_byte = 2 if is_loop else 1
+    loop_numerator = int(cue.get("loop_numerator", 0)) & 0xFFFF
+    loop_denominator = int(cue.get("loop_denominator", 0)) & 0xFFFF
+
+    # Reference field order (crate-digger / pyrekordbox AnlzCuePoint2). The
+    # previous layout put color_id+RGB directly after loop_time and packed the
+    # loop fraction as two u32 — both wrong, which is why fixing only PCO2's
+    # count made readers fail inside the comment field instead.
     body = struct.pack(
-        ">IIIBBBB",
-        cue_num,  # hot_cue
-        time_ms,
-        loop_end & 0xFFFFFFFF,
-        color_id,  # color id (palette index)
-        r,
-        g,
-        b,  # explicit RGB
+        ">IBxH",
+        cue_num,  # hot_cue (0 = memory, 1..8 = hot A..H)
+        cue_type_byte,  # 1 = cue, 2 = loop
+        1000,  # const — same 0x03E8 the PCPT entry carries
     )
     body += struct.pack(
         ">II",
-        0,  # loop numerator
-        0,  # loop denominator
+        time_ms,
+        loop_end & 0xFFFFFFFF,
     )
+    body += struct.pack(">B7x", color_id)
+    body += struct.pack(">HH", loop_numerator, loop_denominator)
     body += struct.pack(">I", len(name_bytes))
     body += name_bytes
+    body += struct.pack(">BBBB", color_id, r, g, b)  # color_code + explicit RGB
 
     hdr_len = 0x10
-    total_len = hdr_len + len(body)
+    # total_len counts the 12-byte tag prefix + body; the reader derives its
+    # trailing padding as len_entry - 48 - len_comment, so an inflated value
+    # (the old hdr_len + len(body)) desynchronised every following entry.
+    total_len = 12 + len(body)
     return struct.pack(">4sII", b"PCP2", hdr_len, total_len) + body
 
 
 def _build_pco2(cue_type: int, cues: list[dict[str, Any]] | None = None) -> bytes:
     """
     PCO2 — Extended cue list (used in .EXT). Carries color + comment per cue.
+    Header (20 bytes): tag(4) + hdr_len(4) + total_len(4) + cue_list_type(4)
+                     + len_cues(2) + unknown(2)
+
+    Reader divergence, verified 2026-08-22: pyrekordbox parses memory-cue
+    entries here (hot_cue == 0) fine, rbox/rekordcrate refuses them — its
+    ExtendedCue models hot_cue as an enum with no 0 variant. We keep emitting
+    them (dropping them would lose memory-cue colours + names, and
+    crate-digger's layout allows them). Safe for us because our own read-back
+    path, app/anlz_safe.py, only ever opens the .DAT — never the .EXT.
+    A scan of 9,718 real Rekordbox ANLZ files found no populated PCO2 tag at
+    all, so real exports cannot settle the question either way.
     """
     cues = cues or []
     if cue_type == 1:
@@ -325,12 +359,13 @@ def _build_pco2(cue_type: int, cues: list[dict[str, Any]] | None = None) -> byte
     total_len = hdr_len + len(entry_data)
 
     buf = struct.pack(
-        ">4sIIII",
+        ">4sIIIHH",
         b"PCO2",
         hdr_len,
         total_len,
         cue_type,
-        len(entries),
+        len(entries),  # len_cues (u16) — a u32 here put 0 in the count slot
+        0,  # unknown
     )
     buf += entry_data
     return buf
