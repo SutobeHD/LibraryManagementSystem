@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -43,14 +44,21 @@ def test_get_miss_after_file_changes(tmp_path):
 def test_corrupt_index_entry_does_not_crash(tmp_path):
     """Regression: an entry without 'cache_id' must not KeyError."""
     c = _make(tmp_path)
+    # Index keys must be what os.path.abspath() produces, or get()/invalidate()
+    # look up a different key than the one injected here and the assertions pass
+    # for the wrong reason. A POSIX literal like "/music/legacy.wav" becomes
+    # "C:\\music\\legacy.wav" under abspath on Windows, so invalidate() missed
+    # and clear() counted 2 — build the keys the way the cache does instead.
+    legacy = os.path.abspath(str(tmp_path / "legacy.wav"))
+    legacy2 = os.path.abspath(str(tmp_path / "legacy2.wav"))
     # inject a legacy/corrupt entry directly, persist, reload
-    c._index["/music/legacy.wav"] = {"mtime": 1.0, "size": 10, "version": 3}
+    c._index[legacy] = {"mtime": 1.0, "size": 10, "version": 3}
     c._save_index()
     c2 = AnalysisCache(str(tmp_path / "cache"))
-    assert c2.get("/music/legacy.wav") is None  # no KeyError
-    c2.invalidate("/music/legacy.wav")  # no KeyError
+    assert c2.get(legacy) is None  # no KeyError
+    c2.invalidate(legacy)  # no KeyError — and actually removes the entry
     # re-add another bad entry and clear()
-    c2._index["/music/legacy2.wav"] = {"mtime": 1.0, "size": 10, "version": 3}
+    c2._index[legacy2] = {"mtime": 1.0, "size": 10, "version": 3}
     assert c2.clear() == 1  # counts + survives missing cache_id
 
 
@@ -73,17 +81,29 @@ def test_stats_reports_entries_and_bytes(tmp_path):
     assert st["version"] == c.stats()["version"]
 
 
-def test_stats_tolerates_file_vanishing_mid_scan(tmp_path):
-    """Regression: a *.json.gz that stat() can't read (here a broken symlink,
-    standing in for a file unlinked by a concurrent clear/invalidate between
-    glob and stat) must be skipped, not raise FileNotFoundError out of stats()."""
+def test_stats_tolerates_file_vanishing_mid_scan(tmp_path, monkeypatch):
+    """Regression: a *.json.gz that stat() can't read — standing in for a file
+    unlinked by a concurrent clear/invalidate between glob and stat — must be
+    skipped, not raise FileNotFoundError out of stats()."""
     src = tmp_path / "s.wav"
     src.write_bytes(b"\x00" * 1024)
     c = _make(tmp_path)
     c.put(str(src), {"bpm": 120})  # one real cache file
-    # a dangling cache file: matches the glob, but stat() raises FileNotFoundError
+    # Make stat() fail rather than making the filesystem fail. The previous
+    # version created a dangling symlink, which needs SeCreateSymbolicLinkPrivilege
+    # — absent on a stock Windows box without Developer Mode, so the test errored
+    # in setup instead of skipping, and a local "pytest is red" became
+    # indistinguishable from a real regression.
     broken = c.cache_dir / "broken.json.gz"
-    broken.symlink_to(tmp_path / "does_not_exist")
+    broken.write_bytes(b"x")
+    real_stat = Path.stat
+
+    def vanishing_stat(self, *args, **kwargs):
+        if self.name == "broken.json.gz":
+            raise FileNotFoundError(2, "unlinked between glob and stat", str(self))
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", vanishing_stat)
 
     st = c.stats()  # must not raise
     assert st["bytes"] > 0  # the real file still counted
