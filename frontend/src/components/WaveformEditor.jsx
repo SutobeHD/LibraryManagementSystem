@@ -390,6 +390,7 @@ const WaveformEditorInner = forwardRef(({ track, blobUrl = null, simpleMode = fa
         </div>
     );
 });
+WaveformEditorInner.displayName = 'WaveformEditorInner';
 
 // Public export wraps the inner component in an ErrorBoundary so a WaveSurfer
 // or decode crash doesn't take the whole app down.
@@ -398,5 +399,6 @@ const WaveformEditor = forwardRef((props, ref) => (
         <WaveformEditorInner {...props} ref={ref} />
     </WaveformErrorBoundary>
 ));
+WaveformEditor.displayName = 'WaveformEditor';
 
 export default WaveformEditor;

@@ -24,6 +24,7 @@ const TimelineCanvas = ({
     onSelectionChange,
     onPlayheadChange,
     onZoomChange,
+    onRegionDrop,
     containerHeight = 240
 }) => {
     const containerRef = useRef(null);

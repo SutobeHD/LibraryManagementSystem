@@ -142,7 +142,7 @@ const TaskCard = ({ task }) => {
                                 {task.artist && <span className="truncate max-w-[180px]">{task.artist}</span>}
                                 {task.file_path && task._src === 'import' && (
                                     <span className="truncate max-w-[260px] font-mono text-[10px]" title={task.file_path}>
-                                        {task.file_path.split(/[\\\/]/).slice(-2).join('/')}
+                                        {task.file_path.split(/[\\/]/).slice(-2).join('/')}
                                     </span>
                                 )}
                                 {task.playlist_title && (
