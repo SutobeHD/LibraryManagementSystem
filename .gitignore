@@ -172,3 +172,6 @@ uv.lock
 .release-backup/
 CLAUDE_OLD.md
 backend_test.log
+
+# CI attr-defined gate scratch output
+mypy-out.txt

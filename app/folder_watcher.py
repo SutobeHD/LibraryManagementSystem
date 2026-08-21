@@ -113,12 +113,12 @@ class FolderWatcher:
             self._stopped = True
             for path, obs in list(self._observers.items()):
                 try:
-                    obs.stop()
+                    obs.stop()  # type: ignore[attr-defined]  # watchdog Observer is a factory alias; stubs lose the concrete type
                 except Exception as exc:
                     logger.warning("Observer stop failed for %s: %s", path, exc)
             for obs in self._observers.values():
                 with contextlib.suppress(Exception):
-                    obs.join(timeout=2.0)
+                    obs.join(timeout=2.0)  # type: ignore[attr-defined]  # watchdog Observer is a factory alias; stubs lose the concrete type
             self._observers.clear()
             for timer in self._timers.values():
                 timer.cancel()
@@ -190,7 +190,7 @@ class FolderWatcher:
             return {
                 "running": not self._stopped,
                 "folders": [
-                    {"path": p, "alive": obs.is_alive()} for p, obs in self._observers.items()
+                    {"path": p, "alive": obs.is_alive()} for p, obs in self._observers.items()  # type: ignore[attr-defined]  # watchdog Observer is a factory alias; stubs lose the concrete type
                 ],
                 "pending_imports": len(self._timers),
             }

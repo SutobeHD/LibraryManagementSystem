@@ -870,7 +870,7 @@ async def clean_xml(
             shutil.copyfileobj(file.file, f)
 
         # Reload DB
-        db.load_xml(str(target_path))
+        db.load_library(str(target_path))
 
         return {
             "status": "success",
@@ -1064,7 +1064,7 @@ async def analyze_track(tid: str):
             )
             track["positionMarks"] = marks
 
-        db.save_xml()
+        db.save()
         return result
     except Exception as e:
         logger.error(f"Analysis error: {e}")
@@ -2444,7 +2444,7 @@ async def import_paths(r: ImportPathsReq):
             if local_id and group_into_playlist:
                 collected_track_ids.append(local_id)
             return
-        threading.current_thread()._lms_import_tid = tid
+        threading.current_thread()._lms_import_tid = tid  # type: ignore[attr-defined]  # deliberate per-thread tag; threading.Thread has no slot for it
         try:
             import_tracker.update(tid, status="Analyzing", progress=20)
             result = ImportManager.process_import(f)
@@ -2468,7 +2468,7 @@ async def import_paths(r: ImportPathsReq):
             counters["skipped"] += 1
         finally:
             with contextlib.suppress(AttributeError):
-                del threading.current_thread()._lms_import_tid
+                del threading.current_thread()._lms_import_tid  # type: ignore[attr-defined]  # deliberate per-thread tag; threading.Thread has no slot for it
 
     def _bundle_into_playlist():
         """After all files are processed, drop them into a single playlist."""
@@ -2714,7 +2714,7 @@ def _run_import_analysis(dest: Path, track_task_id: str) -> None:
     frontend can pick it up via /api/import/tasks."""
     from . import import_tracker
 
-    threading.current_thread()._lms_import_tid = track_task_id
+    threading.current_thread()._lms_import_tid = track_task_id  # type: ignore[attr-defined]  # deliberate per-thread tag; threading.Thread has no slot for it
     try:
         import_tracker.update(track_task_id, status="Analyzing", progress=30)
         tid, analysis = ImportManager.process_import(dest)
@@ -2732,7 +2732,7 @@ def _run_import_analysis(dest: Path, track_task_id: str) -> None:
         import_tracker.update(track_task_id, status="Failed", progress=100, error=str(exc))
     finally:
         with contextlib.suppress(AttributeError):
-            del threading.current_thread()._lms_import_tid
+            del threading.current_thread()._lms_import_tid  # type: ignore[attr-defined]  # deliberate per-thread tag; threading.Thread has no slot for it
 
 
 @app.post("/api/audio/import", dependencies=[Depends(require_session)])
@@ -2787,13 +2787,13 @@ def import_audio(files: list[UploadFile] = File(...), wait: bool = False):
             if wait:
                 # Synchronous path — preserve the legacy response shape so any
                 # CLI / test that still expects {id, bpm, totalTime} keeps working.
-                threading.current_thread()._lms_import_tid = track_task_id
+                threading.current_thread()._lms_import_tid = track_task_id  # type: ignore[attr-defined]  # deliberate per-thread tag; threading.Thread has no slot for it
                 try:
                     import_tracker.update(track_task_id, status="Analyzing", progress=30)
                     tid, analysis = ImportManager.process_import(dest)
                 finally:
                     with contextlib.suppress(AttributeError):
-                        del threading.current_thread()._lms_import_tid
+                        del threading.current_thread()._lms_import_tid  # type: ignore[attr-defined]  # deliberate per-thread tag; threading.Thread has no slot for it
 
                 import_tracker.update(
                     track_task_id,
@@ -5486,7 +5486,7 @@ async def duplicates_merge(body: DuplicateMergeRequest):
             master_id = str(master_track.get("TrackID") or master_track.get("track_id") or "")
             if master_id:
                 try:
-                    db.save_xml()  # persist deletions first
+                    db.save()  # persist deletions first
                 except Exception:
                     pass
 

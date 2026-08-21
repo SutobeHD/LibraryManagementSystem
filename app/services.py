@@ -449,7 +449,7 @@ class AudioEngine:
                 }
 
                 db.add_track(track_data)
-                db.save_xml()
+                db.save()
             except Exception as db_err:
                 logger.warning(f"Could not add exported track to DB (non-fatal): {db_err}")
 
@@ -1269,7 +1269,7 @@ class ImportManager:
                         audio = ID3(file_path)
                         for tag in audio.values():
                             if isinstance(tag, APIC):
-                                art_data = tag.data
+                                art_data = tag.data  # type: ignore[attr-defined]  # mutagen APIC stub gap
                                 break
                     except Exception as e:
                         logger.debug(
@@ -1280,8 +1280,8 @@ class ImportManager:
                 elif file_path.suffix.lower() == ".flac":
                     try:
                         audio = FLAC(file_path)
-                        if audio.pictures:
-                            art_data = audio.pictures[0].data
+                        if audio.pictures:  # type: ignore[attr-defined]  # mutagen stub gap: FLAC/ID3 union not narrowed here
+                            art_data = audio.pictures[0].data  # type: ignore[attr-defined]  # mutagen stub gap: FLAC/ID3 union not narrowed here
                     except Exception as e:
                         logger.debug(
                             "services: FLAC artwork lookup failed for %s (%s)",
@@ -1296,11 +1296,7 @@ class ImportManager:
                     with open(bg_path, "wb") as f:
                         f.write(art_data)
                     artwork_path = str(
-                        bg_path.relative_to(
-                            Path(REKORDBOX_ROOT).parent_path
-                            if hasattr(Path(REKORDBOX_ROOT), "parent_path")
-                            else Path(REKORDBOX_ROOT).parent
-                        )
+                        bg_path.relative_to(Path(REKORDBOX_ROOT).parent)
                     )
                     # Fix path for frontend: absolute or relative strictly?
                     # Let's use absolute path for internally managed, but relative for portability?
@@ -1418,7 +1414,7 @@ class ImportManager:
                             export_path = (
                                 Path(REKORDBOX_ROOT).parent / "exports" / "rekordbox_export.xml"
                             )
-                            RekordboxBridge.export_xml([str(tid)], export_path)
+                            RekordboxBridge.export_collection([str(tid)], export_path)
                             logger.info(f"Auto-export triggered for track {tid} to {export_path}")
                         except Exception as exp_err:
                             logger.warning(f"Auto-export failed: {exp_err}")
@@ -1438,7 +1434,7 @@ class ImportManager:
 
                     if hasattr(threading.current_thread(), "_lms_import_tid"):
                         import_tracker.update(
-                            threading.current_thread()._lms_import_tid,
+                            threading.current_thread()._lms_import_tid,  # type: ignore[attr-defined]  # deliberate per-thread tag; threading.Thread has no slot for it
                             status="ANLZ",
                             progress=85,
                         )

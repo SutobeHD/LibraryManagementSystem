@@ -150,7 +150,7 @@ def _resize_to_jpeg(raw: bytes, size: tuple[int, int], quality: int) -> bytes | 
         try:
             resample = Image.Resampling.LANCZOS
         except AttributeError:
-            resample = Image.LANCZOS
+            resample = Image.LANCZOS  # type: ignore[attr-defined]  # PIL re-exports the enum at module level; stubs miss it
         img.thumbnail(size, resample=resample)
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=quality, optimize=True)

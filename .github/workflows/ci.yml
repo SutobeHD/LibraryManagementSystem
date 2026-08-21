@@ -49,6 +49,27 @@ jobs:
       - name: Type-check with mypy
         run: mypy app/ || true   # gradual typing — non-blocking until type-hint pass completes
 
+      # BLOCKING subset. `attr-defined` is the code that catches "this method
+      # does not exist on this object" — the class of bug that shipped
+      # db.get_tracks, db.save_track_cues, db.save_track_beatgrid, db.save_xml,
+      # db.load_xml and db.get_unanalyzed_track_ids, each a guaranteed HTTP 500.
+      # mypy had flagged every one of them while this step ran with `|| true`.
+      # The count is 0; anything above that fails the build.
+      - name: Type-check — no missing attributes
+        shell: bash
+        run: |
+          mypy app/ --no-error-summary > mypy-out.txt || true
+          if grep -q 'attr-defined' mypy-out.txt; then
+            echo "::error::mypy found missing-attribute errors (attr-defined):"
+            grep 'attr-defined' mypy-out.txt
+            echo ""
+            echo "Either the attribute is genuinely missing (a runtime AttributeError"
+            echo "waiting to happen — fix it) or it is a third-party stub gap, in which"
+            echo "case add: # type: ignore[attr-defined]  # <reason>"
+            exit 1
+          fi
+          echo "no attr-defined errors"
+
       - name: Run pytest
         run: pytest tests/ -v --tb=short   # all 194 tests must pass — Phase 6 baseline
 
@@ -115,8 +136,16 @@ jobs:
       - name: Install frontend deps
         run: npm ci --prefix frontend
 
-      - name: ESLint
-        run: npm run lint --prefix frontend || true   # not yet zero-warning baseline; promoted once cleanup hits steady-state
+      # `npm run lint` is --max-warnings=0 and 194 warnings remain, so the full
+      # run stays advisory. Errors are a different matter: a `no-undef` error is
+      # a guaranteed runtime ReferenceError (it took out the whole
+      # non-destructive editor). Error count is 0 — keep it there.
+      - name: ESLint (advisory — warnings)
+        run: npm run lint --prefix frontend || true
+
+      - name: ESLint — no errors
+        run: npx eslint . --ext .js,.jsx --max-warnings=999999
+        working-directory: frontend
 
       - name: Prettier check
         run: npm run format:check --prefix frontend || true

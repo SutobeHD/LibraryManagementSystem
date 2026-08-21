@@ -1070,6 +1070,13 @@ class RekordboxDB:
             return self.active_db.remove_track_from_playlist(pid, tid)
         return False
 
+    def get_unanalyzed_track_ids(self) -> list[str]:
+        """Track IDs with no analysis yet. Live mode only — the XML backend
+        has no analysis-state column, so it reports nothing to analyse."""
+        if self.mode == "live" and self.live_db is not None:
+            return self.live_db.get_unanalyzed_track_ids()
+        return []
+
     def save(self) -> bool:
         if hasattr(self.active_db, "save_xml"):
             return self.active_db.save_xml()

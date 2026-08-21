@@ -265,6 +265,11 @@ def _write_aiff_wav(path: Path, fields: dict[str, Any], artwork: bytes | None) -
         )
 
         tags = c.tags
+        if tags is None:
+            # add_tags() above is documented to create the chunk; if it silently
+            # did not, every tags.add() below would raise AttributeError one
+            # line at a time. Fail once, with the path.
+            raise RuntimeError(f"mutagen add_tags() produced no ID3 chunk for {path}")
         if "title" in fields:
             tags.delall("TIT2")
             tags.add(TIT2(encoding=3, text=str(fields["title"])))
