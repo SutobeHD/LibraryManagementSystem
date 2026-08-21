@@ -119,6 +119,9 @@ debug_*.py
 diag_*.py
 inspect_*.py
 check_*.py
+# ...but this one is committed tooling, not a debug one-off: it backs the
+# attr-defined gate in .pre-commit-config.yaml and .github/workflows/ci.yml.
+!scripts/check_attr_defined.py
 verify_*.py
 test_*.py
 !tests/test_*.py

@@ -13,7 +13,6 @@
       "Bash(npx prettier*)",
       "Bash(npx vitest*)",
       "Bash(node *)",
-
       "Bash(python -m app.*)",
       "Bash(python -m pip list)",
       "Bash(python -m pip show *)",
@@ -24,7 +23,6 @@
       "Bash(ruff *)",
       "Bash(mypy *)",
       "Bash(black *)",
-
       "Bash(cargo check*)",
       "Bash(cargo build*)",
       "Bash(cargo test*)",
@@ -34,7 +32,6 @@
       "Bash(cargo metadata*)",
       "Bash(rustc --version)",
       "Bash(rustup *)",
-
       "Bash(git status*)",
       "Bash(git diff*)",
       "Bash(git log*)",
@@ -70,7 +67,6 @@
       "Bash(git rebase main*)",
       "Bash(git rebase origin/*)",
       "Bash(git cherry-pick*)",
-
       "Bash(gh pr view*)",
       "Bash(gh pr list*)",
       "Bash(gh pr diff*)",
@@ -84,7 +80,6 @@
       "Bash(gh release list*)",
       "Bash(gh release view*)",
       "Bash(gh pr merge*)",
-
       "Bash(ls*)",
       "Bash(pwd)",
       "Bash(file *)",
@@ -93,13 +88,11 @@
       "Bash(echo *)",
       "Bash(curl http://127.0.0.1:*)",
       "Bash(curl http://localhost:*)",
-
       "Bash(./scripts/security-audit.sh)",
       "Bash(./scripts/security-audit.ps1)",
       "Bash(powershell -File scripts/*)",
       "Bash(powershell -Command Get-Process*)",
       "Bash(powershell -Command Get-NetTCPConnection*)",
-
       "Read(//**)",
       "Edit(//**)",
       "Write(//**)",
@@ -127,7 +120,6 @@
       "Bash(*--no-verify*)",
       "Bash(*--no-gpg-sign*)",
       "Bash(git rebase --root*)",
-
       "Read(./.env)",
       "Read(./.env.local)",
       "Read(./.env.*.local)",
@@ -138,7 +130,6 @@
       "Edit(./.env.local)",
       "Write(./.env)",
       "Write(./.env.local)",
-
       "Read(**/music/**)",
       "Edit(**/music/**)",
       "Write(**/music/**)",
@@ -175,8 +166,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python",
-            "args": [".claude/hooks/format-on-edit.py"]
+            "command": "python \"$(git rev-parse --show-toplevel)/.claude/hooks/format-on-edit.py\""
           }
         ]
       },
@@ -185,8 +175,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python",
-            "args": [".claude/hooks/auto-push-after-commit.py"]
+            "command": "python \"$(git rev-parse --show-toplevel)/.claude/hooks/auto-push-after-commit.py\""
           }
         ]
       }

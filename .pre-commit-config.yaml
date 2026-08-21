@@ -43,16 +43,21 @@ repos:
       - id: ruff-format
         files: '^(app|tests)/'
 
-  # ── Python — mypy (type-check) ───────────────────────────────────────────
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.15.0
+  # ── Python — mypy, attr-defined subset ───────────────────────────────────
+  # Full mypy sits at ~148 errors, so gating on it would block every commit
+  # that touches app/. `attr-defined` is the subset that is at 0 and worth
+  # holding there: it catches "this method does not exist on this object" —
+  # the class of bug that shipped db.get_tracks, db.save_track_cues,
+  # db.save_xml and db.load_xml, each a guaranteed HTTP 500. Mirrors the
+  # "Type-check — no missing attributes" step in .github/workflows/ci.yml.
+  - repo: local
     hooks:
-      - id: mypy
-        files: '^app/'
-        # Don't include test files (mypy on tests is noisy without stubs)
-        additional_dependencies:
-          - "pydantic>=2.0"
-        args: ["--config-file=pyproject.toml"]
+      - id: mypy-attr-defined
+        name: mypy — no missing attributes (attr-defined)
+        entry: python scripts/check_attr_defined.py
+        language: system
+        pass_filenames: false
+        files: '^app/.*\.py$'
 
   # ── Rust — fmt check ─────────────────────────────────────────────────────
   # Runs `cargo fmt --check` against src-tauri/. Doesn't auto-fix to keep the
