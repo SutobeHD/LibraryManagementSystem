@@ -45,7 +45,7 @@ def run_batch_update(db_path, source_id, action, find_text, replace_text):
     # 1. Resolve tracks
     target_ids = []
     if source_id == "LIB":
-        tracks = db.get_tracks()
+        tracks = db.get_contents()
         target_ids = [t.id for t in tracks]
     else:
         try:

@@ -4335,7 +4335,7 @@ async def usb_playcount_diff(usb_root: str, usb_xml_path: str):
         if not db.loaded:
             raise HTTPException(status_code=400, detail="Library not loaded")
 
-        pc_tracks_raw = db.get_tracks() if hasattr(db, "get_tracks") else []
+        pc_tracks_raw = db.get_all_tracks()
         pc_tracks = []
         for t in pc_tracks_raw:
             pc_tracks.append(
@@ -5057,7 +5057,7 @@ async def _run_duplicate_scan(job_id: str, track_paths: list[str]) -> None:
                 # Try to enrich from library db
                 if db.loaded:
                     try:
-                        for t in db.get_tracks() or []:
+                        for t in db.get_all_tracks() or []:
                             loc = t.get("Location") or t.get("path") or ""
                             if loc and (loc == p or Path(loc) == Path(p)):
                                 track_meta["title"] = t.get("Name") or t.get("title") or ""
@@ -5179,7 +5179,7 @@ async def duplicates_merge(body: DuplicateMergeRequest):
 
         # Find master track
         master_track = None
-        for t in db.get_tracks() or []:
+        for t in db.get_all_tracks() or []:
             loc = t.get("Location") or t.get("path") or ""
             if loc and Path(loc) == Path(body.keep_path):
                 master_track = t
@@ -5193,7 +5193,7 @@ async def duplicates_merge(body: DuplicateMergeRequest):
 
         # Remove duplicate library entries and accumulate play counts
         for path in body.remove_paths:
-            for t in db.get_tracks() or []:
+            for t in db.get_all_tracks() or []:
                 loc = t.get("Location") or t.get("path") or ""
                 if not (loc and Path(loc) == Path(path)):
                     continue
