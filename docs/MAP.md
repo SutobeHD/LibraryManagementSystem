@@ -33,6 +33,7 @@
 | `app/db_taste.py` | db_taste — sidecar store for per-user taste vectors (recommender-taste-llm M1, T1). |
 | `app/download_registry.py` | Download Registry — SQLite-based deduplication & analysis history log. |
 | `app/external_track_match.py` | external_track_match — shared title/version parsing + fuzzy-match + fingerprint. |
+| `app/ffmpeg_resolver.py` | Per-encoder FFmpeg binary resolution with cached ``-encoders`` probing. |
 | `app/folder_watcher.py` | FolderWatcher — auto-import audio files from user-configured folders. |
 | `app/import_tracker.py` | Per-file import-progress tracker — gives the frontend a live transparent |
 | `app/library_format_swap.py` | Library-wide audio format conversion engine. |
@@ -211,6 +212,7 @@
 | `tests/test_analysis_cache.py` | Tests for app/analysis_cache.py — persistent analysis-result cache. |
 | `tests/test_analysis_db_writer.py` | Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.db. |
 | `tests/test_analysis_edge.py` | Edge-case robustness for the analysis engine entry points. |
+| `tests/test_anlz_cue_layout.py` | Byte-layout regression tests for the ANLZ cue + VBR tags. |
 | `tests/test_anlz_cue_patch.py` | Round-trip tests for app/anlz_cue_patch.py. |
 | `tests/test_anlz_reference_parse.py` | Validate the produced ANLZ files (.DAT/.EXT/.2EX). |
 | `tests/test_anlz_writer_guards.py` | Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout). |
@@ -219,6 +221,7 @@
 | `tests/test_auth.py` | Tests for ``app/auth.py`` -- Bearer-token session authentication. |
 | `tests/test_batch_worker.py` | Tests for app/batch_worker.py — pure comment-transform logic. |
 | `tests/test_compare_rekordbox.py` | Unit tests for the pure comparison helpers in scripts/compare_rekordbox.py. |
+| `tests/test_cue_beatgrid_persistence.py` | Round-trip tests for the cue / beatgrid sidecar persistence. |
 | `tests/test_database.py` | Tests for `app/database.py`. |
 | `tests/test_db_taste.py` | taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py). |
 | `tests/test_download_registry.py` | Tests for app/download_registry.py — SoundCloud download dedup/history DB. |
@@ -263,6 +266,7 @@
 
 | File | Purpose |
 |------|---------|
+| `scripts/check_attr_defined.py` | Fail if mypy reports any `attr-defined` error in app/. |
 | `scripts/compare_rekordbox.py` | compare_rekordbox.py — A/B accuracy harness: our engine vs Rekordbox. |
 | `scripts/dev/phrase_spike.py` | phrase_spike.py — manual P0 verification for the phrase memory-cue ANLZ write. |
 | `scripts/dev/safe_format_swap.py` | safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist. |

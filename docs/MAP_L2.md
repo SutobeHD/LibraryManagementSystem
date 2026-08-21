@@ -231,10 +231,15 @@ Setup logging
 - `  RekordboxDB.create_playlist()`
 - `  RekordboxDB.add_track_to_playlist()`
 - `  RekordboxDB.remove_track_from_playlist()`
+- `  RekordboxDB.get_unanalyzed_track_ids()` — Track IDs with no analysis yet.
 - `  RekordboxDB.save()`
 - `  RekordboxDB.update_tracks_metadata()`
 - `  RekordboxDB.update_track_comment()`
 - `  RekordboxDB.update_track_path()` — Update the on-disk file path of a track after a rename operation.
+- `  RekordboxDB.save_track_cues()`
+- `  RekordboxDB.get_track_cues()` — Sidecar override first, then whatever the active DB loaded.
+- `  RekordboxDB.save_track_beatgrid()`
+- `  RekordboxDB.get_track_beatgrid()`
 
 ### `app/db_taste.py`
 
@@ -293,6 +298,18 @@ external_track_match — shared title/version parsing + fuzzy-match + fingerprin
 - `is_fingerprinting_available()` — True iff ``fpcalc`` is resolvable on PATH (cached).
 - `fingerprint()` — Compute a Chromaprint fingerprint via ``fpcalc``.
 
+### `app/ffmpeg_resolver.py`
+
+Per-encoder FFmpeg binary resolution with cached ``-encoders`` probing.
+
+- `ResolvedFfmpeg`
+- `clear_probe_cache()`
+- `configured_settings_ffmpeg()` — Late-bound read of the ``ffmpeg_path`` settings key (never at import).
+- `candidate_binaries()` — Ordered ``(path, source_label)`` candidates.
+- `probe_audio_encoders()` — Audio encoder names of ``path``, or ``None`` when the probe fails.
+- `resolve_for_encoder()` — First candidate whose probe carries ``encoder`` wins.
+- `resolve_ffprobe()` — ffprobe path, independent of discovery-candidate ffmpeg binaries.
+
 ### `app/folder_watcher.py`
 
 FolderWatcher — auto-import audio files from user-configured folders.
@@ -330,7 +347,9 @@ Library-wide audio format conversion engine.
 - `  FormatSwapEngine.enumerate_scope()` — Resolve a scope dict to rbox Content rows.
 - `  FormatSwapEngine.build_plans()`
 - `  FormatSwapEngine.dry_run()`
+- `  FormatSwapEngine.export_dry_run()` — Preview an export-copies run.
 - `  FormatSwapEngine.execute()` — Run the batch.
+- `  FormatSwapEngine.export_copies()` — Copy/convert scope tracks into ``dest_dir`` — read-only wrt the
 - `  FormatSwapEngine.rollback()` — Restore from a manifest.
 - `  FormatSwapEngine.list_manifests()`
 
@@ -506,9 +525,12 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `clean_titles()`
 - `FormatSwapDryRunReq`
 - `FormatSwapExecuteReq`
+- `FormatSwapExportReq`
 - `FormatSwapRollbackReq`
 - `format_swap_dry_run()` — Preview a format swap without touching disk or master.db.
 - `format_swap_execute()` — Start the format swap in a background thread; return ``batch_id`` to
+- `format_swap_export()` — Start an export-copies batch in a background thread.
+- `format_swap_capabilities()` — Per-target ffmpeg encoder availability.
 - `format_swap_batch_status()` — Poll a running or finished batch.
 - `format_swap_list_manifests()` — List available rollback manifests, newest first.
 - `format_swap_rollback()` — Restore from a manifest.
@@ -1645,6 +1667,7 @@ Global state holding the playback controller
 
 *(no module docstring)*
 
+- `type DecodeSession` — A decoded-audio session: `(format_reader, decoder, track_id, sample_rate, channels)`.
 - `struct AudioEngine` — Namespace for the audio loader helpers.
 - `load_file()` — Load and decode an audio file using memory mapping.
 - `struct AudioController`
@@ -1664,7 +1687,7 @@ Global state holding the playback controller
 
 fingerprint.rs — Acoustic Fingerprinting for Duplicate Detection Implements a lightweight Chromaprint-style audio fingerprint: 1.
 
-- `hamming_similarity()` — Compute similarity between two fingerprints using Hamming distance.
+- `hamming_similarity()`
 - `struct FingerprintProgress`
 - `fingerprint_track()`
 - `fingerprint_batch()`
@@ -1683,6 +1706,7 @@ fingerprint.rs — Acoustic Fingerprinting for Duplicate Detection Implements a 
 
 *(no module docstring)*
 
+- `type SampleConsumer` — Receiving half of the decode -> output ring buffer.
 - `struct PlaybackEngine` — Audio output engine.
 - `new()`
 - `start_stream()` — Initializes the CPAL stream and returns the sample rate of the device.
@@ -1775,7 +1799,7 @@ Tests for app/analysis_cache.py — persistent analysis-result cache.
 - `test_corrupt_index_entry_does_not_crash()` — Regression: an entry without 'cache_id' must not KeyError.
 - `test_unreadable_index_starts_fresh()`
 - `test_stats_reports_entries_and_bytes()`
-- `test_stats_tolerates_file_vanishing_mid_scan()` — Regression: a *.json.gz that stat() can't read (here a broken symlink,
+- `test_stats_tolerates_file_vanishing_mid_scan()` — Regression: a *.json.gz that stat() can't read — standing in for a file
 - `test_json_default_handles_numpy()`
 
 ### `tests/test_analysis_db_writer.py`
@@ -1797,6 +1821,24 @@ Edge-case robustness for the analysis engine entry points.
 - `test_detect_beats_none_input_no_crash()`
 - `test_detect_key_none_input_no_crash()`
 - `test_empty_returns_have_consistent_shape()` — The empty-input dicts must carry the same keys as a normal result so
+
+### `tests/test_anlz_cue_layout.py`
+
+Byte-layout regression tests for the ANLZ cue + VBR tags.
+
+- `TestPcobFieldOrder`
+- `  TestPcobFieldOrder.test_hot_list_reports_its_real_count()` — The regression: len_cues must carry the entry count, not 0.
+- `  TestPcobFieldOrder.test_memory_list_still_round_trips()`
+- `  TestPcobFieldOrder.test_unknown_u16_is_zero()` — rbox/rekordcrate hard-asserts this field is 0 and rejects the whole
+- `TestPco2FieldOrder`
+- `  TestPco2FieldOrder.test_extended_list_reports_its_real_count()`
+- `  TestPco2FieldOrder.test_extended_entries_carry_names()` — PCO2 is what gives the CDJ-3000 cue names + colours; an entry body
+- `  TestPco2FieldOrder.test_entry_total_len_matches_emitted_bytes()` — len_entry must equal 48 + len_comment — the reader derives its
+- `TestPvbrLength`
+- `  TestPvbrLength.test_declares_1620_like_every_real_export()` — 4,989 PVBR tags in the reference Rekordbox library all declare
+- `  TestPvbrLength.test_parses_without_warnings()`
+- `TestEmptyLists`
+- `  TestEmptyLists.test_no_cues_produces_zero_counts()`
 
 ### `tests/test_anlz_cue_patch.py`
 
@@ -1922,6 +1964,34 @@ Unit tests for the pure comparison helpers in scripts/compare_rekordbox.py.
 - `test_beatgrid_metrics_offset()`
 - `test_beatgrid_metrics_empty()`
 
+### `tests/test_cue_beatgrid_persistence.py`
+
+Round-trip tests for the cue / beatgrid sidecar persistence.
+
+- `db()` — A facade whose sidecars land in tmp_path instead of the real LOG_DIR.
+- `TestCuePersistence`
+- `  TestCuePersistence.test_save_then_get_round_trips()`
+- `  TestCuePersistence.test_unknown_track_returns_empty_list()`
+- `  TestCuePersistence.test_second_track_does_not_clobber_the_first()`
+- `  TestCuePersistence.test_overwrites_the_same_track()`
+- `  TestCuePersistence.test_write_is_atomic_no_tmp_left_behind()`
+- `  TestCuePersistence.test_corrupt_sidecar_does_not_lose_the_new_write()` — A truncated sidecar must not make save() fail — it starts fresh.
+- `  TestCuePersistence.test_corrupt_sidecar_reads_as_empty()`
+- `TestBeatgridPersistence`
+- `  TestBeatgridPersistence.test_save_then_get_round_trips()`
+- `  TestBeatgridPersistence.test_kept_in_a_separate_sidecar_from_cues()`
+- `  TestBeatgridPersistence.test_unknown_track_returns_empty_list()`
+- `TestFallbackToActiveDb`
+- `  TestFallbackToActiveDb.test_cues_fall_back_to_track_details()` — With no sidecar override, whatever the active DB loaded wins.
+- `  TestFallbackToActiveDb.test_sidecar_override_beats_the_active_db()`
+- `TestWriteLockCoverage`
+- `  TestWriteLockCoverage.test_savers_are_serialised()` — Both savers must be in database.py's `_serialised` wrap list —
+- `TestEndpointsNoLongerFiveHundred` — The regression that mattered: both save routes returned HTTP 500
+- `  TestEndpointsNoLongerFiveHundred.request_json()`
+- `  TestEndpointsNoLongerFiveHundred.test_cue_save_route()`
+- `  TestEndpointsNoLongerFiveHundred.test_grid_save_route()`
+- `  TestEndpointsNoLongerFiveHundred.test_cue_save_still_requires_auth()`
+
 ### `tests/test_database.py`
 
 Tests for `app/database.py`.
@@ -2041,6 +2111,7 @@ Tests for app.library_format_swap.
 - `TestTargetConfig`
 - `  TestTargetConfig.test_all_four_targets_present()`
 - `  TestTargetConfig.test_each_target_has_required_keys()`
+- `  TestTargetConfig.test_required_encoder_matches_codec_args()`
 - `  TestTargetConfig.test_file_type_codes()`
 - `  TestTargetConfig.test_expansion_ratios_plausible()`
 - `TestConstants`
@@ -2094,6 +2165,10 @@ Tests for app.library_format_swap.
 - `  TestLibrarySubsetMissingRequiredParam.test_by_file_type_without_file_type()`
 - `  TestLibrarySubsetMissingRequiredParam.test_library_subset_without_subset_kind()`
 - `  TestLibrarySubsetMissingRequiredParam.test_unknown_subset_kind_raises()`
+- `TestMasterDbWriteLock` — `master.db` writers must hold `_db_write_lock` from app.database.
+- `  TestMasterDbWriteLock.test_db_lock_is_the_global_write_lock()` — Not a second private RLock that only serialises this module.
+- `  TestMasterDbWriteLock.test_every_master_db_mutation_holds_the_lock()`
+- `  TestMasterDbWriteLock.test_rollback_db_restore_holds_the_lock()` — rollback() overwrites master.db wholesale via shutil.copy2.
 
 ### `tests/test_library_source.py`
 
@@ -2590,6 +2665,10 @@ Tests for `app/usb_manager.py`.
 - `  TestLockedSync.test_concurrent_acquire_raises()` — A second `locked_sync` over the same root while the first
 - `  TestLockedSync.test_lock_released_after_exception()` — Even if the body raises, the lock file must be cleaned up.
 - `  TestLockedSync.test_stale_lock_is_replaced()` — A lock file older than 10 minutes is treated as stale and replaced
+- `TestDriveLetterValidation` — `UsbActions.eject` / `.format_drive` splice the drive into a PowerShell
+- `  TestDriveLetterValidation.test_accepts_real_drive_letters()`
+- `  TestDriveLetterValidation.test_rejects_injection_payloads()`
+- `  TestDriveLetterValidation.test_eject_refuses_injection_without_spawning_powershell()` — The guard must reject *before* subprocess.run is reached.
 
 ### `tests/test_usb_mysettings.py`
 
@@ -2647,6 +2726,12 @@ Tests for app/xml_generator.py — Rekordbox collection XML export.
 
 
 ## scripts/ — Dev/Build Utilities
+
+### `scripts/check_attr_defined.py`
+
+Fail if mypy reports any `attr-defined` error in app/.
+
+- `main()`
 
 ### `scripts/compare_rekordbox.py`
 
