@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import re
@@ -1138,6 +1139,90 @@ class RekordboxDB:
             )
             return False
 
+    # --- Cue + beatgrid persistence -------------------------------------
+    #
+    # POST /api/track/cues/save, POST /api/track/grid/save and their GET
+    # counterparts called these four methods, but none of them existed on
+    # the facade and there is no __getattr__ — every call raised
+    # AttributeError, so the waveform editor's save button returned HTTP
+    # 500 for as long as it has been wired up.
+    #
+    # STOPGAP: a JSON sidecar next to the logs, NOT master.db and NOT the
+    # ANLZ files. Cues saved here are visible to this app only — they do
+    # not reach Rekordbox or a CDJ. Ported from the unmerged
+    # claude/gallant-lumiere-cff8ae branch; proper rbox + PQTZ/PCOB wiring
+    # is still outstanding (see docs/research inprogress_waveform-editor-
+    # extensions).
+
+    def _cue_sidecar_path(self) -> Path:
+        from .config import LOG_DIR
+
+        return Path(LOG_DIR) / "cue_overrides.json"
+
+    def _beatgrid_sidecar_path(self) -> Path:
+        from .config import LOG_DIR
+
+        return Path(LOG_DIR) / "beatgrid_overrides.json"
+
+    def _sidecar_write(self, sidecar: Path, tid: str, payload: Any, what: str) -> bool:
+        """tmp-file + rename so a crash mid-write can't truncate the sidecar."""
+        try:
+            data: dict[str, Any] = {}
+            if sidecar.exists():
+                try:
+                    data = json.loads(sidecar.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError) as e:
+                    logger.warning("%s: sidecar unreadable, starting fresh: %s", what, e)
+                    data = {}
+            data[str(tid)] = payload
+
+            sidecar.parent.mkdir(parents=True, exist_ok=True)
+            tmp = sidecar.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.replace(sidecar)
+            logger.info("%s: track=%s persisted %d entries", what, tid, len(payload))
+            return True
+        except OSError as e:
+            logger.error("%s: write failed for track %s: %s", what, tid, e)
+            return False
+
+    def _sidecar_read(self, sidecar: Path, tid: str, what: str) -> Any | None:
+        if not sidecar.exists():
+            return None
+        try:
+            data = json.loads(sidecar.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("%s: sidecar unreadable: %s", what, e)
+            return None
+        return data.get(str(tid))
+
+    def save_track_cues(self, tid: str, cues: list[dict[str, Any]]) -> bool:
+        return self._sidecar_write(self._cue_sidecar_path(), tid, cues, "save_track_cues")
+
+    def get_track_cues(self, tid: str) -> list[dict[str, Any]]:
+        """Sidecar override first, then whatever the active DB loaded."""
+        override = self._sidecar_read(self._cue_sidecar_path(), tid, "get_track_cues")
+        if override is not None:
+            return override
+        track = self.get_track_details(tid)
+        if track and "Cues" in track:
+            return track["Cues"]
+        return []
+
+    def save_track_beatgrid(self, tid: str, beat_grid: list[dict[str, Any]]) -> bool:
+        return self._sidecar_write(
+            self._beatgrid_sidecar_path(), tid, beat_grid, "save_track_beatgrid"
+        )
+
+    def get_track_beatgrid(self, tid: str) -> list[dict[str, Any]]:
+        override = self._sidecar_read(self._beatgrid_sidecar_path(), tid, "get_track_beatgrid")
+        if override is not None:
+            return override
+        track = self.get_track_details(tid)
+        if track and "BeatGrid" in track:
+            return track["BeatGrid"]
+        return []
+
 
 # Wrap every mutating method on the facade with the module-level write
 # lock so concurrent route handlers can't race against each other.
@@ -1165,6 +1250,8 @@ for _name in (
     "update_tracks_metadata",
     "update_track_comment",
     "update_track_path",
+    "save_track_cues",
+    "save_track_beatgrid",
 ):
     setattr(RekordboxDB, _name, _serialised(getattr(RekordboxDB, _name)))
 del _name
