@@ -10,6 +10,7 @@ module-level `PROFILES_FILE` Path.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -304,4 +305,73 @@ class TestDriveLetterValidation:
         )
         result = usb_manager.UsbActions.eject("E'); Start-Process calc; #")
         assert result["status"] == "error"
+        assert calls == []
+
+
+class TestFormatDriveGate:
+    """`format_drive` and `/api/usb/format/preview` checked only that the path
+    existed. `_get_removable_drives()` is not a safety gate — it returns FIXED
+    drives on purpose (modern USB sticks enumerate as FIXED) and was never
+    called from the format path, so a direct API call could wipe an internal
+    disk. The gate is a floor, not a guarantee: it refuses the system volume,
+    network shares, optical and RAM disks."""
+
+    def test_refuses_the_system_drive(self) -> None:
+        import os
+
+        system_letter = (os.environ.get("SYSTEMROOT") or "C:")[:1]
+        reason = usb_manager.refuse_reason_for_format(system_letter)
+        assert reason is not None
+        assert "system drive" in reason
+
+    @pytest.mark.parametrize("payload", ["", "EE", "E'); Start-Process calc; #", "../.."])
+    def test_refuses_malformed_drives(self, payload: str) -> None:
+        assert usb_manager.refuse_reason_for_format(payload) is not None
+
+    @pytest.mark.parametrize(
+        "drive_type,fragment",
+        [
+            (usb_manager.DRIVE_REMOTE, "network share"),
+            (usb_manager.DRIVE_CDROM, "optical drive"),
+            (usb_manager.DRIVE_RAMDISK, "RAM disk"),
+            (usb_manager.DRIVE_NO_ROOT_DIR, "not a mounted volume"),
+        ],
+    )
+    def test_refuses_non_disk_devices(self, drive_type, fragment, monkeypatch) -> None:
+        monkeypatch.setattr(usb_manager.sys, "platform", "win32")
+        monkeypatch.setattr(
+            usb_manager,
+            "_windll",
+            SimpleNamespace(kernel32=SimpleNamespace(GetDriveTypeW=lambda d: drive_type)),
+            raising=False,
+        )
+        reason = usb_manager.refuse_reason_for_format("Q")
+        assert reason is not None and fragment in reason
+
+    @pytest.mark.parametrize(
+        "drive_type", [usb_manager.DRIVE_REMOVABLE, usb_manager.DRIVE_FIXED]
+    )
+    def test_allows_removable_and_fixed(self, drive_type, monkeypatch) -> None:
+        """FIXED must stay allowed — excluding it would break real USB sticks."""
+        monkeypatch.setattr(usb_manager.sys, "platform", "win32")
+        monkeypatch.setattr(
+            usb_manager,
+            "_windll",
+            SimpleNamespace(kernel32=SimpleNamespace(GetDriveTypeW=lambda d: drive_type)),
+            raising=False,
+        )
+        assert usb_manager.refuse_reason_for_format("Q") is None
+
+    def test_format_drive_refuses_without_spawning_a_subprocess(self, monkeypatch) -> None:
+        """The engine gates itself — the route is not the only line of defence."""
+        import os
+
+        calls = []
+        monkeypatch.setattr(
+            usb_manager.subprocess, "run", lambda *a, **k: calls.append(a) or None
+        )
+        system_letter = (os.environ.get("SYSTEMROOT") or "C:")[:1]
+        result = usb_manager.UsbActions.format_drive(system_letter)
+        assert result["status"] == "error"
+        assert "system drive" in result["message"]
         assert calls == []

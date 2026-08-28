@@ -58,6 +58,61 @@ def _drive_letter(drive: str) -> str | None:
     return candidate.upper() if re.fullmatch(r"[A-Za-z]", candidate) else None
 
 
+# GetDriveTypeW return values.
+DRIVE_UNKNOWN, DRIVE_NO_ROOT_DIR, DRIVE_REMOVABLE, DRIVE_FIXED = 0, 1, 2, 3
+DRIVE_REMOTE, DRIVE_CDROM, DRIVE_RAMDISK = 4, 5, 6
+
+# REMOVABLE *and* FIXED are both accepted: modern USB sticks and SD readers
+# routinely enumerate as FIXED, so excluding type 3 would break the app's whole
+# purpose. The gate's job is to refuse the things that are never a target.
+_FORMATTABLE_DRIVE_TYPES = frozenset({DRIVE_REMOVABLE, DRIVE_FIXED})
+
+
+def refuse_reason_for_format(drive: str) -> str | None:
+    """Why ``drive`` must not be formatted, or None if it may be.
+
+    Neither the format routes nor UsbActions.format_drive asked anything about
+    the target beyond "does the path exist", and the existing
+    `_get_removable_drives()` helper is not a safety gate — it deliberately
+    returns FIXED drives too and was never called from the format path. A
+    direct API call or a UI refactor could therefore wipe an internal disk.
+
+    This cannot distinguish a USB stick from an internal data disk (Windows
+    reports both as FIXED), so it is a floor, not a guarantee: it refuses the
+    system volume, network shares, CD/DVD and RAM disks. The typed-phrase
+    confirmation stays the primary defence.
+    """
+    letter = _drive_letter(drive)
+    if letter is None:
+        return "Invalid drive."
+
+    system_root = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR") or ""
+    system_letter = _drive_letter(system_root[:2]) if len(system_root) >= 2 else None
+    if system_letter and letter == system_letter:
+        return f"Refusing to format the system drive {letter}:."
+
+    if sys.platform != "win32":
+        return None
+
+    try:
+        drive_type = _windll.kernel32.GetDriveTypeW(f"{letter}:\\")
+    except OSError as e:
+        logger.warning("format gate: GetDriveTypeW failed for %s: %s", letter, e)
+        return f"Could not determine the drive type of {letter}: — refusing to format."
+
+    if drive_type not in _FORMATTABLE_DRIVE_TYPES:
+        names = {
+            DRIVE_UNKNOWN: "an unrecognised device",
+            DRIVE_NO_ROOT_DIR: "not a mounted volume",
+            DRIVE_REMOTE: "a network share",
+            DRIVE_CDROM: "an optical drive",
+            DRIVE_RAMDISK: "a RAM disk",
+        }
+        what = names.get(drive_type, f"drive type {drive_type}")
+        return f"Refusing to format {letter}: — it is {what}."
+    return None
+
+
 def _is_excluded_playlist(name: str) -> bool:
     return (name or "").strip().lower() in EXCLUDED_USB_PLAYLISTS
 
@@ -2060,6 +2115,14 @@ class UsbActions:
         """
         import platform
         import subprocess as sp
+
+        # Defence in depth: the route gates this too, but format_drive is a
+        # public static method and nothing stopped a direct call from wiping
+        # the system volume.
+        refusal = refuse_reason_for_format(drive)
+        if refusal:
+            logger.error("format_drive refused: drive=%s reason=%s", drive, refusal)
+            return {"status": "error", "message": refusal}
 
         fs = (filesystem or "FAT32").upper()
         if fs not in ("FAT32", "EXFAT"):

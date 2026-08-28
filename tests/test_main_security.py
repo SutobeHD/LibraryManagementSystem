@@ -243,3 +243,101 @@ class TestFileRevealSandboxAccepts:
         # check=False is the contract — never let explorer/open/xdg-open
         # raise CalledProcessError back into the handler.
         assert kwargs.get("check") is False
+
+
+# ---------------------------------------------------------------------------
+# /api/audio/render — every cut carries its own `src`
+# ---------------------------------------------------------------------------
+
+
+class TestRenderCutSrcSandbox:
+    """The route validated `source_path` and nothing else, but AudioEngine
+    reads `c.get("src", source_path)` per cut (app/services.py:251 and :281)
+    behind only `os.path.exists`. Any readable file could therefore be spliced
+    into a render output the caller then downloads — a complete bypass of
+    ALLOWED_AUDIO_ROOTS through a field the sandbox never looked at."""
+
+    @staticmethod
+    def _audio(root: Path, name: str = "ok.wav") -> Path:
+        f = root / name
+        f.write_bytes(b"RIFF0000WAVEfmt ")
+        return f
+
+    def test_cut_src_outside_roots_is_rejected(
+        self, sandbox_root: Path, tmp_path: Path, auth_token: dict[str, str]
+    ) -> None:
+        inside = self._audio(sandbox_root)
+        outside = tmp_path / "secret.wav"  # exists, but not under any allowed root
+        outside.write_bytes(b"RIFF0000WAVEfmt ")
+
+        r = _post(
+            "/api/audio/render",
+            {
+                "source_path": str(inside),
+                "filename": "x.wav",
+                "output_name": "out.wav",
+                "cuts": [{"start": 0, "end": 1, "src": str(outside)}],
+            },
+            headers=auth_token,
+        )
+        assert r.status_code in (400, 403, 404), r.text
+
+    def test_cut_src_traversal_is_rejected(
+        self, sandbox_root: Path, auth_token: dict[str, str]
+    ) -> None:
+        inside = self._audio(sandbox_root)
+        r = _post(
+            "/api/audio/render",
+            {
+                "source_path": str(inside),
+                "filename": "x.wav",
+                "output_name": "out.wav",
+                "cuts": [{"start": 0, "end": 1, "src": str(sandbox_root / ".." / "escape.wav")}],
+            },
+            headers=auth_token,
+        )
+        assert r.status_code in (400, 403, 404), r.text
+
+    def test_cut_without_src_still_allowed(
+        self, sandbox_root: Path, auth_token: dict[str, str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A cut with no `src` inherits source_path — must not be broken."""
+        inside = self._audio(sandbox_root)
+        import app.services as services_mod
+
+        monkeypatch.setattr(
+            services_mod.AudioEngine, "render_segment", staticmethod(lambda *a, **k: "tid-1")
+        )
+        r = _post(
+            "/api/audio/render",
+            {
+                "source_path": str(inside),
+                "filename": "x.wav",
+                "output_name": "out.wav",
+                "cuts": [{"start": 0, "end": 1}],
+            },
+            headers=auth_token,
+        )
+        assert r.status_code == 200, r.text
+
+    def test_cut_src_inside_roots_is_allowed(
+        self, sandbox_root: Path, auth_token: dict[str, str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        inside = self._audio(sandbox_root)
+        other = self._audio(sandbox_root, "second.wav")
+        import app.services as services_mod
+
+        monkeypatch.setattr(
+            services_mod.AudioEngine, "render_segment", staticmethod(lambda *a, **k: "tid-1")
+        )
+        r = _post(
+            "/api/audio/render",
+            {
+                "source_path": str(inside),
+                "filename": "x.wav",
+                "output_name": "out.wav",
+                "cuts": [{"start": 0, "end": 1, "src": str(other)}],
+            },
+            headers=auth_token,
+        )
+        assert r.status_code == 200, r.text

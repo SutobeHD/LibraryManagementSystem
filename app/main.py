@@ -114,7 +114,13 @@ from .soundcloud_api import (
     SoundCloudSyncEngine,
 )
 from .soundcloud_downloader import sc_downloader
-from .usb_manager import UsbActions, UsbDetector, UsbProfileManager, UsbSyncEngine
+from .usb_manager import (
+    UsbActions,
+    UsbDetector,
+    UsbProfileManager,
+    UsbSyncEngine,
+    refuse_reason_for_format,
+)
 
 # Per-operation lock — prevents race conditions on concurrent sync requests (Criterion 10)
 _sync_lock = asyncio.Lock()
@@ -2687,6 +2693,16 @@ async def render(r: ExportRequest):
     try:
         # SECURITY: Validate source path
         validate_audio_path(r.source_path)
+        # SECURITY: every cut may carry its own `src`, which AudioEngine feeds
+        # straight to ffmpeg (app/services.py:251 and :281 read
+        # `c.get("src", source_path)` behind nothing but os.path.exists).
+        # Validating only source_path left the whole sandbox bypassable by
+        # putting an arbitrary path in a cut — any readable file could be
+        # rendered into an output the caller then downloads.
+        for cut in r.cuts:
+            cut_src = cut.get("src")
+            if cut_src:
+                validate_audio_path(str(cut_src))
         # SECURITY: Sanitize output name
         safe_name = Path(r.output_name).name  # Strip any path components
         if not safe_name.endswith((".wav", ".mp3", ".flac")):
@@ -3435,6 +3451,13 @@ def usb_format_preview(r: UsbFormatPreviewReq):
     exists = drive_path.exists() or Path(drive).exists()
     if not exists:
         raise HTTPException(404, f"Drive not found: {drive}")
+
+    # Existence was the ONLY check here — a direct call could hand back a
+    # format token for the system volume or a network share.
+    refusal = refuse_reason_for_format(drive)
+    if refusal:
+        logger.warning("FORMAT preview refused for drive=%s: %s", drive, refusal)
+        raise HTTPException(403, refusal)
 
     # Pull volume info if we can; non-fatal otherwise.
     info = {"label": "", "filesystem": "Unknown", "total": 0, "free": 0}
