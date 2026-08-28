@@ -1,4 +1,4 @@
-import React, { useState, useMemo, Component, useEffect, useCallback, Suspense, lazy } from 'react'
+import React, { useState, useMemo, Component, useEffect, useCallback, useRef, Suspense, lazy } from 'react'
 import { invoke } from '@tauri-apps/api/core'; // Tauri Invoke
 import ReactDOM from 'react-dom/client'
 import { Music, Cloud, Download, Settings, Folder, Wrench, Zap, FileCode, AlertTriangle, Upload, X, Minus, Square, Unplug, ArrowRightLeft, RotateCw, Activity, BarChart3, HardDrive, Loader2, Sparkles, Copy, Layers, FilePlus, FolderOpen, ArrowLeft, Sliders, List, User, Tag, Disc, RefreshCw, TrendingDown, PlayCircle, ImageOff, Library } from 'lucide-react'
@@ -645,6 +645,11 @@ const App = () => {
       setActiveTab('lib-playlists');
     } catch (e) {
       console.error("Mode select failed", e);
+      // Nothing else clears this flag on the failure path: the only other
+      // clearer is checkLibraryStatus, and its poll is gated on
+      // !libraryStatus.loaded. Leaving it set pinned the full-screen overlay
+      // up forever.
+      setIsInitialLoading(false);
     }
   }, []);
 
@@ -791,28 +796,51 @@ const App = () => {
     }, LIBRARY_STATUS_INTERVAL_MS);
 
     // Close Tauri splashscreen (only in desktop context — no-op in browser)
+    let splashTimer;
     if (window.__TAURI__) {
-      setTimeout(() => {
+      splashTimer = setTimeout(() => {
         invoke('close_splashscreen').catch(console.error);
       }, 2000);
     }
 
-    // Auto-load remembered mode
-    const autoInit = async () => {
+    return () => {
+      clearInterval(hbInterval);
+      clearInterval(checkInterval);
+      clearTimeout(splashTimer);
+    };
+  }, [libraryStatus.loaded, appMode, checkLibraryStatus]);
+
+  // Auto-load the remembered mode — EXACTLY once.
+  //
+  // This used to live in the effect above, whose deps include appMode and
+  // libraryStatus.loaded. handleModeSelect sets appMode, which re-ran the
+  // effect, which called autoInit again — three times on a normal boot. The
+  // third run set isInitialLoading back to true after the status poll had
+  // already cleared it and reported loaded:true, and at that point nothing
+  // could clear it again: the poll is gated on !libraryStatus.loaded and the
+  // overlay's escape hatch was gated on the same flag. Result: a full-screen
+  // overlay over everything, no way out, reproducing on every restart.
+  const autoInitDone = useRef(false);
+  useEffect(() => {
+    if (autoInitDone.current) return;
+    autoInitDone.current = true;
+    (async () => {
       try {
         const res = await api.get('/api/settings');
         if (res.data.remember_lib_mode && res.data.last_lib_mode) {
           handleModeSelect(res.data.last_lib_mode);
         }
       } catch (e) { console.error("Auto-init failed", e); }
-    };
-    autoInit();
+    })();
+    // handleModeSelect is stable (useCallback with []); the ref guard makes
+    // re-runs inert regardless.
+  }, [handleModeSelect]);
 
-    return () => {
-      clearInterval(hbInterval);
-      clearInterval(checkInterval);
-    };
-  }, [libraryStatus.loaded, appMode, checkLibraryStatus, handleModeSelect]);
+  // Belt and braces: a loaded library must never leave the overlay up, no
+  // matter which path set the flag.
+  useEffect(() => {
+    if (libraryStatus.loaded) setIsInitialLoading(false);
+  }, [libraryStatus.loaded]);
 
   const handleTrackSelect = useCallback((track) => { setActiveTrack(track); }, []);
   const handleTrackEdit = useCallback((track) => { setActiveTrack(track); setActiveTab('editor'); }, []);
@@ -877,14 +905,16 @@ const App = () => {
                 {libraryStatus.loaded ? 'Success' : `Initializing ${appMode.toUpperCase()}…`}
               </span>
             </div>
-            {!libraryStatus.loaded && (
-              <button
-                onClick={() => setIsInitialLoading(false)}
-                className="mt-8 text-[10px] text-ink-muted hover:text-ink-secondary underline transition-colors uppercase tracking-widest font-semibold"
-              >
-                Manual Bypass
-              </button>
-            )}
+            {/* Always reachable. Gating the escape hatch on !libraryStatus.loaded
+                hid it in exactly the state that needed it — overlay up while the
+                library reports loaded — leaving no way out of a full-screen
+                z-[120] panel short of restarting. */}
+            <button
+              onClick={() => setIsInitialLoading(false)}
+              className="mt-8 text-[10px] text-ink-muted hover:text-ink-secondary underline transition-colors uppercase tracking-widest font-semibold"
+            >
+              Manual Bypass
+            </button>
           </div>
         </div>
       )}
