@@ -54,7 +54,9 @@ DEVICE-SQL STRINGS:
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -941,6 +943,34 @@ class PdbBuilder:
 # ─── Public sync-time API ─────────────────────────────────────────────────
 
 
+
+def _atomic_write_bytes(target: Path, data: bytes) -> None:
+    """Write ``data`` to ``target`` via a same-directory temp file + rename.
+
+    ``Path.write_bytes`` truncates the destination and then fills it. On a USB
+    stick that is the worst possible shape: pull the drive (or lose power)
+    part-way through and export.pdb is left truncated, at which point Rekordbox
+    and the CDJ refuse the whole library without saying why — and the previous,
+    working file is already gone.
+
+    The temp file lives in the same directory so ``os.replace`` is a rename
+    within one filesystem, which is atomic. fsync before the rename so the
+    bytes are on the device, not just in the OS cache — removable media is
+    routinely yanked without an eject.
+    """
+    tmp = target.with_name(target.name + ".tmp")
+    try:
+        with open(tmp, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, target)
+    except OSError:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
+
+
 def write_export_pdb(
     usb_root: Path,
     contents: list[dict[str, Any]] | None = None,
@@ -1008,7 +1038,7 @@ def write_export_pdb(
             builder.add_artwork(int(art_id), path)
 
         data = builder.build()
-        target.write_bytes(data)
+        _atomic_write_bytes(target, data)
         logger.info("[PDB] wrote %s (%d B, %d tracks)", target, len(data), len(contents or []))
         return target
     except Exception as exc:
@@ -1234,7 +1264,7 @@ def write_export_ext_pdb(
             builder.add_tag_track(int(track_id), int(tag_id))
 
         data = builder.build()
-        target.write_bytes(data)
+        _atomic_write_bytes(target, data)
         # Log len(data), not a second target.stat(): a stat failure (file
         # locked/removed after a successful write) would otherwise fall to the
         # except and return None despite the write having succeeded.
