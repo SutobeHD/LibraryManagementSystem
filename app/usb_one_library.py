@@ -17,11 +17,51 @@ import contextlib
 import gc
 import hashlib
 import logging
+import os
 import shutil
 import time
 from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import Any
+
+
+def _copy_file_atomic(src: Path, dst: Path) -> None:
+    """Copy ``src`` to ``dst`` via a ``.part`` file + rename.
+
+    ``shutil.copy2`` straight to ``dst`` creates the destination immediately
+    and fills it progressively. Interrupt it — stick pulled, disk full, user
+    cancels — and a TRUNCATED file is sitting at ``dst``. The caller's
+    ``if not dest_path.exists()`` guard then treats it as already-copied on
+    every later sync, so the damage is permanent and silent: the CDJ plays a
+    track that stops early.
+
+    Copying to a sibling ``.part`` first means an interrupted copy leaves
+    nothing at ``dst``, and the next sync copies it properly.
+    """
+    tmp = dst.with_name(dst.name + ".part")
+    try:
+        shutil.copy2(str(src), str(tmp))
+        os.replace(tmp, dst)
+    except OSError:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
+
+
+def _needs_copy(src: Path, dst: Path) -> bool:
+    """True when ``dst`` is missing or does not match ``src``'s size.
+
+    The size check is what heals sticks already damaged by the previous
+    truncate-in-place behaviour — existence alone would keep skipping them
+    forever. copy2 is a byte-exact copy, so a size mismatch means truncation.
+    """
+    try:
+        if not dst.exists():
+            return True
+        return dst.stat().st_size != src.stat().st_size
+    except OSError:
+        return True
+
 
 logger = logging.getLogger(__name__)
 
@@ -291,9 +331,9 @@ class OneLibraryUsbWriter:
                         )
                     else:
                         dest_path = self._dest_audio_path(t, src_path)
-                    if not dest_path.exists():
+                    if _needs_copy(src_path, dest_path):
                         dest_path.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(str(src_path), str(dest_path))
+                        _copy_file_atomic(src_path, dest_path)
                     usb_rel_path = "/" + str(dest_path.relative_to(self.usb_root)).replace(
                         "\\", "/"
                     )
@@ -958,7 +998,7 @@ class OneLibraryUsbWriter:
         for src in sidecar_dir.glob("ANLZ*"):
             dst = target_dir / src.name
             try:
-                shutil.copy2(str(src), str(dst))
+                _copy_file_atomic(src, dst)
                 copied.append(src.name)
             except OSError as exc:
                 logger.debug("[ANLZ] copy %s -> %s failed: %s", src, dst, exc)

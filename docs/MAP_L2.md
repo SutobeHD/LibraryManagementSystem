@@ -2301,6 +2301,20 @@ Phase-2 pairing-code store tests (T2 — app/pairing_store.py).
 - `test_purge_stale_drops_expired_entries()`
 - `test_clear_resets_store()`
 
+### `tests/test_pdb_atomic_write.py`
+
+The USB PDB writers must never leave a truncated file behind.
+
+- `TestAtomicHelper`
+- `  TestAtomicHelper.test_creates_the_file()`
+- `  TestAtomicHelper.test_leaves_no_temp_file_behind()`
+- `  TestAtomicHelper.test_failed_write_preserves_the_previous_file()` — The regression: a failure mid-write must not destroy the old file.
+- `  TestAtomicHelper.test_replaces_content_completely()` — A shorter payload must not leave a tail of the old file.
+- `TestExportPdbWriter`
+- `  TestExportPdbWriter.test_writes_a_valid_file()`
+- `  TestExportPdbWriter.test_rewrite_does_not_go_through_truncate_in_place()` — Interrupt a REWRITE and the stick must still hold the old library.
+- `  TestExportPdbWriter.test_second_write_actually_updates()`
+
 ### `tests/test_pdb_structure.py`
 
 PDB writer structural test against F: drive Pioneer reference.
@@ -2639,6 +2653,24 @@ Regression: GET /api/stream 500 on non-latin-1 filenames.
 - `test_content_disposition_escapes_quoted_string_specials()`
 - `test_content_disposition_strips_control_chars()`
 - `test_stream_non_latin1_filename()`
+
+### `tests/test_usb_copy_atomic.py`
+
+USB audio copies must not leave a truncated file that never self-heals.
+
+- `src()`
+- `TestAtomicCopy`
+- `  TestAtomicCopy.test_copies_the_bytes()`
+- `  TestAtomicCopy.test_leaves_no_part_file()`
+- `  TestAtomicCopy.test_interrupted_copy_leaves_no_destination()` — The regression: a partial copy must not masquerade as a done one.
+- `  TestAtomicCopy.test_interrupted_copy_does_not_destroy_an_existing_track()`
+- `TestNeedsCopy`
+- `  TestNeedsCopy.test_missing_destination_needs_copy()`
+- `  TestNeedsCopy.test_identical_destination_is_skipped()`
+- `  TestNeedsCopy.test_truncated_destination_is_re_copied()` — Heals sticks already damaged by the old truncate-in-place path —
+- `  TestNeedsCopy.test_unreadable_source_errs_toward_copying()`
+- `TestEndToEndHealing`
+- `  TestEndToEndHealing.test_a_truncated_track_is_repaired_on_the_next_sync()`
 
 ### `tests/test_usb_manager.py`
 
