@@ -891,6 +891,7 @@ USB artwork extraction + bucketed write to PIONEER/Artwork/.
 
 USB Device Manager for Rekordbox Editor Pro.
 
+- `refuse_reason_for_format()` — Why ``drive`` must not be formatted, or None if it may be.
 - `locked_sync()` — Req 24: Prevent concurrent access via explicit lock file.
 - `UsbDetector` — Scans Windows drives for Rekordbox-formatted USB devices.
 - `  UsbDetector.is_rekordbox_usb()` — Check if a drive has a PIONEER/rekordbox structure.
@@ -2208,6 +2209,11 @@ Regression tests for ``POST /api/file/reveal`` sandbox.
 - `  TestFileRevealSandboxRejects.test_directory_path_is_rejected()`
 - `TestFileRevealSandboxAccepts`
 - `  TestFileRevealSandboxAccepts.test_valid_audio_calls_subprocess_with_platform_argv()`
+- `TestRenderCutSrcSandbox` — The route validated `source_path` and nothing else, but AudioEngine
+- `  TestRenderCutSrcSandbox.test_cut_src_outside_roots_is_rejected()`
+- `  TestRenderCutSrcSandbox.test_cut_src_traversal_is_rejected()`
+- `  TestRenderCutSrcSandbox.test_cut_without_src_still_allowed()` — A cut with no `src` inherits source_path — must not be broken.
+- `  TestRenderCutSrcSandbox.test_cut_src_inside_roots_is_allowed()`
 
 ### `tests/test_metadata_fixer_applier.py`
 
@@ -2669,6 +2675,17 @@ Tests for `app/usb_manager.py`.
 - `  TestDriveLetterValidation.test_accepts_real_drive_letters()`
 - `  TestDriveLetterValidation.test_rejects_injection_payloads()`
 - `  TestDriveLetterValidation.test_eject_refuses_injection_without_spawning_powershell()` — The guard must reject *before* subprocess.run is reached.
+- `TestFormatDriveGate` — `format_drive` and `/api/usb/format/preview` checked only that the path
+- `  TestFormatDriveGate.win()` — Force the Windows branch with a stubbed GetDriveTypeW.
+- `  TestFormatDriveGate.test_refuses_the_system_drive()`
+- `  TestFormatDriveGate.test_refuses_malformed_drive_letters()`
+- `  TestFormatDriveGate.test_refuses_non_disk_devices()`
+- `  TestFormatDriveGate.test_allows_removable_and_fixed()` — FIXED must stay allowed — excluding it would break real USB sticks.
+- `  TestFormatDriveGate.posix()`
+- `  TestFormatDriveGate.test_posix_allows_a_block_device()`
+- `  TestFormatDriveGate.test_posix_refuses_non_block_paths()`
+- `  TestFormatDriveGate.test_posix_refuses_the_root_device()` — Formatting /dev/sda destroys / even when / is mounted from /dev/sda1.
+- `  TestFormatDriveGate.test_format_drive_refuses_without_spawning_a_subprocess()`
 
 ### `tests/test_usb_mysettings.py`
 
