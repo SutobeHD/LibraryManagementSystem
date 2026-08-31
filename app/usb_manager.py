@@ -68,6 +68,37 @@ DRIVE_REMOTE, DRIVE_CDROM, DRIVE_RAMDISK = 4, 5, 6
 _FORMATTABLE_DRIVE_TYPES = frozenset({DRIVE_REMOVABLE, DRIVE_FIXED})
 
 
+def _root_backing_devices() -> set[str]:
+    """Block devices that carry ``/``, from /proc/mounts. Empty if unreadable."""
+    devices: set[str] = set()
+    try:
+        with open("/proc/mounts", encoding="utf-8") as fh:
+            for line in fh:
+                parts = line.split()
+                if len(parts) >= 2 and parts[1] == "/" and parts[0].startswith("/dev/"):
+                    devices.add(parts[0])
+    except OSError:
+        return devices
+    # /dev/sda1 carries / -> formatting /dev/sda destroys it too.
+    for dev in list(devices):
+        devices.add(dev.rstrip("0123456789"))
+    return devices
+
+
+def _refuse_reason_posix(drive: str) -> str | None:
+    """POSIX counterpart: the format path here takes a block device path
+    (``/dev/sdb1``), not a drive letter, so the Windows checks do not apply."""
+    path = str(drive or "").strip()
+    if not path:
+        return "Invalid drive."
+    if not path.startswith("/dev/") or len(path) <= len("/dev/"):
+        return f"Refusing to format {path!r} — expected a block device path like /dev/sdb1."
+    root_devices = _root_backing_devices()
+    if path.rstrip("/") in root_devices:
+        return f"Refusing to format {path} — it carries the root filesystem."
+    return None
+
+
 def refuse_reason_for_format(drive: str) -> str | None:
     """Why ``drive`` must not be formatted, or None if it may be.
 
@@ -82,6 +113,9 @@ def refuse_reason_for_format(drive: str) -> str | None:
     system volume, network shares, CD/DVD and RAM disks. The typed-phrase
     confirmation stays the primary defence.
     """
+    if sys.platform != "win32":
+        return _refuse_reason_posix(drive)
+
     letter = _drive_letter(drive)
     if letter is None:
         return "Invalid drive."
@@ -90,9 +124,6 @@ def refuse_reason_for_format(drive: str) -> str | None:
     system_letter = _drive_letter(system_root[:2]) if len(system_root) >= 2 else None
     if system_letter and letter == system_letter:
         return f"Refusing to format the system drive {letter}:."
-
-    if sys.platform != "win32":
-        return None
 
     try:
         drive_type = _windll.kernel32.GetDriveTypeW(f"{letter}:\\")

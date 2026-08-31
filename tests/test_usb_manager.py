@@ -313,19 +313,38 @@ class TestFormatDriveGate:
     existed. `_get_removable_drives()` is not a safety gate — it returns FIXED
     drives on purpose (modern USB sticks enumerate as FIXED) and was never
     called from the format path, so a direct API call could wipe an internal
-    disk. The gate is a floor, not a guarantee: it refuses the system volume,
-    network shares, optical and RAM disks."""
+    disk. The gate is a floor, not a guarantee.
 
-    def test_refuses_the_system_drive(self) -> None:
-        import os
+    The format path takes a drive letter on Windows and a block device path on
+    POSIX, so the two branches are tested separately rather than assuming one
+    platform — the first cut of these tests assumed Windows and broke Linux."""
 
-        system_letter = (os.environ.get("SYSTEMROOT") or "C:")[:1]
-        reason = usb_manager.refuse_reason_for_format(system_letter)
-        assert reason is not None
-        assert "system drive" in reason
+    # ── Windows branch ──────────────────────────────────────────────────
+
+    @pytest.fixture
+    def win(self, monkeypatch):
+        """Force the Windows branch with a stubbed GetDriveTypeW."""
+        monkeypatch.setattr(usb_manager.sys, "platform", "win32")
+        monkeypatch.setenv("SYSTEMROOT", r"C:\Windows")
+
+        def _set_type(drive_type):
+            monkeypatch.setattr(
+                usb_manager,
+                "_windll",
+                SimpleNamespace(kernel32=SimpleNamespace(GetDriveTypeW=lambda d: drive_type)),
+                raising=False,
+            )
+
+        return _set_type
+
+    def test_refuses_the_system_drive(self, win) -> None:
+        win(usb_manager.DRIVE_FIXED)
+        reason = usb_manager.refuse_reason_for_format("C")
+        assert reason is not None and "system drive" in reason
 
     @pytest.mark.parametrize("payload", ["", "EE", "E'); Start-Process calc; #", "../.."])
-    def test_refuses_malformed_drives(self, payload: str) -> None:
+    def test_refuses_malformed_drive_letters(self, win, payload: str) -> None:
+        win(usb_manager.DRIVE_FIXED)
         assert usb_manager.refuse_reason_for_format(payload) is not None
 
     @pytest.mark.parametrize(
@@ -337,41 +356,50 @@ class TestFormatDriveGate:
             (usb_manager.DRIVE_NO_ROOT_DIR, "not a mounted volume"),
         ],
     )
-    def test_refuses_non_disk_devices(self, drive_type, fragment, monkeypatch) -> None:
-        monkeypatch.setattr(usb_manager.sys, "platform", "win32")
-        monkeypatch.setattr(
-            usb_manager,
-            "_windll",
-            SimpleNamespace(kernel32=SimpleNamespace(GetDriveTypeW=lambda d: drive_type)),
-            raising=False,
-        )
+    def test_refuses_non_disk_devices(self, win, drive_type, fragment) -> None:
+        win(drive_type)
         reason = usb_manager.refuse_reason_for_format("Q")
         assert reason is not None and fragment in reason
 
     @pytest.mark.parametrize(
         "drive_type", [usb_manager.DRIVE_REMOVABLE, usb_manager.DRIVE_FIXED]
     )
-    def test_allows_removable_and_fixed(self, drive_type, monkeypatch) -> None:
+    def test_allows_removable_and_fixed(self, win, drive_type) -> None:
         """FIXED must stay allowed — excluding it would break real USB sticks."""
-        monkeypatch.setattr(usb_manager.sys, "platform", "win32")
-        monkeypatch.setattr(
-            usb_manager,
-            "_windll",
-            SimpleNamespace(kernel32=SimpleNamespace(GetDriveTypeW=lambda d: drive_type)),
-            raising=False,
-        )
+        win(drive_type)
         assert usb_manager.refuse_reason_for_format("Q") is None
 
-    def test_format_drive_refuses_without_spawning_a_subprocess(self, monkeypatch) -> None:
-        """The engine gates itself — the route is not the only line of defence."""
-        import os
+    # ── POSIX branch ────────────────────────────────────────────────────
 
+    @pytest.fixture
+    def posix(self, monkeypatch):
+        monkeypatch.setattr(usb_manager.sys, "platform", "linux")
+        monkeypatch.setattr(usb_manager, "_root_backing_devices", lambda: {"/dev/sda1", "/dev/sda"})
+
+    def test_posix_allows_a_block_device(self, posix) -> None:
+        assert usb_manager.refuse_reason_for_format("/dev/sdb1") is None
+
+    @pytest.mark.parametrize("payload", ["", "C", "E:", "sdb1", "/dev/", "/home/tb/music"])
+    def test_posix_refuses_non_block_paths(self, posix, payload: str) -> None:
+        assert usb_manager.refuse_reason_for_format(payload) is not None
+
+    @pytest.mark.parametrize("payload", ["/dev/sda1", "/dev/sda"])
+    def test_posix_refuses_the_root_device(self, posix, payload: str) -> None:
+        """Formatting /dev/sda destroys / even when / is mounted from /dev/sda1."""
+        reason = usb_manager.refuse_reason_for_format(payload)
+        assert reason is not None and "root filesystem" in reason
+
+    # ── The engine gates itself, not just the route ─────────────────────
+
+    def test_format_drive_refuses_without_spawning_a_subprocess(self, monkeypatch) -> None:
         calls = []
         monkeypatch.setattr(
             usb_manager.subprocess, "run", lambda *a, **k: calls.append(a) or None
         )
-        system_letter = (os.environ.get("SYSTEMROOT") or "C:")[:1]
-        result = usb_manager.UsbActions.format_drive(system_letter)
+        monkeypatch.setattr(
+            usb_manager, "refuse_reason_for_format", lambda d: "Refusing: test stub."
+        )
+        result = usb_manager.UsbActions.format_drive("whatever")
         assert result["status"] == "error"
-        assert "system drive" in result["message"]
+        assert result["message"] == "Refusing: test stub."
         assert calls == []
