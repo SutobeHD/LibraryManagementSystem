@@ -246,6 +246,27 @@ fn spawn_child(
     }
 }
 
+/// Interpreter for the dev-mode backend: `$LMS_PYTHON`, else the project
+/// `.venv` (the pinned py3.11 stack — system `python` is 3.13 with drifted
+/// packages), else bare `python`. Mirrors scripts/run-backend.mjs.
+#[cfg(debug_assertions)]
+fn dev_python(root: &std::path::Path) -> String {
+    if let Ok(p) = std::env::var("LMS_PYTHON") {
+        if !p.trim().is_empty() {
+            return p;
+        }
+    }
+    let venv = if cfg!(target_os = "windows") {
+        root.join(".venv").join("Scripts").join("python.exe")
+    } else {
+        root.join(".venv").join("bin").join("python")
+    };
+    if venv.is_file() {
+        return venv.to_string_lossy().into_owned();
+    }
+    "python".to_string()
+}
+
 #[cfg(debug_assertions)]
 fn spawn_dev_backend(app: &tauri::AppHandle, token: Arc<Mutex<String>>) {
     use tauri::Manager;
@@ -265,13 +286,15 @@ fn spawn_dev_backend(app: &tauri::AppHandle, token: Arc<Mutex<String>>) {
     if is_port_busy(8000) {
         log::info!("[backend] Port 8000 in use — skipping spawn.");
     } else {
+        let python = dev_python(&root);
         log::info!(
-            "[backend] Spawning python -m app.main from {}",
+            "[backend] Spawning {} -m app.main from {}",
+            python,
             root.display()
         );
         backend = spawn_child(
             "backend",
-            "python",
+            &python,
             &["-m", "app.main"],
             &root,
             Some(token.clone()),

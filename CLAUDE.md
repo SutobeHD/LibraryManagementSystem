@@ -40,7 +40,8 @@ The Tauri wrapper boots a bundled Python sidecar (`backend_entry.py` / `backend.
 
 ```bash
 # Dev
-npm run dev:full          # backend (8000) + frontend (5173), concurrent
+npm run dev:full          # backend (8000) + frontend (5173), concurrent — backend runs on .venv automatically (scripts/run-backend.mjs)
+npm run dev:backend       # backend only, same interpreter resolution ($LMS_PYTHON > .venv > python)
 npm run tauri dev         # full desktop app
 
 # Build

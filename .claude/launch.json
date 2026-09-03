@@ -3,14 +3,14 @@
   "version": "0.0.1",
   "configurations": [
     { "name": "frontend", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev", "--prefix", "frontend"], "port": 5173 },
-    { "name": "backend", "runtimeExecutable": "python", "runtimeArgs": ["-m", "app.main"], "port": 8000 },
+    { "name": "backend", "runtimeExecutable": "node", "runtimeArgs": ["scripts/run-backend.mjs"], "port": 8000 },
     { "name": "mockups", "runtimeExecutable": "python", "runtimeArgs": ["-m", "http.server", "8090", "--directory", "docs/research/mockups"], "port": 8090 }
   ],
   "servers": [
     {
       "name": "backend",
-      "command": "python",
-      "args": ["-m", "app.main"],
+      "command": "node",
+      "args": ["scripts/run-backend.mjs"],
       "cwd": ".",
       "url": "http://127.0.0.1:8000",
       "healthEndpoint": "/api/system/health",
