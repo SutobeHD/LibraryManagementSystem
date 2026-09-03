@@ -1,0 +1,24 @@
+# Every committed blob is already LF (verified 2026-09-03: 401 i/lf, 0 i/crlf),
+# but core.autocrlf=true checks files out as CRLF on Windows. The Python, Rust
+# and JS tooling then writes LF back, so files flip endings under git's feet:
+# `git status` reports src-tauri/Cargo.toml as modified while every `git diff`
+# is empty, and the mixed-line-ending pre-commit hook failed the first attempt
+# of every commit today. Pinning eol=lf ends both.
+* text=auto eol=lf
+
+# PowerShell keeps CRLF — mirrors the mixed-line-ending exclude in
+# .pre-commit-config.yaml.
+*.ps1 text eol=crlf
+
+# Binary payloads: never touch, never diff as text.
+*.db binary
+*.DAT binary
+*.EXT binary
+*.2EX binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.mp3 binary
+*.wav binary
+*.aiff binary
+*.flac binary
