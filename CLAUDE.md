@@ -51,14 +51,14 @@ npm run tauri build       # desktop binary (.msi / .exe on Windows)
 pytest                                              # full Python suite
 pytest tests/test_<area>.py -v                      # focused
 cargo test --manifest-path src-tauri/Cargo.toml     # Rust
-node --experimental-vm-modules <test_file>          # frontend Mocha
+node --import ./frontend/src/audio/dawState/dawReducer.test.resolver.mjs --test frontend/src/audio/dawState/dawReducer.test.js   # frontend node:test (needs the resolver for extensionless imports)
 
 # Audit / lint
 npm run audit             # npm audit + signatures
 npm run lint:lockfile     # lockfile-lint
 ruff check app/ tests/    # Python
 cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings  # Rust
-npx eslint frontend/src   # Frontend
+cd frontend && npx eslint src --ext .js,.jsx   # Frontend (root has no eslint)
 
 # Cleanup
 npm run cleanup           # kill anything on :8000 / :5173

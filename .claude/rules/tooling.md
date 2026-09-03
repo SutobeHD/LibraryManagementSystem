@@ -28,7 +28,7 @@ Relocation to `scripts/dev/` (`HANDOVER.md` Phase 5.3) is done — only `app/ana
 
 ```bash
 npx prettier --write frontend/src
-npx eslint frontend/src --fix
+cd frontend && npx eslint src --ext .js,.jsx --fix   # from frontend/ — root has no eslint
 ```
 
 Or from `frontend/`: `npm run lint`.

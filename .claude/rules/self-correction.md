@@ -16,7 +16,7 @@ Not the entire suite unless cross-cutting.
 
 - **Backend:** `pytest tests/test_<area>.py -v`
 - **Rust:** `cargo test --manifest-path src-tauri/Cargo.toml <test_name>`
-- **Frontend:** `node --experimental-vm-modules <test_file>`
+- **Frontend:** `node --import ./frontend/src/audio/dawState/dawReducer.test.resolver.mjs --test <test_file>` (node:test; the resolver handles extensionless Vite imports)
 
 `test-runner` subagent knows path mapping + classifies failures (real-bug / flaky / stale-test / setup-error).
 
