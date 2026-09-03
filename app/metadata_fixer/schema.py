@@ -209,7 +209,7 @@ def get_run(run_id: str) -> dict[str, object] | None:
 def list_runs() -> list[dict[str, object]]:
     """All runs, newest first (the ``GET /runs`` surface)."""
     conn = _connect()
-    rows = conn.execute("SELECT * FROM runs ORDER BY created_at DESC").fetchall()
+    rows = conn.execute("SELECT * FROM runs ORDER BY created_at DESC, rowid DESC").fetchall()
     return [_run_row(r) for r in rows]
 
 
