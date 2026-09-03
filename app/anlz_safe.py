@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from collections.abc import Iterable
 from concurrent.futures import (
     BrokenExecutor,
@@ -70,7 +71,7 @@ ANLZ_MIN_SIZE = 28
 # How many tracks to feed into a single subprocess invocation.
 # Larger = fewer IPC round-trips (faster). Smaller = less work re-done
 # when bisecting after a panic. 500 is a good compromise: the full
-# library (a few thousand tracks) loads in 5–10 IPC calls.
+# library (a few thousand tracks) loads in 5-10 IPC calls.
 DEFAULT_CHUNK_SIZE = 500
 
 # How long a single chunk is allowed to run before we kill the worker
@@ -81,6 +82,11 @@ PER_CHUNK_TIMEOUT_S = 60.0
 # stop bisecting and accept the loss — protects against a degenerate DB
 # where every other row triggers the panic.
 MAX_PANICS_PER_RUN = 32
+
+# pyrekordbox parses ANLZ with `construct`, whose waveform grammar
+# recurses once per entry — the stock 1000-frame limit trips on long
+# tracks. Mirrors tests/test_anlz_reference_parse.py.
+ANLZ_RECURSION_LIMIT = 10000
 
 
 # ---------------------------------------------------------------------------
@@ -132,22 +138,60 @@ def _validate_anlz_header_worker(dat_path: str) -> bool:
         return False
 
 
+def _pqtz_entries_from_dat(dat_path: str) -> list[dict] | None:
+    """Read the PQTZ beat grid out of one ANLZ .DAT.
+
+    Uses `pyrekordbox.AnlzFile` (pure-Python), not `rbox.Anlz`: on a
+    Rekordbox 6.8.4 library rbox reports "no PQTZ" for every file it
+    does not outright panic on (measured 2026-09-03: 0 grids over 40
+    real files, vs 39 for pyrekordbox), which silently produced
+    `hits=0` for the whole library. The same parser already backs
+    tests/test_anlz_reference_parse.py.
+
+    Returns `None` when the file carries no beat grid or cannot be
+    parsed; never raises.
+    """
+    from pyrekordbox.anlz import AnlzFile
+
+    # pyrekordbox's construct grammar recurses per waveform entry —
+    # the same allowance tests/test_anlz_reference_parse.py makes.
+    prev_limit = sys.getrecursionlimit()
+    if prev_limit < ANLZ_RECURSION_LIMIT:
+        sys.setrecursionlimit(ANLZ_RECURSION_LIMIT)
+    try:
+        anlz = AnlzFile.parse_file(dat_path)
+        tag = anlz.get_tag("PQTZ")
+    except Exception:
+        # Malformed / unsupported tag layout — one unreadable file must
+        # not cost the rest of the batch.
+        return None
+    finally:
+        sys.setrecursionlimit(prev_limit)
+
+    if isinstance(tag, list):
+        tag = tag[0] if tag else None
+    entries = getattr(getattr(tag, "content", None), "entries", None)
+    if not entries:
+        return None
+
+    out: list[dict] = []
+    for entry in entries:
+        try:
+            out.append(
+                {
+                    "time": float(entry.time) / 1000.0,
+                    "bpm": float(entry.tempo) / 100.0,
+                    "beat": int(entry.beat),
+                }
+            )
+        except (AttributeError, TypeError, ValueError):
+            continue
+    return out or None
+
+
 def _parse_pqtz_in_worker(dat_path: str) -> list[dict] | None:
     """Single-file PQTZ parse. Used by `SafeAnlzParser.parse_pqtz`."""
-    import rbox
-
-    anlz = rbox.Anlz(dat_path)
-    pqtz = getattr(anlz, "pqtz", None)
-    if not pqtz or not pqtz.entries:
-        return None
-    return [
-        {
-            "time": float(entry.time) / 1000.0,
-            "bpm": float(entry.bpm) / 100.0,
-            "beat": 1,
-        }
-        for entry in pqtz.entries
-    ]
+    return _pqtz_entries_from_dat(dat_path)
 
 
 def _load_beatgrids_batch_in_worker(db_path: str, track_ids: list[str]) -> dict[str, list[dict]]:
@@ -181,21 +225,9 @@ def _load_beatgrids_batch_in_worker(db_path: str, track_ids: list[str]) -> dict[
         if not _validate_anlz_header_worker(dat_path):
             continue
 
-        try:
-            anlz = rbox.Anlz(dat_path)
-            pqtz = getattr(anlz, "pqtz", None)
-            if not pqtz or not pqtz.entries:
-                continue
-            out[tid] = [
-                {
-                    "time": float(entry.time) / 1000.0,
-                    "bpm": float(entry.bpm) / 100.0,
-                    "beat": 1,
-                }
-                for entry in pqtz.entries
-            ]
-        except Exception:
-            continue
+        entries = _pqtz_entries_from_dat(dat_path)
+        if entries:
+            out[tid] = entries
 
     return out
 

@@ -1864,6 +1864,17 @@ Validate the produced ANLZ files (.DAT/.EXT/.2EX).
 - `test_produced_anlz_structure()` — Byte-level structural validation — runs in CI (librosa only, no pyrekordbox).
 - `test_produced_anlz_parses_with_reference_parser()`
 
+### `tests/test_anlz_safe_pqtz.py`
+
+Beat-grid extraction in `app.anlz_safe`.
+
+- `test_reads_every_beat_with_time_bpm_and_beat_number()`
+- `test_beat_numbers_are_not_flattened_to_one()` — The pre-fix code hardcoded `beat: 1`, which loses downbeats.
+- `test_empty_grid_returns_none()`
+- `test_garbage_file_returns_none_instead_of_raising()`
+- `test_missing_file_returns_none()`
+- `test_recursion_limit_is_restored()`
+
 ### `tests/test_anlz_writer_guards.py`
 
 Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout).

@@ -215,6 +215,7 @@
 | `tests/test_anlz_cue_layout.py` | Byte-layout regression tests for the ANLZ cue + VBR tags. |
 | `tests/test_anlz_cue_patch.py` | Round-trip tests for app/anlz_cue_patch.py. |
 | `tests/test_anlz_reference_parse.py` | Validate the produced ANLZ files (.DAT/.EXT/.2EX). |
+| `tests/test_anlz_safe_pqtz.py` | Beat-grid extraction in `app.anlz_safe`. |
 | `tests/test_anlz_writer_guards.py` | Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout). |
 | `tests/test_audio_analyzer.py` | Tests for app/audio_analyzer.py — the pure _normalize_result mapping. |
 | `tests/test_audio_tags.py` | Tests for app/audio_tags.py — native tag write-back (mutates user files → HIGH risk). |
