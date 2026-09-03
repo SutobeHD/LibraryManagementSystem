@@ -1216,6 +1216,39 @@ def system_heartbeat():
     return {"status": "alive"}
 
 
+class HealthResponse(BaseModel):
+    """Liveness/readiness payload. Deliberately field-pinned.
+
+    ``response_model`` filters anything not declared here, so a future
+    edit cannot leak a path, DB location or token through this
+    unauthenticated route.
+    """
+
+    status: str
+    library_loaded: bool
+
+
+@app.get("/api/system/health", response_model=HealthResponse)
+async def system_health() -> HealthResponse:
+    """Unauthenticated liveness probe.
+
+    Unauth'd by design — tooling polls this *before* a Bearer token
+    exists (``.claude/launch.json`` readiness check, ``/dev-full``,
+    ``e2e-tester``). Same intentional exception as
+    ``POST /api/system/heartbeat``.
+
+    Always 200 while the process serves: liveness != readiness. Boot can
+    block ~30s on the ANLZ scan, so readiness is reported in the
+    ``library_loaded`` field rather than by failing the request — a
+    non-200-while-loading would blow the 30s ``readyTimeoutMs``.
+
+    Reads only ``db.loaded``. Deliberately does NOT touch
+    ``db.active_db`` — that property lazily constructs
+    ``LiveRekordboxDB``, which a probe must never trigger.
+    """
+    return HealthResponse(status="ok", library_loaded=bool(getattr(db, "loaded", False)))
+
+
 @app.post("/api/track/delete", dependencies=[Depends(require_session)])
 def del_trk(r: DeleteTrackReq):
     return {"status": "success" if db.delete_track(r.track_id) else "error"}

@@ -499,6 +499,8 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `update_track()`
 - `batch_up()`
 - `system_heartbeat()` — Lightweight keep-alive ping.
+- `HealthResponse` — Liveness/readiness payload.
+- `system_health()` — Unauthenticated liveness probe.
 - `del_trk()`
 - `move_t()`
 - `ren_t()` — Bulk smart-rename audio files on disk using a token pattern.
@@ -2664,6 +2666,23 @@ Regression: GET /api/stream 500 on non-latin-1 filenames.
 - `test_content_disposition_escapes_quoted_string_specials()`
 - `test_content_disposition_strips_control_chars()`
 - `test_stream_non_latin1_filename()`
+
+### `tests/test_system_health.py`
+
+Contract tests for ``GET /api/system/health`` -- unauth'd liveness probe.
+
+- `TestHealthIsUnauthenticated`
+- `  TestHealthIsUnauthenticated.test_no_header_is_200()`
+- `  TestHealthIsUnauthenticated.test_bogus_bearer_is_still_200()` — Tooling may send a stale token; the probe must not 401.
+- `TestHealthPayloadShape`
+- `  TestHealthPayloadShape.test_exact_field_set()`
+- `  TestHealthPayloadShape.test_status_is_constant_ok()` — Liveness != readiness: always ``ok`` while the process serves.
+- `  TestHealthPayloadShape.test_library_loaded_is_bool_and_tracks_db()`
+- `TestHealthLeaksNothing`
+- `  TestHealthLeaksNothing.test_body_has_no_sensitive_substrings()`
+- `  TestHealthLeaksNothing.test_response_model_filters_undeclared_fields()` — ``response_model`` pins the schema so future edits can't leak.
+- `TestHealthHasNoSideEffects`
+- `  TestHealthHasNoSideEffects.test_does_not_lazily_build_live_db()` — ``db.active_db`` constructs ``LiveRekordboxDB`` on first touch.
 
 ### `tests/test_usb_copy_atomic.py`
 
