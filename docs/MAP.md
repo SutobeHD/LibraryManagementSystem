@@ -232,6 +232,7 @@
 | `tests/test_import_tracker.py` | Tests for app/import_tracker.py — live import-progress tracker. |
 | `tests/test_library_format_swap.py` | Tests for app.library_format_swap. |
 | `tests/test_library_source.py` | Tests for app/library_source.py — the Live/XML normalization layer. |
+| `tests/test_live_cue_loading.py` | Cue loading in `app.live_database`. |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
 | `tests/test_main_security.py` | Regression tests for ``POST /api/file/reveal`` sandbox. |
 | `tests/test_metadata_fixer_applier.py` | metadata-fixer apply/revert tests (T5 — app/metadata_fixer/applier.py). |

@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import re
@@ -233,47 +234,124 @@ class LiveRekordboxDB:
                 "ISRC": getattr(item, "isrc", ""),
             }
 
+    # Rekordbox POSITION_MARK convention, shared by xml_generator.py:56 and
+    # TimelineCanvas.jsx:416 — Num -1 is a memory cue, 0-7 are hot cues A-H.
+    # djmdCue.Kind counts the other way: 0 = memory cue, 1..N = hot slot.
+    MEMORY_CUE_NUM = -1
+    CUE_TYPE_LOOP = 4
+    CUE_TYPE_MARKER = 0
+
+    @staticmethod
+    def _cue_dict(ident, kind, in_msec, out_msec, comment) -> dict:
+        """One cue in the shape every consumer reads."""
+        kind = int(kind or 0)
+        out_msec = int(out_msec or -1)
+        return {
+            "ID": str(ident or ""),
+            "Kind": kind,  # raw Rekordbox value, never clamped
+            "Num": LiveRekordboxDB.MEMORY_CUE_NUM if kind == 0 else kind - 1,
+            "Type": (
+                LiveRekordboxDB.CUE_TYPE_LOOP if out_msec > 0 else LiveRekordboxDB.CUE_TYPE_MARKER
+            ),
+            "InMsec": int(in_msec or 0),
+            "OutMsec": out_msec,
+            "Comment": comment or "",
+        }
+
+    def _attach_cue(self, content_id, cue: dict) -> bool:
+        track = self.tracks.get(str(content_id))
+        if track is None:
+            return False
+        track.setdefault("Cues", []).append(cue)
+        return True
+
     def _load_cues(self):
-        """Loads Hot Cues and Memory Cues (djmdSongCue) for all tracks."""
+        """Load hot cues and memory points for every track.
+
+        Two sources, because the authoritative one is not always readable:
+
+        1. ``djmdCue`` via ``rbox.get_cues()``. Complete, but the call is
+           all-or-nothing — a single row with a NULL in a non-null column
+           fails the whole batch ("Diesel error: Unexpected null for
+           non-null column"), which is the state of this developer's
+           library and left every track cue-less.
+        2. ``djmdContentCue``: Rekordbox's own JSON mirror of the same
+           rows, read per track, immune to that failure.
+
+        The mirror can lag: a djmdCue row that was never mirrored is
+        invisible here and its track silently loads no cues. Measured on
+        the 4719-track dev library: djmdCue 875 cues, mirror 852 — one
+        track short. Hence the warning rather than a quiet fallback.
+        """
         logger.info("Loading Cues (Hot Cues & Memory Points)...")
+
         try:
-            # Check if get_cues is available (safe attribute check)
-            if not hasattr(self.db, "get_cues"):
-                logger.warning("rbox.MasterDb does not support get_cues. Skipping cue load.")
+            count = self._load_cues_from_djmd()
+            source = "djmdCue"
+        except Exception as exc:
+            logger.warning(
+                "djmdCue unreadable (%s: %s) — falling back to the djmdContentCue "
+                "mirror; tracks whose mirror row was never written load NO cues",
+                type(exc).__name__,
+                exc,
+            )
+            try:
+                count = self._load_cues_from_content_cue()
+                source = "djmdContentCue mirror"
+            except Exception as exc2:
+                logger.error("Cue load failed on both sources: %s: %s", type(exc2).__name__, exc2)
                 return
 
-            all_cues = self.db.get_cues()
-            count = 0
+        logger.info("Loaded %d cues across library (source: %s).", count, source)
 
-            # Pre-load all content IDs for fast lookup
-            tracks_by_id = self.tracks
+    def _load_cues_from_djmd(self) -> int:
+        """Authoritative path: one batch read of djmdCue."""
+        if not hasattr(self.db, "get_cues"):
+            raise AttributeError("rbox.MasterDb has no get_cues")
 
-            for cue in all_cues:
-                if not hasattr(cue, "content_id"):
+        count = 0
+        for cue in self.db.get_cues():
+            cid = getattr(cue, "content_id", None)
+            if cid is None:
+                continue
+            entry = self._cue_dict(
+                getattr(cue, "id", ""),
+                getattr(cue, "hot_cue", 0),
+                getattr(cue, "in_msec", 0),
+                getattr(cue, "out_msec", -1),
+                getattr(cue, "commnt", ""),
+            )
+            count += self._attach_cue(cid, entry)
+        return count
+
+    def _load_cues_from_content_cue(self) -> int:
+        """Fallback: Rekordbox's per-track JSON mirror of djmdCue."""
+        count = 0
+        for row in self.db.get_content_cues():
+            blob = getattr(row, "cues", None)
+            if not blob:
+                continue
+            try:
+                entries = json.loads(blob)
+            except (ValueError, TypeError) as exc:
+                logger.debug("contentCue row %s unparsable: %s", getattr(row, "id", "?"), exc)
+                continue
+            if not isinstance(entries, list):
+                continue
+            for e in entries:
+                if not isinstance(e, dict):
                     continue
-                cid = str(cue.content_id)
-
-                if cid in tracks_by_id:
-                    track = tracks_by_id[cid]
-                    if "Cues" not in track:
-                        track["Cues"] = []
-
-                    # Convert cue object to dict safely
-                    cue_data = {
-                        "ID": str(cue.id) if hasattr(cue, "id") else "",
-                        "Type": int(getattr(cue, "type", 0) or 0),
-                        "InMsec": int(getattr(cue, "in_msec", 0) or 0),
-                        "Num": int(
-                            getattr(cue, "hot_cue", 0) or 0
-                        ),  # Hot Cue Number (0 if memory cue)
-                        "Comment": getattr(cue, "commnt", ""),
-                    }
-                    track["Cues"].append(cue_data)
-                    count += 1
-
-            logger.info(f"Loaded {count} cues across library.")
-        except Exception as e:
-            logger.error(f"Failed to load cues: {e}")
+                entry = self._cue_dict(
+                    e.get("ID"),
+                    e.get("Kind"),
+                    e.get("InMsec"),
+                    e.get("OutMsec"),
+                    e.get("Comment"),
+                )
+                count += self._attach_cue(
+                    e.get("ContentID") or getattr(row, "content_id", ""), entry
+                )
+        return count
 
     def _load_beatgrids_from_anlz(self):
         """Loads high-precision beatgrid (PQTZ) from local Rekordbox ANLZ files.

@@ -2218,6 +2218,25 @@ Tests for app/library_source.py — the Live/XML normalization layer.
 - `test_live_normalize_lowercase_and_fallback_keys()`
 - `test_live_normalize_garbage_does_not_crash()`
 
+### `tests/test_live_cue_loading.py`
+
+Cue loading in `app.live_database`.
+
+- `FakeCue`
+- `FakeContentCueRow`
+- `FakeDb`
+- `  FakeDb.get_cues()`
+- `  FakeDb.get_content_cues()`
+- `test_uses_djmd_cue_when_it_is_readable()`
+- `test_falls_back_to_the_mirror_when_djmd_cue_raises()` — The real-world case: one bad row kills the whole batch read.
+- `test_fallback_warns_that_it_may_under_report()`
+- `test_kind_maps_to_the_position_mark_num_convention()` — Kind 0 is a memory cue (-1); hot slot N is Num N-1, i.e.
+- `test_out_point_marks_a_loop()`
+- `test_cues_land_on_their_own_track()`
+- `test_cue_for_an_unknown_track_is_ignored()`
+- `test_unparsable_mirror_row_does_not_abort_the_rest()`
+- `test_both_sources_failing_is_logged_not_raised()`
+
 ### `tests/test_logging_redaction.py`
 
 Unit tests for `app.logging_utils.RedactingFormatter`.
