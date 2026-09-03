@@ -196,29 +196,19 @@ class AnalysisDBWriter:
         Find the existing ANLZ directory for a track.
         Returns the directory path, or None if no ANLZ dir exists yet.
         """
-        try:
-            # rbox can tell us where the ANLZ files live
-            anlz_dir = self.live_db.db.get_content_anlz_dir(str(track_id))
-            if anlz_dir:
-                dir_str = str(anlz_dir)
-                if os.path.exists(dir_str):
-                    return dir_str
-                # Directory doesn't exist yet but path is known — create it
-                os.makedirs(dir_str, exist_ok=True)
-                return dir_str
-        except Exception as e:
-            logger.debug(f"get_content_anlz_dir failed for {track_id}: {e}")
+        # Never call get_content_anlz_dir / get_content_anlz_paths here: both
+        # unwrap() on the AnalysisDataPath column and ABORT the process for a
+        # track Rekordbox has not analysed — which is exactly the case this
+        # method exists to handle. The except clauses below never ran for that
+        # failure; the backend just died.
+        from .anlz_safe import resolve_anlz_dir
 
-        # Fallback: check known paths
-        try:
-            paths = self.live_db.db.get_content_anlz_paths(str(track_id))
-            if paths:
-                for key in ("DAT", "EXT", "2EX"):
-                    p = paths.get(key)
-                    if p:
-                        return str(Path(str(p)).parent)
-        except Exception as e:
-            logger.debug(f"get_content_anlz_paths failed for {track_id}: {e}")
+        dir_str = resolve_anlz_dir(self.live_db.db, str(track_id))
+        if dir_str:
+            if not os.path.exists(dir_str):
+                # Path known but not created yet (Rekordbox writes it lazily).
+                os.makedirs(dir_str, exist_ok=True)
+            return dir_str
 
         return None
 

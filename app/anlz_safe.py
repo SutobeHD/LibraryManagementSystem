@@ -43,7 +43,6 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 from collections.abc import Iterable
 from concurrent.futures import (
     BrokenExecutor,
@@ -52,6 +51,8 @@ from concurrent.futures import (
 from concurrent.futures import (
     TimeoutError as FuturesTimeout,
 )
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -82,11 +83,6 @@ PER_CHUNK_TIMEOUT_S = 60.0
 # stop bisecting and accept the loss — protects against a degenerate DB
 # where every other row triggers the panic.
 MAX_PANICS_PER_RUN = 32
-
-# pyrekordbox parses ANLZ with `construct`, whose waveform grammar
-# recurses once per entry — the stock 1000-frame limit trips on long
-# tracks. Mirrors tests/test_anlz_reference_parse.py.
-ANLZ_RECURSION_LIMIT = 10000
 
 
 # ---------------------------------------------------------------------------
@@ -138,35 +134,162 @@ def _validate_anlz_header_worker(dat_path: str) -> bool:
         return False
 
 
+# pyrekordbox 0.1.7 `config.py:113` greets every import with
+# "Incompatible rekordbox 6 database: Could not retrieve db-key." on the ROOT
+# logger (module-level `logging.warning`, so a `getLogger("pyrekordbox")` level
+# cannot reach it). It fires because the package hunts the master.db key in
+# Rekordbox's app.asar at import time. We parse ANLZ *files*; that key belongs
+# to `pyrekordbox.db6`, which we never touch.
+_PYREKORDBOX_DBKEY_MSG = "Incompatible rekordbox 6 database: Could not retrieve db-key."
+
+
+class _DropPyrekordboxDbKeyWarning(logging.Filter):
+    """Drops exactly that one record, nothing else."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Match `msg`, not `getMessage()`: a foreign record with bad %-args
+        # would make getMessage() raise inside the filter.
+        return not (
+            record.levelno == logging.WARNING
+            and isinstance(record.msg, str)
+            and record.msg == _PYREKORDBOX_DBKEY_MSG
+        )
+
+
+def resolve_anlz_paths(
+    db_path: str, track_ids: Iterable[str] | None = None
+) -> dict[str, dict[str, str]]:
+    """Map track id -> {"DAT", "EXT", "EX2"} absolute ANLZ paths.
+
+    Replaces `rbox.MasterDb.get_content_anlz_paths()`, which calls
+    `unwrap()` on the AnalysisDataPath column (masterdb/database.rs:1165)
+    and therefore ABORTS the whole process for any row that has none.
+    That abort — not a parsing problem — is what capped the beat-grid
+    load at 3468 of 4719 tracks: isolating one bad row costs ~9 worker
+    restarts, so `MAX_PANICS_PER_RUN` ran out after a handful of them and
+    the rest of the library was abandoned unscanned.
+
+    `get_contents()` never panics, and the row already carries the path,
+    so the whole mapping is a pure-Python string join. Verified against
+    the live 4719-track library on 2026-09-03: 4668 of 4668 resolved
+    paths byte-identical to the rbox call, DAT/EXT/EX2 alike, every file
+    present on disk, 0.27s for the full pass, zero panics.
+
+    Rows with an empty path are skipped — that set is exactly the set
+    that used to abort (46 aborts + 5 catchable MasterDbError), and they
+    are tracks Rekordbox has never analysed, so there is no file to find.
+    """
+    import rbox
+
+    db = rbox.MasterDb(db_path)
+    share = Path(db.share_directory())  # a method, not a property
+    wanted = None if track_ids is None else {str(t) for t in track_ids}
+
+    out: dict[str, dict[str, str]] = {}
+    for content in db.get_contents():
+        tid = str(content.id)
+        if wanted is not None and tid not in wanted:
+            continue
+        rel = getattr(content, "analysis_data_path", None)
+        if not rel:
+            continue
+        # lstrip is load-bearing: Path("C:/share") / "/PIONEER/x" throws the
+        # share root away and yields "C:/PIONEER/x".
+        dat = share / str(rel).lstrip("/\\").replace("/", os.sep)
+        out[tid] = {
+            "DAT": str(dat),
+            "EXT": str(dat.with_suffix(".EXT")),
+            "EX2": str(dat.with_suffix(".2EX")),  # rbox spells the key EX2
+        }
+    return out
+
+
+def resolve_anlz_dir(db, track_id: str) -> str | None:
+    """Directory holding a track's ANLZ files, or None if it has none.
+
+    Safe replacement for `MasterDb.get_content_anlz_dir()` /
+    `get_content_anlz_paths()`, both of which `unwrap()` on the
+    AnalysisDataPath column and ABORT the process for a track Rekordbox
+    has never analysed. A `try/except` cannot catch that — a Rust panic
+    is a process abort — so calling them from the backend process is a
+    crash waiting for the first unanalysed track.
+
+    `get_content_by_id` returns those rows normally (verified against
+    all six ids that abort the other call), so read the column and join
+    the path here.
+
+    Args:
+        db: An open `rbox.MasterDb`.
+        track_id: Stringified track id.
+    """
+    try:
+        content = db.get_content_by_id(str(track_id))
+    except Exception as exc:
+        logger.debug("resolve_anlz_dir: content %s unreadable: %s", track_id, exc)
+        return None
+    if content is None:
+        return None
+
+    rel = getattr(content, "analysis_data_path", None)
+    if not rel:
+        return None
+    dat = Path(db.share_directory()) / str(rel).lstrip("/\\").replace("/", os.sep)
+    return str(dat.parent)
+
+
+def _import_anlz_file_cls() -> Any:
+    """Import `AnlzFile` without letting pyrekordbox reconfigure our logging.
+
+    Importing it runs `basicConfig()` and `logging.root.setLevel(NOTSET)`,
+    which would attach a stray handler and downgrade the root level for the
+    rest of the process — in the backend that means every DEBUG record starts
+    reaching the log file the RedactingFormatter guards. Snapshot and restore
+    both, and swallow the one bogus warning while it happens.
+    """
+    # Returns Any, not `type`: pyrekordbox ships no stubs, so a `type`
+    # annotation makes mypy reject every attribute access on the class.
+    root = logging.getLogger()
+    level, handlers = root.level, root.handlers[:]
+    flt = _DropPyrekordboxDbKeyWarning()
+    root.addFilter(flt)
+    try:
+        from pyrekordbox.anlz import AnlzFile
+
+        return AnlzFile
+    finally:
+        root.removeFilter(flt)
+        root.setLevel(level)
+        root.handlers[:] = handlers
+
+
 def _pqtz_entries_from_dat(dat_path: str) -> list[dict] | None:
     """Read the PQTZ beat grid out of one ANLZ .DAT.
 
-    Uses `pyrekordbox.AnlzFile` (pure-Python), not `rbox.Anlz`: on a
-    Rekordbox 6.8.4 library rbox reports "no PQTZ" for every file it
-    does not outright panic on (measured 2026-09-03: 0 grids over 40
-    real files, vs 39 for pyrekordbox), which silently produced
-    `hits=0` for the whole library. The same parser already backs
-    tests/test_anlz_reference_parse.py.
+    Uses `pyrekordbox.AnlzFile` (pure Python), not `rbox.Anlz`: on a Rekordbox
+    6.8.4 library rbox reports "no PQTZ" for every file it does not outright
+    panic on (measured 2026-09-03: 0 grids over 40 real files, vs 39 for
+    pyrekordbox), which silently produced `hits=0` for the whole library. The
+    same parser already backs tests/test_anlz_reference_parse.py.
 
-    Returns `None` when the file carries no beat grid or cannot be
-    parsed; never raises.
+    Returns `None` when the file carries no beat grid or cannot be parsed.
+
+    Never call `AnlzFile.keys()` on the result — its mapping protocol recurses
+    into itself and raises RecursionError. `get_tag()` is safe.
     """
-    from pyrekordbox.anlz import AnlzFile
-
-    # pyrekordbox's construct grammar recurses per waveform entry —
-    # the same allowance tests/test_anlz_reference_parse.py makes.
-    prev_limit = sys.getrecursionlimit()
-    if prev_limit < ANLZ_RECURSION_LIMIT:
-        sys.setrecursionlimit(ANLZ_RECURSION_LIMIT)
     try:
-        anlz = AnlzFile.parse_file(dat_path)
+        anlz_cls = _import_anlz_file_cls()
+        anlz = anlz_cls.parse_file(dat_path)
         tag = anlz.get_tag("PQTZ")
-    except Exception:
-        # Malformed / unsupported tag layout — one unreadable file must
-        # not cost the rest of the batch.
+    except (OSError, ValueError, KeyError, IndexError, TypeError) as exc:
+        # One unreadable file must not cost the rest of the batch, but it
+        # stays visible: the corrupt-ANLZ case is a real library defect.
+        logger.debug("PQTZ parse failed for %s: %s", dat_path, type(exc).__name__)
         return None
-    finally:
-        sys.setrecursionlimit(prev_limit)
+    except Exception as exc:  # construct raises its own ConstError hierarchy
+        if type(exc).__module__.split(".")[0] != "construct":
+            raise
+        logger.debug("PQTZ parse failed for %s: %s", dat_path, type(exc).__name__)
+        return None
 
     if isinstance(tag, list):
         tag = tag[0] if tag else None
@@ -194,41 +317,20 @@ def _parse_pqtz_in_worker(dat_path: str) -> list[dict] | None:
     return _pqtz_entries_from_dat(dat_path)
 
 
-def _load_beatgrids_batch_in_worker(db_path: str, track_ids: list[str]) -> dict[str, list[dict]]:
-    """Batch PQTZ load.
+def _parse_beatgrids_in_worker(items: list[tuple[str, str]]) -> dict[str, list[dict]]:
+    """Parse PQTZ for `(track_id, dat_path)` pairs.
 
-    Opens its own `MasterDb` connection, iterates `track_ids`, and
-    returns a dict ``{track_id: [entries]}`` for tracks that yielded a
-    valid PQTZ chunk. Per-track Python exceptions are swallowed so a
-    single bad row doesn't abort the chunk; rbox panics still kill the
-    worker and are handled by the parent's bisect logic.
+    Touches no database at all — paths are resolved in the parent by
+    `resolve_anlz_paths`, so nothing here can hit the rbox panic that
+    used to kill this worker.
     """
-    import rbox
-
-    db = rbox.MasterDb(db_path)
     out: dict[str, list[dict]] = {}
-
-    for tid in track_ids:
-        try:
-            paths = db.get_content_anlz_paths(tid)
-        except Exception:
-            # Most common case: track has no analysis row yet.
-            continue
-        if not paths:
-            continue
-
-        dat_path = paths.get("DAT")
-        if not dat_path:
-            continue
-        dat_path = str(dat_path)
-
+    for tid, dat_path in items:
         if not _validate_anlz_header_worker(dat_path):
             continue
-
         entries = _pqtz_entries_from_dat(dat_path)
         if entries:
             out[tid] = entries
-
     return out
 
 
@@ -291,8 +393,8 @@ class SafeAnlzParser:
         Returns:
             Dict ``{track_id: [{"time", "bpm", "beat"}, ...]}`` for
             every track that yielded a valid PQTZ chunk. Missing keys
-            mean "no beatgrid available" (un-analyzed, missing file,
-            invalid header, or — rarely — a known bad row).
+            mean "no beatgrid available" (never analysed by Rekordbox,
+            missing file, invalid header, or a corrupt ANLZ).
         """
         if not isinstance(db_path, str) or not db_path:
             logger.error("load_all_beatgrids: invalid db_path=%r", db_path)
@@ -305,22 +407,41 @@ class SafeAnlzParser:
         if not ids:
             return {}
 
+        # Resolve every path up front, in this process. Cheap (~0.3s for a
+        # 4700-track library) and, unlike the old per-track rbox lookup in
+        # the worker, incapable of panicking.
+        try:
+            paths = resolve_anlz_paths(db_path, ids)
+        except Exception as exc:
+            logger.error("SafeAnlzParser: could not resolve ANLZ paths: %s", exc)
+            return {}
+
+        items: list[tuple[str, str]] = [(t, paths[t]["DAT"]) for t in ids if t in paths]
+        unanalysed = len(ids) - len(items)
+        if not items:
+            logger.info(
+                "SafeAnlzParser: none of the %d requested tracks has an ANLZ file", len(ids)
+            )
+            return {}
+
         # FIFO of chunks waiting to be processed. Chunks are bisected
         # on worker crash, so we may push smaller chunks back to the
         # front of the queue.
-        queue: list[list[str]] = [ids[i : i + chunk_size] for i in range(0, len(ids), chunk_size)]
+        queue: list[list[tuple[str, str]]] = [
+            items[i : i + chunk_size] for i in range(0, len(items), chunk_size)
+        ]
         results: dict[str, list[dict]] = {}
         scanned = 0
 
         while queue:
             chunk = queue.pop(0)
-            chunk = [t for t in chunk if t not in self._bad_ids]
+            chunk = [it for it in chunk if it[0] not in self._bad_ids]
             if not chunk:
                 continue
 
             executor = self._ensure_executor()
             try:
-                future = executor.submit(_load_beatgrids_batch_in_worker, db_path, chunk)
+                future = executor.submit(_parse_beatgrids_in_worker, chunk)
                 partial = future.result(timeout=PER_CHUNK_TIMEOUT_S)
                 results.update(partial)
                 scanned += len(chunk)
@@ -341,7 +462,7 @@ class SafeAnlzParser:
                     break
 
                 if len(chunk) == 1:
-                    bad = chunk[0]
+                    bad = chunk[0][0]
                     self._bad_ids.add(bad)
                     logger.warning(
                         "SafeAnlzParser: track id %s blacklisted (rbox panic #%d)",
@@ -378,9 +499,10 @@ class SafeAnlzParser:
                 )
 
         logger.info(
-            "SafeAnlzParser: batch done — scanned=%d hits=%d bad_ids=%d panics=%d",
+            "SafeAnlzParser: batch done — scanned=%d hits=%d no_anlz=%d bad_ids=%d panics=%d",
             scanned,
             len(results),
+            unanalysed,
             len(self._bad_ids),
             self._panic_count,
         )

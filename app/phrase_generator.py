@@ -322,20 +322,16 @@ def resolve_anlz_dir(track_id: int, db_path: str) -> str | None:
         logger.warning("resolve_anlz_dir: rbox not installed")
         return None
 
+    # get_content_anlz_dir / get_content_anlz_paths abort the process (Rust
+    # panic, uncatchable) for any track without an AnalysisDataPath, so this
+    # goes through the pure-Python resolver instead.
+    from .anlz_safe import resolve_anlz_dir as _resolve
+
     try:
         master_db = rbox.MasterDb(db_path)
-        anlz_dir = master_db.get_content_anlz_dir(str(track_id))
-        if anlz_dir and Path(str(anlz_dir)).is_dir():
-            return str(anlz_dir)
-
-        paths = master_db.get_content_anlz_paths(str(track_id))
-        if paths and hasattr(paths, "get"):
-            for key in ("DAT", "EXT", "2EX"):
-                p = paths.get(key)
-                if p:
-                    parent = Path(str(p)).parent
-                    if parent.is_dir():
-                        return str(parent)
+        anlz_dir = _resolve(master_db, str(track_id))
+        if anlz_dir and Path(anlz_dir).is_dir():
+            return anlz_dir
     except Exception as exc:
         logger.warning("resolve_anlz_dir: failed for track_id=%s — %s", track_id, exc)
     return None

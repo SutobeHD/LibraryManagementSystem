@@ -214,6 +214,7 @@
 | `tests/test_analysis_edge.py` | Edge-case robustness for the analysis engine entry points. |
 | `tests/test_anlz_cue_layout.py` | Byte-layout regression tests for the ANLZ cue + VBR tags. |
 | `tests/test_anlz_cue_patch.py` | Round-trip tests for app/anlz_cue_patch.py. |
+| `tests/test_anlz_path_resolution.py` | Pure-Python ANLZ path resolution in `app.anlz_safe`. |
 | `tests/test_anlz_reference_parse.py` | Validate the produced ANLZ files (.DAT/.EXT/.2EX). |
 | `tests/test_anlz_safe_pqtz.py` | Beat-grid extraction in `app.anlz_safe`. |
 | `tests/test_anlz_writer_guards.py` | Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout). |

@@ -88,6 +88,8 @@ anlz_cue_patch.py — non-destructive memory-cue injection into existing ANLZ fi
 
 Safe wrapper around `rbox.MasterDb` + `rbox.Anlz` for PQTZ beatgrid loading.
 
+- `resolve_anlz_paths()` — Map track id -> {"DAT", "EXT", "EX2"} absolute ANLZ paths.
+- `resolve_anlz_dir()` — Directory holding a track's ANLZ files, or None if it has none.
 - `SafeAnlzParser` — Process-isolated PQTZ extractor with crash recovery.
 - `  SafeAnlzParser.load_all_beatgrids()` — Load PQTZ beatgrids for every track id in one efficient pass.
 - `  SafeAnlzParser.parse_pqtz()` — Parse PQTZ entries from one ANLZ DAT file.
@@ -1858,6 +1860,25 @@ Round-trip tests for app/anlz_cue_patch.py.
 - `test_missing_dat_raises()`
 - `test_read_beats_from_anlz_roundtrip()`
 - `test_read_beats_no_dat_returns_empty()`
+
+### `tests/test_anlz_path_resolution.py`
+
+Pure-Python ANLZ path resolution in `app.anlz_safe`.
+
+- `FakeContent`
+- `FakeDb` — Only the two members the resolvers are allowed to touch.
+- `  FakeDb.share_directory()`
+- `  FakeDb.get_contents()`
+- `  FakeDb.get_content_by_id()`
+- `test_joins_share_dir_with_the_relative_path()`
+- `test_leading_slash_does_not_discard_the_share_root()` — `Path("C:/share") / "/PIONEER/x"` yields "C:/PIONEER/x" — the bug this guards.
+- `test_sibling_keys_use_rbox_spelling_and_extensions()`
+- `test_unanalysed_rows_are_skipped_not_resolved()` — Empty path == exactly the set that aborted the old rbox call.
+- `test_track_ids_filter_restricts_the_result()`
+- `test_resolve_dir_returns_the_containing_directory()`
+- `test_resolve_dir_returns_none_for_an_unanalysed_track()` — The case that used to kill the backend process.
+- `test_resolve_dir_returns_none_for_an_unknown_track()`
+- `test_resolve_dir_survives_a_raising_db()`
 
 ### `tests/test_anlz_reference_parse.py`
 
