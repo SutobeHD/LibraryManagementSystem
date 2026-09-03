@@ -488,8 +488,11 @@ def main() -> int:
         return rc
 
     OUT_L1.parent.mkdir(parents=True, exist_ok=True)
-    OUT_L1.write_text(l1, encoding="utf-8")
-    OUT_L2.write_text(l2, encoding="utf-8")
+    # newline="\n": .gitattributes pins these files to LF, but write_text on
+    # Windows translates to CRLF, so every regen dirtied both maps and failed
+    # the mixed-line-ending pre-commit hook on the first attempt.
+    OUT_L1.write_text(l1, encoding="utf-8", newline="\n")
+    OUT_L2.write_text(l2, encoding="utf-8", newline="\n")
     print(f"wrote {OUT_L1.relative_to(REPO_ROOT)} ({len(l1.splitlines())} lines)")
     print(f"wrote {OUT_L2.relative_to(REPO_ROOT)} ({len(l2.splitlines())} lines)")
     return 0
