@@ -1070,6 +1070,37 @@ class RekordboxDB:
             return self.active_db.remove_track_from_playlist(pid, tid)
         return False
 
+    def get_playlist_children(self, parent_id: str = "ROOT") -> list[dict[str, Any]]:
+        """Direct children of a playlist folder, read from the backend not the cache."""
+        if hasattr(self.active_db, "get_playlist_children"):
+            return self.active_db.get_playlist_children(parent_id)
+        return [p for p in self.playlists if str(p.get("ParentID")) == str(parent_id)]
+
+    def get_playlist_by_path(self, path: list[str]) -> dict[str, Any] | None:
+        """Resolve a folder/playlist path like ["Artists", "Boys Noize"].
+
+        Returns the FIRST match. `djmdPlaylist` enforces no uniqueness on
+        (Name, ParentID), so same-named siblings are legal and cannot be told
+        apart here — hold the returned ID if you need a stable handle.
+        """
+        if hasattr(self.active_db, "get_playlist_by_path"):
+            return self.active_db.get_playlist_by_path(path)
+        parent = "ROOT"
+        node = None
+        for name in path:
+            node = next(
+                (
+                    p
+                    for p in self.playlists
+                    if p.get("Name") == name and str(p.get("ParentID")) == str(parent)
+                ),
+                None,
+            )
+            if node is None:
+                return None
+            parent = node["ID"]
+        return node
+
     def get_unanalyzed_track_ids(self) -> list[str]:
         """Track IDs with no analysis yet. Live mode only — the XML backend
         has no analysis-state column, so it reports nothing to analyse."""

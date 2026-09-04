@@ -7,7 +7,7 @@ import time
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 # rbox (pyrekordbox) is not pip-installable on the Linux CI runner. Soft-import
 # so app.main collection survives its absence; every rbox call sits inside a
@@ -403,59 +403,64 @@ class LiveRekordboxDB:
             parser.stats["panics"],
         )
 
+    # Rbox Attribute values:  0 = normal playlist, 1 = folder, 4 = intelligent playlist
+    # Frontend Type values:   "0" = folder, "1" = normal playlist, "4" = intelligent playlist
+    # We must remap 0↔1 to match what PlaylistNode expects.
+    ATTR_TO_TYPE: ClassVar[dict[int, str]] = {0: "1", 1: "0", 4: "4"}
+
+    def _playlist_node(self, pl) -> dict:
+        """Normalise one rbox DjmdPlaylist row into the dict shape the frontend expects."""
+        # rbox 0.1.7+ exposes `attribute` as a `builtins.PlaylistType` enum
+        # object that is NOT hashable, so `ATTR_TO_TYPE.get(attr, "1")`
+        # raised TypeError on every load. Coerce to int via explicit
+        # value/int casting.
+        raw_attr = getattr(pl, "attribute", 0)
+        try:
+            attr = int(getattr(raw_attr, "value", raw_attr))
+        except (TypeError, ValueError):
+            attr = 0
+        pl_type = self.ATTR_TO_TYPE.get(attr, "1")  # default to playlist
+
+        parent_id = str(pl.parent_id) if pl.parent_id else "ROOT"
+        if parent_id.lower() == "root":
+            parent_id = "ROOT"
+
+        # pyrekordbox may expose smart playlist XML as 'SmartList', 'smart_list', or
+        # via a raw attribute — try all known names so intelligent playlists aren't empty.
+        smart_list_xml = None
+        if pl_type == "4":
+            for attr_name in ("SmartList", "smart_list", "smartList", "criteria"):
+                val = getattr(pl, attr_name, None)
+                if val:
+                    smart_list_xml = val
+                    break
+            if smart_list_xml is None:
+                logger.debug(
+                    f"Intelligent playlist '{pl.name}' has no smart_list XML. "
+                    f"Available attrs: {[a for a in dir(pl) if not a.startswith('_')]}"
+                )
+
+        return {
+            "ID": str(pl.id),
+            "Name": pl.name,
+            "ParentID": parent_id,
+            "Type": pl_type,
+            "Seq": pl.seq,
+            # rbox mints a fresh uuid on every create, so this is NOT a re-run
+            # key. It is a second identity: a stored playlist ID whose UUID has
+            # changed points at a different playlist than the one we projected.
+            "UUID": getattr(pl, "uuid", None),
+            "smart_list": smart_list_xml,
+        }
+
     def _load_playlists(self):
         self.playlists = []
         raw_playlists = self.db.get_playlists()
 
-        # Rbox Attribute values:  0 = normal playlist, 1 = folder, 4 = intelligent playlist
-        # Frontend Type values:   "0" = folder, "1" = normal playlist, "4" = intelligent playlist
-        # We must remap 0↔1 to match what PlaylistNode expects.
-        ATTR_TO_TYPE = {0: "1", 1: "0", 4: "4"}
-
         for pl in raw_playlists:
-            # rbox 0.1.7+ exposes `attribute` as a `builtins.PlaylistType` enum
-            # object that is NOT hashable, so `ATTR_TO_TYPE.get(attr, "1")`
-            # raised TypeError on every load. Coerce to int via explicit
-            # value/int casting.
-            raw_attr = getattr(pl, "attribute", 0)
-            try:
-                attr = int(getattr(raw_attr, "value", raw_attr))
-            except (TypeError, ValueError):
-                attr = 0
-            pl_type = ATTR_TO_TYPE.get(attr, "1")  # default to playlist
-            my_id = str(pl.id)
-
             # Update status for frontend feedback
             self.loading_status = f"Loading: {pl.name}"
-
-            parent_id = str(pl.parent_id) if pl.parent_id else "ROOT"
-            if parent_id.lower() == "root":
-                parent_id = "ROOT"
-
-            # pyrekordbox may expose smart playlist XML as 'SmartList', 'smart_list', or
-            # via a raw attribute — try all known names so intelligent playlists aren't empty.
-            smart_list_xml = None
-            if pl_type == "4":
-                for attr_name in ("SmartList", "smart_list", "smartList", "criteria"):
-                    val = getattr(pl, attr_name, None)
-                    if val:
-                        smart_list_xml = val
-                        break
-                if smart_list_xml is None:
-                    logger.debug(
-                        f"Intelligent playlist '{pl.name}' has no smart_list XML. "
-                        f"Available attrs: {[a for a in dir(pl) if not a.startswith('_')]}"
-                    )
-
-            node_data = {
-                "ID": my_id,
-                "Name": pl.name,
-                "ParentID": parent_id,
-                "Type": pl_type,
-                "Seq": pl.seq,
-                "smart_list": smart_list_xml,
-            }
-            self.playlists.append(node_data)
+            self.playlists.append(self._playlist_node(pl))
 
         # Ensure playlists are sorted by Seq for baseline
         self.playlists.sort(key=lambda x: x.get("Seq", 0))
@@ -1311,14 +1316,12 @@ class LiveRekordboxDB:
             else:
                 new_pl = self.db.create_playlist(name, target_parent)
 
-            # Add to cache (simplistic, real schema has more attributes)
-            node_data = {
-                "ID": str(new_pl.id),
-                "Name": new_pl.name,
-                "ParentID": parent_id,
-                "Type": "0" if is_folder else "1",
-                "Seq": getattr(new_pl, "seq", 0),
-            }
+            node_data = self._playlist_node(new_pl)
+            if getattr(new_pl, "attribute", None) is None:
+                # rbox normally echoes the attribute back on the created row; if a
+                # future version stops, trust what the caller asked for rather than
+                # silently filing a new folder as a playlist.
+                node_data["Type"] = "0" if is_folder else "1"
             self.playlists.append(node_data)
             return node_data
         except Exception as e:
@@ -1335,15 +1338,47 @@ class LiveRekordboxDB:
             return False
 
     def remove_track_from_playlist(self, pid, tid):
+        # rbox's delete_playlist_song takes the DjmdSongPlaylist row id — NOT
+        # (playlist_id, track_id). Passing two args raises TypeError on every
+        # call, which is how this silently never worked. Verified against
+        # rbox 0.1.7 `_rbox.pyi:2422` and empirically in
+        # scripts/dev/rbox_artist_merge_probe.py.
         try:
-            # delete_playlist_song expects (playlist_id, track_id) ?
-            # Actually dir showed: delete_playlist_song and delete_playlist_songs
-            # Usually it takes the playlist ID and the track ID.
-            self.db.delete_playlist_song(str(pid), str(tid))
+            row = next(
+                (r for r in self.db.get_playlist_songs(str(pid)) if str(r.content_id) == str(tid)),
+                None,
+            )
+            if row is None:
+                logger.warning("track %s is not in playlist %s — nothing to remove", tid, pid)
+                return False
+            self.db.delete_playlist_song(str(row.id))
             return True
         except Exception as e:
             logger.error(f"Failed to remove track {tid} from playlist {pid}: {e}")
             return False
+
+    def get_playlist_children(self, parent_id="ROOT"):
+        """Direct children of a playlist folder, straight from the DB."""
+        try:
+            target = "root" if str(parent_id).upper() == "ROOT" else str(parent_id)
+            return [self._playlist_node(pl) for pl in self.db.get_playlist_children(target)]
+        except Exception as e:
+            logger.error(f"Failed to list children of playlist {parent_id}: {e}")
+            return []
+
+    def get_playlist_by_path(self, path):
+        """Resolve a folder/playlist path like ["Artists", "Boys Noize"].
+
+        Returns the FIRST match — `djmdPlaylist` has no uniqueness constraint on
+        (Name, ParentID), so same-named siblings are legal and indistinguishable
+        here. Callers that need a stable handle must keep the returned ID.
+        """
+        try:
+            pl = self.db.get_playlist_by_path([str(p) for p in path])
+            return self._playlist_node(pl) if pl is not None else None
+        except Exception as e:
+            logger.error(f"Failed to resolve playlist path {path}: {e}")
+            return None
 
     def reorder_playlist_track(self, pid: str, track_id: str, new_index: int) -> bool:
         """

@@ -32,6 +32,7 @@ superseded_by: []
 - 2026-09-04 — `implement/approvalgate_` — ⛔ **AWAITING /approve**. Two owner decisions bundled into the Approval Summary: USB re-copy after a merge (OQ16) and the SC catalogue-enumeration boundary (OQ15)
 - 2026-09-04 — `implement/approvalgate_` — owner answered both gate questions **as refinements, not as picks**: (a) merge propagates to the audio-file tags and the USB exporter **merges folders** instead of re-copying → new Step 5b, tasks T-11a/T-11b, threats T9/T10, perf rows, 7 new test rows; (b) catalogue is fetched **on artist selection**, and the missing list splits into "definitely theirs" (uploader-id equality) vs "remixes by others" → threat T11, task T-13 extended. Blockers 3+4 rewritten accordingly. Mockup updated. Still awaiting `/approve`.
 - 2026-09-04 — `implement/accepted_` — **approved by user** (`/approve library-artist-hub`). Ready for `inprogress_`; build starts at M1 T-1.
+- 2026-09-04 — `implement/inprogress_` — build started on `feat/artist-hub` (single feature branch, atomic commit per task — easier to test M1 as a whole than 13 separate PRs). T-1 shipped.
 
 ## Original Idea (verbatim — never edit)
 
@@ -569,7 +570,7 @@ No new stdout markers.
 
 **M1 — testable without SoundCloud. Ends with a working Artists tab, merge and Rekordbox folder.**
 
-- [ ] **T-1:** fix `remove_track_from_playlist` arity + facade passthroughs (`get_playlist_by_path`, `get_playlist_children`) + expose playlist `uuid` — Step 1, tests T1
+- [x] **T-1:** fix `remove_track_from_playlist` arity + facade passthroughs (`get_playlist_by_path`, `get_playlist_children`) + expose playlist `uuid` — Step 1, tests T1. **DONE 2026-09-04** on `feat/artist-hub` — one-arg `delete_playlist_song(row.id)` via `get_playlist_songs`; `_playlist_node` factored out of `_load_playlists` and now carries `UUID`; `create_playlist` reuses it with a caller-intent fallback when rbox omits `attribute`; facade passthroughs degrade to a cache walk on the XML backend. `tests/test_live_playlist_ops.py` 27/27, full suite 879 passed, ruff at baseline.
 - [ ] **T-2:** undo-log deltas (`entity_kind`, `entity_id`, `after_json`, nullable `rule_id`) + `revert_run` INSERT path + `_file_sha1` skip — Step 2, tests T2, T3
 - [ ] **T-3:** `app/artist_store/schema.py` sidecar + migration runner — Step 3, tests T11
 - [ ] **T-4:** `registry.py` — resolve, favourites CRUD, Tier-1 backlog — Step 4, tests T12
