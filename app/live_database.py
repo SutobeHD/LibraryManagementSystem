@@ -584,7 +584,18 @@ class LiveRekordboxDB:
         parts = re.split(
             r"(?i),|&|/|;|\s+feat\.?\s+|\s+ft\.?\s+|\s+vs\.?\s+|\s+with\s+", artist_str
         )
-        return [self._normalize_artist_name(p.strip()) for p in parts if p.strip()]
+        out = []
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            # Normalisation can consume the whole name: "Premiere:", "01 - " and
+            # "supported by" all collapse to "". An empty name became a ghost
+            # entry in the artist list that counted tracks but resolved back to
+            # none, because get_tracks_by_artist bails on a falsy name. Keep the
+            # raw part instead so the tracks stay reachable.
+            out.append(self._normalize_artist_name(part) or part)
+        return out
 
     def _normalize_artist_name(self, name):
         if not name:
