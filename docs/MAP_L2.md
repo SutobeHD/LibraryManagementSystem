@@ -1649,7 +1649,7 @@ Floating zoom controls overlay — sits absolutely positioned over the detail co
 
 ### `frontend/src/main.jsx`
 
-SPEED: Lazy-load heavy views — only the active view is loaded into the bundle
+*(no module docstring)*
 
 
 ## src-tauri/src/ — Rust Desktop Wrapper

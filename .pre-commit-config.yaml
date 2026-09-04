@@ -93,16 +93,21 @@ repos:
         pass_filenames: false
 
   # ── JS/JSX — Prettier + ESLint ───────────────────────────────────────────
+  # `npx` resolved against the REPO ROOT, which has neither tool installed
+  # (both live in frontend/node_modules), so npx tried to fetch them and
+  # pre-commit aborted with "npx canceled due to missing packages" — every
+  # commit touching frontend/src hit it. Call the real entry points through
+  # node instead: portable across shells and it never reaches the network.
   - repo: local
     hooks:
       - id: prettier-frontend
         name: prettier (frontend)
-        entry: npx --no-install prettier --write
+        entry: node frontend/node_modules/prettier/bin/prettier.cjs --write
         language: system
         files: '^frontend/src/.*\.(js|jsx|mjs|cjs|json|css)$'
       - id: eslint-frontend
         name: eslint (frontend)
-        entry: npx --no-install eslint --fix
+        entry: node frontend/node_modules/eslint/bin/eslint.js --fix
         language: system
         files: '^frontend/src/.*\.(js|jsx)$'
 

@@ -339,14 +339,56 @@ fn spawn_dev_backend(app: &tauri::AppHandle, token: Arc<Mutex<String>>) {
 /// therefore returns `()` rather than `Result<_, _>`.
 #[tauri::command]
 fn close_splashscreen(window: tauri::Window) {
-    // Close splashscreen — use .ok() to avoid panic if window doesn't exist
-    if let Some(splashscreen) = window.get_webview_window("splashscreen") {
+    reveal_main_window(&window.app_handle().clone());
+}
+
+/// Close the splashscreen and show the main window. Idempotent.
+///
+/// `main` is configured `"visible": false`, so until something calls this
+/// the app runs with no visible window at all. Both the frontend command
+/// and the watchdog below funnel through here.
+fn reveal_main_window(app: &tauri::AppHandle) {
+    use tauri::Manager;
+
+    if let Some(splashscreen) = app.get_webview_window("splashscreen") {
         let _ = splashscreen.close();
     }
-    // Show main window
-    if let Some(main) = window.get_webview_window("main") {
+    if let Some(main) = app.get_webview_window("main") {
         let _ = main.show();
+        let _ = main.set_focus();
     }
+}
+
+/// Show the main window even if the frontend never asks.
+///
+/// The reveal used to depend solely on the React shell invoking
+/// `close_splashscreen` from a 2-second timer inside an effect whose
+/// cleanup cancels that timer on every dependency change
+/// (frontend/src/main.jsx). Any JS error before that point, a rejected
+/// invoke, or a slow boot that keeps re-running the effect left the user
+/// staring at a splashscreen — or nothing — while the backend and the
+/// webview ran fine. One missed IPC call must not cost the whole GUI.
+#[cfg(desktop)]
+fn spawn_window_watchdog(app: &tauri::AppHandle) {
+    use tauri::Manager;
+
+    const REVEAL_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(REVEAL_DEADLINE).await;
+        let hidden = handle
+            .get_webview_window("main")
+            .map(|w| !w.is_visible().unwrap_or(true))
+            .unwrap_or(false);
+        if hidden {
+            log::warn!(
+                "[window] main still hidden after {}s — frontend never called                  close_splashscreen; revealing it anyway",
+                REVEAL_DEADLINE.as_secs()
+            );
+            reveal_main_window(&handle);
+        }
+    });
 }
 
 /// Drive the SoundCloud OAuth 2.1 + PKCE handshake to completion.
@@ -592,6 +634,9 @@ fn main() {
             {
                 spawn_dev_backend(app.handle(), token_handle);
             }
+
+            #[cfg(desktop)]
+            spawn_window_watchdog(app.handle());
 
             Ok(())
         })

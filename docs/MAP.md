@@ -186,7 +186,7 @@
 | `frontend/src/components/waveform/WaveformOverlays.jsx` | Renders cue markers, beat-selection region, cut/insert/delete regions, drop marker, and loop |
 | `frontend/src/components/waveform/WaveformSimpleView.jsx` | Stripped-down view used by RankingView (simpleMode=true) — only overview + main waveform + |
 | `frontend/src/components/waveform/WaveformZoom.jsx` | Floating zoom controls overlay — sits absolutely positioned over the detail container. |
-| `frontend/src/main.jsx` | SPEED: Lazy-load heavy views — only the active view is loaded into the bundle |
+| `frontend/src/main.jsx` | *(no module docstring)* |
 
 ## src-tauri/src/ — Rust Desktop Wrapper
 
