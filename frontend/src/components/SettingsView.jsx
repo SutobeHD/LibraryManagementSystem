@@ -21,7 +21,7 @@
  *   Network    — HTTP proxy, SoundCloud sync, backend restart
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import api, { setScAuthMode } from '../api/api';
 import toast from 'react-hot-toast';
 import {
@@ -119,22 +119,39 @@ const SettingsView = () => {
     const [settings, setSettings] = useState(DEFAULTS);
     const [activeTab, setActiveTab] = useState('library');
     const [saving, setSaving] = useState(false);
+    const [loaded, setLoaded] = useState(false);
 
     // ── Load settings on mount ────────────────────────────────────────────────
-    useEffect(() => {
-        api.get('/api/settings')
-            .then((res) =>
-                setSettings({
-                    ...DEFAULTS,
-                    ...res.data,
-                    shortcuts: { ...DEFAULTS.shortcuts, ...(res.data.shortcuts || {}) },
-                })
-            )
-            .catch(() => {});
+    // The GET shares the global 10 s axios timeout, so it loses the race against
+    // a library load on a big collection. Swallowing that failure left the form
+    // showing DEFAULTS while the backend held real values — and Save then POSTs
+    // the whole object, wiping every stored setting. Saving stays locked until
+    // a load actually succeeds.
+    const loadSettings = useCallback(async () => {
+        try {
+            const res = await api.get('/api/settings');
+            setSettings({
+                ...DEFAULTS,
+                ...res.data,
+                shortcuts: { ...DEFAULTS.shortcuts, ...(res.data.shortcuts || {}) },
+            });
+            setLoaded(true);
+        } catch (err) {
+            console.error('[SettingsView] failed to load settings', err);
+            setLoaded(false);
+        }
     }, []);
+
+    useEffect(() => {
+        loadSettings();
+    }, [loadSettings]);
 
     // ── Persist ───────────────────────────────────────────────────────────────
     const saveSettings = async () => {
+        if (!loaded) {
+            toast.error('Settings were never loaded — refusing to save, that would overwrite them');
+            return;
+        }
         setSaving(true);
         try {
             await api.post('/api/settings', settings);
@@ -219,10 +236,27 @@ const SettingsView = () => {
                 <div className="glass-panel rounded-3xl p-6 shadow-2xl">{renderActiveTab()}</div>
 
                 {/* Footer */}
+                {!loaded && (
+                    <div className="mt-4 flex items-center gap-3 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm">
+                        <span className="flex-1 text-ink-muted">
+                            Could not load your saved settings — the values below are defaults, not
+                            what is stored. Saving is disabled so nothing gets overwritten.
+                        </span>
+                        <button
+                            onClick={loadSettings}
+                            className="btn-secondary flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs"
+                        >
+                            <RefreshCw size={14} />
+                            Retry
+                        </button>
+                    </div>
+                )}
+
                 <div className="mt-4 flex justify-end">
                     <button
                         onClick={saveSettings}
-                        disabled={saving}
+                        disabled={saving || !loaded}
+                        title={loaded ? undefined : 'Settings could not be loaded'}
                         className="btn-primary flex items-center gap-3 px-8 py-3 rounded-xl text-sm shadow-xl shadow-amber2/20 disabled:opacity-50"
                     >
                         {saving ? (
