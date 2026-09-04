@@ -49,6 +49,7 @@
 | `app/phrase_generator.py` | phrase_generator.py — Phrase & Auto-Cue Generator |
 | `app/playcount_sync.py` | playcount_sync.py — USB Play-Count Sync Engine |
 | `app/popularity_engine.py` | Popularity sidecar engine — SoundCloud-only at M1 (underground-mainstream T1-T3). |
+| `app/pyrekordbox_compat.py` | Importing pyrekordbox without letting it reconfigure our logging. |
 | `app/rate_limit.py` | In-process token-bucket rate limiter for the FastAPI sidecar. |
 | `app/rbep_parser.py` | RBEP Parser — Parses Rekordbox Editor Project (.rbep) files. |
 | `app/rekordbox_bridge.py` | *(no module docstring)* |

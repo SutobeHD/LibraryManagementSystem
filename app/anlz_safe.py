@@ -134,28 +134,6 @@ def _validate_anlz_header_worker(dat_path: str) -> bool:
         return False
 
 
-# pyrekordbox 0.1.7 `config.py:113` greets every import with
-# "Incompatible rekordbox 6 database: Could not retrieve db-key." on the ROOT
-# logger (module-level `logging.warning`, so a `getLogger("pyrekordbox")` level
-# cannot reach it). It fires because the package hunts the master.db key in
-# Rekordbox's app.asar at import time. We parse ANLZ *files*; that key belongs
-# to `pyrekordbox.db6`, which we never touch.
-_PYREKORDBOX_DBKEY_MSG = "Incompatible rekordbox 6 database: Could not retrieve db-key."
-
-
-class _DropPyrekordboxDbKeyWarning(logging.Filter):
-    """Drops exactly that one record, nothing else."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        # Match `msg`, not `getMessage()`: a foreign record with bad %-args
-        # would make getMessage() raise inside the filter.
-        return not (
-            record.levelno == logging.WARNING
-            and isinstance(record.msg, str)
-            and record.msg == _PYREKORDBOX_DBKEY_MSG
-        )
-
-
 def resolve_anlz_paths(
     db_path: str, track_ids: Iterable[str] | None = None
 ) -> dict[str, dict[str, str]]:
@@ -238,28 +216,17 @@ def resolve_anlz_dir(db, track_id: str) -> str | None:
 
 
 def _import_anlz_file_cls() -> Any:
-    """Import `AnlzFile` without letting pyrekordbox reconfigure our logging.
+    """Import `AnlzFile` without letting pyrekordbox touch our logging.
 
-    Importing it runs `basicConfig()` and `logging.root.setLevel(NOTSET)`,
-    which would attach a stray handler and downgrade the root level for the
-    rest of the process — in the backend that means every DEBUG record starts
-    reaching the log file the RedactingFormatter guards. Snapshot and restore
-    both, and swallow the one bogus warning while it happens.
+    Returns Any, not `type`: pyrekordbox ships no stubs, so a `type`
+    annotation makes mypy reject every attribute access on the class.
     """
-    # Returns Any, not `type`: pyrekordbox ships no stubs, so a `type`
-    # annotation makes mypy reject every attribute access on the class.
-    root = logging.getLogger()
-    level, handlers = root.level, root.handlers[:]
-    flt = _DropPyrekordboxDbKeyWarning()
-    root.addFilter(flt)
-    try:
+    from .pyrekordbox_compat import quiet_import
+
+    with quiet_import():
         from pyrekordbox.anlz import AnlzFile
 
-        return AnlzFile
-    finally:
-        root.removeFilter(flt)
-        root.setLevel(level)
-        root.handlers[:] = handlers
+    return AnlzFile
 
 
 def _pqtz_entries_from_dat(dat_path: str) -> list[dict] | None:

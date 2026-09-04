@@ -745,6 +745,12 @@ Popularity sidecar engine — SoundCloud-only at M1 (underground-mainstream T1-T
 - `  PopularityStore.get_stale()` — Rows whose ``fetched_at`` is older than ``ttl_seconds`` (refresh queue).
 - `  PopularityStore.delete()` — Drop one platform row (or all rows for a track).
 
+### `app/pyrekordbox_compat.py`
+
+Importing pyrekordbox without letting it reconfigure our logging.
+
+- `quiet_import()` — Restore the root logger's level and handlers after the import.
+
 ### `app/rate_limit.py`
 
 In-process token-bucket rate limiter for the FastAPI sidecar.

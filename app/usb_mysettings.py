@@ -29,13 +29,18 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 try:
-    from pyrekordbox import (
-        DevSettingFile,
-        DjmMySettingFile,
-        MySetting2File,
-        MySettingFile,
-    )
-    from pyrekordbox.mysettings import structs as _ms_structs
+    # quiet_import: pyrekordbox's import sets logging.root to NOTSET, which
+    # would flood the backend's redacted log file with DEBUG records.
+    from .pyrekordbox_compat import quiet_import
+
+    with quiet_import():
+        from pyrekordbox import (
+            DevSettingFile,
+            DjmMySettingFile,
+            MySetting2File,
+            MySettingFile,
+        )
+        from pyrekordbox.mysettings import structs as _ms_structs
 
     _PYRB_AVAILABLE = True
 except Exception as exc:
