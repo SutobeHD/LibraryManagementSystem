@@ -65,7 +65,7 @@ All DAW state is managed in this directory. Do NOT duplicate in component-local 
 | `components/XmlCleanView.jsx` | Rekordbox XML cleaning: drag-drop a file, scan, fix encoding/dead refs. Routes to: `xml`. | `POST /api/xml/clean` |
 | `components/UsbView.jsx` | USB device manager **container** — owns device-selection state, sync settings, API polling, modals. Layout-only; per-panel logic moved to `components/usb/*`. Routes to: `usb`. | `GET /api/usb/devices`, `GET /api/usb/diff/{id}`, `POST /api/usb/sync` |
 | `components/UsbSettingsView.jsx` | Edits `MYSETTING.DAT` / `MYSETTING2.DAT` / `DJMMYSETTING.DAT` per-stick — CDJ + DJM hardware prefs (auto-cue level, jog mode, fader curves). Schema fetched live from backend. Routes to: `usb-settings`. | `GET /api/usb/cdj_settings/schema`, `POST /api/usb/cdj_settings/save` |
-| `components/SoundCloudView.jsx` | SC track search + downloader, OAuth login indicator, per-task progress. Routes to: `soundcloud`. | `GET /api/soundcloud/me`, `POST /api/soundcloud/download`, `invoke('login_to_soundcloud')` |
+| `components/SoundCloudView.jsx` | SC track search + downloader, OAuth login indicator, per-task progress. Routes to: `soundcloud`. | `GET /api/soundcloud/me`, `POST /api/soundcloud/download`, `scLogin()` (api.js → `invoke('login_to_soundcloud', { mode })`) |
 | `components/SoundCloudSyncView.jsx` | Match SC library tracks to local library, preview match-confidence in inspector, trigger downloads. Routes to: `sc-sync`. | `POST /api/soundcloud/preview-matches`, `POST /api/soundcloud/sync` |
 | `components/DownloadManagerView.jsx` | Full download manager — per-task stage timeline (Queued → Downloading → Analyzing → ANLZ → Sorting → Completed) for both local-import and SC tasks. Routes to: `downloads`. | `GET /api/import/tasks`, `GET /api/soundcloud/tasks` |
 | `components/UtilitiesView.jsx` | **Router on `mode`** (from the workspace nav, no inner grid/toggle). Tools: lazy-loads `PhraseGeneratorView` / `DuplicateView` / `XmlCleanView` / Converter-placeholder. Health: `low_quality`/`lost`/`no_artwork` → track list. Routes to: `util-<mode>` (phrase/duplicates/xml/converter/low_quality/lost/no_artwork). | `GET /api/insights/low_quality`, `GET /api/insights/no_artwork`, `GET /api/insights/lost` |
@@ -218,8 +218,8 @@ Composed by `components/WaveformEditor.jsx` (the standalone editor used in `Rank
 | `load_audio` | `{ path: string }` | `Result<AudioInfo, String>` | `src-tauri/src/audio/commands.rs` |
 | `get_3band_waveform` | `{ path: string }` | `{ low: f32[], mid: f32[], high: f32[], peaks: f32[] }` | `src-tauri/src/audio/commands.rs` |
 | `start_project_export` | `{ params: ExportParams }` | `void` (emits events) | `src-tauri/src/audio/commands.rs` |
-| `login_to_soundcloud` | `{}` | `Result<String, String>` (access token) | `src-tauri/src/main.rs` |
-| `export_to_soundcloud` | `{ playlist_name: string, tracks: ExportTrack[] }` | `Result<String, String>` | `src-tauri/src/main.rs` |
+| `login_to_soundcloud` | `{ mode?: 'gui' \| 'browser' }` | `Result<String, String>` (access token) | `src-tauri/src/main.rs` |
+| `export_to_soundcloud` | `{ playlist_name: string, tracks: ExportTrack[], mode?: 'gui' \| 'browser' }` | `Result<String, String>` | `src-tauri/src/main.rs` |
 | `list_audio_devices` | `{}` | `Result<string[], String>` | `src-tauri/src/main.rs` |
 | `close_splashscreen` | `{}` | `void` | `src-tauri/src/main.rs` |
 

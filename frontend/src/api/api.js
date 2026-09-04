@@ -121,6 +121,42 @@ export function ready() {
     return _bootstrapPromise;
 }
 
+// ─── SoundCloud consent surface (in-app window vs. OS browser) ─────────────
+// `sc_auth_mode` lives in settings.json ('gui' │ 'browser'); 'gui' is the
+// default so verification stays inside the app. Cached after the first read —
+// SettingsView pushes the new value through setScAuthMode() on save.
+const SC_AUTH_MODE_DEFAULT = 'gui';
+let _scAuthMode = null;
+
+/** Overwrite the cached consent-surface mode (called by SettingsView on save). */
+export function setScAuthMode(mode) {
+    _scAuthMode = mode === 'browser' ? 'browser' : SC_AUTH_MODE_DEFAULT;
+    return _scAuthMode;
+}
+
+/** Resolve the consent surface: cached value, else settings.json, else 'gui'. */
+export async function getScAuthMode() {
+    if (_scAuthMode) return _scAuthMode;
+    try {
+        const res = await api.get('/api/settings');
+        return setScAuthMode(res.data?.sc_auth_mode);
+    } catch {
+        return SC_AUTH_MODE_DEFAULT; // don't cache a failed read
+    }
+}
+
+/**
+ * Run the native SoundCloud OAuth flow on the user's configured surface.
+ * Returns the access token. Desktop-only — throws in browser-dev mode.
+ */
+export async function scLogin() {
+    if (!isTauri) throw new Error('SoundCloud login is only available in the desktop app.');
+    const mode = await getScAuthMode();
+    // Dynamically imported so browser-preview mode never touches Tauri IPC.
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke('login_to_soundcloud', { mode });
+}
+
 // ─── EC15: Token-refresh state ────────────────────────────────────────────────
 // Prevents an infinite refresh loop if the refresh request itself fails.
 // Pattern: queue all 401-waiting requests, drain them after one refresh.
@@ -161,9 +197,7 @@ async function _refreshScToken() {
         // in browser mode we can't silently refresh — throw immediately.
         if (!isTauri) throw new Error('Silent token refresh unavailable in browser mode.');
 
-        // Dynamically import to avoid crashing in browser-preview mode.
-        const { invoke } = await import('@tauri-apps/api/core');
-        const newToken = await invoke('login_to_soundcloud');
+        const newToken = await scLogin();
 
         await api.post('/api/soundcloud/auth-token', { token: newToken });
         _refreshFailCount = 0;

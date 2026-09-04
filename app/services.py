@@ -787,6 +787,7 @@ class SettingsManager:
         "last_lib_mode": "xml",
         "soundcloud_auth_token": "",
         "sc_sync_folder_id": None,  # local Rekordbox playlist ID to create SC playlists inside
+        "sc_auth_mode": "gui",  # "gui" = in-app OAuth window | "browser" = OS default browser
         "sc_download_format": "auto",  # "auto" (keep source codec) | "aiff" (convert to PCM AIFF lossless)
         "legacy_pdb_stub": False,  # opt-in: write header-only export.pdb for CDJ-2000nxs2 (experimental — see app/usb_pdb.py)
         "scan_folders": [],  # absolute paths watched for new audio files (FolderWatcher)

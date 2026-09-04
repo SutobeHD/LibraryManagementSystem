@@ -1012,6 +1012,8 @@ variant_schema — DDL + idempotent migration runner for the variants sidecar.
 
 ─── EC2: Runtime detection of Tauri context ───────────────────────────────────
 
+- `setScAuthMode()` — export function ready() { return _bootstrapPromise; } // ─── SoundCloud consent surface (in-app win…
+- `scLogin()` — export async function getScAuthMode() { if (_scAuthMode) return _scAuthMode; try { const res = awai…
 - `cancellableGet()` — ─── AbortController helpers ────────────────────────────────────────────────── export function crea…
 
 ### `frontend/src/audio/AudioRegion.js`
@@ -1737,7 +1739,9 @@ soundcloud_client.rs
 - `search_track()` — Searches for a single track on SoundCloud by artist and title.
 - `struct ExportResult`
 - `search_and_create_playlist()` — Searches for each track sequentially (to avoid rate-limiting) and creates a SoundCloud playlist wit…
-- `wait_for_callback()` — Starts a temporary HTTP server on 127.0.0.1:5001, waits for the OAuth callback, extracts the `code`…
+- `callback_port()` — Port the OAuth redirect lands on.
+- `bind_callback_listener()` — Bind the temporary callback server on 127.0.0.1.
+- `accept_callback()` — Waits for the OAuth callback on `listener`, extracts the `code` query parameter, and returns it.
 
 
 ## tests/ — Test Suites
@@ -2870,6 +2874,12 @@ compare_rekordbox.py — A/B accuracy harness: our engine vs Rekordbox.
 ### `scripts/dev/phrase_spike.py`
 
 phrase_spike.py — manual P0 verification for the phrase memory-cue ANLZ write.
+
+- `main()`
+
+### `scripts/dev/rbox_artist_merge_probe.py`
+
+Probe rbox's artist/playlist write semantics against a COPY of a master.db.
 
 - `main()`
 

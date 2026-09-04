@@ -160,8 +160,12 @@ User clicks "Connect SoundCloud"
   → Frontend: invoke('login_to_soundcloud')    [Tauri IPC]
   → src-tauri/main.rs: login_to_soundcloud()
   → soundcloud_client.rs: PKCE OAuth flow
-    → get_auth_url() → open browser
-    → wait_for_callback() → one-shot local HTTP server
+    → get_auth_url()
+    → bind_callback_listener() → one-shot local HTTP server (bound first)
+    → consent page per settings.json sc_auth_mode:
+        'gui' (default) → in-app 'sc-oauth' WebviewWindow
+        'browser'       → open::that() → OS default browser
+    → accept_callback() → blocks for ?code=..., closes the in-app window
     → exchange_code_for_token() → returns token string
   → Frontend receives token → POST /api/soundcloud/auth-token
   → app/main.py stores token in session

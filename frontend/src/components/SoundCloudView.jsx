@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import api from '../api/api';
+import api, { scLogin } from '../api/api';
 import {
     Download,
     Cloud,
@@ -14,7 +14,6 @@ import {
     RefreshCw,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
-import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
 const SoundCloudView = () => {
@@ -104,7 +103,7 @@ const SoundCloudView = () => {
         setIsLoggingIn(true);
         setLoginMessage('Initializing secure login...');
         try {
-            const newToken = await invoke('login_to_soundcloud');
+            const newToken = await scLogin();
             setLoginMessage('Saving credentials securely...');
             // Hand the secret straight to the backend keyring — never persisted
             // in React state. We flip the local auth-flag once the backend has
@@ -118,6 +117,7 @@ const SoundCloudView = () => {
             const errStr = String(e);
             // Distinguish Tauri unavailability from real auth errors
             if (
+                errStr.includes('desktop app') ||
                 errStr.includes('invoke') ||
                 errStr.includes('TAURI') ||
                 errStr.includes('undefined')

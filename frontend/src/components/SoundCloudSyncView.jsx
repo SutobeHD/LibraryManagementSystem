@@ -24,9 +24,8 @@ import {
     LogIn,
     FolderOpen,
 } from 'lucide-react';
-import api from '../api/api';
+import api, { scLogin } from '../api/api';
 import toast from 'react-hot-toast';
-import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import MatchInspectorModal from './MatchInspectorModal';
 import { confirmModal } from './ConfirmModal';
@@ -391,8 +390,9 @@ const SoundCloudSyncView = () => {
         setIsLoggingIn(true);
         setLoginMessage('Initializing secure login...');
         try {
-            // Criterion 1 & 4: invoke only exists in Tauri desktop context
-            const token = await invoke('login_to_soundcloud');
+            // Criterion 1 & 4: scLogin() is desktop-only and picks the
+            // consent surface from sc_auth_mode (in-app window by default).
+            const token = await scLogin();
 
             setLoginMessage('Saving credentials securely...');
             await api.post('/api/soundcloud/auth-token', { token });
@@ -405,6 +405,7 @@ const SoundCloudSyncView = () => {
             const errStr = String(e);
             // Criterion 4: Detect Tauri-unavailability specifically — don't leak raw TypeErrors
             if (
+                errStr.includes('desktop app') ||
                 errStr.includes('invoke') ||
                 errStr.includes('TAURI') ||
                 errStr.includes('undefined')

@@ -438,6 +438,9 @@ class SetReq(BaseModel):
     locale: _Literal["de", "en"] | None = None
     sc_sync_folder_id: _PathStr | None = None
     sc_download_format: _Literal["auto", "aiff"] | None = None
+    # Consent surface for the SC OAuth flow: in-app webview window (default)
+    # or the OS browser. Consumed by the Tauri command, not the backend.
+    sc_auth_mode: _Literal["gui", "browser"] | None = None
     legacy_pdb_stub: bool | None = None
 
     @_mv(mode="after")

@@ -407,21 +407,33 @@ pub async fn search_and_create_playlist(
 // Local callback listener (waits for the OAuth redirect)
 // ---------------------------------------------------------------------------
 
-/// Starts a temporary HTTP server on 127.0.0.1:5001, waits for the OAuth
-/// callback, extracts the `code` query parameter, and returns it.
-pub fn wait_for_callback() -> Result<String, ScError> {
-    // Bind to the same port the redirect URI advertises. We parse it from the
-    // env-driven URL so a custom SOUNDCLOUD_REDIRECT_URI keeps server + URL
-    // in sync.
-    let redirect = get_redirect_uri();
-    let port = Url::parse(&redirect)
+/// Port the OAuth redirect lands on. Parsed from the env-driven redirect URI
+/// so a custom `SOUNDCLOUD_REDIRECT_URI` keeps listener + URL in sync.
+pub fn callback_port() -> u16 {
+    Url::parse(&get_redirect_uri())
         .ok()
         .and_then(|u| u.port())
-        .unwrap_or(5001);
-    let bind_addr = format!("127.0.0.1:{}", port);
-    let listener = TcpListener::bind(&bind_addr)?;
-    log::info!("[SoundCloud] Waiting for OAuth callback on {}...", redirect);
+        .unwrap_or(5001)
+}
 
+/// Bind the temporary callback server on 127.0.0.1.
+///
+/// Split from `accept_callback` on purpose: the caller binds *before* it opens
+/// the consent page, so a fast redirect can never hit a port nobody listens on
+/// yet. It also gives the caller a way to abort a pending `accept()` — a local
+/// TCP connect to `callback_port()` unblocks it.
+pub fn bind_callback_listener() -> Result<TcpListener, ScError> {
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", callback_port()))?;
+    log::info!(
+        "[SoundCloud] Waiting for OAuth callback on {}...",
+        get_redirect_uri()
+    );
+    Ok(listener)
+}
+
+/// Waits for the OAuth callback on `listener`, extracts the `code` query
+/// parameter, and returns it. Blocking — run it off the async runtime.
+pub fn accept_callback(listener: TcpListener) -> Result<String, ScError> {
     // Accept only the first connection
     let (mut stream, _) = listener.accept()?;
 

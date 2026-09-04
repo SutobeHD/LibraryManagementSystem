@@ -8,7 +8,7 @@
 import React, { useCallback } from 'react';
 import api from '../../api/api';
 import toast from 'react-hot-toast';
-import { Wifi, Globe, RefreshCw, Power } from 'lucide-react';
+import { Wifi, Globe, RefreshCw, Power, LogIn } from 'lucide-react';
 import { Toggle, Section, Field } from './SettingsControls';
 
 const SettingsNetwork = ({ settings, setSettings }) => {
@@ -38,6 +38,26 @@ const SettingsNetwork = ({ settings, setSettings }) => {
                         className="input-glass w-full font-mono text-sm"
                     />
                 </Field>
+            </Section>
+
+            <Section title="SoundCloud Login" icon={LogIn}>
+                <Field label="Where the SoundCloud verification opens">
+                    <select
+                        value={settings.sc_auth_mode || 'gui'}
+                        onChange={(e) => set('sc_auth_mode', e.target.value)}
+                        className="input-glass w-full"
+                    >
+                        <option value="gui">In-app window — stay inside the app (default)</option>
+                        <option value="browser">
+                            External browser — open the OS default browser
+                        </option>
+                    </select>
+                </Field>
+                <p className="text-xs text-ink-muted">
+                    Both routes use the same local callback. Switch to the external browser if
+                    SoundCloud blocks a social login (Google/Apple/Facebook) inside the embedded
+                    window, or to reuse a session you are already signed into there.
+                </p>
             </Section>
 
             <Section title="SoundCloud Sync" icon={Globe}>

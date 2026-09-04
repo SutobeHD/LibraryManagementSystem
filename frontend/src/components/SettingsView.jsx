@@ -22,7 +22,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import api from '../api/api';
+import api, { setScAuthMode } from '../api/api';
 import toast from 'react-hot-toast';
 import {
     Settings,
@@ -100,6 +100,7 @@ const DEFAULTS = {
     // Network
     http_proxy: '',
     sc_sync_folder_id: '',
+    sc_auth_mode: 'gui', // 'gui' = in-app login window | 'browser' = external browser
 };
 
 const TABS = [
@@ -137,6 +138,7 @@ const SettingsView = () => {
         setSaving(true);
         try {
             await api.post('/api/settings', settings);
+            setScAuthMode(settings.sc_auth_mode);
             toast.success('Settings saved');
         } catch {
             toast.error('Failed to save settings');

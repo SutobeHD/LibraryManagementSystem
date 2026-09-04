@@ -10,7 +10,7 @@
 | File | Purpose |
 |------|---------|
 | `src-tauri/src/main.rs` | App initialization, splashscreen lifecycle, top-level Tauri commands: `close_splashscreen`, `login_to_soundcloud`, `export_to_soundcloud`. Registers `AudioCommandState` with `.manage()` |
-| `src-tauri/src/soundcloud_client.rs` | SoundCloud OAuth 2.1 + PKCE implementation. `Track` struct. Functions: `get_auth_url()`, `wait_for_callback()`, `exchange_code_for_token()` |
+| `src-tauri/src/soundcloud_client.rs` | SoundCloud OAuth 2.1 + PKCE implementation. `Track` struct. Functions: `get_auth_url()`, `callback_port()`, `bind_callback_listener()`, `accept_callback()`, `exchange_code_for_token()` |
 
 ---
 
@@ -37,8 +37,8 @@ All commands registered via `tauri::Builder::default().invoke_handler(tauri::gen
 | Command | Parameters | Returns | Description |
 |---------|-----------|---------|-------------|
 | `close_splashscreen` | `window: tauri::Window` | `void` | Closes splashscreen window, shows main window |
-| `login_to_soundcloud` | `app: tauri::AppHandle` | `Result<String, String>` | Full PKCE OAuth flow: get auth URL → open browser → wait for callback → exchange code → return access token string |
-| `export_to_soundcloud` | `app: tauri::AppHandle, playlist_name: String, tracks: Vec<ExportTrack>` | `Result<String, String>` | Export a playlist to SoundCloud (requires prior auth) |
+| `login_to_soundcloud` | `app: tauri::AppHandle, mode: Option<String>` | `Result<String, String>` | Full PKCE OAuth flow: get auth URL → open consent page → wait for callback → exchange code → return access token string. `mode`: `"browser"`/`"external"` = OS browser, anything else (incl. `None`) = in-app `sc-oauth` webview window (default) |
+| `export_to_soundcloud` | `app: tauri::AppHandle, playlist_name: String, tracks: Vec<ExportTrack>, mode: Option<String>` | `Result<String, String>` | Export a playlist to SoundCloud (requires prior auth). `mode` = same consent-surface knob as `login_to_soundcloud` |
 
 `ExportTrack` struct: `{ artist: String, title: String, duration_ms: u64 }`
 
@@ -89,10 +89,13 @@ Events emitted by Rust → frontend listens with `listen('event_name', handler)`
 Implements OAuth 2.1 + PKCE:
 
 1. `get_auth_url()` — generate `code_verifier` (random bytes) + `code_challenge` (SHA256 → base64url). Returns `(auth_url, code_verifier)`
-2. `open::that(&auth_url)` — opens system browser for user login
-3. `wait_for_callback()` — spawns one-shot local HTTP server on a random port. Blocks until SC redirects back with `?code=...`. Returns the authorization code
-4. `exchange_code_for_token(&code, &code_verifier)` — POST to SC token endpoint with code + verifier → returns access token string
-5. Token is returned to frontend as plain string; frontend sends it to `POST /api/soundcloud/auth-token` for the Python backend to store
+2. `bind_callback_listener()` — binds the localhost redirect port (`SOUNDCLOUD_REDIRECT_URI`, default 5001) **before** the consent page opens, so a fast redirect can't hit an unbound port
+3. Consent surface, chosen by `sc_auth_mode` (settings.json, default `gui`):
+   - `gui` → `main.rs: open_auth_window()` builds the `sc-oauth` `WebviewWindow` on the auth URL. It carries no capability → no Tauri IPC for the remote page. Closing it early sets `cancelled` and connects once to the callback port to unblock `accept()`; the flow then errors out instead of hanging
+   - `browser` → `open::that(&auth_url)` opens the OS browser (previous behaviour)
+4. `accept_callback(listener)` — blocks until SC redirects back with `?code=...`, serves the success page, returns the authorization code. The in-app window is closed automatically afterwards
+5. `exchange_code_for_token(&code, &code_verifier)` — POST to SC token endpoint with code + verifier → returns access token string
+6. Token is returned to frontend as plain string; frontend sends it to `POST /api/soundcloud/auth-token` for the Python backend to store
 
 **Never log the token** — only log `token_received: true/false`.
 

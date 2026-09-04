@@ -11,6 +11,7 @@ use audio::fingerprint::{fingerprint_batch, fingerprint_track};
 use serde::Deserialize;
 use soundcloud_client::Track;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
 
@@ -391,38 +392,144 @@ fn spawn_window_watchdog(app: &tauri::AppHandle) {
     });
 }
 
+/// Label of the embedded SoundCloud consent window. Reused across attempts so
+/// an abandoned login can never stack a second window on top of the first.
+const SC_AUTH_WINDOW_LABEL: &str = "sc-oauth";
+
+/// Where the SoundCloud consent page is rendered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AuthSurface {
+    /// Embedded webview window owned by the app (default).
+    InApp,
+    /// The user's default OS browser.
+    ExternalBrowser,
+}
+
+impl AuthSurface {
+    /// Only an explicit `"browser"` / `"external"` opts out — an absent or
+    /// unknown value keeps the in-app window, which is the documented default.
+    fn from_opt(mode: Option<String>) -> Self {
+        match mode.as_deref() {
+            Some("browser") | Some("external") => Self::ExternalBrowser,
+            _ => Self::InApp,
+        }
+    }
+}
+
+/// Close the embedded consent window if it is still around.
+fn close_auth_window(app: &tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window(SC_AUTH_WINDOW_LABEL) {
+        let _ = win.close();
+    }
+}
+
+/// Open the SoundCloud consent page in an app-owned webview window.
+///
+/// `finished` / `cancelled` coordinate with the blocking callback listener:
+/// closing the window before the redirect arrives would otherwise leave
+/// `accept()` parked forever, so the close handler connects to the callback
+/// port once to unblock it and flags the attempt as cancelled.
+fn open_auth_window(
+    app: &tauri::AppHandle,
+    auth_url: &str,
+    finished: Arc<AtomicBool>,
+    cancelled: Arc<AtomicBool>,
+) -> Result<(), String> {
+    close_auth_window(app);
+
+    let url = tauri::Url::parse(auth_url).map_err(|e| format!("Invalid auth URL: {}", e))?;
+    let window = tauri::WebviewWindowBuilder::new(
+        app,
+        SC_AUTH_WINDOW_LABEL,
+        tauri::WebviewUrl::External(url),
+    )
+    .title("SoundCloud Login")
+    .inner_size(520.0, 800.0)
+    .min_inner_size(420.0, 560.0)
+    .center()
+    .focused(true)
+    .build()
+    .map_err(|e| format!("Could not open login window: {}", e))?;
+
+    let port = soundcloud_client::callback_port();
+    window.on_window_event(move |event| {
+        if !matches!(
+            event,
+            tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
+        ) {
+            return;
+        }
+        // We close the window ourselves once the code is in — that must not
+        // count as a cancel, nor poke a listener a later attempt may own.
+        if finished.load(Ordering::SeqCst) {
+            return;
+        }
+        cancelled.store(true, Ordering::SeqCst);
+        let _ = std::net::TcpStream::connect(("127.0.0.1", port));
+    });
+
+    Ok(())
+}
+
 /// Drive the SoundCloud OAuth 2.1 + PKCE handshake to completion.
 ///
+/// `surface` decides where the consent page renders: an app-owned webview
+/// window (default) or the OS browser. Both paths share the same localhost
+/// redirect listener — only the surface differs.
+///
 /// Emits three `{stage: "auth", message: ...}` progress events on
-/// `progress_event` as the flow advances (opening browser → waiting →
+/// `progress_event` as the flow advances (opening page → waiting →
 /// exchanging code) and returns the access token on success. Callers
 /// that need a terminal "done" event must emit it themselves after this
 /// returns — login and export use different final-stage payloads.
 ///
 /// # Errors
 /// - "Configuration error" if `SC_CLIENT_ID` / `SC_CLIENT_SECRET` are missing
-/// - "Could not open browser" if the OS browser launcher fails
+/// - "Callback listener error" if the localhost redirect port is taken
+/// - "Could not open login window" / "Could not open browser" if the consent
+///   page cannot be shown
+/// - "Login window was closed..." if the user aborts the in-app flow
 /// - "Task join error" / "Callback error" if the local HTTP listener fails
 /// - "Token exchange failed" if SoundCloud rejects the auth code
 async fn ensure_oauth_token(
     app: &tauri::AppHandle,
     progress_event: &str,
+    surface: AuthSurface,
 ) -> Result<String, String> {
     // Step 1: Generate auth URL with PKCE
     let (auth_url, code_verifier) =
         soundcloud_client::get_auth_url().map_err(|e| format!("Configuration error: {}", e))?;
-    log::info!("[SoundCloud] Opening browser for login...");
 
-    // Emit event: auth started
+    // Bind the redirect listener BEFORE the consent page opens — an embedded
+    // webview can reach the redirect faster than a cold browser launch.
+    let listener = soundcloud_client::bind_callback_listener()
+        .map_err(|e| format!("Callback listener error: {}", e))?;
+
+    let finished = Arc::new(AtomicBool::new(false));
+    let cancelled = Arc::new(AtomicBool::new(false));
+
+    let opening = match surface {
+        AuthSurface::InApp => "Opening SoundCloud login window...",
+        AuthSurface::ExternalBrowser => "Opening browser for login...",
+    };
+    log::info!("[SoundCloud] {}", opening);
     let _ = app.emit(
         progress_event,
-        serde_json::json!({
-            "stage": "auth", "message": "Opening browser for login..."
-        }),
+        serde_json::json!({ "stage": "auth", "message": opening }),
     );
 
-    if let Err(e) = open::that(&auth_url) {
-        return Err(format!("Could not open browser: {}", e));
+    match surface {
+        AuthSurface::InApp => open_auth_window(
+            app,
+            &auth_url,
+            Arc::clone(&finished),
+            Arc::clone(&cancelled),
+        )?,
+        AuthSurface::ExternalBrowser => {
+            if let Err(e) = open::that(&auth_url) {
+                return Err(format!("Could not open browser: {}", e));
+            }
+        }
     }
 
     // Step 2: Wait for OAuth callback
@@ -432,10 +539,19 @@ async fn ensure_oauth_token(
             "stage": "auth", "message": "Waiting for authorization..."
         }),
     );
-    let code = tokio::task::spawn_blocking(soundcloud_client::wait_for_callback)
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
-        .map_err(|e| format!("Callback error: {}", e))?;
+    let callback =
+        tokio::task::spawn_blocking(move || soundcloud_client::accept_callback(listener))
+            .await
+            .map_err(|e| format!("Task join error: {}", e))?;
+
+    finished.store(true, Ordering::SeqCst);
+    if surface == AuthSurface::InApp {
+        close_auth_window(app);
+    }
+    if cancelled.load(Ordering::SeqCst) {
+        return Err("Login window was closed before authorization completed.".to_string());
+    }
+    let code = callback.map_err(|e| format!("Callback error: {}", e))?;
 
     // Step 3: Exchange code for access token
     let _ = app.emit(
@@ -453,6 +569,10 @@ async fn ensure_oauth_token(
 
 /// Run the full SoundCloud OAuth 2.1 + PKCE flow and return the access token.
 ///
+/// `mode` picks the consent surface: `"browser"` (or `"external"`) uses the OS
+/// browser, anything else — including an omitted value — keeps the in-app
+/// window. The frontend passes the user's `sc_auth_mode` setting here.
+///
 /// Delegates to `ensure_oauth_token` for the actual handshake, then emits a
 /// final `{stage: "done", message: "Authorization successful."}` on
 /// `sc-login-progress` so the frontend knows it's safe to call subsequent
@@ -461,8 +581,11 @@ async fn ensure_oauth_token(
 /// # Errors
 /// Propagates every variant from `ensure_oauth_token`.
 #[tauri::command]
-async fn login_to_soundcloud(app: tauri::AppHandle) -> Result<String, String> {
-    let token = ensure_oauth_token(&app, "sc-login-progress").await?;
+async fn login_to_soundcloud(
+    app: tauri::AppHandle,
+    mode: Option<String>,
+) -> Result<String, String> {
+    let token = ensure_oauth_token(&app, "sc-login-progress", AuthSurface::from_opt(mode)).await?;
 
     log::info!("[SoundCloud] ✓ Authorization successful.");
     let _ = app.emit(
@@ -502,6 +625,7 @@ async fn export_to_soundcloud(
     app: tauri::AppHandle,
     playlist_name: String,
     tracks: Vec<ExportTrack>,
+    mode: Option<String>,
 ) -> Result<String, String> {
     let sc_tracks: Vec<Track> = tracks
         .into_iter()
@@ -512,7 +636,7 @@ async fn export_to_soundcloud(
         })
         .collect();
 
-    let token = ensure_oauth_token(&app, "sc-export-progress").await?;
+    let token = ensure_oauth_token(&app, "sc-export-progress", AuthSurface::from_opt(mode)).await?;
     log::info!("[SoundCloud] ✓ Access token received.");
 
     // Step 4: Search tracks and create playlist

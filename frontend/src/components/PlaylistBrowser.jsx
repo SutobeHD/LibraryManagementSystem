@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import api from '../api/api';
+import api, { getScAuthMode } from '../api/api';
 import { log } from '../utils/log';
 import { useToast } from './ToastContext';
 import {
@@ -576,6 +576,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
             const result = await invoke('export_to_soundcloud', {
                 playlistName: selectedPlaylist.Name,
                 tracks: scTracks,
+                mode: await getScAuthMode(),
             });
             toast.success(result);
         } catch (err) {

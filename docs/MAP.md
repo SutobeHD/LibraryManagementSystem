@@ -276,6 +276,7 @@
 | `scripts/check_attr_defined.py` | Fail if mypy reports any `attr-defined` error in app/. |
 | `scripts/compare_rekordbox.py` | compare_rekordbox.py — A/B accuracy harness: our engine vs Rekordbox. |
 | `scripts/dev/phrase_spike.py` | phrase_spike.py — manual P0 verification for the phrase memory-cue ANLZ write. |
+| `scripts/dev/rbox_artist_merge_probe.py` | Probe rbox's artist/playlist write semantics against a COPY of a master.db. |
 | `scripts/dev/safe_format_swap.py` | safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist. |
 | `scripts/pipeline_dashboard.py` | Local web dashboard for the research pipeline. |
 | `scripts/pipeline_status.py` | Show the research pipeline state at a glance. |
