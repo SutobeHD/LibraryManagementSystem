@@ -25,9 +25,18 @@ import React, { useState, useEffect } from 'react';
 import api from '../api/api';
 import toast from 'react-hot-toast';
 import {
-    Settings, Database, HardDrive, RefreshCw, Save,
-    FileOutput, Speaker, Sliders, Keyboard,
-    Wifi, Palette, Music,
+    Settings,
+    Database,
+    HardDrive,
+    RefreshCw,
+    Save,
+    FileOutput,
+    Speaker,
+    Sliders,
+    Keyboard,
+    Wifi,
+    Palette,
+    Music,
 } from 'lucide-react';
 
 import SettingsLibrary from './settings/SettingsLibrary';
@@ -45,19 +54,19 @@ const DEFAULTS = {
     // Library
     remember_lib_mode: false,
     hide_streaming: false,
-    scan_folders: [],               // extra watched folders
+    scan_folders: [], // extra watched folders
 
     // Export
     export_format: 'xml',
     export_bitrate: '320',
     export_sample_rate: '44100',
-    default_export_dir: '',           // Default output folder for audio exports (DAW). Empty = backend ./exports.
+    default_export_dir: '', // Default output folder for audio exports (DAW). Empty = backend ./exports.
 
     // Audio
-    audio_output_device: '',        // '' = system default
+    audio_output_device: '', // '' = system default
 
     // Analysis
-    analysis_quality: 'standard',  // 'fast' | 'standard' | 'thorough'
+    analysis_quality: 'standard', // 'fast' | 'standard' | 'thorough'
     ranking_filter_mode: 'all',
     insights_bitrate_threshold: 320,
     insights_playcount_threshold: 0,
@@ -68,24 +77,24 @@ const DEFAULTS = {
     waveform_color_low: '#ef4444',
     waveform_color_mid: '#22c55e',
     waveform_color_high: '#3b82f6',
-    locale: 'de',                  // 'de' | 'en'
+    locale: 'de', // 'de' | 'en'
 
     // Shortcuts (action → key-combo string)
     shortcuts: {
-        play_pause:  'Space',
-        jump_start:  'Home',
-        jump_end:    'End',
-        scrub_back:  'ArrowLeft',
-        scrub_fwd:   'ArrowRight',
-        split:       'Ctrl+E',
-        delete:      'Delete',
-        undo:        'Ctrl+Z',
-        redo:        'Ctrl+Shift+Z',
-        copy:        'Ctrl+C',
-        paste:       'Ctrl+V',
-        duplicate:   'Ctrl+D',
-        save:        'Ctrl+S',
-        open:        'Ctrl+O',
+        play_pause: 'Space',
+        jump_start: 'Home',
+        jump_end: 'End',
+        scrub_back: 'ArrowLeft',
+        scrub_fwd: 'ArrowRight',
+        split: 'Ctrl+E',
+        delete: 'Delete',
+        undo: 'Ctrl+Z',
+        redo: 'Ctrl+Shift+Z',
+        copy: 'Ctrl+C',
+        paste: 'Ctrl+V',
+        duplicate: 'Ctrl+D',
+        save: 'Ctrl+S',
+        open: 'Ctrl+O',
     },
 
     // Network
@@ -94,14 +103,14 @@ const DEFAULTS = {
 };
 
 const TABS = [
-    { id: 'library',    label: 'Library',    icon: Database },
-    { id: 'export',     label: 'Export',     icon: FileOutput },
-    { id: 'usb',        label: 'USB Profiles', icon: HardDrive },
-    { id: 'audio',      label: 'Audio',      icon: Music },
-    { id: 'analysis',   label: 'Analysis',   icon: Sliders },
+    { id: 'library', label: 'Library', icon: Database },
+    { id: 'export', label: 'Export', icon: FileOutput },
+    { id: 'usb', label: 'USB Profiles', icon: HardDrive },
+    { id: 'audio', label: 'Audio', icon: Music },
+    { id: 'analysis', label: 'Analysis', icon: Sliders },
     { id: 'appearance', label: 'Appearance', icon: Palette },
-    { id: 'shortcuts',  label: 'Shortcuts',  icon: Keyboard },
-    { id: 'network',    label: 'Network',    icon: Wifi },
+    { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
+    { id: 'network', label: 'Network', icon: Wifi },
 ];
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -113,11 +122,13 @@ const SettingsView = () => {
     // ── Load settings on mount ────────────────────────────────────────────────
     useEffect(() => {
         api.get('/api/settings')
-            .then(res => setSettings({
-                ...DEFAULTS,
-                ...res.data,
-                shortcuts: { ...DEFAULTS.shortcuts, ...(res.data.shortcuts || {}) },
-            }))
+            .then((res) =>
+                setSettings({
+                    ...DEFAULTS,
+                    ...res.data,
+                    shortcuts: { ...DEFAULTS.shortcuts, ...(res.data.shortcuts || {}) },
+                })
+            )
             .catch(() => {});
     }, []);
 
@@ -137,15 +148,24 @@ const SettingsView = () => {
     // ── Active tab content ────────────────────────────────────────────────────
     const renderActiveTab = () => {
         switch (activeTab) {
-            case 'library':    return <SettingsLibrary    settings={settings} setSettings={setSettings} />;
-            case 'export':     return <SettingsExport     settings={settings} setSettings={setSettings} />;
-            case 'usb':        return <SettingsUsb />;
-            case 'audio':      return <SettingsAudio      settings={settings} setSettings={setSettings} />;
-            case 'analysis':   return <SettingsAnalysis   settings={settings} setSettings={setSettings} />;
-            case 'appearance': return <SettingsAppearance settings={settings} setSettings={setSettings} />;
-            case 'shortcuts':  return <SettingsShortcuts  settings={settings} setSettings={setSettings} />;
-            case 'network':    return <SettingsNetwork    settings={settings} setSettings={setSettings} />;
-            default:           return null;
+            case 'library':
+                return <SettingsLibrary settings={settings} setSettings={setSettings} />;
+            case 'export':
+                return <SettingsExport settings={settings} setSettings={setSettings} />;
+            case 'usb':
+                return <SettingsUsb />;
+            case 'audio':
+                return <SettingsAudio settings={settings} setSettings={setSettings} />;
+            case 'analysis':
+                return <SettingsAnalysis settings={settings} setSettings={setSettings} />;
+            case 'appearance':
+                return <SettingsAppearance settings={settings} setSettings={setSettings} />;
+            case 'shortcuts':
+                return <SettingsShortcuts settings={settings} setSettings={setSettings} />;
+            case 'network':
+                return <SettingsNetwork settings={settings} setSettings={setSettings} />;
+            default:
+                return null;
         }
     };
 
@@ -162,15 +182,19 @@ const SettingsView = () => {
                             <Settings size={36} className="text-amber2" />
                         </div>
                         <div>
-                            <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">Preferences</h1>
-                            <p className="text-ink-secondary mt-0.5 text-sm">LibraryManagementSystem — Configure all application settings</p>
+                            <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">
+                                Preferences
+                            </h1>
+                            <p className="text-ink-secondary mt-0.5 text-sm">
+                                LibraryManagementSystem — Configure all application settings
+                            </p>
                         </div>
                     </div>
                 </div>
 
                 {/* Tab strip */}
                 <div className="glass-panel rounded-2xl p-1.5 mb-4 flex gap-1 flex-wrap">
-                    {TABS.map(tab => {
+                    {TABS.map((tab) => {
                         const Icon = tab.icon;
                         return (
                             <button
@@ -182,16 +206,15 @@ const SettingsView = () => {
                                         : 'text-ink-secondary hover:text-white hover:bg-white/5'
                                 }`}
                             >
-                                <Icon size={13} />{tab.label}
+                                <Icon size={13} />
+                                {tab.label}
                             </button>
                         );
                     })}
                 </div>
 
                 {/* Tab content */}
-                <div className="glass-panel rounded-3xl p-6 shadow-2xl">
-                    {renderActiveTab()}
-                </div>
+                <div className="glass-panel rounded-3xl p-6 shadow-2xl">{renderActiveTab()}</div>
 
                 {/* Footer */}
                 <div className="mt-4 flex justify-end">
@@ -200,7 +223,11 @@ const SettingsView = () => {
                         disabled={saving}
                         className="btn-primary flex items-center gap-3 px-8 py-3 rounded-xl text-sm shadow-xl shadow-amber2/20 disabled:opacity-50"
                     >
-                        {saving ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}
+                        {saving ? (
+                            <RefreshCw size={16} className="animate-spin" />
+                        ) : (
+                            <Save size={16} />
+                        )}
                         {saving ? 'Saving…' : 'Save Changes'}
                     </button>
                 </div>
