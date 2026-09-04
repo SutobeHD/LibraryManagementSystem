@@ -26,6 +26,10 @@ superseded_by: []
 - 2026-09-04 — `research/exploring_` — wave 2 (SoundCloud): OQ5 + OQ6 both ANSWERED from the official OpenAPI spec; wave-1 claim "API lacks these endpoints" corrected — they exist, the client never called them. New OQ15 (ToU aggregation) raised for the Approval Gate.
 - 2026-09-04 — `research/exploring_` — wave 3 (Rekordbox write + merge): OQ3 + OQ4 ANSWERED, OQ1 + OQ2 PARTIAL (7 empirical checks listed, 5 need no user data). Found a live bug (`remove_track_from_playlist` calls rbox with the wrong arity), an undocumented second artifact (`masterPlaylists6.xml`), a USB re-copy blast radius (new OQ16), and a `_file_sha1` cliff in the shipped applier. Two wave-1 Constraints claims corrected.
 - 2026-09-04 — `research/exploring_` — wave 4 (rbox Rust source via docs.rs; upstream repo is a 404) + wave 5 (**empirical, owner-approved, against a copy** of the real `master.db`). OQ1 + OQ2 now ANSWERED. Decisive result: `update_content_artist` does **not** bump the content row's `rb_local_usn`, `update_content(item)` does → the merge writer changes. Live bug reproduced (`delete_playlist_song` arity) and the fix recipe proven. `search_str` is unpopulated in this library → that risk is closed.
+- 2026-09-04 — `research/evaluated_` — Stage 2 closed: Adversarial (7 concerns, incl. the `update_content` full-row clobber), Citation PASS, Research-Verifier PASS, 3 Options + Recommendation = **Option A** (sidecar store + projection engine) with 4 commit-blockers
+- 2026-09-04 — `implement/draftplan_` — Stage 3 filled: plan, threat model (8 threats), migration, perf budget, API/UX surface, telemetry, 21 test rows, 18-task queue across 3 milestones (M1 usable without SoundCloud)
+- 2026-09-04 — `implement/review_` — Plan-Reviewer: 15/15 boxes, PASS, no rework reasons
+- 2026-09-04 — `implement/approvalgate_` — ⛔ **AWAITING /approve**. Two owner decisions bundled into the Approval Summary: USB re-copy after a merge (OQ16) and the SC catalogue-enumeration boundary (OQ15)
 
 ## Original Idea (verbatim — never edit)
 
@@ -281,22 +285,23 @@ Method: `master.db` + `-wal` + `-shm` + `masterPlaylists6.xml` copied to a scrat
 
 ## Adversarial Findings
 
-Stage 2 Adversarial-Agent (phase 2). Devil's-advocate — what could go wrong, what assumptions are weak, what dependencies betray us. ≤120 words. Append-only.
+### 2026-09-04
 
-### YYYY-MM-DD
-- **Weak assumption:** …
-- **Failure mode:** …
-- **Counter-example:** …
-
-If none survive scrutiny: **"No surviving objections — proceed with caution flags above."**
+- **`update_content(item)` writes the WHOLE row.** Wave 5 picked it as the merge writer because it bumps the USN — but it is a full-row update, not a field patch. A stale `item` silently clobbers every other column (BPM, key, comment, colour, rating) with whatever we read minutes ago. **Mitigation is mandatory, not optional:** re-read `get_content_by_id(cid)` **inside** `db_lock()`, mutate only `artist_id`, write immediately. Any design that batches "read 5000 rows → write 5000 rows" is a data-loss bug.
+- **rbox is unmaintained and unauditable.** `github.com/dylanljones/rbox` is a 404 — no repo, no issues, no changelog. Every `master.db` write in this feature goes through a compiled Rust wheel whose source only survives on docs.rs. A silent behaviour change on the next version breaks the merge with no upstream to report to. `scripts/dev/rbox_artist_merge_probe.py` is the mitigation — it must run before any rbox bump.
+- **`/users/{urn}/related` is 3.5 months old.** No deprecation history, but no track record either. Tier-2 discovery must degrade to the zero-call local fallback on an empty collection **and** on any non-200, never surface an error.
+- **The USB re-copy may make the merge net-negative.** A merge is cheap in the DB and expensive on the stick (OQ16). A user who merges 10 artists before a gig triggers a multi-GB re-copy at the worst possible moment. The confirm dialog has to state it in bytes, not in prose.
+- **Orphan-artist behaviour is undocumented worldwide.** Wave-4 found no source, and the genre analogue splits by UI surface. Any claim that merged duplicates "disappear from Rekordbox" is unverified. Ship with orphan deletion **off**, describe the outcome honestly.
+- **`is_rekordbox_running()` is a process-name check, not a lock.** rbox guards 47 write methods with it, but a user who opens Rekordbox mid-merge races us. Guard at the start of a run **and** re-check per chunk; abort the run cleanly rather than half-writing.
+- **Counter-example to "the sidecar is the source of truth":** the user can rename or delete the `Artists` folder inside Rekordbox at any time. The id-map then points at a dead row. Every sync verifies each stored id with `get_playlist_by_id` and re-adopts by name before assuming it is gone.
 
 ## Citation Quality
 
-Stage 2 Citation-Verifier (phase 2). Checks every `file:line` ref + URL in `## Findings` exists + says what the Finding claims. PASS / FAIL list. ≤80 words.
+### 2026-09-04 — PASS
 
-### YYYY-MM-DD — <PASS|FAIL>
-- PASS: Findings 1, 2, 4 — citations verified
-- FAIL: Finding 3 — `app/main.py:123` no such symbol, replace or remove
+- PASS: Findings waves 1-5 — repo `file:line` refs spot-checked against source; rbox stub refs verified in `.venv/Lib/site-packages/rbox/_rbox.pyi`; SC endpoints verified against the official OpenAPI spec; wave-5 numbers come from a logged run, not inference.
+- CORRECTED (wave 3, already applied): `app/soundcloud_downloader.py:1572-1578` re-read as a dead fallback branch, not a live lock bypass; `tests/test_library_format_swap.py:489-580` re-read as module-scoped, not a general enforcement net.
+- WEAK (flagged, non-load-bearing): orphan-artist UI behaviour rests on a genre analogue in a Pioneer community thread, not on artist evidence. Reddit/djtechtools unreachable (403/CAPTCHA) — "not found" there means unsearched.
 
 ---
 
@@ -304,215 +309,338 @@ Stage 2 Citation-Verifier (phase 2). Checks every `file:line` ref + URL in `## F
 
 ## Research Verification
 
-Stage 2 wave-2 verifier over whole research body. ≤120 words. PASS → `evaluated_`; gaps → more Findings.
+### 2026-09-04 — PASS
 
-### YYYY-MM-DD — <PASS|GAPS>
-- Coverage of Open Questions: …
-- Internal consistency: …
-- Citation quality (cross-ref `## Citation Quality`): …
-- Adversarial concerns addressed: …
+- **OQ coverage:** 1-6 ANSWERED (1+2 empirically), 7-14 are design calls resolved in `## Recommendation`, 15+16 are owner decisions deliberately deferred to the Approval Summary. No OQ left silently open.
+- **Internal consistency:** wave-1 claims that later waves disproved were corrected in place, not left standing (SC endpoint availability, lock-bypass offender, enforcement-test scope).
+- **Citations:** PASS with one flagged-weak, non-load-bearing item.
+- **Adversarial:** all seven concerns carry a named mitigation in the plan; the `update_content` full-row hazard is promoted to a commit-blocker rather than a note.
+- **Empirical basis:** the load-bearing merge decision rests on a measured run against a copy of the real library, reproducible via `scripts/dev/rbox_artist_merge_probe.py`.
 
 ## Options Considered
 
-Stage 2 Synthesis-Agent (phase 2 PASS). Per option: sketch ≤5 bullets, pros, cons, S/M/L/XL, risk, prior-art match.
+### Option A — Sidecar artist store + projection engine
 
-### Option A — <name>
-- Sketch:
-- Pros:
-- Cons:
-- Effort:
-- Risk:
-- Prior-art match: <slug or "novel">
+- Sketch: new `artists.db` sidecar (pattern `app/variant_schema.py:59-90`) holding canonical artist + aliases + SC binding + per-artist sync mode + `artist_key → rb_playlist_id` map, with a generic `collection_kind` column. Projection writes folder `Artists` + one playlist per favourite through the **facade**. Merge repoints tracks with `update_content(item)` under `db_lock()`, journalled in the extended metadata-fixer undo log. Absorbs `generate_smart_playlists` "By Artist".
+- Pros: stable key (survives the `art_{i}` reshuffle); per-artist state has somewhere to live; id-map solves the no-uniqueness problem; one schema serves the label/genre/setlist follow-up; reuses four shipped modules instead of forking them.
+- Cons: a seventh sidecar DB; a migration for anyone who already ran the old artist-playlist generator; most code of the three options.
+- Effort: **L**
+- Risk: Medium — mitigated by the empirical probe and by orphan-deletion staying opt-in.
+- Prior-art match: `inprogress_analysis-remix-detector` (sidecar + migration runner), `inprogress_metadata-name-fixer` (undo log), `inprogress_external-track-match-unified-module` (matcher).
 
-### Option B — <name>
-- Sketch:
-- Pros:
-- Cons:
-- Effort:
-- Risk:
-- Prior-art match: <slug or "novel">
+### Option B — Extend `metadata_mappings.json`
+
+- Sketch: keep `MetadataManager` (`app/services.py:894-927`) as the single store; add favourites, SC links and sync mode as new JSON categories beside `artists|labels|albums`.
+- Pros: smallest diff; the merge UI already writes there; no new DB, no migration.
+- Cons: no id-map (JSON cannot safely hold Rekordbox playlist ids that must be verified per sync); no TTL cache for SC catalogues; whole-file rewrite per change is not concurrency-safe against a background sync; no schema evolution path for the label/genre follow-up.
+- Effort: **M**
+- Risk: High — the concurrency hole shows up exactly when background sync ships.
+- Prior-art match: `app/services.py:894-927` (the thing being extended).
+
+### Option C — Rekordbox-native, no app state
+
+- Sketch: the `Artists` folder in `master.db` **is** the favourites list. Read it back on every load; no sidecar at all.
+- Sketch: merge stays a pure `master.db` operation; suggestions computed live from the library.
+- Pros: zero migration; nothing to keep in sync; the user can curate favourites inside Rekordbox itself.
+- Cons: nowhere to store the SC binding, sync mode, last-sync timestamp, or catalogue cache — which is most of the feature; every read hits `master.db`; two identically-named folders are indistinguishable (wave 5); the user renaming a playlist silently renames a "favourite".
+- Effort: **S**
+- Risk: High — cannot express the Original Idea's download/local-sync half at all.
+- Prior-art match: novel.
 
 ## Recommendation
 
-Stage 2 Synthesis-Agent (phase 2 PASS). ≤120 words. Which option + what blocks commit + which OQ each Finding answers.
+**Option A.** B fails on concurrency the moment background sync lands; C cannot hold the SC binding or sync state, so it cannot deliver the download half of the Original Idea. A's one good idea is borrowed from C: the `Artists` folder is **adoptable**, not owned — if it already exists, adopt it by `(Name, ParentID)` once, then track it by id.
 
----
+Resolves the remaining design OQs: **OQ7** finish the stubbed `app/sidecar.py:39-49` binding, keyed by the store's own artist id (not the name, so it survives a merge); **OQ8** raise the `external_track_match` threshold from 0.65 to a tuned value on a seeded corpus before the missing-diff ships; **OQ9** idle = no running job across the three trackers + nothing exporting; **OQ10** one sidecar with `collection_kind`; **OQ12** reuse the counts from `_finalize_ui_metadata`, no second cache; **OQ13** absorb `generate_smart_playlists` "By Artist"; **OQ14** one-way import of `metadata_mappings.json` artist aliases as pre-seeded merges.
+
+**Four commit-blockers:**
+1. `update_content(item)` re-reads inside the lock and mutates only `artist_id` — full-row clobber is a data-loss bug, not a style issue.
+2. `remove_track_from_playlist` (`app/live_database.py:1342`) is fixed first — diff-in-place projection is impossible without it.
+3. `_file_sha1` is skipped when `write_tags=False` before the merge runs at library scale.
+4. The merge confirm dialog states the USB re-copy cost in bytes.
 
 > ↓ Stage 3 — `implement/draftplan_`. `research-plan` fills Implementation Plan + Task Queue via 5 agents (Planner, Threat-Modeller, Migration, Perf-Budget, Test-Plan). Reviewer fills Review. On Review PASS, the Mockup+Summary-Agent fills `## Approval Summary` + `## Mockup`, then advances to `approvalgate_`.
 
 ## Implementation Plan
 
-Stage 3 Planner-Agent. Concrete enough that someone else executes without re-deriving.
-
 ### Scope
-- **In:** …
-- **Out:** …
+
+- **In:** artist entity + favourites store (sidecar); merge (detection → dry-run → `master.db` write → revert); Rekordbox projection (folder `Artists`, one playlist per favourite, idempotent); Tier-1 local backlog suggestions; SC artist catalogue + missing-diff + batch download through the existing downloader; Tier-2 SC discovery; per-artist Update button + idle background sync; absorbing `generate_smart_playlists` "By Artist".
+- **Out:** label/genre/setlist projection (schema carries `collection_kind`, no UI); new download backend; artist bios/images; non-SC artist sources; auto-merge without confirmation; per-track artist-string repair (that is `metadata-name-fixer`).
 
 ### Step-by-step
-1. …
+
+1. **Unblock the primitives.** Fix `remove_track_from_playlist` (`app/live_database.py:1342`) to the proven one-arg form; add facade passthroughs for `get_playlist_by_path` / `get_playlist_children`; surface `uuid` in `_load_playlists` (`app/live_database.py:452-458`) so the projection can hold a second identity.
+2. **Extend the undo log.** `app/metadata_fixer/schema.py`: `entity_kind` (default `content`), `entity_id`, `after_json`, `rule_id` nullable. `applier.py`: an INSERT path in `revert_run`, honest partial-revert status, and `_file_sha1` skipped when `write_tags=False`.
+3. **Artist store.** `app/artist_store/schema.py` — sidecar `artists.db`, WAL + module-private lock + versioned migration runner mirroring `app/variant_schema.py:59-90`. Tables: `collections(id, kind, canonical_name, sort_key)`, `aliases(collection_id, alias, source)`, `links(collection_id, provider, remote_id, permalink, confidence)`, `sync_state(collection_id, mode, last_sync_at, last_error)`, `projection(collection_id, rb_playlist_id, rb_uuid, last_projected_at)`, `catalogue_cache(collection_id, payload_json, fetched_at)`.
+4. **Registry.** `app/artist_store/registry.py` — resolve library artist strings to store rows through the existing `_split_artists` / `_normalize_artist_name`; favourites CRUD; Tier-1 backlog = counts from `_finalize_ui_metadata` (`app/live_database.py:492-528`), descending, favourited excluded.
+5. **Merge engine.** `app/artist_store/merge.py` — candidate grouping (casefold, punctuation, `&`/`and`, whitespace collapse, smart-quote fold); `preview()` pure; `apply()` per chunk of ~200 under one `db_lock()`: **re-read `get_content_by_id` inside the lock, mutate only `artist_id`, `update_content(item)`**, journal each row. Orphan `delete_artist` only when explicitly requested, journalled last.
+6. **Projection engine.** `app/artist_store/projection.py` — adopt-or-create folder `Artists` by `(Name, ParentID)` once, then track by id; per artist verify `get_playlist_by_id`, re-adopt by name if dead, else create; diff songs in place (add missing, remove stale via the fixed primitive). `rbox.is_rekordbox_running()` guard at run start **and** per chunk.
+7. **Routes.** All mutations behind `Depends(require_session)`; all `master.db` writers through the facade.
+8. **Frontend.** `ArtistHubView` replaces the artist branch of `MetadataView`; merge dialog carries the USB re-copy cost in bytes; projection panel with last-synced.
+9. **Absorb + import.** Retire `generate_smart_playlists` "By Artist" (`app/services.py:664-741`); one-way import of `metadata_mappings.json` artist aliases as pre-seeded merges.
+10. **SoundCloud.** Harden `_sc_get` first (404 opt-out, shared paginator, 429 body, no token-keyed `lru_cache`), then `get_user_tracks` / `get_related_artists`; bind artist ↔ SC user; missing-diff via `app/external_track_match.py` at a tuned threshold; batch download delegates per track to `app/soundcloud_downloader.py`.
+11. **Background sync.** Idle signal composed from the three job trackers; job record + polling mirroring the phrase batch (`app/main.py:5121-5188`, `frontend/src/components/usePhraseBatch.js`).
 
 ### Files touched
-Path + role (read / edit / new):
-- `<path>` — <role> — <why>
+
+- `app/live_database.py` — edit — fix removal arity, expose `uuid`.
+- `app/database.py` — edit — facade passthroughs, add new writers to the auto-serialised list (`:1238-1262`).
+- `app/metadata_fixer/{schema,applier}.py` — edit — undo-log deltas + sha1 skip.
+- `app/artist_store/{__init__,schema,registry,merge,projection,sync}.py` — new — the feature.
+- `app/soundcloud_api.py` — edit — `_sc_get` hardening, `get_user_tracks`, `get_related_artists`.
+- `app/sidecar.py` — edit — retire the artist-link JSON in favour of `links`.
+- `app/main.py` — edit — routes (via `route-architect`).
+- `app/services.py` — edit — retire "By Artist", expose the alias import.
+- `frontend/src/components/ArtistHubView.jsx` + `artistHub/*` — new; `frontend/src/main.jsx`, `MetadataView.jsx` — edit — mount + hand off.
+- `frontend/src/api/api.js` — edit — client calls.
+- `tests/test_artist_store_*.py`, `tests/test_artist_merge.py`, `tests/test_artist_projection.py` — new.
+- `docs/{backend,frontend}-index.md`, `docs/FILE_MAP.md`, `docs/MAP*.md`, `CHANGELOG.md` — edit — doc sync.
 
 ### Testing
-High-level (see `## Test Plan` for concrete pytest/cargo cases):
-- …
+
+- Merge: dry-run writes nothing; apply is byte-revertable; full-row clobber regression (a concurrent BPM edit survives a merge).
+- Projection: two syncs produce one folder and N playlists, not 2N; a user-deleted playlist is re-created; a user-renamed folder is re-adopted once.
+- Locking: every new `master.db` writer sits inside `db_lock()` — its own AST test, since the format-swap one is module-scoped.
+- `pytest tests/test_pdb_structure.py` green after a mass merge.
 
 ### Risks & rollback
-- …
+
+- **rbox behaviour drift** — `scripts/dev/rbox_artist_merge_probe.py` before any bump.
+- **Merge regret** — every run is journalled; revert restores the pre-image `artist_id`.
+- **Projection regret** — delete the `Artists` folder in Rekordbox; the store re-adopts or recreates on the next sync. Nothing else in the library is touched.
+- **Feature-level rollback** — revert the merge commits; `artists.db` is a sidecar, deleting it loses favourites only, never library data.
 
 ## Threat Model
 
-Stage 3 Threat-Modeller-Agent. Required when feature touches: auth, `require_session`, filesystem (paths in / out), `master.db` writes, network, secrets, user-supplied paths. Otherwise: **"N/A — no security surface."**
-
 ### Assets
-- … (data, secrets, attacker goal)
+
+- `master.db` (the user's whole library) — merge and projection write to it.
+- SoundCloud OAuth token in the OS keyring — the batch paths carry it.
+- `artists.db` sidecar — favourites, SC bindings, cached catalogues.
+- Audio files on disk + on the USB stick — indirectly relocated by a merge.
 
 ### Trust boundaries
-- … (which layer trusts which input)
+
+- SC API responses are untrusted input: names, permalinks and track titles reach the DB, the UI, and (via download) the filesystem.
+- The frontend is trusted only after `require_session`; all mutation routes are gated.
+- rbox is trusted to write `master.db` correctly — unauditable (repo 404), mitigated by the probe.
 
 ### Threats (STRIDE-light)
+
 | ID | Threat | Mitigation in plan | Test covers |
 |---|---|---|---|
-| T1 | … | step N / file X | test_… |
+| T1 | Full-row `update_content` clobbers concurrent edits (data loss) | Step 5 — re-read inside `db_lock()`, mutate one field | `test_merge_preserves_concurrent_bpm_edit` |
+| T2 | Merge runs while Rekordbox is open → half-written state | Step 6 — `is_rekordbox_running()` at start + per chunk, clean abort | `test_merge_aborts_when_rekordbox_running` |
+| T3 | Unauthenticated merge/projection call mutates the library | Step 7 — `Depends(require_session)` on every mutation route | `test_artist_routes_require_session` |
+| T4 | SC-supplied artist name used to build a filesystem path (traversal) | Reuse `_build_save_path` sanitising (`app/soundcloud_downloader.py:175-213`) + `validate_audio_path` | `test_sc_artist_name_path_traversal` |
+| T5 | SC token leaked into logs or into a cache key | No token-keyed `lru_cache`; never log the token at any level | `test_no_token_in_artist_logs` |
+| T6 | Batch download becomes a bulk scraper (ToU) | Per-run call cap, favourites only, one related-hop, TTL cache, `aggressive_mode` not inherited | `test_batch_respects_call_cap` |
+| T7 | Malicious/oversized SC payload exhausts memory | Existing `_sc_get` limits + a hard per-artist track cap | `test_catalogue_cap` |
+| T8 | Sidecar DB write races the background sync | Module-private `threading.Lock` per the sidecar pattern | `test_artist_store_concurrent_writes` |
 
 ### Residual risk
-- ≤60 words — what cannot be eliminated, why acceptable.
+
+rbox is a compiled dependency with no upstream. A silent write-semantics change would land unnoticed until the probe runs. Accepted: the probe is cheap, pinned versions are the repo norm, and every merge is journalled and revertable.
 
 ## Migration Path
 
-Stage 3 Migration-Path-Agent. Required when feature changes: DB schema, file layout, settings/config shape, IPC contract, on-disk caches, USB export bytes. Otherwise: **"N/A — no migration."**
-
 ### Before → After
-- Data shape today: …
-- Data shape after: …
-- Existing-data handling: in-place migrate / lazy on read / one-shot backfill
+
+- **Today:** artists exist only as per-track strings; aliases live in `metadata_mappings.json`; artist playlists may exist from `generate_smart_playlists` under whatever folder it created; `app_data.json` may hold a stale artist→SC link map.
+- **After:** `artists.db` owns canonical artists, aliases, SC bindings, sync state and the Rekordbox playlist id-map. `master.db` gains a folder `Artists` and one playlist per favourite. No column is added to `master.db`.
+- **Existing data:** one-shot import at first launch — `metadata_mappings.json` artist entries become pre-seeded merge groups (not applied, only suggested); `app_data.json` artist links become `links` rows; an existing `Artists`-shaped folder is adopted, not duplicated.
 
 ### Backfill / forward-compat
-- Migration script: `<file>` (or "no script — schema-additive")
-- Old client reads new data: yes/no — how degraded
-- Rollback: restore via `<backup>` / re-run reverse migration `<file>`
+
+- Migration script: none — `artists.db` is created on first use by its own versioned runner (`SCHEMA_VERSION`, step walk, downgrade guard).
+- Undo-log change **is** schema-additive with a version step: `entity_kind` defaults to `content`, so rows written by the shipped name-fixer keep reverting correctly.
+- Old client reads new data: an older build simply ignores `artists.db`; it still sees the Rekordbox playlists, which are plain playlists.
+- Rollback: delete `artists.db` (loses favourites, not library data); delete the `Artists` folder in Rekordbox; revert merges from the undo log **before** deleting the sidecar.
 
 ### User-visible behavior during migration
-- … (downtime, progress UI, can app start before complete?)
+
+First open of the Artists tab runs the import and shows a one-time "N alias groups imported as merge suggestions" notice. No downtime, no blocking startup, nothing is applied without a click.
 
 ## Performance Budget
 
-Stage 3 Perf-Budget-Agent. Numbers, not "fast". If feature has no perceptible runtime cost: **"N/A — analysis-only / one-shot."**
-
 | Path | Budget | Measured today | Source |
 |---|---|---|---|
-| <e.g. POST /api/duplicates/scan> | p95 ≤ 800ms / 50MB peak | … | `tests/perf/…` or "untested" |
+| `GET /api/artists/hub` (list + counts) | p95 ≤ 300 ms at 10k tracks | counts already computed at load (`app/live_database.py:492-528`) | untested |
+| Merge preview (dry-run, 500 tracks) | p95 ≤ 500 ms, zero writes | untested | untested |
+| Merge apply, 500 tracks | ≤ 6 s wall, `db_lock()` held ≤ 400 ms per 200-row chunk | journal measured at 190 ms / 5000 rows single-transaction | wave-5 measurement |
+| Merge apply, 5000 tracks | ≤ 60 s wall | **630 GiB of disk reads today** via `_file_sha1` — must be skipped first | wave-5 finding |
+| Projection sync, 50 favourites / 10k tracks | ≤ 10 s wall, diff-in-place not rewrite | untested | untested |
+| SC catalogue refresh, 50 artists | ≤ 60 s background, 50–100 calls, 0 stream calls | pager spacing 0.3 s (`app/soundcloud_api.py:470`) | wave-2 |
+| Artist list render | virtualised; no unpaginated fetch | `drafting_performance-overhaul` documents the existing hotspot | that doc |
 
 ### Worst-case scenario
-- Input shape: <e.g. 50k tracks, 200 dupes>
-- Expected impact: …
-- Mitigation if exceeded: …
+
+- Input: 50k-track library, 200 favourites, one merge spanning 5000 tracks.
+- Expected impact: without the `_file_sha1` skip the merge is disk-bound and effectively hangs; with it, ~60 s with the UI responsive between chunks.
+- Mitigation if exceeded: reduce chunk size, move the run behind the existing job/progress pattern, surface cancel.
 
 ## API / UX Surface
 
-Stage 3 Planner-Agent. What is added / changed at every layer the user / frontend touches.
-
 ### Backend (FastAPI)
-- New routes: `<METHOD> <path>` — auth: `require_session`? rate-limited? lock?
-- Changed routes: `<METHOD> <path>` — what changed in request/response shape
+
+- New, all `Depends(require_session)` unless noted:
+  - `GET /api/artists/hub` — favourites + Tier-1 backlog *(read, no auth change)*
+  - `POST /api/artists/favourites` / `DELETE /api/artists/favourites/{id}`
+  - `GET /api/artists/{id}` — local vs missing split
+  - `POST /api/artists/{id}/update` — one-artist refresh
+  - `GET /api/artists/merge/candidates` *(read)* · `POST /api/artists/merge/preview` *(read-only, POST for payload size)* · `POST /api/artists/merge/apply` — `db_lock` · `POST /api/artists/merge/revert/{run_id}` — `db_lock`
+  - `POST /api/artists/projection/sync` — `db_lock` · `GET /api/artists/projection/status`
+  - `GET /api/artists/discover` — Tier-2
+  - `POST /api/artists/{id}/download-missing` — job id, delegates per track
+  - `GET /api/artists/sync/status?job_id=` — poll
+- Changed: `POST /api/artist/soundcloud` (`app/main.py:2714-2717`) — the stub finally writes, now into `artists.db`.
+- Retired: the "By Artist" branch of the smart-playlist generator.
 
 ### Frontend (React)
-- New components / hooks / IPC calls (axios + invoke):
-- Changed components: …
+
+- New: `ArtistHubView.jsx` + `artistHub/{ArtistList,SuggestionPanel,ArtistDetail,MergeDialog,ProjectionPanel}.jsx`, `useArtistSync.js` (1500 ms poll, mirrors `usePhraseBatch.js`).
+- Changed: `main.jsx` mounts `ArtistHubView` for `lib-artists`; `MetadataView.jsx` hands off the artist branch and keeps its GitMerge button wired to the new dialog.
+- Settings: per-artist default sync mode (Auto / Review / Off), background-sync on/off.
 
 ### Tauri (Rust commands)
-- New `#[tauri::command]`s: …
-- Changed signatures: …
+
+None — no new IPC.
 
 ### CLI / sidecar logs
-- New stdout markers (e.g. `LMS_TOKEN=`-style): …
+
+No new stdout markers.
 
 ## Telemetry
 
-Stage 3 Planner-Agent. How we know it works after ship. ≤80 words. Otherwise: **"N/A — no runtime behavior to observe."**
-
-- Log markers (`logger.info("op=… …")`): …
-- Counters / timing: …
-- Health-endpoint surface: …
-- User-visible status (toast, statusline, dashboard tile): …
+- `logger.info("op=artist_merge run=%s group=%s tracks=%d chunk=%d elapsed=%.2f")` and `op=artist_projection artists=%d created=%d adopted=%d removed=%d`.
+- `op=artist_sc_fetch artist=%s tracks=%d calls=%d` with a per-run call counter, so the ToU call cap is observable.
+- Job records expose `total/done/percent/eta_seconds/cancel_requested` like the phrase batch; the UI shows a progress row plus a last-synced timestamp per artist. Merge and revert both toast with the run id.
 
 ## Test Plan
 
-Stage 3 Test-Plan-Agent. Concrete test cases, one row per. Must cover Threat Model + Migration + Perf budgets.
-
-| ID | Layer | Test file | Case | Covers (Threat / OQ / Step) |
+| ID | Layer | Test file | Case | Covers |
 |---|---|---|---|---|
-| T1 | py | `tests/test_<area>.py::test_<case>` | … | Threat T1 |
-| T2 | rust | `src-tauri/src/audio/.../tests` | … | Step 3 |
-| T3 | js | `frontend/src/**/*.test.js` | … | OQ 2 |
-| T4 | integration | `tests/test_<integration>.py` | end-to-end happy path | full flow |
-| T5 | perf | `tests/perf/<file>.py` (new) | p95 budget vs target | Perf table row N |
+| T1 | py | `tests/test_live_database.py::test_remove_track_from_playlist_one_arg` | fixed arity removes the row | Step 1, blocker 2 |
+| T2 | py | `tests/test_metadata_fixer_schema.py::test_entity_kind_migration` | old rows still revert after the schema step | Migration |
+| T3 | py | `tests/test_metadata_fixer_applier.py::test_skips_sha1_when_not_writing_tags` | `_file_sha1` not called | Perf, blocker 3 |
+| T4 | py | `tests/test_artist_merge.py::test_merge_preserves_concurrent_bpm_edit` | full-row clobber regression | Threat T1, blocker 1 |
+| T5 | py | `tests/test_artist_merge.py::test_apply_then_revert_restores_artist_id` | revert restores the link, not just the name | Step 5 |
+| T6 | py | `tests/test_artist_merge.py::test_merge_aborts_when_rekordbox_running` | clean abort, no partial write | Threat T2 |
+| T7 | py | `tests/test_artist_merge.py::test_dry_run_writes_nothing` | preview is pure | Step 5 |
+| T8 | py | `tests/test_artist_projection.py::test_sync_twice_is_idempotent` | one folder, N playlists | Step 6, OQ1 |
+| T9 | py | `tests/test_artist_projection.py::test_readopts_renamed_folder` | id-map self-heals | Adversarial |
+| T10 | py | `tests/test_artist_projection.py::test_all_writers_hold_db_lock` | AST walk over `app.artist_store` | Locking |
+| T11 | py | `tests/test_artist_store_schema.py::test_migration_step_walk` | version up, downgrade guard | Migration |
+| T12 | py | `tests/test_artist_store_registry.py::test_backlog_excludes_favourited` | Tier-1 ranking | Goal 6 |
+| T13 | py | `tests/test_artist_routes.py::test_all_mutations_require_session` | every route gated | Threat T3 |
+| T14 | py | `tests/test_artist_sc.py::test_missing_diff_threshold_corpus` | seeded corpus, remixes not flagged missing | OQ8 |
+| T15 | py | `tests/test_artist_sc.py::test_mix_set_filter` | duration + keyword rule, "Extended Mix" survives | OQ5 |
+| T16 | py | `tests/test_artist_sc.py::test_related_empty_falls_back_local` | zero-call fallback, no error surfaced | OQ6, Adversarial |
+| T17 | py | `tests/test_artist_sc.py::test_sc_artist_name_path_traversal` | sanitised save path | Threat T4 |
+| T18 | py | `tests/test_artist_sc.py::test_batch_respects_call_cap` | per-run cap enforced | Threat T6 |
+| T19 | py | `tests/test_pdb_structure.py` | green after a mass merge | USB integrity |
+| T20 | js | `frontend/src/components/artistHub/*.test.js` | merge dialog blocks apply until confirmed | Blocker 4 |
+| T21 | integration | `tests/test_artist_hub_flow.py` | add favourite → project → merge → revert | full flow |
 
 ## Task Queue
 
-<!--
-Small, individually-committable implementation tasks. Written by research-plan (Stage 3),
-approved by the user at the Approval Gate. research-implement works ONE task per branch:
-routine/<slug>-task-<N>. 1 task = 1 feature = 1 PR. Tick - [x] when the PR is merged.
-Keep tasks small — a task too big to review in one PR must be split.
-Each task should map back to a Step in ## Implementation Plan and have ≥1 row in ## Test Plan.
--->
+**M1 — testable without SoundCloud. Ends with a working Artists tab, merge and Rekordbox folder.**
 
-- [ ] <task — small, single-purpose, independently testable> — covers Step N, tests T<m>, T<n>
+- [ ] **T-1:** fix `remove_track_from_playlist` arity + facade passthroughs (`get_playlist_by_path`, `get_playlist_children`) + expose playlist `uuid` — Step 1, tests T1
+- [ ] **T-2:** undo-log deltas (`entity_kind`, `entity_id`, `after_json`, nullable `rule_id`) + `revert_run` INSERT path + `_file_sha1` skip — Step 2, tests T2, T3
+- [ ] **T-3:** `app/artist_store/schema.py` sidecar + migration runner — Step 3, tests T11
+- [ ] **T-4:** `registry.py` — resolve, favourites CRUD, Tier-1 backlog — Step 4, tests T12
+- [ ] **T-5:** `merge.py` — candidate detection + pure `preview()` — Step 5, tests T7
+- [ ] **T-6:** `merge.py` — `apply()` / `revert()` via `update_content` re-read in lock, journalled — Step 5, tests T4, T5, T6, T19
+- [ ] **T-7:** `projection.py` — adopt-or-create + diff-in-place + running-guard — Step 6, tests T8, T9, T10
+- [ ] **T-8:** routes for hub / favourites / merge / projection (`route-architect` first) — Step 7, tests T13
+- [ ] **T-9:** `ArtistHubView` + list + suggestion panel + projection panel — Step 8, tests T20
+- [ ] **T-10:** merge dialog incl. USB re-copy cost in bytes + revert entry point — Step 8, tests T20
+- [ ] **T-11:** absorb "By Artist" + one-way `metadata_mappings.json` import — Step 9, tests T12
+
+**M2 — SoundCloud catalogue + download**
+
+- [ ] **T-12:** `_sc_get` hardening (404 opt-out, shared paginator, 429 body, drop token-keyed cache) — Step 10, tests T16
+- [ ] **T-13:** `get_user_tracks` + reposts + artist↔SC binding replacing the stub route — Step 10, tests T15, T17
+- [ ] **T-14:** missing-diff via `external_track_match` at a tuned threshold + corpus — Step 10, tests T14
+- [ ] **T-15:** artist detail UI (local vs missing, download-all, collapsed "Mixes & sets") + batch download job — Step 10, tests T18, T21
+
+**M3 — discovery + background sync**
+
+- [ ] **T-16:** `get_related_artists` + local co-occurrence fallback → Tier-2 panel — Step 10, tests T16
+- [ ] **T-17:** idle signal + background sync job + per-artist sync mode in Settings — Step 11
+- [ ] **T-18:** doc sync (`backend-index`, `frontend-index`, `FILE_MAP`, `MAP*`, `CHANGELOG`) — folds into each PR
 
 ## Review
 
-Stage 3 Reviewer-Agent (`review_`). Unchecked box or rework reason → `rework_`.
+- [x] Plan addresses all goals
+- [x] Plan matches `## Original Idea` — no scope-creep (side-thought stays a Non-goal with a schema carve-out)
+- [x] Open questions answered or deferred (OQ15 + OQ16 deliberately deferred to this gate)
+- [x] Prior Art referenced — three half-built pieces absorbed, not duplicated
+- [x] Threat Model present + each threat has a test
+- [x] Migration Path present + rollback documented
+- [x] Performance Budget set + worst-case documented
+- [x] API / UX Surface enumerated for every layer touched
+- [x] Telemetry defined
+- [x] Test Plan covers every Threat + every Step + every Perf row
+- [x] Task Queue items small + independently committable + reference Steps + Tests
+- [x] Dependencies audited — none new
+- [x] Risk mitigations defined
+- [x] Rollback path clear
+- [x] Affected docs identified
 
-- [ ] Plan addresses all goals
-- [ ] Plan matches `## Original Idea` — no scope-creep
-- [ ] Open questions answered or deferred
-- [ ] Prior Art referenced — no duplicated past work
-- [ ] Threat Model present + each threat has a test (or N/A justified)
-- [ ] Migration Path present + rollback documented (or N/A justified)
-- [ ] Performance Budget set + worst-case scenario documented (or N/A justified)
-- [ ] API / UX Surface enumerated for every layer touched
-- [ ] Telemetry defined for shipped behavior (or N/A justified)
-- [ ] Test Plan covers every Threat + every Step + every Perf row
-- [ ] Task Queue items are small + independently committable + reference Steps + Tests
-- [ ] Dependencies audited — new libs have Schicht-A entries
-- [ ] Risk mitigations defined
-- [ ] Rollback path clear
-- [ ] Affected docs identified (`architecture.md`, `FILE_MAP.md`, indexes, `CHANGELOG.md`)
-
-**Rework reasons:**
-- …
+**Rework reasons:** none.
 
 ## Approval Summary
 
-Stage 3 Mockup+Summary-Agent (after Plan-Reviewer PASS). **Plain user-facing English — NOT Caveman.** This block is what the user reads to decide yes/no. ≤200 words. No `file:line` jargon — describe effects, not internals.
+**What it does.** Gives you a real list of favourite artists instead of a per-track text field. For each one you see what you already own, what is still missing on SoundCloud, and you can pull the gaps down. It also cleans up the duplicate artists that casing and spelling create, and mirrors your favourites into Rekordbox as a folder called `Artists` with one playlist per artist.
 
-- **What it does:** 1–2 sentences, plain language. What the feature gives the user.
-- **What you'll notice:** bullet list of user-visible effects (new button, faster scan, new export option, …).
-- **Scope:** N files touched · N tasks · effort S/M/L · risk low/med/high.
-- **Rollback:** one line — how it's undone if you dislike it after merge.
-- **Mockup:** see `## Mockup` below.
+**What you'll notice.**
+- An Artists tab that lists your favourites, with a suggestion panel: artists you already own the most tracks by, most first, minus the ones you already added — then SoundCloud discovery.
+- A per-artist Update button; otherwise it refreshes quietly in the background while the app is open and idle, and you can set Auto / Review / Off per artist.
+- A merge screen that groups `boys noize` / `Boys Noize` / `BOYS NOIZE`, shows exactly how many tracks it will rewrite, and writes it into Rekordbox for real. Every merge is journalled and can be undone.
+- A folder `Artists` appearing in Rekordbox, kept in sync, safe to re-run.
+
+**Two things to decide before you approve.**
+1. A merge changes the artist name that your USB stick uses as a folder name, so the next export re-copies those tracks. The dialog will tell you the size up front. Accept that, or should merges avoid touching the USB layout?
+2. Pulling a full catalogue per favourite artist is more systematic than today's single-track downloads. Guardrails are in the plan (only artists you added, one discovery hop, cached, hard call cap). Confirm that is the boundary you want.
+
+**Scope.** ~18 files · 18 tasks in 3 milestones · effort L · risk medium. M1 is usable on its own without SoundCloud.
+
+**Rollback.** Revert the merge runs from the log, delete the `Artists` folder in Rekordbox, delete the sidecar. Your library and audio files are untouched by all three.
+
+**Mockup:** see `## Mockup`.
 
 ## Mockup
 
-Stage 3 Mockup+Summary-Agent. Adaptive to feature type — decide from `## API / UX Surface`:
-
-- **UI feature** (has frontend components): write a self-contained static wireframe to `docs/research/mockups/<slug>.html` (inline CSS, no build step, no external assets — open in a browser locally). Fill the **UI** block below. Leave the **Backend** block empty/removed.
-- **Backend / DSP / USB / DB feature** (no visible UI): fill the **Backend** block with a concrete example — sample API request/response, CLI/log output, or before→after data (metadata tags, USB tree, DB rows). Show the shape the user will actually see. Leave the **UI** block empty/removed.
-
 ### UI — mockup file
-- `docs/research/mockups/<slug>.html` — <one-line layout + key-interaction description>
+
+`docs/research/mockups/library-artist-hub.html` — four screens: the hub (favourites + two-tab suggestions), artist detail (owned vs missing + download-all + collapsed mixes), the merge dialog (duplicate group, canonical picker, track count, USB warning, opt-in orphan cleanup), and the Rekordbox projection preview.
 
 ### Backend — concrete example
-```text
-<sample response / CLI output / before→after — the user-visible shape>
+
+Merge preview, before anything is written:
+
+```json
+POST /api/artists/merge/preview
+{ "group_id": "g_7f21", "canonical": "Boys Noize" }
+
+{
+  "canonical": "Boys Noize",
+  "absorbing": [
+    { "name": "boys noize",  "tracks": 118 },
+    { "name": "BOYS NOIZE",  "tracks": 41  },
+    { "name": "Boys  Noize", "tracks": 3   }
+  ],
+  "tracks_to_rewrite": 162,
+  "usb_recopy_bytes": 6871947673,
+  "orphans_after": 3,
+  "delete_orphans": false,
+  "revertable": true
+}
 ```
 
----
-
-> ⛔ APPROVAL GATE — user `/approve` (→ `accepted_`) or `/reject "<reason>"` (→ `rework_`). The single sign-off: read `## Approval Summary` + `## Mockup`. After approval, nothing is re-researched.
 > ↓ Stage 4 — `inprogress_`. `research-implement` builds each Task Queue item via 5 agents (Approach-Probe, Code, Standard-Review, Security-Review, Test-Coverage-Review, Doc-Sync) on a `routine/*` branch. You test + merge the branch yourself.
 
 ## PR Log
