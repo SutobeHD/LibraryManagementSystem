@@ -75,7 +75,7 @@ repos:
     hooks:
       - id: mypy-attr-defined
         name: mypy — no missing attributes (attr-defined)
-        entry: python scripts/check_attr_defined.py
+        entry: bash scripts/hook-python.sh scripts/check_attr_defined.py
         language: system
         pass_filenames: false
         files: '^app/.*\.py$'
@@ -120,7 +120,7 @@ repos:
     hooks:
       - id: validate-research-docs
         name: validate research-pipeline doc structure
-        entry: python scripts/validate_research_docs.py
+        entry: bash scripts/hook-python.sh scripts/validate_research_docs.py
         language: system
         files: '^docs/research/(research|implement|archived)/.*\.md$'
 
@@ -131,7 +131,7 @@ repos:
     hooks:
       - id: routine-divider-check
         name: routine prompts have a `---` divider
-        entry: python scripts/print_routine.py --check
+        entry: bash scripts/hook-python.sh scripts/print_routine.py --check
         language: system
         files: '^docs/research/routines/.*\.md$'
         pass_filenames: false
