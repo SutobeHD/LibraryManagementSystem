@@ -31,6 +31,7 @@ superseded_by: []
 - 2026-09-04 — `implement/review_` — Plan-Reviewer: 15/15 boxes, PASS, no rework reasons
 - 2026-09-04 — `implement/approvalgate_` — ⛔ **AWAITING /approve**. Two owner decisions bundled into the Approval Summary: USB re-copy after a merge (OQ16) and the SC catalogue-enumeration boundary (OQ15)
 - 2026-09-04 — `implement/approvalgate_` — owner answered both gate questions **as refinements, not as picks**: (a) merge propagates to the audio-file tags and the USB exporter **merges folders** instead of re-copying → new Step 5b, tasks T-11a/T-11b, threats T9/T10, perf rows, 7 new test rows; (b) catalogue is fetched **on artist selection**, and the missing list splits into "definitely theirs" (uploader-id equality) vs "remixes by others" → threat T11, task T-13 extended. Blockers 3+4 rewritten accordingly. Mockup updated. Still awaiting `/approve`.
+- 2026-09-04 — `implement/accepted_` — **approved by user** (`/approve library-artist-hub`). Ready for `inprogress_`; build starts at M1 T-1.
 
 ## Original Idea (verbatim — never edit)
 
