@@ -1,7 +1,7 @@
 # app/ INDEX — Python Backend
 
 > Module and endpoint map for the FastAPI backend. Update when adding/removing endpoints or modules.
-> Last updated: 2026-05-17
+> Last updated: 2026-09-05
 
 ---
 
@@ -31,6 +31,10 @@ Marker convention in the route tables below:
 | POST | `/api/tracks/move` `[AUTH]` | Move tracks between playlists |
 | GET | `/api/artists` | All artists (normalized) |
 | GET | `/api/artist/{aid}/tracks` | Tracks by artist |
+| GET | `/api/artists/hub` | Artist Hub: favourite artists + Tier-1 backlog (`artists.db` sidecar, no network calls) |
+| POST | `/api/artists/favourites` `[AUTH]` | Favourite an artist by `collection_id` or by raw library `name` |
+| DELETE | `/api/artists/favourites/{collection_id}` `[AUTH]` | Un-favourite an artist (idempotent; aliases + links survive) |
+| POST | `/api/artists/{collection_id}/sync-mode` `[AUTH]` | Set per-artist catalogue sync mode: `auto` / `review` / `off` |
 | GET | `/api/genres` | All genres |
 | GET | `/api/labels` | All labels |
 | GET | `/api/albums` | All albums |

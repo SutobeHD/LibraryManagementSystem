@@ -80,6 +80,8 @@ KEYRING_SERVICE = "library_management_system"
 KEYRING_SC_TOKEN = "sc_token"
 
 from . import audio_tags, download_registry, folder_watcher
+from .artist_store import registry as artist_registry
+from .artist_store import schema as artist_schema
 from .audio_analyzer import LIBROSA_AVAILABLE, AudioAnalyzer
 from .config import EXPORT_DIR, LOG_DIR, MUSIC_DIR, TEMP_DIR
 from .database import db
@@ -658,6 +660,15 @@ class DBModeReq(BaseModel):
     mode: str  # "xml" or "live"
 
 
+class ArtistFavouriteReq(BaseModel):
+    collection_id: str | None = None  # stable sidecar id; wins when both are given
+    name: str | None = None  # raw library name — creates the collection if unseen
+
+
+class ArtistSyncModeReq(BaseModel):
+    mode: str  # "auto" | "review" | "off"
+
+
 # NOTE: Library auto-load is handled by _on_startup() near the bottom of this file.
 # A second startup hook here was causing the DB to load twice (~90s startup).
 # Removed — do not add another startup handler here.
@@ -1017,6 +1028,60 @@ def get_artists():
 @app.get("/api/artist/{aid}/tracks")
 def get_artist_tracks(aid: str):
     return db.get_tracks_by_artist(aid)
+
+
+# --- ARTIST HUB (artists.db sidecar) -------------------------------------------------
+# Favourites/aliases live in the sidecar, never in master.db. The `art_{i}` ids the
+# artist routes above hand out are list positions rebuilt on every library load, so
+# nothing here keys on them — the sidecar's own collection_id is the stable handle.
+
+
+@app.get("/api/artists/hub")
+def get_artist_hub(limit: int = artist_registry.DEFAULT_BACKLOG_LIMIT, q: str = ""):
+    """Favourite artists + Tier-1 backlog. Pure read, no network calls, no writes.
+
+    `q` filters the backlog server-side, before the limit is applied — filtering only
+    the rows already sent would hide every artist ranked below `limit`.
+    """
+    return artist_registry.hub(db if db.loaded else None, backlog_limit=limit, query=q)
+
+
+@app.post("/api/artists/favourites", dependencies=[Depends(require_session)])
+def add_artist_favourite(r: ArtistFavouriteReq):
+    """Favourite an artist by sidecar id, or by the raw library name a backlog row shows."""
+    cid = (r.collection_id or "").strip()
+    if cid:
+        try:
+            added = artist_registry.add_favourite_artist(cid)
+        except KeyError:
+            raise HTTPException(404, f"Unknown artist collection: {cid}") from None
+    else:
+        name = (r.name or "").strip()
+        if not name:
+            raise HTTPException(400, "collection_id or name is required")
+        known = artist_schema.resolve_alias(name)
+        added = known is None or not artist_schema.is_favourite(str(known["id"]))
+        cid = artist_registry.favourite_artist_by_name(name)
+    return {"status": "success", "collection_id": cid, "added": added}
+
+
+@app.delete("/api/artists/favourites/{collection_id}", dependencies=[Depends(require_session)])
+def remove_artist_favourite(collection_id: str):
+    """Un-favourite. Idempotent — the collection, its aliases and its links survive."""
+    removed = artist_registry.remove_favourite_artist(collection_id)
+    return {"status": "success", "collection_id": collection_id, "removed": removed}
+
+
+@app.post("/api/artists/{collection_id}/sync-mode", dependencies=[Depends(require_session)])
+def set_artist_sync_mode(collection_id: str, r: ArtistSyncModeReq):
+    """Per-artist catalogue sync behaviour: auto / review / off."""
+    if artist_schema.get_collection(collection_id) is None:
+        raise HTTPException(404, f"Unknown artist collection: {collection_id}")
+    try:
+        artist_schema.set_sync_mode(collection_id, r.mode)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+    return {"status": "success", "collection_id": collection_id, "mode": r.mode}
 
 
 @app.get("/api/label/{aid}/tracks")

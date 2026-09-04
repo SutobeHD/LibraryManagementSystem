@@ -112,6 +112,58 @@ LibraryManagementSystem -- ANLZ Binary File Writer
 - `build_2ex()` — Build a complete .2EX ANLZ file (CDJ-3000 HD waveforms).
 - `write_anlz_files()` — Write all three ANLZ files (.DAT, .EXT, .2EX) from AnalysisEngine output.
 
+### `app/artist_store/__init__.py`
+
+artist_store — Artist-Hub sidecar package (``artists.db``).
+
+### `app/artist_store/registry.py`
+
+artist_store.registry — library artists into the store, favourites, Tier-1 backlog (T-4).
+
+- `resolve_library_artists()` — Give every distinct library artist name a stable collection in the store.
+- `library_artist_counts()` — ``collection_id`` -> owned track count, alias variants summed.
+- `add_favourite_artist()` — Favourite an existing collection.
+- `remove_favourite_artist()` — Un-favourite.
+- `favourite_artist_by_name()` — Favourite an artist the UI knows only by name (a backlog row); returns its id.
+- `list_favourite_artists()` — Favourites enriched with local track count, sync mode and SC-link state.
+- `backlog()` — Tier-1 suggestions: artists you already own, most tracks first, favourites out.
+- `hub()` — Payload for ``GET /api/artists/hub``: favourites + Tier-1 backlog, one pass, no writes.
+
+### `app/artist_store/schema.py`
+
+artist_store.schema — sidecar DB + migration runner for the Artist Hub (T-3).
+
+- `collection_id_for()` — Our own stable id for a collection, derived from ``kind`` + the folded name.
+- `sort_key_for()` — Default ordering key — folded name, so ``(kind, sort_key)`` sorts naturally.
+- `migrate()` — Bring ``conn`` to ``SCHEMA_VERSION``.
+- `init_db()` — Eager, idempotent schema create for sidecar boot.
+- `create_collection()` — Create (or adopt) the collection for ``canonical_name``; returns its id.
+- `get_collection()`
+- `get_collection_by_name()` — Lookup by derived id — case/whitespace-insensitive by construction.
+- `list_collections()`
+- `set_canonical_name()` — Rename a collection in place, keeping its id and adding the old name as an alias.
+- `delete_collection()` — Drop a collection and everything hanging off it (FK cascade).
+- `add_alias()` — Map a raw library artist string onto a collection.
+- `remove_alias()`
+- `list_aliases()`
+- `resolve_alias()` — Collection a raw library artist string belongs to, or None.
+- `set_link()` — Bind a collection to a provider account (SoundCloud today).
+- `get_link()`
+- `remove_link()`
+- `set_sync_mode()`
+- `get_sync_mode()` — Sync mode, defaulting to ``review`` for a collection that has no row yet.
+- `get_sync_state()`
+- `record_sync()` — Stamp a finished sync attempt.
+- `set_projection()` — Remember which Rekordbox playlist represents this collection.
+- `get_projection()`
+- `clear_projection()`
+- `add_favourite()` — Mark a collection as a favourite.
+- `remove_favourite()`
+- `is_favourite()`
+- `list_favourites()` — Favourited collections with their ``added_at``, ordered like the artist list.
+- `set_catalogue_cache()` — Store a fetched provider catalogue.
+- `get_catalogue_cache()` — Cached catalogue payload, or None when absent, unparseable or older than the TTL.
+
 ### `app/audio_analyzer.py`
 
 LibraryManagementSystem -- Audio Analyzer (Unified Wrapper)
@@ -233,6 +285,8 @@ Setup logging
 - `  RekordboxDB.create_playlist()`
 - `  RekordboxDB.add_track_to_playlist()`
 - `  RekordboxDB.remove_track_from_playlist()`
+- `  RekordboxDB.get_playlist_children()` — Direct children of a playlist folder, read from the backend not the cache.
+- `  RekordboxDB.get_playlist_by_path()` — Resolve a folder/playlist path like ["Artists", "Boys Noize"].
 - `  RekordboxDB.get_unanalyzed_track_ids()` — Track IDs with no analysis yet.
 - `  RekordboxDB.save()`
 - `  RekordboxDB.update_tracks_metadata()`
@@ -410,6 +464,8 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `  LiveRekordboxDB.create_playlist()`
 - `  LiveRekordboxDB.add_track_to_playlist()`
 - `  LiveRekordboxDB.remove_track_from_playlist()`
+- `  LiveRekordboxDB.get_playlist_children()` — Direct children of a playlist folder, straight from the DB.
+- `  LiveRekordboxDB.get_playlist_by_path()` — Resolve a folder/playlist path like ["Artists", "Boys Noize"].
 - `  LiveRekordboxDB.reorder_playlist_track()` — Reorders a track in a playlist.
 
 ### `app/logging_utils.py`
@@ -466,6 +522,8 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `PlRemoveTrackReq`
 - `ProjectReq`
 - `DBModeReq`
+- `ArtistFavouriteReq`
+- `ArtistSyncModeReq`
 - `stream_audio()` — Streams audio file with HTTP Range support — required for browser seeking.
 - `get_multiband_waveform()` — Returns 3-band waveform data for professional visualization.
 - `FileRevealReq`
@@ -482,6 +540,10 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `merge_metadata()`
 - `get_artists()`
 - `get_artist_tracks()`
+- `get_artist_hub()` — Favourite artists + Tier-1 backlog.
+- `add_artist_favourite()` — Favourite an artist by sidecar id, or by the raw library name a backlog row shows.
+- `remove_artist_favourite()` — Un-favourite.
+- `set_artist_sync_mode()` — Per-artist catalogue sync behaviour: auto / review / off.
 - `get_label_tracks()`
 - `get_album_tracks()`
 - `get_track()`
@@ -674,7 +736,7 @@ metadata_fixer.applier — atomic apply + revert for the metadata fixer (T5).
 
 - `FixRequest` — One requested change: set ``content_id``'s ``field`` to ``after_value``.
 - `apply_fixes()` — Apply ``fixes`` in one journalled run.
-- `revert_run()` — Undo a run: restore each pre-image field value in reverse.
+- `revert_run()` — Undo a run in reverse order.
 
 ### `app/metadata_fixer/detector.py`
 
@@ -688,7 +750,8 @@ Read-only detection of malformed artist/title metadata.
 
 metadata_fixer.schema — sidecar undo-log DB for the metadata fixer (T4).
 
-- `init_db()` — Idempotent schema create.
+- `migrate()` — Bring ``conn`` to ``SCHEMA_VERSION``.
+- `init_db()` — Idempotent schema create + migrate.
 - `create_run()` — Open a new fix run; returns its ``run_id``.
 - `record_mutation()` — Journal one applied mutation with its full pre-image; bump the run count.
 - `set_run_status()` — Transition a run (completed / reverted / failed).
@@ -1311,6 +1374,10 @@ Dev-only logging utility.
 
 - `log()`
 
+### `frontend/src/components/ArtistHubView.jsx`
+
+ArtistHubView — the Artists tab.
+
 ### `frontend/src/components/BatchEditBar.jsx`
 
 *(no module docstring)*
@@ -1915,6 +1982,130 @@ Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout).
 - `test_pwv2_out_of_range_clamped()`
 - `test_pwv3_out_of_range_clamped_preserves_count()`
 
+### `tests/test_artist_routes.py`
+
+Artist-Hub route tests (T-8 — app/main.py, plan test row T13).
+
+- `test_all_mutations_require_session()`
+- `test_all_mutations_reject_wrong_bearer()`
+- `test_rejected_mutation_writes_nothing()`
+- `test_valid_bearer_is_accepted()`
+- `test_hub_returns_both_keys_without_auth()`
+- `test_hub_backlog_is_track_count_descending()`
+- `test_hub_backlog_honours_limit()`
+- `test_hub_renders_before_the_library_loads()`
+- `test_favourite_by_name_round_trips()`
+- `test_favourite_by_name_is_idempotent()`
+- `test_favourite_by_collection_id()`
+- `test_favourite_unknown_collection_id_is_404()`
+- `test_favourite_without_name_or_id_is_400()`
+- `test_unfavourite_unknown_id_is_a_no_op()`
+- `test_sync_mode_round_trips()`
+- `test_sync_mode_rejects_unknown_mode()`
+- `test_sync_mode_unknown_collection_is_404()`
+
+### `tests/test_artist_splitting.py`
+
+Tests for artist-name splitting and the artist list it feeds.
+
+- `backend()`
+- `TestSplitArtists`
+- `  TestSplitArtists.test_never_yields_an_empty_name()`
+- `  TestSplitArtists.test_falls_back_to_the_raw_part()`
+- `  TestSplitArtists.test_blank_input_yields_nothing()`
+- `  TestSplitArtists.test_ordinary_splitting_is_unchanged()`
+- `  TestSplitArtists.test_separators_do_not_leak_empty_entries()`
+- `test_both_backends_split_identically()` — The implementation is duplicated — pin the two copies to each other.
+- `TestArtistListRoundTrip` — The reported symptom: header said "0 / 13 Tracks" with a blank name.
+- `  TestArtistListRoundTrip.test_every_listed_artist_resolves_to_its_tracks()`
+- `  TestArtistListRoundTrip.test_no_artist_has_a_blank_name()`
+- `  TestArtistListRoundTrip.test_count_matches_occurrences()`
+
+### `tests/test_artist_store_registry.py`
+
+Artist-Hub registry tests (T-4 — app/artist_store/registry.py).
+
+- `store()` — Point the sidecar at a throwaway DB and reset its per-process state.
+- `test_resolve_creates_one_collection_per_artist()`
+- `test_resolve_is_idempotent()`
+- `test_resolve_records_the_raw_library_name_as_an_alias()`
+- `test_resolve_folds_case_variants_onto_one_collection()`
+- `test_resolve_keeps_a_merged_variant_on_its_canonical_collection()`
+- `test_resolve_ids_are_not_the_unstable_ui_ids()`
+- `test_favourites_round_trip()`
+- `test_favourite_rows_report_the_soundcloud_link_and_sync_mode()`
+- `test_favourite_track_count_sums_alias_variants()`
+- `test_favourite_by_name_creates_the_collection_when_unseen()`
+- `test_favourite_by_name_rejects_a_blank_name()`
+- `test_favouriting_an_unknown_collection_raises()`
+- `test_favourites_list_without_a_library_still_renders()`
+- `test_backlog_is_sorted_by_owned_track_count_descending()`
+- `test_backlog_excludes_favourited()`
+- `test_backlog_excludes_a_favourite_reached_through_an_alias()`
+- `test_backlog_needs_no_resolve_pass_first()` — The hub is a read: a never-resolved library still ranks, and nothing is written.
+- `test_backlog_honours_the_limit()`
+- `test_backlog_ties_break_deterministically()`
+- `test_library_artist_counts_keys_on_store_ids()`
+- `test_hub_returns_favourites_and_backlog()`
+- `test_hub_writes_nothing()`
+- `test_empty_library_yields_empty_lists()`
+- `test_library_without_an_artist_list_yields_empty_lists()`
+- `test_hub_without_a_library_still_lists_favourites()`
+- `TestBacklogSearchBeyondTheLimit` — A search that only filters the rows already sent hides everything below `limit`.
+- `  TestBacklogSearchBeyondTheLimit.test_query_filters_before_truncation()`
+- `  TestBacklogSearchBeyondTheLimit.test_total_reports_the_pre_truncation_count()`
+- `  TestBacklogSearchBeyondTheLimit.test_query_is_case_and_whitespace_insensitive()`
+- `  TestBacklogSearchBeyondTheLimit.test_empty_query_is_not_a_filter()`
+
+### `tests/test_artist_store_schema.py`
+
+Artist-Hub sidecar schema tests (T-3 — app/artist_store/schema.py).
+
+- `store()` — Point the module at a throwaway DB and reset its per-thread/process state.
+- `artist()`
+- `TestDbLocation`
+- `  TestDbLocation.test_db_path_is_under_user_data_dir()`
+- `  TestDbLocation.test_module_does_not_borrow_the_rekordbox_write_lock()`
+- `TestSchemaCreation`
+- `  TestSchemaCreation.test_all_tables_exist()`
+- `  TestSchemaCreation.test_kind_sort_index_exists()`
+- `  TestSchemaCreation.test_init_is_idempotent_and_keeps_data()`
+- `  TestSchemaCreation.test_kind_defaults_to_artist()`
+- `TestMigrationRunner`
+- `  TestMigrationRunner.test_fresh_db_is_stamped_at_current_version()`
+- `  TestMigrationRunner.test_step_walk_bumps_the_version()`
+- `  TestMigrationRunner.test_missing_step_raises_instead_of_skipping()`
+- `  TestMigrationRunner.test_downgrade_is_refused()`
+- `TestCollectionIds`
+- `  TestCollectionIds.test_id_is_derived_and_stable_across_casing_and_spacing()`
+- `  TestCollectionIds.test_id_never_looks_like_the_unstable_ui_id()`
+- `  TestCollectionIds.test_kind_is_part_of_the_id()`
+- `  TestCollectionIds.test_blank_name_is_rejected()`
+- `  TestCollectionIds.test_create_is_idempotent_for_a_recased_name()`
+- `  TestCollectionIds.test_rename_keeps_the_id_and_keeps_the_old_name_resolvable()`
+- `TestAliases`
+- `  TestAliases.test_alias_round_trip()`
+- `  TestAliases.test_several_variants_resolve_to_one_collection()`
+- `  TestAliases.test_unknown_alias_resolves_to_none()`
+- `  TestAliases.test_canonical_alias_is_seeded_on_create()`
+- `TestFavourites`
+- `  TestFavourites.test_favourites_round_trip()`
+- `  TestFavourites.test_favourites_are_ordered_by_sort_key()`
+- `  TestFavourites.test_favourite_requires_an_existing_collection()`
+- `TestLinksSyncProjection`
+- `  TestLinksSyncProjection.test_link_round_trip_and_upsert()`
+- `  TestLinksSyncProjection.test_sync_mode_defaults_to_review()`
+- `  TestLinksSyncProjection.test_sync_mode_round_trip()`
+- `  TestLinksSyncProjection.test_unknown_sync_mode_is_rejected()`
+- `  TestLinksSyncProjection.test_record_sync_keeps_the_mode()`
+- `  TestLinksSyncProjection.test_projection_round_trip()`
+- `  TestLinksSyncProjection.test_catalogue_cache_round_trip_and_ttl()`
+- `  TestLinksSyncProjection.test_deleting_a_collection_cascades()`
+- `TestWriteLocking`
+- `  TestWriteLocking.test_every_writer_holds_the_module_lock()`
+- `  TestWriteLocking.test_reads_do_not_take_the_lock()`
+- `  TestWriteLocking.test_concurrent_writers_do_not_lose_rows()`
+
 ### `tests/test_audio_analyzer.py`
 
 Tests for app/audio_analyzer.py — the pure _normalize_result mapping.
@@ -2245,6 +2436,41 @@ Cue loading in `app.live_database`.
 - `test_unparsable_mirror_row_does_not_abort_the_rest()`
 - `test_both_sources_failing_is_logged_not_raised()`
 
+### `tests/test_live_playlist_ops.py`
+
+Tests for the live-mode playlist primitives in `app/live_database.py`.
+
+- `live()` — A LiveRekordboxDB whose rbox handle is a mock — __init__ opens nothing.
+- `TestRemoveTrackFromPlaylist`
+- `  TestRemoveTrackFromPlaylist.test_calls_delete_playlist_song_with_one_argument()`
+- `  TestRemoveTrackFromPlaylist.test_never_passes_playlist_and_track()`
+- `  TestRemoveTrackFromPlaylist.test_returns_false_when_track_not_in_playlist()`
+- `  TestRemoveTrackFromPlaylist.test_coerces_ids_to_str_before_comparing()`
+- `  TestRemoveTrackFromPlaylist.test_backend_error_is_contained()`
+- `  TestRemoveTrackFromPlaylist.test_reorder_round_trips_through_the_fixed_primitive()`
+- `TestPlaylistNode`
+- `  TestPlaylistNode.test_exposes_uuid()`
+- `  TestPlaylistNode.test_missing_uuid_is_none_not_an_error()`
+- `  TestPlaylistNode.test_attribute_maps_to_frontend_type()`
+- `  TestPlaylistNode.test_enum_like_attribute_is_coerced()`
+- `  TestPlaylistNode.test_root_parent_is_normalised()`
+- `TestPlaylistLookups`
+- `  TestPlaylistLookups.test_get_playlist_children_delegates_and_normalises_root()`
+- `  TestPlaylistLookups.test_get_playlist_by_path_returns_node()`
+- `  TestPlaylistLookups.test_get_playlist_by_path_missing_is_none()`
+- `  TestPlaylistLookups.test_lookup_errors_are_contained()`
+- `TestFacade` — `_serialised` is a decorator, not a registry — probe the wrapper instead.
+- `  TestFacade.test_removal_stays_serialised()`
+- `  TestFacade.test_lookup_passthroughs_exist()`
+- `  TestFacade.test_lookups_are_reads_not_serialised()`
+- `  TestFacade.test_facade_delegates_to_the_backend()`
+- `  TestFacade.test_facade_falls_back_to_cache_without_backend_support()`
+- `  TestFacade.test_facade_signatures_match_the_live_backend()`
+- `TestCreatePlaylistCaching`
+- `  TestCreatePlaylistCaching.test_folder_type_comes_from_the_returned_row()`
+- `  TestCreatePlaylistCaching.test_caller_intent_wins_when_rbox_omits_the_attribute()`
+- `  TestCreatePlaylistCaching.test_root_parent_is_passed_to_rbox_as_none()`
+
 ### `tests/test_logging_redaction.py`
 
 Unit tests for `app.logging_utils.RedactingFormatter`.
@@ -2292,6 +2518,15 @@ metadata-fixer apply/revert tests (T5 — app/metadata_fixer/applier.py).
 - `test_apply_revert_file_sha1_round_trip()`
 - `test_write_tags_disabled_skips_tag_mirror()`
 - `test_apply_skips_failed_db_write()`
+- `EntityDB` — FakeDB that can also resurrect a journalled entity row (artist-merge undo).
+- `  EntityDB.restore_entity()`
+- `test_skips_sha1_when_not_writing_tags()`
+- `test_hashes_twice_when_writing_tags()`
+- `test_revert_reinserts_deleted_entity()`
+- `test_revert_reinserts_entity_from_after_json()`
+- `test_entity_revert_without_support_is_not_complete()`
+- `test_partial_revert_is_not_reported_complete()`
+- `test_pre_v2_row_still_reverts()` — A run journalled by the shipped v1 name-fixer reverts after the migration.
 
 ### `tests/test_metadata_fixer_detector.py`
 
@@ -2320,6 +2555,13 @@ metadata-fixer undo-log schema tests (T4 — app/metadata_fixer/schema.py).
 - `test_mark_mutation_reverted_idempotent()`
 - `test_set_run_status_and_list_newest_first()`
 - `test_get_run_unknown_returns_none()`
+- `write_v1_db()` — Create a pre-versioning log DB holding one journalled fix.
+- `legacy_db()` — A v1 DB with a journalled row, pointed at but NOT yet migrated.
+- `test_entity_kind_migration()`
+- `test_migration_makes_rule_id_nullable()`
+- `test_entity_mutation_round_trip()`
+- `test_content_row_defaults_to_content_kind()`
+- `test_migrate_leaves_newer_schema_alone()`
 
 ### `tests/test_onelibrary_wal_flush.py`
 
