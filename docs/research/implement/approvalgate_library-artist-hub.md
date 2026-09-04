@@ -30,6 +30,7 @@ superseded_by: []
 - 2026-09-04 — `implement/draftplan_` — Stage 3 filled: plan, threat model (8 threats), migration, perf budget, API/UX surface, telemetry, 21 test rows, 18-task queue across 3 milestones (M1 usable without SoundCloud)
 - 2026-09-04 — `implement/review_` — Plan-Reviewer: 15/15 boxes, PASS, no rework reasons
 - 2026-09-04 — `implement/approvalgate_` — ⛔ **AWAITING /approve**. Two owner decisions bundled into the Approval Summary: USB re-copy after a merge (OQ16) and the SC catalogue-enumeration boundary (OQ15)
+- 2026-09-04 — `implement/approvalgate_` — owner answered both gate questions **as refinements, not as picks**: (a) merge propagates to the audio-file tags and the USB exporter **merges folders** instead of re-copying → new Step 5b, tasks T-11a/T-11b, threats T9/T10, perf rows, 7 new test rows; (b) catalogue is fetched **on artist selection**, and the missing list splits into "definitely theirs" (uploader-id equality) vs "remixes by others" → threat T11, task T-13 extended. Blockers 3+4 rewritten accordingly. Mockup updated. Still awaiting `/approve`.
 
 ## Original Idea (verbatim — never edit)
 
@@ -72,8 +73,10 @@ Library has no artist-level view. Artist exists only as a per-track string — n
 **Goals**
 - **Artist entity + favourites list.** Own artist record (canonical name + aliases + links), user-curated favourites list. **Metric:** favourite artist resolves to all local tracks incl. every alias variant; 0 tracks lost on merge.
 - **Per-artist overview.** Local tracks vs. remote (SC) catalogue, diff = "missing". **Metric:** artist page renders local+missing split for a 200-track artist < 1 s from cache.
+- **"Definitely theirs" vs "remixes by others"** (owner, 2026-09-04): selecting an artist lists tracks that are provably from that artist's own SC account, **separated** from tracks where they are only named in a title/credit (`… (X Remix)`, `feat. X`) and uploaded by someone else. Both lists are viewable and downloadable; only the first is auto-queued. **Metric:** 0 tracks from a foreign uploader appear in the "definitely theirs" list on a 200-track corpus.
 - **Rekordbox projection** (owner, 2026-09-04): **one folder `Artists`, one playlist per favourite artist**, flat. Playlist = all local tracks of the artist (alias-merged). Refreshed on sync. **Metric:** folder + N playlists appear in Rekordbox after sync; re-sync is idempotent (no dupe playlists, no dupe entries).
 - **Merge writes through to Rekordbox** (owner, 2026-09-04): merging `boys noize` + `Boys Noize` + `BOYS NOIZE` rewrites `DjmdArtist`/`DjmdContent` in `master.db` directly. **Every merge is journalled + revertible** (undo-log pattern already shipped in `app/metadata_fixer/schema.py`) and preceded by a dry-run preview — direct write, never blind write. **Metric:** revert restores byte-identical pre-image rows; `pytest tests/test_pdb_structure.py` stays green after a mass merge.
+- **Merge propagates to the files and to the stick** (owner, 2026-09-04, refining the earlier decision): the artist tag is rewritten **inside the audio files** (`app/audio_tags.py`, the path `metadata_fixer/applier.py` already owns), and the USB exporter **merges the variant folders** on the stick instead of re-copying the tracks. **Metric:** after a merge, `ffprobe` on a touched file shows the canonical artist; the next USB sync moves 0 bytes of audio across the wire for a pure artist rename.
 - **Merge-candidate detection.** Auto-surface variant groups (casefold, punctuation, `&`/`and`, whitespace, smart-quote, `feat.`-contamination). **Metric:** ≥ 95 % precision on a seeded variant corpus; one-click merge per group.
 - **Suggestions, 2 tiers** (owner, 2026-09-04): **Tier 1 local backlog** — artists present in the library, ranked by owned-track count desc, already-favourited excluded. **Tier 2 external SC discovery** — related/adjacent artists not in the library, seeded from the favourites. **Metric:** Tier 1 needs 0 network calls; both tiers exclude already-added.
 - **Download / local-sync convenience** (owner, 2026-09-04): per-artist **Update** button (manual, immediate) + **background sync while the app is open and idle** (no sync under load), mode configurable in Settings. **Metric:** background sync never runs during analysis/export/playback load; manual Update completes a 1-artist diff in < 5 s.
@@ -85,7 +88,7 @@ Library has no artist-level view. Artist exists only as a per-track string — n
 - Artist bio / images / social-graph browsing. Overview = tracks, not a fan page.
 - Non-SC artist sources (Spotify/Bandcamp/Beatport artist pages) in v1.
 - Auto-merge without user confirmation. Detection is automatic; the merge click is not.
-- Rewriting the per-track `artist` **string** for reasons other than a merge — that is `metadata-name-fixer`'s job.
+- Rewriting the per-track `artist` **string** for reasons other than a merge — that is `metadata-name-fixer`'s job. (A merge itself **does** now rewrite tags — owner decision 2026-09-04.)
 
 ## Constraints
 
@@ -131,8 +134,8 @@ Library has no artist-level view. Artist exists only as a per-track string — n
 11. **Projection cost.** 50 favourites over a 10k-track library: rewrite every artist playlist per sync, or diff? What is the `_db_write_lock` hold time, does it stall the UI? Resolvable: measured budget + chunking rule.
 12. **Tier-1 ranking cost.** Track counts already fall out of `_finalize_ui_metadata` (`app/live_database.py:492-528`) — enough, or does the backlog list need its own cache at 10k–50k tracks? Resolvable: measured.
 13. **Fate of `generate_smart_playlists` "By Artist"** (`app/services.py:664-741`). Replace it, feed it from the artist store, or accept two writers in the same RB folder space? Resolvable: pick one + migration for anyone who already ran it.
-16. **USB re-copy after a merge — acceptable or must it be avoided?** A merge changes `<usb>/Contents/<Artist>/...` and `_track_hash`, so the next USB sync relocates every affected track's audio. Options: accept it, teach the USB differ to treat a pure-artist rename as a move, or offer "merge without touching the USB layout". Resolvable: pick one — but the cost belongs in the Approval Summary.
-15. **⛔ Owner decision — SC ToU aggregation boundary.** Does systematic per-artist catalogue enumeration + stored diff stay inside the accepted-risk envelope the single-track downloader already occupies? Mitigations listed in Findings wave 2. **Not resolvable by research — belongs in the Approval Summary.**
+16. ~~**USB re-copy after a merge.**~~ **RESOLVED by owner 2026-09-04: neither accept nor avoid — merge the folders.** The exporter treats a pure artist rename as a folder merge/move on the stick, not a re-copy. New work in the USB differ; see Task T-12a. *(original framing:)* A merge changes `<usb>/Contents/<Artist>/...` and `_track_hash`, so the next USB sync relocates every affected track's audio. Options: accept it, teach the USB differ to treat a pure-artist rename as a move, or offer "merge without touching the USB layout". Resolvable: pick one — but the cost belongs in the Approval Summary.
+15. ~~**⛔ Owner decision — SC ToU aggregation boundary.**~~ **RESOLVED by owner 2026-09-04:** catalogue fetch is **on artist selection**, user-initiated — narrower than the guardrail set that was offered. No speculative pre-fetch for non-favourited artists. The remaining guardrails (one discovery hop, TTL cache, per-run call cap, `aggressive_mode` not inherited) stand. *(original framing:)* Does systematic per-artist catalogue enumeration + stored diff stay inside the accepted-risk envelope the single-track downloader already occupies? Mitigations listed in Findings wave 2. **Not resolvable by research — belongs in the Approval Summary.**
 14. **Migrate `metadata_mappings.json`?** Existing artist aliases live in `MetadataManager` (`app/services.py:894-927`). Import as pre-seeded merges, or keep the JSON as the alias layer and store only RB-write history? Resolvable: one-way import vs. dual-source decision.
 
 ## Research Plan
@@ -356,8 +359,8 @@ Resolves the remaining design OQs: **OQ7** finish the stubbed `app/sidecar.py:39
 **Four commit-blockers:**
 1. `update_content(item)` re-reads inside the lock and mutates only `artist_id` — full-row clobber is a data-loss bug, not a style issue.
 2. `remove_track_from_playlist` (`app/live_database.py:1342`) is fixed first — diff-in-place projection is impossible without it.
-3. `_file_sha1` is skipped when `write_tags=False` before the merge runs at library scale.
-4. The merge confirm dialog states the USB re-copy cost in bytes.
+3. `_file_sha1` never runs where it buys nothing: skipped entirely when `write_tags=False`, and whole-file verification is **opt-in above 250 tracks**. The tag pre-image is journalled either way, so revert is correct without it — whole-file hashing only adds byte-identity *proof*, at ~63 MiB of reads per track per hash.
+4. The merge confirm dialog states all three effects up front: N tracks rewritten in `master.db`, N audio files re-tagged, and which folders merge on the stick.
 
 > ↓ Stage 3 — `implement/draftplan_`. `research-plan` fills Implementation Plan + Task Queue via 5 agents (Planner, Threat-Modeller, Migration, Perf-Budget, Test-Plan). Reviewer fills Review. On Review PASS, the Mockup+Summary-Agent fills `## Approval Summary` + `## Mockup`, then advances to `approvalgate_`.
 
@@ -374,7 +377,8 @@ Resolves the remaining design OQs: **OQ7** finish the stubbed `app/sidecar.py:39
 2. **Extend the undo log.** `app/metadata_fixer/schema.py`: `entity_kind` (default `content`), `entity_id`, `after_json`, `rule_id` nullable. `applier.py`: an INSERT path in `revert_run`, honest partial-revert status, and `_file_sha1` skipped when `write_tags=False`.
 3. **Artist store.** `app/artist_store/schema.py` — sidecar `artists.db`, WAL + module-private lock + versioned migration runner mirroring `app/variant_schema.py:59-90`. Tables: `collections(id, kind, canonical_name, sort_key)`, `aliases(collection_id, alias, source)`, `links(collection_id, provider, remote_id, permalink, confidence)`, `sync_state(collection_id, mode, last_sync_at, last_error)`, `projection(collection_id, rb_playlist_id, rb_uuid, last_projected_at)`, `catalogue_cache(collection_id, payload_json, fetched_at)`.
 4. **Registry.** `app/artist_store/registry.py` — resolve library artist strings to store rows through the existing `_split_artists` / `_normalize_artist_name`; favourites CRUD; Tier-1 backlog = counts from `_finalize_ui_metadata` (`app/live_database.py:492-528`), descending, favourited excluded.
-5. **Merge engine.** `app/artist_store/merge.py` — candidate grouping (casefold, punctuation, `&`/`and`, whitespace collapse, smart-quote fold); `preview()` pure; `apply()` per chunk of ~200 under one `db_lock()`: **re-read `get_content_by_id` inside the lock, mutate only `artist_id`, `update_content(item)`**, journal each row. Orphan `delete_artist` only when explicitly requested, journalled last.
+5. **Merge engine.** `app/artist_store/merge.py` — candidate grouping (casefold, punctuation, `&`/`and`, whitespace collapse, smart-quote fold); `preview()` pure; `apply()` per chunk of ~200 under one `db_lock()`: **re-read `get_content_by_id` inside the lock, mutate only `artist_id`, `update_content(item)`**, journal each row. Then **rewrite the artist tag in the file** via `app/audio_tags.py` (owner, 2026-09-04) using the applier's existing `write_tags` path — tag pre-image always journalled, whole-file SHA-1 verification opt-in (see Perf). Orphan `delete_artist` only when explicitly requested, journalled last.
+5b. **USB folder merge** (owner, 2026-09-04). A pure artist rename must not re-copy audio. Add a **relocation pass** ahead of the copy phase in `app/usb_one_library.py` / `app/usb_manager.py`: for a track whose only diff is `_dest_audio_path` (`app/usb_one_library.py:904-912`), `os.replace()` within the volume instead of copy; merge into an existing canonical folder; prune the emptied variant folders. Two traps to handle explicitly: a **case-only** rename (`boys noize` → `Boys Noize`) needs a two-step rename through a temp name on Windows/exFAT, and a name collision inside the target folder must fall back to copy-and-verify rather than clobber. `_track_hash` (`app/usb_manager.py:1068`) still flags the track dirty — that is correct, the pass changes *how* it is resolved, not *whether*.
 6. **Projection engine.** `app/artist_store/projection.py` — adopt-or-create folder `Artists` by `(Name, ParentID)` once, then track by id; per artist verify `get_playlist_by_id`, re-adopt by name if dead, else create; diff songs in place (add missing, remove stale via the fixed primitive). `rbox.is_rekordbox_running()` guard at run start **and** per chunk.
 7. **Routes.** All mutations behind `Depends(require_session)`; all `master.db` writers through the facade.
 8. **Frontend.** `ArtistHubView` replaces the artist branch of `MetadataView`; merge dialog carries the USB re-copy cost in bytes; projection panel with last-synced.
@@ -392,6 +396,8 @@ Resolves the remaining design OQs: **OQ7** finish the stubbed `app/sidecar.py:39
 - `app/sidecar.py` — edit — retire the artist-link JSON in favour of `links`.
 - `app/main.py` — edit — routes (via `route-architect`).
 - `app/services.py` — edit — retire "By Artist", expose the alias import.
+- `app/audio_tags.py` — read/edit — artist-tag write path reused by the merge.
+- `app/usb_one_library.py`, `app/usb_manager.py` — edit — relocation pass so an artist rename moves folders on the stick instead of re-copying.
 - `frontend/src/components/ArtistHubView.jsx` + `artistHub/*` — new; `frontend/src/main.jsx`, `MetadataView.jsx` — edit — mount + hand off.
 - `frontend/src/api/api.js` — edit — client calls.
 - `tests/test_artist_store_*.py`, `tests/test_artist_merge.py`, `tests/test_artist_projection.py` — new.
@@ -438,8 +444,13 @@ Resolves the remaining design OQs: **OQ7** finish the stubbed `app/sidecar.py:39
 | T6 | Batch download becomes a bulk scraper (ToU) | Per-run call cap, favourites only, one related-hop, TTL cache, `aggressive_mode` not inherited | `test_batch_respects_call_cap` |
 | T7 | Malicious/oversized SC payload exhausts memory | Existing `_sc_get` limits + a hard per-artist track cap | `test_catalogue_cap` |
 | T8 | Sidecar DB write races the background sync | Module-private `threading.Lock` per the sidecar pattern | `test_artist_store_concurrent_writes` |
+| T9 | Tag rewrite corrupts an audio file mid-write (power loss, locked file) | Write via the applier's existing atomic path; tag pre-image journalled before the write; skip + report a locked file rather than partially writing | `test_merge_tag_write_is_revertable`, `test_merge_skips_locked_file` |
+| T10 | USB relocation loses audio (collision, case-only rename, cross-volume) | Same-volume `os.replace` only; two-step rename for case-only; collision falls back to copy-and-verify; never delete a source before the destination verifies | `test_usb_relocate_case_only`, `test_usb_relocate_collision_falls_back` |
+| T11 | "Definitely theirs" list admits a foreign uploader's track | Uploader-id equality against the bound SC user, never a name match; title/credit matches route to the separate remix list | `test_definitely_theirs_uploader_id_only` |
 
 ### Residual risk
+
+A merge now mutates audio files, so the blast radius includes the user's files, not just the database. Mitigated by the journalled tag pre-image and by the merge being explicit and previewed — but a file the app cannot write (open in another tool, read-only) is reported and skipped, leaving the library and that file briefly disagreeing until the run is re-tried.
 
 rbox is a compiled dependency with no upstream. A silent write-semantics change would land unnoticed until the probe runs. Accepted: the probe is cheap, pinned versions are the repo norm, and every merge is journalled and revertable.
 
@@ -469,7 +480,9 @@ First open of the Artists tab runs the import and shows a one-time "N alias grou
 | `GET /api/artists/hub` (list + counts) | p95 ≤ 300 ms at 10k tracks | counts already computed at load (`app/live_database.py:492-528`) | untested |
 | Merge preview (dry-run, 500 tracks) | p95 ≤ 500 ms, zero writes | untested | untested |
 | Merge apply, 500 tracks | ≤ 6 s wall, `db_lock()` held ≤ 400 ms per 200-row chunk | journal measured at 190 ms / 5000 rows single-transaction | wave-5 measurement |
-| Merge apply, 5000 tracks | ≤ 60 s wall | **630 GiB of disk reads today** via `_file_sha1` — must be skipped first | wave-5 finding |
+| Merge apply, 5000 tracks (tags on, verification off) | ≤ 5 min wall, bounded by tag rewrites not hashing | `_file_sha1` twice per row would add ~630 GiB of reads — opt-in above 250 tracks | wave-5 finding |
+| Merge apply, 5000 tracks (byte verification on) | no wall-clock promise — the dialog states it may run for hours | ~630 GiB of reads | wave-5 finding |
+| USB relocation, 500 tracks, same volume | ≤ 5 s, **0 bytes of audio copied** | today: full re-copy (~2.7 GB for 412 AIFFs) | `app/usb_one_library.py:904-912` |
 | Projection sync, 50 favourites / 10k tracks | ≤ 10 s wall, diff-in-place not rewrite | untested | untested |
 | SC catalogue refresh, 50 artists | ≤ 60 s background, 50–100 calls, 0 stream calls | pager spacing 0.3 s (`app/soundcloud_api.py:470`) | wave-2 |
 | Artist list render | virtualised; no unpaginated fetch | `drafting_performance-overhaul` documents the existing hotspot | that doc |
@@ -487,15 +500,16 @@ First open of the Artists tab runs the import and shows a one-time "N alias grou
 - New, all `Depends(require_session)` unless noted:
   - `GET /api/artists/hub` — favourites + Tier-1 backlog *(read, no auth change)*
   - `POST /api/artists/favourites` / `DELETE /api/artists/favourites/{id}`
-  - `GET /api/artists/{id}` — local vs missing split
+  - `GET /api/artists/{id}` — local vs missing split, and `missing` is split into `definitely_theirs` (uploader-id match) and `remixes_by_others`
   - `POST /api/artists/{id}/update` — one-artist refresh
-  - `GET /api/artists/merge/candidates` *(read)* · `POST /api/artists/merge/preview` *(read-only, POST for payload size)* · `POST /api/artists/merge/apply` — `db_lock` · `POST /api/artists/merge/revert/{run_id}` — `db_lock`
+  - `GET /api/artists/merge/candidates` *(read)* · `POST /api/artists/merge/preview` *(read-only, POST for payload size)* · `POST /api/artists/merge/apply` — `db_lock`, body carries `write_tags` (default true) and `verify_bytes` (default false above 250 tracks) · `POST /api/artists/merge/revert/{run_id}` — `db_lock`
   - `POST /api/artists/projection/sync` — `db_lock` · `GET /api/artists/projection/status`
   - `GET /api/artists/discover` — Tier-2
   - `POST /api/artists/{id}/download-missing` — job id, delegates per track
   - `GET /api/artists/sync/status?job_id=` — poll
 - Changed: `POST /api/artist/soundcloud` (`app/main.py:2714-2717`) — the stub finally writes, now into `artists.db`.
 - Retired: the "By Artist" branch of the smart-playlist generator.
+- Changed: USB export gains a relocation pass — no new route, the existing export flow reports `relocated` alongside `copied`.
 
 ### Frontend (React)
 
@@ -542,6 +556,13 @@ No new stdout markers.
 | T19 | py | `tests/test_pdb_structure.py` | green after a mass merge | USB integrity |
 | T20 | js | `frontend/src/components/artistHub/*.test.js` | merge dialog blocks apply until confirmed | Blocker 4 |
 | T21 | integration | `tests/test_artist_hub_flow.py` | add favourite → project → merge → revert | full flow |
+| T22 | py | `tests/test_artist_merge.py::test_merge_tag_write_is_revertable` | tag rewritten in the file, revert restores the original tag | Threat T9, Goal |
+| T23 | py | `tests/test_artist_merge.py::test_merge_skips_locked_file` | locked file reported, run continues, nothing half-written | Threat T9 |
+| T24 | py | `tests/test_artist_merge.py::test_verify_bytes_off_above_threshold` | `_file_sha1` not called for a 300-track run by default | Perf |
+| T25 | py | `tests/test_usb_relocate.py::test_case_only_rename_two_step` | `boys noize` → `Boys Noize` survives on a case-insensitive volume | Threat T10 |
+| T26 | py | `tests/test_usb_relocate.py::test_collision_falls_back_to_copy_verify` | existing destination file is never clobbered | Threat T10 |
+| T27 | py | `tests/test_usb_relocate.py::test_pure_rename_copies_zero_bytes` | relocation moves, does not copy | Perf |
+| T28 | py | `tests/test_artist_sc.py::test_definitely_theirs_uploader_id_only` | a `(X Remix)` upload by another user lands in the remix list | Threat T11, Goal |
 
 ## Task Queue
 
@@ -558,11 +579,13 @@ No new stdout markers.
 - [ ] **T-9:** `ArtistHubView` + list + suggestion panel + projection panel — Step 8, tests T20
 - [ ] **T-10:** merge dialog incl. USB re-copy cost in bytes + revert entry point — Step 8, tests T20
 - [ ] **T-11:** absorb "By Artist" + one-way `metadata_mappings.json` import — Step 9, tests T12
+- [ ] **T-11a:** merge writes the artist tag into the audio files (reuses the applier's `write_tags` path) + `verify_bytes` opt-in above 250 tracks — Step 5, tests T22, T23, T24
+- [ ] **T-11b:** USB relocation pass — a pure artist rename moves/merges folders on the stick instead of re-copying; case-only two-step rename; collision fallback — Step 5b, tests T25, T26, T27
 
 **M2 — SoundCloud catalogue + download**
 
 - [ ] **T-12:** `_sc_get` hardening (404 opt-out, shared paginator, 429 body, drop token-keyed cache) — Step 10, tests T16
-- [ ] **T-13:** `get_user_tracks` + reposts + artist↔SC binding replacing the stub route — Step 10, tests T15, T17
+- [ ] **T-13:** `get_user_tracks` + reposts + artist↔SC binding replacing the stub route; split the result into `definitely_theirs` (uploader-id equality) and `remixes_by_others` — Step 10, tests T15, T17, T28
 - [ ] **T-14:** missing-diff via `external_track_match` at a tuned threshold + corpus — Step 10, tests T14
 - [ ] **T-15:** artist detail UI (local vs missing, download-all, collapsed "Mixes & sets") + batch download job — Step 10, tests T18, T21
 
@@ -594,21 +617,24 @@ No new stdout markers.
 
 ## Approval Summary
 
-**What it does.** Gives you a real list of favourite artists instead of a per-track text field. For each one you see what you already own, what is still missing on SoundCloud, and you can pull the gaps down. It also cleans up the duplicate artists that casing and spelling create, and mirrors your favourites into Rekordbox as a folder called `Artists` with one playlist per artist.
+**What it does.** Gives you a real list of favourite artists instead of a per-track text field. For each one you see what you already own, what is still missing on SoundCloud, and you can pull the gaps down. It also cleans up the duplicate artists that casing and spelling create — in Rekordbox, in the audio files, and on your USB sticks — and mirrors your favourites into Rekordbox as a folder called `Artists` with one playlist per artist.
 
 **What you'll notice.**
-- An Artists tab that lists your favourites, with a suggestion panel: artists you already own the most tracks by, most first, minus the ones you already added — then SoundCloud discovery.
+- An Artists tab listing your favourites, with a suggestion panel: artists you already own the most tracks by, most first, minus the ones you already added — then SoundCloud discovery.
+- Selecting an artist fetches their catalogue and shows two separate lists: tracks that are provably from their own SoundCloud account, and tracks where they are only named in a title or credit (`… (X Remix)`, uploaded by someone else). Both are downloadable; only the first is ever auto-queued.
 - A per-artist Update button; otherwise it refreshes quietly in the background while the app is open and idle, and you can set Auto / Review / Off per artist.
-- A merge screen that groups `boys noize` / `Boys Noize` / `BOYS NOIZE`, shows exactly how many tracks it will rewrite, and writes it into Rekordbox for real. Every merge is journalled and can be undone.
+- A merge screen that groups `boys noize` / `Boys Noize` / `BOYS NOIZE` and, on confirm, rewrites the artist in Rekordbox, rewrites the artist tag inside the audio files, and merges the matching folders on your USB stick at the next export. Every merge is journalled and can be undone.
 - A folder `Artists` appearing in Rekordbox, kept in sync, safe to re-run.
 
-**Two things to decide before you approve.**
-1. A merge changes the artist name that your USB stick uses as a folder name, so the next export re-copies those tracks. The dialog will tell you the size up front. Accept that, or should merges avoid touching the USB layout?
-2. Pulling a full catalogue per favourite artist is more systematic than today's single-track downloads. Guardrails are in the plan (only artists you added, one discovery hop, cached, hard call cap). Confirm that is the boundary you want.
+**Decisions already recorded (2026-09-04), so nothing here is a surprise.**
+- Merge propagates all the way: database, file tags, and USB folder layout. Because the folders are *merged* rather than re-copied, a pure rename moves 0 bytes of audio.
+- The catalogue is fetched when you select an artist — not pre-fetched in the background for artists you never added.
 
-**Scope.** ~18 files · 18 tasks in 3 milestones · effort L · risk medium. M1 is usable on its own without SoundCloud.
+**One thing worth knowing.** A merge now edits your audio files, not only the database. Every change is journalled and revertable, and a file the app cannot write is skipped and reported rather than half-written — but this is the first feature that touches your files in bulk, so take a backup before the first large merge.
 
-**Rollback.** Revert the merge runs from the log, delete the `Artists` folder in Rekordbox, delete the sidecar. Your library and audio files are untouched by all three.
+**Scope.** ~21 files · 20 tasks in 3 milestones · effort L · risk medium. M1 stands alone without SoundCloud: artist list, favourites, local suggestions, merge and the Rekordbox folder.
+
+**Rollback.** Revert the merge runs from the log (restores both the database rows and the file tags), delete the `Artists` folder in Rekordbox, delete the sidecar. Audio content is never re-encoded.
 
 **Mockup:** see `## Mockup`.
 
@@ -616,7 +642,12 @@ No new stdout markers.
 
 ### UI — mockup file
 
-`docs/research/mockups/library-artist-hub.html` — four screens: the hub (favourites + two-tab suggestions), artist detail (owned vs missing + download-all + collapsed mixes), the merge dialog (duplicate group, canonical picker, track count, USB warning, opt-in orphan cleanup), and the Rekordbox projection preview.
+`docs/research/mockups/library-artist-hub.html` — open it in a browser. Four screens:
+
+1. **The hub** — favourites (avatar, track count, SC-link state, Auto/Review/Off, per-artist Update) beside a two-tab suggestion panel: "From your library" (ranked by owned tracks, favourites excluded, 0 network calls) and "Discover on SoundCloud".
+2. **Artist detail** — owned vs missing side by side, with the missing list split into "Definitely theirs" and "Remixes by others", plus a collapsed "Mixes & sets — excluded" strip showing the 15-minute/keyword rule.
+3. **Merge** — the variant group, canonical picker, dry-run count, opt-in orphan removal, and the callout stating that the merge rewrites 412 audio files and merges 3 folders on the stick (moved, not re-copied).
+4. **Rekordbox projection** — the `Artists` folder tree, Sync-now, last-synced, per-run delta, idempotency note.
 
 ### Backend — concrete example
 
@@ -634,10 +665,34 @@ POST /api/artists/merge/preview
     { "name": "Boys  Noize", "tracks": 3   }
   ],
   "tracks_to_rewrite": 162,
-  "usb_recopy_bytes": 6871947673,
+  "files_to_retag": 162,
+  "usb_folders_to_merge": ["Contents/boys noize", "Contents/BOYS NOIZE", "Contents/Boys  Noize"],
+  "usb_bytes_copied": 0,
   "orphans_after": 3,
   "delete_orphans": false,
+  "verify_bytes": false,
   "revertable": true
+}
+```
+
+Artist catalogue, split as the owner asked:
+
+```json
+GET /api/artists/a_0c19
+
+{
+  "canonical": "Boys Noize",
+  "sc": { "urn": "soundcloud:users:1234567", "permalink": "boysnoize" },
+  "in_library": 412,
+  "missing": {
+    "definitely_theirs": [
+      { "title": "Rocket Boy (Original Mix)", "uploader_urn": "soundcloud:users:1234567", "duration_ms": 278000 }
+    ],
+    "remixes_by_others": [
+      { "title": "Sirens (Boys Noize Remix)", "uploader_urn": "soundcloud:users:9988776", "matched_on": "title_credit" }
+    ]
+  },
+  "excluded_mixes_sets": 12
 }
 ```
 

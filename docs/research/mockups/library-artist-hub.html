@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Artist Hub — wireframe</title>
+<style>
+  /* Palette copied from frontend/src/index.css + frontend/tailwind.config.js (Melodex, dark) */
+  :root {
+    --mx-deepest:  #0D0F14;
+    --mx-shell:    #13161D;
+    --mx-panel:    #1A1E27;
+    --mx-surface:  #1E2230;
+    --mx-card:     #222736;
+    --mx-hover:    #272C3A;
+    --mx-selected: #2A3045;
+    --mx-input:    #181B24;
+
+    --line-subtle:      #2A2F3E;
+    --line-default:     #353C50;
+    --line-interactive: #404760;
+
+    --ink-primary:     #F0F2F7;
+    --ink-secondary:   #9BA3B8;
+    --ink-muted:       #5C6478;
+    --ink-placeholder: #3E4558;
+    --ink-inverse:     #0D0F14;
+
+    --amber:       #E8A42A;
+    --amber-hover: #F5C860;
+    --amber-dim:   #7A5215;
+    --amber-glow:  rgba(232,164,42,.20);
+    --amber-bg:    rgba(232,164,42,.08);
+
+    --ok:   #3DD68C;
+    --bad:  #E85C4A;
+    --info: #4A9EE8;
+
+    --font-ui:   'DM Sans', Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Mono', ui-monospace, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--mx-deepest); color: var(--ink-primary);
+    font-family: var(--font-ui); font-size: 14px; line-height: 1.45;
+    background-image:
+      radial-gradient(circle at 15% 10%, rgba(232,164,42,.04), transparent 30%),
+      radial-gradient(circle at 85% 40%, rgba(232,164,42,.03), transparent 30%);
+  }
+  .frame { max-width: 1320px; margin: 0 auto; padding: 26px 22px 56px; }
+
+  /* ── page header ─────────────────────────────────────────── */
+  .pagehead { border-bottom: 1px solid var(--line-subtle); padding-bottom: 16px; margin-bottom: 26px; }
+  .pagehead h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
+  .pagehead .sub { margin-top: 5px; font-size: 12.5px; color: var(--ink-muted); }
+  .pagehead .sub b { color: var(--amber); font-weight: 600; }
+  .pagehead .meta { margin-top: 9px; font-size: 11.5px; color: var(--ink-muted); font-family: var(--font-mono); }
+
+  /* ── screen scaffolding ──────────────────────────────────── */
+  .screen { margin-bottom: 40px; }
+  .screenhead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+  .screenhead .num {
+    font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--amber);
+    border: 1px solid var(--amber-dim); background: var(--amber-bg);
+    border-radius: 2px; padding: 1px 6px; position: relative; top: -2px;
+  }
+  .screenhead h2 { margin: 0; font-size: 16px; font-weight: 600; }
+  .caption { font-size: 12.5px; color: var(--ink-muted); margin: 0 0 12px; max-width: 90ch; }
+
+  /* ── app window chrome (mirrors frontend/src/main.jsx workspaces + views) ── */
+  .app { background: var(--mx-deepest); border: 1px solid var(--line-subtle); border-radius: 10px; overflow: hidden;
+         box-shadow: 0 8px 32px rgba(0,0,0,.55); }
+  .titlebar { height: 34px; display: flex; align-items: center; gap: 10px; padding: 0 12px;
+              background: var(--mx-shell); border-bottom: 1px solid var(--line-subtle); }
+  .titlebar .name { font-size: 11.5px; color: var(--ink-secondary); font-weight: 600; }
+  .titlebar .spacer { flex: 1; }
+  .winbtns { display: flex; gap: 14px; color: var(--ink-muted); font-size: 11px; letter-spacing: 1px; }
+  .wstabs { display: flex; gap: 2px; padding: 0 8px; background: var(--mx-shell); border-bottom: 1px solid var(--line-subtle); }
+  .ws { padding: 7px 11px; font-size: 12px; color: var(--ink-muted); border-bottom: 2px solid transparent; white-space: nowrap; }
+  .ws.active { color: var(--ink-primary); border-bottom-color: var(--amber); font-weight: 600; }
+  .viewtabs { display: flex; gap: 2px; padding: 6px 10px; background: var(--mx-panel); border-bottom: 1px solid var(--line-subtle); }
+  .vt { font-size: 11.5px; color: var(--ink-secondary); padding: 4px 10px; border-radius: 4px; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .vt.active { background: var(--mx-selected); color: var(--ink-primary); font-weight: 600; }
+  .vt.active .ic { color: var(--amber); }
+  .viewport { padding: 16px; background: var(--mx-deepest); }
+
+  /* ── generic primitives ──────────────────────────────────── */
+  .ic { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }
+  .ic.sm { width: 12px; height: 12px; }
+  .ic.lg { width: 20px; height: 20px; }
+  .ic.xl { width: 30px; height: 30px; }
+
+  .panel { background: var(--mx-panel); border: 1px solid var(--line-subtle); border-radius: 8px; }
+  .panelhead { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--line-subtle); }
+  .panelhead h3 { margin: 0; font-size: 13px; font-weight: 600; }
+  .panelhead .spacer { flex: 1; }
+  .cap { font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-muted); }
+
+  .btn { font-size: 12px; border-radius: 4px; padding: 6px 11px; display: inline-flex; align-items: center; gap: 6px;
+         white-space: nowrap; border: 1px solid transparent; }
+  .btn-primary { background: var(--amber); color: var(--ink-inverse); font-weight: 600; }
+  .btn-secondary { background: var(--mx-card); color: var(--ink-primary); border-color: var(--line-subtle); }
+  .btn-ghost { background: transparent; color: var(--ink-secondary); border-color: rgba(255,255,255,.05); }
+  .btn-sm { font-size: 11px; padding: 4px 9px; }
+  .btn.icononly { padding: 5px; }
+
+  .search { display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,.2); border: 1px solid var(--line-subtle);
+            border-radius: 999px; padding: 5px 12px; color: var(--ink-placeholder); font-size: 12px; min-width: 190px; }
+
+  .pill { font-family: var(--font-mono); font-size: 11px; color: var(--ink-muted);
+          background: rgba(0,0,0,.2); border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
+  .pill.amber { color: var(--amber); background: var(--amber-bg); }
+  .pill.ok { color: var(--ok); background: rgba(61,214,140,.08); }
+
+  .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; color: var(--ink-secondary);
+          background: var(--mx-card); border: 1px solid var(--line-subtle); border-radius: 2px; padding: 2px 7px; white-space: nowrap; }
+  .chip.amber { color: var(--amber); background: var(--amber-bg); border-color: var(--amber-dim); }
+  .chip.ok { color: var(--ok); border-color: rgba(61,214,140,.3); background: rgba(61,214,140,.07); }
+  .chip.off { color: var(--ink-muted); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex: 0 0 auto; }
+  .dot.muted { background: var(--ink-placeholder); }
+
+  /* segmented sync-mode control */
+  .seg { display: inline-flex; border: 1px solid var(--line-subtle); border-radius: 4px; overflow: hidden; background: var(--mx-input); }
+  .seg span { font-size: 10px; padding: 3px 8px; color: var(--ink-muted); border-right: 1px solid var(--line-subtle); }
+  .seg span:last-child { border-right: 0; }
+  .seg span.on { background: var(--mx-selected); color: var(--ink-primary); font-weight: 600; }
+  .seg span.on.amber { color: var(--amber); background: var(--amber-bg); }
+
+  /* avatars — CSS shapes, no external assets */
+  .av { width: 40px; height: 40px; border-radius: 50%; flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
+        font-size: 12px; font-weight: 700; letter-spacing: .02em; color: rgba(255,255,255,.82);
+        border: 1px solid rgba(255,255,255,.06); background: var(--mx-shell); overflow: hidden; }
+  .av.lg { width: 64px; height: 64px; font-size: 18px; }
+  .av.sm { width: 30px; height: 30px; font-size: 10px; }
+  .av.a1 { background: linear-gradient(140deg,#3a2f5c,#1b2340); }
+  .av.a2 { background: linear-gradient(140deg,#5c3a2f,#3a1f1b); }
+  .av.a3 { background: linear-gradient(140deg,#2f4d5c,#16232e); }
+  .av.a4 { background: linear-gradient(140deg,#4d5c2f,#232e16); }
+  .av.a5 { background: linear-gradient(140deg,#5c2f4d,#2e1626); }
+  .av.a6 { background: linear-gradient(140deg,#2f5c46,#162e24); }
+  .av.a7 { background: linear-gradient(140deg,#46465c,#20202e); }
+  .av.none { color: var(--ink-muted); }
+
+  /* rows — same card language as MetadataView artist grid */
+  .row { display: flex; align-items: center; gap: 12px; padding: 9px 12px;
+         background: rgba(34,39,54,.4); border: 1px solid rgba(255,255,255,.05); border-radius: 10px; margin-bottom: 6px; }
+  .row.sel { border-color: rgba(232,164,42,.5); background: rgba(232,164,42,.06); }
+  .row .grow { flex: 1; min-width: 0; }
+  .nm { font-weight: 600; font-size: 13px; color: var(--ink-primary); }
+  .sub { font-size: 11.5px; color: var(--ink-muted); margin-top: 2px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .mono { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-secondary); }
+  .rowacts { display: flex; align-items: center; gap: 8px; }
+
+  .listbody { padding: 12px; }
+  .more { text-align: center; font-size: 11.5px; color: var(--ink-muted); padding: 7px 0 2px; }
+
+  .grid-hub { display: grid; grid-template-columns: 1fr 400px; gap: 14px; align-items: start; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+  .grid-proj { display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px; align-items: start; }
+  .stack { display: grid; gap: 14px; }
+
+  .subtabs { display: flex; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--line-subtle); }
+  .st { font-size: 12px; padding: 8px 11px; color: var(--ink-muted); border-bottom: 2px solid transparent; }
+  .st.active { color: var(--ink-primary); border-bottom-color: var(--amber); font-weight: 600; }
+
+  .note { font-size: 11.5px; color: var(--ink-muted); padding: 9px 14px; border-top: 1px solid var(--line-subtle); }
+  .note b { color: var(--ink-secondary); font-weight: 600; }
+
+  /* collapsed section */
+  .collapsed { display: flex; align-items: center; gap: 10px; padding: 11px 14px; background: var(--mx-input);
+               border: 1px dashed var(--line-subtle); border-radius: 8px; color: var(--ink-secondary); font-size: 12.5px; }
+  .collapsed .why { color: var(--ink-muted); font-size: 11.5px; }
+
+  /* warning callout */
+  .callout { display: flex; gap: 11px; padding: 12px 14px; border-radius: 8px;
+             background: rgba(232,164,42,.07); border: 1px solid var(--amber-dim); }
+  .callout .ic { color: var(--amber); }
+  .callout .ttl { font-size: 12.5px; font-weight: 600; color: var(--amber-hover); margin-bottom: 3px; }
+  .callout .bd { font-size: 12px; color: var(--ink-secondary); }
+  .callout.info { background: rgba(74,158,232,.06); border-color: rgba(74,158,232,.32); }
+  .callout.info .ic { color: var(--info); }
+  .callout.info .ttl { color: var(--info); }
+
+  /* checkbox / radio shapes */
+  .cb { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--line-interactive); background: var(--mx-input); flex: 0 0 auto; }
+  .cb.on { background: var(--amber); border-color: var(--amber); }
+  .rd { width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--line-interactive); background: var(--mx-input); flex: 0 0 auto; position: relative; }
+  .rd.on { border-color: var(--amber); }
+  .rd.on::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--amber); }
+  .optrow { display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--ink-secondary); }
+
+  .select { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+            background: var(--mx-input); border: 1px solid var(--line-subtle); border-radius: 4px; padding: 8px 11px; font-size: 12.5px; }
+  .select .val { color: var(--ink-primary); font-weight: 600; }
+  .fieldlbl { font-size: 11px; color: var(--ink-muted); margin-bottom: 5px; }
+
+  /* rekordbox tree */
+  .tree { font-family: var(--font-mono); font-size: 12px; padding: 12px 14px; }
+  .tnode { display: flex; align-items: center; gap: 8px; padding: 4px 0; color: var(--ink-secondary); }
+  .tnode .ic { color: var(--ink-muted); }
+  .tnode.root { color: var(--ink-primary); font-weight: 600; }
+  .tnode.folder { color: var(--ink-primary); }
+  .tnode.folder .ic { color: var(--amber); }
+  .tnode .cnt { margin-left: auto; color: var(--ink-muted); }
+  .tnode .new { color: var(--ok); }
+  .indent1 { padding-left: 16px; }
+  .indent2 { padding-left: 34px; }
+
+  .kv { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 6px 0; border-bottom: 1px dashed var(--line-subtle); }
+  .kv:last-child { border-bottom: 0; }
+  .kv span:first-child { color: var(--ink-muted); }
+  .kv span:last-child { color: var(--ink-primary); font-family: var(--font-mono); font-size: 11.5px; }
+
+  .legend { margin-top: 34px; border-top: 1px solid var(--line-subtle); padding-top: 14px; font-size: 11.5px; color: var(--ink-muted); }
+  .legend b { color: var(--ink-secondary); }
+  .legend p { margin: 6px 0 0; }
+</style>
+</head>
+<body>
+
+<!-- icon sprite — inline, same-document references only -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <g id="i-user"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></g>
+    <g id="i-list"><path d="M4 6h16"/><path d="M4 12h12"/><path d="M4 18h9"/></g>
+    <g id="i-tag"><path d="M3 12V4h8l9 9-8 8z"/><circle cx="7.5" cy="7.5" r="1.2"/></g>
+    <g id="i-disc"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/></g>
+    <g id="i-refresh"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.5 4v5h-5"/></g>
+    <g id="i-download"><path d="M12 3.5v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M4.5 20h15"/></g>
+    <g id="i-merge"><circle cx="6.5" cy="6" r="2.5"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="12" r="2.5"/><path d="M6.5 8.5v7"/><path d="M9 6h2.5a3.5 3.5 0 0 1 3.5 3.5v.8"/></g>
+    <g id="i-warn"><path d="M12 4 2.8 20h18.4z"/><path d="M12 10.5v4"/><path d="M12 17.3v.2"/></g>
+    <g id="i-folder"><path d="M3.5 6h5.5l2 2.2h9.5V19h-17z"/></g>
+    <g id="i-plus"><path d="M12 5.5v13"/><path d="M5.5 12h13"/></g>
+    <g id="i-back"><path d="M19.5 12h-14"/><path d="m11.5 18-6-6 6-6"/></g>
+    <g id="i-cloud"><path d="M7.5 18.5h9a4.2 4.2 0 0 0 .7-8.3 6.2 6.2 0 0 0-11.9 1.4 3.6 3.6 0 0 0 1.2 6.9z"/></g>
+    <g id="i-chev-r"><path d="m9.5 6 6 6-6 6"/></g>
+    <g id="i-chev-d"><path d="m6 9.5 6 6 6-6"/></g>
+    <g id="i-search"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-3.7-3.7"/></g>
+    <g id="i-link"><path d="m9.5 14.5 5-5"/><path d="M10.8 6.9 12.3 5.4a4 4 0 0 1 5.7 5.7l-1.5 1.5"/><path d="m13.2 17.1-1.5 1.5A4 4 0 1 1 6 12.9l1.5-1.5"/></g>
+    <g id="i-clock"><circle cx="12" cy="12" r="8.2"/><path d="M12 7.5V12l3 1.8"/></g>
+    <g id="i-undo"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.5 4v5h5"/></g>
+    <g id="i-sliders"><path d="M5 20V13"/><path d="M5 9V4"/><path d="M12 20v-9"/><path d="M12 7V4"/><path d="M19 20v-5"/><path d="M19 11V4"/><path d="M2.5 13h5"/><path d="M9.5 11h5"/><path d="M16.5 15h5"/></g>
+    <g id="i-hd"><path d="M3.5 12.5h17V19h-17z"/><path d="M5.5 12.5 8 5h8l2.5 7.5"/><circle cx="17" cy="15.8" r="1"/></g>
+    <g id="i-zap"><path d="M13 3 5 14h6l-1 7 8-11h-6z"/></g>
+    <g id="i-up"><path d="M12 4v10"/><path d="m7.5 8.5 4.5-4.5 4.5 4.5"/><path d="M4.5 20h15"/></g>
+  </defs>
+</svg>
+
+<div class="frame">
+
+  <div class="pagehead">
+    <h1>Artist Hub — Library</h1>
+    <div class="sub"><b>wireframe for approval gate — not the real UI.</b> Static HTML, no behaviour wired up. Regenerated if the plan changes.</div>
+    <div class="meta">docs/research/research/exploring_library-artist-hub.md &nbsp;·&nbsp; 4 screens &nbsp;·&nbsp; palette + chrome taken from frontend/src/index.css, tailwind.config.js, main.jsx, MetadataView.jsx</div>
+  </div>
+
+  <!-- ══════════════ SCREEN 1 — ARTISTS (THE HUB) ══════════════ -->
+  <div class="screen">
+    <div class="screenhead"><span class="num">1</span><h2>Artists — the hub</h2></div>
+    <p class="caption">Favourites on the left (link state, sync mode, per-artist Update); suggestions on the right — local backlog ranked by owned tracks, plus one-hop SoundCloud discovery.</p>
+
+    <div class="app">
+      <div class="titlebar">
+        <span class="name">Music Library Manager</span>
+        <span class="spacer"></span>
+        <span class="winbtns"><span>&#8211;</span><span>&#9633;</span><span>&#10005;</span></span>
+      </div>
+      <div class="wstabs">
+        <div class="ws active">Library</div><div class="ws">Audio Import</div><div class="ws">Ranking</div>
+        <div class="ws">Editor</div><div class="ws">USB</div><div class="ws">SoundCloud</div><div class="ws">Utilities</div>
+      </div>
+      <div class="viewtabs">
+        <div class="vt"><svg class="ic sm"><use href="#i-list"/></svg>Playlists</div>
+        <div class="vt active"><svg class="ic sm"><use href="#i-user"/></svg>Artists</div>
+        <div class="vt"><svg class="ic sm"><use href="#i-tag"/></svg>Labels</div>
+        <div class="vt"><svg class="ic sm"><use href="#i-disc"/></svg>Albums</div>
+      </div>
+
+      <div class="viewport">
+        <div class="grid-hub">
+
+          <!-- favourites -->
+          <div class="panel">
+            <div class="subtabs">
+              <div class="st active">Favourites <span class="pill" style="margin-left:6px">9</span></div>
+              <div class="st">All artists <span class="pill" style="margin-left:6px">1 284</span></div>
+              <div class="st">Merge candidates <span class="pill amber" style="margin-left:6px">4</span></div>
+            </div>
+            <div class="panelhead">
+              <span class="cap">Favourite artists</span>
+              <span class="spacer"></span>
+              <div class="search"><svg class="ic sm"><use href="#i-search"/></svg>Search artists…</div>
+              <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-refresh"/></svg>Update all</button>
+            </div>
+
+            <div class="listbody">
+
+              <div class="row sel">
+                <div class="av a1">BN</div>
+                <div class="grow">
+                  <div class="nm">Boys Noize</div>
+                  <div class="sub"><span class="mono">412 tracks</span> · 3 aliases merged · <span style="color:var(--amber)">12 missing</span></div>
+                </div>
+                <div class="rowacts">
+                  <span class="chip ok"><span class="dot"></span>SC linked</span>
+                  <span class="seg"><span class="on amber">Auto</span><span>Review</span><span>Off</span></span>
+                  <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-refresh"/></svg>Update</button>
+                </div>
+              </div>
+
+              <div class="row">
+                <div class="av a2">GE</div>
+                <div class="grow">
+                  <div class="nm">Gesaffelstein</div>
+                  <div class="sub"><span class="mono">86 tracks</span> · <span style="color:var(--amber)">3 missing</span> · last check 2 h ago</div>
+                </div>
+                <div class="rowacts">
+                  <span class="chip ok"><span class="dot"></span>SC linked</span>
+                  <span class="seg"><span>Auto</span><span class="on amber">Review</span><span>Off</span></span>
+                  <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-refresh"/></svg>Update</button>
+                </div>
+              </div>
+
+              <div class="row">
+                <div class="av a3">CW</div>
+                <div class="grow">
+                  <div class="nm">Charlotte de Witte</div>
+                  <div class="sub"><span class="mono">154 tracks</span> · up to date · last check 14 min ago</div>
+                </div>
+                <div class="rowacts">
+                  <span class="chip ok"><span class="dot"></span>SC linked</span>
+                  <span class="seg"><span class="on amber">Auto</span><span>Review</span><span>Off</span></span>
+                  <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-refresh"/></svg>Update</button>
+                </div>
+              </div>
+
+              <div class="row">
+                <div class="av a4">SM</div>
+                <div class="grow">
+                  <div class="nm">Skee Mask</div>
+                  <div class="sub"><span class="mono">61 tracks</span> · no SoundCloud profile linked</div>
+                </div>
+                <div class="rowacts">
+                  <span class="chip off"><span class="dot muted"></span>not linked</span>
+                  <span class="seg"><span>Auto</span><span>Review</span><span class="on">Off</span></span>
+                  <button class="btn btn-ghost btn-sm"><svg class="ic sm"><use href="#i-link"/></svg>Link profile</button>
+                </div>
+              </div>
+
+              <div class="row">
+                <div class="av a5">OV</div>
+                <div class="grow">
+                  <div class="nm">Overmono</div>
+                  <div class="sub"><span class="mono">47 tracks</span> · <span style="color:var(--amber)">5 missing</span> · 2 mixes excluded</div>
+                </div>
+                <div class="rowacts">
+                  <span class="chip ok"><span class="dot"></span>SC linked</span>
+                  <span class="seg"><span class="on amber">Auto</span><span>Review</span><span>Off</span></span>
+                  <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-refresh"/></svg>Update</button>
+                </div>
+              </div>
+
+              <div class="row">
+                <div class="av a6">HH</div>
+                <div class="grow">
+                  <div class="nm">Helena Hauff</div>
+                  <div class="sub"><span class="mono">38 tracks</span> · up to date</div>
+                </div>
+                <div class="rowacts">
+                  <span class="chip ok"><span class="dot"></span>SC linked</span>
+                  <span class="seg"><span>Auto</span><span class="on amber">Review</span><span>Off</span></span>
+                  <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-refresh"/></svg>Update</button>
+                </div>
+              </div>
+
+              <div class="row">
+                <div class="av a7">CS</div>
+                <div class="grow">
+                  <div class="nm">Chris Stussy</div>
+                  <div class="sub"><span class="mono">74 tracks</span> · <span style="color:var(--amber)">2 missing</span></div>
+                </div>
+                <div class="rowacts">
+                  <span class="chip ok"><span class="dot"></span>SC linked</span>
+                  <span class="seg"><span class="on amber">Auto</span><span>Review</span><span>Off</span></span>
+                  <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-refresh"/></svg>Update</button>
+                </div>
+              </div>
+
+              <div class="row">
+                <div class="av none"><svg class="ic lg"><use href="#i-user"/></svg></div>
+                <div class="grow">
+                  <div class="nm">DJ Heartstring</div>
+                  <div class="sub"><span class="mono">29 tracks</span> · no artwork · up to date</div>
+                </div>
+                <div class="rowacts">
+                  <span class="chip ok"><span class="dot"></span>SC linked</span>
+                  <span class="seg"><span class="on amber">Auto</span><span>Review</span><span>Off</span></span>
+                  <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-refresh"/></svg>Update</button>
+                </div>
+              </div>
+
+              <div class="row">
+                <div class="av a1">BI</div>
+                <div class="grow">
+                  <div class="nm">Bicep</div>
+                  <div class="sub"><span class="mono">55 tracks</span> · <span style="color:var(--amber)">1 missing</span> · 4 mixes excluded</div>
+                </div>
+                <div class="rowacts">
+                  <span class="chip ok"><span class="dot"></span>SC linked</span>
+                  <span class="seg"><span>Auto</span><span class="on amber">Review</span><span>Off</span></span>
+                  <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-refresh"/></svg>Update</button>
+                </div>
+              </div>
+
+            </div>
+            <div class="note"><b>Auto</b> downloads new tracks while the app is idle · <b>Review</b> only lists them · <b>Off</b> never syncs. Background sync never runs during analysis, export or playback.</div>
+          </div>
+
+          <!-- suggestions -->
+          <div class="stack">
+            <div class="panel">
+              <div class="subtabs">
+                <div class="st active">From your library</div>
+                <div class="st">Discover on SoundCloud</div>
+              </div>
+              <div class="panelhead">
+                <span class="cap">Local backlog · ranked by owned tracks</span>
+                <span class="spacer"></span>
+                <span class="pill">0 network calls</span>
+              </div>
+              <div class="listbody">
+                <div class="row"><div class="av sm a3">AL</div><div class="grow"><div class="nm">Anfisa Letyago</div><div class="sub"><span class="mono">63 tracks</span> · in 7 playlists</div></div>
+                  <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-plus"/></svg>Add</button></div>
+                <div class="row"><div class="av sm a5">DS</div><div class="grow"><div class="nm">Denis Sulta</div><div class="sub"><span class="mono">58 tracks</span> · in 5 playlists</div></div>
+                  <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-plus"/></svg>Add</button></div>
+                <div class="row"><div class="av sm a4">SC</div><div class="grow"><div class="nm">Sally C</div><div class="sub"><span class="mono">41 tracks</span> · in 4 playlists</div></div>
+                  <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-plus"/></svg>Add</button></div>
+                <div class="row"><div class="av sm a6">MD</div><div class="grow"><div class="nm">Mella Dee</div><div class="sub"><span class="mono">37 tracks</span> · in 3 playlists</div></div>
+                  <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-plus"/></svg>Add</button></div>
+                <div class="row"><div class="av sm a7">OR</div><div class="grow"><div class="nm">Or:la</div><div class="sub"><span class="mono">29 tracks</span> · in 3 playlists</div></div>
+                  <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-plus"/></svg>Add</button></div>
+                <div class="row"><div class="av sm a2">TS</div><div class="grow"><div class="nm">Two Shell</div><div class="sub"><span class="mono">24 tracks</span> · in 2 playlists</div></div>
+                  <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-plus"/></svg>Add</button></div>
+                <div class="more">1 275 more artists below the threshold</div>
+              </div>
+              <div class="note">Already-favourited artists are excluded from this list.</div>
+            </div>
+
+            <div class="panel">
+              <div class="subtabs">
+                <div class="st">From your library</div>
+                <div class="st active">Discover on SoundCloud</div>
+              </div>
+              <div class="panelhead">
+                <span class="cap">Second tab of the same panel</span>
+                <span class="spacer"></span>
+                <span class="chip"><svg class="ic sm"><use href="#i-cloud"/></svg>1 hop</span>
+              </div>
+              <div class="listbody">
+                <div class="row"><div class="av sm a1">DJ</div><div class="grow"><div class="nm">Djedjotronic</div><div class="sub"><span class="mono">24.1k followers · 132 tracks</span></div><div class="sub">related to Boys Noize</div></div>
+                  <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-plus"/></svg>Add</button></div>
+                <div class="row"><div class="av sm a5">LO</div><div class="grow"><div class="nm">Louisahhh</div><div class="sub"><span class="mono">18.7k followers · 96 tracks</span></div><div class="sub">related to Gesaffelstein</div></div>
+                  <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-plus"/></svg>Add</button></div>
+                <div class="row"><div class="av sm a3">MA</div><div class="grow"><div class="nm">Maelstrom</div><div class="sub"><span class="mono">11.2k followers · 74 tracks</span></div><div class="sub">related to Boys Noize</div></div>
+                  <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-plus"/></svg>Add</button></div>
+                <div class="row"><div class="av sm a6">PA</div><div class="grow"><div class="nm">Parfait</div><div class="sub"><span class="mono">9.4k followers · 48 tracks</span></div><div class="sub">related to Charlotte de Witte</div></div>
+                  <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-plus"/></svg>Add</button></div>
+                <div class="row"><div class="av sm a4">KE</div><div class="grow"><div class="nm">KI/KI</div><div class="sub"><span class="mono">31.5k followers · 61 tracks</span></div><div class="sub">related to Chris Stussy</div></div>
+                  <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-plus"/></svg>Add</button></div>
+              </div>
+              <div class="note">Suggestions come from <b>one hop</b> off your favourites — no transitive crawl, no bulk scraping. Artists you already own or already favourited are filtered out.</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ SCREEN 2 — ARTIST DETAIL ══════════════ -->
+  <div class="screen">
+    <div class="screenhead"><span class="num">2</span><h2>Artist detail</h2></div>
+    <p class="caption">Drill-down from the hub: what you own vs. what is missing on SoundCloud, per-track download plus one batch action, and the excluded mixes kept visible instead of silently dropped.</p>
+
+    <div class="app">
+      <div class="titlebar">
+        <span class="name">Music Library Manager</span>
+        <span class="spacer"></span>
+        <span class="winbtns"><span>&#8211;</span><span>&#9633;</span><span>&#10005;</span></span>
+      </div>
+      <div class="wstabs">
+        <div class="ws active">Library</div><div class="ws">Audio Import</div><div class="ws">Ranking</div>
+        <div class="ws">Editor</div><div class="ws">USB</div><div class="ws">SoundCloud</div><div class="ws">Utilities</div>
+      </div>
+      <div class="viewtabs">
+        <div class="vt"><svg class="ic sm"><use href="#i-list"/></svg>Playlists</div>
+        <div class="vt active"><svg class="ic sm"><use href="#i-user"/></svg>Artists</div>
+        <div class="vt"><svg class="ic sm"><use href="#i-tag"/></svg>Labels</div>
+        <div class="vt"><svg class="ic sm"><use href="#i-disc"/></svg>Albums</div>
+      </div>
+
+      <div class="viewport">
+
+        <!-- artist header -->
+        <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px">
+          <button class="btn btn-ghost icononly"><svg class="ic lg"><use href="#i-back"/></svg></button>
+          <div class="av lg a1">BN</div>
+          <div class="grow" style="flex:1">
+            <div style="font-size:22px;font-weight:700;display:flex;align-items:center;gap:9px">
+              <svg class="ic lg" style="color:var(--amber)"><use href="#i-user"/></svg>Boys Noize
+            </div>
+            <div class="sub" style="margin-top:4px">
+              <span class="mono">412 in library</span> ·
+              <span class="mono" style="color:var(--amber)">12 missing on SoundCloud</span> ·
+              <span class="mono">3 aliases merged</span>
+            </div>
+          </div>
+          <div class="rowacts">
+            <span class="chip ok"><svg class="ic sm"><use href="#i-link"/></svg>soundcloud.com/boysnoize</span>
+            <span class="seg"><span class="on amber">Auto</span><span>Review</span><span>Off</span></span>
+            <button class="btn btn-secondary"><svg class="ic sm"><use href="#i-refresh"/></svg>Update now</button>
+            <button class="btn btn-primary"><svg class="ic sm"><use href="#i-download"/></svg>Download all missing (12)</button>
+          </div>
+        </div>
+
+        <div class="grid-2">
+
+          <div class="panel">
+            <div class="panelhead">
+              <h3>In your library (412)</h3>
+              <span class="spacer"></span>
+              <div class="search"><svg class="ic sm"><use href="#i-search"/></svg>Filter tracks…</div>
+            </div>
+            <div class="listbody">
+              <div class="row"><div class="grow"><div class="nm">Overthrow (Extended Mix)</div><div class="sub"><span class="mono">128 BPM · 6A · 6:41</span> · added 2026-08-21</div></div><span class="pill">AIFF</span></div>
+              <div class="row"><div class="grow"><div class="nm">Ghost Ride</div><div class="sub"><span class="mono">126 BPM · 11A · 5:12</span> · added 2026-08-14</div></div><span class="pill">AIFF</span></div>
+              <div class="row"><div class="grow"><div class="nm">Nott (Original Mix)</div><div class="sub"><span class="mono">130 BPM · 8B · 5:58</span> · added 2026-07-30</div></div><span class="pill">MP3 320</span></div>
+              <div class="row"><div class="grow"><div class="nm">Iron Curtain (Club Edit)</div><div class="sub"><span class="mono">132 BPM · 4A · 6:02</span> · added 2026-07-11</div></div><span class="pill">AIFF</span></div>
+              <div class="row"><div class="grow"><div class="nm">Starchild (Boys Noize Remix)</div><div class="sub"><span class="mono">124 BPM · 2A · 7:19</span> · added 2026-06-28</div></div><span class="pill">AIFF</span></div>
+              <div class="row"><div class="grow"><div class="nm">Xpress Yourself</div><div class="sub"><span class="mono">127 BPM · 9B · 5:44</span> · added 2026-06-09</div></div><span class="pill">MP3 320</span></div>
+              <div class="more">406 more · list is virtualised</div>
+            </div>
+            <div class="note">Includes every alias variant merged into this artist — <b>boys noize</b>, <b>BOYS NOIZE</b>, <b>Boys Noize</b>.</div>
+          </div>
+
+          <div class="panel">
+            <div class="panelhead">
+              <h3>Missing on SoundCloud (12)</h3>
+              <span class="seg"><span class="on amber">Definitely theirs</span><span>Remixes by others (7)</span></span>
+              <span class="spacer"></span>
+              <span class="pill amber">last diff 2 min ago</span>
+            </div>
+            <div class="listbody">
+              <div class="row"><div class="grow"><div class="nm">Rocket Boy (Original Mix)</div><div class="sub"><span class="mono">4:38</span> · posted 2026-08-29 · <span class="mono">AIFF available</span></div></div>
+                <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-download"/></svg>Download</button></div>
+              <div class="row"><div class="grow"><div class="nm">Cerebral (Extended)</div><div class="sub"><span class="mono">6:12</span> · posted 2026-08-17 · <span class="mono">MP3 320</span></div></div>
+                <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-download"/></svg>Download</button></div>
+              <div class="row"><div class="grow"><div class="nm">Sunset Diagram</div><div class="sub"><span class="mono">5:03</span> · posted 2026-08-02 · <span class="mono">AIFF available</span></div></div>
+                <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-download"/></svg>Download</button></div>
+              <div class="row"><div class="grow"><div class="nm">Kontrast (VIP)</div><div class="sub"><span class="mono">5:47</span> · posted 2026-07-21 · <span class="mono">MP3 320</span></div></div>
+                <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-download"/></svg>Download</button></div>
+              <div class="row"><div class="grow"><div class="nm">Second Skin (Club Tool)</div><div class="sub"><span class="mono">6:55</span> · posted 2026-07-04 · <span class="mono">AIFF available</span></div></div>
+                <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-download"/></svg>Download</button></div>
+              <div class="row"><div class="grow"><div class="nm">Halo Drift</div><div class="sub"><span class="mono">4:21</span> · posted 2026-06-18 · <span class="mono">MP3 320</span></div></div>
+                <button class="btn btn-secondary btn-sm"><svg class="ic sm"><use href="#i-download"/></svg>Download</button></div>
+              <div class="more">6 more missing tracks</div>
+            </div>
+            <div class="note">Only tracks uploaded by this artist's own SoundCloud account. Downloads run through the existing SoundCloud downloader — analysis, auto-import and ANLZ write happen exactly as for a single-track download.</div>
+          </div>
+
+        </div>
+
+        <div style="margin-top:14px">
+          <div class="collapsed">
+            <svg class="ic"><use href="#i-chev-r"/></svg>
+            <span><b>Remixes by others (7) — listed separately</b></span>
+            <span class="why">uploaded by someone else, this artist named only in the title (&#8220;&#8230; (Boys Noize Remix)&#8221;) or as a featured credit. Kept out of the &#8220;definitely theirs&#8221; list so a false attribution can never enter your library silently. Expand to download any of them.</span>
+            <span class="spacer" style="flex:1"></span>
+            <span class="pill">downloadable, not auto-queued</span>
+          </div>
+        </div>
+
+        <div style="margin-top:10px">
+          <div class="collapsed">
+            <svg class="ic"><use href="#i-chev-r"/></svg>
+            <span><b>Mixes &amp; sets (12) — excluded</b></span>
+            <span class="why">longer than 15 min, or the title matched the mix/set rule (dj set, radio show, boiler room, b2b…). Expand to download one anyway.</span>
+            <span class="spacer" style="flex:1"></span>
+            <span class="pill">not counted as missing</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ SCREEN 3 — MERGE ARTISTS ══════════════ -->
+  <div class="screen">
+    <div class="screenhead"><span class="num">3</span><h2>Merge artists</h2></div>
+    <p class="caption">Detected variant groups with a canonical-name picker, a dry-run count, opt-in orphan removal — and what the merge does beyond the database: it rewrites the artist tag in the audio files and merges the folders on the stick.</p>
+
+    <div class="app">
+      <div class="titlebar">
+        <span class="name">Music Library Manager</span>
+        <span class="spacer"></span>
+        <span class="winbtns"><span>&#8211;</span><span>&#9633;</span><span>&#10005;</span></span>
+      </div>
+      <div class="wstabs">
+        <div class="ws active">Library</div><div class="ws">Audio Import</div><div class="ws">Ranking</div>
+        <div class="ws">Editor</div><div class="ws">USB</div><div class="ws">SoundCloud</div><div class="ws">Utilities</div>
+      </div>
+      <div class="viewtabs">
+        <div class="vt"><svg class="ic sm"><use href="#i-list"/></svg>Playlists</div>
+        <div class="vt active"><svg class="ic sm"><use href="#i-user"/></svg>Artists</div>
+        <div class="vt"><svg class="ic sm"><use href="#i-tag"/></svg>Labels</div>
+        <div class="vt"><svg class="ic sm"><use href="#i-disc"/></svg>Albums</div>
+      </div>
+
+      <div class="viewport">
+        <div class="panel" style="margin-bottom:14px">
+          <div class="subtabs">
+            <div class="st">Favourites <span class="pill" style="margin-left:6px">9</span></div>
+            <div class="st">All artists <span class="pill" style="margin-left:6px">1 284</span></div>
+            <div class="st active">Merge candidates <span class="pill amber" style="margin-left:6px">4</span></div>
+          </div>
+          <div class="panelhead">
+            <span class="cap">Detected variant groups · casing, punctuation, &amp;/and, whitespace, smart quotes</span>
+            <span class="spacer"></span>
+            <span class="pill">detection automatic · merge always confirmed</span>
+          </div>
+
+          <div class="listbody">
+
+            <!-- expanded group -->
+            <div class="panel" style="background:var(--mx-surface);padding:0;margin-bottom:10px">
+              <div class="panelhead">
+                <svg class="ic" style="color:var(--amber)"><use href="#i-merge"/></svg>
+                <h3>Group 1 — 3 variants, 412 tracks</h3>
+                <span class="spacer"></span>
+                <span class="chip amber">high confidence · casefold only</span>
+              </div>
+
+              <div style="padding:12px 14px">
+                <div class="row">
+                  <span class="rd"></span>
+                  <div class="av sm a1">bn</div>
+                  <div class="grow"><div class="nm" style="font-family:var(--font-mono)">boys noize</div><div class="sub">lowercase variant · from SoundCloud imports</div></div>
+                  <span class="pill">41 tracks</span>
+                </div>
+                <div class="row sel">
+                  <span class="rd on"></span>
+                  <div class="av sm a1">BN</div>
+                  <div class="grow"><div class="nm" style="font-family:var(--font-mono)">Boys Noize</div><div class="sub">most used spelling · matches SoundCloud profile name</div></div>
+                  <span class="pill amber">358 tracks</span>
+                </div>
+                <div class="row">
+                  <span class="rd"></span>
+                  <div class="av sm a1">BN</div>
+                  <div class="grow"><div class="nm" style="font-family:var(--font-mono)">BOYS NOIZE</div><div class="sub">uppercase variant · from CD rips</div></div>
+                  <span class="pill">13 tracks</span>
+                </div>
+
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px">
+                  <div>
+                    <div class="fieldlbl">Canonical name</div>
+                    <div class="select"><span class="val">Boys Noize</span><svg class="ic sm"><use href="#i-chev-d"/></svg></div>
+                    <div class="sub" style="margin-top:6px">Pick a variant, or type a custom name.</div>
+                  </div>
+                  <div>
+                    <div class="fieldlbl">Result</div>
+                    <div class="select" style="background:var(--amber-bg);border-color:var(--amber-dim)">
+                      <span class="val" style="color:var(--amber)">412 tracks will be rewritten in Rekordbox</span>
+                      <span class="mono" style="color:var(--amber)">3 &#8594; 1</span>
+                    </div>
+                    <div class="sub" style="margin-top:6px">Dry run — nothing written until you confirm.</div>
+                  </div>
+                </div>
+
+                <div class="optrow" style="margin-top:12px">
+                  <span class="cb"></span>
+                  <span>Also remove the now-empty artist entries (2) <span style="color:var(--ink-muted)">— off by default; hard delete, no tombstone</span></span>
+                </div>
+
+                <div class="callout" style="margin-top:12px">
+                  <svg class="ic lg"><use href="#i-warn"/></svg>
+                  <div>
+                    <div class="ttl">This merge also rewrites 412 audio files and merges 3 folders on the stick</div>
+                    <div class="bd">The artist tag is rewritten inside each file, so their timestamps change and any other tool reading them sees the canonical name too. On the next USB export the variant folders (<span class="mono">Contents/boys noize/</span>, <span class="mono">Contents/BOYS NOIZE/</span>) are <b>merged into</b> <span class="mono">Contents/Boys Noize/</span> — moved on the stick, not re-copied, so no multi-GB transfer. Nothing is re-encoded.</div>
+                  </div>
+                </div>
+
+                <div class="callout info" style="margin-top:10px">
+                  <svg class="ic lg"><use href="#i-undo"/></svg>
+                  <div>
+                    <div class="ttl">Journalled and revertable</div>
+                    <div class="bd">Every rewritten row is written to the merge journal with its pre-image. One click in <b>Library &#8594; History</b> restores the exact previous state, including the artist links. Rekordbox must be closed while merging.</div>
+                  </div>
+                </div>
+
+                <div style="display:flex;gap:9px;justify-content:flex-end;margin-top:14px">
+                  <button class="btn btn-ghost">Skip group</button>
+                  <button class="btn btn-secondary">Preview changes (412)</button>
+                  <button class="btn btn-primary"><svg class="ic sm"><use href="#i-merge"/></svg>Merge 412 tracks</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- collapsed groups -->
+            <div class="row">
+              <svg class="ic"><use href="#i-chev-r"/></svg>
+              <div class="grow"><div class="nm" style="font-family:var(--font-mono)">dj koze &nbsp;/&nbsp; DJ Koze</div><div class="sub">2 variants · casefold only</div></div>
+              <span class="pill">96 tracks</span>
+              <button class="btn btn-secondary btn-sm">Review</button>
+            </div>
+            <div class="row">
+              <svg class="ic"><use href="#i-chev-r"/></svg>
+              <div class="grow"><div class="nm" style="font-family:var(--font-mono)">KETTAMA &nbsp;/&nbsp; Kettama</div><div class="sub">2 variants · casefold only</div></div>
+              <span class="pill">44 tracks</span>
+              <button class="btn btn-secondary btn-sm">Review</button>
+            </div>
+            <div class="row">
+              <svg class="ic"><use href="#i-chev-r"/></svg>
+              <div class="grow"><div class="nm" style="font-family:var(--font-mono)">Fjaak &nbsp;/&nbsp; FJAAK &nbsp;/&nbsp; F J A A K</div><div class="sub">3 variants · casefold + whitespace · <span style="color:var(--amber)">needs a look</span></div></div>
+              <span class="pill">37 tracks</span>
+              <button class="btn btn-secondary btn-sm">Review</button>
+            </div>
+
+          </div>
+          <div class="note">Merging rewrites the artist link on each track in <b>master.db</b>. Tags on disk and analysis files are not touched.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ SCREEN 4 — REKORDBOX PROJECTION ══════════════ -->
+  <div class="screen">
+    <div class="screenhead"><span class="num">4</span><h2>Rekordbox projection</h2></div>
+    <p class="caption">One flat folder named <span class="mono">Artists</span> with one playlist per favourite — what the CDJ actually reads. Re-running the sync updates in place instead of creating duplicates.</p>
+
+    <div class="app">
+      <div class="titlebar">
+        <span class="name">Music Library Manager</span>
+        <span class="spacer"></span>
+        <span class="winbtns"><span>&#8211;</span><span>&#9633;</span><span>&#10005;</span></span>
+      </div>
+      <div class="wstabs">
+        <div class="ws active">Library</div><div class="ws">Audio Import</div><div class="ws">Ranking</div>
+        <div class="ws">Editor</div><div class="ws">USB</div><div class="ws">SoundCloud</div><div class="ws">Utilities</div>
+      </div>
+      <div class="viewtabs">
+        <div class="vt"><svg class="ic sm"><use href="#i-list"/></svg>Playlists</div>
+        <div class="vt active"><svg class="ic sm"><use href="#i-user"/></svg>Artists</div>
+        <div class="vt"><svg class="ic sm"><use href="#i-tag"/></svg>Labels</div>
+        <div class="vt"><svg class="ic sm"><use href="#i-disc"/></svg>Albums</div>
+      </div>
+
+      <div class="viewport">
+        <div class="grid-proj">
+
+          <div class="panel">
+            <div class="panelhead">
+              <svg class="ic" style="color:var(--amber)"><use href="#i-folder"/></svg>
+              <h3>Rekordbox playlist tree — preview</h3>
+              <span class="spacer"></span>
+              <span class="chip">flat · one playlist per favourite</span>
+            </div>
+            <div class="tree">
+              <div class="tnode root"><svg class="ic sm"><use href="#i-disc"/></svg>Rekordbox collection</div>
+              <div class="tnode folder indent1"><svg class="ic sm"><use href="#i-folder"/></svg>Artists<span class="cnt">folder · 9 playlists</span></div>
+              <div class="tnode indent2"><svg class="ic sm"><use href="#i-list"/></svg>Boys Noize<span class="cnt">412 tracks</span></div>
+              <div class="tnode indent2"><svg class="ic sm"><use href="#i-list"/></svg>Charlotte de Witte<span class="cnt">154 tracks</span></div>
+              <div class="tnode indent2"><svg class="ic sm"><use href="#i-list"/></svg>Gesaffelstein<span class="cnt">86 tracks</span></div>
+              <div class="tnode indent2"><svg class="ic sm"><use href="#i-list"/></svg>Chris Stussy<span class="cnt">74 tracks</span></div>
+              <div class="tnode indent2"><svg class="ic sm"><use href="#i-list"/></svg>Skee Mask<span class="cnt">61 tracks</span></div>
+              <div class="tnode indent2"><svg class="ic sm"><use href="#i-list"/></svg>Bicep<span class="cnt">55 tracks</span></div>
+              <div class="tnode indent2"><svg class="ic sm"><use href="#i-list"/></svg>Overmono<span class="cnt new">47 tracks · new</span></div>
+              <div class="tnode indent2"><svg class="ic sm"><use href="#i-list"/></svg>Helena Hauff<span class="cnt">38 tracks</span></div>
+              <div class="tnode indent2"><svg class="ic sm"><use href="#i-list"/></svg>DJ Heartstring<span class="cnt">29 tracks</span></div>
+              <div class="tnode indent1" style="color:var(--ink-muted)"><svg class="ic sm"><use href="#i-folder"/></svg>Genres<span class="cnt">later — not in this feature</span></div>
+              <div class="tnode indent1" style="color:var(--ink-muted)"><svg class="ic sm"><use href="#i-folder"/></svg>Labels<span class="cnt">later — not in this feature</span></div>
+            </div>
+            <div class="note">Playlist contents follow the merged artist, so every alias variant lands in the same playlist. Removing a favourite leaves its playlist alone unless you say otherwise.</div>
+          </div>
+
+          <div class="stack">
+            <div class="panel">
+              <div class="panelhead"><h3>Sync</h3><span class="spacer"></span><span class="chip ok"><span class="dot"></span>Rekordbox closed</span></div>
+              <div style="padding:14px">
+                <button class="btn btn-primary" style="width:100%;justify-content:center;padding:10px">
+                  <svg class="ic"><use href="#i-refresh"/></svg>Sync now
+                </button>
+                <div class="sub" style="margin-top:10px;justify-content:center">
+                  <svg class="ic sm"><use href="#i-clock"/></svg>Last synced 2026-09-04 14:12 &nbsp;·&nbsp; 3 min ago
+                </div>
+                <div style="margin-top:12px">
+                  <div class="kv"><span>Folder</span><span>Artists (adopted, not recreated)</span></div>
+                  <div class="kv"><span>Playlists</span><span>9</span></div>
+                  <div class="kv"><span>Last run</span><span>+1 playlist · +23 tracks · &#8722;4</span></div>
+                  <div class="kv"><span>Duration</span><span>3.1 s</span></div>
+                  <div class="kv"><span>Re-run</span><span>idempotent — no duplicates</span></div>
+                </div>
+              </div>
+              <div class="note">Sync is blocked while Rekordbox is open. Writes go through the locked database facade, in chunks, so the UI stays responsive.</div>
+            </div>
+
+            <div class="panel">
+              <div class="panelhead"><h3>Sync options</h3><span class="spacer"></span><svg class="ic" style="color:var(--ink-muted)"><use href="#i-sliders"/></svg></div>
+              <div style="padding:14px;display:grid;gap:10px">
+                <div class="optrow"><span class="cb on"></span><span>Sync automatically after a download or a merge</span></div>
+                <div class="optrow"><span class="cb on"></span><span>Keep playlist order by BPM</span></div>
+                <div class="optrow"><span class="cb"></span><span>Delete the playlist when an artist is un-favourited</span></div>
+                <div class="optrow"><span class="cb"></span><span>Also project labels and genres <span style="color:var(--ink-muted)">— follow-up feature</span></span></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <b>Reading this wireframe.</b>
+    <p>Amber = the single accent, exactly as in the app (primary action, active tab, warning). Round avatars, the mono track-count pill and the card shape are taken from the existing Library artist grid, so the Artist Hub reads as the same view family rather than a new page style.</p>
+    <p>Screens 1&#8211;3 are three states of the same Artists view (favourites list, artist drill-down, merge candidates); screen 4 is the Rekordbox projection panel. The suggestions panel is drawn twice on screen 1 so both of its tabs are visible on one static page.</p>
+    <p>Static wireframe — inline CSS only, no JS, no external assets. Mirrors the plan; regenerated if the plan changes.</p>
+  </div>
+
+</div>
+</body>
+</html>
