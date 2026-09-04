@@ -852,9 +852,18 @@ class SettingsManager:
                 return dict(cls.DEFAULT)
             sanitized = cls._sanitize_loaded(raw)
             return {**cls.DEFAULT, **sanitized}
+        except FileNotFoundError:
+            # No settings file yet — the normal state of a fresh install, and
+            # the defaults are the right answer. Not worth a WARNING on every
+            # boot (it fired twice per startup and read as a fault).
+            logger.debug("services.SettingsManager.load: no %s yet, using defaults", cls.CONFIG)
+            return dict(cls.DEFAULT)
         except (OSError, json.JSONDecodeError) as e:
+            # A settings file that exists but cannot be read IS a fault:
+            # the user's configuration is silently not being applied.
             logger.warning(
-                "services.SettingsManager.load: falling back to defaults — %s",
+                "services.SettingsManager.load: %s unreadable, using defaults — %s",
+                cls.CONFIG,
                 e,
             )
             return dict(cls.DEFAULT)
@@ -1295,9 +1304,7 @@ class ImportManager:
                     bg_path = COVERS_DIR / bg_name
                     with open(bg_path, "wb") as f:
                         f.write(art_data)
-                    artwork_path = str(
-                        bg_path.relative_to(Path(REKORDBOX_ROOT).parent)
-                    )
+                    artwork_path = str(bg_path.relative_to(Path(REKORDBOX_ROOT).parent))
                     # Fix path for frontend: absolute or relative strictly?
                     # Let's use absolute path for internally managed, but relative for portability?
                     # Rekordbox uses absolute. Let's stick to absolute for now to be safe with serving.

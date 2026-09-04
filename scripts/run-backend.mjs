@@ -28,7 +28,13 @@ const python = resolvePython();
 const args = process.argv.length > 2 ? process.argv.slice(2) : ["-m", "app.main"];
 console.log(`[run-backend] ${python} ${args.join(" ")}`);
 
-const child = spawn(python, args, { cwd: root, stdio: "inherit" });
+// PYTHONUTF8: the Windows console defaults to cp1252, which renders every
+// em-dash in a log message as a replacement character.
+const child = spawn(python, args, {
+    cwd: root,
+    stdio: "inherit",
+    env: { ...process.env, PYTHONUTF8: "1" },
+});
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => child.kill(sig));
 child.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
 child.on("error", (err) => {

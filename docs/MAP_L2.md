@@ -572,8 +572,6 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `folder_watcher_status()`
 - `folder_watcher_add()`
 - `folder_watcher_remove()`
-- `startup_event()`
-- `shutdown_watcher_event()`
 - `shutdown()` — Trigger sidecar shutdown.
 - `restart()` — Trigger sidecar restart.
 - `select_db_dialog()`

@@ -10,6 +10,7 @@ import time
 import traceback
 import urllib.parse
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -143,7 +144,23 @@ logger = logging.getLogger("APP_MAIN")
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
-app = FastAPI(title="Music Library Manager")
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Startup/shutdown hooks.
+
+    `@app.on_event` is deprecated in FastAPI and warns on every boot; the
+    bodies live further down the module (`_on_startup` / `_on_shutdown`),
+    which is fine because this only calls them at runtime.
+    """
+    await _on_startup()
+    try:
+        yield
+    finally:
+        await _on_shutdown()
+
+
+app = FastAPI(title="Music Library Manager", lifespan=_lifespan)
 
 # --- SECURITY: Allowed audio directories for streaming/processing ---
 # Users can only stream/process audio from these root directories.
@@ -638,8 +655,8 @@ class DBModeReq(BaseModel):
     mode: str  # "xml" or "live"
 
 
-# NOTE: Library auto-load is handled by startup_event() near the bottom of this file.
-# A second @app.on_event("startup") here was causing the DB to load twice (~90s startup).
+# NOTE: Library auto-load is handled by _on_startup() near the bottom of this file.
+# A second startup hook here was causing the DB to load twice (~90s startup).
 # Removed — do not add another startup handler here.
 
 # --- ENDPOINTS ---
@@ -3036,8 +3053,7 @@ def _graceful_shutdown():
     os._exit(0)
 
 
-@app.on_event("startup")
-async def startup_event():
+async def _on_startup():
     logger.info("Backend started. Binding to 127.0.0.1:8000 only.")
 
     # Initialize download registry (creates SQLite DB if not exists)
@@ -3092,8 +3108,7 @@ async def startup_event():
         logger.error(f"FolderWatcher startup failed: {e}", exc_info=True)
 
 
-@app.on_event("shutdown")
-async def shutdown_watcher_event():
+async def _on_shutdown():
     try:
         folder_watcher.shutdown_watcher()
     except Exception as exc:
