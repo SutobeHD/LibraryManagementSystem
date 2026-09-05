@@ -24,6 +24,8 @@
 | `app/anlz_sidecar.py` | ANLZ-Sidecar writer — shared helper used by every track-import path |
 | `app/anlz_writer.py` | LibraryManagementSystem -- ANLZ Binary File Writer |
 | `app/artist_store/__init__.py` | artist_store — Artist-Hub sidecar package (``artists.db``). |
+| `app/artist_store/merge.py` | artist_store.merge — duplicate-artist detection, preview, apply and revert (T-5/T-6). |
+| `app/artist_store/projection.py` | artist_store.projection — mirror favourite collections into Rekordbox (T-7). |
 | `app/artist_store/registry.py` | artist_store.registry — library artists into the store, favourites, Tier-1 backlog (T-4). |
 | `app/artist_store/schema.py` | artist_store.schema — sidecar DB + migration runner for the Artist Hub (T-3). |
 | `app/audio_analyzer.py` | LibraryManagementSystem -- Audio Analyzer (Unified Wrapper) |
@@ -90,6 +92,9 @@
 | `frontend/src/audio/dawState/regions.js` | regionsReducer — region create / split / move / delete / resize / clipboard. |
 | `frontend/src/audio/dawState/selection.js` | selectionReducer — region selection set and time-range selection. |
 | `frontend/src/audio/dawState/transport.js` | transportReducer — playhead, BPM, zoom/scroll, snap-grid, edit-mode, project metadata, and audio-source actio… |
+| `frontend/src/components/artistHub/artistHubApi.js` | artistHubApi — the merge + projection half of the Artist Hub's HTTP surface. |
+| `frontend/src/components/artistHub/mergeCopy.js` | mergeCopy — the sentences the merge dialog has to say out loud. |
+| `frontend/src/components/artistHub/mergeCopy.test.js` | node --test frontend/src/components/artistHub/mergeCopy.test.js Pure copy builders — no DOM, no resolver need… |
 | `frontend/src/components/daw/timeline/useTimelineEvents.js` | useTimelineEvents — Event-handler layer for DawTimeline Owns: - Hit-testing for cue flags (hot + memory) - Mo… |
 | `frontend/src/components/daw/timeline/useTimelineLayout.js` | useTimelineLayout — Layout / sizing layer for DawTimeline Owns: - ResizeObserver subscription on the containe… |
 | `frontend/src/components/daw/timeline/useTimelineRender.js` | useTimelineRender — Rendering layer for DawTimeline Owns: - State-sync effect (React state → mutable ds.curre… |
@@ -143,12 +148,14 @@
 | `frontend/src/components/SoundCloudView.jsx` | PRIVACY: do not hold the actual OAuth token in React state — the real |
 | `frontend/src/components/ToastContext.jsx` | *(no module docstring)* |
 | `frontend/src/components/ToolsView.jsx` | Mirror of LibraryTools.smart_rename's token substitution + sanitisation, |
-| `frontend/src/components/TrackTable.jsx` | Camelot |
+| `frontend/src/components/TrackTable.jsx` | *(no module docstring)* |
 | `frontend/src/components/UsbSettingsView.jsx` | UsbSettingsView — edit MYSETTING.DAT / MYSETTING2.DAT / DJMMYSETTING.DAT Per-stick CDJ + DJM hardware setting… |
 | `frontend/src/components/UsbView.jsx` | UsbView — Melodex-styled USB device manager (container). |
 | `frontend/src/components/UtilitiesView.jsx` | UtilitiesView — router for the Utilities workspace. |
 | `frontend/src/components/WaveformEditor.jsx` | *(no module docstring)* |
 | `frontend/src/components/XmlCleanView.jsx` | Using existing endpoint but improved backend logic |
+| `frontend/src/components/artistHub/MergeDialog.jsx` | *(no module docstring)* |
+| `frontend/src/components/artistHub/ProjectionPanel.jsx` | ProjectionPanel — the `Artists` folder inside Rekordbox: what is projected right now, and the button that bri… |
 | `frontend/src/components/daw/DawBrowser.jsx` | DawBrowser — Left panel file/library browser for the DJ Edit DAW Lists tracks from the library and recent .rb… |
 | `frontend/src/components/daw/DawControlStrip.jsx` | DawControlStrip — Unified control bar below the timeline Layout: [Transport] | [Edit Tools] | [Hot Cues + Loo… |
 | `frontend/src/components/daw/DawLayout.jsx` | DawLayout — Slot-style layout shell for the DJ Edit DAW. |
@@ -225,6 +232,10 @@
 | `tests/test_anlz_reference_parse.py` | Validate the produced ANLZ files (.DAT/.EXT/.2EX). |
 | `tests/test_anlz_safe_pqtz.py` | Beat-grid extraction in `app.anlz_safe`. |
 | `tests/test_anlz_writer_guards.py` | Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout). |
+| `tests/test_artist_merge_apply.py` | Artist-Hub merge apply/revert tests (T-6 + T-11a — app/artist_store/merge.py). |
+| `tests/test_artist_merge_preview.py` | Artist-Hub merge detection + preview tests (T-5 — app/artist_store/merge.py). |
+| `tests/test_artist_merge_routes.py` | Artist-Hub merge + projection route tests (T-8 rest — app/main.py, plan row T13). |
+| `tests/test_artist_projection.py` | Artist-Hub projection tests (T-7 — app/artist_store/projection.py). |
 | `tests/test_artist_routes.py` | Artist-Hub route tests (T-8 — app/main.py, plan test row T13). |
 | `tests/test_artist_splitting.py` | Tests for artist-name splitting and the artist list it feeds. |
 | `tests/test_artist_store_registry.py` | Artist-Hub registry tests (T-4 — app/artist_store/registry.py). |

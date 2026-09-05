@@ -116,6 +116,53 @@ LibraryManagementSystem -- ANLZ Binary File Writer
 
 artist_store — Artist-Hub sidecar package (``artists.db``).
 
+### `app/artist_store/merge.py`
+
+artist_store.merge — duplicate-artist detection, preview, apply and revert (T-5/T-6).
+
+- `MergeError` — Base for every refusal that stops a merge before it writes.
+- `MergeUnavailable` — The library backend cannot repoint artists (XML mode, rbox absent) — HTTP 400.
+- `RekordboxRunningError` — Rekordbox holds the library — writing now races it — HTTP 409.
+- `fold_key()` — Deterministic grouping key for an artist name.
+- `group_id_for()` — Stable id for a fold group.
+- `suggest_canonical()` — Best-spelled variant of a group: most tracks, ties to mixed case, then A-Z.
+- `MergeVariant` — One spelling of an artist as the library currently holds it.
+- `  MergeVariant.as_dict()`
+- `MergeCandidate` — A group of library names that fold onto one key — i.e.
+- `  MergeCandidate.names()`
+- `  MergeCandidate.as_dict()`
+- `UsbFolderImpact` — One ``Contents/<Artist>`` folder the merge would collapse into the canonical one.
+- `  UsbFolderImpact.as_dict()`
+- `UsbImpact` — What the next USB export would have to reshuffle after this merge.
+- `  UsbImpact.as_dict()`
+- `MergePreview` — Everything an apply would touch, computed without touching any of it.
+- `  MergePreview.as_dict()`
+- `candidates()` — Library artist names that fold onto one key, biggest group first.
+- `preview()` — Exactly what an apply would do to one group — computed, never performed.
+- `preview_many()` — Preview several groups in one pass (the merge screen's "select all").
+- `SkippedFile` — An audio file the run could not write.
+- `  SkippedFile.as_dict()`
+- `MergeApplyResult` — What one merge run actually did — including where it stopped.
+- `  MergeApplyResult.revertable()`
+- `  MergeApplyResult.as_dict()`
+- `MergeRevertResult` — What a replay of one merge run restored — and what it could not.
+- `  MergeRevertResult.orphan_links_not_restored()`
+- `  MergeRevertResult.as_dict()`
+- `apply()` — Repoint every track of a variant group onto one canonical artist.
+- `revert()` — Undo one merge run: replay its journal in reverse, restoring the artist link.
+
+### `app/artist_store/projection.py`
+
+artist_store.projection — mirror favourite collections into Rekordbox (T-7).
+
+- `ProjectionError` — Base for every refusal that stops a projection run before it writes.
+- `ProjectionUnavailable` — The library backend cannot be projected into safely (route: HTTP 400).
+- `RekordboxRunningError` — Rekordbox holds the library — writing now races it (route: HTTP 409).
+- `folder_name_for()` — Root-folder name for a collection kind.
+- `playlist_xml_path()` — Rekordbox's ``masterPlaylists6.xml`` path as the facade reports it, or None.
+- `sync()` — Mirror the favourites of ``kind`` into Rekordbox.
+- `status()` — Projection state for the panel.
+
 ### `app/artist_store/registry.py`
 
 artist_store.registry — library artists into the store, favourites, Tier-1 backlog (T-4).
@@ -138,6 +185,9 @@ artist_store.schema — sidecar DB + migration runner for the Artist Hub (T-3).
 - `sort_key_for()` — Default ordering key — folded name, so ``(kind, sort_key)`` sorts naturally.
 - `migrate()` — Bring ``conn`` to ``SCHEMA_VERSION``.
 - `init_db()` — Eager, idempotent schema create for sidecar boot.
+- `set_meta()` — Store one process-wide scalar (e.g.
+- `get_meta()`
+- `delete_meta()`
 - `create_collection()` — Create (or adopt) the collection for ``canonical_name``; returns its id.
 - `get_collection()`
 - `get_collection_by_name()` — Lookup by derived id — case/whitespace-insensitive by construction.
@@ -287,12 +337,20 @@ Setup logging
 - `  RekordboxDB.add_track_to_playlist()`
 - `  RekordboxDB.remove_track_from_playlist()`
 - `  RekordboxDB.get_playlist_children()` — Direct children of a playlist folder, read from the backend not the cache.
+- `  RekordboxDB.get_playlist_by_id()` — One playlist/folder node by id, or None when it no longer exists.
+- `  RekordboxDB.get_playlist_track_ids()` — Track ids currently in a playlist, read from the backend not the cache.
+- `  RekordboxDB.playlist_xml_path()` — Rekordbox's masterPlaylists6.xml path, or None when the backend has none.
 - `  RekordboxDB.get_playlist_by_path()` — Resolve a folder/playlist path like ["Artists", "Boys Noize"].
 - `  RekordboxDB.get_unanalyzed_track_ids()` — Track IDs with no analysis yet.
 - `  RekordboxDB.save()`
 - `  RekordboxDB.update_tracks_metadata()`
 - `  RekordboxDB.update_track_comment()`
 - `  RekordboxDB.update_track_path()` — Update the on-disk file path of a track after a rename operation.
+- `  RekordboxDB.get_content_by_id()` — Raw ``DjmdContent`` row, or None in XML mode / when rbox cannot serve it.
+- `  RekordboxDB.update_content()` — Write a whole ``DjmdContent`` row back.
+- `  RekordboxDB.get_artist_by_name()` — ``DjmdArtist`` row for an EXACT (case-sensitive) name, or None.
+- `  RekordboxDB.create_artist()` — Insert a ``DjmdArtist`` row and return it (rbox mints the id + USN).
+- `  RekordboxDB.delete_artist()` — Hard-delete a ``DjmdArtist`` row.
 - `  RekordboxDB.save_track_cues()`
 - `  RekordboxDB.get_track_cues()` — Sidecar override first, then whatever the active DB loaded.
 - `  RekordboxDB.save_track_beatgrid()`
@@ -466,6 +524,9 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `  LiveRekordboxDB.add_track_to_playlist()`
 - `  LiveRekordboxDB.remove_track_from_playlist()`
 - `  LiveRekordboxDB.get_playlist_children()` — Direct children of a playlist folder, straight from the DB.
+- `  LiveRekordboxDB.get_playlist_by_id()` — One playlist/folder node by id, straight from the DB — None when it is gone.
+- `  LiveRekordboxDB.get_playlist_track_ids()` — Content ids currently linked to a playlist, read fresh (not from the cache).
+- `  LiveRekordboxDB.playlist_xml_path()` — Path to Rekordbox's masterPlaylists6.xml, or None when rbox found none.
 - `  LiveRekordboxDB.get_playlist_by_path()` — Resolve a folder/playlist path like ["Artists", "Boys Noize"].
 - `  LiveRekordboxDB.reorder_playlist_track()` — Reorders a track in a playlist.
 
@@ -525,6 +586,10 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `DBModeReq`
 - `ArtistFavouriteReq`
 - `ArtistSyncModeReq`
+- `ArtistMergePreviewReq` — One variant group to cost.
+- `ArtistMergeApplyReq` — Same group plus the three effects the confirm dialog has to state up front.
+- `ArtistMergeRevertReq`
+- `ArtistProjectionSyncReq`
 - `stream_audio()` — Streams audio file with HTTP Range support — required for browser seeking.
 - `get_multiband_waveform()` — Returns 3-band waveform data for professional visualization.
 - `FileRevealReq`
@@ -546,6 +611,14 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `add_artist_favourite()` — Favourite an artist by sidecar id, or by the raw library name a backlog row shows.
 - `remove_artist_favourite()` — Un-favourite.
 - `set_artist_sync_mode()` — Per-artist catalogue sync behaviour: auto / review / off.
+- `artist_job_status()` — Poll one artist-hub job.
+- `artist_merge_candidates()` — Library artist names that fold onto one key, biggest group first.
+- `artist_merge_preview()` — Exactly what an apply would touch — computed, never performed.
+- `artist_merge_apply()` — Repoint a variant group onto one canonical artist.
+- `artist_merge_revert()` — Replay one merge run's journal in reverse.
+- `artist_merge_runs()` — Artist-merge runs, newest first — the history the revert button drives.
+- `artist_projection_sync()` — Mirror the favourites into Rekordbox as the `Artists` folder.
+- `artist_projection_status()` — Folder + per-artist projection state.
 - `get_label_tracks()`
 - `get_album_tracks()`
 - `get_track()`
@@ -1206,6 +1279,33 @@ transportReducer — playhead, BPM, zoom/scroll, snap-grid, edit-mode, project m
 
 - `transportReducer()` — transportReducer — playhead, BPM, zoom/scroll, snap-grid, edit-mode, project metadata, and audio-so…
 
+### `frontend/src/components/artistHub/artistHubApi.js`
+
+artistHubApi — the merge + projection half of the Artist Hub's HTTP surface.
+
+- `errorMessage()` — export const REKORDBOX_RUNNING_MESSAGE = 'Rekordbox is open and holds the library.
+- `fetchMergeCandidates()`
+- `fetchMergePreview()`
+- `fetchMergeRuns()`
+- `revertMergeRun()` — export const applyMerge = async ({ names, canonical, deleteOrphans }, hooks = {}) => { const starte…
+- `fetchProjectionStatus()`
+
+### `frontend/src/components/artistHub/mergeCopy.js`
+
+mergeCopy — the sentences the merge dialog has to say out loud.
+
+- `formatBytes()` — export const formatNumber = (value) => { const n = Number(value); return Number.isFinite(n) ?
+- `databaseEffect()` — export const dryRunLine = (preview) => `${pluralise(preview?.tracks_to_rewrite, 'track', 'tracks')}…
+- `usbEffect()` — export const filesEffect = (preview) => { if (preview?.files_measured === false) { return 'The arti…
+- `usbFolderList()` — export const mergeEffects = (preview) => [ { id: 'db', text: databaseEffect(preview) }, { id: 'file…
+- `compoundWarning()` — Repointing a track whose artist row names more than this group flattens the credit ("boys noize, Ob…
+- `confirmMessage()` — export const ORPHAN_WARNING_LINE = 'Hard delete, no tombstone — it also clears Remixer, Original-Ar…
+- `revertSummary()` — export const applySummary = (result) => { if (!result) return 'Merge finished.'; const parts = [`${…
+
+### `frontend/src/components/artistHub/mergeCopy.test.js`
+
+node --test frontend/src/components/artistHub/mergeCopy.test.js Pure copy builders — no DOM, no resolver needed (the imports carry extensio…
+
 ### `frontend/src/components/daw/timeline/useTimelineEvents.js`
 
 useTimelineEvents — Event-handler layer for DawTimeline Owns: - Hit-testing for cue flags (hot + memory) - Mouse down/move/up handlers (cli…
@@ -1354,6 +1454,9 @@ Frontend-wide constants.
 - `TOAST_DURATION_LONG_MS()` — Duration for long-form error toasts that the user needs time to read (full failure paths in DAW / e…
 - `AUDIO_IMPORT_TIMEOUT_MS()` — Axios timeout for the synchronous audio-import endpoint (/api/audio/import → full analysis pipeline…
 - `IMPORT_TASK_POLL_INTERVAL_MS()` — Poll cadence for /api/import/tasks while one or more uploaded files are still being analysed in the…
+- `ARTIST_MERGE_POLL_INTERVAL_MS()` — Poll cadence for a running artist-merge job (POST /api/artists/merge/apply → job_id, then GET /api/…
+- `ARTIST_MERGE_MAX_POLL_FAILURES()` — Consecutive failed status polls tolerated before the dialog stops waiting and tells the user it los…
+- `ARTIST_LONG_OP_TIMEOUT_MS()` — Axios timeout for the long artist-hub mutations (merge apply, merge revert, projection sync).
 
 ### `frontend/src/store/authStore.js`
 
@@ -1501,7 +1604,7 @@ Mirror of LibraryTools.smart_rename's token substitution + sanitisation,
 
 ### `frontend/src/components/TrackTable.jsx`
 
-Camelot
+*(no module docstring)*
 
 ### `frontend/src/components/UsbSettingsView.jsx`
 
@@ -1524,6 +1627,14 @@ UtilitiesView — router for the Utilities workspace.
 ### `frontend/src/components/XmlCleanView.jsx`
 
 Using existing endpoint but improved backend logic
+
+### `frontend/src/components/artistHub/MergeDialog.jsx`
+
+*(no module docstring)*
+
+### `frontend/src/components/artistHub/ProjectionPanel.jsx`
+
+ProjectionPanel — the `Artists` folder inside Rekordbox: what is projected right now, and the button that brings it up to date.
 
 ### `frontend/src/components/daw/DawBrowser.jsx`
 
@@ -1994,6 +2105,170 @@ Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout).
 - `test_pwav_out_of_range_does_not_crash()` — Regression: bytes([300]) / bytes([-1]) would raise ValueError; the
 - `test_pwv2_out_of_range_clamped()`
 - `test_pwv3_out_of_range_clamped_preserves_count()`
+
+### `tests/test_artist_merge_apply.py`
+
+Artist-Hub merge apply/revert tests (T-6 + T-11a — app/artist_store/merge.py).
+
+- `FakeArtist` — An rbox ``DjmdArtist`` row: an id and a name, nothing else the merge reads.
+- `FakeContent` — An rbox ``DjmdContent`` row — a WHOLE row, written whole by ``update_content``.
+- `  FakeContent.snapshot()`
+- `CountingLock` — ``db_lock()`` stand-in: counts acquisitions and knows whether it is held.
+- `FakeFacade` — The slice of ``RekordboxDB`` the merge uses, plus tripwires for the banned paths.
+- `  FakeFacade.get_tracks_by_artist()`
+- `  FakeFacade.get_content_by_id()`
+- `  FakeFacade.update_content()`
+- `  FakeFacade.get_artist_by_name()`
+- `  FakeFacade.create_artist()`
+- `  FakeFacade.delete_artist()`
+- `  FakeFacade.update_content_artist()`
+- `  FakeFacade.update_tracks_metadata()`
+- `lock()`
+- `test_concurrent_bpm_edit_survives_the_merge()` — The regression this whole write loop exists for.
+- `test_merge_bumps_the_content_usn()`
+- `test_writer_is_update_content_never_update_content_artist()` — ``update_content_artist`` and ``update_tracks_metadata`` are tripwires on the fake.
+- `test_db_lock_is_held_once_per_chunk()`
+- `test_canonical_artist_is_created_once_under_the_lock()`
+- `test_apply_then_revert_restores_the_artist_id()`
+- `test_revert_restores_the_file_tag()`
+- `test_revert_marks_every_mutation_and_is_idempotent()`
+- `test_revert_refuses_a_run_it_did_not_write()` — The undo log is shared with the metadata fixer — its runs must bounce off.
+- `test_revert_of_an_unknown_run_raises()`
+- `test_locked_file_is_skipped_and_reported()` — The DB row is still merged and journalled; the file is reported, never half-written.
+- `test_revert_leaves_a_failed_tag_write_unreverted_and_reports_partial()`
+- `test_verify_bytes_defaults_off_above_the_threshold()`
+- `test_verify_bytes_defaults_on_below_the_threshold()`
+- `test_no_hashing_and_no_file_access_when_tags_are_off()`
+- `test_revert_of_a_tagless_run_touches_no_file()`
+- `test_apply_refuses_to_start_while_rekordbox_runs()`
+- `test_run_aborts_cleanly_when_rekordbox_starts_mid_way()`
+- `test_aborted_run_reverts_only_what_it_wrote()`
+- `test_delete_orphans_is_off_by_default()`
+- `test_delete_orphans_removes_the_emptied_rows_and_journals_them_last()`
+- `test_revert_reinserts_the_artist_first_and_remaps_the_new_id()` — rbox mints a fresh id on insert, so the tracks must follow the NEW id.
+- `test_orphan_deletion_is_skipped_when_a_row_is_still_referenced()` — A variant the merge could not fully empty is reported, never deleted blindly.
+- `test_orphans_are_left_alone_when_the_run_aborted()`
+- `test_journal_captures_the_artist_id_not_only_the_name()` — The name alone cannot restore the entity link — the id is what revert needs.
+- `test_run_note_marks_the_run_as_an_artist_merge()`
+- `test_apply_refuses_a_backend_without_the_artist_writers()`
+- `test_apply_refuses_a_group_with_nothing_to_absorb()`
+- `test_apply_refuses_a_bare_artist_name_where_a_group_id_belongs()`
+- `test_tag_updates_only_ever_carries_the_allowlisted_field()`
+
+### `tests/test_artist_merge_preview.py`
+
+Artist-Hub merge detection + preview tests (T-5 — app/artist_store/merge.py).
+
+- `NoWriteDB` — Read-only proxy: every mutator raises instead of running.
+- `test_fold_key_collapses_typing_variants()`
+- `test_fold_key_keeps_different_artists_apart()`
+- `test_fold_key_is_empty_for_pure_punctuation()`
+- `test_casing_variants_form_one_group()`
+- `test_punctuation_variants_form_one_group()`
+- `test_ampersand_and_word_variants_form_one_group()` — ``&`` / ``and`` folds together.
+- `test_different_artists_do_not_group()`
+- `test_single_spelling_is_not_a_candidate()`
+- `test_groups_are_sorted_by_total_tracks_descending()`
+- `test_group_id_is_stable_across_reloads()`
+- `test_canonical_suggestion_prefers_the_most_owned_variant()`
+- `test_canonical_suggestion_breaks_ties_on_spelling()`
+- `test_canonical_suggestion_falls_back_to_alphabetical()`
+- `merge_library()` — 3 canonical tracks, 2 lower-case (30 bytes on disk), 1 upper-case with no file.
+- `test_preview_counts_match_the_fixture()`
+- `test_preview_reports_the_usb_folders_that_would_merge()`
+- `test_preview_accepts_explicit_names_and_a_canonical_outside_the_library()`
+- `test_preview_defaults_to_the_suggested_canonical()`
+- `test_preview_deduplicates_a_track_credited_to_two_variants()` — One track, two spellings of the same artist in its credit — still one rewrite.
+- `test_preview_measure_files_off_skips_the_filesystem()`
+- `test_preview_falls_back_to_variant_counts_without_a_track_lookup()`
+- `test_preview_rejects_an_unknown_group_id()`
+- `test_preview_rejects_an_empty_group()`
+- `test_preview_rejects_a_bare_artist_name()` — A string is iterable — without the guard this would group single letters.
+- `test_preview_as_dict_is_json_shaped()`
+- `test_preview_writes_nothing()`
+- `test_preview_many_writes_nothing()`
+- `test_preview_leaves_the_library_rows_untouched()`
+
+### `tests/test_artist_merge_routes.py`
+
+Artist-Hub merge + projection route tests (T-8 rest — app/main.py, plan row T13).
+
+- `library()` — Fake facade + no device-token lookup, so no real user file is opened.
+- `tags()` — Tag reads/writes and hashing are faked: no route may need a real audio file.
+- `test_all_mutations_require_session()`
+- `test_all_mutations_reject_wrong_bearer()`
+- `test_rejected_mutation_starts_no_job_and_writes_nothing()`
+- `test_candidates_is_a_read_and_groups_the_variants()`
+- `test_preview_writes_nothing()`
+- `test_preview_rejects_an_empty_group()`
+- `test_preview_needs_a_loaded_library()`
+- `test_projection_status_is_a_read_without_auth()`
+- `test_apply_returns_a_job_id_the_status_endpoint_reports()`
+- `test_unknown_job_id_is_404()`
+- `test_second_apply_while_one_runs_gets_409()` — Single-flight: the in-flight job holds ``_artist_job_lock`` for its whole run.
+- `test_apply_409_when_rekordbox_is_running()`
+- `test_apply_rejects_a_group_with_nothing_to_absorb()`
+- `test_revert_unknown_run_is_404()`
+- `test_revert_refuses_a_metadata_fixer_run()` — The undo log is shared — replaying a fixer run here would restore another field.
+- `test_apply_then_revert_restores_the_artist_link()`
+- `test_runs_lists_merge_runs_only()`
+- `test_projection_sync_returns_a_job_id()`
+- `test_projection_sync_409_when_rekordbox_is_running()`
+- `test_projection_dry_run_is_allowed_while_rekordbox_runs()` — A dry run writes nothing at all, so the process guard does not apply to it.
+- `test_projection_sync_400_without_the_playlist_xml()` — rbox drops the masterPlaylists6.xml update when the file is not beside master.db.
+- `test_second_projection_sync_while_one_runs_gets_409()`
+
+### `tests/test_artist_projection.py`
+
+Artist-Hub projection tests (T-7 — app/artist_store/projection.py).
+
+- `FakeRekordbox` — Mocked facade.
+- `  FakeRekordbox.artists()`
+- `  FakeRekordbox.get_tracks_by_artist()`
+- `  FakeRekordbox.playlist_xml_path()`
+- `  FakeRekordbox.get_playlist_by_id()`
+- `  FakeRekordbox.get_playlist_by_path()`
+- `  FakeRekordbox.get_playlist_children()`
+- `  FakeRekordbox.get_playlist_track_ids()`
+- `  FakeRekordbox.create_folder()`
+- `  FakeRekordbox.create_playlist()`
+- `  FakeRekordbox.add_track_to_playlist()`
+- `  FakeRekordbox.remove_track_from_playlist()`
+- `  FakeRekordbox.drop()` — What the user does inside Rekordbox when they delete a node.
+- `  FakeRekordbox.folders()`
+- `  FakeRekordbox.children_of()`
+- `  FakeRekordbox.reset_calls()`
+- `store()` — Throwaway sidecar DB; never the user's real ``artists.db``.
+- `test_sync_twice_leaves_one_folder_and_n_playlists()`
+- `test_second_sync_adds_no_duplicate_entries()`
+- `test_unchanged_artist_performs_zero_writes()`
+- `test_folder_is_addressed_by_stored_id_not_by_name()` — A name lookup on every run would silently hit a same-named sibling.
+- `test_new_tracks_are_added_to_an_existing_playlist()`
+- `test_stale_tracks_are_removed_not_recreated()`
+- `test_duplicate_rows_from_an_earlier_run_are_healed()`
+- `test_alias_variants_land_in_one_playlist()`
+- `test_deleted_playlist_is_recreated_and_the_new_id_stored()`
+- `test_playlist_recreated_by_hand_is_readopted_not_duplicated()`
+- `test_preexisting_folder_is_adopted_by_name_exactly_once()`
+- `test_deleted_folder_is_readopted_by_name_once_then_tracked_by_id()`
+- `test_renamed_folder_is_kept_by_id_never_duplicated()` — Renaming keeps the row id, so the id-map must follow the rename, not the name.
+- `test_a_playlist_named_artists_at_root_is_not_adopted_as_the_folder()`
+- `test_run_aborts_when_rekordbox_is_running()`
+- `test_rekordbox_opened_mid_run_aborts_before_the_next_write()`
+- `test_rekordbox_is_rechecked_once_per_artist()` — Per artist, not per write — and not skipped either.
+- `test_missing_playlist_xml_refuses_to_run()`
+- `test_facade_without_the_passthrough_refuses_to_run()`
+- `test_dry_run_writes_nothing_and_reports_the_plan()`
+- `test_dry_run_diffs_an_existing_projection_without_writing()`
+- `test_dry_run_is_allowed_while_rekordbox_is_running()`
+- `test_last_projected_at_is_recorded_per_artist()`
+- `test_favourite_without_local_tracks_is_skipped_not_projected()`
+- `test_no_favourites_writes_nothing()`
+- `test_a_failing_artist_does_not_lose_the_rest_of_the_run()`
+- `test_a_failed_diff_still_stores_the_playlist_id()` — Otherwise the next run re-creates a playlist that already exists.
+- `test_status_reports_the_id_map_and_verifies_it()`
+- `test_every_master_db_write_goes_through_the_locked_facade()` — `db.active_db.<mutator>` bypasses `_db_write_lock` — an AST walk, not a habit.
+- `test_status_without_a_library_still_renders()`
 
 ### `tests/test_artist_routes.py`
 
