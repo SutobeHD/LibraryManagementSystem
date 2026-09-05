@@ -116,7 +116,7 @@
 | `frontend/src/store/authStore.js` | Tiny module-level auth state shared across the frontend. |
 | `frontend/src/utils/AudioBandAnalyzer.js` | AudioBandAnalyzer Splits an AudioBuffer into 3 frequency bands (Rekordbox-style): - Low: < 400 Hz (Bass / Kic… |
 | `frontend/src/utils/log.js` | Dev-only logging utility. |
-| `frontend/src/components/ArtistHubView.jsx` | ArtistHubView — the Artists tab. |
+| `frontend/src/components/ArtistHubView.jsx` | *(no module docstring)* |
 | `frontend/src/components/BatchEditBar.jsx` | *(no module docstring)* |
 | `frontend/src/components/ConfirmModal.jsx` | Module-level subscriber registry so a single mounted <ConfirmModalRoot /> |
 | `frontend/src/components/DownloadManagerView.jsx` | Stage pipeline (in execution order) — covers BOTH SC-DL and local-import |
@@ -175,6 +175,8 @@
 | `frontend/src/components/settings/SettingsNetwork.jsx` | SettingsNetwork — HTTP proxy, SoundCloud sync target, backend restart. |
 | `frontend/src/components/settings/SettingsShortcuts.jsx` | SettingsShortcuts — Configurable DAW keyboard shortcut bindings. |
 | `frontend/src/components/settings/SettingsUsb.jsx` | SettingsUsb — Per-stick USB profile CRUD (label, type, audio format). |
+| `frontend/src/components/shared/ContextMenu.jsx` | App-wide right-click menu. |
+| `frontend/src/components/shared/GlobalContextMenu.jsx` | Two jobs: |
 | `frontend/src/components/shared/WaveformMiniCanvas.jsx` | WaveformMiniCanvas — Reusable lightweight canvas waveform renderer Shared across WaveformOverview (DAW mini-m… |
 | `frontend/src/components/usb/MetadataSyncPanel.jsx` | MetadataSyncPanel — collapsible per-device metadata sync controls. |
 | `frontend/src/components/usb/PlayCountSync.jsx` | PlayCountSync — collapsible section inside UsbView. |

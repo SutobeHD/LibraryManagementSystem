@@ -128,6 +128,7 @@ artist_store.registry — library artists into the store, favourites, Tier-1 bac
 - `list_favourite_artists()` — Favourites enriched with local track count, sync mode and SC-link state.
 - `backlog()` — Tier-1 suggestions: artists you already own, most tracks first, favourites out.
 - `hub()` — Payload for ``GET /api/artists/hub``: favourites + Tier-1 backlog, one pass, no writes.
+- `browse()` — The whole artist list, searchable and sortable, every row flagged as favourite or not.
 
 ### `app/artist_store/schema.py`
 
@@ -541,6 +542,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `get_artists()`
 - `get_artist_tracks()`
 - `get_artist_hub()` — Favourite artists + Tier-1 backlog.
+- `browse_artists()` — Every artist in the library, paged, with favourite state per row.
 - `add_artist_favourite()` — Favourite an artist by sidecar id, or by the raw library name a backlog row shows.
 - `remove_artist_favourite()` — Un-favourite.
 - `set_artist_sync_mode()` — Per-artist catalogue sync behaviour: auto / review / off.
@@ -1376,7 +1378,7 @@ Dev-only logging utility.
 
 ### `frontend/src/components/ArtistHubView.jsx`
 
-ArtistHubView — the Artists tab.
+*(no module docstring)*
 
 ### `frontend/src/components/BatchEditBar.jsx`
 
@@ -1633,6 +1635,17 @@ SettingsShortcuts — Configurable DAW keyboard shortcut bindings.
 ### `frontend/src/components/settings/SettingsUsb.jsx`
 
 SettingsUsb — Per-stick USB profile CRUD (label, type, audio format).
+
+### `frontend/src/components/shared/ContextMenu.jsx`
+
+App-wide right-click menu.
+
+- `ContextMenu()`
+- `useContextMenu()` — State holder for a single context menu per component.
+
+### `frontend/src/components/shared/GlobalContextMenu.jsx`
+
+Two jobs:
 
 ### `frontend/src/components/shared/WaveformMiniCanvas.jsx`
 
@@ -2003,6 +2016,18 @@ Artist-Hub route tests (T-8 — app/main.py, plan test row T13).
 - `test_sync_mode_round_trips()`
 - `test_sync_mode_rejects_unknown_mode()`
 - `test_sync_mode_unknown_collection_is_404()`
+- `test_browse_returns_the_contract_shape_without_auth()`
+- `test_browse_lists_every_artist_name_sorted()`
+- `test_browse_keeps_favourites_in_the_list_and_flags_them()`
+- `test_browse_toggle_round_trips_through_the_favourite_routes()`
+- `test_browse_row_id_is_derived_until_a_resolve_pass_registers_it()` — Favourite a browse row by `name`: its `collection_id` need not exist in the store yet.
+- `test_browse_sorts_by_track_count()`
+- `test_browse_unknown_sort_falls_back_instead_of_erroring()`
+- `test_browse_query_filters_before_pagination()` — An artist past the first page must still be findable by search.
+- `test_browse_offset_pages_the_list()`
+- `test_browse_caps_the_limit()`
+- `test_browse_survives_hostile_paging()`
+- `test_browse_degrades_when_the_library_is_not_loaded()`
 
 ### `tests/test_artist_splitting.py`
 
@@ -2056,6 +2081,30 @@ Artist-Hub registry tests (T-4 — app/artist_store/registry.py).
 - `  TestBacklogSearchBeyondTheLimit.test_total_reports_the_pre_truncation_count()`
 - `  TestBacklogSearchBeyondTheLimit.test_query_is_case_and_whitespace_insensitive()`
 - `  TestBacklogSearchBeyondTheLimit.test_empty_query_is_not_a_filter()`
+- `test_browse_rows_carry_exactly_the_contract_keys()`
+- `test_browse_includes_favourites_and_flags_them()`
+- `test_browse_flags_a_favourite_reached_through_an_alias()`
+- `test_browse_reports_the_soundcloud_link_and_sync_mode()`
+- `test_browse_sorts_by_name_by_default()`
+- `test_browse_name_sort_is_case_insensitive()`
+- `test_browse_sorts_by_track_count_descending()`
+- `test_browse_track_sort_breaks_ties_by_name()`
+- `test_browse_unknown_sort_falls_back_to_name()`
+- `test_browse_total_is_the_pre_pagination_count()`
+- `test_browse_offset_pages_without_gaps_or_repeats()`
+- `test_browse_offset_past_the_end_is_an_empty_page()`
+- `TestBrowseSearchBeyondTheLimit` — The backlog bug class again: filtering only the delivered page hides the tail.
+- `  TestBrowseSearchBeyondTheLimit.test_query_filters_before_pagination()`
+- `  TestBrowseSearchBeyondTheLimit.test_query_matches_a_raw_library_variant()` — A merged variant is searchable by what Rekordbox shows, not just the canonical.
+- `  TestBrowseSearchBeyondTheLimit.test_query_is_case_and_whitespace_insensitive()`
+- `  TestBrowseSearchBeyondTheLimit.test_empty_query_is_not_a_filter()`
+- `test_browse_caps_the_limit()`
+- `test_browse_survives_a_non_positive_limit()`
+- `test_browse_survives_a_negative_offset()`
+- `test_browse_without_a_loaded_library_still_lists_favourites()` — No library is not the same as no favourites — a star must stay un-starrable.
+- `test_browse_without_a_library_or_favourites_is_an_empty_page()`
+- `test_browse_lists_a_favourite_the_library_no_longer_contains()` — Raising artist_view_threshold after favouriting must not orphan the star.
+- `test_browse_writes_nothing()`
 
 ### `tests/test_artist_store_schema.py`
 

@@ -3,17 +3,21 @@ import { toast } from 'react-hot-toast';
 import {
     ArrowLeft,
     Cloud,
+    Copy,
+    ListMusic,
     Loader2,
     Plus,
     RefreshCw,
     RotateCw,
     Search,
     Star,
+    StarOff,
     User,
 } from 'lucide-react';
 import api from '../api/api';
 import TrackTable from './TrackTable';
 import { confirmModal } from './ConfirmModal';
+import { useContextMenu } from './shared/ContextMenu';
 
 /**
  * ArtistHubView — the Artists tab. Left: curated favourites (link state, sync
@@ -156,11 +160,12 @@ const AliasNote = ({ names }) => {
 };
 
 /** One row of the right-hand panel. `action` is the trailing control (Add / star). */
-const SuggestionRow = ({ row, onOpen, action }) => (
+const SuggestionRow = ({ row, onOpen, action, onContextMenu }) => (
     <div
         role="button"
         tabIndex={0}
         onClick={() => onOpen(row)}
+        onContextMenu={(e) => onContextMenu?.(e, row)}
         onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
@@ -480,6 +485,83 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
         }
     }, []);
 
+    const artistMenu = useContextMenu();
+
+    const copyArtistName = useCallback(async (name) => {
+        try {
+            await navigator.clipboard.writeText(name);
+            toast.success(`Kopiert: ${name}`);
+        } catch (err) {
+            console.error('[ArtistHubView] clipboard write failed', err);
+            toast.error('Zwischenablage nicht verfügbar');
+        }
+    }, []);
+
+    const openArtistMenu = useCallback(
+        (e, row) => {
+            const isFav =
+                !!row.is_favourite || favourites.some((f) => f.collection_id === row.collection_id);
+            const items = [
+                {
+                    id: 'open',
+                    label: 'Tracks anzeigen',
+                    icon: ListMusic,
+                    onSelect: () => openArtist(row),
+                },
+                isFav
+                    ? {
+                          id: 'unfav',
+                          label: 'Aus Favoriten entfernen',
+                          icon: StarOff,
+                          danger: true,
+                          onSelect: () => removeFavourite(row),
+                      }
+                    : {
+                          id: 'fav',
+                          label: 'Zu Favoriten hinzufügen',
+                          icon: Star,
+                          onSelect: () => addFavourite(row),
+                      },
+                ...(isFav
+                    ? [
+                          { separator: true },
+                          ...SYNC_MODES.map((mode) => ({
+                              id: `sync-${mode.id}`,
+                              label: `Sync: ${mode.label}`,
+                              hint: row.sync_mode === mode.id ? '✓' : undefined,
+                              disabled: row.sync_mode === mode.id,
+                              onSelect: () => changeSyncMode(row, mode.id),
+                          })),
+                      ]
+                    : []),
+                { separator: true },
+                {
+                    id: 'sc-update',
+                    label: 'Von SoundCloud aktualisieren',
+                    icon: Cloud,
+                    disabled: true,
+                    hint: 'später',
+                },
+                {
+                    id: 'copy',
+                    label: 'Namen kopieren',
+                    icon: Copy,
+                    onSelect: () => copyArtistName(row.name),
+                },
+            ];
+            artistMenu.open(e, items, row.name);
+        },
+        [
+            artistMenu,
+            favourites,
+            openArtist,
+            addFavourite,
+            removeFavourite,
+            changeSyncMode,
+            copyArtistName,
+        ]
+    );
+
     const filteredFavourites = useMemo(() => {
         const q = searchTerm.toLowerCase();
         if (!q) return favourites;
@@ -644,6 +726,7 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                                             role="button"
                                             tabIndex={0}
                                             onClick={() => openArtist(row)}
+                                            onContextMenu={(e) => openArtistMenu(e, row)}
                                             onKeyDown={(e) => {
                                                 if (e.key === 'Enter' || e.key === ' ') {
                                                     e.preventDefault();
@@ -786,6 +869,7 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                                                     key={row.collection_id}
                                                     row={row}
                                                     onOpen={openArtist}
+                                                    onContextMenu={openArtistMenu}
                                                     action={
                                                         <button
                                                             type="button"
@@ -859,6 +943,7 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                                             key={row.collection_id}
                                             row={row}
                                             onOpen={openArtist}
+                                            onContextMenu={openArtistMenu}
                                             action={
                                                 <button
                                                     type="button"
@@ -911,6 +996,7 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                     </div>
                 </div>
             )}
+            {artistMenu.node}
         </div>
     );
 };
