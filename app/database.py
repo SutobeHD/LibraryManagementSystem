@@ -1087,6 +1087,37 @@ class RekordboxDB:
             return self.active_db.get_playlist_children(parent_id)
         return [p for p in self.playlists if str(p.get("ParentID")) == str(parent_id)]
 
+    def get_playlist_by_id(self, pid: str) -> dict[str, Any] | None:
+        """One playlist/folder node by id, or None when it no longer exists.
+
+        Read, not a write — deliberately outside `_db_write_lock` so verifying a
+        stored id doesn't serialise against every other writer.
+        """
+        if hasattr(self.active_db, "get_playlist_by_id"):
+            return self.active_db.get_playlist_by_id(pid)
+        return next((p for p in self.playlists if str(p.get("ID")) == str(pid)), None)
+
+    def get_playlist_track_ids(self, pid: str) -> list[str]:
+        """Track ids currently in a playlist, read from the backend not the cache."""
+        if hasattr(self.active_db, "get_playlist_track_ids"):
+            return self.active_db.get_playlist_track_ids(pid)
+        ids: list[str] = []
+        for t in self.get_playlist_tracks(pid) or []:
+            tid = t.get("ID") or t.get("id") or t.get("TrackID")
+            if tid:
+                ids.append(str(tid))
+        return ids
+
+    def playlist_xml_path(self) -> str | None:
+        """Rekordbox's masterPlaylists6.xml path, or None when the backend has none.
+
+        None is a hard stop for anything that creates playlists: rbox skips the XML
+        update without it and Rekordbox drops those playlists on the next restart.
+        """
+        if hasattr(self.active_db, "playlist_xml_path"):
+            return self.active_db.playlist_xml_path()
+        return None
+
     def get_playlist_by_path(self, path: list[str]) -> dict[str, Any] | None:
         """Resolve a folder/playlist path like ["Artists", "Boys Noize"].
 
@@ -1187,6 +1218,82 @@ class RekordboxDB:
                 tid,
             )
             return False
+
+    # --- Artist-entity passthroughs (Artist-Hub merge) -------------------
+    #
+    # The merge repoints tracks with `update_content(item)`, NOT with
+    # `update_content_artist(id, name)`: the latter leaves the content row's
+    # `rb_local_usn` stale (measured 330569 before AND after — see
+    # docs/research/implement/inprogress_library-artist-hub.md, wave 5), and
+    # Rekordbox uses that counter for change tracking and cloud sync.
+    #
+    # These sit on the facade so `app/artist_store/merge.py` never reaches
+    # through `active_db` and every write stays inside `_db_write_lock`.
+    # They are the raw rbox row objects, not UI dicts — the merge mutates
+    # exactly one attribute on a row it re-read inside the lock.
+
+    def _rbox_handle(self) -> Any | None:
+        """rbox ``MasterDb`` of the live backend, or None (XML mode / not loaded)."""
+        backend = self.active_db
+        if backend is None:
+            return None
+        try:
+            return getattr(backend, "db", None)
+        except Exception as e:  # rbox is a compiled ext — raised type is not contractual
+            logger.warning("database: rbox handle unavailable (%s)", e)
+            return None
+
+    def get_content_by_id(self, tid: str) -> Any | None:
+        """Raw ``DjmdContent`` row, or None in XML mode / when rbox cannot serve it."""
+        handle = self._rbox_handle()
+        getter = getattr(handle, "get_content_by_id", None)
+        if getter is None:
+            return None
+        return getter(str(tid))
+
+    def update_content(self, item: Any) -> bool:
+        """Write a whole ``DjmdContent`` row back. Bumps ``rb_local_usn`` + ``updated_at``.
+
+        Full-row write: only pass a row re-read inside the same lock, or a stale
+        snapshot silently clobbers BPM / key / comment / colour / rating.
+        """
+        handle = self._rbox_handle()
+        writer = getattr(handle, "update_content", None)
+        if writer is None:
+            return False
+        writer(item)
+        return True
+
+    def get_artist_by_name(self, name: str) -> Any | None:
+        """``DjmdArtist`` row for an EXACT (case-sensitive) name, or None."""
+        handle = self._rbox_handle()
+        getter = getattr(handle, "get_artist_by_name", None)
+        if getter is None:
+            return None
+        return getter(str(name))
+
+    def create_artist(self, name: str) -> Any | None:
+        """Insert a ``DjmdArtist`` row and return it (rbox mints the id + USN)."""
+        handle = self._rbox_handle()
+        creator = getattr(handle, "create_artist", None)
+        if creator is None:
+            return None
+        return creator(str(name))
+
+    def delete_artist(self, artist_id: str) -> bool:
+        """Hard-delete a ``DjmdArtist`` row. No tombstone.
+
+        Collateral, measured: it also NULLs ``ArtistID``, ``RemixerID``,
+        ``OrgArtistID``, ``ComposerID`` and ``Lyricist`` on every referencing
+        content row and leaves those rows' ``rb_local_usn`` stale. Callers must
+        prove the row is unreferenced first.
+        """
+        handle = self._rbox_handle()
+        deleter = getattr(handle, "delete_artist", None)
+        if deleter is None:
+            return False
+        deleter(str(artist_id))
+        return True
 
     # --- Cue + beatgrid persistence -------------------------------------
     #
@@ -1301,6 +1408,9 @@ for _name in (
     "update_track_path",
     "save_track_cues",
     "save_track_beatgrid",
+    "update_content",
+    "create_artist",
+    "delete_artist",
 ):
     setattr(RekordboxDB, _name, _serialised(getattr(RekordboxDB, _name)))
 del _name

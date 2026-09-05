@@ -36,6 +36,14 @@ Marker convention in the route tables below:
 | POST | `/api/artists/favourites` `[AUTH]` | Favourite an artist by `collection_id` or by raw library `name` |
 | DELETE | `/api/artists/favourites/{collection_id}` `[AUTH]` | Un-favourite an artist (idempotent; aliases + links survive) |
 | POST | `/api/artists/{collection_id}/sync-mode` `[AUTH]` | Set per-artist catalogue sync mode: `auto` / `review` / `off` |
+| GET | `/api/artists/merge/candidates` | Duplicate-spelling groups (case / whitespace / `.-_` / apostrophes / `&`↔`and`), biggest first. Pure read |
+| POST | `/api/artists/merge/preview` | Cost one group without touching it: tracks, files, orphans, USB folders. POST for payload size only — writes nothing, no session |
+| POST | `/api/artists/merge/apply` `[AUTH]` | Repoint a group onto one canonical artist. Body `{names[], canonical, write_tags?, verify_bytes?, delete_orphans?}` → job id; 409 while another artist-hub job runs or Rekordbox is open |
+| POST | `/api/artists/merge/revert/{run_id}` `[AUTH]` | Replay one merge run's journal in reverse → job id. 404 unknown run, 400 if the run is a metadata-fixer run |
+| GET | `/api/artists/merge/runs` | Artist-merge runs newest first (fixer runs in the shared undo log filtered out), `note` pre-parsed |
+| POST | `/api/artists/projection/sync` `[AUTH]` | Mirror favourites into Rekordbox as the `Artists` folder → job id. `{dry_run}` writes nothing and is allowed while Rekordbox is open; a real run 409s |
+| GET | `/api/artists/projection/status` | Folder + per-artist projection state; renders before the library loads |
+| GET | `/api/artists/jobs/{job_id}` | Poll one artist-hub job (`kind`, `status`, `total/done/percent/eta_seconds/cancel_requested`, `result`, `error`) |
 | GET | `/api/genres` | All genres |
 | GET | `/api/labels` | All labels |
 | GET | `/api/albums` | All albums |

@@ -4,6 +4,7 @@ import {
     ArrowLeft,
     Cloud,
     Copy,
+    GitMerge,
     ListMusic,
     Loader2,
     Plus,
@@ -18,6 +19,9 @@ import api from '../api/api';
 import TrackTable from './TrackTable';
 import { confirmModal } from './ConfirmModal';
 import { useContextMenu } from './shared/ContextMenu';
+import MergeDialog from './artistHub/MergeDialog';
+import ProjectionPanel from './artistHub/ProjectionPanel';
+import { fetchMergeCandidates } from './artistHub/artistHubApi';
 
 /**
  * ArtistHubView — the Artists tab. Left: curated favourites (link state, sync
@@ -207,6 +211,14 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
     const [browseLoading, setBrowseLoading] = useState(false);
     const [browseAppending, setBrowseAppending] = useState(false);
     const [browseError, setBrowseError] = useState(false);
+    const [mergeOpen, setMergeOpen] = useState(false);
+    const [mergeSeed, setMergeSeed] = useState(null);
+    // null = not scanned (or the scan failed) — the affordance stays honest about
+    // not knowing instead of rendering a confident "0".
+    const [duplicateCount, setDuplicateCount] = useState(null);
+    // Bumped whenever something the Rekordbox projection mirrors has changed
+    // (a favourite, a merge), so the panel re-reads its state instead of drifting.
+    const [projectionToken, setProjectionToken] = useState(0);
 
     // name → library artist id (`art_N`). The ids are list indexes rebuilt on
     // every library load, so this cache is dropped whenever the library reloads.
@@ -231,6 +243,17 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
             toast.error('Failed to load the artist hub');
         } finally {
             setIsLoading(false);
+        }
+    }, []);
+
+    // Ambient badge: a failed scan must not toast — the user did not ask for it.
+    const loadDuplicateCount = useCallback(async () => {
+        try {
+            const groups = await fetchMergeCandidates();
+            setDuplicateCount(groups.length);
+        } catch (e) {
+            console.error('[ArtistHub] duplicate scan failed', e);
+            setDuplicateCount(null);
         }
     }, []);
 
@@ -280,6 +303,7 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
         setHubRequested(false);
         setBrowseRows([]);
         setBrowseTotal(0);
+        setDuplicateCount(null);
     }, [libraryStatus?.loaded]);
 
     // The view stays mounted behind the other library tabs, so the fetch waits
@@ -288,7 +312,8 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
         if (!active || hubRequested) return;
         setHubRequested(true);
         loadHub();
-    }, [active, hubRequested, loadHub]);
+        loadDuplicateCount();
+    }, [active, hubRequested, loadHub, loadDuplicateCount]);
 
     // Re-query the server as the search term changes, debounced so typing does not
     // fire a request per keystroke.
@@ -322,10 +347,31 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
     // The refresh button must not hand its click event to `loadHub` as a query.
     const refreshPanels = useCallback(() => {
         loadHub(searchTerm.trim());
+        loadDuplicateCount();
+        setProjectionToken((n) => n + 1);
         if (suggestTab === SUGGEST_TAB_ALL) {
             loadBrowse({ query: searchTerm.trim(), sort: browseSort, offset: 0, append: false });
         }
-    }, [browseSort, loadBrowse, loadHub, searchTerm, suggestTab]);
+    }, [browseSort, loadBrowse, loadDuplicateCount, loadHub, searchTerm, suggestTab]);
+
+    const openMergeDialog = useCallback((seed = null) => {
+        setMergeSeed(seed);
+        setMergeOpen(true);
+    }, []);
+
+    // A merge (or a revert) rewrites artist rows, so every cached view of them is
+    // stale: the name→`art_N` index, the browse page, the hub and the projection.
+    const handleMergeApplied = useCallback(() => {
+        libraryIndexRef.current = null;
+        setSelected(null);
+        setTracks([]);
+        setProjectionToken((n) => n + 1);
+        loadHub(searchTerm.trim());
+        loadDuplicateCount();
+        if (suggestTab === SUGGEST_TAB_ALL) {
+            loadBrowse({ query: searchTerm.trim(), sort: browseSort, offset: 0, append: false });
+        }
+    }, [browseSort, loadBrowse, loadDuplicateCount, loadHub, searchTerm, suggestTab]);
 
     const libraryArtistIndex = useCallback(async () => {
         if (libraryIndexRef.current) return libraryIndexRef.current;
@@ -403,6 +449,7 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                 const cid = res.data?.collection_id || row.collection_id;
                 patchBrowseRow(row.collection_id, { is_favourite: true, collection_id: cid });
                 toast.success(`${row.name} added to favourites`);
+                setProjectionToken((n) => n + 1);
                 await loadHub(searchTerm.trim());
                 return true;
             } catch (e) {
@@ -425,6 +472,7 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                 );
                 patchBrowseRow(row.collection_id, { is_favourite: false });
                 toast.success(`${row.name} removed from favourites`);
+                setProjectionToken((n) => n + 1);
                 await loadHub(searchTerm.trim());
                 return true;
             } catch (e) {
@@ -536,6 +584,12 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                     : []),
                 { separator: true },
                 {
+                    id: 'merge',
+                    label: 'Schreibweisen zusammenführen…',
+                    icon: GitMerge,
+                    onSelect: () => openMergeDialog(row.name),
+                },
+                {
                     id: 'sc-update',
                     label: 'Von SoundCloud aktualisieren',
                     icon: Cloud,
@@ -559,6 +613,7 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
             removeFavourite,
             changeSyncMode,
             copyArtistName,
+            openMergeDialog,
         ]
     );
 
@@ -639,6 +694,32 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                 )}
 
                 <div className="flex items-center gap-3 shrink-0">
+                    {!selected && (
+                        <button
+                            onClick={() => openMergeDialog(null)}
+                            title={
+                                duplicateCount === null
+                                    ? 'Open the merge screen — the duplicate scan has not run'
+                                    : duplicateCount > 0
+                                      ? `${duplicateCount} artist${
+                                            duplicateCount === 1 ? '' : 's'
+                                        } spelled more than one way — review and merge`
+                                      : 'No duplicate spellings found — opens the merge screen and its run history'
+                            }
+                            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-mx-sm text-[11px] border transition-colors ${
+                                duplicateCount > 0
+                                    ? 'bg-amber2/10 border-amber2/40 text-amber2 hover:bg-amber2/20'
+                                    : 'bg-mx-card border-line-subtle text-ink-muted hover:text-ink-secondary'
+                            }`}
+                        >
+                            <GitMerge size={13} />
+                            {duplicateCount === null
+                                ? 'Duplicates'
+                                : duplicateCount > 0
+                                  ? `Duplicates · ${duplicateCount}`
+                                  : 'No duplicates'}
+                        </button>
+                    )}
                     {!selected && (
                         <button
                             onClick={refreshPanels}
@@ -978,6 +1059,8 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                             </div>
                         </div>
 
+                        <ProjectionPanel refreshToken={projectionToken} />
+
                         <div className="rounded-xl border border-dashed border-line-subtle bg-mx-input/60 p-3.5 shrink-0">
                             <div className="flex items-center gap-2 mb-1.5">
                                 <Cloud size={14} className="text-ink-muted" />
@@ -995,6 +1078,13 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                         </div>
                     </div>
                 </div>
+            )}
+            {mergeOpen && (
+                <MergeDialog
+                    seedName={mergeSeed}
+                    onClose={() => setMergeOpen(false)}
+                    onApplied={handleMergeApplied}
+                />
             )}
             {artistMenu.node}
         </div>

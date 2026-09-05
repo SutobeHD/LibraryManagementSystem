@@ -43,3 +43,19 @@ export const AUDIO_IMPORT_TIMEOUT_MS = 0;
 // still being analysed in the background. 1 s feels live without spamming
 // the backend; the import_tracker snapshot is cheap (in-memory dict copy).
 export const IMPORT_TASK_POLL_INTERVAL_MS = 1000;
+
+// Poll cadence for a running artist-merge job (POST /api/artists/merge/apply →
+// job_id, then GET /api/artists/merge/status). Slower than the import poll: a
+// merge chunk is 200 rows and the progress numbers only move per chunk.
+export const ARTIST_MERGE_POLL_INTERVAL_MS = 1500;
+
+// Consecutive failed status polls tolerated before the dialog stops waiting and
+// tells the user it lost the job. A single dropped request is normal while the
+// backend holds the DB write lock; five in a row is not.
+export const ARTIST_MERGE_MAX_POLL_FAILURES = 5;
+
+// Axios timeout for the long artist-hub mutations (merge apply, merge revert,
+// projection sync). `0` disables it: these run under the master.db write lock
+// for as long as the library needs, and the default 10 s would abort the request
+// while the backend keeps writing — the worst possible outcome.
+export const ARTIST_LONG_OP_TIMEOUT_MS = 0;

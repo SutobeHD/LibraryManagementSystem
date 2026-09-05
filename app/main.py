@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import multiprocessing as _mp
 import os
@@ -10,6 +11,7 @@ import time
 import traceback
 import urllib.parse
 import uuid
+from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -80,11 +82,14 @@ KEYRING_SERVICE = "library_management_system"
 KEYRING_SC_TOKEN = "sc_token"
 
 from . import audio_tags, download_registry, folder_watcher
+from .artist_store import merge as artist_merge
+from .artist_store import projection as artist_projection
 from .artist_store import registry as artist_registry
 from .artist_store import schema as artist_schema
 from .audio_analyzer import LIBROSA_AVAILABLE, AudioAnalyzer
 from .config import EXPORT_DIR, LOG_DIR, MUSIC_DIR, TEMP_DIR
 from .database import db
+from .metadata_fixer import schema as fixer_log
 from .phrase_generator import (
     PhraseNotAnalysedError,
     commit_phrase_cues,
@@ -669,6 +674,29 @@ class ArtistSyncModeReq(BaseModel):
     mode: str  # "auto" | "review" | "off"
 
 
+class ArtistMergePreviewReq(BaseModel):
+    """One variant group to cost. `names` are raw library spellings, not sidecar ids."""
+
+    names: list[str] = []
+    canonical: str | None = None  # None → the engine's suggestion for the group
+
+
+class ArtistMergeApplyReq(ArtistMergePreviewReq):
+    """Same group plus the three effects the confirm dialog has to state up front."""
+
+    write_tags: bool = True
+    verify_bytes: bool | None = None  # None → on at/below merge.VERIFY_BYTES_MAX_TRACKS
+    delete_orphans: bool = False  # opt-in: hard delete, no tombstone, detaches 5 columns
+
+
+class ArtistMergeRevertReq(BaseModel):
+    write_tags: bool = True  # restore the file tags too, not just the DB rows
+
+
+class ArtistProjectionSyncReq(BaseModel):
+    dry_run: bool = False  # writes nothing at all; allowed while Rekordbox is open
+
+
 # NOTE: Library auto-load is handled by _on_startup() near the bottom of this file.
 # A second startup hook here was causing the DB to load twice (~90s startup).
 # Removed — do not add another startup handler here.
@@ -1107,6 +1135,299 @@ def set_artist_sync_mode(collection_id: str, r: ArtistSyncModeReq):
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
     return {"status": "success", "collection_id": collection_id, "mode": r.mode}
+
+
+# --- ARTIST HUB: merge + Rekordbox projection ----------------------------------------
+#
+# `apply`, `revert` and `projection/sync` are the only master.db writers in this
+# feature. They run as background jobs behind ONE single-flight lock: each takes
+# `db_lock()` per chunk inside the engine, so letting two of them interleave would put
+# two writers on the same content rows. The job record copies the phrase batch's shape
+# (`_phrase_jobs`) so the frontend polls one contract, not two.
+#
+# {job_id: {kind, status, total, done, percent, eta_seconds, cancel_requested,
+#           result, error}}
+_artist_jobs: dict[str, dict[str, Any]] = {}
+
+# Single-flight guard over every artist-hub write job. Acquired in the start handler so
+# the 409 check and the acquire are atomic for the request, released in
+# `_run_artist_job`'s finally — the same asymmetry as `_phrase_batch_lock`.
+_artist_job_lock = asyncio.Lock()
+
+ARTIST_JOB_MERGE_APPLY = "merge_apply"
+ARTIST_JOB_MERGE_REVERT = "merge_revert"
+ARTIST_JOB_PROJECTION_SYNC = "projection_sync"
+
+_RB_RUNNING_MERGE = "Rekordbox is running. Close it before merging artists."
+_RB_RUNNING_PROJECTION = "Rekordbox is running. Close it before syncing the Artists folder."
+
+
+def _artist_merge_names(raw: list[str]) -> list[str]:
+    """De-duplicated, stripped library spellings — or 400 when the group is empty."""
+    names: list[str] = []
+    for value in raw:
+        name = str(value or "").strip()
+        if name and name not in names:
+            names.append(name)
+    if not names:
+        raise HTTPException(400, "names must hold at least one artist spelling")
+    return names
+
+
+def _artist_merge_note(run: Mapping[str, Any]) -> dict[str, Any] | None:
+    """A run's note payload when it is an artist merge, else None.
+
+    The undo log is shared with the metadata fixer, so every run this feature hands out
+    or reverts is filtered on the kind marker — replaying a fixer run through the merge
+    engine would restore the wrong field.
+    """
+    try:
+        payload = json.loads(run.get("note") or "")
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict) or payload.get("kind") != artist_merge.MERGE_RUN_KIND:
+        return None
+    return payload
+
+
+def _artist_job_record(kind: str, total: int) -> dict[str, Any]:
+    return {
+        "kind": kind,
+        "status": "running",
+        "total": total,
+        "done": 0,
+        "percent": 0.0,
+        "eta_seconds": 0.0,
+        "cancel_requested": False,
+        "result": None,
+        "error": None,
+    }
+
+
+async def _run_artist_job(job_id: str, work: Callable[[], dict[str, Any]]) -> None:
+    """Run one artist-hub engine call off the event loop and bank its report.
+
+    `done`/`percent` step 0 → total in one move: `merge.apply`, `merge.revert` and
+    `projection.sync` are each a single atomic pass with no progress hook, so a
+    per-track counter here would be a fabricated bar. `cancel_requested` is carried for
+    shape parity with the phrase batch and nothing sets it — these engines cannot be
+    interrupted mid-run; they abort themselves when Rekordbox opens, which surfaces as
+    `result.aborted`.
+    """
+    job = _artist_jobs[job_id]
+    loop = asyncio.get_running_loop()
+    try:
+        job["result"] = await loop.run_in_executor(None, work)
+        job["status"] = "done"
+        job["done"] = job["total"]
+        job["percent"] = 100.0
+    except (artist_merge.RekordboxRunningError, artist_projection.RekordboxRunningError) as exc:
+        # The handler already 409'd on the process check; landing here means the user
+        # opened Rekordbox between the check and the first write.
+        logger.warning("[ARTIST] job %s aborted: %s", job_id, exc)
+        job["status"] = "error"
+        job["error"] = str(exc)
+    except Exception as exc:
+        logger.error("[ARTIST] job %s crashed: %s", job_id, exc, exc_info=True)
+        job["status"] = "error"
+        job["error"] = safe_error_message(exc)
+    finally:
+        # Lock acquired in the start handler; the worker owns its release.
+        if _artist_job_lock.locked():
+            _artist_job_lock.release()
+
+
+def _start_artist_job(
+    background_tasks: BackgroundTasks,
+    kind: str,
+    total: int,
+    work: Callable[[], dict[str, Any]],
+) -> str:
+    """Register + schedule a job. The caller must already hold `_artist_job_lock`."""
+    job_id = str(uuid.uuid4())
+    _artist_jobs[job_id] = _artist_job_record(kind, total)
+    logger.info("[ARTIST] job start: job_id=%s kind=%s total=%d", job_id, kind, total)
+    background_tasks.add_task(_run_artist_job, job_id, work)
+    return job_id
+
+
+@app.get("/api/artists/jobs/{job_id}")
+def artist_job_status(job_id: str):
+    """Poll one artist-hub job. Same envelope as `/api/phrase/batch/status`."""
+    if job_id not in _artist_jobs:
+        raise HTTPException(404, f"Job not found: {job_id}")
+    return {"status": "ok", "data": _artist_jobs[job_id]}
+
+
+@app.get("/api/artists/merge/candidates")
+def artist_merge_candidates():
+    """Library artist names that fold onto one key, biggest group first. Pure read.
+
+    Deterministic folds only (case, whitespace, `.-_`, apostrophes, `&`/`and`) — never
+    fuzzy: a wrong merge is far more expensive than a missed one.
+    """
+    groups = artist_merge.candidates(db if db.loaded else None)
+    return {"candidates": [c.as_dict() for c in groups], "total": len(groups)}
+
+
+@app.post("/api/artists/merge/preview")
+def artist_merge_preview(r: ArtistMergePreviewReq):
+    """Exactly what an apply would touch — computed, never performed.
+
+    POST only because the group can be a long list of names; it writes nothing (no
+    master.db, no tags, no sidecar) and needs no session.
+    """
+    if not db.loaded:
+        raise HTTPException(400, "Library not loaded")
+    names = _artist_merge_names(r.names)
+    try:
+        return artist_merge.preview(db, names, r.canonical).as_dict()
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+
+
+@app.post("/api/artists/merge/apply", dependencies=[Depends(require_session)])
+async def artist_merge_apply(r: ArtistMergeApplyReq, background_tasks: BackgroundTasks):
+    """Repoint a variant group onto one canonical artist. Journalled, revertable.
+
+    Returns a job id immediately — poll `/api/artists/jobs/{job_id}`. One artist-hub
+    job at a time (409 while one is in flight), and 409 while Rekordbox holds the
+    library. The preview runs here so a group with nothing to absorb, an unknown name
+    or an unusable backend fails as a 4xx instead of as a background-job error.
+    """
+    if not db.loaded:
+        raise HTTPException(400, "Library not loaded")
+    if _is_rekordbox_running():
+        raise HTTPException(409, _RB_RUNNING_MERGE)
+
+    names = _artist_merge_names(r.names)
+    try:
+        plan = artist_merge.preview(db, names, r.canonical, measure_files=False)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+    if not plan.absorbing:
+        raise HTTPException(
+            400, f"Nothing to merge into {plan.canonical!r} — the group has one spelling"
+        )
+
+    if _artist_job_lock.locked():
+        raise HTTPException(409, "An artist-hub job is already running")
+    await _artist_job_lock.acquire()
+
+    def _work() -> dict[str, Any]:
+        return artist_merge.apply(
+            db,
+            names,
+            r.canonical,
+            write_tags=r.write_tags,
+            verify_bytes=r.verify_bytes,
+            delete_orphans=r.delete_orphans,
+        ).as_dict()
+
+    job_id = _start_artist_job(
+        background_tasks, ARTIST_JOB_MERGE_APPLY, plan.tracks_to_rewrite, _work
+    )
+    return {
+        "status": "ok",
+        "data": {
+            "job_id": job_id,
+            "total": plan.tracks_to_rewrite,
+            "group_id": plan.group_id,
+            "canonical": plan.canonical,
+        },
+    }
+
+
+@app.post("/api/artists/merge/revert/{run_id}", dependencies=[Depends(require_session)])
+async def artist_merge_revert(
+    run_id: str,
+    background_tasks: BackgroundTasks,
+    r: ArtistMergeRevertReq = ArtistMergeRevertReq(),
+):
+    """Replay one merge run's journal in reverse. Returns a job id.
+
+    Only artist-merge runs are accepted: the undo log is shared with the metadata
+    fixer, and replaying a fixer run here would restore the wrong field.
+    """
+    if not db.loaded:
+        raise HTTPException(400, "Library not loaded")
+    fixer_log.init_db()
+    run = fixer_log.get_run(run_id)
+    if run is None:
+        raise HTTPException(404, f"Unknown merge run: {run_id}")
+    if _artist_merge_note(run) is None:
+        raise HTTPException(400, f"Run {run_id} is not an artist merge")
+    if _is_rekordbox_running():
+        raise HTTPException(409, _RB_RUNNING_MERGE)
+
+    pending = sum(1 for m in fixer_log.get_mutations(run_id) if not m["reverted"])
+
+    if _artist_job_lock.locked():
+        raise HTTPException(409, "An artist-hub job is already running")
+    await _artist_job_lock.acquire()
+
+    def _work() -> dict[str, Any]:
+        return artist_merge.revert(db, run_id, write_tags=r.write_tags).as_dict()
+
+    job_id = _start_artist_job(background_tasks, ARTIST_JOB_MERGE_REVERT, pending, _work)
+    return {"status": "ok", "data": {"job_id": job_id, "total": pending, "run_id": run_id}}
+
+
+@app.get("/api/artists/merge/runs")
+def artist_merge_runs():
+    """Artist-merge runs, newest first — the history the revert button drives.
+
+    Fixer runs in the same log are filtered out; `note` comes back parsed so the UI
+    does not have to re-JSON it.
+    """
+    fixer_log.init_db()
+    runs = []
+    for run in fixer_log.list_runs():
+        note = _artist_merge_note(run)
+        if note is not None:
+            runs.append({**run, "note": note})
+    return {"runs": runs, "total": len(runs)}
+
+
+@app.post("/api/artists/projection/sync", dependencies=[Depends(require_session)])
+async def artist_projection_sync(r: ArtistProjectionSyncReq, background_tasks: BackgroundTasks):
+    """Mirror the favourites into Rekordbox as the `Artists` folder. Returns a job id.
+
+    Idempotent: one folder and N playlists however often it runs. `dry_run` writes
+    nothing at all — not master.db, not the sidecar — and is allowed while Rekordbox is
+    open; a real run is not.
+    """
+    if not db.loaded:
+        raise HTTPException(400, "Library not loaded")
+    if artist_projection.playlist_xml_path(db) is None:
+        # rbox skips the masterPlaylists6.xml update when the file is not beside
+        # master.db, and Rekordbox then drops the playlists on its next restart.
+        raise HTTPException(
+            400,
+            "Rekordbox's masterPlaylists6.xml was not found next to master.db — "
+            "playlists written now would vanish on the next Rekordbox restart. "
+            "Switch to live mode with a real Rekordbox installation first.",
+        )
+    if not r.dry_run and _is_rekordbox_running():
+        raise HTTPException(409, _RB_RUNNING_PROJECTION)
+
+    total = len(artist_schema.list_favourites(artist_schema.KIND_ARTIST))
+
+    if _artist_job_lock.locked():
+        raise HTTPException(409, "An artist-hub job is already running")
+    await _artist_job_lock.acquire()
+
+    def _work() -> dict[str, Any]:
+        return artist_projection.sync(db, dry_run=r.dry_run)
+
+    job_id = _start_artist_job(background_tasks, ARTIST_JOB_PROJECTION_SYNC, total, _work)
+    return {"status": "ok", "data": {"job_id": job_id, "total": total, "dry_run": r.dry_run}}
+
+
+@app.get("/api/artists/projection/status")
+def artist_projection_status():
+    """Folder + per-artist projection state. Pure read; renders before the library loads."""
+    return artist_projection.status(db if db.loaded else None)
 
 
 @app.get("/api/label/{aid}/tracks")
@@ -3898,8 +4219,6 @@ async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
 
     if not track_ids:
         return {"status": "ok", "data": {"message": "No tracks to analyze", "total": 0}}
-
-    import json
 
     async def stream_progress():
         asyncio.get_running_loop()

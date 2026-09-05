@@ -1377,6 +1377,50 @@ class LiveRekordboxDB:
             logger.error(f"Failed to list children of playlist {parent_id}: {e}")
             return []
 
+    def get_playlist_by_id(self, pid):
+        """One playlist/folder node by id, straight from the DB — None when it is gone.
+
+        The projection's id-map verification: a stored id that no longer resolves
+        means the user deleted the node inside Rekordbox.
+        """
+        try:
+            pl = self.db.get_playlist_by_id(str(pid))
+            return self._playlist_node(pl) if pl is not None else None
+        except Exception as e:
+            logger.error(f"Failed to look up playlist {pid}: {e}")
+            return None
+
+    def get_playlist_track_ids(self, pid):
+        """Content ids currently linked to a playlist, read fresh (not from the cache).
+
+        `playlists_tracks` is only filled at library load and no mutator maintains it,
+        so a caller that diffs playlist membership must not read it — it would re-add
+        every track it just added.
+        """
+        try:
+            return [
+                str(s.content_id)
+                for s in self.db.get_playlist_songs(str(pid))
+                if hasattr(s, "content_id")
+            ]
+        except Exception as e:
+            logger.error(f"Failed to list songs of playlist {pid}: {e}")
+            return []
+
+    def playlist_xml_path(self):
+        """Path to Rekordbox's masterPlaylists6.xml, or None when rbox found none.
+
+        None means rbox opened master.db without the XML beside it and will silently
+        skip the XML update on every playlist create — playlists written in that state
+        disappear from Rekordbox on its next restart.
+        """
+        try:
+            path = self.db.playlist_xml_path()
+            return str(path) if path else None
+        except Exception as e:
+            logger.error(f"Failed to read playlist XML path: {e}")
+            return None
+
     def get_playlist_by_path(self, path):
         """Resolve a folder/playlist path like ["Artists", "Boys Noize"].
 

@@ -242,6 +242,40 @@ def init_db() -> None:
     _ensure_schema()
 
 
+# --------------------------------------------------------------------------- store meta
+
+#: Owned by the migration runner — not writable through ``set_meta``.
+_RESERVED_META_KEYS = frozenset({"schema_version"})
+
+
+def set_meta(key: str, value: str) -> None:
+    """Store one process-wide scalar (e.g. the projection's root-folder id)."""
+    if key in _RESERVED_META_KEYS:
+        raise ValueError(f"{key!r} is owned by the migration runner")
+    conn = _ensure_schema()
+    with _write_lock:
+        conn.execute(
+            "INSERT OR REPLACE INTO store_meta (key, value) VALUES (?, ?)", (key, str(value))
+        )
+        conn.commit()
+
+
+def get_meta(key: str) -> str | None:
+    conn = _ensure_schema()
+    row = conn.execute("SELECT value FROM store_meta WHERE key = ?", (key,)).fetchone()
+    return str(row[0]) if row is not None else None
+
+
+def delete_meta(key: str) -> bool:
+    if key in _RESERVED_META_KEYS:
+        raise ValueError(f"{key!r} is owned by the migration runner")
+    conn = _ensure_schema()
+    with _write_lock:
+        cur = conn.execute("DELETE FROM store_meta WHERE key = ?", (key,))
+        conn.commit()
+    return cur.rowcount > 0
+
+
 # --------------------------------------------------------------------------- collections
 
 
