@@ -11,8 +11,9 @@ Splitting and normalising are NOT redone here. ``_split_artists`` /
 This module consumes that list; a second normaliser would drift from the first.
 
 Only ``resolve_library_artists`` and the favourite mutators write. ``hub`` / ``backlog``
-/ ``list_favourite_artists`` are pure reads so ``GET /api/artists/hub`` stays a read,
-and the Tier-1 backlog makes zero network calls — the counts are already in memory.
+/ ``browse`` / ``list_favourite_artists`` are pure reads so ``GET /api/artists/hub`` and
+``GET /api/artists/browse`` stay reads, and the Tier-1 backlog makes zero network calls —
+the counts are already in memory.
 """
 
 from __future__ import annotations
@@ -31,6 +32,16 @@ PROVIDER_SOUNDCLOUD = "soundcloud"
 ALIAS_SOURCE_LIBRARY = "library"
 
 DEFAULT_BACKLOG_LIMIT = 25
+
+DEFAULT_BROWSE_LIMIT = 100
+
+#: Hard ceiling on one browse page. The library has thousands of artists and the view
+#: is not virtualised, so one request must not be able to ask for all of them.
+MAX_BROWSE_LIMIT = 500
+
+SORT_NAME = "name"
+SORT_TRACKS = "tracks"
+BROWSE_SORTS = (SORT_NAME, SORT_TRACKS)
 
 
 class _StoreIndex(NamedTuple):
@@ -244,6 +255,27 @@ def list_favourite_artists(db: Any = None, kind: str = KIND_ARTIST) -> list[dict
     return [_favourite_row(row, local) for row in schema.list_favourites(kind)]
 
 
+# --------------------------------------------------------------------------- search
+
+
+def _filter_rows(rows: list[dict[str, Any]], query: str) -> list[dict[str, Any]]:
+    """Rows whose canonical name or any raw library variant contains ``query``.
+
+    The raw variants are matched too: the store shows ``Boys Noize`` while the library
+    may hold ``BOYS NOIZE (Official)``, and a user typing what Rekordbox shows them has
+    to find the row.
+    """
+    needle = query.strip().casefold()
+    if not needle:
+        return rows
+    return [
+        row
+        for row in rows
+        if needle in str(row["name"]).casefold()
+        or any(needle in str(name).casefold() for name in row["library_names"])
+    ]
+
+
 # --------------------------------------------------------------------------- Tier-1 backlog
 
 
@@ -263,14 +295,7 @@ def _backlog_rows(
         for cid, row in local.items()
         if cid not in favourite_ids and row["track_count"] > 0
     ]
-    needle = query.strip().casefold()
-    if needle:
-        rows = [
-            row
-            for row in rows
-            if needle in str(row["name"]).casefold()
-            or any(needle in str(name).casefold() for name in row["library_names"])
-        ]
+    rows = _filter_rows(rows, query)
     rows.sort(key=lambda r: (-r["track_count"], r["sort_key"]))
     total = len(rows)
     if limit is not None:
@@ -320,4 +345,106 @@ def hub(
         "backlog": suggestions,
         "backlog_total": total,
         "backlog_query": query.strip(),
+    }
+
+
+# --------------------------------------------------------------------------- browse
+
+
+def _browse_row(row: dict[str, Any], favourite_ids: set[str]) -> dict[str, Any]:
+    """One browse row. Store lookups run per page row, never per library artist."""
+    cid = str(row["collection_id"])
+    return {
+        "collection_id": cid,
+        "name": row["name"],
+        "track_count": row["track_count"],
+        "artwork": row["artwork"],
+        "is_favourite": cid in favourite_ids,
+        "sync_mode": schema.get_sync_mode(cid),
+        "sc_linked": schema.get_link(cid, PROVIDER_SOUNDCLOUD) is not None,
+        "library_names": list(row["library_names"]),
+    }
+
+
+def browse(
+    db: Any,
+    query: str = "",
+    limit: int = DEFAULT_BROWSE_LIMIT,
+    offset: int = 0,
+    sort: str = SORT_NAME,
+    kind: str = KIND_ARTIST,
+) -> dict[str, Any]:
+    """The whole artist list, searchable and sortable, every row flagged as favourite or not.
+
+    The complement of ``backlog``: same one-pass machinery, but favourites stay **in**
+    the list carrying ``is_favourite`` so a row can be toggled either way. Pure read —
+    no writes, no network.
+
+    ``query`` filters before ``limit``/``offset``: a UI that filters only the page it
+    already holds finds nothing for an artist ranked below the first page. ``total`` is
+    the match count **before** pagination, so the view can say "showing 100 of 312"
+    honestly. Matching is case-insensitive against the canonical name and every raw
+    library variant.
+
+    ``sort`` is ``name`` (the store's fold-insensitive ``sort_key``) or ``tracks``
+    (owned count descending, ``sort_key`` breaking ties). Anything else falls back to
+    ``name`` rather than raising, and the applied value comes back in the payload.
+
+    Guards: ``limit`` is clamped into ``0..MAX_BROWSE_LIMIT`` (500) and ``offset`` to
+    ``>= 0``, so a negative page never slices from the tail and one request can never
+    pull the whole library. The effective values are echoed back.
+
+    ``db=None`` (library not loaded) yields an empty page rather than an error, the way
+    ``hub`` degrades.
+
+    A favourite whose collection has no rows in the loaded library is still listed, with
+    ``track_count`` 0. Dropping it would leave a star that exists in the favourites pane
+    but cannot be un-starred here — the two views would disagree about the same artist.
+    It is reachable by raising ``artist_view_threshold`` after favouriting, or by
+    swapping libraries.
+
+    Note this list is **not** every artist in ``master.db``: ``_finalize_ui_metadata``
+    (``app/live_database.py``) already dropped everyone below the user's
+    ``artist_view_threshold`` setting before the rows reach here. Nothing is re-filtered
+    on top of that.
+    """
+    sort_mode = sort if sort in BROWSE_SORTS else SORT_NAME
+    page_size = max(0, min(limit, MAX_BROWSE_LIMIT))
+    start = max(0, offset)
+
+    store = _store_index(kind)
+    local = _local_rows(db, kind, store) if db is not None else {}
+    favourite_ids = {str(row["id"]) for row in schema.list_favourites(kind)}
+
+    rows = list(local.values())
+    seen = {str(row["collection_id"]) for row in rows}
+    for favourite in schema.list_favourites(kind):
+        cid = str(favourite["id"])
+        if cid in seen:
+            continue
+        name = str(favourite["canonical_name"])
+        rows.append(
+            {
+                "collection_id": cid,
+                "name": name,
+                "sort_key": schema.sort_key_for(name),
+                "track_count": 0,
+                "artwork": "",
+                "library_names": [],
+            }
+        )
+    rows = _filter_rows(rows, query)
+    if sort_mode == SORT_TRACKS:
+        rows.sort(key=lambda r: (-r["track_count"], r["sort_key"]))
+    else:
+        rows.sort(key=lambda r: r["sort_key"])
+
+    page = rows[start : start + page_size]
+    return {
+        "artists": [_browse_row(row, favourite_ids) for row in page],
+        "total": len(rows),
+        "limit": page_size,
+        "offset": start,
+        "query": query.strip(),
+        "sort": sort_mode,
     }

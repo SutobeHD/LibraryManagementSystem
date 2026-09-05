@@ -17,8 +17,8 @@ import { confirmModal } from './ConfirmModal';
 
 /**
  * ArtistHubView — the Artists tab. Left: curated favourites (link state, sync
- * mode, per-artist Update). Right: suggestions — the Tier-1 local backlog plus
- * the SoundCloud discovery tab.
+ * mode, per-artist Update). Right: a three-tab panel — the Tier-1 local backlog,
+ * the complete "All artists" list, and the SoundCloud discovery tab.
  *
  * Milestone boundary: everything SoundCloud (per-artist Update, Update all,
  * discovery) is M2 of `docs/research/implement/inprogress_library-artist-hub.md`
@@ -31,6 +31,18 @@ const SYNC_MODES = [
     { id: 'review', label: 'Review' },
     { id: 'off', label: 'Off' },
 ];
+
+const SUGGEST_TAB_BACKLOG = 'backlog';
+const SUGGEST_TAB_ALL = 'all';
+
+const BROWSE_SORTS = [
+    { id: 'name', label: 'A–Z' },
+    { id: 'tracks', label: 'Most tracks' },
+];
+
+// One page of GET /api/artists/browse. Matches the route's own default so the
+// first page is never shorter than what "Load more" then pages past.
+const ARTIST_BROWSE_PAGE_SIZE = 100;
 
 const SC_PENDING_REASON =
     'SoundCloud sync is not built yet — this arrives in a later step of the artist-hub plan.';
@@ -84,18 +96,18 @@ const ScLinkChip = ({ linked }) =>
         </span>
     );
 
-const SyncModeControl = ({ value, onChange }) => (
+const Segmented = ({ options, value, onChange, titleFor }) => (
     <div className="inline-flex rounded-mx-sm overflow-hidden border border-line-subtle bg-mx-input">
-        {SYNC_MODES.map((m) => {
-            const on = (value || 'off') === m.id;
+        {options.map((option) => {
+            const on = value === option.id;
             return (
                 <button
-                    key={m.id}
+                    key={option.id}
                     type="button"
-                    title={`Sync mode: ${m.label}`}
+                    title={titleFor ? titleFor(option) : option.label}
                     onClick={(e) => {
                         e.stopPropagation();
-                        onChange(m.id);
+                        onChange(option.id);
                     }}
                     className={`px-2 py-[3px] text-[10px] border-r border-line-subtle last:border-r-0 transition-colors ${
                         on
@@ -103,11 +115,20 @@ const SyncModeControl = ({ value, onChange }) => (
                             : 'text-ink-muted hover:text-ink-secondary hover:bg-mx-hover'
                     }`}
                 >
-                    {m.label}
+                    {option.label}
                 </button>
             );
         })}
     </div>
+);
+
+const SyncModeControl = ({ value, onChange }) => (
+    <Segmented
+        options={SYNC_MODES}
+        value={value || 'off'}
+        onChange={onChange}
+        titleFor={(mode) => `Sync mode: ${mode.label}`}
+    />
 );
 
 const PanelHead = ({ label, right }) => (
@@ -124,6 +145,42 @@ const EmptyHint = ({ children }) => (
     <div className="px-3 py-8 text-center text-[12px] text-ink-muted">{children}</div>
 );
 
+const AliasNote = ({ names }) => {
+    const aliases = (names?.length || 1) - 1;
+    if (aliases <= 0) return null;
+    return (
+        <span>
+            · {aliases} {aliases === 1 ? 'alias' : 'aliases'} merged
+        </span>
+    );
+};
+
+/** One row of the right-hand panel. `action` is the trailing control (Add / star). */
+const SuggestionRow = ({ row, onOpen, action }) => (
+    <div
+        role="button"
+        tabIndex={0}
+        onClick={() => onOpen(row)}
+        onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onOpen(row);
+            }
+        }}
+        className="flex items-center gap-3 px-3 py-2 mb-1.5 rounded-xl bg-mx-card/40 hover:bg-amber2/10 border border-white/5 hover:border-amber2/50 cursor-pointer transition-all"
+    >
+        <ArtistAvatar name={row.name} artwork={row.artwork} small />
+        <div className="flex-1 min-w-0">
+            <div className="font-semibold text-[13px] text-ink-primary truncate">{row.name}</div>
+            <div className="mt-0.5 flex items-center gap-2 text-[11.5px] text-ink-muted flex-wrap">
+                <span className="font-mono">{row.track_count} tracks</span>
+                <AliasNote names={row.library_names} />
+            </div>
+        </div>
+        {action}
+    </div>
+);
+
 const HUB_SEARCH_DEBOUNCE_MS = 250;
 
 const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }) => {
@@ -138,10 +195,21 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
     const [tracks, setTracks] = useState([]);
     const [tracksLoading, setTracksLoading] = useState(false);
     const [busyId, setBusyId] = useState(null);
+    const [suggestTab, setSuggestTab] = useState(SUGGEST_TAB_BACKLOG);
+    const [browseRows, setBrowseRows] = useState([]);
+    const [browseTotal, setBrowseTotal] = useState(0);
+    const [browseSort, setBrowseSort] = useState(BROWSE_SORTS[0].id);
+    const [browseLoading, setBrowseLoading] = useState(false);
+    const [browseAppending, setBrowseAppending] = useState(false);
+    const [browseError, setBrowseError] = useState(false);
 
     // name → library artist id (`art_N`). The ids are list indexes rebuilt on
     // every library load, so this cache is dropped whenever the library reloads.
     const libraryIndexRef = useRef(null);
+
+    // Browse requests are debounced and "Load more" runs against a moving offset,
+    // so a slow earlier response must not overwrite a newer list.
+    const browseSeqRef = useRef(0);
 
     const loadHub = useCallback(async (query = '') => {
         setIsLoading(true);
@@ -161,11 +229,52 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
         }
     }, []);
 
+    const loadBrowse = useCallback(async ({ query, sort, offset, append }) => {
+        const seq = (browseSeqRef.current += 1);
+        if (append) {
+            setBrowseAppending(true);
+        } else {
+            setBrowseLoading(true);
+            setBrowseAppending(false);
+        }
+        try {
+            const res = await api.get('/api/artists/browse', {
+                params: { q: query, sort, limit: ARTIST_BROWSE_PAGE_SIZE, offset },
+            });
+            if (browseSeqRef.current !== seq) return;
+            const rows = res.data?.artists ?? [];
+            setBrowseRows((current) => (append ? [...current, ...rows] : rows));
+            setBrowseTotal((current) => {
+                const total = res.data?.total;
+                if (typeof total === 'number') return total;
+                return append ? current : rows.length;
+            });
+            setBrowseError(false);
+        } catch (e) {
+            if (browseSeqRef.current !== seq) return;
+            console.error('[ArtistHub] failed to load the artist list', e);
+            toast.error('Failed to load the artist list');
+            // An empty list after a failure must not read as "you own no artists".
+            setBrowseError(true);
+            if (!append) {
+                setBrowseRows([]);
+                setBrowseTotal(0);
+            }
+        } finally {
+            if (browseSeqRef.current === seq) {
+                setBrowseLoading(false);
+                setBrowseAppending(false);
+            }
+        }
+    }, []);
+
     useEffect(() => {
         libraryIndexRef.current = null;
         setSelected(null);
         setTracks([]);
         setHubRequested(false);
+        setBrowseRows([]);
+        setBrowseTotal(0);
     }, [libraryStatus?.loaded]);
 
     // The view stays mounted behind the other library tabs, so the fetch waits
@@ -183,6 +292,35 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
         const handle = setTimeout(() => loadHub(searchTerm.trim()), HUB_SEARCH_DEBOUNCE_MS);
         return () => clearTimeout(handle);
     }, [active, hubRequested, searchTerm, loadHub]);
+
+    // "All artists" pages server-side too: the term, the sort and the first page
+    // all go to the server, so nothing is filtered a second time in the browser.
+    useEffect(() => {
+        if (!active || suggestTab !== SUGGEST_TAB_ALL) return undefined;
+        setBrowseLoading(true);
+        const handle = setTimeout(
+            () =>
+                loadBrowse({
+                    query: searchTerm.trim(),
+                    sort: browseSort,
+                    offset: 0,
+                    append: false,
+                }),
+            HUB_SEARCH_DEBOUNCE_MS
+        );
+        return () => clearTimeout(handle);
+        // libraryStatus.loaded belongs here: the reset effect clears the rows when the
+        // library state flips, and without this dep nothing refetches — the panel then
+        // claims "no artists" for a library that is full of them.
+    }, [active, suggestTab, searchTerm, browseSort, libraryStatus?.loaded, loadBrowse]);
+
+    // The refresh button must not hand its click event to `loadHub` as a query.
+    const refreshPanels = useCallback(() => {
+        loadHub(searchTerm.trim());
+        if (suggestTab === SUGGEST_TAB_ALL) {
+            loadBrowse({ query: searchTerm.trim(), sort: browseSort, offset: 0, append: false });
+        }
+    }, [browseSort, loadBrowse, loadHub, searchTerm, suggestTab]);
 
     const libraryArtistIndex = useCallback(async () => {
         if (libraryIndexRef.current) return libraryIndexRef.current;
@@ -238,21 +376,61 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
         [libraryArtistIndex]
     );
 
+    // The three panes show the same artists from different angles, so a favourite
+    // change in one of them is written into the browse rows too instead of waiting
+    // for a reload — the star must never disagree with the favourites pane.
+    const patchBrowseRow = useCallback((collectionId, patch) => {
+        setBrowseRows((rows) =>
+            rows.map((r) => (r.collection_id === collectionId ? { ...r, ...patch } : r))
+        );
+    }, []);
+
+    // Both mutators report success as a boolean instead of throwing: the star
+    // toggle needs the verdict to roll its optimistic flip back, and the plain
+    // buttons have nothing to add to the toast a failure already raised.
     const addFavourite = useCallback(
         async (row) => {
             setBusyId(row.collection_id);
             try {
-                await api.post('/api/artists/favourites', { name: row.name });
+                // By name, not by id: a backlog/browse row can name an artist the
+                // sidecar has never stored, and only the name path creates it.
+                const res = await api.post('/api/artists/favourites', { name: row.name });
+                const cid = res.data?.collection_id || row.collection_id;
+                patchBrowseRow(row.collection_id, { is_favourite: true, collection_id: cid });
                 toast.success(`${row.name} added to favourites`);
-                await loadHub();
+                await loadHub(searchTerm.trim());
+                return true;
             } catch (e) {
                 console.error('[ArtistHub] add favourite failed', e);
                 toast.error(`Could not add ${row.name}`);
+                return false;
             } finally {
                 setBusyId(null);
             }
         },
-        [loadHub]
+        [loadHub, patchBrowseRow, searchTerm]
+    );
+
+    const dropFavourite = useCallback(
+        async (row) => {
+            setBusyId(row.collection_id);
+            try {
+                await api.delete(
+                    `/api/artists/favourites/${encodeURIComponent(row.collection_id)}`
+                );
+                patchBrowseRow(row.collection_id, { is_favourite: false });
+                toast.success(`${row.name} removed from favourites`);
+                await loadHub(searchTerm.trim());
+                return true;
+            } catch (e) {
+                console.error('[ArtistHub] remove favourite failed', e);
+                toast.error(`Could not remove ${row.name}`);
+                return false;
+            } finally {
+                setBusyId(null);
+            }
+        },
+        [loadHub, patchBrowseRow, searchTerm]
     );
 
     const removeFavourite = useCallback(
@@ -263,21 +441,22 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                 confirmLabel: 'Remove',
             });
             if (!ok) return;
-            setBusyId(row.collection_id);
-            try {
-                await api.delete(
-                    `/api/artists/favourites/${encodeURIComponent(row.collection_id)}`
-                );
-                toast.success(`${row.name} removed from favourites`);
-                await loadHub();
-            } catch (e) {
-                console.error('[ArtistHub] remove favourite failed', e);
-                toast.error(`Could not remove ${row.name}`);
-            } finally {
-                setBusyId(null);
-            }
+            await dropFavourite(row);
         },
-        [loadHub]
+        [dropFavourite]
+    );
+
+    // Star toggle in "All artists": flips optimistically, rolls back on failure.
+    // No confirm dialog — a toggle is undone by clicking it again, and the left
+    // pane's Remove keeps its confirm because it is a one-way button.
+    const toggleBrowseFavourite = useCallback(
+        async (row) => {
+            const next = !row.is_favourite;
+            patchBrowseRow(row.collection_id, { is_favourite: next });
+            const ok = await (next ? addFavourite(row) : dropFavourite(row));
+            if (!ok) patchBrowseRow(row.collection_id, { is_favourite: !next });
+        },
+        [addFavourite, dropFavourite, patchBrowseRow]
     );
 
     const changeSyncMode = useCallback(async (row, mode) => {
@@ -310,6 +489,34 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
     // Server-filtered already (see loadHub) — filtering again here would re-introduce
     // the bug this replaced.
     const filteredBacklog = backlog;
+
+    const showAllArtists = suggestTab === SUGGEST_TAB_ALL;
+
+    const suggestTabClass = (id) =>
+        `px-2.5 py-2 text-[12px] border-b-2 transition-colors ${
+            suggestTab === id
+                ? 'font-semibold text-ink-primary border-amber2'
+                : 'text-ink-muted border-transparent hover:text-ink-secondary'
+        }`;
+
+    const loadMoreArtists = useCallback(
+        () =>
+            loadBrowse({
+                query: searchTerm.trim(),
+                sort: browseSort,
+                offset: browseRows.length,
+                append: true,
+            }),
+        [browseRows.length, browseSort, loadBrowse, searchTerm]
+    );
+
+    const browseEmptyHint = useMemo(() => {
+        if (browseError) return 'Could not load the artist list — refresh to try again.';
+        if (!libraryStatus?.loaded) return 'Load a library to browse your artists.';
+        return searchTerm.trim()
+            ? 'No artist in your library matches that search.'
+            : 'The loaded library has no artists.';
+    }, [browseError, libraryStatus?.loaded, searchTerm]);
 
     const filteredTracks = useMemo(() => {
         const q = trackFilter.toLowerCase();
@@ -352,7 +559,7 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                 <div className="flex items-center gap-3 shrink-0">
                     {!selected && (
                         <button
-                            onClick={loadHub}
+                            onClick={refreshPanels}
                             disabled={isLoading}
                             className={`p-2 rounded-full transition-all border border-white/5 hover:bg-white/10 text-ink-secondary hover:text-amber2 ${
                                 isLoading ? 'animate-spin opacity-50' : ''
@@ -431,7 +638,6 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                                 </EmptyHint>
                             ) : (
                                 filteredFavourites.map((row) => {
-                                    const aliases = (row.library_names?.length || 1) - 1;
                                     return (
                                         <div
                                             key={row.collection_id}
@@ -455,13 +661,7 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                                                     <span className="font-mono">
                                                         {row.track_count} tracks
                                                     </span>
-                                                    {aliases > 0 && (
-                                                        <span>
-                                                            · {aliases}{' '}
-                                                            {aliases === 1 ? 'alias' : 'aliases'}{' '}
-                                                            merged
-                                                        </span>
-                                                    )}
+                                                    <AliasNote names={row.library_names} />
                                                 </div>
                                             </div>
                                             <div className="flex items-center gap-2 shrink-0">
@@ -517,9 +717,17 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                             <div className="flex items-stretch px-3 border-b border-line-subtle">
                                 <button
                                     type="button"
-                                    className="px-2.5 py-2 text-[12px] font-semibold text-ink-primary border-b-2 border-amber2"
+                                    onClick={() => setSuggestTab(SUGGEST_TAB_BACKLOG)}
+                                    className={suggestTabClass(SUGGEST_TAB_BACKLOG)}
                                 >
                                     From your library
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setSuggestTab(SUGGEST_TAB_ALL)}
+                                    className={suggestTabClass(SUGGEST_TAB_ALL)}
+                                >
+                                    All artists
                                 </button>
                                 <button
                                     type="button"
@@ -534,21 +742,110 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                                 </button>
                             </div>
 
-                            <PanelHead
-                                label={
-                                    backlogTotal > backlog.length
-                                        ? `Local backlog · top ${backlog.length} of ${backlogTotal} · ranked by owned tracks`
-                                        : 'Local backlog · ranked by owned tracks'
-                                }
-                                right={
-                                    <span className="font-mono text-[11px] text-ink-muted bg-black/20 rounded-full px-2 py-[2px]">
-                                        0 network calls
-                                    </span>
-                                }
-                            />
+                            {showAllArtists ? (
+                                <PanelHead
+                                    label={
+                                        browseTotal > browseRows.length
+                                            ? `All artists · showing ${browseRows.length} of ${browseTotal}`
+                                            : `All artists · ${browseTotal}`
+                                    }
+                                    right={
+                                        <Segmented
+                                            options={BROWSE_SORTS}
+                                            value={browseSort}
+                                            onChange={setBrowseSort}
+                                            titleFor={(option) => `Sort: ${option.label}`}
+                                        />
+                                    }
+                                />
+                            ) : (
+                                <PanelHead
+                                    label={
+                                        backlogTotal > backlog.length
+                                            ? `Local backlog · top ${backlog.length} of ${backlogTotal} · ranked by owned tracks`
+                                            : 'Local backlog · ranked by owned tracks'
+                                    }
+                                    right={
+                                        <span className="font-mono text-[11px] text-ink-muted bg-black/20 rounded-full px-2 py-[2px]">
+                                            0 network calls
+                                        </span>
+                                    }
+                                />
+                            )}
 
                             <div className="flex-1 min-h-0 overflow-y-auto p-3">
-                                {isLoading && backlog.length === 0 ? (
+                                {showAllArtists ? (
+                                    <>
+                                        {browseLoading && browseRows.length === 0 ? (
+                                            <EmptyHint>Loading…</EmptyHint>
+                                        ) : browseRows.length === 0 ? (
+                                            <EmptyHint>{browseEmptyHint}</EmptyHint>
+                                        ) : (
+                                            browseRows.map((row) => (
+                                                <SuggestionRow
+                                                    key={row.collection_id}
+                                                    row={row}
+                                                    onOpen={openArtist}
+                                                    action={
+                                                        <button
+                                                            type="button"
+                                                            disabled={busyId === row.collection_id}
+                                                            aria-pressed={!!row.is_favourite}
+                                                            title={
+                                                                row.is_favourite
+                                                                    ? `Remove ${row.name} from favourites`
+                                                                    : `Add ${row.name} to favourites`
+                                                            }
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                toggleBrowseFavourite(row);
+                                                            }}
+                                                            className={`p-1.5 rounded-mx-sm transition-colors disabled:opacity-40 shrink-0 hover:bg-amber2/10 ${
+                                                                row.is_favourite
+                                                                    ? 'text-amber2'
+                                                                    : 'text-ink-muted hover:text-amber2'
+                                                            }`}
+                                                        >
+                                                            {busyId === row.collection_id ? (
+                                                                <Loader2
+                                                                    size={14}
+                                                                    className="animate-spin"
+                                                                />
+                                                            ) : (
+                                                                <Star
+                                                                    size={14}
+                                                                    fill={
+                                                                        row.is_favourite
+                                                                            ? 'currentColor'
+                                                                            : 'none'
+                                                                    }
+                                                                />
+                                                            )}
+                                                        </button>
+                                                    }
+                                                />
+                                            ))
+                                        )}
+                                        {browseRows.length > 0 &&
+                                            browseTotal > browseRows.length && (
+                                                <button
+                                                    type="button"
+                                                    disabled={browseAppending}
+                                                    onClick={loadMoreArtists}
+                                                    className="w-full flex items-center justify-center gap-1.5 px-2.5 py-2 mt-1 rounded-mx-sm text-[11px] bg-mx-card border border-line-subtle text-ink-primary hover:border-amber2/50 hover:text-amber2 transition-colors disabled:opacity-40"
+                                                >
+                                                    {browseAppending && (
+                                                        <Loader2
+                                                            size={12}
+                                                            className="animate-spin"
+                                                        />
+                                                    )}
+                                                    Load more · {browseTotal - browseRows.length}{' '}
+                                                    left
+                                                </button>
+                                            )}
+                                    </>
+                                ) : isLoading && backlog.length === 0 ? (
                                     <EmptyHint>Loading…</EmptyHint>
                                 ) : filteredBacklog.length === 0 ? (
                                     <EmptyHint>
@@ -558,56 +855,41 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                                     </EmptyHint>
                                 ) : (
                                     filteredBacklog.map((row) => (
-                                        <div
+                                        <SuggestionRow
                                             key={row.collection_id}
-                                            role="button"
-                                            tabIndex={0}
-                                            onClick={() => openArtist(row)}
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'Enter' || e.key === ' ') {
-                                                    e.preventDefault();
-                                                    openArtist(row);
-                                                }
-                                            }}
-                                            className="flex items-center gap-3 px-3 py-2 mb-1.5 rounded-xl bg-mx-card/40 hover:bg-amber2/10 border border-white/5 hover:border-amber2/50 cursor-pointer transition-all"
-                                        >
-                                            <ArtistAvatar
-                                                name={row.name}
-                                                artwork={row.artwork}
-                                                small
-                                            />
-                                            <div className="flex-1 min-w-0">
-                                                <div className="font-semibold text-[13px] text-ink-primary truncate">
-                                                    {row.name}
-                                                </div>
-                                                <div className="mt-0.5 font-mono text-[11.5px] text-ink-muted">
-                                                    {row.track_count} tracks
-                                                </div>
-                                            </div>
-                                            <button
-                                                disabled={busyId === row.collection_id}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    addFavourite(row);
-                                                }}
-                                                title={`Add ${row.name} to favourites`}
-                                                className="flex items-center gap-1.5 px-2.5 py-1 rounded-mx-sm text-[11px] bg-mx-card border border-line-subtle text-ink-primary hover:border-amber2/50 hover:text-amber2 transition-colors disabled:opacity-40 shrink-0"
-                                            >
-                                                {busyId === row.collection_id ? (
-                                                    <Loader2 size={12} className="animate-spin" />
-                                                ) : (
-                                                    <Plus size={12} />
-                                                )}
-                                                Add
-                                            </button>
-                                        </div>
+                                            row={row}
+                                            onOpen={openArtist}
+                                            action={
+                                                <button
+                                                    type="button"
+                                                    disabled={busyId === row.collection_id}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        addFavourite(row);
+                                                    }}
+                                                    title={`Add ${row.name} to favourites`}
+                                                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-mx-sm text-[11px] bg-mx-card border border-line-subtle text-ink-primary hover:border-amber2/50 hover:text-amber2 transition-colors disabled:opacity-40 shrink-0"
+                                                >
+                                                    {busyId === row.collection_id ? (
+                                                        <Loader2
+                                                            size={12}
+                                                            className="animate-spin"
+                                                        />
+                                                    ) : (
+                                                        <Plus size={12} />
+                                                    )}
+                                                    Add
+                                                </button>
+                                            }
+                                        />
                                     ))
                                 )}
                             </div>
 
                             <div className="border-t border-line-subtle px-3.5 py-2.5 text-[11.5px] text-ink-muted">
-                                Artists you already own, most tracks first. Favourites are excluded.
-                                No network calls.
+                                {showAllArtists
+                                    ? 'Every artist in the loaded library. Search and sort run on the server, so nothing below the loaded page is hidden from a search. The star adds or removes a favourite — the pane on the left follows.'
+                                    : 'Artists you already own, most tracks first. Favourites are excluded. No network calls.'}
                             </div>
                         </div>
 

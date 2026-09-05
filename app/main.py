@@ -1046,6 +1046,31 @@ def get_artist_hub(limit: int = artist_registry.DEFAULT_BACKLOG_LIMIT, q: str = 
     return artist_registry.hub(db if db.loaded else None, backlog_limit=limit, query=q)
 
 
+@app.get("/api/artists/browse")
+def browse_artists(
+    q: str = "",
+    limit: int = artist_registry.DEFAULT_BROWSE_LIMIT,
+    offset: int = 0,
+    sort: str = artist_registry.SORT_NAME,
+):
+    """Every artist in the library, paged, with favourite state per row. Pure read.
+
+    The hub's suggestion panel is the *backlog* — favourites removed, truncated. This is
+    the full list to pick from, so favourites stay in and carry `is_favourite`. Toggling
+    goes through the existing POST/DELETE `/api/artists/favourites` routes. Favourite a
+    row by `name`, not by `collection_id`: a read derives the id without creating the
+    row, so POSTing it back 404s until something has registered the collection. The name
+    path resolves to that same id.
+
+    `q` filters and `sort` orders server-side, before `limit`/`offset` — `total` is the
+    pre-pagination match count. `limit` is capped at `MAX_BROWSE_LIMIT`; the effective
+    paging comes back in the payload.
+    """
+    return artist_registry.browse(
+        db if db.loaded else None, query=q, limit=limit, offset=offset, sort=sort
+    )
+
+
 @app.post("/api/artists/favourites", dependencies=[Depends(require_session)])
 def add_artist_favourite(r: ArtistFavouriteReq):
     """Favourite an artist by sidecar id, or by the raw library name a backlog row shows."""

@@ -1,11 +1,14 @@
 """Artist-Hub route tests (T-8 — app/main.py, plan test row T13).
 
-Three contracts:
+Four contracts:
 
 * every **mutation** route is behind ``Depends(require_session)`` — no header and a
   wrong bearer both 401, and the sidecar stays untouched (threat T3).
 * ``GET /api/artists/hub`` stays a plain read: no header needed, always the two keys
   the frontend destructures, and the Tier-1 backlog is owned-track-count descending.
+* ``GET /api/artists/browse`` is the same read for the *whole* list: favourites stay in
+  and carry ``is_favourite``, search and sort run before paging, and hostile paging is
+  clamped instead of erroring.
 * favouriting round-trips through the API — POST moves an artist out of the backlog
   into ``favourites``, DELETE moves it back — and the sync mode set through the route
   is the one the hub reports back.
@@ -318,3 +321,186 @@ def test_sync_mode_unknown_collection_is_404(auth_token) -> None:
     )
 
     assert res.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET /api/artists/browse
+# ---------------------------------------------------------------------------
+
+
+def test_browse_returns_the_contract_shape_without_auth() -> None:
+    res = _request("GET", "/api/artists/browse")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert set(body) == {"artists", "total", "limit", "offset", "query", "sort"}
+    assert body["total"] == 3
+    assert body["limit"] == 100
+    assert body["offset"] == 0
+    assert body["sort"] == "name"
+    assert set(body["artists"][0]) == {
+        "collection_id",
+        "name",
+        "track_count",
+        "artwork",
+        "is_favourite",
+        "sync_mode",
+        "sc_linked",
+        "library_names",
+    }
+
+
+def test_browse_lists_every_artist_name_sorted() -> None:
+    body = _request("GET", "/api/artists/browse").json()
+
+    assert [row["name"] for row in body["artists"]] == [
+        "Boys Noize",
+        "Helena Hauff",
+        "Skee Mask",
+    ]
+    assert all(row["is_favourite"] is False for row in body["artists"])
+
+
+def test_browse_keeps_favourites_in_the_list_and_flags_them(auth_token) -> None:
+    _request("POST", "/api/artists/favourites", json={"name": "Helena Hauff"}, headers=auth_token)
+
+    body = _request("GET", "/api/artists/browse").json()
+
+    assert {row["name"]: row["is_favourite"] for row in body["artists"]} == {
+        "Boys Noize": False,
+        "Helena Hauff": True,
+        "Skee Mask": False,
+    }
+    hub = _request("GET", "/api/artists/hub").json()
+    assert "Helena Hauff" not in [row["name"] for row in hub["backlog"]], "backlog changed shape"
+
+
+def test_browse_toggle_round_trips_through_the_favourite_routes(auth_token) -> None:
+    row = _request("GET", "/api/artists/browse?q=skee").json()["artists"][0]
+    assert row["is_favourite"] is False
+
+    added = _request(
+        "POST", "/api/artists/favourites", json={"name": row["name"]}, headers=auth_token
+    ).json()
+    assert added["collection_id"] == row["collection_id"], "favouriting minted a different id"
+    on = _request("GET", "/api/artists/browse?q=skee").json()["artists"][0]
+    assert on["is_favourite"] is True
+
+    _request("DELETE", f"/api/artists/favourites/{row['collection_id']}", headers=auth_token)
+    off = _request("GET", "/api/artists/browse?q=skee").json()["artists"][0]
+    assert off["is_favourite"] is False
+
+
+def test_browse_row_id_is_derived_until_a_resolve_pass_registers_it(auth_token) -> None:
+    """Favourite a browse row by `name`: its `collection_id` need not exist in the store yet.
+
+    `browse` is a read, so it derives the id from the folded name instead of creating a
+    row. POSTing that id straight back therefore 404s until something has written the
+    collection — the name path (`favourite_artist_by_name`) is the one that always works,
+    and it lands on the very same id.
+    """
+    row = _request("GET", "/api/artists/browse?q=skee").json()["artists"][0]
+
+    by_id = _request(
+        "POST",
+        "/api/artists/favourites",
+        json={"collection_id": row["collection_id"]},
+        headers=auth_token,
+    )
+    assert by_id.status_code == 404
+
+    by_name = _request(
+        "POST", "/api/artists/favourites", json={"name": row["name"]}, headers=auth_token
+    )
+    assert by_name.status_code == 200
+    assert by_name.json()["collection_id"] == row["collection_id"]
+
+
+def test_browse_sorts_by_track_count() -> None:
+    body = _request("GET", "/api/artists/browse?sort=tracks").json()
+
+    assert [row["name"] for row in body["artists"]] == [
+        "Helena Hauff",
+        "Boys Noize",
+        "Skee Mask",
+    ]
+    assert body["sort"] == "tracks"
+
+
+def test_browse_unknown_sort_falls_back_instead_of_erroring() -> None:
+    res = _request("GET", "/api/artists/browse?sort=whatever")
+
+    assert res.status_code == 200
+    assert res.json()["sort"] == "name"
+    assert [row["name"] for row in res.json()["artists"]] == [
+        "Boys Noize",
+        "Helena Hauff",
+        "Skee Mask",
+    ]
+
+
+def test_browse_query_filters_before_pagination(monkeypatch) -> None:
+    """An artist past the first page must still be findable by search."""
+    many = (*((f"Artist {i:02d}", 30 - i) for i in range(29)), ("Zeta Rare", 1))
+    monkeypatch.setattr(main, "db", _LibraryDB(many))
+
+    page_one = _request("GET", "/api/artists/browse?limit=5").json()
+    assert "Zeta Rare" not in [row["name"] for row in page_one["artists"]]
+    assert page_one["total"] == 30
+
+    found = _request("GET", "/api/artists/browse?limit=5&q=zeta").json()
+    assert [row["name"] for row in found["artists"]] == ["Zeta Rare"]
+    assert found["total"] == 1
+    assert found["query"] == "zeta"
+
+
+def test_browse_offset_pages_the_list(monkeypatch) -> None:
+    many = tuple((f"Artist {i:02d}", 1) for i in range(10))
+    monkeypatch.setattr(main, "db", _LibraryDB(many))
+
+    seen = []
+    for offset in (0, 4, 8):
+        page = _request("GET", f"/api/artists/browse?limit=4&offset={offset}").json()
+        assert page["total"] == 10
+        assert page["offset"] == offset
+        seen.extend(row["name"] for row in page["artists"])
+
+    assert seen == [f"Artist {i:02d}" for i in range(10)]
+
+
+def test_browse_caps_the_limit(monkeypatch) -> None:
+    many = tuple((f"Artist {i:04d}", 1) for i in range(505))
+    monkeypatch.setattr(main, "db", _LibraryDB(many))
+
+    body = _request("GET", "/api/artists/browse?limit=10000").json()
+
+    assert body["limit"] == 500
+    assert len(body["artists"]) == 500
+    assert body["total"] == 505
+
+
+@pytest.mark.parametrize("qs", ["limit=0", "limit=-3", "offset=-10", "limit=-1&offset=-1"])
+def test_browse_survives_hostile_paging(qs) -> None:
+    res = _request("GET", f"/api/artists/browse?{qs}")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["limit"] >= 0
+    assert body["offset"] == 0
+    assert body["total"] == 3, "the count stays honest whatever the paging"
+
+
+def test_browse_degrades_when_the_library_is_not_loaded(monkeypatch) -> None:
+    monkeypatch.setattr(main, "db", _LibraryDB(_LIBRARY, loaded=False))
+
+    res = _request("GET", "/api/artists/browse")
+
+    assert res.status_code == 200
+    assert res.json() == {
+        "artists": [],
+        "total": 0,
+        "limit": 100,
+        "offset": 0,
+        "query": "",
+        "sort": "name",
+    }

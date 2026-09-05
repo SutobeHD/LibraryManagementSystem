@@ -397,3 +397,270 @@ class TestBacklogSearchBeyondTheLimit:
     def test_empty_query_is_not_a_filter(self) -> None:
         db = self._db_with(30)
         assert registry.hub(db, backlog_limit=None, query="   ")["backlog_total"] == 30
+
+
+# --------------------------------------------------------------------------- browse
+
+
+_BROWSE_KEYS = {
+    "collection_id",
+    "name",
+    "track_count",
+    "artwork",
+    "is_favourite",
+    "sync_mode",
+    "sc_linked",
+    "library_names",
+}
+
+
+def _browse_library():
+    """5 artists on distinct track counts, so name- and count-order differ."""
+    return _library(
+        *(["Zola Jesus"] * 5),
+        *(["Alpha Tracks"] * 4),
+        *(["Marie Davidson"] * 3),
+        *(["Boys Noize"] * 2),
+        "Helena Hauff",
+    )
+
+
+def test_browse_rows_carry_exactly_the_contract_keys() -> None:
+    db = _library("Boys Noize")
+
+    row = registry.browse(db)["artists"][0]
+
+    assert set(row) == _BROWSE_KEYS
+    assert row["collection_id"] == schema.collection_id_for("Boys Noize")
+    assert row["track_count"] == 1
+    assert row["sync_mode"] == schema.SYNC_REVIEW
+    assert row["sc_linked"] is False
+    assert row["library_names"] == ["Boys Noize"]
+
+
+def test_browse_includes_favourites_and_flags_them() -> None:
+    db = _library(*(["Boys Noize"] * 2), "Helena Hauff")
+    registry.resolve_library_artists(db)
+    registry.add_favourite_artist(schema.collection_id_for("Boys Noize"))
+
+    payload = registry.browse(db)
+
+    assert _names(payload["artists"]) == ["Boys Noize", "Helena Hauff"]
+    assert {r["name"]: r["is_favourite"] for r in payload["artists"]} == {
+        "Boys Noize": True,
+        "Helena Hauff": False,
+    }
+    assert _names(registry.backlog(db)) == ["Helena Hauff"], "backlog still hides favourites"
+
+
+def test_browse_flags_a_favourite_reached_through_an_alias() -> None:
+    db = _library(*(["Boys Noize"] * 2), "boys noize")
+    registry.resolve_library_artists(db)
+    registry.add_favourite_artist(schema.collection_id_for("BOYS NOIZE"))
+
+    rows = registry.browse(db)["artists"]
+
+    assert len(rows) == 1, "casing variants did not fold into one row"
+    assert rows[0]["is_favourite"] is True
+    assert sorted(rows[0]["library_names"]) == ["Boys Noize", "boys noize"]
+
+
+def test_browse_reports_the_soundcloud_link_and_sync_mode() -> None:
+    db = _library("Boys Noize")
+    registry.resolve_library_artists(db)
+    cid = schema.collection_id_for("Boys Noize")
+    schema.set_link(cid, registry.PROVIDER_SOUNDCLOUD, permalink="https://soundcloud.com/bn")
+    schema.set_sync_mode(cid, schema.SYNC_AUTO)
+
+    row = registry.browse(db)["artists"][0]
+
+    assert row["sc_linked"] is True
+    assert row["sync_mode"] == schema.SYNC_AUTO
+
+
+def test_browse_sorts_by_name_by_default() -> None:
+    payload = registry.browse(_browse_library())
+
+    assert _names(payload["artists"]) == [
+        "Alpha Tracks",
+        "Boys Noize",
+        "Helena Hauff",
+        "Marie Davidson",
+        "Zola Jesus",
+    ]
+    assert payload["sort"] == "name"
+
+
+def test_browse_name_sort_is_case_insensitive() -> None:
+    db = _library("zeta", "Alpha", "Mika")
+
+    assert _names(registry.browse(db, sort="name")["artists"]) == ["Alpha", "Mika", "zeta"]
+
+
+def test_browse_sorts_by_track_count_descending() -> None:
+    payload = registry.browse(_browse_library(), sort="tracks")
+
+    assert _names(payload["artists"]) == [
+        "Zola Jesus",
+        "Alpha Tracks",
+        "Marie Davidson",
+        "Boys Noize",
+        "Helena Hauff",
+    ]
+    assert [r["track_count"] for r in payload["artists"]] == [5, 4, 3, 2, 1]
+    assert payload["sort"] == "tracks"
+
+
+def test_browse_track_sort_breaks_ties_by_name() -> None:
+    db = _library("Zola", "Alpha", "Mika")
+
+    assert _names(registry.browse(db, sort="tracks")["artists"]) == ["Alpha", "Mika", "Zola"]
+
+
+def test_browse_unknown_sort_falls_back_to_name() -> None:
+    payload = registry.browse(_browse_library(), sort="popularity")
+
+    assert payload["sort"] == "name"
+    assert _names(payload["artists"]) == _names(registry.browse(_browse_library())["artists"])
+
+
+def test_browse_total_is_the_pre_pagination_count() -> None:
+    payload = registry.browse(_browse_library(), limit=2)
+
+    assert len(payload["artists"]) == 2
+    assert payload["total"] == 5
+    assert payload["limit"] == 2
+    assert payload["offset"] == 0
+
+
+def test_browse_offset_pages_without_gaps_or_repeats() -> None:
+    db = _library(*[f"Artist {i:02d}" for i in range(10)])
+
+    seen = []
+    for offset in range(0, 12, 3):
+        page = registry.browse(db, limit=3, offset=offset)
+        assert page["total"] == 10
+        assert page["offset"] == offset
+        seen.extend(_names(page["artists"]))
+
+    assert seen == [f"Artist {i:02d}" for i in range(10)]
+    assert len(set(seen)) == 10
+
+
+def test_browse_offset_past_the_end_is_an_empty_page() -> None:
+    payload = registry.browse(_browse_library(), offset=500)
+
+    assert payload["artists"] == []
+    assert payload["total"] == 5
+
+
+class TestBrowseSearchBeyondTheLimit:
+    """The backlog bug class again: filtering only the delivered page hides the tail."""
+
+    def _db(self):
+        names = [f"Artist {i:02d}" for i in range(29)] + ["Zeta Rare"]
+        return _library(*names)
+
+    def test_query_filters_before_pagination(self) -> None:
+        db = self._db()
+
+        page_one = registry.browse(db, limit=5)
+        assert "Zeta Rare" not in _names(page_one["artists"])
+
+        found = registry.browse(db, query="zeta", limit=5)
+        assert _names(found["artists"]) == ["Zeta Rare"]
+        assert found["total"] == 1
+        assert found["query"] == "zeta"
+
+    def test_query_matches_a_raw_library_variant(self) -> None:
+        """A merged variant is searchable by what Rekordbox shows, not just the canonical."""
+        cid = schema.create_collection("Boys Noize")
+        schema.add_alias(cid, "BOYS NOIZE (Official)", source="merge")
+        db = _library("Boys Noize", "BOYS NOIZE (Official)")
+
+        found = registry.browse(db, query="official")
+
+        assert len(found["artists"]) == 1
+        assert found["artists"][0]["name"] == "Boys Noize"
+        assert "BOYS NOIZE (Official)" in found["artists"][0]["library_names"]
+
+    def test_query_is_case_and_whitespace_insensitive(self) -> None:
+        assert registry.browse(self._db(), query="  ZETA  ")["total"] == 1
+
+    def test_empty_query_is_not_a_filter(self) -> None:
+        assert registry.browse(self._db(), query="   ")["total"] == 30
+
+
+def test_browse_caps_the_limit() -> None:
+    db = _library(*[f"Artist {i:04d}" for i in range(registry.MAX_BROWSE_LIMIT + 5)])
+
+    payload = registry.browse(db, limit=10_000)
+
+    assert payload["limit"] == registry.MAX_BROWSE_LIMIT
+    assert len(payload["artists"]) == registry.MAX_BROWSE_LIMIT
+    assert payload["total"] == registry.MAX_BROWSE_LIMIT + 5
+
+
+@pytest.mark.parametrize("limit", [0, -1, -500])
+def test_browse_survives_a_non_positive_limit(limit) -> None:
+    payload = registry.browse(_browse_library(), limit=limit)
+
+    assert payload["artists"] == []
+    assert payload["limit"] == 0
+    assert payload["total"] == 5, "the count stays honest even with nothing delivered"
+
+
+def test_browse_survives_a_negative_offset() -> None:
+    payload = registry.browse(_browse_library(), limit=2, offset=-5)
+
+    assert payload["offset"] == 0
+    assert _names(payload["artists"]) == ["Alpha Tracks", "Boys Noize"]
+
+
+def test_browse_without_a_loaded_library_still_lists_favourites() -> None:
+    """No library is not the same as no favourites — a star must stay un-starrable."""
+    registry.favourite_artist_by_name("Boys Noize")
+
+    payload = registry.browse(None)
+
+    assert payload["total"] == 1
+    assert _names(payload["artists"]) == ["Boys Noize"]
+    assert payload["artists"][0]["is_favourite"] is True
+    assert payload["artists"][0]["track_count"] == 0
+    assert payload["artists"][0]["library_names"] == []
+    assert payload["limit"] == registry.DEFAULT_BROWSE_LIMIT
+    assert payload["offset"] == 0
+
+
+def test_browse_without_a_library_or_favourites_is_an_empty_page() -> None:
+    assert registry.browse(None) == {
+        "artists": [],
+        "total": 0,
+        "limit": registry.DEFAULT_BROWSE_LIMIT,
+        "offset": 0,
+        "query": "",
+        "sort": "name",
+    }
+
+
+def test_browse_lists_a_favourite_the_library_no_longer_contains() -> None:
+    """Raising artist_view_threshold after favouriting must not orphan the star."""
+    registry.favourite_artist_by_name("Gone From The Library")
+    db = _library("Boys Noize", "Boys Noize")
+
+    payload = registry.browse(db)
+
+    rows = {r["name"]: r for r in payload["artists"]}
+    assert set(rows) == {"Boys Noize", "Gone From The Library"}
+    assert rows["Gone From The Library"]["is_favourite"] is True
+    assert rows["Gone From The Library"]["track_count"] == 0
+    assert rows["Boys Noize"]["track_count"] == 2
+
+
+def test_browse_writes_nothing() -> None:
+    db = _library("Boys Noize", "Helena Hauff")
+
+    registry.browse(db, query="boys", sort="tracks")
+
+    assert schema.list_collections() == []
+    assert schema.list_favourites() == []

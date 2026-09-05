@@ -32,6 +32,7 @@ Marker convention in the route tables below:
 | GET | `/api/artists` | All artists (normalized) |
 | GET | `/api/artist/{aid}/tracks` | Tracks by artist |
 | GET | `/api/artists/hub` | Artist Hub: favourite artists + Tier-1 backlog (`artists.db` sidecar, no network calls) |
+| GET | `/api/artists/browse` | Artist Hub: whole artist list, paged/searchable/sortable (`q`, `limit`≤500, `offset`, `sort=name\|tracks`), each row flagged `is_favourite` |
 | POST | `/api/artists/favourites` `[AUTH]` | Favourite an artist by `collection_id` or by raw library `name` |
 | DELETE | `/api/artists/favourites/{collection_id}` `[AUTH]` | Un-favourite an artist (idempotent; aliases + links survive) |
 | POST | `/api/artists/{collection_id}/sync-mode` `[AUTH]` | Set per-artist catalogue sync mode: `auto` / `review` / `off` |
