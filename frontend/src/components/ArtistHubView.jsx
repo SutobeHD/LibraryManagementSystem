@@ -21,17 +21,27 @@ import { confirmModal } from './ConfirmModal';
 import { useContextMenu } from './shared/ContextMenu';
 import MergeDialog from './artistHub/MergeDialog';
 import ProjectionPanel from './artistHub/ProjectionPanel';
+import ArtistDetail, { ArtistDetailActions, ArtistDetailSummary } from './artistHub/ArtistDetail';
 import { fetchMergeCandidates } from './artistHub/artistHubApi';
+import { catalogueErrorMessage, fetchCatalogue } from './artistHub/artistCatalogueApi';
+import { splitCatalogue } from './artistHub/catalogueCopy';
+import useArtistCatalogue from './artistHub/useArtistCatalogue';
+import useArtistDetailActions from './artistHub/useArtistDetailActions';
 
 /**
  * ArtistHubView — the Artists tab. Left: curated favourites (link state, sync
  * mode, per-artist Update). Right: a three-tab panel — the Tier-1 local backlog,
  * the complete "All artists" list, and the SoundCloud discovery tab.
  *
- * Milestone boundary: everything SoundCloud (per-artist Update, Update all,
- * discovery) is M2 of `docs/research/implement/inprogress_library-artist-hub.md`
- * and is NOT built. Those controls render disabled with the reason spelled out
- * rather than hidden or stubbed, so the view never implies a sync happened.
+ * Selecting an artist opens `artistHub/ArtistDetail` — owned beside missing on
+ * SoundCloud. That catalogue read is the ONLY place a fetch happens (owner's ToU
+ * guardrail: on selection, favourited artists only, never speculatively).
+ *
+ * Milestone boundary: per-artist Update, linking and the missing-track download are
+ * live; **Update all** and **SoundCloud discovery** are later steps of
+ * `docs/research/implement/inprogress_library-artist-hub.md` and are NOT built. Those
+ * two render disabled with the reason spelled out rather than hidden or stubbed, so
+ * the view never implies a sync happened.
  */
 
 const SYNC_MODES = [
@@ -52,8 +62,21 @@ const BROWSE_SORTS = [
 // first page is never shorter than what "Load more" then pages past.
 const ARTIST_BROWSE_PAGE_SIZE = 100;
 
-const SC_PENDING_REASON =
-    'SoundCloud sync is not built yet — this arrives in a later step of the artist-hub plan.';
+// Bulk refresh stays off on purpose: the approved guardrail fetches a catalogue for
+// the artist the user selected, not for every favourite in one sweep.
+const SC_UPDATE_ALL_REASON =
+    'Updating every favourite in one sweep is not built — by design a catalogue is only ' +
+    'fetched for the artist you open. Use the Update button on a row, or open the artist.';
+
+const SC_DISCOVER_REASON =
+    'SoundCloud discovery (related artists) is a later step of the artist-hub plan and is not built.';
+
+const SC_NOT_LINKED_REASON =
+    'Not linked to SoundCloud yet — open this artist and use "Link SoundCloud profile".';
+
+const scFavouriteOnlyReason = (name) =>
+    `Add ${name || 'this artist'} to your favourites first — a SoundCloud catalogue is only ` +
+    'ever fetched for artists you favourited.';
 
 const MAX_INITIALS = 2;
 
@@ -204,6 +227,8 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
     const [tracks, setTracks] = useState([]);
     const [tracksLoading, setTracksLoading] = useState(false);
     const [busyId, setBusyId] = useState(null);
+    // Which favourite row is currently fetching its catalogue from the Update button.
+    const [updatingId, setUpdatingId] = useState(null);
     const [suggestTab, setSuggestTab] = useState(SUGGEST_TAB_BACKLOG);
     const [browseRows, setBrowseRows] = useState([]);
     const [browseTotal, setBrowseTotal] = useState(0);
@@ -533,6 +558,30 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
         }
     }, []);
 
+    // The row-level Update: a real catalogue fetch for one linked artist, reported with
+    // the numbers it came back with. It does not open the artist — refreshing a row and
+    // drilling into it are two different intents.
+    const updateArtistCatalogue = useCallback(async (row) => {
+        setUpdatingId(row.collection_id);
+        try {
+            const payload = await fetchCatalogue(row.collection_id, { refresh: true });
+            if (payload?.status !== 'ok') {
+                toast.error(payload?.detail || `SoundCloud returned no catalogue for ${row.name}`);
+                return;
+            }
+            const split = splitCatalogue(payload);
+            toast.success(
+                `${row.name}: ${split.missingTheirs.length} missing of ` +
+                    `${split.theirs.length} own uploads`
+            );
+        } catch (e) {
+            console.error('[ArtistHub] per-artist update failed', e);
+            toast.error(catalogueErrorMessage(e, `Could not update ${row.name}`));
+        } finally {
+            setUpdatingId(null);
+        }
+    }, []);
+
     const artistMenu = useContextMenu();
 
     const copyArtistName = useCallback(async (name) => {
@@ -593,8 +642,9 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                     id: 'sc-update',
                     label: 'Von SoundCloud aktualisieren',
                     icon: Cloud,
-                    disabled: true,
-                    hint: 'später',
+                    disabled: !row.sc_linked || updatingId === row.collection_id,
+                    hint: row.sc_linked ? undefined : 'nicht verknüpft',
+                    onSelect: () => updateArtistCatalogue(row),
                 },
                 {
                     id: 'copy',
@@ -614,6 +664,8 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
             changeSyncMode,
             copyArtistName,
             openMergeDialog,
+            updateArtistCatalogue,
+            updatingId,
         ]
     );
 
@@ -666,6 +718,38 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
         );
     }, [tracks, trackFilter]);
 
+    // A catalogue may only be read for an artist the store actually holds — that is a
+    // favourite, or one already bound to an account. A browse row for an artist nobody
+    // favourited has no collection row yet, so asking would 404.
+    const selectedIsFavourite = useMemo(
+        () =>
+            !!selected &&
+            (favourites.some((f) => f.collection_id === selected.collection_id) ||
+                !!selected.favourite),
+        [favourites, selected]
+    );
+    const scEnabled = !!selected && (selectedIsFavourite || !!selected.sc_linked);
+    const scDisabledReason = scFavouriteOnlyReason(selected?.name);
+
+    const catalogue = useArtistCatalogue({
+        collectionId: selected?.collection_id,
+        enabled: scEnabled,
+    });
+
+    // A link change flips `sc_linked` on the rows behind the detail view.
+    const handleLinkChanged = useCallback(() => {
+        loadHub(searchTerm.trim());
+        if (suggestTab === SUGGEST_TAB_ALL) {
+            loadBrowse({ query: searchTerm.trim(), sort: browseSort, offset: 0, append: false });
+        }
+    }, [browseSort, loadBrowse, loadHub, searchTerm, suggestTab]);
+
+    const detailActions = useArtistDetailActions({
+        artist: selected,
+        catalogue,
+        onLinkChanged: handleLinkChanged,
+    });
+
     return (
         <div className="h-full flex flex-col p-4">
             {/* Header — back + artist name when one is open, else refresh + search */}
@@ -683,17 +767,28 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                                 <User size={26} className="text-amber2 shrink-0" />
                                 <span className="truncate">{selected.name}</span>
                             </h1>
-                            <p className="text-ink-secondary text-sm mt-0.5">
-                                {filteredTracks.length} / {selected.track_count || tracks.length}{' '}
-                                Tracks
-                            </p>
+                            <ArtistDetailSummary
+                                localShown={filteredTracks.length}
+                                localTotal={tracks.length}
+                                catalogue={catalogue}
+                                scEnabled={scEnabled}
+                            />
                         </div>
                     </div>
                 ) : (
                     <div />
                 )}
 
-                <div className="flex items-center gap-3 shrink-0">
+                <div className="flex items-center gap-3 shrink-0 flex-wrap justify-end">
+                    {selected && (
+                        <ArtistDetailActions
+                            artist={selected}
+                            catalogue={catalogue}
+                            actions={detailActions}
+                            scEnabled={scEnabled}
+                            disabledReason={scDisabledReason}
+                        />
+                    )}
                     {!selected && (
                         <button
                             onClick={() => openMergeDialog(null)}
@@ -752,26 +847,24 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
             </div>
 
             {selected ? (
-                <div className="flex-1 min-h-0 overflow-y-auto pb-4 p-2">
-                    {tracksLoading ? (
-                        <div className="flex items-center justify-center gap-3 py-16 text-ink-muted text-[12px]">
-                            <Loader2 size={18} className="animate-spin text-amber2" />
-                            Loading tracks…
-                        </div>
-                    ) : tracks.length === 0 ? (
-                        <EmptyHint>
-                            No local tracks found for this artist in the loaded library.
-                        </EmptyHint>
-                    ) : (
-                        <TrackTable
-                            tracks={filteredTracks}
-                            onSelectTrack={onSelectTrack}
-                            onEditTrack={onEditTrack}
-                            onPlay={onPlayTrack}
-                            playlistId={`ARTISTS_${selected.collection_id}`}
-                        />
-                    )}
-                </div>
+                <ArtistDetail
+                    artist={selected}
+                    catalogue={catalogue}
+                    actions={detailActions}
+                    scEnabled={scEnabled}
+                    disabledReason={scDisabledReason}
+                    tracksLoading={tracksLoading}
+                    localTotal={tracks.length}
+                >
+                    <TrackTable
+                        tracks={filteredTracks}
+                        onSelectTrack={onSelectTrack}
+                        onEditTrack={onEditTrack}
+                        onPlay={onPlayTrack}
+                        playlistId={`ARTISTS_${selected.collection_id}`}
+                        variant="embedded"
+                    />
+                </ArtistDetail>
             ) : (
                 <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[1fr_400px] gap-4">
                     {/* Favourites */}
@@ -781,7 +874,7 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                             right={
                                 <button
                                     disabled
-                                    title={SC_PENDING_REASON}
+                                    title={SC_UPDATE_ALL_REASON}
                                     className="flex items-center gap-1.5 px-2.5 py-1 rounded-mx-sm text-[11px] bg-mx-card border border-line-subtle text-ink-muted opacity-50 cursor-not-allowed"
                                 >
                                     <RefreshCw size={12} />
@@ -835,12 +928,29 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                                                     onChange={(mode) => changeSyncMode(row, mode)}
                                                 />
                                                 <button
-                                                    disabled
-                                                    title={SC_PENDING_REASON}
-                                                    onClick={(e) => e.stopPropagation()}
-                                                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-mx-sm text-[11px] bg-mx-card border border-line-subtle text-ink-muted opacity-50 cursor-not-allowed"
+                                                    disabled={
+                                                        !row.sc_linked ||
+                                                        updatingId === row.collection_id
+                                                    }
+                                                    title={
+                                                        row.sc_linked
+                                                            ? `Fetch ${row.name}'s catalogue from SoundCloud now`
+                                                            : SC_NOT_LINKED_REASON
+                                                    }
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        updateArtistCatalogue(row);
+                                                    }}
+                                                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-mx-sm text-[11px] bg-mx-card border border-line-subtle text-ink-primary hover:border-amber2/50 hover:text-amber2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:text-ink-muted disabled:hover:border-line-subtle"
                                                 >
-                                                    <RefreshCw size={12} />
+                                                    {updatingId === row.collection_id ? (
+                                                        <Loader2
+                                                            size={12}
+                                                            className="animate-spin"
+                                                        />
+                                                    ) : (
+                                                        <RefreshCw size={12} />
+                                                    )}
                                                     Update
                                                 </button>
                                                 <button
@@ -862,16 +972,15 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                         </div>
 
                         <div className="border-t border-line-subtle px-3.5 py-2.5 text-[11.5px] text-ink-muted leading-relaxed">
-                            <b className="text-ink-secondary font-semibold">Auto</b> downloads new
-                            tracks while the app is idle ·{' '}
-                            <b className="text-ink-secondary font-semibold">Review</b> only lists
-                            them · <b className="text-ink-secondary font-semibold">Off</b> never
-                            syncs. The choice is stored now, but nothing acts on it yet:{' '}
+                            <b className="text-ink-secondary font-semibold">Update</b> fetches that
+                            artist's SoundCloud catalogue now — it is live for a linked artist, and
+                            disabled with the reason when there is no link. The Auto / Review / Off
+                            modes are stored but{' '}
                             <b className="text-ink-secondary font-semibold">
-                                the SoundCloud sync behind Update, Update all and the modes is not
-                                built
-                            </b>{' '}
-                            — it arrives in a later step, which is why those buttons are disabled.
+                                nothing acts on them yet
+                            </b>
+                            : the idle background sync, and Update all, are later steps of the
+                            artist-hub plan.
                         </div>
                     </div>
 
@@ -896,7 +1005,7 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                                 <button
                                     type="button"
                                     disabled
-                                    title={SC_PENDING_REASON}
+                                    title={SC_DISCOVER_REASON}
                                     className="flex items-center gap-1.5 px-2.5 py-2 text-[12px] text-ink-muted border-b-2 border-transparent opacity-50 cursor-not-allowed"
                                 >
                                     Discover on SoundCloud
@@ -1069,11 +1178,12 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                                 </span>
                             </div>
                             <p className="text-[11.5px] text-ink-muted leading-relaxed">
-                                The SoundCloud half of the hub — linking an artist to their profile,
-                                the missing-track diff, per-artist Update and one-hop discovery — is
-                                a later milestone and is not implemented. The controls stay visible
-                                but disabled so you can see what is coming; none of them shows
-                                invented data or reports a sync that did not happen.
+                                Linking an artist, the missing-track diff and the batch download are
+                                live — open a favourite to use them. What is still missing is{' '}
+                                <b className="text-ink-secondary font-semibold">discovery</b>:
+                                suggesting artists you do not own yet from SoundCloud's related
+                                accounts. That tab stays disabled rather than showing invented
+                                names.
                             </p>
                         </div>
                     </div>

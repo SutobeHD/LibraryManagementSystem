@@ -82,6 +82,8 @@ KEYRING_SERVICE = "library_management_system"
 KEYRING_SC_TOKEN = "sc_token"
 
 from . import audio_tags, download_registry, folder_watcher
+from . import soundcloud_api as sc_api
+from .artist_store import catalogue as artist_catalogue
 from .artist_store import merge as artist_merge
 from .artist_store import projection as artist_projection
 from .artist_store import registry as artist_registry
@@ -117,6 +119,7 @@ from .services import (
 )
 from .soundcloud_api import (
     AuthExpiredError,
+    NotFoundError,
     RateLimitError,
     SoundCloudPlaylistAPI,
     SoundCloudSyncEngine,
@@ -695,6 +698,19 @@ class ArtistMergeRevertReq(BaseModel):
 
 class ArtistProjectionSyncReq(BaseModel):
     dry_run: bool = False  # writes nothing at all; allowed while Rekordbox is open
+
+
+class ArtistLinkReq(BaseModel):
+    """Bind an artist to a SoundCloud account. A profile URL or a bare permalink."""
+
+    url_or_permalink: str = ""
+
+
+class ArtistDownloadMissingReq(BaseModel):
+    """What to queue. Explicit ids OR `auto_queue`, never both — see the route docstring."""
+
+    sc_ids: list[str] = []
+    auto_queue: bool = False
 
 
 # NOTE: Library auto-load is handled by _on_startup() near the bottom of this file.
@@ -1428,6 +1444,560 @@ async def artist_projection_sync(r: ArtistProjectionSyncReq, background_tasks: B
 def artist_projection_status():
     """Folder + per-artist projection state. Pure read; renders before the library loads."""
     return artist_projection.status(db if db.loaded else None)
+
+
+# --- ARTIST HUB: SoundCloud binding, catalogue, batch download -----------------------
+#
+# ToU guardrails (owner decision, docs/research/implement/inprogress_library-artist-hub.md):
+# the catalogue is fetched WHEN THE USER SELECTS AN ARTIST — never speculatively, never
+# for an artist nobody bound. Every fetch carries a `CallBudget` (hard per-run cap,
+# logged), the payload lands in the sidecar's TTL cache and not in a permanent mirror,
+# and the batch download does NOT inherit `sc_aggressive_mode`.
+
+ARTIST_JOB_DOWNLOAD = "download_missing"
+
+#: Hard per-run call cap for one user-initiated catalogue fetch. 25 pages x 200 items
+#: covers a 5000-track artist; anything past that would be a crawl, not a lookup.
+ARTIST_CATALOGUE_CALL_BUDGET = sc_api.SC_DEFAULT_CALL_BUDGET
+
+#: Hard per-run cap on one batch-download job. A bigger ask is refused (400) rather than
+#: silently trimmed — a truncated queue that looks complete is the failure mode this
+#: feature keeps hitting.
+ARTIST_DOWNLOAD_MAX_TRACKS = 100
+
+#: Give up waiting on one track. The downloader runs each track in its own daemon thread
+#: and signals through `on_complete`; without a ceiling a thread that never calls back
+#: would wedge the whole job.
+ARTIST_DOWNLOAD_TRACK_TIMEOUT_S = 900.0
+
+# Single-flight guard for the batch download. Deliberately NOT `_artist_job_lock`: that
+# one serialises master.db writers (merge / projection) and a download is neither.
+_artist_download_lock = asyncio.Lock()
+
+_SC_NOT_CONNECTED = (
+    "SoundCloud is not connected. Sign in under SoundCloud, then reload this artist."
+)
+_SC_SESSION_EXPIRED = "The SoundCloud session expired. Sign in again to refresh the catalogue."
+
+
+def _artist_sc_token() -> str | None:
+    """The stored OAuth token, or None. Never logged — not even redacted."""
+    try:
+        return keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN) or None
+    except Exception as exc:
+        logger.warning("[ARTIST] keyring lookup failed: %s", exc)
+        return None
+
+
+def _artist_collection_or_404(collection_id: str) -> dict[str, Any]:
+    artist_registry.migrate_legacy_artist_links()
+    collection = artist_schema.get_collection(collection_id)
+    if collection is None:
+        raise HTTPException(404, f"Unknown artist collection: {collection_id}")
+    return collection
+
+
+def _artist_state(status: str, collection_id: str, detail: str, **extra: Any) -> dict[str, Any]:
+    """A non-catalogue answer.
+
+    Carries NO bucket keys on purpose: a UI that destructures `definitely_theirs` gets
+    `undefined`, never `[]`. An empty list here would read as "this artist has released
+    nothing", which is a claim about data we do not have.
+    """
+    return {"status": status, "collection_id": collection_id, "detail": detail, **extra}
+
+
+def _artist_catalogue_view(
+    collection_id: str,
+    *,
+    refresh: bool,
+    allow_fetch: bool,
+) -> dict[str, Any]:
+    """Shared body of the catalogue read — also how the download job learns what a track is.
+
+    Returns either the `status="ok"` catalogue or one of the typed states
+    (`not_linked` / `link_unresolved` / `not_connected` / `artist_gone`). `allow_fetch`
+    False means cache-only: the download job must not open a second network session
+    behind the user's back.
+    """
+    _artist_collection_or_404(collection_id)
+
+    link = artist_registry.get_provider_link(collection_id)
+    if link is None:
+        return _artist_state(
+            "not_linked",
+            collection_id,
+            "No SoundCloud account is bound to this artist. Link one to see their catalogue.",
+        )
+    if not link["resolved"]:
+        # A legacy app_data.json import: a permalink, but no URN. One click finishes it.
+        return _artist_state(
+            "link_unresolved",
+            collection_id,
+            "This artist carries an imported SoundCloud URL that was never resolved to an "
+            "account. Re-link it to finish the binding.",
+            permalink=link["permalink"],
+        )
+
+    token = _artist_sc_token() if allow_fetch else None
+    budget = sc_api.CallBudget(limit=ARTIST_CATALOGUE_CALL_BUDGET, label=collection_id)
+
+    fetcher: artist_catalogue.Fetcher | None = None
+    # "not_queried" survives a cache hit: nothing was fetched, so nothing may be
+    # asserted about the reposts half either.
+    fetch_state: dict[str, str] = {"reposts": "not_queried"}
+    if token:
+        # The token is bound as a default so it lives in this call, not in a closure the
+        # catalogue module could ever reach — that module must never see credentials.
+        def _fetch(artist_urn: str, _token: str = token) -> Any:
+            # /users/{urn}/tracks is own-uploads-only, so on its own the
+            # "remixes by others" bucket could never be non-empty while the UI
+            # still claimed none was missing. Reposts are the separate path that
+            # actually surfaces foreign uploads crediting this artist.
+            cap = artist_catalogue.MAX_CATALOGUE_TRACKS
+            own = sc_api.get_user_tracks(artist_urn, _token, max_items=cap, budget=budget)
+            rest = max(0, cap - len(own))
+            reposts: Any = []
+            if not rest or budget.exhausted:
+                fetch_state["reposts"] = "skipped_budget"
+            else:
+                # Best effort: own uploads are the half that matters, so a reposts
+                # failure must not take the whole catalogue down with it. The status
+                # travels to the UI, which must then say the bucket was not queried
+                # rather than claim nothing is missing from it.
+                try:
+                    reposts = sc_api.get_user_reposts(
+                        artist_urn, _token, max_items=rest, budget=budget
+                    )
+                    fetch_state["reposts"] = "ok"
+                except sc_api.NotFoundError:
+                    fetch_state["reposts"] = "ok"
+                except Exception as exc:
+                    logger.warning(
+                        "op=artist_catalogue reposts_failed artist=%s err=%s", artist_urn, exc
+                    )
+                    fetch_state["reposts"] = "failed"
+            combined = sc_api.SCResultList([*own, *reposts])
+            combined.truncated = bool(
+                getattr(own, "truncated", False) or getattr(reposts, "truncated", False)
+            )
+            combined.stop_reason = getattr(own, "stop_reason", "") or getattr(
+                reposts, "stop_reason", ""
+            )
+            combined.calls_used = getattr(own, "calls_used", 0) + getattr(reposts, "calls_used", 0)
+            return combined
+
+        fetcher = _fetch
+
+    try:
+        view = artist_catalogue.catalogue(
+            collection_id,
+            local_tracks=db.tracks if getattr(db, "loaded", False) else None,
+            artist_urn=link["remote_id"],
+            artist_names=artist_registry.artist_names(collection_id),
+            fetch=fetcher,
+            force_refresh=bool(refresh),
+        )
+    except artist_catalogue.ArtistNotLinked:
+        return _artist_state(
+            "not_linked",
+            collection_id,
+            "No SoundCloud account is bound to this artist. Link one to see their catalogue.",
+        )
+    except artist_catalogue.CatalogueUnavailable:
+        # No usable cache and no way to fetch: either signed out, or a cache-only read.
+        return _artist_state(
+            "not_connected",
+            collection_id,
+            _SC_NOT_CONNECTED
+            if allow_fetch
+            else "No catalogue has been fetched for this artist yet. Open the artist first.",
+        )
+    except AuthExpiredError:
+        return _artist_state("not_connected", collection_id, _SC_SESSION_EXPIRED)
+    except NotFoundError:
+        return _artist_state(
+            "artist_gone",
+            collection_id,
+            "SoundCloud no longer serves this account — it may be deleted, private or renamed.",
+            permalink=link["permalink"],
+        )
+
+    logger.info(
+        "op=artist_catalogue_budget collection=%s calls=%d cap=%d from_cache=%s",
+        collection_id,
+        budget.used,
+        budget.limit,
+        view["from_cache"],
+    )
+    return {
+        "status": "ok",
+        "collection_id": collection_id,
+        "link": link,
+        "calls_used": budget.used,
+        "call_budget": budget.limit,
+        # "ok" | "failed" | "skipped_budget" | "not_queried". Only "ok" entitles the UI
+        # to say nothing is missing from the remixes bucket; every other value means
+        # that half was never looked at, and claiming absence would be a fabrication.
+        "reposts_status": fetch_state["reposts"],
+        **view,
+    }
+
+
+@app.get("/api/artists/{collection_id}/catalogue")
+def artist_catalogue_route(collection_id: str, refresh: bool = False):
+    """An artist's SoundCloud catalogue in three buckets, each track flagged owned/missing.
+
+    Fetched on selection, never speculatively, and only for an artist the user bound.
+    `refresh=true` forces a live fetch past the TTL cache.
+
+    The answer is a discriminated union on `status`: `ok` carries the buckets, while
+    `not_linked` / `link_unresolved` / `not_connected` / `artist_gone` carry a `detail`
+    and **no bucket keys at all**, so a missing binding or a missing login can never be
+    rendered as "this artist has released nothing".
+    """
+    try:
+        return _artist_catalogue_view(collection_id, refresh=refresh, allow_fetch=True)
+    except RateLimitError as exc:
+        raise HTTPException(429, safe_error_message(exc)) from None
+
+
+@app.post("/api/artists/{collection_id}/link", dependencies=[Depends(require_session)])
+def artist_link_soundcloud(collection_id: str, r: ArtistLinkReq):
+    """Bind an artist to a SoundCloud account from a profile URL or a bare permalink.
+
+    Stored against the store's stable `collection_id`, never the artist name, so a merge
+    cannot orphan the binding. `confidence` records how well the SoundCloud account name
+    agrees with the local spelling — surfaced, never enforced: the bind is the user's call.
+    """
+    _artist_collection_or_404(collection_id)
+
+    value = (r.url_or_permalink or "").strip()
+    if not value:
+        raise HTTPException(400, "url_or_permalink is required")
+
+    token = _artist_sc_token()
+    if not token:
+        raise HTTPException(400, _SC_NOT_CONNECTED)
+
+    budget = sc_api.CallBudget(limit=ARTIST_CATALOGUE_CALL_BUDGET, label=collection_id)
+    try:
+        artist = sc_api.resolve_user(value, token, budget=budget)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    except AuthExpiredError:
+        raise HTTPException(401, detail="auth_expired") from None
+    except RateLimitError as exc:
+        raise HTTPException(429, safe_error_message(exc)) from None
+
+    if artist is None:
+        raise HTTPException(
+            404,
+            f"SoundCloud did not resolve {value!r} to an account "
+            "(deleted, private, or not a user profile).",
+        )
+
+    confidence = artist_registry.link_confidence(collection_id, artist["username"])
+    link = artist_registry.set_provider_link(
+        collection_id, artist["urn"], artist["permalink_url"], confidence
+    )
+    logger.info(
+        "op=artist_link_resolved collection=%s urn=%s confidence=%.3f calls=%d",
+        collection_id,
+        artist["urn"],
+        confidence,
+        budget.used,
+    )
+    return {"status": "ok", "collection_id": collection_id, "link": link, "artist": artist}
+
+
+@app.delete("/api/artists/{collection_id}/link", dependencies=[Depends(require_session)])
+def artist_unlink_soundcloud(collection_id: str):
+    """Unbind. Idempotent — the collection, its aliases and its favourite state survive."""
+    _artist_collection_or_404(collection_id)
+    removed = artist_registry.remove_provider_link(collection_id)
+    return {"status": "ok", "collection_id": collection_id, "removed": removed}
+
+
+def _sc_numeric_track_id(sc_id: str) -> str | None:
+    """`soundcloud:tracks:123` -> `123`. The downloader speaks numeric ids."""
+    tail = str(sc_id or "").strip().rsplit(":", 1)[-1]
+    return tail if tail.isdigit() else None
+
+
+def _artist_download_selection(
+    view: Mapping[str, Any],
+    sc_ids: list[str],
+    auto_queue: bool,
+) -> list[dict[str, Any]]:
+    """Which catalogue tracks this run may download.
+
+    Two mutually exclusive paths, because they carry different consent:
+
+    * **auto-queue** — the server picks, so it may only ever pick `definitely_theirs`
+      tracks the diff proved missing (`auto_queue_allowed`). A remix uploaded by someone
+      else is never queued on the user's behalf (threat T11).
+    * **explicit ids** — the user pointed at rows, so any bucket is fair game, including
+      a remix. Unknown ids are refused rather than skipped, so the count the UI showed is
+      the count that runs.
+    """
+    by_id: dict[str, dict[str, Any]] = {}
+    for bucket in (
+        artist_catalogue.BUCKET_THEIRS,
+        artist_catalogue.BUCKET_REMIXES,
+        artist_catalogue.BUCKET_MIXES,
+    ):
+        for track in view.get(bucket) or []:
+            by_id[str(track.get("sc_id"))] = track
+
+    if auto_queue:
+        if sc_ids:
+            raise HTTPException(
+                400,
+                "auto_queue picks the tracks itself — send either sc_ids or auto_queue, not both.",
+            )
+        return [
+            track
+            for track in (view.get(artist_catalogue.BUCKET_THEIRS) or [])
+            if track.get("auto_queue_allowed")
+        ]
+
+    wanted: list[str] = []
+    for raw in sc_ids:
+        sc_id = str(raw or "").strip()
+        if sc_id and sc_id not in wanted:
+            wanted.append(sc_id)
+    if not wanted:
+        raise HTTPException(400, "sc_ids must hold at least one track id, or set auto_queue")
+
+    unknown = [sc_id for sc_id in wanted if sc_id not in by_id]
+    if unknown:
+        raise HTTPException(
+            400,
+            f"{len(unknown)} track id(s) are not in this artist's fetched catalogue: "
+            + ", ".join(unknown[:5]),
+        )
+    return [by_id[sc_id] for sc_id in wanted]
+
+
+def _artist_download_job_record(total: int, collection_id: str) -> dict[str, Any]:
+    return {
+        "kind": ARTIST_JOB_DOWNLOAD,
+        "collection_id": collection_id,
+        "status": "running",
+        "total": total,
+        "done": 0,
+        "percent": 0.0,
+        "eta_seconds": 0.0,
+        "cancel_requested": False,
+        "current_track": None,
+        "succeeded": 0,
+        "skipped": 0,
+        "failed": 0,
+        "errors": [],
+        "call_cap": ARTIST_DOWNLOAD_MAX_TRACKS,
+        "result": None,
+        "error": None,
+    }
+
+
+async def _run_artist_download(
+    job_id: str,
+    tracks: list[dict[str, Any]],
+    auth_token: str,
+    artist_name: str,
+) -> None:
+    """Download the selected tracks one at a time through the existing SC downloader.
+
+    Per track it calls `sc_downloader.download_track` — the same entry point the
+    single-track path uses, so the host allowlist, the size cap, the snipped / 401 / 403
+    gates and the dedupe registry all still apply and none of it is reimplemented here.
+    `allow_aggressive=False` is the one deviation: `sc_aggressive_mode` is an opt-in for
+    a track the user picked by hand, and a batch must not inherit it.
+
+    Sequential on purpose: parallel fan-out across an artist's catalogue is exactly the
+    bulk-scraper shape the ToU guardrails rule out.
+    """
+    job = _artist_jobs[job_id]
+    loop = asyncio.get_running_loop()
+    started = time.monotonic()
+    try:
+        for index, track in enumerate(tracks):
+            if job["cancel_requested"]:
+                logger.info("[ARTIST] download %s cancelled at %d/%d", job_id, index, len(tracks))
+                job["status"] = "cancelled"
+                break
+
+            sc_id = str(track.get("sc_id") or "")
+            title = str(track.get("title") or "")
+            job["current_track"] = {"sc_id": sc_id, "title": title}
+
+            numeric_id = _sc_numeric_track_id(sc_id)
+            if numeric_id is None or not artist_catalogue.is_playable(track):
+                job["skipped"] += 1
+                job["errors"].append(
+                    {
+                        "sc_id": sc_id,
+                        "title": title,
+                        "error": "not downloadable: no numeric id, or SoundCloud grants this "
+                        "account only a preview",
+                    }
+                )
+            else:
+                finished = threading.Event()
+                outcome: dict[str, Any] = {"success": False}
+
+                # Bound as defaults: the callback fires on the downloader's own thread,
+                # and closing over the loop variables would let a late callback from a
+                # previous track write into this one's result.
+                def _on_complete(
+                    _task_id: str,
+                    success: bool,
+                    _path: Any,
+                    _outcome: dict[str, Any] = outcome,
+                    _done: threading.Event = finished,
+                ) -> None:
+                    _outcome["success"] = bool(success)
+                    _done.set()
+
+                sc_downloader.download_track(
+                    sc_track_id=numeric_id,
+                    sc_permalink_url=str(track.get("permalink_url") or ""),
+                    title=title,
+                    artist=str(track.get("uploader_name") or artist_name),
+                    duration_ms=int(track.get("duration_ms") or 0),
+                    downloadable=bool(track.get("downloadable")),
+                    auth_token=auth_token,
+                    allow_aggressive=False,
+                    on_complete=_on_complete,
+                )
+                signalled = await loop.run_in_executor(
+                    None, finished.wait, ARTIST_DOWNLOAD_TRACK_TIMEOUT_S
+                )
+                if not signalled:
+                    job["failed"] += 1
+                    job["errors"].append({"sc_id": sc_id, "title": title, "error": "timed out"})
+                elif outcome["success"]:
+                    job["succeeded"] += 1
+                else:
+                    job["failed"] += 1
+                    job["errors"].append(
+                        {"sc_id": sc_id, "title": title, "error": "download failed"}
+                    )
+
+            job["done"] = index + 1
+            job["percent"] = round(100.0 * job["done"] / max(1, job["total"]), 1)
+            elapsed = time.monotonic() - started
+            remaining = job["total"] - job["done"]
+            job["eta_seconds"] = round(elapsed / job["done"] * remaining, 1) if job["done"] else 0.0
+
+        if job["status"] == "running":
+            job["status"] = "done"
+        job["current_track"] = None
+        job["result"] = {
+            "succeeded": job["succeeded"],
+            "skipped": job["skipped"],
+            "failed": job["failed"],
+        }
+        logger.info(
+            "op=artist_download_done job=%s total=%d ok=%d skipped=%d failed=%d cap=%d",
+            job_id,
+            job["total"],
+            job["succeeded"],
+            job["skipped"],
+            job["failed"],
+            ARTIST_DOWNLOAD_MAX_TRACKS,
+        )
+    except Exception as exc:
+        logger.error("[ARTIST] download job %s crashed: %s", job_id, exc, exc_info=True)
+        job["status"] = "error"
+        job["error"] = safe_error_message(exc)
+    finally:
+        # Lock acquired in the start handler; the worker owns its release.
+        if _artist_download_lock.locked():
+            _artist_download_lock.release()
+
+
+@app.post("/api/artists/{collection_id}/download-missing", dependencies=[Depends(require_session)])
+async def artist_download_missing(
+    collection_id: str,
+    r: ArtistDownloadMissingReq,
+    background_tasks: BackgroundTasks,
+):
+    """Queue an artist's missing tracks through the existing SoundCloud downloader.
+
+    Reads the catalogue **from the sidecar cache only** — the run makes no metadata calls
+    of its own, so opening the artist page stays the one place a fetch happens. Returns a
+    job id; poll `/api/artists/download/status?job_id=`. One batch at a time (409).
+
+    `auto_queue` picks only `definitely_theirs` tracks the diff proved missing; a remix
+    uploaded by someone else has to be named in `sc_ids`.
+
+    The job record carries `cancel_requested` for shape parity with the phrase batch and
+    the worker honours it, but **no route sets it yet** — there is deliberately no cancel
+    button in the UI contract until one is wired here.
+    """
+    view = _artist_catalogue_view(collection_id, refresh=False, allow_fetch=False)
+    if view["status"] != "ok":
+        # Typed state, not an empty success — the UI renders the reason, not a blank list.
+        raise HTTPException(409, view["detail"])
+
+    token = _artist_sc_token()
+    if not token:
+        raise HTTPException(400, _SC_NOT_CONNECTED)
+
+    selected = _artist_download_selection(view, r.sc_ids, r.auto_queue)
+    if not selected:
+        raise HTTPException(400, "Nothing to download — every selected track is already owned")
+    if len(selected) > ARTIST_DOWNLOAD_MAX_TRACKS:
+        logger.warning(
+            "op=artist_download_cap collection=%s requested=%d cap=%d result=refused",
+            collection_id,
+            len(selected),
+            ARTIST_DOWNLOAD_MAX_TRACKS,
+        )
+        raise HTTPException(
+            400,
+            f"{len(selected)} tracks exceeds the per-run cap of "
+            f"{ARTIST_DOWNLOAD_MAX_TRACKS}. Download in smaller batches.",
+        )
+
+    if _artist_download_lock.locked():
+        raise HTTPException(409, "An artist download is already running")
+    await _artist_download_lock.acquire()
+
+    collection = artist_schema.get_collection(collection_id) or {}
+    artist_name = str(collection.get("canonical_name") or "")
+
+    job_id = str(uuid.uuid4())
+    _artist_jobs[job_id] = _artist_download_job_record(len(selected), collection_id)
+    logger.info(
+        "op=artist_download_start job=%s collection=%s queued=%d cap=%d auto_queue=%s",
+        job_id,
+        collection_id,
+        len(selected),
+        ARTIST_DOWNLOAD_MAX_TRACKS,
+        r.auto_queue,
+    )
+    background_tasks.add_task(_run_artist_download, job_id, selected, token, artist_name)
+    return {
+        "status": "ok",
+        "data": {
+            "job_id": job_id,
+            "total": len(selected),
+            "collection_id": collection_id,
+            "call_cap": ARTIST_DOWNLOAD_MAX_TRACKS,
+        },
+    }
+
+
+@app.get("/api/artists/download/status")
+def artist_download_status(job_id: str):
+    """Poll one batch download. Same envelope as `/api/phrase/batch/status`."""
+    job = _artist_jobs.get(job_id)
+    if job is None or job.get("kind") != ARTIST_JOB_DOWNLOAD:
+        raise HTTPException(404, f"Job not found: {job_id}")
+    return {"status": "ok", "data": job}
 
 
 @app.get("/api/label/{aid}/tracks")
@@ -3127,8 +3697,18 @@ def load_project_endpoint(name: str):
 
 @app.post("/api/artist/soundcloud", dependencies=[Depends(require_session)])
 def set_sc(r: ScReq):
-    # storage.set_artist_link(r.artist_name, r.link)
-    return {"status": "saved"}
+    """Legacy name-keyed bind — kept working, now writing to the real store.
+
+    Superseded by `POST /api/artists/{collection_id}/link`, which is what the hub calls.
+    This shim exists because the route used to return a fake `{"status": "saved"}` with
+    its storage call commented out; anything still pointing here now resolves the name to
+    a stable `collection_id` and takes the same path, so no caller gets a lie back.
+    """
+    name = (r.artist_name or "").strip()
+    if not name:
+        raise HTTPException(400, "artist_name is required")
+    collection_id = artist_schema.create_collection(name, artist_schema.KIND_ARTIST)
+    return artist_link_soundcloud(collection_id, ArtistLinkReq(url_or_permalink=r.link))
 
 
 class SliceReq(BaseModel):

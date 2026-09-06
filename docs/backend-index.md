@@ -1,13 +1,13 @@
 # app/ INDEX — Python Backend
 
 > Module and endpoint map for the FastAPI backend. Update when adding/removing endpoints or modules.
-> Last updated: 2026-09-05
+> Last updated: 2026-09-06
 
 ---
 
 ## Entry Point & Server Config (`app/main.py`)
 
-FastAPI app (~4000 lines). Security: CORS locked to localhost, `validate_audio_path()` enforces `ALLOWED_AUDIO_ROOTS` sandbox on all file I/O. **Phase-1 Bearer-token auth** (commits `1c7d410..f90f5f8` + `8498937`): every mutation route (POST/PUT/PATCH/DELETE) carries `dependencies=[Depends(require_session)]` from `app/auth.py`. Token is self-generated at sidecar boot (`secrets.token_urlsafe(32)`), printed once as `LMS_TOKEN=<value>` on stdout (captured + scrubbed by Tauri Rust supervisor), and persisted to `%APPDATA%/MusicLibraryManager/.session-token` for the browser-dev fallback. Clients must send `Authorization: Bearer <token>` on every gated request — see `app/auth.py:require_session`. 84/85 mutation routes gated; `POST /api/system/heartbeat` is the only intentional exception (unauth healthcheck), alongside the read-only `GET /api/system/health`. **Phase-1 rate-limit** (`app/rate_limit.py`, commit `e78fb24`): the 3 HIGH-tier routes (shutdown / restart / sc-auth-token) additionally carry `@rate_limit(steady=5.0, burst=10, key_mode="both")`.
+FastAPI app (~4000 lines). Security: CORS locked to localhost, `validate_audio_path()` enforces `ALLOWED_AUDIO_ROOTS` sandbox on all file I/O. **Phase-1 Bearer-token auth** (commits `1c7d410..f90f5f8` + `8498937`): every mutation route (POST/PUT/PATCH/DELETE) carries `dependencies=[Depends(require_session)]` from `app/auth.py`. Token is self-generated at sidecar boot (`secrets.token_urlsafe(32)`), printed once as `LMS_TOKEN=<value>` on stdout (captured + scrubbed by Tauri Rust supervisor), and persisted to `%APPDATA%/MusicLibraryManager/.session-token` for the browser-dev fallback. Clients must send `Authorization: Bearer <token>` on every gated request — see `app/auth.py:require_session`. 99/101 mutation routes gated (measured 2026-09-06); the two intentional exceptions are `POST /api/system/heartbeat` (unauth healthcheck, alongside the read-only `GET /api/system/health`) and `POST /api/artists/merge/preview`, which is a POST only because the group can be a long list of names and writes nothing at all. **Phase-1 rate-limit** (`app/rate_limit.py`, commit `e78fb24`): the 3 HIGH-tier routes (shutdown / restart / sc-auth-token) additionally carry `@rate_limit(steady=5.0, burst=10, key_mode="both")`.
 
 Marker convention in the route tables below:
 - `[AUTH]` — requires `Authorization: Bearer <SESSION_TOKEN>`. Missing/wrong → 401.
@@ -44,6 +44,11 @@ Marker convention in the route tables below:
 | POST | `/api/artists/projection/sync` `[AUTH]` | Mirror favourites into Rekordbox as the `Artists` folder → job id. `{dry_run}` writes nothing and is allowed while Rekordbox is open; a real run 409s |
 | GET | `/api/artists/projection/status` | Folder + per-artist projection state; renders before the library loads |
 | GET | `/api/artists/jobs/{job_id}` | Poll one artist-hub job (`kind`, `status`, `total/done/percent/eta_seconds/cancel_requested`, `result`, `error`) |
+| GET | `/api/artists/{collection_id}/catalogue` | Artist Hub: the bound SoundCloud account's catalogue in three buckets (`definitely_theirs` / `remixes_by_others` / `mixes_and_sets`) + `in_library`, `from_cache`, `truncated`. `?refresh=true` forces a live fetch past the 6 h TTL cache. Discriminated on `status`: `ok` carries the buckets; `not_linked` / `link_unresolved` / `not_connected` / `artist_gone` carry a `detail` and **no bucket keys**, so a missing binding or login can never render as "this artist has released nothing". Fetched on selection only, under a per-run `CallBudget` |
+| POST | `/api/artists/{collection_id}/link` `[AUTH]` | Bind an artist to a SoundCloud account. Body `{url_or_permalink}` → resolved through `/resolve`; stores URN + permalink + name-match `confidence` against the store's stable `collection_id` (never the artist name, so a merge cannot orphan it). 400 without a token, 404 when the URL resolves to nothing or to a non-user |
+| DELETE | `/api/artists/{collection_id}/link` `[AUTH]` | Unbind. Idempotent; collection, aliases, favourite state and the cached catalogue survive |
+| POST | `/api/artists/{collection_id}/download-missing` `[AUTH]` | Queue missing tracks through the existing SC downloader → job id. Body `{sc_ids[]}` **or** `{auto_queue: true}`, never both: auto-queue may only pick `definitely_theirs` tracks the diff proved missing, a foreign uploader's remix has to be named. Reads the catalogue cache only (no metadata calls of its own), refuses more than `ARTIST_DOWNLOAD_MAX_TRACKS` per run instead of trimming, 409 while a batch is in flight or the catalogue is not fetched. `sc_aggressive_mode` is **not** inherited |
+| GET | `/api/artists/download/status` | Poll one batch download by `job_id` (`total/done/percent/eta_seconds/cancel_requested`, `succeeded/skipped/failed`, `errors[]`, `call_cap`). Same envelope as `/api/phrase/batch/status` |
 | GET | `/api/genres` | All genres |
 | GET | `/api/labels` | All labels |
 | GET | `/api/albums` | All albums |
@@ -159,7 +164,7 @@ Marker convention in the route tables below:
 | GET | `/api/soundcloud/history/stats` | Aggregate stats: total/analyzed/failed counts, device count, date range |
 | GET | `/api/soundcloud/check/{sc_track_id}` | O(1) dedup check — returns `{already_downloaded: bool}` |
 | DELETE | `/api/soundcloud/history/{sc_track_id}` `[AUTH]` | Remove registry entry (to allow re-download). Does NOT delete the file. |
-| POST | `/api/artist/soundcloud` `[AUTH]` | Associate artist with SC profile |
+| POST | `/api/artist/soundcloud` `[AUTH]` | **Legacy** name-keyed bind, kept working: resolves `artist_name` to a stable `collection_id` and delegates to `POST /api/artists/{collection_id}/link`. Used to return a fake `{"status":"saved"}` with its storage call commented out. New callers use the `/api/artists/…/link` pair |
 
 ### USB Sync Endpoints
 | Method | Path | Description |

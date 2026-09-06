@@ -8,8 +8,10 @@ as the ``Artists`` folder; ``merge`` groups duplicate artist spellings, costs a 
 performs it and takes it back (``merge.apply`` / ``merge.revert`` — reached through the
 module, their verbs are too generic for this namespace).
 
-``projection`` is imported as a module (``from app.artist_store import projection``) —
-its ``sync`` / ``status`` are too generic to hoist into this namespace.
+``projection`` and ``catalogue`` are imported as modules (``from app.artist_store import
+projection``) — their ``sync`` / ``status`` / ``classify`` / ``diff`` / ``catalogue`` verbs
+are too generic to hoist into this namespace. The provider-link helpers are not: they
+are already artist-specific, and the routes bind through them.
 """
 
 from __future__ import annotations
@@ -30,13 +32,19 @@ from app.artist_store.registry import (  # isort: skip — must follow schema
     DEFAULT_BACKLOG_LIMIT,
     PROVIDER_SOUNDCLOUD,
     add_favourite_artist,
+    artist_names,
     backlog,
     favourite_artist_by_name,
+    get_provider_link,
     hub,
     library_artist_counts,
+    link_confidence,
     list_favourite_artists,
+    migrate_legacy_artist_links,
     remove_favourite_artist,
+    remove_provider_link,
     resolve_library_artists,
+    set_provider_link,
 )
 
 from app.artist_store.merge import (  # isort: skip — must follow registry
@@ -70,18 +78,24 @@ __all__ = [
     "MergeRevertResult",
     "MergeVariant",
     "add_favourite_artist",
+    "artist_names",
     "backlog",
     "candidates",
     "collection_id_for",
     "favourite_artist_by_name",
     "fold_key",
+    "get_provider_link",
     "hub",
     "init_db",
     "library_artist_counts",
+    "link_confidence",
     "list_favourite_artists",
     "migrate",
+    "migrate_legacy_artist_links",
     "preview",
     "remove_favourite_artist",
+    "remove_provider_link",
     "resolve_library_artists",
+    "set_provider_link",
     "suggest_canonical",
 ]

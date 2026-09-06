@@ -19,6 +19,7 @@ the counts are already in memory.
 from __future__ import annotations
 
 import logging
+from difflib import SequenceMatcher
 from typing import Any, NamedTuple
 
 from app.artist_store import schema
@@ -448,3 +449,178 @@ def browse(
         "query": query.strip(),
         "sort": sort_mode,
     }
+
+
+# --------------------------------------------------------------------------- provider links
+
+
+def _collapse(text: Any) -> str:
+    return " ".join(str(text or "").split())
+
+
+def artist_names(collection_id: str, kind: str = KIND_ARTIST) -> tuple[str, ...]:
+    """Every spelling a collection answers to — canonical first, then its aliases.
+
+    The catalogue classifier needs these to decide whether a foreign upload credits this
+    artist ("… (Boys Noize Remix)"), and after a merge one collection legitimately
+    carries several library spellings.
+    """
+    collection = schema.get_collection(collection_id)
+    if collection is None:
+        return ()
+    names: list[str] = [str(collection["canonical_name"])]
+    seen = {names[0].casefold()}
+    for row in schema.list_aliases(collection_id):
+        alias = _collapse(row["alias"])
+        if alias and alias.casefold() not in seen:
+            seen.add(alias.casefold())
+            names.append(alias)
+    return tuple(names)
+
+
+def link_confidence(collection_id: str, username: str) -> float:
+    """How well a resolved SoundCloud account name agrees with the local artist name.
+
+    Recorded, never enforced: the bind is a deliberate user action, so a mismatch is a
+    warning the UI can render ("SoundCloud calls this account 'bnr_official'"), not a
+    refusal. 1.0 on an exact fold match against any known spelling, otherwise the best
+    ``SequenceMatcher`` ratio over them, 0.0 when there is nothing to compare.
+    """
+    target = _collapse(username).casefold()
+    if not target:
+        return 0.0
+    best = 0.0
+    for name in artist_names(collection_id):
+        folded = _collapse(name).casefold()
+        if not folded:
+            continue
+        if folded == target:
+            return 1.0
+        best = max(best, SequenceMatcher(None, folded, target).ratio())
+    return round(best, 3)
+
+
+def get_provider_link(
+    collection_id: str, provider: str = PROVIDER_SOUNDCLOUD
+) -> dict[str, Any] | None:
+    """The stored binding for a collection, or None.
+
+    ``remote_id`` is the load-bearing field: a row carrying a permalink but no URN (what
+    the legacy ``app_data.json`` import produces) is a bookmark, not a usable binding, so
+    ``resolved`` reports it separately instead of letting a caller assume it can fetch.
+    """
+    link = schema.get_link(collection_id, provider)
+    if link is None:
+        return None
+    remote_id = str(link.get("remote_id") or "")
+    return {
+        "collection_id": collection_id,
+        "provider": provider,
+        "remote_id": remote_id,
+        "permalink": str(link.get("permalink") or ""),
+        "confidence": link.get("confidence"),
+        "resolved": bool(remote_id),
+    }
+
+
+def set_provider_link(
+    collection_id: str,
+    remote_id: str | None,
+    permalink: str | None,
+    confidence: float | None,
+    provider: str = PROVIDER_SOUNDCLOUD,
+) -> dict[str, Any]:
+    """Bind a collection to a provider account. Keyed on the store's stable id.
+
+    Deliberately NOT keyed on the artist name the legacy ``app_data.json`` store used: a
+    merge rewrites names, and a name-keyed binding is orphaned the moment it does.
+    Raises ``KeyError`` for an unknown collection — a link row whose collection does not
+    exist is unreachable, and the FK would cascade it away anyway.
+    """
+    if schema.get_collection(collection_id) is None:
+        raise KeyError(collection_id)
+    schema.set_link(collection_id, provider, remote_id, permalink, confidence)
+    logger.info(
+        "op=artist_link collection=%s provider=%s resolved=%s confidence=%s",
+        collection_id,
+        provider,
+        bool(remote_id),
+        confidence,
+    )
+    return get_provider_link(collection_id, provider) or {
+        "collection_id": collection_id,
+        "provider": provider,
+        "remote_id": str(remote_id or ""),
+        "permalink": str(permalink or ""),
+        "confidence": confidence,
+        "resolved": bool(remote_id),
+    }
+
+
+def remove_provider_link(collection_id: str, provider: str = PROVIDER_SOUNDCLOUD) -> bool:
+    """Unbind. Collection, aliases, favourite state and the cached catalogue all survive.
+
+    The cache row is left alone on purpose: ``catalogue`` refuses a payload whose
+    ``artist_urn`` differs from the binding, so a re-bind to a different account cannot
+    read it, and a re-bind to the same one keeps costing zero calls.
+    """
+    removed = schema.remove_link(collection_id, provider)
+    logger.info(
+        "op=artist_unlink collection=%s provider=%s removed=%s", collection_id, provider, removed
+    )
+    return removed
+
+
+#: ``store_meta`` marker; the legacy JSON import runs at most once per store.
+LEGACY_LINK_MIGRATION_KEY = "legacy_sc_links_migrated"
+
+_legacy_migration_done = False
+
+
+def migrate_legacy_artist_links() -> dict[str, Any]:
+    """One-shot import of ``app_data.json``'s name-keyed SoundCloud links (T-7).
+
+    ``app/sidecar.py`` kept ``{artist_name: {"soundcloud": url}}``. That store is
+    superseded: it is keyed on a name a merge can rewrite, and its only writer route
+    never actually wrote. Imported rows carry the permalink but **no URN** — resolving
+    one needs a network call and a token, neither of which exists here — so they land
+    ``resolved=False`` and the UI asks for one click to finish the bind. Nothing is
+    written back to the JSON file.
+
+    Idempotent: guarded by a process flag and by a ``store_meta`` marker.
+    """
+    global _legacy_migration_done
+    if _legacy_migration_done:
+        return {"migrated": 0, "skipped": 0, "already_done": True}
+    if schema.get_meta(LEGACY_LINK_MIGRATION_KEY):
+        _legacy_migration_done = True
+        return {"migrated": 0, "skipped": 0, "already_done": True}
+
+    migrated = 0
+    skipped = 0
+    entries: Any = {}
+    try:
+        from app.sidecar import storage as legacy_storage
+
+        entries = (legacy_storage.data or {}).get("artists") or {}
+    except (ImportError, OSError, AttributeError) as exc:
+        logger.warning("op=artist_link_migration state=unreadable err=%s", exc)
+
+    if isinstance(entries, dict):
+        for raw_name, payload in entries.items():
+            name = _collapse(raw_name)
+            url = _collapse(payload.get("soundcloud")) if isinstance(payload, dict) else ""
+            if not name or not url:
+                skipped += 1
+                continue
+            cid = schema.create_collection(name, KIND_ARTIST)
+            if schema.get_link(cid, PROVIDER_SOUNDCLOUD) is not None:
+                skipped += 1
+                continue
+            schema.set_link(cid, PROVIDER_SOUNDCLOUD, None, url, None)
+            migrated += 1
+
+    schema.set_meta(LEGACY_LINK_MIGRATION_KEY, "1")
+    _legacy_migration_done = True
+    logger.info("op=artist_link_migration migrated=%d skipped=%d", migrated, skipped)
+    return {"migrated": migrated, "skipped": skipped, "already_done": False}

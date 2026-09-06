@@ -59,3 +59,22 @@ export const ARTIST_MERGE_MAX_POLL_FAILURES = 5;
 // for as long as the library needs, and the default 10 s would abort the request
 // while the backend keeps writing — the worst possible outcome.
 export const ARTIST_LONG_OP_TIMEOUT_MS = 0;
+
+// Axios timeout for the artist catalogue read (GET /api/artists/{id}/catalogue).
+// A cold fetch walks SoundCloud page by page with a spacing sleep between pages, so
+// the 10 s default aborts the request while the backend is still legitimately
+// working. `0` disables the client-side abort; the backend owns the call budget.
+export const ARTIST_CATALOGUE_TIMEOUT_MS = 0;
+
+// Poll cadence for a running artist batch download (POST /api/artists/{id}/
+// download-missing → job_id, then GET /api/artists/download/status). The job steps
+// once per finished track, so anything faster only re-reads the same numbers.
+export const ARTIST_DOWNLOAD_POLL_INTERVAL_MS = 1500;
+
+// Consecutive failed download-status polls tolerated before the view stops waiting
+// and says it lost the job. Same reasoning as the merge poll's threshold.
+export const ARTIST_DOWNLOAD_MAX_POLL_FAILURES = 5;
+
+// Rows one catalogue bucket renders before the "show more" button. These lists are
+// plain DOM (no virtualisation), and a 500-track bucket would jank the panel.
+export const ARTIST_CATALOGUE_PAGE_SIZE = 50;

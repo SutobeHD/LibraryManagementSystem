@@ -395,6 +395,7 @@ def _normalize_track_id(raw) -> str | None:
 def _resolve_stream_via_transcodings(
     sc_track_id: str,
     auth_token: str | None,
+    allow_aggressive: bool = True,
 ) -> dict | None:
     """
     Resolve a signed CDN stream URL via the v2 `media.transcodings[]` array.
@@ -498,13 +499,16 @@ def _resolve_stream_via_transcodings(
     # tries every transcoding — including snipped ones. The user is explicitly
     # opting in via Settings; we surface the resulting file size + duration in
     # the registry so they can see whether they got a preview clip.
+    # `allow_aggressive=False` makes the setting unreachable: the artist batch path
+    # passes it so a per-track opt-in cannot silently become a bulk policy (ToU).
     aggressive = False
-    try:
-        from .services import SettingsManager
+    if allow_aggressive:
+        try:
+            from .services import SettingsManager
 
-        aggressive = bool(SettingsManager.load().get("sc_aggressive_mode", False))
-    except Exception:
-        pass
+            aggressive = bool(SettingsManager.load().get("sc_aggressive_mode", False))
+        except Exception:
+            pass
 
     if aggressive:
         full_transcodings = list(transcodings)
@@ -1053,6 +1057,7 @@ class SoundCloudDownloader:
         downloadable: bool,
         auth_token: str | None = None,
         sc_playlist_title: str | None = None,
+        allow_aggressive: bool = True,
         on_complete: Callable | None = None,
     ) -> str:
         """
@@ -1074,6 +1079,9 @@ class SoundCloudDownloader:
           downloadable      : Must be True — from SC API 'downloadable' field
           auth_token        : OAuth access token (required for most downloads)
           sc_playlist_title : Optional source playlist name for auto-sort
+          allow_aggressive  : False makes `sc_aggressive_mode` unreachable for this
+                              track. The artist batch path passes False — that setting
+                              is a per-track opt-in, not a bulk policy.
           on_complete       : Optional callback(task_id: str, success: bool, file_path: Path | None)
         """
         task_id = f"sc_{sc_track_id}_{int(time.time())}"
@@ -1193,6 +1201,7 @@ class SoundCloudDownloader:
                     downloadable=downloadable,
                     auth_token=auth_token,
                     sc_playlist_title=sc_playlist_title,
+                    allow_aggressive=allow_aggressive,
                     on_complete=on_complete,
                 )
             except Exception as exc:
@@ -1226,6 +1235,7 @@ class SoundCloudDownloader:
         auth_token: str | None,
         sc_playlist_title: str | None,
         on_complete: Callable | None,
+        allow_aggressive: bool = True,
     ) -> None:
         """Full download + hash + registry pipeline. Runs in a background thread."""
 
@@ -1262,7 +1272,9 @@ class SoundCloudDownloader:
                     )
 
             if source is None:
-                source = _resolve_stream_via_transcodings(sc_track_id, auth_token)
+                source = _resolve_stream_via_transcodings(
+                    sc_track_id, auth_token, allow_aggressive=allow_aggressive
+                )
 
             if source is None:
                 err = (
