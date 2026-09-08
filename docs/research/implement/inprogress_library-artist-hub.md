@@ -33,6 +33,8 @@ superseded_by: []
 - 2026-09-04 — `implement/approvalgate_` — owner answered both gate questions **as refinements, not as picks**: (a) merge propagates to the audio-file tags and the USB exporter **merges folders** instead of re-copying → new Step 5b, tasks T-11a/T-11b, threats T9/T10, perf rows, 7 new test rows; (b) catalogue is fetched **on artist selection**, and the missing list splits into "definitely theirs" (uploader-id equality) vs "remixes by others" → threat T11, task T-13 extended. Blockers 3+4 rewritten accordingly. Mockup updated. Still awaiting `/approve`.
 - 2026-09-04 — `implement/accepted_` — **approved by user** (`/approve library-artist-hub`). Ready for `inprogress_`; build starts at M1 T-1.
 - 2026-09-04 — `implement/inprogress_` — build started on `feat/artist-hub` (single feature branch, atomic commit per task — easier to test M1 as a whole than 13 separate PRs). T-1 shipped.
+- 2026-09-05..07 — `implement/inprogress_` — M1 shipped (`1cea04a` store/registry/hub, `0111e4c` All-artists tab, `61ab0d0` merge + projection, adversarially verified: clobber / revert / idempotency proofs by execution); M2 shipped (`5599b39` catalogue + split + batch download; two critical verify findings fixed pre-commit: bare `(Remix)` collapsing onto the original, and a fabricated "no remix missing" claim → `reposts_status`).
+- 2026-09-08 — `implement/inprogress_` — **two owner refinements** recorded: (1) identification by NAME with remix-aware roles + confidence, search by name + aliases, local `track_identity` table keyed by ISRC/URN, link stays manual — supersedes the uploader-only rule from T-13; (2) the SoundCloud login must survive restarts and days away → silent refresh (persistent-login Option A absorbed here). Cause confirmed in code: Rust parses `refresh_token`/`expires_in` and drops them, Python stores only the access token, nothing refreshes. Tasks T-19 + T-20 added; build running.
 
 ## Original Idea (verbatim — never edit)
 
@@ -75,7 +77,9 @@ Library has no artist-level view. Artist exists only as a per-track string — n
 **Goals**
 - **Artist entity + favourites list.** Own artist record (canonical name + aliases + links), user-curated favourites list. **Metric:** favourite artist resolves to all local tracks incl. every alias variant; 0 tracks lost on merge.
 - **Per-artist overview.** Local tracks vs. remote (SC) catalogue, diff = "missing". **Metric:** artist page renders local+missing split for a 200-track artist < 1 s from cache.
-- **"Definitely theirs" vs "remixes by others"** (owner, 2026-09-04): selecting an artist lists tracks that are provably from that artist's own SC account, **separated** from tracks where they are only named in a title/credit (`… (X Remix)`, `feat. X`) and uploaded by someone else. Both lists are viewable and downloadable; only the first is auto-queued. **Metric:** 0 tracks from a foreign uploader appear in the "definitely theirs" list on a 200-track corpus.
+- ~~**"Definitely theirs" vs "remixes by others"** (owner, 2026-09-04)~~ — uploader-account equality as the *only* identity signal. **Superseded 2026-09-08.**
+- **Identification by NAME, remix-aware, link stays manual** (owner, 2026-09-08): most of a label-signed artist's catalogue is uploaded by labels/promo channels, so uploader-URN equality alone misses most of it. Catalogue = own uploads ∪ reposts ∪ **search by canonical name + every alias**. Every track gets a **role** for this artist — `primary`, `remixer` (their own remix of someone else's track = their music), `remixed_by_other`, `featured`, `uncertain` — plus a confidence (HIGH = uploader URN or ISRC match, MEDIUM = title-prefix / remixer-credit parse, LOW = tags only). Name folding is deterministic (`merge.fold_key`), never edit distance. A name that appears only inside `(X Remix)` is never `primary`. Auto-queue = role ∈ {primary, remixer} ∧ confidence ∈ {HIGH, MEDIUM}; everything else is review-only. A local **`track_identity`** table (SC URN, **ISRC as the universal id**, collection_id, role, confidence, `user_override`) persists what the user has seen and lets them pin a role by hand — that is the manual part. Linking to an account stays a manual action. **Metric:** the remix corpus in `tests/test_artist_identity.py` passes both directions; a foreign uploader with an identical display name is never HIGH primary.
+- **SoundCloud login survives restarts and days away** (owner, 2026-09-08): the refresh token is stored and used silently (backend-owned single-flight refresh, atomic keyring blob) — implements `evaluated_soundcloud-persistent-login` Option A inside this branch. **Metric:** an expired access token + 10 concurrent callers = exactly one refresh POST; `invalid_grant` clears and sends the user to the login button; a network error keeps the old token.
 - **Rekordbox projection** (owner, 2026-09-04): **one folder `Artists`, one playlist per favourite artist**, flat. Playlist = all local tracks of the artist (alias-merged). Refreshed on sync. **Metric:** folder + N playlists appear in Rekordbox after sync; re-sync is idempotent (no dupe playlists, no dupe entries).
 - **Merge writes through to Rekordbox** (owner, 2026-09-04): merging `boys noize` + `Boys Noize` + `BOYS NOIZE` rewrites `DjmdArtist`/`DjmdContent` in `master.db` directly. **Every merge is journalled + revertible** (undo-log pattern already shipped in `app/metadata_fixer/schema.py`) and preceded by a dry-run preview — direct write, never blind write. **Metric:** revert restores byte-identical pre-image rows; `pytest tests/test_pdb_structure.py` stays green after a mass merge.
 - **Merge propagates to the files and to the stick** (owner, 2026-09-04, refining the earlier decision): the artist tag is rewritten **inside the audio files** (`app/audio_tags.py`, the path `metadata_fixer/applier.py` already owns), and the USB exporter **merges the variant folders** on the stick instead of re-copying the tracks. **Metric:** after a merge, `ffprobe` on a touched file shows the canonical artist; the next USB sync moves 0 bytes of audio across the wire for a pure artist rename.
@@ -448,7 +452,8 @@ Resolves the remaining design OQs: **OQ7** finish the stubbed `app/sidecar.py:39
 | T8 | Sidecar DB write races the background sync | Module-private `threading.Lock` per the sidecar pattern | `test_artist_store_concurrent_writes` |
 | T9 | Tag rewrite corrupts an audio file mid-write (power loss, locked file) | Write via the applier's existing atomic path; tag pre-image journalled before the write; skip + report a locked file rather than partially writing | `test_merge_tag_write_is_revertable`, `test_merge_skips_locked_file` |
 | T10 | USB relocation loses audio (collision, case-only rename, cross-volume) | Same-volume `os.replace` only; two-step rename for case-only; collision falls back to copy-and-verify; never delete a source before the destination verifies | `test_usb_relocate_case_only`, `test_usb_relocate_collision_falls_back` |
-| T11 | "Definitely theirs" list admits a foreign uploader's track | Uploader-id equality against the bound SC user, never a name match; title/credit matches route to the separate remix list | `test_definitely_theirs_uploader_id_only` |
+| T11 | A foreign upload is attributed to the artist and auto-queued | Identity by role + confidence: uploader-URN/ISRC = HIGH, deterministic name fold on title prefix / remixer credit = MEDIUM, tags = LOW; a name only inside `(X Remix)` is never `primary`; auto-queue needs {primary, remixer} × {HIGH, MEDIUM}; `user_override` wins | `tests/test_artist_identity.py` |
+| T12 | Refresh token or client_secret leaks (log, payload, disk) | Single keyring blob, never logged at any level, never in a response, `_log_url` strips queries; caplog canary test | `tests/test_soundcloud_auth.py` |
 
 ### Residual risk
 
@@ -571,25 +576,30 @@ No new stdout markers.
 **M1 — testable without SoundCloud. Ends with a working Artists tab, merge and Rekordbox folder.**
 
 - [x] **T-1:** fix `remove_track_from_playlist` arity + facade passthroughs (`get_playlist_by_path`, `get_playlist_children`) + expose playlist `uuid` — Step 1, tests T1. **DONE 2026-09-04** on `feat/artist-hub` — one-arg `delete_playlist_song(row.id)` via `get_playlist_songs`; `_playlist_node` factored out of `_load_playlists` and now carries `UUID`; `create_playlist` reuses it with a caller-intent fallback when rbox omits `attribute`; facade passthroughs degrade to a cache walk on the XML backend. `tests/test_live_playlist_ops.py` 27/27, full suite 879 passed, ruff at baseline.
-- [ ] **T-2:** undo-log deltas (`entity_kind`, `entity_id`, `after_json`, nullable `rule_id`) + `revert_run` INSERT path + `_file_sha1` skip — Step 2, tests T2, T3
-- [ ] **T-3:** `app/artist_store/schema.py` sidecar + migration runner — Step 3, tests T11
-- [ ] **T-4:** `registry.py` — resolve, favourites CRUD, Tier-1 backlog — Step 4, tests T12
-- [ ] **T-5:** `merge.py` — candidate detection + pure `preview()` — Step 5, tests T7
-- [ ] **T-6:** `merge.py` — `apply()` / `revert()` via `update_content` re-read in lock, journalled — Step 5, tests T4, T5, T6, T19
-- [ ] **T-7:** `projection.py` — adopt-or-create + diff-in-place + running-guard — Step 6, tests T8, T9, T10
-- [ ] **T-8:** routes for hub / favourites / merge / projection (`route-architect` first) — Step 7, tests T13
-- [ ] **T-9:** `ArtistHubView` + list + suggestion panel + projection panel — Step 8, tests T20
-- [ ] **T-10:** merge dialog incl. USB re-copy cost in bytes + revert entry point — Step 8, tests T20
+- [x] **T-2:** undo-log deltas (`entity_kind`, `entity_id`, `after_json`, nullable `rule_id`) + `revert_run` INSERT path + `_file_sha1` skip — Step 2, tests T2, T3 — **DONE** shipped 2026-09-05 (`1cea04a`)
+- [x] **T-3:** `app/artist_store/schema.py` sidecar + migration runner — Step 3, tests T11 — **DONE** shipped 2026-09-05 (`1cea04a`)
+- [x] **T-4:** `registry.py` — resolve, favourites CRUD, Tier-1 backlog — Step 4, tests T12 — **DONE** shipped 2026-09-05 (`1cea04a`)
+- [x] **T-5:** `merge.py` — candidate detection + pure `preview()` — Step 5, tests T7 — **DONE** shipped 2026-09-06 (`61ab0d0`)
+- [x] **T-6:** `merge.py` — `apply()` / `revert()` via `update_content` re-read in lock, journalled — Step 5, tests T4, T5, T6, T19 — **DONE** shipped 2026-09-06 (`61ab0d0`)
+- [x] **T-7:** `projection.py` — adopt-or-create + diff-in-place + running-guard — Step 6, tests T8, T9, T10 — **DONE** shipped 2026-09-06 (`61ab0d0`)
+- [x] **T-8:** routes for hub / favourites / merge / projection (`route-architect` first) — Step 7, tests T13 — **DONE** shipped 2026-09-05/06 (`1cea04a`, `0111e4c`, `61ab0d0`)
+- [x] **T-9:** `ArtistHubView` + list + suggestion panel + projection panel — Step 8, tests T20 — **DONE** shipped 2026-09-05 (`1cea04a`, `0111e4c` adds the All-artists tab)
+- [x] **T-10:** merge dialog incl. USB re-copy cost in bytes + revert entry point — Step 8, tests T20 — **DONE** shipped 2026-09-06 (`61ab0d0`)
 - [ ] **T-11:** absorb "By Artist" + one-way `metadata_mappings.json` import — Step 9, tests T12
-- [ ] **T-11a:** merge writes the artist tag into the audio files (reuses the applier's `write_tags` path) + `verify_bytes` opt-in above 250 tracks — Step 5, tests T22, T23, T24
+- [x] **T-11a:** merge writes the artist tag into the audio files (reuses the applier's `write_tags` path) + `verify_bytes` opt-in above 250 tracks — Step 5, tests T22, T23, T24 — **DONE** shipped 2026-09-06 (`61ab0d0`)
 - [ ] **T-11b:** USB relocation pass — a pure artist rename moves/merges folders on the stick instead of re-copying; case-only two-step rename; collision fallback — Step 5b, tests T25, T26, T27
 
 **M2 — SoundCloud catalogue + download**
 
-- [ ] **T-12:** `_sc_get` hardening (404 opt-out, shared paginator, 429 body, drop token-keyed cache) — Step 10, tests T16
-- [ ] **T-13:** `get_user_tracks` + reposts + artist↔SC binding replacing the stub route; split the result into `definitely_theirs` (uploader-id equality) and `remixes_by_others` — Step 10, tests T15, T17, T28
-- [ ] **T-14:** missing-diff via `external_track_match` at a tuned threshold + corpus — Step 10, tests T14
-- [ ] **T-15:** artist detail UI (local vs missing, download-all, collapsed "Mixes & sets") + batch download job — Step 10, tests T18, T21
+- [x] **T-12:** `_sc_get` hardening (404 opt-out, shared paginator, 429 body, drop token-keyed cache) — Step 10, tests T16 — **DONE** shipped 2026-09-07 (`5599b39`)
+- [x] **T-13:** `get_user_tracks` + reposts + artist↔SC binding replacing the stub route — **DONE** shipped 2026-09-07 (`5599b39`). ~~split into `definitely_theirs` (uploader-id equality) / `remixes_by_others`~~ → **superseded by T-20** (owner 2026-09-08: identify by name, roles + confidence).
+- [x] **T-14:** missing-diff via `external_track_match` at a tuned threshold + corpus — Step 10, tests T14 — **DONE** shipped 2026-09-07 (`5599b39`) — plus the bare-derivation fix
+- [x] **T-15:** artist detail UI (local vs missing, download-all, collapsed "Mixes & sets") + batch download job — Step 10, tests T18, T21 — **DONE** shipped 2026-09-07 (`5599b39`)
+
+**M2b — owner refinements 2026-09-08 (in flight on `feat/artist-hub`)**
+
+- [ ] **T-19 (login):** `app/soundcloud_auth.py` — one atomic keyring blob {access, refresh, expires_at}; `get_access_token()` refreshes silently inside `min_ttl`, single-flight lock, `invalid_grant` → clear + `AuthExpiredError`, network error → keep old blob; Rust `login_to_soundcloud` returns the full triple instead of a bare string; every `KEYRING_SC_TOKEN` reader switches to the getter; `POST /api/soundcloud/refresh`; the 401 interceptor tries `/refresh` before `invoke('login_to_soundcloud')`. Implements `evaluated_soundcloud-persistent-login` Option A. Tests: `tests/test_soundcloud_auth.py`.
+- [ ] **T-20 (identity):** `search_tracks` / `search_tracks_many` on `GET /tracks?q=` (same paginator, same `CallBudget`, `access=playable`); `app/artist_store/identity.py` — `classify_roles` (primary / remixer / remixed_by_other / featured / uncertain × HIGH/MEDIUM/LOW, `fold_key` only), single pure `auto_queue_allowed`; sidecar migration adding `track_identity` (SC URN PK, **ISRC**, role, confidence, `user_override`); ISRC exact-match fast path in the owned/missing diff; catalogue fetch = uploads ∪ search(name+aliases) ∪ reposts under one budget with **per-source status**; role-pin route; UI buckets by role with credit-parse shown. Tests: `tests/test_artist_identity.py` + route tests.
 
 **M3 — discovery + background sync**
 
