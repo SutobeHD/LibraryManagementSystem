@@ -123,22 +123,41 @@ artist_store.catalogue — classify an artist's SoundCloud tracks, diff against 
 - `CatalogueError` — Base of the catalogue error hierarchy.
 - `ArtistNotLinked` — The collection has no SoundCloud account bound, so there is nothing to fetch.
 - `CatalogueUnavailable` — No cached catalogue and no way to fetch one (no fetcher / no credentials).
-- `Classification` — The owner's three buckets.
+- `Classification` — The role buckets.
+- `  Classification.buckets()` — ``bucket key -> rows``, in render order.
+- `  Classification.diffable()` — Everything the ownership diff runs over — i.e.
 - `TrackMatch` — One remote track's verdict against the library.
 - `  TrackMatch.matched()`
 - `Diff` — ``sc_id`` -> verdict, plus the owned / missing split as id tuples.
 - `normalize_user_urn()` — Canonical ``soundcloud:users:<id>`` form.
+- `normalize_isrc()` — Canonical 12-character ISRC (upper, no dashes/spaces), or ``""`` when not one.
 - `token_overlap()` — Jaccard overlap of two stems' word sets.
 - `derivation_key()` — Identity of the *version* a title describes: ``("base", "")`` or (label, who).
 - `title_stems()` — Candidate grouping stems for a title, best first.
+- `coerce_track()` — Public single-row form of the coercion; ``None`` for a row with no identity.
 - `coerce_tracks()` — Coerce a fetched payload, dropping unusable rows and de-duplicating by ``sc_id``.
 - `is_playable()` — Legally and technically streamable in full.
 - `mix_exclusion_reason()` — Why this belongs in the collapsed "Mixes & sets" bucket, or ``None``.
-- `names_the_artist()` — Is the artist named in the title, the tags or the uploading account's name?
-- `classify()` — Split a fetched catalogue into the owner's three buckets.
+- `classify()` — Split a fetched catalogue into the role buckets.
 - `match_score()` — Best score between one remote track and one owned track; 0.0 when gated out.
 - `diff()` — Which remote tracks are already owned, and which are genuinely missing.
-- `catalogue()` — An artist's catalogue: three buckets, each track flagged owned or missing.
+- `catalogue()` — An artist's catalogue: role buckets, each track flagged owned or missing.
+
+### `app/artist_store/identity.py`
+
+artist_store.identity — name-based, remix-aware track roles + the identity table.
+
+- `auto_queue_eligible()` — The single auto-queue rule.
+- `CreditParse` — What the title says, before any artist is compared against it.
+- `  CreditParse.as_dict()`
+- `parse_credit()` — Split a SoundCloud title into artist prefix, body, remix credit and features.
+- `classify_track()` — Role + confidence + WHY for one coerced track.
+- `classify_roles()` — Role, confidence, ``auto_queue_allowed`` and ``credit_parse`` for every track.
+- `role_counts()` — Per-role tally of what was classified — nothing is counted that was not.
+- `load_overrides()` — ``sc_id -> pinned role`` for one collection, straight from the identity table.
+- `remember_identities()` — Upsert the classifier's verdict per track into ``track_identity``.
+- `set_override()` — Pin (or with ``None`` unpin) a track's role for one artist.
+- `classify_for_collection()` — Classify with the collection's link, spellings and pins, then remember the result.
 
 ### `app/artist_store/merge.py`
 
@@ -244,6 +263,14 @@ artist_store.schema — sidecar DB + migration runner for the Artist Hub (T-3).
 - `list_favourites()` — Favourited collections with their ``added_at``, ordered like the artist list.
 - `set_catalogue_cache()` — Store a fetched provider catalogue.
 - `get_catalogue_cache()` — Cached catalogue payload, or None when absent, unparseable or older than the TTL.
+- `upsert_track_identities()` — Remember the classifier's verdict for each track of one collection.
+- `upsert_track_identity()` — Single-row form of :func:`upsert_track_identities`.
+- `get_track_identity()`
+- `list_track_identities()`
+- `find_track_identities_by_isrc()` — Every remembered row carrying this ISRC, across collections (index-backed).
+- `get_identity_overrides()` — ``sc_urn -> pinned role`` for one collection — what the classifier must yield to.
+- `set_identity_override()` — Pin (or with ``None`` unpin) the role of one track for one artist.
+- `delete_track_identity()`
 
 ### `app/audio_analyzer.py`
 
@@ -622,6 +649,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `ArtistProjectionSyncReq`
 - `ArtistLinkReq` — Bind an artist to a SoundCloud account.
 - `ArtistDownloadMissingReq` — What to queue.
+- `ArtistTrackRoleReq` — Pin one catalogue track's role for one artist.
 - `stream_audio()` — Streams audio file with HTTP Range support — required for browser seeking.
 - `get_multiband_waveform()` — Returns 3-band waveform data for professional visualization.
 - `FileRevealReq`
@@ -651,9 +679,11 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `artist_merge_runs()` — Artist-merge runs, newest first — the history the revert button drives.
 - `artist_projection_sync()` — Mirror the favourites into Rekordbox as the `Artists` folder.
 - `artist_projection_status()` — Folder + per-artist projection state.
-- `artist_catalogue_route()` — An artist's SoundCloud catalogue in three buckets, each track flagged owned/missing.
+- `artist_catalogue_route()` — An artist's SoundCloud catalogue in role buckets, each track flagged owned/missing.
 - `artist_link_soundcloud()` — Bind an artist to a SoundCloud account from a profile URL or a bare permalink.
 - `artist_unlink_soundcloud()` — Unbind.
+- `artist_pin_track_role()` — Pin one catalogue track's role for this artist by hand.
+- `artist_track_identities()` — Everything this artist's `track_identity` table holds — what has been seen and pinned.
 - `artist_download_missing()` — Queue an artist's missing tracks through the existing SoundCloud downloader.
 - `artist_download_status()` — Poll one batch download.
 - `get_label_tracks()`
@@ -802,9 +832,10 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `get_download_stats()` — Aggregate statistics: total downloads, analyzed, failed, device count, date range.
 - `check_already_downloaded()` — Fast O(1) deduplication check.
 - `delete_history_entry()` — Remove a registry entry to allow re-download (e.g.
-- `ScAuthTokenReq` — SoundCloud OAuth access-token body — single `token` field, validated
-- `set_soundcloud_auth_token()` — EC7/EC13: Persist the SC OAuth token in the OS keyring (not in cookies or JSON).
-- `get_soundcloud_auth_status()` — Local-only probe: does the OS keyring hold a SC OAuth token?
+- `ScAuthTokenReq` — SoundCloud OAuth handoff from the Tauri login flow.
+- `set_soundcloud_auth_token()` — EC7/EC13: Persist the SC OAuth credentials in the OS keyring (not in cookies or
+- `refresh_soundcloud_token()` — Renew the stored SoundCloud access token from the stored refresh token.
+- `get_soundcloud_auth_status()` — Local-only probe: what does the OS keyring hold for SoundCloud?
 - `ScSettingsReq`
 - `get_sc_settings()` — Return SC-specific settings (sync target folder).
 - `update_sc_settings()` — Persist SC sync target folder to settings.json.
@@ -1028,7 +1059,7 @@ Smart-Playlist evaluator.
 
 ### `app/soundcloud_api.py`
 
-SoundCloud API client — playlists, likes, and per-artist catalogue.
+SoundCloud API client — playlists, likes, per-artist catalogue, and track search.
 
 - `get_sc_client_id()` — Resolve a valid SoundCloud client_id.
 - `AuthExpiredError` — Raised when the SoundCloud OAuth token is invalid or has expired.
@@ -1039,6 +1070,7 @@ SoundCloud API client — playlists, likes, and per-artist catalogue.
 - `  CallBudget.exhausted()`
 - `  CallBudget.try_spend()` — Consume one call.
 - `SCResultList` — A plain list that also reports how the walk ended.
+- `SCSearchResult` — `search_tracks_many` result: which queries actually went out and which did not.
 - `user_urn()` — Build `soundcloud:users:{id}`.
 - `SoundCloudPlaylistAPI` — Fetches playlist and track data from SoundCloud.
 - `  SoundCloudPlaylistAPI.get_user_profile()` — Fetch the authenticated user's public profile from SoundCloud.
@@ -1052,11 +1084,28 @@ SoundCloud API client — playlists, likes, and per-artist catalogue.
 - `get_user_reposts()` — An artist's reposted tracks — `GET /users/{urn}/reposts/tracks`.
 - `get_related_artists()` — Related artists — `GET /users/{urn}/related`.
 - `resolve_user()` — Bind an artist to a SoundCloud account — `GET /resolve`.
+- `search_tracks()` — Full-text track search — `GET /tracks?q=`.
+- `search_tracks_many()` — Run `search_tracks` per query and merge, deduplicated by `sc_id`.
 - `SoundCloudSyncEngine` — Syncs SoundCloud playlists → local Rekordbox collection playlists.
 - `  SoundCloudSyncEngine.find_or_create_playlist()` — Find existing synced playlist or create a new one.
 - `  SoundCloudSyncEngine.sync_playlist()` — Sync a single SoundCloud playlist to local collection.
 - `  SoundCloudSyncEngine.sync_all()` — Sync all provided playlists sequentially.
 - `  SoundCloudSyncEngine.preview_matches()` — Dry-run: return per-track match details WITHOUT writing to the DB.
+
+### `app/soundcloud_auth.py`
+
+SoundCloud OAuth token store + silent refresh (persistent login, Option A).
+
+- `TransientRefreshError` — Refresh could not be completed right now; the stored tokens are untouched.
+- `ScTokens` — The stored token set.
+- `StoreResult`
+- `load_tokens()` — The blob, validated on read.
+- `store_tokens()` — Persist a token set (fresh login or rotation).
+- `clear_tokens()` — Logout: remove the blob and the legacy key.
+- `token_status()` — Auth state without token material — safe to return from an HTTP route.
+- `get_access_token()` — A token good for ≥ `min_ttl_s` more seconds, refreshing if needed.
+- `refresh()` — Single-flight refresh.
+- `with_fresh_token()` — Call `fn(token)`; on `AuthExpiredError` refresh once and retry once.
 
 ### `app/soundcloud_downloader.py`
 
@@ -1201,6 +1250,7 @@ variant_schema — DDL + idempotent migration runner for the variants sidecar.
 
 - `setScAuthMode()` — export function ready() { return _bootstrapPromise; } // ─── SoundCloud consent surface (in-app win…
 - `scLogin()` — export async function getScAuthMode() { if (_scAuthMode) return _scAuthMode; try { const res = awai…
+- `scAuthTokenBody()` — The `POST /api/soundcloud/auth-token` body for one `scLogin()` result.
 - `cancellableGet()` — ─── AbortController helpers ────────────────────────────────────────────────── export function crea…
 
 ### `frontend/src/audio/AudioRegion.js`
@@ -1339,6 +1389,7 @@ artistCatalogueApi — the SoundCloud half of the Artist Hub's HTTP surface.
 - `startMissingDownload()` — Queue a batch download.
 - `fetchDownloadJob()`
 - `pollDownloadJob()` — Poll one batch download to its end and resolve with the final job record.
+- `pinTrackRole()` — Pin one catalogue track's role for this artist.
 
 ### `frontend/src/components/artistHub/artistHubApi.js`
 
@@ -1355,18 +1406,25 @@ artistHubApi — the merge + projection half of the Artist Hub's HTTP surface.
 
 catalogueCopy — the sentences the artist-detail view has to say out loud.
 
+- `BUCKETS()` — The rendered buckets, in the owner's order.
+- `MIXES_BUCKET()`
+- `ROLE_OPTIONS()` — export const ROLE_LABEL = { primary: 'Their track', remixer: 'Their remix', remixed_by_other: 'Remi…
+- `CONFIDENCE_LABEL()`
 - `splitCatalogue()` — The buckets and the counts the detail view renders, derived in one place.
 - `formatDuration()` — export const relativeTime = (iso) => { if (!iso) return null; const parsed = new Date(iso); if (Num…
 - `STATE_FALLBACK()` — export const formatDate = (iso) => { if (!iso) return ''; const parsed = new Date(iso); return Numb…
 - `stateSentence()`
 - `truncationNote()` — export const fetchedLine = (view) => { if (!view || view.status !== 'ok') return ''; const ago = re…
-- `EXCLUSION_REASON_TEXT()` — export const callBudgetLine = (view) => { if (!view || view.status !== 'ok') return ''; const used …
-- `exclusionReason()`
-- `progressLine()` — export const MIXES_RULE_SENTENCE = 'Anything longer than 15 minutes, matching a mix/set keyword (dj…
+- `sourceStates()` — export const callBudgetLine = (view) => { if (!view || view.status !== 'ok') return ''; const used …
+- `allSourcesOk()` — export const sourceStatusLine = (view) => sourceStates(view) .map((source) => `${source.label} ${so…
+- `bucketEmptyNote()` — What an empty bucket is allowed to say.
+- `LINK_MISSING_CHIP()` — export const searchNamesLine = (view) => { if (!view || view.status !== 'ok') return ''; const run …
+- `LINK_MISSING_SENTENCE()`
+- `roleLine()` — export const creditLine = (track) => { const reason = track?.credit_parse?.reason; if (typeof reaso…
+- `MIXES_RULE_SENTENCE()` — export const EXCLUSION_REASON_TEXT = { long_form: 'longer than 15 minutes', keyword: 'the title, ta…
+- `progressLine()` — export const downloadAllNote = (count) => `${count} track${count === 1 ?
 - `downloadSummary()` — What actually landed.
 - `DOWNLOAD_PATH_NOTE()` — export const downloadTone = (job) => { if (!job) return 'neutral'; if ((Number(job.failed) || 0) > …
-- `REPOSTS_STATUS_TEXT()` — The remixes bucket can only ever be filled from the reposts path.
-- `repostsNote()`
 
 ### `frontend/src/components/artistHub/catalogueCopy.test.js`
 
@@ -1390,7 +1448,9 @@ node --test frontend/src/components/artistHub/mergeCopy.test.js Pure copy builde
 
 ### `frontend/src/components/artistHub/useArtistCatalogue.js`
 
-useArtistCatalogue — catalogue state for exactly one selected artist.
+Move one row into the bucket its new role renders in — the optimistic half of a pin.
+
+- `movePinnedRow()` — Move one row into the bucket its new role renders in — the optimistic half of a pin.
 
 ### `frontend/src/components/artistHub/useArtistDetailActions.js`
 
@@ -1726,7 +1786,7 @@ Using existing endpoint but improved backend logic
 
 *(no module docstring)*
 
-- `ArtistDetailSummary()` — const TrackRow = ({ track, onDownload, busy, disabled, showUploader, reason }) => { const duration …
+- `ArtistDetailActions()` — export const ArtistDetailSummary = ({ localShown, localTotal, catalogue, scEnabled }) => { const sp…
 
 ### `frontend/src/components/artistHub/MergeDialog.jsx`
 
@@ -2025,8 +2085,9 @@ soundcloud_client.rs
 
 - `enum ScError`
 - `struct Track`
+- `struct ScTokenSet`
 - `get_auth_url()` — Generates the SoundCloud authorization URL and the associated PKCE code verifier.
-- `exchange_code_for_token()` — Exchanges an authorization code for an access token using the PKCE code verifier.
+- `exchange_code_for_token()` — Exchanges an authorization code for a token set using the PKCE code verifier.
 - `search_track()` — Searches for a single track on SoundCloud by artist and title.
 - `struct ExportResult`
 - `search_and_create_playlist()` — Searches for each track sequentially (to avoid rate-limiting) and creates a SoundCloud playlist wit…
@@ -2215,19 +2276,20 @@ Artist-Hub catalogue tests (T-14 — app/artist_store/catalogue.py).
 - `local()`
 - `library()`
 - `titles()`
-- `test_three_buckets_split()`
-- `test_definitely_theirs_is_uploader_id_only()` — Threat T11: a foreign account naming the artist must never be 'theirs'.
-- `test_remix_by_other_never_auto_queued()`
-- `test_missing_urn_can_never_produce_definitely_theirs()` — No bound account means no proof of ownership — including for a blank uploader_urn.
+- `test_role_buckets_split()`
+- `test_a_label_upload_is_found_by_name_not_only_by_account()` — Owner decision 2026-09-08: most of a signed artist's catalogue is uploaded by others.
+- `test_their_own_remix_is_their_music()` — A remix BY the artist is theirs; a remix OF their track by someone else is not.
+- `test_review_buckets_are_never_auto_queued()` — Only ``primary``/``remixer`` at high/medium may be queued for the user (threat T11).
+- `test_a_user_override_wins_over_the_classifier()` — The pin moves the row and says so; the classifier's own reading stays visible.
+- `test_an_unlinked_artist_is_still_identified_by_name()` — Search needs no URN — but nothing may reach ``high`` without the uploader signal.
 - `test_urn_and_numeric_id_are_the_same_account()` — Numeric ids are deprecated but still in flight; they must not split identity.
-- `test_foreign_upload_without_a_credit_is_listed_but_flagged()` — Nothing fetched is silently dropped; an unproven credit is ranked, not hidden.
-- `test_without_artist_names_foreign_uploads_stay_in_the_remix_bucket()` — Unproven credit degrades to the visible-but-never-queued bucket, never to 'theirs'.
+- `test_without_a_name_or_an_account_nothing_is_claimed()` — No signal at all is ``uncertain`` — listed for review, never asserted as theirs.
 - `test_mix_words_that_must_survive()` — A bare \bmix\b is NOT in the keyword regex — these are the tracks the user wants.
 - `test_mix_keywords_excluded()`
 - `test_long_form_excluded_even_without_a_keyword()`
 - `test_boiler_room_loses_to_the_filter_while_extended_mix_survives()`
 - `test_not_fully_playable_is_excluded()` — A snippet is not the track — a preview must never reach the missing list.
-- `test_preview_track_is_kept_out_of_definitely_theirs()`
+- `test_preview_track_is_kept_out_of_the_role_buckets()`
 - `test_downloadable_is_never_a_filter()`
 - `test_hostile_payload_rows_are_dropped_not_invented()`
 - `test_missing_diff_threshold_corpus()` — The threshold is pinned by the corpus, not by taste.
@@ -2243,11 +2305,14 @@ Artist-Hub catalogue tests (T-14 — app/artist_store/catalogue.py).
 - `test_force_refresh_bypasses_the_cache()`
 - `test_cache_is_ignored_after_rebinding_to_another_account()`
 - `test_catalogue_uses_the_bound_urn_when_none_is_passed()`
-- `test_unlinked_artist_raises_instead_of_looking_empty()`
+- `test_an_unlinked_artist_is_catalogued_by_name_and_says_the_link_is_missing()` — Owner decision 2026-09-08: search needs no URN, so the link is a signal, not a gate.
+- `test_without_a_link_or_a_name_there_is_nothing_to_identify()`
 - `test_no_fetcher_and_no_cache_raises_instead_of_faking_a_sync()`
 - `test_cached_catalogue_still_serves_without_a_fetcher()`
 - `test_track_cap_truncates_and_reports_it()`
 - `test_fetcher_reported_truncation_is_carried_through()` — A fetch cut short by the client's call budget must not read as a complete catalogue.
+- `test_the_classifier_verdict_is_remembered_per_track()` — The local artist→track table fills as the user browses (owner decision 2026-09-08).
+- `test_a_pinned_role_wins_on_the_next_pass()`
 - `test_catalogue_logs_no_credentials()` — The module never receives the OAuth token; nothing about it may reach the log.
 - `TestBareDerivationsAreNotOwned` — Regression: a parenthetical with no remixer used to collapse onto the original.
 - `  TestBareDerivationsAreNotOwned.test_bare_derivation_gets_its_own_key()`
@@ -2267,12 +2332,13 @@ Artist-Hub SoundCloud route tests — binding, catalogue, batch download (T-13/T
 - `test_mutations_reject_wrong_bearer()`
 - `test_rejected_mutation_writes_no_link()`
 - `test_catalogue_read_needs_no_session()`
-- `test_unlinked_artist_returns_typed_not_linked()`
+- `test_unlinked_and_signed_out_says_not_connected_not_empty()` — No account AND no login: nothing was queried, so nothing may be listed.
+- `test_unlinked_artist_is_catalogued_by_name_and_flagged()` — Owner decision 2026-09-08: linking stays manual, but a name is enough to search.
 - `test_unknown_collection_is_404()`
 - `test_missing_credentials_return_not_connected()` — No token and nothing cached — say so, never hand back an empty catalogue.
 - `test_expired_session_returns_not_connected()`
 - `test_deleted_soundcloud_account_returns_artist_gone()` — A dead artist 404s legitimately — that is not a "please log in again".
-- `test_catalogue_splits_into_buckets_and_reports_the_budget()`
+- `test_catalogue_splits_into_role_buckets_and_reports_the_budget()`
 - `test_catalogue_fetch_carries_a_call_budget()`
 - `test_truncated_fetch_is_reported_not_hidden()`
 - `test_link_stores_urn_permalink_and_confidence()`
@@ -2283,8 +2349,8 @@ Artist-Hub SoundCloud route tests — binding, catalogue, batch download (T-13/T
 - `test_download_missing_returns_a_job_id()`
 - `test_download_status_404s_on_an_unknown_job()`
 - `test_batch_never_inherits_aggressive_mode()`
-- `test_auto_queue_takes_only_definitely_theirs()` — The server may not queue a foreign uploader's remix on the user's behalf (T11).
-- `test_a_remix_must_be_requested_explicitly()`
+- `test_auto_queue_takes_their_music_and_nothing_from_the_review_buckets()` — Their tracks AND their own remixes; never a foreign remix, a feature or a maybe (T11).
+- `test_a_review_bucket_track_must_be_requested_explicitly()` — Refused for the server to pick, accepted when the user points at the row.
 - `test_auto_queue_and_explicit_ids_are_mutually_exclusive()`
 - `test_unknown_track_ids_are_refused_not_skipped()`
 - `test_download_without_a_fetched_catalogue_is_409()` — The job reads the cache only — it must never open its own SoundCloud session.
@@ -2295,10 +2361,114 @@ Artist-Hub SoundCloud route tests — binding, catalogue, batch download (T-13/T
 - `snipped_only_track()` — A track SoundCloud exposes to this account as a 30 s preview only.
 - `test_aggressive_mode_still_applies_to_a_hand_picked_track()` — Control case: with the opt-in on, the single-track path does accept the preview.
 - `test_batch_path_refuses_the_preview_aggressive_mode_would_accept()` — `allow_aggressive=False` makes the setting unreachable — a batch never inherits it.
-- `TestRepostsPathIsQueriedAndReported` — Regression: only own uploads were fetched, so remixes_by_others could never fill.
-- `  TestRepostsPathIsQueriedAndReported.test_the_route_actually_queries_reposts()`
-- `  TestRepostsPathIsQueriedAndReported.test_a_reposts_failure_does_not_sink_the_catalogue()` — Own uploads are the half that matters — a reposts error must degrade, not fail.
-- `  TestRepostsPathIsQueriedAndReported.test_a_cached_read_does_not_claim_the_reposts_half()` — A cache hit fetched nothing, so it may not assert anything about reposts.
+- `TestEverySourceReportsItsOwnStatus` — Regression, twice shipped: a bucket nobody queried was rendered as "nothing missing".
+- `  TestEverySourceReportsItsOwnStatus.test_all_three_sources_run_in_budget_order()`
+- `  TestEverySourceReportsItsOwnStatus.test_search_runs_for_the_canonical_name_and_every_alias_on_one_budget()`
+- `  TestEverySourceReportsItsOwnStatus.test_a_track_in_both_uploads_and_search_is_listed_once()`
+- `  TestEverySourceReportsItsOwnStatus.test_a_search_failure_does_not_sink_the_catalogue()`
+- `  TestEverySourceReportsItsOwnStatus.test_a_reposts_failure_does_not_sink_the_catalogue()` — Own uploads are the half that matters — a reposts error must degrade, not fail.
+- `  TestEverySourceReportsItsOwnStatus.test_an_alias_the_budget_never_reached_is_reported_as_skipped()` — A name that was never searched is a bucket nobody looked in — say which.
+- `  TestEverySourceReportsItsOwnStatus.test_a_cached_read_claims_nothing_about_any_source()` — A cache hit fetched nothing, so it may not assert anything about any source.
+- `TestRolePin` — ``POST /api/artists/{id}/tracks/{sc_urn}/role`` — the manual half of identification.
+- `  TestRolePin.test_pin_requires_a_session()`
+- `  TestRolePin.test_a_pin_persists_and_wins_on_the_next_pass()`
+- `  TestRolePin.test_a_pin_can_be_cleared()`
+- `  TestRolePin.test_an_unknown_role_is_refused()`
+- `  TestRolePin.test_a_track_nobody_fetched_cannot_be_pinned()` — No invented identity row: the catalogue has to have seen the track first.
+- `  TestRolePin.test_pinning_a_review_row_makes_it_auto_queueable()`
+- `TestIdentityTable` — ``GET /api/artists/{id}/identities`` — what the local artist→track table holds.
+- `  TestIdentityTable.test_browsing_fills_the_table()`
+- `  TestIdentityTable.test_an_artist_nobody_opened_has_an_empty_table_not_an_error()`
+- `  TestIdentityTable.test_unknown_collection_is_404()`
+- `test_the_auto_queue_rule_is_the_identity_module_s()` — One definition of "may the server queue this", not a second copy in the route.
+
+### `tests/test_artist_identity.py`
+
+Artist-Hub identity tests (app/artist_store/identity.py + schema v2 track_identity).
+
+- `store()` — Point the sidecar at a throwaway DB and reset its per-process state.
+- `collection()`
+- `sc()`
+- `one()`
+- `role_of()`
+- `TestRemixCare`
+- `  TestRemixCare.test_remix_by_the_artist_of_someone_elses_track_is_remixer()`
+- `  TestRemixCare.test_remix_by_the_artist_uploaded_by_linked_account_is_remixer_high()`
+- `  TestRemixCare.test_artists_track_remixed_by_someone_else_splits_by_perspective()`
+- `  TestRemixCare.test_extended_mix_is_primary_not_a_remix()`
+- `  TestRemixCare.test_a_name_only_inside_a_remix_credit_is_never_primary()`
+- `  TestRemixCare.test_own_vip_of_own_track_is_primary()`
+- `  TestRemixCare.test_radio_edit_is_a_version_not_a_remixer_called_radio()`
+- `  TestRemixCare.test_label_bracket_after_the_remix_credit_is_peeled()`
+- `  TestRemixCare.test_dash_separated_remix_credit_counts()`
+- `  TestRemixCare.test_unbracketed_suffix_naming_the_artist_counts()`
+- `  TestRemixCare.test_unattributed_edit_from_a_foreign_uploader_is_uncertain()`
+- `  TestRemixCare.test_co_remixer_credit_counts()`
+- `TestPrimarySignals`
+- `  TestPrimarySignals.test_linked_uploader_is_primary_high()`
+- `  TestPrimarySignals.test_title_prefix_from_a_label_upload_is_primary_medium()`
+- `  TestPrimarySignals.test_same_display_name_on_a_foreign_account_is_at_most_medium()`
+- `  TestPrimarySignals.test_without_a_linked_account_nothing_reaches_high()`
+- `  TestPrimarySignals.test_co_credited_prefix_counts_for_each_name()`
+- `  TestPrimarySignals.test_promo_prefix_is_stripped()`
+- `  TestPrimarySignals.test_linked_account_uploading_someone_elses_track_is_not_primary()`
+- `  TestPrimarySignals.test_the_uploader_urn_alone_does_not_beat_a_foreign_remixer_credit()`
+- `TestFeaturedAndUncertain`
+- `  TestFeaturedAndUncertain.test_featured_credit_only_is_featured()`
+- `  TestFeaturedAndUncertain.test_with_in_running_text_is_not_a_feature()`
+- `  TestFeaturedAndUncertain.test_name_only_in_tags_is_uncertain()`
+- `  TestFeaturedAndUncertain.test_near_spelling_is_uncertain_and_named()`
+- `  TestFeaturedAndUncertain.test_no_credit_at_all_is_uncertain_and_says_so()`
+- `  TestFeaturedAndUncertain.test_every_track_gets_exactly_one_role()`
+- `TestAliases`
+- `  TestAliases.test_alias_spellings_resolve_like_the_canonical_name()`
+- `  TestAliases.test_without_the_alias_the_same_title_is_not_attributed()`
+- `  TestAliases.test_fold_key_variants_of_the_canonical_name_match()`
+- `  TestAliases.test_registry_names_feed_classify_for_collection()`
+- `TestAutoQueueRule`
+- `  TestAutoQueueRule.test_uncertain_is_never_eligible()`
+- `  TestAutoQueueRule.test_review_only_roles_are_never_eligible()`
+- `  TestAutoQueueRule.test_primary_and_remixer_need_high_or_medium()`
+- `  TestAutoQueueRule.test_classified_flag_uses_the_same_rule()`
+- `  TestAutoQueueRule.test_an_owned_track_is_never_queued_whatever_its_role()`
+- `TestUserOverride`
+- `  TestUserOverride.test_override_wins_over_the_classifier()`
+- `  TestUserOverride.test_override_can_demote_too()`
+- `  TestUserOverride.test_unknown_override_role_is_refused()`
+- `  TestUserOverride.test_stored_override_wins_on_every_subsequent_pass()`
+- `  TestUserOverride.test_override_on_an_unseen_track_is_refused_not_invented()`
+- `  TestUserOverride.test_unpin_restores_the_classifier()`
+- `TestRememberIdentities`
+- `  TestRememberIdentities.test_upsert_count_and_round_trip()`
+- `  TestRememberIdentities.test_upsert_keeps_first_seen_refreshes_last_seen_and_keeps_the_pin()`
+- `  TestRememberIdentities.test_one_track_can_hold_a_different_role_per_artist()`
+- `  TestRememberIdentities.test_rows_without_an_id_are_skipped_not_invented()`
+- `  TestRememberIdentities.test_unknown_collection_is_an_integrity_error()`
+- `  TestRememberIdentities.test_garbage_role_is_refused_by_the_store()`
+- `  TestRememberIdentities.test_cascade_on_collection_delete()`
+- `  TestRememberIdentities.test_role_counts_only_count_what_was_classified()`
+- `TestIsrcFastPath`
+- `  TestIsrcFastPath.test_isrc_match_short_circuits_to_owned()`
+- `  TestIsrcFastPath.test_isrc_fast_path_beats_the_derivation_gate()`
+- `  TestIsrcFastPath.test_title_path_runs_when_either_side_lacks_an_isrc()`
+- `  TestIsrcFastPath.test_different_isrcs_do_not_prevent_a_title_match()`
+- `  TestIsrcFastPath.test_junk_isrcs_never_compare_equal()`
+- `  TestIsrcFastPath.test_normalize_isrc_shapes()`
+- `  TestIsrcFastPath.test_annotated_catalogue_exposes_the_match_method()`
+- `TestMigrationV2`
+- `  TestMigrationV2.test_v1_file_walks_to_v2_and_keeps_its_rows()`
+- `  TestMigrationV2.test_fresh_db_also_gets_the_v2_table()`
+- `  TestMigrationV2.test_step_is_registered_for_v1()`
+- `TestHygiene`
+- `  TestHygiene.test_identity_writers_hold_the_module_lock()`
+- `  TestHygiene.test_identity_reads_do_not_take_the_lock()`
+- `  TestHygiene.test_identity_module_touches_no_library_writer_and_no_network()`
+- `  TestHygiene.test_classify_is_pure_no_sidecar_write()`
+- `TestDisplayNameAloneNeverAutoQueues` — A bare display-name match must not spend the user's bandwidth unattended.
+- `  TestDisplayNameAloneNeverAutoQueues.test_uploader_name_only_is_primary_but_not_queueable()`
+- `  TestDisplayNameAloneNeverAutoQueues.test_a_title_credit_clears_the_gate()`
+- `  TestDisplayNameAloneNeverAutoQueues.test_the_linked_account_clears_the_gate()`
+- `  TestDisplayNameAloneNeverAutoQueues.test_the_rule_is_pure_and_signal_aware()`
 
 ### `tests/test_artist_merge_apply.py`
 
@@ -3473,6 +3643,8 @@ Artist-Hub SoundCloud client tests (T-12 + T-13 — app/soundcloud_api.py).
 - `  TestNormalisedContract.test_field_values_and_types()`
 - `  TestNormalisedContract.test_uploader_urn_survives_a_urn_shaped_payload()`
 - `  TestNormalisedContract.test_missing_fields_become_empty_never_guessed()`
+- `  TestNormalisedContract.test_isrc_and_label_name_are_part_of_the_contract()` — Name-based identification (2026-09-08) needs both — a label upload of the
+- `  TestNormalisedContract.test_null_isrc_becomes_empty_string()`
 - `  TestNormalisedContract.test_dead_and_malformed_entries_are_dropped()`
 - `  TestNormalisedContract.test_repost_envelopes_are_unwrapped()`
 - `TestRelatedAndResolve`
@@ -3482,6 +3654,26 @@ Artist-Hub SoundCloud client tests (T-12 + T-13 — app/soundcloud_api.py).
 - `  TestRelatedAndResolve.test_resolve_user_accepts_a_bare_permalink()`
 - `  TestRelatedAndResolve.test_resolve_user_rejects_a_non_soundcloud_host_without_calling_out()`
 - `  TestRelatedAndResolve.test_resolve_user_returns_none_for_a_track_url()`
+- `TestTrackSearch`
+- `  TestTrackSearch.test_search_request_shape()`
+- `  TestTrackSearch.test_search_pages_follow_next_href()`
+- `  TestTrackSearch.test_search_returns_the_normalised_contract()`
+- `  TestTrackSearch.test_search_budget_truncates_and_reports()`
+- `  TestTrackSearch.test_search_max_items_truncates_and_reports()`
+- `  TestTrackSearch.test_blank_query_makes_zero_calls()`
+- `  TestTrackSearch.test_search_404_raises_not_found_not_auth_expired()`
+- `  TestTrackSearch.test_search_401_still_raises_auth_expired()`
+- `  TestTrackSearch.test_search_without_token_raises_before_any_request()`
+- `  TestTrackSearch.test_search_many_dedups_by_sc_id_and_keeps_first_seen_order()`
+- `  TestTrackSearch.test_search_many_first_sighting_wins()`
+- `  TestTrackSearch.test_search_many_drops_blank_and_case_duplicate_queries()`
+- `  TestTrackSearch.test_search_many_reports_calls_across_the_batch()`
+- `  TestTrackSearch.test_search_many_stops_when_the_budget_is_exhausted_and_says_so()`
+- `  TestTrackSearch.test_search_many_budget_exhausted_mid_walk_skips_the_rest()`
+- `  TestTrackSearch.test_search_many_max_items_per_query_is_passed_through()`
+- `  TestTrackSearch.test_search_many_propagates_a_404_instead_of_swallowing_it()`
+- `  TestTrackSearch.test_search_never_logs_the_token()`
+- `  TestTrackSearch.test_search_token_is_not_logged_on_the_auth_failure_path()`
 - `TestTokenIsNeverLogged`
 - `  TestTokenIsNeverLogged.test_no_log_record_contains_the_token()`
 - `  TestTokenIsNeverLogged.test_token_is_not_logged_on_the_auth_failure_path()`
@@ -3490,16 +3682,66 @@ Artist-Hub SoundCloud client tests (T-12 + T-13 — app/soundcloud_api.py).
 - `  TestNoTokenKeyedCache.test_playlist_fetches_are_no_longer_lru_cached()`
 - `  TestNoTokenKeyedCache.test_cache_clear_shim_survives_for_main_py()`
 
+### `tests/test_soundcloud_auth.py`
+
+Tests for `app/soundcloud_auth.py` — token store + silent refresh.
+
+- `FakeKeyring` — Dict-backed keyring that records every write and can refuse long values.
+- `  FakeKeyring.get_password()`
+- `  FakeKeyring.set_password()`
+- `  FakeKeyring.delete_password()`
+- `FakeResponse`
+- `  FakeResponse.json()`
+- `PostRecorder` — Scripted `requests.post`: returns responses in order, records every call.
+- `clock()`
+- `kr()`
+- `post()`
+- `test_store_writes_one_blob_and_mirrors_legacy()`
+- `test_store_without_expires_in_assumes_documented_hour()`
+- `test_store_rejects_empty_access_token()`
+- `test_blob_too_large_for_backend_keeps_session_in_legacy_key()` — Windows Credential Manager caps one entry at 1280 UTF-16 chars and keyring
+- `test_clear_removes_both_keys_and_tolerates_missing()`
+- `test_constants_match_main_keyring_names()`
+- `test_get_returns_without_refresh_when_ttl_ample()`
+- `test_get_refreshes_inside_min_ttl()`
+- `test_refresh_writes_blob_before_mirroring_legacy()`
+- `test_refresh_keeps_old_refresh_token_when_response_omits_it()`
+- `test_get_returns_none_when_nothing_stored()`
+- `test_ten_concurrent_callers_trigger_exactly_one_refresh()`
+- `test_refresh_with_stale_token_skips_post_when_already_rotated()`
+- `test_refresh_with_stale_token_posts_even_when_clock_says_fresh()` — A server 401 outranks the local clock.
+- `test_rejected_refresh_clears_both_keys_and_raises()`
+- `test_refresh_without_refresh_token_raises_auth_expired_without_clearing_legacy()`
+- `test_network_error_keeps_blob_and_raises_transient()`
+- `test_transient_failure_inside_margin_serves_stale_token()`
+- `test_server_side_problems_are_transient()`
+- `test_missing_client_secret_is_transient_not_logout()`
+- `test_legacy_only_state_still_yields_token()`
+- `test_corrupt_blob_falls_back_to_legacy()`
+- `test_blob_without_access_token_is_treated_as_absent()`
+- `test_blob_without_refresh_token_is_served_unrefreshed_after_expiry()`
+- `test_token_status_reports_expiry_without_material()`
+- `test_with_fresh_token_retries_once_after_server_401()`
+- `test_with_fresh_token_does_not_loop_on_second_401()`
+- `test_with_fresh_token_raises_when_not_connected()`
+- `test_with_fresh_token_concurrent_401s_share_one_refresh()`
+- `test_no_secret_reaches_the_log_at_debug()`
+- `test_repr_of_token_set_hides_secrets()`
+- `test_exception_messages_carry_no_secrets()`
+
 ### `tests/test_soundcloud_auth_status.py`
 
 Tests for GET /api/soundcloud/auth-status.
 
-- `patched_keyring()` — Swap out the module-level keyring with one we control per test.
-- `test_authenticated_true_when_token_present()`
-- `test_authenticated_false_when_token_absent()`
-- `test_authenticated_false_when_token_empty_string()` — Empty-string token is treated as absent — bool('') is False.
-- `test_degrades_when_keyring_raises()` — A broken keyring backend (locked session, missing libsecret) must
-- `test_response_never_contains_token_material()` — Belt-and-suspenders: the response payload must never leak the
+- `patched_keyring()` — Install a controllable keyring on `soundcloud_auth` — the module the route reads.
+- `test_reports_a_renewable_oauth_session()`
+- `test_legacy_token_is_authenticated_but_not_refreshable()` — A login stored before the refresh work shipped must not log the user out —
+- `test_authenticated_false_when_nothing_stored()`
+- `test_authenticated_false_when_token_empty_string()` — Empty-string legacy token is treated as absent.
+- `test_corrupt_blob_reads_as_signed_out()` — Half-written or garbage blob → signed out, never a half-trusted session.
+- `test_degrades_when_keyring_raises()` — A broken keyring backend (locked session, missing libsecret) must return
+- `test_route_survives_a_raising_token_status()` — Belt-and-braces: even if the store itself throws, the route answers 200.
+- `test_response_never_contains_token_material()` — Belt-and-suspenders: the payload must never leak a stored secret.
 
 ### `tests/test_soundcloud_downloader_security.py`
 
@@ -3520,6 +3762,25 @@ Security regression tests for app/soundcloud_downloader.
 - `TestSizeLimits` — The byte-budget constant must stay sane — too small breaks WAV/FLAC,
 - `  TestSizeLimits.test_budget_is_at_least_500_mib()`
 - `  TestSizeLimits.test_budget_is_at_most_4_gib()`
+
+### `tests/test_soundcloud_refresh_route.py`
+
+Route tests for the persistent SoundCloud login (T-19).
+
+- `test_refresh_requires_a_session_token()` — Unauthenticated callers are refused before any keyring read happens.
+- `test_refresh_ok_returns_status_only()`
+- `test_refresh_maps_auth_expired_to_401()`
+- `test_refresh_maps_transient_failure_to_503()` — A network fault must not read as "signed out" — the stored login is intact.
+- `test_refresh_without_stored_tokens_is_401()` — Nothing stored → `refresh` raises AuthExpiredError; the UI must offer a login.
+- `test_refresh_is_rate_limited()` — Same bucket as auth-token: burst 10, then 429.
+- `test_auth_token_stores_the_full_triple()`
+- `test_auth_token_without_refresh_half_reports_unrefreshable()` — An old frontend posts one field.
+- `test_auth_token_empty_clears_every_credential()`
+- `test_auth_token_rejects_an_out_of_range_lifetime()`
+- `test_auth_token_requires_a_session_token()`
+- `test_auth_status_reports_remaining_lifetime()`
+- `test_auth_status_clamps_a_negative_lifetime()` — An already-expired token reports 0 s left, never a negative number.
+- `test_auth_status_legacy_session_has_no_known_lifetime()` — A pre-refresh login carries no expiry — `null`, never a made-up number.
 
 ### `tests/test_stream_unicode_filename.py`
 

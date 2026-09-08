@@ -25,6 +25,7 @@
 | `app/anlz_writer.py` | LibraryManagementSystem -- ANLZ Binary File Writer |
 | `app/artist_store/__init__.py` | artist_store — Artist-Hub sidecar package (``artists.db``). |
 | `app/artist_store/catalogue.py` | artist_store.catalogue — classify an artist's SoundCloud tracks, diff against the library (T-14). |
+| `app/artist_store/identity.py` | artist_store.identity — name-based, remix-aware track roles + the identity table. |
 | `app/artist_store/merge.py` | artist_store.merge — duplicate-artist detection, preview, apply and revert (T-5/T-6). |
 | `app/artist_store/projection.py` | artist_store.projection — mirror favourite collections into Rekordbox (T-7). |
 | `app/artist_store/registry.py` | artist_store.registry — library artists into the store, favourites, Tier-1 backlog (T-4). |
@@ -64,7 +65,8 @@
 | `app/services.py` | *(no module docstring)* |
 | `app/sidecar.py` | Legacy ``app_data.json`` store — READ-ONLY, kept only for a one-shot import. |
 | `app/smart_playlist_engine.py` | Smart-Playlist evaluator. |
-| `app/soundcloud_api.py` | SoundCloud API client — playlists, likes, and per-artist catalogue. |
+| `app/soundcloud_api.py` | SoundCloud API client — playlists, likes, per-artist catalogue, and track search. |
+| `app/soundcloud_auth.py` | SoundCloud OAuth token store + silent refresh (persistent login, Option A). |
 | `app/soundcloud_downloader.py` | SoundCloud Downloader — Dedup-aware download pipeline with two acquisition paths. |
 | `app/templates/build_template.py` | Build a clean exportLibrary_template.db from any Rekordbox-exported USB stick. |
 | `app/usb_artwork.py` | USB artwork extraction + bucketed write to PIONEER/Artwork/. |
@@ -99,7 +101,7 @@
 | `frontend/src/components/artistHub/catalogueCopy.test.js` | node --test frontend/src/components/artistHub/catalogueCopy.test.js Pure copy + derivation builders — no DOM,… |
 | `frontend/src/components/artistHub/mergeCopy.js` | mergeCopy — the sentences the merge dialog has to say out loud. |
 | `frontend/src/components/artistHub/mergeCopy.test.js` | node --test frontend/src/components/artistHub/mergeCopy.test.js Pure copy builders — no DOM, no resolver need… |
-| `frontend/src/components/artistHub/useArtistCatalogue.js` | useArtistCatalogue — catalogue state for exactly one selected artist. |
+| `frontend/src/components/artistHub/useArtistCatalogue.js` | Move one row into the bucket its new role renders in — the optimistic half of a pin. |
 | `frontend/src/components/artistHub/useArtistDetailActions.js` | useArtistDetailActions — the click handlers of the artist detail view. |
 | `frontend/src/components/daw/timeline/useTimelineEvents.js` | useTimelineEvents — Event-handler layer for DawTimeline Owns: - Hit-testing for cue flags (hot + memory) - Mo… |
 | `frontend/src/components/daw/timeline/useTimelineLayout.js` | useTimelineLayout — Layout / sizing layer for DawTimeline Owns: - ResizeObserver subscription on the containe… |
@@ -241,6 +243,7 @@
 | `tests/test_anlz_writer_guards.py` | Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout). |
 | `tests/test_artist_catalogue.py` | Artist-Hub catalogue tests (T-14 — app/artist_store/catalogue.py). |
 | `tests/test_artist_catalogue_routes.py` | Artist-Hub SoundCloud route tests — binding, catalogue, batch download (T-13/T-15). |
+| `tests/test_artist_identity.py` | Artist-Hub identity tests (app/artist_store/identity.py + schema v2 track_identity). |
 | `tests/test_artist_merge_apply.py` | Artist-Hub merge apply/revert tests (T-6 + T-11a — app/artist_store/merge.py). |
 | `tests/test_artist_merge_preview.py` | Artist-Hub merge detection + preview tests (T-5 — app/artist_store/merge.py). |
 | `tests/test_artist_merge_routes.py` | Artist-Hub merge + projection route tests (T-8 rest — app/main.py, plan row T13). |
@@ -290,8 +293,10 @@
 | `tests/test_smart_playlist_engine.py` | Tests for app/smart_playlist_engine.py — the smart-playlist rule evaluator. |
 | `tests/test_soundcloud_api.py` | Tests for `app/soundcloud_api.py`. |
 | `tests/test_soundcloud_artist_api.py` | Artist-Hub SoundCloud client tests (T-12 + T-13 — app/soundcloud_api.py). |
+| `tests/test_soundcloud_auth.py` | Tests for `app/soundcloud_auth.py` — token store + silent refresh. |
 | `tests/test_soundcloud_auth_status.py` | Tests for GET /api/soundcloud/auth-status. |
 | `tests/test_soundcloud_downloader_security.py` | Security regression tests for app/soundcloud_downloader. |
+| `tests/test_soundcloud_refresh_route.py` | Route tests for the persistent SoundCloud login (T-19). |
 | `tests/test_stream_unicode_filename.py` | Regression: GET /api/stream 500 on non-latin-1 filenames. |
 | `tests/test_system_health.py` | Contract tests for ``GET /api/system/health`` -- unauth'd liveness probe. |
 | `tests/test_usb_copy_atomic.py` | USB audio copies must not leave a truncated file that never self-heals. |
