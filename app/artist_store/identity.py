@@ -198,13 +198,23 @@ _QUOTES = re.compile(r"[\"“”]")
 # ── Public rule ───────────────────────────────────────────────────────────────
 
 
-def auto_queue_eligible(role: str, confidence: str) -> bool:
+def auto_queue_eligible(role: str, confidence: str, matched_on: str = "") -> bool:
     """The single auto-queue rule. ``primary``/``remixer`` at ``high``/``medium`` only.
 
     ``uncertain``, ``featured`` and ``remixed_by_other`` are review-only whatever their
     confidence; ``low`` is review-only whatever the role.
+
+    One extra gate on top of role × confidence: a match resting ONLY on the uploader's
+    display name never auto-queues. Display names are not unique on SoundCloud, so a
+    tribute page, an impostor, or a genuinely different act of the same name would
+    otherwise spend the user's bandwidth and disk unattended on a pure name collision.
+    Such a track still lands in the artist's bucket at MEDIUM — it is visible and one
+    click from downloading — it just never goes unattended. Any corroborating signal
+    (the linked account URN, an artist credit in the title, a remix credit) clears it.
     """
-    return role in AUTO_QUEUE_ROLES and confidence in AUTO_QUEUE_CONFIDENCES
+    if not (role in AUTO_QUEUE_ROLES and confidence in AUTO_QUEUE_CONFIDENCES):
+        return False
+    return matched_on != SIGNAL_UPLOADER_NAME
 
 
 # ── Name folding ──────────────────────────────────────────────────────────────
@@ -634,7 +644,7 @@ def classify_track(
         matched_on = SIGNAL_USER_OVERRIDE
         reason = f"Pinned by you as {override} (classifier read: {role}, {confidence})"
 
-    eligible = auto_queue_eligible(effective_role, effective_conf)
+    eligible = auto_queue_eligible(effective_role, effective_conf, matched_on)
     # A track that has been through the ownership diff carries ``in_library``; an
     # owned track is never queued however strong its role. Before the diff the flag
     # is the role gate alone.

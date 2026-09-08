@@ -44,10 +44,12 @@ Marker convention in the route tables below:
 | POST | `/api/artists/projection/sync` `[AUTH]` | Mirror favourites into Rekordbox as the `Artists` folder → job id. `{dry_run}` writes nothing and is allowed while Rekordbox is open; a real run 409s |
 | GET | `/api/artists/projection/status` | Folder + per-artist projection state; renders before the library loads |
 | GET | `/api/artists/jobs/{job_id}` | Poll one artist-hub job (`kind`, `status`, `total/done/percent/eta_seconds/cancel_requested`, `result`, `error`) |
-| GET | `/api/artists/{collection_id}/catalogue` | Artist Hub: the bound SoundCloud account's catalogue in three buckets (`definitely_theirs` / `remixes_by_others` / `mixes_and_sets`) + `in_library`, `from_cache`, `truncated`. `?refresh=true` forces a live fetch past the 6 h TTL cache. Discriminated on `status`: `ok` carries the buckets; `not_linked` / `link_unresolved` / `not_connected` / `artist_gone` carry a `detail` and **no bucket keys**, so a missing binding or login can never render as "this artist has released nothing". Fetched on selection only, under a per-run `CallBudget` |
+| GET | `/api/artists/{collection_id}/catalogue` | Artist Hub: the artist's SoundCloud catalogue in six **role** buckets (`their_tracks` / `their_remixes` / `remixed_by_others` / `featured` / `uncertain` / `mixes_and_sets`) + `in_library`, `role_counts`, `linked`, `from_cache`, `truncated`. Three sources under ONE `CallBudget`, in budget order: own uploads → search by canonical name + every alias → reposts; `sources` reports `ok`/`failed`/`skipped_budget`/`not_queried` per source (only `ok` entitles a caller to say nothing is missing), with `search_queries_run` / `search_queries_skipped`. Roles come from `app/artist_store/identity.py` (name-driven, remix-aware; uploader URN = the only path to `high`), and every classified track is persisted to `track_identity`. Linking stays manual: an **unlinked** artist is still catalogued by name and the payload carries `link_missing: true` + `link_state`. `?refresh=true` forces past the 6 h TTL cache. Discriminated on `status`: `ok` carries the buckets; `not_linked` / `not_connected` / `artist_gone` carry a `detail` and **no bucket keys**. Fetched on selection only |
 | POST | `/api/artists/{collection_id}/link` `[AUTH]` | Bind an artist to a SoundCloud account. Body `{url_or_permalink}` → resolved through `/resolve`; stores URN + permalink + name-match `confidence` against the store's stable `collection_id` (never the artist name, so a merge cannot orphan it). 400 without a token, 404 when the URL resolves to nothing or to a non-user |
 | DELETE | `/api/artists/{collection_id}/link` `[AUTH]` | Unbind. Idempotent; collection, aliases, favourite state and the cached catalogue survive |
-| POST | `/api/artists/{collection_id}/download-missing` `[AUTH]` | Queue missing tracks through the existing SC downloader → job id. Body `{sc_ids[]}` **or** `{auto_queue: true}`, never both: auto-queue may only pick `definitely_theirs` tracks the diff proved missing, a foreign uploader's remix has to be named. Reads the catalogue cache only (no metadata calls of its own), refuses more than `ARTIST_DOWNLOAD_MAX_TRACKS` per run instead of trimming, 409 while a batch is in flight or the catalogue is not fetched. `sc_aggressive_mode` is **not** inherited |
+| POST | `/api/artists/{collection_id}/tracks/{sc_urn}/role` `[AUTH]` | Pin one catalogue track's role by hand — the manual half of identification. Body `{role}` (`primary` / `remixer` / `remixed_by_other` / `featured` / `uncertain`, or `null` to unpin). Stored as `user_override` in `track_identity` and **wins over the classifier on every later read**; the classifier's own verdict stays visible in `classifier_role`. 400 unknown role, 404 when the track has no identity row yet (open the catalogue first — no invented rows) |
+| GET | `/api/artists/{collection_id}/identities` | The local artist→track identity table: `sc_urn`, `isrc`, `title`, `uploader_urn`, `role`, `confidence`, `user_override`, `first_seen`/`last_seen`. Read-only, no SoundCloud call, no ownership verdict |
+| POST | `/api/artists/{collection_id}/download-missing` `[AUTH]` | Queue missing tracks through the existing SC downloader → job id. Body `{sc_ids[]}` **or** `{auto_queue: true}`, never both: auto-queue may only pick tracks the identity layer marked `auto_queue_allowed` (role `primary`/`remixer` at `high`/`medium`) that the diff proved missing — a review-bucket row (`remixed_by_others` / `featured` / `uncertain`) or an excluded mix has to be named. Reads the catalogue cache only (no metadata calls of its own), refuses more than `ARTIST_DOWNLOAD_MAX_TRACKS` per run instead of trimming, 409 while a batch is in flight or the catalogue is not fetched. `sc_aggressive_mode` is **not** inherited |
 | GET | `/api/artists/download/status` | Poll one batch download by `job_id` (`total/done/percent/eta_seconds/cancel_requested`, `succeeded/skipped/failed`, `errors[]`, `call_cap`). Same envelope as `/api/phrase/batch/status` |
 | GET | `/api/genres` | All genres |
 | GET | `/api/labels` | All labels |
@@ -148,8 +150,9 @@ Marker convention in the route tables below:
 |--------|------|-------------|
 | GET | `/api/soundcloud/playlists` | Fetch SC playlists for authenticated user |
 | GET | `/api/soundcloud/me` | Get authenticated SC user profile |
-| POST | `/api/soundcloud/auth-token` `[AUTH]` `[RL]` | Store SC OAuth token (called after Tauri OAuth flow). Rate-limited: 5 req/min steady, burst 10, `key_mode="both"`. |
-| GET | `/api/soundcloud/auth-status` | Local keyring probe — returns `{authenticated: bool}` without any network round-trip. UI uses this on mount instead of `/me` to avoid the 100-500 ms SC round-trip and the `sc:auth-expired` interceptor noise. |
+| POST | `/api/soundcloud/auth-token` `[AUTH]` `[RL]` | Store the SC OAuth credentials (called after the Tauri OAuth flow). Body `{token, refresh_token?, expires_in?}` — `expires_in` 60..86400. Persists through `app/soundcloud_auth.py:store_tokens`; empty `token` = logout (`clear_tokens`). Returns `{status, persistent, refreshable}` — never any token material. Rate-limited: 5 req/min steady, burst 10, `key_mode="both"`. |
+| POST | `/api/soundcloud/refresh` `[AUTH]` `[RL]` | Renew the stored access token from the stored refresh token (`soundcloud_auth.refresh`, single-flight, stale-token guarded). `200 {status: "refreshed"}` · `401 {status: "expired"}` on `AuthExpiredError` (keyring already cleared → user must sign in) · `503 {status: "unavailable"}` on `TransientRefreshError` (SoundCloud unreachable, stored login kept). Returns no token. The axios 401 interceptor calls this **before** falling back to the interactive Tauri login, so browser-dev renews too. |
+| GET | `/api/soundcloud/auth-status` | Local keyring probe — `{authenticated, refreshable, source: "oauth"\|"legacy"\|null, expires_in_s}` without any network round-trip. `refreshable` is the only flag that entitles the UI to say the session renews itself; `expires_in_s` is clamped at 0 and `null` for a legacy session that carries no expiry. UI uses this on mount instead of `/me` to avoid the 100-500 ms SC round-trip and the `sc:auth-expired` interceptor noise. |
 | GET | `/api/soundcloud/settings` | Get SC-specific settings (target folder, etc.) |
 | PUT | `/api/soundcloud/settings` `[AUTH]` | Update SC settings |
 | POST | `/api/soundcloud/preview-matches` `[AUTH]` | Preview library matches for SC playlist tracks (dry run) |
@@ -380,8 +383,27 @@ Ties analysis → ANLZ files → master.db in a single pipeline. **Requires live
 |------------------|---------|
 | `SoundCloudPlaylistAPI` | SC unofficial v2 API client: `fetch_playlists(token)`, `fetch_likes(token)`, `get_me(token)`. Handles dynamic `client_id` scraping, Cloudflare fallback, exponential backoff on 429, full pagination |
 | `SoundCloudSyncEngine` | `match_to_library(sc_tracks, local_tracks) → [MatchResult]` — fuzzy title/artist matching (jaro-winkler), duration tiebreaker, confidence scoring |
-| `AuthExpiredError` | Raised when SC token is expired → frontend should trigger re-auth via `login_to_soundcloud` Tauri command |
+| `AuthExpiredError` | Raised when the SC token is expired → the backend refreshes silently (`soundcloud_auth`); only a rejected refresh token reaches the frontend as a re-auth prompt |
 | `RateLimitError` | Raised on 429 → includes `retry_after` seconds |
+
+---
+
+## SoundCloud token store (`app/soundcloud_auth.py`)
+
+Owns the SC OAuth lifecycle: one atomic keyring blob (`sc_oauth`) plus the legacy bare-token mirror (`sc_token`), and a single-flight refresh. SoundCloud rotates the refresh token on every use, so every renewal serialises through a module-private lock. No token, refresh token or client secret is ever logged — at any level, redacted or not.
+
+| Symbol | Returns | Description |
+|--------|---------|-------------|
+| `store_tokens(access, refresh=None, expires_in=None, *, scope=None)` | `StoreResult(tokens, persistent)` | Blob first, legacy mirror second. `persistent=False` → the keyring refused the blob; the session survives in the legacy key but cannot renew itself. |
+| `clear_tokens()` | None | Logout: drops blob + legacy key. |
+| `load_tokens()` | `ScTokens \| None` | The blob, validated on read. Corrupt / partial → `None` (reads as signed out). |
+| `token_status()` | `dict` | `{authenticated, refreshable, source, expires_at, remaining_ttl_s}` — no token material. Backs `GET /api/soundcloud/auth-status`. |
+| `get_access_token(*, min_ttl_s=120)` | `str \| None` | A token good for ≥ `min_ttl_s`, refreshing behind the call. Raises `AuthExpiredError` (refresh rejected, keys cleared) or `TransientRefreshError` (expired + endpoint unreachable). |
+| `refresh(*, min_ttl_s=120, stale_token=None, force=False)` | `str` | Single-flight refresh grant against `secure.soundcloud.com/oauth/token`. `stale_token` = the token a server just rejected; if the store already holds a different one, another caller won the race and its token is returned without a POST. |
+| `with_fresh_token(fn, *, min_ttl_s=120)` | `T` | `fn(token)`; on `AuthExpiredError` refresh once and retry once. The reactive backstop for long downloads. |
+| `TransientRefreshError` | exception | Refresh could not run now (network / 5xx / 429 / malformed / missing client credentials). Stored tokens untouched → 503, never 401. |
+
+Every `keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)` reader in `app/main.py` now goes through `_sc_access_token()` (routes: 401/503) or `_artist_sc_token()` (artist hub: typed states).
 
 ---
 
@@ -631,5 +653,6 @@ Phase-1 deliverable from `docs/research/research/evaluated_security-rate-limit-d
 - `POST /api/system/shutdown`
 - `POST /api/system/restart`
 - `POST /api/soundcloud/auth-token`
+- `POST /api/soundcloud/refresh`
 
 Decorator order: `@app.post(...)` outermost → `@rate_limit(...)` inner → `Depends(require_session)` via `dependencies=` kwarg on the `@app.post`, so `require_session` raises 401 before the bucket is decremented (verified by `tests/test_rate_limit.py::test_auth_before_ratelimit`). Remaining MEDIUM/LOW-tier wiring is Phase-2 work.

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
     AlertTriangle,
     ChevronDown,
@@ -11,47 +11,59 @@ import {
     Link2Off,
     Loader2,
     RefreshCw,
+    Tag,
 } from 'lucide-react';
 
 import { ARTIST_CATALOGUE_PAGE_SIZE } from '../../config/constants';
 import { formatNumber, pluralise } from './mergeCopy';
 import {
+    BUCKETS,
     DOWNLOAD_PATH_NOTE,
+    LINK_MISSING_CHIP,
+    LINK_MISSING_SENTENCE,
+    MIXES_BUCKET,
     MIXES_RULE_SENTENCE,
-    REMIX_RULE_SENTENCE,
+    ROLE_OPTIONS,
+    bucketEmptyNote,
     callBudgetLine,
+    creditLine,
+    downloadAllNote,
     downloadSummary,
     exclusionReason,
     fetchedLine,
     formatDate,
     formatDuration,
     progressLine,
+    roleLine,
+    searchNamesLine,
+    sourceStates,
     splitCatalogue,
     stateSentence,
     truncationNote,
-    repostsNote,
 } from './catalogueCopy';
 
 /**
  * ArtistDetail — screen 2 of `docs/research/mockups/library-artist-hub.html`: what you
  * own beside what is missing on SoundCloud, plus the excluded sets kept visible.
  *
- * Three things this view is built not to do, because the feature shipped them twice:
- *  1. Show a control that looks live but is not. The Update button is enabled only for
- *     a linked artist; otherwise it stays disabled and says why in the same words the
- *     backend uses.
+ * Since the owner's 2026-09-08 decision the remote half is split by **role**, not by
+ * uploader account: their tracks, their remixes, remixed by others, featured on,
+ * uncertain, and the excluded mixes. Every row shows the parsed credit that put it
+ * there and its confidence, and every row can be pinned to a different role by hand.
+ *
+ * Four things this view is built not to do, because the feature shipped them:
+ *  1. Show a control that looks live but is not. The Update button is enabled only when
+ *     there is something to update; otherwise it stays disabled and says why.
  *  2. Render a typed backend state (`not_linked`, `not_connected`, `artist_gone`) as an
- *     empty list. Those states carry no bucket keys at all and are rendered as the
- *     sentence they are.
- *  3. Report a download that did not happen. Every run reports downloaded / skipped /
+ *     empty list. Those states carry no bucket keys and are rendered as the sentence.
+ *  3. Call a bucket empty when the sources that fill it were never queried. The
+ *     per-source status line and `bucketEmptyNote` carry that distinction.
+ *  4. Report a download that did not happen. Every run reports downloaded / skipped /
  *     failed from the job record, never a blanket success.
  *
  * The left panel takes the existing `TrackTable` as `children` — the local half of this
  * screen is the same table the rest of the app uses, not a second track renderer.
  */
-
-const BUCKET_THEIRS = 'theirs';
-const BUCKET_REMIXES = 'remixes';
 
 const MAX_ERRORS_SHOWN = 5;
 const PERCENT_MAX = 100;
@@ -110,16 +122,72 @@ const SmallButton = ({ onClick, disabled, title, icon: Icon, busy, tone, childre
     </button>
 );
 
+/** The per-row role pin. Small menu, closes on outside click, one call per pick. */
+const RolePinMenu = ({ track, onPin, disabled }) => {
+    const [open, setOpen] = useState(false);
+    const boxRef = useRef(null);
+
+    useEffect(() => {
+        if (!open) return undefined;
+        const close = (event) => {
+            if (!boxRef.current?.contains(event.target)) setOpen(false);
+        };
+        document.addEventListener('mousedown', close);
+        return () => document.removeEventListener('mousedown', close);
+    }, [open]);
+
+    return (
+        <div className="relative shrink-0" ref={boxRef}>
+            <SmallButton
+                onClick={() => setOpen((v) => !v)}
+                disabled={disabled}
+                icon={Tag}
+                title={
+                    disabled
+                        ? 'Pinning needs a catalogue read first'
+                        : 'Put this track in a different bucket — your pin beats the classifier from now on'
+                }
+            >
+                Role
+            </SmallButton>
+            {open && (
+                <div className="absolute right-0 top-full mt-1 z-20 w-64 rounded-mx-sm border border-line-subtle bg-mx-panel shadow-lg py-1">
+                    {ROLE_OPTIONS.map((option) => {
+                        const current = option.value !== null && option.value === track.role;
+                        return (
+                            <button
+                                key={String(option.value)}
+                                type="button"
+                                onClick={() => {
+                                    setOpen(false);
+                                    onPin(track, option.value);
+                                }}
+                                className={`w-full text-left px-3 py-1.5 text-[11.5px] transition-colors hover:bg-mx-hover ${
+                                    current ? 'text-amber2 font-semibold' : 'text-ink-secondary'
+                                }`}
+                            >
+                                {option.label}
+                                {current ? ' · current' : ''}
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+};
+
 /** One catalogue row. Never claims a format or a bitrate — the API reports neither. */
-const TrackRow = ({ track, onDownload, busy, disabled, showUploader, reason }) => {
+const TrackRow = ({ track, onDownload, onPin, busy, disabled, reason }) => {
     const duration = formatDuration(track.duration_ms);
     const posted = formatDate(track.created_at);
     // Mirrors `app/artist_store/catalogue.py::is_playable` exactly. Getting this wrong
     // would offer a Download the backend then refuses and counts as "skipped".
     const playable =
         track.access === 'playable' && !!track.streamable && track.sharing === 'public';
+    const role = roleLine(track);
     return (
-        <div className="flex items-center gap-3 px-3 py-2 mb-1.5 rounded-xl bg-mx-card/40 border border-white/5">
+        <div className="flex items-start gap-3 px-3 py-2 mb-1.5 rounded-xl bg-mx-card/40 border border-white/5">
             <div className="flex-1 min-w-0">
                 <div className="font-semibold text-[13px] text-ink-primary truncate">
                     {track.permalink_url ? (
@@ -139,30 +207,46 @@ const TrackRow = ({ track, onDownload, busy, disabled, showUploader, reason }) =
                 <div className="mt-0.5 flex items-center gap-2 text-[11.5px] text-ink-muted flex-wrap">
                     {duration && <span className="font-mono">{duration}</span>}
                     {posted && <span>posted {posted}</span>}
-                    {showUploader && track.uploader_name && (
+                    {track.uploader_name && (
                         <span className="truncate">by {track.uploader_name}</span>
-                    )}
-                    {showUploader && (
-                        <span>{track.credited ? 'named in the title/tags' : 'not named'}</span>
                     )}
                     {reason && <span>{reason}</span>}
                     {track.downloadable && <Chip>artist allows download</Chip>}
                 </div>
+                {/* Why this row is in this bucket — the classifier's own words, always shown. */}
+                <div className="mt-1 text-[11px] text-ink-muted leading-snug">
+                    {role && (
+                        <span
+                            className={
+                                track.identity_source === 'user_override'
+                                    ? 'text-amber2 font-semibold'
+                                    : 'text-ink-secondary'
+                            }
+                        >
+                            {role}
+                        </span>
+                    )}
+                    {role && ' — '}
+                    {creditLine(track)}
+                </div>
             </div>
-            <SmallButton
-                onClick={() => onDownload(track)}
-                busy={busy}
-                disabled={disabled || !playable}
-                icon={Download}
-                title={
-                    playable
-                        ? `Download "${track.title}" through the SoundCloud downloader`
-                        : 'SoundCloud does not serve this account a full stream of this track — ' +
-                          'preview only, private or blocked. It is not downloadable.'
-                }
-            >
-                {playable ? 'Download' : 'Not streamable'}
-            </SmallButton>
+            <div className="flex items-center gap-1.5 shrink-0">
+                {onPin && <RolePinMenu track={track} onPin={onPin} disabled={disabled} />}
+                <SmallButton
+                    onClick={() => onDownload(track)}
+                    busy={busy}
+                    disabled={disabled || !playable}
+                    icon={Download}
+                    title={
+                        playable
+                            ? `Download "${track.title}" through the SoundCloud downloader`
+                            : 'SoundCloud does not serve this account a full stream of this track — ' +
+                              'preview only, private or blocked. It is not downloadable.'
+                    }
+                >
+                    {playable ? 'Download' : 'Not streamable'}
+                </SmallButton>
+            </div>
         </div>
     );
 };
@@ -183,10 +267,16 @@ export const ArtistDetailSummary = ({ localShown, localTotal, catalogue, scEnabl
             ) : split.ok ? (
                 <>
                     <span className="text-amber2 font-mono">
-                        · {formatNumber(split.missingTheirs.length)} missing on SoundCloud
+                        · {formatNumber(split.queueable.length)} missing and queueable
                     </span>
                     <span className="text-ink-muted font-mono">
-                        · {formatNumber(split.missingRemixes.length)} remixes by others
+                        ·{' '}
+                        {formatNumber(
+                            split.missingCounts.remixed_by_others +
+                                split.missingCounts.featured +
+                                split.missingCounts.uncertain
+                        )}{' '}
+                        to review
                     </span>
                 </>
             ) : (
@@ -202,26 +292,20 @@ export const ArtistDetailSummary = ({ localShown, localTotal, catalogue, scEnabl
 export const ArtistDetailActions = ({ artist, catalogue, actions, scEnabled, disabledReason }) => {
     const split = useMemo(() => splitCatalogue(catalogue.view), [catalogue.view]);
     const view = catalogue.view;
-    // Three states, not two: bound and usable, bound but broken (imported URL that was
-    // never resolved, or an account SoundCloud no longer serves), and not bound at all.
-    // Collapsing the middle one into "not linked" would hide the Unlink button for
-    // exactly the link the user needs to get rid of.
-    const usable = view?.status === 'ok' || !!view?.link?.resolved;
-    const bound =
-        usable ||
-        view?.status === 'artist_gone' ||
-        view?.status === 'link_unresolved' ||
-        (!view && !!artist?.sc_linked);
+    // Three states, not two: bound and usable, bound but broken (an account SoundCloud
+    // no longer serves), and not bound at all. An unbound artist is no longer a dead
+    // end — the catalogue is searched by name — but the Link action stays prominent
+    // because nothing can reach high confidence without the account.
+    const usable = view?.status === 'ok' && view?.link_missing === false;
+    const bound = usable || view?.status === 'artist_gone' || (!view && !!artist?.sc_linked);
     const permalink = view?.link?.permalink || view?.permalink || artist?.sc_permalink || '';
     const queueable = split.queueable.length;
 
     const updateBlocked = !scEnabled
         ? disabledReason
-        : !bound
-          ? 'Link a SoundCloud profile first — there is nothing to update until this artist is bound to an account.'
-          : view?.status === 'not_connected'
-            ? stateSentence(view)
-            : '';
+        : view?.status === 'not_connected'
+          ? stateSentence(view)
+          : '';
 
     return (
         <div className="flex items-center gap-2 shrink-0">
@@ -230,21 +314,29 @@ export const ArtistDetailActions = ({ artist, catalogue, actions, scEnabled, dis
                     {permalink ? permalink.replace(/^https?:\/\//, '') : 'SC linked'}
                 </Chip>
             ) : (
-                <SmallButton
-                    onClick={actions.handleLink}
-                    disabled={!scEnabled}
-                    busy={catalogue.linking}
-                    icon={Link2}
-                    title={
-                        scEnabled
-                            ? bound
-                                ? stateSentence(view)
-                                : 'Bind this artist to a SoundCloud profile URL'
-                            : disabledReason
-                    }
-                >
-                    {bound ? 'Re-link profile' : 'Link SoundCloud profile'}
-                </SmallButton>
+                <>
+                    {split.ok && (
+                        <Chip tone="amber" icon={AlertTriangle} title={LINK_MISSING_SENTENCE}>
+                            {LINK_MISSING_CHIP}
+                        </Chip>
+                    )}
+                    <SmallButton
+                        tone="primary"
+                        onClick={actions.handleLink}
+                        disabled={!scEnabled}
+                        busy={catalogue.linking}
+                        icon={Link2}
+                        title={
+                            scEnabled
+                                ? bound
+                                    ? stateSentence(view)
+                                    : LINK_MISSING_SENTENCE
+                                : disabledReason
+                        }
+                    >
+                        {bound ? 'Re-link profile' : 'Link SoundCloud profile'}
+                    </SmallButton>
+                </>
             )}
             {bound && (
                 <SmallButton
@@ -275,12 +367,32 @@ export const ArtistDetailActions = ({ artist, catalogue, actions, scEnabled, dis
                     !split.ok
                         ? 'No catalogue has been read for this artist yet'
                         : queueable === 0
-                          ? 'Nothing from this artist’s own uploads is missing'
-                          : `Download ${queueable} missing track(s) uploaded by this artist‘s own account`
+                          ? 'Nothing is both missing and confidently theirs'
+                          : downloadAllNote(queueable)
                 }
             >
                 Download all missing{split.ok && queueable > 0 ? ` (${queueable})` : ''}
             </SmallButton>
+        </div>
+    );
+};
+
+/** "Uploads ✓ · Search ✓ · Reposts not queried (budget)" — never decoration. */
+const SourceLine = ({ view }) => {
+    const states = sourceStates(view);
+    if (states.length === 0) return null;
+    const names = searchNamesLine(view);
+    return (
+        <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-ink-muted">
+            {states.map((source, index) => (
+                <span key={source.key} title={`${source.label}: ${source.text}`}>
+                    {index > 0 && <span className="mr-1.5">·</span>}
+                    <span className={source.ok ? 'text-ok' : 'text-amber2'}>
+                        {source.label} {source.short}
+                    </span>
+                </span>
+            ))}
+            {names && <span className="w-full text-ink-muted">{names}</span>}
         </div>
     );
 };
@@ -370,7 +482,7 @@ const MixesStrip = ({ tracks, actions, catalogue }) => {
             {open && (
                 <div className="px-3 pb-3 max-h-64 overflow-y-auto">
                     {tracks.length === 0 ? (
-                        <Hint>Nothing was excluded for this artist.</Hint>
+                        <Hint>{bucketEmptyNote(catalogue.view, MIXES_BUCKET)}</Hint>
                     ) : (
                         tracks.map((track) => (
                             <TrackRow
@@ -413,16 +525,13 @@ const MissingEmptyState = ({ catalogue, actions, scEnabled, disabledReason, spli
     }
     if (!view) return <Hint>No catalogue has been read for this artist yet.</Hint>;
     if (view.status !== 'ok') {
-        const canLink = view.status === 'not_linked' || view.status === 'link_unresolved';
         return (
             <Hint>
                 <p className="mb-3">{stateSentence(view)}</p>
                 <div className="flex items-center justify-center gap-2">
-                    {canLink && (
+                    {view.status === 'not_linked' && (
                         <SmallButton onClick={actions.handleLink} icon={Link2} tone="primary">
-                            {view.status === 'link_unresolved'
-                                ? 'Re-link this profile'
-                                : 'Link SoundCloud profile'}
+                            Link SoundCloud profile
                         </SmallButton>
                     )}
                     {view.status === 'not_connected' && (
@@ -445,11 +554,15 @@ const MissingEmptyState = ({ catalogue, actions, scEnabled, disabledReason, spli
             </Hint>
         );
     }
-    if (split.theirs.length + split.remixes.length === 0) {
-        return <Hint>SoundCloud lists no playable tracks on this account.</Hint>;
+    if (split.total === 0) {
+        return <Hint>{bucketEmptyNote(view, 'their_tracks')}</Hint>;
     }
     return null;
 };
+
+//: The role buckets the missing panel tabs through. The excluded mixes keep their own
+//: collapsed strip below, so they are not one of the tabs.
+const ROLE_BUCKETS = BUCKETS.filter((bucket) => bucket.key !== MIXES_BUCKET);
 
 const ArtistDetail = ({
     artist,
@@ -462,10 +575,11 @@ const ArtistDetail = ({
     children,
 }) => {
     const split = useMemo(() => splitCatalogue(catalogue.view), [catalogue.view]);
-    const [bucket, setBucket] = useState(BUCKET_THEIRS);
+    const [bucket, setBucket] = useState(ROLE_BUCKETS[0].key);
     const [shown, setShown] = useState(ARTIST_CATALOGUE_PAGE_SIZE);
 
-    const rows = bucket === BUCKET_THEIRS ? split.missingTheirs : split.missingRemixes;
+    const rows = split.missing[bucket] || [];
+    const active = ROLE_BUCKETS.find((entry) => entry.key === bucket) || ROLE_BUCKETS[0];
 
     useEffect(() => {
         setShown(ARTIST_CATALOGUE_PAGE_SIZE);
@@ -474,11 +588,7 @@ const ArtistDetail = ({
     // Every branch that has no list to show routes through MissingEmptyState, so a
     // typed backend state can never be rendered as an empty bucket.
     const showList =
-        scEnabled &&
-        !catalogue.loading &&
-        !catalogue.error &&
-        split.ok &&
-        split.theirs.length + split.remixes.length > 0;
+        scEnabled && !catalogue.loading && !catalogue.error && split.ok && split.total > 0;
 
     const budget = callBudgetLine(catalogue.view);
     const truncated = truncationNote(catalogue.view);
@@ -516,37 +626,9 @@ const ArtistDetail = ({
                     </div>
                 </div>
 
-                {/* Remote half — missing, split the way the owner asked. */}
+                {/* Remote half — missing, split by the role the classifier read. */}
                 <div className="bg-mx-panel border border-line-subtle rounded-xl flex flex-col min-h-0 overflow-hidden">
                     <PanelHead label={`Missing on SoundCloud · ${formatNumber(rows.length)}`}>
-                        <div className="inline-flex rounded-mx-sm overflow-hidden border border-line-subtle bg-mx-input ml-1">
-                            {[
-                                {
-                                    id: BUCKET_THEIRS,
-                                    label: `Definitely theirs (${split.missingTheirs.length})`,
-                                    title: 'Uploaded by this artist’s own SoundCloud account — the only bucket "Download all missing" queues.',
-                                },
-                                {
-                                    id: BUCKET_REMIXES,
-                                    label: `Remixes by others (${split.missingRemixes.length})`,
-                                    title: REMIX_RULE_SENTENCE,
-                                },
-                            ].map((option) => (
-                                <button
-                                    key={option.id}
-                                    type="button"
-                                    title={option.title}
-                                    onClick={() => setBucket(option.id)}
-                                    className={`px-2 py-[3px] text-[10px] border-r border-line-subtle last:border-r-0 transition-colors ${
-                                        bucket === option.id
-                                            ? 'bg-amber2/10 text-amber2 font-semibold'
-                                            : 'text-ink-muted hover:text-ink-secondary hover:bg-mx-hover'
-                                    }`}
-                                >
-                                    {option.label}
-                                </button>
-                            ))}
-                        </div>
                         <span className="flex-1" />
                         {split.ok && (
                             <Chip
@@ -559,6 +641,29 @@ const ArtistDetail = ({
                         )}
                     </PanelHead>
 
+                    <div className="flex flex-wrap gap-1 px-3.5 py-2 border-b border-line-subtle">
+                        {ROLE_BUCKETS.map((entry) => (
+                            <button
+                                key={entry.key}
+                                type="button"
+                                title={entry.blurb}
+                                onClick={() => setBucket(entry.key)}
+                                className={`px-2 py-[3px] rounded-mx-xs text-[10px] border transition-colors ${
+                                    bucket === entry.key
+                                        ? 'bg-amber2/10 text-amber2 border-amber2/40 font-semibold'
+                                        : 'bg-mx-input text-ink-muted border-line-subtle hover:text-ink-secondary'
+                                }`}
+                            >
+                                {entry.label} ({split.missingCounts[entry.key]}/
+                                {split.counts[entry.key]})
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="px-3.5 py-2 border-b border-line-subtle">
+                        <SourceLine view={catalogue.view} />
+                    </div>
+
                     <div className="flex-1 min-h-0 overflow-y-auto p-3">
                         {!showList ? (
                             <MissingEmptyState
@@ -570,11 +675,9 @@ const ArtistDetail = ({
                             />
                         ) : rows.length === 0 ? (
                             <Hint>
-                                {bucket === BUCKET_THEIRS
-                                    ? `Nothing missing from this artist’s own uploads — all ${formatNumber(
-                                          split.theirs.length
-                                      )} of them are already in your library.`
-                                    : repostsNote(catalogue?.reposts_status)}
+                                {split.counts[bucket] > 0
+                                    ? `All ${formatNumber(split.counts[bucket])} of them are already in your library.`
+                                    : bucketEmptyNote(catalogue.view, bucket)}
                             </Hint>
                         ) : (
                             <>
@@ -582,8 +685,8 @@ const ArtistDetail = ({
                                     <TrackRow
                                         key={track.sc_id}
                                         track={track}
-                                        showUploader={bucket === BUCKET_REMIXES}
                                         onDownload={actions.handleDownloadOne}
+                                        onPin={actions.handlePinRole}
                                         busy={actions.pendingScId === track.sc_id}
                                         disabled={catalogue.downloading}
                                     />
@@ -610,14 +713,22 @@ const ArtistDetail = ({
                                 {truncated}
                             </span>
                         )}
-                        {bucket === BUCKET_THEIRS ? DOWNLOAD_PATH_NOTE : REMIX_RULE_SENTENCE}
+                        {split.ok && split.linkMissing && (
+                            <span className="block mb-1 text-amber2">{LINK_MISSING_SENTENCE}</span>
+                        )}
+                        {active.blurb}
+                        <span className="block mt-1">{DOWNLOAD_PATH_NOTE}</span>
                         {budget && <span className="block mt-1 font-mono">{budget}</span>}
                     </PanelNote>
                 </div>
             </div>
 
             {split.ok && (
-                <MixesStrip tracks={split.mixes} actions={actions} catalogue={catalogue} />
+                <MixesStrip
+                    tracks={split.rows[MIXES_BUCKET]}
+                    actions={actions}
+                    catalogue={catalogue}
+                />
             )}
         </div>
     );

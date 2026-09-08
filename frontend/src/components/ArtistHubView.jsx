@@ -401,9 +401,18 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
     const libraryArtistIndex = useCallback(async () => {
         if (libraryIndexRef.current) return libraryIndexRef.current;
         const res = await api.get('/api/artists');
+        // name → EVERY matching library id, not one. The library keeps case-distinct
+        // entries ("Klangkuenstler" and "klangkuenstler" are two rows with two ids),
+        // and a case-insensitive key that stored a single id let the second overwrite
+        // the first — the drill-in then showed one spelling's tracks (7) while the hub
+        // counted the merged collection (15).
         const index = new Map();
         (res.data ?? []).forEach((a) => {
-            if (a?.name) index.set(String(a.name).toLowerCase(), a.id);
+            if (!a?.name) return;
+            const key = String(a.name).toLowerCase();
+            const bucket = index.get(key);
+            if (bucket) bucket.push(a.id);
+            else index.set(key, [a.id]);
         });
         libraryIndexRef.current = index;
         return index;
@@ -422,9 +431,7 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                 const index = await libraryArtistIndex();
                 const names = row.library_names?.length ? row.library_names : [row.name];
                 const ids = [
-                    ...new Set(
-                        names.map((n) => index.get(String(n).toLowerCase())).filter(Boolean)
-                    ),
+                    ...new Set(names.flatMap((n) => index.get(String(n).toLowerCase()) ?? [])),
                 ];
                 const responses = await Promise.all(
                     ids.map((id) => api.get(`/api/artist/${encodeURIComponent(id)}/tracks`))
@@ -571,8 +578,8 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
             }
             const split = splitCatalogue(payload);
             toast.success(
-                `${row.name}: ${split.missingTheirs.length} missing of ` +
-                    `${split.theirs.length} own uploads`
+                `${row.name}: ${split.queueable.length} missing and queueable of ` +
+                    `${split.total} tracks read`
             );
         } catch (e) {
             console.error('[ArtistHub] per-artist update failed', e);

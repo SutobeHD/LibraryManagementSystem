@@ -560,7 +560,7 @@ class TestIsrcFastPath:
             artist_names=[ARTIST],
             fetch=lambda _u: remote,
         )
-        by_id = {t["sc_id"]: t for t in view["definitely_theirs"]}
+        by_id = {t["sc_id"]: t for t in view[cat.BUCKET_THEIR_TRACKS]}
         assert by_id["soundcloud:tracks:1"]["match_method"] == cat.MATCH_ISRC
         assert by_id["soundcloud:tracks:1"]["in_library"] is True
         assert by_id["soundcloud:tracks:2"]["match_method"] == cat.MATCH_NONE
@@ -710,3 +710,50 @@ class TestHygiene:
     def test_classify_is_pure_no_sidecar_write(self, store, collection) -> None:
         idn.classify_roles([sc("1", "Boys Noize - Overdrive")], ARTIST_URN, [ARTIST])
         assert store.list_track_identities(collection) == []
+
+
+class TestDisplayNameAloneNeverAutoQueues:
+    """A bare display-name match must not spend the user's bandwidth unattended.
+
+    SoundCloud display names are not unique. A tribute page, an impostor or a
+    genuinely different act of the same name lands at ``primary``/``medium`` — right,
+    because the name really is the artist's — but MEDIUM is otherwise auto-queue
+    eligible, so without this gate a pure name collision would download itself.
+    The track stays visible and one click from downloading; it just never goes
+    unattended. Any corroborating signal clears the gate.
+    """
+
+    def test_uploader_name_only_is_primary_but_not_queueable(self) -> None:
+        row = one(sc("1", "Some Track", uploader_urn=FOREIGN_URN, uploader_name=ARTIST))
+
+        assert (row["role"], row["confidence"]) == (idn.ROLE_PRIMARY, idn.CONFIDENCE_MEDIUM)
+        assert row["credit_parse"]["matched_on"] == idn.SIGNAL_UPLOADER_NAME
+        assert row["auto_queue_allowed"] is False, (
+            "a foreign account merely NAMED like the artist would auto-download on a "
+            "pure name collision"
+        )
+
+    def test_a_title_credit_clears_the_gate(self) -> None:
+        row = one(sc("2", f"{ARTIST} - Some Track", uploader_urn=FOREIGN_URN, uploader_name=LABEL))
+
+        assert row["credit_parse"]["matched_on"] == idn.SIGNAL_TITLE_PREFIX
+        assert row["auto_queue_allowed"] is True
+
+    def test_the_linked_account_clears_the_gate(self) -> None:
+        row = one(sc("3", "Some Track", uploader_urn=ARTIST_URN, uploader_name=ARTIST))
+
+        assert row["credit_parse"]["matched_on"] == idn.SIGNAL_UPLOADER_URN
+        assert row["auto_queue_allowed"] is True
+
+    def test_the_rule_is_pure_and_signal_aware(self) -> None:
+        assert idn.auto_queue_eligible(idn.ROLE_PRIMARY, idn.CONFIDENCE_MEDIUM) is True
+        assert (
+            idn.auto_queue_eligible(
+                idn.ROLE_PRIMARY, idn.CONFIDENCE_MEDIUM, idn.SIGNAL_UPLOADER_NAME
+            )
+            is False
+        )
+        assert (
+            idn.auto_queue_eligible(idn.ROLE_PRIMARY, idn.CONFIDENCE_HIGH, idn.SIGNAL_UPLOADER_NAME)
+            is False
+        ), "even HIGH must not rescue a name-only match — HIGH comes from the URN, not the name"

@@ -4,21 +4,25 @@ Six contracts, all of them things this feature has previously got wrong:
 
 * every **mutation** is behind ``Depends(require_session)`` (threat T3), and a rejected
   call writes no link row.
-* an artist with no SoundCloud binding gets a **typed** ``not_linked`` payload that
-  carries no bucket keys at all — an empty ``definitely_theirs`` would render as "this
-  artist has released nothing", which is a claim about data nobody fetched.
-* no token, no cache ⇒ ``not_connected``, again with no bucket keys. Never an empty
+* an artist with no SoundCloud binding is still catalogued **by name** (owner decision
+  2026-09-08 — search needs no URN), and the payload says ``link_missing`` instead of
+  pretending to a bound account.
+* no token, no cache ⇒ ``not_connected``, with no bucket keys at all. Never an empty
   success, never a fabricated count.
+* every one of the three sources (uploads / search / reposts) reports its own status,
+  and only ``ok`` entitles anyone to say nothing is missing from what it supplies.
 * ``download-missing`` hands back a job id and refuses a second concurrent run with 409.
 * the per-run cap (``ARTIST_DOWNLOAD_MAX_TRACKS``) is refused, not silently trimmed.
-* the auto-queue path may only pick ``definitely_theirs``; a remix uploaded by another
-  account has to be named explicitly (threat T11). And no queued download inherits
-  ``sc_aggressive_mode`` (ToU guardrail).
+* the auto-queue path may only pick what the identity layer marked
+  ``auto_queue_allowed`` (role ``primary``/``remixer`` at high/medium confidence); a
+  review-bucket row has to be named explicitly (threat T11). And no queued download
+  inherits ``sc_aggressive_mode`` (ToU guardrail).
 
 **No network, no real credentials, no real library.** ``sc_api.get_user_tracks`` /
-``resolve_user`` and ``sc_downloader.download_track`` are replaced per test; an autouse
-fixture pins ``keyring.get_password`` to ``None`` so a test that forgets to opt in reads
-"signed out" instead of the developer's real OAuth token. The sidecar is a throwaway file
+``search_tracks_many`` / ``get_user_reposts`` / ``resolve_user`` and
+``sc_downloader.download_track`` are replaced per test; an autouse
+fixture pins ``soundcloud_auth.get_access_token`` to ``None`` so a test that forgets to opt
+in reads "signed out" instead of the developer's real OAuth token. The sidecar is a throwaway file
 in a tmp dir and the ``db`` facade is a stub, exactly as in ``tests/test_artist_routes.py``.
 """
 
@@ -33,7 +37,8 @@ import pytest
 
 from app import auth, main
 from app import soundcloud_api as sc_api
-from app.artist_store import registry, schema
+from app.artist_store import catalogue as artist_catalogue
+from app.artist_store import identity, registry, schema
 from app.main import app
 
 ARTIST_URN = "soundcloud:users:4242"
@@ -92,13 +97,31 @@ def _sc_track(
 
 OWN_TRACK = _sc_track(101, "Overdrive")
 OWN_TRACK_2 = _sc_track(102, "Kill The Beat")
-REMIX_TRACK = _sc_track(
+#: Their own remix of someone else's track — THEIR music, so it is auto-queueable.
+THEIR_REMIX = _sc_track(
     201,
     "Someone Else — Track (Boys Noize Remix)",
     uploader_urn=OTHER_URN,
     uploader_name="Someone Else",
 )
-CATALOGUE = [OWN_TRACK, OWN_TRACK_2, REMIX_TRACK]
+#: Their track remixed by somebody else — review bucket, never queued for the user.
+FOREIGN_REMIX = _sc_track(
+    202,
+    "Boys Noize - Overdrive (Erol Alkan Remix)",
+    uploader_urn=OTHER_URN,
+    uploader_name="Some Label",
+)
+#: Nothing credits this artist — review bucket.
+UNCERTAIN_TRACK = _sc_track(203, "Some Other Track", uploader_urn=OTHER_URN, uploader_name="Nobody")
+CATALOGUE = [OWN_TRACK, OWN_TRACK_2, THEIR_REMIX, FOREIGN_REMIX, UNCERTAIN_TRACK]
+
+#: What the auto-queue path is allowed to pick out of ``CATALOGUE`` with an empty library.
+AUTO_QUEUE_IDS = ["101", "102", "201"]
+
+
+def _empty_search(*_a: Any, **_kw: Any) -> sc_api.SCSearchResult:
+    """Search ran and found nothing new — distinct from search never running."""
+    return sc_api.SCSearchResult([], queries_run=(ARTIST_NAME,))
 
 
 class _LibraryDB:
@@ -159,11 +182,14 @@ def _clean_store():
 def _no_network(monkeypatch):
     """No library, no keyring, no SoundCloud, no downloader — every escape hatch closed.
 
-    ``keyring.get_password`` defaults to ``None`` on purpose: a test that forgets to opt
-    into a token must read "signed out", never the developer's real OAuth token.
+    The token getter defaults to ``None`` on purpose: a test that forgets to opt into a
+    token must read "signed out", never the developer's real OAuth token — and it is
+    patched on ``soundcloud_auth``, the module the routes now go through, so no test can
+    reach the real keyring (or trigger a real refresh POST).
     """
     monkeypatch.setattr(main, "db", _LibraryDB())
     monkeypatch.setattr(auth, "paired_token_valid", lambda _token: False)
+    monkeypatch.setattr(main.sc_auth, "get_access_token", lambda **_kw: None)
     monkeypatch.setattr(main.keyring, "get_password", lambda _service, _user: None)
 
     def _no_fetch(*_a: Any, **_kw: Any):
@@ -171,13 +197,15 @@ def _no_network(monkeypatch):
 
     monkeypatch.setattr(main.sc_api, "get_user_tracks", _no_fetch)
     monkeypatch.setattr(main.sc_api, "get_user_reposts", _no_fetch)
+    monkeypatch.setattr(main.sc_api, "search_tracks", _no_fetch)
+    monkeypatch.setattr(main.sc_api, "search_tracks_many", _no_fetch)
     monkeypatch.setattr(main.sc_api, "resolve_user", _no_fetch)
     monkeypatch.setattr(main.sc_downloader, "download_track", _no_fetch)
 
 
 @pytest.fixture
 def signed_in(monkeypatch):
-    monkeypatch.setattr(main.keyring, "get_password", lambda _service, _user: FAKE_TOKEN)
+    monkeypatch.setattr(main.sc_auth, "get_access_token", lambda **_kw: FAKE_TOKEN)
 
 
 @pytest.fixture
@@ -201,9 +229,10 @@ def fetched(monkeypatch, linked: str, signed_in) -> str:
         "get_user_tracks",
         lambda _urn, _token, **_kw: sc_api.SCResultList(list(CATALOGUE)),
     )
-    # The route fetches own uploads AND reposts — the remixes bucket can only ever be
-    # filled from the second path, so a fixture that stubs only the first would make
-    # "no remixes missing" look true when it was simply never queried.
+    # The route fetches own uploads AND search AND reposts. A fixture that stubbed only
+    # the first would make "nothing missing" look true for two sources that were never
+    # queried — the exact fabrication this feature keeps shipping.
+    monkeypatch.setattr(main.sc_api, "search_tracks_many", _empty_search)
     monkeypatch.setattr(
         main.sc_api, "get_user_reposts", lambda _urn, _token, **_kw: sc_api.SCResultList([])
     )
@@ -229,7 +258,7 @@ def downloads(monkeypatch) -> list[dict[str, Any]]:
     return calls
 
 
-_BUCKET_KEYS = {"definitely_theirs", "remixes_by_others", "mixes_and_sets"}
+_BUCKET_KEYS = set(artist_catalogue.BUCKET_KEYS)
 
 
 def _assert_no_buckets(body: dict[str, Any]) -> None:
@@ -278,12 +307,42 @@ def test_catalogue_read_needs_no_session(linked: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_unlinked_artist_returns_typed_not_linked(collection_id: str) -> None:
+def test_unlinked_and_signed_out_says_not_connected_not_empty(collection_id: str) -> None:
+    """No account AND no login: nothing was queried, so nothing may be listed."""
     body = _request("GET", f"/api/artists/{collection_id}/catalogue").json()
 
-    assert body["status"] == "not_linked"
+    assert body["status"] == "not_connected"
     assert body["collection_id"] == collection_id
     _assert_no_buckets(body)
+
+
+def test_unlinked_artist_is_catalogued_by_name_and_flagged(
+    monkeypatch, collection_id: str, signed_in
+) -> None:
+    """Owner decision 2026-09-08: linking stays manual, but a name is enough to search."""
+    seen: dict[str, Any] = {}
+
+    def _search(queries, _token, **kwargs: Any):
+        seen["queries"] = list(queries)
+        return sc_api.SCSearchResult(
+            [_sc_track(301, "Overdrive", uploader_urn=OTHER_URN, uploader_name=ARTIST_NAME)],
+            queries_run=(ARTIST_NAME,),
+        )
+
+    monkeypatch.setattr(main.sc_api, "search_tracks_many", _search)
+    body = _request("GET", f"/api/artists/{collection_id}/catalogue").json()
+
+    assert body["status"] == "ok"
+    assert body["link_missing"] is True
+    assert body["link_state"] == "missing"
+    assert body["linked"] is False
+    assert seen["queries"] == [ARTIST_NAME]
+    # No uploader signal without a link, so nothing may claim "high".
+    theirs = body[artist_catalogue.BUCKET_THEIR_TRACKS]
+    assert [t["title"] for t in theirs] == ["Overdrive"]
+    assert theirs[0]["confidence"] == "medium"
+    # Neither account-bound source could run — say so, never imply they came back empty.
+    assert body["sources"] == {"uploads": "not_queried", "search": "ok", "reposts": "not_queried"}
 
 
 def test_unknown_collection_is_404() -> None:
@@ -325,15 +384,15 @@ def test_deleted_soundcloud_account_returns_artist_gone(
     _assert_no_buckets(body)
 
 
-def test_catalogue_splits_into_buckets_and_reports_the_budget(fetched: str) -> None:
+def test_catalogue_splits_into_role_buckets_and_reports_the_budget(fetched: str) -> None:
     body = _request("GET", f"/api/artists/{fetched}/catalogue").json()
 
     assert body["status"] == "ok"
-    assert [t["sc_id"] for t in body["definitely_theirs"]] == [
-        OWN_TRACK["sc_id"],
-        OWN_TRACK_2["sc_id"],
-    ]
-    assert [t["sc_id"] for t in body["remixes_by_others"]] == [REMIX_TRACK["sc_id"]]
+    assert [t["sc_id"] for t in body["their_tracks"]] == [OWN_TRACK["sc_id"], OWN_TRACK_2["sc_id"]]
+    assert [t["sc_id"] for t in body["their_remixes"]] == [THEIR_REMIX["sc_id"]]
+    assert [t["sc_id"] for t in body["remixed_by_others"]] == [FOREIGN_REMIX["sc_id"]]
+    assert [t["sc_id"] for t in body["uncertain"]] == [UNCERTAIN_TRACK["sc_id"]]
+    assert body["link_missing"] is False
     assert body["from_cache"] is True  # the fixture already warmed it
     assert body["call_budget"] == main.ARTIST_CATALOGUE_CALL_BUDGET
     assert body["calls_used"] == 0
@@ -348,6 +407,8 @@ def test_catalogue_fetch_carries_a_call_budget(monkeypatch, linked: str, signed_
         return sc_api.SCResultList(list(CATALOGUE))
 
     monkeypatch.setattr(main.sc_api, "get_user_tracks", _fetch)
+    monkeypatch.setattr(main.sc_api, "search_tracks_many", _empty_search)
+    monkeypatch.setattr(main.sc_api, "get_user_reposts", lambda *_a, **_kw: sc_api.SCResultList([]))
     body = _request("GET", f"/api/artists/{linked}/catalogue").json()
 
     assert seen["urn"] == ARTIST_URN
@@ -364,6 +425,8 @@ def test_truncated_fetch_is_reported_not_hidden(monkeypatch, linked: str, signed
             list(CATALOGUE), truncated=True, stop_reason="budget"
         ),
     )
+    monkeypatch.setattr(main.sc_api, "search_tracks_many", _empty_search)
+    monkeypatch.setattr(main.sc_api, "get_user_reposts", lambda *_a, **_kw: sc_api.SCResultList([]))
     body = _request("GET", f"/api/artists/{linked}/catalogue").json()
 
     assert body["truncated"] is True
@@ -451,9 +514,13 @@ def test_legacy_json_links_migrate_once_and_stay_unresolved(monkeypatch) -> None
 
     body = _request("GET", f"/api/artists/{cid}/catalogue").json()
 
-    assert body["status"] == "link_unresolved"
-    assert body["permalink"] == "sc.com/bnr"
+    # Signed out, so nothing was fetched — but the imported row is still only a
+    # bookmark, and the next signed-in read must not treat it as a bound account.
+    assert body["status"] == "not_connected"
     _assert_no_buckets(body)
+    link = registry.get_provider_link(cid)
+    assert link["permalink"] == "sc.com/bnr"
+    assert link["resolved"] is False
     assert registry.migrate_legacy_artist_links()["already_done"] is True
 
 
@@ -472,12 +539,12 @@ def test_download_missing_returns_a_job_id(fetched: str, downloads, auth_token) 
 
     assert res.status_code == 200
     data = res.json()["data"]
-    assert data["total"] == 2
+    assert data["total"] == len(AUTO_QUEUE_IDS)
     status = _request("GET", f"/api/artists/download/status?job_id={data['job_id']}")
     assert status.status_code == 200
     job = status.json()["data"]
     assert job["status"] == "done"
-    assert job["succeeded"] == 2
+    assert job["succeeded"] == len(AUTO_QUEUE_IDS)
     assert job["percent"] == 100.0
 
 
@@ -497,8 +564,10 @@ def test_batch_never_inherits_aggressive_mode(fetched: str, downloads, auth_toke
     assert all(call["allow_aggressive"] is False for call in downloads)
 
 
-def test_auto_queue_takes_only_definitely_theirs(fetched: str, downloads, auth_token) -> None:
-    """The server may not queue a foreign uploader's remix on the user's behalf (T11)."""
+def test_auto_queue_takes_their_music_and_nothing_from_the_review_buckets(
+    fetched: str, downloads, auth_token
+) -> None:
+    """Their tracks AND their own remixes; never a foreign remix, a feature or a maybe (T11)."""
     _request(
         "POST",
         f"/api/artists/{fetched}/download-missing",
@@ -506,20 +575,33 @@ def test_auto_queue_takes_only_definitely_theirs(fetched: str, downloads, auth_t
         headers=auth_token,
     )
 
-    assert [call["sc_track_id"] for call in downloads] == ["101", "102"]
+    assert [call["sc_track_id"] for call in downloads] == AUTO_QUEUE_IDS
 
 
-def test_a_remix_must_be_requested_explicitly(fetched: str, downloads, auth_token) -> None:
+@pytest.mark.parametrize("track", [FOREIGN_REMIX, UNCERTAIN_TRACK])
+def test_a_review_bucket_track_must_be_requested_explicitly(
+    track, fetched: str, downloads, auth_token
+) -> None:
+    """Refused for the server to pick, accepted when the user points at the row."""
+    body = _request("GET", f"/api/artists/{fetched}/catalogue").json()
+    row = next(
+        t
+        for bucket in artist_catalogue.BUCKET_KEYS
+        for t in body[bucket]
+        if t["sc_id"] == track["sc_id"]
+    )
+    assert row["auto_queue_allowed"] is False
+
     res = _request(
         "POST",
         f"/api/artists/{fetched}/download-missing",
-        json={"sc_ids": [REMIX_TRACK["sc_id"]]},
+        json={"sc_ids": [track["sc_id"]]},
         headers=auth_token,
     )
 
     assert res.status_code == 200
     assert res.json()["data"]["total"] == 1
-    assert [call["sc_track_id"] for call in downloads] == ["201"]
+    assert [call["sc_track_id"] for call in downloads] == [track["sc_id"].rsplit(":", 1)[-1]]
 
 
 def test_auto_queue_and_explicit_ids_are_mutually_exclusive(
@@ -579,6 +661,8 @@ def test_per_run_cap_is_refused_not_trimmed(
     over_cap = main.ARTIST_DOWNLOAD_MAX_TRACKS + 1
     big = [_sc_track(1000 + i, f"Track {i}") for i in range(over_cap)]
     monkeypatch.setattr(main.sc_api, "get_user_tracks", lambda *_a, **_kw: sc_api.SCResultList(big))
+    monkeypatch.setattr(main.sc_api, "search_tracks_many", _empty_search)
+    monkeypatch.setattr(main.sc_api, "get_user_reposts", lambda *_a, **_kw: sc_api.SCResultList([]))
     assert _request("GET", f"/api/artists/{linked}/catalogue").json()["status"] == "ok"
 
     res = _request(
@@ -710,33 +794,118 @@ def test_batch_path_refuses_the_preview_aggressive_mode_would_accept(snipped_onl
     assert source is None
 
 
-class TestRepostsPathIsQueriedAndReported:
-    """Regression: only own uploads were fetched, so remixes_by_others could never fill.
+class TestEverySourceReportsItsOwnStatus:
+    """Regression, twice shipped: a bucket nobody queried was rendered as "nothing missing".
 
-    ``/users/{urn}/tracks`` is own-uploads-only. With nothing else fetched, every row
-    satisfied ``uploader_urn == artist_urn`` and the remixes bucket was structurally
-    empty — while the UI still printed "No remix by another uploader is missing from
-    your library", a positive claim about data nobody had asked SoundCloud for.
+    ``/users/{urn}/tracks`` is own-uploads-only, and most of a label-signed artist's
+    catalogue is uploaded by labels, promo channels and DJs — so the search source is
+    where the majority lives. Each of the three sources therefore carries its own
+    ``ok`` / ``failed`` / ``skipped_budget`` / ``not_queried``, and only ``ok`` entitles
+    anyone to speak about absence.
     """
 
-    def test_the_route_actually_queries_reposts(self, monkeypatch, linked, signed_in) -> None:
+    def test_all_three_sources_run_in_budget_order(self, monkeypatch, linked, signed_in) -> None:
         calls: list[str] = []
 
         def _own(_urn, _token, **_kw):
-            calls.append("tracks")
+            calls.append("uploads")
             return sc_api.SCResultList(list(CATALOGUE))
+
+        def _search(_queries, _token, **_kw):
+            calls.append("search")
+            return sc_api.SCSearchResult([], queries_run=(ARTIST_NAME,))
 
         def _reposts(_urn, _token, **_kw):
             calls.append("reposts")
             return sc_api.SCResultList([])
 
         monkeypatch.setattr(main.sc_api, "get_user_tracks", _own)
+        monkeypatch.setattr(main.sc_api, "search_tracks_many", _search)
         monkeypatch.setattr(main.sc_api, "get_user_reposts", _reposts)
 
         body = _request("GET", f"/api/artists/{linked}/catalogue").json()
 
-        assert calls == ["tracks", "reposts"]
-        assert body["reposts_status"] == "ok"
+        assert calls == ["uploads", "search", "reposts"]
+        assert body["sources"] == {"uploads": "ok", "search": "ok", "reposts": "ok"}
+
+    def test_search_runs_for_the_canonical_name_and_every_alias_on_one_budget(
+        self, monkeypatch, linked, signed_in
+    ) -> None:
+        schema.add_alias(linked, "Boysnoize")
+        schema.add_alias(linked, "BNR")
+        seen: dict[str, Any] = {}
+
+        def _own(_urn, _token, **kwargs: Any):
+            seen["upload_budget"] = kwargs.get("budget")
+            return sc_api.SCResultList([OWN_TRACK])
+
+        def _search(queries, _token, **kwargs: Any):
+            seen["queries"] = list(queries)
+            seen["search_budget"] = kwargs.get("budget")
+            return sc_api.SCSearchResult([], queries_run=tuple(queries))
+
+        monkeypatch.setattr(main.sc_api, "get_user_tracks", _own)
+        monkeypatch.setattr(main.sc_api, "search_tracks_many", _search)
+        monkeypatch.setattr(
+            main.sc_api, "get_user_reposts", lambda *_a, **_kw: sc_api.SCResultList([])
+        )
+
+        body = _request("GET", f"/api/artists/{linked}/catalogue").json()
+
+        expected = list(registry.artist_names(linked))
+        assert set(expected) == {ARTIST_NAME, "Boysnoize", "BNR"}
+        assert seen["queries"] == expected, "every spelling the artist answers to is searched"
+        assert body["search_names"] == expected
+        # ONE budget across all three sources — not one cap per source.
+        assert isinstance(seen["search_budget"], sc_api.CallBudget)
+        assert seen["search_budget"] is seen["upload_budget"]
+
+    def test_a_track_in_both_uploads_and_search_is_listed_once(
+        self, monkeypatch, linked, signed_in
+    ) -> None:
+        monkeypatch.setattr(
+            main.sc_api, "get_user_tracks", lambda *_a, **_kw: sc_api.SCResultList([OWN_TRACK])
+        )
+        monkeypatch.setattr(
+            main.sc_api,
+            "search_tracks_many",
+            lambda *_a, **_kw: sc_api.SCSearchResult(
+                [dict(OWN_TRACK), OWN_TRACK_2], queries_run=(ARTIST_NAME,)
+            ),
+        )
+        monkeypatch.setattr(
+            main.sc_api, "get_user_reposts", lambda *_a, **_kw: sc_api.SCResultList([])
+        )
+
+        body = _request("GET", f"/api/artists/{linked}/catalogue").json()
+
+        ids = [t["sc_id"] for bucket in artist_catalogue.BUCKET_KEYS for t in body[bucket]]
+        assert ids.count(OWN_TRACK["sc_id"]) == 1
+        assert sorted(ids) == sorted([OWN_TRACK["sc_id"], OWN_TRACK_2["sc_id"]])
+        # The uploads sighting wins, so the URN signal is not lost to the search copy.
+        theirs = body[artist_catalogue.BUCKET_THEIR_TRACKS]
+        assert next(t for t in theirs if t["sc_id"] == OWN_TRACK["sc_id"])["confidence"] == "high"
+
+    def test_a_search_failure_does_not_sink_the_catalogue(
+        self, monkeypatch, linked, signed_in
+    ) -> None:
+        def _boom(*_a: Any, **_kw: Any):
+            raise RuntimeError("search endpoint exploded")
+
+        monkeypatch.setattr(
+            main.sc_api, "get_user_tracks", lambda *_a, **_kw: sc_api.SCResultList(list(CATALOGUE))
+        )
+        monkeypatch.setattr(main.sc_api, "search_tracks_many", _boom)
+        monkeypatch.setattr(
+            main.sc_api, "get_user_reposts", lambda *_a, **_kw: sc_api.SCResultList([])
+        )
+
+        body = _request("GET", f"/api/artists/{linked}/catalogue").json()
+
+        assert body["status"] == "ok"
+        assert body["sources"]["search"] == "failed"
+        assert body["sources"]["uploads"] == "ok"
+        assert body[artist_catalogue.BUCKET_THEIR_TRACKS], "own uploads must still be reported"
 
     def test_a_reposts_failure_does_not_sink_the_catalogue(
         self, monkeypatch, linked, signed_in
@@ -747,21 +916,181 @@ class TestRepostsPathIsQueriedAndReported:
             raise RuntimeError("reposts endpoint exploded")
 
         monkeypatch.setattr(
-            main.sc_api,
-            "get_user_tracks",
-            lambda _urn, _token, **_kw: sc_api.SCResultList(list(CATALOGUE)),
+            main.sc_api, "get_user_tracks", lambda *_a, **_kw: sc_api.SCResultList(list(CATALOGUE))
         )
+        monkeypatch.setattr(main.sc_api, "search_tracks_many", _empty_search)
         monkeypatch.setattr(main.sc_api, "get_user_reposts", _boom)
 
         body = _request("GET", f"/api/artists/{linked}/catalogue").json()
 
         assert body["status"] == "ok"
-        assert body["reposts_status"] == "failed"
-        assert body["definitely_theirs"], "own uploads must still be reported"
+        assert body["sources"]["reposts"] == "failed"
+        assert body[artist_catalogue.BUCKET_THEIR_TRACKS]
 
-    def test_a_cached_read_does_not_claim_the_reposts_half(self, fetched) -> None:
-        """A cache hit fetched nothing, so it may not assert anything about reposts."""
+    def test_an_alias_the_budget_never_reached_is_reported_as_skipped(
+        self, monkeypatch, linked, signed_in
+    ) -> None:
+        """A name that was never searched is a bucket nobody looked in — say which."""
+        monkeypatch.setattr(
+            main.sc_api, "get_user_tracks", lambda *_a, **_kw: sc_api.SCResultList([OWN_TRACK])
+        )
+        monkeypatch.setattr(
+            main.sc_api,
+            "search_tracks_many",
+            lambda *_a, **_kw: sc_api.SCSearchResult(
+                [],
+                truncated=True,
+                stop_reason="budget",
+                queries_run=(ARTIST_NAME,),
+                queries_skipped=("BOYS NOIZE",),
+            ),
+        )
+        monkeypatch.setattr(
+            main.sc_api, "get_user_reposts", lambda *_a, **_kw: sc_api.SCResultList([])
+        )
+
+        body = _request("GET", f"/api/artists/{linked}/catalogue").json()
+
+        assert body["sources"]["search"] == "skipped_budget"
+        assert body["search_queries_run"] == [ARTIST_NAME]
+        assert body["search_queries_skipped"] == ["BOYS NOIZE"]
+
+    def test_a_cached_read_claims_nothing_about_any_source(self, fetched) -> None:
+        """A cache hit fetched nothing, so it may not assert anything about any source."""
         body = _request("GET", f"/api/artists/{fetched}/catalogue").json()
 
         assert body["from_cache"] is True
-        assert body["reposts_status"] == "not_queried"
+        assert body["sources"] == {
+            "uploads": "not_queried",
+            "search": "not_queried",
+            "reposts": "not_queried",
+        }
+
+
+# ---------------------------------------------------------------------------
+# Manual role pins — the user overrules the classifier
+# ---------------------------------------------------------------------------
+
+
+class TestRolePin:
+    """``POST /api/artists/{id}/tracks/{sc_urn}/role`` — the manual half of identification."""
+
+    def test_pin_requires_a_session(self, fetched: str) -> None:
+        res = _request(
+            "POST",
+            f"/api/artists/{fetched}/tracks/{UNCERTAIN_TRACK['sc_id']}/role",
+            json={"role": "primary"},
+        )
+
+        assert res.status_code == 401
+        assert schema.get_identity_overrides(fetched) == {}
+
+    def test_a_pin_persists_and_wins_on_the_next_pass(self, fetched: str, auth_token) -> None:
+        before = _request("GET", f"/api/artists/{fetched}/catalogue").json()
+        assert [t["sc_id"] for t in before["uncertain"]] == [UNCERTAIN_TRACK["sc_id"]]
+
+        res = _request(
+            "POST",
+            f"/api/artists/{fetched}/tracks/{UNCERTAIN_TRACK['sc_id']}/role",
+            json={"role": "primary"},
+            headers=auth_token,
+        )
+        assert res.status_code == 200
+        assert res.json()["identity"]["user_override"] == "primary"
+
+        after = _request("GET", f"/api/artists/{fetched}/catalogue").json()
+        pinned = next(t for t in after["their_tracks"] if t["sc_id"] == UNCERTAIN_TRACK["sc_id"])
+        assert pinned["identity_source"] == "user_override"
+        assert pinned["classifier_role"] == "uncertain"
+        assert after["uncertain"] == []
+
+    def test_a_pin_can_be_cleared(self, fetched: str, auth_token) -> None:
+        url = f"/api/artists/{fetched}/tracks/{UNCERTAIN_TRACK['sc_id']}/role"
+        _request("POST", url, json={"role": "primary"}, headers=auth_token)
+
+        res = _request("POST", url, json={"role": None}, headers=auth_token)
+
+        assert res.status_code == 200
+        assert schema.get_identity_overrides(fetched) == {}
+        body = _request("GET", f"/api/artists/{fetched}/catalogue").json()
+        assert [t["sc_id"] for t in body["uncertain"]] == [UNCERTAIN_TRACK["sc_id"]]
+
+    def test_an_unknown_role_is_refused(self, fetched: str, auth_token) -> None:
+        res = _request(
+            "POST",
+            f"/api/artists/{fetched}/tracks/{UNCERTAIN_TRACK['sc_id']}/role",
+            json={"role": "definitely-theirs"},
+            headers=auth_token,
+        )
+
+        assert res.status_code == 400
+        assert schema.get_identity_overrides(fetched) == {}
+
+    def test_a_track_nobody_fetched_cannot_be_pinned(self, fetched: str, auth_token) -> None:
+        """No invented identity row: the catalogue has to have seen the track first."""
+        res = _request(
+            "POST",
+            f"/api/artists/{fetched}/tracks/soundcloud:tracks:999999/role",
+            json={"role": "primary"},
+            headers=auth_token,
+        )
+
+        assert res.status_code == 404
+
+    def test_pinning_a_review_row_makes_it_auto_queueable(
+        self, fetched: str, downloads, auth_token
+    ) -> None:
+        _request(
+            "POST",
+            f"/api/artists/{fetched}/tracks/{FOREIGN_REMIX['sc_id']}/role",
+            json={"role": "primary"},
+            headers=auth_token,
+        )
+
+        _request(
+            "POST",
+            f"/api/artists/{fetched}/download-missing",
+            json={"auto_queue": True},
+            headers=auth_token,
+        )
+
+        assert sorted(call["sc_track_id"] for call in downloads) == sorted([*AUTO_QUEUE_IDS, "202"])
+
+
+class TestIdentityTable:
+    """``GET /api/artists/{id}/identities`` — what the local artist→track table holds."""
+
+    def test_browsing_fills_the_table(self, fetched: str) -> None:
+        body = _request("GET", f"/api/artists/{fetched}/identities").json()
+
+        assert body["status"] == "ok"
+        assert body["total"] == len(CATALOGUE)
+        by_urn = {row["sc_urn"]: row for row in body["identities"]}
+        assert by_urn[OWN_TRACK["sc_id"]]["role"] == "primary"
+        assert by_urn[OWN_TRACK["sc_id"]]["confidence"] == "high"
+        assert by_urn[THEIR_REMIX["sc_id"]]["role"] == "remixer"
+        assert by_urn[UNCERTAIN_TRACK["sc_id"]]["role"] == "uncertain"
+        assert all(row["user_override"] is None for row in body["identities"])
+
+    def test_an_artist_nobody_opened_has_an_empty_table_not_an_error(
+        self, collection_id: str
+    ) -> None:
+        body = _request("GET", f"/api/artists/{collection_id}/identities").json()
+
+        assert body["total"] == 0
+        assert body["identities"] == []
+
+    def test_unknown_collection_is_404(self) -> None:
+        assert _request("GET", "/api/artists/a_deadbeef/identities").status_code == 404
+
+
+def test_the_auto_queue_rule_is_the_identity_module_s(fetched: str) -> None:
+    """One definition of "may the server queue this", not a second copy in the route."""
+    body = _request("GET", f"/api/artists/{fetched}/catalogue").json()
+
+    for bucket in artist_catalogue.BUCKET_KEYS:
+        for track in body[bucket]:
+            expected = track["in_library"] is False and identity.auto_queue_eligible(
+                track["role"], track["confidence"]
+            )
+            assert track["auto_queue_allowed"] is expected, track["title"]

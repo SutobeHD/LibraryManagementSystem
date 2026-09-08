@@ -3,10 +3,12 @@
 Three jobs, kept apart so each is testable on its own:
 
 ``classify``
-    Splits a fetched catalogue into the owner's three buckets on the **uploader
-    account URN**. Since 2026-09-08 that is the highest-confidence signal, not the
-    only one: the name-driven, remix-aware role layer lives in
-    ``app/artist_store/identity.py`` and runs on top of these buckets.
+    Runs the mix/set gate, then splits a fetched catalogue into the owner's **role**
+    buckets. The roles come from ``app/artist_store/identity.py``: identification is
+    by NAME (title prefix, uploader name, remixer credit), with the uploader-account
+    URN kept as the highest-confidence signal rather than the only one (owner
+    decision 2026-09-08). Most of a label-signed artist's catalogue is uploaded by
+    labels, promo channels and DJs, so a URN-only split misses most of it.
 ``diff``
     "Do I already own this?" — reuses ``app/external_track_match.py`` (``parse_version_tag``,
     ``extract_title_stem``, ``fuzzy_match_with_score``) behind a derivation gate so a
@@ -42,9 +44,35 @@ logger = logging.getLogger("ARTIST_STORE")
 
 PROVIDER_SOUNDCLOUD = "soundcloud"
 
-BUCKET_THEIRS = "definitely_theirs"
-BUCKET_REMIXES = "remixes_by_others"
+#: The rendered buckets, in the order the UI lists them. One per identity role, plus
+#: the collapsed mix/set strip. A track lands in exactly one — there is no discard.
+BUCKET_THEIR_TRACKS = "their_tracks"
+BUCKET_THEIR_REMIXES = "their_remixes"
+BUCKET_REMIXED_BY_OTHERS = "remixed_by_others"
+BUCKET_FEATURED = "featured"
+BUCKET_UNCERTAIN = "uncertain"
 BUCKET_MIXES = "mixes_and_sets"
+
+#: Which bucket an identity role renders in. ``their_remixes`` is deliberately a
+#: first-class bucket and not a footnote: an artist's own remix of someone else's
+#: track is their music, and a DJ wants it.
+BUCKET_FOR_ROLE: dict[str, str] = {
+    schema.ROLE_PRIMARY: BUCKET_THEIR_TRACKS,
+    schema.ROLE_REMIXER: BUCKET_THEIR_REMIXES,
+    schema.ROLE_REMIXED_BY_OTHER: BUCKET_REMIXED_BY_OTHERS,
+    schema.ROLE_FEATURED: BUCKET_FEATURED,
+    schema.ROLE_UNCERTAIN: BUCKET_UNCERTAIN,
+}
+
+#: Every bucket key the payload carries, in render order.
+BUCKET_KEYS: tuple[str, ...] = (
+    BUCKET_THEIR_TRACKS,
+    BUCKET_THEIR_REMIXES,
+    BUCKET_REMIXED_BY_OTHERS,
+    BUCKET_FEATURED,
+    BUCKET_UNCERTAIN,
+    BUCKET_MIXES,
+)
 
 #: Anything longer is a set, not a track. Owner rule; catches the long-form the
 #: keyword list misses (an untitled 40-minute live recording).
@@ -146,17 +174,43 @@ class CatalogueUnavailable(CatalogueError):
 
 @dataclass(frozen=True)
 class Classification:
-    """The owner's three buckets. Every fetched track lands in exactly one of them.
+    """The role buckets. Every fetched track lands in exactly one of them.
 
-    There is deliberately no fourth "discard" bucket: a track that was fetched but shown
-    nowhere is a silent drop, and the owner ruled those out for the mix filter for the
-    same reason. A foreign upload whose credit cannot be proven is still listed under
-    ``remixes_by_others`` — visible, never auto-queued — carrying ``credited=False``.
+    There is deliberately no discard bucket: a track that was fetched but shown nowhere
+    is a silent drop, and the owner ruled those out for the mix filter for the same
+    reason. A foreign upload whose credit cannot be parsed is still listed — under
+    ``uncertain``, visible and reviewable, never auto-queued.
     """
 
-    definitely_theirs: list[dict[str, Any]] = field(default_factory=list)
-    remixes_by_others: list[dict[str, Any]] = field(default_factory=list)
+    their_tracks: list[dict[str, Any]] = field(default_factory=list)
+    their_remixes: list[dict[str, Any]] = field(default_factory=list)
+    remixed_by_others: list[dict[str, Any]] = field(default_factory=list)
+    featured: list[dict[str, Any]] = field(default_factory=list)
+    uncertain: list[dict[str, Any]] = field(default_factory=list)
     mixes_and_sets: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def buckets(self) -> dict[str, list[dict[str, Any]]]:
+        """``bucket key -> rows``, in render order."""
+        return {
+            BUCKET_THEIR_TRACKS: self.their_tracks,
+            BUCKET_THEIR_REMIXES: self.their_remixes,
+            BUCKET_REMIXED_BY_OTHERS: self.remixed_by_others,
+            BUCKET_FEATURED: self.featured,
+            BUCKET_UNCERTAIN: self.uncertain,
+            BUCKET_MIXES: self.mixes_and_sets,
+        }
+
+    @property
+    def diffable(self) -> list[dict[str, Any]]:
+        """Everything the ownership diff runs over — i.e. everything but the mixes."""
+        return [
+            *self.their_tracks,
+            *self.their_remixes,
+            *self.remixed_by_others,
+            *self.featured,
+            *self.uncertain,
+        ]
 
 
 @dataclass(frozen=True)
@@ -463,63 +517,53 @@ def mix_exclusion_reason(track: Mapping[str, Any]) -> str | None:
     return None
 
 
-def names_the_artist(track: Mapping[str, Any], folded_names: Sequence[str]) -> bool:
-    """Is the artist named in the title, the tags or the uploading account's name?
+def _identity() -> Any:
+    """The identity module, imported late.
 
-    A display-name hit is evidence of a *credit*, never of ownership — an account can
-    call itself anything. It only ever sorts the remix list; identity stays on the URN.
+    ``identity`` imports this module for the coercion helpers, so a module-level import
+    here would be circular. Nothing else in the package needs the indirection.
     """
-    if not folded_names:
-        return False
-    haystack = (
-        f" {_fold(str(track.get('title') or ''))} "
-        f"{_fold(str(track.get('tag_list') or ''))} "
-        f"{_fold(str(track.get('uploader_name') or ''))} "
-    )
-    return any(name and f" {name} " in haystack for name in folded_names)
+    from app.artist_store import identity
+
+    return identity
 
 
 def classify(
     tracks: Iterable[Any],
-    artist_urn: str,
+    artist_urn: str | None,
     *,
     artist_names: Sequence[str] = (),
+    overrides: Mapping[str, str] | None = None,
 ) -> Classification:
-    """Split a fetched catalogue into the owner's three buckets.
+    """Split a fetched catalogue into the role buckets.
 
-    ``definitely_theirs`` is decided by ``uploader_urn == artist_urn`` and by nothing
-    else — never by a name match (threat T11). It is the only bucket a batch download
-    may ever auto-queue.
+    The role, the confidence and the parsed credit come from
+    :func:`app.artist_store.identity.classify_roles`: identification is by name across
+    the title's artist prefix, the uploader name and remixer credits, with
+    ``uploader_urn == artist_urn`` as the highest-confidence signal. ``artist_urn`` may
+    be ``None`` for an artist nobody has linked yet — then no track can reach ``high``
+    through the uploader, and the payload has to say the link is missing.
 
-    Everything uploaded by another account lands in ``remixes_by_others``, tagged
-    ``credited`` when ``artist_names`` (canonical name + aliases) is actually found in
-    the title, tags or uploader name. Uncredited rows are ranked lower by the UI, not
-    hidden: this is a reposts-path listing, and dropping it would be the silent loss the
-    mix filter was explicitly designed to avoid.
+    ``overrides`` maps ``sc_id`` to a role the user pinned by hand; it wins over the
+    classifier on every pass.
 
     The mix/set gate runs first, so a 40-minute set from the artist's own account is a
-    set, not a missing track.
+    set, not a missing track — whatever role its title parses to.
     """
-    own_urn = normalize_user_urn(artist_urn)
-    folded_names = [n for n in (_fold(name) for name in artist_names) if n]
     result = Classification()
+    buckets = result.buckets
 
-    for track in coerce_tracks(tracks):
-        is_own = bool(own_urn) and normalize_user_urn(track["uploader_urn"]) == own_urn
-        entry = {
-            **track,
-            "credited": True if is_own else names_the_artist(track, folded_names),
-            "excluded_reason": None,
-        }
+    for track in _identity().classify_roles(
+        tracks, artist_urn or None, tuple(artist_names), overrides=overrides
+    ):
         reason = mix_exclusion_reason(track)
         if reason is not None:
             result.mixes_and_sets.append(
-                {**entry, "bucket": BUCKET_MIXES, "excluded_reason": reason}
+                {**track, "bucket": BUCKET_MIXES, "excluded_reason": reason}
             )
-        elif is_own:
-            result.definitely_theirs.append({**entry, "bucket": BUCKET_THEIRS})
-        else:
-            result.remixes_by_others.append({**entry, "bucket": BUCKET_REMIXES})
+            continue
+        bucket = BUCKET_FOR_ROLE.get(str(track.get("role")), BUCKET_UNCERTAIN)
+        buckets[bucket].append({**track, "bucket": bucket, "excluded_reason": None})
 
     return result
 
@@ -715,7 +759,13 @@ def _annotate(tracks: list[dict[str, Any]], result: Diff) -> list[dict[str, Any]
     A track the diff never looked at (the mixes bucket is excluded from "missing" by the
     owner's rule) gets ``in_library=None`` — "not checked" — rather than ``False``, which
     would assert something about the library that was never measured.
+
+    ``auto_queue_allowed`` is the identity module's single pure rule (role ∈ {primary,
+    remixer} ∧ confidence ∈ {high, medium}) AND a proven gap. It is not recomputed from
+    the bucket here: two definitions of "may the server queue this" is how a review-only
+    track ends up in a batch.
     """
+    eligible = _identity().auto_queue_eligible
     out: list[dict[str, Any]] = []
     for track in tracks:
         verdict = result.matches.get(track["sc_id"])
@@ -727,7 +777,12 @@ def _annotate(tracks: list[dict[str, Any]], result: Diff) -> list[dict[str, Any]
                 "local_track_id": verdict.local_track_id if verdict is not None else None,
                 "match_score": verdict.score if verdict is not None else None,
                 "match_method": verdict.method if verdict is not None else None,
-                "auto_queue_allowed": track.get("bucket") == BUCKET_THEIRS and owned is False,
+                "auto_queue_allowed": owned is False
+                and eligible(
+                    str(track.get("role") or ""),
+                    str(track.get("confidence") or ""),
+                    str((track.get("credit_parse") or {}).get("matched_on") or ""),
+                ),
             }
         )
     return out
@@ -756,8 +811,9 @@ def catalogue(
     force_refresh: bool = False,
     max_tracks: int = MAX_CATALOGUE_TRACKS,
     threshold: float = MISSING_MATCH_THRESHOLD,
+    remember: bool = True,
 ) -> dict[str, Any]:
-    """An artist's catalogue: three buckets, each track flagged owned or missing.
+    """An artist's catalogue: role buckets, each track flagged owned or missing.
 
     Fetching happens **on selection** and only through the caller's ``fetch`` callable —
     no speculative pre-fetch, and no credentials in this module. A fresh cache entry is
@@ -766,25 +822,33 @@ def catalogue(
     read as "this artist has released nothing".
 
     The **fetched catalogue** is what gets cached, never the diff — the local side moves
-    every time the library does.
+    every time the library does. The classifier's verdict per track is persisted to
+    ``track_identity`` unless ``remember=False``, so the local artist→track table fills
+    as the user browses and a pinned role survives the next pass.
 
-    Returns ``definitely_theirs`` / ``remixes_by_others`` / ``mixes_and_sets`` (lists of
-    annotated tracks), ``in_library`` (the ``sc_id``s found in the library),
-    ``fetched_at``, ``from_cache`` and ``truncated``.
+    An artist with **no linked account** is still catalogued: search by name needs no
+    URN. ``linked`` then comes back ``False`` and no track can reach ``high`` confidence
+    through the uploader signal.
 
-    Raises :class:`ArtistNotLinked` when no SoundCloud account is bound.
+    Returns one list per :data:`BUCKET_KEYS`, ``in_library`` (the ``sc_id``s found in the
+    library), ``role_counts``, ``linked``, ``artist_urn``, ``fetched_at``, ``from_cache``
+    and ``truncated``.
+
+    Raises :class:`ArtistNotLinked` when there is neither a bound account nor a name to
+    search for — nothing at all to identify the artist by.
     """
     urn = artist_urn
     if not urn:
         link = schema.get_link(collection_id, PROVIDER_SOUNDCLOUD)
         urn = str(link.get("remote_id") or "") if link else ""
-    if not urn:
-        raise ArtistNotLinked(
-            f"collection {collection_id!r} has no SoundCloud account bound; "
-            "link one before fetching a catalogue"
-        )
 
     names = tuple(str(n).strip() for n in artist_names if str(n or "").strip())
+    if not urn and not names:
+        raise ArtistNotLinked(
+            f"collection {collection_id!r} has no SoundCloud account bound and no name to "
+            "search for; link an account before fetching a catalogue"
+        )
+
     payload = None if force_refresh else _cached_payload(collection_id, urn, max_age_s)
     from_cache = payload is not None
 
@@ -822,37 +886,47 @@ def catalogue(
         }
         schema.set_catalogue_cache(collection_id, payload)
 
+    identity = _identity()
     tracks = coerce_tracks(payload.get("tracks") or [])
-    split = classify(tracks, urn, artist_names=names)
-    result = diff(
-        local_tracks,
-        split.definitely_theirs + split.remixes_by_others,
-        threshold=threshold,
+    split = classify(
+        tracks,
+        urn,
         artist_names=names,
+        overrides=identity.load_overrides(collection_id),
     )
+    classified = split.diffable + split.mixes_and_sets
+    if remember and classified:
+        identity.remember_identities(collection_id, classified)
 
-    theirs = _annotate(split.definitely_theirs, result)
-    remixes = _annotate(split.remixes_by_others, result)
-    mixes = _annotate(split.mixes_and_sets, Diff())
+    result = diff(local_tracks, split.diffable, threshold=threshold, artist_names=names)
 
+    annotated = {key: _annotate(rows, result) for key, rows in split.buckets.items()}
+    # The mixes bucket is deliberately excluded from the diff, so its rows carry
+    # in_library=None ("not checked"), never False.
+    annotated[BUCKET_MIXES] = _annotate(split.mixes_and_sets, Diff())
+
+    # Roles of the rows that were actually diffed. The excluded mixes carry a role too
+    # but are not counted here — they are never part of a missing figure.
+    counts = identity.role_counts(split.diffable)
     logger.info(
-        "op=artist_catalogue collection=%s tracks=%d theirs=%d remixes=%d mixes=%d "
+        "op=artist_catalogue collection=%s tracks=%d linked=%s roles=%s mixes=%d "
         "in_library=%d cache=%s truncated=%s",
         collection_id,
         len(tracks),
-        len(theirs),
-        len(remixes),
-        len(mixes),
+        bool(urn),
+        counts,
+        len(annotated[BUCKET_MIXES]),
         len(result.in_library),
         from_cache,
         bool(payload.get("truncated")),
     )
 
     return {
-        BUCKET_THEIRS: theirs,
-        BUCKET_REMIXES: remixes,
-        BUCKET_MIXES: mixes,
+        **annotated,
         "in_library": list(result.in_library),
+        "role_counts": counts,
+        "linked": bool(urn),
+        "artist_urn": normalize_user_urn(urn),
         "fetched_at": str(payload.get("fetched_at") or ""),
         "from_cache": from_cache,
         "truncated": bool(payload.get("truncated")),
@@ -860,9 +934,14 @@ def catalogue(
 
 
 __all__ = [
+    "BUCKET_FEATURED",
+    "BUCKET_FOR_ROLE",
+    "BUCKET_KEYS",
     "BUCKET_MIXES",
-    "BUCKET_REMIXES",
-    "BUCKET_THEIRS",
+    "BUCKET_REMIXED_BY_OTHERS",
+    "BUCKET_THEIR_REMIXES",
+    "BUCKET_THEIR_TRACKS",
+    "BUCKET_UNCERTAIN",
     "CACHE_TTL_S",
     "LONG_FORM_MS",
     "MATCH_ISRC",
@@ -886,7 +965,6 @@ __all__ = [
     "is_playable",
     "match_score",
     "mix_exclusion_reason",
-    "names_the_artist",
     "normalize_isrc",
     "normalize_user_urn",
     "title_stems",

@@ -11,7 +11,7 @@ import time
 import traceback
 import urllib.parse
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -83,7 +83,9 @@ KEYRING_SC_TOKEN = "sc_token"
 
 from . import audio_tags, download_registry, folder_watcher
 from . import soundcloud_api as sc_api
+from . import soundcloud_auth as sc_auth
 from .artist_store import catalogue as artist_catalogue
+from .artist_store import identity as artist_identity
 from .artist_store import merge as artist_merge
 from .artist_store import projection as artist_projection
 from .artist_store import registry as artist_registry
@@ -711,6 +713,12 @@ class ArtistDownloadMissingReq(BaseModel):
 
     sc_ids: list[str] = []
     auto_queue: bool = False
+
+
+class ArtistTrackRoleReq(BaseModel):
+    """Pin one catalogue track's role for one artist. `null` clears the pin."""
+
+    role: str | None = None
 
 
 # NOTE: Library auto-load is handled by _on_startup() near the bottom of this file.
@@ -1478,15 +1486,49 @@ _SC_NOT_CONNECTED = (
     "SoundCloud is not connected. Sign in under SoundCloud, then reload this artist."
 )
 _SC_SESSION_EXPIRED = "The SoundCloud session expired. Sign in again to refresh the catalogue."
+_SC_REFRESH_UNAVAILABLE = (
+    "The SoundCloud session needed renewing and SoundCloud could not be reached. "
+    "The stored login is untouched — try again once the connection is back."
+)
 
 
 def _artist_sc_token() -> str | None:
-    """The stored OAuth token, or None. Never logged — not even redacted."""
+    """A token good for the next call, renewed silently. None = no login stored.
+
+    Never logged — not even redacted.
+
+    Raises:
+        AuthExpiredError: SoundCloud rejected the stored refresh token; both keyring
+            entries are already cleared and the user has to sign in again.
+        soundcloud_auth.TransientRefreshError: the token is past its expiry and the
+            token endpoint was unreachable. The stored login is kept.
+    """
     try:
-        return keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN) or None
+        return sc_auth.get_access_token()
+    except (AuthExpiredError, sc_auth.TransientRefreshError):
+        raise
     except Exception as exc:
-        logger.warning("[ARTIST] keyring lookup failed: %s", exc)
+        logger.warning("[ARTIST] token lookup failed: %s", type(exc).__name__)
         return None
+
+
+def _sc_access_token() -> str | None:
+    """`_artist_sc_token` for the plain SC routes, with the two failures as HTTP codes.
+
+    A rejected refresh is a 401 the frontend answers with a re-login; an unreachable
+    token endpoint is a 503, never a 401 — a dropped connection must not throw the
+    user at a login button.
+
+    Blocking: a renewal costs one HTTPS round-trip. `async def` handlers call it through
+    `asyncio.to_thread`; sync handlers already run in FastAPI's threadpool.
+    """
+    try:
+        return _artist_sc_token()
+    except AuthExpiredError:
+        raise HTTPException(401, detail="auth_expired") from None
+    except sc_auth.TransientRefreshError as exc:
+        logger.warning("[SC] token renewal unavailable: %s", exc)
+        raise HTTPException(503, detail="sc_refresh_unavailable") from None
 
 
 def _artist_collection_or_404(collection_id: str) -> dict[str, Any]:
@@ -1500,11 +1542,115 @@ def _artist_collection_or_404(collection_id: str) -> dict[str, Any]:
 def _artist_state(status: str, collection_id: str, detail: str, **extra: Any) -> dict[str, Any]:
     """A non-catalogue answer.
 
-    Carries NO bucket keys on purpose: a UI that destructures `definitely_theirs` gets
+    Carries NO bucket keys on purpose: a UI that destructures `their_tracks` gets
     `undefined`, never `[]`. An empty list here would read as "this artist has released
     nothing", which is a claim about data we do not have.
     """
     return {"status": status, "collection_id": collection_id, "detail": detail, **extra}
+
+
+def _artist_fetch_sources(
+    artist_urn: str,
+    auth_token: str,
+    names: Sequence[str],
+    budget: sc_api.CallBudget,
+    state: dict[str, Any],
+) -> sc_api.SCResultList:
+    """The three catalogue sources under ONE call budget, deduplicated by `sc_id`.
+
+    Order is the priority order, because the budget is spent in it:
+
+    1. **own uploads** — `/users/{urn}/tracks`, the highest-confidence source, skipped
+       when nobody has linked an account (search needs no URN).
+    2. **search by name** — the canonical name plus every alias. This is where the
+       label-, promo- and DJ-uploaded majority of a signed artist's catalogue lives, so
+       it outranks reposts for the remaining budget.
+    3. **reposts** — `/users/{urn}/reposts/tracks`, the artist's own re-shares.
+
+    Every source writes its outcome into `state` (`ok` / `failed` / `skipped_budget` /
+    `not_queried`). A source that was not queried must never be spoken about as "nothing
+    missing" — that is the whole reason the status travels with the payload.
+
+    Search and reposts are best-effort: own uploads are the half a linked artist cannot
+    do without, so a failure in either degrades to a status rather than sinking the
+    catalogue. `AuthExpiredError` is the exception — it kills the session for every
+    source, so it propagates.
+
+    The token is a parameter, never a log field: the warnings below carry the artist's
+    URN, the number of names and the exception type, and nothing else.
+    """
+    cap = artist_catalogue.MAX_CATALOGUE_TRACKS
+    merged: dict[str, dict] = {}
+    truncated = False
+    stop_reason = ""
+    calls = 0
+
+    def _absorb(rows: Any) -> None:
+        nonlocal truncated, stop_reason, calls
+        for track in rows:
+            sc_id = str(track.get("sc_id") or "")
+            if sc_id:
+                merged.setdefault(sc_id, track)
+        truncated = truncated or bool(getattr(rows, "truncated", False))
+        stop_reason = stop_reason or str(getattr(rows, "stop_reason", "") or "")
+        calls += int(getattr(rows, "calls_used", 0) or 0)
+
+    def _room() -> int:
+        return max(0, cap - len(merged))
+
+    if artist_urn:
+        # Unguarded on purpose: a 404 here means the linked account is gone and a
+        # rate-limit means the run cannot proceed — both are states the route renders,
+        # not a partial catalogue.
+        own = sc_api.get_user_tracks(artist_urn, auth_token, max_items=cap, budget=budget)
+        _absorb(own)
+        state["uploads"] = "ok"
+
+    if names and _room() and not budget.exhausted:
+        try:
+            found = sc_api.search_tracks_many(
+                list(names), auth_token, max_items_per_query=_room(), budget=budget
+            )
+            _absorb(found)
+            state["search_queries_run"] = list(found.queries_run)
+            state["search_queries_skipped"] = list(found.queries_skipped)
+            state["search"] = "skipped_budget" if found.queries_skipped else "ok"
+        except AuthExpiredError:
+            raise
+        except Exception as exc:
+            logger.warning("op=artist_catalogue search_failed names=%d err=%s", len(names), exc)
+            state["search"] = "failed"
+    elif names:
+        state["search"] = "skipped_budget"
+
+    if artist_urn:
+        if not _room() or budget.exhausted:
+            state["reposts"] = "skipped_budget"
+        else:
+            try:
+                reposts = sc_api.get_user_reposts(
+                    artist_urn, auth_token, max_items=_room(), budget=budget
+                )
+                _absorb(reposts)
+                state["reposts"] = "ok"
+            except AuthExpiredError:
+                raise
+            except sc_api.NotFoundError:
+                # The account has no reposts endpoint content — nothing to report, and
+                # the source WAS queried.
+                state["reposts"] = "ok"
+            except Exception as exc:
+                logger.warning(
+                    "op=artist_catalogue reposts_failed artist=%s err=%s", artist_urn, exc
+                )
+                state["reposts"] = "failed"
+
+    return sc_api.SCResultList(
+        list(merged.values()),
+        truncated=truncated,
+        stop_reason=stop_reason,
+        calls_used=calls,
+    )
 
 
 def _artist_catalogue_view(
@@ -1516,76 +1662,58 @@ def _artist_catalogue_view(
     """Shared body of the catalogue read — also how the download job learns what a track is.
 
     Returns either the `status="ok"` catalogue or one of the typed states
-    (`not_linked` / `link_unresolved` / `not_connected` / `artist_gone`). `allow_fetch`
-    False means cache-only: the download job must not open a second network session
-    behind the user's back.
+    (`not_linked` / `not_connected` / `artist_gone`). `allow_fetch` False means
+    cache-only: the download job must not open a second network session behind the
+    user's back.
+
+    An artist with **no linked account** is no longer a typed state: identification is
+    by name (owner decision 2026-09-08) and search needs no URN, so the catalogue is
+    built from the search source alone and the payload carries `link_missing=True`.
+    Without any name to search for — which the store cannot produce — it stays
+    `not_linked`.
     """
     _artist_collection_or_404(collection_id)
 
     link = artist_registry.get_provider_link(collection_id)
-    if link is None:
+    resolved = bool(link and link["resolved"])
+    artist_urn = str(link["remote_id"]) if link and resolved else ""
+    link_state = "linked" if resolved else ("unresolved" if link else "missing")
+    names = artist_registry.artist_names(collection_id)
+    if not names and not artist_urn:
         return _artist_state(
             "not_linked",
             collection_id,
-            "No SoundCloud account is bound to this artist. Link one to see their catalogue.",
-        )
-    if not link["resolved"]:
-        # A legacy app_data.json import: a permalink, but no URN. One click finishes it.
-        return _artist_state(
-            "link_unresolved",
-            collection_id,
-            "This artist carries an imported SoundCloud URL that was never resolved to an "
-            "account. Re-link it to finish the binding.",
-            permalink=link["permalink"],
+            "No SoundCloud account is bound to this artist and there is no name to search "
+            "for. Link an account to see their catalogue.",
         )
 
-    token = _artist_sc_token() if allow_fetch else None
+    token: str | None = None
+    if allow_fetch:
+        try:
+            token = _artist_sc_token()
+        except AuthExpiredError:
+            return _artist_state("not_connected", collection_id, _SC_SESSION_EXPIRED)
+        except sc_auth.TransientRefreshError:
+            # Not "signed out": the login is still stored, SoundCloud just could not be
+            # reached to renew it. The panel offers Retry, not a sign-in button.
+            return _artist_state("not_connected", collection_id, _SC_REFRESH_UNAVAILABLE)
     budget = sc_api.CallBudget(limit=ARTIST_CATALOGUE_CALL_BUDGET, label=collection_id)
 
     fetcher: artist_catalogue.Fetcher | None = None
-    # "not_queried" survives a cache hit: nothing was fetched, so nothing may be
-    # asserted about the reposts half either.
-    fetch_state: dict[str, str] = {"reposts": "not_queried"}
+    # "not_queried" survives a cache hit: nothing was fetched on this pass, so nothing
+    # may be asserted about any of the three sources.
+    fetch_state: dict[str, Any] = {
+        "uploads": "not_queried",
+        "search": "not_queried",
+        "reposts": "not_queried",
+        "search_queries_run": [],
+        "search_queries_skipped": [],
+    }
     if token:
         # The token is bound as a default so it lives in this call, not in a closure the
         # catalogue module could ever reach — that module must never see credentials.
-        def _fetch(artist_urn: str, _token: str = token) -> Any:
-            # /users/{urn}/tracks is own-uploads-only, so on its own the
-            # "remixes by others" bucket could never be non-empty while the UI
-            # still claimed none was missing. Reposts are the separate path that
-            # actually surfaces foreign uploads crediting this artist.
-            cap = artist_catalogue.MAX_CATALOGUE_TRACKS
-            own = sc_api.get_user_tracks(artist_urn, _token, max_items=cap, budget=budget)
-            rest = max(0, cap - len(own))
-            reposts: Any = []
-            if not rest or budget.exhausted:
-                fetch_state["reposts"] = "skipped_budget"
-            else:
-                # Best effort: own uploads are the half that matters, so a reposts
-                # failure must not take the whole catalogue down with it. The status
-                # travels to the UI, which must then say the bucket was not queried
-                # rather than claim nothing is missing from it.
-                try:
-                    reposts = sc_api.get_user_reposts(
-                        artist_urn, _token, max_items=rest, budget=budget
-                    )
-                    fetch_state["reposts"] = "ok"
-                except sc_api.NotFoundError:
-                    fetch_state["reposts"] = "ok"
-                except Exception as exc:
-                    logger.warning(
-                        "op=artist_catalogue reposts_failed artist=%s err=%s", artist_urn, exc
-                    )
-                    fetch_state["reposts"] = "failed"
-            combined = sc_api.SCResultList([*own, *reposts])
-            combined.truncated = bool(
-                getattr(own, "truncated", False) or getattr(reposts, "truncated", False)
-            )
-            combined.stop_reason = getattr(own, "stop_reason", "") or getattr(
-                reposts, "stop_reason", ""
-            )
-            combined.calls_used = getattr(own, "calls_used", 0) + getattr(reposts, "calls_used", 0)
-            return combined
+        def _fetch(urn: str, _token: str = token, _names: tuple[str, ...] = names) -> Any:
+            return _artist_fetch_sources(urn, _token, _names, budget, fetch_state)
 
         fetcher = _fetch
 
@@ -1593,8 +1721,8 @@ def _artist_catalogue_view(
         view = artist_catalogue.catalogue(
             collection_id,
             local_tracks=db.tracks if getattr(db, "loaded", False) else None,
-            artist_urn=link["remote_id"],
-            artist_names=artist_registry.artist_names(collection_id),
+            artist_urn=artist_urn,
+            artist_names=names,
             fetch=fetcher,
             force_refresh=bool(refresh),
         )
@@ -1602,7 +1730,8 @@ def _artist_catalogue_view(
         return _artist_state(
             "not_linked",
             collection_id,
-            "No SoundCloud account is bound to this artist. Link one to see their catalogue.",
+            "No SoundCloud account is bound to this artist and there is no name to search "
+            "for. Link an account to see their catalogue.",
         )
     except artist_catalogue.CatalogueUnavailable:
         # No usable cache and no way to fetch: either signed out, or a cache-only read.
@@ -1620,41 +1749,63 @@ def _artist_catalogue_view(
             "artist_gone",
             collection_id,
             "SoundCloud no longer serves this account — it may be deleted, private or renamed.",
-            permalink=link["permalink"],
+            permalink=(link or {}).get("permalink", ""),
         )
 
     logger.info(
-        "op=artist_catalogue_budget collection=%s calls=%d cap=%d from_cache=%s",
+        "op=artist_catalogue_budget collection=%s calls=%d cap=%d from_cache=%s "
+        "uploads=%s search=%s reposts=%s",
         collection_id,
         budget.used,
         budget.limit,
         view["from_cache"],
+        fetch_state["uploads"],
+        fetch_state["search"],
+        fetch_state["reposts"],
     )
     return {
         "status": "ok",
         "collection_id": collection_id,
         "link": link,
+        "link_state": link_state,
+        # Identification is by name; the account link only adds the highest-confidence
+        # signal. Say when it is absent instead of letting the UI imply a bound artist.
+        "link_missing": not resolved,
+        "search_names": list(names),
         "calls_used": budget.used,
         "call_budget": budget.limit,
-        # "ok" | "failed" | "skipped_budget" | "not_queried". Only "ok" entitles the UI
-        # to say nothing is missing from the remixes bucket; every other value means
-        # that half was never looked at, and claiming absence would be a fabrication.
-        "reposts_status": fetch_state["reposts"],
+        # Per source: "ok" | "failed" | "skipped_budget" | "not_queried". Only "ok"
+        # entitles the UI to say nothing is missing from what that source would have
+        # supplied; every other value means it was never looked at, and claiming
+        # absence would be a fabrication.
+        "sources": {
+            "uploads": fetch_state["uploads"],
+            "search": fetch_state["search"],
+            "reposts": fetch_state["reposts"],
+        },
+        "search_queries_run": list(fetch_state["search_queries_run"]),
+        "search_queries_skipped": list(fetch_state["search_queries_skipped"]),
         **view,
     }
 
 
 @app.get("/api/artists/{collection_id}/catalogue")
 def artist_catalogue_route(collection_id: str, refresh: bool = False):
-    """An artist's SoundCloud catalogue in three buckets, each track flagged owned/missing.
+    """An artist's SoundCloud catalogue in role buckets, each track flagged owned/missing.
 
-    Fetched on selection, never speculatively, and only for an artist the user bound.
-    `refresh=true` forces a live fetch past the TTL cache.
+    Fetched on selection, never speculatively. Three sources under one call budget —
+    own uploads, then search by canonical name + aliases, then reposts — with a
+    per-source status in `sources` so a bucket nobody queried is never reported as
+    empty. `refresh=true` forces a live fetch past the TTL cache.
+
+    Linking stays manual, but an **unlinked** artist still gets a by-name catalogue:
+    `link_missing` is then true and no track can reach `high` confidence through the
+    uploader account.
 
     The answer is a discriminated union on `status`: `ok` carries the buckets, while
-    `not_linked` / `link_unresolved` / `not_connected` / `artist_gone` carry a `detail`
-    and **no bucket keys at all**, so a missing binding or a missing login can never be
-    rendered as "this artist has released nothing".
+    `not_linked` / `not_connected` / `artist_gone` carry a `detail` and **no bucket keys
+    at all**, so a missing login can never be rendered as "this artist has released
+    nothing".
     """
     try:
         return _artist_catalogue_view(collection_id, refresh=refresh, allow_fetch=True)
@@ -1676,7 +1827,7 @@ def artist_link_soundcloud(collection_id: str, r: ArtistLinkReq):
     if not value:
         raise HTTPException(400, "url_or_permalink is required")
 
-    token = _artist_sc_token()
+    token = _sc_access_token()
     if not token:
         raise HTTPException(400, _SC_NOT_CONNECTED)
 
@@ -1719,6 +1870,68 @@ def artist_unlink_soundcloud(collection_id: str):
     return {"status": "ok", "collection_id": collection_id, "removed": removed}
 
 
+@app.post(
+    "/api/artists/{collection_id}/tracks/{sc_urn}/role",
+    dependencies=[Depends(require_session)],
+)
+def artist_pin_track_role(collection_id: str, sc_urn: str, r: ArtistTrackRoleReq):
+    """Pin one catalogue track's role for this artist by hand. `role: null` unpins it.
+
+    The classifier reads a name; the user knows. A pin is stored in `track_identity`
+    and **wins over the classifier on every later pass**, so the row stays where the
+    user put it. The classifier's own reading is kept beside it and stays visible.
+
+    404 when the track has no identity row yet — the artist's catalogue has to have
+    been read once before a row can be pinned, and inventing one would create a
+    reference to a track nobody fetched.
+    """
+    _artist_collection_or_404(collection_id)
+    role = r.role
+    if role is not None:
+        role = str(role).strip()
+        if role not in artist_identity.ROLES:
+            raise HTTPException(
+                400,
+                f"unknown role {role!r} — expected one of {', '.join(sorted(artist_identity.ROLES))}",
+            )
+    if not artist_identity.set_override(collection_id, sc_urn, role):
+        raise HTTPException(
+            404,
+            f"{sc_urn} is not in this artist's identity table — open the artist's catalogue "
+            "first, then pin the row.",
+        )
+    logger.info(
+        "op=artist_identity_pin collection=%s track=%s role=%s",
+        collection_id,
+        sc_urn,
+        role or "cleared",
+    )
+    return {
+        "status": "ok",
+        "collection_id": collection_id,
+        "sc_urn": sc_urn,
+        "identity": artist_schema.get_track_identity(collection_id, sc_urn),
+    }
+
+
+@app.get("/api/artists/{collection_id}/identities")
+def artist_track_identities(collection_id: str):
+    """Everything this artist's `track_identity` table holds — what has been seen and pinned.
+
+    Read-only view of the local artist→track table that fills as the user browses. It
+    is not a catalogue: it carries no ownership verdict and no SoundCloud call, only the
+    classifier's role/confidence per track plus any `user_override`.
+    """
+    _artist_collection_or_404(collection_id)
+    rows = artist_schema.list_track_identities(collection_id)
+    return {
+        "status": "ok",
+        "collection_id": collection_id,
+        "total": len(rows),
+        "identities": rows,
+    }
+
+
 def _sc_numeric_track_id(sc_id: str) -> str | None:
     """`soundcloud:tracks:123` -> `123`. The downloader speaks numeric ids."""
     tail = str(sc_id or "").strip().rsplit(":", 1)[-1]
@@ -1734,19 +1947,17 @@ def _artist_download_selection(
 
     Two mutually exclusive paths, because they carry different consent:
 
-    * **auto-queue** — the server picks, so it may only ever pick `definitely_theirs`
-      tracks the diff proved missing (`auto_queue_allowed`). A remix uploaded by someone
-      else is never queued on the user's behalf (threat T11).
+    * **auto-queue** — the server picks, so it may only ever pick tracks the identity
+      layer marked `auto_queue_allowed` (role ∈ {primary, remixer} ∧ confidence ∈
+      {high, medium}) AND the diff proved missing. A remix by someone else, a `featured`
+      credit or anything in the review bucket is never queued on the user's behalf
+      (threat T11).
     * **explicit ids** — the user pointed at rows, so any bucket is fair game, including
-      a remix. Unknown ids are refused rather than skipped, so the count the UI showed is
-      the count that runs.
+      a review-bucket track. Unknown ids are refused rather than skipped, so the count
+      the UI showed is the count that runs.
     """
     by_id: dict[str, dict[str, Any]] = {}
-    for bucket in (
-        artist_catalogue.BUCKET_THEIRS,
-        artist_catalogue.BUCKET_REMIXES,
-        artist_catalogue.BUCKET_MIXES,
-    ):
+    for bucket in artist_catalogue.BUCKET_KEYS:
         for track in view.get(bucket) or []:
             by_id[str(track.get("sc_id"))] = track
 
@@ -1756,11 +1967,7 @@ def _artist_download_selection(
                 400,
                 "auto_queue picks the tracks itself — send either sc_ids or auto_queue, not both.",
             )
-        return [
-            track
-            for track in (view.get(artist_catalogue.BUCKET_THEIRS) or [])
-            if track.get("auto_queue_allowed")
-        ]
+        return [track for track in by_id.values() if track.get("auto_queue_allowed")]
 
     wanted: list[str] = []
     for raw in sc_ids:
@@ -1930,8 +2137,10 @@ async def artist_download_missing(
     of its own, so opening the artist page stays the one place a fetch happens. Returns a
     job id; poll `/api/artists/download/status?job_id=`. One batch at a time (409).
 
-    `auto_queue` picks only `definitely_theirs` tracks the diff proved missing; a remix
-    uploaded by someone else has to be named in `sc_ids`.
+    `auto_queue` picks only tracks the identity layer marked `auto_queue_allowed` — role
+    `primary` or `remixer` at `high`/`medium` confidence — that the diff proved missing.
+    Anything in a review bucket (`remixed_by_others`, `featured`, `uncertain`) or in the
+    excluded mixes has to be named in `sc_ids`.
 
     The job record carries `cancel_requested` for shape parity with the phrase batch and
     the worker honours it, but **no route sets it yet** — there is deliberately no cancel
@@ -1942,7 +2151,7 @@ async def artist_download_missing(
         # Typed state, not an empty success — the UI renders the reason, not a blank list.
         raise HTTPException(409, view["detail"])
 
-    token = _artist_sc_token()
+    token = await asyncio.to_thread(_sc_access_token)
     if not token:
         raise HTTPException(400, _SC_NOT_CONNECTED)
 
@@ -4902,7 +5111,7 @@ async def soundcloud_download(data: ScDownloadRequest, request: Request):
 
     Returns: { task_id: str }
     """
-    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
+    auth_token = await asyncio.to_thread(_sc_access_token)
 
     # Write-permission guard
     sc_dir = MUSIC_DIR / "SoundCloud"
@@ -4979,7 +5188,7 @@ class ScDownloadPlaylistReq(BaseModel):
 @app.post("/api/soundcloud/download-playlist", dependencies=[Depends(require_session)])
 async def soundcloud_download_playlist(r: ScDownloadPlaylistReq):
     """Enqueue download for every track in a SoundCloud playlist."""
-    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
+    auth_token = await asyncio.to_thread(_sc_access_token)
     if not auth_token:
         raise HTTPException(400, "SoundCloud auth token not configured")
 
@@ -5151,21 +5360,33 @@ async def delete_history_entry(sc_track_id: str):
 
 
 class ScAuthTokenReq(BaseModel):
-    """SoundCloud OAuth access-token body — single `token` field, validated
-    by `set_soundcloud_auth_token` for length (10–2048 chars) and ASCII."""
+    """SoundCloud OAuth handoff from the Tauri login flow.
+
+    `token` empty = logout (every stored credential is dropped). `refresh_token` and
+    `expires_in` are optional so an older frontend's single-field body still parses —
+    without a refresh token the session simply cannot renew itself, and `auth-status`
+    reports that as `refreshable: false` rather than pretending otherwise.
+    """
 
     token: str
+    refresh_token: str | None = _Field(default=None, max_length=2048)
+    expires_in: int | None = _Field(default=None, ge=60, le=86400)
 
 
 @app.post("/api/soundcloud/auth-token", dependencies=[Depends(require_session)])
 @rate_limit(steady=5.0, burst=10, key_mode="both")
 async def set_soundcloud_auth_token(request: Request, r: ScAuthTokenReq):
     """
-    EC7/EC13: Persist the SC OAuth token in the OS keyring (not in cookies or JSON).
-    Frontend detects auth state via 401 responses on subsequent requests, not via
-    cookies — bearer-in-header is the only authenticated transport.
+    EC7/EC13: Persist the SC OAuth credentials in the OS keyring (not in cookies or
+    JSON). Frontend detects auth state via 401 responses on subsequent requests, not
+    via cookies — bearer-in-header is the only authenticated transport.
+
+    The response never echoes any token material — not the access token, not the
+    refresh token. `persistent: false` means the keyring refused the blob, so the
+    session lives in the legacy key alone and cannot renew itself silently.
     """
     token = r.token.strip()
+    refresh_token = (r.refresh_token or "").strip()
 
     # EC13: Token format validation.
     # SoundCloud OAuth 2.1 issues JWT access tokens that are typically 400–900+ chars.
@@ -5184,38 +5405,100 @@ async def set_soundcloud_auth_token(request: Request, r: ScAuthTokenReq):
             logger.warning(f"[SC] /api/soundcloud/auth-token rejected: {reason}")
             raise HTTPException(status_code=400, detail=f"Invalid token format: {reason}")
 
-    if token:
-        keyring.set_password(KEYRING_SERVICE, KEYRING_SC_TOKEN, token)
-        logger.info("[SC] Auth token stored in OS keyring.")
-    else:
-        # Empty token → clear credentials (logout)
-        with contextlib.suppress(Exception):
-            keyring.delete_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
-        logger.info("[SC] Auth token cleared from keyring (logout).")
+    if refresh_token and not refresh_token.isascii():
+        logger.warning("[SC] /api/soundcloud/auth-token rejected: refresh_token not ASCII")
+        raise HTTPException(
+            status_code=400, detail="Invalid refresh_token format: contains non-ASCII characters"
+        )
 
-    return {"status": "success"}
+    if token:
+        result = sc_auth.store_tokens(token, refresh_token or None, r.expires_in)
+        logger.info(
+            "op=sc_auth_token outcome=stored persistent=%s refreshable=%s",
+            result.persistent,
+            result.tokens.refresh_token is not None,
+        )
+        return {
+            "status": "success",
+            "persistent": result.persistent,
+            "refreshable": result.tokens.refresh_token is not None,
+        }
+
+    # Empty token → clear credentials (logout)
+    sc_auth.clear_tokens()
+    logger.info("op=sc_auth_token outcome=cleared")
+    return {"status": "success", "persistent": False, "refreshable": False}
+
+
+@app.post("/api/soundcloud/refresh", dependencies=[Depends(require_session)])
+@rate_limit(steady=5.0, burst=10, key_mode="both")
+async def refresh_soundcloud_token(request: Request):
+    """Renew the stored SoundCloud access token from the stored refresh token.
+
+    Backend-owned and single-flight (`soundcloud_auth.refresh`) because SoundCloud
+    rotates the refresh token on every use — two parallel refreshes would burn each
+    other's token. The stored access token is passed as `stale_token`, so a caller
+    that lost the race gets the winner's token back instead of a second POST.
+
+    No token material is ever returned. Outcomes:
+      - 200 `{"status": "refreshed"}` — a valid access token is stored.
+      - 401 `{"status": "expired"}` — SoundCloud rejected the refresh token, or none
+        was stored. The keyring is already cleared; the user must sign in again.
+      - 503 `{"status": "unavailable"}` — SoundCloud was unreachable. The stored
+        login is untouched; retrying later is the right move.
+    """
+
+    def _renew() -> None:
+        stored = sc_auth.load_tokens()
+        sc_auth.refresh(stale_token=stored.access_token if stored else None)
+
+    try:
+        await asyncio.to_thread(_renew)
+    except AuthExpiredError:
+        return JSONResponse(
+            status_code=401, content={"status": "expired", "detail": "auth_expired"}
+        )
+    except sc_auth.TransientRefreshError as exc:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unavailable", "detail": safe_error_message(exc)},
+        )
+    return {"status": "refreshed"}
 
 
 @app.get("/api/soundcloud/auth-status")
 async def get_soundcloud_auth_status() -> dict[str, object]:
-    """Local-only probe: does the OS keyring hold a SC OAuth token?
+    """Local-only probe: what does the OS keyring hold for SoundCloud?
 
-    Boolean only — no token material, no api.soundcloud.com round-trip. The
-    frontend uses this on mount to decide "Connect" vs "Authenticated" UI
-    without paying the 100-500 ms /me round-trip or tripping the global
-    sc:auth-expired interceptor every render.
+    No token material, no api.soundcloud.com round-trip. The frontend uses this on
+    mount to decide "Connect" vs "Signed in" without paying the 100-500 ms /me
+    round-trip or tripping the global sc:auth-expired interceptor every render.
+
+    `refreshable` says whether a refresh token is stored — only then may the UI claim
+    the session renews itself. `expires_in_s` is the remaining life of the stored
+    access token, floored at 0; `null` means unknown (a legacy-key-only session, which
+    carries no expiry), never "fresh".
 
     Unauthenticated to match the other read-only SC GET endpoints.
     """
     try:
-        authenticated = bool(keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN))
+        state = sc_auth.token_status()
     except Exception as exc:
         # Keyring backend unavailable (locked session, missing libsecret) —
         # degrade to "not authenticated" so the UI shows the login button
         # instead of a 500 error.
-        logger.warning("[SC] auth-status keyring lookup failed: %s", exc)
-        authenticated = False
-    return {"status": "ok", "data": {"authenticated": authenticated}}
+        logger.warning("[SC] auth-status keyring lookup failed: %s", type(exc).__name__)
+        state = {"authenticated": False, "refreshable": False, "source": None}
+    remaining = state.get("remaining_ttl_s")
+    return {
+        "status": "ok",
+        "data": {
+            "authenticated": bool(state["authenticated"]),
+            "refreshable": bool(state["refreshable"]),
+            "source": state["source"],
+            "expires_in_s": max(0, int(remaining)) if remaining is not None else None,
+        },
+    }
 
 
 # ─── SoundCloud Playlist Sync API ─────────────────────────────────────────────
@@ -5263,7 +5546,7 @@ async def get_soundcloud_playlists(request: Request):
     or invalid token) now raise AuthExpiredError instead of leaking the raw
     "404 Client Error: Not Found" string to the frontend toast.
     """
-    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
+    auth_token = await asyncio.to_thread(_sc_access_token)
 
     if not auth_token:
         logger.warning("[SC] /api/soundcloud/playlists: no auth token in keyring — returning 401.")
@@ -5324,7 +5607,7 @@ async def get_soundcloud_me(request: Request):
     Returns the SC account info (username, avatar) independently of playlists.
     Useful for the account card/header component without re-fetching all playlists.
     """
-    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
+    auth_token = await asyncio.to_thread(_sc_access_token)
     if not auth_token:
         raise HTTPException(401, detail="auth_expired")
 
@@ -5357,7 +5640,7 @@ async def sync_soundcloud_playlists(r: ScSyncReq, request: Request):
     if _sync_lock.locked():
         raise HTTPException(409, "A sync operation is already in progress. Please wait.")
 
-    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
+    auth_token = await asyncio.to_thread(_sc_access_token)
     if not auth_token:
         raise HTTPException(400, "SoundCloud auth token not configured")
 
@@ -5405,7 +5688,7 @@ async def preview_soundcloud_matches(r: ScPreviewReq, request: Request):
     Does NOT write anything to the database.
     Used by the Inspector Panel in the frontend.
     """
-    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
+    auth_token = await asyncio.to_thread(_sc_access_token)
     if not auth_token:
         raise HTTPException(401, detail="auth_expired")
     if not db.active_db:
@@ -5450,7 +5733,7 @@ async def sync_all_soundcloud(request: Request):
     if _sync_lock.locked():
         raise HTTPException(409, "A sync operation is already in progress. Please wait.")
 
-    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
+    auth_token = await asyncio.to_thread(_sc_access_token)
     if not auth_token:
         raise HTTPException(400, "SoundCloud auth token not configured")
 
@@ -5496,7 +5779,7 @@ async def merge_soundcloud_playlists(r: ScMergeReq, request: Request):
     if _sync_lock.locked():
         raise HTTPException(409, "A sync operation is already in progress. Please wait.")
 
-    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
+    auth_token = await asyncio.to_thread(_sc_access_token)
     if not auth_token:
         raise HTTPException(400, "SoundCloud auth token not configured")
 

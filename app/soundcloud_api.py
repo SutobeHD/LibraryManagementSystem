@@ -507,13 +507,19 @@ def _sc_get(
         if resp.status_code == 404:
             if auth_404:
                 logger.error(
-                    f"[SC] 404 Not Found from SoundCloud for {url}. Body: {resp.text[:200]}"
+                    f"[SC] 404 Not Found from SoundCloud for {_log_url(url)}. "
+                    f"Body: {resp.text[:200]}"
                 )
                 raise AuthExpiredError(
-                    f"SoundCloud returned 404 for {url}. Token or client_id may be invalid."
+                    f"SoundCloud returned 404 for {_log_url(url)}. "
+                    "Token or client_id may be invalid."
                 )
-            logger.info("[SC] 404 — resource gone (deleted, private or renamed): %s", url)
-            raise NotFoundError(f"SoundCloud resource not found: {url}")
+            # _log_url, not the raw url: during pagination this is a SERVER-SUPPLIED
+            # next_href whose query carries a client_id and cursor. The OAuth token is
+            # header-borne so nothing secret escapes either way, but an untrusted
+            # remote URL has no business landing in a log line verbatim.
+            logger.info("[SC] 404 — resource gone (deleted, private or renamed): %s", _log_url(url))
+            raise NotFoundError(f"SoundCloud resource not found: {_log_url(url)}")
 
         if resp.status_code == 429:
             retry_after = _rate_limit_wait(resp, delay * 2)

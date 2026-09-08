@@ -147,7 +147,8 @@ export async function getScAuthMode() {
 
 /**
  * Run the native SoundCloud OAuth flow on the user's configured surface.
- * Returns the access token. Desktop-only — throws in browser-dev mode.
+ * Resolves to `{access_token, refresh_token, expires_in}`. Desktop-only — throws
+ * in browser-dev mode.
  */
 export async function scLogin() {
     if (!isTauri) throw new Error('SoundCloud login is only available in the desktop app.');
@@ -155,6 +156,23 @@ export async function scLogin() {
     // Dynamically imported so browser-preview mode never touches Tauri IPC.
     const { invoke } = await import('@tauri-apps/api/core');
     return invoke('login_to_soundcloud', { mode });
+}
+
+/**
+ * The `POST /api/soundcloud/auth-token` body for one `scLogin()` result.
+ *
+ * The refresh token is the half that makes the login survive a restart, so all
+ * three fields travel. A string argument is a Tauri binary from before the struct
+ * landed (`tauri dev` keeps the old binary across a Vite reload) — treated as an
+ * access token with no refresh half instead of posting `undefined`.
+ */
+export function scAuthTokenBody(tokens) {
+    if (typeof tokens === 'string') return { token: tokens };
+    return {
+        token: tokens?.access_token ?? '',
+        refresh_token: tokens?.refresh_token ?? null,
+        expires_in: tokens?.expires_in ?? null,
+    };
 }
 
 // ─── EC15: Token-refresh state ────────────────────────────────────────────────
@@ -176,8 +194,24 @@ function _drainRefreshQueue(newToken, error) {
     _refreshSubscribers = [];
 }
 
-/** Attempt to silently re-authenticate using a stored SC token.
- *  Returns the new token string, or throws on failure. */
+// The backend renews the SoundCloud session from the stored refresh token. It is a
+// plain HTTP call, so it also works in browser-dev, where there is no Tauri IPC.
+const SC_REFRESH_URL = '/api/soundcloud/refresh';
+
+/** Ask the backend to renew the SC session. No token is sent or returned. */
+async function _silentScRefresh() {
+    // _skipAuthRetry: this request must never re-enter the 401 handler below,
+    // or a rejected refresh would call itself.
+    await api.post(SC_REFRESH_URL, null, { _skipAuthRetry: true });
+}
+
+/** Re-authenticate the SoundCloud session.
+ *
+ *  Silent backend refresh first; only when that answers 401 (the stored refresh
+ *  token is gone or rejected) does the interactive Tauri login run. Resolves with
+ *  no value — the token lives in the backend keyring and never reaches the
+ *  renderer. Throws the axios error on a transient failure so the caller can tell
+ *  "could not renew right now" from "signed out". */
 async function _refreshScToken() {
     // EC15: Only one refresh in flight at a time.
     if (_isRefreshing) {
@@ -192,24 +226,34 @@ async function _refreshScToken() {
 
     _isRefreshing = true;
     try {
-        // The backend /api/soundcloud/auth-token endpoint validates and stores
-        // the new token.  In Tauri the token comes from the native keystore;
-        // in browser mode we can't silently refresh — throw immediately.
-        if (!isTauri) throw new Error('Silent token refresh unavailable in browser mode.');
-
-        const newToken = await scLogin();
-
-        await api.post('/api/soundcloud/auth-token', { token: newToken });
-        _refreshFailCount = 0;
-        _isRefreshing = false;
-        _drainRefreshQueue(newToken, null);
-        return newToken;
+        await _silentScRefresh();
     } catch (err) {
-        _refreshFailCount++;
-        _isRefreshing = false;
-        _drainRefreshQueue(null, err);
-        throw err;
+        if (err?.response?.status !== 401) {
+            // 503 / network: the stored login is intact, this is not an auth failure —
+            // deliberately not counted against the refresh-loop guard.
+            _isRefreshing = false;
+            _drainRefreshQueue(null, err);
+            throw err;
+        }
+        try {
+            // Refresh token rejected or absent → the user has to consent again.
+            if (!isTauri) {
+                throw new Error('SoundCloud sign-in is only available in the desktop app.');
+            }
+            const tokens = await scLogin();
+            await api.post('/api/soundcloud/auth-token', scAuthTokenBody(tokens), {
+                _skipAuthRetry: true,
+            });
+        } catch (loginErr) {
+            _refreshFailCount++;
+            _isRefreshing = false;
+            _drainRefreshQueue(null, loginErr);
+            throw loginErr;
+        }
     }
+    _refreshFailCount = 0;
+    _isRefreshing = false;
+    _drainRefreshQueue(null, null);
 }
 
 // ─── REQUEST INTERCEPTOR ──────────────────────────────────────────────────────
@@ -256,7 +300,9 @@ api.interceptors.response.use(
         const { status } = error.response;
 
         // EC7/EC15: 401 Unauthorized → attempt silent token refresh once.
-        if (status === 401 && !originalRequest._retried) {
+        // _skipAuthRetry marks the refresh/login calls themselves: retrying those
+        // here would recurse.
+        if (status === 401 && !originalRequest._retried && !originalRequest._skipAuthRetry) {
             // EC15: Bail out if we've already failed MAX_REFRESH_FAILS times —
             // this breaks the infinite refresh loop.
             if (_refreshFailCount >= MAX_REFRESH_FAILS) {
@@ -274,6 +320,12 @@ api.interceptors.response.use(
                 // Re-send the original request now that the token is fresh.
                 return api(originalRequest);
             } catch (refreshErr) {
+                if (refreshErr?.response?.status === 503) {
+                    // Renewal could not run (SoundCloud unreachable). The stored login
+                    // is untouched, so claiming "signed out" here would be a lie.
+                    console.warn('[API] SoundCloud session renewal unavailable — try again.');
+                    return Promise.reject(error);
+                }
                 // Refresh failed → propagate the original 401
                 window.dispatchEvent(new CustomEvent('sc:auth-expired'));
                 return Promise.reject(error);

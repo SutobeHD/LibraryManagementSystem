@@ -9,14 +9,17 @@
  *   GET    /api/artists/{id}/catalogue?refresh=  → discriminated union on `status`
  *   POST   /api/artists/{id}/link                → { status, collection_id, link, artist }
  *   DELETE /api/artists/{id}/link                → { status, collection_id, removed }
+ *   POST   /api/artists/{id}/tracks/{urn}/role   → { status, sc_urn, identity }
+ *   GET    /api/artists/{id}/identities          → { status, total, identities }
  *   POST   /api/artists/{id}/download-missing    → { status, data: { job_id, total, … } }
  *   GET    /api/artists/download/status?job_id=  → { status, data: job }
  *
  * The catalogue read is a **union, not an error channel**: `status: "ok"` carries the
- * three buckets, while `not_linked` / `link_unresolved` / `not_connected` /
- * `artist_gone` carry a `detail` and no bucket keys at all. Callers must branch on
- * `status` and render `detail`; treating a typed state as an empty catalogue is the
- * exact "looks live but is not" failure this feature keeps hitting.
+ * role buckets, while `not_linked` / `not_connected` / `artist_gone` carry a `detail`
+ * and no bucket keys at all. Callers must branch on `status` and render `detail`;
+ * treating a typed state as an empty catalogue is the exact "looks live but is not"
+ * failure this feature keeps hitting. An `ok` payload with `link_missing: true` is a
+ * real by-name catalogue for an artist nobody bound — not an error state.
  */
 
 import api from '../../api/api';
@@ -100,9 +103,10 @@ export const unlinkSoundCloudProfile = async (collectionId) => {
 /**
  * Queue a batch download.
  *
- * `autoQueue` lets the server pick, and it may then only pick `definitely_theirs`
- * tracks the diff proved missing. Anything else — a remix, an excluded set — has to
- * be named in `scIds`, so a foreign uploader's track can never be queued implicitly.
+ * `autoQueue` lets the server pick, and it may then only pick tracks the identity
+ * layer marked `auto_queue_allowed` (their tracks and their own remixes, at high or
+ * medium confidence) that the diff proved missing. A review-bucket row or an excluded
+ * set has to be named in `scIds`, so nothing uncertain is ever queued implicitly.
  */
 export const startMissingDownload = async (
     collectionId,
@@ -155,4 +159,26 @@ export const pollDownloadJob = async (jobId, { onProgress, isCancelled } = {}) =
             return job;
         }
     }
+};
+
+/**
+ * Pin one catalogue track's role for this artist. `role: null` clears the pin.
+ *
+ * The classifier reads a name; the user knows. The pin is stored in the sidecar's
+ * `track_identity` table and wins over the classifier on every later read, so the row
+ * stays where the user put it. 404 means the track has no identity row yet — the
+ * artist's catalogue has to have been read once first.
+ */
+export const pinTrackRole = async (collectionId, scUrn, role) => {
+    const res = await api.post(
+        `/api/artists/${encodeURIComponent(collectionId)}/tracks/${encodeURIComponent(scUrn)}/role`,
+        { role: role ?? null }
+    );
+    return res.data;
+};
+
+/** The local artist→track identity table. Read-only, no SoundCloud call. */
+export const fetchTrackIdentities = async (collectionId) => {
+    const res = await api.get(`/api/artists/${encodeURIComponent(collectionId)}/identities`);
+    return res.data;
 };

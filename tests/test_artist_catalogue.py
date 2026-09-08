@@ -1,12 +1,16 @@
 """Artist-Hub catalogue tests (T-14 — app/artist_store/catalogue.py).
 
 Covers the parts the owner called out and the parts that have burned this feature
-before: the three buckets split on the uploader ACCOUNT and never on a name, a foreign
-uploader's "(X Remix)" can never reach ``definitely_theirs``, "Original Mix" /
-"Extended Mix" survive the mix filter while a 22-minute Boiler Room does not, a
-preview/snipped track never enters the missing list, the missing-diff threshold is
-pinned in both directions by a seeded corpus, and a second call is served from the
-sidecar cache without touching the fetcher.
+before: the role buckets (owner decision 2026-09-08 — identification by NAME, with the
+uploader URN as the highest-confidence signal rather than the only one), an artist's own
+remix landing in ``their_remixes`` while someone else's remix of their track does not,
+"Original Mix" / "Extended Mix" surviving the mix filter while a 22-minute Boiler Room
+does not, a preview/snipped track never entering the missing list, the missing-diff
+threshold pinned in both directions by a seeded corpus, and a second call served from
+the sidecar cache without touching the fetcher.
+
+The role rules themselves live in ``tests/test_artist_identity.py``; what is pinned here
+is that ``catalogue`` renders them into buckets and never invents ownership.
 
 No network: the fetcher is a local callable that counts its calls. No ``master.db``:
 nothing here imports the library. The sidecar is a throwaway file in ``tmp_path``,
@@ -91,109 +95,152 @@ def titles(bucket: list[dict]) -> list[str]:
 # --------------------------------------------------------------------------- classify
 
 
-def test_three_buckets_split() -> None:
+def test_role_buckets_split() -> None:
     result = cat.classify(
         [
             sc_track("1", "Overdrive"),
             sc_track(
                 "2", "Mayday (Boys Noize Remix)", uploader_urn=OTHER_URN, uploader_name="Some Label"
             ),
-            sc_track("3", "Boiler Room Berlin", duration_ms=22 * 60 * 1000),
+            sc_track(
+                "3",
+                "Boys Noize - Overdrive (Erol Alkan Remix)",
+                uploader_urn=OTHER_URN,
+                uploader_name="Some Label",
+            ),
+            sc_track("4", "Yeah! (feat. Boys Noize)", uploader_urn=OTHER_URN, uploader_name="Snax"),
+            sc_track("5", "Some Other Track", uploader_urn=OTHER_URN, uploader_name="Nobody"),
+            sc_track("6", "Boiler Room Berlin", duration_ms=22 * 60 * 1000),
         ],
         ARTIST_URN,
         artist_names=[ARTIST],
     )
 
-    assert titles(result.definitely_theirs) == ["Overdrive"]
-    assert titles(result.remixes_by_others) == ["Mayday (Boys Noize Remix)"]
+    assert titles(result.their_tracks) == ["Overdrive"]
+    assert titles(result.their_remixes) == ["Mayday (Boys Noize Remix)"]
+    assert titles(result.remixed_by_others) == ["Boys Noize - Overdrive (Erol Alkan Remix)"]
+    assert titles(result.featured) == ["Yeah! (feat. Boys Noize)"]
+    assert titles(result.uncertain) == ["Some Other Track"]
     assert titles(result.mixes_and_sets) == ["Boiler Room Berlin"]
+    assert [t["bucket"] for t in result.their_remixes] == [cat.BUCKET_THEIR_REMIXES]
 
 
-def test_definitely_theirs_is_uploader_id_only() -> None:
-    """Threat T11: a foreign account naming the artist must never be 'theirs'."""
+def test_a_label_upload_is_found_by_name_not_only_by_account() -> None:
+    """Owner decision 2026-09-08: most of a signed artist's catalogue is uploaded by others.
+
+    A label re-upload carrying the artist's name is theirs at ``medium`` — evidence, not
+    proof — and the uploader-URN hit stays the only way to ``high``.
+    """
     result = cat.classify(
         [
-            # Same display name, different account — an impostor or a label re-upload.
             sc_track("1", "Overdrive", uploader_urn=OTHER_URN, uploader_name=ARTIST),
+            sc_track("2", "Kill the Beat"),
+        ],
+        ARTIST_URN,
+        artist_names=[ARTIST],
+    )
+
+    by_name, by_account = result.their_tracks
+    assert by_name["confidence"] == "medium"
+    assert by_name["credit_parse"]["matched_on"] == "uploader_name"
+    assert by_account["confidence"] == "high"
+    assert by_account["credit_parse"]["matched_on"] == "uploader_urn"
+
+
+def test_their_own_remix_is_their_music() -> None:
+    """A remix BY the artist is theirs; a remix OF their track by someone else is not."""
+    result = cat.classify(
+        [
             sc_track(
-                "2",
+                "1",
                 "Kontact Me (Boys Noize Remix)",
                 uploader_urn=OTHER_URN,
                 uploader_name="Helena Hauff",
             ),
-            sc_track("3", "Yeah! (feat. Boys Noize)", uploader_urn=OTHER_URN, uploader_name="Snax"),
+            sc_track(
+                "2",
+                "Boys Noize - Overdrive (Helena Hauff Remix)",
+                uploader_urn=OTHER_URN,
+                uploader_name="Helena Hauff",
+            ),
         ],
         ARTIST_URN,
         artist_names=[ARTIST],
     )
 
-    assert result.definitely_theirs == []
-    assert len(result.remixes_by_others) == 3
-    assert all(t["bucket"] == cat.BUCKET_REMIXES for t in result.remixes_by_others)
+    assert titles(result.their_remixes) == ["Kontact Me (Boys Noize Remix)"]
+    assert titles(result.remixed_by_others) == ["Boys Noize - Overdrive (Helena Hauff Remix)"]
 
 
-def test_remix_by_other_never_auto_queued() -> None:
-    payload = cat.classify(
+def test_review_buckets_are_never_auto_queued() -> None:
+    """Only ``primary``/``remixer`` at high/medium may be queued for the user (threat T11)."""
+    result = cat.classify(
         [
             sc_track(
                 "1",
-                "Overdrive (Helena Hauff Remix)",
+                "Boys Noize - Overdrive (Helena Hauff Remix)",
                 uploader_urn=OTHER_URN,
                 uploader_name="Helena Hauff",
-            )
+            ),
+            sc_track("2", "Yeah! (feat. Boys Noize)", uploader_urn=OTHER_URN, uploader_name="Snax"),
+            sc_track("3", "Some Other Track", uploader_urn=OTHER_URN, uploader_name="Nobody"),
         ],
         ARTIST_URN,
         artist_names=[ARTIST],
     )
-    annotated = cat._annotate(payload.remixes_by_others, cat.Diff())
+    rows = result.remixed_by_others + result.featured + result.uncertain
+    annotated = cat._annotate(rows, cat.Diff())
 
-    assert annotated[0]["auto_queue_allowed"] is False
+    assert len(annotated) == 3
+    assert all(t["auto_queue_allowed"] is False for t in annotated)
 
 
-def test_missing_urn_can_never_produce_definitely_theirs() -> None:
-    """No bound account means no proof of ownership — including for a blank uploader_urn."""
-    result = cat.classify([sc_track("1", "Overdrive", uploader_urn="")], "")
+def test_a_user_override_wins_over_the_classifier() -> None:
+    """The pin moves the row and says so; the classifier's own reading stays visible."""
+    track = sc_track("1", "Some Other Track", uploader_urn=OTHER_URN, uploader_name="Nobody")
+    result = cat.classify(
+        [track],
+        ARTIST_URN,
+        artist_names=[ARTIST],
+        overrides={track["sc_id"]: "primary"},
+    )
 
-    assert result.definitely_theirs == []
-    assert titles(result.remixes_by_others) == ["Overdrive"]
+    pinned = result.their_tracks[0]
+    assert pinned["role"] == "primary"
+    assert pinned["identity_source"] == "user_override"
+    assert pinned["classifier_role"] == "uncertain"
+    assert result.uncertain == []
+
+
+def test_an_unlinked_artist_is_still_identified_by_name() -> None:
+    """Search needs no URN — but nothing may reach ``high`` without the uploader signal."""
+    result = cat.classify(
+        [sc_track("1", "Overdrive", uploader_urn=OTHER_URN, uploader_name=ARTIST)],
+        None,
+        artist_names=[ARTIST],
+    )
+
+    assert titles(result.their_tracks) == ["Overdrive"]
+    assert result.their_tracks[0]["confidence"] == "medium"
 
 
 def test_urn_and_numeric_id_are_the_same_account() -> None:
     """Numeric ids are deprecated but still in flight; they must not split identity."""
     result = cat.classify([sc_track("1", "Overdrive", uploader_urn="1000")], ARTIST_URN)
 
-    assert titles(result.definitely_theirs) == ["Overdrive"]
+    assert titles(result.their_tracks) == ["Overdrive"]
+    assert result.their_tracks[0]["confidence"] == "high"
 
 
-def test_foreign_upload_without_a_credit_is_listed_but_flagged() -> None:
-    """Nothing fetched is silently dropped; an unproven credit is ranked, not hidden."""
-    result = cat.classify(
-        [
-            sc_track("1", "Some Other Track", uploader_urn=OTHER_URN, uploader_name="Nobody"),
-            sc_track(
-                "2",
-                "Kontact Me (Boys Noize Remix)",
-                uploader_urn=OTHER_URN,
-                uploader_name="Helena Hauff",
-            ),
-        ],
-        ARTIST_URN,
-        artist_names=[ARTIST],
-    )
-
-    assert result.definitely_theirs == []
-    assert [t["credited"] for t in result.remixes_by_others] == [False, True]
-
-
-def test_without_artist_names_foreign_uploads_stay_in_the_remix_bucket() -> None:
-    """Unproven credit degrades to the visible-but-never-queued bucket, never to 'theirs'."""
+def test_without_a_name_or_an_account_nothing_is_claimed() -> None:
+    """No signal at all is ``uncertain`` — listed for review, never asserted as theirs."""
     result = cat.classify(
         [sc_track("1", "Some Other Track", uploader_urn=OTHER_URN, uploader_name="Nobody")],
         ARTIST_URN,
     )
 
-    assert result.definitely_theirs == []
-    assert titles(result.remixes_by_others) == ["Some Other Track"]
+    assert result.their_tracks == []
+    assert titles(result.uncertain) == ["Some Other Track"]
 
 
 # --------------------------------------------------------------------------- mix filter
@@ -250,7 +297,7 @@ def test_boiler_room_loses_to_the_filter_while_extended_mix_survives() -> None:
         ARTIST_URN,
     )
 
-    assert titles(result.definitely_theirs) == ["Overdrive (Extended Mix)"]
+    assert titles(result.their_tracks) == ["Overdrive (Extended Mix)"]
     assert titles(result.mixes_and_sets) == ["Boiler Room Berlin"]
 
 
@@ -266,19 +313,19 @@ def test_not_fully_playable_is_excluded(field_name: str, value: object) -> None:
     assert cat.mix_exclusion_reason(track) == "unavailable"
 
 
-def test_preview_track_is_kept_out_of_definitely_theirs() -> None:
+def test_preview_track_is_kept_out_of_the_role_buckets() -> None:
     result = cat.classify(
         [sc_track("1", "Overdrive", access="preview")], ARTIST_URN, artist_names=[ARTIST]
     )
 
-    assert result.definitely_theirs == []
+    assert result.their_tracks == []
     assert result.mixes_and_sets[0]["excluded_reason"] == "unavailable"
 
 
 def test_downloadable_is_never_a_filter() -> None:
     result = cat.classify([sc_track("1", "Overdrive", downloadable=False)], ARTIST_URN)
 
-    assert titles(result.definitely_theirs) == ["Overdrive"]
+    assert titles(result.their_tracks) == ["Overdrive"]
 
 
 # --------------------------------------------------------------------------- coercion
@@ -489,21 +536,27 @@ def test_catalogue_ties_buckets_and_diff_together() -> None:
     )
 
     assert set(payload) == {
-        cat.BUCKET_THEIRS,
-        cat.BUCKET_REMIXES,
-        cat.BUCKET_MIXES,
+        *cat.BUCKET_KEYS,
         "in_library",
+        "role_counts",
+        "linked",
+        "artist_urn",
         "fetched_at",
         "from_cache",
         "truncated",
     }
-    assert titles(payload[cat.BUCKET_THEIRS]) == ["Overdrive (Original Mix)", "Kill the Beat"]
-    assert titles(payload[cat.BUCKET_REMIXES]) == ["Mayday (Boys Noize Remix)"]
+    assert titles(payload[cat.BUCKET_THEIR_TRACKS]) == [
+        "Overdrive (Original Mix)",
+        "Kill the Beat",
+    ]
+    assert titles(payload[cat.BUCKET_THEIR_REMIXES]) == ["Mayday (Boys Noize Remix)"]
     assert titles(payload[cat.BUCKET_MIXES]) == ["Boiler Room Berlin"]
     assert payload["in_library"] == ["soundcloud:tracks:1"]
+    assert payload["linked"] is True
+    assert payload["role_counts"]["primary"] == 2
     assert payload["from_cache"] is False
     assert payload["truncated"] is False
-    owned, missing = payload[cat.BUCKET_THEIRS]
+    owned, missing = payload[cat.BUCKET_THEIR_TRACKS]
     assert owned["in_library"] is True and owned["auto_queue_allowed"] is False
     assert missing["in_library"] is False and missing["auto_queue_allowed"] is True
     # Mixes are excluded from the diff, so their ownership is unknown, not "no".
@@ -523,7 +576,7 @@ def test_second_call_is_served_from_cache_without_refetching() -> None:
     assert first["from_cache"] is False
     assert second["from_cache"] is True
     assert second["fetched_at"] == first["fetched_at"]
-    assert titles(second[cat.BUCKET_THEIRS]) == ["Overdrive"]
+    assert titles(second[cat.BUCKET_THEIR_TRACKS]) == ["Overdrive"]
 
 
 def test_cache_holds_the_catalogue_not_the_diff() -> None:
@@ -581,7 +634,20 @@ def test_catalogue_uses_the_bound_urn_when_none_is_passed() -> None:
     assert fetch.seen_urns == [ARTIST_URN]
 
 
-def test_unlinked_artist_raises_instead_of_looking_empty() -> None:
+def test_an_unlinked_artist_is_catalogued_by_name_and_says_the_link_is_missing() -> None:
+    """Owner decision 2026-09-08: search needs no URN, so the link is a signal, not a gate."""
+    cid = schema.create_collection(ARTIST)
+    fetch = _Fetcher([sc_track("1", "Overdrive", uploader_urn=OTHER_URN, uploader_name=ARTIST)])
+
+    payload = cat.catalogue(cid, local_tracks={}, artist_names=[ARTIST], fetch=fetch)
+
+    assert fetch.seen_urns == [""], "no account is bound, so the fetcher gets no URN"
+    assert payload["linked"] is False
+    assert titles(payload[cat.BUCKET_THEIR_TRACKS]) == ["Overdrive"]
+    assert payload[cat.BUCKET_THEIR_TRACKS][0]["confidence"] == "medium"
+
+
+def test_without_a_link_or_a_name_there_is_nothing_to_identify() -> None:
     cid = schema.create_collection("Unbound Artist")
 
     with pytest.raises(cat.ArtistNotLinked):
@@ -602,7 +668,7 @@ def test_cached_catalogue_still_serves_without_a_fetcher() -> None:
     payload = cat.catalogue(cid, local_tracks={})
 
     assert payload["from_cache"] is True
-    assert titles(payload[cat.BUCKET_THEIRS]) == ["Overdrive"]
+    assert titles(payload[cat.BUCKET_THEIR_TRACKS]) == ["Overdrive"]
 
 
 def test_track_cap_truncates_and_reports_it() -> None:
@@ -612,7 +678,7 @@ def test_track_cap_truncates_and_reports_it() -> None:
     payload = cat.catalogue(cid, local_tracks={}, fetch=fetch, max_tracks=10)
 
     assert payload["truncated"] is True
-    assert len(payload[cat.BUCKET_THEIRS]) == 10
+    assert len(payload[cat.BUCKET_THEIR_TRACKS]) == 10
 
 
 def test_fetcher_reported_truncation_is_carried_through() -> None:
@@ -630,7 +696,36 @@ def test_fetcher_reported_truncation_is_carried_through() -> None:
     payload = cat.catalogue(cid, local_tracks={}, fetch=fetch)
 
     assert payload["truncated"] is True
-    assert len(payload[cat.BUCKET_THEIRS]) == 1
+    assert len(payload[cat.BUCKET_THEIR_TRACKS]) == 1
+
+
+def test_the_classifier_verdict_is_remembered_per_track() -> None:
+    """The local artist→track table fills as the user browses (owner decision 2026-09-08)."""
+    cid = _linked_collection()
+    fetch = _Fetcher([sc_track("1", "Overdrive"), sc_track("2", "Boiler Room", duration_ms=10**7)])
+
+    cat.catalogue(cid, local_tracks={}, artist_names=[ARTIST], fetch=fetch)
+
+    rows = {r["sc_urn"]: r for r in schema.list_track_identities(cid)}
+    assert set(rows) == {"soundcloud:tracks:1", "soundcloud:tracks:2"}
+    assert rows["soundcloud:tracks:1"]["role"] == "primary"
+    assert rows["soundcloud:tracks:1"]["confidence"] == "high"
+
+
+def test_a_pinned_role_wins_on_the_next_pass() -> None:
+    cid = _linked_collection()
+    fetch = _Fetcher(
+        [sc_track("1", "Some Other Track", uploader_urn=OTHER_URN, uploader_name="Nobody")]
+    )
+    first = cat.catalogue(cid, local_tracks={}, artist_names=[ARTIST], fetch=fetch)
+    assert titles(first[cat.BUCKET_UNCERTAIN]) == ["Some Other Track"]
+
+    assert schema.set_identity_override(cid, "soundcloud:tracks:1", "primary") is True
+    second = cat.catalogue(cid, local_tracks={}, artist_names=[ARTIST], fetch=fetch)
+
+    assert titles(second[cat.BUCKET_THEIR_TRACKS]) == ["Some Other Track"]
+    assert second[cat.BUCKET_THEIR_TRACKS][0]["identity_source"] == "user_override"
+    assert second[cat.BUCKET_UNCERTAIN] == []
 
 
 def test_catalogue_logs_no_credentials(caplog) -> None:

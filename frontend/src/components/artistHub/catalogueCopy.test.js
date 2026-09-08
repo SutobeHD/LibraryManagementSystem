@@ -3,7 +3,8 @@
  *
  * Pure copy + derivation builders — no DOM, no resolver needed (the imports carry
  * extensions). The load-bearing cases are the honesty ones: a typed backend state
- * must never derive buckets, a not-checked track must never count as missing, and a
+ * must never derive buckets, a not-checked track must never count as missing, a
+ * bucket whose sources were not queried must never read as "nothing missing", and a
  * run with failures must never read as a success.
  */
 
@@ -11,7 +12,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    LINK_MISSING_CHIP,
+    allSourcesOk,
+    bucketEmptyNote,
     callBudgetLine,
+    creditLine,
+    downloadAllNote,
     downloadSummary,
     downloadTone,
     exclusionReason,
@@ -20,6 +26,10 @@ import {
     formatDuration,
     progressLine,
     relativeTime,
+    roleLine,
+    searchNamesLine,
+    sourceStates,
+    sourceStatusLine,
     splitCatalogue,
     stateSentence,
     truncationNote,
@@ -31,16 +41,29 @@ const track = (over = {}) => ({
     duration_ms: 278000,
     in_library: false,
     auto_queue_allowed: true,
+    role: 'primary',
+    confidence: 'high',
+    identity_source: 'classifier',
+    credit_parse: { reason: 'Uploaded by the linked account' },
     ...over,
 });
+
+const ALL_OK = { uploads: 'ok', search: 'ok', reposts: 'ok' };
 
 const okView = (over = {}) => ({
     status: 'ok',
     collection_id: 'a_1',
-    definitely_theirs: [track()],
-    remixes_by_others: [],
+    their_tracks: [track()],
+    their_remixes: [],
+    remixed_by_others: [],
+    featured: [],
+    uncertain: [],
     mixes_and_sets: [],
     in_library: [],
+    link_missing: false,
+    sources: { ...ALL_OK },
+    search_queries_run: ['Boys Noize'],
+    search_queries_skipped: [],
     fetched_at: new Date().toISOString(),
     from_cache: false,
     truncated: false,
@@ -50,12 +73,13 @@ const okView = (over = {}) => ({
 });
 
 test('splitCatalogue returns empty buckets for every typed non-ok state', () => {
-    for (const status of ['not_linked', 'link_unresolved', 'not_connected', 'artist_gone']) {
+    for (const status of ['not_linked', 'not_connected', 'artist_gone']) {
         const split = splitCatalogue({ status, detail: 'x' });
         assert.equal(split.ok, false);
-        assert.deepEqual(split.theirs, []);
-        assert.deepEqual(split.missingTheirs, []);
+        assert.deepEqual(split.rows.their_tracks, []);
+        assert.deepEqual(split.missing.their_tracks, []);
         assert.deepEqual(split.queueable, []);
+        assert.equal(split.total, 0);
     }
     assert.equal(splitCatalogue(null).ok, false);
 });
@@ -63,7 +87,7 @@ test('splitCatalogue returns empty buckets for every typed non-ok state', () => 
 test('only an explicit in_library:false counts as missing', () => {
     const split = splitCatalogue(
         okView({
-            definitely_theirs: [
+            their_tracks: [
                 track({ sc_id: 'a', in_library: false }),
                 track({ sc_id: 'b', in_library: true, auto_queue_allowed: false }),
                 // never diffed (the excluded bucket's shape) — not a gap we measured
@@ -72,25 +96,35 @@ test('only an explicit in_library:false counts as missing', () => {
         })
     );
     assert.deepEqual(
-        split.missingTheirs.map((t) => t.sc_id),
+        split.missing.their_tracks.map((t) => t.sc_id),
         ['a']
     );
-    assert.equal(split.ownedTheirs, 1);
+    assert.equal(split.counts.their_tracks, 3);
+    assert.equal(split.missingCounts.their_tracks, 1);
 });
 
-test('queueable mirrors the server flag, not a rule we recompute', () => {
+test('queueable mirrors the server flag across every bucket, not a rule we recompute', () => {
     const split = splitCatalogue(
         okView({
-            definitely_theirs: [
-                track({ sc_id: 'a', auto_queue_allowed: true }),
-                track({ sc_id: 'b', auto_queue_allowed: false }),
+            their_tracks: [track({ sc_id: 'a', auto_queue_allowed: true })],
+            their_remixes: [
+                track({ sc_id: 'b', role: 'remixer', auto_queue_allowed: true }),
+                track({ sc_id: 'c', role: 'remixer', auto_queue_allowed: false }),
             ],
+            uncertain: [track({ sc_id: 'd', role: 'uncertain', auto_queue_allowed: false })],
         })
     );
     assert.deepEqual(
         split.queueable.map((t) => t.sc_id),
-        ['a']
+        ['a', 'b']
     );
+    assert.equal(split.total, 4);
+});
+
+test('splitCatalogue carries the link-missing flag through instead of guessing', () => {
+    assert.equal(splitCatalogue(okView()).linkMissing, false);
+    assert.equal(splitCatalogue(okView({ link_missing: true })).linkMissing, true);
+    assert.equal(splitCatalogue({ status: 'not_connected' }).linkMissing, null);
 });
 
 test('stateSentence prefers the backend detail and always says something', () => {
@@ -115,6 +149,101 @@ test('callBudgetLine drops rather than invent a budget', () => {
     assert.equal(callBudgetLine(okView()), '3 of 25 SoundCloud calls used');
     assert.equal(callBudgetLine(okView({ call_budget: 0 })), '');
     assert.equal(callBudgetLine({ status: 'not_linked' }), '');
+});
+
+// ─── per-source honesty ───────────────────────────────────────────────────────
+
+test('sourceStatusLine names all three sources and their real status', () => {
+    assert.equal(sourceStatusLine(okView()), 'Uploads ✓ · Search ✓ · Reposts ✓');
+    assert.equal(
+        sourceStatusLine(okView({ sources: { ...ALL_OK, reposts: 'skipped_budget' } })),
+        'Uploads ✓ · Search ✓ · Reposts not queried (budget)'
+    );
+    assert.equal(sourceStatusLine({ status: 'not_connected' }), '');
+});
+
+test('an unlinked artist says WHY uploads and reposts did not run', () => {
+    const states = sourceStates(
+        okView({
+            link_missing: true,
+            sources: { uploads: 'not_queried', search: 'ok', reposts: 'not_queried' },
+        })
+    );
+    const byKey = Object.fromEntries(states.map((s) => [s.key, s]));
+    assert.match(byKey.uploads.short, /no linked account/);
+    assert.match(byKey.reposts.text, /no SoundCloud account is linked/);
+    assert.equal(byKey.search.ok, true);
+});
+
+test('a missing source status defaults to not_queried, never to ok', () => {
+    const states = sourceStates(okView({ sources: {} }));
+    assert.deepEqual(
+        states.map((s) => s.status),
+        ['not_queried', 'not_queried', 'not_queried']
+    );
+    assert.equal(allSourcesOk(okView({ sources: {} })), false);
+    assert.equal(allSourcesOk(okView()), true);
+    assert.equal(allSourcesOk({ status: 'not_connected' }), false);
+});
+
+test('an empty bucket may only claim "nothing missing" when every source ran', () => {
+    assert.match(bucketEmptyNote(okView(), 'their_tracks'), /Nothing from this artist/);
+    assert.match(bucketEmptyNote(okView(), 'their_remixes'), /own remixes is missing/);
+
+    const partial = bucketEmptyNote(
+        okView({ sources: { ...ALL_OK, reposts: 'skipped_budget' } }),
+        'their_remixes'
+    );
+    assert.match(partial, /only partly queried/);
+    assert.match(partial, /reposts not queried \(the per-run call budget ran out\)/);
+    assert.match(partial, /nobody looked/);
+    assert.doesNotMatch(partial, /Nothing/);
+
+    const failed = bucketEmptyNote(
+        okView({ sources: { ...ALL_OK, search: 'failed' } }),
+        'featured'
+    );
+    assert.match(failed, /search could not be reached/);
+
+    assert.match(bucketEmptyNote(null, 'their_tracks'), /No catalogue has been read/);
+});
+
+test('searchNamesLine reports which spellings were searched and which never were', () => {
+    assert.equal(searchNamesLine(okView()), 'searched for Boys Noize');
+    assert.match(
+        searchNamesLine(
+            okView({ search_queries_run: ['Boys Noize'], search_queries_skipped: ['BNR'] })
+        ),
+        /never searched for BNR \(budget\)/
+    );
+    assert.equal(searchNamesLine(okView({ search_queries_run: [] })), '');
+    assert.equal(searchNamesLine({ status: 'not_connected' }), '');
+});
+
+// ─── per-row explanation ──────────────────────────────────────────────────────
+
+test('roleLine and creditLine say why a row is where it is, or admit they cannot', () => {
+    assert.equal(roleLine(track()), 'Their track · high confidence');
+    assert.equal(
+        roleLine(track({ role: 'remixer', confidence: 'medium' })),
+        'Their remix · medium confidence'
+    );
+    assert.match(roleLine(track({ identity_source: 'user_override' })), /pinned by you$/);
+    assert.equal(roleLine({}), '');
+    assert.equal(creditLine(track()), 'Uploaded by the linked account');
+    assert.match(creditLine({}), /No reason was recorded/);
+});
+
+test('the link-missing chip is one short phrase, not a paragraph', () => {
+    assert.equal(LINK_MISSING_CHIP, 'not linked — identified by name only');
+});
+
+test('downloadAllNote says what the button will NOT take', () => {
+    const note = downloadAllNote(3);
+    assert.match(note, /^3 tracks/);
+    assert.match(note, /their remix/);
+    assert.match(note, /remixed by others, featured, uncertain/);
+    assert.match(downloadAllNote(1), /^1 track /);
 });
 
 test('downloadSummary reports what landed, never a blanket success', () => {

@@ -5,10 +5,51 @@ import {
     fetchCatalogue,
     isUnknownCollection,
     linkSoundCloudProfile,
+    pinTrackRole,
     pollDownloadJob,
     startMissingDownload,
     unlinkSoundCloudProfile,
 } from './artistCatalogueApi';
+import { BUCKETS, MIXES_BUCKET } from './catalogueCopy';
+
+const ROLE_BUCKET = {
+    primary: 'their_tracks',
+    remixer: 'their_remixes',
+    remixed_by_other: 'remixed_by_others',
+    featured: 'featured',
+    uncertain: 'uncertain',
+};
+
+/**
+ * Move one row into the bucket its new role renders in — the optimistic half of a pin.
+ *
+ * `role: null` (clearing a pin) cannot be predicted here: only the classifier knows
+ * where the row goes back to, so the view is left untouched and the reload that follows
+ * shows the answer. An excluded mix never moves either: the mix/set gate runs before
+ * roles, so a pin does not lift it out of the strip.
+ */
+export const movePinnedRow = (view, scId, role) => {
+    const target = ROLE_BUCKET[role];
+    if (!view || view.status !== 'ok' || !target) return view;
+    let moved = null;
+    const next = { ...view };
+    for (const bucket of BUCKETS) {
+        const rows = Array.isArray(view[bucket.key]) ? view[bucket.key] : [];
+        const hit = rows.find((t) => t.sc_id === scId);
+        if (hit && bucket.key === MIXES_BUCKET) return view;
+        if (hit) {
+            moved = { ...hit, role, identity_source: 'user_override', confidence: 'high' };
+            next[bucket.key] = rows.filter((t) => t.sc_id !== scId);
+        } else {
+            next[bucket.key] = rows;
+        }
+    }
+    if (!moved) return view;
+    moved.auto_queue_allowed =
+        moved.in_library === false && (role === 'primary' || role === 'remixer');
+    next[target] = [...next[target], moved];
+    return next;
+};
 
 /**
  * useArtistCatalogue — catalogue state for exactly one selected artist.
@@ -24,6 +65,9 @@ import {
  *    list. Those are successful answers and are handed back in `view` verbatim.
  *  - report anything about a download job it stopped watching. Switching artist
  *    cancels the poll; the run continues server-side and is not summarised here.
+ *  - leave a role pin showing after the server refused it. `pinRole` moves the row
+ *    optimistically and puts the whole previous view back if the call fails, so the
+ *    screen never shows a classification the sidecar did not store.
  */
 const useArtistCatalogue = ({ collectionId, enabled = true }) => {
     const [view, setView] = useState(null);
@@ -155,6 +199,31 @@ const useArtistCatalogue = ({ collectionId, enabled = true }) => {
         [collectionId, load]
     );
 
+    /**
+     * Pin a track's role and move it between buckets at once.
+     *
+     * The row jumps immediately — the server's answer is the classification the next
+     * read will produce anyway — but the pre-click view is kept and restored verbatim
+     * if the call fails, because a row sitting in a bucket the sidecar never accepted
+     * is exactly the "looks live but is not" failure this screen keeps shipping.
+     * Throws for the caller's toast.
+     */
+    const pinRole = useCallback(
+        async (scId, role) => {
+            if (!collectionId || !scId) return null;
+            const seq = seqRef.current;
+            const previous = view;
+            setView((current) => movePinnedRow(current, scId, role));
+            try {
+                return await pinTrackRole(collectionId, scId, role);
+            } catch (e) {
+                if (seqRef.current === seq) setView(previous);
+                throw e;
+            }
+        },
+        [collectionId, view]
+    );
+
     // Nothing may be reported about a run this hook is no longer watching.
     useEffect(
         () => () => {
@@ -176,6 +245,7 @@ const useArtistCatalogue = ({ collectionId, enabled = true }) => {
         link,
         unlink,
         download,
+        pinRole,
         clearResult: () => setResult(null),
     };
 };
