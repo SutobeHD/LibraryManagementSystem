@@ -23,6 +23,7 @@ from app.soundcloud_api import (
     AuthExpiredError,
     CallBudget,
     NotFoundError,
+    SCSearchResult,
     SoundCloudPlaylistAPI,
     _parse_reset_time,
     get_related_artists,
@@ -30,6 +31,8 @@ from app.soundcloud_api import (
     get_user_tracks,
     normalize_catalogue_track,
     resolve_user,
+    search_tracks,
+    search_tracks_many,
 )
 
 TOKEN = "sc-secret-token-DO-NOT-LOG"
@@ -539,6 +542,28 @@ class TestNormalisedContract:
         assert track["duration_ms"] == 0
         assert track["artwork_url"] == ""
         assert track["streamable"] is False
+        assert track["isrc"] == ""
+        assert track["label_name"] == ""
+
+    def test_isrc_and_label_name_are_part_of_the_contract(self):
+        """Name-based identification (2026-09-08) needs both — a label upload of the
+        artist's track carries the label, the ISRC survives a re-upload."""
+        assert SC_TRACK_FIELDS[-2:] == ("isrc", "label_name")
+
+        track = normalize_catalogue_track(
+            _raw_track(8, isrc="DEA211900012", label_name="Boysnoize Records")
+        )
+
+        assert track is not None
+        assert track["isrc"] == "DEA211900012"
+        assert track["label_name"] == "Boysnoize Records"
+
+    def test_null_isrc_becomes_empty_string(self):
+        track = normalize_catalogue_track(_raw_track(8, isrc=None, label_name=None))
+
+        assert track is not None
+        assert track["isrc"] == ""
+        assert track["label_name"] == ""
 
     def test_dead_and_malformed_entries_are_dropped(self, http, sleeps):
         http(
@@ -632,6 +657,269 @@ class TestRelatedAndResolve:
         http([_FakeResponse(json_data={"kind": "track", "id": 1, "title": "x"})])
 
         assert resolve_user("https://soundcloud.com/boysnoize/rocket-boy", TOKEN) is None
+
+
+# ---------------------------------------------------------------------------
+# Track search — GET /tracks?q= (name-based identification, 2026-09-08)
+# ---------------------------------------------------------------------------
+
+
+def _search_page(*track_ids: int, next_href: str | None = None) -> _FakeResponse:
+    body: dict[str, Any] = {"collection": [_raw_track(i) for i in track_ids]}
+    if next_href:
+        body["next_href"] = next_href
+    return _FakeResponse(json_data=body)
+
+
+class TestTrackSearch:
+    def test_search_request_shape(self, http, sleeps):
+        recorder = http([_search_page()])
+
+        search_tracks("Boys Noize", TOKEN)
+
+        call = recorder.calls[0]
+        assert call.url == "https://api.soundcloud.com/tracks"
+        assert call.params["q"] == "Boys Noize"
+        assert call.params["access"] == "playable"
+        assert call.params["linked_partitioning"] == "true"
+        assert call.params["limit"] == 200
+        assert "offset" not in call.params
+        assert call.headers["Authorization"] == f"OAuth {TOKEN}"
+
+    def test_search_pages_follow_next_href(self, http, sleeps):
+        next_href = "https://api.soundcloud.com/tracks?q=Boys+Noize&cursor=abc&limit=200"
+        recorder = http([_search_page(1, 2, next_href=next_href), _search_page(3)])
+
+        tracks = search_tracks("Boys Noize", TOKEN)
+
+        assert [t["sc_id"] for t in tracks] == [f"soundcloud:tracks:{i}" for i in (1, 2, 3)]
+        assert recorder.urls[1] == next_href
+        assert recorder.calls[1].params == {}
+        assert tracks.truncated is False
+        assert tracks.calls_used == 0, "no budget → nothing to count"
+
+    def test_search_returns_the_normalised_contract(self, http, sleeps):
+        http(
+            [
+                _FakeResponse(
+                    json_data={
+                        "collection": [
+                            _raw_track(
+                                11,
+                                isrc="DEA211900012",
+                                label_name="Boysnoize Records",
+                                user={"urn": "soundcloud:users:555", "username": "BNR Promo"},
+                            )
+                        ]
+                    }
+                )
+            ]
+        )
+
+        track = search_tracks("Boys Noize", TOKEN)[0]
+
+        assert set(track) == set(SC_TRACK_FIELDS)
+        assert track["uploader_urn"] == "soundcloud:users:555"
+        assert track["uploader_name"] == "BNR Promo"
+        assert track["isrc"] == "DEA211900012"
+        assert track["label_name"] == "Boysnoize Records"
+
+    def test_search_budget_truncates_and_reports(self, http, sleeps):
+        recorder = http(
+            [_search_page(i, next_href=f"https://api.soundcloud.com/p/{i}") for i in range(1, 6)]
+        )
+        budget = CallBudget(limit=2, label="search-run")
+
+        tracks = search_tracks("Boys Noize", TOKEN, budget=budget)
+
+        assert len(recorder.calls) == 2
+        assert len(tracks) == 2
+        assert tracks.truncated is True
+        assert tracks.stop_reason == "budget"
+        assert tracks.calls_used == 2
+        assert budget.exhausted is True
+
+    def test_search_max_items_truncates_and_reports(self, http, sleeps):
+        http([_search_page(1, 2, 3, next_href="https://api.soundcloud.com/p/2")])
+
+        tracks = search_tracks("Boys Noize", TOKEN, max_items=2)
+
+        assert len(tracks) == 2
+        assert tracks.truncated is True
+        assert tracks.stop_reason == "max_items"
+
+    def test_blank_query_makes_zero_calls(self, http):
+        recorder = http([])
+
+        for blank in ("", "   ", "\t\n"):
+            result = search_tracks(blank, TOKEN)
+            assert list(result) == []
+            assert result.truncated is False
+            assert result.stop_reason == "empty_query"
+
+        many = search_tracks_many(["", "  "], TOKEN)
+        assert list(many) == []
+        assert many.queries_run == ()
+        assert many.queries_skipped == ()
+        assert recorder.calls == []
+
+    def test_search_404_raises_not_found_not_auth_expired(self, http, sleeps):
+        http([_FakeResponse(status_code=404, text="not found")])
+
+        with pytest.raises(NotFoundError) as excinfo:
+            search_tracks("Boys Noize", TOKEN)
+
+        assert not isinstance(excinfo.value, AuthExpiredError)
+
+    def test_search_401_still_raises_auth_expired(self, http, sleeps):
+        http([_FakeResponse(status_code=401, text="unauthorized")])
+
+        with pytest.raises(AuthExpiredError):
+            search_tracks("Boys Noize", TOKEN)
+
+    def test_search_without_token_raises_before_any_request(self, http):
+        recorder = http([])
+
+        with pytest.raises(AuthExpiredError):
+            search_tracks("Boys Noize", "")
+
+        assert recorder.calls == []
+
+    def test_search_many_dedups_by_sc_id_and_keeps_first_seen_order(self, http, sleeps):
+        recorder = http([_search_page(1, 2, 3), _search_page(2, 4, 1), _search_page(5, 3)])
+
+        result = search_tracks_many(["Boys Noize", "Boysnoize", "BNR"], TOKEN)
+
+        assert isinstance(result, SCSearchResult)
+        assert [t["sc_id"] for t in result] == [f"soundcloud:tracks:{i}" for i in (1, 2, 3, 4, 5)]
+        assert [c.params["q"] for c in recorder.calls] == ["Boys Noize", "Boysnoize", "BNR"]
+        assert result.queries_run == ("Boys Noize", "Boysnoize", "BNR")
+        assert result.queries_skipped == ()
+        assert result.truncated is False
+
+    def test_search_many_first_sighting_wins(self, http, sleeps):
+        http(
+            [
+                _FakeResponse(json_data={"collection": [_raw_track(1, title="First Sighting")]}),
+                _FakeResponse(json_data={"collection": [_raw_track(1, title="Second Sighting")]}),
+            ]
+        )
+
+        result = search_tracks_many(["Boys Noize", "Boysnoize"], TOKEN)
+
+        assert [t["title"] for t in result] == ["First Sighting"]
+
+    def test_search_many_drops_blank_and_case_duplicate_queries(self, http, sleeps):
+        recorder = http([_search_page(1), _search_page(2)])
+
+        result = search_tracks_many(
+            ["Boys Noize", "  ", "boys noize", "BOYS  NOIZE", "Boysnoize"], TOKEN
+        )
+
+        assert [c.params["q"] for c in recorder.calls] == ["Boys Noize", "Boysnoize"]
+        assert result.queries_run == ("Boys Noize", "Boysnoize")
+        assert len(result) == 2
+
+    def test_search_many_reports_calls_across_the_batch(self, http, sleeps):
+        http(
+            [
+                _search_page(1, next_href="https://api.soundcloud.com/p/2"),
+                _search_page(2),
+                _search_page(3),
+            ]
+        )
+        budget = CallBudget(limit=10)
+
+        result = search_tracks_many(["Boys Noize", "Boysnoize"], TOKEN, budget=budget)
+
+        assert result.calls_used == 3
+        assert budget.used == 3
+        assert len(result) == 3
+
+    def test_search_many_stops_when_the_budget_is_exhausted_and_says_so(self, http, sleeps):
+        recorder = http([_search_page(1), _search_page(2), _search_page(3)])
+        budget = CallBudget(limit=1, label="search-run")
+
+        result = search_tracks_many(["Boys Noize", "Boysnoize", "BNR"], TOKEN, budget=budget)
+
+        assert len(recorder.calls) == 1, "an exhausted budget must not send more searches"
+        assert [t["sc_id"] for t in result] == ["soundcloud:tracks:1"]
+        assert result.truncated is True
+        assert result.stop_reason == "budget"
+        assert result.calls_used == 1
+        assert result.queries_run == ("Boys Noize",)
+        assert result.queries_skipped == ("Boysnoize", "BNR")
+
+    def test_search_many_budget_exhausted_mid_walk_skips_the_rest(self, http, sleeps):
+        recorder = http(
+            [
+                _search_page(1, next_href="https://api.soundcloud.com/p/2"),
+                _search_page(2, next_href="https://api.soundcloud.com/p/3"),
+                _search_page(3),
+            ]
+        )
+        budget = CallBudget(limit=2)
+
+        result = search_tracks_many(["Boys Noize", "Boysnoize"], TOKEN, budget=budget)
+
+        assert len(recorder.calls) == 2
+        assert result.truncated is True
+        assert result.stop_reason == "budget"
+        assert result.queries_run == ("Boys Noize",)
+        assert result.queries_skipped == ("Boysnoize",)
+
+    def test_search_many_max_items_per_query_is_passed_through(self, http, sleeps):
+        http(
+            [
+                _search_page(1, 2, 3, next_href="https://api.soundcloud.com/p/2"),
+                _search_page(4, 5, 6, next_href="https://api.soundcloud.com/p/3"),
+            ]
+        )
+
+        result = search_tracks_many(["Boys Noize", "Boysnoize"], TOKEN, max_items_per_query=2)
+
+        assert [t["sc_id"] for t in result] == [f"soundcloud:tracks:{i}" for i in (1, 2, 4, 5)]
+        assert result.truncated is True
+        assert result.stop_reason == "max_items"
+        assert result.queries_skipped == ()
+
+    def test_search_many_propagates_a_404_instead_of_swallowing_it(self, http, sleeps):
+        http([_search_page(1), _FakeResponse(status_code=404, text="not found")])
+
+        with pytest.raises(NotFoundError):
+            search_tracks_many(["Boys Noize", "Boysnoize"], TOKEN)
+
+    def test_search_never_logs_the_token(self, http, sleeps, caplog):
+        caplog.set_level(logging.DEBUG, logger="app.soundcloud_api")
+        http(
+            [
+                _FakeResponse(
+                    status_code=429,
+                    json_data={"errors": [{"meta": {"reset_time": time.time() + 5}}]},
+                ),
+                _search_page(1, next_href="https://api.soundcloud.com/tracks?cursor=x"),
+                _search_page(2),
+                _search_page(3),
+            ]
+        )
+        budget = CallBudget(limit=3)
+
+        search_tracks_many(["Boys Noize", "Boysnoize", "BNR"], TOKEN, budget=budget)
+
+        assert caplog.records, "expected the search to log at all"
+        for record in caplog.records:
+            assert TOKEN not in record.getMessage()
+            assert TOKEN not in str(record.args)
+        assert TOKEN not in caplog.text
+
+    def test_search_token_is_not_logged_on_the_auth_failure_path(self, http, sleeps, caplog):
+        caplog.set_level(logging.DEBUG, logger="app.soundcloud_api")
+        http([_FakeResponse(status_code=403, text="forbidden")])
+
+        with pytest.raises(AuthExpiredError):
+            search_tracks("Boys Noize", TOKEN)
+
+        assert TOKEN not in caplog.text
 
 
 # ---------------------------------------------------------------------------

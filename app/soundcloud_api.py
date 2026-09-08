@@ -1,5 +1,5 @@
 """
-SoundCloud API client — playlists, likes, and per-artist catalogue.
+SoundCloud API client — playlists, likes, per-artist catalogue, and track search.
 
 Uses the auth_token (stored in the OS keyring via `keyring.get_password`) for
 authenticated requests. Public API only (`api.soundcloud.com`).
@@ -16,8 +16,9 @@ Resilience:
 
 ToU guardrails (owner decision — docs/research/implement/inprogress_library-artist-hub.md):
   - Catalogue fetches are user-initiated per artist. Nothing is pre-fetched.
-  - Every fetch takes a `CallBudget`: a hard per-run call cap that stops the walk
-    and reports `truncated`, logged as `op=artist_sc_fetch … calls=N`.
+  - Every fetch and every search takes a `CallBudget`: a hard per-run call cap
+    that stops the walk and reports `truncated`, logged as
+    `op=artist_sc_fetch … calls=N` / `op=artist_sc_search … calls=N`.
   - No response caching in this module — caching belongs in the sidecar with a TTL.
     The fetches used to be `@lru_cache`d on the OAuth token, which froze background
     syncs (new uploads never appeared) and pinned the token as a process-lifetime
@@ -187,6 +188,10 @@ _SC_RESOLVE_HOSTS = ("soundcloud.com", "www.soundcloud.com", "m.soundcloud.com")
 _PERMALINK_RE = re.compile(r"^[A-Za-z0-9_-]{1,255}$")
 
 # The normalised track contract between this client and the catalogue classifier.
+# `isrc` + `label_name` joined on 2026-09-08 for name-based identification: a
+# label upload of the artist's track carries the label in `label_name`, and the
+# ISRC is the one identifier that survives a re-upload under a different account.
+# Both are "" when the payload omits them — never guessed.
 SC_TRACK_FIELDS: tuple[str, ...] = (
     "sc_id",
     "title",
@@ -202,6 +207,8 @@ SC_TRACK_FIELDS: tuple[str, ...] = (
     "downloadable",
     "created_at",
     "artwork_url",
+    "isrc",
+    "label_name",
 )
 
 SC_ARTIST_FIELDS: tuple[str, ...] = (
@@ -298,6 +305,29 @@ class SCResultList(list):
         self.truncated = truncated
         self.stop_reason = stop_reason
         self.calls_used = calls_used
+
+
+class SCSearchResult(SCResultList):
+    """`search_tracks_many` result: which queries actually went out and which did not.
+
+    A query that was never sent because the budget ran dry is a bucket that was
+    not looked at — the caller must be able to say so instead of reporting the
+    artist as fully searched.
+    """
+
+    def __init__(
+        self,
+        items: list | None = None,
+        *,
+        truncated: bool = False,
+        stop_reason: str = "",
+        calls_used: int = 0,
+        queries_run: tuple[str, ...] = (),
+        queries_skipped: tuple[str, ...] = (),
+    ) -> None:
+        super().__init__(items, truncated=truncated, stop_reason=stop_reason, calls_used=calls_used)
+        self.queries_run = queries_run
+        self.queries_skipped = queries_skipped
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -964,7 +994,19 @@ def normalize_catalogue_track(raw: Any) -> dict | None:
         "downloadable": bool(raw.get("downloadable", False)),
         "created_at": _as_str(raw.get("created_at")),
         "artwork_url": _as_str(raw.get("artwork_url")),
+        "isrc": _as_str(raw.get("isrc")),
+        "label_name": _as_str(raw.get("label_name")),
     }
+
+
+def _normalized_tracks(raw_items: list) -> list[dict]:
+    """Unwrap + normalise a page of track objects, dropping dead / malformed entries."""
+    tracks: list[dict] = []
+    for item in raw_items:
+        normalized = normalize_catalogue_track(_unwrap_track(item))
+        if normalized:
+            tracks.append(normalized)
+    return tracks
 
 
 def normalize_artist(raw: Any) -> dict | None:
@@ -1018,11 +1060,7 @@ def _fetch_track_collection(
         auth_404=False,
     )
 
-    tracks: list[dict] = []
-    for item in raw_items:
-        normalized = normalize_catalogue_track(_unwrap_track(item))
-        if normalized:
-            tracks.append(normalized)
+    tracks = _normalized_tracks(raw_items)
 
     calls = (budget.used - spent_before) if budget else 0
     logger.info(
@@ -1208,6 +1246,146 @@ def resolve_user(
 
     logger.info("op=artist_sc_resolve url=%s result=ok urn=%s", target, artist["urn"])
     return artist
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Track search — GET /tracks?q=
+#
+# Most of a label-signed artist's catalogue is uploaded by labels, promo channels
+# and DJs, so walking the artist's own account misses most of it (owner decision
+# 2026-09-08). Search by name is how the rest is found; the uploader-URN match
+# stays the highest-confidence signal, it just stops being the only one.
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _clean_query(query: str) -> str:
+    return " ".join(str(query or "").split())
+
+
+def search_tracks(
+    query: str,
+    auth_token: str,
+    *,
+    max_items: int | None = None,
+    budget: CallBudget | None = None,
+) -> SCResultList:
+    """Full-text track search — `GET /tracks?q=`. Same `SC_TRACK_FIELDS` dicts.
+
+    Same cursor walk, `access=playable` gate and truncation contract as
+    `get_user_tracks`: one budget unit per page, `truncated` / `stop_reason` on the
+    result, `NotFoundError` on a 404 (never a bogus re-login). A blank query is an
+    empty result with zero calls, not a search for everything.
+    """
+    text = _clean_query(query)
+    if not text:
+        return SCResultList([], stop_reason="empty_query")
+    if max_items is not None and max_items <= 0:
+        return SCResultList([], truncated=True, stop_reason="max_items")
+
+    headers = _artist_headers(auth_token)
+    spent_before = budget.used if budget else 0
+
+    params: dict[str, Any] = {
+        "q": text,
+        "limit": SC_PAGE_LIMIT,
+        "linked_partitioning": "true",
+        "access": "playable",
+    }
+
+    raw_items, truncated, reason = _sc_paginate(
+        f"{SC_API_BASE}/tracks",
+        headers,
+        params,
+        max_items=max_items,
+        budget=budget,
+        auth_404=False,
+    )
+
+    tracks = _normalized_tracks(raw_items)
+
+    calls = (budget.used - spent_before) if budget else 0
+    logger.info(
+        "op=artist_sc_search query=%r tracks=%d calls=%d truncated=%s reason=%s",
+        text,
+        len(tracks),
+        calls,
+        truncated,
+        reason or "-",
+    )
+    return SCResultList(tracks, truncated=truncated, stop_reason=reason, calls_used=calls)
+
+
+def search_tracks_many(
+    queries: list[str] | tuple[str, ...],
+    auth_token: str,
+    *,
+    max_items_per_query: int | None = None,
+    budget: CallBudget | None = None,
+) -> SCSearchResult:
+    """Run `search_tracks` per query and merge, deduplicated by `sc_id`.
+
+    An artist plus their aliases overlap heavily, so the first sighting of a track
+    wins and order of first appearance is kept. Blank and case-insensitive
+    duplicate queries are dropped before spending anything. When the shared
+    budget runs dry the remaining queries are NOT sent — they are reported in
+    `queries_skipped` with `stop_reason="budget"` so a caller can say which
+    names were never looked up instead of claiming a complete search.
+    Errors from the API (auth, 404, rate limit) propagate — a swallowed failure
+    would read as an empty catalogue.
+    """
+    planned: list[str] = []
+    seen_queries: set[str] = set()
+    for raw in queries:
+        text = _clean_query(raw)
+        key = text.casefold()
+        if text and key not in seen_queries:
+            seen_queries.add(key)
+            planned.append(text)
+
+    merged: dict[str, dict] = {}
+    run: list[str] = []
+    skipped: list[str] = []
+    calls = 0
+    truncated = False
+    reason = ""
+
+    for index, text in enumerate(planned):
+        if budget is not None and budget.exhausted:
+            skipped = planned[index:]
+            truncated, reason = True, "budget"
+            break
+        page = search_tracks(text, auth_token, max_items=max_items_per_query, budget=budget)
+        run.append(text)
+        calls += page.calls_used
+        for track in page:
+            merged.setdefault(track["sc_id"], track)
+        if page.truncated:
+            truncated = True
+            if page.stop_reason == "budget" or not reason:
+                reason = page.stop_reason
+
+    if skipped:
+        logger.warning(
+            "op=artist_sc_search_many state=budget_exhausted run=%d skipped=%d",
+            len(run),
+            len(skipped),
+        )
+    logger.info(
+        "op=artist_sc_search_many queries=%d tracks=%d calls=%d truncated=%s reason=%s",
+        len(run),
+        len(merged),
+        calls,
+        truncated,
+        reason or "-",
+    )
+    return SCSearchResult(
+        list(merged.values()),
+        truncated=truncated,
+        stop_reason=reason,
+        calls_used=calls,
+        queries_run=tuple(run),
+        queries_skipped=tuple(skipped),
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────

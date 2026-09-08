@@ -3,9 +3,10 @@
 Three jobs, kept apart so each is testable on its own:
 
 ``classify``
-    Splits a fetched catalogue into the owner's three buckets. Identity is the
-    **uploader account URN**, never a name match: only tracks uploaded by the artist's
-    own bound account may ever be auto-queued (threat T11).
+    Splits a fetched catalogue into the owner's three buckets on the **uploader
+    account URN**. Since 2026-09-08 that is the highest-confidence signal, not the
+    only one: the name-driven, remix-aware role layer lives in
+    ``app/artist_store/identity.py`` and runs on top of these buckets.
 ``diff``
     "Do I already own this?" — reuses ``app/external_track_match.py`` (``parse_version_tag``,
     ``extract_title_stem``, ``fuzzy_match_with_score``) behind a derivation gate so a
@@ -105,6 +106,18 @@ _WS_RUN = re.compile(r"\s+")
 _NON_ALNUM = re.compile(r"[^\w]+")
 _FIRST_TOKEN = re.compile(r"\w+")
 
+#: ISO 3901: 2-letter country, 3-char registrant, 2-digit year, 5-digit designation.
+#: Anything else ("", "0", "unknown", a placeholder a label typed) is not an identity
+#: and must never short-circuit the diff to "owned".
+_ISRC_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{3}\d{7}$")
+_ISRC_STRIP = re.compile(r"[\s\-]+")
+
+#: How a remote track was matched to a local one. ``isrc`` is exact identity;
+#: ``title`` is the fuzzy path; ``none`` means the diff found no owned track.
+MATCH_ISRC = "isrc"
+MATCH_TITLE = "title"
+MATCH_NONE = "none"
+
 
 # ── Errors ────────────────────────────────────────────────────────────────────
 
@@ -148,11 +161,16 @@ class Classification:
 
 @dataclass(frozen=True)
 class TrackMatch:
-    """One remote track's verdict against the library."""
+    """One remote track's verdict against the library.
+
+    ``method`` says HOW it was decided: an exact ISRC hit is identity, a title score is
+    a similarity — the UI should not present the two with the same certainty.
+    """
 
     sc_id: str
     local_track_id: str | None
     score: float
+    method: str = MATCH_NONE
 
     @property
     def matched(self) -> bool:
@@ -191,6 +209,18 @@ def normalize_user_urn(value: Any) -> str:
     if m:
         return f"soundcloud:users:{m.group(1)}"
     return text.casefold()
+
+
+def normalize_isrc(value: Any) -> str:
+    """Canonical 12-character ISRC (upper, no dashes/spaces), or ``""`` when not one.
+
+    Rekordbox stores whatever the tag carried (``US-RC1-17-07839`` or ``USRC11707839``)
+    and SoundCloud returns whatever the uploader typed. Both fold onto one comparable
+    string; a value that does not have the ISO 3901 shape is discarded rather than
+    compared, so two tracks tagged ``"0"`` never read as the same recording.
+    """
+    text = _ISRC_STRIP.sub("", str(value or "")).upper()
+    return text if _ISRC_RE.match(text) else ""
 
 
 def _accent_fold(text: str) -> str:
@@ -371,7 +401,16 @@ def _coerce_track(raw: Any) -> dict[str, Any] | None:
         "downloadable": bool(raw.get("downloadable")),
         "created_at": str(raw.get("created_at") or ""),
         "artwork_url": str(raw.get("artwork_url") or ""),
+        # Normalised here so the diff, the identity table and the UI all compare the
+        # same 12 characters; "" when the upload carries no usable ISRC.
+        "isrc": normalize_isrc(raw.get("isrc")),
+        "label_name": str(raw.get("label_name") or "").strip(),
     }
+
+
+def coerce_track(raw: Any) -> dict[str, Any] | None:
+    """Public single-row form of the coercion; ``None`` for a row with no identity."""
+    return _coerce_track(raw)
 
 
 def coerce_tracks(raw_tracks: Iterable[Any]) -> list[dict[str, Any]]:
@@ -505,13 +544,19 @@ class _LocalIndex:
     derivation key before any fuzzy work happens.
     """
 
-    __slots__ = ("by_artist", "by_token", "entries")
+    __slots__ = ("by_artist", "by_isrc", "by_token", "entries")
 
     def __init__(self, local_tracks: Mapping[str, Any] | Iterable[Any] | None) -> None:
         self.entries: list[_LocalEntry] = []
         self.by_artist: dict[str, list[int]] = {}
         self.by_token: dict[str, list[int]] = {}
+        # ISRC -> first local track id carrying it. Exact identity, consulted before
+        # any title work. Indexed even for a track without a usable title.
+        self.by_isrc: dict[str, str] = {}
         for track_id, track in _iter_local(local_tracks):
+            isrc = normalize_isrc(track.get("ISRC") or track.get("isrc"))
+            if isrc:
+                self.by_isrc.setdefault(isrc, track_id)
             title = str(track.get("Title") or track.get("title") or "").strip()
             if not title:
                 continue
@@ -614,7 +659,12 @@ def diff(
 ) -> Diff:
     """Which remote tracks are already owned, and which are genuinely missing.
 
-    Two gates, in order. **Derivation** — a remix, VIP, bootleg or year-edit never
+    **ISRC first.** When the remote track and a local track both carry a usable ISRC
+    and they are equal, that is the same recording by definition — ``owned``, score
+    1.0, ``method="isrc"``, no title work. Only when either side lacks an ISRC does the
+    title path run.
+
+    Then two gates, in order. **Derivation** — a remix, VIP, bootleg or year-edit never
     matches the original it derives from, while ``(Original Mix)`` / ``(Extended Mix)``
     / bare are the same recording. **Fuzzy** — the shipped ``external_track_match``
     scorer over title stems + artist, at :data:`MISSING_MATCH_THRESHOLD`.
@@ -626,6 +676,12 @@ def diff(
 
     for track in coerce_tracks(remote_tracks):
         sc_id = track["sc_id"]
+        isrc = track.get("isrc") or ""
+        local_by_isrc = index.by_isrc.get(isrc) if isrc else None
+        if local_by_isrc is not None:
+            matches[sc_id] = TrackMatch(sc_id, local_by_isrc, 1.0, MATCH_ISRC)
+            owned.append(sc_id)
+            continue
         names = _artist_names_for(track, artist_names)
         stems = title_stems(track["title"], names)
         best_id: str | None = None
@@ -637,10 +693,10 @@ def diff(
             if best_score >= 1.0:
                 break
         if best_id is not None and best_score >= threshold:
-            matches[sc_id] = TrackMatch(sc_id, best_id, round(best_score, 3))
+            matches[sc_id] = TrackMatch(sc_id, best_id, round(best_score, 3), MATCH_TITLE)
             owned.append(sc_id)
         else:
-            matches[sc_id] = TrackMatch(sc_id, None, round(best_score, 3))
+            matches[sc_id] = TrackMatch(sc_id, None, round(best_score, 3), MATCH_NONE)
             missing.append(sc_id)
 
     return Diff(matches=matches, in_library=tuple(owned), missing=tuple(missing))
@@ -670,6 +726,7 @@ def _annotate(tracks: list[dict[str, Any]], result: Diff) -> list[dict[str, Any]
                 "in_library": owned,
                 "local_track_id": verdict.local_track_id if verdict is not None else None,
                 "match_score": verdict.score if verdict is not None else None,
+                "match_method": verdict.method if verdict is not None else None,
                 "auto_queue_allowed": track.get("bucket") == BUCKET_THEIRS and owned is False,
             }
         )
@@ -808,6 +865,9 @@ __all__ = [
     "BUCKET_THEIRS",
     "CACHE_TTL_S",
     "LONG_FORM_MS",
+    "MATCH_ISRC",
+    "MATCH_NONE",
+    "MATCH_TITLE",
     "MAX_CATALOGUE_TRACKS",
     "MISSING_MATCH_THRESHOLD",
     "TOKEN_OVERLAP_FLOOR",
@@ -819,6 +879,7 @@ __all__ = [
     "TrackMatch",
     "catalogue",
     "classify",
+    "coerce_track",
     "coerce_tracks",
     "derivation_key",
     "diff",
@@ -826,6 +887,7 @@ __all__ = [
     "match_score",
     "mix_exclusion_reason",
     "names_the_artist",
+    "normalize_isrc",
     "normalize_user_urn",
     "title_stems",
     "token_overlap",

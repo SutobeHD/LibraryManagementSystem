@@ -30,6 +30,7 @@ EXPECTED_TABLES = {
     "catalogue_cache",
     "favourites",
     "store_meta",
+    "track_identity",
 }
 
 
@@ -140,23 +141,26 @@ class TestMigrationRunner:
         assert store._schema_version(store._connect()) == store.SCHEMA_VERSION
 
     def test_step_walk_bumps_the_version(self, store, monkeypatch) -> None:
+        # Relative to the real SCHEMA_VERSION: the fixture already ran the shipped
+        # steps, so the fake ones are hung off the end of the chain.
+        base = store.SCHEMA_VERSION
         walked: list[int] = []
 
-        def _v1_to_v2(conn: sqlite3.Connection) -> None:
-            walked.append(2)
+        def _step_a(conn: sqlite3.Connection) -> None:
+            walked.append(base + 1)
             conn.execute("CREATE TABLE step_two (x TEXT)")
 
-        def _v2_to_v3(conn: sqlite3.Connection) -> None:
-            walked.append(3)
+        def _step_b(conn: sqlite3.Connection) -> None:
+            walked.append(base + 2)
             conn.execute("CREATE TABLE step_three (x TEXT)")
 
-        monkeypatch.setattr(store, "SCHEMA_VERSION", 3)
-        monkeypatch.setattr(store, "_MIGRATIONS", {1: _v1_to_v2, 2: _v2_to_v3})
+        monkeypatch.setattr(store, "SCHEMA_VERSION", base + 2)
+        monkeypatch.setattr(store, "_MIGRATIONS", {base: _step_a, base + 1: _step_b})
 
         conn = store._connect()
-        assert store.migrate(conn) == 3
-        assert walked == [2, 3], "steps must run in order, one version at a time"
-        assert store._schema_version(conn) == 3
+        assert store.migrate(conn) == base + 2
+        assert walked == [base + 1, base + 2], "steps must run in order, one version at a time"
+        assert store._schema_version(conn) == base + 2
         tables = {
             r["name"]
             for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()

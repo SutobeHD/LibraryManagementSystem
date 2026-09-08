@@ -8,9 +8,11 @@ as the ``Artists`` folder; ``merge`` groups duplicate artist spellings, costs a 
 performs it and takes it back (``merge.apply`` / ``merge.revert`` — reached through the
 module, their verbs are too generic for this namespace).
 
-``projection`` and ``catalogue`` are imported as modules (``from app.artist_store import
-projection``) — their ``sync`` / ``status`` / ``classify`` / ``diff`` / ``catalogue`` verbs
-are too generic to hoist into this namespace. The provider-link helpers are not: they
+``projection``, ``catalogue`` and ``identity`` are imported as modules (``from
+app.artist_store import projection``) — their ``sync`` / ``status`` / ``classify`` /
+``diff`` / ``catalogue`` / ``classify_roles`` verbs are too generic to hoist into this
+namespace. ``identity`` is the name-based, remix-aware role layer (owner decision
+2026-09-08) plus the ``track_identity`` table. The provider-link helpers are not: they
 are already artist-specific, and the routes bind through them.
 """
 

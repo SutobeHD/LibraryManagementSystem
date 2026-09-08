@@ -27,7 +27,7 @@ import multiprocessing as _mp
 import re
 import sqlite3
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -39,9 +39,26 @@ logger = logging.getLogger("ARTIST_STORE")
 _APP_DIRNAME = "MusicLibraryManager"
 _DB_FILENAME = "artists.db"
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 KIND_ARTIST = "artist"
+
+#: Roles a fetched track can hold for ONE artist (``track_identity.role`` and
+#: ``user_override``). Defined here, not in ``identity.py``, because the store must
+#: refuse a value the classifier does not know — and ``identity`` imports this module.
+ROLE_PRIMARY = "primary"
+ROLE_REMIXER = "remixer"
+ROLE_REMIXED_BY_OTHER = "remixed_by_other"
+ROLE_FEATURED = "featured"
+ROLE_UNCERTAIN = "uncertain"
+IDENTITY_ROLES = frozenset(
+    {ROLE_PRIMARY, ROLE_REMIXER, ROLE_REMIXED_BY_OTHER, ROLE_FEATURED, ROLE_UNCERTAIN}
+)
+
+CONFIDENCE_HIGH = "high"
+CONFIDENCE_MEDIUM = "medium"
+CONFIDENCE_LOW = "low"
+IDENTITY_CONFIDENCES = frozenset({CONFIDENCE_HIGH, CONFIDENCE_MEDIUM, CONFIDENCE_LOW})
 
 #: Per-collection sync behaviour (Settings: Auto / Review / Off).
 SYNC_AUTO = "auto"
@@ -180,24 +197,54 @@ def _set_schema_version(conn: sqlite3.Connection, version: int) -> None:
     )
 
 
-# vN -> vN+1 steps. Empty at v1; register additive steps here as the feature grows.
-_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {}
+# v2: the owner's "local file with artist id + universal track id". One row per
+# (collection, SoundCloud track): the role the classifier gave the track FOR THAT
+# artist, and the role the user pinned over it. ``isrc`` is the universal id when the
+# upload carries one; ``sc_urn`` is the fallback key. The key is composite on purpose:
+# "Bangarang (Boys Noize Remix)" is ``remixer`` for Boys Noize and ``remixed_by_other``
+# for Skrillex, and a per-track primary key could hold only one of those verdicts.
+_DDL_V2_TRACK_IDENTITY = """
+CREATE TABLE IF NOT EXISTS track_identity (
+    sc_urn        TEXT NOT NULL,                  -- soundcloud:tracks:<id>
+    collection_id TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    isrc          TEXT,                           -- normalised (upper, no dashes) or NULL
+    title         TEXT,
+    uploader_urn  TEXT,
+    role          TEXT NOT NULL,                  -- classifier verdict, see IDENTITY_ROLES
+    confidence    TEXT NOT NULL,                  -- high|medium|low
+    first_seen    TEXT NOT NULL,
+    last_seen     TEXT NOT NULL,
+    user_override TEXT,                           -- pinned role; wins over `role`
+    PRIMARY KEY (collection_id, sc_urn)
+);
+CREATE INDEX IF NOT EXISTS ix_track_identity_collection ON track_identity(collection_id);
+CREATE INDEX IF NOT EXISTS ix_track_identity_isrc ON track_identity(isrc);
+"""
+
+
+def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
+    conn.executescript(_DDL_V2_TRACK_IDENTITY)
+
+
+# vN -> vN+1 steps. Additive only — the base DDL above is frozen (users already hold a
+# v1 file), so every later table arrives through a step here.
+_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {1: _migrate_v1_to_v2}
 
 
 def migrate(conn: sqlite3.Connection) -> int:
     """Bring ``conn`` to ``SCHEMA_VERSION``. Idempotent. Returns the resulting version.
 
-    A fresh DB gets the current tables and is stamped directly. An existing DB walks
-    ``_MIGRATIONS`` forward one step at a time. A DB newer than the code is left alone
+    A fresh DB gets the v1 tables, is stamped v1 and then walks the same
+    ``_MIGRATIONS`` steps an existing file would — one code path for both, so a step
+    cannot be forgotten on the fresh side. A DB newer than the code is left alone
     (logged) so a downgrade cannot silently corrupt rows.
     """
     conn.executescript(_DDL_V1)
     current = _schema_version(conn)
 
     if current == 0:
-        _set_schema_version(conn, SCHEMA_VERSION)
-        conn.commit()
-        return SCHEMA_VERSION
+        current = 1
+        _set_schema_version(conn, current)
     if current > SCHEMA_VERSION:
         logger.warning(
             "artists.db schema_version=%d newer than code SCHEMA_VERSION=%d; leaving as-is",
@@ -655,3 +702,161 @@ def get_catalogue_cache(collection_id: str, max_age_s: float | None = None) -> A
     except (TypeError, json.JSONDecodeError) as e:
         logger.warning("artist_store cache payload unreadable id=%s err=%s", collection_id, e)
         return None
+
+
+# --------------------------------------------------------------------------- track identity
+
+
+def _check_role(role: str, *, field_name: str = "role") -> str:
+    if role not in IDENTITY_ROLES:
+        raise ValueError(f"unknown {field_name} {role!r}; expected one of {sorted(IDENTITY_ROLES)}")
+    return role
+
+
+def _check_confidence(confidence: str) -> str:
+    if confidence not in IDENTITY_CONFIDENCES:
+        raise ValueError(
+            f"unknown confidence {confidence!r}; expected one of {sorted(IDENTITY_CONFIDENCES)}"
+        )
+    return confidence
+
+
+def _identity_row(collection_id: str, entry: Mapping[str, Any], now: str) -> tuple[Any, ...] | None:
+    sc_urn = str(entry.get("sc_urn") or entry.get("sc_id") or "").strip()
+    if not sc_urn:
+        return None
+    role = _check_role(str(entry.get("role") or ""))
+    confidence = _check_confidence(str(entry.get("confidence") or ""))
+    isrc = str(entry.get("isrc") or "").strip() or None
+    title = str(entry.get("title") or "").strip() or None
+    uploader_urn = str(entry.get("uploader_urn") or "").strip() or None
+    return (sc_urn, collection_id, isrc, title, uploader_urn, role, confidence, now, now)
+
+
+_UPSERT_IDENTITY_SQL = (
+    "INSERT INTO track_identity "
+    "(sc_urn, collection_id, isrc, title, uploader_urn, role, confidence, first_seen, last_seen) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+    "ON CONFLICT(collection_id, sc_urn) DO UPDATE SET "
+    "isrc = excluded.isrc, title = excluded.title, uploader_urn = excluded.uploader_urn, "
+    "role = excluded.role, confidence = excluded.confidence, last_seen = excluded.last_seen"
+)
+
+
+def upsert_track_identities(collection_id: str, entries: Iterable[Mapping[str, Any]]) -> int:
+    """Remember the classifier's verdict for each track of one collection.
+
+    One transaction under the module lock. ``first_seen`` and ``user_override`` are
+    never touched by an upsert — the first is history, the second is the user's
+    decision and the classifier has no say over it. ``last_seen`` is refreshed.
+    Rows without an ``sc_urn``/``sc_id`` are skipped. Returns the number of rows written.
+    """
+    now = _now_iso()
+    rows = [r for r in (_identity_row(collection_id, e, now) for e in entries) if r is not None]
+    if not rows:
+        return 0
+    conn = _ensure_schema()
+    with _write_lock:
+        conn.executemany(_UPSERT_IDENTITY_SQL, rows)
+        conn.commit()
+    return len(rows)
+
+
+def upsert_track_identity(
+    collection_id: str,
+    sc_urn: str,
+    *,
+    role: str,
+    confidence: str,
+    isrc: str | None = None,
+    title: str | None = None,
+    uploader_urn: str | None = None,
+) -> bool:
+    """Single-row form of :func:`upsert_track_identities`. True when a row was written."""
+    return (
+        upsert_track_identities(
+            collection_id,
+            [
+                {
+                    "sc_urn": sc_urn,
+                    "role": role,
+                    "confidence": confidence,
+                    "isrc": isrc,
+                    "title": title,
+                    "uploader_urn": uploader_urn,
+                }
+            ],
+        )
+        == 1
+    )
+
+
+def get_track_identity(collection_id: str, sc_urn: str) -> dict[str, Any] | None:
+    conn = _ensure_schema()
+    row = conn.execute(
+        "SELECT * FROM track_identity WHERE collection_id = ? AND sc_urn = ?",
+        (collection_id, sc_urn),
+    ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def list_track_identities(collection_id: str) -> list[dict[str, Any]]:
+    conn = _ensure_schema()
+    rows = conn.execute(
+        "SELECT * FROM track_identity WHERE collection_id = ? ORDER BY last_seen DESC, sc_urn",
+        (collection_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def find_track_identities_by_isrc(isrc: str) -> list[dict[str, Any]]:
+    """Every remembered row carrying this ISRC, across collections (index-backed)."""
+    text = str(isrc or "").strip()
+    if not text:
+        return []
+    conn = _ensure_schema()
+    rows = conn.execute(
+        "SELECT * FROM track_identity WHERE isrc = ? ORDER BY collection_id, sc_urn", (text,)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_identity_overrides(collection_id: str) -> dict[str, str]:
+    """``sc_urn -> pinned role`` for one collection — what the classifier must yield to."""
+    conn = _ensure_schema()
+    rows = conn.execute(
+        "SELECT sc_urn, user_override FROM track_identity "
+        "WHERE collection_id = ? AND user_override IS NOT NULL",
+        (collection_id,),
+    ).fetchall()
+    return {str(r["sc_urn"]): str(r["user_override"]) for r in rows}
+
+
+def set_identity_override(collection_id: str, sc_urn: str, role: str | None) -> bool:
+    """Pin (or with ``None`` unpin) the role of one track for one artist.
+
+    This is what "manual" means for a wrongly-classified track. A pin on a track the
+    store has never seen is refused (False) rather than inventing a row with a made-up
+    classifier verdict — the row appears once the catalogue has been classified.
+    """
+    if role is not None:
+        _check_role(role, field_name="override")
+    conn = _ensure_schema()
+    with _write_lock:
+        cur = conn.execute(
+            "UPDATE track_identity SET user_override = ? WHERE collection_id = ? AND sc_urn = ?",
+            (role, collection_id, sc_urn),
+        )
+        conn.commit()
+    return cur.rowcount > 0
+
+
+def delete_track_identity(collection_id: str, sc_urn: str) -> bool:
+    conn = _ensure_schema()
+    with _write_lock:
+        cur = conn.execute(
+            "DELETE FROM track_identity WHERE collection_id = ? AND sc_urn = ?",
+            (collection_id, sc_urn),
+        )
+        conn.commit()
+    return cur.rowcount > 0
