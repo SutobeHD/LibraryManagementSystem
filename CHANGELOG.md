@@ -74,6 +74,50 @@
   by Tauri stdout reader + dev-middleware fallback. Frontend attaches
   `Authorization: Bearer` via bootstrap promise. New `safe_compare` helper.
   `SHUTDOWN_TOKEN` query-string scheme deleted (redundant under `require_session`).
+- Added: **Artist Hub** — an overview of your favourite artists and their music.
+  - Favourites picked from a browse column listing every artist in the library,
+    with a configurable minimum track count (Settings -> Analysis).
+  - **Merge** for the same artist spelled several ways (`boys noize` /
+    `Boys Noize`). Deterministic folds only — case, whitespace, `.`/`-`/`_`,
+    apostrophes, `&` vs `and`. Never fuzzy: an initialism or a typo stays a
+    separate group on purpose, because a false merge cannot be told apart again
+    afterwards. Apply repoints `master.db` **and** rewrites the audio file tags,
+    and every row is journalled so Revert restores both.
+  - **Rekordbox projection** — a flat `Artists` folder with one playlist per
+    favourite, holding every alias variant, so a merged artist is one playlist.
+    Diff-in-place: re-syncing an unchanged artist writes nothing. Refuses to run
+    when `masterPlaylists6.xml` is missing, because rbox silently skips that file
+    and the playlists would vanish on the next Rekordbox restart.
+  - **SoundCloud catalogue per artist**, linked manually. The artist is
+    identified by **name** — title prefix, uploader name, remixer credit — not by
+    the uploading account, because labels, promo channels and DJs upload most of
+    a signed artist's catalogue. Remixes are handled explicitly: their own
+    remixes count as theirs; a remix of their track by someone else is listed
+    separately and never auto-queued. What is missing from the library is split
+    the same way.
+  - **Discover** — artists you do not have yet, from one related-artists hop per
+    linked favourite plus a zero-call tier over catalogues already cached.
+    Already-owned and already-favourited names are filtered out.
+  - **Background sync** (off by default, Settings -> Network) refreshes
+    favourites' catalogues while the app is idle, under a per-pass call budget,
+    stopping the moment you start anything. It never downloads — that stays a
+    button.
+  - Persistent SoundCloud login: the refresh token is stored in the OS keyring
+    and renewed silently, so closing the app (or a day away) no longer means
+    logging in again. **Existing users must log in once more** to store a refresh
+    token.
+  - USB export moves files instead of re-copying them when only the artist
+    folder changed, including the two-step rename a case-only change needs on
+    Windows. Both relocation branches verify file content (size + first/last
+    64 KiB) before moving or deleting anything on the stick; an unreadable file
+    counts as unproven and is skipped.
+  - Changed: the smart-playlist button generates **labels only**. Its old
+    `By Artist` branch grouped on the raw artist string (so two spellings became
+    two folders) and duplicated every playlist on each re-run. An existing
+    `By Artist` folder is reported but never deleted.
+  - Fixed: Settings could silently overwrite every stored value — a timed-out
+    `GET /api/settings` left the form showing defaults, and Save posted them.
+    Saving is now disabled until a load succeeds.
 
 ## v1.0.0-beta — 2026-05-07
 

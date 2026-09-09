@@ -203,6 +203,59 @@ The library DB (``master.db``) is not backed up by this app — Rekordbox
 itself maintains versioned copies in its install directory. If a user
 needs to revert in-app edits, they restore from Rekordbox.
 
+### 9. Artist Hub (landed 2026-09-09, `feat/artist-hub`)
+```
+Library load
+  → db.artists (names already normalised + metadata_mappings applied)
+  → app/artist_store/registry.py: resolve_library_artists()
+    → artists.db  (SIDECAR, platformdirs — never master.db)
+       collections · aliases · sc_binding · sync_state · playlist id-map · catalogue cache
+
+Favourite an artist
+  → POST /api/artists/favourites  → sidecar row  (DELETE .../{collection_id} to undo)
+
+Merge duplicate spellings
+  → GET  /api/artists/merge/candidates   (fold_key groups — deterministic, no fuzzy)
+  → POST /api/artists/merge/preview      (writes NOTHING)
+  → POST /api/artists/merge/apply
+    → RekordboxDB facade (holds _db_write_lock) → update_content(item)
+    → audio_tags.write_tags() on every affected file
+    → metadata-fixer undo log, one run_id  → POST /api/artists/merge/revert/{run_id}
+
+Project into Rekordbox
+  → POST /api/artists/projection/sync
+    → refuses when masterPlaylists6.xml is absent (rbox skips it silently,
+      and the playlists would vanish on the next Rekordbox restart)
+    → flat "Artists" folder, one playlist per favourite, all alias variants
+    → diff-in-place: unchanged artist = zero master.db writes
+
+SoundCloud catalogue (manual link)
+  → app/soundcloud_auth.py: get_access_token()  ← keyring blob, silent refresh
+  → soundcloud_api: uploads ∪ search(name+aliases) ∪ reposts, one CallBudget
+  → artist_store/identity.py: role + confidence per track (name-based, remix-aware)
+  → artist_store/catalogue.py: diff vs library behind the derivation gate
+  → cached in the sidecar (the FETCH is cached, never the diff)
+
+Discover / background sync
+  → GET  /api/artists/discover      one /related hop per linked favourite
+                                    + zero-call co-occurrence over the cache
+  → GET  /api/artists/sync/status   artist_store/sync.py: is_idle() — composed
+                                    from every existing tracker, fails closed
+  → POST /api/artists/sync/run      refreshes auto/review favourites, shared
+                                    CallBudget, never downloads
+
+USB export after a merge
+  → OneLibraryUsbWriter.sync() Stage 1b: artist-folder rename MOVES the file
+    (two-step on Windows for a case-only change) instead of re-copying,
+    gated on a size + first/last-64-KiB fingerprint on both the move and the
+    delete branch — unreadable file = unproven = skipped
+```
+
+Rollback for the whole feature is ``rm artists.db``: no library data lives
+in the sidecar. What a merge wrote into ``master.db`` and the audio tags is
+undone by Revert, not by deleting the sidecar.
+
+
 ---
 
 ## Security Architecture
