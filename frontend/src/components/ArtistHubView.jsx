@@ -25,6 +25,26 @@ import ArtistDetail, { ArtistDetailActions, ArtistDetailSummary } from './artist
 import { fetchMergeCandidates } from './artistHub/artistHubApi';
 import { catalogueErrorMessage, fetchCatalogue } from './artistHub/artistCatalogueApi';
 import { splitCatalogue } from './artistHub/catalogueCopy';
+import {
+    discoveryErrorMessage,
+    fetchDiscovery,
+    fetchSyncStatus,
+    runBackgroundSync,
+} from './artistHub/artistDiscoveryApi';
+import {
+    SYNC_MODE_HINTS,
+    callBudgetNote,
+    candidateFacts,
+    coOccurrenceNote,
+    emptyNote,
+    exclusionNote,
+    idleSentence,
+    lastSyncedLabel,
+    relatedNote,
+    runSummary,
+    seedLine,
+} from './artistHub/discoveryCopy';
+import { ARTIST_SYNC_STATUS_POLL_MS } from '../config/constants';
 import useArtistCatalogue from './artistHub/useArtistCatalogue';
 import useArtistDetailActions from './artistHub/useArtistDetailActions';
 
@@ -34,14 +54,19 @@ import useArtistDetailActions from './artistHub/useArtistDetailActions';
  * the complete "All artists" list, and the SoundCloud discovery tab.
  *
  * Selecting an artist opens `artistHub/ArtistDetail` — owned beside missing on
- * SoundCloud. That catalogue read is the ONLY place a fetch happens (owner's ToU
- * guardrail: on selection, favourited artists only, never speculatively).
+ * SoundCloud. A catalogue fetch happens on selection, on the row's Update button, or in
+ * the idle background pass — favourited artists only, never speculatively (owner's ToU
+ * guardrail).
  *
- * Milestone boundary: per-artist Update, linking and the missing-track download are
- * live; **Update all** and **SoundCloud discovery** are later steps of
- * `docs/research/implement/inprogress_library-artist-hub.md` and are NOT built. Those
- * two render disabled with the reason spelled out rather than hidden or stubbed, so
- * the view never implies a sync happened.
+ * Discovery (`GET /api/artists/discover`) is live: one `/related` hop per linked
+ * favourite plus a zero-call co-occurrence pass over already-cached catalogues. The
+ * panel renders the per-source state, so an empty list never reads as "nobody found"
+ * when a source failed, hit the call cap or was never queried.
+ *
+ * Background sync (`/api/artists/sync/*`) honours the per-artist Auto / Review / Off
+ * mode. It refreshes catalogues and **never downloads** — a download stays a button the
+ * user presses. Every sentence about it comes from `artistHub/discoveryCopy.js`, which
+ * is unit-tested precisely because this screen has shipped fabricated absence before.
  */
 
 const SYNC_MODES = [
@@ -52,6 +77,7 @@ const SYNC_MODES = [
 
 const SUGGEST_TAB_BACKLOG = 'backlog';
 const SUGGEST_TAB_ALL = 'all';
+const SUGGEST_TAB_DISCOVER = 'discover';
 
 const BROWSE_SORTS = [
     { id: 'name', label: 'A–Z' },
@@ -62,14 +88,12 @@ const BROWSE_SORTS = [
 // first page is never shorter than what "Load more" then pages past.
 const ARTIST_BROWSE_PAGE_SIZE = 100;
 
-// Bulk refresh stays off on purpose: the approved guardrail fetches a catalogue for
-// the artist the user selected, not for every favourite in one sweep.
-const SC_UPDATE_ALL_REASON =
-    'Updating every favourite in one sweep is not built — by design a catalogue is only ' +
-    'fetched for the artist you open. Use the Update button on a row, or open the artist.';
-
-const SC_DISCOVER_REASON =
-    'SoundCloud discovery (related artists) is a later step of the artist-hub plan and is not built.';
+// "Sync now" runs the same idle pass the scheduler runs, on demand. It refreshes the
+// catalogues of favourites whose mode is Auto or Review, under one hard call budget, and
+// it queues nothing — a download stays a button the user presses.
+const SYNC_NOW_TITLE =
+    'Refresh the SoundCloud catalogues of your Auto/Review favourites now. Caps: 20 artists ' +
+    'and 60 calls per pass. It never downloads anything.';
 
 const SC_NOT_LINKED_REASON =
     'Not linked to SoundCloud yet — open this artist and use "Link SoundCloud profile".';
@@ -158,9 +182,69 @@ const SyncModeControl = ({ value, onChange }) => (
         options={SYNC_MODES}
         value={value || 'off'}
         onChange={onChange}
-        titleFor={(mode) => `Sync mode: ${mode.label}`}
+        titleFor={(mode) => SYNC_MODE_HINTS[mode.id] || `Sync mode: ${mode.label}`}
     />
 );
+
+/** One suggestion from `GET /api/artists/discover`. Only measured facts are printed. */
+const DiscoveryRow = ({ candidate, busy, onAdd }) => {
+    const facts = candidateFacts(candidate);
+    const seeds = seedLine(candidate);
+    return (
+        <div className="flex items-center gap-3 px-3 py-2 mb-1.5 rounded-xl bg-mx-card/40 border border-white/5 transition-all">
+            <ArtistAvatar name={candidate.name} artwork="" small />
+            <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 min-w-0">
+                    {candidate.permalink_url ? (
+                        <a
+                            href={candidate.permalink_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="font-semibold text-[13px] text-ink-primary truncate hover:text-amber2"
+                            title={`Open ${candidate.name} on SoundCloud`}
+                        >
+                            {candidate.name}
+                        </a>
+                    ) : (
+                        <span className="font-semibold text-[13px] text-ink-primary truncate">
+                            {candidate.name}
+                        </span>
+                    )}
+                    {candidate.co_signal > 1 && (
+                        <span className="px-1.5 py-[1px] rounded-mx-xs text-[9px] font-semibold uppercase tracking-wider bg-amber2/10 border border-amber2/30 text-amber2 shrink-0">
+                            {candidate.co_signal}× seeded
+                        </span>
+                    )}
+                </div>
+                {facts.length > 0 && (
+                    <div className="mt-0.5 text-[11.5px] text-ink-muted font-mono truncate">
+                        {facts.join(' · ')}
+                    </div>
+                )}
+                {seeds && <div className="mt-0.5 text-[11px] text-ink-muted truncate">{seeds}</div>}
+            </div>
+            <button
+                type="button"
+                disabled={busy}
+                onClick={() => onAdd(candidate)}
+                title={`Add ${candidate.name} to your favourite artists`}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-mx-sm text-[11px] bg-mx-card border border-line-subtle text-ink-primary hover:border-amber2/50 hover:text-amber2 transition-colors disabled:opacity-40 shrink-0"
+            >
+                {busy ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                Add
+            </button>
+        </div>
+    );
+};
+
+/** A source that could not answer. Never rendered as an empty result. */
+const SourceNote = ({ children }) =>
+    children ? (
+        <div className="mb-2 px-2.5 py-2 rounded-mx-sm bg-amber2/[0.06] border border-amber2/25 text-[11.5px] text-ink-secondary leading-relaxed">
+            {children}
+        </div>
+    ) : null;
 
 const PanelHead = ({ label, right }) => (
     <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-line-subtle">
@@ -236,6 +320,14 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
     const [browseLoading, setBrowseLoading] = useState(false);
     const [browseAppending, setBrowseAppending] = useState(false);
     const [browseError, setBrowseError] = useState(false);
+    // null = never fetched. The panel must not render "nothing found" for a source it
+    // has not asked yet, so absence of a payload is its own state.
+    const [discovery, setDiscovery] = useState(null);
+    const [discoveryLoading, setDiscoveryLoading] = useState(false);
+    const [discoveryError, setDiscoveryError] = useState('');
+    // GET /api/artists/sync/status — idle verdict, opt-in flag and the last run record.
+    const [syncStatus, setSyncStatus] = useState(null);
+    const [syncBusy, setSyncBusy] = useState(false);
     const [mergeOpen, setMergeOpen] = useState(false);
     const [mergeSeed, setMergeSeed] = useState(null);
     // null = not scanned (or the scan failed) — the affordance stays honest about
@@ -279,6 +371,36 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
         } catch (e) {
             console.error('[ArtistHub] duplicate scan failed', e);
             setDuplicateCount(null);
+        }
+    }, []);
+
+    // Discovery costs SoundCloud calls, so it fires when the tab is opened or the
+    // reload button is pressed — never on mount, never on a poll.
+    const loadDiscovery = useCallback(async () => {
+        setDiscoveryLoading(true);
+        setDiscoveryError('');
+        try {
+            setDiscovery(await fetchDiscovery());
+        } catch (e) {
+            console.error('[ArtistHub] discovery failed', e);
+            // The payload is gone, so the panel has no per-source state to show. Keep
+            // the previous list rather than replacing it with a misleading empty one.
+            setDiscoveryError(
+                discoveryErrorMessage(e, 'Could not reach the backend for suggestions.')
+            );
+        } finally {
+            setDiscoveryLoading(false);
+        }
+    }, []);
+
+    // Read-only and cheap (a probe sweep + one sidecar read); safe to poll while the
+    // tab is open so the idle line stays true instead of going stale.
+    const loadSyncStatus = useCallback(async () => {
+        try {
+            setSyncStatus(await fetchSyncStatus());
+        } catch (e) {
+            console.error('[ArtistHub] sync status failed', e);
+            setSyncStatus(null);
         }
     }, []);
 
@@ -329,6 +451,10 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
         setBrowseRows([]);
         setBrowseTotal(0);
         setDuplicateCount(null);
+        // The "already yours" exclusion is measured against the loaded library, so a
+        // library swap invalidates the whole discovery payload, not just its counts.
+        setDiscovery(null);
+        setDiscoveryError('');
     }, [libraryStatus?.loaded]);
 
     // The view stays mounted behind the other library tabs, so the fetch waits
@@ -338,7 +464,24 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
         setHubRequested(true);
         loadHub();
         loadDuplicateCount();
-    }, [active, hubRequested, loadHub, loadDuplicateCount]);
+        loadSyncStatus();
+    }, [active, hubRequested, loadHub, loadDuplicateCount, loadSyncStatus]);
+
+    // Keep the idle line and the last-run record current while the tab is open. Stops
+    // the moment the user leaves — there is nothing to explain on a hidden tab.
+    useEffect(() => {
+        if (!active) return undefined;
+        const handle = setInterval(loadSyncStatus, ARTIST_SYNC_STATUS_POLL_MS);
+        return () => clearInterval(handle);
+    }, [active, loadSyncStatus]);
+
+    // The first visit to the Discover tab fetches; later visits reuse what is loaded
+    // until the user presses reload. A tab switch must not spend a call budget.
+    useEffect(() => {
+        if (!active || suggestTab !== SUGGEST_TAB_DISCOVER) return;
+        if (discovery !== null || discoveryLoading || discoveryError) return;
+        loadDiscovery();
+    }, [active, suggestTab, discovery, discoveryLoading, discoveryError, loadDiscovery]);
 
     // Re-query the server as the search term changes, debounced so typing does not
     // fire a request per keystroke.
@@ -373,11 +516,24 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
     const refreshPanels = useCallback(() => {
         loadHub(searchTerm.trim());
         loadDuplicateCount();
+        loadSyncStatus();
         setProjectionToken((n) => n + 1);
         if (suggestTab === SUGGEST_TAB_ALL) {
             loadBrowse({ query: searchTerm.trim(), sort: browseSort, offset: 0, append: false });
         }
-    }, [browseSort, loadBrowse, loadDuplicateCount, loadHub, searchTerm, suggestTab]);
+        if (suggestTab === SUGGEST_TAB_DISCOVER) {
+            loadDiscovery();
+        }
+    }, [
+        browseSort,
+        loadBrowse,
+        loadDiscovery,
+        loadDuplicateCount,
+        loadHub,
+        loadSyncStatus,
+        searchTerm,
+        suggestTab,
+    ]);
 
     const openMergeDialog = useCallback((seed = null) => {
         setMergeSeed(seed);
@@ -589,6 +745,49 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
         }
     }, []);
 
+    // A suggestion has no collection row yet — only a name (and a SoundCloud URN we do
+    // NOT auto-bind: linking an account stays a manual, deliberate action).
+    const addSuggestedArtist = useCallback(
+        async (candidate) => {
+            const ok = await addFavourite({
+                collection_id: candidate.urn || candidate.name,
+                name: candidate.name,
+            });
+            if (!ok) return;
+            setDiscovery((current) =>
+                current
+                    ? {
+                          ...current,
+                          suggestions: (current.suggestions ?? []).filter(
+                              (s) => s.name !== candidate.name || s.urn !== candidate.urn
+                          ),
+                      }
+                    : current
+            );
+        },
+        [addFavourite]
+    );
+
+    // The manual half of the background pass: same code path, same caps, run on demand.
+    // `force` only bypasses the opt-in setting — a busy app still gets a refusal, and
+    // the toast reports the refusal instead of pretending a sync happened.
+    const syncNow = useCallback(async () => {
+        setSyncBusy(true);
+        try {
+            const run = await runBackgroundSync({ force: true });
+            const summary = runSummary(run);
+            if (run?.artists_synced > 0) toast.success(summary);
+            else toast(summary || 'Nothing to refresh right now.');
+            await loadHub(searchTerm.trim());
+        } catch (e) {
+            console.error('[ArtistHub] background sync failed', e);
+            toast.error(discoveryErrorMessage(e, 'Could not run the background sync'));
+        } finally {
+            setSyncBusy(false);
+            loadSyncStatus();
+        }
+    }, [loadHub, loadSyncStatus, searchTerm]);
+
     const artistMenu = useContextMenu();
 
     const copyArtistName = useCallback(async (name) => {
@@ -687,6 +886,18 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
     const filteredBacklog = backlog;
 
     const showAllArtists = suggestTab === SUGGEST_TAB_ALL;
+    const showDiscover = suggestTab === SUGGEST_TAB_DISCOVER;
+
+    // collection_id → { last_sync_at, last_error } from GET /api/artists/sync/status.
+    // A favourite missing from the map has never been synced; the row then says nothing
+    // rather than inventing a date.
+    const syncStateById = useMemo(() => {
+        const map = new Map();
+        (syncStatus?.artists ?? []).forEach((row) => map.set(row.collection_id, row));
+        return map;
+    }, [syncStatus]);
+
+    const suggestions = discovery?.suggestions ?? [];
 
     const suggestTabClass = (id) =>
         `px-2.5 py-2 text-[12px] border-b-2 transition-colors ${
@@ -880,12 +1091,22 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                             label={`Favourite artists · ${favourites.length}`}
                             right={
                                 <button
-                                    disabled
-                                    title={SC_UPDATE_ALL_REASON}
-                                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-mx-sm text-[11px] bg-mx-card border border-line-subtle text-ink-muted opacity-50 cursor-not-allowed"
+                                    type="button"
+                                    disabled={syncBusy || favourites.length === 0}
+                                    title={
+                                        favourites.length === 0
+                                            ? 'Favourite an artist first — a pass only refreshes favourites.'
+                                            : SYNC_NOW_TITLE
+                                    }
+                                    onClick={syncNow}
+                                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-mx-sm text-[11px] bg-mx-card border border-line-subtle text-ink-primary hover:border-amber2/50 hover:text-amber2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:text-ink-muted disabled:hover:border-line-subtle"
                                 >
-                                    <RefreshCw size={12} />
-                                    Update all
+                                    {syncBusy ? (
+                                        <Loader2 size={12} className="animate-spin" />
+                                    ) : (
+                                        <RefreshCw size={12} />
+                                    )}
+                                    Sync now
                                 </button>
                             }
                         />
@@ -926,6 +1147,34 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                                                         {row.track_count} tracks
                                                     </span>
                                                     <AliasNote names={row.library_names} />
+                                                    {(() => {
+                                                        const state = syncStateById.get(
+                                                            row.collection_id
+                                                        );
+                                                        const label = lastSyncedLabel(
+                                                            state?.last_sync_at
+                                                        );
+                                                        if (!label) return null;
+                                                        return (
+                                                            <span
+                                                                title={
+                                                                    state?.last_error
+                                                                        ? `Last attempt failed: ${state.last_error}`
+                                                                        : 'Last SoundCloud catalogue refresh'
+                                                                }
+                                                                className={
+                                                                    state?.last_error
+                                                                        ? 'text-bad'
+                                                                        : undefined
+                                                                }
+                                                            >
+                                                                · {label}
+                                                                {state?.last_error
+                                                                    ? ' (failed)'
+                                                                    : ''}
+                                                            </span>
+                                                        );
+                                                    })()}
                                                 </div>
                                             </div>
                                             <div className="flex items-center gap-2 shrink-0">
@@ -979,15 +1228,42 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                         </div>
 
                         <div className="border-t border-line-subtle px-3.5 py-2.5 text-[11.5px] text-ink-muted leading-relaxed">
-                            <b className="text-ink-secondary font-semibold">Update</b> fetches that
-                            artist's SoundCloud catalogue now — it is live for a linked artist, and
-                            disabled with the reason when there is no link. The Auto / Review / Off
-                            modes are stored but{' '}
-                            <b className="text-ink-secondary font-semibold">
-                                nothing acts on them yet
-                            </b>
-                            : the idle background sync, and Update all, are later steps of the
-                            artist-hub plan.
+                            <b className="text-ink-secondary font-semibold">Update</b> fetches one
+                            artist's SoundCloud catalogue now.{' '}
+                            <b className="text-ink-secondary font-semibold">Auto</b> and{' '}
+                            <b className="text-ink-secondary font-semibold">Review</b> put the
+                            artist into the background pass — <b>Off</b> skips them entirely.
+                            Neither mode ever downloads: a pass refreshes the catalogue, and every
+                            download stays a button you press.
+                            <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                                <span
+                                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                        syncStatus?.idle ? 'bg-ok' : 'bg-ink-placeholder'
+                                    }`}
+                                />
+                                <span className="text-ink-secondary">
+                                    {idleSentence(syncStatus)}
+                                </span>
+                                {syncStatus && !syncStatus.enabled && (
+                                    <span className="text-ink-muted">
+                                        Background sync is off — turn it on in Settings → Network,
+                                        or press Sync now.
+                                    </span>
+                                )}
+                            </div>
+                            {syncStatus?.last_run && (
+                                <div className="mt-1 text-ink-muted">
+                                    Last pass: {runSummary(syncStatus.last_run)}
+                                </div>
+                            )}
+                            {(syncStatus?.unobservable?.length ?? 0) > 0 && (
+                                <div className="mt-1 text-ink-muted">
+                                    Not everything is observable — {syncStatus.unobservable.length}{' '}
+                                    load path
+                                    {syncStatus.unobservable.length === 1 ? '' : 's'} report
+                                    nothing, so "idle" is a best reading, not a proof.
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -1011,18 +1287,51 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                                 </button>
                                 <button
                                     type="button"
-                                    disabled
-                                    title={SC_DISCOVER_REASON}
-                                    className="flex items-center gap-1.5 px-2.5 py-2 text-[12px] text-ink-muted border-b-2 border-transparent opacity-50 cursor-not-allowed"
+                                    onClick={() => setSuggestTab(SUGGEST_TAB_DISCOVER)}
+                                    title="Artists you do not own yet, from SoundCloud's related accounts plus the catalogues already cached here"
+                                    className={`flex items-center gap-1.5 ${suggestTabClass(
+                                        SUGGEST_TAB_DISCOVER
+                                    )}`}
                                 >
-                                    Discover on SoundCloud
-                                    <span className="px-1.5 py-[1px] rounded-mx-xs text-[9px] font-semibold uppercase tracking-wider bg-mx-card border border-line-subtle">
-                                        Later
-                                    </span>
+                                    <Cloud size={13} />
+                                    Discover
                                 </button>
                             </div>
 
-                            {showAllArtists ? (
+                            {showDiscover ? (
+                                <PanelHead
+                                    label={
+                                        discovery
+                                            ? `Discover · ${suggestions.length} suggested from ${discovery.favourites} favourite${
+                                                  discovery.favourites === 1 ? '' : 's'
+                                              }`
+                                            : 'Discover · SoundCloud'
+                                    }
+                                    right={
+                                        <div className="flex items-center gap-2">
+                                            {callBudgetNote(discovery) && (
+                                                <span className="font-mono text-[11px] text-ink-muted bg-black/20 rounded-full px-2 py-[2px]">
+                                                    {callBudgetNote(discovery)}
+                                                </span>
+                                            )}
+                                            <button
+                                                type="button"
+                                                disabled={discoveryLoading}
+                                                onClick={loadDiscovery}
+                                                title="Ask SoundCloud again (spends calls from the per-run cap)"
+                                                className="p-1 rounded-mx-sm text-ink-muted hover:text-amber2 transition-colors disabled:opacity-40"
+                                            >
+                                                <RotateCw
+                                                    size={13}
+                                                    className={
+                                                        discoveryLoading ? 'animate-spin' : ''
+                                                    }
+                                                />
+                                            </button>
+                                        </div>
+                                    }
+                                />
+                            ) : showAllArtists ? (
                                 <PanelHead
                                     label={
                                         browseTotal > browseRows.length
@@ -1054,7 +1363,53 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                             )}
 
                             <div className="flex-1 min-h-0 overflow-y-auto p-3">
-                                {showAllArtists ? (
+                                {showDiscover ? (
+                                    <>
+                                        {discoveryError && (
+                                            <SourceNote>
+                                                {discoveryError} Nothing below was refreshed.
+                                            </SourceNote>
+                                        )}
+                                        {discovery && (
+                                            <>
+                                                <SourceNote>{relatedNote(discovery)}</SourceNote>
+                                                {suggestions.length === 0 && (
+                                                    <SourceNote>
+                                                        {coOccurrenceNote(discovery)}
+                                                    </SourceNote>
+                                                )}
+                                            </>
+                                        )}
+                                        {discoveryLoading && suggestions.length === 0 ? (
+                                            <EmptyHint>Asking SoundCloud…</EmptyHint>
+                                        ) : suggestions.length === 0 ? (
+                                            <EmptyHint>
+                                                {discovery
+                                                    ? emptyNote(discovery)
+                                                    : discoveryError
+                                                      ? 'No suggestions loaded — the request never got through.'
+                                                      : 'Open this tab to look for artists you do not own yet.'}
+                                            </EmptyHint>
+                                        ) : (
+                                            suggestions.map((candidate) => (
+                                                <DiscoveryRow
+                                                    key={candidate.urn || candidate.name}
+                                                    candidate={candidate}
+                                                    busy={
+                                                        busyId === (candidate.urn || candidate.name)
+                                                    }
+                                                    onAdd={addSuggestedArtist}
+                                                />
+                                            ))
+                                        )}
+                                        {discovery?.truncated && suggestions.length > 0 && (
+                                            <div className="px-2.5 py-2 text-[11px] text-ink-muted">
+                                                Cut short by the per-run call cap — this is part of
+                                                what the sources could offer, not all of it.
+                                            </div>
+                                        )}
+                                    </>
+                                ) : showAllArtists ? (
                                     <>
                                         {browseLoading && browseRows.length === 0 ? (
                                             <EmptyHint>Loading…</EmptyHint>
@@ -1169,28 +1524,57 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                             </div>
 
                             <div className="border-t border-line-subtle px-3.5 py-2.5 text-[11.5px] text-ink-muted">
-                                {showAllArtists
-                                    ? 'Every artist in the loaded library. Search and sort run on the server, so nothing below the loaded page is hidden from a search. The star adds or removes a favourite — the pane on the left follows.'
-                                    : 'Artists you already own, most tracks first. Favourites are excluded. No network calls.'}
+                                {showDiscover ? (
+                                    <>
+                                        Seeded from your favourites — one related-artist hop per
+                                        linked favourite, never a hop on a result, plus a zero-call
+                                        pass over catalogues already cached here.{' '}
+                                        {discovery
+                                            ? exclusionNote(discovery)
+                                            : 'Nothing has been asked yet.'}{' '}
+                                        Add puts the artist in your favourites; linking their
+                                        SoundCloud account stays a separate, manual step.
+                                    </>
+                                ) : showAllArtists ? (
+                                    'Every artist in the loaded library. Search and sort run on the server, so nothing below the loaded page is hidden from a search. The star adds or removes a favourite — the pane on the left follows.'
+                                ) : (
+                                    'Artists you already own, most tracks first. Favourites are excluded. No network calls.'
+                                )}
                             </div>
                         </div>
 
                         <ProjectionPanel refreshToken={projectionToken} />
 
-                        <div className="rounded-xl border border-dashed border-line-subtle bg-mx-input/60 p-3.5 shrink-0">
+                        <div className="rounded-xl border border-line-subtle bg-mx-input/60 p-3.5 shrink-0">
                             <div className="flex items-center gap-2 mb-1.5">
-                                <Cloud size={14} className="text-ink-muted" />
+                                <RefreshCw size={14} className="text-ink-muted" />
                                 <span className="text-[12px] font-semibold text-ink-secondary">
-                                    Discover on SoundCloud — not live yet
+                                    Background sync
+                                </span>
+                                <span
+                                    className={`px-1.5 py-[1px] rounded-mx-xs text-[9px] font-semibold uppercase tracking-wider border ${
+                                        syncStatus?.enabled
+                                            ? 'bg-ok/[0.07] border-ok/30 text-ok'
+                                            : 'bg-mx-card border-line-subtle text-ink-muted'
+                                    }`}
+                                >
+                                    {syncStatus === null
+                                        ? 'unknown'
+                                        : syncStatus.enabled
+                                          ? 'on'
+                                          : 'off'}
                                 </span>
                             </div>
                             <p className="text-[11.5px] text-ink-muted leading-relaxed">
-                                Linking an artist, the missing-track diff and the batch download are
-                                live — open a favourite to use them. What is still missing is{' '}
-                                <b className="text-ink-secondary font-semibold">discovery</b>:
-                                suggesting artists you do not own yet from SoundCloud's related
-                                accounts. That tab stays disabled rather than showing invented
-                                names.
+                                Runs only while the app is open and idle, only over favourites set
+                                to Auto or Review, capped at 20 artists and 60 SoundCloud calls per
+                                pass. It refreshes catalogues and{' '}
+                                <b className="text-ink-secondary font-semibold">never downloads</b>.
+                                Switch it on under Settings → Network, or press Sync now to run one
+                                pass by hand.
+                            </p>
+                            <p className="mt-1.5 text-[11.5px] text-ink-secondary">
+                                {idleSentence(syncStatus)}
                             </p>
                         </div>
                     </div>

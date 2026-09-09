@@ -14,13 +14,14 @@ Workflow:
 from __future__ import annotations
 
 import contextlib
+import errno
 import gc
 import hashlib
 import logging
 import os
 import shutil
 import time
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -73,6 +74,472 @@ except Exception as e:
     rbox = None
     RBOX_AVAILABLE = False
     logger.warning(f"rbox library unavailable: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Relocation pass — a renamed artist must MOVE audio, not re-copy it
+# ---------------------------------------------------------------------------
+
+#: Intermediate name used by the two-step rename. Never left behind on success.
+_RELOC_TMP_SUFFIX = ".lms-reloc-tmp"
+
+#: Per-run cap on the report's `details` list, so a 10k-track stick stays cheap.
+_RELOC_DETAIL_CAP = 200
+
+#: Windows ERROR_NOT_SAME_DEVICE — the MoveFileEx twin of POSIX EXDEV.
+_WIN_NOT_SAME_DEVICE = 17
+
+
+def _dir_entries(path: Path) -> list[str]:
+    """Real on-disk names inside `path`; empty when missing or unreadable."""
+    try:
+        return os.listdir(path)
+    except OSError:
+        return []
+
+
+def _match_segment(parent: Path, wanted: str) -> tuple[str | None, list[str]]:
+    """(exact name, case-insensitive matches) for `wanted` inside `parent`.
+
+    `Path.exists()` cannot answer this: on Windows/exFAT it returns True for
+    `Boys Noize` while the directory on disk is really `boys noize` — which is
+    precisely the difference this pass exists to see.
+    """
+    names = _dir_entries(parent)
+    if wanted in names:
+        return wanted, []
+    folded = wanted.casefold()
+    return None, [n for n in names if n.casefold() == folded]
+
+
+def _existing_ci(root: Path, target: Path) -> Path | None:
+    """Real path under `root` matching `target`, tolerating case differences.
+
+    An exact segment always wins, so on a case-sensitive volume holding both
+    `boys noize/` and `Boys Noize/` this never crosses from one into the other.
+    Ambiguity (several variants, no exact match) returns None instead of guessing.
+    """
+    try:
+        parts = target.relative_to(root).parts
+    except ValueError:
+        return None
+    cur = root
+    for part in parts:
+        exact, ci = _match_segment(cur, part)
+        if exact is not None:
+            cur = cur / exact
+        elif len(ci) == 1:
+            cur = cur / ci[0]
+        else:
+            return None
+    return cur
+
+
+def _two_step_rename(src: Path, dst: Path) -> None:
+    """Rename `src` to `dst` through a temporary name.
+
+    A case-only rename (`boys noize` -> `Boys Noize`) performed directly is
+    either a no-op or a FileExistsError on Windows/exFAT, because both names
+    address the same directory entry. Going through a third name is the only
+    portable way to restyle a folder that already holds the files.
+    """
+    tmp = src.with_name(src.name + _RELOC_TMP_SUFFIX)
+    n = 0
+    while tmp.exists():
+        n += 1
+        tmp = src.with_name(f"{src.name}{_RELOC_TMP_SUFFIX}{n}")
+    os.rename(src, tmp)
+    try:
+        os.rename(tmp, dst)
+    except OSError:
+        with contextlib.suppress(OSError):
+            os.rename(tmp, src)
+        raise
+
+
+def _ensure_dirs_cased(root: Path, directory: Path) -> None:
+    """Make `directory` exist under `root` with exactly the requested casing."""
+    try:
+        parts = directory.relative_to(root).parts
+    except ValueError:
+        return
+    cur = root
+    cur.mkdir(parents=True, exist_ok=True)
+    for part in parts:
+        exact, ci = _match_segment(cur, part)
+        if exact is None:
+            if len(ci) == 1:
+                _two_step_rename(cur / ci[0], cur / part)
+            else:
+                (cur / part).mkdir(exist_ok=True)
+        cur = cur / part
+
+
+def _existing_ancestor(path: Path) -> Path:
+    cur = path
+    while not cur.exists() and cur != cur.parent:
+        cur = cur.parent
+    return cur
+
+
+def _same_volume(src: Path, dst: Path) -> bool:
+    """True when both paths live on one volume.
+
+    `st_dev` carries the volume serial number on Windows too, so this is a real
+    check on both platforms. Any stat failure answers False: a copy is slow, a
+    half-move is unrecoverable.
+    """
+    try:
+        return os.stat(_existing_ancestor(src)).st_dev == os.stat(_existing_ancestor(dst)).st_dev
+    except OSError:
+        return False
+
+
+def _size_of(path: Path | None) -> int | None:
+    if path is None:
+        return None
+    try:
+        return path.stat().st_size
+    except OSError:
+        return None
+
+
+#: Bytes hashed from each end of a file for the relocation identity check. Enough to
+#: separate two different recordings that happen to share a name and a byte count —
+#: audio headers and tags differ at the head, the payload tail differs at the end —
+#: without reading gigabytes off a USB stick to decide one move.
+_FINGERPRINT_EDGE = 64 * 1024
+
+
+def _content_fingerprint(path: Path | None) -> str | None:
+    """A cheap identity for an audio file: size + first and last 64 KiB.
+
+    Relocation moves and deletes files on removable media, and the only thing it
+    otherwise knows about a candidate is its name and its byte count. Those two match
+    routinely on a DJ stick full of re-exported versions of the same track, so acting
+    on them alone can move — or delete — a recording the user cannot get back.
+    Returns ``None`` when the file cannot be read, which callers must treat as
+    "not proven identical", never as a match.
+    """
+    if path is None:
+        return None
+    try:
+        size = path.stat().st_size
+        digest = hashlib.sha1(str(size).encode("ascii"), usedforsecurity=False)
+        with path.open("rb") as handle:
+            digest.update(handle.read(_FINGERPRINT_EDGE))
+            if size > _FINGERPRINT_EDGE * 2:
+                handle.seek(-_FINGERPRINT_EDGE, os.SEEK_END)
+                digest.update(handle.read(_FINGERPRINT_EDGE))
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def _same_content(left: Path | None, right: Path | None) -> bool:
+    """True only when both files were readable AND fingerprint identical."""
+    a = _content_fingerprint(left)
+    return a is not None and a == _content_fingerprint(right)
+
+
+def _copy_verify(src: Path, dst: Path) -> int:
+    """Copy `src` to `dst` and prove it arrived. Returns the verified size.
+
+    Raises before the caller is allowed to delete anything, so a failed copy can
+    never cost the only surviving copy of a track.
+    """
+    expected = src.stat().st_size
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    _copy_file_atomic(src, dst)
+    landed = _size_of(dst)
+    if landed != expected:
+        raise OSError(f"relocation copy unverified: {dst} is {landed} B, expected {expected} B")
+    return expected
+
+
+def _free_name(dest: Path) -> Path:
+    """A sibling of `dest` that nothing occupies yet."""
+    n = 0
+    cand = dest
+    while cand.exists() or _existing_ci(dest.parent, cand) is not None:
+        n += 1
+        cand = dest.with_name(f"{dest.stem} ({n}){dest.suffix}")
+    return cand
+
+
+def _prune_empty_dirs(leaf: Path, stop: Path) -> int:
+    """Remove `leaf` and its parents below `stop`, but only while truly empty."""
+    removed = 0
+    cur = leaf
+    while cur != stop and stop in cur.parents:
+        if not cur.is_dir() or _dir_entries(cur):
+            break
+        try:
+            cur.rmdir()
+        except OSError:
+            break
+        removed += 1
+        cur = cur.parent
+    return removed
+
+
+def _index_contents(contents: Path) -> dict[str, list[Path]]:
+    """Every file already on the stick, bucketed by case-folded filename."""
+    index: dict[str, list[Path]] = {}
+    for dirpath, _dirnames, filenames in os.walk(contents):
+        base = Path(dirpath)
+        for name in filenames:
+            if name.endswith(".part") or _RELOC_TMP_SUFFIX in name:
+                continue
+            index.setdefault(name.casefold(), []).append(base / name)
+    return index
+
+
+def _index_drop(index: dict[str, list[Path]], path: Path) -> None:
+    bucket = index.get(path.name.casefold())
+    if bucket and path in bucket:
+        bucket.remove(path)
+
+
+def _index_move(index: dict[str, list[Path]], old: Path, new: Path) -> None:
+    _index_drop(index, old)
+    index.setdefault(new.name.casefold(), []).append(new)
+
+
+def _reloc_detail(report: dict[str, Any], action: str, dest: Path, **fields: str) -> None:
+    details = report["details"]
+    if len(details) >= _RELOC_DETAIL_CAP:
+        report["details_truncated"] = True
+        return
+    details.append({"action": action, "dest": str(dest), **fields})
+
+
+def _pick_candidate(
+    index: dict[str, list[Path]],
+    dest: Path,
+    expected: int,
+    planned_dests: set[str],
+) -> Path | None:
+    """The file already on the stick that `dest` should be fed from, or None.
+
+    Three guards stop this from stealing the wrong track: identical filename,
+    identical byte size, and never a path some other track in the same run is
+    itself planning to occupy.
+    """
+    cands = [
+        p
+        for p in index.get(dest.name.casefold(), [])
+        if p != dest and str(p).casefold() not in planned_dests and _size_of(p) == expected
+    ]
+    if not cands:
+        return None
+    same_title = dest.parent.name.casefold()
+    cands.sort(key=lambda p: (p.parent.name.casefold() != same_title, str(p)))
+    return cands[0]
+
+
+def _relocate_one(
+    contents: Path,
+    src: Path | None,
+    dest: Path,
+    index: dict[str, list[Path]],
+    planned_dests: set[str],
+    touched: set[Path],
+    report: dict[str, Any],
+) -> None:
+    if contents not in dest.parents:
+        report["skipped"] += 1
+        _reloc_detail(report, "outside_contents", dest)
+        return
+
+    expected = _size_of(src)
+    if expected is None:
+        report["skipped"] += 1
+        return
+
+    # `Path.__eq__` is case-insensitive on Windows, so every identity check below
+    # compares strings — telling `boys noize` from `Boys Noize` is the whole job.
+    actual = _existing_ci(contents, dest)
+    if actual is not None and str(actual) != str(dest):
+        # Only the casing differs — the bytes already sit where they belong.
+        _ensure_dirs_cased(contents, dest.parent)
+        recased = _existing_ci(contents, dest)
+        if recased is not None and str(recased) != str(dest):
+            _two_step_rename(recased, dest)
+        if not dest.exists():
+            report["errors"] += 1
+            _reloc_detail(report, "case_rename_failed", dest, source=str(actual))
+            return
+        _index_move(index, actual, dest)
+        touched.add(actual.parent)
+        report["relocated"] += 1
+        report["bytes_moved"] += _size_of(dest) or 0
+        _reloc_detail(report, "case_rename", dest, source=str(actual))
+        return
+
+    cand = _pick_candidate(index, dest, expected, planned_dests)
+    if cand is None:
+        report["skipped"] += 1
+        return
+
+    # `_pick_candidate` matches on filename and byte count alone. On a stick full of
+    # re-exported versions that also matches files belonging to tracks OUTSIDE this
+    # sync — and moving one of those strands its PDB row while the copy phase, which
+    # compares sizes, sees nothing to repair. Prove the bytes are the same recording
+    # before touching it; an unreadable candidate counts as not proven.
+    if not _same_content(cand, src):
+        report["skipped"] += 1
+        _reloc_detail(report, "candidate_content_mismatch", dest, source=str(cand))
+        return
+
+    _ensure_dirs_cased(contents, dest.parent)
+    if not cand.exists():
+        # A directory rename just above may have carried the candidate with it.
+        recased = _existing_ci(contents, cand)
+        if recased is None:
+            report["errors"] += 1
+            _reloc_detail(report, "source_vanished", dest, source=str(cand))
+            return
+        cand = recased
+
+    origin_dir = cand.parent
+    occupied = _existing_ci(contents, dest)
+
+    if occupied is not None and str(occupied) == str(cand):
+        # The directory rename above already carried the candidate here.
+        if str(cand) != str(dest):
+            _two_step_rename(cand, dest)
+        _index_move(index, cand, dest)
+        touched.add(origin_dir)
+        report["relocated"] += 1
+        report["bytes_moved"] += _size_of(dest) or 0
+        _reloc_detail(report, "case_rename", dest, source=str(cand))
+        return
+
+    if occupied is not None:
+        report["collisions"] += 1
+        # Deleting from the stick needs proof, not a size match: two different
+        # recordings of the same track routinely share a name and a byte count, and
+        # this file may be the user's only copy. Only a fingerprint match removes it;
+        # anything else falls through to keeping BOTH files.
+        if _size_of(occupied) == expected and _same_content(occupied, cand):
+            cand.unlink()
+            _index_drop(index, cand)
+            touched.add(origin_dir)
+            report["duplicates_removed"] += 1
+            report["skipped"] += 1
+            _reloc_detail(report, "collision_identical", dest, source=str(cand))
+            return
+        alt = _free_name(dest)
+        report["bytes_copied"] += _copy_verify(cand, alt)
+        cand.unlink()
+        _index_move(index, cand, alt)
+        touched.add(origin_dir)
+        report["copied"] += 1
+        _reloc_detail(report, "collision_renamed", alt, source=str(cand), occupied=str(occupied))
+        return
+
+    if _same_volume(cand, dest.parent):
+        try:
+            os.replace(cand, dest)
+        except OSError as exc:
+            if exc.errno != errno.EXDEV and getattr(exc, "winerror", None) != _WIN_NOT_SAME_DEVICE:
+                raise
+        else:
+            if _size_of(dest) != expected:
+                report["errors"] += 1
+                _reloc_detail(report, "move_unverified", dest, source=str(cand))
+                return
+            _index_move(index, cand, dest)
+            touched.add(origin_dir)
+            report["relocated"] += 1
+            report["bytes_moved"] += expected
+            _reloc_detail(report, "moved", dest, source=str(cand))
+            return
+
+    report["bytes_copied"] += _copy_verify(cand, dest)
+    cand.unlink()
+    _index_move(index, cand, dest)
+    touched.add(origin_dir)
+    report["copied"] += 1
+    _reloc_detail(report, "copied_cross_volume", dest, source=str(cand))
+
+
+def relocate_audio_files(
+    usb_root: str | Path,
+    planned: Iterable[tuple[Path | None, Path]],
+    *,
+    contents_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Move audio already on the stick to its new destination instead of re-copying it.
+
+    An artist merge (`boys noize` + `Boys Noize` -> one artist) changes nothing
+    about a track except the path it belongs at, so the copy phase would rewrite
+    gigabytes that are already there. This pass runs first and settles a pure
+    path change with a rename.
+
+    `planned` is one `(local source, wanted USB destination)` pair per track; an
+    entry whose source is missing locally is left to the copy phase. Nothing
+    outside `contents_dir` is ever touched, and a file only becomes a candidate
+    when it carries the destination's filename AND the source's exact byte size
+    AND is not itself another track's planned destination.
+
+    Report keys: `relocated`, `copied` (copy-and-verify fallback), `skipped`,
+    `collisions`, `errors`, `bytes_moved`, `bytes_copied`, `duplicates_removed`,
+    `pruned_dirs`, `details` (capped) and `details_truncated`.
+    """
+    report: dict[str, Any] = {
+        "relocated": 0,
+        "copied": 0,
+        "skipped": 0,
+        "collisions": 0,
+        "errors": 0,
+        "bytes_moved": 0,
+        "bytes_copied": 0,
+        "duplicates_removed": 0,
+        "pruned_dirs": 0,
+        "details": [],
+        "details_truncated": False,
+    }
+    root = Path(usb_root)
+    contents = Path(contents_dir) if contents_dir is not None else root / "Contents"
+    entries = [(Path(s) if s is not None else None, Path(d)) for s, d in planned]
+    if not entries or not contents.is_dir():
+        report["skipped"] = len(entries)
+        return report
+
+    index = _index_contents(contents)
+    if not index:
+        report["skipped"] = len(entries)
+        return report
+
+    planned_dests = {str(d).casefold() for _, d in entries}
+    touched: set[Path] = set()
+    for src, dest in entries:
+        try:
+            _relocate_one(contents, src, dest, index, planned_dests, touched, report)
+        except OSError as exc:
+            report["errors"] += 1
+            _reloc_detail(report, "error", dest, error=str(exc))
+            logger.warning("[USB-relocate] %s failed: %s", dest, exc)
+
+    for leaf in sorted(touched, key=lambda p: len(p.parts), reverse=True):
+        report["pruned_dirs"] += _prune_empty_dirs(leaf, contents)
+
+    logger.info(
+        "[USB-relocate] relocated=%d copied=%d skipped=%d collisions=%d errors=%d "
+        "moved=%dB copied=%dB pruned=%d dupes=%d",
+        report["relocated"],
+        report["copied"],
+        report["skipped"],
+        report["collisions"],
+        report["errors"],
+        report["bytes_moved"],
+        report["bytes_copied"],
+        report["pruned_dirs"],
+        report["duplicates_removed"],
+    )
+    return report
 
 
 class OneLibraryUsbWriter:
@@ -303,6 +770,29 @@ class OneLibraryUsbWriter:
         used_slots = 0
         skipped_overflow = 0
 
+        # Stage 1b — relocation. An artist rename (merge) changes only where a
+        # track belongs, so move what is already on the stick before the copy
+        # phase decides it is missing and rewrites gigabytes.
+        if audio_copy:
+            planned: list[tuple[Path | None, Path]] = []
+            for t in all_tracks[:slot_count]:
+                p = Path(t["path"]) if t.get("path") else None
+                if p is None or not p.exists():
+                    continue
+                planned.append((p, self._planned_dest(t, p)))
+            reloc = relocate_audio_files(self.usb_root, planned, contents_dir=self.music_dir)
+            if any(reloc[k] for k in ("relocated", "copied", "collisions", "errors")):
+                yield {
+                    "stage": "relocate",
+                    "message": (
+                        f"Moved {reloc['relocated']} file(s) in place "
+                        f"({reloc['copied']} copied, {reloc['collisions']} collision(s), "
+                        f"{reloc['errors']} error(s))"
+                    ),
+                    "progress": 5,
+                    "report": reloc,
+                }
+
         # Stage 2 — populate slots via update_content (the working path)
         for i, t in enumerate(all_tracks):
             if i >= slot_count:
@@ -323,14 +813,7 @@ class OneLibraryUsbWriter:
                 # Audio file copy → USB (Pioneer-canonical /Contents/<Artist>/<Title>/)
                 src_path = Path(t["path"]) if t.get("path") else None
                 if audio_copy and src_path and src_path.exists():
-                    if self._dest_resolver is not None:
-                        dest_path = self._dest_resolver(
-                            t.get("artist") or "",
-                            t.get("title") or "",
-                            src_path.name,
-                        )
-                    else:
-                        dest_path = self._dest_audio_path(t, src_path)
+                    dest_path = self._planned_dest(t, src_path)
                     if _needs_copy(src_path, dest_path):
                         dest_path.parent.mkdir(parents=True, exist_ok=True)
                         _copy_file_atomic(src_path, dest_path)
@@ -900,6 +1383,20 @@ class OneLibraryUsbWriter:
                 db.update_image(img_row)
         except Exception as exc:
             logger.debug("[OneLibrary] update_image path skipped: %s", exc)
+
+    def _planned_dest(self, track: dict, src_path: Path) -> Path:
+        """Where this track's audio belongs on the stick.
+
+        Single source of truth for the relocation pass and the copy phase — the
+        two disagreeing would relocate a file and then copy it again anyway.
+        """
+        if self._dest_resolver is not None:
+            return self._dest_resolver(
+                track.get("artist") or "",
+                track.get("title") or "",
+                src_path.name,
+            )
+        return self._dest_audio_path(track, src_path)
 
     def _dest_audio_path(self, track: dict, src_path: Path) -> Path:
         """Pioneer-canonical layout: <usb>/Contents/<Artist>/<Title>/<filename>.

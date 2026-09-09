@@ -85,11 +85,13 @@ from . import audio_tags, download_registry, folder_watcher
 from . import soundcloud_api as sc_api
 from . import soundcloud_auth as sc_auth
 from .artist_store import catalogue as artist_catalogue
+from .artist_store import discovery as artist_discovery
 from .artist_store import identity as artist_identity
 from .artist_store import merge as artist_merge
 from .artist_store import projection as artist_projection
 from .artist_store import registry as artist_registry
 from .artist_store import schema as artist_schema
+from .artist_store import sync as artist_sync
 from .audio_analyzer import LIBROSA_AVAILABLE, AudioAnalyzer
 from .config import EXPORT_DIR, LOG_DIR, MUSIC_DIR, TEMP_DIR
 from .database import db
@@ -454,6 +456,10 @@ class SetReq(BaseModel):
     # or the OS browser. Consumed by the Tauri command, not the backend.
     sc_auth_mode: _Literal["gui", "browser"] | None = None
     legacy_pdb_stub: bool | None = None
+    # Opt-in: refresh favourite artists' SoundCloud catalogues while the app is open and
+    # idle. Key name is `artist_store.sync.SETTING_KEY` — renaming it silently disables
+    # the scheduler, which reads it back through SettingsManager.load().
+    artist_background_sync: bool | None = None
 
     @_mv(mode="after")
     def _enforce_caps(self) -> "SetReq":
@@ -528,6 +534,9 @@ class SetReq(BaseModel):
 
 
 class SmartPlReq(BaseModel):
+    """`artist_threshold` is accepted for older clients and ignored — artist
+    playlists come from the Artist Hub projection, not from this route."""
+
     artist_threshold: int = 3
     label_threshold: int = 3
 
@@ -1658,6 +1667,7 @@ def _artist_catalogue_view(
     *,
     refresh: bool,
     allow_fetch: bool,
+    budget: sc_api.CallBudget | None = None,
 ) -> dict[str, Any]:
     """Shared body of the catalogue read — also how the download job learns what a track is.
 
@@ -1671,6 +1681,11 @@ def _artist_catalogue_view(
     built from the search source alone and the payload carries `link_missing=True`.
     Without any name to search for — which the store cannot produce — it stays
     `not_linked`.
+
+    `budget` lets a caller that sweeps several artists — the background sync — hold ONE
+    cap across the whole run instead of handing every artist a fresh one. Omitted, the
+    call gets its own `ARTIST_CATALOGUE_CALL_BUDGET`, which is what every interactive
+    caller wants.
     """
     _artist_collection_or_404(collection_id)
 
@@ -1697,7 +1712,8 @@ def _artist_catalogue_view(
             # Not "signed out": the login is still stored, SoundCloud just could not be
             # reached to renew it. The panel offers Retry, not a sign-in button.
             return _artist_state("not_connected", collection_id, _SC_REFRESH_UNAVAILABLE)
-    budget = sc_api.CallBudget(limit=ARTIST_CATALOGUE_CALL_BUDGET, label=collection_id)
+    if budget is None:
+        budget = sc_api.CallBudget(limit=ARTIST_CATALOGUE_CALL_BUDGET, label=collection_id)
 
     fetcher: artist_catalogue.Fetcher | None = None
     # "not_queried" survives a cache hit: nothing was fetched on this pass, so nothing
@@ -2207,6 +2223,179 @@ def artist_download_status(job_id: str):
     if job is None or job.get("kind") != ARTIST_JOB_DOWNLOAD:
         raise HTTPException(404, f"Job not found: {job_id}")
     return {"status": "ok", "data": job}
+
+
+# --- ARTIST HUB: discovery + background sync (T-16 / T-17) ---------------------------
+#
+# ToU guardrails, same set as the catalogue read: discovery is user-initiated, seeded
+# ONLY from favourited artists, does AT MOST ONE `/related` hop per seed (never a hop on
+# a result), spends a hard per-run `CallBudget` that is logged, and caches nothing beyond
+# the sidecar's TTL. The background pass refreshes catalogues and queues NOTHING — a
+# download stays a button the user presses.
+
+#: How long after boot the idle poll first looks. The library load owns the first
+#: minutes of the process; the idle probe would say so anyway, this just saves the wake.
+ARTIST_SYNC_STARTUP_DELAY_S = 180.0
+
+#: Gap between idle polls. A pass is cheap when the app is busy (one probe sweep) and
+#: capped hard when it is not, so this is about freshness, not throughput.
+ARTIST_SYNC_POLL_INTERVAL_S = 15 * 60.0
+
+# Single-flight for the background pass. Deliberately NOT one of the names
+# `artist_store.sync._probe_job_locks` watches — a run must not read itself as load.
+_artist_sync_run_lock = asyncio.Lock()
+
+_artist_sync_task: asyncio.Task | None = None
+
+
+class ArtistSyncRunReq(BaseModel):
+    """`force` runs the pass with the opt-in setting off. It does NOT bypass idle."""
+
+    force: bool = False
+
+
+def _artist_idle_report() -> dict[str, Any]:
+    """`artist_sync.idle_report()` minus the load paths this module now observes.
+
+    `UNOBSERVABLE_LOAD` is a constant in the sync module, so once `analyze_batch` has a
+    registered probe the entry would be a stale claim in the other direction. Anything
+    still listed genuinely has no probe.
+    """
+    report = artist_sync.idle_report()
+    covered = set(report.get("probes") or {})
+    report["unobservable"] = [
+        entry
+        for entry in report.get("unobservable") or []
+        if str(entry).split(":", 1)[0].strip() not in covered
+    ]
+    return report
+
+
+def _artist_sync_states() -> list[dict[str, Any]]:
+    """Per-favourite mode + when it was last refreshed. `None` = never, not "now"."""
+    rows: list[dict[str, Any]] = []
+    for fav in artist_schema.list_favourites():
+        cid = str(fav["id"])
+        state = artist_schema.get_sync_state(cid) or {}
+        rows.append(
+            {
+                "collection_id": cid,
+                "name": fav.get("canonical_name") or "",
+                "mode": artist_schema.get_sync_mode(cid),
+                "last_sync_at": state.get("last_sync_at") or None,
+                "last_error": state.get("last_error") or None,
+            }
+        )
+    return rows
+
+
+@app.get("/api/artists/discover")
+def artist_discover_route(limit: int = artist_discovery.DEFAULT_SUGGESTION_LIMIT):
+    """Artists the user does not own yet, seeded from their favourites.
+
+    Never a bare list: the payload carries a state per source (`related` /
+    `co_occurrence`), so a source that failed, hit the budget or was never queried says
+    exactly that. An empty `suggestions` with `sources.related != "ok"` means "we could
+    not look", and the UI must not render it as "nothing found".
+
+    Signed out is not an error — tier 1 reports `not_queried` and the zero-call
+    co-occurrence tier still answers. `soundcloud.connected` says which of the two
+    happened.
+    """
+    capped = max(1, min(int(limit), artist_discovery.DEFAULT_SUGGESTION_LIMIT * 4))
+
+    token = ""
+    connected = False
+    token_detail = ""
+    try:
+        token = _artist_sc_token() or ""
+        connected = bool(token)
+        if not connected:
+            token_detail = _SC_NOT_CONNECTED
+    except AuthExpiredError:
+        token_detail = _SC_SESSION_EXPIRED
+    except sc_auth.TransientRefreshError:
+        token_detail = _SC_REFRESH_UNAVAILABLE
+
+    try:
+        payload = artist_discovery.discover(token=token, limit=capped)
+    except RateLimitError as exc:
+        raise HTTPException(429, safe_error_message(exc)) from None
+
+    return {
+        "status": "ok",
+        "soundcloud": {"connected": connected, "detail": token_detail},
+        **payload,
+    }
+
+
+@app.get("/api/artists/sync/status")
+def artist_sync_status():
+    """Is a background pass allowed to run right now, and what did the last one do.
+
+    Read-only, no session gate — the panel polls it to explain itself. `enabled` is the
+    opt-in setting, `idle`/`reason` is why a pass would run or wait, `last_run` is the
+    stored record of the previous pass (`None` when none has ever finished) and
+    `running` is true only while a pass is actually in flight.
+    """
+    return {
+        "status": "ok",
+        "enabled": artist_sync.background_sync_enabled(),
+        "running": _artist_sync_run_lock.locked(),
+        **_artist_idle_report(),
+        "last_run": artist_sync.last_run(),
+        "artists": _artist_sync_states(),
+        "poll_interval_s": ARTIST_SYNC_POLL_INTERVAL_S,
+    }
+
+
+@app.post("/api/artists/sync/run", dependencies=[Depends(require_session)])
+async def artist_sync_run(r: ArtistSyncRunReq = ArtistSyncRunReq()):
+    """Run one background pass now. 409 while one is already in flight.
+
+    `run_sync` is blocking (SQLite + HTTP), so it goes to a thread. It refuses on its
+    own when the app is not idle and reports that as `reason_stopped` — a refusal is a
+    200 with the reason in it, not an error, because "not now, a download is running" is
+    an answer.
+    """
+    if _artist_sync_run_lock.locked():
+        raise HTTPException(409, "An artist background sync is already running")
+    await _artist_sync_run_lock.acquire()
+    try:
+        run = await asyncio.to_thread(artist_sync.run_sync, force=bool(r.force))
+    finally:
+        _artist_sync_run_lock.release()
+    return {"status": "ok", "data": run.as_dict()}
+
+
+async def _artist_sync_scheduler() -> None:
+    """Poll for idle and run a pass when the user opted in. Never runs on its own terms.
+
+    Gated on `artist_sync.SETTING_KEY` (default off) and re-read every wake, so toggling
+    the setting takes effect without a restart. The first sleep is what keeps this out of
+    startup; the library probe is what keeps it out of a library load.
+    """
+    await asyncio.sleep(ARTIST_SYNC_STARTUP_DELAY_S)
+    while True:
+        try:
+            if artist_sync.background_sync_enabled() and not _artist_sync_run_lock.locked():
+                await _artist_sync_run_lock.acquire()
+                try:
+                    run = await asyncio.to_thread(artist_sync.run_sync)
+                finally:
+                    _artist_sync_run_lock.release()
+                if run.artists_synced or run.reason_stopped != artist_sync.STOP_COMPLETED:
+                    logger.info(
+                        "op=artist_sync_scheduler synced=%d skipped=%d stop=%s",
+                        run.artists_synced,
+                        run.artists_skipped,
+                        run.reason_stopped,
+                    )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("op=artist_sync_scheduler err=%s: %s", type(exc).__name__, exc)
+        await asyncio.sleep(ARTIST_SYNC_POLL_INTERVAL_S)
 
 
 @app.get("/api/label/{aid}/tracks")
@@ -3529,8 +3718,15 @@ async def rbx_import(r: RbxImportReq):
 
 @app.post("/api/library/smart-playlists", dependencies=[Depends(require_session)])
 def gen_smart(r: SmartPlReq):
-    status = LibraryTools.generate_smart_playlists(r.artist_threshold, r.label_threshold)
-    return {"status": "success" if status else "error"}
+    """Rebuild the "By Label" auto-playlists.
+
+    Artist playlists are NOT written here any more — the Artist Hub projection
+    (`POST /api/artists/projection/sync`) owns the `Artists` folder. The response
+    carries `legacy_by_artist` while the retired generator's folder is still in
+    the library, so the UI can say so instead of pretending it is gone.
+    """
+    report = LibraryTools.generate_smart_playlists(r.artist_threshold, r.label_threshold)
+    return {"status": "success" if report.get("ok") else "error", **report}
 
 
 class PathRequest(BaseModel):
@@ -4310,8 +4506,29 @@ async def _on_startup():
     except Exception as e:
         logger.error(f"FolderWatcher startup failed: {e}", exc_info=True)
 
+    # Artist background sync: a poll loop, not a job. `create_task` returns immediately
+    # and the loop sleeps first, so nothing here delays boot; the pass itself is gated on
+    # the opt-in setting (default off) and on the idle probes.
+    global _artist_sync_task
+    try:
+        _artist_sync_task = asyncio.create_task(_artist_sync_scheduler())
+        logger.info(
+            "Artist background-sync poller started (every %.0fs, opt-in: %s).",
+            ARTIST_SYNC_POLL_INTERVAL_S,
+            artist_sync.SETTING_KEY,
+        )
+    except RuntimeError as exc:
+        logger.warning("Artist background-sync poller not started: %s", exc)
+
 
 async def _on_shutdown():
+    global _artist_sync_task
+    task = _artist_sync_task
+    _artist_sync_task = None
+    if task is not None and not task.done():
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
     try:
         folder_watcher.shutdown_watcher()
     except Exception as exc:
@@ -4986,6 +5203,22 @@ async def analyze_track_full(tid: str, req: AnalyzeFullReq = AnalyzeFullReq()):
         raise HTTPException(500, safe_error_message(e))
 
 
+#: In-flight `analyze-batch` streams. This route writes analysis into `master.db` and
+#: ANLZ for minutes at a time while keeping no job record, so it was the one load path
+#: `artist_store.sync` could not see; the probe registered below closes that gap.
+_analyze_batch_active = 0
+_analyze_batch_count_lock = threading.Lock()
+
+
+def _analyze_batch_probe() -> str | None:
+    return f"analyze_batch:{_analyze_batch_active}" if _analyze_batch_active else None
+
+
+# Registered at import, not in `_on_startup`: the probe must be live for every caller of
+# `artist_sync.is_idle()`, including a process that never ran the lifespan hooks.
+artist_sync.register_probe("analyze_batch", _analyze_batch_probe)
+
+
 @app.post("/api/library/analyze-batch", dependencies=[Depends(require_session)])
 async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
     """
@@ -5010,10 +5243,20 @@ async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
         return {"status": "ok", "data": {"message": "No tracks to analyze", "total": 0}}
 
     async def stream_progress():
-        asyncio.get_running_loop()
-        for progress in writer.analyze_batch(track_ids, force=req.force):
-            yield json.dumps(progress) + "\n"
-            await asyncio.sleep(0)  # Yield control to event loop
+        # The counter is incremented inside the generator, not around the response:
+        # a stream the client aborts before it starts is never entered, so nothing can
+        # leak a permanent "busy" that would disable the artist background sync forever.
+        global _analyze_batch_active
+        with _analyze_batch_count_lock:
+            _analyze_batch_active += 1
+        try:
+            asyncio.get_running_loop()
+            for progress in writer.analyze_batch(track_ids, force=req.force):
+                yield json.dumps(progress) + "\n"
+                await asyncio.sleep(0)  # Yield control to event loop
+        finally:
+            with _analyze_batch_count_lock:
+                _analyze_batch_active -= 1
 
     return StreamingResponse(
         stream_progress(),
