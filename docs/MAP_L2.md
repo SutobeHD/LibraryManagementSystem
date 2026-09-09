@@ -143,6 +143,19 @@ artist_store.catalogue — classify an artist's SoundCloud tracks, diff against 
 - `diff()` — Which remote tracks are already owned, and which are genuinely missing.
 - `catalogue()` — An artist's catalogue: role buckets, each track flagged owned or missing.
 
+### `app/artist_store/discovery.py`
+
+artist_store.discovery — Tier-2 suggestions: artists the user does not have yet (T-16).
+
+- `RelatedFetcher` — The one client call this module makes.
+- `Candidate` — One suggested artist.
+- `  Candidate.key()` — Identity for de-duplication: the URN when SoundCloud gave one, else the fold.
+- `  Candidate.co_signal()`
+- `  Candidate.as_dict()`
+- `Ranking` — Result of the pure rank/exclude pass.
+- `rank_candidates()` — De-duplicate, drop what the user already has, rank.
+- `discover()` — Artists the user does not have yet, seeded from the ones they favourited.
+
 ### `app/artist_store/identity.py`
 
 artist_store.identity — name-based, remix-aware track roles + the identity table.
@@ -271,6 +284,23 @@ artist_store.schema — sidecar DB + migration runner for the Artist Hub (T-3).
 - `get_identity_overrides()` — ``sc_urn -> pinned role`` for one collection — what the classifier must yield to.
 - `set_identity_override()` — Pin (or with ``None`` unpin) the role of one track for one artist.
 - `delete_track_identity()`
+
+### `app/artist_store/sync.py`
+
+artist_store.sync — the idle signal + the background catalogue refresh (T-17).
+
+- `SyncError` — Background sync could not run at all.
+- `register_probe()` — Add a load signal this module cannot see itself (e.g.
+- `unregister_probe()`
+- `idle_report()` — Per-probe verdict, for the UI and the run log.
+- `is_idle()` — ``(idle, reason)``.
+- `background_sync_enabled()` — The single opt-in boolean, read fresh from ``settings.json``.
+- `ArtistSyncResult` — What one artist's pass did.
+- `  ArtistSyncResult.as_dict()`
+- `SyncRun` — One background pass, start to stop.
+- `  SyncRun.as_dict()`
+- `last_run()` — The previous run record, or None when no pass has ever finished.
+- `run_sync()` — One background pass over the favourites whose mode is ``auto`` or ``review``.
 
 ### `app/audio_analyzer.py`
 
@@ -613,7 +643,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `CueReq`
 - `GridReq`
 - `SetReq`
-- `SmartPlReq`
+- `SmartPlReq` — `artist_threshold` is accepted for older clients and ignored — artist
 - `PlCreateReq`
 - `PlRenameReq`
 - `PlDeleteReq`
@@ -686,6 +716,10 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `artist_track_identities()` — Everything this artist's `track_identity` table holds — what has been seen and pinned.
 - `artist_download_missing()` — Queue an artist's missing tracks through the existing SoundCloud downloader.
 - `artist_download_status()` — Poll one batch download.
+- `ArtistSyncRunReq` — `force` runs the pass with the opt-in setting off.
+- `artist_discover_route()` — Artists the user does not own yet, seeded from their favourites.
+- `artist_sync_status()` — Is a background pass allowed to run right now, and what did the last one do.
+- `artist_sync_run()` — Run one background pass now.
 - `get_label_tracks()`
 - `get_album_tracks()`
 - `get_track()`
@@ -754,7 +788,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `unload_lib()`
 - `rbx_export()` — Exports specified tracks to a Rekordbox XML file.
 - `rbx_import()` — Imports tracks and metadata from a Rekordbox XML file.
-- `gen_smart()`
+- `gen_smart()` — Rebuild the "By Label" auto-playlists.
 - `PathRequest` — Generic single-path body used by every endpoint that needs to point at
 - `ImportPathsReq` — Drag-drop import body.
 - `scan_folder()` — Trigger an import scan of a specific directory.
@@ -1019,7 +1053,7 @@ Constant-time equality helper for tokens, secrets, HMAC outputs.
 - `LibraryTools`
 - `  LibraryTools.find_duplicates()`
 - `  LibraryTools.clean_track_titles()` — Removes artist name from track title if redundant.
-- `  LibraryTools.generate_smart_playlists()` — Generates intelligent playlists for Artists and Labels meeting the threshold.
+- `  LibraryTools.generate_smart_playlists()` — Build the "By Label" auto-playlists.
 - `  LibraryTools.smart_rename()`
 - `SettingsManager`
 - `  SettingsManager.load()`
@@ -1175,6 +1209,7 @@ USB MYSETTING / DJMMYSETTING file read/write + schema for frontend.
 
 USB OneLibrary writer — uses rbox.OneLibrary to build PIONEER/rekordbox/exportLibrary.db
 
+- `relocate_audio_files()` — Move audio already on the stick to its new destination instead of re-copying it.
 - `OneLibraryUsbWriter` — Writes the modern Library One DB (exportLibrary.db) plus ANLZ sidecars
 - `  OneLibraryUsbWriter.ensure_structure()`
 - `  OneLibraryUsbWriter.sync()` — Main entry: yields progress events.
@@ -1391,6 +1426,15 @@ artistCatalogueApi — the SoundCloud half of the Artist Hub's HTTP surface.
 - `pollDownloadJob()` — Poll one batch download to its end and resolve with the final job record.
 - `pinTrackRole()` — Pin one catalogue track's role for this artist.
 
+### `frontend/src/components/artistHub/artistDiscoveryApi.js`
+
+artistDiscoveryApi — the discovery + background-sync half of the Artist Hub's HTTP surface.
+
+- `SYNC_ALREADY_RUNNING_MESSAGE()`
+- `fetchSyncStatus()` — export const fetchDiscovery = async ({ limit = ARTIST_DISCOVER_LIMIT } = {}) => { const res = await…
+- `runBackgroundSync()` — `POST /api/artists/sync/run`.
+- `isSyncAlreadyRunning()`
+
 ### `frontend/src/components/artistHub/artistHubApi.js`
 
 artistHubApi — the merge + projection half of the Artist Hub's HTTP surface.
@@ -1429,6 +1473,31 @@ catalogueCopy — the sentences the artist-detail view has to say out loud.
 ### `frontend/src/components/artistHub/catalogueCopy.test.js`
 
 node --test frontend/src/components/artistHub/catalogueCopy.test.js Pure copy + derivation builders — no DOM, no resolver needed (the impor…
+
+### `frontend/src/components/artistHub/discoveryCopy.js`
+
+discoveryCopy — the sentences the Discover tab and the background-sync line must say.
+
+- `SOURCE_RELATED()`
+- `SOURCE_CO_OCCURRENCE()`
+- `STATE_OK()`
+- `STATE_FAILED()`
+- `STATE_SKIPPED_BUDGET()`
+- `STATE_NOT_QUERIED()`
+- `STATE_NO_DATA()`
+- `relatedNote()` — export const STOP_DISABLED = 'disabled'; export const STOP_COMPLETED = 'completed'; export const ST…
+- `allSourcesAnswered()` — export const coOccurrenceNote = (payload) => { const state = payload?.sources?.[SOURCE_CO_OCCURRENC…
+- `emptyNote()` — What to print when the list came back empty.
+- `exclusionNote()` — The "already yours" filter is a claim about the library.
+- `seedLine()` — export const callBudgetNote = (payload) => { const budget = payload?.call_budget; if (!budget || ty…
+- `candidateFacts()` — The measured facts of one candidate, in order.
+- `idleSentence()` — export const busyReasonSentence = (reason) => { const raw = String(reason || '').trim(); if (!raw |…
+- `runSummary()` — One sentence for a finished run, built only from what the record actually counted.
+- `SYNC_MODE_HINTS()` — export const lastSyncedLabel = (isoOrNull) => { const ago = relativeTime(isoOrNull); return ago ?
+
+### `frontend/src/components/artistHub/discoveryCopy.test.js`
+
+node --test frontend/src/components/artistHub/discoveryCopy.test.js Pure copy builders — no DOM, no resolver needed (the imports carry exte…
 
 ### `frontend/src/components/artistHub/mergeCopy.js`
 
@@ -1611,6 +1680,11 @@ Frontend-wide constants.
 - `ARTIST_DOWNLOAD_POLL_INTERVAL_MS()` — Poll cadence for a running artist batch download (POST /api/artists/{id}/ download-missing → job_id…
 - `ARTIST_DOWNLOAD_MAX_POLL_FAILURES()` — Consecutive failed download-status polls tolerated before the view stops waiting and says it lost t…
 - `ARTIST_CATALOGUE_PAGE_SIZE()` — Rows one catalogue bucket renders before the "show more" button.
+- `SMART_PLAYLIST_LABEL_THRESHOLD()` — Minimum tracks a label needs before POST /api/library/smart-playlists writes a playlist for it.
+- `ARTIST_DISCOVER_TIMEOUT_MS()` — Axios timeout for GET /api/artists/discover.
+- `ARTIST_SYNC_RUN_TIMEOUT_MS()` — Axios timeout for POST /api/artists/sync/run.
+- `ARTIST_SYNC_STATUS_POLL_MS()` — Poll cadence for GET /api/artists/sync/status while the Artists tab is open.
+- `ARTIST_DISCOVER_LIMIT()` — Suggestions requested from GET /api/artists/discover.
 
 ### `frontend/src/store/authStore.js`
 
@@ -2382,6 +2456,75 @@ Artist-Hub SoundCloud route tests — binding, catalogue, batch download (T-13/T
 - `  TestIdentityTable.test_unknown_collection_is_404()`
 - `test_the_auto_queue_rule_is_the_identity_module_s()` — One definition of "may the server queue this", not a second copy in the route.
 
+### `tests/test_artist_discovery.py`
+
+Artist-Hub Tier-2 discovery tests (T-16 — app/artist_store/discovery.py).
+
+- `store()` — Point the sidecar at a throwaway DB and reset its per-process state.
+- `favourite()` — Create a favourited collection, optionally bound to a SoundCloud account.
+- `sc_user()` — One normalised SC user dict — what ``normalize_artist`` hands back.
+- `cached_catalogue()` — Seed the sidecar catalogue cache with ``(uploader_urn, uploader_name)`` tracks.
+- `FakeRelated` — Stand-in for ``sc_api.get_related_artists``: counts calls, spends the budget.
+- `test_related_is_called_once_per_favourite_and_never_on_a_result()` — ONE hop.
+- `test_unlinked_favourite_is_reported_not_queried()` — An artist with no bound account was never looked up — say so, do not call.
+- `test_missing_token_never_queries_and_says_so()`
+- `test_empty_related_falls_back_to_co_occurrence_with_zero_further_calls()`
+- `test_404_degrades_to_the_fallback_and_never_raises()`
+- `test_client_swallowed_404_is_still_reported_as_failed()` — The client turns a 404 into an empty list with ``stop_reason='not_found'``.
+- `test_auth_failure_stops_the_run_and_is_reported_not_raised()`
+- `test_no_cached_catalogue_is_no_data_not_nothing_found()`
+- `test_already_favourited_and_already_local_candidates_are_excluded()`
+- `test_co_occurrence_never_suggests_the_seed_itself()`
+- `test_two_favourites_beat_one_bigger_catalogue()` — Co-signal first: an artist two favourites point at outranks a bigger single hit.
+- `test_rank_falls_back_to_track_count_then_followers()`
+- `test_rank_excludes_by_fold_and_by_urn_and_counts_them()`
+- `test_rank_limit_reports_truncation()`
+- `test_rank_merges_the_two_sources_into_one_row()`
+- `test_budget_truncates_the_run_and_is_reported()`
+- `test_exhausted_budget_reports_skipped_budget_not_empty()`
+- `test_client_reported_budget_stop_is_a_skip_not_an_answer()`
+- `test_discover_runs_under_a_cap_even_without_a_caller_budget()`
+- `test_report_names_the_seeds_and_both_sources()`
+- `test_default_path_uses_the_real_client_over_a_mocked_http_layer()` — No fetcher injected: the module must reach ``sc_api.get_related_artists``.
+- `TestAPartialWalkIsNotOk` — An abort after one seed answered must not read as "both sources answered".
+- `  TestAPartialWalkIsNotOk.test_rate_limited_after_one_seed_is_not_ok()`
+- `  TestAPartialWalkIsNotOk.test_a_clean_full_walk_is_still_ok()`
+
+### `tests/test_artist_discovery_routes.py`
+
+Artist-Hub discovery + background-sync route tests (T-16 / T-17).
+
+- `signed_in()`
+- `favourite()`
+- `linked_favourite()`
+- `test_discover_is_never_a_bare_list()`
+- `test_signed_out_says_not_queried_never_nothing_found()`
+- `test_no_linked_favourite_reports_the_reason()` — A signed-in user with no bound account: nothing was asked, and it says so.
+- `test_related_hop_returns_ranked_candidates()`
+- `test_a_failed_hop_is_reported_not_swallowed()`
+- `test_an_artist_you_already_favourited_is_excluded()` — The suggestion IS the seed's own account — it must not be offered back.
+- `test_discover_limit_is_capped()`
+- `test_sync_status_needs_no_session()`
+- `test_sync_status_reports_the_busy_probe_by_name()`
+- `test_sync_status_defaults_to_off_and_has_no_invented_run_record()`
+- `test_sync_status_lists_every_favourite_state()`
+- `test_analyze_batch_is_probed_and_no_longer_listed_as_unobservable()`
+- `test_analyze_batch_counter_makes_the_app_look_busy()`
+- `test_sync_run_requires_session()`
+- `test_sync_run_rejects_a_wrong_bearer()`
+- `test_sync_run_returns_the_run_record()`
+- `test_sync_run_without_force_stops_at_the_opt_in_setting()`
+- `test_sync_run_409s_while_a_pass_is_in_flight()`
+- `test_a_busy_app_refuses_the_pass_with_a_reason()`
+- `test_setting_defaults_to_off()`
+- `test_setting_on_lets_a_pass_run()`
+- `test_catalogue_view_accepts_one_shared_budget()` — Without this keyword `run_sync` refuses outright — N artists would get N caps.
+- `test_a_passed_budget_is_used_instead_of_a_fresh_one()` — The caller's cap survives the call — that is what stops N artists getting N caps.
+- `test_the_scheduler_is_wired_and_starts_paused()` — The poller exists, waits before its first look, and is gated on the setting.
+- `fast_scheduler()`
+- `test_scheduler_does_nothing_while_the_setting_is_off()`
+- `test_scheduler_runs_a_pass_once_the_setting_is_on()`
+
 ### `tests/test_artist_identity.py`
 
 Artist-Hub identity tests (app/artist_store/identity.py + schema v2 track_identity).
@@ -2793,6 +2936,42 @@ Artist-Hub sidecar schema tests (T-3 — app/artist_store/schema.py).
 - `  TestWriteLocking.test_every_writer_holds_the_module_lock()`
 - `  TestWriteLocking.test_reads_do_not_take_the_lock()`
 - `  TestWriteLocking.test_concurrent_writers_do_not_lose_rows()`
+
+### `tests/test_artist_sync.py`
+
+Artist-Hub background sync + idle signal (T-17 — app/artist_store/sync.py).
+
+- `store()`
+- `quiet_app()` — Every observable tracker reports nothing running.
+- `test_idle_true_only_when_every_tracker_is_quiet()`
+- `test_not_idle_while_a_phrase_batch_runs()`
+- `test_not_idle_while_a_soundcloud_download_runs()`
+- `test_not_idle_while_a_local_import_runs()`
+- `test_not_idle_while_the_library_is_loading()`
+- `test_finished_jobs_do_not_block()`
+- `test_unknown_job_status_counts_as_busy()`
+- `test_a_probe_that_raises_counts_as_busy()`
+- `test_a_registered_probe_can_report_busy()`
+- `test_an_abandoned_task_is_ignored_but_reported()`
+- `test_off_artist_is_never_fetched()`
+- `test_review_artist_is_fetched_and_queues_nothing()`
+- `test_auto_artist_also_queues_nothing()`
+- `test_sync_module_never_calls_a_download_or_queue()` — Structural guard: the pass reads the downloader's task dict and nothing else.
+- `test_run_stops_mid_way_when_idle_goes_false()`
+- `test_a_busy_app_runs_nothing_at_all()`
+- `test_one_budget_is_shared_across_the_whole_run()`
+- `test_the_run_stops_when_the_shared_budget_is_spent()`
+- `test_oldest_last_synced_goes_first()`
+- `test_a_freshly_synced_artist_is_left_alone()`
+- `test_record_sync_stamps_success_and_stores_the_error()`
+- `test_a_signed_out_session_ends_the_run()`
+- `test_a_non_ok_state_is_not_counted_as_a_sync()`
+- `test_a_payload_without_buckets_prints_no_count()`
+- `test_artist_cap_bounds_one_pass()`
+- `test_the_setting_is_opt_in()`
+- `test_the_setting_switches_the_run_on()`
+- `test_a_refresher_without_a_shared_budget_is_refused()`
+- `test_the_run_record_round_trips()`
 
 ### `tests/test_audio_analyzer.py`
 
@@ -3523,6 +3702,14 @@ Tests for `app/services.py`.
 - `  TestSettingsAtomicSave.test_save_writes_complete_json()`
 - `  TestSettingsAtomicSave.test_save_leaves_no_tmp_files()`
 - `  TestSettingsAtomicSave.test_save_overwrites_existing_file()`
+- `TestSmartPlaylistsRetiredArtistBranch` — The raw-string "By Artist" generator is gone; "By Label" is untouched.
+- `  TestSmartPlaylistsRetiredArtistBranch.test_no_by_artist_folder_is_created()`
+- `  TestSmartPlaylistsRetiredArtistBranch.test_by_label_still_generated()`
+- `  TestSmartPlaylistsRetiredArtistBranch.test_label_threshold_still_filters()`
+- `  TestSmartPlaylistsRetiredArtistBranch.test_report_points_at_the_artist_hub()`
+- `  TestSmartPlaylistsRetiredArtistBranch.test_existing_by_artist_folder_is_reported_never_deleted()` — A user who already ran the old generator keeps their playlists.
+- `  TestSmartPlaylistsRetiredArtistBranch.test_no_legacy_folder_reports_none()`
+- `  TestSmartPlaylistsRetiredArtistBranch.test_unreachable_auto_folder_reports_not_ok()`
 
 ### `tests/test_settings_caps.py`
 
@@ -3890,6 +4077,60 @@ Tests for app/usb_mysettings.py — Pioneer MYSETTING file schema + I/O.
 - `test_every_field_has_required_keys_and_unique()`
 - `test_io_degrades_without_pyrekordbox()`
 - `test_enum_options_empty_without_pyrekordbox()`
+
+### `tests/test_usb_relocate.py`
+
+Tests for the USB relocation pass (`app/usb_one_library.py`).
+
+- `stick()` — `<tmp>/usb` with an existing (empty) Contents tree.
+- `no_copies()` — Fail the test the moment anything tries to copy bytes.
+- `TestPureRename`
+- `  TestPureRename.test_pure_rename_copies_zero_bytes()`
+- `  TestPureRename.test_emptied_variant_folder_is_pruned()`
+- `  TestPureRename.test_non_empty_variant_folder_survives()`
+- `  TestPureRename.test_several_variant_folders_merge_into_one()` — The headline case: `boys noize` + `BN` + `Boys Noize` -> one folder.
+- `  TestPureRename.test_already_in_place_is_left_alone()`
+- `  TestPureRename.test_nothing_on_the_stick_is_left_to_the_copy_phase()`
+- `  TestPureRename.test_missing_local_source_is_skipped()`
+- `  TestPureRename.test_a_different_size_is_never_a_candidate()` — Same filename, different bytes = a different track.
+- `  TestPureRename.test_never_steals_another_tracks_planned_destination()` — Two tracks, one filename: B already sits at its own destination.
+- `  TestPureRename.test_destination_outside_contents_is_refused()`
+- `TestCaseOnlyRename`
+- `  TestCaseOnlyRename.case_insensitive_volume()` — Make a DIRECT case-only rename fail the way Windows/exFAT does.
+- `  TestCaseOnlyRename.test_case_only_rename_two_step()`
+- `  TestCaseOnlyRename.test_case_only_rename_leaves_no_temp_directory()`
+- `  TestCaseOnlyRename.test_case_only_filename_rename()`
+- `  TestCaseOnlyRename.test_exact_name_wins_over_a_case_variant()` — On a case-sensitive volume both folders can exist.
+- `TestCollision`
+- `  TestCollision.test_collision_never_clobbers()`
+- `  TestCollision.test_identical_duplicate_is_removed_not_moved()`
+- `TestCrossVolume`
+- `  TestCrossVolume.test_cross_volume_falls_back_to_copy_and_verify()`
+- `  TestCrossVolume.test_exdev_from_os_replace_also_falls_back()` — `_same_volume` says yes but the kernel disagrees — still no half-move.
+- `  TestCrossVolume.test_source_survives_a_failed_verification()` — A truncated copy must cost the copy, never the only good file.
+- `  TestCrossVolume.test_a_failure_does_not_abort_the_other_tracks()`
+- `TestGuards`
+- `  TestGuards.test_missing_contents_dir_is_a_no_op()`
+- `  TestGuards.test_empty_plan_is_a_no_op()`
+- `  TestGuards.test_part_files_are_never_candidates()`
+- `  TestGuards.test_details_are_capped()`
+- `TestCaseSensitiveVolumeLookup` — `_existing_ci` on a case-sensitive volume, simulated through its listing.
+- `  TestCaseSensitiveVolumeLookup.test_exact_segment_never_crosses_into_the_variant()`
+- `  TestCaseSensitiveVolumeLookup.test_lone_variant_is_found()`
+- `  TestCaseSensitiveVolumeLookup.test_two_variants_and_no_exact_is_refused()`
+- `TestPlannedDest` — The relocation pass and the copy phase must agree on the destination.
+- `  TestPlannedDest.test_resolver_wins_over_the_fallback()`
+- `  TestPlannedDest.test_fallback_uses_the_pioneer_layout()`
+- `TestLegacySyncWiring`
+- `  TestLegacySyncWiring.test_relocate_before_copy_reports_a_move()`
+- `  TestLegacySyncWiring.test_relocate_before_copy_is_silent_when_nothing_moves()`
+- `  TestLegacySyncWiring.test_streaming_pseudo_path_rule()`
+- `  TestLegacySyncWiring.test_streaming_pseudo_paths_are_ignored()`
+- `TestContentIsProvenBeforeMovingOrDeleting` — Name + byte count is not proof of "the same recording".
+- `  TestContentIsProvenBeforeMovingOrDeleting.test_a_stranger_with_the_same_name_and_size_is_not_moved()`
+- `  TestContentIsProvenBeforeMovingOrDeleting.test_the_real_file_still_moves()` — The guard must not break the case it exists to protect.
+- `  TestContentIsProvenBeforeMovingOrDeleting.test_a_same_size_collision_with_different_bytes_deletes_nothing()`
+- `  TestContentIsProvenBeforeMovingOrDeleting.test_a_genuine_duplicate_is_still_removed()` — Identical bytes: removing the stale copy is the point of the branch.
 
 ### `tests/test_variant_detector.py`
 

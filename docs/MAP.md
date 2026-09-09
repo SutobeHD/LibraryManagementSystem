@@ -25,11 +25,13 @@
 | `app/anlz_writer.py` | LibraryManagementSystem -- ANLZ Binary File Writer |
 | `app/artist_store/__init__.py` | artist_store — Artist-Hub sidecar package (``artists.db``). |
 | `app/artist_store/catalogue.py` | artist_store.catalogue — classify an artist's SoundCloud tracks, diff against the library (T-14). |
+| `app/artist_store/discovery.py` | artist_store.discovery — Tier-2 suggestions: artists the user does not have yet (T-16). |
 | `app/artist_store/identity.py` | artist_store.identity — name-based, remix-aware track roles + the identity table. |
 | `app/artist_store/merge.py` | artist_store.merge — duplicate-artist detection, preview, apply and revert (T-5/T-6). |
 | `app/artist_store/projection.py` | artist_store.projection — mirror favourite collections into Rekordbox (T-7). |
 | `app/artist_store/registry.py` | artist_store.registry — library artists into the store, favourites, Tier-1 backlog (T-4). |
 | `app/artist_store/schema.py` | artist_store.schema — sidecar DB + migration runner for the Artist Hub (T-3). |
+| `app/artist_store/sync.py` | artist_store.sync — the idle signal + the background catalogue refresh (T-17). |
 | `app/audio_analyzer.py` | LibraryManagementSystem -- Audio Analyzer (Unified Wrapper) |
 | `app/audio_tags.py` | audio_tags — write metadata back to the source audio file. |
 | `app/auth.py` | Bearer-token authentication for the FastAPI sidecar. |
@@ -96,9 +98,12 @@
 | `frontend/src/audio/dawState/selection.js` | selectionReducer — region selection set and time-range selection. |
 | `frontend/src/audio/dawState/transport.js` | transportReducer — playhead, BPM, zoom/scroll, snap-grid, edit-mode, project metadata, and audio-source actio… |
 | `frontend/src/components/artistHub/artistCatalogueApi.js` | artistCatalogueApi — the SoundCloud half of the Artist Hub's HTTP surface. |
+| `frontend/src/components/artistHub/artistDiscoveryApi.js` | artistDiscoveryApi — the discovery + background-sync half of the Artist Hub's HTTP surface. |
 | `frontend/src/components/artistHub/artistHubApi.js` | artistHubApi — the merge + projection half of the Artist Hub's HTTP surface. |
 | `frontend/src/components/artistHub/catalogueCopy.js` | catalogueCopy — the sentences the artist-detail view has to say out loud. |
 | `frontend/src/components/artistHub/catalogueCopy.test.js` | node --test frontend/src/components/artistHub/catalogueCopy.test.js Pure copy + derivation builders — no DOM,… |
+| `frontend/src/components/artistHub/discoveryCopy.js` | discoveryCopy — the sentences the Discover tab and the background-sync line must say. |
+| `frontend/src/components/artistHub/discoveryCopy.test.js` | node --test frontend/src/components/artistHub/discoveryCopy.test.js Pure copy builders — no DOM, no resolver … |
 | `frontend/src/components/artistHub/mergeCopy.js` | mergeCopy — the sentences the merge dialog has to say out loud. |
 | `frontend/src/components/artistHub/mergeCopy.test.js` | node --test frontend/src/components/artistHub/mergeCopy.test.js Pure copy builders — no DOM, no resolver need… |
 | `frontend/src/components/artistHub/useArtistCatalogue.js` | Move one row into the bucket its new role renders in — the optimistic half of a pin. |
@@ -243,6 +248,8 @@
 | `tests/test_anlz_writer_guards.py` | Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout). |
 | `tests/test_artist_catalogue.py` | Artist-Hub catalogue tests (T-14 — app/artist_store/catalogue.py). |
 | `tests/test_artist_catalogue_routes.py` | Artist-Hub SoundCloud route tests — binding, catalogue, batch download (T-13/T-15). |
+| `tests/test_artist_discovery.py` | Artist-Hub Tier-2 discovery tests (T-16 — app/artist_store/discovery.py). |
+| `tests/test_artist_discovery_routes.py` | Artist-Hub discovery + background-sync route tests (T-16 / T-17). |
 | `tests/test_artist_identity.py` | Artist-Hub identity tests (app/artist_store/identity.py + schema v2 track_identity). |
 | `tests/test_artist_merge_apply.py` | Artist-Hub merge apply/revert tests (T-6 + T-11a — app/artist_store/merge.py). |
 | `tests/test_artist_merge_preview.py` | Artist-Hub merge detection + preview tests (T-5 — app/artist_store/merge.py). |
@@ -252,6 +259,7 @@
 | `tests/test_artist_splitting.py` | Tests for artist-name splitting and the artist list it feeds. |
 | `tests/test_artist_store_registry.py` | Artist-Hub registry tests (T-4 — app/artist_store/registry.py). |
 | `tests/test_artist_store_schema.py` | Artist-Hub sidecar schema tests (T-3 — app/artist_store/schema.py). |
+| `tests/test_artist_sync.py` | Artist-Hub background sync + idle signal (T-17 — app/artist_store/sync.py). |
 | `tests/test_audio_analyzer.py` | Tests for app/audio_analyzer.py — the pure _normalize_result mapping. |
 | `tests/test_audio_tags.py` | Tests for app/audio_tags.py — native tag write-back (mutates user files → HIGH risk). |
 | `tests/test_auth.py` | Tests for ``app/auth.py`` -- Bearer-token session authentication. |
@@ -302,6 +310,7 @@
 | `tests/test_usb_copy_atomic.py` | USB audio copies must not leave a truncated file that never self-heals. |
 | `tests/test_usb_manager.py` | Tests for `app/usb_manager.py`. |
 | `tests/test_usb_mysettings.py` | Tests for app/usb_mysettings.py — Pioneer MYSETTING file schema + I/O. |
+| `tests/test_usb_relocate.py` | Tests for the USB relocation pass (`app/usb_one_library.py`). |
 | `tests/test_variant_detector.py` | variant_schema + variant_detector tests (analysis-remix-detector T-2, T-3). |
 | `tests/test_variant_schema.py` | Tests for app/variant_schema.py — variants.db DDL + migration runner. |
 | `tests/test_xml_generator.py` | Tests for app/xml_generator.py — Rekordbox collection XML export. |
