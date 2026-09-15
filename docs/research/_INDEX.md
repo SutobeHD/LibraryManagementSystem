@@ -14,7 +14,7 @@ If this index drifts from the file system, the file system wins — re-derive wi
 ## research/
 
 ### idea
-_(none)_
+- [idea_soundcloud-collection-sync.md](research/idea_soundcloud-collection-sync.md) — SoundCloud Collection Sync: likes + playlists mirrored into Rekordbox, incremental download, genre/sub-genre routing into the Genres tree; follow-up carved out of `accepted_library-artist-hub` (`collection_kind`) (2026-09-15)
 
 ### drafting
 - [drafting_performance-overhaul.md](research/drafting_performance-overhaul.md) — Speed & efficiency overhaul; Stage-1 pre-filled from 9-agent perf investigation (48 hotspots: no list virtualization, unpaginated `/api/library/tracks`, unmemoized always-mounted views, blocking USB export+scan, event-loop waveform, 30s blocking startup); 16 OQs + 8-agent research plan queued for research-explore (2026-06-09)
