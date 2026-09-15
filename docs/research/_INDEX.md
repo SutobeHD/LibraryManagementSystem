@@ -14,9 +14,10 @@ If this index drifts from the file system, the file system wins — re-derive wi
 ## research/
 
 ### idea
-- [idea_soundcloud-collection-sync.md](research/idea_soundcloud-collection-sync.md) — SoundCloud Collection Sync: likes + playlists mirrored into Rekordbox, incremental download, genre/sub-genre routing into the Genres tree; follow-up carved out of `accepted_library-artist-hub` (`collection_kind`) (2026-09-15)
+_(none)_
 
 ### drafting
+- [drafting_soundcloud-collection-sync.md](research/drafting_soundcloud-collection-sync.md) — SoundCloud Collection Sync: likes + playlists mirrored into Rekordbox, incremental download, SC genre/`tag_list` routed into the user's Genres smart-list tree; follow-up carved out of `accepted_library-artist-hub` (`collection_kind`). Stage 1 filled interactively (2 codebase scans + OpenAPI spec): half-built `SoundCloudSyncEngine` to absorb, likes capped at 500 on a deprecated endpoint, `tag_list` dropped, live mode already parses RB smart-list rules; 17 OQs, 5-agent plan; awaiting Idea-Verifier (2026-09-15)
 - [drafting_performance-overhaul.md](research/drafting_performance-overhaul.md) — Speed & efficiency overhaul; Stage-1 pre-filled from 9-agent perf investigation (48 hotspots: no list virtualization, unpaginated `/api/library/tracks`, unmemoized always-mounted views, blocking USB export+scan, event-loop waveform, 30s blocking startup); 16 OQs + 8-agent research plan queued for research-explore (2026-06-09)
 
 ### exploring
