@@ -1,12 +1,15 @@
 import axios from 'axios';
 import toast from 'react-hot-toast';
 
+import { SC_REFRESH_TIMEOUT_MS } from '../config/constants';
 import {
     getSessionToken,
+    isAuthBootstrapFailed,
     setBootstrapFailed,
     setBootstrapPromise,
     setSessionToken,
 } from '../store/authStore';
+import { SC_EXPIRED, SESSION_DEAD, classifyRefreshError } from './scRefreshClassification';
 
 // ─── EC2: Runtime detection of Tauri context ───────────────────────────────────
 // Tauri injects window.__TAURI_INTERNALS__ before the page loads.
@@ -202,16 +205,20 @@ const SC_REFRESH_URL = '/api/soundcloud/refresh';
 async function _silentScRefresh() {
     // _skipAuthRetry: this request must never re-enter the 401 handler below,
     // or a rejected refresh would call itself.
-    await api.post(SC_REFRESH_URL, null, { _skipAuthRetry: true });
+    await api.post(SC_REFRESH_URL, null, {
+        _skipAuthRetry: true,
+        timeout: SC_REFRESH_TIMEOUT_MS,
+    });
 }
 
 /** Re-authenticate the SoundCloud session.
  *
- *  Silent backend refresh first; only when that answers 401 (the stored refresh
- *  token is gone or rejected) does the interactive Tauri login run. Resolves with
- *  no value — the token lives in the backend keyring and never reaches the
- *  renderer. Throws the axios error on a transient failure so the caller can tell
- *  "could not renew right now" from "signed out". */
+ *  Silent backend refresh first; `classifyRefreshError` decides what a failure meant
+ *  and only `SC_EXPIRED` runs the interactive Tauri login. Resolves with no value —
+ *  the token lives in the backend keyring and never reaches the renderer. A rejection
+ *  carries the verdict on `_refreshOutcome` (same object the queued subscribers get)
+ *  so the interceptor can tell the three outcomes apart without re-classifying: the
+ *  re-consent failure below is not an axios error and would classify as transient. */
 async function _refreshScToken() {
     // EC15: Only one refresh in flight at a time.
     if (_isRefreshing) {
@@ -228,9 +235,15 @@ async function _refreshScToken() {
     try {
         await _silentScRefresh();
     } catch (err) {
-        if (err?.response?.status !== 401) {
-            // 503 / network: the stored login is intact, this is not an auth failure —
-            // deliberately not counted against the refresh-loop guard.
+        const outcome = classifyRefreshError(err);
+        if (outcome !== SC_EXPIRED) {
+            // 503 / network / client timeout, or a require_session 401 from our own
+            // stale SESSION_TOKEN after a sidecar restart. The stored SC login is
+            // intact in every one of those cases, so this is not an auth failure —
+            // deliberately not counted against the refresh-loop guard. Tagging is
+            // object-only: module scope is strict mode, so a primitive rejection
+            // would throw here, and an untagged one reads as transient anyway.
+            if (err && typeof err === 'object') err._refreshOutcome = outcome;
             _isRefreshing = false;
             _drainRefreshQueue(null, err);
             throw err;
@@ -247,8 +260,16 @@ async function _refreshScToken() {
         } catch (loginErr) {
             _refreshFailCount++;
             _isRefreshing = false;
-            _drainRefreshQueue(null, loginErr);
-            throw loginErr;
+            // Only here is the stored login actually gone: the backend answered
+            // auth_expired (keyring already cleared) and re-consent then failed.
+            // `invoke()` can reject with a bare string, so wrap it — the flag has to
+            // survive to the interceptor, and it travels to the queued subscribers
+            // on the same object.
+            const expiredErr =
+                loginErr && typeof loginErr === 'object' ? loginErr : new Error(String(loginErr));
+            expiredErr._refreshOutcome = SC_EXPIRED;
+            _drainRefreshQueue(null, expiredErr);
+            throw expiredErr;
         }
     }
     _refreshFailCount = 0;
@@ -303,6 +324,16 @@ api.interceptors.response.use(
         // _skipAuthRetry marks the refresh/login calls themselves: retrying those
         // here would recurse.
         if (status === 401 && !originalRequest._retried && !originalRequest._skipAuthRetry) {
+            // A dead SESSION_TOKEN is terminal for this page: the token is fetched
+            // once at module load and there is no path that fetches another one, so
+            // every later 401 would buy the same failed refresh POST plus a log line.
+            // MAX_REFRESH_FAILS does not cover this — it only counts failed
+            // re-consents — so the flag set below is the latch. Escape is the app
+            // restart the toast asks for.
+            if (isAuthBootstrapFailed()) {
+                return Promise.reject(error);
+            }
+
             // EC15: Bail out if we've already failed MAX_REFRESH_FAILS times —
             // this breaks the infinite refresh loop.
             if (_refreshFailCount >= MAX_REFRESH_FAILS) {
@@ -320,13 +351,27 @@ api.interceptors.response.use(
                 // Re-send the original request now that the token is fresh.
                 return api(originalRequest);
             } catch (refreshErr) {
-                if (refreshErr?.response?.status === 503) {
-                    // Renewal could not run (SoundCloud unreachable). The stored login
-                    // is untouched, so claiming "signed out" here would be a lie.
+                const outcome = refreshErr?._refreshOutcome;
+                if (outcome === SESSION_DEAD) {
+                    // Our own bearer is dead (sidecar restarted → new SESSION_TOKEN),
+                    // which has nothing to do with SoundCloud. Same remedy and same
+                    // toast id as a failed bootstrap, so the two can't stack up.
+                    console.error('[API] Backend session token rejected — restart the app.');
+                    setBootstrapFailed(true);
+                    toast.error('Backend session expired. Restart the app.', {
+                        duration: Infinity,
+                        id: 'auth-bootstrap-failed',
+                    });
+                    return Promise.reject(error);
+                }
+                if (outcome !== SC_EXPIRED) {
+                    // Renewal could not run: SoundCloud unreachable, network drop,
+                    // timeout, 429. The stored login is untouched, so claiming
+                    // "signed out" here would be a lie.
                     console.warn('[API] SoundCloud session renewal unavailable — try again.');
                     return Promise.reject(error);
                 }
-                // Refresh failed → propagate the original 401
+                // Genuinely signed out of SoundCloud → propagate the original 401
                 window.dispatchEvent(new CustomEvent('sc:auth-expired'));
                 return Promise.reject(error);
             }

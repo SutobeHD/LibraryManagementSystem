@@ -101,3 +101,12 @@ export const ARTIST_SYNC_STATUS_POLL_MS = 20000;
 // Suggestions requested from GET /api/artists/discover. Matches the backend's own
 // DEFAULT_SUGGESTION_LIMIT — the panel is a shortlist, not a directory.
 export const ARTIST_DISCOVER_LIMIT = 25;
+
+// Headroom over the backend's own SoundCloud call (SC_REFRESH_TIMEOUT_S = 15 s in
+// app/soundcloud_auth.py), not a guarantee: `requests` applies that 15 s per phase
+// (connect + read) and `_refresh_lock` serialises concurrent callers, so a slow
+// SoundCloud can still outlast any value we pick here. Raising it further only makes
+// the user wait longer for the same verdict — the classification in api.js /
+// scRefreshClassification.js therefore keys
+// on the `auth_expired` marker, and a client abort (no response) reads as transient.
+export const SC_REFRESH_TIMEOUT_MS = 20_000;
