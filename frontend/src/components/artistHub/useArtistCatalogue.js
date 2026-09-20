@@ -79,14 +79,22 @@ const useArtistCatalogue = ({ collectionId, enabled = true }) => {
     const [downloading, setDownloading] = useState(false);
     const [result, setResult] = useState(null);
 
-    // Every async result is stamped with the sequence it started in, so a slow
-    // response for the previous artist can never land in this artist's panel.
+    // Two counters, deliberately not one. `seqRef` is `load`'s own fetch counter:
+    // a superseded catalogue response is dropped. `genRef` counts only the events
+    // that end this panel's claim on a run — another artist, or unmount — and is
+    // what `download` guards on. Conflating them made an ordinary re-read (Update
+    // pressed mid-run) read as "nobody is watching": the run cancelled itself and
+    // the panel stayed disabled with the progress bar pinned until an artist switch.
     const seqRef = useRef(0);
+    const genRef = useRef(0);
+    const runsRef = useRef(0);
     const currentRef = useRef(collectionId);
 
     useEffect(() => {
         currentRef.current = collectionId;
         seqRef.current += 1;
+        genRef.current += 1;
+        runsRef.current = 0;
         setView(null);
         setError('');
         setJob(null);
@@ -172,27 +180,37 @@ const useArtistCatalogue = ({ collectionId, enabled = true }) => {
     const download = useCallback(
         async ({ scIds = [], autoQueue = false } = {}) => {
             if (!collectionId) return null;
-            const seq = seqRef.current;
+            const gen = genRef.current;
+            // `downloading` means "a run is in flight", not "the run I started" —
+            // hence a count: an earlier run reaching its finally must not clear a
+            // panel a later one is still driving.
+            runsRef.current += 1;
             setDownloading(true);
             setResult(null);
             try {
                 const started = await startMissingDownload(collectionId, { scIds, autoQueue });
-                if (seqRef.current !== seq) return null;
+                if (genRef.current !== gen) return null;
                 setJob({ status: 'running', total: started?.total ?? 0, done: 0, percent: 0 });
                 const finished = await pollDownloadJob(started.job_id, {
                     onProgress: (next) => {
-                        if (seqRef.current === seq) setJob(next);
+                        if (genRef.current === gen) setJob(next);
                     },
-                    isCancelled: () => seqRef.current !== seq,
+                    isCancelled: () => genRef.current !== gen,
                 });
-                if (seqRef.current !== seq || !finished) return null;
+                if (genRef.current !== gen || !finished) return null;
                 setResult(finished);
                 await load();
                 return finished;
             } finally {
-                if (seqRef.current === seq) {
-                    setDownloading(false);
-                    setJob(null);
+                // Held until the closing re-read lands, so the result summary is
+                // never shown against the split the run started from. A run for an
+                // artist nobody is on any more resets nothing (the switch already did).
+                if (genRef.current === gen) {
+                    runsRef.current -= 1;
+                    if (runsRef.current === 0) {
+                        setDownloading(false);
+                        setJob(null);
+                    }
                 }
             }
         },
@@ -228,6 +246,7 @@ const useArtistCatalogue = ({ collectionId, enabled = true }) => {
     useEffect(
         () => () => {
             seqRef.current += 1;
+            genRef.current += 1;
         },
         []
     );
