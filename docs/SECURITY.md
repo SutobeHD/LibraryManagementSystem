@@ -158,7 +158,7 @@ Outer transport authenticated by the tunnel (Tailscale identity / Cloudflare Acc
 2. **Token-on-disk during Vite-dev.** The dev-middleware in `frontend/vite.config.js` reads `%APPDATA%/MusicLibraryManager/.session-token` and exposes it at `GET /dev-token`. The file path is unchanged from prod, so dev backups / OneDrive / Time-Machine may capture it. Mitigation: token rotates on every sidecar restart.
 3. **Token in Tauri-process memory.** The captured token sits in a `Mutex<String>` for the lifetime of the supervisor. Process Explorer / `ReadProcessMemory` on Windows or `/proc/<pid>/mem` on Linux can lift it from any process running as the same user. Accepted — same trust boundary as the file itself.
 4. **No per-device revoke / no rotation mid-session.** Token rotates **only** on sidecar restart. User can force-rotate by hitting `POST /api/system/restart`. Phase 2 introduces paired-device tokens with explicit revoke UI.
-5. **Read routes stay open** (loopback-gated only) in Phase 1. Same-machine attacker can still scrape library metadata without a token. Phase 2 may flip this to require_session-everywhere.
+5. **Pure read routes stay open** (loopback-gated only) in Phase 1. Same-machine attacker can still scrape library metadata without a token. Phase 2 may flip this to require_session-everywhere. **Carve-out:** a GET with a side effect — third-party quota spend or a sidecar write — is gated like a mutation, not covered by this allowance (`GET /api/artists/{id}/catalogue`, `GET /api/artists/discover`). The gate closes the cross-origin browser vector (a page can send a simple GET that CORS never blocks); it does not stop a same-machine process, which can lift the token file (risk 1).
 
 ## Permanent Constraints — Future Code MUST Honor
 
@@ -167,6 +167,7 @@ These are codified in `.claude/rules/coding-rules.md`:
 - **Log-scrubbing.** Any logging middleware added later MUST scrub `Authorization` and `Cookie` headers before emitting. Today no code logs headers, but a careless `request.headers` dump would leak the token to `log/app.log`.
 - **WebSocket auth.** When the first `@app.websocket` route lands, it MUST call `await require_session_ws(websocket)` **inside the handler** and `await ws.close(1008)` on auth-fail. A bare `Depends(require_session)` on a WebSocket route does not close the socket cleanly when the dep raises `HTTPException`.
 - **Never log the token.** Not at INFO, not at DEBUG, not redacted. `app/auth.py` enforces this contract; downstream code MUST too.
+- **SoundCloud query credentials never reach a log line.** `_scrub_secrets` / `_log_params` (`app/soundcloud_api.py`) strip `client_id`, `oauth_token`, `access_token` and `secret_token` from every logged URL, params dict and exception message — the pagination path follows a server-supplied `next_href`, so the URL is not ours to trust. `resp.raise_for_status()` is deliberately not used: `requests` renders the prepared URL, query string and all, into the `HTTPError` message, and this repo has 80+ `except Exception as e` handlers that would log it. `tests/test_soundcloud_log_redaction.py` pins the call sites via `caplog`.
 
 ## Phase 2 — Out of Scope for Now
 

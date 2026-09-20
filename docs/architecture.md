@@ -247,8 +247,9 @@ Discover / background sync
 USB export after a merge
   → OneLibraryUsbWriter.sync() Stage 1b: artist-folder rename MOVES the file
     (two-step on Windows for a case-only change) instead of re-copying,
-    gated on a size + first/last-64-KiB fingerprint on both the move and the
-    delete branch — unreadable file = unproven = skipped
+    gated on a content fingerprint (size + the whole file up to 128 KiB, above
+    that both 64 KiB edges) on both the move and the delete branch —
+    unreadable file = unproven = skipped
 ```
 
 Rollback for the whole feature is ``rm artists.db``: no library data lives

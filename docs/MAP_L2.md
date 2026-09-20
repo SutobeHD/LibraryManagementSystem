@@ -949,6 +949,15 @@ pairing_store — in-memory one-shot pairing codes (Phase-2 auth, T2).
 - `mint_code()` — Mint a one-shot pairing code on the shared store.
 - `consume_code()` — Redeem a pairing code on the shared store.
 
+### `app/phrase_db_writer.py`
+
+phrase_db_writer.py — write phrase memory cues into Rekordbox master.db (djmdCue).
+
+- `RekordboxLockedError` — master.db is locked — Rekordbox is probably running.
+- `backup_master_db()` — Copy `db_path` (+ its -wal) to timestamped `.phrasebak-*` files.
+- `restore_master_db()` — Roll master.db back from ONE backup set (all files, one timestamp).
+- `write_phrase_memory_cues()` — Write phrase memory cues (Kind=0) into djmdCue for one track.
+
 ### `app/phrase_generator.py`
 
 phrase_generator.py — Phrase & Auto-Cue Generator
@@ -1288,6 +1297,17 @@ variant_schema — DDL + idempotent migration runner for the variants sidecar.
 - `scAuthTokenBody()` — The `POST /api/soundcloud/auth-token` body for one `scLogin()` result.
 - `cancellableGet()` — ─── AbortController helpers ────────────────────────────────────────────────── export function crea…
 
+### `frontend/src/api/scRefreshClassification.js`
+
+scRefreshClassification — what a failed `POST /api/soundcloud/refresh` means.
+
+- `SESSION_DEAD()` — scRefreshClassification — what a failed `POST /api/soundcloud/refresh` means.
+- `classifyRefreshError()` — export const TRANSIENT = 'transient'; const HTTP_UNAUTHORIZED = 401; const SC_EXPIRED_DETAIL = 'aut…
+
+### `frontend/src/api/scRefreshClassification.test.js`
+
+node --test frontend/src/api/scRefreshClassification.test.js Pure predicate — no DOM, no axios, no resolver needed (the import carries its …
+
 ### `frontend/src/audio/AudioRegion.js`
 
 AudioRegion - Core data structure for non-destructive audio editing Each region represents a reference to a portion of the original audio f…
@@ -1485,7 +1505,9 @@ discoveryCopy — the sentences the Discover tab and the background-sync line mu
 - `STATE_SKIPPED_BUDGET()`
 - `STATE_NOT_QUERIED()`
 - `STATE_NO_DATA()`
-- `relatedNote()` — export const STOP_DISABLED = 'disabled'; export const STOP_COMPLETED = 'completed'; export const ST…
+- `STATE_SKIPPED_TRACK_CAP()` — A catalogue source nobody queried because the artist's own track ceiling was already full — mirrors…
+- `SKIPPED_TRACK_CAP_NOTE()`
+- `relatedNote()` — What the related-artists hop actually did.
 - `allSourcesAnswered()` — export const coOccurrenceNote = (payload) => { const state = payload?.sources?.[SOURCE_CO_OCCURRENC…
 - `emptyNote()` — What to print when the list came back empty.
 - `exclusionNote()` — The "already yours" filter is a claim about the library.
@@ -1493,6 +1515,7 @@ discoveryCopy — the sentences the Discover tab and the background-sync line mu
 - `candidateFacts()` — The measured facts of one candidate, in order.
 - `idleSentence()` — export const busyReasonSentence = (reason) => { const raw = String(reason || '').trim(); if (!raw |…
 - `runSummary()` — One sentence for a finished run, built only from what the record actually counted.
+- `syncStateNote()` — How to render one artist's `sync_state.last_error`: `{ title, className, suffix }`.
 - `SYNC_MODE_HINTS()` — export const lastSyncedLabel = (isoOrNull) => { const ago = relativeTime(isoOrNull); return ago ?
 
 ### `frontend/src/components/artistHub/discoveryCopy.test.js`
@@ -1520,6 +1543,10 @@ node --test frontend/src/components/artistHub/mergeCopy.test.js Pure copy builde
 Move one row into the bucket its new role renders in — the optimistic half of a pin.
 
 - `movePinnedRow()` — Move one row into the bucket its new role renders in — the optimistic half of a pin.
+
+### `frontend/src/components/artistHub/useArtistCatalogue.test.js`
+
+node --import ./frontend/src/components/artistHub/useArtistCatalogue.test.resolver.mjs \ --test frontend/src/components/artistHub/useArtist…
 
 ### `frontend/src/components/artistHub/useArtistDetailActions.js`
 
@@ -1685,6 +1712,7 @@ Frontend-wide constants.
 - `ARTIST_SYNC_RUN_TIMEOUT_MS()` — Axios timeout for POST /api/artists/sync/run.
 - `ARTIST_SYNC_STATUS_POLL_MS()` — Poll cadence for GET /api/artists/sync/status while the Artists tab is open.
 - `ARTIST_DISCOVER_LIMIT()` — Suggestions requested from GET /api/artists/discover.
+- `SC_REFRESH_TIMEOUT_MS()` — Headroom over the backend's own SoundCloud call (SC_REFRESH_TIMEOUT_S = 15 s in app/soundcloud_auth…
 
 ### `frontend/src/store/authStore.js`
 
@@ -2078,6 +2106,34 @@ Floating zoom controls overlay — sits absolutely positioned over the detail co
 
 *(no module docstring)*
 
+### `frontend/src/components/artistHub/useArtistCatalogue.test.api-stub.mjs`
+
+Stand-in for `artistCatalogueApi` in `useArtistCatalogue.test.js`.
+
+- `stub()` — Stand-in for `artistCatalogueApi` in `useArtistCatalogue.test.js`.
+- `calls()`
+- `resetStub()`
+- `fetchCatalogue()`
+- `startMissingDownload()`
+- `pollDownloadJob()`
+- `linkSoundCloudProfile()`
+- `unlinkSoundCloudProfile()`
+- `pinTrackRole()`
+- `catalogueErrorMessage()`
+- `isUnknownCollection()`
+
+### `frontend/src/components/artistHub/useArtistCatalogue.test.fake-react.mjs`
+
+Minimal hooks runtime standing in for `react` in `useArtistCatalogue.test.js`.
+
+- `useState()`
+- `useRef()`
+- `useMemo()`
+- `useCallback()`
+- `useEffect()`
+- `useLayoutEffect()`
+- `settle()` — export const renderHook = (fn, props) => { const instance = { fn, props, hooks: [], index: 0, queue…
+
 
 ## src-tauri/src/ — Rust Desktop Wrapper
 
@@ -2402,10 +2458,11 @@ Artist-Hub SoundCloud route tests — binding, catalogue, batch download (T-13/T
 - `linked()`
 - `fetched()` — A linked artist whose catalogue is already in the TTL cache.
 - `downloads()` — Record every ``download_track`` call and complete it immediately.
-- `test_mutations_require_session()`
-- `test_mutations_reject_wrong_bearer()`
+- `test_gated_routes_require_session()`
+- `test_gated_routes_reject_wrong_bearer()`
 - `test_rejected_mutation_writes_no_link()`
-- `test_catalogue_read_needs_no_session()`
+- `test_catalogue_read_with_a_session_is_served()`
+- `test_a_gated_read_reaches_no_further_than_the_gate()` — 401 before the route body, so a rejected call spends nothing and caches nothing.
 - `test_unlinked_and_signed_out_says_not_connected_not_empty()` — No account AND no login: nothing was queried, so nothing may be listed.
 - `test_unlinked_artist_is_catalogued_by_name_and_flagged()` — Owner decision 2026-09-08: linking stays manual, but a name is enough to search.
 - `test_unknown_collection_is_404()`
@@ -2414,6 +2471,10 @@ Artist-Hub SoundCloud route tests — binding, catalogue, batch download (T-13/T
 - `test_deleted_soundcloud_account_returns_artist_gone()` — A dead artist 404s legitimately — that is not a "please log in again".
 - `test_catalogue_splits_into_role_buckets_and_reports_the_budget()`
 - `test_catalogue_fetch_carries_a_call_budget()`
+- `TestForcedRefreshCooldown` — ``refresh=true`` skips the TTL cache and spends a whole budget — once per window.
+- `  TestForcedRefreshCooldown.test_a_second_forced_refresh_in_the_window_reads_the_cache()`
+- `  TestForcedRefreshCooldown.test_the_window_expires()`
+- `  TestForcedRefreshCooldown.test_a_signed_out_read_does_not_burn_the_window()` — Nothing was spendable, so the first refresh that CAN fetch must still fetch.
 - `test_truncated_fetch_is_reported_not_hidden()`
 - `test_link_stores_urn_permalink_and_confidence()`
 - `test_link_without_a_token_is_refused()`
@@ -2443,6 +2504,13 @@ Artist-Hub SoundCloud route tests — binding, catalogue, batch download (T-13/T
 - `  TestEverySourceReportsItsOwnStatus.test_a_reposts_failure_does_not_sink_the_catalogue()` — Own uploads are the half that matters — a reposts error must degrade, not fail.
 - `  TestEverySourceReportsItsOwnStatus.test_an_alias_the_budget_never_reached_is_reported_as_skipped()` — A name that was never searched is a bucket nobody looked in — say which.
 - `  TestEverySourceReportsItsOwnStatus.test_a_cached_read_claims_nothing_about_any_source()` — A cache hit fetched nothing, so it may not assert anything about any source.
+- `  TestEverySourceReportsItsOwnStatus.test_a_full_track_ceiling_is_not_reported_as_a_budget_skip()` — Both skips used to be ``skipped_budget`` — one of them is not about the budget.
+- `  TestEverySourceReportsItsOwnStatus.test_a_budget_cut_outranks_a_cap_an_earlier_source_hit()` — First-wins let own uploads' permanent cap hide search's retryable budget cut.
+- `TestAForcedRefreshRecordsWhatItMeasured` — ``refresh=true`` replaces the cached catalogue, so it owns ``sync_state`` too.
+- `  TestAForcedRefreshRecordsWhatItMeasured.test_a_complete_refresh_clears_a_stale_partial_marker()`
+- `  TestAForcedRefreshRecordsWhatItMeasured.test_a_truncated_refresh_writes_the_cap_the_fetch_measured()`
+- `  TestAForcedRefreshRecordsWhatItMeasured.test_a_budget_cut_refresh_leaves_the_background_counter_alone()` — ``partial:`` counts *background passes*; a button press is not one of them.
+- `  TestAForcedRefreshRecordsWhatItMeasured.test_a_refresh_served_from_cache_records_nothing()` — The cooldown turns the second press into a cache read — no truth changed.
 - `TestRolePin` — ``POST /api/artists/{id}/tracks/{sc_urn}/role`` — the manual half of identification.
 - `  TestRolePin.test_pin_requires_a_session()`
 - `  TestRolePin.test_a_pin_persists_and_wins_on_the_next_pass()`
@@ -2497,6 +2565,8 @@ Artist-Hub discovery + background-sync route tests (T-16 / T-17).
 - `signed_in()`
 - `favourite()`
 - `linked_favourite()`
+- `test_discover_requires_session()` — A GET by shape only: the related tier has no cache and hops live on the token.
+- `test_discover_rejects_a_wrong_bearer()`
 - `test_discover_is_never_a_bare_list()`
 - `test_signed_out_says_not_queried_never_nothing_found()`
 - `test_no_linked_favourite_reports_the_reason()` — A signed-in user with no bound account: nothing was asked, and it says so.
@@ -2524,6 +2594,7 @@ Artist-Hub discovery + background-sync route tests (T-16 / T-17).
 - `fast_scheduler()`
 - `test_scheduler_does_nothing_while_the_setting_is_off()`
 - `test_scheduler_runs_a_pass_once_the_setting_is_on()`
+- `test_the_scheduler_reports_a_pass_that_only_cut_refreshes_short()` — A cut-short refresh is work: calls were spent and a marker was written.
 
 ### `tests/test_artist_identity.py`
 
@@ -2966,6 +3037,15 @@ Artist-Hub background sync + idle signal (T-17 — app/artist_store/sync.py).
 - `test_record_sync_stamps_success_and_stores_the_error()`
 - `test_a_signed_out_session_ends_the_run()`
 - `test_a_non_ok_state_is_not_counted_as_a_sync()`
+- `test_a_truncated_refresh_is_not_counted_as_a_sync()`
+- `test_a_partially_synced_artist_is_retried_next_pass()`
+- `test_a_partially_synced_artist_sorts_first()`
+- `test_a_ceiling_truncated_refresh_is_a_finished_sync()` — `truncated` is not a budget signal — three of its four causes are permanent.
+- `test_a_chronically_cut_artist_stops_jumping_the_queue()` — The TTL bypass is bounded: one artist the budget never finishes cannot own it.
+- `test_the_partial_marker_names_the_cause_that_was_measured()`
+- `test_a_spent_budget_is_a_measurement_too()` — The payload blames a cap, but this run's own budget ran dry — that is retryable.
+- `test_a_truncation_with_no_recorded_reason_is_named_as_unknown()` — A cache entry written before ``stop_reason`` existed reports truncation, no cause.
+- `test_a_stale_partial_marker_loses_to_a_complete_cached_catalogue()` — A foreground fetch can write the catalogue without recording `sync_state`.
 - `test_a_payload_without_buckets_prints_no_count()`
 - `test_artist_cap_bounds_one_pass()`
 - `test_the_setting_is_opt_in()`
@@ -3525,6 +3605,45 @@ Tests for the phrase-batch backend (app/main.py):
 - `test_cancel_unknown_404()`
 - `test_cancel_sets_flag()`
 
+### `tests/test_phrase_db_writer.py`
+
+Unit tests for app/phrase_db_writer.py (djmdCue memory-cue writer).
+
+- `test_write_creates_kind0_memory_cues()`
+- `test_copy_is_opened_without_sqlcipher_unlock()` — A decrypted copy must not go through pyrekordbox's unlock branch.
+- `test_live_path_opens_the_caller_db_path()` — Not pyrekordbox's auto-detected DB — the backup must match the target.
+- `test_generated_ids_are_unique_strings_not_in_use()`
+- `test_generated_ids_are_deduped_against_each_other()` — A newer pyrekordbox's `generate_unused_id` only knows what is in the DB.
+- `test_prefetched_used_ids_skip_the_per_call_id_query()` — Batch callers pay the `SELECT ID` once; the shared set keeps IDs disjoint.
+- `test_write_idempotent_removes_only_prior_phrase_cues()`
+- `test_locked_db_raises_rekordbox_locked()`
+- `test_non_lock_exception_propagates_unchanged()` — The broad `except Exception` must not widen into RekordboxLockedError.
+- `test_missing_content_raises_before_deleting()`
+- `test_content_without_uuid_raises()`
+- `test_no_backup_is_written_for_a_rejected_content_id()`
+- `test_backup_snapshots_the_copy_that_is_written_not_the_live_db()` — `db_file` is the file that gets mutated — snapshotting master.db protects nothing.
+- `test_rollback_hint_points_at_the_written_file()` — Following the logged hint must not restore (and wipe the -wal of) the live DB.
+- `test_fake_db_only_exposes_real_pyrekordbox_methods()` — Pins the fake to the pinned dependency, so it cannot invent an API.
+- `test_module_only_uses_attributes_the_pinned_class_has()` — `db.<attr>` in the module must exist on Rekordbox6Database 0.1.7.
+- `test_cue_row_satisfies_real_schema()` — The writer's exact kwargs must survive a real INSERT (NOT NULL columns).
+- `test_backup_master_db()`
+- `test_backup_skips_shm()` — -shm is a rebuildable wal-index; a stale copy has no value.
+- `test_backup_stamps_do_not_collide()` — Two snapshots inside one second must not overwrite each other.
+- `test_backup_keeps_both_sets_when_the_clock_does_not_tick()` — `datetime.now()` steps ~16 ms on Windows/py3.11 — two snapshots fit in one tick.
+- `test_restore_restores_the_newest_set()`
+- `test_restore_never_mixes_generations()` — A db from T2 beside a -wal from T1 = silent page-level corruption.
+- `test_restore_removes_orphan_sidecars()`
+- `test_restore_accepts_an_explicit_set()`
+- `test_restore_rejects_a_path_without_the_backup_marker()` — Declared in the docstring's Raises block — an unmarked path is not a snapshot.
+- `test_restore_refuses_a_set_without_the_main_db()`
+- `test_restore_returns_zero_when_no_backups()`
+- `test_restore_refuses_while_rekordbox_runs()`
+- `TestMasterDbWriteLock` — Snapshot and restore are master.db writers — they hold the global lock.
+- `  TestMasterDbWriteLock.test_db_lock_is_the_global_write_lock()`
+- `  TestMasterDbWriteLock.test_snapshot_is_taken_under_the_lock()` — Outside it, another writer can commit between copy and write.
+- `  TestMasterDbWriteLock.test_restore_mutations_are_under_the_lock()`
+- `test_pyrekordbox_is_imported_quietly()` — A bare import drops the root logger to NOTSET — see pyrekordbox_compat.
+
 ### `tests/test_playcount_sync.py`
 
 Tests for app/playcount_sync.py — USB <-> PC play-count sync engine.
@@ -3950,6 +4069,17 @@ Security regression tests for app/soundcloud_downloader.
 - `  TestSizeLimits.test_budget_is_at_least_500_mib()`
 - `  TestSizeLimits.test_budget_is_at_most_4_gib()`
 
+### `tests/test_soundcloud_log_redaction.py`
+
+Regression guard: no SoundCloud log record may carry a `client_id`.
+
+- `test_non_json_200_does_not_log_client_id()`
+- `test_502_does_not_log_client_id_and_raises_sanitized_http_error()`
+- `test_network_error_does_not_log_client_id()`
+- `test_404_does_not_log_client_id()`
+- `test_log_params_redacts_credential_keys_only()`
+- `test_scrub_secrets_strips_query_credentials()`
+
 ### `tests/test_soundcloud_refresh_route.py`
 
 Route tests for the persistent SoundCloud login (T-19).
@@ -4131,6 +4261,20 @@ Tests for the USB relocation pass (`app/usb_one_library.py`).
 - `  TestContentIsProvenBeforeMovingOrDeleting.test_the_real_file_still_moves()` — The guard must not break the case it exists to protect.
 - `  TestContentIsProvenBeforeMovingOrDeleting.test_a_same_size_collision_with_different_bytes_deletes_nothing()`
 - `  TestContentIsProvenBeforeMovingOrDeleting.test_a_genuine_duplicate_is_still_removed()` — Identical bytes: removing the stale copy is the point of the branch.
+- `  TestContentIsProvenBeforeMovingOrDeleting.test_a_shared_head_is_not_proof_for_a_small_file()` — 64 KiB < size <= 128 KiB used to hash the head only — an oversized ID3
+- `  TestContentIsProvenBeforeMovingOrDeleting.test_a_shared_head_collision_deletes_nothing()`
+- `  TestContentIsProvenBeforeMovingOrDeleting.test_a_stranger_does_not_veto_the_real_candidate()` — A same-name, same-size stranger sorting first is skipped over, not a veto.
+- `run_sync()` — Drive the REAL `sync()` against a fake rbox.
+- `TestOneLibrarySyncStage1b` — Stage 1b must run before the copy loop and agree with it on the destination.
+- `  TestOneLibrarySyncStage1b.test_a_pure_rename_copies_zero_bytes_through_sync()`
+- `  TestOneLibrarySyncStage1b.test_skipped_when_audio_copy_false()`
+- `  TestOneLibrarySyncStage1b.test_playlist_filter_bounds_stage_1b()` — Stage 1b runs AFTER the playlist filter — a track the user did not select
+- `  TestOneLibrarySyncStage1b.test_slot_count_bounds_stage_1b()` — Past the template's slot count a track gets no row, so moving its stick
+- `  TestOneLibrarySyncStage1b.test_stage_1b_honours_the_dest_resolver()` — Production always passes a resolver, so both stages must route through it
+- `TestUnreadableLocalPath` — One local file the user lost read access to must cost that one track.
+- `  TestUnreadableLocalPath.test_one_unreadable_file_does_not_cost_the_export()`
+- `TestSlotPruning` — Stage 3 deletes the placeholder slots nothing was written into.
+- `  TestSlotPruning.test_a_failed_slot_does_not_delete_a_populated_row()`
 
 ### `tests/test_variant_detector.py`
 
@@ -4204,6 +4348,12 @@ Probe rbox's artist/playlist write semantics against a COPY of a master.db.
 
 - `main()`
 
+### `scripts/dev/rescan_unreadable.py`
+
+Re-scan only the rows marked unreadable in an audio_report.json.
+
+- `main()`
+
 ### `scripts/dev/safe_format_swap.py`
 
 safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist.
@@ -4217,6 +4367,16 @@ safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist.
 - `convert_m4a_to_aiff()` — ffmpeg src -> dst.
 - `execute()`
 - `rollback()`
+- `main()`
+
+### `scripts/dev/scan_audio_quality.py`
+
+Scan an audio library with ffprobe, aggregate codec/bitrate/sample-rate.
+
+- `default_workers()` — ffprobe is seek-bound, not CPU-bound; >8 thrashes an external USB/HDD.
+- `require_ffprobe()` — Fail before spawning one process per track - see CLAUDE.md, External deps.
+- `probe()`
+- `classify()` — Bucket per club-readiness tier.
 - `main()`
 
 ### `scripts/pipeline_dashboard.py`

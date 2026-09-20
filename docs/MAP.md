@@ -55,6 +55,7 @@
 | `app/metadata_fixer/detector.py` | Read-only detection of malformed artist/title metadata. |
 | `app/metadata_fixer/schema.py` | metadata_fixer.schema — sidecar undo-log DB for the metadata fixer (T4). |
 | `app/pairing_store.py` | pairing_store — in-memory one-shot pairing codes (Phase-2 auth, T2). |
+| `app/phrase_db_writer.py` | phrase_db_writer.py — write phrase memory cues into Rekordbox master.db (djmdCue). |
 | `app/phrase_generator.py` | phrase_generator.py — Phrase & Auto-Cue Generator |
 | `app/playcount_sync.py` | playcount_sync.py — USB Play-Count Sync Engine |
 | `app/popularity_engine.py` | Popularity sidecar engine — SoundCloud-only at M1 (underground-mainstream T1-T3). |
@@ -85,6 +86,8 @@
 | File | Purpose |
 |------|---------|
 | `frontend/src/api/api.js` | ─── EC2: Runtime detection of Tauri context ─────────────────────────────────── |
+| `frontend/src/api/scRefreshClassification.js` | scRefreshClassification — what a failed `POST /api/soundcloud/refresh` means. |
+| `frontend/src/api/scRefreshClassification.test.js` | node --test frontend/src/api/scRefreshClassification.test.js Pure predicate — no DOM, no axios, no resolver n… |
 | `frontend/src/audio/AudioRegion.js` | AudioRegion - Core data structure for non-destructive audio editing Each region represents a reference to a p… |
 | `frontend/src/audio/DawEngine.js` | DawEngine — Web Audio API Playback Engine Manages AudioContext lifecycle, audio loading, and region-based pla… |
 | `frontend/src/audio/DawState.js` | DawState — Central state management for the DJ Edit DAW. |
@@ -107,6 +110,7 @@
 | `frontend/src/components/artistHub/mergeCopy.js` | mergeCopy — the sentences the merge dialog has to say out loud. |
 | `frontend/src/components/artistHub/mergeCopy.test.js` | node --test frontend/src/components/artistHub/mergeCopy.test.js Pure copy builders — no DOM, no resolver need… |
 | `frontend/src/components/artistHub/useArtistCatalogue.js` | Move one row into the bucket its new role renders in — the optimistic half of a pin. |
+| `frontend/src/components/artistHub/useArtistCatalogue.test.js` | node --import ./frontend/src/components/artistHub/useArtistCatalogue.test.resolver.mjs \ --test frontend/src/… |
 | `frontend/src/components/artistHub/useArtistDetailActions.js` | useArtistDetailActions — the click handlers of the artist detail view. |
 | `frontend/src/components/daw/timeline/useTimelineEvents.js` | useTimelineEvents — Event-handler layer for DawTimeline Owns: - Hit-testing for cue flags (hot + memory) - Mo… |
 | `frontend/src/components/daw/timeline/useTimelineLayout.js` | useTimelineLayout — Layout / sizing layer for DawTimeline Owns: - ResizeObserver subscription on the containe… |
@@ -214,6 +218,8 @@
 | `frontend/src/components/waveform/WaveformSimpleView.jsx` | Stripped-down view used by RankingView (simpleMode=true) — only overview + main waveform + |
 | `frontend/src/components/waveform/WaveformZoom.jsx` | Floating zoom controls overlay — sits absolutely positioned over the detail container. |
 | `frontend/src/main.jsx` | *(no module docstring)* |
+| `frontend/src/components/artistHub/useArtistCatalogue.test.api-stub.mjs` | Stand-in for `artistCatalogueApi` in `useArtistCatalogue.test.js`. |
+| `frontend/src/components/artistHub/useArtistCatalogue.test.fake-react.mjs` | Minimal hooks runtime standing in for `react` in `useArtistCatalogue.test.js`. |
 
 ## src-tauri/src/ — Rust Desktop Wrapper
 
@@ -287,6 +293,7 @@
 | `tests/test_pdb_atomic_write.py` | The USB PDB writers must never leave a truncated file behind. |
 | `tests/test_pdb_structure.py` | PDB writer structural test against F: drive Pioneer reference. |
 | `tests/test_phrase_batch.py` | Tests for the phrase-batch backend (app/main.py): |
+| `tests/test_phrase_db_writer.py` | Unit tests for app/phrase_db_writer.py (djmdCue memory-cue writer). |
 | `tests/test_playcount_sync.py` | Tests for app/playcount_sync.py — USB <-> PC play-count sync engine. |
 | `tests/test_popularity_engine.py` | PopularityStore tests (underground-mainstream-classifier T1-T3). |
 | `tests/test_rate_limit.py` | Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter. |
@@ -304,6 +311,7 @@
 | `tests/test_soundcloud_auth.py` | Tests for `app/soundcloud_auth.py` — token store + silent refresh. |
 | `tests/test_soundcloud_auth_status.py` | Tests for GET /api/soundcloud/auth-status. |
 | `tests/test_soundcloud_downloader_security.py` | Security regression tests for app/soundcloud_downloader. |
+| `tests/test_soundcloud_log_redaction.py` | Regression guard: no SoundCloud log record may carry a `client_id`. |
 | `tests/test_soundcloud_refresh_route.py` | Route tests for the persistent SoundCloud login (T-19). |
 | `tests/test_stream_unicode_filename.py` | Regression: GET /api/stream 500 on non-latin-1 filenames. |
 | `tests/test_system_health.py` | Contract tests for ``GET /api/system/health`` -- unauth'd liveness probe. |
@@ -323,7 +331,9 @@
 | `scripts/compare_rekordbox.py` | compare_rekordbox.py — A/B accuracy harness: our engine vs Rekordbox. |
 | `scripts/dev/phrase_spike.py` | phrase_spike.py — manual P0 verification for the phrase memory-cue ANLZ write. |
 | `scripts/dev/rbox_artist_merge_probe.py` | Probe rbox's artist/playlist write semantics against a COPY of a master.db. |
+| `scripts/dev/rescan_unreadable.py` | Re-scan only the rows marked unreadable in an audio_report.json. |
 | `scripts/dev/safe_format_swap.py` | safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist. |
+| `scripts/dev/scan_audio_quality.py` | Scan an audio library with ffprobe, aggregate codec/bitrate/sample-rate. |
 | `scripts/pipeline_dashboard.py` | Local web dashboard for the research pipeline. |
 | `scripts/pipeline_status.py` | Show the research pipeline state at a glance. |
 | `scripts/print_routine.py` | Extract the deploy-ready prompt from a routine .md file. |

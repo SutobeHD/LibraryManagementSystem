@@ -108,9 +108,12 @@
     token.
   - USB export moves files instead of re-copying them when only the artist
     folder changed, including the two-step rename a case-only change needs on
-    Windows. Both relocation branches verify file content (size + first/last
-    64 KiB) before moving or deleting anything on the stick; an unreadable file
-    counts as unproven and is skipped.
+    Windows. Both relocation branches verify file content before moving
+    or deleting anything on the stick — the whole file is hashed up to 128 KiB,
+    above that its first and last 64 KiB — and an unreadable file counts as
+    unproven and is skipped. Hashing only the edges would have read the head
+    twice for a file under 128 KiB, so two different short recordings sharing an
+    oversized cover-art frame fingerprinted identically.
   - Changed: the smart-playlist button generates **labels only**. Its old
     `By Artist` branch grouped on the raw artist string (so two spellings became
     two folders) and duplicated every playlist on each re-run. An existing
