@@ -12,7 +12,10 @@ each one has its own test:
   * a collision must never clobber the file that is already there,
   * a cross-volume move must fall back to copy-and-verify,
   * the source is never deleted before the destination verifies,
-  * emptied variant folders are pruned, folders still holding files are not.
+  * emptied variant folders are pruned, folders still holding files are not,
+  * name + size is never proof — only a content fingerprint moves or deletes,
+  * `OneLibraryUsbWriter.sync()`'s own Stage-1b wiring, the configuration
+    production actually runs (`audio_copy=True` + a `dest_resolver`).
 
 Everything runs in `tmp_path`. No real USB volume is touched.
 """
@@ -21,6 +24,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -689,3 +693,380 @@ class TestContentIsProvenBeforeMovingOrDeleting:
         assert report["duplicates_removed"] == 1
         assert not cand.exists()
         assert occupied.read_bytes() == b"D" * 1000
+
+    @pytest.mark.parametrize(
+        "size",
+        [uol._FINGERPRINT_EDGE + 1, 100 * 1024, uol._FINGERPRINT_EDGE * 2],
+    )
+    def test_a_shared_head_is_not_proof_for_a_small_file(self, tmp_path: Path, size: int) -> None:
+        """64 KiB < size <= 128 KiB used to hash the head only — an oversized ID3
+        cover-art frame makes two different recordings share that head verbatim."""
+        head = b"H" * uol._FINGERPRINT_EDGE
+        a = _write(tmp_path / "a.aiff", head + b"A" * (size - len(head)))
+        b = _write(tmp_path / "b.aiff", head + b"B" * (size - len(head)))
+
+        assert uol._same_content(a, b) is False
+
+    def test_a_shared_head_collision_deletes_nothing(self, tmp_path: Path, stick: Path) -> None:
+        # No `no_copies`: keeping both recordings means copying one beside the other.
+        head = b"H" * uol._FINGERPRINT_EDGE
+        body = 100 * 1024 - len(head)
+        local = _write(tmp_path / "music" / "c.aiff", head + b"D" * body)
+        _write(stick / "Contents" / "old name" / "T" / "c.aiff", head + b"D" * body)
+        occupied = _write(stick / "Contents" / "New Name" / "T" / "c.aiff", head + b"E" * body)
+
+        report = _relocate(stick, [(local, occupied)])
+
+        assert report["duplicates_removed"] == 0
+        assert occupied.read_bytes().endswith(b"E" * 64)
+        assert sorted(p.name for p in occupied.parent.iterdir()) == ["c (1).aiff", "c.aiff"]
+
+    def test_a_stranger_does_not_veto_the_real_candidate(
+        self, tmp_path: Path, stick: Path, no_copies
+    ) -> None:
+        """A same-name, same-size stranger sorting first is skipped over, not a veto."""
+        local = _write(tmp_path / "music" / "shared.aiff", b"X" * 600)
+        stranger = _write(stick / "Contents" / "Aaa" / "T" / "shared.aiff", b"Y" * 600)
+        real_old = _write(stick / "Contents" / "zzz" / "T" / "shared.aiff", b"X" * 600)
+        dest = stick / "Contents" / "New" / "T" / "shared.aiff"
+
+        report = _relocate(stick, [(local, dest)])
+
+        assert report["relocated"] == 1
+        assert report["bytes_copied"] == 0
+        assert dest.read_bytes() == b"X" * 600
+        assert not real_old.exists()
+        assert stranger.read_bytes() == b"Y" * 600
+
+
+# ---------------------------------------------------------------------------
+# Wiring — OneLibraryUsbWriter.sync() Stage 1b
+# ---------------------------------------------------------------------------
+#
+# `TestLegacySyncWiring` above covers `UsbSyncEngine._relocate_before_copy`, the
+# legacy XML path. Production drives the OneLibrary writer instead
+# (app/usb_manager.py: `OneLibraryUsbWriter(drive, dest_resolver=...)` then
+# `sync(..., audio_copy=True)`), and Stage 1b only runs under `audio_copy` — the
+# exact complement of what the legacy tests reach. These drive the REAL `sync()`
+# against a fake rbox handle, so the wiring itself is asserted: the guard, the
+# ordering against the copy loop, the two bounds, and the shared destination.
+
+
+class _Row:
+    """Stand-in for an rbox content / artist / album row."""
+
+    def __init__(self, rid: int) -> None:
+        self.id = rid
+        self.name = f"__placeholder_{rid}__"
+        self.title = self.name
+        self.path = ""
+
+
+class _FakeDb:
+    """Only the rbox.OneLibrary surface `sync()` actually calls."""
+
+    def __init__(self, slots: int, fail_titles: frozenset[str] = frozenset()) -> None:
+        self.contents = [_Row(i + 1) for i in range(slots)]
+        self.updated: list[_Row] = []
+        self.deleted: list[int] = []
+        self.fail_titles = fail_titles
+        self._next = 1000
+
+    def get_properties(self):
+        return []
+
+    def get_contents(self):
+        return list(self.contents)
+
+    def get_artists(self):
+        return []
+
+    def get_albums(self):
+        return []
+
+    def get_genres(self):
+        return []
+
+    def get_keys(self):
+        return []
+
+    def get_labels(self):
+        return []
+
+    def get_artist_by_name(self, *a):
+        return None
+
+    get_album_by_name = get_artist_by_name
+    get_genre_by_name = get_artist_by_name
+    get_key_by_name = get_artist_by_name
+    get_label_by_name = get_artist_by_name
+
+    def create_artist(self, *a):
+        self._next += 1
+        return _Row(self._next)
+
+    create_album = create_artist
+    create_genre = create_artist
+    create_key = create_artist
+    create_label = create_artist
+
+    def update_content(self, slot):
+        if slot.title in self.fail_titles:
+            raise RuntimeError(f"rbox refused slot {slot.id}")
+        self.updated.append(slot)
+
+    def delete_content(self, cid):
+        self.deleted.append(cid)
+
+    def survivors(self) -> list[_Row]:
+        return [row for row in self.contents if row.id not in self.deleted]
+
+
+class _FakeSource:
+    def __init__(self, tracks, playlists=None):
+        self.tracks = tracks
+        self._pl = playlists or {}
+
+    def iter_tracks(self):
+        return iter(self.tracks)
+
+    def iter_playlists(self):
+        return iter([])
+
+    def get_playlists_tree(self):
+        return []
+
+    def get_playlist_track_ids(self, pid):
+        return self._pl.get(pid, [])
+
+    def get_track_anlz_paths(self, tid):
+        return None
+
+
+def _track(local: Path, artist: str, title: str, tid: str = "1") -> dict:
+    return {"id": tid, "artist": artist, "title": title, "path": str(local)}
+
+
+def _reloc_event(events):
+    got = [e for e in events if e.get("stage") == "relocate"]
+    return got[0] if got else None
+
+
+@pytest.fixture
+def run_sync(tmp_path: Path, monkeypatch):
+    """Drive the REAL `sync()` against a fake rbox. Returns (events, db, writer)."""
+
+    def _run(
+        stick_root,
+        tracks,
+        *,
+        slots=4,
+        audio_copy=True,
+        playlist_filter=None,
+        dest_resolver=None,
+        playlists=None,
+        fail_titles=frozenset(),
+    ):
+        db = _FakeDb(slots, frozenset(fail_titles))
+        monkeypatch.setattr(uol, "rbox", SimpleNamespace(OneLibrary=lambda p: db))
+        monkeypatch.setattr(uol, "RBOX_AVAILABLE", True)
+        # Stage 6 sleeps 2x0.5 s waiting for the rbox handle to release the WAL.
+        monkeypatch.setattr(uol, "time", SimpleNamespace(sleep=lambda *_: None))
+        writer = uol.OneLibraryUsbWriter(str(stick_root), dest_resolver=dest_resolver)
+        template = tmp_path / "template.db"
+        template.write_bytes(b"\x00" * 64)
+        writer.TEMPLATE_DB = template
+        events = list(
+            writer.sync(
+                _FakeSource(tracks, playlists),
+                audio_copy=audio_copy,
+                copy_anlz=False,
+                playlist_filter=playlist_filter,
+                write_pdb=False,
+            )
+        )
+        return events, db, writer
+
+    return _run
+
+
+class TestOneLibrarySyncStage1b:
+    """Stage 1b must run before the copy loop and agree with it on the destination.
+
+    The two disagreeing, or Stage 1b not running at all, means a pure artist rename
+    re-copies gigabytes that are already on the stick — silently, with both stages
+    reporting success. `no_copies` is on every pure-rename test here: Stage 1 copies
+    the template with `shutil.copy2`, so the fixture proves Stage 1b AND the copy
+    loop moved zero bytes.
+    """
+
+    def test_a_pure_rename_copies_zero_bytes_through_sync(
+        self, tmp_path: Path, stick: Path, run_sync, no_copies
+    ) -> None:
+        local = _write(tmp_path / "music" / "t.aiff", BLOCK)
+        old = _write(stick / "Contents" / "Old Name" / "Xpress" / "t.aiff", BLOCK)
+
+        events, db, _writer = run_sync(stick, [_track(local, "New Name", "Xpress")])
+
+        ev = _reloc_event(events)
+        assert ev is not None
+        assert ev["progress"] == 5
+        assert ev["report"]["relocated"] == 1
+        assert ev["report"]["bytes_moved"] == len(BLOCK)
+        assert ev["report"]["bytes_copied"] == 0
+        assert not old.exists()
+        assert os.listdir(stick / "Contents") == ["New Name"]
+        assert (stick / "Contents" / "New Name" / "Xpress" / "t.aiff").read_bytes() == BLOCK
+        # The copy loop resolved the same destination Stage 1b moved the file to.
+        assert db.updated[0].path == "/Contents/New Name/Xpress/t.aiff"
+
+    def test_skipped_when_audio_copy_false(
+        self, tmp_path: Path, stick: Path, run_sync, no_copies
+    ) -> None:
+        local = _write(tmp_path / "music" / "t.aiff", BLOCK)
+        old = _write(stick / "Contents" / "Old Name" / "Xpress" / "t.aiff", BLOCK)
+
+        events, _db, _writer = run_sync(
+            stick, [_track(local, "New Name", "Xpress")], audio_copy=False
+        )
+
+        assert _reloc_event(events) is None
+        assert old.exists()
+        assert os.listdir(stick / "Contents") == ["Old Name"]
+
+    def test_playlist_filter_bounds_stage_1b(
+        self, tmp_path: Path, stick: Path, run_sync, no_copies
+    ) -> None:
+        """Stage 1b runs AFTER the playlist filter — a track the user did not select
+        is not part of this export, so its stick copy must stay where it is."""
+        keep = _write(tmp_path / "music" / "keep.aiff", BLOCK)
+        drop = _write(tmp_path / "music" / "drop.aiff", BLOCK + b"Z")
+        _write(stick / "Contents" / "Old" / "K" / "keep.aiff", BLOCK)
+        drop_old = _write(stick / "Contents" / "Old" / "D" / "drop.aiff", BLOCK + b"Z")
+
+        events, _db, _writer = run_sync(
+            stick,
+            [_track(keep, "New", "K", "1"), _track(drop, "New", "D", "2")],
+            playlist_filter=["pl1"],
+            playlists={"pl1": ["1"]},
+        )
+
+        ev = _reloc_event(events)
+        assert ev is not None
+        assert ev["report"]["relocated"] == 1
+        assert drop_old.exists()
+
+    def test_slot_count_bounds_stage_1b(
+        self, tmp_path: Path, stick: Path, run_sync, no_copies
+    ) -> None:
+        """Past the template's slot count a track gets no row, so moving its stick
+        copy would strand audio no library entry points at."""
+        tracks = []
+        for i in range(3):
+            loc = _write(tmp_path / "music" / f"t{i}.aiff", BLOCK + bytes([i]))
+            _write(stick / "Contents" / "Old" / f"T{i}" / f"t{i}.aiff", BLOCK + bytes([i]))
+            tracks.append(_track(loc, "New", f"T{i}", str(i)))
+
+        events, _db, _writer = run_sync(stick, tracks, slots=2)
+
+        ev = _reloc_event(events)
+        assert ev is not None
+        assert ev["report"]["relocated"] == 2
+        assert (stick / "Contents" / "Old" / "T2" / "t2.aiff").exists()
+
+    def test_stage_1b_honours_the_dest_resolver(
+        self, tmp_path: Path, stick: Path, run_sync, no_copies
+    ) -> None:
+        """Production always passes a resolver, so both stages must route through it
+        rather than the fallback layout."""
+
+        def resolver(artist, title, filename):
+            return stick / "Contents" / f"R_{artist}" / title / filename
+
+        local = _write(tmp_path / "music" / "t.aiff", BLOCK)
+        _write(stick / "Contents" / "Old" / "Xpress" / "t.aiff", BLOCK)
+
+        events, db, _writer = run_sync(
+            stick, [_track(local, "New Name", "Xpress")], dest_resolver=resolver
+        )
+
+        ev = _reloc_event(events)
+        assert ev is not None
+        assert ev["report"]["relocated"] == 1
+        assert ev["report"]["bytes_copied"] == 0
+        assert os.listdir(stick / "Contents") == ["R_New Name"]
+        assert db.updated[0].path == "/Contents/R_New Name/Xpress/t.aiff"
+
+
+class TestUnreadableLocalPath:
+    """One local file the user lost read access to must cost that one track.
+
+    `Path.exists()` re-raises EACCES — py3.11 `pathlib._IGNORED_ERRNOS` covers only
+    ENOENT, ENOTDIR, EBADF and WSAELOOP — and by Stage 1b the stick's
+    exportLibrary.db has already been replaced with the bare template. An abort
+    there leaves the user with a wiped CDJ library.
+    """
+
+    def test_one_unreadable_file_does_not_cost_the_export(
+        self, tmp_path: Path, stick: Path, run_sync, no_copies, monkeypatch
+    ) -> None:
+        import errno as _errno
+
+        good = _write(tmp_path / "music" / "good.aiff", BLOCK)
+        _write(stick / "Contents" / "Old" / "Good" / "good.aiff", BLOCK)
+        bad = tmp_path / "locked" / "bad.aiff"
+
+        real_exists = Path.exists
+
+        def guarded(self, *args, **kwargs):
+            if str(self) == str(bad):
+                raise PermissionError(_errno.EACCES, "access is denied")
+            return real_exists(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "exists", guarded)
+
+        events, db, _writer = run_sync(
+            stick,
+            [_track(bad, "New", "Bad", "1"), _track(good, "New", "Good", "2")],
+        )
+
+        assert any(e["stage"] == "complete" for e in events)
+        reloc = _reloc_event(events)
+        assert reloc is not None
+        assert reloc["report"]["relocated"] == 1
+        assert (stick / "Contents" / "New" / "Good" / "good.aiff").read_bytes() == BLOCK
+
+        # Stage 3 prunes the slots nothing was written into BY INDEX. Counting them
+        # instead leaves a gap the moment one slot fails, and deletes the row of the
+        # track that did survive.
+        survivors = db.survivors()
+        assert [row.title for row in survivors] == ["Bad", "Good"]
+        assert survivors[0].path == ""  # unreadable: row kept, no audio on the stick
+        assert survivors[1].path == "/Contents/New/Good/good.aiff"
+
+
+class TestSlotPruning:
+    """Stage 3 deletes the placeholder slots nothing was written into.
+
+    It has to pick them by index. A slot can fail anywhere in the Stage 2 body —
+    rbox refusing the write, artwork, ANLZ — and counting the successes instead
+    shifts the slice by one, deleting the row of a track that DID land.
+    """
+
+    def test_a_failed_slot_does_not_delete_a_populated_row(
+        self, tmp_path: Path, stick: Path, run_sync, no_copies
+    ) -> None:
+        doomed = _write(tmp_path / "music" / "a.aiff", BLOCK)
+        keeper = _write(tmp_path / "music" / "b.aiff", BLOCK + b"Z")
+        _write(stick / "Contents" / "Old" / "Doomed" / "a.aiff", BLOCK)
+        _write(stick / "Contents" / "Old" / "Keeper" / "b.aiff", BLOCK + b"Z")
+
+        _events, db, _writer = run_sync(
+            stick,
+            [_track(doomed, "New", "Doomed", "1"), _track(keeper, "New", "Keeper", "2")],
+            fail_titles={"Doomed"},
+        )
+
+        survivors = db.survivors()
+        assert [row.title for row in survivors] == ["Keeper"]
+        assert survivors[0].path == "/Contents/New/Keeper/b.aiff"

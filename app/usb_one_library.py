@@ -204,15 +204,31 @@ def _size_of(path: Path | None) -> int | None:
         return None
 
 
-#: Bytes hashed from each end of a file for the relocation identity check. Enough to
-#: separate two different recordings that happen to share a name and a byte count —
-#: audio headers and tags differ at the head, the payload tail differs at the end —
-#: without reading gigabytes off a USB stick to decide one move.
+def _exists_safe(path: Path | None) -> bool:
+    """`Path.exists()` that answers False instead of raising.
+
+    py3.11 `pathlib._IGNORED_ERRNOS` is (ENOENT, ENOTDIR, EBADF, WSAELOOP) — EACCES
+    and EIO on a locked or read-only-reconnected share propagate out, and would abort
+    an export whose DB has already been replaced with the bare template.
+    """
+    if path is None:
+        return False
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
+#: Bytes hashed for the relocation identity check: the whole file up to 128 KiB,
+#: above that its first and last 64 KiB. Enough to separate two different recordings
+#: that happen to share a name and a byte count — audio headers and tags differ at the
+#: head, the payload tail differs at the end — without reading gigabytes off a USB
+#: stick to decide one move.
 _FINGERPRINT_EDGE = 64 * 1024
 
 
 def _content_fingerprint(path: Path | None) -> str | None:
-    """A cheap identity for an audio file: size + first and last 64 KiB.
+    """A cheap identity: size, the whole file up to 128 KiB, above that both 64 KiB edges.
 
     Relocation moves and deletes files on removable media, and the only thing it
     otherwise knows about a candidate is its name and its byte count. Those two match
@@ -227,8 +243,12 @@ def _content_fingerprint(path: Path | None) -> str | None:
         size = path.stat().st_size
         digest = hashlib.sha1(str(size).encode("ascii"), usedforsecurity=False)
         with path.open("rb") as handle:
-            digest.update(handle.read(_FINGERPRINT_EDGE))
-            if size > _FINGERPRINT_EDGE * 2:
+            if size <= _FINGERPRINT_EDGE * 2:
+                # Read bounded rather than `read()`: `size` is a pre-open stat, so a
+                # file that grew since would otherwise be pulled into memory whole.
+                digest.update(handle.read(_FINGERPRINT_EDGE * 2))
+            else:
+                digest.update(handle.read(_FINGERPRINT_EDGE))
                 handle.seek(-_FINGERPRINT_EDGE, os.SEEK_END)
                 digest.update(handle.read(_FINGERPRINT_EDGE))
         return digest.hexdigest()
@@ -319,12 +339,19 @@ def _pick_candidate(
     dest: Path,
     expected: int,
     planned_dests: set[str],
-) -> Path | None:
+    src: Path | None,
+) -> tuple[Path | None, Path | None]:
     """The file already on the stick that `dest` should be fed from, or None.
 
-    Three guards stop this from stealing the wrong track: identical filename,
-    identical byte size, and never a path some other track in the same run is
-    itself planning to occupy.
+    Four guards stop this from stealing the wrong track: identical filename,
+    identical byte size, never a path some other track in the same run is itself
+    planning to occupy, and identical content fingerprint. Name and size collide
+    routinely on a stick full of re-exported versions, so a stranger that matches the
+    first three is skipped over — not treated as a veto on the whole relocation, which
+    would strand the genuine old copy and re-copy the track.
+
+    Returns `(chosen, rejected)`; `rejected` names a same-name, same-size file whose
+    bytes differed, for the report, and is only set when nothing was chosen.
     """
     cands = [
         p
@@ -332,10 +359,14 @@ def _pick_candidate(
         if p != dest and str(p).casefold() not in planned_dests and _size_of(p) == expected
     ]
     if not cands:
-        return None
+        return None, None
     same_title = dest.parent.name.casefold()
     cands.sort(key=lambda p: (p.parent.name.casefold() != same_title, str(p)))
-    return cands[0]
+    for p in cands:
+        # An unreadable candidate counts as not proven, never as a match.
+        if _same_content(p, src):
+            return p, None
+    return None, cands[0]
 
 
 def _relocate_one(
@@ -377,19 +408,11 @@ def _relocate_one(
         _reloc_detail(report, "case_rename", dest, source=str(actual))
         return
 
-    cand = _pick_candidate(index, dest, expected, planned_dests)
+    cand, rejected = _pick_candidate(index, dest, expected, planned_dests, src)
     if cand is None:
         report["skipped"] += 1
-        return
-
-    # `_pick_candidate` matches on filename and byte count alone. On a stick full of
-    # re-exported versions that also matches files belonging to tracks OUTSIDE this
-    # sync — and moving one of those strands its PDB row while the copy phase, which
-    # compares sizes, sees nothing to repair. Prove the bytes are the same recording
-    # before touching it; an unreadable candidate counts as not proven.
-    if not _same_content(cand, src):
-        report["skipped"] += 1
-        _reloc_detail(report, "candidate_content_mismatch", dest, source=str(cand))
+        if rejected is not None:
+            _reloc_detail(report, "candidate_content_mismatch", dest, source=str(rejected))
         return
 
     _ensure_dirs_cased(contents, dest.parent)
@@ -769,6 +792,9 @@ class OneLibraryUsbWriter:
         total = len(all_tracks)
         used_slots = 0
         skipped_overflow = 0
+        # Which slot indices really carry a track. A failed slot leaves a gap, and
+        # `placeholders[used_slots:]` would then delete a populated row instead.
+        populated: set[int] = set()
 
         # Stage 1b — relocation. An artist rename (merge) changes only where a
         # track belongs, so move what is already on the stick before the copy
@@ -777,7 +803,7 @@ class OneLibraryUsbWriter:
             planned: list[tuple[Path | None, Path]] = []
             for t in all_tracks[:slot_count]:
                 p = Path(t["path"]) if t.get("path") else None
-                if p is None or not p.exists():
+                if p is None or not _exists_safe(p):
                     continue
                 planned.append((p, self._planned_dest(t, p)))
             reloc = relocate_audio_files(self.usb_root, planned, contents_dir=self.music_dir)
@@ -812,7 +838,7 @@ class OneLibraryUsbWriter:
 
                 # Audio file copy → USB (Pioneer-canonical /Contents/<Artist>/<Title>/)
                 src_path = Path(t["path"]) if t.get("path") else None
-                if audio_copy and src_path and src_path.exists():
+                if audio_copy and src_path is not None and _exists_safe(src_path):
                     dest_path = self._planned_dest(t, src_path)
                     if _needs_copy(src_path, dest_path):
                         dest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -852,7 +878,7 @@ class OneLibraryUsbWriter:
                 # (image_id is preserved from the placeholder slot) at the
                 # small variant. Done BEFORE update_content so the FK stays
                 # valid in case the user-data overlay shifts image_id.
-                if src_path and src_path.exists():
+                if src_path is not None and _exists_safe(src_path):
                     try:
                         self._write_track_artwork(db, slot, src_path)
                     except Exception as exc:
@@ -871,6 +897,7 @@ class OneLibraryUsbWriter:
 
                 db.update_content(slot)
                 content_id_map[t["id"]] = str(slot.id)
+                populated.add(i)
                 used_slots += 1
 
                 if i % 5 == 0 or i == slot_count - 1:
@@ -887,7 +914,9 @@ class OneLibraryUsbWriter:
 
         # Stage 3 — delete unused placeholder rows so the CDJ menu doesn't
         # show "__placeholder_X__" entries
-        for unused in placeholders[used_slots:]:
+        for j, unused in enumerate(placeholders):
+            if j in populated:
+                continue
             try:
                 db.delete_content(unused.id)
             except Exception as exc:
