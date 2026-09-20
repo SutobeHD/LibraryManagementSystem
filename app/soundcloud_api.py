@@ -130,7 +130,9 @@ def get_sc_client_id() -> str:
                     _DYNAMIC_CLIENT_ID = new_id
                     _DYNAMIC_CLIENT_ID_EXPIRES = now + 3600  # cache 1 hour
                     logger.info(
-                        f"[SC Scraper] SUCCESS! Fetched dynamic client_id: {_DYNAMIC_CLIENT_ID}"
+                        "[SC Scraper] SUCCESS — dynamic client_id resolved (%d chars), "
+                        "cached for 1h.",
+                        len(new_id),
                     )
                     return _DYNAMIC_CLIENT_ID
                 else:
@@ -441,6 +443,28 @@ def _log_url(url: str) -> str:
     return f"{base}?…" if split.query else base
 
 
+_SECRET_QUERY_KEYS = ("client_id", "oauth_token", "access_token", "secret_token")
+
+_SECRET_IN_TEXT_RE = re.compile(
+    r"\b(" + "|".join(_SECRET_QUERY_KEYS) + r")=[^&\s\"'>]+", re.IGNORECASE
+)
+
+
+def _scrub_secrets(text: object) -> str:
+    """Rendered text with any `client_id=…`-style query value stripped.
+
+    `requests` builds its exception messages from the PREPARED url, so the
+    unauthenticated path's `client_id` param lands inside `str(exc)` even where
+    the call site only ever passed a bare url — `_log_url` never sees it.
+    """
+    return _SECRET_IN_TEXT_RE.sub(r"\1=…", str(text))
+
+
+def _log_params(params: dict | None) -> dict:
+    """A params dict safe to log: credential-bearing values replaced."""
+    return {k: ("…" if k.lower() in _SECRET_QUERY_KEYS else v) for k, v in (params or {}).items()}
+
+
 def _sc_get(
     url: str,
     headers: dict,
@@ -469,13 +493,19 @@ def _sc_get(
     delay = 1.0
     for attempt in range(max_retries + 1):
         try:
-            logger.debug("[SC] GET Request to %s (params: %s)", _log_url(url), params)
+            logger.debug("[SC] GET Request to %s (params: %s)", _log_url(url), _log_params(params))
             resp = requests.get(
                 url, headers=headers, params=params, timeout=timeout, proxies=_get_proxy()
             )
             logger.info("[SC] Response %s from %s", resp.status_code, _log_url(url))
         except requests.RequestException as exc:
-            logger.warning(f"[SC] Network error on attempt {attempt + 1}: {exc}")
+            logger.warning(
+                "[SC] Network error on attempt %d for %s: %s (%s)",
+                attempt + 1,
+                _log_url(url),
+                type(exc).__name__,
+                _scrub_secrets(exc),
+            )
             if attempt >= max_retries:
                 raise
             time.sleep(delay)
@@ -490,7 +520,8 @@ def _sc_get(
                 return resp
             except ValueError as json_err:
                 logger.error(
-                    f"[SC] Malformed JSON from {url}: {json_err}. Raw body snippet: {resp.text[:200]}"
+                    f"[SC] Malformed JSON from {_log_url(url)}: {json_err}. "
+                    f"Raw body snippet: {resp.text[:200]}"
                 )
                 raise ValueError(
                     f"SoundCloud returned non-JSON (status 200). Raw: {resp.text[:120]}"
@@ -536,8 +567,18 @@ def _sc_get(
             continue
 
         # All other non-200 codes
-        logger.error(f"[SC] Unexpected status {resp.status_code} for {url}: {resp.text[:200]}")
-        resp.raise_for_status()
+        logger.error(
+            f"[SC] Unexpected status {resp.status_code} for {_log_url(url)}: {resp.text[:200]}"
+        )
+        # Not resp.raise_for_status(): requests renders the PREPARED url — query
+        # string and all — into its HTTPError message, which puts the url back in
+        # every log that catches it. Same 4xx/5xx trigger, sanitised message,
+        # `response=` kept so handlers reading `exc.response.status_code` still work.
+        if resp.status_code >= 400:
+            raise requests.HTTPError(
+                f"SoundCloud returned HTTP {resp.status_code} for {_log_url(url)}",
+                response=resp,
+            )
 
     raise RateLimitError("Max retries reached.")
 
@@ -572,7 +613,11 @@ def _sc_paginate(
 
     while next_url:
         if pages >= page_cap:
-            logger.warning("[SC] paginate: page cap %d reached for %s — stopping.", page_cap, url)
+            logger.warning(
+                "[SC] paginate: page cap %d reached at %s — stopping.",
+                page_cap,
+                _log_url(next_url),
+            )
             truncated, reason = True, "max_pages"
             break
         if budget is not None and not budget.try_spend():
@@ -776,7 +821,11 @@ class SoundCloudPlaylistAPI:
         except AuthExpiredError:
             raise
         except Exception as exc:
-            logger.error("[SC] resolve_track_from_url failed for %s: %s", permalink_url, exc)
+            logger.error(
+                "[SC] resolve_track_from_url failed for %s: %s",
+                permalink_url,
+                _scrub_secrets(exc),
+            )
             return None
 
     @staticmethod
@@ -896,7 +945,7 @@ class SoundCloudPlaylistAPI:
         except AuthExpiredError:
             raise
         except Exception as exc:
-            logger.error(f"[SC] get_full_playlist_tracks({playlist_id}): {exc}")
+            logger.error(f"[SC] get_full_playlist_tracks({playlist_id}): {_scrub_secrets(exc)}")
             return []
 
         data = resp.json()
