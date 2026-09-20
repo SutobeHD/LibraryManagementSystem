@@ -43,6 +43,7 @@ import {
     relatedNote,
     runSummary,
     seedLine,
+    syncStateNote,
 } from './artistHub/discoveryCopy';
 import { ARTIST_SYNC_STATUS_POLL_MS } from '../config/constants';
 import useArtistCatalogue from './artistHub/useArtistCatalogue';
@@ -1155,23 +1156,16 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                                                             state?.last_sync_at
                                                         );
                                                         if (!label) return null;
+                                                        const note = syncStateNote(
+                                                            state?.last_error
+                                                        );
                                                         return (
                                                             <span
-                                                                title={
-                                                                    state?.last_error
-                                                                        ? `Last attempt failed: ${state.last_error}`
-                                                                        : 'Last SoundCloud catalogue refresh'
-                                                                }
-                                                                className={
-                                                                    state?.last_error
-                                                                        ? 'text-bad'
-                                                                        : undefined
-                                                                }
+                                                                title={note.title}
+                                                                className={note.className}
                                                             >
                                                                 · {label}
-                                                                {state?.last_error
-                                                                    ? ' (failed)'
-                                                                    : ''}
+                                                                {note.suffix}
                                                             </span>
                                                         );
                                                     })()}

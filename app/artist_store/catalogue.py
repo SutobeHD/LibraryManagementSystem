@@ -82,6 +82,12 @@ LONG_FORM_MS = 15 * 60 * 1000
 #: sidecar hold an unbounded payload; the overflow is reported as ``truncated``.
 MAX_CATALOGUE_TRACKS = 2000
 
+#: ``stop_reason`` for an overflow of :data:`MAX_CATALOGUE_TRACKS`. The fetcher never
+#: reports this one — the ceiling is applied here, after the fetch. Unlike the client's
+#: own ``"budget"`` reason it is a permanent property of the artist: a later fetch on a
+#: full budget returns just as many tracks and just as few of them fit.
+STOP_REASON_MAX_TRACKS = "max_tracks"
+
 #: TTL for the sidecar catalogue cache. Long enough that clicking through artists
 #: costs no calls, short enough that it stays a cache and not a mirror (ToU).
 CACHE_TTL_S = 6 * 60 * 60
@@ -831,8 +837,9 @@ def catalogue(
     through the uploader signal.
 
     Returns one list per :data:`BUCKET_KEYS`, ``in_library`` (the ``sc_id``s found in the
-    library), ``role_counts``, ``linked``, ``artist_urn``, ``fetched_at``, ``from_cache``
-    and ``truncated``.
+    library), ``role_counts``, ``linked``, ``artist_urn``, ``fetched_at``, ``from_cache``,
+    ``truncated`` and ``stop_reason`` — which cap actually stopped the fetch, so a caller
+    can tell a retryable budget cut from a ceiling that a refetch cannot move.
 
     Raises :class:`ArtistNotLinked` when there is neither a bound account nor a name to
     search for — nothing at all to identify the artist by.
@@ -860,17 +867,20 @@ def catalogue(
             )
         raw = fetch(urn)
         # The client's own result object reports a fetch cut short by its call budget or
-        # item cap. Losing that flag here would present a partial catalogue as complete.
-        stop_reason = getattr(raw, "stop_reason", None)
+        # item cap. Losing that flag would present a partial catalogue as complete, and
+        # losing the *reason* would leave callers guessing which cap it was: a budget cut
+        # is worth retrying, every other cap is a property of the artist and is not.
+        fetch_reason = str(getattr(raw, "stop_reason", "") or "")
         fetched = coerce_tracks(raw)
-        truncated = bool(getattr(raw, "truncated", False)) or len(fetched) > max_tracks
-        if stop_reason:
+        over_cap = len(fetched) > max_tracks
+        truncated = bool(getattr(raw, "truncated", False)) or over_cap
+        if fetch_reason:
             logger.info(
                 "op=artist_catalogue collection=%s fetch_stopped reason=%s",
                 collection_id,
-                stop_reason,
+                fetch_reason,
             )
-        if len(fetched) > max_tracks:
+        if over_cap:
             logger.warning(
                 "op=artist_catalogue collection=%s capped fetched=%d cap=%d",
                 collection_id,
@@ -878,10 +888,14 @@ def catalogue(
                 max_tracks,
             )
             fetched = fetched[:max_tracks]
+        # The ceiling outranks whatever stopped the fetcher: more tracks came back than
+        # this cache holds, so a wider fetch has nowhere to put them.
+        stop_reason = STOP_REASON_MAX_TRACKS if over_cap else (fetch_reason if truncated else "")
         payload = {
             "artist_urn": normalize_user_urn(urn),
             "fetched_at": _now_iso(),
             "truncated": truncated,
+            "stop_reason": stop_reason,
             "tracks": fetched,
         }
         schema.set_catalogue_cache(collection_id, payload)
@@ -930,6 +944,9 @@ def catalogue(
         "fetched_at": str(payload.get("fetched_at") or ""),
         "from_cache": from_cache,
         "truncated": bool(payload.get("truncated")),
+        # Which cap stopped it, "" when nothing did. A cache entry written before this
+        # key existed reports "" too — unknown, never guessed as the retryable one.
+        "stop_reason": str(payload.get("stop_reason") or ""),
     }
 
 
@@ -949,6 +966,7 @@ __all__ = [
     "MATCH_TITLE",
     "MAX_CATALOGUE_TRACKS",
     "MISSING_MATCH_THRESHOLD",
+    "STOP_REASON_MAX_TRACKS",
     "TOKEN_OVERLAP_FLOOR",
     "ArtistNotLinked",
     "CatalogueError",

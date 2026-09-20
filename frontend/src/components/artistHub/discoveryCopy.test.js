@@ -12,11 +12,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    SKIPPED_TRACK_CAP_NOTE,
     STATE_FAILED,
     STATE_NOT_QUERIED,
     STATE_NO_DATA,
     STATE_OK,
     STATE_SKIPPED_BUDGET,
+    STATE_SKIPPED_TRACK_CAP,
+    SYNC_CAPPED_PREFIX,
+    SYNC_PARTIAL_PREFIX,
     allSourcesAnswered,
     busyReasonSentence,
     callBudgetNote,
@@ -29,6 +33,7 @@ import {
     relatedNote,
     runSummary,
     seedLine,
+    syncStateNote,
 } from './discoveryCopy.js';
 
 const payload = (over = {}) => ({
@@ -117,6 +122,16 @@ test('an unasked seed with no stated reason never invents the call cap', () => {
     );
     assert.match(note, /stopped before the rest/i);
     assert.doesNotMatch(note, /call cap/i);
+});
+
+test('a source the track ceiling stopped is not spoken of as a budget skip', () => {
+    // app/main.py used to label both skips `skipped_budget`, so a full catalogue read as
+    // "the call cap ran out" — a retry the next pass cannot improve on.
+    assert.equal(STATE_SKIPPED_TRACK_CAP, 'skipped_track_cap');
+    assert.notEqual(STATE_SKIPPED_TRACK_CAP, STATE_SKIPPED_BUDGET);
+    assert.match(SKIPPED_TRACK_CAP_NOTE, /not queried/i);
+    assert.match(SKIPPED_TRACK_CAP_NOTE, /track ceiling/i);
+    assert.doesNotMatch(SKIPPED_TRACK_CAP_NOTE, /budget|call cap/i);
 });
 
 test('skipped_budget reports the cap', () => {
@@ -271,4 +286,48 @@ test('an artist that was never synced gets no invented timestamp', () => {
     assert.equal(lastSyncedLabel(null), '');
     assert.equal(lastSyncedLabel(''), '');
     assert.match(lastSyncedLabel(new Date().toISOString()), /checked/);
+});
+
+test('a pass that only cut refreshes short still says what it did', () => {
+    const summary = runSummary({
+        artists_synced: 0,
+        artists_partial: 2,
+        artists_skipped: 0,
+        calls_used: 41,
+        call_budget: 60,
+        reason_stopped: 'completed',
+        errors: [],
+    });
+    assert.match(summary, /2 cut short by the call cap/);
+    assert.match(summary, /41 of 60 calls used/);
+});
+
+test('a marker is never rendered as a failure', () => {
+    const partial = syncStateNote(`${SYNC_PARTIAL_PREFIX}#1 the call budget cut the fetch short`);
+    assert.equal(partial.suffix, ' (partial)');
+    assert.equal(partial.className, 'text-amber2');
+    // The tooltip repeats the cause the backend measured — never a hardcoded one.
+    assert.match(partial.title, /the call budget cut the fetch short/);
+    assert.doesNotMatch(partial.title, /#1/);
+
+    const capped = syncStateNote(`${SYNC_CAPPED_PREFIX}the fetch hit the per-artist track ceiling`);
+    assert.equal(capped.suffix, ' (capped)');
+    assert.match(capped.title, /per-artist track ceiling/);
+    // A cap is permanent: the tooltip must not promise another attempt.
+    assert.doesNotMatch(capped.title, /next pass/);
+});
+
+test('a repeatedly cut refresh counts the passes instead of promising one', () => {
+    const note = syncStateNote(`${SYNC_PARTIAL_PREFIX}#3 the call budget ran out`);
+    assert.match(note.title, /last 3 refreshes/);
+    assert.match(note.title, /the call budget ran out/);
+});
+
+test('a real error still reads as a failure', () => {
+    const note = syncStateNote('RuntimeError: SoundCloud said no');
+    assert.equal(note.suffix, ' (failed)');
+    assert.equal(note.className, 'text-bad');
+    assert.match(note.title, /SoundCloud said no/);
+    assert.equal(syncStateNote(null).suffix, '');
+    assert.equal(syncStateNote(null).className, undefined);
 });

@@ -227,6 +227,7 @@ export const SOURCE_STATUS_TEXT = {
     ok: 'queried',
     failed: 'could not be reached',
     skipped_budget: 'not queried (the per-run call budget ran out)',
+    skipped_track_cap: 'not queried (the per-artist track ceiling is already full)',
     not_queried: 'not queried on this pass',
 };
 
@@ -234,6 +235,7 @@ const SOURCE_STATUS_SHORT = {
     ok: '✓',
     failed: 'failed',
     skipped_budget: 'not queried (budget)',
+    skipped_track_cap: 'not queried (catalogue full)',
     not_queried: 'not queried',
 };
 
@@ -250,7 +252,9 @@ export const sourceStates = (view) => {
             label: source.label,
             status,
             ok: status === 'ok',
-            short: blockedByLink ? 'not queried (no linked account)' : SOURCE_STATUS_SHORT[status],
+            short: blockedByLink
+                ? 'not queried (no linked account)'
+                : SOURCE_STATUS_SHORT[status] || SOURCE_STATUS_SHORT.not_queried,
             text: blockedByLink
                 ? 'not queried — no SoundCloud account is linked to this artist'
                 : SOURCE_STATUS_TEXT[status] || SOURCE_STATUS_TEXT.not_queried,

@@ -29,6 +29,20 @@ All it does is keep the catalogue cache — and therefore the badge counts — c
 observable rather than merely asserted. ``auto`` and ``review`` fetch identically here;
 they differ only in what the *foreground* is allowed to offer afterwards.
 
+A refresh the **call budget** cut short is recorded as **partial**, never as a clean
+sync: the fetch path has already cached the thin payload, so counting it would let a
+catalogue that is missing tracks drive the "missing" badge for a whole TTL. It gets its
+own counter (``artists_partial``), a :data:`PARTIAL_PREFIX` marker in ``last_error``, and
+first place in the next pass — until it has been cut short :data:`MAX_CONSECUTIVE_PARTIALS`
+times in a row, after which it rejoins the normal TTL order so one artist the budget can
+never finish cannot own the head of the queue.
+
+``truncated`` alone does **not** mean that. It is also set by the per-artist track
+ceiling and the fetcher's page/item caps, which no retry can move: an artist whose
+catalogue is simply bigger than the ceiling would otherwise be refetched first, forever.
+Those get a :data:`CAPPED_PREFIX` marker and count as synced. The two are told apart by
+the ``stop_reason`` the fetch actually measured, never by guesswork.
+
 No HTTP, no credentials, no ``master.db`` in this module. The refresher owns all three.
 """
 
@@ -37,6 +51,7 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import sqlite3
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -95,6 +110,46 @@ STOP_ARTIST_CAP = "artist_cap_reached"
 STOP_COMPLETED = "completed"
 STOP_NO_REFRESHER = "refresher_unsupported"
 STOP_NOT_CONNECTED = "not_connected"
+
+#: Marks a refresh the call budget cut short. It rides in ``sync_state.last_error``
+#: because that column is the only per-artist status the schema has — so it is a
+#: *marker*, not a failure: :func:`_pending` refetches such an artist first and the
+#: Artist Hub renders it as "(partial)", never as "(failed)". Both sides read this one
+#: constant so the two halves of that contract cannot drift apart. The text after the
+#: prefix is ``#<consecutive attempts> <the measured cause>``.
+PARTIAL_PREFIX = "partial: "
+
+#: Marks a refresh a **permanent** cap cut short — the per-artist track ceiling or one of
+#: the fetcher's page/item caps. Also not a failure, and deliberately not retried: the
+#: next fetch would hit the same cap at the same cost. Rendered as "(capped)".
+CAPPED_PREFIX = "capped: "
+
+#: ``stop_reason`` the SoundCloud client reports when the shared :class:`CallBudget` ran
+#: out mid-walk (``app/soundcloud_api.py:_sc_paginate``). The only retryable one.
+BUDGET_STOP_REASON = "budget"
+
+#: After this many consecutive budget-cut passes an artist stops jumping the queue and
+#: goes back to the normal ``last_sync_at`` order. Without the bound, an artist whose
+#: complete fetch never fits the per-run budget would be refetched first on every pass —
+#: every 15 minutes instead of every TTL, on the user's own OAuth quota, forever.
+MAX_CONSECUTIVE_PARTIALS = 2
+
+#: Plain-English cause per ``stop_reason``, for the marker the Artist Hub reads back.
+#: Only what the fetch measured: no entry here claims a cap nobody hit.
+CAUSE_BY_STOP_REASON = {
+    BUDGET_STOP_REASON: "the call budget cut the fetch short",
+    "max_items": "the fetch hit the per-artist track ceiling",
+    "max_pages": "the fetch hit the page cap",
+    catalogue_mod.STOP_REASON_MAX_TRACKS: "more tracks came back than the ceiling holds",
+}
+
+#: The budget was spent, but the payload's own reason names a different cap. Both are
+#: true; the budget is the one a later pass can do something about.
+CAUSE_BUDGET_SPENT = "the call budget ran out before the fetch finished"
+
+#: Truncated with no reason recorded — an old cache entry from before ``stop_reason``
+#: existed. Named as unknown rather than dressed up as either cap.
+CAUSE_UNKNOWN = "the fetch stopped early and did not record why"
 
 #: Meta key holding the last run record, so the UI can render "last checked" without a
 #: job store. `store_meta` is v1 — no migration needed for this.
@@ -384,6 +439,12 @@ class SyncRun:
     started: str = ""
     finished: str = ""
     artists_synced: int = 0
+    #: Refetched, but the **call budget** cut the fetch short: neither a clean sync nor a
+    #: skip — calls were spent and the cached payload is now thinner than the artist's
+    #: real catalogue. Kept separate so `artists_synced` never counts a pass a later one
+    #: can improve on. A truncation a retry cannot fix (the track ceiling, the fetcher's
+    #: page/item caps) is not counted here — it is a finished sync of a capped catalogue.
+    artists_partial: int = 0
     artists_skipped: int = 0
     reason_stopped: str = STOP_COMPLETED
     calls_used: int = 0
@@ -398,6 +459,7 @@ class SyncRun:
             "started": self.started,
             "finished": self.finished,
             "artists_synced": self.artists_synced,
+            "artists_partial": self.artists_partial,
             "artists_skipped": self.artists_skipped,
             "reason_stopped": self.reason_stopped,
             "calls_used": self.calls_used,
@@ -430,8 +492,42 @@ def _view_counts(view: Mapping[str, Any]) -> tuple[int | None, int | None]:
     return missing, queueable
 
 
+def _partial_marker(attempt: int, cause: str) -> str:
+    """``"partial: #2 the call budget cut the fetch short"`` — count, then measured cause."""
+    return f"{PARTIAL_PREFIX}#{attempt} {cause}"
+
+
+def _partial_attempt(last_error: Any) -> int:
+    """Consecutive budget-cut passes this marker records; 0 when it is not one."""
+    text = str(last_error or "")
+    if not text.startswith(PARTIAL_PREFIX):
+        return 0
+    head = text[len(PARTIAL_PREFIX) :].split(" ", 1)[0]
+    if head.startswith("#") and head[1:].isdigit():
+        return int(head[1:])
+    return 1  # a marker written before the counter existed — treat as the first
+
+
+def _cache_truncated(collection_id: str) -> bool | None:
+    """The cached payload's own truncation flag, or None when there is no readable cache."""
+    try:
+        payload = schema.get_catalogue_cache(collection_id)
+    except (sqlite3.Error, OSError) as exc:
+        logger.warning("op=artist_sync artist=%s cache_unreadable err=%s", collection_id, exc)
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    return bool(payload.get("truncated"))
+
+
 def _pending(favourites: Iterable[Mapping[str, Any]], now: datetime) -> list[dict[str, Any]]:
-    """Eligible favourites, oldest-last-synced first. ``off`` never appears."""
+    """Eligible favourites, budget-cut refresh first then oldest-last-synced.
+
+    ``off`` never appears. The first tier is bounded: an artist the budget has cut short
+    :data:`MAX_CONSECUTIVE_PARTIALS` times in a row keeps its marker but rejoins the
+    normal TTL order, so it cannot hold first place — and a 15-minute refetch loop —
+    indefinitely.
+    """
     rows: list[dict[str, Any]] = []
     for fav in favourites:
         collection_id = str(fav.get("id") or "")
@@ -442,18 +538,32 @@ def _pending(favourites: Iterable[Mapping[str, Any]], now: datetime) -> list[dic
             continue
         state = schema.get_sync_state(collection_id) or {}
         last = str(state.get("last_sync_at") or "")
+        attempt = _partial_attempt(state.get("last_error"))
+        # The marker is only as fresh as the last catalogue write. A foreground fetch the
+        # route did not record — a cold-cache open, or one whose `record_sync` failed —
+        # leaves it describing a truncation the cache has outlived, so believe the
+        # payload over the marker.
+        if attempt and _cache_truncated(collection_id) is False:
+            attempt = 0
+        retry_first = 0 < attempt < MAX_CONSECUTIVE_PARTIALS
         rows.append(
             {
                 "collection_id": collection_id,
                 "name": str(fav.get("canonical_name") or ""),
                 "mode": mode,
                 "last_sync_at": last,
-                "age_s": _age_seconds(last, now),
+                "partial": retry_first,
+                "partial_attempt": attempt,
+                # A truncated refresh stamps a fresh `last_sync_at` over a thin payload.
+                # Reporting no age keeps the TTL from parking it as fresh for 6 hours —
+                # only while it is still in the retry tier, never forever.
+                "age_s": None if retry_first else _age_seconds(last, now),
             }
         )
-    # "" (never synced) sorts before every ISO timestamp, which is exactly the order we
-    # want: an artist nobody has ever fetched goes first.
-    rows.sort(key=lambda r: r["last_sync_at"])
+    # Budget-cut first — its stamp is the newest, so timestamp order alone would put the
+    # one artist with an incomplete catalogue LAST. Then "" (never synced), which sorts
+    # before every ISO timestamp, then oldest.
+    rows.sort(key=lambda r: (not r["partial"], r["last_sync_at"]))
     return rows
 
 
@@ -499,9 +609,10 @@ def run_sync(
     """One background pass over the favourites whose mode is ``auto`` or ``review``.
 
     Refreshes each artist's catalogue through ``refresher`` — the manual Update button's
-    own body — oldest-last-synced first, under **one** :class:`CallBudget` for the whole
-    run. Idle is re-checked before every artist and the run stops cleanly the moment the
-    user starts doing something. Nothing is queued and nothing is downloaded, ever.
+    own body — budget-cut refreshes first (bounded by :data:`MAX_CONSECUTIVE_PARTIALS`),
+    then oldest-last-synced, under **one** :class:`CallBudget` for the whole run. Idle is
+    re-checked before every artist and the run stops cleanly the moment the user starts
+    doing something. Nothing is queued and nothing is downloaded, ever.
 
     ``force=True`` runs with the opt-in setting off (the manual "sync all now" path); it
     does **not** bypass the idle check — a run under load is the thing this exists to
@@ -582,8 +693,9 @@ def run_sync(
 
     run.calls_used = int(getattr(budget, "used", 0) or 0)
     logger.info(
-        "op=artist_sync finished synced=%d skipped=%d calls=%d cap=%d queued=%d stop=%s",
+        "op=artist_sync finished synced=%d partial=%d skipped=%d calls=%d cap=%d queued=%d stop=%s",
         run.artists_synced,
+        run.artists_partial,
         run.artists_skipped,
         run.calls_used,
         run.call_budget,
@@ -628,6 +740,38 @@ def _sync_one(
         )
 
     missing, queueable = _view_counts(view)
+    if bool(view.get("truncated")):
+        # The fetch path caches what it got before returning, so the thin payload has
+        # already overwritten the good one. Stamping that as a clean sync would clear the
+        # artist's marker, count it, and park it behind the TTL with a catalogue that is
+        # missing tracks — the badge would then claim an absence nobody measured.
+        #
+        # Which cap stopped it decides whether a retry can help. `stop_reason` is the
+        # fetch's own measurement; an exhausted shared budget is this run's. Every other
+        # cap is a property of the artist, so retrying it would spend the user's quota on
+        # a fetch that cannot come back any fuller.
+        stop_reason = str(view.get("stop_reason") or "")
+        budget_spent = bool(getattr(budget, "exhausted", False))
+        if stop_reason == BUDGET_STOP_REASON or budget_spent:
+            return False, _record_partial(collection_id, row, stop_reason, missing, queueable, run)
+        cause = CAUSE_BY_STOP_REASON.get(stop_reason, CAUSE_UNKNOWN)
+        schema.record_sync(collection_id, error=CAPPED_PREFIX + cause)
+        run.artists_synced += 1
+        logger.info(
+            "op=artist_sync artist=%s capped reason=%s", collection_id, stop_reason or "unknown"
+        )
+        return False, ArtistSyncResult(
+            collection_id=collection_id,
+            name=name,
+            mode=mode,
+            status="capped",
+            missing=missing,
+            auto_queue_candidates=queueable,
+            # Counted as a sync: the refresh is as complete as this artist's catalogue
+            # can be. The marker says the catalogue is capped; a refetch cannot lift it.
+            detail=f"catalogue capped: {cause}",
+        )
+
     schema.record_sync(collection_id, error=None)
     run.artists_synced += 1
     return False, ArtistSyncResult(
@@ -640,6 +784,49 @@ def _sync_one(
     )
 
 
+def _record_partial(
+    collection_id: str,
+    row: Mapping[str, Any],
+    stop_reason: str,
+    missing: int | None,
+    queueable: int | None,
+    run: SyncRun,
+) -> ArtistSyncResult:
+    """Mark a budget-cut refresh, counting how many passes in a row have been cut.
+
+    The count is what bounds the retry: :func:`_pending` lets the artist jump the queue
+    only while it is below :data:`MAX_CONSECUTIVE_PARTIALS`. A clean or capped pass
+    writes a different marker, so the count resets by itself.
+    """
+    attempt = int(row.get("partial_attempt") or 0) + 1
+    cause = (
+        CAUSE_BY_STOP_REASON[BUDGET_STOP_REASON]
+        if stop_reason == BUDGET_STOP_REASON
+        else CAUSE_BUDGET_SPENT
+    )
+    schema.record_sync(collection_id, error=_partial_marker(attempt, cause))
+    run.artists_partial += 1
+    logger.info(
+        "op=artist_sync artist=%s partial attempt=%d reason=%s",
+        collection_id,
+        attempt,
+        stop_reason or "budget_spent",
+    )
+    if attempt < MAX_CONSECUTIVE_PARTIALS:
+        tail = "; refreshed first next pass"
+    else:
+        tail = f"; cut short {attempt} passes in a row, back on the normal refresh interval"
+    return ArtistSyncResult(
+        collection_id=collection_id,
+        name=str(row["name"]),
+        mode=str(row["mode"]),
+        status="partial",
+        missing=missing,
+        auto_queue_candidates=queueable,
+        detail=f"fetch stopped: {cause}{tail}",
+    )
+
+
 def _finish(run: SyncRun, *, remember: bool) -> SyncRun:
     run.finished = _now_iso()
     if remember:
@@ -649,9 +836,16 @@ def _finish(run: SyncRun, *, remember: bool) -> SyncRun:
 
 __all__ = [
     "BUDGET_KWARG",
+    "BUDGET_STOP_REASON",
+    "CAPPED_PREFIX",
+    "CAUSE_BUDGET_SPENT",
+    "CAUSE_BY_STOP_REASON",
+    "CAUSE_UNKNOWN",
     "MAX_ARTISTS_PER_RUN",
+    "MAX_CONSECUTIVE_PARTIALS",
     "META_LAST_RUN",
     "MIN_RESYNC_INTERVAL_S",
+    "PARTIAL_PREFIX",
     "SETTING_DEFAULT",
     "SETTING_KEY",
     "STALE_TASK_S",

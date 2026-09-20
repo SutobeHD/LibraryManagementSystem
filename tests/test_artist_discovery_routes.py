@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from typing import Any
 
 import httpx
@@ -199,8 +200,22 @@ def _related_payload() -> sc_api.SCResultList:
 # ---------------------------------------------------------------------------
 
 
-def test_discover_is_never_a_bare_list() -> None:
-    body = _request("GET", "/api/artists/discover").json()
+def test_discover_requires_session() -> None:
+    """A GET by shape only: the related tier has no cache and hops live on the token."""
+    assert _request("GET", "/api/artists/discover").status_code == 401
+
+
+def test_discover_rejects_a_wrong_bearer() -> None:
+    res = _request(
+        "GET",
+        "/api/artists/discover",
+        headers={"Authorization": "Bearer not-the-session-token"},
+    )
+    assert res.status_code == 401
+
+
+def test_discover_is_never_a_bare_list(auth_token) -> None:
+    body = _request("GET", "/api/artists/discover", headers=auth_token).json()
 
     assert isinstance(body, dict)
     assert body["status"] == "ok"
@@ -211,8 +226,8 @@ def test_discover_is_never_a_bare_list() -> None:
     assert isinstance(body["suggestions"], list)
 
 
-def test_signed_out_says_not_queried_never_nothing_found(favourite: str) -> None:
-    body = _request("GET", "/api/artists/discover").json()
+def test_signed_out_says_not_queried_never_nothing_found(favourite: str, auth_token) -> None:
+    body = _request("GET", "/api/artists/discover", headers=auth_token).json()
 
     assert body["soundcloud"]["connected"] is False
     assert body["soundcloud"]["detail"]
@@ -222,9 +237,11 @@ def test_signed_out_says_not_queried_never_nothing_found(favourite: str) -> None
     assert body["calls_used"] == 0
 
 
-def test_no_linked_favourite_reports_the_reason(monkeypatch, signed_in, favourite: str) -> None:
+def test_no_linked_favourite_reports_the_reason(
+    monkeypatch, signed_in, favourite: str, auth_token
+) -> None:
     """A signed-in user with no bound account: nothing was asked, and it says so."""
-    body = _request("GET", "/api/artists/discover").json()
+    body = _request("GET", "/api/artists/discover", headers=auth_token).json()
 
     assert body["soundcloud"]["connected"] is True
     assert body["sources"]["related"] == discovery.STATE_NOT_QUERIED
@@ -233,7 +250,7 @@ def test_no_linked_favourite_reports_the_reason(monkeypatch, signed_in, favourit
 
 
 def test_related_hop_returns_ranked_candidates(
-    monkeypatch, signed_in, linked_favourite: str
+    monkeypatch, signed_in, linked_favourite: str, auth_token
 ) -> None:
     seen: list[tuple[str, str]] = []
 
@@ -245,7 +262,7 @@ def test_related_hop_returns_ranked_candidates(
 
     monkeypatch.setattr(sc_api, "get_related_artists", _related)
 
-    body = _request("GET", "/api/artists/discover").json()
+    body = _request("GET", "/api/artists/discover", headers=auth_token).json()
 
     assert seen == [(ARTIST_URN, FAKE_TOKEN)]
     assert body["sources"]["related"] == discovery.STATE_OK
@@ -263,14 +280,14 @@ def test_related_hop_returns_ranked_candidates(
 
 
 def test_a_failed_hop_is_reported_not_swallowed(
-    monkeypatch, signed_in, linked_favourite: str
+    monkeypatch, signed_in, linked_favourite: str, auth_token
 ) -> None:
     def _boom(*_a: Any, **_kw: Any):
         raise sc_api.RateLimitError("429")
 
     monkeypatch.setattr(sc_api, "get_related_artists", _boom)
 
-    body = _request("GET", "/api/artists/discover").json()
+    body = _request("GET", "/api/artists/discover", headers=auth_token).json()
 
     assert body["sources"]["related"] == discovery.STATE_FAILED
     assert body["sources_detail"]["related"]["reason"] == "rate_limited"
@@ -278,7 +295,7 @@ def test_a_failed_hop_is_reported_not_swallowed(
 
 
 def test_an_artist_you_already_favourited_is_excluded(
-    monkeypatch, signed_in, linked_favourite: str
+    monkeypatch, signed_in, linked_favourite: str, auth_token
 ) -> None:
     """The suggestion IS the seed's own account — it must not be offered back."""
 
@@ -289,15 +306,15 @@ def test_an_artist_you_already_favourited_is_excluded(
 
     monkeypatch.setattr(sc_api, "get_related_artists", _related)
 
-    body = _request("GET", "/api/artists/discover").json()
+    body = _request("GET", "/api/artists/discover", headers=auth_token).json()
 
     assert body["suggestions"] == []
     assert body["excluded"] == 1
     assert body["excluded_against"]["local_names"] > 0
 
 
-def test_discover_limit_is_capped(monkeypatch, signed_in) -> None:
-    body = _request("GET", "/api/artists/discover?limit=100000").json()
+def test_discover_limit_is_capped(monkeypatch, signed_in, auth_token) -> None:
+    body = _request("GET", "/api/artists/discover?limit=100000", headers=auth_token).json()
 
     assert body["limit"] == discovery.DEFAULT_SUGGESTION_LIMIT * 4
 
@@ -535,3 +552,26 @@ def test_scheduler_runs_a_pass_once_the_setting_is_on(monkeypatch, fast_schedule
     assert fast_scheduler, "the poller never asked for a pass"
     # The scheduled pass never forces: `force` is the manual button's escape hatch.
     assert all("force" not in kwargs for kwargs in fast_scheduler)
+
+
+def test_the_scheduler_reports_a_pass_that_only_cut_refreshes_short(
+    monkeypatch, fast_scheduler, caplog
+) -> None:
+    """A cut-short refresh is work: calls were spent and a marker was written.
+
+    The log line skipped it — ``artists_synced`` was 0 and the pass still "completed", so
+    the one pass that needs explaining was the one that left no trace.
+    """
+    monkeypatch.setattr(main.artist_sync, "background_sync_enabled", lambda: True)
+    monkeypatch.setattr(
+        main.artist_sync, "run_sync", lambda **_kw: artist_sync.SyncRun(artists_partial=1)
+    )
+
+    with caplog.at_level(logging.INFO, logger=main.logger.name):
+        _drive_scheduler(0.1)
+
+    lines = [r.getMessage() for r in caplog.records if "op=artist_sync_scheduler" in r.getMessage()]
+
+    assert lines, "a pass whose only work was a cut-short refresh logged nothing"
+    assert "partial=1" in lines[0]
+    assert "synced=0" in lines[0]

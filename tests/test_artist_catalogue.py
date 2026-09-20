@@ -544,7 +544,10 @@ def test_catalogue_ties_buckets_and_diff_together() -> None:
         "fetched_at",
         "from_cache",
         "truncated",
+        "stop_reason",
     }
+    assert payload["truncated"] is False
+    assert payload["stop_reason"] == ""
     assert titles(payload[cat.BUCKET_THEIR_TRACKS]) == [
         "Overdrive (Original Mix)",
         "Kill the Beat",
@@ -678,6 +681,7 @@ def test_track_cap_truncates_and_reports_it() -> None:
     payload = cat.catalogue(cid, local_tracks={}, fetch=fetch, max_tracks=10)
 
     assert payload["truncated"] is True
+    assert payload["stop_reason"] == cat.STOP_REASON_MAX_TRACKS
     assert len(payload[cat.BUCKET_THEIR_TRACKS]) == 10
 
 
@@ -696,6 +700,7 @@ def test_fetcher_reported_truncation_is_carried_through() -> None:
     payload = cat.catalogue(cid, local_tracks={}, fetch=fetch)
 
     assert payload["truncated"] is True
+    assert payload["stop_reason"] == "call_budget_exhausted"
     assert len(payload[cat.BUCKET_THEIR_TRACKS]) == 1
 
 

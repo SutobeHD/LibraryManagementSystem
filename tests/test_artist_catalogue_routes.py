@@ -1,6 +1,6 @@
 """Artist-Hub SoundCloud route tests — binding, catalogue, batch download (T-13/T-15).
 
-Six contracts, all of them things this feature has previously got wrong:
+The contracts under test, all of them things this feature has previously got wrong:
 
 * every **mutation** is behind ``Depends(require_session)`` (threat T3), and a rejected
   call writes no link row.
@@ -10,7 +10,11 @@ Six contracts, all of them things this feature has previously got wrong:
 * no token, no cache ⇒ ``not_connected``, with no bucket keys at all. Never an empty
   success, never a fabricated count.
 * every one of the three sources (uploads / search / reposts) reports its own status,
-  and only ``ok`` entitles anyone to say nothing is missing from what it supplies.
+  and only ``ok`` entitles anyone to say nothing is missing from what it supplies — with
+  the budget skip told apart from the full-ceiling one, because only the first is worth
+  retrying.
+* a forced ``refresh=true`` records what it measured in ``sync_state``: a complete fetch
+  clears the background pass's marker instead of letting it outlive the truncation.
 * ``download-missing`` hands back a job id and refuses a second concurrent run with 409.
 * the per-run cap (``ARTIST_DOWNLOAD_MAX_TRACKS``) is refused, not silently trimmed.
 * the auto-queue path may only pick what the identity layer marked
@@ -39,6 +43,7 @@ from app import auth, main
 from app import soundcloud_api as sc_api
 from app.artist_store import catalogue as artist_catalogue
 from app.artist_store import identity, registry, schema
+from app.artist_store import sync as artist_sync
 from app.main import app
 
 ARTIST_URN = "soundcloud:users:4242"
@@ -175,6 +180,8 @@ def _clean_store():
         conn.commit()
     registry._legacy_migration_done = False
     main._artist_jobs.clear()
+    # Process-wide, so a forced refresh in one test would otherwise sit out the next.
+    main._artist_forced_refresh_at.clear()
     yield
 
 
@@ -222,7 +229,7 @@ def linked(collection_id: str) -> str:
 
 
 @pytest.fixture
-def fetched(monkeypatch, linked: str, signed_in) -> str:
+def fetched(monkeypatch, linked: str, signed_in, auth_token) -> str:
     """A linked artist whose catalogue is already in the TTL cache."""
     monkeypatch.setattr(
         main.sc_api,
@@ -236,7 +243,7 @@ def fetched(monkeypatch, linked: str, signed_in) -> str:
     monkeypatch.setattr(
         main.sc_api, "get_user_reposts", lambda _urn, _token, **_kw: sc_api.SCResultList([])
     )
-    res = _request("GET", f"/api/artists/{linked}/catalogue")
+    res = _request("GET", f"/api/artists/{linked}/catalogue", headers=auth_token)
     assert res.json()["status"] == "ok"
     return linked
 
@@ -278,14 +285,24 @@ _MUTATIONS = [
     ("POST", "/api/artist/soundcloud", {"artist_name": ARTIST_NAME, "link": "bnr"}),
 ]
 
+#: GETs that fetch live on the user's OAuth token and write the answer to the sidecar.
+#: A read by shape only — gated like a mutation, and pinned here so nobody reopens them.
+_SIDE_EFFECTING_READS = [
+    ("GET", "/api/artists/{cid}/catalogue", None),
+    ("GET", "/api/artists/{cid}/catalogue?refresh=true", None),
+    ("GET", "/api/artists/discover", None),
+]
 
-@pytest.mark.parametrize(("method", "url", "body"), _MUTATIONS)
-def test_mutations_require_session(method, url, body, collection_id) -> None:
+_GATED = _MUTATIONS + _SIDE_EFFECTING_READS
+
+
+@pytest.mark.parametrize(("method", "url", "body"), _GATED)
+def test_gated_routes_require_session(method, url, body, collection_id) -> None:
     assert _request(method, url.format(cid=collection_id), json=body).status_code == 401
 
 
-@pytest.mark.parametrize(("method", "url", "body"), _MUTATIONS)
-def test_mutations_reject_wrong_bearer(method, url, body, collection_id) -> None:
+@pytest.mark.parametrize(("method", "url", "body"), _GATED)
+def test_gated_routes_reject_wrong_bearer(method, url, body, collection_id) -> None:
     headers = {"Authorization": "Bearer not-the-session-token"}
     res = _request(method, url.format(cid=collection_id), json=body, headers=headers)
     assert res.status_code == 401
@@ -298,8 +315,16 @@ def test_rejected_mutation_writes_no_link(collection_id, auth_token) -> None:
     assert schema.get_link(collection_id, registry.PROVIDER_SOUNDCLOUD) is None
 
 
-def test_catalogue_read_needs_no_session(linked: str) -> None:
-    assert _request("GET", f"/api/artists/{linked}/catalogue").status_code == 200
+def test_catalogue_read_with_a_session_is_served(linked: str, auth_token) -> None:
+    res = _request("GET", f"/api/artists/{linked}/catalogue", headers=auth_token)
+
+    assert res.status_code == 200
+
+
+def test_a_gated_read_reaches_no_further_than_the_gate(linked: str) -> None:
+    """401 before the route body, so a rejected call spends nothing and caches nothing."""
+    assert _request("GET", f"/api/artists/{linked}/catalogue?refresh=true").status_code == 401
+    assert schema.get_catalogue_cache(linked) is None
 
 
 # ---------------------------------------------------------------------------
@@ -307,9 +332,11 @@ def test_catalogue_read_needs_no_session(linked: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_unlinked_and_signed_out_says_not_connected_not_empty(collection_id: str) -> None:
+def test_unlinked_and_signed_out_says_not_connected_not_empty(
+    collection_id: str, auth_token
+) -> None:
     """No account AND no login: nothing was queried, so nothing may be listed."""
-    body = _request("GET", f"/api/artists/{collection_id}/catalogue").json()
+    body = _request("GET", f"/api/artists/{collection_id}/catalogue", headers=auth_token).json()
 
     assert body["status"] == "not_connected"
     assert body["collection_id"] == collection_id
@@ -317,7 +344,7 @@ def test_unlinked_and_signed_out_says_not_connected_not_empty(collection_id: str
 
 
 def test_unlinked_artist_is_catalogued_by_name_and_flagged(
-    monkeypatch, collection_id: str, signed_in
+    monkeypatch, collection_id: str, signed_in, auth_token
 ) -> None:
     """Owner decision 2026-09-08: linking stays manual, but a name is enough to search."""
     seen: dict[str, Any] = {}
@@ -330,7 +357,7 @@ def test_unlinked_artist_is_catalogued_by_name_and_flagged(
         )
 
     monkeypatch.setattr(main.sc_api, "search_tracks_many", _search)
-    body = _request("GET", f"/api/artists/{collection_id}/catalogue").json()
+    body = _request("GET", f"/api/artists/{collection_id}/catalogue", headers=auth_token).json()
 
     assert body["status"] == "ok"
     assert body["link_missing"] is True
@@ -345,32 +372,36 @@ def test_unlinked_artist_is_catalogued_by_name_and_flagged(
     assert body["sources"] == {"uploads": "not_queried", "search": "ok", "reposts": "not_queried"}
 
 
-def test_unknown_collection_is_404() -> None:
-    assert _request("GET", "/api/artists/a_deadbeef/catalogue").status_code == 404
+def test_unknown_collection_is_404(auth_token) -> None:
+    assert (
+        _request("GET", "/api/artists/a_deadbeef/catalogue", headers=auth_token).status_code == 404
+    )
 
 
-def test_missing_credentials_return_not_connected(linked: str) -> None:
+def test_missing_credentials_return_not_connected(linked: str, auth_token) -> None:
     """No token and nothing cached — say so, never hand back an empty catalogue."""
-    body = _request("GET", f"/api/artists/{linked}/catalogue").json()
+    body = _request("GET", f"/api/artists/{linked}/catalogue", headers=auth_token).json()
 
     assert body["status"] == "not_connected"
     assert "not connected" in body["detail"].lower()
     _assert_no_buckets(body)
 
 
-def test_expired_session_returns_not_connected(monkeypatch, linked: str, signed_in) -> None:
+def test_expired_session_returns_not_connected(
+    monkeypatch, linked: str, signed_in, auth_token
+) -> None:
     def _expired(*_a: Any, **_kw: Any):
         raise sc_api.AuthExpiredError("token rejected")
 
     monkeypatch.setattr(main.sc_api, "get_user_tracks", _expired)
-    body = _request("GET", f"/api/artists/{linked}/catalogue").json()
+    body = _request("GET", f"/api/artists/{linked}/catalogue", headers=auth_token).json()
 
     assert body["status"] == "not_connected"
     _assert_no_buckets(body)
 
 
 def test_deleted_soundcloud_account_returns_artist_gone(
-    monkeypatch, linked: str, signed_in
+    monkeypatch, linked: str, signed_in, auth_token
 ) -> None:
     """A dead artist 404s legitimately — that is not a "please log in again"."""
 
@@ -378,14 +409,16 @@ def test_deleted_soundcloud_account_returns_artist_gone(
         raise sc_api.NotFoundError("gone")
 
     monkeypatch.setattr(main.sc_api, "get_user_tracks", _gone)
-    body = _request("GET", f"/api/artists/{linked}/catalogue").json()
+    body = _request("GET", f"/api/artists/{linked}/catalogue", headers=auth_token).json()
 
     assert body["status"] == "artist_gone"
     _assert_no_buckets(body)
 
 
-def test_catalogue_splits_into_role_buckets_and_reports_the_budget(fetched: str) -> None:
-    body = _request("GET", f"/api/artists/{fetched}/catalogue").json()
+def test_catalogue_splits_into_role_buckets_and_reports_the_budget(
+    fetched: str, auth_token
+) -> None:
+    body = _request("GET", f"/api/artists/{fetched}/catalogue", headers=auth_token).json()
 
     assert body["status"] == "ok"
     assert [t["sc_id"] for t in body["their_tracks"]] == [OWN_TRACK["sc_id"], OWN_TRACK_2["sc_id"]]
@@ -398,7 +431,9 @@ def test_catalogue_splits_into_role_buckets_and_reports_the_budget(fetched: str)
     assert body["calls_used"] == 0
 
 
-def test_catalogue_fetch_carries_a_call_budget(monkeypatch, linked: str, signed_in) -> None:
+def test_catalogue_fetch_carries_a_call_budget(
+    monkeypatch, linked: str, signed_in, auth_token
+) -> None:
     seen: dict[str, Any] = {}
 
     def _fetch(urn: str, token: str, **kwargs: Any):
@@ -409,7 +444,7 @@ def test_catalogue_fetch_carries_a_call_budget(monkeypatch, linked: str, signed_
     monkeypatch.setattr(main.sc_api, "get_user_tracks", _fetch)
     monkeypatch.setattr(main.sc_api, "search_tracks_many", _empty_search)
     monkeypatch.setattr(main.sc_api, "get_user_reposts", lambda *_a, **_kw: sc_api.SCResultList([]))
-    body = _request("GET", f"/api/artists/{linked}/catalogue").json()
+    body = _request("GET", f"/api/artists/{linked}/catalogue", headers=auth_token).json()
 
     assert seen["urn"] == ARTIST_URN
     assert isinstance(seen["budget"], sc_api.CallBudget)
@@ -417,7 +452,75 @@ def test_catalogue_fetch_carries_a_call_budget(monkeypatch, linked: str, signed_
     assert body["from_cache"] is False
 
 
-def test_truncated_fetch_is_reported_not_hidden(monkeypatch, linked: str, signed_in) -> None:
+class TestForcedRefreshCooldown:
+    """``refresh=true`` skips the TTL cache and spends a whole budget — once per window.
+
+    The session gate stops a foreign caller; this stops an authenticated one, i.e. a UI
+    that retries in a loop. The second read still answers, from cache, with the same
+    payload — a cooldown must degrade, never fail.
+    """
+
+    @staticmethod
+    def _live_sources(monkeypatch) -> list[str]:
+        fetched_urns: list[str] = []
+
+        def _own(urn: str, _token: str, **_kw: Any):
+            fetched_urns.append(urn)
+            return sc_api.SCResultList(list(CATALOGUE))
+
+        monkeypatch.setattr(main.sc_api, "get_user_tracks", _own)
+        monkeypatch.setattr(main.sc_api, "search_tracks_many", _empty_search)
+        monkeypatch.setattr(
+            main.sc_api, "get_user_reposts", lambda *_a, **_kw: sc_api.SCResultList([])
+        )
+        return fetched_urns
+
+    def test_a_second_forced_refresh_in_the_window_reads_the_cache(
+        self, monkeypatch, linked: str, signed_in, auth_token
+    ) -> None:
+        urns = self._live_sources(monkeypatch)
+        url = f"/api/artists/{linked}/catalogue?refresh=true"
+
+        first = _request("GET", url, headers=auth_token).json()
+        second = _request("GET", url, headers=auth_token).json()
+
+        assert first["from_cache"] is False
+        assert second["status"] == "ok"
+        assert second["from_cache"] is True
+        assert urns == [ARTIST_URN], "the second forced refresh spent a second live fetch"
+
+    def test_the_window_expires(self, monkeypatch, linked: str, signed_in, auth_token) -> None:
+        urns = self._live_sources(monkeypatch)
+        monkeypatch.setattr(main, "ARTIST_CATALOGUE_REFRESH_COOLDOWN_S", 0.0)
+        url = f"/api/artists/{linked}/catalogue?refresh=true"
+
+        _request("GET", url, headers=auth_token)
+        second = _request("GET", url, headers=auth_token).json()
+
+        assert second["from_cache"] is False
+        assert urns == [ARTIST_URN, ARTIST_URN]
+
+    def test_a_signed_out_read_does_not_burn_the_window(
+        self, monkeypatch, linked: str, auth_token
+    ) -> None:
+        """Nothing was spendable, so the first refresh that CAN fetch must still fetch."""
+        url = f"/api/artists/{linked}/catalogue?refresh=true"
+        assert _request("GET", url, headers=auth_token).json()["status"] == "not_connected"
+        assert (
+            linked not in main._artist_forced_refresh_at
+        ), "a read that could not fetch stamped the window"
+
+        urns = self._live_sources(monkeypatch)
+        monkeypatch.setattr(main.sc_auth, "get_access_token", lambda **_kw: FAKE_TOKEN)
+        body = _request("GET", url, headers=auth_token).json()
+
+        assert body["from_cache"] is False
+        assert urns == [ARTIST_URN]
+
+
+def test_truncated_fetch_is_reported_not_hidden(
+    monkeypatch, linked: str, signed_in, auth_token
+) -> None:
     monkeypatch.setattr(
         main.sc_api,
         "get_user_tracks",
@@ -427,7 +530,7 @@ def test_truncated_fetch_is_reported_not_hidden(monkeypatch, linked: str, signed
     )
     monkeypatch.setattr(main.sc_api, "search_tracks_many", _empty_search)
     monkeypatch.setattr(main.sc_api, "get_user_reposts", lambda *_a, **_kw: sc_api.SCResultList([]))
-    body = _request("GET", f"/api/artists/{linked}/catalogue").json()
+    body = _request("GET", f"/api/artists/{linked}/catalogue", headers=auth_token).json()
 
     assert body["truncated"] is True
 
@@ -503,7 +606,7 @@ def test_unlink_removes_the_binding(linked: str, auth_token) -> None:
     assert schema.get_collection(linked) is not None  # collection survives
 
 
-def test_legacy_json_links_migrate_once_and_stay_unresolved(monkeypatch) -> None:
+def test_legacy_json_links_migrate_once_and_stay_unresolved(monkeypatch, auth_token) -> None:
     """``app_data.json`` held a URL but no URN — import it, flag it, never claim it works."""
     from app import sidecar
 
@@ -512,7 +615,7 @@ def test_legacy_json_links_migrate_once_and_stay_unresolved(monkeypatch) -> None
     )
     cid = schema.collection_id_for(ARTIST_NAME, schema.KIND_ARTIST)
 
-    body = _request("GET", f"/api/artists/{cid}/catalogue").json()
+    body = _request("GET", f"/api/artists/{cid}/catalogue", headers=auth_token).json()
 
     # Signed out, so nothing was fetched — but the imported row is still only a
     # bookmark, and the next signed-in read must not treat it as a bound account.
@@ -583,7 +686,7 @@ def test_a_review_bucket_track_must_be_requested_explicitly(
     track, fetched: str, downloads, auth_token
 ) -> None:
     """Refused for the server to pick, accepted when the user points at the row."""
-    body = _request("GET", f"/api/artists/{fetched}/catalogue").json()
+    body = _request("GET", f"/api/artists/{fetched}/catalogue", headers=auth_token).json()
     row = next(
         t
         for bucket in artist_catalogue.BUCKET_KEYS
@@ -663,7 +766,10 @@ def test_per_run_cap_is_refused_not_trimmed(
     monkeypatch.setattr(main.sc_api, "get_user_tracks", lambda *_a, **_kw: sc_api.SCResultList(big))
     monkeypatch.setattr(main.sc_api, "search_tracks_many", _empty_search)
     monkeypatch.setattr(main.sc_api, "get_user_reposts", lambda *_a, **_kw: sc_api.SCResultList([]))
-    assert _request("GET", f"/api/artists/{linked}/catalogue").json()["status"] == "ok"
+    assert (
+        _request("GET", f"/api/artists/{linked}/catalogue", headers=auth_token).json()["status"]
+        == "ok"
+    )
 
     res = _request(
         "POST",
@@ -804,7 +910,9 @@ class TestEverySourceReportsItsOwnStatus:
     anyone to speak about absence.
     """
 
-    def test_all_three_sources_run_in_budget_order(self, monkeypatch, linked, signed_in) -> None:
+    def test_all_three_sources_run_in_budget_order(
+        self, monkeypatch, linked, signed_in, auth_token
+    ) -> None:
         calls: list[str] = []
 
         def _own(_urn, _token, **_kw):
@@ -823,13 +931,13 @@ class TestEverySourceReportsItsOwnStatus:
         monkeypatch.setattr(main.sc_api, "search_tracks_many", _search)
         monkeypatch.setattr(main.sc_api, "get_user_reposts", _reposts)
 
-        body = _request("GET", f"/api/artists/{linked}/catalogue").json()
+        body = _request("GET", f"/api/artists/{linked}/catalogue", headers=auth_token).json()
 
         assert calls == ["uploads", "search", "reposts"]
         assert body["sources"] == {"uploads": "ok", "search": "ok", "reposts": "ok"}
 
     def test_search_runs_for_the_canonical_name_and_every_alias_on_one_budget(
-        self, monkeypatch, linked, signed_in
+        self, monkeypatch, linked, signed_in, auth_token
     ) -> None:
         schema.add_alias(linked, "Boysnoize")
         schema.add_alias(linked, "BNR")
@@ -850,7 +958,7 @@ class TestEverySourceReportsItsOwnStatus:
             main.sc_api, "get_user_reposts", lambda *_a, **_kw: sc_api.SCResultList([])
         )
 
-        body = _request("GET", f"/api/artists/{linked}/catalogue").json()
+        body = _request("GET", f"/api/artists/{linked}/catalogue", headers=auth_token).json()
 
         expected = list(registry.artist_names(linked))
         assert set(expected) == {ARTIST_NAME, "Boysnoize", "BNR"}
@@ -861,7 +969,7 @@ class TestEverySourceReportsItsOwnStatus:
         assert seen["search_budget"] is seen["upload_budget"]
 
     def test_a_track_in_both_uploads_and_search_is_listed_once(
-        self, monkeypatch, linked, signed_in
+        self, monkeypatch, linked, signed_in, auth_token
     ) -> None:
         monkeypatch.setattr(
             main.sc_api, "get_user_tracks", lambda *_a, **_kw: sc_api.SCResultList([OWN_TRACK])
@@ -877,7 +985,7 @@ class TestEverySourceReportsItsOwnStatus:
             main.sc_api, "get_user_reposts", lambda *_a, **_kw: sc_api.SCResultList([])
         )
 
-        body = _request("GET", f"/api/artists/{linked}/catalogue").json()
+        body = _request("GET", f"/api/artists/{linked}/catalogue", headers=auth_token).json()
 
         ids = [t["sc_id"] for bucket in artist_catalogue.BUCKET_KEYS for t in body[bucket]]
         assert ids.count(OWN_TRACK["sc_id"]) == 1
@@ -887,7 +995,7 @@ class TestEverySourceReportsItsOwnStatus:
         assert next(t for t in theirs if t["sc_id"] == OWN_TRACK["sc_id"])["confidence"] == "high"
 
     def test_a_search_failure_does_not_sink_the_catalogue(
-        self, monkeypatch, linked, signed_in
+        self, monkeypatch, linked, signed_in, auth_token
     ) -> None:
         def _boom(*_a: Any, **_kw: Any):
             raise RuntimeError("search endpoint exploded")
@@ -900,7 +1008,7 @@ class TestEverySourceReportsItsOwnStatus:
             main.sc_api, "get_user_reposts", lambda *_a, **_kw: sc_api.SCResultList([])
         )
 
-        body = _request("GET", f"/api/artists/{linked}/catalogue").json()
+        body = _request("GET", f"/api/artists/{linked}/catalogue", headers=auth_token).json()
 
         assert body["status"] == "ok"
         assert body["sources"]["search"] == "failed"
@@ -908,7 +1016,7 @@ class TestEverySourceReportsItsOwnStatus:
         assert body[artist_catalogue.BUCKET_THEIR_TRACKS], "own uploads must still be reported"
 
     def test_a_reposts_failure_does_not_sink_the_catalogue(
-        self, monkeypatch, linked, signed_in
+        self, monkeypatch, linked, signed_in, auth_token
     ) -> None:
         """Own uploads are the half that matters — a reposts error must degrade, not fail."""
 
@@ -921,14 +1029,14 @@ class TestEverySourceReportsItsOwnStatus:
         monkeypatch.setattr(main.sc_api, "search_tracks_many", _empty_search)
         monkeypatch.setattr(main.sc_api, "get_user_reposts", _boom)
 
-        body = _request("GET", f"/api/artists/{linked}/catalogue").json()
+        body = _request("GET", f"/api/artists/{linked}/catalogue", headers=auth_token).json()
 
         assert body["status"] == "ok"
         assert body["sources"]["reposts"] == "failed"
         assert body[artist_catalogue.BUCKET_THEIR_TRACKS]
 
     def test_an_alias_the_budget_never_reached_is_reported_as_skipped(
-        self, monkeypatch, linked, signed_in
+        self, monkeypatch, linked, signed_in, auth_token
     ) -> None:
         """A name that was never searched is a bucket nobody looked in — say which."""
         monkeypatch.setattr(
@@ -949,15 +1057,15 @@ class TestEverySourceReportsItsOwnStatus:
             main.sc_api, "get_user_reposts", lambda *_a, **_kw: sc_api.SCResultList([])
         )
 
-        body = _request("GET", f"/api/artists/{linked}/catalogue").json()
+        body = _request("GET", f"/api/artists/{linked}/catalogue", headers=auth_token).json()
 
         assert body["sources"]["search"] == "skipped_budget"
         assert body["search_queries_run"] == [ARTIST_NAME]
         assert body["search_queries_skipped"] == ["BOYS NOIZE"]
 
-    def test_a_cached_read_claims_nothing_about_any_source(self, fetched) -> None:
+    def test_a_cached_read_claims_nothing_about_any_source(self, fetched, auth_token) -> None:
         """A cache hit fetched nothing, so it may not assert anything about any source."""
-        body = _request("GET", f"/api/artists/{fetched}/catalogue").json()
+        body = _request("GET", f"/api/artists/{fetched}/catalogue", headers=auth_token).json()
 
         assert body["from_cache"] is True
         assert body["sources"] == {
@@ -965,6 +1073,169 @@ class TestEverySourceReportsItsOwnStatus:
             "search": "not_queried",
             "reposts": "not_queried",
         }
+
+    def test_a_full_track_ceiling_is_not_reported_as_a_budget_skip(
+        self, monkeypatch, linked, signed_in, auth_token
+    ) -> None:
+        """Both skips used to be ``skipped_budget`` — one of them is not about the budget.
+
+        With the per-artist ceiling full there is nowhere to put more tracks, so the next
+        run skips the source again however much budget it has. Calling that a budget skip
+        told every consumer a retry would fix it.
+        """
+        monkeypatch.setattr(artist_catalogue, "MAX_CATALOGUE_TRACKS", 1)
+        seen: dict[str, Any] = {}
+
+        def _own(_urn, _token, **kwargs: Any):
+            seen["budget"] = kwargs.get("budget")
+            return sc_api.SCResultList([OWN_TRACK])
+
+        monkeypatch.setattr(main.sc_api, "get_user_tracks", _own)
+
+        body = _request("GET", f"/api/artists/{linked}/catalogue", headers=auth_token).json()
+
+        # `_no_fetch` guards search and reposts: reaching either would fail the test.
+        assert body["sources"]["search"] == main.ARTIST_SOURCE_SKIPPED_TRACK_CAP
+        assert body["sources"]["reposts"] == main.ARTIST_SOURCE_SKIPPED_TRACK_CAP
+        assert main.ARTIST_SOURCE_SKIPPED_TRACK_CAP != main.ARTIST_SOURCE_SKIPPED_BUDGET
+        # The ceiling did it, not the cap: the budget is barely touched.
+        assert seen["budget"].exhausted is False
+
+    def test_a_budget_cut_outranks_a_cap_an_earlier_source_hit(
+        self, monkeypatch, linked, signed_in, auth_token
+    ) -> None:
+        """First-wins let own uploads' permanent cap hide search's retryable budget cut.
+
+        The merged ``stop_reason`` is what the background pass reads to decide whether a
+        refetch can bring more back, so the actionable cause has to win — the same rule
+        ``sc_api.search_tracks_many`` already applies across its own pages.
+        """
+        monkeypatch.setattr(
+            main.sc_api,
+            "get_user_tracks",
+            lambda *_a, **_kw: sc_api.SCResultList(
+                [OWN_TRACK], truncated=True, stop_reason="max_items"
+            ),
+        )
+        monkeypatch.setattr(
+            main.sc_api,
+            "search_tracks_many",
+            lambda *_a, **_kw: sc_api.SCSearchResult(
+                [OWN_TRACK_2],
+                truncated=True,
+                stop_reason=artist_sync.BUDGET_STOP_REASON,
+                queries_run=(ARTIST_NAME,),
+            ),
+        )
+        monkeypatch.setattr(
+            main.sc_api, "get_user_reposts", lambda *_a, **_kw: sc_api.SCResultList([])
+        )
+
+        body = _request("GET", f"/api/artists/{linked}/catalogue", headers=auth_token).json()
+
+        assert body["truncated"] is True
+        assert body["stop_reason"] == artist_sync.BUDGET_STOP_REASON
+
+
+class TestAForcedRefreshRecordsWhatItMeasured:
+    """``refresh=true`` replaces the cached catalogue, so it owns ``sync_state`` too.
+
+    While this path wrote nothing, a ``partial:`` marker from the background pass
+    outlived the truncation it described: the user pressed Update, got a complete
+    catalogue, and the Hub kept rendering "(partial)" until the next background pass
+    happened to look.
+    """
+
+    def _complete(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            main.sc_api, "get_user_tracks", lambda *_a, **_kw: sc_api.SCResultList(list(CATALOGUE))
+        )
+        monkeypatch.setattr(main.sc_api, "search_tracks_many", _empty_search)
+        monkeypatch.setattr(
+            main.sc_api, "get_user_reposts", lambda *_a, **_kw: sc_api.SCResultList([])
+        )
+
+    def test_a_complete_refresh_clears_a_stale_partial_marker(
+        self, monkeypatch, linked, signed_in, auth_token
+    ) -> None:
+        schema.record_sync(
+            linked, error=artist_sync._partial_marker(1, artist_sync.CAUSE_BUDGET_SPENT)
+        )
+        self._complete(monkeypatch)
+
+        body = _request(
+            "GET", f"/api/artists/{linked}/catalogue?refresh=true", headers=auth_token
+        ).json()
+
+        assert (body["status"], body["from_cache"], body["truncated"]) == ("ok", False, False)
+        state = schema.get_sync_state(linked)
+        assert state["last_error"] is None
+        assert state["last_sync_at"]
+
+    def test_a_truncated_refresh_writes_the_cap_the_fetch_measured(
+        self, monkeypatch, linked, signed_in, auth_token
+    ) -> None:
+        monkeypatch.setattr(
+            main.sc_api,
+            "get_user_tracks",
+            lambda *_a, **_kw: sc_api.SCResultList(
+                list(CATALOGUE), truncated=True, stop_reason="max_items"
+            ),
+        )
+        monkeypatch.setattr(main.sc_api, "search_tracks_many", _empty_search)
+        monkeypatch.setattr(
+            main.sc_api, "get_user_reposts", lambda *_a, **_kw: sc_api.SCResultList([])
+        )
+
+        body = _request(
+            "GET", f"/api/artists/{linked}/catalogue?refresh=true", headers=auth_token
+        ).json()
+
+        assert body["truncated"] is True
+        marker = schema.get_sync_state(linked)["last_error"]
+        assert marker.startswith(artist_sync.CAPPED_PREFIX)
+        assert artist_sync.CAUSE_BY_STOP_REASON["max_items"] in marker
+
+    def test_a_budget_cut_refresh_leaves_the_background_counter_alone(
+        self, monkeypatch, linked, signed_in, auth_token
+    ) -> None:
+        """``partial:`` counts *background passes*; a button press is not one of them."""
+        marker = artist_sync._partial_marker(2, artist_sync.CAUSE_BUDGET_SPENT)
+        schema.record_sync(linked, error=marker)
+        monkeypatch.setattr(
+            main.sc_api,
+            "get_user_tracks",
+            lambda *_a, **_kw: sc_api.SCResultList(
+                list(CATALOGUE), truncated=True, stop_reason=artist_sync.BUDGET_STOP_REASON
+            ),
+        )
+        monkeypatch.setattr(main.sc_api, "search_tracks_many", _empty_search)
+        monkeypatch.setattr(
+            main.sc_api, "get_user_reposts", lambda *_a, **_kw: sc_api.SCResultList([])
+        )
+
+        _request("GET", f"/api/artists/{linked}/catalogue?refresh=true", headers=auth_token)
+
+        assert schema.get_sync_state(linked)["last_error"] == marker
+
+    def test_a_refresh_served_from_cache_records_nothing(
+        self, monkeypatch, linked, signed_in, auth_token
+    ) -> None:
+        """The cooldown turns the second press into a cache read — no truth changed."""
+        self._complete(monkeypatch)
+        first = _request(
+            "GET", f"/api/artists/{linked}/catalogue?refresh=true", headers=auth_token
+        ).json()
+        assert first["from_cache"] is False
+        marker = artist_sync.CAPPED_PREFIX + artist_sync.CAUSE_UNKNOWN
+        schema.record_sync(linked, error=marker)
+
+        second = _request(
+            "GET", f"/api/artists/{linked}/catalogue?refresh=true", headers=auth_token
+        ).json()
+
+        assert second["from_cache"] is True
+        assert schema.get_sync_state(linked)["last_error"] == marker
 
 
 # ---------------------------------------------------------------------------
@@ -986,7 +1257,7 @@ class TestRolePin:
         assert schema.get_identity_overrides(fetched) == {}
 
     def test_a_pin_persists_and_wins_on_the_next_pass(self, fetched: str, auth_token) -> None:
-        before = _request("GET", f"/api/artists/{fetched}/catalogue").json()
+        before = _request("GET", f"/api/artists/{fetched}/catalogue", headers=auth_token).json()
         assert [t["sc_id"] for t in before["uncertain"]] == [UNCERTAIN_TRACK["sc_id"]]
 
         res = _request(
@@ -998,7 +1269,7 @@ class TestRolePin:
         assert res.status_code == 200
         assert res.json()["identity"]["user_override"] == "primary"
 
-        after = _request("GET", f"/api/artists/{fetched}/catalogue").json()
+        after = _request("GET", f"/api/artists/{fetched}/catalogue", headers=auth_token).json()
         pinned = next(t for t in after["their_tracks"] if t["sc_id"] == UNCERTAIN_TRACK["sc_id"])
         assert pinned["identity_source"] == "user_override"
         assert pinned["classifier_role"] == "uncertain"
@@ -1012,7 +1283,7 @@ class TestRolePin:
 
         assert res.status_code == 200
         assert schema.get_identity_overrides(fetched) == {}
-        body = _request("GET", f"/api/artists/{fetched}/catalogue").json()
+        body = _request("GET", f"/api/artists/{fetched}/catalogue", headers=auth_token).json()
         assert [t["sc_id"] for t in body["uncertain"]] == [UNCERTAIN_TRACK["sc_id"]]
 
     def test_an_unknown_role_is_refused(self, fetched: str, auth_token) -> None:
@@ -1084,9 +1355,9 @@ class TestIdentityTable:
         assert _request("GET", "/api/artists/a_deadbeef/identities").status_code == 404
 
 
-def test_the_auto_queue_rule_is_the_identity_module_s(fetched: str) -> None:
+def test_the_auto_queue_rule_is_the_identity_module_s(fetched: str, auth_token) -> None:
     """One definition of "may the server queue this", not a second copy in the route."""
-    body = _request("GET", f"/api/artists/{fetched}/catalogue").json()
+    body = _request("GET", f"/api/artists/{fetched}/catalogue", headers=auth_token).json()
 
     for bucket in artist_catalogue.BUCKET_KEYS:
         for track in body[bucket]:

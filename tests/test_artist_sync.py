@@ -15,6 +15,17 @@ The contracts that matter, all of them things this feature could get quietly wro
   ``reason_stopped``.
 * **``record_sync`` is stamped** on success and carries the error text on failure,
   without clobbering the artist's mode.
+* **A budget-truncated refresh is not a sync.** The fetch path has already cached the
+  thin payload, so it is counted as ``artists_partial``, marked with
+  ``sync.PARTIAL_PREFIX`` in ``last_error``, and refetched *first* next pass instead of
+  parking behind the resync TTL with its brand-new timestamp.
+* **…but only when the budget is what cut it.** ``truncated`` is an OR over four causes
+  and three of them — the track ceiling, the page cap, the item cap — no retry can move.
+  Those are marked ``sync.CAPPED_PREFIX`` and counted as synced; marking them partial
+  would refetch an artist first, every pass, forever, for a catalogue that cannot grow.
+* **The retry is bounded and the marker can go stale.** An artist cut short
+  ``MAX_CONSECUTIVE_PARTIALS`` times in a row rejoins the normal TTL order, and a marker
+  the cached payload has outlived (a foreground refresh completed it) stops applying.
 
 No network, no keyring, no ``master.db``: every tracker is monkeypatched, the refresher
 is a local callable, and the sidecar is a throwaway file in ``tmp_path``.
@@ -110,6 +121,15 @@ def _ok_view(*, missing: int = 1, queueable: int = 1) -> dict:
         catalogue_mod.BUCKET_THEIR_TRACKS: tracks,
         catalogue_mod.BUCKET_MIXES: [{"sc_id": "mix1", "in_library": None}],
     }
+
+
+def _truncated_view(reason: str = sync.BUDGET_STOP_REASON) -> dict:
+    """A success payload whose fetch a cap cut short — `catalogue()` reports which one.
+
+    Defaults to the call budget: the one cause a later pass can actually do something
+    about, and the only one that may set the partial marker.
+    """
+    return {**_ok_view(), "truncated": True, "stop_reason": reason}
 
 
 class _Recorder:
@@ -453,6 +473,200 @@ def test_a_non_ok_state_is_not_counted_as_a_sync(store):
 
     assert run.artists_synced == 1
     assert [r.status for r in run.results].count("artist_gone") == 1
+
+
+def test_a_truncated_refresh_is_not_counted_as_a_sync(store):
+    cut = _favourite("Cut Artist", schema.SYNC_AUTO)
+
+    run = sync.run_sync(
+        refresher=lambda cid, *, budget: _truncated_view(),
+        budget=_budget(),
+        force=True,
+        remember=False,
+    )
+
+    assert run.artists_synced == 0
+    assert run.artists_partial == 1
+    assert run.artists_skipped == 0
+    assert run.as_dict()["artists_partial"] == 1
+    result = run.results[0]
+    assert result.status == "partial"
+    # What it did read is still reported — the payload was measured, just incomplete.
+    assert result.missing == 1
+    assert schema.get_sync_state(cut)["last_error"].startswith(sync.PARTIAL_PREFIX)
+
+
+def test_a_partially_synced_artist_is_retried_next_pass(store):
+    cut = _favourite("Cut Artist", schema.SYNC_AUTO)
+    sync.run_sync(
+        refresher=lambda cid, *, budget: _truncated_view(),
+        budget=_budget(),
+        force=True,
+        remember=False,
+    )
+
+    second = _Recorder()
+    run = sync.run_sync(refresher=second, budget=_budget(), force=True, remember=False)
+
+    # A clean sync a second ago would be parked by MIN_RESYNC_INTERVAL_S
+    # (test_a_freshly_synced_artist_is_left_alone). A truncated one must not be.
+    assert second.calls == [cut]
+    assert run.artists_synced == 1
+    assert schema.get_sync_state(cut)["last_error"] is None
+
+
+def test_a_partially_synced_artist_sorts_first(store):
+    complete = _favourite("Complete Artist", schema.SYNC_AUTO)
+    partial = _favourite("Partial Artist", schema.SYNC_AUTO)
+    schema.record_sync(complete)
+    conn = schema._ensure_schema()
+    conn.execute(
+        "UPDATE sync_state SET last_sync_at = ? WHERE collection_id = ?",
+        ("2020-01-01T00:00:00+00:00", complete),
+    )
+    conn.commit()
+    # Stamped now, so the partial row is the NEWEST one: ordering by timestamp alone
+    # would send the only incomplete catalogue to the back of the queue.
+    schema.record_sync(partial, error=sync.PARTIAL_PREFIX + "the call budget cut the fetch short")
+    refresher = _Recorder()
+
+    sync.run_sync(refresher=refresher, budget=_budget(), force=True, remember=False)
+
+    assert refresher.calls == [partial, complete]
+
+
+def test_a_ceiling_truncated_refresh_is_a_finished_sync(store):
+    """`truncated` is not a budget signal — three of its four causes are permanent.
+
+    An artist whose catalogue is simply bigger than the per-artist ceiling is truncated
+    on every fetch there will ever be. Marking that partial would put it first in the
+    queue and refetch it every pass, forever, for tracks that cannot fit.
+    """
+    capped = _favourite("Capped Artist", schema.SYNC_AUTO)
+
+    run = sync.run_sync(
+        refresher=lambda cid, *, budget: _truncated_view("max_items"),
+        budget=_budget(),
+        force=True,
+        remember=False,
+    )
+
+    assert run.artists_synced == 1
+    assert run.artists_partial == 0
+    assert run.results[0].status == "capped"
+    marker = schema.get_sync_state(capped)["last_error"]
+    assert marker.startswith(sync.CAPPED_PREFIX)
+    assert not marker.startswith(sync.PARTIAL_PREFIX)
+
+    second = _Recorder()
+    again = sync.run_sync(refresher=second, budget=_budget(), force=True, remember=False)
+
+    assert second.calls == []  # parked by the TTL like any other finished sync
+    assert again.results[0].status == "fresh"
+
+
+def test_a_chronically_cut_artist_stops_jumping_the_queue(store):
+    """The TTL bypass is bounded: one artist the budget never finishes cannot own it."""
+    cut = _favourite("Cut Artist", schema.SYNC_AUTO)
+
+    def _cut(collection_id: str, *, budget) -> dict:
+        return _truncated_view()
+
+    for _ in range(sync.MAX_CONSECUTIVE_PARTIALS):
+        run = sync.run_sync(refresher=_cut, budget=_budget(), force=True, remember=False)
+        assert run.artists_partial == 1
+
+    marker = schema.get_sync_state(cut)["last_error"]
+    assert sync._partial_attempt(marker) == sync.MAX_CONSECUTIVE_PARTIALS
+
+    third = _Recorder()
+    run = sync.run_sync(refresher=third, budget=_budget(), force=True, remember=False)
+
+    assert third.calls == []
+    assert run.results[0].status == "fresh"
+
+
+def test_the_partial_marker_names_the_cause_that_was_measured(store):
+    cut = _favourite("Cut Artist", schema.SYNC_AUTO)
+
+    sync.run_sync(
+        refresher=lambda cid, *, budget: _truncated_view(),
+        budget=_budget(),
+        force=True,
+        remember=False,
+    )
+
+    marker = schema.get_sync_state(cut)["last_error"]
+    assert sync.CAUSE_BY_STOP_REASON[sync.BUDGET_STOP_REASON] in marker
+
+
+def test_a_spent_budget_is_a_measurement_too(store):
+    """The payload blames a cap, but this run's own budget ran dry — that is retryable."""
+    cut = _favourite("Cut Artist", schema.SYNC_AUTO)
+
+    def _spend_it_all(collection_id: str, *, budget) -> dict:
+        while budget.try_spend():
+            pass
+        return _truncated_view("max_items")
+
+    run = sync.run_sync(
+        refresher=_spend_it_all, budget=_budget(limit=3), force=True, remember=False
+    )
+
+    assert run.artists_partial == 1
+    assert sync.CAUSE_BUDGET_SPENT in schema.get_sync_state(cut)["last_error"]
+
+
+def test_a_truncation_with_no_recorded_reason_is_named_as_unknown(store):
+    """A cache entry written before ``stop_reason`` existed reports truncation, no cause.
+
+    Both guesses would be an invention with a cost: ``budget`` would refetch the artist
+    first on every pass forever, ``max_items`` would park a catalogue a retry could still
+    finish. The marker says what is actually known — nothing.
+    """
+    silent = _favourite("Silent Artist", schema.SYNC_AUTO)
+    budget = _budget()
+
+    run = sync.run_sync(
+        refresher=lambda cid, *, budget: _truncated_view(""),
+        budget=budget,
+        force=True,
+        remember=False,
+    )
+
+    assert budget.exhausted is False  # nothing measured a budget cut, so nothing claims one
+    assert run.artists_partial == 0
+    assert run.results[0].status == "capped"
+    marker = schema.get_sync_state(silent)["last_error"]
+    assert marker == sync.CAPPED_PREFIX + sync.CAUSE_UNKNOWN
+    # Unknown is its own cause, never an alias of a cap the fetch never reported.
+    assert sync.CAUSE_UNKNOWN not in sync.CAUSE_BY_STOP_REASON.values()
+
+
+def test_a_stale_partial_marker_loses_to_a_complete_cached_catalogue(store):
+    """A foreground fetch can write the catalogue without recording `sync_state`.
+
+    ``refresh=true`` now stamps it, but a cold-cache open does not — and neither does a
+    stamp the sidecar refused. The marker then outlives the truncation it describes, and
+    believing it would keep the artist at the front of every pass, spending calls on a
+    catalogue that is already complete.
+    """
+    artist = _favourite("Refreshed Artist", schema.SYNC_AUTO)
+    schema.record_sync(artist, error=sync._partial_marker(1, sync.CAUSE_BUDGET_SPENT))
+    schema.set_catalogue_cache(artist, {"artist_urn": "", "truncated": False, "tracks": []})
+    refresher = _Recorder()
+
+    run = sync.run_sync(refresher=refresher, budget=_budget(), force=True, remember=False)
+
+    assert refresher.calls == []
+    assert run.results[0].status == "fresh"
+
+    # The fallback reads the cache; it does not simply ignore the marker.
+    schema.set_catalogue_cache(artist, {"artist_urn": "", "truncated": True, "tracks": []})
+    retried = _Recorder()
+    sync.run_sync(refresher=retried, budget=_budget(), force=True, remember=False)
+
+    assert retried.calls == [artist]
 
 
 def test_a_payload_without_buckets_prints_no_count(store):

@@ -32,6 +32,16 @@ export const STATE_SKIPPED_BUDGET = 'skipped_budget';
 export const STATE_NOT_QUERIED = 'not_queried';
 export const STATE_NO_DATA = 'no_data';
 
+// A catalogue source nobody queried because the artist's own track ceiling was already
+// full — mirrors ARTIST_SOURCE_SKIPPED_TRACK_CAP in app/main.py, which stopped labelling
+// it `skipped_budget`. The budget is the only skip a later pass can undo, so anything
+// reading `sources` as a budget signal must not see one here. The per-source chip itself
+// is rendered from `catalogueCopy.js`; this pair is the vocabulary both sides read, for
+// the same reason SYNC_PARTIAL_PREFIX below lives in one place.
+export const STATE_SKIPPED_TRACK_CAP = 'skipped_track_cap';
+export const SKIPPED_TRACK_CAP_NOTE =
+    'not queried (this artist’s catalogue already fills the per-artist track ceiling)';
+
 /** `reason_stopped` values of a run that never walked an artist. */
 export const STOP_DISABLED = 'disabled';
 export const STOP_COMPLETED = 'completed';
@@ -39,6 +49,17 @@ export const STOP_CALL_BUDGET = 'call_budget_exhausted';
 export const STOP_ARTIST_CAP = 'artist_cap_reached';
 export const STOP_NO_REFRESHER = 'refresher_unsupported';
 export const STOP_NOT_CONNECTED = 'not_connected';
+
+// `sync_state.last_error` is the only per-artist status column the artist store has, so
+// the background pass parks two NON-failure markers there — mirrors PARTIAL_PREFIX and
+// CAPPED_PREFIX in app/artist_store/sync.py. Rendering either as "(failed)" would be the
+// same lie the backend fix removes: nothing failed, the catalogue is just incomplete.
+// One constant per side, read by every consumer, so the contract cannot drift.
+export const SYNC_PARTIAL_PREFIX = 'partial: ';
+export const SYNC_CAPPED_PREFIX = 'capped: ';
+
+// `partial: #2 <cause>` — the leading segment counts consecutive cut-short passes.
+const PARTIAL_ATTEMPT = /^#(\d+)\s*/;
 
 const RELATED_REASONS = {
     not_signed_in: 'SoundCloud is not connected, so its related-artist list was never asked.',
@@ -238,15 +259,60 @@ export const runSummary = (run) => {
     if (stop === STOP_NO_REFRESHER) return `The pass ${STOP_SENTENCES[STOP_NO_REFRESHER]}.`;
 
     const synced = Number(run.artists_synced) || 0;
+    const partial = Number(run.artists_partial) || 0;
     const skipped = Number(run.artists_skipped) || 0;
     const calls = Number(run.calls_used) || 0;
     const parts = [`${synced} artist${synced === 1 ? '' : 's'} refreshed`];
+    // A pass whose only work was a cut-short refresh still spent calls. Without this
+    // clause it reads as "0 artists refreshed" — a pass that did nothing.
+    if (partial) parts.push(`${partial} cut short by the call cap`);
     if (skipped) parts.push(`${skipped} left for next time`);
     parts.push(`${calls} of ${run.call_budget} calls used`);
     const tail = STOP_SENTENCES[stop];
     const errors = (run.errors ?? []).length;
     const failed = errors ? ` · ${errors} failed` : '';
     return `${parts.join(' · ')}${failed}${tail && stop !== STOP_COMPLETED ? ` · ${tail}` : ''}.`;
+};
+
+/**
+ * How to render one artist's `sync_state.last_error`: `{ title, className, suffix }`.
+ *
+ * A marker is not a failure, and the tooltip says the cause the *backend measured* —
+ * it is the marker's own tail, never a hardcoded one, so the two can never claim
+ * different reasons. Only a real error text reads as "(failed)".
+ */
+export const syncStateNote = (lastError) => {
+    const text = String(lastError ?? '');
+    if (!text) {
+        return { title: 'Last SoundCloud catalogue refresh', className: undefined, suffix: '' };
+    }
+    if (text.startsWith(SYNC_PARTIAL_PREFIX)) {
+        const tail = text.slice(SYNC_PARTIAL_PREFIX.length);
+        const attempts = Number(PARTIAL_ATTEMPT.exec(tail)?.[1]) || 1;
+        const cause = tail.replace(PARTIAL_ATTEMPT, '');
+        return {
+            title:
+                attempts > 1
+                    ? `Cut short on the last ${attempts} refreshes: ${cause}`
+                    : `The last refresh was cut short: ${cause}`,
+            className: 'text-amber2',
+            suffix: ' (partial)',
+        };
+    }
+    if (text.startsWith(SYNC_CAPPED_PREFIX)) {
+        return {
+            title:
+                `This catalogue is capped: ${text.slice(SYNC_CAPPED_PREFIX.length)}. ` +
+                'Fetching it again cannot add to it.',
+            className: 'text-amber2',
+            suffix: ' (capped)',
+        };
+    }
+    return {
+        title: `Last attempt failed: ${text}`,
+        className: 'text-bad',
+        suffix: ' (failed)',
+    };
 };
 
 /** "Last checked 3 h ago" for one artist. Empty when it has never been synced. */

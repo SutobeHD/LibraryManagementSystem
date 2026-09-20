@@ -5,6 +5,7 @@ import multiprocessing as _mp
 import os
 import secrets
 import shutil
+import sqlite3
 import sys
 import threading
 import time
@@ -1477,6 +1478,29 @@ ARTIST_JOB_DOWNLOAD = "download_missing"
 #: covers a 5000-track artist; anything past that would be a crawl, not a lookup.
 ARTIST_CATALOGUE_CALL_BUDGET = sc_api.SC_DEFAULT_CALL_BUDGET
 
+#: Shortest gap between two honoured `refresh=true` reads of the same artist. A forced
+#: refresh skips the TTL cache and spends a whole `CallBudget` on the user's OAuth token,
+#: so a stuck retry loop in the UI would turn one button into a crawl. Inside the window
+#: the read falls back to the cache and answers with the same payload — the session gate
+#: stops a foreign caller, this stops an authenticated one.
+ARTIST_CATALOGUE_REFRESH_COOLDOWN_S = 60.0
+
+_artist_refresh_lock = threading.Lock()
+#: collection_id -> `time.monotonic()` of the last forced refresh that was honoured.
+_artist_forced_refresh_at: dict[str, float] = {}
+
+
+def _claim_forced_refresh(collection_id: str) -> bool:
+    """Whether this caller may skip the TTL cache for `collection_id`, stamping the claim."""
+    now = time.monotonic()
+    with _artist_refresh_lock:
+        last = _artist_forced_refresh_at.get(collection_id)
+        if last is not None and now - last < ARTIST_CATALOGUE_REFRESH_COOLDOWN_S:
+            return False
+        _artist_forced_refresh_at[collection_id] = now
+        return True
+
+
 #: Hard per-run cap on one batch-download job. A bigger ask is refused (400) rather than
 #: silently trimmed — a truncated queue that looks complete is the failure mode this
 #: feature keeps hitting.
@@ -1558,6 +1582,30 @@ def _artist_state(status: str, collection_id: str, detail: str, **extra: Any) ->
     return {"status": status, "collection_id": collection_id, "detail": detail, **extra}
 
 
+#: Per-source outcome in the catalogue payload's `sources` map. Only `ok` entitles anyone
+#: to speak about absence; every other value means nobody looked at that source.
+ARTIST_SOURCE_OK = "ok"
+ARTIST_SOURCE_FAILED = "failed"
+#: Not queried because the shared call budget was spent — the one skip a later pass on a
+#: fresh budget can undo.
+ARTIST_SOURCE_SKIPPED_BUDGET = "skipped_budget"
+#: Not queried because the per-artist track ceiling (`MAX_CATALOGUE_TRACKS`) was already
+#: full. Reported even when the budget is spent too — the ceiling wins, because a fresh
+#: budget would skip this source again, and a consumer reading `sources` as a budget
+#: signal must not see one here.
+ARTIST_SOURCE_SKIPPED_TRACK_CAP = "skipped_track_cap"
+ARTIST_SOURCE_NOT_QUERIED = "not_queried"
+
+
+def _skipped_state(room: int) -> str:
+    """Which cap stopped a source, for a caller that already knows one of the two did.
+
+    The ceiling wins when both apply: a later run on a full budget would skip the source
+    again, so naming the budget there would promise a retry that changes nothing.
+    """
+    return ARTIST_SOURCE_SKIPPED_TRACK_CAP if room <= 0 else ARTIST_SOURCE_SKIPPED_BUDGET
+
+
 def _artist_fetch_sources(
     artist_urn: str,
     auth_token: str,
@@ -1577,8 +1625,10 @@ def _artist_fetch_sources(
     3. **reposts** — `/users/{urn}/reposts/tracks`, the artist's own re-shares.
 
     Every source writes its outcome into `state` (`ok` / `failed` / `skipped_budget` /
-    `not_queried`). A source that was not queried must never be spoken about as "nothing
-    missing" — that is the whole reason the status travels with the payload.
+    `skipped_track_cap` / `not_queried`). A source that was not queried must never be
+    spoken about as "nothing missing" — that is the whole reason the status travels with
+    the payload. The two skips are separate because only the budget one can come out
+    differently next run.
 
     Search and reposts are best-effort: own uploads are the half a linked artist cannot
     do without, so a failure in either degrades to a status rather than sinking the
@@ -1601,7 +1651,13 @@ def _artist_fetch_sources(
             if sc_id:
                 merged.setdefault(sc_id, track)
         truncated = truncated or bool(getattr(rows, "truncated", False))
-        stop_reason = stop_reason or str(getattr(rows, "stop_reason", "") or "")
+        reason = str(getattr(rows, "stop_reason", "") or "")
+        # Same rule as `sc_api.search_tracks_many`: the budget outranks whatever came
+        # first. First-wins let an early `max_items` from own uploads mask a later
+        # `budget` from search, and only the budget one tells a caller that retrying
+        # can bring more back.
+        if reason and (not stop_reason or reason == artist_sync.BUDGET_STOP_REASON):
+            stop_reason = reason
         calls += int(getattr(rows, "calls_used", 0) or 0)
 
     def _room() -> int:
@@ -1613,7 +1669,7 @@ def _artist_fetch_sources(
         # not a partial catalogue.
         own = sc_api.get_user_tracks(artist_urn, auth_token, max_items=cap, budget=budget)
         _absorb(own)
-        state["uploads"] = "ok"
+        state["uploads"] = ARTIST_SOURCE_OK
 
     if names and _room() and not budget.exhausted:
         try:
@@ -1623,36 +1679,40 @@ def _artist_fetch_sources(
             _absorb(found)
             state["search_queries_run"] = list(found.queries_run)
             state["search_queries_skipped"] = list(found.queries_skipped)
-            state["search"] = "skipped_budget" if found.queries_skipped else "ok"
+            state["search"] = (
+                ARTIST_SOURCE_SKIPPED_BUDGET if found.queries_skipped else ARTIST_SOURCE_OK
+            )
         except AuthExpiredError:
             raise
         except Exception as exc:
             logger.warning("op=artist_catalogue search_failed names=%d err=%s", len(names), exc)
-            state["search"] = "failed"
+            state["search"] = ARTIST_SOURCE_FAILED
     elif names:
-        state["search"] = "skipped_budget"
+        # Reached when the ceiling filled up or the budget ran out; `_skipped_state` says
+        # which, because only one of the two means a later run could do better.
+        state["search"] = _skipped_state(_room())
 
     if artist_urn:
         if not _room() or budget.exhausted:
-            state["reposts"] = "skipped_budget"
+            state["reposts"] = _skipped_state(_room())
         else:
             try:
                 reposts = sc_api.get_user_reposts(
                     artist_urn, auth_token, max_items=_room(), budget=budget
                 )
                 _absorb(reposts)
-                state["reposts"] = "ok"
+                state["reposts"] = ARTIST_SOURCE_OK
             except AuthExpiredError:
                 raise
             except sc_api.NotFoundError:
                 # The account has no reposts endpoint content — nothing to report, and
                 # the source WAS queried.
-                state["reposts"] = "ok"
+                state["reposts"] = ARTIST_SOURCE_OK
             except Exception as exc:
                 logger.warning(
                     "op=artist_catalogue reposts_failed artist=%s err=%s", artist_urn, exc
                 )
-                state["reposts"] = "failed"
+                state["reposts"] = ARTIST_SOURCE_FAILED
 
     return sc_api.SCResultList(
         list(merged.values()),
@@ -1719,9 +1779,9 @@ def _artist_catalogue_view(
     # "not_queried" survives a cache hit: nothing was fetched on this pass, so nothing
     # may be asserted about any of the three sources.
     fetch_state: dict[str, Any] = {
-        "uploads": "not_queried",
-        "search": "not_queried",
-        "reposts": "not_queried",
+        "uploads": ARTIST_SOURCE_NOT_QUERIED,
+        "search": ARTIST_SOURCE_NOT_QUERIED,
+        "reposts": ARTIST_SOURCE_NOT_QUERIED,
         "search_queries_run": [],
         "search_queries_skipped": [],
     }
@@ -1733,6 +1793,10 @@ def _artist_catalogue_view(
 
         fetcher = _fetch
 
+    # Claimed only with a fetcher in hand: a signed-out read cannot spend anything, and
+    # burning the window there would leave the first real refresh serving stale cache.
+    forced = bool(refresh) and fetcher is not None and _claim_forced_refresh(collection_id)
+
     try:
         view = artist_catalogue.catalogue(
             collection_id,
@@ -1740,7 +1804,7 @@ def _artist_catalogue_view(
             artist_urn=artist_urn,
             artist_names=names,
             fetch=fetcher,
-            force_refresh=bool(refresh),
+            force_refresh=forced,
         )
     except artist_catalogue.ArtistNotLinked:
         return _artist_state(
@@ -1790,10 +1854,11 @@ def _artist_catalogue_view(
         "search_names": list(names),
         "calls_used": budget.used,
         "call_budget": budget.limit,
-        # Per source: "ok" | "failed" | "skipped_budget" | "not_queried". Only "ok"
-        # entitles the UI to say nothing is missing from what that source would have
-        # supplied; every other value means it was never looked at, and claiming
-        # absence would be a fabrication.
+        # Per source: "ok" | "failed" | "skipped_budget" | "skipped_track_cap" |
+        # "not_queried". Only "ok" entitles the UI to say nothing is missing from what
+        # that source would have supplied; every other value means it was never looked
+        # at, and claiming absence would be a fabrication. The two skips are separate
+        # because only the budget one says a later run could do better.
         "sources": {
             "uploads": fetch_state["uploads"],
             "search": fetch_state["search"],
@@ -1805,14 +1870,57 @@ def _artist_catalogue_view(
     }
 
 
-@app.get("/api/artists/{collection_id}/catalogue")
+def _record_foreground_refresh(collection_id: str, view: dict[str, Any]) -> None:
+    """Stamp `sync_state` for a manual refresh that actually fetched.
+
+    The background pass is not the only writer of the catalogue cache — the Hub's Update
+    button replaces the same payload. While this path recorded nothing, a `partial:`
+    marker outlived the truncation it described and the Hub kept rendering "(partial)"
+    over a catalogue that had since come back whole.
+
+    Only what this fetch measured is written: a complete catalogue clears the marker, a
+    truncation blamed on a permanent cap writes `capped:` with the cause the fetch
+    reported. A budget-cut fetch writes nothing — `partial:` carries the background
+    pass's consecutive-attempt counter (`artist_sync.MAX_CONSECUTIVE_PARTIALS`) and a
+    foreground refresh is not one of those passes.
+
+    A cache hit (`from_cache`) changed no truth and is left alone — which is what a
+    cooldown-denied refresh normally degrades to.
+    """
+    if view.get("status") != "ok" or view.get("from_cache") is not False:
+        return
+    truncated = bool(view.get("truncated"))
+    stop_reason = str(view.get("stop_reason") or "")
+    if truncated and stop_reason == artist_sync.BUDGET_STOP_REASON:
+        return
+    marker: str | None = None
+    if truncated:
+        cause = artist_sync.CAUSE_BY_STOP_REASON.get(stop_reason, artist_sync.CAUSE_UNKNOWN)
+        marker = artist_sync.CAPPED_PREFIX + cause
+    try:
+        artist_schema.record_sync(collection_id, error=marker)
+    except (sqlite3.Error, OSError) as exc:
+        # Bookkeeping, not the answer: the catalogue was fetched either way.
+        logger.warning(
+            "op=artist_catalogue_refresh_state collection=%s unwritable err=%s",
+            collection_id,
+            exc,
+        )
+
+
+@app.get("/api/artists/{collection_id}/catalogue", dependencies=[Depends(require_session)])
 def artist_catalogue_route(collection_id: str, refresh: bool = False):
     """An artist's SoundCloud catalogue in role buckets, each track flagged owned/missing.
 
     Fetched on selection, never speculatively. Three sources under one call budget —
     own uploads, then search by canonical name + aliases, then reposts — with a
     per-source status in `sources` so a bucket nobody queried is never reported as
-    empty. `refresh=true` forces a live fetch past the TTL cache.
+    empty. `refresh=true` forces a live fetch past the TTL cache, at most once per
+    `ARTIST_CATALOGUE_REFRESH_COOLDOWN_S` per artist, and records what it measured in
+    `sync_state` so the Hub stops showing a marker the new catalogue has outlived.
+
+    Session-gated although it is a GET: a cold cache fetches live on the user's OAuth
+    token and writes the result to the sidecar, so it spends quota like a mutation.
 
     Linking stays manual, but an **unlinked** artist still gets a by-name catalogue:
     `link_missing` is then true and no track can reach `high` confidence through the
@@ -1824,9 +1932,12 @@ def artist_catalogue_route(collection_id: str, refresh: bool = False):
     nothing".
     """
     try:
-        return _artist_catalogue_view(collection_id, refresh=refresh, allow_fetch=True)
+        view = _artist_catalogue_view(collection_id, refresh=refresh, allow_fetch=True)
     except RateLimitError as exc:
         raise HTTPException(429, safe_error_message(exc)) from None
+    if refresh:
+        _record_foreground_refresh(collection_id, view)
+    return view
 
 
 @app.post("/api/artists/{collection_id}/link", dependencies=[Depends(require_session)])
@@ -2289,7 +2400,7 @@ def _artist_sync_states() -> list[dict[str, Any]]:
     return rows
 
 
-@app.get("/api/artists/discover")
+@app.get("/api/artists/discover", dependencies=[Depends(require_session)])
 def artist_discover_route(limit: int = artist_discovery.DEFAULT_SUGGESTION_LIMIT):
     """Artists the user does not own yet, seeded from their favourites.
 
@@ -2301,6 +2412,9 @@ def artist_discover_route(limit: int = artist_discovery.DEFAULT_SUGGESTION_LIMIT
     Signed out is not an error — tier 1 reports `not_queried` and the zero-call
     co-occurrence tier still answers. `soundcloud.connected` says which of the two
     happened.
+
+    Session-gated although it is a GET: the related tier has no cache and runs a live
+    `/related` hop per seed on the user's OAuth token.
     """
     capped = max(1, min(int(limit), artist_discovery.DEFAULT_SUGGESTION_LIMIT * 4))
 
@@ -2384,10 +2498,15 @@ async def _artist_sync_scheduler() -> None:
                     run = await asyncio.to_thread(artist_sync.run_sync)
                 finally:
                     _artist_sync_run_lock.release()
-                if run.artists_synced or run.reason_stopped != artist_sync.STOP_COMPLETED:
+                if (
+                    run.artists_synced
+                    or run.artists_partial
+                    or run.reason_stopped != artist_sync.STOP_COMPLETED
+                ):
                     logger.info(
-                        "op=artist_sync_scheduler synced=%d skipped=%d stop=%s",
+                        "op=artist_sync_scheduler synced=%d partial=%d skipped=%d stop=%s",
                         run.artists_synced,
+                        run.artists_partial,
                         run.artists_skipped,
                         run.reason_stopped,
                     )
