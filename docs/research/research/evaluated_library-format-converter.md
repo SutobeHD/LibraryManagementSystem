@@ -348,34 +348,287 @@ Stage 2 wave-2 verifier over the whole research body. ≤80 words. PASS → `eva
 
 ## Implementation Plan
 
-Required from `implement/draftplan_`. Concrete enough that someone else executes without re-deriving.
+Stage 3 Planner-Agent. Concrete enough that someone else executes without re-deriving.
 
 ### Scope
-- **In:** …
-- **Out:** …
+
+- **In:**
+  - `app/format_swap_engine.py` (new) — extract proven primitives from `scripts/dev/safe_format_swap.py` into importable engine: snapshot, manifest, convert (FFmpeg per-target codec), watchdog, content_id-keyed `update_content` mutate-in-place, rollback.
+  - `POST /api/library/format-swap` (new) — single shared endpoint, `Depends(require_session)`, batch-scoped `_db_write_lock`. Bilateral signature with sister `accepted_library-quality-upgrade-finder` (commit-blocker 1).
+  - `GET /api/library/format-swap/status` (new) — progress poll (counter + current track + phase).
+  - `POST /api/library/format-swap/rollback` (new) — manifest-driven restore.
+  - Targets: AIFF, FLAC, WAV, MP3. Scopes: `track_ids` | `playlist_id` | `all_m4a` | `path` (+ `quality_verdict` source→target pair). Source codecs: any decodable (m4a/mp3/wav/aiff/flac/alac/ogg/wma).
+  - Frontend page `FormatConverterView.jsx` + `frontend/src/api/formatSwap.js` — scope-picker, format-picker, dry-run preview, progress UI, rollback button, ConfirmModal + useToast.
+  - Phase-1a beatgrid A/B fixture protocol + ≤2-sample falsifier (commit-blocker 2). Phase-1b mid-run-abort chaos drill (commit-blocker 3). Multi-source AAC matrix n≥3 (commit-blocker 4).
+- **Out:**
+  - CDJ / USB-export byte changes (`Non-goals`).
+  - Quality auditing / verdict heuristic (sister doc owns it).
+  - Rekordbox re-analyse trigger (user does in RB-UI).
+  - Rust-DSP path (offline transcode = Python, `coding-rules.md:20-21`).
+  - `OneLibrary.create_content` path (rbox 0.1.7 broken).
+  - `update_track_path` (`database.py:1030-1069`, returns False live).
 
 ### Step-by-step
-1. …
+
+1. **Engine module skeleton** — create `app/format_swap_engine.py`. Dataclasses `SwapScope`, `SwapPlanItem`, `SwapResult`, `SwapManifest`. `TARGET_CODEC = {"AIFF": ("pcm_s16le"|"pcm_s24le", ".aiff"), "WAV": (same, ".wav"), "FLAC": ("flac", ".flac"), "MP3": ("libmp3lame -q:a 0", ".mp3")}`. Bit-depth from ffprobe `sample_fmt` primary (`s16`→16, `s24/s32`→24), `bits_per_raw_sample` fallback (Finding 2026-05-29 OQ6). FFmpeg cmd lifted from `safe_format_swap.py:148` + `soundcloud_downloader.py:953` (`-vn -map_metadata 0 -ar <src_sr> -y`). `subprocess.run(..., timeout=600)` w/ comment cite OQ3. Type hints, pathlib, no bare except. (covers T11, T12, T18)
+2. **ffprobe SR + bit-depth probe** — `_probe_audio(path) -> AudioProbe` (sample_rate, sample_fmt→bit_depth, codec, duration). `subprocess timeout=30`. Locks output SR to source (no resample → no cue drift, `safe_format_swap.py:156`). (covers T12)
+3. **Snapshot + manifest** — `_snapshot_master_db(ts)` copies `master.db`(+`-wal`/`-shm`) into snapshot dir under app-data (NOT user music tree). `manifest.json` atomic tmp-write+rename (`safe_format_swap.py:273-278`), anchored before first track, appended per track. Stores per-track `{content_id, original{folder_path,file_name_l,file_type,file_size,audio_backup}, new{...}}`. (covers T6, T7)
+4. **Pioneer watchdog** — `_kill_rekordbox_if_present()` lifted from `safe_format_swap.py:77-94`; `check_rekordbox_running()` preflight (abort writes if RB open). Periodic kill every N tracks mid-batch. PowerShell `subprocess timeout=15`. **Replace `print()` → `logger.info/warning`** (engine in-process, coding-rules). (covers T13)
+5. **Disk preflight** — `_disk_preflight(items, target) -> (ok, ratio)`: estimate `Σ src_size × EXPANSION[target]` (AAC→AIFF 5.5×, MP3-320→AIFF 4.4×, FLAC ~0.6× of PCM). `shutil.disk_usage(music_root).free`. `< 1.5×` → hard-abort (HTTP 507); `< 1.2×` → warning flag in response (Finding OQ4). (covers T14)
+6. **content_id mutate-in-place core** — `_swap_one(db, item, target, ts)`: probe → convert to tmp/dst → rename original to `.backup-<ts>` → mutate `c.folder_path`/`c.file_name_l`/`c.file_type`/`c.file_size` → `db.update_content(c)` (`safe_format_swap.py:320-325`). **NEVER `update_track_path`, NEVER delete+readd** (content_id preserved → cues/beatgrid/MyTag/history/hot-cue-bank/related-tracks survive, Finding OQ5 + Gap 2). Per-track failure → individual file-pair rollback (`safe_format_swap.py:329-348`). (covers T1, T2, T11)
+7. **Batch driver under one lock** — `run_swap(scope, target, dry_run) -> SwapResult`. Resolve scope→items via app `db` singleton (`db.live_db.db`, shares thread-local rbox conn `live_database.py:41`). `dry_run` → plan + disk forecast, no writes. Else: `with db_lock():` (ONE acquire for whole batch, Gap 4) → snapshot → loop `_swap_one` + periodic watchdog + per-track `save_manifest()` + progress counter. Returns manifest path + counts. (covers T2, T8, T15)
+8. **Detect target FileType int** — `_detect_file_type(db, target)`: scan existing rows for target extension to reuse RB's integer (`safe_format_swap.py:110-123`); fallback constants per target. (covers T11)
+9. **Endpoint + Pydantic v2 models** — add to `app/main.py` after `/api/tools/rename:1203`. `FormatSwapReq` / `FormatSwapResp` (shapes in `## API / UX Surface`). `@app.post("/api/library/format-swap", dependencies=[Depends(require_session)])`. `validate_audio_path` on every resolved source path AND computed output path (both, sandbox — commit-blocker / Threat T3). Reject 400 on unknown target/scope. Spawn engine on FastAPI worker thread (in-process, NOT ProcessPool, Gap 4). Use `route-architect` subagent before editing `main.py`. (covers T3, T4, T5, T15)
+10. **Status + rollback endpoints** — module-level `_swap_progress` dict guarded by a `threading.Lock` (separate from `_db_write_lock`). `GET /status` returns snapshot. `POST /api/library/format-swap/rollback` body `{manifest_id}` → `validate_audio_path` snapshot path → restore DB+WAL+SHM + rename audio backups + delete new files (`safe_format_swap.py:383-412`), under `db_lock()`. (covers T9, T10)
+11. **Phase-1a beatgrid A/B fixture + falsifier** (commit-blocker 2) — `tests/fixtures/format_swap/` synth + real m4a. Test transcodes, reads beatgrid marker offset before/after (RB export-XML `<TEMPO Inizio>` or ANLZ via `anlz_safe`), asserts `|Δ| ≤ 2 samples @ source SR`. Fail path documented: engine emits `needs_reanalyze=true` per track instead of silent-preserve (warn-and-reanalyze fallback, Gap 3). (covers T16)
+12. **Phase-1b mid-run-abort chaos drill** (commit-blocker 3) — 10-track fixture, kill engine mid-batch (raise in `_swap_one` at track 5), call rollback from manifest, assert master.db rows + on-disk files all consistent (no half-state). (covers T17)
+13. **Multi-source AAC sanity matrix** (commit-blocker 4) — n≥3 AAC sources (iTunes-Store w/ iTunSMPB priming, Bandcamp HE-AAC, SoundCloud LC). Per-source priming-drift check (onset offset src vs transcoded). Documents which sources are sample-clean vs need `needs_reanalyze`. (covers T19)
+14. **Frontend page** — `frontend/src/components/FormatConverterView.jsx` + `frontend/src/api/formatSwap.js` (axios via `api.js`). Scope-picker (track-selection/playlist/all-m4a/path), format dropdown (6-option pattern from download-format precedent), dry-run preview table, progress bar polling `/status`, rollback button. `ConfirmModal.jsx` + `useToast` (`ToastContext.jsx`) — NO alert/confirm/prompt. Magic numbers → `frontend/src/config/constants.js`. Wire into app shell nav. Run `e2e-tester`. (covers T20, T21)
+15. **Sister-contract sign-off** (commit-blocker 1) — record final `FormatSwapReq` shape in `## API / UX Surface`; sister doc must reference it at its `draftplan_`. `quality_verdict` trigger path = explicit `source_path`+`target_path` pair (not scope-resolution). (covers T15)
 
 ### Files touched
-- …
+
+Path + role (read / edit / new):
+- `app/format_swap_engine.py` — **new** — engine: snapshot/convert/watchdog/mutate-in-place/rollback (primitives from `scripts/dev/safe_format_swap.py`).
+- `app/main.py` — **edit** — 3 routes + 2 Pydantic models after `:1203`; `validate_audio_path` on in+out paths; `route-architect` first.
+- `app/database.py` — **read** — `_db_write_lock`/`db_lock()` (`:22`/`:26`); `update_track_path` (`:1030`, the API to AVOID).
+- `app/live_database.py` — **read** — `self.db = rbox.MasterDb` (`:41`), `update_content` (`:960`), `get_content_by_id` (`:913`), playlist-contents accessor — engine reuses app `db` singleton.
+- `app/soundcloud_downloader.py` — **read** — `_convert_to_aiff:953` FFmpeg cmd shape (verbatim base).
+- `scripts/dev/safe_format_swap.py` — **read** — proven primitives (`:77-94` watchdog, `:148` convert, `:170` timeout, `:273-278` manifest, `:320-325` mutate, `:383-412` rollback).
+- `frontend/src/components/FormatConverterView.jsx` — **new** — scope/format pickers, dry-run, progress, rollback.
+- `frontend/src/api/formatSwap.js` — **new** — axios calls via `api.js`.
+- `frontend/src/components/ConfirmModal.jsx` — **read** — destructive-confirm reuse.
+- `frontend/src/components/ToastContext.jsx` — **read** — `useToast`.
+- `frontend/src/config/constants.js` — **edit** — poll interval, disk-ratio thresholds, format list.
+- App-shell nav component — **edit** — register new view.
+- `tests/test_format_swap_engine.py` — **new** — engine unit + integration tests.
+- `tests/test_format_swap_api.py` — **new** — route auth/lock/validation/contract tests.
+- `tests/fixtures/format_swap/` — **new** — synth + real AAC sources (commit-blockers 2+4).
+- `frontend/src/components/__tests__/FormatConverterView.test.jsx` — **new** — render + no-alert grep.
 
 ### Testing
-- …
+
+High-level (concrete rows in `## Test Plan`):
+- Engine: content_id preserved + cues/beatgrid intact (mutate-in-place); per-track + batch rollback; disk preflight thresholds; watchdog kill; manifest atomicity.
+- API: 401 sans Bearer; 400 bad target/scope; `validate_audio_path` rejects out-of-sandbox in+out; lock acquired once/batch; dry-run writes nothing; sister-contract body shape.
+- Commit-blockers: Phase-1a beatgrid ≤2-sample A/B; Phase-1b mid-run-abort+restore consistency; multi-source AAC matrix.
+- Frontend: render, ConfirmModal gate, no alert/confirm/prompt, progress poll.
 
 ### Risks & rollback
-- …
+
+- **Coupling bug** w/ sister until bilateral `draftplan_` signature lands → final shape frozen in `## API / UX Surface` Step 15; sister references it. `quality_verdict` path flag-gated OFF until this ships.
+- **Phase-1a A/B fail** → scope shrinks silent-preserve → warn-and-reanalyze (per-track `needs_reanalyze`); not a build-blocker, a behavior switch.
+- **Disk pressure** on thousands-track libs (5.5× AAC→AIFF) → 1.5× hard-abort preflight; rollback-under-pressure tested by Phase-1b drill.
+- **Rollback** = manifest-driven: restore master.db+WAL+SHM from snapshot, rename `.backup-<ts>` audio back, delete new files. Per-track failure self-heals one pair (`safe_format_swap.py:329-348`); whole-batch via `/rollback`. content_id never destroyed → beatgrid never orphaned.
+- **RB auto-restart race** → watchdog kills `rekordbox.exe`/`Upmgr` periodically; `update_content` failure mid-batch → per-track restore + clean abort.
+
+## API / UX Surface
+
+Stage 3 Planner-Agent. What is added / changed at every layer.
+
+### Backend (FastAPI)
+
+All **new**, all `dependencies=[Depends(require_session)]`, Bearer-only (no cookies):
+
+| Method | Path | Auth | Lock | Body |
+|---|---|---|---|---|
+| POST | `/api/library/format-swap` | require_session | `db_lock()` batch-scoped | `FormatSwapReq` |
+| GET | `/api/library/format-swap/status` | require_session | none (read counter) | — |
+| POST | `/api/library/format-swap/rollback` | require_session | `db_lock()` | `{manifest_id: str}` |
+
+**Final Pydantic v2 request (commit-blocker 1 — bilateral signature):**
+
+```python
+class FormatSwapScope(BaseModel):          # exactly one field set
+    track_ids: list[int] | None = None
+    playlist_id: int | None = None
+    all_m4a: bool = False
+    path: str | None = None
+
+class FormatSwapReq(BaseModel):
+    trigger: Literal["user_format_pick", "quality_verdict"]
+    target: Literal["AIFF", "FLAC", "WAV", "MP3"]
+    dry_run: bool = True
+    scope: FormatSwapScope | None = None   # required when trigger=user_format_pick
+    source_path: str | None = None         # required when trigger=quality_verdict
+    target_path: str | None = None         # optional explicit out-path (quality_verdict)
+    force_16bit: bool = False              # FLAC bit-depth override (OQ6 user-toggle)
+```
+
+- `trigger="user_format_pick"` → `scope` mandatory, `source_path` ignored.
+- `trigger="quality_verdict"` (sister caller) → `source_path` mandatory (single track), `scope` ignored. Matches sister body `{trigger, source_path, target_path, candidate_meta}` (`accepted_library-quality-upgrade-finder.md:636`) — `candidate_meta` accepted+ignored (forward-compat, extra fields allowed).
+
+**Response:**
+
+```python
+class FormatSwapResp(BaseModel):
+    status: Literal["planned", "completed", "aborted", "disk_abort"]
+    manifest_id: str | None                # for /rollback (None on dry_run)
+    planned: int
+    converted: int
+    failed: int
+    needs_reanalyze: list[int]             # content_ids where beatgrid A/B > 2 samples
+    disk_warning: bool                     # 1.2×–1.5× borderline
+    dry_run: bool
+    items: list[SwapPlanItem]              # dry-run preview rows
+```
+
+### Frontend (React)
+
+- **New** `FormatConverterView.jsx` — standalone view: scope-picker, 6-option format dropdown, dry-run preview table, progress bar (poll `/status`), rollback button. `ConfirmModal` before execute + before rollback. `useToast` for done/error. No magic numbers (`constants.js`).
+- **New** `frontend/src/api/formatSwap.js` — `requestSwap(body)`, `getSwapStatus()`, `rollbackSwap(manifestId)` — axios via `api.js`, `invoke()` not used (HTTP route).
+- **Edit** app-shell nav — register view.
+
+### Tauri (Rust commands)
+
+- None — feature is HTTP-only (Python sidecar). No new `#[tauri::command]`.
+
+### CLI / sidecar logs
+
+- New stdout/log markers (never the token): `op=format_swap phase=<plan|snapshot|convert|mutate|done|rollback> ...` (see `## Telemetry`).
+- `scripts/dev/safe_format_swap.py` stays as-is (CLI dev tool; engine imports its logic, not vice-versa).
+
+## Threat Model
+
+Stage 3 Threat-Modeller-Agent. Feature touches auth, filesystem (paths in/out), `master.db` writes, subprocess, disk.
+
+### Assets
+
+- `master.db` (cues/beatgrid/playlists — irreplaceable user work).
+- User audio files (originals; lossy→lossless not reversible if original deleted).
+- Session Bearer token.
+- Disk capacity (thousands-track lib).
+
+### Trust boundaries
+
+- LAN-exposed sidecar (port 8000) trusts only Bearer holder (`require_session`).
+- Filesystem access bounded by `ALLOWED_AUDIO_ROOTS` via `validate_audio_path`.
+- FFmpeg subprocess: args built from validated paths only — no shell, list-argv.
+
+### Threats (STRIDE-light)
+
+| ID | Threat | Mitigation in plan | Test covers |
+|---|---|---|---|
+| TM1 | **S** — forged/absent Bearer triggers batch transcode | `Depends(require_session)` on all 3 routes (Step 9/10) | T3 |
+| TM2 | **T/E** — path-traversal in `scope.path`/`source_path`/`target_path` → read/write outside sandbox | `validate_audio_path` on every resolved input AND computed output (Step 9); `is_relative_to(root)` (`main.py:207`) | T4, T22 |
+| TM3 | **T** — delete+readd or `update_track_path` orphans beatgrid (silent data loss) | mutate-in-place `update_content`, content_id preserved (Step 6); NEVER delete+readd | T1, T2 |
+| TM4 | **D** — concurrent FastAPI writer races `master.db` mid-swap → corruption | batch-scoped `db_lock()` single acquire (Step 7, Gap 4); in-process (no ProcessPool) | T8 |
+| TM5 | **D** — disk exhaustion mid-batch (5.5× expansion) bricks library half-converted | disk preflight 1.5× hard-abort / 1.2× warn (Step 5); rollback restores (Step 10) | T14, T17 |
+| TM6 | **T** — FFmpeg/ffprobe arg-injection via crafted filename | list-argv (no `shell=True`), paths pre-validated, `timeout=600`/`30` (Step 1/2) | T23 |
+| TM7 | **D** — RB auto-restart locks DB → write hang/fail | watchdog kills `rekordbox.exe`/`Upmgr` (Step 4); per-track failure → clean abort+restore | T13 |
+| TM8 | **I** — error/log leaks absolute paths/token | `logger` markers use content_id/relative, `safe_error_message` on responses; token never logged | T24 |
+| TM9 | **D/Tamper** — mid-run abort leaves master.db ⟂ files inconsistent | manifest anchored pre-batch + per-track append; `/rollback` restores both (Step 3/10/12) | T17 |
+
+### Residual risk
+
+≤2-sample beatgrid drift accepted as sub-perceptual (Gap 3); sources exceeding it flagged `needs_reanalyze`, not silently shipped. Snapshot is full-DB copy (not per-row) — large `master.db` (~100 MB) doubles transient disk; covered by 1.5× preflight. Rollback assumes snapshot dir intact (same disk as DB).
+
+## Migration Path
+
+Stage 3 Migration-Path-Agent. Feature mutates `master.db` rows + on-disk file extensions. No schema change.
+
+### Before → After
+
+- **Data shape today:** `DjmdContent` row: `FolderPath=".../track.m4a"`, `FileNameL="track.m4a"`, `FileType=4` (m4a), `FileSize=<aac bytes>`. Sidecar ANLZ + BeatGrid/CuePoint/MyTag/History/HotCueBank/RelatedTracks bound by `content_id` only (Finding OQ5 + Gap 2). On disk: `track.m4a`.
+- **Data shape after:** same row, same `content_id` (UNCHANGED), `FolderPath=".../track.aiff"`, `FileNameL="track.aiff"`, `FileType=<target int>`, `FileSize=<pcm bytes>`. On disk: `track.aiff` (new) + `track.m4a.backup-<ts>` (preserved). All sidecar/cue/grid bindings intact (content_id-keyed).
+- **Existing-data handling:** in-place mutate via `rbox.MasterDb.update_content` under `db_lock()`. No backfill, no schema version bump — DjmdContent columns are mutated, not added.
+
+### Backfill / forward-compat
+
+- **Migration script:** none — engine IS the migration, invoked per user batch (not a one-shot at boot).
+- **Old client reads new data:** N/A — single app owns `master.db`; Rekordbox itself reads mutated row natively (FolderPath/FileType are RB's own fields). User may re-analyze in RB-UI if `needs_reanalyze`.
+- **Rollback:** `POST /api/library/format-swap/rollback {manifest_id}` → restore `master.db`+`-wal`+`-shm` from snapshot copy, rename `*.backup-<ts>` audio back to original name, delete generated files (`safe_format_swap.py:383-412`). content_id never changed → no orphan possible.
+
+### User-visible behavior during migration
+
+- Dry-run preview first (no changes). Execute behind ConfirmModal.
+- Progress UI polls `/status` (converted/total + current track).
+- Rekordbox MUST be closed during execute (watchdog enforces; preflight aborts if open). No app downtime — sidecar serves other routes (lock only blocks other `master.db` writers).
+- Per-track `needs_reanalyze` surfaced post-run → user opens RB, re-analyzes those tracks.
+
+## Performance Budget
+
+Stage 3 Perf-Budget-Agent. Numbers from OQ3/OQ4 closures + 3041-track production run.
+
+| Path | Budget (p95 + peak) | Measured today | Source |
+|---|---|---|---|
+| FFmpeg transcode, 1 track (≤6 min DJ set) | p95 ≤ 30s wall / ~200 MB peak (PCM buffer) | ~10× realtime: 60-min source = 6-30s SSD, 60-180s slow USB/NAS | OQ3 closure 2026-05-29; `safe_format_swap.py:170` timeout=600 (10× margin) |
+| ffprobe SR/bit-depth probe | p95 ≤ 1s | sub-second | `safe_format_swap.py:133`, timeout=30 |
+| `update_content` per row (under lock) | p95 ≤ 50ms | rbox SQLCipher write; n=3041 forward-run + Aphex Twin patch | Blocker-3 closure 2026-05-30 |
+| Batch of N tracks | ~N × (probe + transcode + write); lock held whole batch | 3041 m4a→AIFF completed (production) | Original Idea + `fdb461c` |
+| Disk preflight | p95 ≤ 100ms | `shutil.disk_usage` single statvfs | OQ4 closure |
+| `GET /status` poll | p95 ≤ 20ms | in-memory dict read | new |
+
+### Worst-case scenario
+
+- **Input shape:** thousands of tracks (e.g. 5000 m4a), AAC→AIFF 5.5× expansion. 30 GB lib → +150 GB.
+- **Expected impact:** wall ≈ 5000 × ~15s avg ≈ 20+ h on slow target; lock held entire batch (no concurrent `master.db` writes for duration — acceptable, single-user desktop, RB closed anyway). Disk: 1.5× preflight blocks if `< 225 GB` free.
+- **Mitigation if exceeded:** scope to playlist / path subset (smaller batches); disk hard-abort before start (Step 5); per-track manifest append → resume/rollback if interrupted (Phase-1b drill proves consistency). Watchdog prevents RB-restart stalls.
+
+## Telemetry
+
+Stage 3 Planner-Agent.
+
+- **Log markers** (never token, content_id not path): `logger.info("op=format_swap phase=plan scope=%s target=%s planned=%d est_disk_gb=%.1f", ...)`; `phase=snapshot manifest=%s`; `phase=convert i=%d/%d cid=%d sr=%d`; `phase=mutate cid=%d ok=%s`; `phase=watchdog killed_rekordbox=true`; `phase=done converted=%d failed=%d needs_reanalyze=%d`; `phase=rollback restored=%d`.
+- **Counters / timing:** `_swap_progress = {planned, converted, failed, current_cid, phase, started_at}` (in-memory, served by `/status`). Per-track elapsed logged at DEBUG.
+- **Health-endpoint surface:** `/status` exposes live counter; idle = `null`. (No new field in `/api/system/health`.)
+- **User-visible status:** progress bar + count in `FormatConverterView`; `useToast` on completion (`converted/failed`, `needs_reanalyze` list) + on rollback. Disk-warning toast at 1.2× borderline.
+
+## Test Plan
+
+Stage 3 Test-Plan-Agent. One row per case. Covers every Threat + every Step + every Perf row + Migration + the 4 commit-blockers.
+
+| ID | Layer | Test file | Case | Covers |
+|---|---|---|---|---|
+| T1 | py | `tests/test_format_swap_engine.py::test_content_id_preserved_after_swap` | swap one track, assert same `content_id`, FolderPath/FileType/FileSize mutated | TM3, Step 6 |
+| T2 | py | `..._engine.py::test_cues_beatgrid_survive_swap` | post-swap `get_cues()`/beatgrid still resolve for content_id (no orphan) | TM3, Step 6/7 |
+| T3 | py | `tests/test_format_swap_api.py::test_swap_requires_bearer_token` | POST sans `Authorization` → 401 | TM1, Step 9 |
+| T4 | py | `..._api.py::test_swap_rejects_out_of_sandbox_source` | `scope.path` outside ALLOWED_AUDIO_ROOTS → 403 | TM2, Step 9 |
+| T5 | py | `..._api.py::test_swap_rejects_unknown_target_and_scope` | `target="OGG"` / empty scope → 400 | Step 9 |
+| T6 | py | `..._engine.py::test_manifest_atomic_anchor_before_first_track` | manifest exists + parses after crash before track 1 | Step 3, TM9 |
+| T7 | py | `..._engine.py::test_snapshot_copies_db_wal_shm` | snapshot dir has all 3 files | Step 3 |
+| T8 | py | `..._engine.py::test_lock_acquired_once_per_batch` | monkeypatch lock, assert single acquire for N tracks | TM4, Step 7, Perf row 4 |
+| T9 | py | `..._api.py::test_status_reports_progress_counter` | mid-batch `/status` returns converted/total/current | Step 10, Perf row 6 |
+| T10 | py | `..._api.py::test_rollback_restores_db_and_files` | after swap, `/rollback` restores DB + renames backups + deletes new | Step 10, Migration rollback |
+| T11 | py | `..._engine.py::test_target_filetype_and_codec_matrix` | AIFF/WAV/FLAC/MP3 produce right ext + FileType int + codec | Step 1/6/8 |
+| T12 | py | `..._engine.py::test_bitdepth_from_sample_fmt_with_fallback` | s16→pcm_s16le, s24→pcm_s24le, `bits_per_raw_sample` fallback; SR locked to source | Step 1/2, OQ6 |
+| T13 | py | `..._engine.py::test_watchdog_kills_rekordbox_mid_batch` | mock tasklist with rekordbox.exe → kill invoked | TM7, Step 4 |
+| T14 | py | `..._engine.py::test_disk_preflight_hard_abort_and_warn` | monkeypatch `disk_usage`: <1.5×→507 abort, <1.2×→warn flag | TM5, Step 5, Perf row 5 |
+| T15 | py | `..._api.py::test_sister_contract_quality_verdict_body` | `{trigger:"quality_verdict", source_path, target_path, candidate_meta}` accepted; extra field ignored; resolves single track not scope | **Commit-blocker 1**, Step 9/15 |
+| T16 | py | `..._engine.py::test_beatgrid_ab_within_two_samples` | A/B: marker offset src vs transcoded, assert `|Δ| ≤ 2 samples @ src SR`; fail → `needs_reanalyze=true` not silent | **Commit-blocker 2**, Step 11, Gap 3 |
+| T17 | integration | `..._engine.py::test_midrun_abort_manifest_restore_consistent` | 10-track fixture, kill at track 5, `/rollback`, assert master.db rows ⟂ disk files all consistent | **Commit-blocker 3**, TM9, Step 12 |
+| T18 | py | `..._engine.py::test_subprocess_timeout_is_600` | convert call uses `timeout=600`; ffprobe `timeout=30` | Step 1/2, OQ3, Perf row 1 |
+| T19 | py | `..._engine.py::test_multisource_aac_priming_matrix` | n≥3 AAC (iTunes iTunSMPB / Bandcamp HE-AAC / SoundCloud LC): per-source onset-drift; flags which need reanalyze | **Commit-blocker 4**, Step 13 |
+| T20 | js | `frontend/src/components/__tests__/FormatConverterView.test.jsx::renders_pickers_and_progress` | scope+format pickers, dry-run table, progress bar render | Step 14 |
+| T21 | js | `...FormatConverterView.test.jsx::no_alert_confirm_prompt` | grep component source: no `alert(`/`confirm(`/`prompt(`; ConfirmModal used | Step 14, coding-rules |
+| T22 | py | `..._api.py::test_swap_rejects_out_of_sandbox_target_path` | `target_path` outside sandbox → 403 (output-path validation) | TM2, Step 9 |
+| T23 | py | `..._engine.py::test_ffmpeg_args_are_list_no_shell` | crafted filename w/ `;`/`$()` → list-argv, no shell exec | TM6, Step 1 |
+| T24 | py | `..._engine.py::test_logs_no_token_no_abs_path` | log capture: markers use content_id, no token, paths scrubbed | TM8, Telemetry |
+| T25 | py | `..._engine.py::test_dry_run_writes_nothing` | dry_run=true → no DB write, no file rename, returns preview + disk forecast | Step 7/9, Migration |
 
 ## Task Queue
 
 <!--
 Small, individually-committable implementation tasks. Written by research-plan (Stage 3),
-approved by the user at GATE C. research-implement works ONE task per branch:
+approved by the user at the Approval Gate. research-implement works ONE task per branch:
 routine/<slug>-task-<N>. 1 task = 1 feature = 1 PR. Tick - [x] when the PR is merged.
-Keep tasks small — a task too big to review in one PR must be split.
+Keep tasks small. Each task maps to a Step in ## Implementation Plan + has ≥1 row in ## Test Plan.
+Ordered: engine/schema → routes → frontend; commit-blocker fixtures (1a/1b) early.
 -->
 
-- [ ] <task — small, single-purpose, independently testable>
+- [ ] **T-1** `feat(audio): format_swap_engine probe + codec/bit-depth matrix` — `app/format_swap_engine.py` dataclasses + `_probe_audio` + `TARGET_CODEC` + FFmpeg cmd builder (no DB yet). Covers Step 1/2, tests T11, T12, T18, T23.
+- [ ] **T-2** `feat(audio): snapshot + atomic manifest in swap engine` — `_snapshot_master_db` + manifest write/append, app-data dir, `.gitignore`. Covers Step 3, tests T6, T7.
+- [ ] **T-3** `feat(audio): Pioneer watchdog + disk preflight (logger, not print)` — `_kill_rekordbox_if_present` + `check_rekordbox_running` + `_disk_preflight`. Covers Step 4/5, tests T13, T14.
+- [ ] **T-4** `feat(audio): content_id mutate-in-place _swap_one + per-track rollback` — `_swap_one` + `_detect_file_type`; uses app `db` singleton. Covers Step 6/8, tests T1, T2, T11.
+- [ ] **T-5** `feat(audio): batch driver run_swap under one db_lock + dry-run` — `run_swap` scope-resolution, single-acquire lock, progress counter, manifest loop. Covers Step 7, tests T8, T25.
+- [ ] **T-6** `test(audio): Phase-1a beatgrid A/B fixture + ≤2-sample falsifier` — `tests/fixtures/format_swap/` synth+real; A/B harness + `needs_reanalyze` fallback. **Commit-blocker 2.** Covers Step 11, test T16.
+- [ ] **T-7** `test(audio): Phase-1b mid-run-abort + manifest-restore chaos drill` — 10-track fixture, kill+restore consistency. **Commit-blocker 3.** Covers Step 12, test T17.
+- [ ] **T-8** `test(audio): multi-source AAC priming matrix (n≥3)` — iTunes/Bandcamp/SoundCloud fixtures, per-source drift. **Commit-blocker 4.** Covers Step 13, test T19.
+- [ ] **T-9** `feat(backend): POST /api/library/format-swap + Pydantic v2 models` — route after `main.py:1203`, `route-architect` first, `validate_audio_path` in+out, `require_session`, batch lock. **Commit-blocker 1** (final signature). Covers Step 9/15, tests T3, T4, T5, T15, T22, T24.
+- [ ] **T-10** `feat(backend): GET /status + POST /rollback endpoints` — progress dict + manifest restore route. Covers Step 10, tests T9, T10.
+- [ ] **T-11** `feat(frontend): formatSwap.js api client` — axios `requestSwap`/`getSwapStatus`/`rollbackSwap` via `api.js`; constants. Covers Step 14.
+- [ ] **T-12** `feat(frontend): FormatConverterView page (pickers, dry-run, progress, rollback)` — ConfirmModal + useToast, nav wire-in, `e2e-tester`. Covers Step 14, tests T20, T21.
+- [ ] **T-13** `docs: sister-endpoint contract sign-off + index/FILE_MAP/CHANGELOG` — record final body in both docs; `doc-syncer`. Covers Step 15.
 
 ## Review
 

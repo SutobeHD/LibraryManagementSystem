@@ -17,16 +17,16 @@
 //! - `fingerprint_batch(paths, window)` → `HashMap<String, Vec<u32>>`
 //!   Emits `"fingerprint_progress"` events: `{done: usize, total: usize}`
 
-use std::collections::HashMap;
 use log::{debug, error, info, warn};
 use serde::Serialize;
-use tauri::Emitter;
+use std::collections::HashMap;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
+use tauri::Emitter;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Constants
@@ -69,7 +69,10 @@ fn decode_to_mono_11k(path: &str) -> Result<Vec<f32>, String> {
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
     let mut hint = Hint::new();
-    if let Some(ext) = std::path::Path::new(path).extension().and_then(|s| s.to_str()) {
+    if let Some(ext) = std::path::Path::new(path)
+        .extension()
+        .and_then(|s| s.to_str())
+    {
         hint.with_extension(ext);
     }
 
@@ -117,8 +120,7 @@ fn decode_to_mono_11k(path: &str) -> Result<Vec<f32>, String> {
 
         // Convert to f32 sample buffer
         let spec = *decoded.spec();
-        let mut sample_buf: SampleBuffer<f32> =
-            SampleBuffer::new(decoded.capacity() as u64, spec);
+        let mut sample_buf: SampleBuffer<f32> = SampleBuffer::new(decoded.capacity() as u64, spec);
         sample_buf.copy_interleaved_ref(decoded);
 
         // Mix down to mono: average across channels
@@ -393,6 +395,10 @@ pub async fn fingerprint_batch(
         },
     );
 
-    info!("fingerprint_batch: completed {}/{} files", results.len(), total);
+    info!(
+        "fingerprint_batch: completed {}/{} files",
+        results.len(),
+        total
+    );
     Ok(results)
 }
