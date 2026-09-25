@@ -70,6 +70,60 @@ export const CDJ_MEMORY_COLORS = [
     { id: 8, name: 'Purple', hex: '#A874E3' },
 ];
 
+// Waveform style presets. Each preset bundles a layering mode
+// (`3band` stacked or `rgb` additive-blend) with a 3-band colour set
+// plus the down-beat colour, so the user can switch the visual
+// language of the editor with one click. `rekordbox` is the default.
+//
+// To add a new preset (e.g. Serato), copy one of the existing entries,
+// rename the key, and pick the four colour values. No further plumbing
+// needed — `useMultibandLayers` and `WaveformCanvas` consume the map
+// directly.
+export const WAVEFORM_STYLE_PRESETS = {
+    rekordbox: {
+        label: 'Rekordbox',
+        mode: '3band',
+        threeBand: {
+            low:  'rgba(59, 130, 246, 1.0)',   // blue
+            mid:  'rgba(250, 204, 21, 1.0)',   // yellow
+            high: 'rgba(34, 211, 238, 1.0)',   // cyan
+        },
+        downbeat: 'rgba(255, 165, 0, 0.85)',
+    },
+    mixxx: {
+        label: 'Mixxx',
+        mode: '3band',
+        threeBand: {
+            low:  'rgba(34, 197, 94, 1.0)',    // green
+            mid:  'rgba(168, 85, 247, 1.0)',   // purple
+            high: 'rgba(244, 114, 182, 1.0)',  // pink
+        },
+        downbeat: 'rgba(255, 220, 30, 0.85)',
+    },
+    traktor: {
+        label: 'Traktor',
+        mode: '3band',
+        threeBand: {
+            low:  'rgba(245, 158, 11, 1.0)',   // amber
+            mid:  'rgba(229, 231, 235, 0.9)',  // soft white
+            high: 'rgba(56, 189, 248, 1.0)',   // sky
+        },
+        downbeat: 'rgba(0, 200, 255, 0.85)',
+    },
+    rgbAdditive: {
+        label: 'RGB Mix',
+        mode: 'rgb',
+        threeBand: {
+            low:  'rgba(220, 38, 38, 1.0)',
+            mid:  'rgba(34, 197, 94, 1.0)',
+            high: 'rgba(37, 99, 235, 1.0)',
+        },
+        downbeat: 'rgba(255, 165, 0, 0.85)',
+    },
+};
+
+export const DEFAULT_WAVEFORM_STYLE = 'rekordbox';
+
 // 16 Rekordbox hot-cue surface colors — the subset of the 64-color
 // internal palette that Rekordbox UI exposes for hot cues. Approximate
 // hex values; exact CDJ rendering uses the palette `id` lookup.

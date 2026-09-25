@@ -134,18 +134,25 @@ export default function CuePanel({ track, currentTime = 0, onAudition = null }) 
                         <button
                             key={slot}
                             onClick={() => handleHotPadClick(slot)}
-                            className="h-12 rounded flex items-center justify-center text-[10px] font-bold border border-white/10 transition-all hover:border-white/30 relative"
+                            className="h-16 rounded flex flex-col items-center justify-center gap-0.5 text-[10px] font-bold border border-white/10 transition-all hover:border-white/30 hover:scale-[1.02] relative overflow-hidden"
                             style={{
                                 backgroundColor: cue ? colorHex : '#1f1f1f',
                                 color: cue ? '#000' : '#666',
                             }}
                             title={
                                 cue
-                                    ? `Hot cue ${String.fromCharCode(64 + slot)} @ ${formatTime(cue.time_ms / 1000)}`
-                                    : `Set hot cue ${String.fromCharCode(64 + slot)}`
+                                    ? `Hot cue ${String.fromCharCode(64 + slot)} @ ${formatTime(cue.time_ms / 1000)} — click to audition`
+                                    : `Set hot cue ${String.fromCharCode(64 + slot)} at ${formatTime(currentTime)}`
                             }
                         >
-                            {String.fromCharCode(64 + slot)}
+                            <span className="text-[15px] leading-none">
+                                {String.fromCharCode(64 + slot)}
+                            </span>
+                            {cue && (
+                                <span className="text-[8px] font-mono opacity-70 leading-none">
+                                    {formatTime(cue.time_ms / 1000)}
+                                </span>
+                            )}
                             {cue && (
                                 <span
                                     onClick={(e) => {

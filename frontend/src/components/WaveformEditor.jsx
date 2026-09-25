@@ -22,7 +22,14 @@ import CuePanel from './waveform/panels/CuePanel';
 import LoopPanel from './waveform/panels/LoopPanel';
 import BeatgridPanel from './waveform/panels/BeatgridPanel';
 import MetadataPanel from './waveform/panels/MetadataPanel';
-import { FEATURE_CUE_PANEL, FEATURE_LOOP_PANEL, FEATURE_BEATGRID_PANEL, FEATURE_METADATA_PANEL } from '../config/constants';
+import {
+    FEATURE_CUE_PANEL,
+    FEATURE_LOOP_PANEL,
+    FEATURE_BEATGRID_PANEL,
+    FEATURE_METADATA_PANEL,
+    WAVEFORM_STYLE_PRESETS,
+    DEFAULT_WAVEFORM_STYLE,
+} from '../config/constants';
 
 const ZOOM_DEFAULT = 200;
 
@@ -91,6 +98,7 @@ const WaveformEditorInner = forwardRef(({ track, blobUrl = null, simpleMode = fa
     const [loopOut, setLoopOut] = useState(null);
     const [isLooping, setIsLooping] = useState(false);
     const [visualMode, setVisualMode] = useState('blue'); // 'blue', 'rgb', '3band'
+    const [visualStyle, setVisualStyle] = useState(DEFAULT_WAVEFORM_STYLE); // key into WAVEFORM_STYLE_PRESETS
     const [multibandBuffers, setMultibandBuffers] = useState(null);
     const [analyzing, setAnalyzing] = useState(false);
     const [bufferReady, setBufferReady] = useState(false);
@@ -156,7 +164,18 @@ const WaveformEditorInner = forwardRef(({ track, blobUrl = null, simpleMode = fa
     }, [visualMode, multibandBuffers, bufferReady]);
 
     // Slave-band lifecycle + RAF sync loop
-    useMultibandLayers({ wavesurfer, waveLowRef, waveMidRef, waveHighRef, visualMode, multibandBuffers, zoom, trackBlobUrl });
+    useMultibandLayers({ wavesurfer, waveLowRef, waveMidRef, waveHighRef, visualMode, visualStyle, multibandBuffers, zoom, trackBlobUrl });
+
+    // Switching the visual style also flips the layering mode (3band vs
+    // rgb-additive) so the preset feels like a single coherent choice. The
+    // visualMode toggle button stays available if the user wants to cycle
+    // through layers independently.
+    const handleSelectVisualStyle = useCallback((styleId) => {
+        const preset = WAVEFORM_STYLE_PRESETS[styleId];
+        if (!preset) return;
+        setVisualStyle(styleId);
+        setVisualMode(preset.mode);
+    }, []);
 
     const handleToggleVisualMode = async () => {
         const modes = ['blue', 'rgb', '3band'];
@@ -338,6 +357,7 @@ const WaveformEditorInner = forwardRef(({ track, blobUrl = null, simpleMode = fa
                 isPlaying={isPlaying}
                 internalVolume={internalVolume} setInternalVolume={setInternalVolume}
                 visualMode={visualMode} handleToggleVisualMode={handleToggleVisualMode}
+                visualStyle={visualStyle} setVisualStyle={handleSelectVisualStyle}
                 handleGridShift={interactions.handleGridShift}
                 handleSaveGrid={interactions.handleSaveGrid}
                 handleDetectDrop={interactions.handleDetectDrop}
@@ -355,7 +375,7 @@ const WaveformEditorInner = forwardRef(({ track, blobUrl = null, simpleMode = fa
                 waveformRef={waveformRef} overviewRef={overviewRef} beatCanvasRef={beatCanvasRef}
                 waveLowRef={waveLowRef} waveMidRef={waveMidRef} waveHighRef={waveHighRef}
                 wavesurfer={wavesurfer}
-                visualMode={visualMode} streaming={streaming} loading={loading}
+                visualMode={visualMode} visualStyle={visualStyle} streaming={streaming} loading={loading}
                 isDragOver={isDragOver}
                 onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
                 beats={beats} duration={duration} bpm={bpm} zoom={zoom}

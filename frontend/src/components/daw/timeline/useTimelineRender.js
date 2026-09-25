@@ -30,7 +30,9 @@ const COLORS = {
     rulerText: 'rgba(255,255,255,0.45)',
     rulerLine: 'rgba(255,255,255,0.08)',
     rulerTick: 'rgba(255,255,255,0.28)',
-    gridBar: 'rgba(239, 68, 68, 0.35)',
+    // gridBar is overwritten at runtime from the active colour preset
+    // (see React→draw sync effect). Default = Rekordbox orange.
+    gridBar: 'rgba(255, 165, 0, 0.85)',
     gridBeat: 'rgba(255, 255, 255, 0.08)',
     gridSub: 'rgba(255, 255, 255, 0.025)',
     phraseMarker: '#F87171',
@@ -87,7 +89,21 @@ export function useTimelineRender({ state, dispatch, canvasRef, ds, goodFramesRe
         d.dispatch = dispatch;
         d.zoom = state.zoom;
 
-        if (!state.isPlaying || Math.abs(d.scrollX - state.scrollX) > window.innerWidth * 0.5) {
+        // Playback-stop transition. `d.isPlaying` still holds the PREVIOUS
+        // value at this point (it's overwritten a few lines down). When we
+        // were playing and now we're not, push the RAF loop's final
+        // d.scrollX to React state ONCE so the view doesn't snap back to
+        // the pre-play scroll position. This replaces the old ~5×/s
+        // periodic dispatch that re-rendered the DAW tree mid-playback and
+        // made the playhead jump.
+        const justStopped = d.isPlaying && !state.isPlaying;
+        if (justStopped) {
+            if (Math.abs(d.scrollX - state.scrollX) > 1) {
+                dispatch({ type: 'SET_SCROLL_X', payload: d.scrollX });
+            }
+            // Keep d.scrollX as-is — the dispatch above converges
+            // state.scrollX to it on the next render.
+        } else if (!state.isPlaying || Math.abs(d.scrollX - state.scrollX) > window.innerWidth * 0.5) {
             d.scrollX = state.scrollX;
         }
         if (!state.isPlaying) d.playhead = state.playhead;
@@ -115,6 +131,25 @@ export function useTimelineRender({ state, dispatch, canvasRef, ds, goodFramesRe
         d.waveformStyle = state.waveformStyle || '3band';
         d.selectionRange = state.selectionRange;
 
+        // Apply the active colour preset (Rekordbox / Mixxx / Traktor / RGB).
+        // Mutating module-level state is OK here because the DAW renders a
+        // single canvas — there's no second instance to confuse. Switching
+        // also invalidates the waveform bitmap cache below so the next
+        // bitmap rebuild paints with the new palette instead of replaying
+        // the cached image.
+        const nextPreset =
+            COLOR_PRESETS[state.colorPreset] ||
+            COLOR_PRESETS[DEFAULT_COLOR_PRESET];
+        if (nextPreset !== MIXXX_COLORS) {
+            MIXXX_COLORS = nextPreset;
+            COLORS.gridBar = nextPreset.gridBar;
+            d.needsWaveformRebuild = true;
+        }
+
+        // HD-detail toggle. When true the RAF loop pins LOD to 1 and skips
+        // the framerate-adaptive downgrade — maximum sampling density.
+        d.forceMaxDetail = !!state.forceMaxDetail;
+
         // Detect waveform data change → force rebuild. scrollX is included so manual
         // scroll/zoom triggers a rebuild (the bitmap covers only the visible window).
         // regionsSig is critical: insert/paste/move/delete of regions changes the
@@ -133,7 +168,7 @@ export function useTimelineRender({ state, dispatch, canvasRef, ds, goodFramesRe
             }
             regionsSig = `${state.regions.length}:${h}`;
         }
-        const newKey = `${state.totalDuration?.toFixed(2)}-${state.zoom?.toFixed(0)}-${Math.round(d.scrollX)}-${d.lodLevel}-${!!state.bandPeaks}-${!!state.fallbackPeaks}-${state.waveformStyle}-${regionsSig}`;
+        const newKey = `${state.totalDuration?.toFixed(2)}-${state.zoom?.toFixed(0)}-${Math.round(d.scrollX)}-${d.lodLevel}-${!!state.bandPeaks}-${!!state.fallbackPeaks}-${state.waveformStyle}-${state.colorPreset || DEFAULT_COLOR_PRESET}-${!!state.forceMaxDetail}-${regionsSig}`;
         if (newKey !== waveformKey.current) {
             d.needsWaveformRebuild = true;
             waveformKey.current = newKey;
@@ -176,52 +211,44 @@ export function useTimelineRender({ state, dispatch, canvasRef, ds, goodFramesRe
                 if (Math.abs(delta) > 0.5) {
                     // Linear lerp; no easing needed at this rate
                     d.scrollX += delta * 0.18;
-                    // Rebuild bitmap when the scroll delta exceeds the
-                    // safe overscan range. drawFrame translates the
-                    // bitmap by (lastBuiltScrollX - scrollX) so smaller
-                    // deltas remain visually continuous without rebuild.
-                    // Threshold raised 100 → 400 px so we rebuild ~4× less
-                    // often during auto-follow scroll, eliminating the
-                    // micro-shape variation the user sees as "waves
-                    // wiggling during playback".
-                    if (Math.abs(d.scrollX - (d.lastBuiltScrollX || 0)) > 400) {
+                    // Rebuild only once the auto-follow scroll has consumed
+                    // most of the overscan buffer. buildWaveformBitmap now
+                    // builds a 2.5× viewport-wide bitmap, so the visible
+                    // window stays fully covered until scrollX has advanced
+                    // ~1.5 viewports past the build position. This fires the
+                    // synchronous rebuild ~7× less often than the old fixed
+                    // 400 px threshold — the fix for "rattern beim Abspielen".
+                    if (d.scrollX - (d.lastBuiltScrollX || 0) > d.width * 1.5) {
                         d.needsWaveformRebuild = true;
                     }
                 }
-                // Push state.scrollX in sync periodically so the scrollbar
-                // tracks the waveform AND so playback stop doesn't snap
-                // the view back to the pre-play scroll position.
-                d.scrollSyncAccum = (d.scrollSyncAccum || 0) + 1;
-                if (d.scrollSyncAccum >= 12) {  // ~5 dispatches/sec at 60fps
-                    d.scrollSyncAccum = 0;
-                    if (d.dispatch) d.dispatch({ type: 'SET_SCROLL_X', payload: d.scrollX });
-                }
+                // NOTE: no periodic SET_SCROLL_X dispatch here anymore.
+                // It used to fire ~5×/s, and EACH dispatch re-rendered the
+                // whole DAW React tree (DjEditDaw → DawLayout → DawTimeline
+                // → the useTimelineRender sync effect) mid-playback. That
+                // periodic React churn dropped RAF frames — the user-
+                // reported "es ruckelt und der Zeiger springt". During
+                // playback the RAF loop owns d.scrollX outright; React's
+                // state.scrollX is synced exactly ONCE, on the play→stop
+                // transition, in the React→draw sync effect.
             }
 
-            // LOD hysteresis (EC25) — frame-rate-adaptive peak resolution.
-            // GATED OFF during playback. Switching LOD levels mid-playback
-            // re-samples the peaks at a different density and yields a
-            // visibly different waveform shape between consecutive bitmap
-            // rebuilds — user-reported "waves change all the time, looks
-            // weird". The shape MUST stay identical for a given (time, zoom)
-            // so the only visible motion during play is the playhead and the
-            // auto-follow scroll. LOD adjustments are still allowed while
-            // paused (the user is exploring; sluggish frames are tolerated).
-            if (!d.isPlaying && d.lastFrameTime > 0) {
-                const delta = ts - d.lastFrameTime;
-                if (delta > 22) {
-                    goodFramesRef.current = 0;
-                    d.lodLevel = Math.min(4, d.lodLevel + 1);
-                    d.needsWaveformRebuild = true;
-                } else if (delta < 15) {
-                    goodFramesRef.current++;
-                    if (goodFramesRef.current >= 60) {
-                        goodFramesRef.current = 0;
-                        const prev = d.lodLevel;
-                        d.lodLevel = Math.max(1, d.lodLevel - 1);
-                        if (d.lodLevel !== prev) d.needsWaveformRebuild = true;
-                    }
-                }
+            // FIXED LOD — no framerate-adaptive resampling.
+            //
+            // The old EC25 adaptive logic upgraded/downgraded d.lodLevel
+            // based on recent frame timings. Every change re-sampled the
+            // peaks at a different density and rebuilt the bitmap with a
+            // DIFFERENT shape — exactly the user-reported "Waveform ändert
+            // sich die ganze Zeit wenn man stoppt". A waveform that morphs
+            // on its own is worse than one that's marginally heavier to
+            // draw, so the LOD is now pinned and fully deterministic:
+            //   HD toggle ON  → level 1 (max sampling density)
+            //   HD toggle OFF → level 2 (lighter, still 100% stable)
+            // The shape for a given (time, zoom, lod) never changes again.
+            const targetLod = d.forceMaxDetail ? 1 : 2;
+            if (d.lodLevel !== targetLod) {
+                d.lodLevel = targetLod;
+                d.needsWaveformRebuild = true;
             }
             d.lastFrameTime = ts;
 
@@ -270,12 +297,21 @@ function buildWaveformBitmap(d) {
     // waveform across the edit timeline (.rbep projects).
     if (!sourceDuration || sourceDuration <= 0) return null;
 
-    const oc = new OffscreenCanvas(Math.round(width * dpr), Math.round(height * dpr));
+    // Horizontal overscan: build the bitmap WIDER than the viewport so the
+    // auto-follow scroll during playback can advance ~1.5 viewports before
+    // a rebuild is needed. Previously the bitmap was exactly viewport-width,
+    // so a synchronous rebuild fired every ~400 px of scroll (~every 4 s of
+    // playback) — that main-thread spike is the audible/visible "rattern".
+    // With 2.5× overscan the rebuild cadence drops ~7×.
+    const OVERSCAN = 2.5;
+    const buildWidth = Math.round(width * OVERSCAN);
+
+    const oc = new OffscreenCanvas(Math.round(buildWidth * dpr), Math.round(height * dpr));
     const ctx = oc.getContext('2d', { alpha: true });
     ctx.scale(dpr, dpr);
 
     // Transparent background (painted over the main canvas bg)
-    ctx.clearRect(0, 0, width, height);
+    ctx.clearRect(0, 0, buildWidth, height);
 
     const waveTop = RULER_HEIGHT;
     const waveBot = height - PHASE_METER_HEIGHT;
@@ -295,15 +331,15 @@ function buildWaveformBitmap(d) {
     }
 
     const startTime = scrollX / zoom;
-    const endTime   = (scrollX + width) / zoom;
+    const endTime   = (scrollX + buildWidth) / zoom;
 
     for (const region of regions) {
         if (!region.duration || region.duration <= 0) continue; // EC16
         const regionEnd = region.timelineStart + region.duration;
         if (regionEnd < startTime || region.timelineStart > endTime) continue;
 
-        const rStartPx = Math.max(0,     region.timelineStart * zoom - scrollX);
-        const rEndPx   = Math.min(width, regionEnd            * zoom - scrollX);
+        const rStartPx = Math.max(0,          region.timelineStart * zoom - scrollX);
+        const rEndPx   = Math.min(buildWidth, regionEnd            * zoom - scrollX);
         if (rEndPx <= rStartPx) continue;
 
         // Style dispatcher:
@@ -389,14 +425,65 @@ function buildWaveformBitmap(d) {
 // flows continuously like the real Rekordbox display.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const MIXXX_COLORS = {
-    // Rekordbox CDJ-style palette — warmer reds for bass body, brighter
-    // emerald for mids, sky-blue for highs. Picked from samples of the
-    // Pioneer Rekordbox 6/7 main waveform.
-    low:  [255, 80, 40],     // orange-red — bass / kick / sub
-    mid:  [70, 230, 100],    // emerald green — vocals / instruments
-    high: [60, 180, 255],    // sky blue — hi-hats / cymbals / air
+// Color presets keyed by DAW state.colorPreset. Switching a preset
+// rewires the band colours used by drawMixxxFilteredWaveform plus the
+// grid-bar (down-beat) colour. Order of the entries is also the
+// order shown in the toolbar dropdown.
+const COLOR_PRESETS = {
+    rekordbox: {
+        // Authentic Pioneer Rekordbox 6/7 main-waveform palette — sampled
+        // from a real Rekordbox EDIT screen. The bass body reads as a
+        // warm cream-white core, mids as amber/orange, highs as blue.
+        label:   'Rekordbox',
+        low:     [238, 233, 222],   // cream white — bass / kick body
+        mid:     [198, 120, 45],    // amber-orange — mids / vocals
+        high:    [45, 95, 228],     // blue — highs / hats / air
+        gridBar: 'rgba(255, 165, 0, 0.85)',
+    },
+    rekordbox_classic: {
+        label:   'Rekordbox (Classic RGB)',
+        low:     [255, 80, 40],     // orange-red
+        mid:     [70, 230, 100],    // emerald green
+        high:    [60, 180, 255],    // sky blue
+        gridBar: 'rgba(255, 165, 0, 0.85)',
+    },
+    rekordbox_bluemid: {
+        label:   'Rekordbox (Yellow Mid)',
+        low:     [59, 130, 246],    // blue
+        mid:     [250, 204, 21],    // yellow
+        high:    [34, 211, 238],    // cyan
+        gridBar: 'rgba(255, 165, 0, 0.85)',
+    },
+    mixxx: {
+        label:   'Mixxx',
+        low:     [34, 197, 94],     // green
+        mid:     [168, 85, 247],    // purple
+        high:    [244, 114, 182],   // pink
+        gridBar: 'rgba(255, 220, 30, 0.85)',
+    },
+    traktor: {
+        label:   'Traktor',
+        low:     [245, 158, 11],    // amber
+        mid:     [229, 231, 235],   // soft white
+        high:    [56, 189, 248],    // sky
+        gridBar: 'rgba(0, 200, 255, 0.85)',
+    },
+    rgb: {
+        label:   'RGB Mix',
+        low:     [220, 38, 38],     // red
+        mid:     [34, 197, 94],     // green
+        high:    [37, 99, 235],     // blue
+        gridBar: 'rgba(255, 165, 0, 0.85)',
+    },
 };
+
+export const DEFAULT_COLOR_PRESET = 'rekordbox';
+export { COLOR_PRESETS };
+
+// Mutable so the React→draw sync effect can swap palettes without
+// rebuilding every closure that captured the reference. The grid-bar
+// colour is published through `COLORS` (also let) for the same reason.
+let MIXXX_COLORS = COLOR_PRESETS[DEFAULT_COLOR_PRESET];
 
 function drawMixxxFilteredWaveform(ctx, bandPeaks, region, rStartPx, rEndPx, scrollX, zoom, sourceDuration, centerY, maxAmp) {
     const low  = bandPeaks.low;
@@ -751,8 +838,19 @@ function drawFrame(ctx, d, bitmap) {
     // and produces the user-reported "visuelles geht voraus, nicht
     // konstant" + "ruckelt" symptoms.
     if (bitmap) {
-        const offset = (d.lastBuiltScrollX || 0) - d.scrollX;
-        ctx.drawImage(bitmap, offset, 0, width, height);
+        // The bitmap is built with horizontal overscan (buildWaveformBitmap
+        // → OVERSCAN). Blit ONLY the visible viewport slice via the 9-arg
+        // drawImage. Blitting the whole 2.5× bitmap every frame would be a
+        // per-frame cost spike on its own and reintroduce the stutter —
+        // the 9-arg form keeps the per-frame blit at exactly viewport size.
+        const built = d.lastBuiltScrollX || 0;
+        const sw = width * dpr;
+        // sx = how far into the (overscanned) bitmap the live scroll has
+        // advanced, in physical px. Clamped into bitmap bounds as a safety
+        // net for backward scrubs / the brief window before a rebuild lands.
+        let sx = (d.scrollX - built) * dpr;
+        sx = Math.max(0, Math.min(sx, Math.max(0, bitmap.width - sw)));
+        ctx.drawImage(bitmap, sx, 0, sw, bitmap.height, 0, 0, width, height);
     }
 
     // ── LAYER 1: Grid + interactive ──

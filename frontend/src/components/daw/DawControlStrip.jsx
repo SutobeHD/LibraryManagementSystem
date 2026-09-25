@@ -18,6 +18,7 @@ import {
     Download, Crosshair
 } from 'lucide-react';
 import { getPositionInfo, HOT_CUE_COLORS, snapToGrid } from '../../audio/DawState';
+import { useLivePlayhead } from './playheadStore';
 
 const DawControlStrip = React.memo(({
     state,
@@ -30,12 +31,19 @@ const DawControlStrip = React.memo(({
     onExport,
 }) => {
     const {
-        isPlaying, playhead, bpm, totalDuration, zoom,
+        isPlaying, playhead: reducerPlayhead, bpm, totalDuration, zoom,
         snapEnabled, snapDivision, slipMode, loopEnabled,
         hotCues, loops, activeLoopIndex,
         undoStack, redoStack, selectedRegionIds, waveformStyle, clipboard,
         gridOffsetSec
     } = state;
+    // During playback the reducer's playhead is intentionally frozen — the
+    // RAF loop pushes ticks to the external playheadStore instead, so the
+    // whole DAW tree doesn't re-render ~60×/s (the stutter fix). Subscribe
+    // to that store for the live readout; fall back to the reducer value
+    // when paused / scrubbing, where it IS the source of truth.
+    const livePlayhead = useLivePlayhead();
+    const playhead = isPlaying ? livePlayhead : reducerPlayhead;
     const firstBeatSec = ((state.tempoMap?.[0]?.positionMs || 0) / 1000) + (gridOffsetSec || 0);
 
     const hasSelection = selectedRegionIds && selectedRegionIds.size > 0;
@@ -49,9 +57,9 @@ const DawControlStrip = React.memo(({
     // ── ADAPTIVE ZOOM-TO-PLAYHEAD ──
     const handleZoomToPlayhead = useCallback(() => {
         const containerWidth = window.innerWidth * 0.6; // rough estimate of timeline width
-        const newScrollX = Math.max(0, state.playhead * state.zoom - containerWidth * 0.5);
+        const newScrollX = Math.max(0, playhead * state.zoom - containerWidth * 0.5);
         dispatch({ type: 'SET_SCROLL_X', payload: newScrollX });
-    }, [state.playhead, state.zoom, dispatch]);
+    }, [playhead, state.zoom, dispatch]);
 
 
     // ── FORMAT ──

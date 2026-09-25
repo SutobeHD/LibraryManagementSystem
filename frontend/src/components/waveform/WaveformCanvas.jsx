@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { Loader2, Music, Upload } from 'lucide-react';
 import { log } from '../../utils/log';
+import { WAVEFORM_STYLE_PRESETS, DEFAULT_WAVEFORM_STYLE } from '../../config/constants';
 
 // Canvas-based beatgrid renderer + WaveSurfer mount points (main + overview + 3-band layers).
 // Receives refs from the orchestrator so WaveSurfer keeps a stable mount target.
@@ -15,6 +16,7 @@ export default function WaveformCanvas({
     waveHighRef,
     wavesurfer,
     visualMode,
+    visualStyle,
     streaming,
     loading,
     isDragOver,
@@ -28,6 +30,13 @@ export default function WaveformCanvas({
     zoom,
     children,
 }) {
+    // Beat-grid colours from the active style preset. We resolve here (outside
+    // the effect) so the look-up happens once per render rather than every
+    // draw frame.
+    const stylePreset =
+        WAVEFORM_STYLE_PRESETS[visualStyle] ||
+        WAVEFORM_STYLE_PRESETS[DEFAULT_WAVEFORM_STYLE];
+    const downbeatColor = stylePreset.downbeat;
     // 1. Grid Rendering Effect — Canvas-based (1 element vs 1000+ regions)
     useEffect(() => {
         if (!wavesurfer.current || !duration || !beats?.length || !beatCanvasRef.current) return;
@@ -71,37 +80,48 @@ export default function WaveformCanvas({
                 const x = Math.round(b.time * pxPerSec - scrollLeft) + 0.5;
 
                 if (b.isDownbeat) {
-                    // Vertical line
-                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
-                    ctx.lineWidth = 1;
+                    // Down-beat colour comes from the active style preset
+                    // (orange for Rekordbox, cyan for Traktor, yellow for
+                    // Mixxx, etc.). Thick (2 px) full-height line so it
+                    // stays visible on top of the multi-band waveform.
+                    ctx.strokeStyle = downbeatColor;
+                    ctx.lineWidth = 2;
                     ctx.beginPath();
                     ctx.moveTo(x, 0);
                     ctx.lineTo(x, h);
                     ctx.stroke();
 
-                    // Top triangle
-                    ctx.fillStyle = 'rgba(255, 60, 60, 0.95)';
+                    // Top triangle anchor (bigger so it pops over the wave)
+                    ctx.fillStyle = downbeatColor;
                     ctx.beginPath();
-                    ctx.moveTo(x - 4, 0);
-                    ctx.lineTo(x + 4, 0);
-                    ctx.lineTo(x, 5);
+                    ctx.moveTo(x - 5, 0);
+                    ctx.lineTo(x + 5, 0);
+                    ctx.lineTo(x, 7);
                     ctx.closePath();
                     ctx.fill();
 
-                    // Bottom triangle
+                    // Bottom triangle anchor
                     ctx.beginPath();
-                    ctx.moveTo(x - 4, h);
-                    ctx.lineTo(x + 4, h);
-                    ctx.lineTo(x, h - 5);
+                    ctx.moveTo(x - 5, h);
+                    ctx.lineTo(x + 5, h);
+                    ctx.lineTo(x, h - 7);
                     ctx.closePath();
                     ctx.fill();
 
-                    // Bar number
-                    ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
-                    ctx.font = 'bold 10px ui-monospace, Menlo, monospace';
-                    ctx.fillText(String(b.barNum), x + 4, 12);
+                    // Bar number — bigger, takes the downbeat colour, with a
+                    // dark stroke so it stays readable when sitting on a
+                    // bright frequency band.
+                    ctx.font = 'bold 11px ui-monospace, Menlo, monospace';
+                    ctx.fillStyle = downbeatColor;
+                    ctx.strokeStyle = 'rgba(0, 0, 0, 0.85)';
+                    ctx.lineWidth = 3;
+                    ctx.strokeText(String(b.barNum), x + 5, 14);
+                    ctx.fillText(String(b.barNum), x + 5, 14);
                 } else {
-                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+                    // Non-downbeat — slightly brighter than before so all four
+                    // beats per bar stay visible, but still well below the
+                    // downbeat so the bar phrasing reads at a glance.
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
                     ctx.lineWidth = 1;
                     ctx.beginPath();
                     ctx.moveTo(x, 0);
@@ -137,7 +157,7 @@ export default function WaveformCanvas({
             ro.disconnect();
             try { wavesurfer.current?.un('zoom', zoomHandler); } catch (e) { log.debug('WaveformEditor zoom listener cleanup failed', e); }
         };
-    }, [beats, zoom, duration, bpm, wavesurfer, beatCanvasRef]);
+    }, [beats, zoom, duration, bpm, wavesurfer, beatCanvasRef, downbeatColor]);
 
     return (
         <div className="flex-1 flex flex-col bg-black">

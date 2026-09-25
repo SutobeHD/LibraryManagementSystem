@@ -1,6 +1,14 @@
 import React, { useEffect } from 'react';
 import { Scissors, X } from 'lucide-react';
 import { HOT_CUE_COLORS } from './useWaveformInteractions';
+import useTrackEditorState from './state/useTrackEditorState';
+import { CDJ_MEMORY_COLORS, HOT_CUE_SURFACE_COLORS } from '../../config/constants';
+
+function hexToRgba(hex, alpha) {
+    const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+    if (!m) return `rgba(255, 215, 0, ${alpha})`;
+    return `rgba(${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}, ${alpha})`;
+}
 
 // Renders cue markers, beat-selection region, cut/insert/delete regions, drop marker, and loop
 // region via the WaveSurfer Regions plugin (side-effect only). Also paints the floating cuts
@@ -24,23 +32,55 @@ export default function WaveformOverlays({
     loopOut,
     handleClear,
 }) {
+    // Slice 5 follow-up: also render the hook-driven cues + memory cues on
+    // both the detail waveform and the overview minimap. Both data sources
+    // coexist during dogfood; Slice 6 cleanup will retire the old useState
+    // bag and the two sources will collapse.
+    const { state: trackEditorState } = useTrackEditorState();
+    const hookHotCues = trackEditorState?.hotCues || [];
+    const hookMemoryCues = trackEditorState?.cues || [];
+
     // 2. Interactive Overlay Effect (Cues, Selection, Cuts) — writes into the Regions plugin.
     useEffect(() => {
         if (!wavesurfer.current || !duration) return;
-        let regions = wavesurfer.current.plugins.find(p => p.addRegion);
-        let ovRegions = overviewWs.current?.plugins.find(p => p.addRegion);
+        // Prefer the stashed `__regions` ref (set in useWaveSurfer) and fall
+        // back to the `.plugins.find` lookup for backward compat.
+        const regions =
+            wavesurfer.current.__regions ||
+            wavesurfer.current.plugins?.find(p => p.addRegion);
+        const ovRegions =
+            overviewWs.current?.__regions ||
+            overviewWs.current?.plugins?.find(p => p.addRegion);
         if (!regions) return;
 
         // Clear existing interactive regions
         regions.getRegions().forEach(r => {
-            if (r.id === 'selection-range' || r.id.startsWith('cut-') || r.id.startsWith('insert-') || r.id.startsWith('delete-') || r.id === 'drop-marker' || r.id === 'active-loop' || r.id.startsWith('cue-')) {
+            if (
+                r.id === 'selection-range' ||
+                r.id.startsWith('cut-') ||
+                r.id.startsWith('insert-') ||
+                r.id.startsWith('delete-') ||
+                r.id === 'drop-marker' ||
+                r.id === 'active-loop' ||
+                r.id.startsWith('cue-') ||
+                r.id.startsWith('hook-cue-') ||
+                r.id.startsWith('hook-mem-')
+            ) {
                 r.remove();
             }
         });
 
         if (ovRegions) {
             ovRegions.getRegions().forEach(r => {
-                if (r.id.startsWith('cue-ov-') || r.id === 'drop-marker-ov') r.remove();
+                if (
+                    r.id.startsWith('cue-ov-') ||
+                    r.id === 'drop-marker-ov' ||
+                    r.id === 'active-loop-ov' ||
+                    r.id.startsWith('hook-cue-ov-') ||
+                    r.id.startsWith('hook-mem-ov-')
+                ) {
+                    r.remove();
+                }
             });
         }
 
@@ -143,7 +183,8 @@ export default function WaveformOverlays({
             }
         });
 
-        // 6. Render Active Loop
+        // 6. Render Active Loop — on detail AND overview so the loop range
+        //    is visible at the high-level view too.
         if (loopIn !== null && loopOut !== null) {
             regions.addRegion({
                 id: 'active-loop',
@@ -154,9 +195,79 @@ export default function WaveformOverlays({
                 resize: true,
                 attributes: { label: 'LOOP' }
             });
+            if (ovRegions) {
+                ovRegions.addRegion({
+                    id: 'active-loop-ov',
+                    start: loopIn,
+                    end: loopOut,
+                    color: 'rgba(255, 255, 0, 0.32)',
+                    drag: false,
+                    resize: false,
+                });
+            }
         }
 
-    }, [selectionStart, selectedBeats, bpm, cuts, isQuantized, dropTime, hotCues, loopIn, loopOut, duration, beats, simpleMode, wavesurfer, overviewWs]);
+        // 7. Render NEW hot cues from the hook (Slice 1+).
+        //    Wider band (0.25 s) on detail and thicker band (0.6 s) on
+        //    overview so the markers are visible at any zoom level.
+        //    `content` is the visible label (WaveSurfer v7 supports HTML).
+        hookHotCues.forEach(cue => {
+            const palette = HOT_CUE_SURFACE_COLORS.find(p => p.id === cue.color_id) || HOT_CUE_SURFACE_COLORS[0];
+            const colorDetail = hexToRgba(palette.hex, 0.85);
+            const colorOv = hexToRgba(palette.hex, 0.95);
+            const start = (cue.time_ms || 0) / 1000;
+            const letter = String.fromCharCode(64 + (cue.number || 1));
+            regions.addRegion({
+                id: `hook-cue-${cue.number}`,
+                start,
+                end: start + 0.25,
+                color: colorDetail,
+                drag: false,
+                resize: false,
+                content: letter,
+                attributes: { label: letter, 'data-cue-kind': 'hot' },
+            });
+            if (ovRegions) {
+                ovRegions.addRegion({
+                    id: `hook-cue-ov-${cue.number}`,
+                    start,
+                    end: start + 0.6,
+                    color: colorOv,
+                    drag: false,
+                    resize: false,
+                });
+            }
+        });
+
+        // 8. Render NEW memory cues from the hook (Slice 1+). Thinner band
+        //    than hot cues so the two are visually distinguishable.
+        hookMemoryCues.forEach(cue => {
+            const palette = CDJ_MEMORY_COLORS.find(p => p.id === cue.color_id) || CDJ_MEMORY_COLORS[4];
+            const colorDetail = hexToRgba(palette.hex, 0.7);
+            const colorOv = hexToRgba(palette.hex, 0.85);
+            const start = (cue.time_ms || 0) / 1000;
+            regions.addRegion({
+                id: `hook-mem-${cue.id}`,
+                start,
+                end: start + 0.15,
+                color: colorDetail,
+                drag: false,
+                resize: false,
+                attributes: { label: cue.name || 'M' },
+            });
+            if (ovRegions) {
+                ovRegions.addRegion({
+                    id: `hook-mem-ov-${cue.id}`,
+                    start,
+                    end: start + 0.45,
+                    color: colorOv,
+                    drag: false,
+                    resize: false,
+                });
+            }
+        });
+
+    }, [selectionStart, selectedBeats, bpm, cuts, isQuantized, dropTime, hotCues, loopIn, loopOut, duration, beats, simpleMode, wavesurfer, overviewWs, hookHotCues, hookMemoryCues]);
 
     // Cuts summary floats inside the detail container — slotted in via the children-pass-through.
     if (cuts.length === 0) return null;

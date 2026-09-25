@@ -89,9 +89,31 @@ export default function useWaveSurfer({
                 backend: 'WebAudio'
             });
 
-            // Initialize Plugins
-            wavesurfer.current.registerPlugin(RegionsPlugin.create());
-            overviewWs.current.registerPlugin(RegionsPlugin.create());
+            // Initialize Plugins. registerPlugin returns the plugin instance
+            // — stash it on the wavesurfer as `__regions` so consumers
+            // (WaveformOverlays) don't have to search `.plugins.find(...)`,
+            // which is fragile in WaveSurfer v7 when the overview is created
+            // with a different plugin set than the detail waveform.
+            wavesurfer.current.__regions = wavesurfer.current.registerPlugin(RegionsPlugin.create());
+            overviewWs.current.__regions = overviewWs.current.registerPlugin(RegionsPlugin.create());
+
+            // Smooth-playhead CSS: WaveSurfer fires `audioprocess` ~10-30x/sec
+            // which makes the cursor visibly jump on slower events. A short
+            // CSS transition on the cursor's left position interpolates the
+            // jumps so the playhead glides instead of stutters. Injected once
+            // globally; covers both the detail and the overview shadow DOMs.
+            if (!document.getElementById('ws-cursor-smooth-style')) {
+                const style = document.createElement('style');
+                style.id = 'ws-cursor-smooth-style';
+                style.textContent = `
+                    .rb-detail-container ::part(cursor),
+                    .rb-overview-container ::part(cursor) {
+                        transition: left 55ms linear;
+                        will-change: left;
+                    }
+                `;
+                document.head.appendChild(style);
+            }
 
             // --- Event Listeners ---
             wavesurfer.current.on('ready', () => {

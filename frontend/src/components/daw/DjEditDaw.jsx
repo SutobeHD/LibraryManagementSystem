@@ -32,6 +32,7 @@ import useDawProject from './useDawProject';
 import useDawKeyhandlers from './useDawKeyhandlers';
 import useDawShortcuts from './useDawShortcuts';
 import useTrackLoader from './useTrackLoader';
+import { setLivePlayhead } from './playheadStore';
 import { log } from '../../utils/log';
 import { TrackEditorProvider } from '../waveform/state/useTrackEditorState';
 import CuePanel from '../waveform/panels/CuePanel';
@@ -48,6 +49,17 @@ function extendedReducer(state, action) {
     // Handle palette clips (not in core reducer)
     if (action.type === 'SET_PALETTE_CLIPS') {
         return { ...state, paletteClips: action.payload };
+    }
+    // Waveform colour preset (Rekordbox / Mixxx / Traktor / RGB).
+    // Consumed by `useTimelineRender` via `state.colorPreset` — see
+    // frontend/src/components/daw/timeline/useTimelineRender.js.
+    if (action.type === 'SET_COLOR_PRESET') {
+        return { ...state, colorPreset: action.payload };
+    }
+    // HD-detail toggle. Pins the LOD level at 1 so the bitmap is rebuilt
+    // at full sampling density. CPU heavier but pixel-accurate.
+    if (action.type === 'SET_FORCE_MAX_DETAIL') {
+        return { ...state, forceMaxDetail: !!action.payload };
     }
     return dawReducer(state, action);
 }
@@ -103,36 +115,49 @@ const DjEditDaw = ({ track: initialTrack }) => {
     // ── LOAD TRACK (audio decode + tempo map + waveform peaks) ──
     useTrackLoader({ activeTrack, dispatch, skipNextAutoLoad, hasInitialized });
 
-    // ── PLAYHEAD ANIMATION + DEAD RECKONING SYNC ──
+    // ── PLAYHEAD ANIMATION ──
+    // During playback the playhead advances ~60×/s. It is pushed to the
+    // lightweight `playheadStore` (a pub/sub OUTSIDE the reducer) — it is
+    // NOT dispatched into the DAW reducer. Dispatching it re-rendered the
+    // entire DjEditDaw tree every tick (toolbar + timeline + control strip
+    // + the canvas sync effect that hashes all regions) — the dominant
+    // cause of the "es ruckelt sehr" stutter.
+    //
+    // What still works without the dispatch:
+    //   • Canvas playhead — useTimelineRender reads getCurrentTime() at 60fps.
+    //   • Time / bar-beat readout — DawControlStrip subscribes to the store.
+    //   • The old SET_DEAD_RECKONING_SYNC dispatch is dropped entirely:
+    //     `state.deadReckoning` was assigned into the draw-state but never
+    //     read by any draw function — it was dead code.
+    // `state.playhead` (the reducer copy) is synced once on the play→stop
+    // transition by the effect below.
     useEffect(() => {
-        let lastSyncTime = 0;
-        const updatePlayhead = (timestamp) => {
+        const updatePlayhead = () => {
             if (state.isPlaying) {
-                // Throttle React state updates to ~15fps (66ms) — Canvas reads at 60fps directly
-                if (timestamp - lastSyncTime > 66) {
-                    const currentTime = DawEngine.getCurrentTime();
-                    dispatch({ type: 'SET_PLAYHEAD', payload: currentTime });
-
-                    // Dead Reckoning sync: store wall-clock + audio time so Timeline can interpolate
-                    dispatch({
-                        type: 'SET_DEAD_RECKONING_SYNC',
-                        payload: {
-                            lastSyncWallClock: performance.now(),
-                            lastSyncAudioTime: currentTime,
-                        },
-                    });
-
-                    lastSyncTime = timestamp;
-                }
+                setLivePlayhead(DawEngine.getCurrentTime());
             }
             animFrameRef.current = requestAnimationFrame(updatePlayhead);
         };
-
         animFrameRef.current = requestAnimationFrame(updatePlayhead);
         return () => {
             if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
         };
     }, [state.isPlaying]);
+
+    // ── PLAY → STOP: sync reducer playhead ONCE ──
+    // On the transition out of playback, push the final position into the
+    // reducer so paused-state logic (scrub, jump, the canvas's !isPlaying
+    // read, "set cue at current position") has the correct value.
+    // wasPlayingRef survives the effect re-creation across isPlaying flips.
+    const wasPlayingRef = useRef(false);
+    useEffect(() => {
+        if (state.isPlaying) {
+            wasPlayingRef.current = true;
+        } else if (wasPlayingRef.current) {
+            wasPlayingRef.current = false;
+            dispatch({ type: 'SET_PLAYHEAD', payload: DawEngine.getCurrentTime() });
+        }
+    }, [state.isPlaying, dispatch]);
 
     // ─── RESUME PLAYBACK AFTER MID-PLAYBACK PASTE / DUPLICATE ─────
     // The keyboard handler stops Web Audio + sets pendingResumeAt before
@@ -312,10 +337,17 @@ const DjEditDaw = ({ track: initialTrack }) => {
     try {
         return (
             <TrackEditorProvider>
-            {FEATURE_CUE_PANEL && <CuePanel track={activeTrack} currentTime={(state.playhead || 0)} />}
-            {FEATURE_LOOP_PANEL && <LoopPanel track={activeTrack} currentTime={(state.playhead || 0)} bpm={state.bpm || 128} />}
-            {FEATURE_BEATGRID_PANEL && <BeatgridPanel track={activeTrack} bpm={state.bpm || 128} beatGrid={state.beatGrid || []} />}
-            {FEATURE_METADATA_PANEL && <MetadataPanel track={activeTrack} />}
+            {/* The four extension panels float over the DAW so they don't
+                disturb the canvas layout. Each panel renders only when its
+                feature flag is on. */}
+            {(FEATURE_CUE_PANEL || FEATURE_LOOP_PANEL || FEATURE_BEATGRID_PANEL || FEATURE_METADATA_PANEL) && (
+                <div className="fixed top-12 right-4 z-[120] w-[360px] max-h-[calc(100vh-120px)] overflow-y-auto space-y-2 pointer-events-auto">
+                    {FEATURE_CUE_PANEL && <CuePanel track={activeTrack} currentTime={(state.playhead || 0)} />}
+                    {FEATURE_LOOP_PANEL && <LoopPanel track={activeTrack} currentTime={(state.playhead || 0)} bpm={state.bpm || 128} />}
+                    {FEATURE_BEATGRID_PANEL && <BeatgridPanel track={activeTrack} bpm={state.bpm || 128} beatGrid={state.beatGrid || []} />}
+                    {FEATURE_METADATA_PANEL && <MetadataPanel track={activeTrack} />}
+                </div>
+            )}
             <DawLayout
                 activeTrack={activeTrack}
                 isLibraryCollapsed={isLibraryCollapsed}
@@ -330,6 +362,12 @@ const DjEditDaw = ({ track: initialTrack }) => {
                         onSplit={handleSplit}
                         onRippleDelete={handleRippleDelete}
                         onAutoCue={handleAutoCue}
+                        colorPreset={state.colorPreset}
+                        onSelectColorPreset={(id) => dispatch({ type: 'SET_COLOR_PRESET', payload: id })}
+                        waveformStyle={state.waveformStyle}
+                        onSelectWaveformStyle={(id) => dispatch({ type: 'SET_WAVEFORM_STYLE', payload: id })}
+                        forceMaxDetail={!!state.forceMaxDetail}
+                        onToggleMaxDetail={() => dispatch({ type: 'SET_FORCE_MAX_DETAIL', payload: !state.forceMaxDetail })}
                     />
                 }
                 overview={<WaveformOverview state={state} dispatch={dispatch} />}

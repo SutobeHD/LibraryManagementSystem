@@ -7,6 +7,7 @@ import {
     Volume2, VolumeX,
 } from 'lucide-react';
 import { HOT_CUE_COLORS } from './useWaveformInteractions';
+import { WAVEFORM_STYLE_PRESETS, DEFAULT_WAVEFORM_STYLE } from '../../config/constants';
 
 // Top toolbars — header, project select, hot-cue strip, transport, volume, viz toggle,
 // grid shift, drop detection, metadata bar. Plus the render-progress overlay.
@@ -32,6 +33,8 @@ export default function WaveformControls({
     setInternalVolume,
     visualMode,
     handleToggleVisualMode,
+    visualStyle,
+    setVisualStyle,
     handleGridShift,
     handleSaveGrid,
     handleDetectDrop,
@@ -163,6 +166,22 @@ export default function WaveformControls({
                         <Layers size={12} className={visualMode !== 'blue' ? 'text-indigo-400' : 'text-ink-muted'} />
                         <span className={`text-[10px] uppercase font-bold ${visualMode !== 'blue' ? 'text-indigo-400' : 'text-ink-muted'}`}>{visualMode}</span>
                     </div>
+
+                    {/* Style preset selector (Rekordbox / Mixxx / Traktor / RGB Mix).
+                        Picking a style also flips the layering mode via
+                        handleSelectVisualStyle in WaveformEditor.jsx. */}
+                    {typeof setVisualStyle === 'function' && (
+                        <select
+                            value={visualStyle || DEFAULT_WAVEFORM_STYLE}
+                            onChange={(e) => setVisualStyle(e.target.value)}
+                            title="Waveform style preset"
+                            className="h-8 px-2 rounded border border-white/5 bg-black text-ink-muted hover:text-white text-[10px] uppercase font-bold cursor-pointer focus:outline-none focus:ring-1 focus:ring-amber2/40"
+                        >
+                            {Object.entries(WAVEFORM_STYLE_PRESETS).map(([id, preset]) => (
+                                <option key={id} value={id}>{preset.label}</option>
+                            ))}
+                        </select>
+                    )}
 
                     <div onClick={() => setIsQuantized(!isQuantized)} className={`flex items-center h-8 px-3 rounded border border-white/5 gap-2 cursor-pointer transition-all ${isQuantized ? 'bg-amber2/10 border-amber2/30' : 'bg-black'}`}>
                         <RotateCcw size={12} className={isQuantized ? 'text-amber2' : 'text-orange-500'} />

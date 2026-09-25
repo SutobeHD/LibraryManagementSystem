@@ -5,9 +5,25 @@
  */
 
 import React, { useCallback } from 'react';
-import { Save, FolderOpen, Download, Scissors, Trash2, Undo2, Redo2, FileAudio, Hash } from 'lucide-react';
+import { Save, FolderOpen, Download, Scissors, Trash2, Undo2, Redo2, FileAudio, Hash, Palette, Activity, Zap } from 'lucide-react';
+import { COLOR_PRESETS, DEFAULT_COLOR_PRESET } from './timeline/useTimelineRender';
 
-const DawToolbar = React.memo(({ state, dispatch, onSave, onOpen, onExport, onSplit, onRippleDelete, onAutoCue }) => {
+// Render-mode options surfaced in the toolbar. The keys match the
+// strings consumed by `useTimelineRender.js:buildWaveformBitmap`.
+const WAVEFORM_STYLE_OPTIONS = [
+    { id: '3band',  label: '3-Band envelope' },
+    { id: 'liquid', label: 'Liquid (smooth bezier per band)' },
+    { id: 'mono',   label: 'Mono silhouette' },
+    { id: 'bass',   label: 'Bass only' },
+];
+
+const DawToolbar = React.memo(({
+    state, dispatch,
+    onSave, onOpen, onExport, onSplit, onRippleDelete, onAutoCue,
+    colorPreset, onSelectColorPreset,
+    waveformStyle, onSelectWaveformStyle,
+    forceMaxDetail, onToggleMaxDetail,
+}) => {
     const isDirty = state.project.dirty;
     const bpm = state.bpm;
     const snapEnabled = state.snapEnabled;
@@ -42,8 +58,65 @@ const DawToolbar = React.memo(({ state, dispatch, onSave, onOpen, onExport, onSp
         }
     }, [handleNameBlur, state.project.name]);
 
+    const activeColorPreset = colorPreset || DEFAULT_COLOR_PRESET;
+    const activeWaveformStyle = waveformStyle || '3band';
+
     return (
         <div className="h-11 bg-mx-shell/60 border-b border-white/5 flex items-center px-4 gap-3 shrink-0 backdrop-blur-xl">
+            {/* Style-preset selector — switches the band colours of the
+                3-band waveform and the down-beat colour. Drives
+                state.colorPreset → useTimelineRender's bitmap rebuild. */}
+            {typeof onSelectColorPreset === 'function' && (
+                <div className="flex items-center gap-1.5 mr-1" title="Waveform colour preset">
+                    <Palette size={12} className="text-ink-muted" />
+                    <select
+                        value={activeColorPreset}
+                        onChange={(e) => onSelectColorPreset(e.target.value)}
+                        className="h-7 px-2 rounded border border-white/5 bg-mx-card text-ink-secondary hover:text-white text-[10px] uppercase font-bold cursor-pointer focus:outline-none focus:ring-1 focus:ring-amber2/40"
+                    >
+                        {Object.entries(COLOR_PRESETS).map(([id, preset]) => (
+                            <option key={id} value={id}>{preset.label}</option>
+                        ))}
+                    </select>
+                </div>
+            )}
+
+            {/* Render-mode selector — controls which drawing strategy the
+                offscreen-canvas bitmap builder uses. Independent from
+                colour preset. */}
+            {typeof onSelectWaveformStyle === 'function' && (
+                <div className="flex items-center gap-1.5 mr-1" title="Render mode (drawing strategy)">
+                    <Activity size={12} className="text-ink-muted" />
+                    <select
+                        value={activeWaveformStyle}
+                        onChange={(e) => onSelectWaveformStyle(e.target.value)}
+                        className="h-7 px-2 rounded border border-white/5 bg-mx-card text-ink-secondary hover:text-white text-[10px] uppercase font-bold cursor-pointer focus:outline-none focus:ring-1 focus:ring-amber2/40"
+                    >
+                        {WAVEFORM_STYLE_OPTIONS.map(opt => (
+                            <option key={opt.id} value={opt.id}>{opt.label}</option>
+                        ))}
+                    </select>
+                </div>
+            )}
+
+            {/* HD-detail toggle — pins LOD to 1 (max sampling density).
+                CPU heavier but pixel-accurate. */}
+            {typeof onToggleMaxDetail === 'function' && (
+                <button
+                    onClick={onToggleMaxDetail}
+                    title={forceMaxDetail
+                        ? 'HD detail ON — LOD pinned to 1 (full sampling density). Click to disable.'
+                        : 'HD detail OFF — adaptive LOD (saves CPU). Click to force max detail.'}
+                    className={`h-7 px-2 mr-2 rounded border text-[10px] uppercase font-bold flex items-center gap-1 transition-all ${
+                        forceMaxDetail
+                            ? 'bg-amber2/20 border-amber2/40 text-amber2'
+                            : 'bg-mx-card border-white/5 text-ink-muted hover:text-white'
+                    }`}
+                >
+                    <Zap size={12} /> HD
+                </button>
+            )}
+
             {/* Project info */}
             <div className="flex items-center gap-2 min-w-0 mr-4">
                 <FileAudio size={14} className="text-amber2 shrink-0" />

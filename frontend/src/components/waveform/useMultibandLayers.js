@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { WAVEFORM_STYLE_PRESETS, DEFAULT_WAVEFORM_STYLE } from '../../config/constants';
 
 // Owns the slave WaveSurfer instances that render the LOW/MID/HIGH bands, plus the RAF sync
 // loop that keeps their scroll & time aligned with the master wavesurfer. Mode 'blue' tears
@@ -9,6 +10,7 @@ export default function useMultibandLayers({
     waveMidRef,
     waveHighRef,
     visualMode,
+    visualStyle,
     multibandBuffers,
     zoom,
     trackBlobUrl,
@@ -46,14 +48,18 @@ export default function useMultibandLayers({
             // Always cleanup old slaves when switching modes (colors differ)
             cleanupSlaves();
 
-            // Colors — match Rekordbox exactly
-            const isRGB = visualMode === 'rgb';
-            // RGB: Balanced rich colors — screen blending brightens them, so we start with strong saturation
-            // but not full 255 neon.
-            // 3Band: Blue (Low) + Amber (Mid) + White (High) — classic Rekordbox
-            const colLow = isRGB ? 'rgba(210, 0, 0, 1.0)' : 'rgba(0, 100, 255, 1.0)';
-            const colMid = isRGB ? 'rgba(0, 190, 0, 1.0)' : 'rgba(255, 160, 0, 1.0)';
-            const colHigh = isRGB ? 'rgba(0, 80, 255, 1.0)' : 'rgba(255, 255, 255, 1.0)';
+            // Colours come from the active style preset (Rekordbox / Mixxx /
+            // Traktor / RGB Mix). `visualMode` still chooses the layering
+            // approach (stacked vs additive); the preset chooses the actual
+            // RGB values used for each band. Falling back to Rekordbox keeps
+            // existing callers safe.
+            const stylePresetId = visualStyle || DEFAULT_WAVEFORM_STYLE;
+            const stylePreset =
+                WAVEFORM_STYLE_PRESETS[stylePresetId] ||
+                WAVEFORM_STYLE_PRESETS[DEFAULT_WAVEFORM_STYLE];
+            const colLow  = stylePreset.threeBand.low;
+            const colMid  = stylePreset.threeBand.mid;
+            const colHigh = stylePreset.threeBand.high;
 
             // Hide Main Waveform (keep interaction)
             wavesurfer.current.setOptions({
@@ -171,7 +177,7 @@ export default function useMultibandLayers({
         return () => {
             if (rafId) cancelAnimationFrame(rafId);
         };
-    }, [visualMode, multibandBuffers, zoom, wavesurfer, waveLowRef, waveMidRef, waveHighRef, trackBlobUrl]); // re-run on zoom to recalc widths
+    }, [visualMode, visualStyle, multibandBuffers, zoom, wavesurfer, waveLowRef, waveMidRef, waveHighRef, trackBlobUrl]); // re-run on zoom or style to recalc widths + colours
 
     // Sync zoom to slaves when state changes
     useEffect(() => {
