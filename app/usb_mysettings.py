@@ -1,6 +1,6 @@
 """USB MYSETTING / DJMMYSETTING file read/write + schema for frontend.
 
-These tiny binary files (148–160 bytes) live in `<USB>/PIONEER/` and tell
+These tiny binary files (148-160 bytes) live in `<USB>/PIONEER/` and tell
 CDJs / DJMs how the user wants their hardware to behave when this stick is
 inserted (auto-cue level, jog mode, fader curve, mic low-cut, …).
 
@@ -96,7 +96,7 @@ def _enum_options(enum_name: str) -> list[dict[str, str]]:
     # construct Enum stores its mapping in `.encmapping`
     members = getattr(enum_obj, "encmapping", None) or {}
     out: list[dict[str, str]] = []
-    for name in members.keys():
+    for name in members:
         # Python identifier suffix `_` is used to avoid keyword collisions
         clean = name.rstrip("_")
         out.append({"value": clean, "label": _humanize(clean)})
@@ -158,8 +158,8 @@ SCHEMA: dict[str, list[dict[str, Any]]] = {
         {"key": "talk_over_level",       "label": "Talk-Over Level",       "enum": "TalkOverLevel",          "group": "Mic",        "help": "Amount of attenuation applied during talk-over."},
         # FX / MIDI
         {"key": "beat_fx_quantize",      "label": "Beat FX Quantize",      "enum": "BeatFXQuantize",         "group": "FX",         "help": "Snap Beat FX engagement to the beatgrid."},
-        {"key": "midi_channel",          "label": "MIDI Channel",          "enum": "MidiChannel",            "group": "MIDI",       "help": "Outgoing MIDI channel for performance data."},
-        {"key": "midi_button_type",      "label": "MIDI Button Type",      "enum": "MidiButtonType",         "group": "MIDI",       "help": "Toggle vs. trigger behaviour for MIDI buttons."},
+        {"key": "midi_channel",          "label": "MIDI Channel",          "enum": "MidiChannel",            "group": "MIDI",       "help": "Standalone DJM only: which MIDI channel the mixer sends its fader / EQ / button moves on to DJ software. No effect on DDJ-style controllers."},
+        {"key": "midi_button_type",      "label": "MIDI Button Type",      "enum": "MidiButtonType",         "group": "MIDI",       "help": "Standalone DJM only: whether the mixer's MIDI buttons send Toggle (latching on/off) or Trigger (momentary press) messages."},
         # Display
         {"key": "display_brightness",    "label": "Display Brightness",    "enum": "MixerDisplayBrightness", "group": "Display",    "help": "Brightness of the mixer display."},
         {"key": "indicator_brightness",  "label": "Indicator Brightness",  "enum": "MixerIndicatorBrightness","group": "Display",    "help": "Brightness of LED indicators."},

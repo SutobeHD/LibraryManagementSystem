@@ -7,7 +7,7 @@
  *
  * Layout:
  *   ┌ Device picker ───────────────────────────┐
- *   │ [Player] [Player+] [Mixer]              │  file tabs
+ *   │ [Player] [Mixer]                        │  tabs
  *   ├──────────────────────────────────────────┤
  *   │  Group: Auto Cue                        │
  *   │   Auto Cue          [On  ▼]             │
@@ -18,17 +18,30 @@
  *   │ [Reset to Defaults]            [Save] ──┤  sticky footer
  *   └──────────────────────────────────────────┘
  */
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Save, RotateCcw, Sliders, HardDrive, Info, Loader2, AlertTriangle } from 'lucide-react';
 import api from '../api/api';
 import { useToast } from './ToastContext';
 import { confirmModal } from './ConfirmModal';
 
-// File-tab label + descriptive subtitle for the panel header
-const FILE_TABS = [
-  { id: 'MYSETTING',    label: 'Player',          sub: 'CDJ — Cues, Quantize, Jog, Display' },
-  { id: 'MYSETTING2',   label: 'Player Extended', sub: 'CDJ — Vinyl, Pads, Waveform, Beat Jump' },
-  { id: 'DJMMYSETTING', label: 'Mixer',           sub: 'DJM — Faders, Headphones, Mic, FX, MIDI' },
+// Logical tabs — each spans one or more Pioneer .DAT files. "Player" merges
+// MYSETTING (core) + MYSETTING2 (the NXS2-era "extended" fields); Pioneer only
+// splits them across two binaries for historical reasons, so we present them as
+// one tab. Each field still routes to its own file on save (see `_fileId`).
+const TABS = [
+  {
+    id: 'player',
+    label: 'Player',
+    sub: 'CDJ — Cues, Quantize, Tempo, Jog, Vinyl, Pads, Waveform, Display',
+    files: ['MYSETTING', 'MYSETTING2'],
+  },
+  {
+    id: 'mixer',
+    label: 'Mixer',
+    sub: 'DJM standalone mixer — Faders, Headphones, Mic, FX, MIDI',
+    files: ['DJMMYSETTING'],
+  },
 ];
 
 const log = (level, msg, data) => console[level](`[UsbSettingsView] ${msg}`, data ?? '');
@@ -39,7 +52,7 @@ export default function UsbSettingsView() {
   const [devices, setDevices] = useState([]);            // detected USBs (from /api/usb/devices)
   const [profiles, setProfiles] = useState([]);          // saved profiles (from /api/usb/profiles)
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
-  const [activeFile, setActiveFile] = useState('MYSETTING');
+  const [activeTab, setActiveTab] = useState('player');
   const [values, setValues] = useState({});              // {MYSETTING: {auto_cue: "on", …}, …}
   const [dirty, setDirty] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -153,17 +166,24 @@ export default function UsbSettingsView() {
     toast.info('Defaults restored — click Save to write to stick');
   }, [schema, toast]);
 
-  // Group fields of the active file by their `group` attribute, preserving
-  // the schema's original ordering inside each group.
+  // Merge every file of the active tab into `group`-keyed buckets, tagging each
+  // field with the file it belongs to (`_fileId`) so save still targets the
+  // right .DAT. Shared group names (e.g. "Display" exists in both MYSETTING and
+  // MYSETTING2) collapse into one card; insertion order is preserved.
   const groupedFields = useMemo(() => {
-    if (!schema?.files?.[activeFile]) return [];
+    const tab = TABS.find(t => t.id === activeTab);
+    if (!tab || !schema?.files) return [];
     const groups = new Map();
-    schema.files[activeFile].fields.forEach(f => {
-      if (!groups.has(f.group)) groups.set(f.group, []);
-      groups.get(f.group).push(f);
+    tab.files.forEach(fileId => {
+      const fileSchema = schema.files[fileId];
+      if (!fileSchema) return;
+      fileSchema.fields.forEach(f => {
+        if (!groups.has(f.group)) groups.set(f.group, []);
+        groups.get(f.group).push({ ...f, _fileId: fileId });
+      });
     });
     return Array.from(groups.entries()).map(([name, fields]) => ({ name, fields }));
-  }, [schema, activeFile]);
+  }, [schema, activeTab]);
 
   // ── Render guards ─────────────────────────────────────────────────────────
   if (error) {
@@ -266,15 +286,15 @@ export default function UsbSettingsView() {
         </div>
       </div>
 
-      {/* File tabs */}
+      {/* Tabs */}
       <div className="px-6 pt-3 flex-shrink-0">
         <div className="flex gap-1">
-          {FILE_TABS.map(t => (
+          {TABS.map(t => (
             <button
               key={t.id}
-              onClick={() => setActiveFile(t.id)}
+              onClick={() => setActiveTab(t.id)}
               className={`px-4 py-2 rounded-mx-sm text-tiny font-semibold transition-all border ${
-                activeFile === t.id
+                activeTab === t.id
                   ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
                   : 'border-line-subtle text-ink-secondary hover:bg-mx-hover'
               }`}
@@ -283,7 +303,7 @@ export default function UsbSettingsView() {
             </button>
           ))}
         </div>
-        <p className="mx-caption mt-2">{FILE_TABS.find(t => t.id === activeFile)?.sub}</p>
+        <p className="mx-caption mt-2">{TABS.find(t => t.id === activeTab)?.sub}</p>
       </div>
 
       {/* Settings groups — scrollable */}
@@ -298,10 +318,10 @@ export default function UsbSettingsView() {
               <SettingGroup key={name} name={name}>
                 {fields.map(f => (
                   <SettingField
-                    key={f.key}
+                    key={`${f._fileId}:${f.key}`}
                     field={f}
-                    value={values[activeFile]?.[f.key] ?? f.default}
-                    onChange={v => setField(activeFile, f.key, v)}
+                    value={values[f._fileId]?.[f.key] ?? f.default}
+                    onChange={v => setField(f._fileId, f.key, v)}
                   />
                 ))}
               </SettingGroup>
@@ -348,15 +368,13 @@ function SettingGroup({ name, children }) {
 function SettingField({ field, value, onChange }) {
   return (
     <div className="flex items-center gap-3">
-      <label
-        className="text-tiny text-ink-secondary flex-1 truncate"
-        title={field.help}
+      <HelpTooltip
+        text={field.help}
+        className={`flex-1 min-w-0 flex items-center gap-1 text-tiny text-ink-secondary ${field.help ? 'cursor-help' : ''}`}
       >
-        {field.label}
-        {field.help && (
-          <Info size={10} className="inline ml-1 text-ink-muted/50" />
-        )}
-      </label>
+        <span className="truncate">{field.label}</span>
+        {field.help && <Info size={10} className="shrink-0 text-ink-muted/50" />}
+      </HelpTooltip>
       <select
         value={value || ''}
         onChange={e => onChange(e.target.value)}
@@ -367,5 +385,46 @@ function SettingField({ field, value, onChange }) {
         ))}
       </select>
     </div>
+  );
+}
+
+// Hover/focus help bubble. Renders into a body-level portal with fixed
+// positioning so it never gets clipped by the scrollable settings pane.
+function HelpTooltip({ text, className = '', children }) {
+  const [show, setShow] = useState(false);
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
+  const ref = useRef(null);
+
+  const reveal = useCallback(() => {
+    const r = ref.current?.getBoundingClientRect();
+    if (r) setCoords({ top: r.top - 8, left: r.left + r.width / 2 });
+    setShow(true);
+  }, []);
+  const hide = useCallback(() => setShow(false), []);
+
+  if (!text) return <span className={className}>{children}</span>;
+
+  return (
+    <span
+      ref={ref}
+      className={className}
+      onMouseEnter={reveal}
+      onMouseLeave={hide}
+      onFocus={reveal}
+      onBlur={hide}
+      tabIndex={0}
+    >
+      {children}
+      {show && createPortal(
+        <div
+          role="tooltip"
+          style={{ top: coords.top, left: coords.left }}
+          className="fixed z-[200] -translate-x-1/2 -translate-y-full max-w-[260px] px-2.5 py-1.5 rounded-mx-sm bg-mx-deepest border border-line-subtle text-[11px] leading-snug text-ink-secondary shadow-lg pointer-events-none whitespace-normal"
+        >
+          {text}
+        </div>,
+        document.body,
+      )}
+    </span>
   );
 }

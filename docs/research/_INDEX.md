@@ -17,6 +17,7 @@ If this index drifts from the file system, the file system wins — re-derive wi
 _(none)_
 
 ### drafting
+- [drafting_performance-overhaul.md](research/drafting_performance-overhaul.md) — Speed & efficiency overhaul; Stage-1 pre-filled from 9-agent perf investigation (48 hotspots: no list virtualization, unpaginated `/api/library/tracks`, unmemoized always-mounted views, blocking USB export+scan, event-loop waveform, 30s blocking startup); 16 OQs + 8-agent research plan queued for research-explore (2026-06-09)
 - [drafting_toast-notification-ux.md](research/drafting_toast-notification-ux.md) — Toast-Notification UX — Limit, Position & Styling (2026-06-09)
 
 ### exploring
