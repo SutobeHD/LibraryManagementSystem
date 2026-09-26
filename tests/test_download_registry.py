@@ -120,3 +120,40 @@ def test_local_track_ids_never_creates_the_registry(tmp_path, monkeypatch):
 
     assert dr.local_track_ids(["1", "2"]) == {}
     assert not path.exists()
+
+
+def test_set_names_rewrites_only_the_names(registry):
+    """Apply / undo of a recognizer suggestion (artist hub T-31)."""
+    registry.register_download(sc_track_id="11", title="Boys Noize - Starter", artist="Label")
+    registry.update_analysis(sc_track_id="11", bpm=128.0, local_track_id="501")
+    registry.register_download(sc_track_id="12", title="Other", artist="Someone")
+
+    assert registry.set_names("11", title="Starter", artist="Boys Noize") is True
+
+    rec = registry.get_record("11")
+    assert (rec["artist"], rec["title"]) == ("Boys Noize", "Starter")
+    assert (rec["status"], rec["local_track_id"], rec["bpm"]) == ("analyzed", "501", 128.0)
+    other = registry.get_record("12")
+    assert (other["artist"], other["title"]) == ("Someone", "Other")
+
+
+def test_set_names_binds_its_values(registry):
+    registry.register_download(sc_track_id="11", title="t", artist="a")
+    hostile = "x'; DROP TABLE download_history; --"
+
+    assert registry.set_names("11", title=hostile, artist="O'Brien") is True
+
+    rec = registry.get_record("11")
+    assert (rec["artist"], rec["title"]) == ("O'Brien", hostile)
+
+
+def test_set_names_on_a_row_that_is_not_there_is_false(registry):
+    assert registry.set_names("404", title="t", artist="a") is False
+    assert registry.get_record("404") is None
+
+
+def test_set_names_on_an_unreadable_registry_is_false_and_logged(tmp_path, monkeypatch, caplog):
+    monkeypatch.setattr(dr, "_REGISTRY_DB", tmp_path / "no-schema.db")
+
+    assert dr.set_names("11", title="t", artist="a") is False
+    assert "set_names failed" in caplog.text

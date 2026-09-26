@@ -347,6 +347,24 @@ def update_analysis(
         return False
 
 
+def set_names(sc_track_id: str, *, title: str, artist: str) -> bool:
+    """Store the names a download carries now, after the user applied or undid a suggestion.
+
+    Library row and file tags already hold them (artist hub T-31); history search and the
+    duplicate notice read these. True when the row was there to update.
+    """
+    try:
+        with _conn() as db:
+            updated = db.execute(
+                "UPDATE download_history SET title=?, artist=? WHERE sc_track_id=?",
+                (title, artist, str(sc_track_id)),
+            ).rowcount
+    except sqlite3.Error as exc:
+        logger.error("[Registry] set_names failed (sc_id=%s): %s", sc_track_id, exc)
+        return False
+    return updated > 0
+
+
 def mark_failed(sc_track_id: str, error: str) -> None:
     """Mark a download as permanently failed."""
     try:

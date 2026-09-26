@@ -1062,6 +1062,7 @@ class SoundCloudDownloader:
     Public API:
       download_track(...)    → task_id str  (returns immediately)
       get_task_status(id)    → dict | None
+      note_names(sc_id, …)   → tasks touched (user applied / undid a name correction)
       cleanup_processes()    → atexit hook (no-op — no subprocesses to kill)
     """
 
@@ -1685,6 +1686,31 @@ class SoundCloudDownloader:
     def get_task_status(self, task_id: str) -> dict | None:
         with self._lock:
             return self.tasks.get(task_id)
+
+    def note_names(self, sc_track_id: str, *, artist: str, title: str) -> int:
+        """Every task of one SoundCloud track shows the names the track carries now.
+
+        Called after the user applied a recognizer suggestion or undid one (artist hub
+        T-31); ``recognition.applied`` tells the Download Manager which names won. The
+        recognition dict is replaced, not mutated: ``GET /api/soundcloud/tasks`` serialises
+        these dicts outside the lock. Returns the number of tasks touched.
+        """
+        sc_id = str(sc_track_id)
+        touched = 0
+        with self._lock:
+            for task in self.tasks.values():
+                if str(task.get("sc_track_id")) != sc_id:
+                    continue
+                task["artist"] = artist
+                task["title"] = title
+                recognition = task.get("recognition")
+                if isinstance(recognition, dict):
+                    task["recognition"] = {
+                        **recognition,
+                        "applied": {"artist": artist, "title": title},
+                    }
+                touched += 1
+        return touched
 
     def cleanup_processes(self) -> None:
         """No-op: kept for API compatibility. No subprocesses used."""

@@ -190,3 +190,50 @@ def test_the_library_is_consulted_only_when_loaded(monkeypatch, loaded: bool) ->
 
     assert sdl._recognize_download(LABEL_UPLOAD) == "recognized"
     assert seen == [fake if loaded else None]
+
+
+def test_note_names_moves_every_task_of_the_track_and_marks_what_was_applied() -> None:
+    """Apply / undo from the Download Manager (artist hub T-31)."""
+    rec = recognizer.Recognition(
+        raw_artist="Boysnoize Records",
+        raw_title="Boys Noize - Starter",
+        artist="Boysnoize Records",
+        title="Boys Noize - Starter",
+        corrections=(),
+        credits=(),
+        suggestion=recognizer.Suggestion(
+            BOYS, "Starter", recognizer.SUGGESTION_UNKNOWN_ARTIST_PREFIX
+        ),
+    ).as_dict()
+    dl = sdl.SoundCloudDownloader()
+    dl.tasks["a"] = {
+        "id": "a",
+        "sc_track_id": "123",
+        "title": "x",
+        "artist": "y",
+        "recognition": rec,
+    }
+    # A later re-queue of the same track: "Skipped"/"Linked", no recognition of its own.
+    dl.tasks["b"] = {"id": "b", "sc_track_id": "123", "title": "x", "artist": "y"}
+    dl.tasks["c"] = {"id": "c", "sc_track_id": "1234", "title": "other", "artist": "else"}
+
+    assert dl.note_names("123", artist=BOYS, title="Starter") == 2
+
+    a, b, c = dl.tasks["a"], dl.tasks["b"], dl.tasks["c"]
+    assert (a["artist"], a["title"]) == (BOYS, "Starter")
+    assert a["recognition"]["applied"] == {"artist": BOYS, "title": "Starter"}
+    assert a["recognition"]["suggestion"] == rec["suggestion"]
+    assert a["recognition"]["raw_artist"] == "Boysnoize Records"
+    # Replaced, not mutated: a serialiser already iterating the old dict sees no new key.
+    assert "applied" not in rec
+    assert (b["artist"], b["title"]) == (BOYS, "Starter")
+    assert "recognition" not in b
+    assert c == {"id": "c", "sc_track_id": "1234", "title": "other", "artist": "else"}
+
+
+def test_note_names_for_a_track_without_tasks_touches_nothing() -> None:
+    dl = sdl.SoundCloudDownloader()
+    dl.tasks["a"] = {"id": "a", "sc_track_id": "123", "title": "x", "artist": "y"}
+
+    assert dl.note_names("999", artist=BOYS, title="Starter") == 0
+    assert dl.tasks["a"] == {"id": "a", "sc_track_id": "123", "title": "x", "artist": "y"}

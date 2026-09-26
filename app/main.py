@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 import traceback
+import unicodedata
 import urllib.parse
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -97,7 +98,7 @@ from .artist_store import schema as artist_schema
 from .artist_store import sync as artist_sync
 from .audio_analyzer import LIBROSA_AVAILABLE, AudioAnalyzer
 from .config import EXPORT_DIR, LOG_DIR, MUSIC_DIR, TEMP_DIR
-from .database import db
+from .database import db, db_lock
 from .metadata_fixer import schema as fixer_log
 from .phrase_generator import (
     PhraseNotAnalysedError,
@@ -402,6 +403,7 @@ from typing import Literal as _Literal  # noqa: E402
 
 from pydantic import Field as _Field  # noqa: E402
 from pydantic import StringConstraints as _SC  # noqa: E402
+from pydantic import field_validator as _fv  # noqa: E402
 from pydantic import model_validator as _mv  # noqa: E402
 
 # Cap constants. Numbers picked from measured 619 B baseline + 14-shortcut max;
@@ -768,6 +770,28 @@ class ArtistTrackAssignReq(BaseModel):
     action: _Literal["assign", "exclude", "clear"]
     role: str | None = _Field(default=None, max_length=32)
     name: str | None = _Field(default=None, max_length=512)
+
+
+class DownloadNamesReq(BaseModel):
+    """Artist/Title for a downloaded track: a taken suggestion, or the raw names an undo restores.
+
+    Both required, stripped, 1..512 chars. Control characters and line breaks are refused
+    (422): a NUL splits an ID3v2.4 text frame into two values, a newline breaks every
+    one-line view of the name.
+    """
+
+    model_config = {"str_strip_whitespace": True}
+
+    artist: str = _Field(min_length=1, max_length=512)
+    title: str = _Field(min_length=1, max_length=512)
+
+    @_fv("artist", "title")
+    @classmethod
+    def _one_printable_line(cls, value: str) -> str:
+        # Cc = C0/C1 controls incl. NUL and DEL; Zl/Zp = U+2028 / U+2029.
+        if any(unicodedata.category(ch) in ("Cc", "Zl", "Zp") for ch in value):
+            raise ValueError("control characters and line breaks are not allowed")
+        return value
 
 
 # NOTE: Library auto-load is handled by _on_startup() near the bottom of this file.
@@ -5966,6 +5990,108 @@ async def get_soundcloud_task_status(task_id: str):
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
+
+
+def _same_file(registered: Any, library: Any) -> bool:
+    """The registry's downloaded file vs the library track's file; an unknown side passes."""
+    a, b = str(registered or "").strip(), str(library or "").strip()
+    if not a or not b:
+        return True
+    return Path(a) == Path(b)
+
+
+def _download_names_tags(tid: str, track: Mapping[str, Any], updates: dict[str, Any]) -> str:
+    """Mirror a names change into the file's tags, on `POST /api/track/{tid}`'s rules.
+
+    Runs after the library write landed, so it cannot fail the request: any error is
+    reported as `file_tags` + a warning, never a 500 that reads as "nothing changed".
+    """
+    try:
+        if not SettingsManager.load().get("write_tags_to_files", True):
+            return "skipped"
+        src = track.get("path")
+        if not src:
+            return "skipped"
+        art_path = track.get("Artwork")
+        # Rewriting the tags must not drop the cover.
+        artwork = audio_tags.load_artwork(art_path) if art_path else None
+        return "written" if audio_tags.write_tags(src, updates, artwork=artwork) else "failed"
+    except Exception as exc:  # best-effort boundary: the library already has the names
+        logger.warning("op=download_names tag write failed local=%s err=%s", tid, exc)
+        return "error"
+
+
+@app.post(
+    "/api/soundcloud/downloads/{sc_track_id}/names",
+    dependencies=[Depends(require_session)],
+)
+def soundcloud_download_names(sc_track_id: str, r: DownloadNamesReq) -> dict[str, Any]:
+    """Rename a downloaded track: library row, file tags, registry row, Download Manager tasks.
+
+    Artist hub T-31, Threat T18. The recognizer writes only HIGH-confidence names itself;
+    an uncertain split comes back as `recognition.suggestion` and the user applies it here
+    in one click. "Rückgängig" is the same call with `recognition.raw_artist` /
+    `raw_title`. Keyed by the SoundCloud id because that is what the task knows — the
+    registry maps it to the track the importer created. `POST /api/track/{tid}` cannot do
+    this: it has no Title, and registry + tasks would keep the old names.
+
+    Only differing fields are written. Diff and write share one `db_lock()` hold, so a
+    concurrent edit cannot land between them. `no_change` leaves library and file alone
+    but still records the names on the registry row and the tasks — the track carries
+    them, so the card must stop offering them. The library track must still be the file
+    the registry downloaded: a reload can hand its id to another recording (Threat T16),
+    and renaming that one would be silent damage.
+    """
+    if len(sc_track_id) > 20 or not (sc_track_id.isascii() and sc_track_id.isdigit()):
+        raise HTTPException(400, "sc_track_id must be a numeric SoundCloud track id.")
+    record = download_registry.get_record(sc_track_id)
+    if record is None:
+        raise HTTPException(404, "Not a track this app downloaded.")
+    # Same rule as the catalogue's "downloaded" match: the historical tuple-string ids
+    # an old build stored are never a usable library id.
+    tid = str(record.get("local_track_id") or "").strip()
+    if not tid.isalnum():
+        raise HTTPException(409, "Not in the library yet — the import is still running or failed.")
+    if not db.loaded:
+        raise HTTPException(409, "Library not loaded.")
+    if getattr(db, "mode", "") == "live" and _is_rekordbox_running():
+        raise HTTPException(409, "Close Rekordbox first — it holds master.db.")
+
+    wanted = {"Artist": r.artist, "Title": r.title}
+    with db_lock():
+        track = db.get_track_details(tid)
+        if not track:
+            raise HTTPException(404, "That track left the library.")
+        if not _same_file(record.get("file_path"), track.get("path")):
+            raise HTTPException(
+                409,
+                "The library track under this id is another file now — rename it in the "
+                "track editor instead.",
+            )
+        updates = {k: v for k, v in wanted.items() if str(track.get(k) or "") != v}
+        if updates and not db.update_tracks_metadata([tid], updates):
+            raise HTTPException(500, "Library update failed.")
+
+    answer: dict[str, Any] = {
+        "sc_track_id": sc_track_id,
+        "local_track_id": tid,
+        "artist": r.artist,
+        "title": r.title,
+        "fields": list(updates),
+    }
+    file_tags = _download_names_tags(tid, track, updates) if updates else "skipped"
+    registry_ok = download_registry.set_names(sc_track_id, title=r.title, artist=r.artist)
+    tasks = sc_downloader.note_names(sc_track_id, artist=r.artist, title=r.title)
+    logger.info(
+        "op=download_names sc_id=%s local=%s fields=%s file_tags=%s registry=%s tasks=%d",
+        sc_track_id,
+        tid,
+        ",".join(updates) or "none",
+        file_tags,
+        registry_ok,
+        tasks,
+    )
+    return {"status": "ok" if updates else "no_change", **answer, "file_tags": file_tags}
 
 
 # ─── Download History & Deduplication API ────────────────────────────────────
