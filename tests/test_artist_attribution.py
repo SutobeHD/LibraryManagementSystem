@@ -298,24 +298,99 @@ def test_an_assigned_track_that_left_the_library_is_listed_not_repointed() -> No
 
     assert set(_roles(page)) == {"1"}
     assert page["assigned_missing"] == [
-        {"track_id": "2", "title": "Gone", "artist": "X", "role": "primary"}
+        {"track_id": "2", "title": "Gone", "artist": "X", "role": "primary", "reason": "gone"}
     ]
+
+
+def _reload_with(db: LiveRekordboxDB, tid: str, row: dict) -> None:
+    """A reload — another XML, a rebuilt master.db — that hands ``tid`` to ``row``."""
+    db.tracks[tid] = {"ID": tid, "Title": "", "Artist": "", "Remixer": "", **row}
+    db._finalize_ui_metadata()
+
+
+def test_a_reused_id_does_not_carry_a_manual_assignment() -> None:
+    db = _library({"Title": "Overdrive", "Artist": "Boys Noize"}, {"Title": "White Label Tool"})
+    attribution.set_assignment(db, _cid(), "2", action="assign", role="remixer", name=BOYS)
+
+    _reload_with(db, "2", {"Title": "Completely Different Song", "Artist": "Other Act"})
+    page = attribution.local_tracks(db, _cid())
+
+    assert set(_roles(page)) == {"1"}
+    assert page["assigned_missing"] == [
+        {
+            "track_id": "2",
+            "title": "White Label Tool",
+            "artist": "",
+            "role": "remixer",
+            "reason": "replaced",
+        }
+    ]
+    assert attribution.membership(db, [_cid()]) == {_cid(): ["1"]}
+
+
+def test_a_reused_id_does_not_carry_an_exclusion() -> None:
+    db = _library({"Title": "Rocket Boy", "Artist": "Boys Noize"})
+    attribution.set_assignment(db, _cid(), "1", action="exclude", name=BOYS)
+
+    _reload_with(db, "1", {"Title": "Overdrive", "Artist": "Boys Noize"})
+    page = attribution.local_tracks(db, _cid())
+
+    assert _roles(page) == {"1": ("primary", "high", "artist_field")}
+    assert page["excluded"] == []
+
+
+@pytest.mark.parametrize(
+    ("then", "now"),
+    [
+        ("Boys Noize - Starter", "Starter"),
+        ("01 Starter", "Starter"),
+        ("Starter", "Starter (Original Mix)"),
+        ("STARTER", "starter"),
+    ],
+)
+def test_a_fixed_title_keeps_the_manual_row(then: str, now: str) -> None:
+    db = _library({"Title": then, "Artist": "Boysnoize Records"})
+    attribution.set_assignment(db, _cid(), "1", action="assign", role="primary", name=BOYS)
+
+    _reload_with(db, "1", {"Title": now, "Artist": "Boysnoize Records"})
+
+    assert _roles(attribution.local_tracks(db, _cid())) == {"1": ("primary", "high", "manual")}
+
+
+def test_a_merge_rewritten_artist_keeps_the_manual_row() -> None:
+    db = _library({"Title": "Starter", "Artist": "Boysnoize Records"})
+    attribution.set_assignment(db, _cid(), "1", action="exclude", name=BOYS)
+
+    _reload_with(db, "1", {"Title": "Starter", "Artist": "BNR"})
+
+    assert [e["track_id"] for e in attribution.local_tracks(db, _cid())["excluded"]] == ["1"]
+
+
+def test_a_title_that_only_shares_letters_is_another_recording() -> None:
+    db = _library({"Title": "Go", "Artist": "Somebody"})
+    attribution.set_assignment(db, _cid(), "1", action="assign", name=BOYS)
+
+    _reload_with(db, "1", {"Title": "Gold", "Artist": "Somebody"})
+
+    assert attribution.local_tracks(db, _cid())["assigned_missing"][0]["reason"] == "replaced"
 
 
 def test_a_name_that_does_not_derive_the_id_is_refused() -> None:
     db = _library({"Title": "Overdrive", "Artist": "Boys Noize"})
 
-    with pytest.raises(KeyError):
+    with pytest.raises(attribution.UnknownCollection):
         attribution.set_assignment(db, _cid(), "1", action="exclude", name="Somebody Else")
-    with pytest.raises(KeyError):
+    with pytest.raises(attribution.UnknownCollection):
         attribution.set_assignment(db, _cid(), "1", action="exclude")
+    with pytest.raises(attribution.UnknownCollection):
+        attribution.set_assignment(db, _cid(), "1", action="clear")
     assert schema.get_collection(_cid()) is None
 
 
 def test_bad_inputs_are_refused_before_anything_is_written() -> None:
     db = _library({"Title": "Overdrive", "Artist": "Boys Noize"})
 
-    with pytest.raises(LookupError):
+    with pytest.raises(attribution.TrackNotInLibrary):
         attribution.set_assignment(db, _cid(), "999", action="assign", name=BOYS)
     with pytest.raises(ValueError):
         attribution.set_assignment(db, _cid(), "1", action="assign", role="uncertain", name=BOYS)
@@ -333,6 +408,8 @@ def test_unknown_collection_is_none() -> None:
     db = _library({"Title": "Overdrive", "Artist": "Boys Noize"})
 
     assert attribution.local_tracks(db, _cid("Nobody")) is None
+    assert attribution.search_candidates(db, _cid("Nobody"), "over") is None
+    assert attribution.search_candidates(None, _cid("Nobody"), "over") is None
 
 
 def test_without_a_library_a_stored_artist_is_empty_and_says_why() -> None:

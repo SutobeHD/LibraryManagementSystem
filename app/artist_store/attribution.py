@@ -63,6 +63,14 @@ class LibraryNotLoaded(RuntimeError):
     """A write needs the loaded library to snapshot the track it names."""
 
 
+class UnknownCollection(KeyError):
+    """No stored collection has this id, and no name came with it that derives the id."""
+
+
+class TrackNotInLibrary(LookupError):
+    """The loaded library holds no track with this id."""
+
+
 def track_id(track: Any) -> str | None:
     """Content id of a UI track dict. Live rows key it ``ID``, the XML backend ``id``."""
     if not isinstance(track, Mapping):
@@ -306,6 +314,22 @@ def _manual(row: Mapping[str, Any]) -> Attribution:
     )
 
 
+def _same_recording(row: Mapping[str, Any], track: Mapping[str, Any]) -> bool:
+    """Does the id still name the track the user picked? (Threat T16)
+
+    Content ids come back after a reload — another XML, a rebuilt ``master.db`` — on a
+    different recording, and a manual row must not follow the number there. The title
+    is the witness, not the artist string: a merge rewrites that on purpose. A fixer
+    edit that trims the title ("Boys Noize - Starter" -> "Starter", "01 Starter")
+    keeps the row, whole words either way round; an unrelated title does not.
+    """
+    then = fold_key(str(row.get("title") or ""))
+    now = fold_key(str(track.get("Title") or ""))
+    if not then or not now:
+        return True
+    return f" {then} " in f" {now} " or f" {now} " in f" {then} "
+
+
 def _attribute(
     db: Any,
     scope: _Scope,
@@ -333,17 +357,21 @@ def _attribute(
     for row in manual:
         tid = str(row["track_id"])
         track = tracks.get(tid)
+        replaced = track is not None and not _same_recording(row, track)
+        if replaced:
+            track = None
         if row["action"] == schema.EXCLUDE:
+            if track is None:
+                continue
             hit = found.pop(tid, None)
-            if track is not None:
-                excluded.append(
-                    {
-                        "track_id": tid,
-                        "title": track.get("Title") or row.get("title") or "",
-                        "artist": track.get("Artist") or row.get("artist") or "",
-                        "would_be": hit[1].as_dict() if hit else None,
-                    }
-                )
+            excluded.append(
+                {
+                    "track_id": tid,
+                    "title": track.get("Title") or row.get("title") or "",
+                    "artist": track.get("Artist") or row.get("artist") or "",
+                    "would_be": hit[1].as_dict() if hit else None,
+                }
+            )
             continue
         if track is None:
             missing.append(
@@ -352,6 +380,7 @@ def _attribute(
                     "title": row.get("title") or "",
                     "artist": row.get("artist") or "",
                     "role": row.get("role"),
+                    "reason": "replaced" if replaced else "gone",
                 }
             )
             continue
@@ -438,7 +467,7 @@ def _ensure_collection(collection_id: str, name: str | None, kind: str) -> None:
         return
     text = " ".join(str(name or "").split())
     if not text or schema.collection_id_for(text, kind) != collection_id:
-        raise KeyError(collection_id)
+        raise UnknownCollection(collection_id)
     cid = schema.create_collection(text, kind)
     schema.add_alias(cid, text, source=registry.ALIAS_SOURCE_LIBRARY)
 
@@ -456,16 +485,18 @@ def set_assignment(
     """Assign, exclude or clear one track for one artist; returns that track's new state.
 
     ``clear`` drops the manual row so the automatic layers decide again. ``assign``
-    defaults to ``primary``. Raises ``KeyError`` for an unknown collection (and no name
-    that derives it), ``LookupError`` for a track the loaded library does not hold,
-    ``LibraryNotLoaded`` without a library, ``ValueError`` for a bad action or role.
+    defaults to ``primary``. Raises ``UnknownCollection`` for an unknown collection (and
+    no name that derives it), ``TrackNotInLibrary`` for a track the loaded library does
+    not hold, ``LibraryNotLoaded`` without a library, ``ValueError`` for a bad action or
+    role. The two lookups are their own types so a stray ``KeyError`` from a bug can
+    never pass for "not found".
     """
     tid = str(track or "").strip()
     if not tid:
         raise ValueError("track_id must be non-empty")
     if action == ACTION_CLEAR:
         if schema.get_collection(collection_id) is None:
-            raise KeyError(collection_id)
+            raise UnknownCollection(collection_id)
         schema.clear_track_assignment(collection_id, tid)
     else:
         if action not in schema.ASSIGNMENT_ACTIONS:
@@ -477,7 +508,7 @@ def set_assignment(
         library = _library_tracks(db)
         target = library.get(tid)
         if target is None:
-            raise LookupError(tid)
+            raise TrackNotInLibrary(tid)
         chosen = (role or schema.ROLE_PRIMARY) if action == schema.ASSIGN else None
         if chosen is not None and chosen not in schema.ASSIGNABLE_ROLES:
             raise ValueError(
@@ -512,17 +543,23 @@ def search_candidates(
     query: str,
     limit: int = DEFAULT_CANDIDATE_LIMIT,
     kind: str = KIND_ARTIST,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     """Library tracks matching ``query`` for "Add tracks", each flagged if already theirs.
 
     Case-insensitive substring over title, artist and remixer. A blank query returns
-    nothing rather than the whole library — this is a search box, not a browser.
+    nothing rather than the whole library — this is a search box, not a browser. None,
+    like :func:`local_tracks`, when neither the store nor the library knows the id.
     """
     needle = " ".join(str(query or "").split()).casefold()
     size = max(1, min(int(limit), MAX_CANDIDATE_LIMIT))
-    if not needle or db is None:
-        return {"collection_id": collection_id, "query": needle, "tracks": [], "total": 0}
-    page = local_tracks(db, collection_id, kind) or {}
+    empty = {"collection_id": collection_id, "query": needle, "tracks": [], "total": 0}
+    if not needle:
+        return empty
+    page = local_tracks(db, collection_id, kind)
+    if page is None:
+        return None
+    if db is None:
+        return empty
     roles = {track_id(t): t["artist_role"] for t in page.get("tracks", [])}
     excluded = {e["track_id"] for e in page.get("excluded", [])}
     folded_needle = fold_key(needle)
