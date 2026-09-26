@@ -14,6 +14,7 @@
 
 const MAX_URL_LENGTH = 2048;
 const WHITESPACE = /\s/;
+const IPV4_HOST = /^\d{1,3}(\.\d{1,3}){3}$/;
 
 /** Whitespace, a backslash or a C0/DEL control character — none belongs in a web link. */
 function hasUnsafeChars(text) {
@@ -44,7 +45,10 @@ export function safeExternalUrl(raw) {
     }
     if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
     if (url.username || url.password) return null;
-    if (!url.hostname.includes('.') || url.hostname.startsWith('[')) return null;
+    // The URL parser rewrites every IPv4 spelling (hex, octal, one integer) to dotted
+    // decimal, so one pattern refuses them all — as the backend's classify_url does.
+    const host = url.hostname.replace(/\.$/, '');
+    if (!host.includes('.') || host.startsWith('[') || IPV4_HOST.test(host)) return null;
     return url.href;
 }
 

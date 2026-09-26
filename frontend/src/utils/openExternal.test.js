@@ -41,6 +41,20 @@ test('script, file, credential and local links are refused', () => {
     }
 });
 
+test('an IP-literal host is refused in every spelling the URL parser folds to IPv4', () => {
+    for (const raw of [
+        'https://127.0.0.1/x',
+        'http://192.168.1.10/',
+        'https://0x7f.1/',
+        'https://2130706433/',
+        'https://1.2.3/',
+        'https://localhost./x',
+    ]) {
+        assert.equal(safeExternalUrl(raw), null, raw);
+    }
+    assert.equal(safeExternalUrl('https://www.example.com./x'), 'https://www.example.com./x');
+});
+
 test('in Tauri the shell plugin opens it', async () => {
     const calls = [];
     const where = await openExternal('https://soundcloud.com/boysnoize', {
