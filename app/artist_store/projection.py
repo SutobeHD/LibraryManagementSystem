@@ -32,7 +32,7 @@ import logging
 import time
 from typing import Any
 
-from app.artist_store import registry, schema
+from app.artist_store import attribution, schema
 from app.artist_store.schema import KIND_ARTIST
 
 logger = logging.getLogger("ARTIST_STORE")
@@ -169,33 +169,14 @@ def _track_id(track: Any) -> str | None:
 
 
 def _artist_track_ids(db: Any, kind: str, wanted: set[str]) -> dict[str, list[str]]:
-    """``collection_id`` -> ordered local track ids, every alias variant folded in.
+    """``collection_id`` -> ordered local track ids — exactly what the artist page lists.
 
-    Resolution reuses ``registry``'s one-pass store index deliberately: a second
-    name->collection rule would drift from the one the hub and the merge use, and a
-    merged artist would split back into one playlist per spelling.
+    Delegates to ``attribution.membership``: every alias variant of the Artist field
+    (the registry's own name->collection rule, so a merged artist never splits back
+    into one playlist per spelling), plus remix / feature credits and the user's manual
+    assignments, minus their exclusions (owner refinement 2026-09-26).
     """
-    store = registry._store_index(kind)
-    ordered: dict[str, list[str]] = {}
-    seen: dict[str, set[str]] = {}
-    for row in getattr(db, "artists", None) or []:
-        if not isinstance(row, dict):
-            continue
-        name = str(row.get("name") or "").strip()
-        artist_id = row.get("id")
-        if not name or not artist_id:
-            continue
-        cid = registry._resolve_id(name, kind, store)
-        if cid not in wanted:
-            continue
-        bucket = ordered.setdefault(cid, [])
-        known = seen.setdefault(cid, set())
-        for track in db.get_tracks_by_artist(str(artist_id)) or []:
-            tid = _track_id(track)
-            if tid and tid not in known:
-                known.add(tid)
-                bucket.append(tid)
-    return ordered
+    return attribution.membership(db, sorted(wanted), kind)
 
 
 def _diff(current: list[str], desired: list[str]) -> tuple[list[str], list[str]]:
