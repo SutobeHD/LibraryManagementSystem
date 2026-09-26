@@ -116,6 +116,19 @@ LibraryManagementSystem -- ANLZ Binary File Writer
 
 artist_store — Artist-Hub sidecar package (``artists.db``).
 
+### `app/artist_store/attribution.py`
+
+artist_store.attribution — which library tracks belong to an artist, and as what.
+
+- `LibraryNotLoaded` — A write needs the loaded library to snapshot the track it names.
+- `track_id()` — Content id of a UI track dict.
+- `Attribution`
+- `  Attribution.as_dict()`
+- `local_tracks()` — The artist page's local half: every attributed track with its role, in one call.
+- `membership()` — ``collection_id`` -> ordered local track ids, for the Rekordbox projection.
+- `set_assignment()` — Assign, exclude or clear one track for one artist; returns that track's new state.
+- `search_candidates()` — Library tracks matching ``query`` for "Add tracks", each flagged if already theirs.
+
 ### `app/artist_store/catalogue.py`
 
 artist_store.catalogue — classify an artist's SoundCloud tracks, diff against the library (T-14).
@@ -171,6 +184,29 @@ artist_store.identity — name-based, remix-aware track roles + the identity tab
 - `remember_identities()` — Upsert the classifier's verdict per track into ``track_identity``.
 - `set_override()` — Pin (or with ``None`` unpin) a track's role for one artist.
 - `classify_for_collection()` — Classify with the collection's link, spellings and pins, then remember the result.
+
+### `app/artist_store/links.py`
+
+artist_store.links — where to find an artist: their own profiles, classified and ranked.
+
+- `Service`
+- `LinkCandidate` — One classified profile URL, before any source or confidence is attached.
+- `  LinkCandidate.entry()`
+- `classify_url()` — The one gate from an untrusted string to a storable link, or None.
+- `extract_bio_links()` — Known-service profile links and ``IG: @name``-style handles in free bio text.
+- `from_soundcloud_profile()` — The account itself, its ``website`` field and every web-profile link it lists.
+- `from_musicbrainz()` — URL relationships of a MusicBrainz artist, profile-shaped and still current.
+- `best_per_key()` — One store entry per ``url_key``: the strongest source wins, first seen breaks ties.
+- `musicbrainz_binding()`
+- `list_links()` — Stored links in display order, plus what the last refresh saw.
+- `add_manual_link()` — Store a URL the user typed.
+- `remove_link()` — ``deleted`` (a manual link), ``hidden`` (a fetched one) or None (no such link).
+- `restore_hidden()`
+- `musicbrainz_candidates()` — Name-search hits worth showing: a high score AND a spelling that folds to ours.
+- `confirm_musicbrainz()` — Bind the MusicBrainz artist the user picked.
+- `drop_musicbrainz()` — Unbind MusicBrainz and take its links with it.
+- `refresh()` — Ask every source once, fold the answers into the store, report per source.
+- `rank_soundcloud_accounts()` — Order SoundCloud search hits for the "which account is theirs?" picker.
 
 ### `app/artist_store/merge.py`
 
@@ -284,6 +320,19 @@ artist_store.schema — sidecar DB + migration runner for the Artist Hub (T-3).
 - `get_identity_overrides()` — ``sc_urn -> pinned role`` for one collection — what the classifier must yield to.
 - `set_identity_override()` — Pin (or with ``None`` unpin) the role of one track for one artist.
 - `delete_track_identity()`
+- `list_web_links()`
+- `get_web_link()`
+- `count_hidden_web_links()`
+- `add_manual_web_link()` — Store a link the user typed.
+- `remove_web_link()` — Remove a link from view.
+- `unhide_web_links()`
+- `merge_fetched_web_links()` — Fold one refresh into the stored links, in one transaction.
+- `record_link_fetch()`
+- `get_link_fetch()`
+- `set_track_assignment()` — Assign a library track to the artist, or exclude an automatic match.
+- `clear_track_assignment()`
+- `list_track_assignments()`
+- `list_assignments_for_track()` — Every collection a track is manually tied to or excluded from (index-backed).
 
 ### `app/artist_store/sync.py`
 
@@ -680,6 +729,10 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `ArtistLinkReq` — Bind an artist to a SoundCloud account.
 - `ArtistDownloadMissingReq` — What to queue.
 - `ArtistTrackRoleReq` — Pin one catalogue track's role for one artist.
+- `ArtistLinksRefreshReq` — One Find-links click.
+- `ArtistLinkAddReq` — A profile URL the user pasted.
+- `ArtistLinkRemoveReq` — One link to take off, by `url_key`: a manual link is deleted, a fetched one hidden.
+- `ArtistMusicBrainzReq` — The MusicBrainz artist the user picked out of the refresh's candidates.
 - `stream_audio()` — Streams audio file with HTTP Range support — required for browser seeking.
 - `get_multiband_waveform()` — Returns 3-band waveform data for professional visualization.
 - `FileRevealReq`
@@ -714,6 +767,14 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `artist_unlink_soundcloud()` — Unbind.
 - `artist_pin_track_role()` — Pin one catalogue track's role for this artist by hand.
 - `artist_track_identities()` — Everything this artist's `track_identity` table holds — what has been seen and pinned.
+- `artist_web_links()` — Where to find this artist: the stored profile links, in display order.
+- `artist_web_links_refresh()` — Find links: ask SoundCloud and MusicBrainz once, fold the answers into the store.
+- `artist_web_link_add()` — Add a profile link by hand.
+- `artist_web_link_remove()` — Take one link off this artist: a manual link is deleted, a fetched one hidden.
+- `artist_web_links_restore()` — Un-hide every link the user took off this artist.
+- `artist_musicbrainz_confirm()` — Bind the MusicBrainz artist the user picked, then read its links in the same click.
+- `artist_musicbrainz_drop()` — Unbind MusicBrainz ("that is not this artist").
+- `artist_soundcloud_candidates()` — Which SoundCloud account is theirs?
 - `artist_download_missing()` — Queue an artist's missing tracks through the existing SoundCloud downloader.
 - `artist_download_status()` — Poll one batch download.
 - `ArtistSyncRunReq` — `force` runs the pass with the opt-in setting off.
@@ -937,6 +998,17 @@ metadata_fixer.schema — sidecar undo-log DB for the metadata fixer (T4).
 - `list_runs()` — All runs, newest first (the ``GET /runs`` surface).
 - `get_mutations()` — Mutations of a run; ``reverse=True`` orders newest-first for undo replay.
 
+### `app/musicbrainz_client.py`
+
+musicbrainz_client — the one MusicBrainz web-service client (``/ws/2``, JSON).
+
+- `MusicBrainzError` — MusicBrainz answered, but not with something usable (4xx, malformed JSON).
+- `MusicBrainzUnavailable` — MusicBrainz could not be reached or is shedding load (network, 5xx, 503).
+- `is_mbid()`
+- `artists_for_url()` — Artists MusicBrainz relates to exactly this URL (``/url?resource=…&inc=artist-rels``).
+- `artist_with_urls()` — One artist plus its URL relationships (``/artist/<mbid>?inc=url-rels``).
+- `search_artists()` — Artists whose name or alias matches ``name`` as a phrase, best score first.
+
 ### `app/pairing_store.py`
 
 pairing_store — in-memory one-shot pairing codes (Phase-2 auth, T2).
@@ -1126,6 +1198,10 @@ SoundCloud API client — playlists, likes, per-artist catalogue, and track sear
 - `get_user_tracks()` — An artist's OWN uploads — `GET /users/{urn}/tracks`.
 - `get_user_reposts()` — An artist's reposted tracks — `GET /users/{urn}/reposts/tracks`.
 - `get_related_artists()` — Related artists — `GET /users/{urn}/related`.
+- `normalize_user_profile()` — Raw SC user → `SC_PROFILE_FIELDS` dict, or None when it carries no identity.
+- `get_user()` — One account's full profile — `GET /users/{urn}` — as `SC_PROFILE_FIELDS`.
+- `get_user_web_profiles()` — Links the artist added to their own profile — `GET /users/{urn}/web-profiles`.
+- `search_users()` — Account search — `GET /users?q=` — one page, `SC_PROFILE_FIELDS` dicts.
 - `resolve_user()` — Bind an artist to a SoundCloud account — `GET /resolve`.
 - `search_tracks()` — Full-text track search — `GET /tracks?q=`.
 - `search_tracks_many()` — Run `search_tracks` per query and merge, deduplicated by `sc_id`.
@@ -1734,6 +1810,17 @@ AudioBandAnalyzer Splits an AudioBuffer into 3 frequency bands (Rekordbox-style)
 Dev-only logging utility.
 
 - `log()`
+
+### `frontend/src/utils/openExternal.js`
+
+Open a web link outside the app: the system browser in Tauri, a new tab in the browser.
+
+- `safeExternalUrl()` — function hasUnsafeChars(text) { if (WHITESPACE.test(text)) return true; for (let i = 0; i < text.le…
+- `openExternal()` — Open `raw` outside the app.
+
+### `frontend/src/utils/openExternal.test.js`
+
+node:test — `node --test frontend/src/utils/openExternal.test.js`
 
 ### `frontend/src/components/ArtistHubView.jsx`
 
@@ -2397,6 +2484,37 @@ Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout).
 - `test_pwv2_out_of_range_clamped()`
 - `test_pwv3_out_of_range_clamped_preserves_count()`
 
+### `tests/test_artist_attribution.py`
+
+Local attribution tests (T-24 — app/artist_store/attribution.py).
+
+- `store()`
+- `test_artist_field_set_is_the_registry_grouping_across_spellings()`
+- `test_featured_only_in_the_artist_field_is_featured()`
+- `test_someone_elses_remix_of_their_track_is_remixed_by_other()`
+- `test_their_remix_with_the_original_act_in_the_artist_field_is_remixer()`
+- `test_their_own_remix_of_their_own_track_stays_primary()`
+- `test_remixer_field_credits_them()`
+- `test_title_remix_credit_is_remixer()`
+- `test_title_feature_credit_is_featured()`
+- `test_label_upload_with_the_artist_in_the_title_prefix_is_primary()`
+- `test_a_version_word_is_never_a_person()`
+- `test_a_near_spelling_is_not_a_credit()`
+- `test_the_old_artist_field_set_is_a_subset_of_the_new_one()`
+- `test_assign_adds_any_track_under_the_chosen_role()`
+- `test_assign_defaults_to_primary()`
+- `test_exclude_beats_every_automatic_match()`
+- `test_clear_hands_the_track_back_to_the_automatic_layers()`
+- `test_an_assigned_track_that_left_the_library_is_listed_not_repointed()`
+- `test_a_name_that_does_not_derive_the_id_is_refused()`
+- `test_bad_inputs_are_refused_before_anything_is_written()`
+- `test_unknown_collection_is_none()`
+- `test_without_a_library_a_stored_artist_is_empty_and_says_why()`
+- `test_search_candidates_flags_attributed_and_excluded_rows()`
+- `test_projection_reads_the_same_membership()`
+- `test_v2_file_walks_to_v3_and_keeps_its_rows()`
+- `test_v3_step_is_registered()`
+
 ### `tests/test_artist_catalogue.py`
 
 Artist-Hub catalogue tests (T-14 — app/artist_store/catalogue.py).
@@ -2683,6 +2801,69 @@ Artist-Hub identity tests (app/artist_store/identity.py + schema v2 track_identi
 - `  TestDisplayNameAloneNeverAutoQueues.test_a_title_credit_clears_the_gate()`
 - `  TestDisplayNameAloneNeverAutoQueues.test_the_linked_account_clears_the_gate()`
 - `  TestDisplayNameAloneNeverAutoQueues.test_the_rule_is_pure_and_signal_aware()`
+
+### `tests/test_artist_links.py`
+
+Social-link tests (T-22 / T-23, Threats T13 T15 — app/artist_store/links.py).
+
+- `store()`
+- `cid()`
+- `test_classify_known_shapes()`
+- `test_hostile_or_useless_input_is_refused()`
+- `test_posts_tracks_and_share_dialogs_are_not_profiles()`
+- `test_lookalike_hosts_are_never_the_service()`
+- `test_one_key_per_profile_however_it_is_spelled()`
+- `test_bio_yields_known_services_and_labelled_handles_only()`
+- `test_an_email_is_not_a_handle()`
+- `test_manual_link_is_stored_and_listed()`
+- `test_manual_link_refuses_a_script_url()`
+- `test_removing_a_manual_link_deletes_it()`
+- `test_refresh_merges_soundcloud_and_anchored_musicbrainz()`
+- `test_bio_links_are_low_and_lose_to_the_profile()`
+- `test_a_hidden_link_stays_hidden_after_a_refresh()`
+- `test_manual_link_is_never_overwritten_by_a_fetch()`
+- `test_a_failed_source_keeps_what_it_gave_before()`
+- `test_a_link_the_source_dropped_goes_when_that_source_answers()`
+- `test_a_name_match_is_a_candidate_never_a_binding()`
+- `test_a_low_score_or_other_name_is_not_even_a_candidate()`
+- `test_an_ambiguous_anchor_binds_nothing()`
+- `test_a_confirmed_binding_is_never_second_guessed()`
+- `test_an_anchored_binding_goes_when_the_anchor_does()`
+- `test_dropping_musicbrainz_takes_its_links_now()`
+- `test_unlinking_the_account_takes_its_links_but_not_yours()`
+- `test_not_connected_is_reported_without_touching_soundcloud()`
+- `test_confirm_refuses_a_malformed_mbid()`
+- `test_account_ranking_puts_exact_names_first_then_followers()`
+
+### `tests/test_artist_links_routes.py`
+
+Artist-Hub profile-link routes (T-22 / T-23 — app/main.py, plan test row T36).
+
+- `network_calls()` — Every escape hatch closed, and every attempt on the one door recorded.
+- `signed_in()`
+- `collection_id()`
+- `linked()`
+- `test_gated_routes_require_session()`
+- `test_gated_routes_reject_wrong_bearer()`
+- `test_rejected_calls_change_nothing_and_ask_nobody()`
+- `test_links_read_needs_no_session_and_starts_empty()`
+- `test_unknown_collection_is_404_before_anything_else()`
+- `test_add_refuses_what_is_not_a_web_profile()`
+- `test_add_stores_the_canonical_profile_and_the_read_lists_it()`
+- `test_oversized_fields_are_refused_before_the_route()`
+- `test_remove_deletes_a_manual_link()`
+- `test_remove_hides_a_fetched_link_until_restore()` — Deleting a fetched link would last one refresh — the hide has to live in the row.
+- `test_remove_an_unknown_link_is_404()`
+- `test_refresh_without_link_or_musicbrainz_asks_nobody()`
+- `test_refresh_body_is_optional()` — No body = the default click: MusicBrainz is asked.
+- `test_refresh_without_a_usable_login_says_not_connected()` — Not an error: the SoundCloud source says why it was skipped, the call still answers.
+- `test_refresh_folds_both_sources_and_never_leaks_the_token()`
+- `test_mb_name_match_never_autobinds()` — An exact name at score 100 is still only a candidate — the confirm click binds.
+- `test_confirm_refuses_a_malformed_mbid()`
+- `test_drop_musicbrainz_unbinds_and_takes_its_links()`
+- `test_sc_candidates_never_link()` — Ranked by name, not by reach — and a suggestion stays a suggestion.
+- `test_sc_candidates_signed_out_is_400_and_searches_nothing()`
+- `test_sc_candidates_map_soundcloud_failures()`
 
 ### `tests/test_artist_merge_apply.py`
 
@@ -3007,6 +3188,7 @@ Artist-Hub sidecar schema tests (T-3 — app/artist_store/schema.py).
 - `  TestWriteLocking.test_every_writer_holds_the_module_lock()`
 - `  TestWriteLocking.test_reads_do_not_take_the_lock()`
 - `  TestWriteLocking.test_concurrent_writers_do_not_lose_rows()`
+- `  TestWriteLocking.test_a_failed_write_rolls_back_and_frees_the_database()` — A writer that raised must not leave its transaction open on the thread.
 
 ### `tests/test_artist_sync.py`
 
@@ -3509,6 +3691,26 @@ metadata-fixer undo-log schema tests (T4 — app/metadata_fixer/schema.py).
 - `test_entity_mutation_round_trip()`
 - `test_content_row_defaults_to_content_kind()`
 - `test_migrate_leaves_newer_schema_alone()`
+
+### `tests/test_musicbrainz_client.py`
+
+MusicBrainz client tests (T-22, Threat T14 — app/musicbrainz_client.py).
+
+- `clock()` — A fake monotonic clock; ``time.sleep`` advances it instead of waiting.
+- `test_every_request_carries_the_named_user_agent()`
+- `test_requests_are_spaced_at_least_the_minimum_interval()`
+- `test_a_503_is_retried_once_honouring_retry_after()`
+- `test_retry_after_is_capped()`
+- `test_a_second_503_raises_unavailable()`
+- `test_network_error_raises_unavailable()`
+- `test_404_is_nothing_there()`
+- `test_non_json_is_an_error()`
+- `test_a_malformed_mbid_never_reaches_a_request()`
+- `test_a_non_web_resource_never_reaches_a_request()`
+- `test_artists_for_url_keeps_only_artist_relations()`
+- `test_artist_with_urls_returns_relations()`
+- `test_search_escapes_lucene_syntax_and_sorts_by_score()`
+- `test_blank_search_costs_nothing()`
 
 ### `tests/test_onelibrary_wal_flush.py`
 
@@ -4231,6 +4433,7 @@ Tests for the USB relocation pass (`app/usb_one_library.py`).
 - `  TestCaseOnlyRename.test_case_only_rename_leaves_no_temp_directory()`
 - `  TestCaseOnlyRename.test_case_only_filename_rename()`
 - `  TestCaseOnlyRename.test_exact_name_wins_over_a_case_variant()` — On a case-sensitive volume both folders can exist.
+- `  TestCaseOnlyRename.test_a_case_variant_another_track_plans_is_never_taken()` — Two tracks whose destinations differ only by case: neither may steal the file.
 - `TestCollision`
 - `  TestCollision.test_collision_never_clobbers()`
 - `  TestCollision.test_identical_duplicate_is_removed_not_moved()`

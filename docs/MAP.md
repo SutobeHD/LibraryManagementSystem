@@ -24,9 +24,11 @@
 | `app/anlz_sidecar.py` | ANLZ-Sidecar writer — shared helper used by every track-import path |
 | `app/anlz_writer.py` | LibraryManagementSystem -- ANLZ Binary File Writer |
 | `app/artist_store/__init__.py` | artist_store — Artist-Hub sidecar package (``artists.db``). |
+| `app/artist_store/attribution.py` | artist_store.attribution — which library tracks belong to an artist, and as what. |
 | `app/artist_store/catalogue.py` | artist_store.catalogue — classify an artist's SoundCloud tracks, diff against the library (T-14). |
 | `app/artist_store/discovery.py` | artist_store.discovery — Tier-2 suggestions: artists the user does not have yet (T-16). |
 | `app/artist_store/identity.py` | artist_store.identity — name-based, remix-aware track roles + the identity table. |
+| `app/artist_store/links.py` | artist_store.links — where to find an artist: their own profiles, classified and ranked. |
 | `app/artist_store/merge.py` | artist_store.merge — duplicate-artist detection, preview, apply and revert (T-5/T-6). |
 | `app/artist_store/projection.py` | artist_store.projection — mirror favourite collections into Rekordbox (T-7). |
 | `app/artist_store/registry.py` | artist_store.registry — library artists into the store, favourites, Tier-1 backlog (T-4). |
@@ -54,6 +56,7 @@
 | `app/metadata_fixer/applier.py` | metadata_fixer.applier — atomic apply + revert for the metadata fixer (T5). |
 | `app/metadata_fixer/detector.py` | Read-only detection of malformed artist/title metadata. |
 | `app/metadata_fixer/schema.py` | metadata_fixer.schema — sidecar undo-log DB for the metadata fixer (T4). |
+| `app/musicbrainz_client.py` | musicbrainz_client — the one MusicBrainz web-service client (``/ws/2``, JSON). |
 | `app/pairing_store.py` | pairing_store — in-memory one-shot pairing codes (Phase-2 auth, T2). |
 | `app/phrase_db_writer.py` | phrase_db_writer.py — write phrase memory cues into Rekordbox master.db (djmdCue). |
 | `app/phrase_generator.py` | phrase_generator.py — Phrase & Auto-Cue Generator |
@@ -138,6 +141,8 @@
 | `frontend/src/store/authStore.js` | Tiny module-level auth state shared across the frontend. |
 | `frontend/src/utils/AudioBandAnalyzer.js` | AudioBandAnalyzer Splits an AudioBuffer into 3 frequency bands (Rekordbox-style): - Low: < 400 Hz (Bass / Kic… |
 | `frontend/src/utils/log.js` | Dev-only logging utility. |
+| `frontend/src/utils/openExternal.js` | Open a web link outside the app: the system browser in Tauri, a new tab in the browser. |
+| `frontend/src/utils/openExternal.test.js` | node:test — `node --test frontend/src/utils/openExternal.test.js` |
 | `frontend/src/components/ArtistHubView.jsx` | *(no module docstring)* |
 | `frontend/src/components/BatchEditBar.jsx` | *(no module docstring)* |
 | `frontend/src/components/ConfirmModal.jsx` | Module-level subscriber registry so a single mounted <ConfirmModalRoot /> |
@@ -252,11 +257,14 @@
 | `tests/test_anlz_reference_parse.py` | Validate the produced ANLZ files (.DAT/.EXT/.2EX). |
 | `tests/test_anlz_safe_pqtz.py` | Beat-grid extraction in `app.anlz_safe`. |
 | `tests/test_anlz_writer_guards.py` | Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout). |
+| `tests/test_artist_attribution.py` | Local attribution tests (T-24 — app/artist_store/attribution.py). |
 | `tests/test_artist_catalogue.py` | Artist-Hub catalogue tests (T-14 — app/artist_store/catalogue.py). |
 | `tests/test_artist_catalogue_routes.py` | Artist-Hub SoundCloud route tests — binding, catalogue, batch download (T-13/T-15). |
 | `tests/test_artist_discovery.py` | Artist-Hub Tier-2 discovery tests (T-16 — app/artist_store/discovery.py). |
 | `tests/test_artist_discovery_routes.py` | Artist-Hub discovery + background-sync route tests (T-16 / T-17). |
 | `tests/test_artist_identity.py` | Artist-Hub identity tests (app/artist_store/identity.py + schema v2 track_identity). |
+| `tests/test_artist_links.py` | Social-link tests (T-22 / T-23, Threats T13 T15 — app/artist_store/links.py). |
+| `tests/test_artist_links_routes.py` | Artist-Hub profile-link routes (T-22 / T-23 — app/main.py, plan test row T36). |
 | `tests/test_artist_merge_apply.py` | Artist-Hub merge apply/revert tests (T-6 + T-11a — app/artist_store/merge.py). |
 | `tests/test_artist_merge_preview.py` | Artist-Hub merge detection + preview tests (T-5 — app/artist_store/merge.py). |
 | `tests/test_artist_merge_routes.py` | Artist-Hub merge + projection route tests (T-8 rest — app/main.py, plan row T13). |
@@ -287,6 +295,7 @@
 | `tests/test_metadata_fixer_applier.py` | metadata-fixer apply/revert tests (T5 — app/metadata_fixer/applier.py). |
 | `tests/test_metadata_fixer_detector.py` | M0 detector tests — read-only malformation detection. |
 | `tests/test_metadata_fixer_schema.py` | metadata-fixer undo-log schema tests (T4 — app/metadata_fixer/schema.py). |
+| `tests/test_musicbrainz_client.py` | MusicBrainz client tests (T-22, Threat T14 — app/musicbrainz_client.py). |
 | `tests/test_onelibrary_wal_flush.py` | End-to-end regression test for OneLibraryUsbWriter — runs the FULL |
 | `tests/test_pairing.py` | Phase-2 paired-token store tests (T1 — app/auth_db.py). |
 | `tests/test_pairing_store.py` | Phase-2 pairing-code store tests (T2 — app/pairing_store.py). |
