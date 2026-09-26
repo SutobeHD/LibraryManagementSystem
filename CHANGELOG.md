@@ -114,6 +114,29 @@
     unproven and is skipped. Hashing only the edges would have read the head
     twice for a file under 128 KiB, so two different short recordings sharing an
     oversized cover-art frame fingerprinted identically.
+  - **Tracks belong to artists by their credits, not only by the Artist field.**
+    An artist's page lists their own tracks, **their remixes of other people's
+    tracks** (Remixer column, `(X Remix)` / `X Remix` / `X VIP` in the title),
+    remixes of their tracks by others, and features (`feat. X`) — each row says
+    why it counts. Right-click a row to change its role or take it away from the
+    artist; "Add tracks" searches the library for what the credits miss, and
+    "Artist zuordnen…" in every track table's context menu does the same from
+    anywhere. The artist's Rekordbox playlist holds exactly this set, so their
+    remixes land in it on the next sync; exclusions leave it.
+  - **Find their social media.** A links strip on every favourite: "Find links"
+    reads the profiles the artist lists on their own SoundCloud page and their
+    MusicBrainz entry (Instagram, Bandcamp, Beatport, Resident Advisor, Spotify,
+    YouTube, …). MusicBrainz is only trusted through the linked SoundCloud
+    profile or an entry you confirm — a name match is offered, never applied.
+    Links spotted in a bio are marked as unverified. Add your own, hide wrong
+    ones (a hidden link stays hidden). "Find their SoundCloud" suggests accounts
+    by name for an artist that is not linked yet — you pick the right one.
+  - Fixed: external links never opened in the desktop app — the shell plugin
+    intercepted them but was not allowed to open anything (`shell:allow-open`
+    was missing from the Tauri capability). This also fixes "Auf SoundCloud
+    öffnen" in the track context menu.
+  - Fixed: on a case-sensitive stick filesystem, merging `boys noize/` into an
+    existing `Boys Noize/` re-copied the audio instead of moving it.
   - Changed: the smart-playlist button generates **labels only**. Its old
     `By Artist` branch grouped on the raw artist string (so two spellings became
     two folders) and duplicated every playlist on each re-run. An existing

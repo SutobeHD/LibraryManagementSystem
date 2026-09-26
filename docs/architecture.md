@@ -222,12 +222,41 @@ Merge duplicate spellings
     → audio_tags.write_tags() on every affected file
     → metadata-fixer undo log, one run_id  → POST /api/artists/merge/revert/{run_id}
 
+An artist's local tracks (owner refinement 2026-09-26)
+  → GET  /api/artists/{id}/local-tracks
+    → artist_store/attribution.py: ONE answer, three layers
+       1. Artist field — db.get_tracks_by_artist over every alias spelling
+          (the registry grouping — the old set, unchanged)
+       2. credits — Remixer field, "(X Remix)" / "X Remix" / "feat. X" / "X - Title"
+          in the title, parsed by identity.parse_credit (fold_key, no fuzzy)
+       3. manual — track_assignments (assign under a role / exclude), keyed by
+          the library content id, snapshot title+artist for vanished tracks
+  → POST /api/artists/{id}/local-tracks/{track}   assign | exclude | clear
+  → GET  /api/artists/{id}/local-tracks/candidates?q=   "Add tracks" search
+
 Project into Rekordbox
   → POST /api/artists/projection/sync
     → refuses when masterPlaylists6.xml is absent (rbox skips it silently,
       and the playlists would vanish on the next Rekordbox restart)
-    → flat "Artists" folder, one playlist per favourite, all alias variants
+    → flat "Artists" folder, one playlist per favourite
+    → membership = attribution.membership() — the same set the artist page lists
+      (remix credits in, exclusions out)
     → diff-in-place: unchanged artist = zero master.db writes
+
+Where the artist lives online (owner refinement 2026-09-26)
+  → GET  /api/artists/{id}/links            stored links, no network
+  → POST /api/artists/{id}/links/refresh    user-initiated only
+    → SoundCloud: GET /users/{urn} + /users/{urn}/web-profiles (2 calls, own
+      CallBudget) + URLs/handles in the bio (known services only, LOW)
+    → app/musicbrainz_client.py (1 req/s per process, named UA):
+      /url?resource=<linked SC URL> → exactly one artist = anchored binding;
+      otherwise a name search yields CANDIDATES the user confirms
+      (POST …/links/musicbrainz) — never an automatic binding
+    → artist_store/links.py:classify_url on every URL, precedence
+      manual > SC profile > MusicBrainz > bio, hidden stays hidden,
+      a source that failed keeps its old rows
+  → frontend utils/openExternal.js → Tauri shell `open` (capability
+    shell:allow-open, default http(s)/mailto/tel scope) / window.open in the browser
 
 SoundCloud catalogue (manual link)
   → app/soundcloud_auth.py: get_access_token()  ← keyring blob, silent refresh

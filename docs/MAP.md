@@ -106,10 +106,13 @@
 | `frontend/src/components/artistHub/artistCatalogueApi.js` | artistCatalogueApi — the SoundCloud half of the Artist Hub's HTTP surface. |
 | `frontend/src/components/artistHub/artistDiscoveryApi.js` | artistDiscoveryApi — the discovery + background-sync half of the Artist Hub's HTTP surface. |
 | `frontend/src/components/artistHub/artistHubApi.js` | artistHubApi — the merge + projection half of the Artist Hub's HTTP surface. |
+| `frontend/src/components/artistHub/artistLinksApi.js` | artistLinksApi — where an artist lives online, and which library tracks are theirs. |
 | `frontend/src/components/artistHub/catalogueCopy.js` | catalogueCopy — the sentences the artist-detail view has to say out loud. |
 | `frontend/src/components/artistHub/catalogueCopy.test.js` | node --test frontend/src/components/artistHub/catalogueCopy.test.js Pure copy + derivation builders — no DOM,… |
 | `frontend/src/components/artistHub/discoveryCopy.js` | discoveryCopy — the sentences the Discover tab and the background-sync line must say. |
 | `frontend/src/components/artistHub/discoveryCopy.test.js` | node --test frontend/src/components/artistHub/discoveryCopy.test.js Pure copy builders — no DOM, no resolver … |
+| `frontend/src/components/artistHub/linksCopy.js` | linksCopy — what the artist view says about where an artist lives online, and about which library tracks are … |
+| `frontend/src/components/artistHub/linksCopy.test.js` | node:test — `node --test frontend/src/components/artistHub/linksCopy.test.js` |
 | `frontend/src/components/artistHub/mergeCopy.js` | mergeCopy — the sentences the merge dialog has to say out loud. |
 | `frontend/src/components/artistHub/mergeCopy.test.js` | node --test frontend/src/components/artistHub/mergeCopy.test.js Pure copy builders — no DOM, no resolver need… |
 | `frontend/src/components/artistHub/useArtistCatalogue.js` | Move one row into the bucket its new role renders in — the optimistic half of a pin. |
@@ -177,6 +180,9 @@
 | `frontend/src/components/WaveformEditor.jsx` | *(no module docstring)* |
 | `frontend/src/components/XmlCleanView.jsx` | Using existing endpoint but improved backend logic |
 | `frontend/src/components/artistHub/ArtistDetail.jsx` | *(no module docstring)* |
+| `frontend/src/components/artistHub/ArtistLinks.jsx` | *(no module docstring)* |
+| `frontend/src/components/artistHub/AssignArtistModal.jsx` | assignArtistModal — "Artist zuordnen…" from any track table in the app. |
+| `frontend/src/components/artistHub/LocalTracksPanel.jsx` | LocalTracksPanel — the "in your library" half of the artist page (owner refinement 2026-09-26): every track t… |
 | `frontend/src/components/artistHub/MergeDialog.jsx` | *(no module docstring)* |
 | `frontend/src/components/artistHub/ProjectionPanel.jsx` | ProjectionPanel — the `Artists` folder inside Rekordbox: what is projected right now, and the button that bri… |
 | `frontend/src/components/daw/DawBrowser.jsx` | DawBrowser — Left panel file/library browser for the DJ Edit DAW Lists tracks from the library and recent .rb… |
@@ -265,6 +271,7 @@
 | `tests/test_artist_identity.py` | Artist-Hub identity tests (app/artist_store/identity.py + schema v2 track_identity). |
 | `tests/test_artist_links.py` | Social-link tests (T-22 / T-23, Threats T13 T15 — app/artist_store/links.py). |
 | `tests/test_artist_links_routes.py` | Artist-Hub profile-link routes (T-22 / T-23 — app/main.py, plan test row T36). |
+| `tests/test_artist_local_tracks_routes.py` | Artist-Hub local-attribution routes (T-24 — app/main.py, route half of plan rows T30/T31). |
 | `tests/test_artist_merge_apply.py` | Artist-Hub merge apply/revert tests (T-6 + T-11a — app/artist_store/merge.py). |
 | `tests/test_artist_merge_preview.py` | Artist-Hub merge detection + preview tests (T-5 — app/artist_store/merge.py). |
 | `tests/test_artist_merge_routes.py` | Artist-Hub merge + projection route tests (T-8 rest — app/main.py, plan row T13). |

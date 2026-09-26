@@ -121,6 +121,8 @@ artist_store — Artist-Hub sidecar package (``artists.db``).
 artist_store.attribution — which library tracks belong to an artist, and as what.
 
 - `LibraryNotLoaded` — A write needs the loaded library to snapshot the track it names.
+- `UnknownCollection` — No stored collection has this id, and no name came with it that derives the id.
+- `TrackNotInLibrary` — The loaded library holds no track with this id.
 - `track_id()` — Content id of a UI track dict.
 - `Attribution`
 - `  Attribution.as_dict()`
@@ -733,6 +735,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `ArtistLinkAddReq` — A profile URL the user pasted.
 - `ArtistLinkRemoveReq` — One link to take off, by `url_key`: a manual link is deleted, a fetched one hidden.
 - `ArtistMusicBrainzReq` — The MusicBrainz artist the user picked out of the refresh's candidates.
+- `ArtistTrackAssignReq` — One manual correction to an artist's local tracks.
 - `stream_audio()` — Streams audio file with HTTP Range support — required for browser seeking.
 - `get_multiband_waveform()` — Returns 3-band waveform data for professional visualization.
 - `FileRevealReq`
@@ -775,6 +778,9 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `artist_musicbrainz_confirm()` — Bind the MusicBrainz artist the user picked, then read its links in the same click.
 - `artist_musicbrainz_drop()` — Unbind MusicBrainz ("that is not this artist").
 - `artist_soundcloud_candidates()` — Which SoundCloud account is theirs?
+- `artist_local_tracks()` — The artist page's local half: every library track credited to them, with its role.
+- `artist_local_track_candidates()` — Library search behind "Add tracks": title / artist / remixer substring, capped.
+- `artist_local_track_assign()` — Correct the automatic attribution for one library track: assign, exclude or clear.
 - `artist_download_missing()` — Queue an artist's missing tracks through the existing SoundCloud downloader.
 - `artist_download_status()` — Poll one batch download.
 - `ArtistSyncRunReq` — `force` runs the pass with the opt-in setting off.
@@ -1542,6 +1548,13 @@ artistHubApi — the merge + projection half of the Artist Hub's HTTP surface.
 - `revertMergeRun()` — export const applyMerge = async ({ names, canonical, deleteOrphans }, hooks = {}) => { const starte…
 - `fetchProjectionStatus()`
 
+### `frontend/src/components/artistHub/artistLinksApi.js`
+
+artistLinksApi — where an artist lives online, and which library tracks are theirs.
+
+- `setTrackAssignment()` — export const linksErrorMessage = (error, fallback) => catalogueErrorMessage(error, fallback); expor…
+- `searchAssignCandidates()`
+
 ### `frontend/src/components/artistHub/catalogueCopy.js`
 
 catalogueCopy — the sentences the artist-detail view has to say out loud.
@@ -1597,6 +1610,26 @@ discoveryCopy — the sentences the Discover tab and the background-sync line mu
 ### `frontend/src/components/artistHub/discoveryCopy.test.js`
 
 node --test frontend/src/components/artistHub/discoveryCopy.test.js Pure copy builders — no DOM, no resolver needed (the imports carry exte…
+
+### `frontend/src/components/artistHub/linksCopy.js`
+
+linksCopy — what the artist view says about where an artist lives online, and about which library tracks are theirs (owner refinement 2026-…
+
+- `linkLabel()` — export const LINK_GROUPS = [ { key: 'social', label: 'Social' }, { key: 'music', label: 'Listen' },…
+- `isTentative()` — export const linkTitle = (link) => { const lines = [link?.url || '']; const source = SOURCE_TEXT[li…
+- `sourceLines()` — export const groupLinks = (links) => { const byKey = new Map(LINK_GROUPS.map((g) => [g.key, []])); …
+- `emptyLinksNote()` — export const lastFetchedLine = (lastFetch) => { const when = relativeTime(lastFetch?.fetched_at); r…
+- `hiddenLine()`
+- `compactCount()` — export const musicBrainzCandidateLine = (candidate) => { const bits = [candidate?.type, candidate?.…
+- `LOCAL_FILTERS()` — export const soundCloudCandidateLine = (user) => { const bits = [ `${compactCount(user?.followers_c…
+- `LOCAL_ROLE_LABEL()`
+- `localFilterCount()` — export const ASSIGNABLE_ROLES = ['primary', 'remixer', 'remixed_by_other', 'featured']; export cons…
+- `localRoleTitle()` — export const filterLocalTracks = (tracks, key) => { const rows = Array.isArray(tracks) ?
+- `localSummaryLine()` — The line under the local panel head.
+
+### `frontend/src/components/artistHub/linksCopy.test.js`
+
+node:test — `node --test frontend/src/components/artistHub/linksCopy.test.js`
 
 ### `frontend/src/components/artistHub/mergeCopy.js`
 
@@ -1787,6 +1820,10 @@ Frontend-wide constants.
 - `ARTIST_DISCOVER_TIMEOUT_MS()` — Axios timeout for GET /api/artists/discover.
 - `ARTIST_SYNC_RUN_TIMEOUT_MS()` — Axios timeout for POST /api/artists/sync/run.
 - `ARTIST_SYNC_STATUS_POLL_MS()` — Poll cadence for GET /api/artists/sync/status while the Artists tab is open.
+- `ARTIST_LINKS_TIMEOUT_MS()` — Axios timeout for the artist-links refresh (POST /api/artists/{id}/links/refresh and the MusicBrain…
+- `ARTIST_ASSIGN_SEARCH_DEBOUNCE_MS()` — Debounce for the "Add tracks" library search in the artist view and the app-wide "Artist zuordnen…"…
+- `ARTIST_ASSIGN_SEARCH_LIMIT()` — Results the "Add tracks" search asks for.
+- `ARTIST_ASSIGN_PICKER_LIMIT()` — Artists the app-wide "Artist zuordnen…" picker lists per search.
 - `ARTIST_DISCOVER_LIMIT()` — Suggestions requested from GET /api/artists/discover.
 - `SC_REFRESH_TIMEOUT_MS()` — Headroom over the backend's own SoundCloud call (SC_REFRESH_TIMEOUT_S = 15 s in app/soundcloud_auth…
 
@@ -1976,6 +2013,20 @@ Using existing endpoint but improved backend logic
 *(no module docstring)*
 
 - `ArtistDetailActions()` — export const ArtistDetailSummary = ({ localShown, localTotal, catalogue, scEnabled }) => { const sp…
+
+### `frontend/src/components/artistHub/ArtistLinks.jsx`
+
+*(no module docstring)*
+
+### `frontend/src/components/artistHub/AssignArtistModal.jsx`
+
+assignArtistModal — "Artist zuordnen…" from any track table in the app.
+
+- `assignArtistModal()`
+
+### `frontend/src/components/artistHub/LocalTracksPanel.jsx`
+
+LocalTracksPanel — the "in your library" half of the artist page (owner refinement 2026-09-26): every track that is theirs, grouped by role…
 
 ### `frontend/src/components/artistHub/MergeDialog.jsx`
 
@@ -2506,6 +2557,11 @@ Local attribution tests (T-24 — app/artist_store/attribution.py).
 - `test_exclude_beats_every_automatic_match()`
 - `test_clear_hands_the_track_back_to_the_automatic_layers()`
 - `test_an_assigned_track_that_left_the_library_is_listed_not_repointed()`
+- `test_a_reused_id_does_not_carry_a_manual_assignment()`
+- `test_a_reused_id_does_not_carry_an_exclusion()`
+- `test_a_fixed_title_keeps_the_manual_row()`
+- `test_a_merge_rewritten_artist_keeps_the_manual_row()`
+- `test_a_title_that_only_shares_letters_is_another_recording()`
 - `test_a_name_that_does_not_derive_the_id_is_refused()`
 - `test_bad_inputs_are_refused_before_anything_is_written()`
 - `test_unknown_collection_is_none()`
@@ -2864,6 +2920,40 @@ Artist-Hub profile-link routes (T-22 / T-23 — app/main.py, plan test row T36).
 - `test_sc_candidates_never_link()` — Ranked by name, not by reach — and a suggestion stays a suggestion.
 - `test_sc_candidates_signed_out_is_400_and_searches_nothing()`
 - `test_sc_candidates_map_soundcloud_failures()`
+
+### `tests/test_artist_local_tracks_routes.py`
+
+Artist-Hub local-attribution routes (T-24 — app/main.py, route half of plan rows T30/T31).
+
+- `use_library()` — Install a hand-filled library as ``app.main.db``; ``loaded=False`` keeps its tracks.
+- `library()`
+- `unloaded()` — A stored artist, and the same library with ``loaded`` false.
+- `test_write_requires_session()`
+- `test_write_rejects_wrong_bearer()`
+- `test_rejected_writes_store_nothing()`
+- `test_the_reads_need_no_session()`
+- `test_a_derived_collection_lists_its_artist_field_and_remix_credits()` — The hub hands out this id for a library spelling that nothing has stored yet.
+- `test_an_id_nobody_knows_is_404()`
+- `test_without_a_loaded_library_a_stored_artist_says_so()`
+- `test_assign_with_the_name_stores_the_artist_and_the_track_turns_manual()`
+- `test_assign_defaults_to_primary()`
+- `test_an_unstored_artist_is_only_stored_under_the_name_that_derives_its_id()`
+- `test_a_track_the_library_does_not_hold_is_404()`
+- `test_clear_on_an_artist_nothing_stored_is_404()`
+- `test_a_stray_lookup_error_from_a_bug_is_a_500_not_a_404()`
+- `test_exclude_takes_an_automatic_match_out_and_clear_hands_it_back()`
+- `test_a_role_nobody_may_assign_is_400()` — ``uncertain`` is the classifier's review bucket — nobody assigns "not sure".
+- `test_an_unknown_action_never_reaches_the_engine()`
+- `test_oversized_fields_are_refused_before_the_route()`
+- `test_the_action_vocabulary_is_the_engines()`
+- `test_without_a_loaded_library_a_write_is_409()`
+- `test_clear_needs_no_library()` — Dropping a row needs no snapshot — only assign / exclude read the library.
+- `test_candidates_find_by_title_and_flag_what_is_already_theirs()`
+- `test_candidates_honour_the_limit_but_count_every_hit()`
+- `test_a_blank_search_returns_nothing()`
+- `test_candidates_without_a_loaded_library_find_nothing()`
+- `test_candidates_for_an_id_nobody_knows_is_404()`
+- `test_the_candidates_path_reaches_the_search_not_the_write()`
 
 ### `tests/test_artist_merge_apply.py`
 
