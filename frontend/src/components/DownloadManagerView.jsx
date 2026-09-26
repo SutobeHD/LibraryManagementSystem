@@ -57,9 +57,14 @@ const STATUS_LABELS = {
     'Analysis Failed': 'Analyse-Fehler',
 };
 
+// The file steps between download and "Downloaded" — convert, tag (the artist
+// recognizer runs here), hash. Without them the timeline fell back to "Queued".
+const FILE_STEPS = new Set(['Processing', 'Converting', 'Tagging', 'Hashing']);
+
 const stageIndex = (status) => {
     const i = STAGES.findIndex((s) => s.key === status);
     if (i >= 0) return i;
+    if (FILE_STEPS.has(status)) return STAGES.findIndex((s) => s.key === 'Downloading');
     // Skip-states map onto the playlist-link stage so the timeline still reads
     // "this got into a playlist" without a noisy 0-fallback.
     if (SKIP_STATES.has(status)) return STAGES.findIndex((s) => s.key === 'Sorting');
