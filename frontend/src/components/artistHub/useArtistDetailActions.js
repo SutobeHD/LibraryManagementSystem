@@ -60,6 +60,32 @@ const useArtistDetailActions = ({ artist, catalogue, onLinkChanged }) => {
         }
     }, [artist?.name, catalogue, onLinkChanged, permalink]);
 
+    /**
+     * Link one account the user picked from the "Find their SoundCloud" suggestions.
+     * No prompt — the pick was the confirmation. Resolves true when it bound.
+     */
+    const linkAccount = useCallback(
+        async (permalinkUrl) => {
+            const value = String(permalinkUrl ?? '').trim();
+            if (!value) return false;
+            try {
+                const account = await catalogue.link(value);
+                toast.success(
+                    account?.username
+                        ? `Linked to ${account.username} on SoundCloud`
+                        : 'SoundCloud profile linked'
+                );
+                onLinkChanged?.();
+                return true;
+            } catch (e) {
+                console.error('[ArtistHub] linking the suggested account failed', e);
+                toast.error(catalogueErrorMessage(e, 'Could not link that SoundCloud profile.'));
+                return false;
+            }
+        },
+        [catalogue, onLinkChanged]
+    );
+
     const handleUnlink = useCallback(async () => {
         const ok = await confirmModal({
             title: 'Unlink the SoundCloud profile?',
@@ -180,6 +206,7 @@ const useArtistDetailActions = ({ artist, catalogue, onLinkChanged }) => {
     return {
         pendingScId,
         handleLink,
+        linkAccount,
         handleUnlink,
         handleUpdate,
         handleDownloadAll,

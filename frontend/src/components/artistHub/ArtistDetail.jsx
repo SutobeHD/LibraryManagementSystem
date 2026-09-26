@@ -15,7 +15,8 @@ import {
 } from 'lucide-react';
 
 import { ARTIST_CATALOGUE_PAGE_SIZE } from '../../config/constants';
-import { formatNumber, pluralise } from './mergeCopy';
+import ArtistLinks from './ArtistLinks';
+import { formatNumber } from './mergeCopy';
 import {
     BUCKETS,
     DOWNLOAD_PATH_NOTE,
@@ -61,8 +62,9 @@ import {
  *  4. Report a download that did not happen. Every run reports downloaded / skipped /
  *     failed from the job record, never a blanket success.
  *
- * The left panel takes the existing `TrackTable` as `children` — the local half of this
- * screen is the same table the rest of the app uses, not a second track renderer.
+ * The left panel is `children` — `LocalTracksPanel`, the same `TrackTable` the rest of
+ * the app uses, grouped by role since the owner's 2026-09-26 refinement. Above both
+ * halves sits `ArtistLinks`: where the artist lives online.
  */
 
 const MAX_ERRORS_SHOWN = 5;
@@ -570,8 +572,8 @@ const ArtistDetail = ({
     actions,
     scEnabled,
     disabledReason,
-    tracksLoading,
-    localTotal,
+    linksDisabledReason,
+    linksRefreshToken,
     children,
 }) => {
     const split = useMemo(() => splitCatalogue(catalogue.view), [catalogue.view]);
@@ -592,39 +594,23 @@ const ArtistDetail = ({
 
     const budget = callBudgetLine(catalogue.view);
     const truncated = truncationNote(catalogue.view);
-    const aliases = (artist?.library_names?.length || 1) - 1;
 
     return (
         <div className="flex-1 min-h-0 flex flex-col gap-3">
+            <ArtistLinks
+                artist={artist}
+                enabled={scEnabled}
+                disabledReason={linksDisabledReason || disabledReason}
+                catalogue={catalogue}
+                onLinkAccount={actions.linkAccount}
+                refreshToken={linksRefreshToken}
+            />
             <RunProgress catalogue={catalogue} />
             <RunResult catalogue={catalogue} />
 
             <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-2 gap-4">
-                {/* Local half — the same TrackTable the rest of the app uses. */}
-                <div className="bg-mx-panel border border-line-subtle rounded-xl flex flex-col min-h-0 overflow-hidden">
-                    <PanelHead label={`In your library · ${formatNumber(localTotal)}`}>
-                        <span className="flex-1" />
-                        {aliases > 0 && (
-                            <Chip title={(artist?.library_names || []).join(' · ')}>
-                                {pluralise(aliases, 'alias', 'aliases')} merged
-                            </Chip>
-                        )}
-                    </PanelHead>
-                    <div className="flex-1 min-h-0">
-                        {tracksLoading ? (
-                            <div className="flex items-center justify-center gap-3 py-16 text-ink-muted text-[12px]">
-                                <Loader2 size={18} className="animate-spin text-amber2" />
-                                Loading tracks…
-                            </div>
-                        ) : localTotal === 0 ? (
-                            <Hint>
-                                No local tracks found for this artist in the loaded library.
-                            </Hint>
-                        ) : (
-                            children
-                        )}
-                    </div>
-                </div>
+                {/* Local half — LocalTracksPanel: the shared TrackTable, grouped by role. */}
+                {children}
 
                 {/* Remote half — missing, split by the role the classifier read. */}
                 <div className="bg-mx-panel border border-line-subtle rounded-xl flex flex-col min-h-0 overflow-hidden">

@@ -54,6 +54,7 @@ import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
 import { ConfirmModalRoot, confirmModal } from './components/ConfirmModal';
 import { PromptModalRoot, promptModal } from './components/PromptModal';
+import { AssignArtistModalRoot } from './components/artistHub/AssignArtistModal';
 import GlobalContextMenu from './components/shared/GlobalContextMenu';
 import { log } from './utils/log';
 import { HEARTBEAT_INTERVAL_MS, LIBRARY_STATUS_INTERVAL_MS } from './config/constants';
@@ -1241,6 +1242,7 @@ root.render(
         />
         <ConfirmModalRoot />
         <PromptModalRoot />
+        <AssignArtistModalRoot />
         <GlobalContextMenu />
         <App />
     </ToastProvider>

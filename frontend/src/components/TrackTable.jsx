@@ -17,12 +17,15 @@ import {
     Copy,
     Info,
     Tag,
+    UserPlus,
 } from 'lucide-react';
 import api from '../api/api';
 import toast from 'react-hot-toast';
 import { confirmModal } from './ConfirmModal';
 import { promptModal } from './PromptModal';
+import { assignArtistModal } from './artistHub/AssignArtistModal';
 import { log } from '../utils/log';
+import { openExternal } from '../utils/openExternal';
 
 const DEFAULT_COLUMNS = [
     { id: 'index', label: '#', width: '32px', align: 'right', fixed: true },
@@ -127,18 +130,34 @@ const TrackTable = ({
     customColumns,
     variant = 'default',
     onSortedTracksChange,
+    contextActions,
+    // A narrow embedding (the artist page's half-width panel) keeps its own column set:
+    // the table is `table-fixed`, so the global all-columns default squeezes the
+    // percentage columns — Title, Artist — to nothing there.
+    columnsStorageKey = 'track_table_columns',
+    defaultColumnIds,
 }) => {
     const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
     const [visibleColumns, setVisibleColumns] = useState(() => {
-        const saved = localStorage.getItem('track_table_columns');
-        return saved ? JSON.parse(saved) : DEFAULT_COLUMNS.map((c) => c.id);
+        const fallback = defaultColumnIds ?? DEFAULT_COLUMNS.map((c) => c.id);
+        try {
+            const saved = localStorage.getItem(columnsStorageKey);
+            return saved ? JSON.parse(saved) : fallback;
+        } catch (err) {
+            console.warn('[TrackTable] saved column set unreadable', err);
+            return fallback;
+        }
     });
     const [headerMenu, setHeaderMenu] = useState(null);
     const [contextMenu, setContextMenu] = useState(null);
 
     useEffect(() => {
-        localStorage.setItem('track_table_columns', JSON.stringify(visibleColumns));
-    }, [visibleColumns]);
+        try {
+            localStorage.setItem(columnsStorageKey, JSON.stringify(visibleColumns));
+        } catch (err) {
+            console.warn('[TrackTable] column set not saved', err);
+        }
+    }, [columnsStorageKey, visibleColumns]);
 
     const handleSort = (key) => {
         setSortConfig((prev) => {
@@ -200,10 +219,15 @@ const TrackTable = ({
         return `${m}:${s.toString().padStart(2, '0')}`;
     };
 
+    // window.open is refused inside the desktop app; openExternal goes through the
+    // shell plugin there and falls back to a new tab in the browser.
     const openSoundCloud = (track) => {
         if (!track) return;
         const query = encodeURIComponent(`${track.Artist} ${track.Title}`);
-        window.open(`https://soundcloud.com/search?q=${query}`, '_blank');
+        openExternal(`https://soundcloud.com/search?q=${query}`).catch((err) => {
+            console.error('[TrackTable] opening SoundCloud failed', err);
+            toast.error('Konnte SoundCloud nicht öffnen');
+        });
     };
 
     return (
@@ -560,6 +584,7 @@ const TrackTable = ({
                     onAddToPlaylist={onAddToPlaylist}
                     availablePlaylists={availablePlaylists}
                     setContextMenu={setContextMenu}
+                    contextActions={contextActions}
                 />
             )}
         </div>
@@ -646,6 +671,7 @@ const TrackContextMenuPopup = ({
     onAddToPlaylist,
     availablePlaylists,
     setContextMenu,
+    contextActions,
 }) => {
     const [showAddSubmenu, setShowAddSubmenu] = useState(false);
     const [pSearch, setPSearch] = useState('');
@@ -658,6 +684,9 @@ const TrackContextMenuPopup = ({
     );
     const t = contextMenu.track;
     const trackPath = t.path || t.Path || t.Location || '';
+    // `contextActions` is an array, or a function of the track for per-row items.
+    const extraActions =
+        (typeof contextActions === 'function' ? contextActions(t) : contextActions) || [];
 
     const handleReveal = async () => {
         try {
@@ -774,6 +803,45 @@ const TrackContextMenuPopup = ({
                 ></div>
                 Auf SoundCloud öffnen
             </button>
+            <button
+                onClick={() => {
+                    setContextMenu(null);
+                    assignArtistModal({ track: t });
+                }}
+                disabled={t.id == null && t.ID == null}
+                className="w-full flex items-center gap-3 px-4 py-2 hover:bg-mx-hover text-[12px] text-ink-secondary hover:text-amber2 transition-colors text-left disabled:opacity-30"
+            >
+                <UserPlus size={14} /> Artist zuordnen…
+            </button>
+
+            {/* View-specific actions (e.g. the artist page's exclude / re-role) */}
+            {extraActions.length > 0 && (
+                <>
+                    <div className="h-px bg-line-subtle" />
+                    {extraActions.map((action) => {
+                        const Icon = action.icon;
+                        return (
+                            <button
+                                key={action.id}
+                                disabled={action.disabled}
+                                title={action.title}
+                                onClick={() => {
+                                    setContextMenu(null);
+                                    action.onSelect(t);
+                                }}
+                                className={`w-full flex items-center gap-3 px-4 py-2 hover:bg-mx-hover text-[12px] transition-colors text-left disabled:opacity-30 ${
+                                    action.danger
+                                        ? 'text-ink-secondary hover:text-bad'
+                                        : 'text-ink-secondary hover:text-amber2'
+                                }`}
+                            >
+                                {Icon ? <Icon size={14} /> : <span className="w-[14px]" />}
+                                {action.label}
+                            </button>
+                        );
+                    })}
+                </>
+            )}
 
             {/* Add to Playlist */}
             {onAddToPlaylist && availablePlaylists.length > 0 && (

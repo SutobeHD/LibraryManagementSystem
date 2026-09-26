@@ -98,6 +98,23 @@ export const ARTIST_SYNC_RUN_TIMEOUT_MS = 0;
 // job starts or ends, so a slow poll is enough to keep the idle line honest.
 export const ARTIST_SYNC_STATUS_POLL_MS = 20000;
 
+// Axios timeout for the artist-links refresh (POST /api/artists/{id}/links/refresh and
+// the MusicBrainz confirm). Two SoundCloud calls plus up to three MusicBrainz calls, and
+// MusicBrainz allows one request per second per address — the 10 s default can abort a
+// refresh that is simply waiting its turn. `0` disables the client abort.
+export const ARTIST_LINKS_TIMEOUT_MS = 0;
+
+// Debounce for the "Add tracks" library search in the artist view and the app-wide
+// "Artist zuordnen…" artist search — one request per pause in typing, not per key.
+export const ARTIST_ASSIGN_SEARCH_DEBOUNCE_MS = 250;
+
+// Results the "Add tracks" search asks for. The backend caps it at 200; 50 is what a
+// person scans before refining the query.
+export const ARTIST_ASSIGN_SEARCH_LIMIT = 50;
+
+// Artists the app-wide "Artist zuordnen…" picker lists per search.
+export const ARTIST_ASSIGN_PICKER_LIMIT = 20;
+
 // Suggestions requested from GET /api/artists/discover. Matches the backend's own
 // DEFAULT_SUGGESTION_LIMIT — the panel is a shortlist, not a directory.
 export const ARTIST_DISCOVER_LIMIT = 25;

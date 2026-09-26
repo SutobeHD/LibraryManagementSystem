@@ -16,12 +16,18 @@ import {
     User,
 } from 'lucide-react';
 import api from '../api/api';
-import TrackTable from './TrackTable';
 import { confirmModal } from './ConfirmModal';
 import { useContextMenu } from './shared/ContextMenu';
 import MergeDialog from './artistHub/MergeDialog';
 import ProjectionPanel from './artistHub/ProjectionPanel';
 import ArtistDetail, { ArtistDetailActions, ArtistDetailSummary } from './artistHub/ArtistDetail';
+import LocalTracksPanel from './artistHub/LocalTracksPanel';
+import {
+    fetchLocalTracks,
+    linksErrorMessage,
+    setTrackAssignment,
+} from './artistHub/artistLinksApi';
+import { LOCAL_ROLE_LABEL } from './artistHub/linksCopy';
 import { fetchMergeCandidates } from './artistHub/artistHubApi';
 import { catalogueErrorMessage, fetchCatalogue } from './artistHub/artistCatalogueApi';
 import { splitCatalogue } from './artistHub/catalogueCopy';
@@ -98,6 +104,9 @@ const SYNC_NOW_TITLE =
 
 const SC_NOT_LINKED_REASON =
     'Not linked to SoundCloud yet — open this artist and use "Link SoundCloud profile".';
+
+const linksFavouriteOnlyReason = (name) =>
+    `Add ${name || 'this artist'} to your favourites to find and keep their links.`;
 
 const scFavouriteOnlyReason = (name) =>
     `Add ${name || 'this artist'} to your favourites first — a SoundCloud catalogue is only ` +
@@ -309,8 +318,12 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
     const [searchTerm, setSearchTerm] = useState('');
     const [trackFilter, setTrackFilter] = useState('');
     const [selected, setSelected] = useState(null);
-    const [tracks, setTracks] = useState([]);
+    // GET /api/artists/{id}/local-tracks — every library track that is theirs, with its
+    // role. null = not loaded for the selected artist yet.
+    const [local, setLocal] = useState(null);
     const [tracksLoading, setTracksLoading] = useState(false);
+    // Bumped after a SoundCloud link / unlink so the links strip re-reads that account.
+    const [linksRefreshToken, setLinksRefreshToken] = useState(0);
     const [busyId, setBusyId] = useState(null);
     // Which favourite row is currently fetching its catalogue from the Update button.
     const [updatingId, setUpdatingId] = useState(null);
@@ -337,10 +350,6 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
     // Bumped whenever something the Rekordbox projection mirrors has changed
     // (a favourite, a merge), so the panel re-reads its state instead of drifting.
     const [projectionToken, setProjectionToken] = useState(0);
-
-    // name → library artist id (`art_N`). The ids are list indexes rebuilt on
-    // every library load, so this cache is dropped whenever the library reloads.
-    const libraryIndexRef = useRef(null);
 
     // Browse requests are debounced and "Load more" runs against a moving offset,
     // so a slow earlier response must not overwrite a newer list.
@@ -445,9 +454,8 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
     }, []);
 
     useEffect(() => {
-        libraryIndexRef.current = null;
         setSelected(null);
-        setTracks([]);
+        setLocal(null);
         setHubRequested(false);
         setBrowseRows([]);
         setBrowseTotal(0);
@@ -544,9 +552,8 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
     // A merge (or a revert) rewrites artist rows, so every cached view of them is
     // stale: the name→`art_N` index, the browse page, the hub and the projection.
     const handleMergeApplied = useCallback(() => {
-        libraryIndexRef.current = null;
         setSelected(null);
-        setTracks([]);
+        setLocal(null);
         setProjectionToken((n) => n + 1);
         loadHub(searchTerm.trim());
         loadDuplicateCount();
@@ -555,65 +562,38 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
         }
     }, [browseSort, loadBrowse, loadDuplicateCount, loadHub, searchTerm, suggestTab]);
 
-    const libraryArtistIndex = useCallback(async () => {
-        if (libraryIndexRef.current) return libraryIndexRef.current;
-        const res = await api.get('/api/artists');
-        // name → EVERY matching library id, not one. The library keeps case-distinct
-        // entries ("Klangkuenstler" and "klangkuenstler" are two rows with two ids),
-        // and a case-insensitive key that stored a single id let the second overwrite
-        // the first — the drill-in then showed one spelling's tracks (7) while the hub
-        // counted the merged collection (15).
-        const index = new Map();
-        (res.data ?? []).forEach((a) => {
-            if (!a?.name) return;
-            const key = String(a.name).toLowerCase();
-            const bucket = index.get(key);
-            if (bucket) bucket.push(a.id);
-            else index.set(key, [a.id]);
-        });
-        libraryIndexRef.current = index;
-        return index;
+    // One backend answer for the local half (owner refinement 2026-09-26): the Artist
+    // field across every alias spelling, remix / feature credits and the user's own
+    // assignments — the same set the Rekordbox projection mirrors. `seq` drops a slow
+    // answer for an artist the user already left.
+    const localSeqRef = useRef(0);
+    const loadLocal = useCallback(async (row, { quiet = false } = {}) => {
+        if (!row?.collection_id) return null;
+        const seq = (localSeqRef.current += 1);
+        if (!quiet) setTracksLoading(true);
+        try {
+            const payload = await fetchLocalTracks(row.collection_id);
+            if (localSeqRef.current !== seq) return null;
+            setLocal(payload);
+            return payload;
+        } catch (e) {
+            if (localSeqRef.current !== seq) return null;
+            console.error('[ArtistHub] failed to load artist tracks', e);
+            toast.error(linksErrorMessage(e, `Failed to load tracks for ${row.name}`));
+            return null;
+        } finally {
+            if (localSeqRef.current === seq) setTracksLoading(false);
+        }
     }, []);
 
-    // Drill-in keeps the old behaviour: the artist's local tracks in the shared
-    // TrackTable. A hub row can fold several library spellings into one
-    // collection, so every variant is fetched and the results de-duplicated.
     const openArtist = useCallback(
-        async (row) => {
+        (row) => {
             setSelected(row);
-            setTracks([]);
+            setLocal(null);
             setTrackFilter('');
-            setTracksLoading(true);
-            try {
-                const index = await libraryArtistIndex();
-                const names = row.library_names?.length ? row.library_names : [row.name];
-                const ids = [
-                    ...new Set(names.flatMap((n) => index.get(String(n).toLowerCase()) ?? [])),
-                ];
-                const responses = await Promise.all(
-                    ids.map((id) => api.get(`/api/artist/${encodeURIComponent(id)}/tracks`))
-                );
-                const seen = new Set();
-                const merged = [];
-                responses.forEach((res) => {
-                    (res.data ?? []).forEach((t) => {
-                        const key = t.id ?? t.ID;
-                        if (key != null) {
-                            if (seen.has(key)) return;
-                            seen.add(key);
-                        }
-                        merged.push(t);
-                    });
-                });
-                setTracks(merged);
-            } catch (e) {
-                console.error('[ArtistHub] failed to load artist tracks', e);
-                toast.error(`Failed to load tracks for ${row.name}`);
-            } finally {
-                setTracksLoading(false);
-            }
+            loadLocal(row);
         },
-        [libraryArtistIndex]
+        [loadLocal]
     );
 
     // The three panes show the same artists from different angles, so a favourite
@@ -926,16 +906,37 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
             : 'The loaded library has no artists.';
     }, [browseError, libraryStatus?.loaded, searchTerm]);
 
-    const filteredTracks = useMemo(() => {
-        const q = trackFilter.toLowerCase();
-        if (!q) return tracks;
-        return tracks.filter(
-            (t) =>
-                (t.Title && t.Title.toLowerCase().includes(q)) ||
-                (t.Artist && t.Artist.toLowerCase().includes(q)) ||
-                (t.Album && t.Album.toLowerCase().includes(q))
-        );
-    }, [tracks, trackFilter]);
+    const localTotal = Number(local?.counts?.total) || 0;
+
+    /**
+     * Assign / exclude / clear one track for the open artist, then re-read the local half
+     * so filters, counts and badges come from the backend again. Resolves to the track's
+     * new row (null when it no longer belongs to the artist, or on failure).
+     */
+    const handleAssign = useCallback(
+        async (trackId, { action, role } = {}) => {
+            if (!selected || trackId == null) return null;
+            try {
+                const res = await setTrackAssignment(selected.collection_id, trackId, {
+                    action,
+                    role,
+                    name: selected.name,
+                });
+                if (action === 'exclude') toast(`Removed from ${selected.name}`);
+                else if (action === 'clear') toast('Back to automatic');
+                else toast.success(`${LOCAL_ROLE_LABEL[role] || 'Assigned'} · ${selected.name}`);
+                await loadLocal(selected, { quiet: true });
+                // The artist's Rekordbox playlist follows this set on the next sync.
+                setProjectionToken((n) => n + 1);
+                return res?.track ?? null;
+            } catch (e) {
+                console.error('[ArtistHub] track assignment failed', e);
+                toast.error(linksErrorMessage(e, 'Could not change that assignment.'));
+                return null;
+            }
+        },
+        [loadLocal, selected]
+    );
 
     // A catalogue may only be read for an artist the store actually holds — that is a
     // favourite, or one already bound to an account. A browse row for an artist nobody
@@ -955,8 +956,10 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
         enabled: scEnabled,
     });
 
-    // A link change flips `sc_linked` on the rows behind the detail view.
+    // A link change flips `sc_linked` on the rows behind the detail view, and makes a
+    // different account's links readable — the strip re-reads them.
     const handleLinkChanged = useCallback(() => {
+        setLinksRefreshToken((n) => n + 1);
         loadHub(searchTerm.trim());
         if (suggestTab === SUGGEST_TAB_ALL) {
             loadBrowse({ query: searchTerm.trim(), sort: browseSort, offset: 0, append: false });
@@ -987,8 +990,8 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                                 <span className="truncate">{selected.name}</span>
                             </h1>
                             <ArtistDetailSummary
-                                localShown={filteredTracks.length}
-                                localTotal={tracks.length}
+                                localShown={localTotal}
+                                localTotal={localTotal}
                                 catalogue={catalogue}
                                 scEnabled={scEnabled}
                             />
@@ -1072,16 +1075,18 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                     actions={detailActions}
                     scEnabled={scEnabled}
                     disabledReason={scDisabledReason}
-                    tracksLoading={tracksLoading}
-                    localTotal={tracks.length}
+                    linksDisabledReason={linksFavouriteOnlyReason(selected?.name)}
+                    linksRefreshToken={linksRefreshToken}
                 >
-                    <TrackTable
-                        tracks={filteredTracks}
+                    <LocalTracksPanel
+                        artist={selected}
+                        local={local}
+                        loading={tracksLoading}
+                        trackFilter={trackFilter}
                         onSelectTrack={onSelectTrack}
                         onEditTrack={onEditTrack}
-                        onPlay={onPlayTrack}
-                        playlistId={`ARTISTS_${selected.collection_id}`}
-                        variant="embedded"
+                        onPlayTrack={onPlayTrack}
+                        onAssign={handleAssign}
                     />
                 </ArtistDetail>
             ) : (
