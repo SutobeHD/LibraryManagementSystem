@@ -22,6 +22,8 @@ Edited file → relevant pytest target:
 | `app/usb_pdb.py` | `pytest tests/test_pdb_structure.py -v` |
 | `app/usb_one_library.py` | `pytest tests/test_onelibrary_wal_flush.py tests/test_usb_relocate.py -v` |
 | `app/soundcloud_*.py` | `pytest tests/test_soundcloud_api.py tests/test_soundcloud_log_redaction.py -v` |
+| `app/soundcloud_downloader.py`, `app/download_registry.py` | `pytest tests/test_soundcloud_download_recognition.py tests/test_soundcloud_downloader_security.py tests/test_download_registry.py -v` |
+| `app/artist_store/*.py`, `app/musicbrainz_client.py` | `pytest tests/test_artist_*.py tests/test_musicbrainz_client.py -v` |
 | `app/phrase_db_writer.py` | `pytest tests/test_phrase_db_writer.py -v` |
 | `app/analysis_*.py`, `app/anlz_*.py`, `app/phrase_generator.py` | `pytest tests/test_analysis.py -v` |
 | Anything else / wide refactor | `pytest -v` (full suite) |
@@ -43,7 +45,7 @@ The frontend uses node's experimental VM modules + Mocha-style runners for state
 ```bash
 node --import ./frontend/src/audio/dawState/dawReducer.test.resolver.mjs --test frontend/src/audio/dawState/dawReducer.test.js   # DAW reducer — needs its resolver for extensionless imports
 node --import ./frontend/src/components/artistHub/useArtistCatalogue.test.resolver.mjs --test frontend/src/components/artistHub/useArtistCatalogue.test.js   # artist-hub catalogue hook — needs its OWN resolver
-node --test frontend/src/api/scRefreshClassification.test.js frontend/src/components/artistHub/mergeCopy.test.js frontend/src/components/artistHub/catalogueCopy.test.js frontend/src/components/artistHub/discoveryCopy.test.js   # plain suites, no resolver
+node --test $(find frontend/src -name '*.test.js' ! -name 'dawReducer.test.js' ! -name 'useArtistCatalogue.test.js')   # every plain suite, discovered like CI — a listed set is how suites stopped running
 ```
 
 **Three commands, not one.** The two resolvers must never be co-loaded: `register()` installs a hook process-wide, and the artistHub one short-circuits `react` to a fake hooks runtime and `artistCatalogueApi` to a stub for **every** module in that process, not just its own suite.
@@ -52,7 +54,8 @@ Known test files:
 - `frontend/src/audio/dawState/dawReducer.test.js` — DAW reducer transitions (resolver: `dawReducer.test.resolver.mjs`)
 - `frontend/src/components/artistHub/useArtistCatalogue.test.js` — one batch download's lifecycle in the catalogue hook; the shipped regression was `download()` guarding its reset with `load`'s fetch counter, so a mid-run Update pinned the panel (resolver: `useArtistCatalogue.test.resolver.mjs`, plus its `…resolver-impl` / `…api-stub` / `…fake-react` shims)
 - `frontend/src/api/scRefreshClassification.test.js` — the three-way SC-refresh verdict (sc-expired / session-dead / transient)
-- `frontend/src/components/artistHub/{mergeCopy,catalogueCopy,discoveryCopy}.test.js` — pure copy builders
+- `frontend/src/components/artistHub/{mergeCopy,catalogueCopy,discoveryCopy,linksCopy}.test.js`, `frontend/src/components/downloads/recognitionCopy.test.js` — pure copy builders
+- `frontend/src/utils/openExternal.test.js` — only a plain http(s) link reaches the system opener
 - Plus the `.test.resolver*.mjs` / `.test.api-stub.mjs` / `.test.fake-react.mjs` files, which are module-resolution + runtime shims (don't run directly, they support the above)
 
 ### E2E — Tauri WebDriver
@@ -71,7 +74,7 @@ pytest -v
 cargo test --manifest-path src-tauri/Cargo.toml
 node --import ./frontend/src/audio/dawState/dawReducer.test.resolver.mjs --test frontend/src/audio/dawState/dawReducer.test.js
 node --import ./frontend/src/components/artistHub/useArtistCatalogue.test.resolver.mjs --test frontend/src/components/artistHub/useArtistCatalogue.test.js
-node --test frontend/src/api/scRefreshClassification.test.js frontend/src/components/artistHub/mergeCopy.test.js frontend/src/components/artistHub/catalogueCopy.test.js frontend/src/components/artistHub/discoveryCopy.test.js
+node --test $(find frontend/src -name '*.test.js' ! -name 'dawReducer.test.js' ! -name 'useArtistCatalogue.test.js')
 ```
 
 E2E only on explicit request — it requires the driver running.

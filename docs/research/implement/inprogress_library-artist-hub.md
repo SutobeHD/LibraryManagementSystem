@@ -466,7 +466,7 @@ Resolves the remaining design OQs: **OQ7** finish the stubbed `app/sidecar.py:39
 | T15 | Wrong artist's profiles shown (name collision on MusicBrainz / SC search) | MB only auto-binds through the linked SC permalink URL relation (exact); a name search yields **candidates** the user confirms; SC account search only **suggests** — linking stays a click | `test_mb_name_match_never_autobinds`, `test_sc_candidates_never_link` |
 | T16 | Manual assignment points at a vanished / re-used content id | Assignment row snapshots title + artist; a missing id is listed as `assigned_missing`, never silently re-pointed; a re-used id (title snapshot unrelated to the track now at that id, whole-word containment either way) = `assigned_missing` reason `replaced`, a stale exclusion stops applying; exclude wins over every automatic match | `tests/test_artist_attribution.py` |
 | T17 | Widening the desktop capability (`shell:allow-open`) lets page JS open arbitrary programs | Permission only reaches the plugin's `open` command; scope left at the 2.3.5 default regex (http(s)/mailto/tel) — no custom `open` config, no `with` program; nothing else added | config review; `openExternal.test.js` refuses non-http(s) before any invoke |
-| T18 | Download renames a track on a guess — wrong artist born into the file and the library | Only HIGH reaches the tags: prefix = credited artist, prefix names a known artist, a known artist's own spelling (alias / fold-equal, unambiguous), uploader = the artist's bound SC account. Unknown prefix → suggestion only, applied by the user through the existing track editor route. A version phrase on either side of the dash is never a credit. Save path unchanged | `tests/test_artist_recognizer.py` (T39, T40) |
+| T18 | Download renames a track on a guess — wrong artist born into the file and the library | Only HIGH reaches the tags: prefix = credited artist, prefix names a known artist, a known artist's own spelling (alias / fold-equal, unambiguous), uploader = the artist's bound SC account. Unknown prefix → suggestion only, applied by the user through `POST /api/soundcloud/downloads/{sc_id}/names` — registry-linked track only, still the downloaded file, `db_lock`, live mode refused while Rekordbox runs. A version phrase on either side of the dash is never a credit. Save path unchanged | `tests/test_artist_recognizer.py` (T39, T40), `tests/test_download_names_route.py` (T44) |
 | T19 | Recognition error or slow lookup costs the download | Hook wrapped: any exception → logged, tags = SoundCloud's fields as before, download continues. Pure reads (artists.db snapshot + in-memory library artists), no network, once per download | `tests/test_soundcloud_download_recognition.py` (T41) |
 
 ### Residual risk
@@ -539,10 +539,11 @@ First open of the Artists tab runs the import and shows a one-time "N alias grou
   - `POST /api/artists/{id}/links/refresh` — SC profile + web-profiles + bio, MusicBrainz; per-source status; MB name candidates when unanchored.
   - `POST /api/artists/{id}/links` `{url}` · `POST /api/artists/{id}/links/remove` `{url_key}` · `POST /api/artists/{id}/links/restore` — manual add, hide/delete, unhide.
   - `POST /api/artists/{id}/links/musicbrainz` `{mbid}` / `DELETE …/links/musicbrainz` — confirm / drop a MusicBrainz match.
-- New 2026-09-26 (owner refinement 2, M5): no new route.
+- New 2026-09-26 (owner refinement 2, M5):
   - `GET /api/soundcloud/tasks` — each task gains `recognition`: `{raw_artist, raw_title, artist, title, changed, corrections[], suggestion?{artist, title, reason}, credits[{name, role, known, collection_id, canonical, stored, favourite, library_tracks}]}`; the task's `artist`/`title` become the tagged names.
   - Artist catalogue rows: `match_method` gains `downloaded` (registry `sc_track_id → local_track_id`, id still in the library).
-  - Applying a suggestion = the existing `POST /api/track/{tid}` `{Artist, Title}` (library row + file tags).
+  - `POST /api/soundcloud/downloads/{sc_track_id}/names` `{artist, title}` — apply a suggestion / undo (raw names). Registry-linked library track only; 404 unknown, 409 import pending / another file now / library not loaded / Rekordbox running (live); diff + write under one `db_lock()`; file tags on `POST /api/track/{tid}`'s rules; registry row + tasks (`recognition.applied`) also on `no_change`. `POST /api/track/{tid}` could not do it: no Title, no registry, no tasks.
+  - `live_database.update_track_metadata` handles `Title` (was ignored).
   - `GET /api/artists/{id}/soundcloud/candidates` — session-gated SC user search (1 call) to **suggest** the account to link.
 
 ### Frontend (React)
@@ -552,7 +553,7 @@ First open of the Artists tab runs the import and shows a one-time "N alias grou
 - Settings: per-artist default sync mode (Auto / Review / Off), background-sync on/off.
 
 - New 2026-09-26: `artistHub/ArtistLinks.jsx` (links strip: find / add / hide / restore, MB confirm, SC account suggestions), local panel grouped by role with exclude / re-role / "Add tracks" search, TrackTable `contextActions` prop + app-wide "Artist zuordnen…" item, `utils/openExternal.js`.
-- New 2026-09-26 (2): Download Manager task card — recognition line (per credit: known / favourite / new + role), "Name korrigiert" before → after, a suggestion with "Übernehmen" (once the track is imported) / "Ignorieren".
+- New 2026-09-26 (2): Download Manager task card — recognition line (per credit: known / favourite / new + role), "Name korrigiert" before → after, a suggestion with "Übernehmen" (once the track is imported) / "Ignorieren", then "Übernommen" + "Rückgängig" (`downloads/RecognitionPanel.jsx`, copy in `downloads/recognitionCopy.js`).
 
 ### Tauri (Rust commands)
 
@@ -615,6 +616,7 @@ No new stdout markers.
 | T41 | py | `tests/test_soundcloud_download_recognition.py` | tags written with the recognized names; recognition error → SoundCloud's fields, download continues; task carries `recognition` | T-29, Threat T19 |
 | T42 | py | `tests/test_artist_catalogue.py` | a registry-linked download counts as owned (`downloaded`) though titles differ; a local id that left the library does not | T-30 |
 | T43 | js | `frontend/src/components/downloads/recognitionCopy.test.js` | recognition lines never claim a known artist, a correction or a suggestion the payload lacks | T-31 |
+| T44 | py | `tests/test_download_names_route.py` | names route gated; only a registry-linked track, still the downloaded file; 409 import pending / Rekordbox running (live); only differing fields under `db_lock`; tags setting-gated, cover kept, tag error never a 500; registry + tasks carry the names, also on `no_change`; undo | T-31, Threats T3 T16 T18 |
 
 ## Task Queue
 
@@ -660,15 +662,15 @@ No new stdout markers.
 - [x] **T-24:** local attribution — `app/artist_store/attribution.py` + schema v3 `track_assignments`; `local-tracks` routes; projection membership switches to it — tests T30–T32 — **DONE** 2026-09-26 (`36f0434`, routes `f1a38fe`). Route review found a re-used id carried a manual row onto another recording (T16 only covered the vanished half) — title snapshot now witnesses, typed lookup errors so a bug is a 500 (`bad83a4`).
 - [x] **T-25:** frontend links strip + `openExternal` + `shell:allow-open` — tests T37, T38 — **DONE** 2026-09-26 (`e387e36`, `81c8ea6`). E2E (browser dev mode, XML fixture): manual link canonicalised, `javascript:` refused, chip opens the canonical URL, MusicBrainz confirm → 18 profile links.
 - [x] **T-26:** frontend local panel by role, exclude / re-role / Add tracks, TrackTable `contextActions` + app-wide "Artist zuordnen…" — tests T38 — **DONE** 2026-09-26 (`81c8ea6`). E2E caught the half-width TrackTable squeezing Title + Artist to 0 px (`table-fixed` + global all-columns default, pre-existing) — the panel now keeps its own column set.
-- [ ] **T-27:** doc sync (`backend-index`, `frontend-index`, `rust-index`, `FILE_MAP`, `SECURITY`, `MAP*`, `CHANGELOG`) — `SECURITY`, `architecture`, `CHANGELOG`, `MAP*` in `5db5254`; index docs pending.
+- [x] **T-27:** doc sync (`backend-index`, `frontend-index`, `rust-index`, `FILE_MAP`, `SECURITY`, `MAP*`, `CHANGELOG`) — **DONE** 2026-09-26 (`5db5254`, index docs `f6c443b`). The sync found `safeExternalUrl` letting IPv4 hosts through (`https://192.168.1.10/`) — fixed `3d4796f`.
 
 **M5 — owner refinement 2 2026-09-26: download recognizer (same branch, PR #58)**
 
-- [ ] **T-28:** `app/artist_store/recognizer.py` — credit split (label metadata > prefix > uploader, version phrases never split), `registry.ArtistLookup` (store + library, fold-tolerant, ambiguous = unknown), canonical spelling, bound uploader account (`schema.collection_for_remote`), per-credit known / favourite / role — tests T39, T40
-- [ ] **T-29:** downloader hook — `_do_download` recognizes between metadata fetch and tag write; `_apply_sc_metadata` takes the recognized names; task carries `recognition`; registry row keeps the tagged names; any failure → SoundCloud's fields — tests T41
-- [ ] **T-30:** catalogue owned-match via the download registry (`downloaded`) — tests T42
-- [ ] **T-31:** frontend — Download Manager recognition line + "Übernehmen" (existing `POST /api/track/{tid}`) / "Ignorieren" — tests T43
-- [ ] **T-32:** doc sync (`FILE_MAP`, `backend-index`, `frontend-index`, `architecture`, `CHANGELOG`, `MAP*`)
+- [x] **T-28:** `app/artist_store/recognizer.py` — credit split (label metadata > prefix > uploader, version phrases never split), `registry.known_artists` + a tiered lookup (exact → case → fold, ambiguous = unknown), canonical spelling, bound uploader account (`schema.collection_for_remote`), per-credit known / favourite / role — tests T39, T40 — **DONE** 2026-09-26 (`b4d7da3`). ≈135 ms per download at 5000 stored artists, most of it `_store_index`'s per-collection alias reads (N+1, shared with hub/browse — follow-up proposed).
+- [x] **T-29:** downloader hook — `_do_download` recognizes between metadata fetch and tag write; `_apply_sc_metadata` takes the recognized names; task carries `recognition`; registry row keeps the tagged names; any failure → SoundCloud's fields — tests T41 — **DONE** 2026-09-26 (`9274b50`; tagging step extracted to `_tag_download` so it tests without a network).
+- [x] **T-30:** catalogue owned-match via the download registry (`downloaded`) — tests T42 — **DONE** 2026-09-26 (`69955b8`). Catalogue route tests now use a throwaway registry — they read the developer's own before.
+- [x] **T-31:** frontend — Download Manager recognition line + "Übernehmen" / "Rückgängig" / "Ignorieren" — tests T43, T44 — **DONE** 2026-09-26 (route `ec35e52`, UI `b0089b0`). The planned reuse of `POST /api/track/{tid}` could not work (no Title, no registry, no tasks) — own route, reviewed by route-architect (39 mutations caught). E2E: UI against a mocked task feed; route by pytest.
+- [x] **T-32:** doc sync (`FILE_MAP`, `backend-index`, `frontend-index`, `architecture`, `SECURITY`, `CHANGELOG`, `MAP*`) — **DONE** 2026-09-26: `CHANGELOG`, `architecture`, `SECURITY`, `MAP*` with the research doc; `FILE_MAP` / `backend-index` / `frontend-index` in the doc sync right after.
 
 ## Review
 

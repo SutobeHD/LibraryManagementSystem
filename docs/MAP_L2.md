@@ -257,12 +257,26 @@ artist_store.projection — mirror favourite collections into Rekordbox (T-7).
 - `sync()` — Mirror the favourites of ``kind`` into Rekordbox.
 - `status()` — Projection state for the panel.
 
+### `app/artist_store/recognizer.py`
+
+artist_store.recognizer — who a downloaded track is by, and the names its file gets.
+
+- `Credit` — One name on the track, as the hub knows it.
+- `  Credit.as_dict()`
+- `Suggestion` — A correction nothing vouches for — shown, never written.
+- `  Suggestion.as_dict()`
+- `Recognition`
+- `  Recognition.changed()`
+- `  Recognition.as_dict()`
+- `recognize()` — The names a SoundCloud download should carry, and who is on it.
+
 ### `app/artist_store/registry.py`
 
 artist_store.registry — library artists into the store, favourites, Tier-1 backlog (T-4).
 
 - `resolve_library_artists()` — Give every distinct library artist name a stable collection in the store.
 - `library_artist_counts()` — ``collection_id`` -> owned track count, alias variants summed.
+- `known_artists()` — Every artist the hub knows — stored or only in the library — once each.
 - `add_favourite_artist()` — Favourite an existing collection.
 - `remove_favourite_artist()` — Un-favourite.
 - `favourite_artist_by_name()` — Favourite an artist the UI knows only by name (a backlog row); returns its id.
@@ -301,6 +315,7 @@ artist_store.schema — sidecar DB + migration runner for the Artist Hub (T-3).
 - `set_link()` — Bind a collection to a provider account (SoundCloud today).
 - `get_link()`
 - `remove_link()`
+- `collection_for_remote()` — The one collection bound to a provider account, or None — also when two are.
 - `set_sync_mode()`
 - `get_sync_mode()` — Sync mode, defaulting to ``review`` for a collection that has no row yet.
 - `get_sync_state()`
@@ -511,10 +526,12 @@ Download Registry — SQLite-based deduplication & analysis history log.
 - `init_registry()` — Create DB schema if it doesn't exist.
 - `get_current_device_id()` — Expose device ID so the frontend can filter history to this device.
 - `get_record()` — Return full DB row for a SoundCloud track ID, or None if not present.
+- `local_track_ids()` — ``sc_track_id`` -> the library id this app imported it as, for the given ids.
 - `is_already_downloaded()` — O(1) dedup check by SoundCloud track ID.
 - `find_by_hash()` — Content-based dedup.
 - `register_download()` — Insert or update a download record.
 - `update_analysis()` — Store DSP analysis results and mark the record as 'analyzed'.
+- `set_names()` — Store the names a download carries now, after the user applied or undid a suggestion.
 - `mark_failed()` — Mark a download as permanently failed.
 - `delete_entry()` — Remove a registry entry (e.g.
 - `get_history()` — Paginated history log, newest-first.
@@ -736,6 +753,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `ArtistLinkRemoveReq` — One link to take off, by `url_key`: a manual link is deleted, a fetched one hidden.
 - `ArtistMusicBrainzReq` — The MusicBrainz artist the user picked out of the refresh's candidates.
 - `ArtistTrackAssignReq` — One manual correction to an artist's local tracks.
+- `DownloadNamesReq` — Artist/Title for a downloaded track: a taken suggestion, or the raw names an undo restores.
 - `stream_audio()` — Streams audio file with HTTP Range support — required for browser seeking.
 - `get_multiband_waveform()` — Returns 3-band waveform data for professional visualization.
 - `FileRevealReq`
@@ -929,6 +947,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `soundcloud_download_playlist()` — Enqueue download for every track in a SoundCloud playlist.
 - `get_soundcloud_tasks()` — Poll all active download tasks.
 - `get_soundcloud_task_status()` — Get status for a specific download task.
+- `soundcloud_download_names()` — Rename a downloaded track: library row, file tags, registry row, Download Manager tasks.
 - `get_download_history()` — Paginated analysis history log for all downloaded tracks.
 - `get_download_stats()` — Aggregate statistics: total downloads, analyzed, failed, device count, date range.
 - `check_already_downloaded()` — Fast O(1) deduplication check.
@@ -1239,6 +1258,7 @@ SoundCloud Downloader — Dedup-aware download pipeline with two acquisition pat
 - `SoundCloudDownloader` — Queue-based manager for SoundCloud downloads.
 - `  SoundCloudDownloader.download_track()` — Queue a track for download.
 - `  SoundCloudDownloader.get_task_status()`
+- `  SoundCloudDownloader.note_names()` — Every task of one SoundCloud track shows the names the track carries now.
 - `  SoundCloudDownloader.cleanup_processes()` — No-op: kept for API compatibility.
 
 ### `app/templates/build_template.py`
@@ -1706,6 +1726,19 @@ useTrackLoader — Effect hook that hydrates DAW state when activeTrack changes.
 
 - `useTrackLoader()`
 
+### `frontend/src/components/downloads/recognitionCopy.js`
+
+Copy for the download recognizer (artist hub T-31): who a downloaded track is by, whether the library knows them, and which names the file …
+
+- `formatNames()` — Copy for the download recognizer (artist hub T-31): who a downloaded track is by, whether the libra…
+- `creditChips()` — One chip per credited name: `{ key, label, title, tone }`, tone one of `favourite` / `known` / `new…
+- `correctionLine()` — export function recognitionHeadline(recognition) { const chips = creditChips(recognition); if (!chi…
+- `suggestionState()` — The pending suggestion for a task, or null.
+
+### `frontend/src/components/downloads/recognitionCopy.test.js`
+
+node:test — `node --test frontend/src/components/downloads/recognitionCopy.test.js`
+
 ### `frontend/src/components/editor/index.js`
 
 Editor Components Index Exports all non-destructive editor components
@@ -2073,6 +2106,10 @@ ExportModal — Project Export UI Features: - Reads the user's default export fo
 ### `frontend/src/components/daw/WaveformOverview.jsx`
 
 WaveformOverview — Full-track mini-map with draggable viewport window Renders a downsampled mono/3-band waveform of the entire track via Wa…
+
+### `frontend/src/components/downloads/RecognitionPanel.jsx`
+
+RecognitionPanel — the download recognizer's answer on a Download Manager task (artist hub T-31): who is credited and whether the library k…
 
 ### `frontend/src/components/editor/EditorBrowser.jsx`
 
@@ -2602,9 +2639,12 @@ Artist-Hub catalogue tests (T-14 — app/artist_store/catalogue.py).
 - `test_remix_is_reported_missing_even_when_the_original_is_owned()`
 - `test_owned_remix_matches_its_own_remote_listing()`
 - `test_empty_library_reports_everything_missing()`
+- `test_a_download_this_app_imported_is_owned_however_its_title_drifted()` — T-30: the registry link is identity; the recognizer may have renamed the file.
+- `test_a_download_whose_track_left_the_library_is_not_owned()`
 - `test_catalogue_ties_buckets_and_diff_together()`
 - `test_second_call_is_served_from_cache_without_refetching()`
 - `test_cache_holds_the_catalogue_not_the_diff()` — The local side moves whenever the library does, so the cached hit must re-diff.
+- `test_the_download_lookup_sees_the_diffed_ids_and_decides_ownership()`
 - `test_expired_cache_refetches()`
 - `test_force_refresh_bypasses_the_cache()`
 - `test_cache_is_ignored_after_rebinding_to_another_account()`
@@ -2643,6 +2683,7 @@ Artist-Hub SoundCloud route tests — binding, catalogue, batch download (T-13/T
 - `test_missing_credentials_return_not_connected()` — No token and nothing cached — say so, never hand back an empty catalogue.
 - `test_expired_session_returns_not_connected()`
 - `test_deleted_soundcloud_account_returns_artist_gone()` — A dead artist 404s legitimately — that is not a "please log in again".
+- `test_a_track_this_app_downloaded_counts_as_owned_by_identity()` — T-30: the registry's sc_track_id -> local id link beats any title drift.
 - `test_catalogue_splits_into_role_buckets_and_reports_the_budget()`
 - `test_catalogue_fetch_carries_a_call_budget()`
 - `TestForcedRefreshCooldown` — ``refresh=true`` skips the TTL cache and spends a whole budget — once per window.
@@ -3119,6 +3160,31 @@ Artist-Hub projection tests (T-7 — app/artist_store/projection.py).
 - `test_every_master_db_write_goes_through_the_locked_facade()` — `db.active_db.<mutator>` bypasses `_db_write_lock` — an AST walk, not a habit.
 - `test_status_without_a_library_still_renders()`
 
+### `tests/test_artist_recognizer.py`
+
+Download recognizer tests (T-28 — app/artist_store/recognizer.py, rows T39 + T40).
+
+- `store()`
+- `test_a_label_upload_naming_a_known_artist_is_split()`
+- `test_an_unknown_prefix_is_only_a_suggestion()`
+- `test_a_version_phrase_is_never_a_credit()`
+- `test_the_uploader_repeating_their_name_is_stripped()`
+- `test_a_handle_repeated_as_a_spelled_name_takes_the_spelling()`
+- `test_label_metadata_wins_over_uploader_and_prefix()`
+- `test_no_name_at_all_stays_unknown_and_is_never_a_known_artist()`
+- `test_without_a_library_the_store_still_vouches()`
+- `test_a_known_spelling_is_taken()`
+- `test_a_merged_alias_resolves_to_its_artist()`
+- `test_the_bound_account_names_the_artist()`
+- `test_a_foreign_account_with_the_same_title_is_not_bound()`
+- `test_an_ambiguous_fold_is_left_alone()`
+- `test_credits_carry_known_favourite_and_the_role_on_their_page()`
+- `test_a_new_artist_and_a_guest_are_reported_new()`
+- `test_version_words_are_peeled_off_a_remixer()`
+- `test_their_own_remix_of_their_own_track_stays_primary()`
+- `test_as_dict_is_the_task_payload()`
+- `test_control_characters_never_reach_the_names()` — A tag (and the undo pair the card sends back) never carries a control character.
+
 ### `tests/test_artist_routes.py`
 
 Artist-Hub route tests (T-8 — app/main.py, plan test row T13).
@@ -3486,6 +3552,47 @@ taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py).
 - `test_empty_profile_id_rejected()`
 - `test_list_and_delete_profile()`
 
+### `tests/test_download_names_route.py`
+
+``POST /api/soundcloud/downloads/{sc_track_id}/names`` (artist hub T-31, Threat T18).
+
+- `LockProbe` — Stands in for ``main.db_lock``: takes the real lock and counts how deep we are.
+- `FakeLibrary` — The slice of ``app.database.db`` the route touches.
+- `  FakeLibrary.get_track_details()`
+- `  FakeLibrary.update_tracks_metadata()`
+- `TagProbe` — ``audio_tags.write_tags`` / ``load_artwork`` without a file.
+- `  TagProbe.write_tags()`
+- `  TagProbe.load_artwork()`
+- `registry_file()`
+- `settings()` — Never the developer's settings.json; a test flips keys on the returned dict.
+- `lock()`
+- `library()`
+- `tags()`
+- `downloader()` — The task the recognizer left behind, plus another track's task that must not move.
+- `untouched()` — After the test: no library write, no tag write, registry + tasks as they were.
+- `test_without_the_session_it_is_401_and_nothing_moves()`
+- `test_an_unauthenticated_caller_learns_nothing_about_the_body()` — Auth runs before body validation: a bad body without a session is 401, not 422.
+- `test_an_id_that_is_not_a_soundcloud_track_id_is_400()`
+- `test_twenty_digits_is_still_an_id()`
+- `test_names_that_cannot_be_a_tag_are_422()`
+- `test_a_track_this_app_never_downloaded_is_404()`
+- `test_a_row_without_a_usable_library_id_is_409()`
+- `test_a_padded_library_id_reads_as_the_catalogue_reads_it()` — Same token rule as ``download_registry.local_track_ids`` (the "downloaded" match).
+- `test_no_loaded_library_is_409()`
+- `test_a_library_id_that_no_longer_resolves_is_404()`
+- `test_applying_the_suggestion_moves_library_tags_registry_and_task()`
+- `test_only_the_field_that_differs_is_written()`
+- `test_names_are_stripped_and_512_characters_still_fit()`
+- `test_names_the_track_already_has_leave_library_and_file_but_settle_the_card()` — The track carries these names already, so the card must stop offering them.
+- `test_an_id_now_naming_another_file_is_refused()` — Threat T16: a reload handed the imported id to another recording.
+- `test_the_downloaded_file_itself_is_renamed()`
+- `test_a_running_rekordbox_blocks_only_a_live_write()`
+- `test_with_tag_writing_off_the_file_is_left_alone()`
+- `test_a_failed_tag_write_never_fails_the_request()` — The library already carries the names — a 500 here would read as "nothing changed".
+- `test_a_track_without_a_cover_is_tagged_without_one()`
+- `test_a_failed_library_write_is_500_and_nothing_else_moves()`
+- `test_undo_puts_the_raw_names_back_everywhere()`
+
 ### `tests/test_download_registry.py`
 
 Tests for app/download_registry.py — SoundCloud download dedup/history DB.
@@ -3498,6 +3605,13 @@ Tests for app/download_registry.py — SoundCloud download dedup/history DB.
 - `test_delete_entry_commits()`
 - `test_history_search_and_stats()`
 - `test_many_calls_persist_no_corruption()` — A burst of open/commit/close cycles must all land (proves _conn closes
+- `test_local_track_ids_maps_only_imported_rows()` — The artist catalogue's "downloaded" match (artist hub T-30).
+- `test_local_track_ids_reads_past_the_parameter_ceiling()`
+- `test_local_track_ids_never_creates_the_registry()`
+- `test_set_names_rewrites_only_the_names()` — Apply / undo of a recognizer suggestion (artist hub T-31).
+- `test_set_names_binds_its_values()`
+- `test_set_names_on_a_row_that_is_not_there_is_false()`
+- `test_set_names_on_an_unreadable_registry_is_false_and_logged()`
 
 ### `tests/test_external_track_match.py`
 
@@ -4340,6 +4454,23 @@ Tests for GET /api/soundcloud/auth-status.
 - `test_degrades_when_keyring_raises()` — A broken keyring backend (locked session, missing libsecret) must return
 - `test_route_survives_a_raising_token_status()` — Belt-and-braces: even if the store itself throws, the route answers 200.
 - `test_response_never_contains_token_material()` — Belt-and-suspenders: the payload must never leak a stored secret.
+
+### `tests/test_soundcloud_download_recognition.py`
+
+Downloader hook for the artist recognizer (artist hub T-29, plan row T41).
+
+- `store()`
+- `no_library()` — Whatever another test left in the global library, only the store vouches here.
+- `written()` — Every tag write, instead of touching a file.
+- `downloader()`
+- `test_the_file_is_tagged_with_the_recognized_names()`
+- `test_an_unknown_prefix_leaves_the_tags_and_offers_a_suggestion()`
+- `test_a_recognizer_failure_keeps_soundclouds_names()`
+- `test_no_metadata_means_no_tagging_and_no_recognition()`
+- `test_without_overrides_the_tags_are_what_they_always_were()`
+- `test_the_library_is_consulted_only_when_loaded()`
+- `test_note_names_moves_every_task_of_the_track_and_marks_what_was_applied()` — Apply / undo from the Download Manager (artist hub T-31).
+- `test_note_names_for_a_track_without_tasks_touches_nothing()`
 
 ### `tests/test_soundcloud_downloader_security.py`
 

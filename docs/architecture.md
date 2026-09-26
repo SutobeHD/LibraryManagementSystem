@@ -183,6 +183,23 @@ User confirms sync + download
   → POST /api/soundcloud/sync (marks matches in library)
   → POST /api/soundcloud/download (triggers yt-dlp download per track)
   → Frontend polls GET /api/soundcloud/task/{task_id} for progress
+
+Every download, tagging step (artist hub T-29, 2026-09-26)
+  → soundcloud_downloader._tag_download(): _fetch_sc_metadata() (v2 payload)
+  → _recognize_download() → artist_store/recognizer.recognize(sc_meta, db|None)
+      credited artist: publisher_metadata.artist > "X - Title" prefix > uploader
+      known? registry.known_artists() (store + aliases + favourites + library
+        spellings) exact → case → fold_key, ambiguous = unknown; the uploader's
+        account bound to a collection (schema.collection_for_remote)
+      HIGH only → artist/title changed; unknown prefix → suggestion, not applied
+      never raises — failure = SoundCloud's names, download continues
+  → _apply_sc_metadata(..., artist=, title=) → audio_tags.write_tags
+  → task["recognition"] (credits, corrections, suggestion) → Download Manager
+    RecognitionPanel; registry row keeps the tagged names
+  → "Übernehmen"/"Rückgängig": POST /api/soundcloud/downloads/{sc_id}/names
+    (only a registry-linked local track; db_lock + file tags)
+  → artist catalogue: download_registry.local_track_ids() → match "downloaded"
+    (a track fetched from "missing" is owned by identity, not title similarity)
 ```
 
 ### 7. USB Sync

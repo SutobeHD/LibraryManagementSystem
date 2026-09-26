@@ -131,6 +131,19 @@
     Links spotted in a bio are marked as unverified. Add your own, hide wrong
     ones (a hidden link stays hidden). "Find their SoundCloud" suggests accounts
     by name for an artist that is not linked yet — you pick the right one.
+  - **Downloads recognise the artist and get the right names.** Every SoundCloud
+    download now checks who it is by — label metadata, then `Artist - Title` in
+    the title, then the uploader — against your artists (favourites, merged
+    spellings, the SoundCloud account an artist is linked to) and your library.
+    A label upload of an artist you have lands as `Boys Noize — Starter`, not
+    `Boysnoize Records — Boys Noize - Starter`; a re-cased name takes your
+    library's spelling. Only certain corrections are applied on their own; a
+    split nothing vouches for (an artist you do not have yet) shows up as a
+    suggestion on the download — "Übernehmen" writes it to the library and the
+    file, "Rückgängig" puts SoundCloud's names back. The Download Manager shows
+    per download who is credited, as what (artist / remix / original / feat.),
+    and whether they are a favourite, known or new. A track downloaded from an
+    artist's "missing" list now counts as owned even when its title changed.
   - Fixed: external links never opened in the desktop app — the shell plugin
     intercepted them but was not allowed to open anything (`shell:allow-open`
     was missing from the Tauri capability). This also fixes "Auf SoundCloud

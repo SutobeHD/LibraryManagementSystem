@@ -31,6 +31,7 @@
 | `app/artist_store/links.py` | artist_store.links — where to find an artist: their own profiles, classified and ranked. |
 | `app/artist_store/merge.py` | artist_store.merge — duplicate-artist detection, preview, apply and revert (T-5/T-6). |
 | `app/artist_store/projection.py` | artist_store.projection — mirror favourite collections into Rekordbox (T-7). |
+| `app/artist_store/recognizer.py` | artist_store.recognizer — who a downloaded track is by, and the names its file gets. |
 | `app/artist_store/registry.py` | artist_store.registry — library artists into the store, favourites, Tier-1 backlog (T-4). |
 | `app/artist_store/schema.py` | artist_store.schema — sidecar DB + migration runner for the Artist Hub (T-3). |
 | `app/artist_store/sync.py` | artist_store.sync — the idle signal + the background catalogue refresh (T-17). |
@@ -125,6 +126,8 @@
 | `frontend/src/components/daw/useDawProject.js` | useDawProject — Project persistence hook for the DJ Edit DAW Owns: • File input ref used by the hidden <input… |
 | `frontend/src/components/daw/useDawShortcuts.js` | useDawShortcuts — keyboard-shortcut binding for the DJ Edit DAW. |
 | `frontend/src/components/daw/useTrackLoader.js` | useTrackLoader — Effect hook that hydrates DAW state when activeTrack changes. |
+| `frontend/src/components/downloads/recognitionCopy.js` | Copy for the download recognizer (artist hub T-31): who a downloaded track is by, whether the library knows t… |
+| `frontend/src/components/downloads/recognitionCopy.test.js` | node:test — `node --test frontend/src/components/downloads/recognitionCopy.test.js` |
 | `frontend/src/components/editor/index.js` | Editor Components Index Exports all non-destructive editor components |
 | `frontend/src/components/editor/useEditorKeyboard.js` | useEditorKeyboard - Wires global keydown shortcuts for the editor. |
 | `frontend/src/components/editor/useEditorPersistence.js` | useEditorPersistence - .rbep project save / list / load Talks to backend endpoints: - POST /api/projects/save… |
@@ -194,6 +197,7 @@
 | `frontend/src/components/daw/DjEditDaw.jsx` | DjEditDaw — Root container for the DJ Edit DAW. |
 | `frontend/src/components/daw/ExportModal.jsx` | ExportModal — Project Export UI Features: - Reads the user's default export folder from /api/settings (Settin… |
 | `frontend/src/components/daw/WaveformOverview.jsx` | WaveformOverview — Full-track mini-map with draggable viewport window Renders a downsampled mono/3-band wavef… |
+| `frontend/src/components/downloads/RecognitionPanel.jsx` | RecognitionPanel — the download recognizer's answer on a Download Manager task (artist hub T-31): who is cred… |
 | `frontend/src/components/editor/EditorBrowser.jsx` | Ensure we have an array |
 | `frontend/src/components/editor/EditorToolbar.jsx` | EditorToolbar - Top toolbar + edit toolbar for NonDestructiveEditor. |
 | `frontend/src/components/editor/EnvelopeOverlay.jsx` | EnvelopeOverlay - Interactive envelope editor for audio regions Provides draggable nodes for: - Fade-in durat… |
@@ -276,6 +280,7 @@
 | `tests/test_artist_merge_preview.py` | Artist-Hub merge detection + preview tests (T-5 — app/artist_store/merge.py). |
 | `tests/test_artist_merge_routes.py` | Artist-Hub merge + projection route tests (T-8 rest — app/main.py, plan row T13). |
 | `tests/test_artist_projection.py` | Artist-Hub projection tests (T-7 — app/artist_store/projection.py). |
+| `tests/test_artist_recognizer.py` | Download recognizer tests (T-28 — app/artist_store/recognizer.py, rows T39 + T40). |
 | `tests/test_artist_routes.py` | Artist-Hub route tests (T-8 — app/main.py, plan test row T13). |
 | `tests/test_artist_splitting.py` | Tests for artist-name splitting and the artist list it feeds. |
 | `tests/test_artist_store_registry.py` | Artist-Hub registry tests (T-4 — app/artist_store/registry.py). |
@@ -289,6 +294,7 @@
 | `tests/test_cue_beatgrid_persistence.py` | Round-trip tests for the cue / beatgrid sidecar persistence. |
 | `tests/test_database.py` | Tests for `app/database.py`. |
 | `tests/test_db_taste.py` | taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py). |
+| `tests/test_download_names_route.py` | ``POST /api/soundcloud/downloads/{sc_track_id}/names`` (artist hub T-31, Threat T18). |
 | `tests/test_download_registry.py` | Tests for app/download_registry.py — SoundCloud download dedup/history DB. |
 | `tests/test_external_track_match.py` | external_track_match unit tests (external-track-match-unified-module T-3..T-9). |
 | `tests/test_folder_watcher.py` | Tests for app/folder_watcher.py — auto-import folder watcher. |
@@ -326,6 +332,7 @@
 | `tests/test_soundcloud_artist_api.py` | Artist-Hub SoundCloud client tests (T-12 + T-13 — app/soundcloud_api.py). |
 | `tests/test_soundcloud_auth.py` | Tests for `app/soundcloud_auth.py` — token store + silent refresh. |
 | `tests/test_soundcloud_auth_status.py` | Tests for GET /api/soundcloud/auth-status. |
+| `tests/test_soundcloud_download_recognition.py` | Downloader hook for the artist recognizer (artist hub T-29, plan row T41). |
 | `tests/test_soundcloud_downloader_security.py` | Security regression tests for app/soundcloud_downloader. |
 | `tests/test_soundcloud_log_redaction.py` | Regression guard: no SoundCloud log record may carry a `client_id`. |
 | `tests/test_soundcloud_refresh_route.py` | Route tests for the persistent SoundCloud login (T-19). |
