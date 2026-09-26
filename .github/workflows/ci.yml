@@ -108,7 +108,7 @@ jobs:
         run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --no-fail-fast
 
   frontend-lint:
-    name: Frontend — eslint + prettier + build
+    name: Frontend — eslint + prettier + build + node:test
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -140,3 +140,28 @@ jobs:
 
       - name: Build (smoke)
         run: npm run build --prefix frontend
+
+      # node:test suites, blocking — these are behaviour regressions, not style.
+      # The two resolver-backed suites need their own `--import` (Vite's
+      # extensionless imports, and stubs standing in for react/axios), and one
+      # resolver must not be loaded for the other's files, so they run one per
+      # process below. Everything else is discovered instead of listed: a listed
+      # set is how the existing suites ended up never running at all.
+      # Node 20 has no glob support for `--test`, hence `find`.
+      - name: Unit tests — node:test (plain suites)
+        run: |
+          files=$(find frontend/src -name '*.test.js' \
+            ! -name 'dawReducer.test.js' ! -name 'useArtistCatalogue.test.js')
+          test -n "$files" || { echo "no plain node:test suites found"; exit 1; }
+          echo "$files"
+          node --test $files
+
+      - name: Unit tests — dawReducer (node:test)
+        run: >
+          node --import ./frontend/src/audio/dawState/dawReducer.test.resolver.mjs
+          --test frontend/src/audio/dawState/dawReducer.test.js
+
+      - name: Unit tests — artist catalogue hook (node:test)
+        run: >
+          node --import ./frontend/src/components/artistHub/useArtistCatalogue.test.resolver.mjs
+          --test frontend/src/components/artistHub/useArtistCatalogue.test.js

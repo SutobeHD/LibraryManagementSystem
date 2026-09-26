@@ -65,12 +65,16 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 import requests
 
 from . import download_registry as registry
 from .config import FFMPEG_BIN, MUSIC_DIR
+
+if TYPE_CHECKING:
+    from .artist_store.recognizer import Recognition
 
 logger = logging.getLogger(__name__)
 
@@ -395,6 +399,7 @@ def _normalize_track_id(raw) -> str | None:
 def _resolve_stream_via_transcodings(
     sc_track_id: str,
     auth_token: str | None,
+    allow_aggressive: bool = True,
 ) -> dict | None:
     """
     Resolve a signed CDN stream URL via the v2 `media.transcodings[]` array.
@@ -498,13 +503,16 @@ def _resolve_stream_via_transcodings(
     # tries every transcoding — including snipped ones. The user is explicitly
     # opting in via Settings; we surface the resulting file size + duration in
     # the registry so they can see whether they got a preview clip.
+    # `allow_aggressive=False` makes the setting unreachable: the artist batch path
+    # passes it so a per-track opt-in cannot silently become a bulk policy (ToU).
     aggressive = False
-    try:
-        from .services import SettingsManager
+    if allow_aggressive:
+        try:
+            from .services import SettingsManager
 
-        aggressive = bool(SettingsManager.load().get("sc_aggressive_mode", False))
-    except Exception:
-        pass
+            aggressive = bool(SettingsManager.load().get("sc_aggressive_mode", False))
+        except Exception:
+            pass
 
     if aggressive:
         full_transcodings = list(transcodings)
@@ -882,13 +890,34 @@ def _fetch_artwork_bytes(artwork_url: str | None) -> bytes | None:
         return None
 
 
+def _recognize_download(sc_meta: dict) -> "Recognition | None":
+    """Artist recognition for one download (artist hub T-29); None keeps SC's names.
+
+    Decides the Artist/Title the file is born with and who is on it — see
+    ``app/artist_store/recognizer.py``. Never raises: a recognition failure must not
+    cost the download (Threat T19); the tags then say what SoundCloud says, as before.
+    """
+    try:
+        from .artist_store import recognizer
+        from .database import db
+
+        return recognizer.recognize(sc_meta, db if getattr(db, "loaded", False) else None)
+    except Exception as exc:
+        logger.warning("[SC-DL] Artist recognition skipped: %s", exc)
+        return None
+
+
 def _apply_sc_metadata(
     file_path: Path,
     sc_meta: dict,
     sc_playlist_title: str | None,
+    *,
+    artist: str | None = None,
+    title: str | None = None,
 ) -> bool:
     """Write SoundCloud track metadata (title/artist/genre/year/cover/ISRC) onto
-    the downloaded audio file via mutagen.
+    the downloaded audio file via mutagen. ``artist``/``title`` are the recognizer's
+    names when it ran; otherwise SoundCloud's own fields decide, as they always did.
 
     Maps SC fields:
       title          → ID3 TIT2 / MP4 ©nam / Vorbis title
@@ -907,8 +936,8 @@ def _apply_sc_metadata(
     user = sc_meta.get("user") or {}
     pub = sc_meta.get("publisher_metadata") or {}
 
-    artist = pub.get("artist") or user.get("username") or "Unknown Artist"
-    title = pub.get("release_title") or sc_meta.get("title") or file_path.stem
+    artist = artist or pub.get("artist") or user.get("username") or "Unknown Artist"
+    title = title or pub.get("release_title") or sc_meta.get("title") or file_path.stem
     album = pub.get("album_title") or sc_playlist_title or ""
 
     # Year: prefer release_date, fall back to created_at. Both are ISO-8601.
@@ -1033,6 +1062,7 @@ class SoundCloudDownloader:
     Public API:
       download_track(...)    → task_id str  (returns immediately)
       get_task_status(id)    → dict | None
+      note_names(sc_id, …)   → tasks touched (user applied / undid a name correction)
       cleanup_processes()    → atexit hook (no-op — no subprocesses to kill)
     """
 
@@ -1053,6 +1083,7 @@ class SoundCloudDownloader:
         downloadable: bool,
         auth_token: str | None = None,
         sc_playlist_title: str | None = None,
+        allow_aggressive: bool = True,
         on_complete: Callable | None = None,
     ) -> str:
         """
@@ -1074,6 +1105,9 @@ class SoundCloudDownloader:
           downloadable      : Must be True — from SC API 'downloadable' field
           auth_token        : OAuth access token (required for most downloads)
           sc_playlist_title : Optional source playlist name for auto-sort
+          allow_aggressive  : False makes `sc_aggressive_mode` unreachable for this
+                              track. The artist batch path passes False — that setting
+                              is a per-track opt-in, not a bulk policy.
           on_complete       : Optional callback(task_id: str, success: bool, file_path: Path | None)
         """
         task_id = f"sc_{sc_track_id}_{int(time.time())}"
@@ -1193,6 +1227,7 @@ class SoundCloudDownloader:
                     downloadable=downloadable,
                     auth_token=auth_token,
                     sc_playlist_title=sc_playlist_title,
+                    allow_aggressive=allow_aggressive,
                     on_complete=on_complete,
                 )
             except Exception as exc:
@@ -1226,6 +1261,7 @@ class SoundCloudDownloader:
         auth_token: str | None,
         sc_playlist_title: str | None,
         on_complete: Callable | None,
+        allow_aggressive: bool = True,
     ) -> None:
         """Full download + hash + registry pipeline. Runs in a background thread."""
 
@@ -1262,7 +1298,9 @@ class SoundCloudDownloader:
                     )
 
             if source is None:
-                source = _resolve_stream_via_transcodings(sc_track_id, auth_token)
+                source = _resolve_stream_via_transcodings(
+                    sc_track_id, auth_token, allow_aggressive=allow_aggressive
+                )
 
             if source is None:
                 err = (
@@ -1325,22 +1363,13 @@ class SoundCloudDownloader:
                     )
 
             # Step 3b — Write SC metadata + cover art onto the file ────────────
-            # Without this the downloaded file has whatever (often bare) tags
-            # the uploader set, and our ImportManager would fall back to
-            # filename parsing. Pulling SC's authoritative title/artist/genre/
-            # cover here means USB exports build a clean Artist/Album folder
-            # tree and ID3 readers (Rekordbox, Serato, …) show full metadata.
             self._update_task(task_id, status="Tagging", progress=84)
-            sc_meta = _fetch_sc_metadata(sc_track_id, auth_token) or {}
-            if sc_meta:
-                try:
-                    _apply_sc_metadata(final_path, sc_meta, sc_playlist_title)
-                except Exception as exc:
-                    logger.warning(
-                        "[SC-DL] Tag application failed for %s: %s", final_path.name, exc
-                    )
-            else:
-                logger.info("[SC-DL] No v2 metadata for tag-writing on sc_id=%s", sc_track_id)
+            recognition = self._tag_download(
+                task_id, final_path, sc_track_id, auth_token, sc_playlist_title
+            )
+            if recognition is not None:
+                # The registry row keeps the names the file carries.
+                artist, title = recognition.artist, recognition.title or title
 
             file_size = final_path.stat().st_size
             logger.info("[SC-DL] Final size: %d bytes (%s)", file_size, final_path.name)
@@ -1419,6 +1448,45 @@ class SoundCloudDownloader:
             registry.mark_failed(sc_track_id, err)
             if on_complete:
                 on_complete(task_id, False, None)
+
+    def _tag_download(
+        self,
+        task_id: str,
+        final_path: Path,
+        sc_track_id: str,
+        auth_token: str | None,
+        sc_playlist_title: str | None,
+    ) -> "Recognition | None":
+        """Step 3b — SoundCloud's metadata + cover onto the file, under recognized names.
+
+        Without this the file keeps whatever (often bare) tags the uploader set and
+        ImportManager falls back to filename parsing; with it, USB exports build a clean
+        Artist/Album tree and ID3 readers show full metadata. The recognizer decides the
+        Artist/Title first (artist hub T-29) and the task carries its answer for the
+        Download Manager. Returns it — None when SoundCloud sent no metadata or the
+        recognizer failed, and the tags then say what SoundCloud says.
+        """
+        sc_meta = _fetch_sc_metadata(sc_track_id, auth_token) or {}
+        if not sc_meta:
+            logger.info("[SC-DL] No v2 metadata for tag-writing on sc_id=%s", sc_track_id)
+            return None
+        recognition = _recognize_download(sc_meta)
+        if recognition is not None:
+            fields = {"artist": recognition.artist, "recognition": recognition.as_dict()}
+            if recognition.title:
+                fields["title"] = recognition.title
+            self._update_task(task_id, **fields)
+        try:
+            _apply_sc_metadata(
+                final_path,
+                sc_meta,
+                sc_playlist_title,
+                artist=recognition.artist if recognition else None,
+                title=recognition.title if recognition else None,
+            )
+        except Exception as exc:
+            logger.warning("[SC-DL] Tag application failed for %s: %s", final_path.name, exc)
+        return recognition
 
     # ── Post-download pipeline ─────────────────────────────────────────────────
 
@@ -1618,6 +1686,31 @@ class SoundCloudDownloader:
     def get_task_status(self, task_id: str) -> dict | None:
         with self._lock:
             return self.tasks.get(task_id)
+
+    def note_names(self, sc_track_id: str, *, artist: str, title: str) -> int:
+        """Every task of one SoundCloud track shows the names the track carries now.
+
+        Called after the user applied a recognizer suggestion or undid one (artist hub
+        T-31); ``recognition.applied`` tells the Download Manager which names won. The
+        recognition dict is replaced, not mutated: ``GET /api/soundcloud/tasks`` serialises
+        these dicts outside the lock. Returns the number of tasks touched.
+        """
+        sc_id = str(sc_track_id)
+        touched = 0
+        with self._lock:
+            for task in self.tasks.values():
+                if str(task.get("sc_track_id")) != sc_id:
+                    continue
+                task["artist"] = artist
+                task["title"] = title
+                recognition = task.get("recognition")
+                if isinstance(recognition, dict):
+                    task["recognition"] = {
+                        **recognition,
+                        "applied": {"artist": artist, "title": title},
+                    }
+                touched += 1
+        return touched
 
     def cleanup_processes(self) -> None:
         """No-op: kept for API compatibility. No subprocesses used."""

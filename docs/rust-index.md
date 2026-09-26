@@ -10,7 +10,7 @@
 | File | Purpose |
 |------|---------|
 | `src-tauri/src/main.rs` | App initialization, splashscreen lifecycle, top-level Tauri commands: `close_splashscreen`, `login_to_soundcloud`, `export_to_soundcloud`. Registers `AudioCommandState` with `.manage()` |
-| `src-tauri/src/soundcloud_client.rs` | SoundCloud OAuth 2.1 + PKCE implementation. `Track` struct. Functions: `get_auth_url()`, `callback_port()`, `bind_callback_listener()`, `accept_callback()`, `exchange_code_for_token()` |
+| `src-tauri/src/soundcloud_client.rs` | SoundCloud OAuth 2.1 + PKCE implementation. `Track` + `ScTokenSet` structs. Functions: `get_auth_url()`, `callback_port()`, `bind_callback_listener()`, `accept_callback()`, `exchange_code_for_token()` |
 
 ---
 
@@ -37,7 +37,7 @@ All commands registered via `tauri::Builder::default().invoke_handler(tauri::gen
 | Command | Parameters | Returns | Description |
 |---------|-----------|---------|-------------|
 | `close_splashscreen` | `window: tauri::Window` | `void` | Closes splashscreen window, shows main window |
-| `login_to_soundcloud` | `app: tauri::AppHandle, mode: Option<String>` | `Result<String, String>` | Full PKCE OAuth flow: get auth URL → open consent page → wait for callback → exchange code → return access token string. `mode`: `"browser"`/`"external"` = OS browser, anything else (incl. `None`) = in-app `sc-oauth` webview window (default) |
+| `login_to_soundcloud` | `app: tauri::AppHandle, mode: Option<String>` | `Result<ScTokenSet, String>` | Full PKCE OAuth flow: get auth URL → open consent page → wait for callback → exchange code → return `{access_token, refresh_token, expires_in}`. The frontend posts all three to `POST /api/soundcloud/auth-token`, which is what makes the login survive a restart. `mode`: `"browser"`/`"external"` = OS browser, anything else (incl. `None`) = in-app `sc-oauth` webview window (default) |
 | `export_to_soundcloud` | `app: tauri::AppHandle, playlist_name: String, tracks: Vec<ExportTrack>, mode: Option<String>` | `Result<String, String>` | Export a playlist to SoundCloud (requires prior auth). `mode` = same consent-surface knob as `login_to_soundcloud` |
 
 `ExportTrack` struct: `{ artist: String, title: String, duration_ms: u64 }`
@@ -94,10 +94,10 @@ Implements OAuth 2.1 + PKCE:
    - `gui` → `main.rs: open_auth_window()` builds the `sc-oauth` `WebviewWindow` on the auth URL. It carries no capability → no Tauri IPC for the remote page. Closing it early sets `cancelled` and connects once to the callback port to unblock `accept()`; the flow then errors out instead of hanging
    - `browser` → `open::that(&auth_url)` opens the OS browser (previous behaviour)
 4. `accept_callback(listener)` — blocks until SC redirects back with `?code=...`, serves the success page, returns the authorization code. The in-app window is closed automatically afterwards
-5. `exchange_code_for_token(&code, &code_verifier)` — POST to SC token endpoint with code + verifier → returns access token string
-6. Token is returned to frontend as plain string; frontend sends it to `POST /api/soundcloud/auth-token` for the Python backend to store
+5. `exchange_code_for_token(&code, &code_verifier)` — POST to SC token endpoint with code + verifier → returns `ScTokenSet { access_token, refresh_token: Option<String>, expires_in: Option<u64> }`
+6. The token set is returned to the frontend, which posts all three fields to `POST /api/soundcloud/auth-token`. The Python sidecar stores them in the OS keyring and owns renewal from then on — dropping `refresh_token` here is what used to force a browser re-login on every restart
 
-**Never log the token** — only log `token_received: true/false`.
+**Never log any of it** — not the access token, not the refresh token, not redacted. `ScTokenSet` deliberately derives no `Debug` so it cannot reach a log line by accident; the only thing logged is `refreshable: true/false`.
 
 ---
 
@@ -106,7 +106,7 @@ Implements OAuth 2.1 + PKCE:
 | Crate | Version | Purpose |
 |-------|---------|---------|
 | `tauri` | 2.2 | Desktop framework, window management, Tauri IPC |
-| `tauri-plugin-shell` | — | `open::that()` — open URLs in system browser |
+| `tauri-plugin-shell` | — | Sidecar spawn (`app.shell().sidecar("rb-backend")` in `main.rs`) + the frontend's `plugin:shell\|open` command for external links (`utils/openExternal.js`, capability `shell:allow-open`; Cargo.lock resolves 2.3.5). `open::that()` is the separate `open` crate below |
 | `cpal` | — | Cross-platform audio output (device abstraction) |
 | `symphonia` | — | Audio decoding: MP3, FLAC, WAV, ALAC, ISOMP4 |
 | `rustfft` | — | FFT computation for waveform analysis |
@@ -130,11 +130,16 @@ Implements OAuth 2.1 + PKCE:
 
 ## Capabilities (`src-tauri/capabilities/main.json`)
 
-Minimum required permissions:
+Granted to the `main` window only (`identifier: "main-capability"`; the `sc-oauth` window gets none):
 - `core:default` — standard window/event APIs
-- `shell:allow-open` — open URLs in system browser (required for OAuth)
+- `shell:allow-spawn` — scoped to the sidecar `binaries/rb-backend` only
+- `shell:allow-execute` — bare entry, no inline `allow` scope
+- `shell:allow-open` — the shell plugin's `open` command (added 2026-09-26, `e387e36`; before it every external link in the desktop app was silently refused). Default scope: `plugins.shell.open` is unset in `tauri.conf.json`, so tauri-plugin-shell 2.3.5 validates targets against `^((mailto:\w+)|(tel:\w+)|(https?://\w+)).+`. Reached by `frontend/src/utils/openExternal.js` (`invoke('plugin:shell|open', { path })`) and by the plugin's own hook on `<a target="_blank">`. **Not** used by OAuth — `main.rs` opens the consent URL Rust-side via the `open` crate (`open::that`), which needs no capability. No custom regex, no `with` program (`docs/SECURITY.md`).
+- `dialog:default`, `dialog:allow-open`, `dialog:allow-save` — folder picker / save dialog
+- `fs:default`, `fs:allow-write-file`, `fs:allow-read-file`, `fs:allow-mkdir` — binary writes + folder creation (export)
+- `core:window:allow-minimize`, `core:window:allow-toggle-maximize`, `core:window:allow-close`, `core:window:allow-start-dragging` — custom title-bar window controls
 
-Add new permissions only when required. Document the reason in a comment in the JSON file.
+Add new permissions only when required. JSON carries no comments — record the reason in this section.
 
 ---
 

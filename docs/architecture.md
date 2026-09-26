@@ -183,6 +183,23 @@ User confirms sync + download
   → POST /api/soundcloud/sync (marks matches in library)
   → POST /api/soundcloud/download (triggers yt-dlp download per track)
   → Frontend polls GET /api/soundcloud/task/{task_id} for progress
+
+Every download, tagging step (artist hub T-29, 2026-09-26)
+  → soundcloud_downloader._tag_download(): _fetch_sc_metadata() (v2 payload)
+  → _recognize_download() → artist_store/recognizer.recognize(sc_meta, db|None)
+      credited artist: publisher_metadata.artist > "X - Title" prefix > uploader
+      known? registry.known_artists() (store + aliases + favourites + library
+        spellings) exact → case → fold_key, ambiguous = unknown; the uploader's
+        account bound to a collection (schema.collection_for_remote)
+      HIGH only → artist/title changed; unknown prefix → suggestion, not applied
+      never raises — failure = SoundCloud's names, download continues
+  → _apply_sc_metadata(..., artist=, title=) → audio_tags.write_tags
+  → task["recognition"] (credits, corrections, suggestion) → Download Manager
+    RecognitionPanel; registry row keeps the tagged names
+  → "Übernehmen"/"Rückgängig": POST /api/soundcloud/downloads/{sc_id}/names
+    (only a registry-linked local track; db_lock + file tags)
+  → artist catalogue: download_registry.local_track_ids() → match "downloaded"
+    (a track fetched from "missing" is owned by identity, not title similarity)
 ```
 
 ### 7. USB Sync
@@ -202,6 +219,89 @@ User clicks sync to USB
 The library DB (``master.db``) is not backed up by this app — Rekordbox
 itself maintains versioned copies in its install directory. If a user
 needs to revert in-app edits, they restore from Rekordbox.
+
+### 9. Artist Hub (landed 2026-09-09, `feat/artist-hub`)
+```
+Library load
+  → db.artists (names already normalised + metadata_mappings applied)
+  → app/artist_store/registry.py: resolve_library_artists()
+    → artists.db  (SIDECAR, platformdirs — never master.db)
+       collections · aliases · sc_binding · sync_state · playlist id-map · catalogue cache
+
+Favourite an artist
+  → POST /api/artists/favourites  → sidecar row  (DELETE .../{collection_id} to undo)
+
+Merge duplicate spellings
+  → GET  /api/artists/merge/candidates   (fold_key groups — deterministic, no fuzzy)
+  → POST /api/artists/merge/preview      (writes NOTHING)
+  → POST /api/artists/merge/apply
+    → RekordboxDB facade (holds _db_write_lock) → update_content(item)
+    → audio_tags.write_tags() on every affected file
+    → metadata-fixer undo log, one run_id  → POST /api/artists/merge/revert/{run_id}
+
+An artist's local tracks (owner refinement 2026-09-26)
+  → GET  /api/artists/{id}/local-tracks
+    → artist_store/attribution.py: ONE answer, three layers
+       1. Artist field — db.get_tracks_by_artist over every alias spelling
+          (the registry grouping — the old set, unchanged)
+       2. credits — Remixer field, "(X Remix)" / "X Remix" / "feat. X" / "X - Title"
+          in the title, parsed by identity.parse_credit (fold_key, no fuzzy)
+       3. manual — track_assignments (assign under a role / exclude), keyed by
+          the library content id, snapshot title+artist for vanished tracks
+  → POST /api/artists/{id}/local-tracks/{track}   assign | exclude | clear
+  → GET  /api/artists/{id}/local-tracks/candidates?q=   "Add tracks" search
+
+Project into Rekordbox
+  → POST /api/artists/projection/sync
+    → refuses when masterPlaylists6.xml is absent (rbox skips it silently,
+      and the playlists would vanish on the next Rekordbox restart)
+    → flat "Artists" folder, one playlist per favourite
+    → membership = attribution.membership() — the same set the artist page lists
+      (remix credits in, exclusions out)
+    → diff-in-place: unchanged artist = zero master.db writes
+
+Where the artist lives online (owner refinement 2026-09-26)
+  → GET  /api/artists/{id}/links            stored links, no network
+  → POST /api/artists/{id}/links/refresh    user-initiated only
+    → SoundCloud: GET /users/{urn} + /users/{urn}/web-profiles (2 calls, own
+      CallBudget) + URLs/handles in the bio (known services only, LOW)
+    → app/musicbrainz_client.py (1 req/s per process, named UA):
+      /url?resource=<linked SC URL> → exactly one artist = anchored binding;
+      otherwise a name search yields CANDIDATES the user confirms
+      (POST …/links/musicbrainz) — never an automatic binding
+    → artist_store/links.py:classify_url on every URL, precedence
+      manual > SC profile > MusicBrainz > bio, hidden stays hidden,
+      a source that failed keeps its old rows
+  → frontend utils/openExternal.js → Tauri shell `open` (capability
+    shell:allow-open, default http(s)/mailto/tel scope) / window.open in the browser
+
+SoundCloud catalogue (manual link)
+  → app/soundcloud_auth.py: get_access_token()  ← keyring blob, silent refresh
+  → soundcloud_api: uploads ∪ search(name+aliases) ∪ reposts, one CallBudget
+  → artist_store/identity.py: role + confidence per track (name-based, remix-aware)
+  → artist_store/catalogue.py: diff vs library behind the derivation gate
+  → cached in the sidecar (the FETCH is cached, never the diff)
+
+Discover / background sync
+  → GET  /api/artists/discover      one /related hop per linked favourite
+                                    + zero-call co-occurrence over the cache
+  → GET  /api/artists/sync/status   artist_store/sync.py: is_idle() — composed
+                                    from every existing tracker, fails closed
+  → POST /api/artists/sync/run      refreshes auto/review favourites, shared
+                                    CallBudget, never downloads
+
+USB export after a merge
+  → OneLibraryUsbWriter.sync() Stage 1b: artist-folder rename MOVES the file
+    (two-step on Windows for a case-only change) instead of re-copying,
+    gated on a content fingerprint (size + the whole file up to 128 KiB, above
+    that both 64 KiB edges) on both the move and the delete branch —
+    unreadable file = unproven = skipped
+```
+
+Rollback for the whole feature is ``rm artists.db``: no library data lives
+in the sidecar. What a merge wrote into ``master.db`` and the audio tags is
+undone by Revert, not by deleting the sidecar.
+
 
 ---
 

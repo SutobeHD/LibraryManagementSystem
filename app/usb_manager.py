@@ -980,6 +980,23 @@ class UsbProfileManager:
 # --- Smart Sync Engine ---
 
 
+def _is_streaming_pseudo_path(path_str: str) -> bool:
+    """True for `soundcloud:tracks:123` and friends — a URI, not a file.
+
+    Windows drive letters (`C:/`, `C:\\`) must never match.
+    """
+    if ":" not in path_str[:12] or path_str[1:3] in (":\\", ":/"):
+        return False
+    return path_str.split(":", 1)[0].lower() in (
+        "soundcloud",
+        "spotify",
+        "tidal",
+        "beatport",
+        "http",
+        "https",
+    )
+
+
 class UsbSyncEngine:
     """
     Smart sync engine that performs diff-based synchronization
@@ -1449,6 +1466,56 @@ class UsbSyncEngine:
 
         return dest
 
+    def _relocate_planned(
+        self, planned: list[tuple[Path | None, Path]]
+    ) -> Generator[dict, None, None]:
+        """Run the relocation pass over `(local source, USB destination)` pairs.
+
+        Yields one progress event only when something actually happened — the
+        counts come from the pass itself, never from an assumption.
+        """
+        from .usb_one_library import relocate_audio_files
+
+        if not planned:
+            return
+        report = relocate_audio_files(
+            self.usb_root, planned, contents_dir=self.usb_root / "Contents"
+        )
+        if any(report[k] for k in ("relocated", "copied", "collisions", "errors")):
+            yield {
+                "stage": "relocate",
+                "message": (
+                    f"Moved {report['relocated']} file(s) in place "
+                    f"({report['copied']} copied, {report['collisions']} collision(s), "
+                    f"{report['errors']} error(s))"
+                ),
+                "progress": 1,
+                "report": report,
+            }
+
+    def _relocate_before_copy(self, tracks: list[dict]) -> Generator[dict, None, None]:
+        """Relocation pass for the LibrarySource track dicts (XML-mode legacy sync)."""
+        planned: list[tuple[Path | None, Path]] = []
+        for t in tracks:
+            raw = t.get("path") or ""
+            if not raw:
+                continue
+            local = Path(raw)
+            try:
+                if not local.exists():
+                    continue
+            except OSError:
+                continue
+            planned.append(
+                (
+                    local,
+                    self._get_safe_dest_path(
+                        t.get("artist", "") or "", t.get("title", "") or "", local.name
+                    ),
+                )
+            )
+        yield from self._relocate_planned(planned)
+
     def _copy_file_stream(self, src: Path, dest: Path) -> Generator[dict, None, None]:
         """Req 18 & 19: Chunk-based streaming & Deduplication."""
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -1597,6 +1664,42 @@ class UsbSyncEngine:
             )
 
             collection = ET.SubElement(root, "COLLECTION", Entries=str(len(tracks_to_export)))
+
+            # An artist merge only changes where a track belongs. Move what is
+            # already on the stick before the copy loop calls it missing.
+            relocation_plan: list[tuple[Path | None, Path]] = []
+            artist_name_cache: dict[str, str] = {}
+            for t in tracks_to_export:
+                raw_path = getattr(t, "folder_path", "") or ""
+                if _is_streaming_pseudo_path(raw_path):
+                    continue
+                try:
+                    local_candidate = Path(raw_path).resolve(strict=False)
+                except (OSError, ValueError):
+                    local_candidate = Path(raw_path)
+                try:
+                    if not local_candidate.exists():
+                        continue
+                except OSError:
+                    continue
+                aid = str(getattr(t, "artist_id", "") or "")
+                if aid and aid not in artist_name_cache:
+                    try:
+                        artist_name_cache[aid] = getattr(db.get_artist_by_id(aid), "name", "") or ""
+                    except Exception as exc:
+                        logger.debug("relocation: artist lookup failed for id=%s (%s)", aid, exc)
+                        artist_name_cache[aid] = ""
+                relocation_plan.append(
+                    (
+                        local_candidate,
+                        self._get_safe_dest_path(
+                            artist_name_cache.get(aid, ""),
+                            getattr(t, "title", "") or "",
+                            getattr(t, "file_name_l", "") or os.path.basename(raw_path),
+                        ),
+                    )
+                )
+            yield from self._relocate_planned(relocation_plan)
 
             skipped_streaming = 0
             skipped_missing = 0
@@ -1855,6 +1958,11 @@ class UsbSyncEngine:
             t for t in all_tracks if not target_track_ids or t["id"] in target_track_ids
         ]
         logger.info(f"[USB-Legacy-XML] {len(tracks_to_export)} tracks to process")
+
+        # An artist merge changes only the destination path of an already
+        # exported track. Move those first, so the copy loop below sees them
+        # in place instead of re-copying gigabytes of unchanged audio.
+        yield from self._relocate_before_copy(tracks_to_export)
 
         root = ET.Element("DJ_PLAYLISTS", Version="1.0.0")
         collection = ET.SubElement(root, "COLLECTION", Entries=str(len(tracks_to_export)))
