@@ -85,6 +85,7 @@ KEYRING_SC_TOKEN = "sc_token"
 from . import audio_tags, download_registry, folder_watcher
 from . import soundcloud_api as sc_api
 from . import soundcloud_auth as sc_auth
+from .artist_store import attribution as artist_attribution
 from .artist_store import catalogue as artist_catalogue
 from .artist_store import discovery as artist_discovery
 from .artist_store import identity as artist_identity
@@ -754,6 +755,19 @@ class ArtistMusicBrainzReq(BaseModel):
     """The MusicBrainz artist the user picked out of the refresh's candidates."""
 
     mbid: str = _Field(max_length=64)
+
+
+class ArtistTrackAssignReq(BaseModel):
+    """One manual correction to an artist's local tracks. `clear` hands the track back.
+
+    `role` is checked by the engine (400), not here, so an unknown role reads as the
+    domain refusal it is. `name` lets the first write store an artist the library only
+    names — see the route docstring.
+    """
+
+    action: _Literal["assign", "exclude", "clear"]
+    role: str | None = _Field(default=None, max_length=32)
+    name: str | None = _Field(default=None, max_length=512)
 
 
 # NOTE: Library auto-load is handled by _on_startup() near the bottom of this file.
@@ -2268,6 +2282,90 @@ def artist_soundcloud_candidates(collection_id: str) -> dict[str, Any]:
         "query": names[0],
         "candidates": candidates,
     }
+
+
+@app.get("/api/artists/{collection_id}/local-tracks")
+def artist_local_tracks(collection_id: str) -> dict[str, Any]:
+    """The artist page's local half: every library track credited to them, with its role.
+
+    More than the Artist field — the Remixer field and title credits (`(X Remix)`,
+    `feat. X`, `X - Title`) count too, and the user's own assign / exclude rows win over
+    both. Read-only, no network, no session gate, like `/identities`.
+
+    Deliberately no `_artist_collection_or_404`: the hub and browse hand out ids for
+    library spellings nothing has stored yet, and their pages must still list tracks. 404
+    only when neither the store nor the loaded library knows the id. Without a library a
+    stored artist answers `library_loaded: false` — "not loaded", never "has no tracks".
+    """
+    payload = artist_attribution.local_tracks(db if db.loaded else None, collection_id)
+    if payload is None:
+        raise HTTPException(404, f"Unknown artist collection: {collection_id}")
+    return {"status": "ok", **payload}
+
+
+@app.get("/api/artists/{collection_id}/local-tracks/candidates")
+def artist_local_track_candidates(
+    collection_id: str,
+    q: str = "",
+    limit: int = artist_attribution.DEFAULT_CANDIDATE_LIMIT,
+) -> dict[str, Any]:
+    """Library search behind "Add tracks": title / artist / remixer substring, capped.
+
+    Every hit carries this artist's current `artist_role` (null when not theirs) and
+    `excluded`, so the picker shows what is already attributed before the user adds it
+    twice. A blank query returns nothing — a search box, not a library browser. 404, like
+    the page itself, when neither the store nor the loaded library knows the id. Read-only.
+    Registered ahead of every `…/local-tracks/{track_id}` route: Starlette serves the first
+    match, so a later `GET …/{track_id}` cannot swallow this literal path.
+    """
+    payload = artist_attribution.search_candidates(
+        db if db.loaded else None, collection_id, q, limit
+    )
+    if payload is None:
+        raise HTTPException(404, f"Unknown artist collection: {collection_id}")
+    return {"status": "ok", **payload}
+
+
+@app.post(
+    "/api/artists/{collection_id}/local-tracks/{track_id}",
+    dependencies=[Depends(require_session)],
+)
+def artist_local_track_assign(
+    collection_id: str, track_id: str, r: ArtistTrackAssignReq
+) -> dict[str, Any]:
+    """Correct the automatic attribution for one library track: assign, exclude or clear.
+
+    The automatic layers read names, and a DJ library is full of names that lie; the user
+    knows. `exclude` beats every automatic match, `assign` adds any track under the role
+    picked (default `primary`), `clear` hands the track back. The row snapshots title and
+    artist, so a track that leaves the library — or whose id a reload hands to another
+    recording — is listed as `assigned_missing`, never silently re-pointed.
+
+    An artist the hub only knows as a library spelling has no row to hang this off:
+    `name` stores it on the first write, and only a name that derives exactly this id is
+    taken. Writes the artists.db sidecar alone, under its own lock — never `master.db`,
+    so no `db_lock`.
+    """
+    try:
+        result = artist_attribution.set_assignment(
+            db if db.loaded else None,
+            collection_id,
+            track_id,
+            action=r.action,
+            role=r.role,
+            name=r.name,
+        )
+    except artist_attribution.UnknownCollection:
+        raise HTTPException(
+            404, f"Unknown artist collection: {collection_id} — send its name so it can be stored."
+        ) from None
+    except artist_attribution.TrackNotInLibrary:
+        raise HTTPException(404, "That track is not in the loaded library.") from None
+    except artist_attribution.LibraryNotLoaded as exc:
+        raise HTTPException(409, str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return {"status": "ok", **result}
 
 
 def _sc_numeric_track_id(sc_id: str) -> str | None:
