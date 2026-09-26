@@ -290,6 +290,30 @@ class TestCaseOnlyRename:
         assert dest.read_bytes() == BLOCK
         assert not (stick / "Contents" / "boys noize").exists()
 
+    def test_a_case_variant_another_track_plans_is_never_taken(
+        self, tmp_path: Path, stick: Path, no_copies
+    ) -> None:
+        """Two tracks whose destinations differ only by case: neither may steal the file.
+
+        The case variant of a track's own destination is only a candidate while no
+        second track plans that same folded path — otherwise one of them would move
+        the other's audio out from under it.
+        """
+        local_a = _write(tmp_path / "music" / "a" / "track.aiff", BLOCK)
+        local_b = _write(tmp_path / "music" / "b" / "track.aiff", BLOCK)
+        occupied = stick / "Contents" / "boys noize" / "T" / "track.aiff"
+        _write(occupied, BLOCK)
+        (stick / "Contents" / "Boys Noize" / "T").mkdir(parents=True, exist_ok=True)
+        dest_a = stick / "Contents" / "Boys Noize" / "T" / "track.aiff"
+        if dest_a.exists():
+            pytest.skip("case-insensitive volume — the two folders are one")
+
+        report = _relocate(stick, [(local_a, dest_a), (local_b, occupied)])
+
+        assert report["relocated"] == 0
+        assert occupied.read_bytes() == BLOCK
+        assert not dest_a.exists()
+
 
 # ---------------------------------------------------------------------------
 # Collisions — the destination is occupied
@@ -673,9 +697,9 @@ class TestContentIsProvenBeforeMovingOrDeleting:
         report = _relocate(stick, [(local, occupied)])
 
         assert occupied.read_bytes() == b"E" * 1000, "the occupant was overwritten"
-        assert (
-            report["duplicates_removed"] == 0
-        ), "a file was deleted from the stick on a name+size match alone"
+        assert report["duplicates_removed"] == 0, (
+            "a file was deleted from the stick on a name+size match alone"
+        )
         survivors = sorted(p.name for p in occupied.parent.iterdir())
         assert len(survivors) == 2, f"one of the two recordings was lost: {survivors}"
         assert not cand.exists() or cand.read_bytes() == b"D" * 1000

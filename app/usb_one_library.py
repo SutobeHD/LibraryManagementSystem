@@ -21,6 +21,7 @@ import logging
 import os
 import shutil
 import time
+from collections import Counter
 from collections.abc import Callable, Generator, Iterable
 from pathlib import Path
 from typing import Any
@@ -338,7 +339,7 @@ def _pick_candidate(
     index: dict[str, list[Path]],
     dest: Path,
     expected: int,
-    planned_dests: set[str],
+    planned_dests: Counter[str],
     src: Path | None,
 ) -> tuple[Path | None, Path | None]:
     """The file already on the stick that `dest` should be fed from, or None.
@@ -350,13 +351,24 @@ def _pick_candidate(
     first three is skipped over — not treated as a veto on the whole relocation, which
     would strand the genuine old copy and re-copy the track.
 
+    `planned_dests` counts case-folded destinations. A candidate that folds onto this
+    track's OWN destination is the case variant being merged (`boys noize/T/x` for
+    `Boys Noize/T/x` on a case-sensitive volume) and stays eligible — unless a second
+    track plans the same folded path, which leaves nothing safe to pick.
+
     Returns `(chosen, rejected)`; `rejected` names a same-name, same-size file whose
     bytes differed, for the report, and is only set when nothing was chosen.
     """
+    own = str(dest).casefold()
+
+    def _claimed_by_another(p: Path) -> bool:
+        folded = str(p).casefold()
+        return planned_dests.get(folded, 0) > (1 if folded == own else 0)
+
     cands = [
         p
         for p in index.get(dest.name.casefold(), [])
-        if p != dest and str(p).casefold() not in planned_dests and _size_of(p) == expected
+        if p != dest and not _claimed_by_another(p) and _size_of(p) == expected
     ]
     if not cands:
         return None, None
@@ -374,7 +386,7 @@ def _relocate_one(
     src: Path | None,
     dest: Path,
     index: dict[str, list[Path]],
-    planned_dests: set[str],
+    planned_dests: Counter[str],
     touched: set[Path],
     report: dict[str, Any],
 ) -> None:
@@ -536,7 +548,7 @@ def relocate_audio_files(
         report["skipped"] = len(entries)
         return report
 
-    planned_dests = {str(d).casefold() for _, d in entries}
+    planned_dests = Counter(str(d).casefold() for _, d in entries)
     touched: set[Path] = set()
     for src, dest in entries:
         try:
