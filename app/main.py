@@ -6080,6 +6080,13 @@ def soundcloud_download_names(sc_track_id: str, r: DownloadNamesReq) -> dict[str
         "fields": list(updates),
     }
     file_tags = _download_names_tags(tid, track, updates) if updates else "skipped"
+    if "Artist" in updates:
+        # An applied suggestion is by definition an artist the library did not have:
+        # the hub and the next download's recognizer read db.artists, a cache.
+        try:
+            db.refresh_metadata()
+        except Exception as exc:  # the rename landed; a stale list is not a failed request
+            logger.warning("op=download_names artist list refresh failed err=%s", exc)
     registry_ok = download_registry.set_names(sc_track_id, title=r.title, artist=r.artist)
     tasks = sc_downloader.note_names(sc_track_id, artist=r.artist, title=r.title)
     logger.info(

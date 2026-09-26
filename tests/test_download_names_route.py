@@ -94,8 +94,13 @@ class FakeLibrary:
             "None": {"ID": "None", "Title": "Decoy", "Artist": "Decoy", "path": "/decoy.mp3"},
         }
 
+    refreshes = 0
+
     def get_track_details(self, tid: str) -> dict[str, Any] | None:
         return self.tracks.get(tid)
+
+    def refresh_metadata(self) -> None:
+        self.refreshes += 1
 
     def update_tracks_metadata(self, track_ids: list[str], updates: dict[str, Any]) -> bool:
         self.writes.append((list(track_ids), dict(updates), self._lock.depth > 0))
@@ -697,3 +702,35 @@ def test_undo_puts_the_raw_names_back_everywhere(
     assert (task["artist"], task["title"]) == (RAW_ARTIST, RAW_TITLE)
     assert task["recognition"]["applied"] == {"artist": RAW_ARTIST, "title": RAW_TITLE}
     assert task["recognition"]["suggestion"]["artist"] == BOYS, "the suggestion is offered again"
+
+
+@pytest.mark.parametrize(
+    ("artist", "title", "refreshes"),
+    [(BOYS, STARTER, 1), (RAW_ARTIST, STARTER, 0), (RAW_ARTIST, RAW_TITLE, 0)],
+    ids=["artist_changed", "title_only", "no_change"],
+)
+def test_a_new_artist_name_refreshes_the_artist_list(
+    library: FakeLibrary, auth_token: dict[str, str], artist: str, title: str, refreshes: int
+) -> None:
+    """The hub and the next download's recognizer read db.artists — a cache."""
+    _downloaded()
+
+    assert _names(headers=auth_token, artist=artist, title=title).status_code == 200
+    assert library.refreshes == refreshes
+
+
+def test_a_failed_artist_list_refresh_does_not_fail_the_rename(
+    library: FakeLibrary, auth_token: dict[str, str], monkeypatch, caplog
+) -> None:
+    _downloaded()
+
+    def broken() -> None:
+        raise RuntimeError("cache rebuild failed")
+
+    monkeypatch.setattr(library, "refresh_metadata", broken)
+
+    res = _names(headers=auth_token)
+
+    assert res.status_code == 200
+    assert library.writes == [([LOCAL_ID], {"Artist": BOYS, "Title": STARTER}, True)]
+    assert "artist list refresh failed" in caplog.text
