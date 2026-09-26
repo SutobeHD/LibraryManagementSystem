@@ -1,15 +1,18 @@
 import asyncio
+import json
 import logging
 import multiprocessing as _mp
 import os
 import secrets
 import shutil
+import sqlite3
 import sys
 import threading
 import time
 import traceback
 import urllib.parse
 import uuid
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -80,9 +83,22 @@ KEYRING_SERVICE = "library_management_system"
 KEYRING_SC_TOKEN = "sc_token"
 
 from . import audio_tags, download_registry, folder_watcher
+from . import soundcloud_api as sc_api
+from . import soundcloud_auth as sc_auth
+from .artist_store import attribution as artist_attribution
+from .artist_store import catalogue as artist_catalogue
+from .artist_store import discovery as artist_discovery
+from .artist_store import identity as artist_identity
+from .artist_store import links as artist_links
+from .artist_store import merge as artist_merge
+from .artist_store import projection as artist_projection
+from .artist_store import registry as artist_registry
+from .artist_store import schema as artist_schema
+from .artist_store import sync as artist_sync
 from .audio_analyzer import LIBROSA_AVAILABLE, AudioAnalyzer
 from .config import EXPORT_DIR, LOG_DIR, MUSIC_DIR, TEMP_DIR
 from .database import db
+from .metadata_fixer import schema as fixer_log
 from .phrase_generator import (
     PhraseNotAnalysedError,
     commit_phrase_cues,
@@ -110,6 +126,7 @@ from .services import (
 )
 from .soundcloud_api import (
     AuthExpiredError,
+    NotFoundError,
     RateLimitError,
     SoundCloudPlaylistAPI,
     SoundCloudSyncEngine,
@@ -442,6 +459,10 @@ class SetReq(BaseModel):
     # or the OS browser. Consumed by the Tauri command, not the backend.
     sc_auth_mode: _Literal["gui", "browser"] | None = None
     legacy_pdb_stub: bool | None = None
+    # Opt-in: refresh favourite artists' SoundCloud catalogues while the app is open and
+    # idle. Key name is `artist_store.sync.SETTING_KEY` — renaming it silently disables
+    # the scheduler, which reads it back through SettingsManager.load().
+    artist_background_sync: bool | None = None
 
     @_mv(mode="after")
     def _enforce_caps(self) -> "SetReq":
@@ -516,6 +537,9 @@ class SetReq(BaseModel):
 
 
 class SmartPlReq(BaseModel):
+    """`artist_threshold` is accepted for older clients and ignored — artist
+    playlists come from the Artist Hub projection, not from this route."""
+
     artist_threshold: int = 3
     label_threshold: int = 3
 
@@ -656,6 +680,94 @@ class ProjectReq(BaseModel):
 
 class DBModeReq(BaseModel):
     mode: str  # "xml" or "live"
+
+
+class ArtistFavouriteReq(BaseModel):
+    collection_id: str | None = None  # stable sidecar id; wins when both are given
+    name: str | None = None  # raw library name — creates the collection if unseen
+
+
+class ArtistSyncModeReq(BaseModel):
+    mode: str  # "auto" | "review" | "off"
+
+
+class ArtistMergePreviewReq(BaseModel):
+    """One variant group to cost. `names` are raw library spellings, not sidecar ids."""
+
+    names: list[str] = []
+    canonical: str | None = None  # None → the engine's suggestion for the group
+
+
+class ArtistMergeApplyReq(ArtistMergePreviewReq):
+    """Same group plus the three effects the confirm dialog has to state up front."""
+
+    write_tags: bool = True
+    verify_bytes: bool | None = None  # None → on at/below merge.VERIFY_BYTES_MAX_TRACKS
+    delete_orphans: bool = False  # opt-in: hard delete, no tombstone, detaches 5 columns
+
+
+class ArtistMergeRevertReq(BaseModel):
+    write_tags: bool = True  # restore the file tags too, not just the DB rows
+
+
+class ArtistProjectionSyncReq(BaseModel):
+    dry_run: bool = False  # writes nothing at all; allowed while Rekordbox is open
+
+
+class ArtistLinkReq(BaseModel):
+    """Bind an artist to a SoundCloud account. A profile URL or a bare permalink."""
+
+    url_or_permalink: str = ""
+
+
+class ArtistDownloadMissingReq(BaseModel):
+    """What to queue. Explicit ids OR `auto_queue`, never both — see the route docstring."""
+
+    sc_ids: list[str] = []
+    auto_queue: bool = False
+
+
+class ArtistTrackRoleReq(BaseModel):
+    """Pin one catalogue track's role for one artist. `null` clears the pin."""
+
+    role: str | None = None
+
+
+class ArtistLinksRefreshReq(BaseModel):
+    """One Find-links click. `musicbrainz: false` asks SoundCloud only."""
+
+    musicbrainz: bool = True
+
+
+class ArtistLinkAddReq(BaseModel):
+    """A profile URL the user pasted. Classified before it is stored, never kept raw."""
+
+    url: str = _Field(max_length=artist_links.MAX_URL_LENGTH)
+
+
+class ArtistLinkRemoveReq(BaseModel):
+    """One link to take off, by `url_key`: a manual link is deleted, a fetched one hidden."""
+
+    url_key: str = _Field(max_length=512)
+
+
+class ArtistMusicBrainzReq(BaseModel):
+    """The MusicBrainz artist the user picked out of the refresh's candidates."""
+
+    mbid: str = _Field(max_length=64)
+
+
+class ArtistTrackAssignReq(BaseModel):
+    """One manual correction to an artist's local tracks. `clear` hands the track back.
+
+    `role` is checked by the engine (400), not here, so an unknown role reads as the
+    domain refusal it is. `name` lets the first write store an artist the library only
+    names — see the route docstring.
+    """
+
+    action: _Literal["assign", "exclude", "clear"]
+    role: str | None = _Field(default=None, max_length=32)
+    name: str | None = _Field(default=None, max_length=512)
 
 
 # NOTE: Library auto-load is handled by _on_startup() near the bottom of this file.
@@ -1017,6 +1129,1701 @@ def get_artists():
 @app.get("/api/artist/{aid}/tracks")
 def get_artist_tracks(aid: str):
     return db.get_tracks_by_artist(aid)
+
+
+# --- ARTIST HUB (artists.db sidecar) -------------------------------------------------
+# Favourites/aliases live in the sidecar, never in master.db. The `art_{i}` ids the
+# artist routes above hand out are list positions rebuilt on every library load, so
+# nothing here keys on them — the sidecar's own collection_id is the stable handle.
+
+
+@app.get("/api/artists/hub")
+def get_artist_hub(limit: int = artist_registry.DEFAULT_BACKLOG_LIMIT, q: str = ""):
+    """Favourite artists + Tier-1 backlog. Pure read, no network calls, no writes.
+
+    `q` filters the backlog server-side, before the limit is applied — filtering only
+    the rows already sent would hide every artist ranked below `limit`.
+    """
+    return artist_registry.hub(db if db.loaded else None, backlog_limit=limit, query=q)
+
+
+@app.get("/api/artists/browse")
+def browse_artists(
+    q: str = "",
+    limit: int = artist_registry.DEFAULT_BROWSE_LIMIT,
+    offset: int = 0,
+    sort: str = artist_registry.SORT_NAME,
+):
+    """Every artist in the library, paged, with favourite state per row. Pure read.
+
+    The hub's suggestion panel is the *backlog* — favourites removed, truncated. This is
+    the full list to pick from, so favourites stay in and carry `is_favourite`. Toggling
+    goes through the existing POST/DELETE `/api/artists/favourites` routes. Favourite a
+    row by `name`, not by `collection_id`: a read derives the id without creating the
+    row, so POSTing it back 404s until something has registered the collection. The name
+    path resolves to that same id.
+
+    `q` filters and `sort` orders server-side, before `limit`/`offset` — `total` is the
+    pre-pagination match count. `limit` is capped at `MAX_BROWSE_LIMIT`; the effective
+    paging comes back in the payload.
+    """
+    return artist_registry.browse(
+        db if db.loaded else None, query=q, limit=limit, offset=offset, sort=sort
+    )
+
+
+@app.post("/api/artists/favourites", dependencies=[Depends(require_session)])
+def add_artist_favourite(r: ArtistFavouriteReq):
+    """Favourite an artist by sidecar id, or by the raw library name a backlog row shows."""
+    cid = (r.collection_id or "").strip()
+    if cid:
+        try:
+            added = artist_registry.add_favourite_artist(cid)
+        except KeyError:
+            raise HTTPException(404, f"Unknown artist collection: {cid}") from None
+    else:
+        name = (r.name or "").strip()
+        if not name:
+            raise HTTPException(400, "collection_id or name is required")
+        known = artist_schema.resolve_alias(name)
+        added = known is None or not artist_schema.is_favourite(str(known["id"]))
+        cid = artist_registry.favourite_artist_by_name(name)
+    return {"status": "success", "collection_id": cid, "added": added}
+
+
+@app.delete("/api/artists/favourites/{collection_id}", dependencies=[Depends(require_session)])
+def remove_artist_favourite(collection_id: str):
+    """Un-favourite. Idempotent — the collection, its aliases and its links survive."""
+    removed = artist_registry.remove_favourite_artist(collection_id)
+    return {"status": "success", "collection_id": collection_id, "removed": removed}
+
+
+@app.post("/api/artists/{collection_id}/sync-mode", dependencies=[Depends(require_session)])
+def set_artist_sync_mode(collection_id: str, r: ArtistSyncModeReq):
+    """Per-artist catalogue sync behaviour: auto / review / off."""
+    if artist_schema.get_collection(collection_id) is None:
+        raise HTTPException(404, f"Unknown artist collection: {collection_id}")
+    try:
+        artist_schema.set_sync_mode(collection_id, r.mode)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+    return {"status": "success", "collection_id": collection_id, "mode": r.mode}
+
+
+# --- ARTIST HUB: merge + Rekordbox projection ----------------------------------------
+#
+# `apply`, `revert` and `projection/sync` are the only master.db writers in this
+# feature. They run as background jobs behind ONE single-flight lock: each takes
+# `db_lock()` per chunk inside the engine, so letting two of them interleave would put
+# two writers on the same content rows. The job record copies the phrase batch's shape
+# (`_phrase_jobs`) so the frontend polls one contract, not two.
+#
+# {job_id: {kind, status, total, done, percent, eta_seconds, cancel_requested,
+#           result, error}}
+_artist_jobs: dict[str, dict[str, Any]] = {}
+
+# Single-flight guard over every artist-hub write job. Acquired in the start handler so
+# the 409 check and the acquire are atomic for the request, released in
+# `_run_artist_job`'s finally — the same asymmetry as `_phrase_batch_lock`.
+_artist_job_lock = asyncio.Lock()
+
+ARTIST_JOB_MERGE_APPLY = "merge_apply"
+ARTIST_JOB_MERGE_REVERT = "merge_revert"
+ARTIST_JOB_PROJECTION_SYNC = "projection_sync"
+
+_RB_RUNNING_MERGE = "Rekordbox is running. Close it before merging artists."
+_RB_RUNNING_PROJECTION = "Rekordbox is running. Close it before syncing the Artists folder."
+
+
+def _artist_merge_names(raw: list[str]) -> list[str]:
+    """De-duplicated, stripped library spellings — or 400 when the group is empty."""
+    names: list[str] = []
+    for value in raw:
+        name = str(value or "").strip()
+        if name and name not in names:
+            names.append(name)
+    if not names:
+        raise HTTPException(400, "names must hold at least one artist spelling")
+    return names
+
+
+def _artist_merge_note(run: Mapping[str, Any]) -> dict[str, Any] | None:
+    """A run's note payload when it is an artist merge, else None.
+
+    The undo log is shared with the metadata fixer, so every run this feature hands out
+    or reverts is filtered on the kind marker — replaying a fixer run through the merge
+    engine would restore the wrong field.
+    """
+    try:
+        payload = json.loads(run.get("note") or "")
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict) or payload.get("kind") != artist_merge.MERGE_RUN_KIND:
+        return None
+    return payload
+
+
+def _artist_job_record(kind: str, total: int) -> dict[str, Any]:
+    return {
+        "kind": kind,
+        "status": "running",
+        "total": total,
+        "done": 0,
+        "percent": 0.0,
+        "eta_seconds": 0.0,
+        "cancel_requested": False,
+        "result": None,
+        "error": None,
+    }
+
+
+async def _run_artist_job(job_id: str, work: Callable[[], dict[str, Any]]) -> None:
+    """Run one artist-hub engine call off the event loop and bank its report.
+
+    `done`/`percent` step 0 → total in one move: `merge.apply`, `merge.revert` and
+    `projection.sync` are each a single atomic pass with no progress hook, so a
+    per-track counter here would be a fabricated bar. `cancel_requested` is carried for
+    shape parity with the phrase batch and nothing sets it — these engines cannot be
+    interrupted mid-run; they abort themselves when Rekordbox opens, which surfaces as
+    `result.aborted`.
+    """
+    job = _artist_jobs[job_id]
+    loop = asyncio.get_running_loop()
+    try:
+        job["result"] = await loop.run_in_executor(None, work)
+        job["status"] = "done"
+        job["done"] = job["total"]
+        job["percent"] = 100.0
+    except (artist_merge.RekordboxRunningError, artist_projection.RekordboxRunningError) as exc:
+        # The handler already 409'd on the process check; landing here means the user
+        # opened Rekordbox between the check and the first write.
+        logger.warning("[ARTIST] job %s aborted: %s", job_id, exc)
+        job["status"] = "error"
+        job["error"] = str(exc)
+    except Exception as exc:
+        logger.error("[ARTIST] job %s crashed: %s", job_id, exc, exc_info=True)
+        job["status"] = "error"
+        job["error"] = safe_error_message(exc)
+    finally:
+        # Lock acquired in the start handler; the worker owns its release.
+        if _artist_job_lock.locked():
+            _artist_job_lock.release()
+
+
+def _start_artist_job(
+    background_tasks: BackgroundTasks,
+    kind: str,
+    total: int,
+    work: Callable[[], dict[str, Any]],
+) -> str:
+    """Register + schedule a job. The caller must already hold `_artist_job_lock`."""
+    job_id = str(uuid.uuid4())
+    _artist_jobs[job_id] = _artist_job_record(kind, total)
+    logger.info("[ARTIST] job start: job_id=%s kind=%s total=%d", job_id, kind, total)
+    background_tasks.add_task(_run_artist_job, job_id, work)
+    return job_id
+
+
+@app.get("/api/artists/jobs/{job_id}")
+def artist_job_status(job_id: str):
+    """Poll one artist-hub job. Same envelope as `/api/phrase/batch/status`."""
+    if job_id not in _artist_jobs:
+        raise HTTPException(404, f"Job not found: {job_id}")
+    return {"status": "ok", "data": _artist_jobs[job_id]}
+
+
+@app.get("/api/artists/merge/candidates")
+def artist_merge_candidates():
+    """Library artist names that fold onto one key, biggest group first. Pure read.
+
+    Deterministic folds only (case, whitespace, `.-_`, apostrophes, `&`/`and`) — never
+    fuzzy: a wrong merge is far more expensive than a missed one.
+    """
+    groups = artist_merge.candidates(db if db.loaded else None)
+    return {"candidates": [c.as_dict() for c in groups], "total": len(groups)}
+
+
+@app.post("/api/artists/merge/preview")
+def artist_merge_preview(r: ArtistMergePreviewReq):
+    """Exactly what an apply would touch — computed, never performed.
+
+    POST only because the group can be a long list of names; it writes nothing (no
+    master.db, no tags, no sidecar) and needs no session.
+    """
+    if not db.loaded:
+        raise HTTPException(400, "Library not loaded")
+    names = _artist_merge_names(r.names)
+    try:
+        return artist_merge.preview(db, names, r.canonical).as_dict()
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+
+
+@app.post("/api/artists/merge/apply", dependencies=[Depends(require_session)])
+async def artist_merge_apply(r: ArtistMergeApplyReq, background_tasks: BackgroundTasks):
+    """Repoint a variant group onto one canonical artist. Journalled, revertable.
+
+    Returns a job id immediately — poll `/api/artists/jobs/{job_id}`. One artist-hub
+    job at a time (409 while one is in flight), and 409 while Rekordbox holds the
+    library. The preview runs here so a group with nothing to absorb, an unknown name
+    or an unusable backend fails as a 4xx instead of as a background-job error.
+    """
+    if not db.loaded:
+        raise HTTPException(400, "Library not loaded")
+    if _is_rekordbox_running():
+        raise HTTPException(409, _RB_RUNNING_MERGE)
+
+    names = _artist_merge_names(r.names)
+    try:
+        plan = artist_merge.preview(db, names, r.canonical, measure_files=False)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+    if not plan.absorbing:
+        raise HTTPException(
+            400, f"Nothing to merge into {plan.canonical!r} — the group has one spelling"
+        )
+
+    if _artist_job_lock.locked():
+        raise HTTPException(409, "An artist-hub job is already running")
+    await _artist_job_lock.acquire()
+
+    def _work() -> dict[str, Any]:
+        return artist_merge.apply(
+            db,
+            names,
+            r.canonical,
+            write_tags=r.write_tags,
+            verify_bytes=r.verify_bytes,
+            delete_orphans=r.delete_orphans,
+        ).as_dict()
+
+    job_id = _start_artist_job(
+        background_tasks, ARTIST_JOB_MERGE_APPLY, plan.tracks_to_rewrite, _work
+    )
+    return {
+        "status": "ok",
+        "data": {
+            "job_id": job_id,
+            "total": plan.tracks_to_rewrite,
+            "group_id": plan.group_id,
+            "canonical": plan.canonical,
+        },
+    }
+
+
+@app.post("/api/artists/merge/revert/{run_id}", dependencies=[Depends(require_session)])
+async def artist_merge_revert(
+    run_id: str,
+    background_tasks: BackgroundTasks,
+    r: ArtistMergeRevertReq = ArtistMergeRevertReq(),
+):
+    """Replay one merge run's journal in reverse. Returns a job id.
+
+    Only artist-merge runs are accepted: the undo log is shared with the metadata
+    fixer, and replaying a fixer run here would restore the wrong field.
+    """
+    if not db.loaded:
+        raise HTTPException(400, "Library not loaded")
+    fixer_log.init_db()
+    run = fixer_log.get_run(run_id)
+    if run is None:
+        raise HTTPException(404, f"Unknown merge run: {run_id}")
+    if _artist_merge_note(run) is None:
+        raise HTTPException(400, f"Run {run_id} is not an artist merge")
+    if _is_rekordbox_running():
+        raise HTTPException(409, _RB_RUNNING_MERGE)
+
+    pending = sum(1 for m in fixer_log.get_mutations(run_id) if not m["reverted"])
+
+    if _artist_job_lock.locked():
+        raise HTTPException(409, "An artist-hub job is already running")
+    await _artist_job_lock.acquire()
+
+    def _work() -> dict[str, Any]:
+        return artist_merge.revert(db, run_id, write_tags=r.write_tags).as_dict()
+
+    job_id = _start_artist_job(background_tasks, ARTIST_JOB_MERGE_REVERT, pending, _work)
+    return {"status": "ok", "data": {"job_id": job_id, "total": pending, "run_id": run_id}}
+
+
+@app.get("/api/artists/merge/runs")
+def artist_merge_runs():
+    """Artist-merge runs, newest first — the history the revert button drives.
+
+    Fixer runs in the same log are filtered out; `note` comes back parsed so the UI
+    does not have to re-JSON it.
+    """
+    fixer_log.init_db()
+    runs = []
+    for run in fixer_log.list_runs():
+        note = _artist_merge_note(run)
+        if note is not None:
+            runs.append({**run, "note": note})
+    return {"runs": runs, "total": len(runs)}
+
+
+@app.post("/api/artists/projection/sync", dependencies=[Depends(require_session)])
+async def artist_projection_sync(r: ArtistProjectionSyncReq, background_tasks: BackgroundTasks):
+    """Mirror the favourites into Rekordbox as the `Artists` folder. Returns a job id.
+
+    Idempotent: one folder and N playlists however often it runs. `dry_run` writes
+    nothing at all — not master.db, not the sidecar — and is allowed while Rekordbox is
+    open; a real run is not.
+    """
+    if not db.loaded:
+        raise HTTPException(400, "Library not loaded")
+    if artist_projection.playlist_xml_path(db) is None:
+        # rbox skips the masterPlaylists6.xml update when the file is not beside
+        # master.db, and Rekordbox then drops the playlists on its next restart.
+        raise HTTPException(
+            400,
+            "Rekordbox's masterPlaylists6.xml was not found next to master.db — "
+            "playlists written now would vanish on the next Rekordbox restart. "
+            "Switch to live mode with a real Rekordbox installation first.",
+        )
+    if not r.dry_run and _is_rekordbox_running():
+        raise HTTPException(409, _RB_RUNNING_PROJECTION)
+
+    total = len(artist_schema.list_favourites(artist_schema.KIND_ARTIST))
+
+    if _artist_job_lock.locked():
+        raise HTTPException(409, "An artist-hub job is already running")
+    await _artist_job_lock.acquire()
+
+    def _work() -> dict[str, Any]:
+        return artist_projection.sync(db, dry_run=r.dry_run)
+
+    job_id = _start_artist_job(background_tasks, ARTIST_JOB_PROJECTION_SYNC, total, _work)
+    return {"status": "ok", "data": {"job_id": job_id, "total": total, "dry_run": r.dry_run}}
+
+
+@app.get("/api/artists/projection/status")
+def artist_projection_status():
+    """Folder + per-artist projection state. Pure read; renders before the library loads."""
+    return artist_projection.status(db if db.loaded else None)
+
+
+# --- ARTIST HUB: SoundCloud binding, catalogue, batch download -----------------------
+#
+# ToU guardrails (owner decision, docs/research/implement/inprogress_library-artist-hub.md):
+# the catalogue is fetched WHEN THE USER SELECTS AN ARTIST — never speculatively, never
+# for an artist nobody bound. Every fetch carries a `CallBudget` (hard per-run cap,
+# logged), the payload lands in the sidecar's TTL cache and not in a permanent mirror,
+# and the batch download does NOT inherit `sc_aggressive_mode`.
+
+ARTIST_JOB_DOWNLOAD = "download_missing"
+
+#: Hard per-run call cap for one user-initiated catalogue fetch. 25 pages x 200 items
+#: covers a 5000-track artist; anything past that would be a crawl, not a lookup.
+ARTIST_CATALOGUE_CALL_BUDGET = sc_api.SC_DEFAULT_CALL_BUDGET
+
+#: Shortest gap between two honoured `refresh=true` reads of the same artist. A forced
+#: refresh skips the TTL cache and spends a whole `CallBudget` on the user's OAuth token,
+#: so a stuck retry loop in the UI would turn one button into a crawl. Inside the window
+#: the read falls back to the cache and answers with the same payload — the session gate
+#: stops a foreign caller, this stops an authenticated one.
+ARTIST_CATALOGUE_REFRESH_COOLDOWN_S = 60.0
+
+_artist_refresh_lock = threading.Lock()
+#: collection_id -> `time.monotonic()` of the last forced refresh that was honoured.
+_artist_forced_refresh_at: dict[str, float] = {}
+
+
+def _claim_forced_refresh(collection_id: str) -> bool:
+    """Whether this caller may skip the TTL cache for `collection_id`, stamping the claim."""
+    now = time.monotonic()
+    with _artist_refresh_lock:
+        last = _artist_forced_refresh_at.get(collection_id)
+        if last is not None and now - last < ARTIST_CATALOGUE_REFRESH_COOLDOWN_S:
+            return False
+        _artist_forced_refresh_at[collection_id] = now
+        return True
+
+
+#: Hard per-run cap on one batch-download job. A bigger ask is refused (400) rather than
+#: silently trimmed — a truncated queue that looks complete is the failure mode this
+#: feature keeps hitting.
+ARTIST_DOWNLOAD_MAX_TRACKS = 100
+
+#: Give up waiting on one track. The downloader runs each track in its own daemon thread
+#: and signals through `on_complete`; without a ceiling a thread that never calls back
+#: would wedge the whole job.
+ARTIST_DOWNLOAD_TRACK_TIMEOUT_S = 900.0
+
+# Single-flight guard for the batch download. Deliberately NOT `_artist_job_lock`: that
+# one serialises master.db writers (merge / projection) and a download is neither.
+_artist_download_lock = asyncio.Lock()
+
+_SC_NOT_CONNECTED = (
+    "SoundCloud is not connected. Sign in under SoundCloud, then reload this artist."
+)
+_SC_SESSION_EXPIRED = "The SoundCloud session expired. Sign in again to refresh the catalogue."
+_SC_REFRESH_UNAVAILABLE = (
+    "The SoundCloud session needed renewing and SoundCloud could not be reached. "
+    "The stored login is untouched — try again once the connection is back."
+)
+
+
+def _artist_sc_token() -> str | None:
+    """A token good for the next call, renewed silently. None = no login stored.
+
+    Never logged — not even redacted.
+
+    Raises:
+        AuthExpiredError: SoundCloud rejected the stored refresh token; both keyring
+            entries are already cleared and the user has to sign in again.
+        soundcloud_auth.TransientRefreshError: the token is past its expiry and the
+            token endpoint was unreachable. The stored login is kept.
+    """
+    try:
+        return sc_auth.get_access_token()
+    except (AuthExpiredError, sc_auth.TransientRefreshError):
+        raise
+    except Exception as exc:
+        logger.warning("[ARTIST] token lookup failed: %s", type(exc).__name__)
+        return None
+
+
+def _sc_access_token() -> str | None:
+    """`_artist_sc_token` for the plain SC routes, with the two failures as HTTP codes.
+
+    A rejected refresh is a 401 the frontend answers with a re-login; an unreachable
+    token endpoint is a 503, never a 401 — a dropped connection must not throw the
+    user at a login button.
+
+    Blocking: a renewal costs one HTTPS round-trip. `async def` handlers call it through
+    `asyncio.to_thread`; sync handlers already run in FastAPI's threadpool.
+    """
+    try:
+        return _artist_sc_token()
+    except AuthExpiredError:
+        raise HTTPException(401, detail="auth_expired") from None
+    except sc_auth.TransientRefreshError as exc:
+        logger.warning("[SC] token renewal unavailable: %s", exc)
+        raise HTTPException(503, detail="sc_refresh_unavailable") from None
+
+
+def _artist_collection_or_404(collection_id: str) -> dict[str, Any]:
+    artist_registry.migrate_legacy_artist_links()
+    collection = artist_schema.get_collection(collection_id)
+    if collection is None:
+        raise HTTPException(404, f"Unknown artist collection: {collection_id}")
+    return collection
+
+
+def _artist_state(status: str, collection_id: str, detail: str, **extra: Any) -> dict[str, Any]:
+    """A non-catalogue answer.
+
+    Carries NO bucket keys on purpose: a UI that destructures `their_tracks` gets
+    `undefined`, never `[]`. An empty list here would read as "this artist has released
+    nothing", which is a claim about data we do not have.
+    """
+    return {"status": status, "collection_id": collection_id, "detail": detail, **extra}
+
+
+#: Per-source outcome in the catalogue payload's `sources` map. Only `ok` entitles anyone
+#: to speak about absence; every other value means nobody looked at that source.
+ARTIST_SOURCE_OK = "ok"
+ARTIST_SOURCE_FAILED = "failed"
+#: Not queried because the shared call budget was spent — the one skip a later pass on a
+#: fresh budget can undo.
+ARTIST_SOURCE_SKIPPED_BUDGET = "skipped_budget"
+#: Not queried because the per-artist track ceiling (`MAX_CATALOGUE_TRACKS`) was already
+#: full. Reported even when the budget is spent too — the ceiling wins, because a fresh
+#: budget would skip this source again, and a consumer reading `sources` as a budget
+#: signal must not see one here.
+ARTIST_SOURCE_SKIPPED_TRACK_CAP = "skipped_track_cap"
+ARTIST_SOURCE_NOT_QUERIED = "not_queried"
+
+
+def _skipped_state(room: int) -> str:
+    """Which cap stopped a source, for a caller that already knows one of the two did.
+
+    The ceiling wins when both apply: a later run on a full budget would skip the source
+    again, so naming the budget there would promise a retry that changes nothing.
+    """
+    return ARTIST_SOURCE_SKIPPED_TRACK_CAP if room <= 0 else ARTIST_SOURCE_SKIPPED_BUDGET
+
+
+def _artist_fetch_sources(
+    artist_urn: str,
+    auth_token: str,
+    names: Sequence[str],
+    budget: sc_api.CallBudget,
+    state: dict[str, Any],
+) -> sc_api.SCResultList:
+    """The three catalogue sources under ONE call budget, deduplicated by `sc_id`.
+
+    Order is the priority order, because the budget is spent in it:
+
+    1. **own uploads** — `/users/{urn}/tracks`, the highest-confidence source, skipped
+       when nobody has linked an account (search needs no URN).
+    2. **search by name** — the canonical name plus every alias. This is where the
+       label-, promo- and DJ-uploaded majority of a signed artist's catalogue lives, so
+       it outranks reposts for the remaining budget.
+    3. **reposts** — `/users/{urn}/reposts/tracks`, the artist's own re-shares.
+
+    Every source writes its outcome into `state` (`ok` / `failed` / `skipped_budget` /
+    `skipped_track_cap` / `not_queried`). A source that was not queried must never be
+    spoken about as "nothing missing" — that is the whole reason the status travels with
+    the payload. The two skips are separate because only the budget one can come out
+    differently next run.
+
+    Search and reposts are best-effort: own uploads are the half a linked artist cannot
+    do without, so a failure in either degrades to a status rather than sinking the
+    catalogue. `AuthExpiredError` is the exception — it kills the session for every
+    source, so it propagates.
+
+    The token is a parameter, never a log field: the warnings below carry the artist's
+    URN, the number of names and the exception type, and nothing else.
+    """
+    cap = artist_catalogue.MAX_CATALOGUE_TRACKS
+    merged: dict[str, dict] = {}
+    truncated = False
+    stop_reason = ""
+    calls = 0
+
+    def _absorb(rows: Any) -> None:
+        nonlocal truncated, stop_reason, calls
+        for track in rows:
+            sc_id = str(track.get("sc_id") or "")
+            if sc_id:
+                merged.setdefault(sc_id, track)
+        truncated = truncated or bool(getattr(rows, "truncated", False))
+        reason = str(getattr(rows, "stop_reason", "") or "")
+        # Same rule as `sc_api.search_tracks_many`: the budget outranks whatever came
+        # first. First-wins let an early `max_items` from own uploads mask a later
+        # `budget` from search, and only the budget one tells a caller that retrying
+        # can bring more back.
+        if reason and (not stop_reason or reason == artist_sync.BUDGET_STOP_REASON):
+            stop_reason = reason
+        calls += int(getattr(rows, "calls_used", 0) or 0)
+
+    def _room() -> int:
+        return max(0, cap - len(merged))
+
+    if artist_urn:
+        # Unguarded on purpose: a 404 here means the linked account is gone and a
+        # rate-limit means the run cannot proceed — both are states the route renders,
+        # not a partial catalogue.
+        own = sc_api.get_user_tracks(artist_urn, auth_token, max_items=cap, budget=budget)
+        _absorb(own)
+        state["uploads"] = ARTIST_SOURCE_OK
+
+    if names and _room() and not budget.exhausted:
+        try:
+            found = sc_api.search_tracks_many(
+                list(names), auth_token, max_items_per_query=_room(), budget=budget
+            )
+            _absorb(found)
+            state["search_queries_run"] = list(found.queries_run)
+            state["search_queries_skipped"] = list(found.queries_skipped)
+            state["search"] = (
+                ARTIST_SOURCE_SKIPPED_BUDGET if found.queries_skipped else ARTIST_SOURCE_OK
+            )
+        except AuthExpiredError:
+            raise
+        except Exception as exc:
+            logger.warning("op=artist_catalogue search_failed names=%d err=%s", len(names), exc)
+            state["search"] = ARTIST_SOURCE_FAILED
+    elif names:
+        # Reached when the ceiling filled up or the budget ran out; `_skipped_state` says
+        # which, because only one of the two means a later run could do better.
+        state["search"] = _skipped_state(_room())
+
+    if artist_urn:
+        if not _room() or budget.exhausted:
+            state["reposts"] = _skipped_state(_room())
+        else:
+            try:
+                reposts = sc_api.get_user_reposts(
+                    artist_urn, auth_token, max_items=_room(), budget=budget
+                )
+                _absorb(reposts)
+                state["reposts"] = ARTIST_SOURCE_OK
+            except AuthExpiredError:
+                raise
+            except sc_api.NotFoundError:
+                # The account has no reposts endpoint content — nothing to report, and
+                # the source WAS queried.
+                state["reposts"] = ARTIST_SOURCE_OK
+            except Exception as exc:
+                logger.warning(
+                    "op=artist_catalogue reposts_failed artist=%s err=%s", artist_urn, exc
+                )
+                state["reposts"] = ARTIST_SOURCE_FAILED
+
+    return sc_api.SCResultList(
+        list(merged.values()),
+        truncated=truncated,
+        stop_reason=stop_reason,
+        calls_used=calls,
+    )
+
+
+def _artist_catalogue_view(
+    collection_id: str,
+    *,
+    refresh: bool,
+    allow_fetch: bool,
+    budget: sc_api.CallBudget | None = None,
+) -> dict[str, Any]:
+    """Shared body of the catalogue read — also how the download job learns what a track is.
+
+    Returns either the `status="ok"` catalogue or one of the typed states
+    (`not_linked` / `not_connected` / `artist_gone`). `allow_fetch` False means
+    cache-only: the download job must not open a second network session behind the
+    user's back.
+
+    An artist with **no linked account** is no longer a typed state: identification is
+    by name (owner decision 2026-09-08) and search needs no URN, so the catalogue is
+    built from the search source alone and the payload carries `link_missing=True`.
+    Without any name to search for — which the store cannot produce — it stays
+    `not_linked`.
+
+    `budget` lets a caller that sweeps several artists — the background sync — hold ONE
+    cap across the whole run instead of handing every artist a fresh one. Omitted, the
+    call gets its own `ARTIST_CATALOGUE_CALL_BUDGET`, which is what every interactive
+    caller wants.
+    """
+    _artist_collection_or_404(collection_id)
+
+    link = artist_registry.get_provider_link(collection_id)
+    resolved = bool(link and link["resolved"])
+    artist_urn = str(link["remote_id"]) if link and resolved else ""
+    link_state = "linked" if resolved else ("unresolved" if link else "missing")
+    names = artist_registry.artist_names(collection_id)
+    if not names and not artist_urn:
+        return _artist_state(
+            "not_linked",
+            collection_id,
+            "No SoundCloud account is bound to this artist and there is no name to search "
+            "for. Link an account to see their catalogue.",
+        )
+
+    token: str | None = None
+    if allow_fetch:
+        try:
+            token = _artist_sc_token()
+        except AuthExpiredError:
+            return _artist_state("not_connected", collection_id, _SC_SESSION_EXPIRED)
+        except sc_auth.TransientRefreshError:
+            # Not "signed out": the login is still stored, SoundCloud just could not be
+            # reached to renew it. The panel offers Retry, not a sign-in button.
+            return _artist_state("not_connected", collection_id, _SC_REFRESH_UNAVAILABLE)
+    if budget is None:
+        budget = sc_api.CallBudget(limit=ARTIST_CATALOGUE_CALL_BUDGET, label=collection_id)
+
+    fetcher: artist_catalogue.Fetcher | None = None
+    # "not_queried" survives a cache hit: nothing was fetched on this pass, so nothing
+    # may be asserted about any of the three sources.
+    fetch_state: dict[str, Any] = {
+        "uploads": ARTIST_SOURCE_NOT_QUERIED,
+        "search": ARTIST_SOURCE_NOT_QUERIED,
+        "reposts": ARTIST_SOURCE_NOT_QUERIED,
+        "search_queries_run": [],
+        "search_queries_skipped": [],
+    }
+    if token:
+        # The token is bound as a default so it lives in this call, not in a closure the
+        # catalogue module could ever reach — that module must never see credentials.
+        def _fetch(urn: str, _token: str = token, _names: tuple[str, ...] = names) -> Any:
+            return _artist_fetch_sources(urn, _token, _names, budget, fetch_state)
+
+        fetcher = _fetch
+
+    # Claimed only with a fetcher in hand: a signed-out read cannot spend anything, and
+    # burning the window there would leave the first real refresh serving stale cache.
+    forced = bool(refresh) and fetcher is not None and _claim_forced_refresh(collection_id)
+
+    try:
+        view = artist_catalogue.catalogue(
+            collection_id,
+            local_tracks=db.tracks if getattr(db, "loaded", False) else None,
+            artist_urn=artist_urn,
+            artist_names=names,
+            fetch=fetcher,
+            force_refresh=forced,
+        )
+    except artist_catalogue.ArtistNotLinked:
+        return _artist_state(
+            "not_linked",
+            collection_id,
+            "No SoundCloud account is bound to this artist and there is no name to search "
+            "for. Link an account to see their catalogue.",
+        )
+    except artist_catalogue.CatalogueUnavailable:
+        # No usable cache and no way to fetch: either signed out, or a cache-only read.
+        return _artist_state(
+            "not_connected",
+            collection_id,
+            _SC_NOT_CONNECTED
+            if allow_fetch
+            else "No catalogue has been fetched for this artist yet. Open the artist first.",
+        )
+    except AuthExpiredError:
+        return _artist_state("not_connected", collection_id, _SC_SESSION_EXPIRED)
+    except NotFoundError:
+        return _artist_state(
+            "artist_gone",
+            collection_id,
+            "SoundCloud no longer serves this account — it may be deleted, private or renamed.",
+            permalink=(link or {}).get("permalink", ""),
+        )
+
+    logger.info(
+        "op=artist_catalogue_budget collection=%s calls=%d cap=%d from_cache=%s "
+        "uploads=%s search=%s reposts=%s",
+        collection_id,
+        budget.used,
+        budget.limit,
+        view["from_cache"],
+        fetch_state["uploads"],
+        fetch_state["search"],
+        fetch_state["reposts"],
+    )
+    return {
+        "status": "ok",
+        "collection_id": collection_id,
+        "link": link,
+        "link_state": link_state,
+        # Identification is by name; the account link only adds the highest-confidence
+        # signal. Say when it is absent instead of letting the UI imply a bound artist.
+        "link_missing": not resolved,
+        "search_names": list(names),
+        "calls_used": budget.used,
+        "call_budget": budget.limit,
+        # Per source: "ok" | "failed" | "skipped_budget" | "skipped_track_cap" |
+        # "not_queried". Only "ok" entitles the UI to say nothing is missing from what
+        # that source would have supplied; every other value means it was never looked
+        # at, and claiming absence would be a fabrication. The two skips are separate
+        # because only the budget one says a later run could do better.
+        "sources": {
+            "uploads": fetch_state["uploads"],
+            "search": fetch_state["search"],
+            "reposts": fetch_state["reposts"],
+        },
+        "search_queries_run": list(fetch_state["search_queries_run"]),
+        "search_queries_skipped": list(fetch_state["search_queries_skipped"]),
+        **view,
+    }
+
+
+def _record_foreground_refresh(collection_id: str, view: dict[str, Any]) -> None:
+    """Stamp `sync_state` for a manual refresh that actually fetched.
+
+    The background pass is not the only writer of the catalogue cache — the Hub's Update
+    button replaces the same payload. While this path recorded nothing, a `partial:`
+    marker outlived the truncation it described and the Hub kept rendering "(partial)"
+    over a catalogue that had since come back whole.
+
+    Only what this fetch measured is written: a complete catalogue clears the marker, a
+    truncation blamed on a permanent cap writes `capped:` with the cause the fetch
+    reported. A budget-cut fetch writes nothing — `partial:` carries the background
+    pass's consecutive-attempt counter (`artist_sync.MAX_CONSECUTIVE_PARTIALS`) and a
+    foreground refresh is not one of those passes.
+
+    A cache hit (`from_cache`) changed no truth and is left alone — which is what a
+    cooldown-denied refresh normally degrades to.
+    """
+    if view.get("status") != "ok" or view.get("from_cache") is not False:
+        return
+    truncated = bool(view.get("truncated"))
+    stop_reason = str(view.get("stop_reason") or "")
+    if truncated and stop_reason == artist_sync.BUDGET_STOP_REASON:
+        return
+    marker: str | None = None
+    if truncated:
+        cause = artist_sync.CAUSE_BY_STOP_REASON.get(stop_reason, artist_sync.CAUSE_UNKNOWN)
+        marker = artist_sync.CAPPED_PREFIX + cause
+    try:
+        artist_schema.record_sync(collection_id, error=marker)
+    except (sqlite3.Error, OSError) as exc:
+        # Bookkeeping, not the answer: the catalogue was fetched either way.
+        logger.warning(
+            "op=artist_catalogue_refresh_state collection=%s unwritable err=%s",
+            collection_id,
+            exc,
+        )
+
+
+@app.get("/api/artists/{collection_id}/catalogue", dependencies=[Depends(require_session)])
+def artist_catalogue_route(collection_id: str, refresh: bool = False):
+    """An artist's SoundCloud catalogue in role buckets, each track flagged owned/missing.
+
+    Fetched on selection, never speculatively. Three sources under one call budget —
+    own uploads, then search by canonical name + aliases, then reposts — with a
+    per-source status in `sources` so a bucket nobody queried is never reported as
+    empty. `refresh=true` forces a live fetch past the TTL cache, at most once per
+    `ARTIST_CATALOGUE_REFRESH_COOLDOWN_S` per artist, and records what it measured in
+    `sync_state` so the Hub stops showing a marker the new catalogue has outlived.
+
+    Session-gated although it is a GET: a cold cache fetches live on the user's OAuth
+    token and writes the result to the sidecar, so it spends quota like a mutation.
+
+    Linking stays manual, but an **unlinked** artist still gets a by-name catalogue:
+    `link_missing` is then true and no track can reach `high` confidence through the
+    uploader account.
+
+    The answer is a discriminated union on `status`: `ok` carries the buckets, while
+    `not_linked` / `not_connected` / `artist_gone` carry a `detail` and **no bucket keys
+    at all**, so a missing login can never be rendered as "this artist has released
+    nothing".
+    """
+    try:
+        view = _artist_catalogue_view(collection_id, refresh=refresh, allow_fetch=True)
+    except RateLimitError as exc:
+        raise HTTPException(429, safe_error_message(exc)) from None
+    if refresh:
+        _record_foreground_refresh(collection_id, view)
+    return view
+
+
+@app.post("/api/artists/{collection_id}/link", dependencies=[Depends(require_session)])
+def artist_link_soundcloud(collection_id: str, r: ArtistLinkReq):
+    """Bind an artist to a SoundCloud account from a profile URL or a bare permalink.
+
+    Stored against the store's stable `collection_id`, never the artist name, so a merge
+    cannot orphan the binding. `confidence` records how well the SoundCloud account name
+    agrees with the local spelling — surfaced, never enforced: the bind is the user's call.
+    """
+    _artist_collection_or_404(collection_id)
+
+    value = (r.url_or_permalink or "").strip()
+    if not value:
+        raise HTTPException(400, "url_or_permalink is required")
+
+    token = _sc_access_token()
+    if not token:
+        raise HTTPException(400, _SC_NOT_CONNECTED)
+
+    budget = sc_api.CallBudget(limit=ARTIST_CATALOGUE_CALL_BUDGET, label=collection_id)
+    try:
+        artist = sc_api.resolve_user(value, token, budget=budget)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    except AuthExpiredError:
+        raise HTTPException(401, detail="auth_expired") from None
+    except RateLimitError as exc:
+        raise HTTPException(429, safe_error_message(exc)) from None
+
+    if artist is None:
+        raise HTTPException(
+            404,
+            f"SoundCloud did not resolve {value!r} to an account "
+            "(deleted, private, or not a user profile).",
+        )
+
+    confidence = artist_registry.link_confidence(collection_id, artist["username"])
+    link = artist_registry.set_provider_link(
+        collection_id, artist["urn"], artist["permalink_url"], confidence
+    )
+    logger.info(
+        "op=artist_link_resolved collection=%s urn=%s confidence=%.3f calls=%d",
+        collection_id,
+        artist["urn"],
+        confidence,
+        budget.used,
+    )
+    return {"status": "ok", "collection_id": collection_id, "link": link, "artist": artist}
+
+
+@app.delete("/api/artists/{collection_id}/link", dependencies=[Depends(require_session)])
+def artist_unlink_soundcloud(collection_id: str):
+    """Unbind. Idempotent — the collection, its aliases and its favourite state survive."""
+    _artist_collection_or_404(collection_id)
+    removed = artist_registry.remove_provider_link(collection_id)
+    return {"status": "ok", "collection_id": collection_id, "removed": removed}
+
+
+@app.post(
+    "/api/artists/{collection_id}/tracks/{sc_urn}/role",
+    dependencies=[Depends(require_session)],
+)
+def artist_pin_track_role(collection_id: str, sc_urn: str, r: ArtistTrackRoleReq):
+    """Pin one catalogue track's role for this artist by hand. `role: null` unpins it.
+
+    The classifier reads a name; the user knows. A pin is stored in `track_identity`
+    and **wins over the classifier on every later pass**, so the row stays where the
+    user put it. The classifier's own reading is kept beside it and stays visible.
+
+    404 when the track has no identity row yet — the artist's catalogue has to have
+    been read once before a row can be pinned, and inventing one would create a
+    reference to a track nobody fetched.
+    """
+    _artist_collection_or_404(collection_id)
+    role = r.role
+    if role is not None:
+        role = str(role).strip()
+        if role not in artist_identity.ROLES:
+            raise HTTPException(
+                400,
+                f"unknown role {role!r} — expected one of {', '.join(sorted(artist_identity.ROLES))}",
+            )
+    if not artist_identity.set_override(collection_id, sc_urn, role):
+        raise HTTPException(
+            404,
+            f"{sc_urn} is not in this artist's identity table — open the artist's catalogue "
+            "first, then pin the row.",
+        )
+    logger.info(
+        "op=artist_identity_pin collection=%s track=%s role=%s",
+        collection_id,
+        sc_urn,
+        role or "cleared",
+    )
+    return {
+        "status": "ok",
+        "collection_id": collection_id,
+        "sc_urn": sc_urn,
+        "identity": artist_schema.get_track_identity(collection_id, sc_urn),
+    }
+
+
+@app.get("/api/artists/{collection_id}/identities")
+def artist_track_identities(collection_id: str):
+    """Everything this artist's `track_identity` table holds — what has been seen and pinned.
+
+    Read-only view of the local artist→track table that fills as the user browses. It
+    is not a catalogue: it carries no ownership verdict and no SoundCloud call, only the
+    classifier's role/confidence per track plus any `user_override`.
+    """
+    _artist_collection_or_404(collection_id)
+    rows = artist_schema.list_track_identities(collection_id)
+    return {
+        "status": "ok",
+        "collection_id": collection_id,
+        "total": len(rows),
+        "identities": rows,
+    }
+
+
+def _artist_links_refresh(collection_id: str, *, use_musicbrainz: bool) -> dict[str, Any]:
+    """One Find-links pass for a known collection — the refresh route and the MB confirm.
+
+    The token is looked up only when an account is linked, since nothing else could spend
+    it, and goes straight into the engine: never logged, never in the payload. An expired
+    login or an unreachable renewal is not an error here — SoundCloud reports
+    `not_connected` and MusicBrainz, which needs no login, still answers.
+    """
+    link = artist_registry.get_provider_link(collection_id)
+    sc_urn = str(link["remote_id"]) if link and link["resolved"] else ""
+    token = ""
+    if sc_urn:
+        try:
+            token = _artist_sc_token() or ""
+        except (AuthExpiredError, sc_auth.TransientRefreshError) as exc:
+            logger.warning(
+                "op=artist_links_refresh collection=%s sc_login=unavailable err=%s",
+                collection_id,
+                type(exc).__name__,
+            )
+    result = artist_links.refresh(
+        collection_id,
+        names=artist_registry.artist_names(collection_id),
+        sc_urn=sc_urn,
+        sc_permalink=link["permalink"] if link else None,
+        token=token,
+        use_musicbrainz=use_musicbrainz,
+    )
+    return {"status": "ok", **result}
+
+
+@app.get("/api/artists/{collection_id}/links")
+def artist_web_links(collection_id: str) -> dict[str, Any]:
+    """Where to find this artist: the stored profile links, in display order. No network.
+
+    Read-only, like `/identities` — what the last Find-links click stored plus the user's
+    own additions. `last_fetch.sources` says which sources answered that click; hidden
+    links are counted in `hidden_count`, never listed.
+    """
+    _artist_collection_or_404(collection_id)
+    return {"status": "ok", **artist_links.list_links(collection_id)}
+
+
+@app.post("/api/artists/{collection_id}/links/refresh", dependencies=[Depends(require_session)])
+def artist_web_links_refresh(
+    collection_id: str, r: ArtistLinksRefreshReq = ArtistLinksRefreshReq()
+) -> dict[str, Any]:
+    """Find links: ask SoundCloud and MusicBrainz once, fold the answers into the store.
+
+    User-initiated only — the Find-links click, or right after the user linked an
+    account. `sources` is the honesty contract, as in the catalogue: a source that was
+    not reached says so and the links it gave before stay, so an empty strip after a
+    failed source never reads as "this artist has no profiles". SoundCloud is asked only
+    for a linked account, within `links.LINKS_CALL_BUDGET` calls.
+
+    A MusicBrainz *name* match only fills `musicbrainz_candidates` and binds nothing —
+    shared names are the norm in electronic music. The user confirms one through
+    `POST …/links/musicbrainz`.
+    """
+    _artist_collection_or_404(collection_id)
+    return _artist_links_refresh(collection_id, use_musicbrainz=r.musicbrainz)
+
+
+@app.post("/api/artists/{collection_id}/links", dependencies=[Depends(require_session)])
+def artist_web_link_add(collection_id: str, r: ArtistLinkAddReq) -> dict[str, Any]:
+    """Add a profile link by hand. It outranks every fetched source; no refresh rewrites it.
+
+    The classifier that gates fetched URLs gates this one too — http(s) only, no
+    credentials, no IP hosts, stored in canonical form — so a pasted `javascript:` string
+    is a 400, never a row. Re-adding a link the user hid brings it back.
+    """
+    _artist_collection_or_404(collection_id)
+    try:
+        link = artist_links.add_manual_link(collection_id, r.url)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return {"status": "ok", "collection_id": collection_id, "link": link}
+
+
+@app.post("/api/artists/{collection_id}/links/remove", dependencies=[Depends(require_session)])
+def artist_web_link_remove(collection_id: str, r: ArtistLinkRemoveReq) -> dict[str, Any]:
+    """Take one link off this artist: a manual link is deleted, a fetched one hidden.
+
+    Hidden rather than deleted because the next Find-links click would fetch it straight
+    back — the hide lives in the row and outlasts every refresh until `/links/restore`.
+    """
+    _artist_collection_or_404(collection_id)
+    outcome = artist_links.remove_link(collection_id, r.url_key)
+    if outcome is None:
+        raise HTTPException(404, "This artist has no link with that url_key.")
+    return {"status": "ok", "collection_id": collection_id, "outcome": outcome}
+
+
+@app.post("/api/artists/{collection_id}/links/restore", dependencies=[Depends(require_session)])
+def artist_web_links_restore(collection_id: str) -> dict[str, Any]:
+    """Un-hide every link the user took off this artist. Idempotent — 0 when none were."""
+    _artist_collection_or_404(collection_id)
+    restored = artist_links.restore_hidden(collection_id)
+    return {"status": "ok", "collection_id": collection_id, "restored": restored}
+
+
+@app.post("/api/artists/{collection_id}/links/musicbrainz", dependencies=[Depends(require_session)])
+def artist_musicbrainz_confirm(collection_id: str, r: ArtistMusicBrainzReq) -> dict[str, Any]:
+    """Bind the MusicBrainz artist the user picked, then read its links in the same click.
+
+    The only way a name match becomes a binding: refresh offers candidates, the user
+    names one here. A confirmed pick is never second-guessed by a later refresh —
+    `DELETE` is how it goes. Answers with the refresh payload, so the strip redraws
+    without a second round-trip.
+    """
+    _artist_collection_or_404(collection_id)
+    try:
+        artist_links.confirm_musicbrainz(collection_id, r.mbid)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return _artist_links_refresh(collection_id, use_musicbrainz=True)
+
+
+@app.delete(
+    "/api/artists/{collection_id}/links/musicbrainz", dependencies=[Depends(require_session)]
+)
+def artist_musicbrainz_drop(collection_id: str) -> dict[str, Any]:
+    """Unbind MusicBrainz ("that is not this artist"). Its links leave with it, now.
+
+    Idempotent; hidden links stay hidden. While a linked SoundCloud URL is one MusicBrainz
+    itself ties to exactly one artist, the next refresh re-anchors from it — unbinding is
+    for a wrong pick, not for muting a correct anchor.
+    """
+    _artist_collection_or_404(collection_id)
+    removed = artist_links.drop_musicbrainz(collection_id)
+    return {
+        "status": "ok",
+        "collection_id": collection_id,
+        "removed": removed,
+        **artist_links.list_links(collection_id),
+    }
+
+
+#: Call cap for one "which account is theirs?" search. `search_users` spends a single
+#: call; the cap is the per-run ToU guardrail every SoundCloud fetch here carries.
+ARTIST_SC_CANDIDATES_CALL_BUDGET = 2
+
+
+@app.get(
+    "/api/artists/{collection_id}/soundcloud/candidates",
+    dependencies=[Depends(require_session)],
+)
+def artist_soundcloud_candidates(collection_id: str) -> dict[str, Any]:
+    """Which SoundCloud account is theirs? One account search on the canonical name, ranked.
+
+    Suggestions only: display names are not unique, so the bind stays the user's click on
+    `POST …/link` and nothing here writes. `match` is `exact` / `close` / `weak`, more
+    followers first within a tier.
+
+    Session-gated although it is a GET: the search runs live on the user's OAuth token.
+    """
+    _artist_collection_or_404(collection_id)
+    names = artist_registry.artist_names(collection_id)
+    if not names or not names[0].strip():
+        raise HTTPException(400, "This artist has no name to search SoundCloud for.")
+    token = _sc_access_token()
+    if not token:
+        raise HTTPException(400, _SC_NOT_CONNECTED)
+    budget = sc_api.CallBudget(limit=ARTIST_SC_CANDIDATES_CALL_BUDGET, label=collection_id)
+    try:
+        users = sc_api.search_users(names[0], token, budget=budget)
+    except AuthExpiredError:
+        raise HTTPException(401, detail="auth_expired") from None
+    except RateLimitError as exc:
+        raise HTTPException(429, safe_error_message(exc)) from None
+    candidates = artist_links.rank_soundcloud_accounts(users, names)
+    logger.info(
+        "op=artist_sc_candidates collection=%s found=%d shown=%d calls=%d",
+        collection_id,
+        len(users),
+        len(candidates),
+        budget.used,
+    )
+    return {
+        "status": "ok",
+        "collection_id": collection_id,
+        "query": names[0],
+        "candidates": candidates,
+    }
+
+
+@app.get("/api/artists/{collection_id}/local-tracks")
+def artist_local_tracks(collection_id: str) -> dict[str, Any]:
+    """The artist page's local half: every library track credited to them, with its role.
+
+    More than the Artist field — the Remixer field and title credits (`(X Remix)`,
+    `feat. X`, `X - Title`) count too, and the user's own assign / exclude rows win over
+    both. Read-only, no network, no session gate, like `/identities`.
+
+    Deliberately no `_artist_collection_or_404`: the hub and browse hand out ids for
+    library spellings nothing has stored yet, and their pages must still list tracks. 404
+    only when neither the store nor the loaded library knows the id. Without a library a
+    stored artist answers `library_loaded: false` — "not loaded", never "has no tracks".
+    """
+    payload = artist_attribution.local_tracks(db if db.loaded else None, collection_id)
+    if payload is None:
+        raise HTTPException(404, f"Unknown artist collection: {collection_id}")
+    return {"status": "ok", **payload}
+
+
+@app.get("/api/artists/{collection_id}/local-tracks/candidates")
+def artist_local_track_candidates(
+    collection_id: str,
+    q: str = "",
+    limit: int = artist_attribution.DEFAULT_CANDIDATE_LIMIT,
+) -> dict[str, Any]:
+    """Library search behind "Add tracks": title / artist / remixer substring, capped.
+
+    Every hit carries this artist's current `artist_role` (null when not theirs) and
+    `excluded`, so the picker shows what is already attributed before the user adds it
+    twice. A blank query returns nothing — a search box, not a library browser. 404, like
+    the page itself, when neither the store nor the loaded library knows the id. Read-only.
+    Registered ahead of every `…/local-tracks/{track_id}` route: Starlette serves the first
+    match, so a later `GET …/{track_id}` cannot swallow this literal path.
+    """
+    payload = artist_attribution.search_candidates(
+        db if db.loaded else None, collection_id, q, limit
+    )
+    if payload is None:
+        raise HTTPException(404, f"Unknown artist collection: {collection_id}")
+    return {"status": "ok", **payload}
+
+
+@app.post(
+    "/api/artists/{collection_id}/local-tracks/{track_id}",
+    dependencies=[Depends(require_session)],
+)
+def artist_local_track_assign(
+    collection_id: str, track_id: str, r: ArtistTrackAssignReq
+) -> dict[str, Any]:
+    """Correct the automatic attribution for one library track: assign, exclude or clear.
+
+    The automatic layers read names, and a DJ library is full of names that lie; the user
+    knows. `exclude` beats every automatic match, `assign` adds any track under the role
+    picked (default `primary`), `clear` hands the track back. The row snapshots title and
+    artist, so a track that leaves the library — or whose id a reload hands to another
+    recording — is listed as `assigned_missing`, never silently re-pointed.
+
+    An artist the hub only knows as a library spelling has no row to hang this off:
+    `name` stores it on the first write, and only a name that derives exactly this id is
+    taken. Writes the artists.db sidecar alone, under its own lock — never `master.db`,
+    so no `db_lock`.
+    """
+    try:
+        result = artist_attribution.set_assignment(
+            db if db.loaded else None,
+            collection_id,
+            track_id,
+            action=r.action,
+            role=r.role,
+            name=r.name,
+        )
+    except artist_attribution.UnknownCollection:
+        raise HTTPException(
+            404, f"Unknown artist collection: {collection_id} — send its name so it can be stored."
+        ) from None
+    except artist_attribution.TrackNotInLibrary:
+        raise HTTPException(404, "That track is not in the loaded library.") from None
+    except artist_attribution.LibraryNotLoaded as exc:
+        raise HTTPException(409, str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return {"status": "ok", **result}
+
+
+def _sc_numeric_track_id(sc_id: str) -> str | None:
+    """`soundcloud:tracks:123` -> `123`. The downloader speaks numeric ids."""
+    tail = str(sc_id or "").strip().rsplit(":", 1)[-1]
+    return tail if tail.isdigit() else None
+
+
+def _artist_download_selection(
+    view: Mapping[str, Any],
+    sc_ids: list[str],
+    auto_queue: bool,
+) -> list[dict[str, Any]]:
+    """Which catalogue tracks this run may download.
+
+    Two mutually exclusive paths, because they carry different consent:
+
+    * **auto-queue** — the server picks, so it may only ever pick tracks the identity
+      layer marked `auto_queue_allowed` (role ∈ {primary, remixer} ∧ confidence ∈
+      {high, medium}) AND the diff proved missing. A remix by someone else, a `featured`
+      credit or anything in the review bucket is never queued on the user's behalf
+      (threat T11).
+    * **explicit ids** — the user pointed at rows, so any bucket is fair game, including
+      a review-bucket track. Unknown ids are refused rather than skipped, so the count
+      the UI showed is the count that runs.
+    """
+    by_id: dict[str, dict[str, Any]] = {}
+    for bucket in artist_catalogue.BUCKET_KEYS:
+        for track in view.get(bucket) or []:
+            by_id[str(track.get("sc_id"))] = track
+
+    if auto_queue:
+        if sc_ids:
+            raise HTTPException(
+                400,
+                "auto_queue picks the tracks itself — send either sc_ids or auto_queue, not both.",
+            )
+        return [track for track in by_id.values() if track.get("auto_queue_allowed")]
+
+    wanted: list[str] = []
+    for raw in sc_ids:
+        sc_id = str(raw or "").strip()
+        if sc_id and sc_id not in wanted:
+            wanted.append(sc_id)
+    if not wanted:
+        raise HTTPException(400, "sc_ids must hold at least one track id, or set auto_queue")
+
+    unknown = [sc_id for sc_id in wanted if sc_id not in by_id]
+    if unknown:
+        raise HTTPException(
+            400,
+            f"{len(unknown)} track id(s) are not in this artist's fetched catalogue: "
+            + ", ".join(unknown[:5]),
+        )
+    return [by_id[sc_id] for sc_id in wanted]
+
+
+def _artist_download_job_record(total: int, collection_id: str) -> dict[str, Any]:
+    return {
+        "kind": ARTIST_JOB_DOWNLOAD,
+        "collection_id": collection_id,
+        "status": "running",
+        "total": total,
+        "done": 0,
+        "percent": 0.0,
+        "eta_seconds": 0.0,
+        "cancel_requested": False,
+        "current_track": None,
+        "succeeded": 0,
+        "skipped": 0,
+        "failed": 0,
+        "errors": [],
+        "call_cap": ARTIST_DOWNLOAD_MAX_TRACKS,
+        "result": None,
+        "error": None,
+    }
+
+
+async def _run_artist_download(
+    job_id: str,
+    tracks: list[dict[str, Any]],
+    auth_token: str,
+    artist_name: str,
+) -> None:
+    """Download the selected tracks one at a time through the existing SC downloader.
+
+    Per track it calls `sc_downloader.download_track` — the same entry point the
+    single-track path uses, so the host allowlist, the size cap, the snipped / 401 / 403
+    gates and the dedupe registry all still apply and none of it is reimplemented here.
+    `allow_aggressive=False` is the one deviation: `sc_aggressive_mode` is an opt-in for
+    a track the user picked by hand, and a batch must not inherit it.
+
+    Sequential on purpose: parallel fan-out across an artist's catalogue is exactly the
+    bulk-scraper shape the ToU guardrails rule out.
+    """
+    job = _artist_jobs[job_id]
+    loop = asyncio.get_running_loop()
+    started = time.monotonic()
+    try:
+        for index, track in enumerate(tracks):
+            if job["cancel_requested"]:
+                logger.info("[ARTIST] download %s cancelled at %d/%d", job_id, index, len(tracks))
+                job["status"] = "cancelled"
+                break
+
+            sc_id = str(track.get("sc_id") or "")
+            title = str(track.get("title") or "")
+            job["current_track"] = {"sc_id": sc_id, "title": title}
+
+            numeric_id = _sc_numeric_track_id(sc_id)
+            if numeric_id is None or not artist_catalogue.is_playable(track):
+                job["skipped"] += 1
+                job["errors"].append(
+                    {
+                        "sc_id": sc_id,
+                        "title": title,
+                        "error": "not downloadable: no numeric id, or SoundCloud grants this "
+                        "account only a preview",
+                    }
+                )
+            else:
+                finished = threading.Event()
+                outcome: dict[str, Any] = {"success": False}
+
+                # Bound as defaults: the callback fires on the downloader's own thread,
+                # and closing over the loop variables would let a late callback from a
+                # previous track write into this one's result.
+                def _on_complete(
+                    _task_id: str,
+                    success: bool,
+                    _path: Any,
+                    _outcome: dict[str, Any] = outcome,
+                    _done: threading.Event = finished,
+                ) -> None:
+                    _outcome["success"] = bool(success)
+                    _done.set()
+
+                sc_downloader.download_track(
+                    sc_track_id=numeric_id,
+                    sc_permalink_url=str(track.get("permalink_url") or ""),
+                    title=title,
+                    artist=str(track.get("uploader_name") or artist_name),
+                    duration_ms=int(track.get("duration_ms") or 0),
+                    downloadable=bool(track.get("downloadable")),
+                    auth_token=auth_token,
+                    allow_aggressive=False,
+                    on_complete=_on_complete,
+                )
+                signalled = await loop.run_in_executor(
+                    None, finished.wait, ARTIST_DOWNLOAD_TRACK_TIMEOUT_S
+                )
+                if not signalled:
+                    job["failed"] += 1
+                    job["errors"].append({"sc_id": sc_id, "title": title, "error": "timed out"})
+                elif outcome["success"]:
+                    job["succeeded"] += 1
+                else:
+                    job["failed"] += 1
+                    job["errors"].append(
+                        {"sc_id": sc_id, "title": title, "error": "download failed"}
+                    )
+
+            job["done"] = index + 1
+            job["percent"] = round(100.0 * job["done"] / max(1, job["total"]), 1)
+            elapsed = time.monotonic() - started
+            remaining = job["total"] - job["done"]
+            job["eta_seconds"] = round(elapsed / job["done"] * remaining, 1) if job["done"] else 0.0
+
+        if job["status"] == "running":
+            job["status"] = "done"
+        job["current_track"] = None
+        job["result"] = {
+            "succeeded": job["succeeded"],
+            "skipped": job["skipped"],
+            "failed": job["failed"],
+        }
+        logger.info(
+            "op=artist_download_done job=%s total=%d ok=%d skipped=%d failed=%d cap=%d",
+            job_id,
+            job["total"],
+            job["succeeded"],
+            job["skipped"],
+            job["failed"],
+            ARTIST_DOWNLOAD_MAX_TRACKS,
+        )
+    except Exception as exc:
+        logger.error("[ARTIST] download job %s crashed: %s", job_id, exc, exc_info=True)
+        job["status"] = "error"
+        job["error"] = safe_error_message(exc)
+    finally:
+        # Lock acquired in the start handler; the worker owns its release.
+        if _artist_download_lock.locked():
+            _artist_download_lock.release()
+
+
+@app.post("/api/artists/{collection_id}/download-missing", dependencies=[Depends(require_session)])
+async def artist_download_missing(
+    collection_id: str,
+    r: ArtistDownloadMissingReq,
+    background_tasks: BackgroundTasks,
+):
+    """Queue an artist's missing tracks through the existing SoundCloud downloader.
+
+    Reads the catalogue **from the sidecar cache only** — the run makes no metadata calls
+    of its own, so opening the artist page stays the one place a fetch happens. Returns a
+    job id; poll `/api/artists/download/status?job_id=`. One batch at a time (409).
+
+    `auto_queue` picks only tracks the identity layer marked `auto_queue_allowed` — role
+    `primary` or `remixer` at `high`/`medium` confidence — that the diff proved missing.
+    Anything in a review bucket (`remixed_by_others`, `featured`, `uncertain`) or in the
+    excluded mixes has to be named in `sc_ids`.
+
+    The job record carries `cancel_requested` for shape parity with the phrase batch and
+    the worker honours it, but **no route sets it yet** — there is deliberately no cancel
+    button in the UI contract until one is wired here.
+    """
+    view = _artist_catalogue_view(collection_id, refresh=False, allow_fetch=False)
+    if view["status"] != "ok":
+        # Typed state, not an empty success — the UI renders the reason, not a blank list.
+        raise HTTPException(409, view["detail"])
+
+    token = await asyncio.to_thread(_sc_access_token)
+    if not token:
+        raise HTTPException(400, _SC_NOT_CONNECTED)
+
+    selected = _artist_download_selection(view, r.sc_ids, r.auto_queue)
+    if not selected:
+        raise HTTPException(400, "Nothing to download — every selected track is already owned")
+    if len(selected) > ARTIST_DOWNLOAD_MAX_TRACKS:
+        logger.warning(
+            "op=artist_download_cap collection=%s requested=%d cap=%d result=refused",
+            collection_id,
+            len(selected),
+            ARTIST_DOWNLOAD_MAX_TRACKS,
+        )
+        raise HTTPException(
+            400,
+            f"{len(selected)} tracks exceeds the per-run cap of "
+            f"{ARTIST_DOWNLOAD_MAX_TRACKS}. Download in smaller batches.",
+        )
+
+    if _artist_download_lock.locked():
+        raise HTTPException(409, "An artist download is already running")
+    await _artist_download_lock.acquire()
+
+    collection = artist_schema.get_collection(collection_id) or {}
+    artist_name = str(collection.get("canonical_name") or "")
+
+    job_id = str(uuid.uuid4())
+    _artist_jobs[job_id] = _artist_download_job_record(len(selected), collection_id)
+    logger.info(
+        "op=artist_download_start job=%s collection=%s queued=%d cap=%d auto_queue=%s",
+        job_id,
+        collection_id,
+        len(selected),
+        ARTIST_DOWNLOAD_MAX_TRACKS,
+        r.auto_queue,
+    )
+    background_tasks.add_task(_run_artist_download, job_id, selected, token, artist_name)
+    return {
+        "status": "ok",
+        "data": {
+            "job_id": job_id,
+            "total": len(selected),
+            "collection_id": collection_id,
+            "call_cap": ARTIST_DOWNLOAD_MAX_TRACKS,
+        },
+    }
+
+
+@app.get("/api/artists/download/status")
+def artist_download_status(job_id: str):
+    """Poll one batch download. Same envelope as `/api/phrase/batch/status`."""
+    job = _artist_jobs.get(job_id)
+    if job is None or job.get("kind") != ARTIST_JOB_DOWNLOAD:
+        raise HTTPException(404, f"Job not found: {job_id}")
+    return {"status": "ok", "data": job}
+
+
+# --- ARTIST HUB: discovery + background sync (T-16 / T-17) ---------------------------
+#
+# ToU guardrails, same set as the catalogue read: discovery is user-initiated, seeded
+# ONLY from favourited artists, does AT MOST ONE `/related` hop per seed (never a hop on
+# a result), spends a hard per-run `CallBudget` that is logged, and caches nothing beyond
+# the sidecar's TTL. The background pass refreshes catalogues and queues NOTHING — a
+# download stays a button the user presses.
+
+#: How long after boot the idle poll first looks. The library load owns the first
+#: minutes of the process; the idle probe would say so anyway, this just saves the wake.
+ARTIST_SYNC_STARTUP_DELAY_S = 180.0
+
+#: Gap between idle polls. A pass is cheap when the app is busy (one probe sweep) and
+#: capped hard when it is not, so this is about freshness, not throughput.
+ARTIST_SYNC_POLL_INTERVAL_S = 15 * 60.0
+
+# Single-flight for the background pass. Deliberately NOT one of the names
+# `artist_store.sync._probe_job_locks` watches — a run must not read itself as load.
+_artist_sync_run_lock = asyncio.Lock()
+
+_artist_sync_task: asyncio.Task | None = None
+
+
+class ArtistSyncRunReq(BaseModel):
+    """`force` runs the pass with the opt-in setting off. It does NOT bypass idle."""
+
+    force: bool = False
+
+
+def _artist_idle_report() -> dict[str, Any]:
+    """`artist_sync.idle_report()` minus the load paths this module now observes.
+
+    `UNOBSERVABLE_LOAD` is a constant in the sync module, so once `analyze_batch` has a
+    registered probe the entry would be a stale claim in the other direction. Anything
+    still listed genuinely has no probe.
+    """
+    report = artist_sync.idle_report()
+    covered = set(report.get("probes") or {})
+    report["unobservable"] = [
+        entry
+        for entry in report.get("unobservable") or []
+        if str(entry).split(":", 1)[0].strip() not in covered
+    ]
+    return report
+
+
+def _artist_sync_states() -> list[dict[str, Any]]:
+    """Per-favourite mode + when it was last refreshed. `None` = never, not "now"."""
+    rows: list[dict[str, Any]] = []
+    for fav in artist_schema.list_favourites():
+        cid = str(fav["id"])
+        state = artist_schema.get_sync_state(cid) or {}
+        rows.append(
+            {
+                "collection_id": cid,
+                "name": fav.get("canonical_name") or "",
+                "mode": artist_schema.get_sync_mode(cid),
+                "last_sync_at": state.get("last_sync_at") or None,
+                "last_error": state.get("last_error") or None,
+            }
+        )
+    return rows
+
+
+@app.get("/api/artists/discover", dependencies=[Depends(require_session)])
+def artist_discover_route(limit: int = artist_discovery.DEFAULT_SUGGESTION_LIMIT):
+    """Artists the user does not own yet, seeded from their favourites.
+
+    Never a bare list: the payload carries a state per source (`related` /
+    `co_occurrence`), so a source that failed, hit the budget or was never queried says
+    exactly that. An empty `suggestions` with `sources.related != "ok"` means "we could
+    not look", and the UI must not render it as "nothing found".
+
+    Signed out is not an error — tier 1 reports `not_queried` and the zero-call
+    co-occurrence tier still answers. `soundcloud.connected` says which of the two
+    happened.
+
+    Session-gated although it is a GET: the related tier has no cache and runs a live
+    `/related` hop per seed on the user's OAuth token.
+    """
+    capped = max(1, min(int(limit), artist_discovery.DEFAULT_SUGGESTION_LIMIT * 4))
+
+    token = ""
+    connected = False
+    token_detail = ""
+    try:
+        token = _artist_sc_token() or ""
+        connected = bool(token)
+        if not connected:
+            token_detail = _SC_NOT_CONNECTED
+    except AuthExpiredError:
+        token_detail = _SC_SESSION_EXPIRED
+    except sc_auth.TransientRefreshError:
+        token_detail = _SC_REFRESH_UNAVAILABLE
+
+    try:
+        payload = artist_discovery.discover(token=token, limit=capped)
+    except RateLimitError as exc:
+        raise HTTPException(429, safe_error_message(exc)) from None
+
+    return {
+        "status": "ok",
+        "soundcloud": {"connected": connected, "detail": token_detail},
+        **payload,
+    }
+
+
+@app.get("/api/artists/sync/status")
+def artist_sync_status():
+    """Is a background pass allowed to run right now, and what did the last one do.
+
+    Read-only, no session gate — the panel polls it to explain itself. `enabled` is the
+    opt-in setting, `idle`/`reason` is why a pass would run or wait, `last_run` is the
+    stored record of the previous pass (`None` when none has ever finished) and
+    `running` is true only while a pass is actually in flight.
+    """
+    return {
+        "status": "ok",
+        "enabled": artist_sync.background_sync_enabled(),
+        "running": _artist_sync_run_lock.locked(),
+        **_artist_idle_report(),
+        "last_run": artist_sync.last_run(),
+        "artists": _artist_sync_states(),
+        "poll_interval_s": ARTIST_SYNC_POLL_INTERVAL_S,
+    }
+
+
+@app.post("/api/artists/sync/run", dependencies=[Depends(require_session)])
+async def artist_sync_run(r: ArtistSyncRunReq = ArtistSyncRunReq()):
+    """Run one background pass now. 409 while one is already in flight.
+
+    `run_sync` is blocking (SQLite + HTTP), so it goes to a thread. It refuses on its
+    own when the app is not idle and reports that as `reason_stopped` — a refusal is a
+    200 with the reason in it, not an error, because "not now, a download is running" is
+    an answer.
+    """
+    if _artist_sync_run_lock.locked():
+        raise HTTPException(409, "An artist background sync is already running")
+    await _artist_sync_run_lock.acquire()
+    try:
+        run = await asyncio.to_thread(artist_sync.run_sync, force=bool(r.force))
+    finally:
+        _artist_sync_run_lock.release()
+    return {"status": "ok", "data": run.as_dict()}
+
+
+async def _artist_sync_scheduler() -> None:
+    """Poll for idle and run a pass when the user opted in. Never runs on its own terms.
+
+    Gated on `artist_sync.SETTING_KEY` (default off) and re-read every wake, so toggling
+    the setting takes effect without a restart. The first sleep is what keeps this out of
+    startup; the library probe is what keeps it out of a library load.
+    """
+    await asyncio.sleep(ARTIST_SYNC_STARTUP_DELAY_S)
+    while True:
+        try:
+            if artist_sync.background_sync_enabled() and not _artist_sync_run_lock.locked():
+                await _artist_sync_run_lock.acquire()
+                try:
+                    run = await asyncio.to_thread(artist_sync.run_sync)
+                finally:
+                    _artist_sync_run_lock.release()
+                if (
+                    run.artists_synced
+                    or run.artists_partial
+                    or run.reason_stopped != artist_sync.STOP_COMPLETED
+                ):
+                    logger.info(
+                        "op=artist_sync_scheduler synced=%d partial=%d skipped=%d stop=%s",
+                        run.artists_synced,
+                        run.artists_partial,
+                        run.artists_skipped,
+                        run.reason_stopped,
+                    )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("op=artist_sync_scheduler err=%s: %s", type(exc).__name__, exc)
+        await asyncio.sleep(ARTIST_SYNC_POLL_INTERVAL_S)
 
 
 @app.get("/api/label/{aid}/tracks")
@@ -2339,8 +4146,15 @@ async def rbx_import(r: RbxImportReq):
 
 @app.post("/api/library/smart-playlists", dependencies=[Depends(require_session)])
 def gen_smart(r: SmartPlReq):
-    status = LibraryTools.generate_smart_playlists(r.artist_threshold, r.label_threshold)
-    return {"status": "success" if status else "error"}
+    """Rebuild the "By Label" auto-playlists.
+
+    Artist playlists are NOT written here any more — the Artist Hub projection
+    (`POST /api/artists/projection/sync`) owns the `Artists` folder. The response
+    carries `legacy_by_artist` while the retired generator's folder is still in
+    the library, so the UI can say so instead of pretending it is gone.
+    """
+    report = LibraryTools.generate_smart_playlists(r.artist_threshold, r.label_threshold)
+    return {"status": "success" if report.get("ok") else "error", **report}
 
 
 class PathRequest(BaseModel):
@@ -2716,8 +4530,18 @@ def load_project_endpoint(name: str):
 
 @app.post("/api/artist/soundcloud", dependencies=[Depends(require_session)])
 def set_sc(r: ScReq):
-    # storage.set_artist_link(r.artist_name, r.link)
-    return {"status": "saved"}
+    """Legacy name-keyed bind — kept working, now writing to the real store.
+
+    Superseded by `POST /api/artists/{collection_id}/link`, which is what the hub calls.
+    This shim exists because the route used to return a fake `{"status": "saved"}` with
+    its storage call commented out; anything still pointing here now resolves the name to
+    a stable `collection_id` and takes the same path, so no caller gets a lie back.
+    """
+    name = (r.artist_name or "").strip()
+    if not name:
+        raise HTTPException(400, "artist_name is required")
+    collection_id = artist_schema.create_collection(name, artist_schema.KIND_ARTIST)
+    return artist_link_soundcloud(collection_id, ArtistLinkReq(url_or_permalink=r.link))
 
 
 class SliceReq(BaseModel):
@@ -3110,8 +4934,29 @@ async def _on_startup():
     except Exception as e:
         logger.error(f"FolderWatcher startup failed: {e}", exc_info=True)
 
+    # Artist background sync: a poll loop, not a job. `create_task` returns immediately
+    # and the loop sleeps first, so nothing here delays boot; the pass itself is gated on
+    # the opt-in setting (default off) and on the idle probes.
+    global _artist_sync_task
+    try:
+        _artist_sync_task = asyncio.create_task(_artist_sync_scheduler())
+        logger.info(
+            "Artist background-sync poller started (every %.0fs, opt-in: %s).",
+            ARTIST_SYNC_POLL_INTERVAL_S,
+            artist_sync.SETTING_KEY,
+        )
+    except RuntimeError as exc:
+        logger.warning("Artist background-sync poller not started: %s", exc)
+
 
 async def _on_shutdown():
+    global _artist_sync_task
+    task = _artist_sync_task
+    _artist_sync_task = None
+    if task is not None and not task.done():
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
     try:
         folder_watcher.shutdown_watcher()
     except Exception as exc:
@@ -3786,6 +5631,22 @@ async def analyze_track_full(tid: str, req: AnalyzeFullReq = AnalyzeFullReq()):
         raise HTTPException(500, safe_error_message(e))
 
 
+#: In-flight `analyze-batch` streams. This route writes analysis into `master.db` and
+#: ANLZ for minutes at a time while keeping no job record, so it was the one load path
+#: `artist_store.sync` could not see; the probe registered below closes that gap.
+_analyze_batch_active = 0
+_analyze_batch_count_lock = threading.Lock()
+
+
+def _analyze_batch_probe() -> str | None:
+    return f"analyze_batch:{_analyze_batch_active}" if _analyze_batch_active else None
+
+
+# Registered at import, not in `_on_startup`: the probe must be live for every caller of
+# `artist_sync.is_idle()`, including a process that never ran the lifespan hooks.
+artist_sync.register_probe("analyze_batch", _analyze_batch_probe)
+
+
 @app.post("/api/library/analyze-batch", dependencies=[Depends(require_session)])
 async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
     """
@@ -3809,13 +5670,21 @@ async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
     if not track_ids:
         return {"status": "ok", "data": {"message": "No tracks to analyze", "total": 0}}
 
-    import json
-
     async def stream_progress():
-        asyncio.get_running_loop()
-        for progress in writer.analyze_batch(track_ids, force=req.force):
-            yield json.dumps(progress) + "\n"
-            await asyncio.sleep(0)  # Yield control to event loop
+        # The counter is incremented inside the generator, not around the response:
+        # a stream the client aborts before it starts is never entered, so nothing can
+        # leak a permanent "busy" that would disable the artist background sync forever.
+        global _analyze_batch_active
+        with _analyze_batch_count_lock:
+            _analyze_batch_active += 1
+        try:
+            asyncio.get_running_loop()
+            for progress in writer.analyze_batch(track_ids, force=req.force):
+                yield json.dumps(progress) + "\n"
+                await asyncio.sleep(0)  # Yield control to event loop
+        finally:
+            with _analyze_batch_count_lock:
+                _analyze_batch_active -= 1
 
     return StreamingResponse(
         stream_progress(),
@@ -3913,7 +5782,7 @@ async def soundcloud_download(data: ScDownloadRequest, request: Request):
 
     Returns: { task_id: str }
     """
-    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
+    auth_token = await asyncio.to_thread(_sc_access_token)
 
     # Write-permission guard
     sc_dir = MUSIC_DIR / "SoundCloud"
@@ -3990,7 +5859,7 @@ class ScDownloadPlaylistReq(BaseModel):
 @app.post("/api/soundcloud/download-playlist", dependencies=[Depends(require_session)])
 async def soundcloud_download_playlist(r: ScDownloadPlaylistReq):
     """Enqueue download for every track in a SoundCloud playlist."""
-    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
+    auth_token = await asyncio.to_thread(_sc_access_token)
     if not auth_token:
         raise HTTPException(400, "SoundCloud auth token not configured")
 
@@ -4162,21 +6031,33 @@ async def delete_history_entry(sc_track_id: str):
 
 
 class ScAuthTokenReq(BaseModel):
-    """SoundCloud OAuth access-token body — single `token` field, validated
-    by `set_soundcloud_auth_token` for length (10–2048 chars) and ASCII."""
+    """SoundCloud OAuth handoff from the Tauri login flow.
+
+    `token` empty = logout (every stored credential is dropped). `refresh_token` and
+    `expires_in` are optional so an older frontend's single-field body still parses —
+    without a refresh token the session simply cannot renew itself, and `auth-status`
+    reports that as `refreshable: false` rather than pretending otherwise.
+    """
 
     token: str
+    refresh_token: str | None = _Field(default=None, max_length=2048)
+    expires_in: int | None = _Field(default=None, ge=60, le=86400)
 
 
 @app.post("/api/soundcloud/auth-token", dependencies=[Depends(require_session)])
 @rate_limit(steady=5.0, burst=10, key_mode="both")
 async def set_soundcloud_auth_token(request: Request, r: ScAuthTokenReq):
     """
-    EC7/EC13: Persist the SC OAuth token in the OS keyring (not in cookies or JSON).
-    Frontend detects auth state via 401 responses on subsequent requests, not via
-    cookies — bearer-in-header is the only authenticated transport.
+    EC7/EC13: Persist the SC OAuth credentials in the OS keyring (not in cookies or
+    JSON). Frontend detects auth state via 401 responses on subsequent requests, not
+    via cookies — bearer-in-header is the only authenticated transport.
+
+    The response never echoes any token material — not the access token, not the
+    refresh token. `persistent: false` means the keyring refused the blob, so the
+    session lives in the legacy key alone and cannot renew itself silently.
     """
     token = r.token.strip()
+    refresh_token = (r.refresh_token or "").strip()
 
     # EC13: Token format validation.
     # SoundCloud OAuth 2.1 issues JWT access tokens that are typically 400–900+ chars.
@@ -4195,38 +6076,100 @@ async def set_soundcloud_auth_token(request: Request, r: ScAuthTokenReq):
             logger.warning(f"[SC] /api/soundcloud/auth-token rejected: {reason}")
             raise HTTPException(status_code=400, detail=f"Invalid token format: {reason}")
 
-    if token:
-        keyring.set_password(KEYRING_SERVICE, KEYRING_SC_TOKEN, token)
-        logger.info("[SC] Auth token stored in OS keyring.")
-    else:
-        # Empty token → clear credentials (logout)
-        with contextlib.suppress(Exception):
-            keyring.delete_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
-        logger.info("[SC] Auth token cleared from keyring (logout).")
+    if refresh_token and not refresh_token.isascii():
+        logger.warning("[SC] /api/soundcloud/auth-token rejected: refresh_token not ASCII")
+        raise HTTPException(
+            status_code=400, detail="Invalid refresh_token format: contains non-ASCII characters"
+        )
 
-    return {"status": "success"}
+    if token:
+        result = sc_auth.store_tokens(token, refresh_token or None, r.expires_in)
+        logger.info(
+            "op=sc_auth_token outcome=stored persistent=%s refreshable=%s",
+            result.persistent,
+            result.tokens.refresh_token is not None,
+        )
+        return {
+            "status": "success",
+            "persistent": result.persistent,
+            "refreshable": result.tokens.refresh_token is not None,
+        }
+
+    # Empty token → clear credentials (logout)
+    sc_auth.clear_tokens()
+    logger.info("op=sc_auth_token outcome=cleared")
+    return {"status": "success", "persistent": False, "refreshable": False}
+
+
+@app.post("/api/soundcloud/refresh", dependencies=[Depends(require_session)])
+@rate_limit(steady=5.0, burst=10, key_mode="both")
+async def refresh_soundcloud_token(request: Request):
+    """Renew the stored SoundCloud access token from the stored refresh token.
+
+    Backend-owned and single-flight (`soundcloud_auth.refresh`) because SoundCloud
+    rotates the refresh token on every use — two parallel refreshes would burn each
+    other's token. The stored access token is passed as `stale_token`, so a caller
+    that lost the race gets the winner's token back instead of a second POST.
+
+    No token material is ever returned. Outcomes:
+      - 200 `{"status": "refreshed"}` — a valid access token is stored.
+      - 401 `{"status": "expired"}` — SoundCloud rejected the refresh token, or none
+        was stored. The keyring is already cleared; the user must sign in again.
+      - 503 `{"status": "unavailable"}` — SoundCloud was unreachable. The stored
+        login is untouched; retrying later is the right move.
+    """
+
+    def _renew() -> None:
+        stored = sc_auth.load_tokens()
+        sc_auth.refresh(stale_token=stored.access_token if stored else None)
+
+    try:
+        await asyncio.to_thread(_renew)
+    except AuthExpiredError:
+        return JSONResponse(
+            status_code=401, content={"status": "expired", "detail": "auth_expired"}
+        )
+    except sc_auth.TransientRefreshError as exc:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unavailable", "detail": safe_error_message(exc)},
+        )
+    return {"status": "refreshed"}
 
 
 @app.get("/api/soundcloud/auth-status")
 async def get_soundcloud_auth_status() -> dict[str, object]:
-    """Local-only probe: does the OS keyring hold a SC OAuth token?
+    """Local-only probe: what does the OS keyring hold for SoundCloud?
 
-    Boolean only — no token material, no api.soundcloud.com round-trip. The
-    frontend uses this on mount to decide "Connect" vs "Authenticated" UI
-    without paying the 100-500 ms /me round-trip or tripping the global
-    sc:auth-expired interceptor every render.
+    No token material, no api.soundcloud.com round-trip. The frontend uses this on
+    mount to decide "Connect" vs "Signed in" without paying the 100-500 ms /me
+    round-trip or tripping the global sc:auth-expired interceptor every render.
+
+    `refreshable` says whether a refresh token is stored — only then may the UI claim
+    the session renews itself. `expires_in_s` is the remaining life of the stored
+    access token, floored at 0; `null` means unknown (a legacy-key-only session, which
+    carries no expiry), never "fresh".
 
     Unauthenticated to match the other read-only SC GET endpoints.
     """
     try:
-        authenticated = bool(keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN))
+        state = sc_auth.token_status()
     except Exception as exc:
         # Keyring backend unavailable (locked session, missing libsecret) —
         # degrade to "not authenticated" so the UI shows the login button
         # instead of a 500 error.
-        logger.warning("[SC] auth-status keyring lookup failed: %s", exc)
-        authenticated = False
-    return {"status": "ok", "data": {"authenticated": authenticated}}
+        logger.warning("[SC] auth-status keyring lookup failed: %s", type(exc).__name__)
+        state = {"authenticated": False, "refreshable": False, "source": None}
+    remaining = state.get("remaining_ttl_s")
+    return {
+        "status": "ok",
+        "data": {
+            "authenticated": bool(state["authenticated"]),
+            "refreshable": bool(state["refreshable"]),
+            "source": state["source"],
+            "expires_in_s": max(0, int(remaining)) if remaining is not None else None,
+        },
+    }
 
 
 # ─── SoundCloud Playlist Sync API ─────────────────────────────────────────────
@@ -4274,7 +6217,7 @@ async def get_soundcloud_playlists(request: Request):
     or invalid token) now raise AuthExpiredError instead of leaking the raw
     "404 Client Error: Not Found" string to the frontend toast.
     """
-    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
+    auth_token = await asyncio.to_thread(_sc_access_token)
 
     if not auth_token:
         logger.warning("[SC] /api/soundcloud/playlists: no auth token in keyring — returning 401.")
@@ -4335,7 +6278,7 @@ async def get_soundcloud_me(request: Request):
     Returns the SC account info (username, avatar) independently of playlists.
     Useful for the account card/header component without re-fetching all playlists.
     """
-    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
+    auth_token = await asyncio.to_thread(_sc_access_token)
     if not auth_token:
         raise HTTPException(401, detail="auth_expired")
 
@@ -4368,7 +6311,7 @@ async def sync_soundcloud_playlists(r: ScSyncReq, request: Request):
     if _sync_lock.locked():
         raise HTTPException(409, "A sync operation is already in progress. Please wait.")
 
-    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
+    auth_token = await asyncio.to_thread(_sc_access_token)
     if not auth_token:
         raise HTTPException(400, "SoundCloud auth token not configured")
 
@@ -4416,7 +6359,7 @@ async def preview_soundcloud_matches(r: ScPreviewReq, request: Request):
     Does NOT write anything to the database.
     Used by the Inspector Panel in the frontend.
     """
-    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
+    auth_token = await asyncio.to_thread(_sc_access_token)
     if not auth_token:
         raise HTTPException(401, detail="auth_expired")
     if not db.active_db:
@@ -4461,7 +6404,7 @@ async def sync_all_soundcloud(request: Request):
     if _sync_lock.locked():
         raise HTTPException(409, "A sync operation is already in progress. Please wait.")
 
-    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
+    auth_token = await asyncio.to_thread(_sc_access_token)
     if not auth_token:
         raise HTTPException(400, "SoundCloud auth token not configured")
 
@@ -4507,7 +6450,7 @@ async def merge_soundcloud_playlists(r: ScMergeReq, request: Request):
     if _sync_lock.locked():
         raise HTTPException(409, "A sync operation is already in progress. Please wait.")
 
-    auth_token = keyring.get_password(KEYRING_SERVICE, KEYRING_SC_TOKEN)
+    auth_token = await asyncio.to_thread(_sc_access_token)
     if not auth_token:
         raise HTTPException(400, "SoundCloud auth token not configured")
 

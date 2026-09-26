@@ -23,6 +23,17 @@
 | `app/anlz_safe.py` | Safe wrapper around `rbox.MasterDb` + `rbox.Anlz` for PQTZ beatgrid loading. |
 | `app/anlz_sidecar.py` | ANLZ-Sidecar writer — shared helper used by every track-import path |
 | `app/anlz_writer.py` | LibraryManagementSystem -- ANLZ Binary File Writer |
+| `app/artist_store/__init__.py` | artist_store — Artist-Hub sidecar package (``artists.db``). |
+| `app/artist_store/attribution.py` | artist_store.attribution — which library tracks belong to an artist, and as what. |
+| `app/artist_store/catalogue.py` | artist_store.catalogue — classify an artist's SoundCloud tracks, diff against the library (T-14). |
+| `app/artist_store/discovery.py` | artist_store.discovery — Tier-2 suggestions: artists the user does not have yet (T-16). |
+| `app/artist_store/identity.py` | artist_store.identity — name-based, remix-aware track roles + the identity table. |
+| `app/artist_store/links.py` | artist_store.links — where to find an artist: their own profiles, classified and ranked. |
+| `app/artist_store/merge.py` | artist_store.merge — duplicate-artist detection, preview, apply and revert (T-5/T-6). |
+| `app/artist_store/projection.py` | artist_store.projection — mirror favourite collections into Rekordbox (T-7). |
+| `app/artist_store/registry.py` | artist_store.registry — library artists into the store, favourites, Tier-1 backlog (T-4). |
+| `app/artist_store/schema.py` | artist_store.schema — sidecar DB + migration runner for the Artist Hub (T-3). |
+| `app/artist_store/sync.py` | artist_store.sync — the idle signal + the background catalogue refresh (T-17). |
 | `app/audio_analyzer.py` | LibraryManagementSystem -- Audio Analyzer (Unified Wrapper) |
 | `app/audio_tags.py` | audio_tags — write metadata back to the source audio file. |
 | `app/auth.py` | Bearer-token authentication for the FastAPI sidecar. |
@@ -45,7 +56,9 @@
 | `app/metadata_fixer/applier.py` | metadata_fixer.applier — atomic apply + revert for the metadata fixer (T5). |
 | `app/metadata_fixer/detector.py` | Read-only detection of malformed artist/title metadata. |
 | `app/metadata_fixer/schema.py` | metadata_fixer.schema — sidecar undo-log DB for the metadata fixer (T4). |
+| `app/musicbrainz_client.py` | musicbrainz_client — the one MusicBrainz web-service client (``/ws/2``, JSON). |
 | `app/pairing_store.py` | pairing_store — in-memory one-shot pairing codes (Phase-2 auth, T2). |
+| `app/phrase_db_writer.py` | phrase_db_writer.py — write phrase memory cues into Rekordbox master.db (djmdCue). |
 | `app/phrase_generator.py` | phrase_generator.py — Phrase & Auto-Cue Generator |
 | `app/playcount_sync.py` | playcount_sync.py — USB Play-Count Sync Engine |
 | `app/popularity_engine.py` | Popularity sidecar engine — SoundCloud-only at M1 (underground-mainstream T1-T3). |
@@ -56,9 +69,10 @@
 | `app/rekordbox_export.py` | *(no module docstring)* |
 | `app/security_compare.py` | Constant-time equality helper for tokens, secrets, HMAC outputs. |
 | `app/services.py` | *(no module docstring)* |
-| `app/sidecar.py` | *(no module docstring)* |
+| `app/sidecar.py` | Legacy ``app_data.json`` store — READ-ONLY, kept only for a one-shot import. |
 | `app/smart_playlist_engine.py` | Smart-Playlist evaluator. |
-| `app/soundcloud_api.py` | SoundCloud Playlist API — Fetches playlists & favorites via the unofficial V2 API. |
+| `app/soundcloud_api.py` | SoundCloud API client — playlists, likes, per-artist catalogue, and track search. |
+| `app/soundcloud_auth.py` | SoundCloud OAuth token store + silent refresh (persistent login, Option A). |
 | `app/soundcloud_downloader.py` | SoundCloud Downloader — Dedup-aware download pipeline with two acquisition paths. |
 | `app/templates/build_template.py` | Build a clean exportLibrary_template.db from any Rekordbox-exported USB stick. |
 | `app/usb_artwork.py` | USB artwork extraction + bucketed write to PIONEER/Artwork/. |
@@ -75,6 +89,8 @@
 | File | Purpose |
 |------|---------|
 | `frontend/src/api/api.js` | ─── EC2: Runtime detection of Tauri context ─────────────────────────────────── |
+| `frontend/src/api/scRefreshClassification.js` | scRefreshClassification — what a failed `POST /api/soundcloud/refresh` means. |
+| `frontend/src/api/scRefreshClassification.test.js` | node --test frontend/src/api/scRefreshClassification.test.js Pure predicate — no DOM, no axios, no resolver n… |
 | `frontend/src/audio/AudioRegion.js` | AudioRegion - Core data structure for non-destructive audio editing Each region represents a reference to a p… |
 | `frontend/src/audio/DawEngine.js` | DawEngine — Web Audio API Playback Engine Manages AudioContext lifecycle, audio loading, and region-based pla… |
 | `frontend/src/audio/DawState.js` | DawState — Central state management for the DJ Edit DAW. |
@@ -87,6 +103,21 @@
 | `frontend/src/audio/dawState/regions.js` | regionsReducer — region create / split / move / delete / resize / clipboard. |
 | `frontend/src/audio/dawState/selection.js` | selectionReducer — region selection set and time-range selection. |
 | `frontend/src/audio/dawState/transport.js` | transportReducer — playhead, BPM, zoom/scroll, snap-grid, edit-mode, project metadata, and audio-source actio… |
+| `frontend/src/components/artistHub/artistCatalogueApi.js` | artistCatalogueApi — the SoundCloud half of the Artist Hub's HTTP surface. |
+| `frontend/src/components/artistHub/artistDiscoveryApi.js` | artistDiscoveryApi — the discovery + background-sync half of the Artist Hub's HTTP surface. |
+| `frontend/src/components/artistHub/artistHubApi.js` | artistHubApi — the merge + projection half of the Artist Hub's HTTP surface. |
+| `frontend/src/components/artistHub/artistLinksApi.js` | artistLinksApi — where an artist lives online, and which library tracks are theirs. |
+| `frontend/src/components/artistHub/catalogueCopy.js` | catalogueCopy — the sentences the artist-detail view has to say out loud. |
+| `frontend/src/components/artistHub/catalogueCopy.test.js` | node --test frontend/src/components/artistHub/catalogueCopy.test.js Pure copy + derivation builders — no DOM,… |
+| `frontend/src/components/artistHub/discoveryCopy.js` | discoveryCopy — the sentences the Discover tab and the background-sync line must say. |
+| `frontend/src/components/artistHub/discoveryCopy.test.js` | node --test frontend/src/components/artistHub/discoveryCopy.test.js Pure copy builders — no DOM, no resolver … |
+| `frontend/src/components/artistHub/linksCopy.js` | linksCopy — what the artist view says about where an artist lives online, and about which library tracks are … |
+| `frontend/src/components/artistHub/linksCopy.test.js` | node:test — `node --test frontend/src/components/artistHub/linksCopy.test.js` |
+| `frontend/src/components/artistHub/mergeCopy.js` | mergeCopy — the sentences the merge dialog has to say out loud. |
+| `frontend/src/components/artistHub/mergeCopy.test.js` | node --test frontend/src/components/artistHub/mergeCopy.test.js Pure copy builders — no DOM, no resolver need… |
+| `frontend/src/components/artistHub/useArtistCatalogue.js` | Move one row into the bucket its new role renders in — the optimistic half of a pin. |
+| `frontend/src/components/artistHub/useArtistCatalogue.test.js` | node --import ./frontend/src/components/artistHub/useArtistCatalogue.test.resolver.mjs \ --test frontend/src/… |
+| `frontend/src/components/artistHub/useArtistDetailActions.js` | useArtistDetailActions — the click handlers of the artist detail view. |
 | `frontend/src/components/daw/timeline/useTimelineEvents.js` | useTimelineEvents — Event-handler layer for DawTimeline Owns: - Hit-testing for cue flags (hot + memory) - Mo… |
 | `frontend/src/components/daw/timeline/useTimelineLayout.js` | useTimelineLayout — Layout / sizing layer for DawTimeline Owns: - ResizeObserver subscription on the containe… |
 | `frontend/src/components/daw/timeline/useTimelineRender.js` | useTimelineRender — Rendering layer for DawTimeline Owns: - State-sync effect (React state → mutable ds.curre… |
@@ -113,6 +144,9 @@
 | `frontend/src/store/authStore.js` | Tiny module-level auth state shared across the frontend. |
 | `frontend/src/utils/AudioBandAnalyzer.js` | AudioBandAnalyzer Splits an AudioBuffer into 3 frequency bands (Rekordbox-style): - Low: < 400 Hz (Bass / Kic… |
 | `frontend/src/utils/log.js` | Dev-only logging utility. |
+| `frontend/src/utils/openExternal.js` | Open a web link outside the app: the system browser in Tauri, a new tab in the browser. |
+| `frontend/src/utils/openExternal.test.js` | node:test — `node --test frontend/src/utils/openExternal.test.js` |
+| `frontend/src/components/ArtistHubView.jsx` | *(no module docstring)* |
 | `frontend/src/components/BatchEditBar.jsx` | *(no module docstring)* |
 | `frontend/src/components/ConfirmModal.jsx` | Module-level subscriber registry so a single mounted <ConfirmModalRoot /> |
 | `frontend/src/components/DownloadManagerView.jsx` | Stage pipeline (in execution order) — covers BOTH SC-DL and local-import |
@@ -139,12 +173,18 @@
 | `frontend/src/components/SoundCloudView.jsx` | PRIVACY: do not hold the actual OAuth token in React state — the real |
 | `frontend/src/components/ToastContext.jsx` | *(no module docstring)* |
 | `frontend/src/components/ToolsView.jsx` | Mirror of LibraryTools.smart_rename's token substitution + sanitisation, |
-| `frontend/src/components/TrackTable.jsx` | Camelot |
+| `frontend/src/components/TrackTable.jsx` | *(no module docstring)* |
 | `frontend/src/components/UsbSettingsView.jsx` | UsbSettingsView — edit MYSETTING.DAT / MYSETTING2.DAT / DJMMYSETTING.DAT Per-stick CDJ + DJM hardware setting… |
 | `frontend/src/components/UsbView.jsx` | UsbView — Melodex-styled USB device manager (container). |
 | `frontend/src/components/UtilitiesView.jsx` | UtilitiesView — router for the Utilities workspace. |
 | `frontend/src/components/WaveformEditor.jsx` | *(no module docstring)* |
 | `frontend/src/components/XmlCleanView.jsx` | Using existing endpoint but improved backend logic |
+| `frontend/src/components/artistHub/ArtistDetail.jsx` | *(no module docstring)* |
+| `frontend/src/components/artistHub/ArtistLinks.jsx` | *(no module docstring)* |
+| `frontend/src/components/artistHub/AssignArtistModal.jsx` | assignArtistModal — "Artist zuordnen…" from any track table in the app. |
+| `frontend/src/components/artistHub/LocalTracksPanel.jsx` | LocalTracksPanel — the "in your library" half of the artist page (owner refinement 2026-09-26): every track t… |
+| `frontend/src/components/artistHub/MergeDialog.jsx` | *(no module docstring)* |
+| `frontend/src/components/artistHub/ProjectionPanel.jsx` | ProjectionPanel — the `Artists` folder inside Rekordbox: what is projected right now, and the button that bri… |
 | `frontend/src/components/daw/DawBrowser.jsx` | DawBrowser — Left panel file/library browser for the DJ Edit DAW Lists tracks from the library and recent .rb… |
 | `frontend/src/components/daw/DawControlStrip.jsx` | DawControlStrip — Unified control bar below the timeline Layout: [Transport] | [Edit Tools] | [Hot Cues + Loo… |
 | `frontend/src/components/daw/DawLayout.jsx` | DawLayout — Slot-style layout shell for the DJ Edit DAW. |
@@ -171,6 +211,8 @@
 | `frontend/src/components/settings/SettingsNetwork.jsx` | SettingsNetwork — HTTP proxy, SoundCloud sync target, backend restart. |
 | `frontend/src/components/settings/SettingsShortcuts.jsx` | SettingsShortcuts — Configurable DAW keyboard shortcut bindings. |
 | `frontend/src/components/settings/SettingsUsb.jsx` | SettingsUsb — Per-stick USB profile CRUD (label, type, audio format). |
+| `frontend/src/components/shared/ContextMenu.jsx` | App-wide right-click menu. |
+| `frontend/src/components/shared/GlobalContextMenu.jsx` | Two jobs: |
 | `frontend/src/components/shared/WaveformMiniCanvas.jsx` | WaveformMiniCanvas — Reusable lightweight canvas waveform renderer Shared across WaveformOverview (DAW mini-m… |
 | `frontend/src/components/usb/MetadataSyncPanel.jsx` | MetadataSyncPanel — collapsible per-device metadata sync controls. |
 | `frontend/src/components/usb/PlayCountSync.jsx` | PlayCountSync — collapsible section inside UsbView. |
@@ -187,6 +229,8 @@
 | `frontend/src/components/waveform/WaveformSimpleView.jsx` | Stripped-down view used by RankingView (simpleMode=true) — only overview + main waveform + |
 | `frontend/src/components/waveform/WaveformZoom.jsx` | Floating zoom controls overlay — sits absolutely positioned over the detail container. |
 | `frontend/src/main.jsx` | *(no module docstring)* |
+| `frontend/src/components/artistHub/useArtistCatalogue.test.api-stub.mjs` | Stand-in for `artistCatalogueApi` in `useArtistCatalogue.test.js`. |
+| `frontend/src/components/artistHub/useArtistCatalogue.test.fake-react.mjs` | Minimal hooks runtime standing in for `react` in `useArtistCatalogue.test.js`. |
 
 ## src-tauri/src/ — Rust Desktop Wrapper
 
@@ -219,6 +263,24 @@
 | `tests/test_anlz_reference_parse.py` | Validate the produced ANLZ files (.DAT/.EXT/.2EX). |
 | `tests/test_anlz_safe_pqtz.py` | Beat-grid extraction in `app.anlz_safe`. |
 | `tests/test_anlz_writer_guards.py` | Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout). |
+| `tests/test_artist_attribution.py` | Local attribution tests (T-24 — app/artist_store/attribution.py). |
+| `tests/test_artist_catalogue.py` | Artist-Hub catalogue tests (T-14 — app/artist_store/catalogue.py). |
+| `tests/test_artist_catalogue_routes.py` | Artist-Hub SoundCloud route tests — binding, catalogue, batch download (T-13/T-15). |
+| `tests/test_artist_discovery.py` | Artist-Hub Tier-2 discovery tests (T-16 — app/artist_store/discovery.py). |
+| `tests/test_artist_discovery_routes.py` | Artist-Hub discovery + background-sync route tests (T-16 / T-17). |
+| `tests/test_artist_identity.py` | Artist-Hub identity tests (app/artist_store/identity.py + schema v2 track_identity). |
+| `tests/test_artist_links.py` | Social-link tests (T-22 / T-23, Threats T13 T15 — app/artist_store/links.py). |
+| `tests/test_artist_links_routes.py` | Artist-Hub profile-link routes (T-22 / T-23 — app/main.py, plan test row T36). |
+| `tests/test_artist_local_tracks_routes.py` | Artist-Hub local-attribution routes (T-24 — app/main.py, route half of plan rows T30/T31). |
+| `tests/test_artist_merge_apply.py` | Artist-Hub merge apply/revert tests (T-6 + T-11a — app/artist_store/merge.py). |
+| `tests/test_artist_merge_preview.py` | Artist-Hub merge detection + preview tests (T-5 — app/artist_store/merge.py). |
+| `tests/test_artist_merge_routes.py` | Artist-Hub merge + projection route tests (T-8 rest — app/main.py, plan row T13). |
+| `tests/test_artist_projection.py` | Artist-Hub projection tests (T-7 — app/artist_store/projection.py). |
+| `tests/test_artist_routes.py` | Artist-Hub route tests (T-8 — app/main.py, plan test row T13). |
+| `tests/test_artist_splitting.py` | Tests for artist-name splitting and the artist list it feeds. |
+| `tests/test_artist_store_registry.py` | Artist-Hub registry tests (T-4 — app/artist_store/registry.py). |
+| `tests/test_artist_store_schema.py` | Artist-Hub sidecar schema tests (T-3 — app/artist_store/schema.py). |
+| `tests/test_artist_sync.py` | Artist-Hub background sync + idle signal (T-17 — app/artist_store/sync.py). |
 | `tests/test_audio_analyzer.py` | Tests for app/audio_analyzer.py — the pure _normalize_result mapping. |
 | `tests/test_audio_tags.py` | Tests for app/audio_tags.py — native tag write-back (mutates user files → HIGH risk). |
 | `tests/test_auth.py` | Tests for ``app/auth.py`` -- Bearer-token session authentication. |
@@ -234,17 +296,20 @@
 | `tests/test_library_format_swap.py` | Tests for app.library_format_swap. |
 | `tests/test_library_source.py` | Tests for app/library_source.py — the Live/XML normalization layer. |
 | `tests/test_live_cue_loading.py` | Cue loading in `app.live_database`. |
+| `tests/test_live_playlist_ops.py` | Tests for the live-mode playlist primitives in `app/live_database.py`. |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
 | `tests/test_main_security.py` | Regression tests for ``POST /api/file/reveal`` sandbox. |
 | `tests/test_metadata_fixer_applier.py` | metadata-fixer apply/revert tests (T5 — app/metadata_fixer/applier.py). |
 | `tests/test_metadata_fixer_detector.py` | M0 detector tests — read-only malformation detection. |
 | `tests/test_metadata_fixer_schema.py` | metadata-fixer undo-log schema tests (T4 — app/metadata_fixer/schema.py). |
+| `tests/test_musicbrainz_client.py` | MusicBrainz client tests (T-22, Threat T14 — app/musicbrainz_client.py). |
 | `tests/test_onelibrary_wal_flush.py` | End-to-end regression test for OneLibraryUsbWriter — runs the FULL |
 | `tests/test_pairing.py` | Phase-2 paired-token store tests (T1 — app/auth_db.py). |
 | `tests/test_pairing_store.py` | Phase-2 pairing-code store tests (T2 — app/pairing_store.py). |
 | `tests/test_pdb_atomic_write.py` | The USB PDB writers must never leave a truncated file behind. |
 | `tests/test_pdb_structure.py` | PDB writer structural test against F: drive Pioneer reference. |
 | `tests/test_phrase_batch.py` | Tests for the phrase-batch backend (app/main.py): |
+| `tests/test_phrase_db_writer.py` | Unit tests for app/phrase_db_writer.py (djmdCue memory-cue writer). |
 | `tests/test_playcount_sync.py` | Tests for app/playcount_sync.py — USB <-> PC play-count sync engine. |
 | `tests/test_popularity_engine.py` | PopularityStore tests (underground-mainstream-classifier T1-T3). |
 | `tests/test_rate_limit.py` | Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter. |
@@ -258,13 +323,18 @@
 | `tests/test_settings_caps.py` | Tests for `SetReq` payload caps + `SettingsManager.load` sanitizer. |
 | `tests/test_smart_playlist_engine.py` | Tests for app/smart_playlist_engine.py — the smart-playlist rule evaluator. |
 | `tests/test_soundcloud_api.py` | Tests for `app/soundcloud_api.py`. |
+| `tests/test_soundcloud_artist_api.py` | Artist-Hub SoundCloud client tests (T-12 + T-13 — app/soundcloud_api.py). |
+| `tests/test_soundcloud_auth.py` | Tests for `app/soundcloud_auth.py` — token store + silent refresh. |
 | `tests/test_soundcloud_auth_status.py` | Tests for GET /api/soundcloud/auth-status. |
 | `tests/test_soundcloud_downloader_security.py` | Security regression tests for app/soundcloud_downloader. |
+| `tests/test_soundcloud_log_redaction.py` | Regression guard: no SoundCloud log record may carry a `client_id`. |
+| `tests/test_soundcloud_refresh_route.py` | Route tests for the persistent SoundCloud login (T-19). |
 | `tests/test_stream_unicode_filename.py` | Regression: GET /api/stream 500 on non-latin-1 filenames. |
 | `tests/test_system_health.py` | Contract tests for ``GET /api/system/health`` -- unauth'd liveness probe. |
 | `tests/test_usb_copy_atomic.py` | USB audio copies must not leave a truncated file that never self-heals. |
 | `tests/test_usb_manager.py` | Tests for `app/usb_manager.py`. |
 | `tests/test_usb_mysettings.py` | Tests for app/usb_mysettings.py — Pioneer MYSETTING file schema + I/O. |
+| `tests/test_usb_relocate.py` | Tests for the USB relocation pass (`app/usb_one_library.py`). |
 | `tests/test_variant_detector.py` | variant_schema + variant_detector tests (analysis-remix-detector T-2, T-3). |
 | `tests/test_variant_schema.py` | Tests for app/variant_schema.py — variants.db DDL + migration runner. |
 | `tests/test_xml_generator.py` | Tests for app/xml_generator.py — Rekordbox collection XML export. |
@@ -277,7 +347,9 @@
 | `scripts/compare_rekordbox.py` | compare_rekordbox.py — A/B accuracy harness: our engine vs Rekordbox. |
 | `scripts/dev/phrase_spike.py` | phrase_spike.py — manual P0 verification for the phrase memory-cue ANLZ write. |
 | `scripts/dev/rbox_artist_merge_probe.py` | Probe rbox's artist/playlist write semantics against a COPY of a master.db. |
+| `scripts/dev/rescan_unreadable.py` | Re-scan only the rows marked unreadable in an audio_report.json. |
 | `scripts/dev/safe_format_swap.py` | safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist. |
+| `scripts/dev/scan_audio_quality.py` | Scan an audio library with ffprobe, aggregate codec/bitrate/sample-rate. |
 | `scripts/pipeline_dashboard.py` | Local web dashboard for the research pipeline. |
 | `scripts/pipeline_status.py` | Show the research pipeline state at a glance. |
 | `scripts/print_routine.py` | Extract the deploy-ready prompt from a routine .md file. |

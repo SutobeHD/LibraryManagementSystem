@@ -112,6 +112,247 @@ LibraryManagementSystem -- ANLZ Binary File Writer
 - `build_2ex()` — Build a complete .2EX ANLZ file (CDJ-3000 HD waveforms).
 - `write_anlz_files()` — Write all three ANLZ files (.DAT, .EXT, .2EX) from AnalysisEngine output.
 
+### `app/artist_store/__init__.py`
+
+artist_store — Artist-Hub sidecar package (``artists.db``).
+
+### `app/artist_store/attribution.py`
+
+artist_store.attribution — which library tracks belong to an artist, and as what.
+
+- `LibraryNotLoaded` — A write needs the loaded library to snapshot the track it names.
+- `UnknownCollection` — No stored collection has this id, and no name came with it that derives the id.
+- `TrackNotInLibrary` — The loaded library holds no track with this id.
+- `track_id()` — Content id of a UI track dict.
+- `Attribution`
+- `  Attribution.as_dict()`
+- `local_tracks()` — The artist page's local half: every attributed track with its role, in one call.
+- `membership()` — ``collection_id`` -> ordered local track ids, for the Rekordbox projection.
+- `set_assignment()` — Assign, exclude or clear one track for one artist; returns that track's new state.
+- `search_candidates()` — Library tracks matching ``query`` for "Add tracks", each flagged if already theirs.
+
+### `app/artist_store/catalogue.py`
+
+artist_store.catalogue — classify an artist's SoundCloud tracks, diff against the library (T-14).
+
+- `CatalogueError` — Base of the catalogue error hierarchy.
+- `ArtistNotLinked` — The collection has no SoundCloud account bound, so there is nothing to fetch.
+- `CatalogueUnavailable` — No cached catalogue and no way to fetch one (no fetcher / no credentials).
+- `Classification` — The role buckets.
+- `  Classification.buckets()` — ``bucket key -> rows``, in render order.
+- `  Classification.diffable()` — Everything the ownership diff runs over — i.e.
+- `TrackMatch` — One remote track's verdict against the library.
+- `  TrackMatch.matched()`
+- `Diff` — ``sc_id`` -> verdict, plus the owned / missing split as id tuples.
+- `normalize_user_urn()` — Canonical ``soundcloud:users:<id>`` form.
+- `normalize_isrc()` — Canonical 12-character ISRC (upper, no dashes/spaces), or ``""`` when not one.
+- `token_overlap()` — Jaccard overlap of two stems' word sets.
+- `derivation_key()` — Identity of the *version* a title describes: ``("base", "")`` or (label, who).
+- `title_stems()` — Candidate grouping stems for a title, best first.
+- `coerce_track()` — Public single-row form of the coercion; ``None`` for a row with no identity.
+- `coerce_tracks()` — Coerce a fetched payload, dropping unusable rows and de-duplicating by ``sc_id``.
+- `is_playable()` — Legally and technically streamable in full.
+- `mix_exclusion_reason()` — Why this belongs in the collapsed "Mixes & sets" bucket, or ``None``.
+- `classify()` — Split a fetched catalogue into the role buckets.
+- `match_score()` — Best score between one remote track and one owned track; 0.0 when gated out.
+- `diff()` — Which remote tracks are already owned, and which are genuinely missing.
+- `catalogue()` — An artist's catalogue: role buckets, each track flagged owned or missing.
+
+### `app/artist_store/discovery.py`
+
+artist_store.discovery — Tier-2 suggestions: artists the user does not have yet (T-16).
+
+- `RelatedFetcher` — The one client call this module makes.
+- `Candidate` — One suggested artist.
+- `  Candidate.key()` — Identity for de-duplication: the URN when SoundCloud gave one, else the fold.
+- `  Candidate.co_signal()`
+- `  Candidate.as_dict()`
+- `Ranking` — Result of the pure rank/exclude pass.
+- `rank_candidates()` — De-duplicate, drop what the user already has, rank.
+- `discover()` — Artists the user does not have yet, seeded from the ones they favourited.
+
+### `app/artist_store/identity.py`
+
+artist_store.identity — name-based, remix-aware track roles + the identity table.
+
+- `auto_queue_eligible()` — The single auto-queue rule.
+- `CreditParse` — What the title says, before any artist is compared against it.
+- `  CreditParse.as_dict()`
+- `parse_credit()` — Split a SoundCloud title into artist prefix, body, remix credit and features.
+- `classify_track()` — Role + confidence + WHY for one coerced track.
+- `classify_roles()` — Role, confidence, ``auto_queue_allowed`` and ``credit_parse`` for every track.
+- `role_counts()` — Per-role tally of what was classified — nothing is counted that was not.
+- `load_overrides()` — ``sc_id -> pinned role`` for one collection, straight from the identity table.
+- `remember_identities()` — Upsert the classifier's verdict per track into ``track_identity``.
+- `set_override()` — Pin (or with ``None`` unpin) a track's role for one artist.
+- `classify_for_collection()` — Classify with the collection's link, spellings and pins, then remember the result.
+
+### `app/artist_store/links.py`
+
+artist_store.links — where to find an artist: their own profiles, classified and ranked.
+
+- `Service`
+- `LinkCandidate` — One classified profile URL, before any source or confidence is attached.
+- `  LinkCandidate.entry()`
+- `classify_url()` — The one gate from an untrusted string to a storable link, or None.
+- `extract_bio_links()` — Known-service profile links and ``IG: @name``-style handles in free bio text.
+- `from_soundcloud_profile()` — The account itself, its ``website`` field and every web-profile link it lists.
+- `from_musicbrainz()` — URL relationships of a MusicBrainz artist, profile-shaped and still current.
+- `best_per_key()` — One store entry per ``url_key``: the strongest source wins, first seen breaks ties.
+- `musicbrainz_binding()`
+- `list_links()` — Stored links in display order, plus what the last refresh saw.
+- `add_manual_link()` — Store a URL the user typed.
+- `remove_link()` — ``deleted`` (a manual link), ``hidden`` (a fetched one) or None (no such link).
+- `restore_hidden()`
+- `musicbrainz_candidates()` — Name-search hits worth showing: a high score AND a spelling that folds to ours.
+- `confirm_musicbrainz()` — Bind the MusicBrainz artist the user picked.
+- `drop_musicbrainz()` — Unbind MusicBrainz and take its links with it.
+- `refresh()` — Ask every source once, fold the answers into the store, report per source.
+- `rank_soundcloud_accounts()` — Order SoundCloud search hits for the "which account is theirs?" picker.
+
+### `app/artist_store/merge.py`
+
+artist_store.merge — duplicate-artist detection, preview, apply and revert (T-5/T-6).
+
+- `MergeError` — Base for every refusal that stops a merge before it writes.
+- `MergeUnavailable` — The library backend cannot repoint artists (XML mode, rbox absent) — HTTP 400.
+- `RekordboxRunningError` — Rekordbox holds the library — writing now races it — HTTP 409.
+- `fold_key()` — Deterministic grouping key for an artist name.
+- `group_id_for()` — Stable id for a fold group.
+- `suggest_canonical()` — Best-spelled variant of a group: most tracks, ties to mixed case, then A-Z.
+- `MergeVariant` — One spelling of an artist as the library currently holds it.
+- `  MergeVariant.as_dict()`
+- `MergeCandidate` — A group of library names that fold onto one key — i.e.
+- `  MergeCandidate.names()`
+- `  MergeCandidate.as_dict()`
+- `UsbFolderImpact` — One ``Contents/<Artist>`` folder the merge would collapse into the canonical one.
+- `  UsbFolderImpact.as_dict()`
+- `UsbImpact` — What the next USB export would have to reshuffle after this merge.
+- `  UsbImpact.as_dict()`
+- `MergePreview` — Everything an apply would touch, computed without touching any of it.
+- `  MergePreview.as_dict()`
+- `candidates()` — Library artist names that fold onto one key, biggest group first.
+- `preview()` — Exactly what an apply would do to one group — computed, never performed.
+- `preview_many()` — Preview several groups in one pass (the merge screen's "select all").
+- `SkippedFile` — An audio file the run could not write.
+- `  SkippedFile.as_dict()`
+- `MergeApplyResult` — What one merge run actually did — including where it stopped.
+- `  MergeApplyResult.revertable()`
+- `  MergeApplyResult.as_dict()`
+- `MergeRevertResult` — What a replay of one merge run restored — and what it could not.
+- `  MergeRevertResult.orphan_links_not_restored()`
+- `  MergeRevertResult.as_dict()`
+- `apply()` — Repoint every track of a variant group onto one canonical artist.
+- `revert()` — Undo one merge run: replay its journal in reverse, restoring the artist link.
+
+### `app/artist_store/projection.py`
+
+artist_store.projection — mirror favourite collections into Rekordbox (T-7).
+
+- `ProjectionError` — Base for every refusal that stops a projection run before it writes.
+- `ProjectionUnavailable` — The library backend cannot be projected into safely (route: HTTP 400).
+- `RekordboxRunningError` — Rekordbox holds the library — writing now races it (route: HTTP 409).
+- `folder_name_for()` — Root-folder name for a collection kind.
+- `playlist_xml_path()` — Rekordbox's ``masterPlaylists6.xml`` path as the facade reports it, or None.
+- `sync()` — Mirror the favourites of ``kind`` into Rekordbox.
+- `status()` — Projection state for the panel.
+
+### `app/artist_store/registry.py`
+
+artist_store.registry — library artists into the store, favourites, Tier-1 backlog (T-4).
+
+- `resolve_library_artists()` — Give every distinct library artist name a stable collection in the store.
+- `library_artist_counts()` — ``collection_id`` -> owned track count, alias variants summed.
+- `add_favourite_artist()` — Favourite an existing collection.
+- `remove_favourite_artist()` — Un-favourite.
+- `favourite_artist_by_name()` — Favourite an artist the UI knows only by name (a backlog row); returns its id.
+- `list_favourite_artists()` — Favourites enriched with local track count, sync mode and SC-link state.
+- `backlog()` — Tier-1 suggestions: artists you already own, most tracks first, favourites out.
+- `hub()` — Payload for ``GET /api/artists/hub``: favourites + Tier-1 backlog, one pass, no writes.
+- `browse()` — The whole artist list, searchable and sortable, every row flagged as favourite or not.
+- `artist_names()` — Every spelling a collection answers to — canonical first, then its aliases.
+- `link_confidence()` — How well a resolved SoundCloud account name agrees with the local artist name.
+- `get_provider_link()` — The stored binding for a collection, or None.
+- `set_provider_link()` — Bind a collection to a provider account.
+- `remove_provider_link()` — Unbind.
+- `migrate_legacy_artist_links()` — One-shot import of ``app_data.json``'s name-keyed SoundCloud links (T-7).
+
+### `app/artist_store/schema.py`
+
+artist_store.schema — sidecar DB + migration runner for the Artist Hub (T-3).
+
+- `collection_id_for()` — Our own stable id for a collection, derived from ``kind`` + the folded name.
+- `sort_key_for()` — Default ordering key — folded name, so ``(kind, sort_key)`` sorts naturally.
+- `migrate()` — Bring ``conn`` to ``SCHEMA_VERSION``.
+- `init_db()` — Eager, idempotent schema create for sidecar boot.
+- `set_meta()` — Store one process-wide scalar (e.g.
+- `get_meta()`
+- `delete_meta()`
+- `create_collection()` — Create (or adopt) the collection for ``canonical_name``; returns its id.
+- `get_collection()`
+- `get_collection_by_name()` — Lookup by derived id — case/whitespace-insensitive by construction.
+- `list_collections()`
+- `set_canonical_name()` — Rename a collection in place, keeping its id and adding the old name as an alias.
+- `delete_collection()` — Drop a collection and everything hanging off it (FK cascade).
+- `add_alias()` — Map a raw library artist string onto a collection.
+- `remove_alias()`
+- `list_aliases()`
+- `resolve_alias()` — Collection a raw library artist string belongs to, or None.
+- `set_link()` — Bind a collection to a provider account (SoundCloud today).
+- `get_link()`
+- `remove_link()`
+- `set_sync_mode()`
+- `get_sync_mode()` — Sync mode, defaulting to ``review`` for a collection that has no row yet.
+- `get_sync_state()`
+- `record_sync()` — Stamp a finished sync attempt.
+- `set_projection()` — Remember which Rekordbox playlist represents this collection.
+- `get_projection()`
+- `clear_projection()`
+- `add_favourite()` — Mark a collection as a favourite.
+- `remove_favourite()`
+- `is_favourite()`
+- `list_favourites()` — Favourited collections with their ``added_at``, ordered like the artist list.
+- `set_catalogue_cache()` — Store a fetched provider catalogue.
+- `get_catalogue_cache()` — Cached catalogue payload, or None when absent, unparseable or older than the TTL.
+- `upsert_track_identities()` — Remember the classifier's verdict for each track of one collection.
+- `upsert_track_identity()` — Single-row form of :func:`upsert_track_identities`.
+- `get_track_identity()`
+- `list_track_identities()`
+- `find_track_identities_by_isrc()` — Every remembered row carrying this ISRC, across collections (index-backed).
+- `get_identity_overrides()` — ``sc_urn -> pinned role`` for one collection — what the classifier must yield to.
+- `set_identity_override()` — Pin (or with ``None`` unpin) the role of one track for one artist.
+- `delete_track_identity()`
+- `list_web_links()`
+- `get_web_link()`
+- `count_hidden_web_links()`
+- `add_manual_web_link()` — Store a link the user typed.
+- `remove_web_link()` — Remove a link from view.
+- `unhide_web_links()`
+- `merge_fetched_web_links()` — Fold one refresh into the stored links, in one transaction.
+- `record_link_fetch()`
+- `get_link_fetch()`
+- `set_track_assignment()` — Assign a library track to the artist, or exclude an automatic match.
+- `clear_track_assignment()`
+- `list_track_assignments()`
+- `list_assignments_for_track()` — Every collection a track is manually tied to or excluded from (index-backed).
+
+### `app/artist_store/sync.py`
+
+artist_store.sync — the idle signal + the background catalogue refresh (T-17).
+
+- `SyncError` — Background sync could not run at all.
+- `register_probe()` — Add a load signal this module cannot see itself (e.g.
+- `unregister_probe()`
+- `idle_report()` — Per-probe verdict, for the UI and the run log.
+- `is_idle()` — ``(idle, reason)``.
+- `background_sync_enabled()` — The single opt-in boolean, read fresh from ``settings.json``.
+- `ArtistSyncResult` — What one artist's pass did.
+- `  ArtistSyncResult.as_dict()`
+- `SyncRun` — One background pass, start to stop.
+- `  SyncRun.as_dict()`
+- `last_run()` — The previous run record, or None when no pass has ever finished.
+- `run_sync()` — One background pass over the favourites whose mode is ``auto`` or ``review``.
+
 ### `app/audio_analyzer.py`
 
 LibraryManagementSystem -- Audio Analyzer (Unified Wrapper)
@@ -233,11 +474,21 @@ Setup logging
 - `  RekordboxDB.create_playlist()`
 - `  RekordboxDB.add_track_to_playlist()`
 - `  RekordboxDB.remove_track_from_playlist()`
+- `  RekordboxDB.get_playlist_children()` — Direct children of a playlist folder, read from the backend not the cache.
+- `  RekordboxDB.get_playlist_by_id()` — One playlist/folder node by id, or None when it no longer exists.
+- `  RekordboxDB.get_playlist_track_ids()` — Track ids currently in a playlist, read from the backend not the cache.
+- `  RekordboxDB.playlist_xml_path()` — Rekordbox's masterPlaylists6.xml path, or None when the backend has none.
+- `  RekordboxDB.get_playlist_by_path()` — Resolve a folder/playlist path like ["Artists", "Boys Noize"].
 - `  RekordboxDB.get_unanalyzed_track_ids()` — Track IDs with no analysis yet.
 - `  RekordboxDB.save()`
 - `  RekordboxDB.update_tracks_metadata()`
 - `  RekordboxDB.update_track_comment()`
 - `  RekordboxDB.update_track_path()` — Update the on-disk file path of a track after a rename operation.
+- `  RekordboxDB.get_content_by_id()` — Raw ``DjmdContent`` row, or None in XML mode / when rbox cannot serve it.
+- `  RekordboxDB.update_content()` — Write a whole ``DjmdContent`` row back.
+- `  RekordboxDB.get_artist_by_name()` — ``DjmdArtist`` row for an EXACT (case-sensitive) name, or None.
+- `  RekordboxDB.create_artist()` — Insert a ``DjmdArtist`` row and return it (rbox mints the id + USN).
+- `  RekordboxDB.delete_artist()` — Hard-delete a ``DjmdArtist`` row.
 - `  RekordboxDB.save_track_cues()`
 - `  RekordboxDB.get_track_cues()` — Sidecar override first, then whatever the active DB loaded.
 - `  RekordboxDB.save_track_beatgrid()`
@@ -410,6 +661,11 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `  LiveRekordboxDB.create_playlist()`
 - `  LiveRekordboxDB.add_track_to_playlist()`
 - `  LiveRekordboxDB.remove_track_from_playlist()`
+- `  LiveRekordboxDB.get_playlist_children()` — Direct children of a playlist folder, straight from the DB.
+- `  LiveRekordboxDB.get_playlist_by_id()` — One playlist/folder node by id, straight from the DB — None when it is gone.
+- `  LiveRekordboxDB.get_playlist_track_ids()` — Content ids currently linked to a playlist, read fresh (not from the cache).
+- `  LiveRekordboxDB.playlist_xml_path()` — Path to Rekordbox's masterPlaylists6.xml, or None when rbox found none.
+- `  LiveRekordboxDB.get_playlist_by_path()` — Resolve a folder/playlist path like ["Artists", "Boys Noize"].
 - `  LiveRekordboxDB.reorder_playlist_track()` — Reorders a track in a playlist.
 
 ### `app/logging_utils.py`
@@ -438,7 +694,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `CueReq`
 - `GridReq`
 - `SetReq`
-- `SmartPlReq`
+- `SmartPlReq` — `artist_threshold` is accepted for older clients and ignored — artist
 - `PlCreateReq`
 - `PlRenameReq`
 - `PlDeleteReq`
@@ -466,6 +722,20 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `PlRemoveTrackReq`
 - `ProjectReq`
 - `DBModeReq`
+- `ArtistFavouriteReq`
+- `ArtistSyncModeReq`
+- `ArtistMergePreviewReq` — One variant group to cost.
+- `ArtistMergeApplyReq` — Same group plus the three effects the confirm dialog has to state up front.
+- `ArtistMergeRevertReq`
+- `ArtistProjectionSyncReq`
+- `ArtistLinkReq` — Bind an artist to a SoundCloud account.
+- `ArtistDownloadMissingReq` — What to queue.
+- `ArtistTrackRoleReq` — Pin one catalogue track's role for one artist.
+- `ArtistLinksRefreshReq` — One Find-links click.
+- `ArtistLinkAddReq` — A profile URL the user pasted.
+- `ArtistLinkRemoveReq` — One link to take off, by `url_key`: a manual link is deleted, a fetched one hidden.
+- `ArtistMusicBrainzReq` — The MusicBrainz artist the user picked out of the refresh's candidates.
+- `ArtistTrackAssignReq` — One manual correction to an artist's local tracks.
 - `stream_audio()` — Streams audio file with HTTP Range support — required for browser seeking.
 - `get_multiband_waveform()` — Returns 3-band waveform data for professional visualization.
 - `FileRevealReq`
@@ -482,6 +752,41 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `merge_metadata()`
 - `get_artists()`
 - `get_artist_tracks()`
+- `get_artist_hub()` — Favourite artists + Tier-1 backlog.
+- `browse_artists()` — Every artist in the library, paged, with favourite state per row.
+- `add_artist_favourite()` — Favourite an artist by sidecar id, or by the raw library name a backlog row shows.
+- `remove_artist_favourite()` — Un-favourite.
+- `set_artist_sync_mode()` — Per-artist catalogue sync behaviour: auto / review / off.
+- `artist_job_status()` — Poll one artist-hub job.
+- `artist_merge_candidates()` — Library artist names that fold onto one key, biggest group first.
+- `artist_merge_preview()` — Exactly what an apply would touch — computed, never performed.
+- `artist_merge_apply()` — Repoint a variant group onto one canonical artist.
+- `artist_merge_revert()` — Replay one merge run's journal in reverse.
+- `artist_merge_runs()` — Artist-merge runs, newest first — the history the revert button drives.
+- `artist_projection_sync()` — Mirror the favourites into Rekordbox as the `Artists` folder.
+- `artist_projection_status()` — Folder + per-artist projection state.
+- `artist_catalogue_route()` — An artist's SoundCloud catalogue in role buckets, each track flagged owned/missing.
+- `artist_link_soundcloud()` — Bind an artist to a SoundCloud account from a profile URL or a bare permalink.
+- `artist_unlink_soundcloud()` — Unbind.
+- `artist_pin_track_role()` — Pin one catalogue track's role for this artist by hand.
+- `artist_track_identities()` — Everything this artist's `track_identity` table holds — what has been seen and pinned.
+- `artist_web_links()` — Where to find this artist: the stored profile links, in display order.
+- `artist_web_links_refresh()` — Find links: ask SoundCloud and MusicBrainz once, fold the answers into the store.
+- `artist_web_link_add()` — Add a profile link by hand.
+- `artist_web_link_remove()` — Take one link off this artist: a manual link is deleted, a fetched one hidden.
+- `artist_web_links_restore()` — Un-hide every link the user took off this artist.
+- `artist_musicbrainz_confirm()` — Bind the MusicBrainz artist the user picked, then read its links in the same click.
+- `artist_musicbrainz_drop()` — Unbind MusicBrainz ("that is not this artist").
+- `artist_soundcloud_candidates()` — Which SoundCloud account is theirs?
+- `artist_local_tracks()` — The artist page's local half: every library track credited to them, with its role.
+- `artist_local_track_candidates()` — Library search behind "Add tracks": title / artist / remixer substring, capped.
+- `artist_local_track_assign()` — Correct the automatic attribution for one library track: assign, exclude or clear.
+- `artist_download_missing()` — Queue an artist's missing tracks through the existing SoundCloud downloader.
+- `artist_download_status()` — Poll one batch download.
+- `ArtistSyncRunReq` — `force` runs the pass with the opt-in setting off.
+- `artist_discover_route()` — Artists the user does not own yet, seeded from their favourites.
+- `artist_sync_status()` — Is a background pass allowed to run right now, and what did the last one do.
+- `artist_sync_run()` — Run one background pass now.
 - `get_label_tracks()`
 - `get_album_tracks()`
 - `get_track()`
@@ -550,7 +855,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `unload_lib()`
 - `rbx_export()` — Exports specified tracks to a Rekordbox XML file.
 - `rbx_import()` — Imports tracks and metadata from a Rekordbox XML file.
-- `gen_smart()`
+- `gen_smart()` — Rebuild the "By Label" auto-playlists.
 - `PathRequest` — Generic single-path body used by every endpoint that needs to point at
 - `ImportPathsReq` — Drag-drop import body.
 - `scan_folder()` — Trigger an import scan of a specific directory.
@@ -562,7 +867,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `list_projects()`
 - `save_project()`
 - `load_project_endpoint()`
-- `set_sc()`
+- `set_sc()` — Legacy name-keyed bind — kept working, now writing to the real store.
 - `SliceReq`
 - `slice_endpoint()`
 - `render()`
@@ -628,9 +933,10 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `get_download_stats()` — Aggregate statistics: total downloads, analyzed, failed, device count, date range.
 - `check_already_downloaded()` — Fast O(1) deduplication check.
 - `delete_history_entry()` — Remove a registry entry to allow re-download (e.g.
-- `ScAuthTokenReq` — SoundCloud OAuth access-token body — single `token` field, validated
-- `set_soundcloud_auth_token()` — EC7/EC13: Persist the SC OAuth token in the OS keyring (not in cookies or JSON).
-- `get_soundcloud_auth_status()` — Local-only probe: does the OS keyring hold a SC OAuth token?
+- `ScAuthTokenReq` — SoundCloud OAuth handoff from the Tauri login flow.
+- `set_soundcloud_auth_token()` — EC7/EC13: Persist the SC OAuth credentials in the OS keyring (not in cookies or
+- `refresh_soundcloud_token()` — Renew the stored SoundCloud access token from the stored refresh token.
+- `get_soundcloud_auth_status()` — Local-only probe: what does the OS keyring hold for SoundCloud?
 - `ScSettingsReq`
 - `get_sc_settings()` — Return SC-specific settings (sync target folder).
 - `update_sc_settings()` — Persist SC sync target folder to settings.json.
@@ -674,7 +980,7 @@ metadata_fixer.applier — atomic apply + revert for the metadata fixer (T5).
 
 - `FixRequest` — One requested change: set ``content_id``'s ``field`` to ``after_value``.
 - `apply_fixes()` — Apply ``fixes`` in one journalled run.
-- `revert_run()` — Undo a run: restore each pre-image field value in reverse.
+- `revert_run()` — Undo a run in reverse order.
 
 ### `app/metadata_fixer/detector.py`
 
@@ -688,7 +994,8 @@ Read-only detection of malformed artist/title metadata.
 
 metadata_fixer.schema — sidecar undo-log DB for the metadata fixer (T4).
 
-- `init_db()` — Idempotent schema create.
+- `migrate()` — Bring ``conn`` to ``SCHEMA_VERSION``.
+- `init_db()` — Idempotent schema create + migrate.
 - `create_run()` — Open a new fix run; returns its ``run_id``.
 - `record_mutation()` — Journal one applied mutation with its full pre-image; bump the run count.
 - `set_run_status()` — Transition a run (completed / reverted / failed).
@@ -696,6 +1003,17 @@ metadata_fixer.schema — sidecar undo-log DB for the metadata fixer (T4).
 - `get_run()` — Fetch one run, or ``None``.
 - `list_runs()` — All runs, newest first (the ``GET /runs`` surface).
 - `get_mutations()` — Mutations of a run; ``reverse=True`` orders newest-first for undo replay.
+
+### `app/musicbrainz_client.py`
+
+musicbrainz_client — the one MusicBrainz web-service client (``/ws/2``, JSON).
+
+- `MusicBrainzError` — MusicBrainz answered, but not with something usable (4xx, malformed JSON).
+- `MusicBrainzUnavailable` — MusicBrainz could not be reached or is shedding load (network, 5xx, 503).
+- `is_mbid()`
+- `artists_for_url()` — Artists MusicBrainz relates to exactly this URL (``/url?resource=…&inc=artist-rels``).
+- `artist_with_urls()` — One artist plus its URL relationships (``/artist/<mbid>?inc=url-rels``).
+- `search_artists()` — Artists whose name or alias matches ``name`` as a phrase, best score first.
 
 ### `app/pairing_store.py`
 
@@ -708,6 +1026,15 @@ pairing_store — in-memory one-shot pairing codes (Phase-2 auth, T2).
 - `  PairingCodeStore.clear()` — Test helper: drop all codes and reset the purge clock.
 - `mint_code()` — Mint a one-shot pairing code on the shared store.
 - `consume_code()` — Redeem a pairing code on the shared store.
+
+### `app/phrase_db_writer.py`
+
+phrase_db_writer.py — write phrase memory cues into Rekordbox master.db (djmdCue).
+
+- `RekordboxLockedError` — master.db is locked — Rekordbox is probably running.
+- `backup_master_db()` — Copy `db_path` (+ its -wal) to timestamped `.phrasebak-*` files.
+- `restore_master_db()` — Roll master.db back from ONE backup set (all files, one timestamp).
+- `write_phrase_memory_cues()` — Write phrase memory cues (Kind=0) into djmdCue for one track.
 
 ### `app/phrase_generator.py`
 
@@ -813,7 +1140,7 @@ Constant-time equality helper for tokens, secrets, HMAC outputs.
 - `LibraryTools`
 - `  LibraryTools.find_duplicates()`
 - `  LibraryTools.clean_track_titles()` — Removes artist name from track title if redundant.
-- `  LibraryTools.generate_smart_playlists()` — Generates intelligent playlists for Artists and Labels meeting the threshold.
+- `  LibraryTools.generate_smart_playlists()` — Build the "By Label" auto-playlists.
 - `  LibraryTools.smart_rename()`
 - `SettingsManager`
 - `  SettingsManager.load()`
@@ -838,11 +1165,10 @@ Constant-time equality helper for tokens, secrets, HMAC outputs.
 
 ### `app/sidecar.py`
 
-*(no module docstring)*
+Legacy ``app_data.json`` store — READ-ONLY, kept only for a one-shot import.
 
 - `SidecarStorage`
-- `  SidecarStorage.get_artist_link()`
-- `  SidecarStorage.set_artist_link()`
+- `  SidecarStorage.get_artist_link()` — Legacy read.
 
 ### `app/smart_playlist_engine.py`
 
@@ -854,22 +1180,57 @@ Smart-Playlist evaluator.
 
 ### `app/soundcloud_api.py`
 
-SoundCloud Playlist API — Fetches playlists & favorites via the unofficial V2 API.
+SoundCloud API client — playlists, likes, per-artist catalogue, and track search.
 
 - `get_sc_client_id()` — Resolve a valid SoundCloud client_id.
 - `AuthExpiredError` — Raised when the SoundCloud OAuth token is invalid or has expired.
 - `RateLimitError` — Raised when the API rate limit is exceeded and retries are exhausted.
+- `NotFoundError` — Raised when a SoundCloud resource is really gone (404), not an auth problem.
+- `CallBudget` — Hard cap on HTTP calls for one user-initiated run.
+- `  CallBudget.remaining()`
+- `  CallBudget.exhausted()`
+- `  CallBudget.try_spend()` — Consume one call.
+- `SCResultList` — A plain list that also reports how the walk ended.
+- `SCSearchResult` — `search_tracks_many` result: which queries actually went out and which did not.
+- `user_urn()` — Build `soundcloud:users:{id}`.
 - `SoundCloudPlaylistAPI` — Fetches playlist and track data from SoundCloud.
 - `  SoundCloudPlaylistAPI.get_user_profile()` — Fetch the authenticated user's public profile from SoundCloud.
 - `  SoundCloudPlaylistAPI.resolve_track_from_url()` — Resolve a SoundCloud permalink URL to a normalized track dict.
 - `  SoundCloudPlaylistAPI.get_playlists()` — Fetch ALL playlists for the authenticated user.
 - `  SoundCloudPlaylistAPI.get_likes()` — Fetch user's liked tracks as a virtual playlist.
 - `  SoundCloudPlaylistAPI.get_full_playlist_tracks()` — Fetch ALL tracks for a specific playlist (not just the 20-track preview).
+- `normalize_catalogue_track()` — Raw SC track → the normalised contract dict (`SC_TRACK_FIELDS`), or None.
+- `normalize_artist()` — Raw SC user → `SC_ARTIST_FIELDS` dict, or None when it carries no identity.
+- `get_user_tracks()` — An artist's OWN uploads — `GET /users/{urn}/tracks`.
+- `get_user_reposts()` — An artist's reposted tracks — `GET /users/{urn}/reposts/tracks`.
+- `get_related_artists()` — Related artists — `GET /users/{urn}/related`.
+- `normalize_user_profile()` — Raw SC user → `SC_PROFILE_FIELDS` dict, or None when it carries no identity.
+- `get_user()` — One account's full profile — `GET /users/{urn}` — as `SC_PROFILE_FIELDS`.
+- `get_user_web_profiles()` — Links the artist added to their own profile — `GET /users/{urn}/web-profiles`.
+- `search_users()` — Account search — `GET /users?q=` — one page, `SC_PROFILE_FIELDS` dicts.
+- `resolve_user()` — Bind an artist to a SoundCloud account — `GET /resolve`.
+- `search_tracks()` — Full-text track search — `GET /tracks?q=`.
+- `search_tracks_many()` — Run `search_tracks` per query and merge, deduplicated by `sc_id`.
 - `SoundCloudSyncEngine` — Syncs SoundCloud playlists → local Rekordbox collection playlists.
 - `  SoundCloudSyncEngine.find_or_create_playlist()` — Find existing synced playlist or create a new one.
 - `  SoundCloudSyncEngine.sync_playlist()` — Sync a single SoundCloud playlist to local collection.
 - `  SoundCloudSyncEngine.sync_all()` — Sync all provided playlists sequentially.
 - `  SoundCloudSyncEngine.preview_matches()` — Dry-run: return per-track match details WITHOUT writing to the DB.
+
+### `app/soundcloud_auth.py`
+
+SoundCloud OAuth token store + silent refresh (persistent login, Option A).
+
+- `TransientRefreshError` — Refresh could not be completed right now; the stored tokens are untouched.
+- `ScTokens` — The stored token set.
+- `StoreResult`
+- `load_tokens()` — The blob, validated on read.
+- `store_tokens()` — Persist a token set (fresh login or rotation).
+- `clear_tokens()` — Logout: remove the blob and the legacy key.
+- `token_status()` — Auth state without token material — safe to return from an HTTP route.
+- `get_access_token()` — A token good for ≥ `min_ttl_s` more seconds, refreshing if needed.
+- `refresh()` — Single-flight refresh.
+- `with_fresh_token()` — Call `fn(token)`; on `AuthExpiredError` refresh once and retry once.
 
 ### `app/soundcloud_downloader.py`
 
@@ -939,6 +1300,7 @@ USB MYSETTING / DJMMYSETTING file read/write + schema for frontend.
 
 USB OneLibrary writer — uses rbox.OneLibrary to build PIONEER/rekordbox/exportLibrary.db
 
+- `relocate_audio_files()` — Move audio already on the stick to its new destination instead of re-copying it.
 - `OneLibraryUsbWriter` — Writes the modern Library One DB (exportLibrary.db) plus ANLZ sidecars
 - `  OneLibraryUsbWriter.ensure_structure()`
 - `  OneLibraryUsbWriter.sync()` — Main entry: yields progress events.
@@ -1014,7 +1376,19 @@ variant_schema — DDL + idempotent migration runner for the variants sidecar.
 
 - `setScAuthMode()` — export function ready() { return _bootstrapPromise; } // ─── SoundCloud consent surface (in-app win…
 - `scLogin()` — export async function getScAuthMode() { if (_scAuthMode) return _scAuthMode; try { const res = awai…
+- `scAuthTokenBody()` — The `POST /api/soundcloud/auth-token` body for one `scLogin()` result.
 - `cancellableGet()` — ─── AbortController helpers ────────────────────────────────────────────────── export function crea…
+
+### `frontend/src/api/scRefreshClassification.js`
+
+scRefreshClassification — what a failed `POST /api/soundcloud/refresh` means.
+
+- `SESSION_DEAD()` — scRefreshClassification — what a failed `POST /api/soundcloud/refresh` means.
+- `classifyRefreshError()` — export const TRANSIENT = 'transient'; const HTTP_UNAUTHORIZED = 401; const SC_EXPIRED_DETAIL = 'aut…
+
+### `frontend/src/api/scRefreshClassification.test.js`
+
+node --test frontend/src/api/scRefreshClassification.test.js Pure predicate — no DOM, no axios, no resolver needed (the import carries its …
 
 ### `frontend/src/audio/AudioRegion.js`
 
@@ -1140,6 +1514,152 @@ selectionReducer — region selection set and time-range selection.
 transportReducer — playhead, BPM, zoom/scroll, snap-grid, edit-mode, project metadata, and audio-source actions.
 
 - `transportReducer()` — transportReducer — playhead, BPM, zoom/scroll, snap-grid, edit-mode, project metadata, and audio-so…
+
+### `frontend/src/components/artistHub/artistCatalogueApi.js`
+
+artistCatalogueApi — the SoundCloud half of the Artist Hub's HTTP surface.
+
+- `catalogueErrorMessage()` — const AUTH_EXPIRED_DETAIL = 'auth_expired'; export const SC_SESSION_EXPIRED_MESSAGE = 'The SoundClo…
+- `isUnknownCollection()`
+- `fetchCatalogue()` — One artist's catalogue.
+- `unlinkSoundCloudProfile()` — export const linkSoundCloudProfile = async (collectionId, urlOrPermalink) => { const res = await ap…
+- `startMissingDownload()` — Queue a batch download.
+- `fetchDownloadJob()`
+- `pollDownloadJob()` — Poll one batch download to its end and resolve with the final job record.
+- `pinTrackRole()` — Pin one catalogue track's role for this artist.
+
+### `frontend/src/components/artistHub/artistDiscoveryApi.js`
+
+artistDiscoveryApi — the discovery + background-sync half of the Artist Hub's HTTP surface.
+
+- `SYNC_ALREADY_RUNNING_MESSAGE()`
+- `fetchSyncStatus()` — export const fetchDiscovery = async ({ limit = ARTIST_DISCOVER_LIMIT } = {}) => { const res = await…
+- `runBackgroundSync()` — `POST /api/artists/sync/run`.
+- `isSyncAlreadyRunning()`
+
+### `frontend/src/components/artistHub/artistHubApi.js`
+
+artistHubApi — the merge + projection half of the Artist Hub's HTTP surface.
+
+- `errorMessage()` — export const REKORDBOX_RUNNING_MESSAGE = 'Rekordbox is open and holds the library.
+- `fetchMergeCandidates()`
+- `fetchMergePreview()`
+- `fetchMergeRuns()`
+- `revertMergeRun()` — export const applyMerge = async ({ names, canonical, deleteOrphans }, hooks = {}) => { const starte…
+- `fetchProjectionStatus()`
+
+### `frontend/src/components/artistHub/artistLinksApi.js`
+
+artistLinksApi — where an artist lives online, and which library tracks are theirs.
+
+- `setTrackAssignment()` — export const linksErrorMessage = (error, fallback) => catalogueErrorMessage(error, fallback); expor…
+- `searchAssignCandidates()`
+
+### `frontend/src/components/artistHub/catalogueCopy.js`
+
+catalogueCopy — the sentences the artist-detail view has to say out loud.
+
+- `BUCKETS()` — The rendered buckets, in the owner's order.
+- `MIXES_BUCKET()`
+- `ROLE_OPTIONS()` — export const ROLE_LABEL = { primary: 'Their track', remixer: 'Their remix', remixed_by_other: 'Remi…
+- `CONFIDENCE_LABEL()`
+- `splitCatalogue()` — The buckets and the counts the detail view renders, derived in one place.
+- `formatDuration()` — export const relativeTime = (iso) => { if (!iso) return null; const parsed = new Date(iso); if (Num…
+- `STATE_FALLBACK()` — export const formatDate = (iso) => { if (!iso) return ''; const parsed = new Date(iso); return Numb…
+- `stateSentence()`
+- `truncationNote()` — export const fetchedLine = (view) => { if (!view || view.status !== 'ok') return ''; const ago = re…
+- `sourceStates()` — export const callBudgetLine = (view) => { if (!view || view.status !== 'ok') return ''; const used …
+- `allSourcesOk()` — export const sourceStatusLine = (view) => sourceStates(view) .map((source) => `${source.label} ${so…
+- `bucketEmptyNote()` — What an empty bucket is allowed to say.
+- `LINK_MISSING_CHIP()` — export const searchNamesLine = (view) => { if (!view || view.status !== 'ok') return ''; const run …
+- `LINK_MISSING_SENTENCE()`
+- `roleLine()` — export const creditLine = (track) => { const reason = track?.credit_parse?.reason; if (typeof reaso…
+- `MIXES_RULE_SENTENCE()` — export const EXCLUSION_REASON_TEXT = { long_form: 'longer than 15 minutes', keyword: 'the title, ta…
+- `progressLine()` — export const downloadAllNote = (count) => `${count} track${count === 1 ?
+- `downloadSummary()` — What actually landed.
+- `DOWNLOAD_PATH_NOTE()` — export const downloadTone = (job) => { if (!job) return 'neutral'; if ((Number(job.failed) || 0) > …
+
+### `frontend/src/components/artistHub/catalogueCopy.test.js`
+
+node --test frontend/src/components/artistHub/catalogueCopy.test.js Pure copy + derivation builders — no DOM, no resolver needed (the impor…
+
+### `frontend/src/components/artistHub/discoveryCopy.js`
+
+discoveryCopy — the sentences the Discover tab and the background-sync line must say.
+
+- `SOURCE_RELATED()`
+- `SOURCE_CO_OCCURRENCE()`
+- `STATE_OK()`
+- `STATE_FAILED()`
+- `STATE_SKIPPED_BUDGET()`
+- `STATE_NOT_QUERIED()`
+- `STATE_NO_DATA()`
+- `STATE_SKIPPED_TRACK_CAP()` — A catalogue source nobody queried because the artist's own track ceiling was already full — mirrors…
+- `SKIPPED_TRACK_CAP_NOTE()`
+- `relatedNote()` — What the related-artists hop actually did.
+- `allSourcesAnswered()` — export const coOccurrenceNote = (payload) => { const state = payload?.sources?.[SOURCE_CO_OCCURRENC…
+- `emptyNote()` — What to print when the list came back empty.
+- `exclusionNote()` — The "already yours" filter is a claim about the library.
+- `seedLine()` — export const callBudgetNote = (payload) => { const budget = payload?.call_budget; if (!budget || ty…
+- `candidateFacts()` — The measured facts of one candidate, in order.
+- `idleSentence()` — export const busyReasonSentence = (reason) => { const raw = String(reason || '').trim(); if (!raw |…
+- `runSummary()` — One sentence for a finished run, built only from what the record actually counted.
+- `syncStateNote()` — How to render one artist's `sync_state.last_error`: `{ title, className, suffix }`.
+- `SYNC_MODE_HINTS()` — export const lastSyncedLabel = (isoOrNull) => { const ago = relativeTime(isoOrNull); return ago ?
+
+### `frontend/src/components/artistHub/discoveryCopy.test.js`
+
+node --test frontend/src/components/artistHub/discoveryCopy.test.js Pure copy builders — no DOM, no resolver needed (the imports carry exte…
+
+### `frontend/src/components/artistHub/linksCopy.js`
+
+linksCopy — what the artist view says about where an artist lives online, and about which library tracks are theirs (owner refinement 2026-…
+
+- `linkLabel()` — export const LINK_GROUPS = [ { key: 'social', label: 'Social' }, { key: 'music', label: 'Listen' },…
+- `isTentative()` — export const linkTitle = (link) => { const lines = [link?.url || '']; const source = SOURCE_TEXT[li…
+- `sourceLines()` — export const groupLinks = (links) => { const byKey = new Map(LINK_GROUPS.map((g) => [g.key, []])); …
+- `emptyLinksNote()` — export const lastFetchedLine = (lastFetch) => { const when = relativeTime(lastFetch?.fetched_at); r…
+- `hiddenLine()`
+- `compactCount()` — export const musicBrainzCandidateLine = (candidate) => { const bits = [candidate?.type, candidate?.…
+- `LOCAL_FILTERS()` — export const soundCloudCandidateLine = (user) => { const bits = [ `${compactCount(user?.followers_c…
+- `LOCAL_ROLE_LABEL()`
+- `localFilterCount()` — export const ASSIGNABLE_ROLES = ['primary', 'remixer', 'remixed_by_other', 'featured']; export cons…
+- `localRoleTitle()` — export const filterLocalTracks = (tracks, key) => { const rows = Array.isArray(tracks) ?
+- `localSummaryLine()` — The line under the local panel head.
+
+### `frontend/src/components/artistHub/linksCopy.test.js`
+
+node:test — `node --test frontend/src/components/artistHub/linksCopy.test.js`
+
+### `frontend/src/components/artistHub/mergeCopy.js`
+
+mergeCopy — the sentences the merge dialog has to say out loud.
+
+- `formatBytes()` — export const formatNumber = (value) => { const n = Number(value); return Number.isFinite(n) ?
+- `databaseEffect()` — export const dryRunLine = (preview) => `${pluralise(preview?.tracks_to_rewrite, 'track', 'tracks')}…
+- `usbEffect()` — export const filesEffect = (preview) => { if (preview?.files_measured === false) { return 'The arti…
+- `usbFolderList()` — export const mergeEffects = (preview) => [ { id: 'db', text: databaseEffect(preview) }, { id: 'file…
+- `compoundWarning()` — Repointing a track whose artist row names more than this group flattens the credit ("boys noize, Ob…
+- `confirmMessage()` — export const ORPHAN_WARNING_LINE = 'Hard delete, no tombstone — it also clears Remixer, Original-Ar…
+- `revertSummary()` — export const applySummary = (result) => { if (!result) return 'Merge finished.'; const parts = [`${…
+
+### `frontend/src/components/artistHub/mergeCopy.test.js`
+
+node --test frontend/src/components/artistHub/mergeCopy.test.js Pure copy builders — no DOM, no resolver needed (the imports carry extensio…
+
+### `frontend/src/components/artistHub/useArtistCatalogue.js`
+
+Move one row into the bucket its new role renders in — the optimistic half of a pin.
+
+- `movePinnedRow()` — Move one row into the bucket its new role renders in — the optimistic half of a pin.
+
+### `frontend/src/components/artistHub/useArtistCatalogue.test.js`
+
+node --import ./frontend/src/components/artistHub/useArtistCatalogue.test.resolver.mjs \ --test frontend/src/components/artistHub/useArtist…
+
+### `frontend/src/components/artistHub/useArtistDetailActions.js`
+
+useArtistDetailActions — the click handlers of the artist detail view.
 
 ### `frontend/src/components/daw/timeline/useTimelineEvents.js`
 
@@ -1289,6 +1809,23 @@ Frontend-wide constants.
 - `TOAST_DURATION_LONG_MS()` — Duration for long-form error toasts that the user needs time to read (full failure paths in DAW / e…
 - `AUDIO_IMPORT_TIMEOUT_MS()` — Axios timeout for the synchronous audio-import endpoint (/api/audio/import → full analysis pipeline…
 - `IMPORT_TASK_POLL_INTERVAL_MS()` — Poll cadence for /api/import/tasks while one or more uploaded files are still being analysed in the…
+- `ARTIST_MERGE_POLL_INTERVAL_MS()` — Poll cadence for a running artist-merge job (POST /api/artists/merge/apply → job_id, then GET /api/…
+- `ARTIST_MERGE_MAX_POLL_FAILURES()` — Consecutive failed status polls tolerated before the dialog stops waiting and tells the user it los…
+- `ARTIST_LONG_OP_TIMEOUT_MS()` — Axios timeout for the long artist-hub mutations (merge apply, merge revert, projection sync).
+- `ARTIST_CATALOGUE_TIMEOUT_MS()` — Axios timeout for the artist catalogue read (GET /api/artists/{id}/catalogue).
+- `ARTIST_DOWNLOAD_POLL_INTERVAL_MS()` — Poll cadence for a running artist batch download (POST /api/artists/{id}/ download-missing → job_id…
+- `ARTIST_DOWNLOAD_MAX_POLL_FAILURES()` — Consecutive failed download-status polls tolerated before the view stops waiting and says it lost t…
+- `ARTIST_CATALOGUE_PAGE_SIZE()` — Rows one catalogue bucket renders before the "show more" button.
+- `SMART_PLAYLIST_LABEL_THRESHOLD()` — Minimum tracks a label needs before POST /api/library/smart-playlists writes a playlist for it.
+- `ARTIST_DISCOVER_TIMEOUT_MS()` — Axios timeout for GET /api/artists/discover.
+- `ARTIST_SYNC_RUN_TIMEOUT_MS()` — Axios timeout for POST /api/artists/sync/run.
+- `ARTIST_SYNC_STATUS_POLL_MS()` — Poll cadence for GET /api/artists/sync/status while the Artists tab is open.
+- `ARTIST_LINKS_TIMEOUT_MS()` — Axios timeout for the artist-links refresh (POST /api/artists/{id}/links/refresh and the MusicBrain…
+- `ARTIST_ASSIGN_SEARCH_DEBOUNCE_MS()` — Debounce for the "Add tracks" library search in the artist view and the app-wide "Artist zuordnen…"…
+- `ARTIST_ASSIGN_SEARCH_LIMIT()` — Results the "Add tracks" search asks for.
+- `ARTIST_ASSIGN_PICKER_LIMIT()` — Artists the app-wide "Artist zuordnen…" picker lists per search.
+- `ARTIST_DISCOVER_LIMIT()` — Suggestions requested from GET /api/artists/discover.
+- `SC_REFRESH_TIMEOUT_MS()` — Headroom over the backend's own SoundCloud call (SC_REFRESH_TIMEOUT_S = 15 s in app/soundcloud_auth…
 
 ### `frontend/src/store/authStore.js`
 
@@ -1310,6 +1847,21 @@ AudioBandAnalyzer Splits an AudioBuffer into 3 frequency bands (Rekordbox-style)
 Dev-only logging utility.
 
 - `log()`
+
+### `frontend/src/utils/openExternal.js`
+
+Open a web link outside the app: the system browser in Tauri, a new tab in the browser.
+
+- `safeExternalUrl()` — function hasUnsafeChars(text) { if (WHITESPACE.test(text)) return true; for (let i = 0; i < text.le…
+- `openExternal()` — Open `raw` outside the app.
+
+### `frontend/src/utils/openExternal.test.js`
+
+node:test — `node --test frontend/src/utils/openExternal.test.js`
+
+### `frontend/src/components/ArtistHubView.jsx`
+
+*(no module docstring)*
 
 ### `frontend/src/components/BatchEditBar.jsx`
 
@@ -1432,7 +1984,7 @@ Mirror of LibraryTools.smart_rename's token substitution + sanitisation,
 
 ### `frontend/src/components/TrackTable.jsx`
 
-Camelot
+*(no module docstring)*
 
 ### `frontend/src/components/UsbSettingsView.jsx`
 
@@ -1455,6 +2007,34 @@ UtilitiesView — router for the Utilities workspace.
 ### `frontend/src/components/XmlCleanView.jsx`
 
 Using existing endpoint but improved backend logic
+
+### `frontend/src/components/artistHub/ArtistDetail.jsx`
+
+*(no module docstring)*
+
+- `ArtistDetailActions()` — export const ArtistDetailSummary = ({ localShown, localTotal, catalogue, scEnabled }) => { const sp…
+
+### `frontend/src/components/artistHub/ArtistLinks.jsx`
+
+*(no module docstring)*
+
+### `frontend/src/components/artistHub/AssignArtistModal.jsx`
+
+assignArtistModal — "Artist zuordnen…" from any track table in the app.
+
+- `assignArtistModal()`
+
+### `frontend/src/components/artistHub/LocalTracksPanel.jsx`
+
+LocalTracksPanel — the "in your library" half of the artist page (owner refinement 2026-09-26): every track that is theirs, grouped by role…
+
+### `frontend/src/components/artistHub/MergeDialog.jsx`
+
+*(no module docstring)*
+
+### `frontend/src/components/artistHub/ProjectionPanel.jsx`
+
+ProjectionPanel — the `Artists` folder inside Rekordbox: what is projected right now, and the button that brings it up to date.
 
 ### `frontend/src/components/daw/DawBrowser.jsx`
 
@@ -1567,6 +2147,17 @@ SettingsShortcuts — Configurable DAW keyboard shortcut bindings.
 
 SettingsUsb — Per-stick USB profile CRUD (label, type, audio format).
 
+### `frontend/src/components/shared/ContextMenu.jsx`
+
+App-wide right-click menu.
+
+- `ContextMenu()`
+- `useContextMenu()` — State holder for a single context menu per component.
+
+### `frontend/src/components/shared/GlobalContextMenu.jsx`
+
+Two jobs:
+
 ### `frontend/src/components/shared/WaveformMiniCanvas.jsx`
 
 WaveformMiniCanvas — Reusable lightweight canvas waveform renderer Shared across WaveformOverview (DAW mini-map), track row previews, and a…
@@ -1653,6 +2244,34 @@ Floating zoom controls overlay — sits absolutely positioned over the detail co
 
 *(no module docstring)*
 
+### `frontend/src/components/artistHub/useArtistCatalogue.test.api-stub.mjs`
+
+Stand-in for `artistCatalogueApi` in `useArtistCatalogue.test.js`.
+
+- `stub()` — Stand-in for `artistCatalogueApi` in `useArtistCatalogue.test.js`.
+- `calls()`
+- `resetStub()`
+- `fetchCatalogue()`
+- `startMissingDownload()`
+- `pollDownloadJob()`
+- `linkSoundCloudProfile()`
+- `unlinkSoundCloudProfile()`
+- `pinTrackRole()`
+- `catalogueErrorMessage()`
+- `isUnknownCollection()`
+
+### `frontend/src/components/artistHub/useArtistCatalogue.test.fake-react.mjs`
+
+Minimal hooks runtime standing in for `react` in `useArtistCatalogue.test.js`.
+
+- `useState()`
+- `useRef()`
+- `useMemo()`
+- `useCallback()`
+- `useEffect()`
+- `useLayoutEffect()`
+- `settle()` — export const renderHook = (fn, props) => { const instance = { fn, props, hooks: [], index: 0, queue…
+
 
 ## src-tauri/src/ — Rust Desktop Wrapper
 
@@ -1734,8 +2353,9 @@ soundcloud_client.rs
 
 - `enum ScError`
 - `struct Track`
+- `struct ScTokenSet`
 - `get_auth_url()` — Generates the SoundCloud authorization URL and the associated PKCE code verifier.
-- `exchange_code_for_token()` — Exchanges an authorization code for an access token using the PKCE code verifier.
+- `exchange_code_for_token()` — Exchanges an authorization code for a token set using the PKCE code verifier.
 - `search_track()` — Searches for a single track on SoundCloud by artist and title.
 - `struct ExportResult`
 - `search_and_create_playlist()` — Searches for each track sequentially (to avoid rate-limiting) and creates a SoundCloud playlist wit…
@@ -1914,6 +2534,796 @@ Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout).
 - `test_pwav_out_of_range_does_not_crash()` — Regression: bytes([300]) / bytes([-1]) would raise ValueError; the
 - `test_pwv2_out_of_range_clamped()`
 - `test_pwv3_out_of_range_clamped_preserves_count()`
+
+### `tests/test_artist_attribution.py`
+
+Local attribution tests (T-24 — app/artist_store/attribution.py).
+
+- `store()`
+- `test_artist_field_set_is_the_registry_grouping_across_spellings()`
+- `test_featured_only_in_the_artist_field_is_featured()`
+- `test_someone_elses_remix_of_their_track_is_remixed_by_other()`
+- `test_their_remix_with_the_original_act_in_the_artist_field_is_remixer()`
+- `test_their_own_remix_of_their_own_track_stays_primary()`
+- `test_remixer_field_credits_them()`
+- `test_title_remix_credit_is_remixer()`
+- `test_title_feature_credit_is_featured()`
+- `test_label_upload_with_the_artist_in_the_title_prefix_is_primary()`
+- `test_a_version_word_is_never_a_person()`
+- `test_a_near_spelling_is_not_a_credit()`
+- `test_the_old_artist_field_set_is_a_subset_of_the_new_one()`
+- `test_assign_adds_any_track_under_the_chosen_role()`
+- `test_assign_defaults_to_primary()`
+- `test_exclude_beats_every_automatic_match()`
+- `test_clear_hands_the_track_back_to_the_automatic_layers()`
+- `test_an_assigned_track_that_left_the_library_is_listed_not_repointed()`
+- `test_a_reused_id_does_not_carry_a_manual_assignment()`
+- `test_a_reused_id_does_not_carry_an_exclusion()`
+- `test_a_fixed_title_keeps_the_manual_row()`
+- `test_a_merge_rewritten_artist_keeps_the_manual_row()`
+- `test_a_title_that_only_shares_letters_is_another_recording()`
+- `test_a_name_that_does_not_derive_the_id_is_refused()`
+- `test_bad_inputs_are_refused_before_anything_is_written()`
+- `test_unknown_collection_is_none()`
+- `test_without_a_library_a_stored_artist_is_empty_and_says_why()`
+- `test_search_candidates_flags_attributed_and_excluded_rows()`
+- `test_projection_reads_the_same_membership()`
+- `test_v2_file_walks_to_v3_and_keeps_its_rows()`
+- `test_v3_step_is_registered()`
+
+### `tests/test_artist_catalogue.py`
+
+Artist-Hub catalogue tests (T-14 — app/artist_store/catalogue.py).
+
+- `store()` — Point the sidecar at a throwaway DB and reset its per-process state.
+- `sc_track()` — One normalised SC track dict — the contract shape the client hands over.
+- `local()`
+- `library()`
+- `titles()`
+- `test_role_buckets_split()`
+- `test_a_label_upload_is_found_by_name_not_only_by_account()` — Owner decision 2026-09-08: most of a signed artist's catalogue is uploaded by others.
+- `test_their_own_remix_is_their_music()` — A remix BY the artist is theirs; a remix OF their track by someone else is not.
+- `test_review_buckets_are_never_auto_queued()` — Only ``primary``/``remixer`` at high/medium may be queued for the user (threat T11).
+- `test_a_user_override_wins_over_the_classifier()` — The pin moves the row and says so; the classifier's own reading stays visible.
+- `test_an_unlinked_artist_is_still_identified_by_name()` — Search needs no URN — but nothing may reach ``high`` without the uploader signal.
+- `test_urn_and_numeric_id_are_the_same_account()` — Numeric ids are deprecated but still in flight; they must not split identity.
+- `test_without_a_name_or_an_account_nothing_is_claimed()` — No signal at all is ``uncertain`` — listed for review, never asserted as theirs.
+- `test_mix_words_that_must_survive()` — A bare \bmix\b is NOT in the keyword regex — these are the tracks the user wants.
+- `test_mix_keywords_excluded()`
+- `test_long_form_excluded_even_without_a_keyword()`
+- `test_boiler_room_loses_to_the_filter_while_extended_mix_survives()`
+- `test_not_fully_playable_is_excluded()` — A snippet is not the track — a preview must never reach the missing list.
+- `test_preview_track_is_kept_out_of_the_role_buckets()`
+- `test_downloadable_is_never_a_filter()`
+- `test_hostile_payload_rows_are_dropped_not_invented()`
+- `test_missing_diff_threshold_corpus()` — The threshold is pinned by the corpus, not by taste.
+- `test_diff_splits_owned_from_missing()`
+- `test_diff_accepts_a_plain_sequence_of_tracks()`
+- `test_remix_is_reported_missing_even_when_the_original_is_owned()`
+- `test_owned_remix_matches_its_own_remote_listing()`
+- `test_empty_library_reports_everything_missing()`
+- `test_catalogue_ties_buckets_and_diff_together()`
+- `test_second_call_is_served_from_cache_without_refetching()`
+- `test_cache_holds_the_catalogue_not_the_diff()` — The local side moves whenever the library does, so the cached hit must re-diff.
+- `test_expired_cache_refetches()`
+- `test_force_refresh_bypasses_the_cache()`
+- `test_cache_is_ignored_after_rebinding_to_another_account()`
+- `test_catalogue_uses_the_bound_urn_when_none_is_passed()`
+- `test_an_unlinked_artist_is_catalogued_by_name_and_says_the_link_is_missing()` — Owner decision 2026-09-08: search needs no URN, so the link is a signal, not a gate.
+- `test_without_a_link_or_a_name_there_is_nothing_to_identify()`
+- `test_no_fetcher_and_no_cache_raises_instead_of_faking_a_sync()`
+- `test_cached_catalogue_still_serves_without_a_fetcher()`
+- `test_track_cap_truncates_and_reports_it()`
+- `test_fetcher_reported_truncation_is_carried_through()` — A fetch cut short by the client's call budget must not read as a complete catalogue.
+- `test_the_classifier_verdict_is_remembered_per_track()` — The local artist→track table fills as the user browses (owner decision 2026-09-08).
+- `test_a_pinned_role_wins_on_the_next_pass()`
+- `test_catalogue_logs_no_credentials()` — The module never receives the OAuth token; nothing about it may reach the log.
+- `TestBareDerivationsAreNotOwned` — Regression: a parenthetical with no remixer used to collapse onto the original.
+- `  TestBareDerivationsAreNotOwned.test_bare_derivation_gets_its_own_key()`
+- `  TestBareDerivationsAreNotOwned.test_base_labels_still_fold_onto_the_original()`
+- `  TestBareDerivationsAreNotOwned.test_a_bare_derivation_reads_as_missing_not_owned()`
+
+### `tests/test_artist_catalogue_routes.py`
+
+Artist-Hub SoundCloud route tests — binding, catalogue, batch download (T-13/T-15).
+
+- `signed_in()`
+- `collection_id()`
+- `linked()`
+- `fetched()` — A linked artist whose catalogue is already in the TTL cache.
+- `downloads()` — Record every ``download_track`` call and complete it immediately.
+- `test_gated_routes_require_session()`
+- `test_gated_routes_reject_wrong_bearer()`
+- `test_rejected_mutation_writes_no_link()`
+- `test_catalogue_read_with_a_session_is_served()`
+- `test_a_gated_read_reaches_no_further_than_the_gate()` — 401 before the route body, so a rejected call spends nothing and caches nothing.
+- `test_unlinked_and_signed_out_says_not_connected_not_empty()` — No account AND no login: nothing was queried, so nothing may be listed.
+- `test_unlinked_artist_is_catalogued_by_name_and_flagged()` — Owner decision 2026-09-08: linking stays manual, but a name is enough to search.
+- `test_unknown_collection_is_404()`
+- `test_missing_credentials_return_not_connected()` — No token and nothing cached — say so, never hand back an empty catalogue.
+- `test_expired_session_returns_not_connected()`
+- `test_deleted_soundcloud_account_returns_artist_gone()` — A dead artist 404s legitimately — that is not a "please log in again".
+- `test_catalogue_splits_into_role_buckets_and_reports_the_budget()`
+- `test_catalogue_fetch_carries_a_call_budget()`
+- `TestForcedRefreshCooldown` — ``refresh=true`` skips the TTL cache and spends a whole budget — once per window.
+- `  TestForcedRefreshCooldown.test_a_second_forced_refresh_in_the_window_reads_the_cache()`
+- `  TestForcedRefreshCooldown.test_the_window_expires()`
+- `  TestForcedRefreshCooldown.test_a_signed_out_read_does_not_burn_the_window()` — Nothing was spendable, so the first refresh that CAN fetch must still fetch.
+- `test_truncated_fetch_is_reported_not_hidden()`
+- `test_link_stores_urn_permalink_and_confidence()`
+- `test_link_without_a_token_is_refused()`
+- `test_link_refuses_an_unresolvable_profile()`
+- `test_unlink_removes_the_binding()`
+- `test_legacy_json_links_migrate_once_and_stay_unresolved()` — ``app_data.json`` held a URL but no URN — import it, flag it, never claim it works.
+- `test_download_missing_returns_a_job_id()`
+- `test_download_status_404s_on_an_unknown_job()`
+- `test_batch_never_inherits_aggressive_mode()`
+- `test_auto_queue_takes_their_music_and_nothing_from_the_review_buckets()` — Their tracks AND their own remixes; never a foreign remix, a feature or a maybe (T11).
+- `test_a_review_bucket_track_must_be_requested_explicitly()` — Refused for the server to pick, accepted when the user points at the row.
+- `test_auto_queue_and_explicit_ids_are_mutually_exclusive()`
+- `test_unknown_track_ids_are_refused_not_skipped()`
+- `test_download_without_a_fetched_catalogue_is_409()` — The job reads the cache only — it must never open its own SoundCloud session.
+- `test_download_for_an_unlinked_artist_is_409()`
+- `test_per_run_cap_is_refused_not_trimmed()`
+- `test_second_concurrent_run_is_409()` — A real second start while the first job is mid-flight, not a simulated lock.
+- `test_lock_is_released_so_the_next_run_starts()`
+- `snipped_only_track()` — A track SoundCloud exposes to this account as a 30 s preview only.
+- `test_aggressive_mode_still_applies_to_a_hand_picked_track()` — Control case: with the opt-in on, the single-track path does accept the preview.
+- `test_batch_path_refuses_the_preview_aggressive_mode_would_accept()` — `allow_aggressive=False` makes the setting unreachable — a batch never inherits it.
+- `TestEverySourceReportsItsOwnStatus` — Regression, twice shipped: a bucket nobody queried was rendered as "nothing missing".
+- `  TestEverySourceReportsItsOwnStatus.test_all_three_sources_run_in_budget_order()`
+- `  TestEverySourceReportsItsOwnStatus.test_search_runs_for_the_canonical_name_and_every_alias_on_one_budget()`
+- `  TestEverySourceReportsItsOwnStatus.test_a_track_in_both_uploads_and_search_is_listed_once()`
+- `  TestEverySourceReportsItsOwnStatus.test_a_search_failure_does_not_sink_the_catalogue()`
+- `  TestEverySourceReportsItsOwnStatus.test_a_reposts_failure_does_not_sink_the_catalogue()` — Own uploads are the half that matters — a reposts error must degrade, not fail.
+- `  TestEverySourceReportsItsOwnStatus.test_an_alias_the_budget_never_reached_is_reported_as_skipped()` — A name that was never searched is a bucket nobody looked in — say which.
+- `  TestEverySourceReportsItsOwnStatus.test_a_cached_read_claims_nothing_about_any_source()` — A cache hit fetched nothing, so it may not assert anything about any source.
+- `  TestEverySourceReportsItsOwnStatus.test_a_full_track_ceiling_is_not_reported_as_a_budget_skip()` — Both skips used to be ``skipped_budget`` — one of them is not about the budget.
+- `  TestEverySourceReportsItsOwnStatus.test_a_budget_cut_outranks_a_cap_an_earlier_source_hit()` — First-wins let own uploads' permanent cap hide search's retryable budget cut.
+- `TestAForcedRefreshRecordsWhatItMeasured` — ``refresh=true`` replaces the cached catalogue, so it owns ``sync_state`` too.
+- `  TestAForcedRefreshRecordsWhatItMeasured.test_a_complete_refresh_clears_a_stale_partial_marker()`
+- `  TestAForcedRefreshRecordsWhatItMeasured.test_a_truncated_refresh_writes_the_cap_the_fetch_measured()`
+- `  TestAForcedRefreshRecordsWhatItMeasured.test_a_budget_cut_refresh_leaves_the_background_counter_alone()` — ``partial:`` counts *background passes*; a button press is not one of them.
+- `  TestAForcedRefreshRecordsWhatItMeasured.test_a_refresh_served_from_cache_records_nothing()` — The cooldown turns the second press into a cache read — no truth changed.
+- `TestRolePin` — ``POST /api/artists/{id}/tracks/{sc_urn}/role`` — the manual half of identification.
+- `  TestRolePin.test_pin_requires_a_session()`
+- `  TestRolePin.test_a_pin_persists_and_wins_on_the_next_pass()`
+- `  TestRolePin.test_a_pin_can_be_cleared()`
+- `  TestRolePin.test_an_unknown_role_is_refused()`
+- `  TestRolePin.test_a_track_nobody_fetched_cannot_be_pinned()` — No invented identity row: the catalogue has to have seen the track first.
+- `  TestRolePin.test_pinning_a_review_row_makes_it_auto_queueable()`
+- `TestIdentityTable` — ``GET /api/artists/{id}/identities`` — what the local artist→track table holds.
+- `  TestIdentityTable.test_browsing_fills_the_table()`
+- `  TestIdentityTable.test_an_artist_nobody_opened_has_an_empty_table_not_an_error()`
+- `  TestIdentityTable.test_unknown_collection_is_404()`
+- `test_the_auto_queue_rule_is_the_identity_module_s()` — One definition of "may the server queue this", not a second copy in the route.
+
+### `tests/test_artist_discovery.py`
+
+Artist-Hub Tier-2 discovery tests (T-16 — app/artist_store/discovery.py).
+
+- `store()` — Point the sidecar at a throwaway DB and reset its per-process state.
+- `favourite()` — Create a favourited collection, optionally bound to a SoundCloud account.
+- `sc_user()` — One normalised SC user dict — what ``normalize_artist`` hands back.
+- `cached_catalogue()` — Seed the sidecar catalogue cache with ``(uploader_urn, uploader_name)`` tracks.
+- `FakeRelated` — Stand-in for ``sc_api.get_related_artists``: counts calls, spends the budget.
+- `test_related_is_called_once_per_favourite_and_never_on_a_result()` — ONE hop.
+- `test_unlinked_favourite_is_reported_not_queried()` — An artist with no bound account was never looked up — say so, do not call.
+- `test_missing_token_never_queries_and_says_so()`
+- `test_empty_related_falls_back_to_co_occurrence_with_zero_further_calls()`
+- `test_404_degrades_to_the_fallback_and_never_raises()`
+- `test_client_swallowed_404_is_still_reported_as_failed()` — The client turns a 404 into an empty list with ``stop_reason='not_found'``.
+- `test_auth_failure_stops_the_run_and_is_reported_not_raised()`
+- `test_no_cached_catalogue_is_no_data_not_nothing_found()`
+- `test_already_favourited_and_already_local_candidates_are_excluded()`
+- `test_co_occurrence_never_suggests_the_seed_itself()`
+- `test_two_favourites_beat_one_bigger_catalogue()` — Co-signal first: an artist two favourites point at outranks a bigger single hit.
+- `test_rank_falls_back_to_track_count_then_followers()`
+- `test_rank_excludes_by_fold_and_by_urn_and_counts_them()`
+- `test_rank_limit_reports_truncation()`
+- `test_rank_merges_the_two_sources_into_one_row()`
+- `test_budget_truncates_the_run_and_is_reported()`
+- `test_exhausted_budget_reports_skipped_budget_not_empty()`
+- `test_client_reported_budget_stop_is_a_skip_not_an_answer()`
+- `test_discover_runs_under_a_cap_even_without_a_caller_budget()`
+- `test_report_names_the_seeds_and_both_sources()`
+- `test_default_path_uses_the_real_client_over_a_mocked_http_layer()` — No fetcher injected: the module must reach ``sc_api.get_related_artists``.
+- `TestAPartialWalkIsNotOk` — An abort after one seed answered must not read as "both sources answered".
+- `  TestAPartialWalkIsNotOk.test_rate_limited_after_one_seed_is_not_ok()`
+- `  TestAPartialWalkIsNotOk.test_a_clean_full_walk_is_still_ok()`
+
+### `tests/test_artist_discovery_routes.py`
+
+Artist-Hub discovery + background-sync route tests (T-16 / T-17).
+
+- `signed_in()`
+- `favourite()`
+- `linked_favourite()`
+- `test_discover_requires_session()` — A GET by shape only: the related tier has no cache and hops live on the token.
+- `test_discover_rejects_a_wrong_bearer()`
+- `test_discover_is_never_a_bare_list()`
+- `test_signed_out_says_not_queried_never_nothing_found()`
+- `test_no_linked_favourite_reports_the_reason()` — A signed-in user with no bound account: nothing was asked, and it says so.
+- `test_related_hop_returns_ranked_candidates()`
+- `test_a_failed_hop_is_reported_not_swallowed()`
+- `test_an_artist_you_already_favourited_is_excluded()` — The suggestion IS the seed's own account — it must not be offered back.
+- `test_discover_limit_is_capped()`
+- `test_sync_status_needs_no_session()`
+- `test_sync_status_reports_the_busy_probe_by_name()`
+- `test_sync_status_defaults_to_off_and_has_no_invented_run_record()`
+- `test_sync_status_lists_every_favourite_state()`
+- `test_analyze_batch_is_probed_and_no_longer_listed_as_unobservable()`
+- `test_analyze_batch_counter_makes_the_app_look_busy()`
+- `test_sync_run_requires_session()`
+- `test_sync_run_rejects_a_wrong_bearer()`
+- `test_sync_run_returns_the_run_record()`
+- `test_sync_run_without_force_stops_at_the_opt_in_setting()`
+- `test_sync_run_409s_while_a_pass_is_in_flight()`
+- `test_a_busy_app_refuses_the_pass_with_a_reason()`
+- `test_setting_defaults_to_off()`
+- `test_setting_on_lets_a_pass_run()`
+- `test_catalogue_view_accepts_one_shared_budget()` — Without this keyword `run_sync` refuses outright — N artists would get N caps.
+- `test_a_passed_budget_is_used_instead_of_a_fresh_one()` — The caller's cap survives the call — that is what stops N artists getting N caps.
+- `test_the_scheduler_is_wired_and_starts_paused()` — The poller exists, waits before its first look, and is gated on the setting.
+- `fast_scheduler()`
+- `test_scheduler_does_nothing_while_the_setting_is_off()`
+- `test_scheduler_runs_a_pass_once_the_setting_is_on()`
+- `test_the_scheduler_reports_a_pass_that_only_cut_refreshes_short()` — A cut-short refresh is work: calls were spent and a marker was written.
+
+### `tests/test_artist_identity.py`
+
+Artist-Hub identity tests (app/artist_store/identity.py + schema v2 track_identity).
+
+- `store()` — Point the sidecar at a throwaway DB and reset its per-process state.
+- `collection()`
+- `sc()`
+- `one()`
+- `role_of()`
+- `TestRemixCare`
+- `  TestRemixCare.test_remix_by_the_artist_of_someone_elses_track_is_remixer()`
+- `  TestRemixCare.test_remix_by_the_artist_uploaded_by_linked_account_is_remixer_high()`
+- `  TestRemixCare.test_artists_track_remixed_by_someone_else_splits_by_perspective()`
+- `  TestRemixCare.test_extended_mix_is_primary_not_a_remix()`
+- `  TestRemixCare.test_a_name_only_inside_a_remix_credit_is_never_primary()`
+- `  TestRemixCare.test_own_vip_of_own_track_is_primary()`
+- `  TestRemixCare.test_radio_edit_is_a_version_not_a_remixer_called_radio()`
+- `  TestRemixCare.test_label_bracket_after_the_remix_credit_is_peeled()`
+- `  TestRemixCare.test_dash_separated_remix_credit_counts()`
+- `  TestRemixCare.test_unbracketed_suffix_naming_the_artist_counts()`
+- `  TestRemixCare.test_unattributed_edit_from_a_foreign_uploader_is_uncertain()`
+- `  TestRemixCare.test_co_remixer_credit_counts()`
+- `TestPrimarySignals`
+- `  TestPrimarySignals.test_linked_uploader_is_primary_high()`
+- `  TestPrimarySignals.test_title_prefix_from_a_label_upload_is_primary_medium()`
+- `  TestPrimarySignals.test_same_display_name_on_a_foreign_account_is_at_most_medium()`
+- `  TestPrimarySignals.test_without_a_linked_account_nothing_reaches_high()`
+- `  TestPrimarySignals.test_co_credited_prefix_counts_for_each_name()`
+- `  TestPrimarySignals.test_promo_prefix_is_stripped()`
+- `  TestPrimarySignals.test_linked_account_uploading_someone_elses_track_is_not_primary()`
+- `  TestPrimarySignals.test_the_uploader_urn_alone_does_not_beat_a_foreign_remixer_credit()`
+- `TestFeaturedAndUncertain`
+- `  TestFeaturedAndUncertain.test_featured_credit_only_is_featured()`
+- `  TestFeaturedAndUncertain.test_with_in_running_text_is_not_a_feature()`
+- `  TestFeaturedAndUncertain.test_name_only_in_tags_is_uncertain()`
+- `  TestFeaturedAndUncertain.test_near_spelling_is_uncertain_and_named()`
+- `  TestFeaturedAndUncertain.test_no_credit_at_all_is_uncertain_and_says_so()`
+- `  TestFeaturedAndUncertain.test_every_track_gets_exactly_one_role()`
+- `TestAliases`
+- `  TestAliases.test_alias_spellings_resolve_like_the_canonical_name()`
+- `  TestAliases.test_without_the_alias_the_same_title_is_not_attributed()`
+- `  TestAliases.test_fold_key_variants_of_the_canonical_name_match()`
+- `  TestAliases.test_registry_names_feed_classify_for_collection()`
+- `TestAutoQueueRule`
+- `  TestAutoQueueRule.test_uncertain_is_never_eligible()`
+- `  TestAutoQueueRule.test_review_only_roles_are_never_eligible()`
+- `  TestAutoQueueRule.test_primary_and_remixer_need_high_or_medium()`
+- `  TestAutoQueueRule.test_classified_flag_uses_the_same_rule()`
+- `  TestAutoQueueRule.test_an_owned_track_is_never_queued_whatever_its_role()`
+- `TestUserOverride`
+- `  TestUserOverride.test_override_wins_over_the_classifier()`
+- `  TestUserOverride.test_override_can_demote_too()`
+- `  TestUserOverride.test_unknown_override_role_is_refused()`
+- `  TestUserOverride.test_stored_override_wins_on_every_subsequent_pass()`
+- `  TestUserOverride.test_override_on_an_unseen_track_is_refused_not_invented()`
+- `  TestUserOverride.test_unpin_restores_the_classifier()`
+- `TestRememberIdentities`
+- `  TestRememberIdentities.test_upsert_count_and_round_trip()`
+- `  TestRememberIdentities.test_upsert_keeps_first_seen_refreshes_last_seen_and_keeps_the_pin()`
+- `  TestRememberIdentities.test_one_track_can_hold_a_different_role_per_artist()`
+- `  TestRememberIdentities.test_rows_without_an_id_are_skipped_not_invented()`
+- `  TestRememberIdentities.test_unknown_collection_is_an_integrity_error()`
+- `  TestRememberIdentities.test_garbage_role_is_refused_by_the_store()`
+- `  TestRememberIdentities.test_cascade_on_collection_delete()`
+- `  TestRememberIdentities.test_role_counts_only_count_what_was_classified()`
+- `TestIsrcFastPath`
+- `  TestIsrcFastPath.test_isrc_match_short_circuits_to_owned()`
+- `  TestIsrcFastPath.test_isrc_fast_path_beats_the_derivation_gate()`
+- `  TestIsrcFastPath.test_title_path_runs_when_either_side_lacks_an_isrc()`
+- `  TestIsrcFastPath.test_different_isrcs_do_not_prevent_a_title_match()`
+- `  TestIsrcFastPath.test_junk_isrcs_never_compare_equal()`
+- `  TestIsrcFastPath.test_normalize_isrc_shapes()`
+- `  TestIsrcFastPath.test_annotated_catalogue_exposes_the_match_method()`
+- `TestMigrationV2`
+- `  TestMigrationV2.test_v1_file_walks_to_v2_and_keeps_its_rows()`
+- `  TestMigrationV2.test_fresh_db_also_gets_the_v2_table()`
+- `  TestMigrationV2.test_step_is_registered_for_v1()`
+- `TestHygiene`
+- `  TestHygiene.test_identity_writers_hold_the_module_lock()`
+- `  TestHygiene.test_identity_reads_do_not_take_the_lock()`
+- `  TestHygiene.test_identity_module_touches_no_library_writer_and_no_network()`
+- `  TestHygiene.test_classify_is_pure_no_sidecar_write()`
+- `TestDisplayNameAloneNeverAutoQueues` — A bare display-name match must not spend the user's bandwidth unattended.
+- `  TestDisplayNameAloneNeverAutoQueues.test_uploader_name_only_is_primary_but_not_queueable()`
+- `  TestDisplayNameAloneNeverAutoQueues.test_a_title_credit_clears_the_gate()`
+- `  TestDisplayNameAloneNeverAutoQueues.test_the_linked_account_clears_the_gate()`
+- `  TestDisplayNameAloneNeverAutoQueues.test_the_rule_is_pure_and_signal_aware()`
+
+### `tests/test_artist_links.py`
+
+Social-link tests (T-22 / T-23, Threats T13 T15 — app/artist_store/links.py).
+
+- `store()`
+- `cid()`
+- `test_classify_known_shapes()`
+- `test_hostile_or_useless_input_is_refused()`
+- `test_posts_tracks_and_share_dialogs_are_not_profiles()`
+- `test_lookalike_hosts_are_never_the_service()`
+- `test_one_key_per_profile_however_it_is_spelled()`
+- `test_bio_yields_known_services_and_labelled_handles_only()`
+- `test_an_email_is_not_a_handle()`
+- `test_manual_link_is_stored_and_listed()`
+- `test_manual_link_refuses_a_script_url()`
+- `test_removing_a_manual_link_deletes_it()`
+- `test_refresh_merges_soundcloud_and_anchored_musicbrainz()`
+- `test_bio_links_are_low_and_lose_to_the_profile()`
+- `test_a_hidden_link_stays_hidden_after_a_refresh()`
+- `test_manual_link_is_never_overwritten_by_a_fetch()`
+- `test_a_failed_source_keeps_what_it_gave_before()`
+- `test_a_link_the_source_dropped_goes_when_that_source_answers()`
+- `test_a_name_match_is_a_candidate_never_a_binding()`
+- `test_a_low_score_or_other_name_is_not_even_a_candidate()`
+- `test_an_ambiguous_anchor_binds_nothing()`
+- `test_a_confirmed_binding_is_never_second_guessed()`
+- `test_an_anchored_binding_goes_when_the_anchor_does()`
+- `test_dropping_musicbrainz_takes_its_links_now()`
+- `test_unlinking_the_account_takes_its_links_but_not_yours()`
+- `test_not_connected_is_reported_without_touching_soundcloud()`
+- `test_confirm_refuses_a_malformed_mbid()`
+- `test_account_ranking_puts_exact_names_first_then_followers()`
+
+### `tests/test_artist_links_routes.py`
+
+Artist-Hub profile-link routes (T-22 / T-23 — app/main.py, plan test row T36).
+
+- `network_calls()` — Every escape hatch closed, and every attempt on the one door recorded.
+- `signed_in()`
+- `collection_id()`
+- `linked()`
+- `test_gated_routes_require_session()`
+- `test_gated_routes_reject_wrong_bearer()`
+- `test_rejected_calls_change_nothing_and_ask_nobody()`
+- `test_links_read_needs_no_session_and_starts_empty()`
+- `test_unknown_collection_is_404_before_anything_else()`
+- `test_add_refuses_what_is_not_a_web_profile()`
+- `test_add_stores_the_canonical_profile_and_the_read_lists_it()`
+- `test_oversized_fields_are_refused_before_the_route()`
+- `test_remove_deletes_a_manual_link()`
+- `test_remove_hides_a_fetched_link_until_restore()` — Deleting a fetched link would last one refresh — the hide has to live in the row.
+- `test_remove_an_unknown_link_is_404()`
+- `test_refresh_without_link_or_musicbrainz_asks_nobody()`
+- `test_refresh_body_is_optional()` — No body = the default click: MusicBrainz is asked.
+- `test_refresh_without_a_usable_login_says_not_connected()` — Not an error: the SoundCloud source says why it was skipped, the call still answers.
+- `test_refresh_folds_both_sources_and_never_leaks_the_token()`
+- `test_mb_name_match_never_autobinds()` — An exact name at score 100 is still only a candidate — the confirm click binds.
+- `test_confirm_refuses_a_malformed_mbid()`
+- `test_drop_musicbrainz_unbinds_and_takes_its_links()`
+- `test_sc_candidates_never_link()` — Ranked by name, not by reach — and a suggestion stays a suggestion.
+- `test_sc_candidates_signed_out_is_400_and_searches_nothing()`
+- `test_sc_candidates_map_soundcloud_failures()`
+
+### `tests/test_artist_local_tracks_routes.py`
+
+Artist-Hub local-attribution routes (T-24 — app/main.py, route half of plan rows T30/T31).
+
+- `use_library()` — Install a hand-filled library as ``app.main.db``; ``loaded=False`` keeps its tracks.
+- `library()`
+- `unloaded()` — A stored artist, and the same library with ``loaded`` false.
+- `test_write_requires_session()`
+- `test_write_rejects_wrong_bearer()`
+- `test_rejected_writes_store_nothing()`
+- `test_the_reads_need_no_session()`
+- `test_a_derived_collection_lists_its_artist_field_and_remix_credits()` — The hub hands out this id for a library spelling that nothing has stored yet.
+- `test_an_id_nobody_knows_is_404()`
+- `test_without_a_loaded_library_a_stored_artist_says_so()`
+- `test_assign_with_the_name_stores_the_artist_and_the_track_turns_manual()`
+- `test_assign_defaults_to_primary()`
+- `test_an_unstored_artist_is_only_stored_under_the_name_that_derives_its_id()`
+- `test_a_track_the_library_does_not_hold_is_404()`
+- `test_clear_on_an_artist_nothing_stored_is_404()`
+- `test_a_stray_lookup_error_from_a_bug_is_a_500_not_a_404()`
+- `test_exclude_takes_an_automatic_match_out_and_clear_hands_it_back()`
+- `test_a_role_nobody_may_assign_is_400()` — ``uncertain`` is the classifier's review bucket — nobody assigns "not sure".
+- `test_an_unknown_action_never_reaches_the_engine()`
+- `test_oversized_fields_are_refused_before_the_route()`
+- `test_the_action_vocabulary_is_the_engines()`
+- `test_without_a_loaded_library_a_write_is_409()`
+- `test_clear_needs_no_library()` — Dropping a row needs no snapshot — only assign / exclude read the library.
+- `test_candidates_find_by_title_and_flag_what_is_already_theirs()`
+- `test_candidates_honour_the_limit_but_count_every_hit()`
+- `test_a_blank_search_returns_nothing()`
+- `test_candidates_without_a_loaded_library_find_nothing()`
+- `test_candidates_for_an_id_nobody_knows_is_404()`
+- `test_the_candidates_path_reaches_the_search_not_the_write()`
+
+### `tests/test_artist_merge_apply.py`
+
+Artist-Hub merge apply/revert tests (T-6 + T-11a — app/artist_store/merge.py).
+
+- `FakeArtist` — An rbox ``DjmdArtist`` row: an id and a name, nothing else the merge reads.
+- `FakeContent` — An rbox ``DjmdContent`` row — a WHOLE row, written whole by ``update_content``.
+- `  FakeContent.snapshot()`
+- `CountingLock` — ``db_lock()`` stand-in: counts acquisitions and knows whether it is held.
+- `FakeFacade` — The slice of ``RekordboxDB`` the merge uses, plus tripwires for the banned paths.
+- `  FakeFacade.get_tracks_by_artist()`
+- `  FakeFacade.get_content_by_id()`
+- `  FakeFacade.update_content()`
+- `  FakeFacade.get_artist_by_name()`
+- `  FakeFacade.create_artist()`
+- `  FakeFacade.delete_artist()`
+- `  FakeFacade.update_content_artist()`
+- `  FakeFacade.update_tracks_metadata()`
+- `lock()`
+- `test_concurrent_bpm_edit_survives_the_merge()` — The regression this whole write loop exists for.
+- `test_merge_bumps_the_content_usn()`
+- `test_writer_is_update_content_never_update_content_artist()` — ``update_content_artist`` and ``update_tracks_metadata`` are tripwires on the fake.
+- `test_db_lock_is_held_once_per_chunk()`
+- `test_canonical_artist_is_created_once_under_the_lock()`
+- `test_apply_then_revert_restores_the_artist_id()`
+- `test_revert_restores_the_file_tag()`
+- `test_revert_marks_every_mutation_and_is_idempotent()`
+- `test_revert_refuses_a_run_it_did_not_write()` — The undo log is shared with the metadata fixer — its runs must bounce off.
+- `test_revert_of_an_unknown_run_raises()`
+- `test_locked_file_is_skipped_and_reported()` — The DB row is still merged and journalled; the file is reported, never half-written.
+- `test_revert_leaves_a_failed_tag_write_unreverted_and_reports_partial()`
+- `test_verify_bytes_defaults_off_above_the_threshold()`
+- `test_verify_bytes_defaults_on_below_the_threshold()`
+- `test_no_hashing_and_no_file_access_when_tags_are_off()`
+- `test_revert_of_a_tagless_run_touches_no_file()`
+- `test_apply_refuses_to_start_while_rekordbox_runs()`
+- `test_run_aborts_cleanly_when_rekordbox_starts_mid_way()`
+- `test_aborted_run_reverts_only_what_it_wrote()`
+- `test_delete_orphans_is_off_by_default()`
+- `test_delete_orphans_removes_the_emptied_rows_and_journals_them_last()`
+- `test_revert_reinserts_the_artist_first_and_remaps_the_new_id()` — rbox mints a fresh id on insert, so the tracks must follow the NEW id.
+- `test_orphan_deletion_is_skipped_when_a_row_is_still_referenced()` — A variant the merge could not fully empty is reported, never deleted blindly.
+- `test_orphans_are_left_alone_when_the_run_aborted()`
+- `test_journal_captures_the_artist_id_not_only_the_name()` — The name alone cannot restore the entity link — the id is what revert needs.
+- `test_run_note_marks_the_run_as_an_artist_merge()`
+- `test_apply_refuses_a_backend_without_the_artist_writers()`
+- `test_apply_refuses_a_group_with_nothing_to_absorb()`
+- `test_apply_refuses_a_bare_artist_name_where_a_group_id_belongs()`
+- `test_tag_updates_only_ever_carries_the_allowlisted_field()`
+
+### `tests/test_artist_merge_preview.py`
+
+Artist-Hub merge detection + preview tests (T-5 — app/artist_store/merge.py).
+
+- `NoWriteDB` — Read-only proxy: every mutator raises instead of running.
+- `test_fold_key_collapses_typing_variants()`
+- `test_fold_key_keeps_different_artists_apart()`
+- `test_fold_key_is_empty_for_pure_punctuation()`
+- `test_casing_variants_form_one_group()`
+- `test_punctuation_variants_form_one_group()`
+- `test_ampersand_and_word_variants_form_one_group()` — ``&`` / ``and`` folds together.
+- `test_different_artists_do_not_group()`
+- `test_single_spelling_is_not_a_candidate()`
+- `test_groups_are_sorted_by_total_tracks_descending()`
+- `test_group_id_is_stable_across_reloads()`
+- `test_canonical_suggestion_prefers_the_most_owned_variant()`
+- `test_canonical_suggestion_breaks_ties_on_spelling()`
+- `test_canonical_suggestion_falls_back_to_alphabetical()`
+- `merge_library()` — 3 canonical tracks, 2 lower-case (30 bytes on disk), 1 upper-case with no file.
+- `test_preview_counts_match_the_fixture()`
+- `test_preview_reports_the_usb_folders_that_would_merge()`
+- `test_preview_accepts_explicit_names_and_a_canonical_outside_the_library()`
+- `test_preview_defaults_to_the_suggested_canonical()`
+- `test_preview_deduplicates_a_track_credited_to_two_variants()` — One track, two spellings of the same artist in its credit — still one rewrite.
+- `test_preview_measure_files_off_skips_the_filesystem()`
+- `test_preview_falls_back_to_variant_counts_without_a_track_lookup()`
+- `test_preview_rejects_an_unknown_group_id()`
+- `test_preview_rejects_an_empty_group()`
+- `test_preview_rejects_a_bare_artist_name()` — A string is iterable — without the guard this would group single letters.
+- `test_preview_as_dict_is_json_shaped()`
+- `test_preview_writes_nothing()`
+- `test_preview_many_writes_nothing()`
+- `test_preview_leaves_the_library_rows_untouched()`
+
+### `tests/test_artist_merge_routes.py`
+
+Artist-Hub merge + projection route tests (T-8 rest — app/main.py, plan row T13).
+
+- `library()` — Fake facade + no device-token lookup, so no real user file is opened.
+- `tags()` — Tag reads/writes and hashing are faked: no route may need a real audio file.
+- `test_all_mutations_require_session()`
+- `test_all_mutations_reject_wrong_bearer()`
+- `test_rejected_mutation_starts_no_job_and_writes_nothing()`
+- `test_candidates_is_a_read_and_groups_the_variants()`
+- `test_preview_writes_nothing()`
+- `test_preview_rejects_an_empty_group()`
+- `test_preview_needs_a_loaded_library()`
+- `test_projection_status_is_a_read_without_auth()`
+- `test_apply_returns_a_job_id_the_status_endpoint_reports()`
+- `test_unknown_job_id_is_404()`
+- `test_second_apply_while_one_runs_gets_409()` — Single-flight: the in-flight job holds ``_artist_job_lock`` for its whole run.
+- `test_apply_409_when_rekordbox_is_running()`
+- `test_apply_rejects_a_group_with_nothing_to_absorb()`
+- `test_revert_unknown_run_is_404()`
+- `test_revert_refuses_a_metadata_fixer_run()` — The undo log is shared — replaying a fixer run here would restore another field.
+- `test_apply_then_revert_restores_the_artist_link()`
+- `test_runs_lists_merge_runs_only()`
+- `test_projection_sync_returns_a_job_id()`
+- `test_projection_sync_409_when_rekordbox_is_running()`
+- `test_projection_dry_run_is_allowed_while_rekordbox_runs()` — A dry run writes nothing at all, so the process guard does not apply to it.
+- `test_projection_sync_400_without_the_playlist_xml()` — rbox drops the masterPlaylists6.xml update when the file is not beside master.db.
+- `test_second_projection_sync_while_one_runs_gets_409()`
+
+### `tests/test_artist_projection.py`
+
+Artist-Hub projection tests (T-7 — app/artist_store/projection.py).
+
+- `FakeRekordbox` — Mocked facade.
+- `  FakeRekordbox.artists()`
+- `  FakeRekordbox.get_tracks_by_artist()`
+- `  FakeRekordbox.playlist_xml_path()`
+- `  FakeRekordbox.get_playlist_by_id()`
+- `  FakeRekordbox.get_playlist_by_path()`
+- `  FakeRekordbox.get_playlist_children()`
+- `  FakeRekordbox.get_playlist_track_ids()`
+- `  FakeRekordbox.create_folder()`
+- `  FakeRekordbox.create_playlist()`
+- `  FakeRekordbox.add_track_to_playlist()`
+- `  FakeRekordbox.remove_track_from_playlist()`
+- `  FakeRekordbox.drop()` — What the user does inside Rekordbox when they delete a node.
+- `  FakeRekordbox.folders()`
+- `  FakeRekordbox.children_of()`
+- `  FakeRekordbox.reset_calls()`
+- `store()` — Throwaway sidecar DB; never the user's real ``artists.db``.
+- `test_sync_twice_leaves_one_folder_and_n_playlists()`
+- `test_second_sync_adds_no_duplicate_entries()`
+- `test_unchanged_artist_performs_zero_writes()`
+- `test_folder_is_addressed_by_stored_id_not_by_name()` — A name lookup on every run would silently hit a same-named sibling.
+- `test_new_tracks_are_added_to_an_existing_playlist()`
+- `test_stale_tracks_are_removed_not_recreated()`
+- `test_duplicate_rows_from_an_earlier_run_are_healed()`
+- `test_alias_variants_land_in_one_playlist()`
+- `test_deleted_playlist_is_recreated_and_the_new_id_stored()`
+- `test_playlist_recreated_by_hand_is_readopted_not_duplicated()`
+- `test_preexisting_folder_is_adopted_by_name_exactly_once()`
+- `test_deleted_folder_is_readopted_by_name_once_then_tracked_by_id()`
+- `test_renamed_folder_is_kept_by_id_never_duplicated()` — Renaming keeps the row id, so the id-map must follow the rename, not the name.
+- `test_a_playlist_named_artists_at_root_is_not_adopted_as_the_folder()`
+- `test_run_aborts_when_rekordbox_is_running()`
+- `test_rekordbox_opened_mid_run_aborts_before_the_next_write()`
+- `test_rekordbox_is_rechecked_once_per_artist()` — Per artist, not per write — and not skipped either.
+- `test_missing_playlist_xml_refuses_to_run()`
+- `test_facade_without_the_passthrough_refuses_to_run()`
+- `test_dry_run_writes_nothing_and_reports_the_plan()`
+- `test_dry_run_diffs_an_existing_projection_without_writing()`
+- `test_dry_run_is_allowed_while_rekordbox_is_running()`
+- `test_last_projected_at_is_recorded_per_artist()`
+- `test_favourite_without_local_tracks_is_skipped_not_projected()`
+- `test_no_favourites_writes_nothing()`
+- `test_a_failing_artist_does_not_lose_the_rest_of_the_run()`
+- `test_a_failed_diff_still_stores_the_playlist_id()` — Otherwise the next run re-creates a playlist that already exists.
+- `test_status_reports_the_id_map_and_verifies_it()`
+- `test_every_master_db_write_goes_through_the_locked_facade()` — `db.active_db.<mutator>` bypasses `_db_write_lock` — an AST walk, not a habit.
+- `test_status_without_a_library_still_renders()`
+
+### `tests/test_artist_routes.py`
+
+Artist-Hub route tests (T-8 — app/main.py, plan test row T13).
+
+- `test_all_mutations_require_session()`
+- `test_all_mutations_reject_wrong_bearer()`
+- `test_rejected_mutation_writes_nothing()`
+- `test_valid_bearer_is_accepted()`
+- `test_hub_returns_both_keys_without_auth()`
+- `test_hub_backlog_is_track_count_descending()`
+- `test_hub_backlog_honours_limit()`
+- `test_hub_renders_before_the_library_loads()`
+- `test_favourite_by_name_round_trips()`
+- `test_favourite_by_name_is_idempotent()`
+- `test_favourite_by_collection_id()`
+- `test_favourite_unknown_collection_id_is_404()`
+- `test_favourite_without_name_or_id_is_400()`
+- `test_unfavourite_unknown_id_is_a_no_op()`
+- `test_sync_mode_round_trips()`
+- `test_sync_mode_rejects_unknown_mode()`
+- `test_sync_mode_unknown_collection_is_404()`
+- `test_browse_returns_the_contract_shape_without_auth()`
+- `test_browse_lists_every_artist_name_sorted()`
+- `test_browse_keeps_favourites_in_the_list_and_flags_them()`
+- `test_browse_toggle_round_trips_through_the_favourite_routes()`
+- `test_browse_row_id_is_derived_until_a_resolve_pass_registers_it()` — Favourite a browse row by `name`: its `collection_id` need not exist in the store yet.
+- `test_browse_sorts_by_track_count()`
+- `test_browse_unknown_sort_falls_back_instead_of_erroring()`
+- `test_browse_query_filters_before_pagination()` — An artist past the first page must still be findable by search.
+- `test_browse_offset_pages_the_list()`
+- `test_browse_caps_the_limit()`
+- `test_browse_survives_hostile_paging()`
+- `test_browse_degrades_when_the_library_is_not_loaded()`
+
+### `tests/test_artist_splitting.py`
+
+Tests for artist-name splitting and the artist list it feeds.
+
+- `backend()`
+- `TestSplitArtists`
+- `  TestSplitArtists.test_never_yields_an_empty_name()`
+- `  TestSplitArtists.test_falls_back_to_the_raw_part()`
+- `  TestSplitArtists.test_blank_input_yields_nothing()`
+- `  TestSplitArtists.test_ordinary_splitting_is_unchanged()`
+- `  TestSplitArtists.test_separators_do_not_leak_empty_entries()`
+- `test_both_backends_split_identically()` — The implementation is duplicated — pin the two copies to each other.
+- `TestArtistListRoundTrip` — The reported symptom: header said "0 / 13 Tracks" with a blank name.
+- `  TestArtistListRoundTrip.test_every_listed_artist_resolves_to_its_tracks()`
+- `  TestArtistListRoundTrip.test_no_artist_has_a_blank_name()`
+- `  TestArtistListRoundTrip.test_count_matches_occurrences()`
+
+### `tests/test_artist_store_registry.py`
+
+Artist-Hub registry tests (T-4 — app/artist_store/registry.py).
+
+- `store()` — Point the sidecar at a throwaway DB and reset its per-process state.
+- `test_resolve_creates_one_collection_per_artist()`
+- `test_resolve_is_idempotent()`
+- `test_resolve_records_the_raw_library_name_as_an_alias()`
+- `test_resolve_folds_case_variants_onto_one_collection()`
+- `test_resolve_keeps_a_merged_variant_on_its_canonical_collection()`
+- `test_resolve_ids_are_not_the_unstable_ui_ids()`
+- `test_favourites_round_trip()`
+- `test_favourite_rows_report_the_soundcloud_link_and_sync_mode()`
+- `test_favourite_track_count_sums_alias_variants()`
+- `test_favourite_by_name_creates_the_collection_when_unseen()`
+- `test_favourite_by_name_rejects_a_blank_name()`
+- `test_favouriting_an_unknown_collection_raises()`
+- `test_favourites_list_without_a_library_still_renders()`
+- `test_backlog_is_sorted_by_owned_track_count_descending()`
+- `test_backlog_excludes_favourited()`
+- `test_backlog_excludes_a_favourite_reached_through_an_alias()`
+- `test_backlog_needs_no_resolve_pass_first()` — The hub is a read: a never-resolved library still ranks, and nothing is written.
+- `test_backlog_honours_the_limit()`
+- `test_backlog_ties_break_deterministically()`
+- `test_library_artist_counts_keys_on_store_ids()`
+- `test_hub_returns_favourites_and_backlog()`
+- `test_hub_writes_nothing()`
+- `test_empty_library_yields_empty_lists()`
+- `test_library_without_an_artist_list_yields_empty_lists()`
+- `test_hub_without_a_library_still_lists_favourites()`
+- `TestBacklogSearchBeyondTheLimit` — A search that only filters the rows already sent hides everything below `limit`.
+- `  TestBacklogSearchBeyondTheLimit.test_query_filters_before_truncation()`
+- `  TestBacklogSearchBeyondTheLimit.test_total_reports_the_pre_truncation_count()`
+- `  TestBacklogSearchBeyondTheLimit.test_query_is_case_and_whitespace_insensitive()`
+- `  TestBacklogSearchBeyondTheLimit.test_empty_query_is_not_a_filter()`
+- `test_browse_rows_carry_exactly_the_contract_keys()`
+- `test_browse_includes_favourites_and_flags_them()`
+- `test_browse_flags_a_favourite_reached_through_an_alias()`
+- `test_browse_reports_the_soundcloud_link_and_sync_mode()`
+- `test_browse_sorts_by_name_by_default()`
+- `test_browse_name_sort_is_case_insensitive()`
+- `test_browse_sorts_by_track_count_descending()`
+- `test_browse_track_sort_breaks_ties_by_name()`
+- `test_browse_unknown_sort_falls_back_to_name()`
+- `test_browse_total_is_the_pre_pagination_count()`
+- `test_browse_offset_pages_without_gaps_or_repeats()`
+- `test_browse_offset_past_the_end_is_an_empty_page()`
+- `TestBrowseSearchBeyondTheLimit` — The backlog bug class again: filtering only the delivered page hides the tail.
+- `  TestBrowseSearchBeyondTheLimit.test_query_filters_before_pagination()`
+- `  TestBrowseSearchBeyondTheLimit.test_query_matches_a_raw_library_variant()` — A merged variant is searchable by what Rekordbox shows, not just the canonical.
+- `  TestBrowseSearchBeyondTheLimit.test_query_is_case_and_whitespace_insensitive()`
+- `  TestBrowseSearchBeyondTheLimit.test_empty_query_is_not_a_filter()`
+- `test_browse_caps_the_limit()`
+- `test_browse_survives_a_non_positive_limit()`
+- `test_browse_survives_a_negative_offset()`
+- `test_browse_without_a_loaded_library_still_lists_favourites()` — No library is not the same as no favourites — a star must stay un-starrable.
+- `test_browse_without_a_library_or_favourites_is_an_empty_page()`
+- `test_browse_lists_a_favourite_the_library_no_longer_contains()` — Raising artist_view_threshold after favouriting must not orphan the star.
+- `test_browse_writes_nothing()`
+
+### `tests/test_artist_store_schema.py`
+
+Artist-Hub sidecar schema tests (T-3 — app/artist_store/schema.py).
+
+- `store()` — Point the module at a throwaway DB and reset its per-thread/process state.
+- `artist()`
+- `TestDbLocation`
+- `  TestDbLocation.test_db_path_is_under_user_data_dir()`
+- `  TestDbLocation.test_module_does_not_borrow_the_rekordbox_write_lock()`
+- `TestSchemaCreation`
+- `  TestSchemaCreation.test_all_tables_exist()`
+- `  TestSchemaCreation.test_kind_sort_index_exists()`
+- `  TestSchemaCreation.test_init_is_idempotent_and_keeps_data()`
+- `  TestSchemaCreation.test_kind_defaults_to_artist()`
+- `TestMigrationRunner`
+- `  TestMigrationRunner.test_fresh_db_is_stamped_at_current_version()`
+- `  TestMigrationRunner.test_step_walk_bumps_the_version()`
+- `  TestMigrationRunner.test_missing_step_raises_instead_of_skipping()`
+- `  TestMigrationRunner.test_downgrade_is_refused()`
+- `TestCollectionIds`
+- `  TestCollectionIds.test_id_is_derived_and_stable_across_casing_and_spacing()`
+- `  TestCollectionIds.test_id_never_looks_like_the_unstable_ui_id()`
+- `  TestCollectionIds.test_kind_is_part_of_the_id()`
+- `  TestCollectionIds.test_blank_name_is_rejected()`
+- `  TestCollectionIds.test_create_is_idempotent_for_a_recased_name()`
+- `  TestCollectionIds.test_rename_keeps_the_id_and_keeps_the_old_name_resolvable()`
+- `TestAliases`
+- `  TestAliases.test_alias_round_trip()`
+- `  TestAliases.test_several_variants_resolve_to_one_collection()`
+- `  TestAliases.test_unknown_alias_resolves_to_none()`
+- `  TestAliases.test_canonical_alias_is_seeded_on_create()`
+- `TestFavourites`
+- `  TestFavourites.test_favourites_round_trip()`
+- `  TestFavourites.test_favourites_are_ordered_by_sort_key()`
+- `  TestFavourites.test_favourite_requires_an_existing_collection()`
+- `TestLinksSyncProjection`
+- `  TestLinksSyncProjection.test_link_round_trip_and_upsert()`
+- `  TestLinksSyncProjection.test_sync_mode_defaults_to_review()`
+- `  TestLinksSyncProjection.test_sync_mode_round_trip()`
+- `  TestLinksSyncProjection.test_unknown_sync_mode_is_rejected()`
+- `  TestLinksSyncProjection.test_record_sync_keeps_the_mode()`
+- `  TestLinksSyncProjection.test_projection_round_trip()`
+- `  TestLinksSyncProjection.test_catalogue_cache_round_trip_and_ttl()`
+- `  TestLinksSyncProjection.test_deleting_a_collection_cascades()`
+- `TestWriteLocking`
+- `  TestWriteLocking.test_every_writer_holds_the_module_lock()`
+- `  TestWriteLocking.test_reads_do_not_take_the_lock()`
+- `  TestWriteLocking.test_concurrent_writers_do_not_lose_rows()`
+- `  TestWriteLocking.test_a_failed_write_rolls_back_and_frees_the_database()` — A writer that raised must not leave its transaction open on the thread.
+
+### `tests/test_artist_sync.py`
+
+Artist-Hub background sync + idle signal (T-17 — app/artist_store/sync.py).
+
+- `store()`
+- `quiet_app()` — Every observable tracker reports nothing running.
+- `test_idle_true_only_when_every_tracker_is_quiet()`
+- `test_not_idle_while_a_phrase_batch_runs()`
+- `test_not_idle_while_a_soundcloud_download_runs()`
+- `test_not_idle_while_a_local_import_runs()`
+- `test_not_idle_while_the_library_is_loading()`
+- `test_finished_jobs_do_not_block()`
+- `test_unknown_job_status_counts_as_busy()`
+- `test_a_probe_that_raises_counts_as_busy()`
+- `test_a_registered_probe_can_report_busy()`
+- `test_an_abandoned_task_is_ignored_but_reported()`
+- `test_off_artist_is_never_fetched()`
+- `test_review_artist_is_fetched_and_queues_nothing()`
+- `test_auto_artist_also_queues_nothing()`
+- `test_sync_module_never_calls_a_download_or_queue()` — Structural guard: the pass reads the downloader's task dict and nothing else.
+- `test_run_stops_mid_way_when_idle_goes_false()`
+- `test_a_busy_app_runs_nothing_at_all()`
+- `test_one_budget_is_shared_across_the_whole_run()`
+- `test_the_run_stops_when_the_shared_budget_is_spent()`
+- `test_oldest_last_synced_goes_first()`
+- `test_a_freshly_synced_artist_is_left_alone()`
+- `test_record_sync_stamps_success_and_stores_the_error()`
+- `test_a_signed_out_session_ends_the_run()`
+- `test_a_non_ok_state_is_not_counted_as_a_sync()`
+- `test_a_truncated_refresh_is_not_counted_as_a_sync()`
+- `test_a_partially_synced_artist_is_retried_next_pass()`
+- `test_a_partially_synced_artist_sorts_first()`
+- `test_a_ceiling_truncated_refresh_is_a_finished_sync()` — `truncated` is not a budget signal — three of its four causes are permanent.
+- `test_a_chronically_cut_artist_stops_jumping_the_queue()` — The TTL bypass is bounded: one artist the budget never finishes cannot own it.
+- `test_the_partial_marker_names_the_cause_that_was_measured()`
+- `test_a_spent_budget_is_a_measurement_too()` — The payload blames a cap, but this run's own budget ran dry — that is retryable.
+- `test_a_truncation_with_no_recorded_reason_is_named_as_unknown()` — A cache entry written before ``stop_reason`` existed reports truncation, no cause.
+- `test_a_stale_partial_marker_loses_to_a_complete_cached_catalogue()` — A foreground fetch can write the catalogue without recording `sync_state`.
+- `test_a_payload_without_buckets_prints_no_count()`
+- `test_artist_cap_bounds_one_pass()`
+- `test_the_setting_is_opt_in()`
+- `test_the_setting_switches_the_run_on()`
+- `test_a_refresher_without_a_shared_budget_is_refused()`
+- `test_the_run_record_round_trips()`
 
 ### `tests/test_audio_analyzer.py`
 
@@ -2245,6 +3655,41 @@ Cue loading in `app.live_database`.
 - `test_unparsable_mirror_row_does_not_abort_the_rest()`
 - `test_both_sources_failing_is_logged_not_raised()`
 
+### `tests/test_live_playlist_ops.py`
+
+Tests for the live-mode playlist primitives in `app/live_database.py`.
+
+- `live()` — A LiveRekordboxDB whose rbox handle is a mock — __init__ opens nothing.
+- `TestRemoveTrackFromPlaylist`
+- `  TestRemoveTrackFromPlaylist.test_calls_delete_playlist_song_with_one_argument()`
+- `  TestRemoveTrackFromPlaylist.test_never_passes_playlist_and_track()`
+- `  TestRemoveTrackFromPlaylist.test_returns_false_when_track_not_in_playlist()`
+- `  TestRemoveTrackFromPlaylist.test_coerces_ids_to_str_before_comparing()`
+- `  TestRemoveTrackFromPlaylist.test_backend_error_is_contained()`
+- `  TestRemoveTrackFromPlaylist.test_reorder_round_trips_through_the_fixed_primitive()`
+- `TestPlaylistNode`
+- `  TestPlaylistNode.test_exposes_uuid()`
+- `  TestPlaylistNode.test_missing_uuid_is_none_not_an_error()`
+- `  TestPlaylistNode.test_attribute_maps_to_frontend_type()`
+- `  TestPlaylistNode.test_enum_like_attribute_is_coerced()`
+- `  TestPlaylistNode.test_root_parent_is_normalised()`
+- `TestPlaylistLookups`
+- `  TestPlaylistLookups.test_get_playlist_children_delegates_and_normalises_root()`
+- `  TestPlaylistLookups.test_get_playlist_by_path_returns_node()`
+- `  TestPlaylistLookups.test_get_playlist_by_path_missing_is_none()`
+- `  TestPlaylistLookups.test_lookup_errors_are_contained()`
+- `TestFacade` — `_serialised` is a decorator, not a registry — probe the wrapper instead.
+- `  TestFacade.test_removal_stays_serialised()`
+- `  TestFacade.test_lookup_passthroughs_exist()`
+- `  TestFacade.test_lookups_are_reads_not_serialised()`
+- `  TestFacade.test_facade_delegates_to_the_backend()`
+- `  TestFacade.test_facade_falls_back_to_cache_without_backend_support()`
+- `  TestFacade.test_facade_signatures_match_the_live_backend()`
+- `TestCreatePlaylistCaching`
+- `  TestCreatePlaylistCaching.test_folder_type_comes_from_the_returned_row()`
+- `  TestCreatePlaylistCaching.test_caller_intent_wins_when_rbox_omits_the_attribute()`
+- `  TestCreatePlaylistCaching.test_root_parent_is_passed_to_rbox_as_none()`
+
 ### `tests/test_logging_redaction.py`
 
 Unit tests for `app.logging_utils.RedactingFormatter`.
@@ -2292,6 +3737,15 @@ metadata-fixer apply/revert tests (T5 — app/metadata_fixer/applier.py).
 - `test_apply_revert_file_sha1_round_trip()`
 - `test_write_tags_disabled_skips_tag_mirror()`
 - `test_apply_skips_failed_db_write()`
+- `EntityDB` — FakeDB that can also resurrect a journalled entity row (artist-merge undo).
+- `  EntityDB.restore_entity()`
+- `test_skips_sha1_when_not_writing_tags()`
+- `test_hashes_twice_when_writing_tags()`
+- `test_revert_reinserts_deleted_entity()`
+- `test_revert_reinserts_entity_from_after_json()`
+- `test_entity_revert_without_support_is_not_complete()`
+- `test_partial_revert_is_not_reported_complete()`
+- `test_pre_v2_row_still_reverts()` — A run journalled by the shipped v1 name-fixer reverts after the migration.
 
 ### `tests/test_metadata_fixer_detector.py`
 
@@ -2320,6 +3774,33 @@ metadata-fixer undo-log schema tests (T4 — app/metadata_fixer/schema.py).
 - `test_mark_mutation_reverted_idempotent()`
 - `test_set_run_status_and_list_newest_first()`
 - `test_get_run_unknown_returns_none()`
+- `write_v1_db()` — Create a pre-versioning log DB holding one journalled fix.
+- `legacy_db()` — A v1 DB with a journalled row, pointed at but NOT yet migrated.
+- `test_entity_kind_migration()`
+- `test_migration_makes_rule_id_nullable()`
+- `test_entity_mutation_round_trip()`
+- `test_content_row_defaults_to_content_kind()`
+- `test_migrate_leaves_newer_schema_alone()`
+
+### `tests/test_musicbrainz_client.py`
+
+MusicBrainz client tests (T-22, Threat T14 — app/musicbrainz_client.py).
+
+- `clock()` — A fake monotonic clock; ``time.sleep`` advances it instead of waiting.
+- `test_every_request_carries_the_named_user_agent()`
+- `test_requests_are_spaced_at_least_the_minimum_interval()`
+- `test_a_503_is_retried_once_honouring_retry_after()`
+- `test_retry_after_is_capped()`
+- `test_a_second_503_raises_unavailable()`
+- `test_network_error_raises_unavailable()`
+- `test_404_is_nothing_there()`
+- `test_non_json_is_an_error()`
+- `test_a_malformed_mbid_never_reaches_a_request()`
+- `test_a_non_web_resource_never_reaches_a_request()`
+- `test_artists_for_url_keeps_only_artist_relations()`
+- `test_artist_with_urls_returns_relations()`
+- `test_search_escapes_lucene_syntax_and_sorts_by_score()`
+- `test_blank_search_costs_nothing()`
 
 ### `tests/test_onelibrary_wal_flush.py`
 
@@ -2415,6 +3896,45 @@ Tests for the phrase-batch backend (app/main.py):
 - `test_status_returns_job()`
 - `test_cancel_unknown_404()`
 - `test_cancel_sets_flag()`
+
+### `tests/test_phrase_db_writer.py`
+
+Unit tests for app/phrase_db_writer.py (djmdCue memory-cue writer).
+
+- `test_write_creates_kind0_memory_cues()`
+- `test_copy_is_opened_without_sqlcipher_unlock()` — A decrypted copy must not go through pyrekordbox's unlock branch.
+- `test_live_path_opens_the_caller_db_path()` — Not pyrekordbox's auto-detected DB — the backup must match the target.
+- `test_generated_ids_are_unique_strings_not_in_use()`
+- `test_generated_ids_are_deduped_against_each_other()` — A newer pyrekordbox's `generate_unused_id` only knows what is in the DB.
+- `test_prefetched_used_ids_skip_the_per_call_id_query()` — Batch callers pay the `SELECT ID` once; the shared set keeps IDs disjoint.
+- `test_write_idempotent_removes_only_prior_phrase_cues()`
+- `test_locked_db_raises_rekordbox_locked()`
+- `test_non_lock_exception_propagates_unchanged()` — The broad `except Exception` must not widen into RekordboxLockedError.
+- `test_missing_content_raises_before_deleting()`
+- `test_content_without_uuid_raises()`
+- `test_no_backup_is_written_for_a_rejected_content_id()`
+- `test_backup_snapshots_the_copy_that_is_written_not_the_live_db()` — `db_file` is the file that gets mutated — snapshotting master.db protects nothing.
+- `test_rollback_hint_points_at_the_written_file()` — Following the logged hint must not restore (and wipe the -wal of) the live DB.
+- `test_fake_db_only_exposes_real_pyrekordbox_methods()` — Pins the fake to the pinned dependency, so it cannot invent an API.
+- `test_module_only_uses_attributes_the_pinned_class_has()` — `db.<attr>` in the module must exist on Rekordbox6Database 0.1.7.
+- `test_cue_row_satisfies_real_schema()` — The writer's exact kwargs must survive a real INSERT (NOT NULL columns).
+- `test_backup_master_db()`
+- `test_backup_skips_shm()` — -shm is a rebuildable wal-index; a stale copy has no value.
+- `test_backup_stamps_do_not_collide()` — Two snapshots inside one second must not overwrite each other.
+- `test_backup_keeps_both_sets_when_the_clock_does_not_tick()` — `datetime.now()` steps ~16 ms on Windows/py3.11 — two snapshots fit in one tick.
+- `test_restore_restores_the_newest_set()`
+- `test_restore_never_mixes_generations()` — A db from T2 beside a -wal from T1 = silent page-level corruption.
+- `test_restore_removes_orphan_sidecars()`
+- `test_restore_accepts_an_explicit_set()`
+- `test_restore_rejects_a_path_without_the_backup_marker()` — Declared in the docstring's Raises block — an unmarked path is not a snapshot.
+- `test_restore_refuses_a_set_without_the_main_db()`
+- `test_restore_returns_zero_when_no_backups()`
+- `test_restore_refuses_while_rekordbox_runs()`
+- `TestMasterDbWriteLock` — Snapshot and restore are master.db writers — they hold the global lock.
+- `  TestMasterDbWriteLock.test_db_lock_is_the_global_write_lock()`
+- `  TestMasterDbWriteLock.test_snapshot_is_taken_under_the_lock()` — Outside it, another writer can commit between copy and write.
+- `  TestMasterDbWriteLock.test_restore_mutations_are_under_the_lock()`
+- `test_pyrekordbox_is_imported_quietly()` — A bare import drops the root logger to NOTSET — see pyrekordbox_compat.
 
 ### `tests/test_playcount_sync.py`
 
@@ -2593,6 +4113,14 @@ Tests for `app/services.py`.
 - `  TestSettingsAtomicSave.test_save_writes_complete_json()`
 - `  TestSettingsAtomicSave.test_save_leaves_no_tmp_files()`
 - `  TestSettingsAtomicSave.test_save_overwrites_existing_file()`
+- `TestSmartPlaylistsRetiredArtistBranch` — The raw-string "By Artist" generator is gone; "By Label" is untouched.
+- `  TestSmartPlaylistsRetiredArtistBranch.test_no_by_artist_folder_is_created()`
+- `  TestSmartPlaylistsRetiredArtistBranch.test_by_label_still_generated()`
+- `  TestSmartPlaylistsRetiredArtistBranch.test_label_threshold_still_filters()`
+- `  TestSmartPlaylistsRetiredArtistBranch.test_report_points_at_the_artist_hub()`
+- `  TestSmartPlaylistsRetiredArtistBranch.test_existing_by_artist_folder_is_reported_never_deleted()` — A user who already ran the old generator keeps their playlists.
+- `  TestSmartPlaylistsRetiredArtistBranch.test_no_legacy_folder_reports_none()`
+- `  TestSmartPlaylistsRetiredArtistBranch.test_unreachable_auto_folder_reports_not_ok()`
 
 ### `tests/test_settings_caps.py`
 
@@ -2671,16 +4199,147 @@ Tests for `app/soundcloud_api.py`.
 - `  TestFuzzyMatch.test_picks_highest_score_among_candidates()` — When several candidates pass the threshold, the best wins.
 - `  TestFuzzyMatch.test_match_with_score_returns_tuple()` — The underlying API used by the preview endpoint returns (id, score).
 
+### `tests/test_soundcloud_artist_api.py`
+
+Artist-Hub SoundCloud client tests (T-12 + T-13 — app/soundcloud_api.py).
+
+- `sleeps()` — Capture backoff/spacing waits instead of serving them.
+- `http()` — Install a scripted recorder in place of requests.get.
+- `TestPagination`
+- `  TestPagination.test_follows_next_href_and_stops_without_one()`
+- `  TestPagination.test_bare_list_response_is_a_single_page()`
+- `  TestPagination.test_max_items_truncates_and_reports_it()`
+- `  TestPagination.test_exact_max_items_without_next_page_is_not_truncated()`
+- `  TestPagination.test_offset_is_never_sent()`
+- `TestCallBudget`
+- `  TestCallBudget.test_budget_stops_the_walk_and_reports_truncation()`
+- `  TestCallBudget.test_budget_is_shared_across_calls_in_one_run()`
+- `  TestCallBudget.test_unbudgeted_walk_still_stops_at_the_page_cap()` — A self-referential next_href must not spin the sidecar forever.
+- `  TestCallBudget.test_exhausted_budget_blocks_resolve_before_any_request()`
+- `TestNotFoundVsAuth`
+- `  TestNotFoundVsAuth.test_artist_tracks_404_raises_not_found()`
+- `  TestNotFoundVsAuth.test_not_found_is_not_an_auth_error()`
+- `  TestNotFoundVsAuth.test_me_404_still_raises_auth_expired()`
+- `  TestNotFoundVsAuth.test_artist_401_still_raises_auth_expired()`
+- `  TestNotFoundVsAuth.test_related_404_degrades_to_empty_not_an_error()`
+- `  TestNotFoundVsAuth.test_resolve_404_returns_none()`
+- `TestRateLimitBackoff`
+- `  TestRateLimitBackoff.test_reset_time_is_honoured_when_retry_after_is_missing()`
+- `  TestRateLimitBackoff.test_iso_reset_time_is_parsed()`
+- `  TestRateLimitBackoff.test_plain_delta_reset_time_is_parsed()`
+- `  TestRateLimitBackoff.test_unparseable_reset_time_is_ignored()`
+- `  TestRateLimitBackoff.test_retry_after_header_wins_when_present()`
+- `  TestRateLimitBackoff.test_backoff_is_clamped()`
+- `TestRequestShape`
+- `  TestRequestShape.test_user_tracks_request()`
+- `  TestRequestShape.test_numeric_id_is_converted_to_a_urn()`
+- `  TestRequestShape.test_reposts_is_a_separate_path_and_still_gates_on_access()`
+- `  TestRequestShape.test_likes_use_the_replacement_endpoint_not_favorites()`
+- `  TestRequestShape.test_missing_token_raises_a_typed_auth_error_before_any_request()`
+- `TestNormalisedContract`
+- `  TestNormalisedContract.test_exactly_the_contract_keys()`
+- `  TestNormalisedContract.test_field_values_and_types()`
+- `  TestNormalisedContract.test_uploader_urn_survives_a_urn_shaped_payload()`
+- `  TestNormalisedContract.test_missing_fields_become_empty_never_guessed()`
+- `  TestNormalisedContract.test_isrc_and_label_name_are_part_of_the_contract()` — Name-based identification (2026-09-08) needs both — a label upload of the
+- `  TestNormalisedContract.test_null_isrc_becomes_empty_string()`
+- `  TestNormalisedContract.test_dead_and_malformed_entries_are_dropped()`
+- `  TestNormalisedContract.test_repost_envelopes_are_unwrapped()`
+- `TestRelatedAndResolve`
+- `  TestRelatedAndResolve.test_related_returns_the_ranking_fields_inline()`
+- `  TestRelatedAndResolve.test_related_empty_collection_is_not_an_error()`
+- `  TestRelatedAndResolve.test_resolve_user_maps_the_account()`
+- `  TestRelatedAndResolve.test_resolve_user_accepts_a_bare_permalink()`
+- `  TestRelatedAndResolve.test_resolve_user_rejects_a_non_soundcloud_host_without_calling_out()`
+- `  TestRelatedAndResolve.test_resolve_user_returns_none_for_a_track_url()`
+- `TestTrackSearch`
+- `  TestTrackSearch.test_search_request_shape()`
+- `  TestTrackSearch.test_search_pages_follow_next_href()`
+- `  TestTrackSearch.test_search_returns_the_normalised_contract()`
+- `  TestTrackSearch.test_search_budget_truncates_and_reports()`
+- `  TestTrackSearch.test_search_max_items_truncates_and_reports()`
+- `  TestTrackSearch.test_blank_query_makes_zero_calls()`
+- `  TestTrackSearch.test_search_404_raises_not_found_not_auth_expired()`
+- `  TestTrackSearch.test_search_401_still_raises_auth_expired()`
+- `  TestTrackSearch.test_search_without_token_raises_before_any_request()`
+- `  TestTrackSearch.test_search_many_dedups_by_sc_id_and_keeps_first_seen_order()`
+- `  TestTrackSearch.test_search_many_first_sighting_wins()`
+- `  TestTrackSearch.test_search_many_drops_blank_and_case_duplicate_queries()`
+- `  TestTrackSearch.test_search_many_reports_calls_across_the_batch()`
+- `  TestTrackSearch.test_search_many_stops_when_the_budget_is_exhausted_and_says_so()`
+- `  TestTrackSearch.test_search_many_budget_exhausted_mid_walk_skips_the_rest()`
+- `  TestTrackSearch.test_search_many_max_items_per_query_is_passed_through()`
+- `  TestTrackSearch.test_search_many_propagates_a_404_instead_of_swallowing_it()`
+- `  TestTrackSearch.test_search_never_logs_the_token()`
+- `  TestTrackSearch.test_search_token_is_not_logged_on_the_auth_failure_path()`
+- `TestTokenIsNeverLogged`
+- `  TestTokenIsNeverLogged.test_no_log_record_contains_the_token()`
+- `  TestTokenIsNeverLogged.test_token_is_not_logged_on_the_auth_failure_path()`
+- `TestNoTokenKeyedCache`
+- `  TestNoTokenKeyedCache.test_repeated_fetches_hit_the_api_again()`
+- `  TestNoTokenKeyedCache.test_playlist_fetches_are_no_longer_lru_cached()`
+- `  TestNoTokenKeyedCache.test_cache_clear_shim_survives_for_main_py()`
+
+### `tests/test_soundcloud_auth.py`
+
+Tests for `app/soundcloud_auth.py` — token store + silent refresh.
+
+- `FakeKeyring` — Dict-backed keyring that records every write and can refuse long values.
+- `  FakeKeyring.get_password()`
+- `  FakeKeyring.set_password()`
+- `  FakeKeyring.delete_password()`
+- `FakeResponse`
+- `  FakeResponse.json()`
+- `PostRecorder` — Scripted `requests.post`: returns responses in order, records every call.
+- `clock()`
+- `kr()`
+- `post()`
+- `test_store_writes_one_blob_and_mirrors_legacy()`
+- `test_store_without_expires_in_assumes_documented_hour()`
+- `test_store_rejects_empty_access_token()`
+- `test_blob_too_large_for_backend_keeps_session_in_legacy_key()` — Windows Credential Manager caps one entry at 1280 UTF-16 chars and keyring
+- `test_clear_removes_both_keys_and_tolerates_missing()`
+- `test_constants_match_main_keyring_names()`
+- `test_get_returns_without_refresh_when_ttl_ample()`
+- `test_get_refreshes_inside_min_ttl()`
+- `test_refresh_writes_blob_before_mirroring_legacy()`
+- `test_refresh_keeps_old_refresh_token_when_response_omits_it()`
+- `test_get_returns_none_when_nothing_stored()`
+- `test_ten_concurrent_callers_trigger_exactly_one_refresh()`
+- `test_refresh_with_stale_token_skips_post_when_already_rotated()`
+- `test_refresh_with_stale_token_posts_even_when_clock_says_fresh()` — A server 401 outranks the local clock.
+- `test_rejected_refresh_clears_both_keys_and_raises()`
+- `test_refresh_without_refresh_token_raises_auth_expired_without_clearing_legacy()`
+- `test_network_error_keeps_blob_and_raises_transient()`
+- `test_transient_failure_inside_margin_serves_stale_token()`
+- `test_server_side_problems_are_transient()`
+- `test_missing_client_secret_is_transient_not_logout()`
+- `test_legacy_only_state_still_yields_token()`
+- `test_corrupt_blob_falls_back_to_legacy()`
+- `test_blob_without_access_token_is_treated_as_absent()`
+- `test_blob_without_refresh_token_is_served_unrefreshed_after_expiry()`
+- `test_token_status_reports_expiry_without_material()`
+- `test_with_fresh_token_retries_once_after_server_401()`
+- `test_with_fresh_token_does_not_loop_on_second_401()`
+- `test_with_fresh_token_raises_when_not_connected()`
+- `test_with_fresh_token_concurrent_401s_share_one_refresh()`
+- `test_no_secret_reaches_the_log_at_debug()`
+- `test_repr_of_token_set_hides_secrets()`
+- `test_exception_messages_carry_no_secrets()`
+
 ### `tests/test_soundcloud_auth_status.py`
 
 Tests for GET /api/soundcloud/auth-status.
 
-- `patched_keyring()` — Swap out the module-level keyring with one we control per test.
-- `test_authenticated_true_when_token_present()`
-- `test_authenticated_false_when_token_absent()`
-- `test_authenticated_false_when_token_empty_string()` — Empty-string token is treated as absent — bool('') is False.
-- `test_degrades_when_keyring_raises()` — A broken keyring backend (locked session, missing libsecret) must
-- `test_response_never_contains_token_material()` — Belt-and-suspenders: the response payload must never leak the
+- `patched_keyring()` — Install a controllable keyring on `soundcloud_auth` — the module the route reads.
+- `test_reports_a_renewable_oauth_session()`
+- `test_legacy_token_is_authenticated_but_not_refreshable()` — A login stored before the refresh work shipped must not log the user out —
+- `test_authenticated_false_when_nothing_stored()`
+- `test_authenticated_false_when_token_empty_string()` — Empty-string legacy token is treated as absent.
+- `test_corrupt_blob_reads_as_signed_out()` — Half-written or garbage blob → signed out, never a half-trusted session.
+- `test_degrades_when_keyring_raises()` — A broken keyring backend (locked session, missing libsecret) must return
+- `test_route_survives_a_raising_token_status()` — Belt-and-braces: even if the store itself throws, the route answers 200.
+- `test_response_never_contains_token_material()` — Belt-and-suspenders: the payload must never leak a stored secret.
 
 ### `tests/test_soundcloud_downloader_security.py`
 
@@ -2701,6 +4360,36 @@ Security regression tests for app/soundcloud_downloader.
 - `TestSizeLimits` — The byte-budget constant must stay sane — too small breaks WAV/FLAC,
 - `  TestSizeLimits.test_budget_is_at_least_500_mib()`
 - `  TestSizeLimits.test_budget_is_at_most_4_gib()`
+
+### `tests/test_soundcloud_log_redaction.py`
+
+Regression guard: no SoundCloud log record may carry a `client_id`.
+
+- `test_non_json_200_does_not_log_client_id()`
+- `test_502_does_not_log_client_id_and_raises_sanitized_http_error()`
+- `test_network_error_does_not_log_client_id()`
+- `test_404_does_not_log_client_id()`
+- `test_log_params_redacts_credential_keys_only()`
+- `test_scrub_secrets_strips_query_credentials()`
+
+### `tests/test_soundcloud_refresh_route.py`
+
+Route tests for the persistent SoundCloud login (T-19).
+
+- `test_refresh_requires_a_session_token()` — Unauthenticated callers are refused before any keyring read happens.
+- `test_refresh_ok_returns_status_only()`
+- `test_refresh_maps_auth_expired_to_401()`
+- `test_refresh_maps_transient_failure_to_503()` — A network fault must not read as "signed out" — the stored login is intact.
+- `test_refresh_without_stored_tokens_is_401()` — Nothing stored → `refresh` raises AuthExpiredError; the UI must offer a login.
+- `test_refresh_is_rate_limited()` — Same bucket as auth-token: burst 10, then 429.
+- `test_auth_token_stores_the_full_triple()`
+- `test_auth_token_without_refresh_half_reports_unrefreshable()` — An old frontend posts one field.
+- `test_auth_token_empty_clears_every_credential()`
+- `test_auth_token_rejects_an_out_of_range_lifetime()`
+- `test_auth_token_requires_a_session_token()`
+- `test_auth_status_reports_remaining_lifetime()`
+- `test_auth_status_clamps_a_negative_lifetime()` — An already-expired token reports 0 s left, never a negative number.
+- `test_auth_status_legacy_session_has_no_known_lifetime()` — A pre-refresh login carries no expiry — `null`, never a made-up number.
 
 ### `tests/test_stream_unicode_filename.py`
 
@@ -2811,6 +4500,75 @@ Tests for app/usb_mysettings.py — Pioneer MYSETTING file schema + I/O.
 - `test_io_degrades_without_pyrekordbox()`
 - `test_enum_options_empty_without_pyrekordbox()`
 
+### `tests/test_usb_relocate.py`
+
+Tests for the USB relocation pass (`app/usb_one_library.py`).
+
+- `stick()` — `<tmp>/usb` with an existing (empty) Contents tree.
+- `no_copies()` — Fail the test the moment anything tries to copy bytes.
+- `TestPureRename`
+- `  TestPureRename.test_pure_rename_copies_zero_bytes()`
+- `  TestPureRename.test_emptied_variant_folder_is_pruned()`
+- `  TestPureRename.test_non_empty_variant_folder_survives()`
+- `  TestPureRename.test_several_variant_folders_merge_into_one()` — The headline case: `boys noize` + `BN` + `Boys Noize` -> one folder.
+- `  TestPureRename.test_already_in_place_is_left_alone()`
+- `  TestPureRename.test_nothing_on_the_stick_is_left_to_the_copy_phase()`
+- `  TestPureRename.test_missing_local_source_is_skipped()`
+- `  TestPureRename.test_a_different_size_is_never_a_candidate()` — Same filename, different bytes = a different track.
+- `  TestPureRename.test_never_steals_another_tracks_planned_destination()` — Two tracks, one filename: B already sits at its own destination.
+- `  TestPureRename.test_destination_outside_contents_is_refused()`
+- `TestCaseOnlyRename`
+- `  TestCaseOnlyRename.case_insensitive_volume()` — Make a DIRECT case-only rename fail the way Windows/exFAT does.
+- `  TestCaseOnlyRename.test_case_only_rename_two_step()`
+- `  TestCaseOnlyRename.test_case_only_rename_leaves_no_temp_directory()`
+- `  TestCaseOnlyRename.test_case_only_filename_rename()`
+- `  TestCaseOnlyRename.test_exact_name_wins_over_a_case_variant()` — On a case-sensitive volume both folders can exist.
+- `  TestCaseOnlyRename.test_a_case_variant_another_track_plans_is_never_taken()` — Two tracks whose destinations differ only by case: neither may steal the file.
+- `TestCollision`
+- `  TestCollision.test_collision_never_clobbers()`
+- `  TestCollision.test_identical_duplicate_is_removed_not_moved()`
+- `TestCrossVolume`
+- `  TestCrossVolume.test_cross_volume_falls_back_to_copy_and_verify()`
+- `  TestCrossVolume.test_exdev_from_os_replace_also_falls_back()` — `_same_volume` says yes but the kernel disagrees — still no half-move.
+- `  TestCrossVolume.test_source_survives_a_failed_verification()` — A truncated copy must cost the copy, never the only good file.
+- `  TestCrossVolume.test_a_failure_does_not_abort_the_other_tracks()`
+- `TestGuards`
+- `  TestGuards.test_missing_contents_dir_is_a_no_op()`
+- `  TestGuards.test_empty_plan_is_a_no_op()`
+- `  TestGuards.test_part_files_are_never_candidates()`
+- `  TestGuards.test_details_are_capped()`
+- `TestCaseSensitiveVolumeLookup` — `_existing_ci` on a case-sensitive volume, simulated through its listing.
+- `  TestCaseSensitiveVolumeLookup.test_exact_segment_never_crosses_into_the_variant()`
+- `  TestCaseSensitiveVolumeLookup.test_lone_variant_is_found()`
+- `  TestCaseSensitiveVolumeLookup.test_two_variants_and_no_exact_is_refused()`
+- `TestPlannedDest` — The relocation pass and the copy phase must agree on the destination.
+- `  TestPlannedDest.test_resolver_wins_over_the_fallback()`
+- `  TestPlannedDest.test_fallback_uses_the_pioneer_layout()`
+- `TestLegacySyncWiring`
+- `  TestLegacySyncWiring.test_relocate_before_copy_reports_a_move()`
+- `  TestLegacySyncWiring.test_relocate_before_copy_is_silent_when_nothing_moves()`
+- `  TestLegacySyncWiring.test_streaming_pseudo_path_rule()`
+- `  TestLegacySyncWiring.test_streaming_pseudo_paths_are_ignored()`
+- `TestContentIsProvenBeforeMovingOrDeleting` — Name + byte count is not proof of "the same recording".
+- `  TestContentIsProvenBeforeMovingOrDeleting.test_a_stranger_with_the_same_name_and_size_is_not_moved()`
+- `  TestContentIsProvenBeforeMovingOrDeleting.test_the_real_file_still_moves()` — The guard must not break the case it exists to protect.
+- `  TestContentIsProvenBeforeMovingOrDeleting.test_a_same_size_collision_with_different_bytes_deletes_nothing()`
+- `  TestContentIsProvenBeforeMovingOrDeleting.test_a_genuine_duplicate_is_still_removed()` — Identical bytes: removing the stale copy is the point of the branch.
+- `  TestContentIsProvenBeforeMovingOrDeleting.test_a_shared_head_is_not_proof_for_a_small_file()` — 64 KiB < size <= 128 KiB used to hash the head only — an oversized ID3
+- `  TestContentIsProvenBeforeMovingOrDeleting.test_a_shared_head_collision_deletes_nothing()`
+- `  TestContentIsProvenBeforeMovingOrDeleting.test_a_stranger_does_not_veto_the_real_candidate()` — A same-name, same-size stranger sorting first is skipped over, not a veto.
+- `run_sync()` — Drive the REAL `sync()` against a fake rbox.
+- `TestOneLibrarySyncStage1b` — Stage 1b must run before the copy loop and agree with it on the destination.
+- `  TestOneLibrarySyncStage1b.test_a_pure_rename_copies_zero_bytes_through_sync()`
+- `  TestOneLibrarySyncStage1b.test_skipped_when_audio_copy_false()`
+- `  TestOneLibrarySyncStage1b.test_playlist_filter_bounds_stage_1b()` — Stage 1b runs AFTER the playlist filter — a track the user did not select
+- `  TestOneLibrarySyncStage1b.test_slot_count_bounds_stage_1b()` — Past the template's slot count a track gets no row, so moving its stick
+- `  TestOneLibrarySyncStage1b.test_stage_1b_honours_the_dest_resolver()` — Production always passes a resolver, so both stages must route through it
+- `TestUnreadableLocalPath` — One local file the user lost read access to must cost that one track.
+- `  TestUnreadableLocalPath.test_one_unreadable_file_does_not_cost_the_export()`
+- `TestSlotPruning` — Stage 3 deletes the placeholder slots nothing was written into.
+- `  TestSlotPruning.test_a_failed_slot_does_not_delete_a_populated_row()`
+
 ### `tests/test_variant_detector.py`
 
 variant_schema + variant_detector tests (analysis-remix-detector T-2, T-3).
@@ -2883,6 +4641,12 @@ Probe rbox's artist/playlist write semantics against a COPY of a master.db.
 
 - `main()`
 
+### `scripts/dev/rescan_unreadable.py`
+
+Re-scan only the rows marked unreadable in an audio_report.json.
+
+- `main()`
+
 ### `scripts/dev/safe_format_swap.py`
 
 safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist.
@@ -2896,6 +4660,16 @@ safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist.
 - `convert_m4a_to_aiff()` — ffmpeg src -> dst.
 - `execute()`
 - `rollback()`
+- `main()`
+
+### `scripts/dev/scan_audio_quality.py`
+
+Scan an audio library with ffprobe, aggregate codec/bitrate/sample-rate.
+
+- `default_workers()` — ffprobe is seek-bound, not CPU-bound; >8 thrashes an external USB/HDD.
+- `require_ffprobe()` — Fail before spawning one process per track - see CLAUDE.md, External deps.
+- `probe()`
+- `classify()` — Bucket per club-readiness tier.
 - `main()`
 
 ### `scripts/pipeline_dashboard.py`

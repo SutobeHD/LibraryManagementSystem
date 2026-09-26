@@ -1,0 +1,626 @@
+"""artist_store.registry — library artists into the store, favourites, Tier-1 backlog (T-4).
+
+Bridges the library's per-track artist strings to the sidecar's stable collection ids.
+The UI's ``art_{i}`` ids are positions in a list that is rebuilt on every library load
+(``app/live_database.py:_finalize_ui_metadata``), so nothing here keys on them: the
+bridge is the NAME, folded into ``schema.collection_id_for``.
+
+Splitting and normalising are NOT redone here. ``_split_artists`` /
+``_normalize_artist_name`` already ran at library load and their output *is*
+``db.artists`` — one row per distinct artist with its owned track count and artwork.
+This module consumes that list; a second normaliser would drift from the first.
+
+Only ``resolve_library_artists`` and the favourite mutators write. ``hub`` / ``backlog``
+/ ``browse`` / ``list_favourite_artists`` are pure reads so ``GET /api/artists/hub`` and
+``GET /api/artists/browse`` stay reads, and the Tier-1 backlog makes zero network calls —
+the counts are already in memory.
+"""
+
+from __future__ import annotations
+
+import logging
+from difflib import SequenceMatcher
+from typing import Any, NamedTuple
+
+from app.artist_store import schema
+from app.artist_store.schema import KIND_ARTIST
+
+logger = logging.getLogger("ARTIST_STORE")
+
+PROVIDER_SOUNDCLOUD = "soundcloud"
+
+#: ``source`` stamped on alias rows minted from a library scan.
+ALIAS_SOURCE_LIBRARY = "library"
+
+DEFAULT_BACKLOG_LIMIT = 25
+
+DEFAULT_BROWSE_LIMIT = 100
+
+#: Hard ceiling on one browse page. The library has thousands of artists and the view
+#: is not virtualised, so one request must not be able to ask for all of them.
+MAX_BROWSE_LIMIT = 500
+
+SORT_NAME = "name"
+SORT_TRACKS = "tracks"
+BROWSE_SORTS = (SORT_NAME, SORT_TRACKS)
+
+
+class _StoreIndex(NamedTuple):
+    """One-pass snapshot of the store, so a whole-library scan stays O(collections).
+
+    ``schema.resolve_alias`` falls back to a full alias scan on a miss; calling it once
+    per library artist is O(names x aliases). This is read once and reused instead.
+    """
+
+    collections: dict[str, dict[str, Any]]
+    by_alias: dict[str, str]
+    by_fold: dict[str, str]
+
+
+def _store_index(kind: str) -> _StoreIndex:
+    collections: dict[str, dict[str, Any]] = {}
+    by_alias: dict[str, str] = {}
+    by_fold: dict[str, str] = {}
+    for collection in schema.list_collections(kind):
+        cid = str(collection["id"])
+        collections[cid] = collection
+        for alias_row in schema.list_aliases(cid):
+            alias = str(alias_row["alias"]).strip()
+            if not alias:
+                continue
+            by_alias.setdefault(alias, cid)
+            by_fold.setdefault(schema.collection_id_for(alias, kind), cid)
+    return _StoreIndex(collections, by_alias, by_fold)
+
+
+def _resolve_id(name: str, kind: str, store: _StoreIndex) -> str:
+    """Collection a raw library name belongs to. Never writes; derives the id on a miss."""
+    known = store.by_alias.get(name)
+    if known is not None:
+        return known
+    own = schema.collection_id_for(name, kind)
+    return store.by_fold.get(own, own)
+
+
+def _library_artists(db: Any) -> list[dict[str, Any]]:
+    """``db.artists`` as ``{name, track_count, artwork}``, hostile input tolerated.
+
+    Accepts ``LiveRekordboxDB``, ``RekordboxXMLDB`` and the ``RekordboxDB`` facade —
+    all three expose the same list. The XML backend omits ``Artwork``.
+    """
+    rows = getattr(db, "artists", None)
+    if not rows and hasattr(db, "get_all_artists"):
+        try:
+            rows = db.get_all_artists()
+        except (AttributeError, TypeError) as e:
+            logger.warning("artist registry: get_all_artists failed err=%s", e)
+            rows = None
+    out: list[dict[str, Any]] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or "").strip()
+        if not name:
+            continue
+        try:
+            count = int(row.get("track_count") or 0)
+        except (TypeError, ValueError):
+            count = 0
+        out.append({"name": name, "track_count": count, "artwork": row.get("Artwork") or ""})
+    return out
+
+
+def _local_rows(db: Any, kind: str, store: _StoreIndex) -> dict[str, dict[str, Any]]:
+    """``collection_id`` -> owned-track summary, alias variants folded together.
+
+    Several raw library strings can share one collection (a merge, or plain re-casing),
+    so counts are summed. Display name and artwork come from the store's canonical name
+    when it has one, else from the busiest variant.
+    """
+    rows: dict[str, dict[str, Any]] = {}
+    ordered = sorted(_library_artists(db), key=lambda r: (-r["track_count"], r["name"]))
+    for entry in ordered:
+        cid = _resolve_id(entry["name"], kind, store)
+        existing = rows.get(cid)
+        if existing is not None:
+            existing["track_count"] += entry["track_count"]
+            existing["library_names"].append(entry["name"])
+            if not existing["artwork"]:
+                existing["artwork"] = entry["artwork"]
+            continue
+        collection = store.collections.get(cid)
+        name = str(collection["canonical_name"]) if collection is not None else entry["name"]
+        rows[cid] = {
+            "collection_id": cid,
+            "name": name,
+            "sort_key": schema.sort_key_for(name),
+            "track_count": entry["track_count"],
+            "artwork": entry["artwork"],
+            "library_names": [entry["name"]],
+        }
+    return rows
+
+
+# --------------------------------------------------------------------------- resolve
+
+
+def resolve_library_artists(db: Any, kind: str = KIND_ARTIST) -> dict[str, Any]:
+    """Give every distinct library artist name a stable collection in the store.
+
+    Idempotent: the id is derived from the folded name and both inserts are
+    ``INSERT OR IGNORE``, so a second run over an unchanged library creates nothing.
+    A name already mapped as an alias of another collection (a merge happened) keeps
+    that collection — resolving must never split a merged artist back apart.
+
+    Returns ``{scanned, created, aliases_added, by_name}``.
+    """
+    store = _store_index(kind)
+    created = 0
+    aliases_added = 0
+    by_name: dict[str, str] = {}
+
+    for entry in _library_artists(db):
+        name = entry["name"]
+        cid = _resolve_id(name, kind, store)
+        if cid not in store.collections:
+            cid = schema.create_collection(name, kind)
+            collection = schema.get_collection(cid)
+            if collection is not None:
+                store.collections[cid] = collection
+            store.by_fold.setdefault(schema.collection_id_for(name, kind), cid)
+            created += 1
+        if schema.add_alias(cid, name, source=ALIAS_SOURCE_LIBRARY):
+            aliases_added += 1
+        store.by_alias.setdefault(name, cid)
+        by_name[name] = cid
+
+    logger.info(
+        "op=artist_resolve scanned=%d created=%d aliases=%d",
+        len(by_name),
+        created,
+        aliases_added,
+    )
+    return {
+        "scanned": len(by_name),
+        "created": created,
+        "aliases_added": aliases_added,
+        "by_name": by_name,
+    }
+
+
+def library_artist_counts(db: Any, kind: str = KIND_ARTIST) -> dict[str, int]:
+    """``collection_id`` -> owned track count, alias variants summed. Read-only."""
+    store = _store_index(kind)
+    return {cid: row["track_count"] for cid, row in _local_rows(db, kind, store).items()}
+
+
+# --------------------------------------------------------------------------- favourites
+
+
+def add_favourite_artist(collection_id: str) -> bool:
+    """Favourite an existing collection. False if it already was. KeyError if unknown."""
+    if schema.get_collection(collection_id) is None:
+        raise KeyError(f"unknown collection {collection_id!r}")
+    return schema.add_favourite(collection_id)
+
+
+def remove_favourite_artist(collection_id: str) -> bool:
+    """Un-favourite. The collection, its aliases and its links survive."""
+    return schema.remove_favourite(collection_id)
+
+
+def favourite_artist_by_name(name: str, kind: str = KIND_ARTIST) -> str:
+    """Favourite an artist the UI knows only by name (a backlog row); returns its id.
+
+    Creates the collection when the store has not seen the name yet, so favouriting
+    works before a full ``resolve_library_artists`` pass has run.
+    """
+    text = str(name or "").strip()
+    if not text:
+        raise ValueError("artist name must contain a non-space character")
+    existing = schema.resolve_alias(text, kind)
+    cid = str(existing["id"]) if existing is not None else schema.create_collection(text, kind)
+    schema.add_alias(cid, text, source=ALIAS_SOURCE_LIBRARY)
+    schema.add_favourite(cid)
+    return cid
+
+
+def _favourite_row(row: dict[str, Any], local: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    cid = str(row["id"])
+    entry = local.get(cid)
+    link = schema.get_link(cid, PROVIDER_SOUNDCLOUD)
+    return {
+        "collection_id": cid,
+        "kind": row["kind"],
+        "name": row["canonical_name"],
+        "sort_key": row["sort_key"],
+        "track_count": entry["track_count"] if entry is not None else 0,
+        "artwork": entry["artwork"] if entry is not None else "",
+        "library_names": list(entry["library_names"]) if entry is not None else [],
+        "sync_mode": schema.get_sync_mode(cid),
+        "sc_linked": link is not None,
+        "sc_permalink": link.get("permalink") if link is not None else None,
+        "added_at": row["added_at"],
+        "favourite": True,
+    }
+
+
+def list_favourite_artists(db: Any = None, kind: str = KIND_ARTIST) -> list[dict[str, Any]]:
+    """Favourites enriched with local track count, sync mode and SC-link state.
+
+    ``db`` is optional: without a loaded library the rows still come back, with a
+    ``track_count`` of 0, so the hub renders before the library finishes loading.
+    """
+    store = _store_index(kind)
+    local = _local_rows(db, kind, store) if db is not None else {}
+    return [_favourite_row(row, local) for row in schema.list_favourites(kind)]
+
+
+# --------------------------------------------------------------------------- search
+
+
+def _filter_rows(rows: list[dict[str, Any]], query: str) -> list[dict[str, Any]]:
+    """Rows whose canonical name or any raw library variant contains ``query``.
+
+    The raw variants are matched too: the store shows ``Boys Noize`` while the library
+    may hold ``BOYS NOIZE (Official)``, and a user typing what Rekordbox shows them has
+    to find the row.
+    """
+    needle = query.strip().casefold()
+    if not needle:
+        return rows
+    return [
+        row
+        for row in rows
+        if needle in str(row["name"]).casefold()
+        or any(needle in str(name).casefold() for name in row["library_names"])
+    ]
+
+
+# --------------------------------------------------------------------------- Tier-1 backlog
+
+
+def _backlog_rows(
+    local: dict[str, dict[str, Any]],
+    favourite_ids: set[str],
+    limit: int | None,
+    query: str = "",
+) -> tuple[list[dict[str, Any]], int]:
+    """Ranked backlog plus the total that matched BEFORE truncation.
+
+    The caller needs the pre-truncation count: a UI that filters only the rows it
+    already holds silently finds nothing for an artist ranked below the limit.
+    """
+    rows = [
+        {**row, "library_names": list(row["library_names"])}
+        for cid, row in local.items()
+        if cid not in favourite_ids and row["track_count"] > 0
+    ]
+    rows = _filter_rows(rows, query)
+    rows.sort(key=lambda r: (-r["track_count"], r["sort_key"]))
+    total = len(rows)
+    if limit is not None:
+        rows = rows[:limit]
+    return rows, total
+
+
+def backlog(
+    db: Any,
+    limit: int | None = DEFAULT_BACKLOG_LIMIT,
+    kind: str = KIND_ARTIST,
+    query: str = "",
+) -> list[dict[str, Any]]:
+    """Tier-1 suggestions: artists you already own, most tracks first, favourites out.
+
+    Zero network calls — the counts fall out of the library load. ``limit=None`` returns
+    the whole tail.
+    """
+    if limit is not None and limit <= 0:
+        return []
+    store = _store_index(kind)
+    local = _local_rows(db, kind, store)
+    favourite_ids = {str(row["id"]) for row in schema.list_favourites(kind)}
+    rows, _total = _backlog_rows(local, favourite_ids, limit, query)
+    return rows
+
+
+def hub(
+    db: Any,
+    backlog_limit: int | None = DEFAULT_BACKLOG_LIMIT,
+    kind: str = KIND_ARTIST,
+    query: str = "",
+) -> dict[str, Any]:
+    """Payload for ``GET /api/artists/hub``: favourites + Tier-1 backlog, one pass, no writes."""
+    store = _store_index(kind)
+    local = _local_rows(db, kind, store) if db is not None else {}
+    favourite_rows = schema.list_favourites(kind)
+    favourite_ids = {str(row["id"]) for row in favourite_rows}
+    limit = backlog_limit
+    if limit is not None and limit <= 0:
+        suggestions: list[dict[str, Any]] = []
+        total = 0
+    else:
+        suggestions, total = _backlog_rows(local, favourite_ids, limit, query)
+    return {
+        "favourites": [_favourite_row(row, local) for row in favourite_rows],
+        "backlog": suggestions,
+        "backlog_total": total,
+        "backlog_query": query.strip(),
+    }
+
+
+# --------------------------------------------------------------------------- browse
+
+
+def _browse_row(row: dict[str, Any], favourite_ids: set[str]) -> dict[str, Any]:
+    """One browse row. Store lookups run per page row, never per library artist."""
+    cid = str(row["collection_id"])
+    return {
+        "collection_id": cid,
+        "name": row["name"],
+        "track_count": row["track_count"],
+        "artwork": row["artwork"],
+        "is_favourite": cid in favourite_ids,
+        "sync_mode": schema.get_sync_mode(cid),
+        "sc_linked": schema.get_link(cid, PROVIDER_SOUNDCLOUD) is not None,
+        "library_names": list(row["library_names"]),
+    }
+
+
+def browse(
+    db: Any,
+    query: str = "",
+    limit: int = DEFAULT_BROWSE_LIMIT,
+    offset: int = 0,
+    sort: str = SORT_NAME,
+    kind: str = KIND_ARTIST,
+) -> dict[str, Any]:
+    """The whole artist list, searchable and sortable, every row flagged as favourite or not.
+
+    The complement of ``backlog``: same one-pass machinery, but favourites stay **in**
+    the list carrying ``is_favourite`` so a row can be toggled either way. Pure read —
+    no writes, no network.
+
+    ``query`` filters before ``limit``/``offset``: a UI that filters only the page it
+    already holds finds nothing for an artist ranked below the first page. ``total`` is
+    the match count **before** pagination, so the view can say "showing 100 of 312"
+    honestly. Matching is case-insensitive against the canonical name and every raw
+    library variant.
+
+    ``sort`` is ``name`` (the store's fold-insensitive ``sort_key``) or ``tracks``
+    (owned count descending, ``sort_key`` breaking ties). Anything else falls back to
+    ``name`` rather than raising, and the applied value comes back in the payload.
+
+    Guards: ``limit`` is clamped into ``0..MAX_BROWSE_LIMIT`` (500) and ``offset`` to
+    ``>= 0``, so a negative page never slices from the tail and one request can never
+    pull the whole library. The effective values are echoed back.
+
+    ``db=None`` (library not loaded) yields an empty page rather than an error, the way
+    ``hub`` degrades.
+
+    A favourite whose collection has no rows in the loaded library is still listed, with
+    ``track_count`` 0. Dropping it would leave a star that exists in the favourites pane
+    but cannot be un-starred here — the two views would disagree about the same artist.
+    It is reachable by raising ``artist_view_threshold`` after favouriting, or by
+    swapping libraries.
+
+    Note this list is **not** every artist in ``master.db``: ``_finalize_ui_metadata``
+    (``app/live_database.py``) already dropped everyone below the user's
+    ``artist_view_threshold`` setting before the rows reach here. Nothing is re-filtered
+    on top of that.
+    """
+    sort_mode = sort if sort in BROWSE_SORTS else SORT_NAME
+    page_size = max(0, min(limit, MAX_BROWSE_LIMIT))
+    start = max(0, offset)
+
+    store = _store_index(kind)
+    local = _local_rows(db, kind, store) if db is not None else {}
+    favourite_ids = {str(row["id"]) for row in schema.list_favourites(kind)}
+
+    rows = list(local.values())
+    seen = {str(row["collection_id"]) for row in rows}
+    for favourite in schema.list_favourites(kind):
+        cid = str(favourite["id"])
+        if cid in seen:
+            continue
+        name = str(favourite["canonical_name"])
+        rows.append(
+            {
+                "collection_id": cid,
+                "name": name,
+                "sort_key": schema.sort_key_for(name),
+                "track_count": 0,
+                "artwork": "",
+                "library_names": [],
+            }
+        )
+    rows = _filter_rows(rows, query)
+    if sort_mode == SORT_TRACKS:
+        rows.sort(key=lambda r: (-r["track_count"], r["sort_key"]))
+    else:
+        rows.sort(key=lambda r: r["sort_key"])
+
+    page = rows[start : start + page_size]
+    return {
+        "artists": [_browse_row(row, favourite_ids) for row in page],
+        "total": len(rows),
+        "limit": page_size,
+        "offset": start,
+        "query": query.strip(),
+        "sort": sort_mode,
+    }
+
+
+# --------------------------------------------------------------------------- provider links
+
+
+def _collapse(text: Any) -> str:
+    return " ".join(str(text or "").split())
+
+
+def artist_names(collection_id: str, kind: str = KIND_ARTIST) -> tuple[str, ...]:
+    """Every spelling a collection answers to — canonical first, then its aliases.
+
+    The catalogue classifier needs these to decide whether a foreign upload credits this
+    artist ("… (Boys Noize Remix)"), and after a merge one collection legitimately
+    carries several library spellings.
+    """
+    collection = schema.get_collection(collection_id)
+    if collection is None:
+        return ()
+    names: list[str] = [str(collection["canonical_name"])]
+    seen = {names[0].casefold()}
+    for row in schema.list_aliases(collection_id):
+        alias = _collapse(row["alias"])
+        if alias and alias.casefold() not in seen:
+            seen.add(alias.casefold())
+            names.append(alias)
+    return tuple(names)
+
+
+def link_confidence(collection_id: str, username: str) -> float:
+    """How well a resolved SoundCloud account name agrees with the local artist name.
+
+    Recorded, never enforced: the bind is a deliberate user action, so a mismatch is a
+    warning the UI can render ("SoundCloud calls this account 'bnr_official'"), not a
+    refusal. 1.0 on an exact fold match against any known spelling, otherwise the best
+    ``SequenceMatcher`` ratio over them, 0.0 when there is nothing to compare.
+    """
+    target = _collapse(username).casefold()
+    if not target:
+        return 0.0
+    best = 0.0
+    for name in artist_names(collection_id):
+        folded = _collapse(name).casefold()
+        if not folded:
+            continue
+        if folded == target:
+            return 1.0
+        best = max(best, SequenceMatcher(None, folded, target).ratio())
+    return round(best, 3)
+
+
+def get_provider_link(
+    collection_id: str, provider: str = PROVIDER_SOUNDCLOUD
+) -> dict[str, Any] | None:
+    """The stored binding for a collection, or None.
+
+    ``remote_id`` is the load-bearing field: a row carrying a permalink but no URN (what
+    the legacy ``app_data.json`` import produces) is a bookmark, not a usable binding, so
+    ``resolved`` reports it separately instead of letting a caller assume it can fetch.
+    """
+    link = schema.get_link(collection_id, provider)
+    if link is None:
+        return None
+    remote_id = str(link.get("remote_id") or "")
+    return {
+        "collection_id": collection_id,
+        "provider": provider,
+        "remote_id": remote_id,
+        "permalink": str(link.get("permalink") or ""),
+        "confidence": link.get("confidence"),
+        "resolved": bool(remote_id),
+    }
+
+
+def set_provider_link(
+    collection_id: str,
+    remote_id: str | None,
+    permalink: str | None,
+    confidence: float | None,
+    provider: str = PROVIDER_SOUNDCLOUD,
+) -> dict[str, Any]:
+    """Bind a collection to a provider account. Keyed on the store's stable id.
+
+    Deliberately NOT keyed on the artist name the legacy ``app_data.json`` store used: a
+    merge rewrites names, and a name-keyed binding is orphaned the moment it does.
+    Raises ``KeyError`` for an unknown collection — a link row whose collection does not
+    exist is unreachable, and the FK would cascade it away anyway.
+    """
+    if schema.get_collection(collection_id) is None:
+        raise KeyError(collection_id)
+    schema.set_link(collection_id, provider, remote_id, permalink, confidence)
+    logger.info(
+        "op=artist_link collection=%s provider=%s resolved=%s confidence=%s",
+        collection_id,
+        provider,
+        bool(remote_id),
+        confidence,
+    )
+    return get_provider_link(collection_id, provider) or {
+        "collection_id": collection_id,
+        "provider": provider,
+        "remote_id": str(remote_id or ""),
+        "permalink": str(permalink or ""),
+        "confidence": confidence,
+        "resolved": bool(remote_id),
+    }
+
+
+def remove_provider_link(collection_id: str, provider: str = PROVIDER_SOUNDCLOUD) -> bool:
+    """Unbind. Collection, aliases, favourite state and the cached catalogue all survive.
+
+    The cache row is left alone on purpose: ``catalogue`` refuses a payload whose
+    ``artist_urn`` differs from the binding, so a re-bind to a different account cannot
+    read it, and a re-bind to the same one keeps costing zero calls.
+    """
+    removed = schema.remove_link(collection_id, provider)
+    logger.info(
+        "op=artist_unlink collection=%s provider=%s removed=%s", collection_id, provider, removed
+    )
+    return removed
+
+
+#: ``store_meta`` marker; the legacy JSON import runs at most once per store.
+LEGACY_LINK_MIGRATION_KEY = "legacy_sc_links_migrated"
+
+_legacy_migration_done = False
+
+
+def migrate_legacy_artist_links() -> dict[str, Any]:
+    """One-shot import of ``app_data.json``'s name-keyed SoundCloud links (T-7).
+
+    ``app/sidecar.py`` kept ``{artist_name: {"soundcloud": url}}``. That store is
+    superseded: it is keyed on a name a merge can rewrite, and its only writer route
+    never actually wrote. Imported rows carry the permalink but **no URN** — resolving
+    one needs a network call and a token, neither of which exists here — so they land
+    ``resolved=False`` and the UI asks for one click to finish the bind. Nothing is
+    written back to the JSON file.
+
+    Idempotent: guarded by a process flag and by a ``store_meta`` marker.
+    """
+    global _legacy_migration_done
+    if _legacy_migration_done:
+        return {"migrated": 0, "skipped": 0, "already_done": True}
+    if schema.get_meta(LEGACY_LINK_MIGRATION_KEY):
+        _legacy_migration_done = True
+        return {"migrated": 0, "skipped": 0, "already_done": True}
+
+    migrated = 0
+    skipped = 0
+    entries: Any = {}
+    try:
+        from app.sidecar import storage as legacy_storage
+
+        entries = (legacy_storage.data or {}).get("artists") or {}
+    except (ImportError, OSError, AttributeError) as exc:
+        logger.warning("op=artist_link_migration state=unreadable err=%s", exc)
+
+    if isinstance(entries, dict):
+        for raw_name, payload in entries.items():
+            name = _collapse(raw_name)
+            url = _collapse(payload.get("soundcloud")) if isinstance(payload, dict) else ""
+            if not name or not url:
+                skipped += 1
+                continue
+            cid = schema.create_collection(name, KIND_ARTIST)
+            if schema.get_link(cid, PROVIDER_SOUNDCLOUD) is not None:
+                skipped += 1
+                continue
+            schema.set_link(cid, PROVIDER_SOUNDCLOUD, None, url, None)
+            migrated += 1
+
+    schema.set_meta(LEGACY_LINK_MIGRATION_KEY, "1")
+    _legacy_migration_done = True
+    logger.info("op=artist_link_migration migrated=%d skipped=%d", migrated, skipped)
+    return {"migrated": migrated, "skipped": skipped, "already_done": False}

@@ -33,6 +33,7 @@ import RenameModal from './RenameModal';
 import SmartPlaylistEditor from './SmartPlaylistEditor';
 import { confirmModal } from './ConfirmModal';
 import { promptModal } from './PromptModal';
+import { SMART_PLAYLIST_LABEL_THRESHOLD } from '../config/constants';
 
 const PlaylistNode = ({
     node,
@@ -294,17 +295,30 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
         });
     };
 
+    // Label playlists only. The "Artists" folder belongs to the Artist Hub
+    // projection now, so this must not claim to have generated artists.
     const handleSmartPlaylists = async () => {
         setIsProcessing(true);
         try {
-            await api.post('/api/library/smart-playlists', {
-                artist_threshold: 3,
-                label_threshold: 3,
+            const res = await api.post('/api/library/smart-playlists', {
+                label_threshold: SMART_PLAYLIST_LABEL_THRESHOLD,
             });
             loadTree();
-            toast.success('Smart Playlists generated!');
+            const created = res.data?.labels_created ?? 0;
+            toast.success(
+                `${created} label playlist(s) written. Artist playlists live in the Artist Hub.`
+            );
+            const legacy = res.data?.legacy_by_artist;
+            if (legacy) {
+                toast(
+                    `An old "By Artist" folder with ${legacy.playlists} playlist(s) is still in ` +
+                        `your library. Nothing touched it — the Artist Hub replaces it.`,
+                    { icon: 'ℹ️' }
+                );
+            }
         } catch (err) {
-            toast.error('Failed to generate smart playlists.');
+            console.error('[PlaylistBrowser] smart-playlists failed', err);
+            toast.error('Failed to generate label playlists.');
         } finally {
             setIsProcessing(false);
         }

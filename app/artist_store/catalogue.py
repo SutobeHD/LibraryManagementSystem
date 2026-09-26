@@ -1,0 +1,990 @@
+"""artist_store.catalogue — classify an artist's SoundCloud tracks, diff against the library (T-14).
+
+Three jobs, kept apart so each is testable on its own:
+
+``classify``
+    Runs the mix/set gate, then splits a fetched catalogue into the owner's **role**
+    buckets. The roles come from ``app/artist_store/identity.py``: identification is
+    by NAME (title prefix, uploader name, remixer credit), with the uploader-account
+    URN kept as the highest-confidence signal rather than the only one (owner
+    decision 2026-09-08). Most of a label-signed artist's catalogue is uploaded by
+    labels, promo channels and DJs, so a URN-only split misses most of it.
+``diff``
+    "Do I already own this?" — reuses ``app/external_track_match.py`` (``parse_version_tag``,
+    ``extract_title_stem``, ``fuzzy_match_with_score``) behind a derivation gate so a
+    remix/VIP never collapses onto the original it derives from.
+``catalogue``
+    Ties the two together over the sidecar's TTL cache. The **fetched catalogue** is
+    cached, never the diff — the local side changes whenever the library does.
+
+This module never sees the OAuth token. The fetch callable is supplied by the caller
+(the route owns the keyring), so there is no token here to log, cache or key on.
+
+Pure + stdlib apart from the sidecar schema: no HTTP, no ``master.db``, no rbox.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+import unicodedata
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any
+
+from app.artist_store import schema
+from app.external_track_match import (
+    extract_title_stem,
+    fuzzy_match_with_score,
+    parse_version_tag,
+)
+
+logger = logging.getLogger("ARTIST_STORE")
+
+PROVIDER_SOUNDCLOUD = "soundcloud"
+
+#: The rendered buckets, in the order the UI lists them. One per identity role, plus
+#: the collapsed mix/set strip. A track lands in exactly one — there is no discard.
+BUCKET_THEIR_TRACKS = "their_tracks"
+BUCKET_THEIR_REMIXES = "their_remixes"
+BUCKET_REMIXED_BY_OTHERS = "remixed_by_others"
+BUCKET_FEATURED = "featured"
+BUCKET_UNCERTAIN = "uncertain"
+BUCKET_MIXES = "mixes_and_sets"
+
+#: Which bucket an identity role renders in. ``their_remixes`` is deliberately a
+#: first-class bucket and not a footnote: an artist's own remix of someone else's
+#: track is their music, and a DJ wants it.
+BUCKET_FOR_ROLE: dict[str, str] = {
+    schema.ROLE_PRIMARY: BUCKET_THEIR_TRACKS,
+    schema.ROLE_REMIXER: BUCKET_THEIR_REMIXES,
+    schema.ROLE_REMIXED_BY_OTHER: BUCKET_REMIXED_BY_OTHERS,
+    schema.ROLE_FEATURED: BUCKET_FEATURED,
+    schema.ROLE_UNCERTAIN: BUCKET_UNCERTAIN,
+}
+
+#: Every bucket key the payload carries, in render order.
+BUCKET_KEYS: tuple[str, ...] = (
+    BUCKET_THEIR_TRACKS,
+    BUCKET_THEIR_REMIXES,
+    BUCKET_REMIXED_BY_OTHERS,
+    BUCKET_FEATURED,
+    BUCKET_UNCERTAIN,
+    BUCKET_MIXES,
+)
+
+#: Anything longer is a set, not a track. Owner rule; catches the long-form the
+#: keyword list misses (an untitled 40-minute live recording).
+LONG_FORM_MS = 15 * 60 * 1000
+
+#: Hard per-artist ceiling (threat T7). A hostile or absurd profile cannot make the
+#: sidecar hold an unbounded payload; the overflow is reported as ``truncated``.
+MAX_CATALOGUE_TRACKS = 2000
+
+#: ``stop_reason`` for an overflow of :data:`MAX_CATALOGUE_TRACKS`. The fetcher never
+#: reports this one — the ceiling is applied here, after the fetch. Unlike the client's
+#: own ``"budget"`` reason it is a permanent property of the artist: a later fetch on a
+#: full budget returns just as many tracks and just as few of them fit.
+STOP_REASON_MAX_TRACKS = "max_tracks"
+
+#: TTL for the sidecar catalogue cache. Long enough that clicking through artists
+#: costs no calls, short enough that it stays a cache and not a mirror (ToU).
+CACHE_TTL_S = 6 * 60 * 60
+
+#: Owned-vs-remote match threshold. Tuned on the seeded corpus in
+#: ``tests/test_artist_catalogue.py`` (``test_missing_diff_threshold_corpus``), which
+#: pins both directions: same-track-different-punctuation must match, remix/VIP/other-track
+#: must not. Deliberately far above ``external_track_match``'s own 0.65 default — that
+#: value was tuned for free-text external search, while here the strings are already
+#: stem-reduced, accent-folded, derivation-gated and token-gated, so true pairs land at
+#: or near 1.0 and the headroom is spent rejecting near-miss titles.
+MISSING_MATCH_THRESHOLD = 0.90
+
+#: Minimum Jaccard overlap of the two title stems' word sets before the fuzzy score is
+#: even consulted. SequenceMatcher cannot separate "Kill the Beat" from "Kill the Beast"
+#: (0.981) from "Cafe Racer" vs "Café Racer" (0.957) — one differing character inside a
+#: word costs about as much as an accent. Comparing word *sets* does separate them: a
+#: substituted word breaks the set, re-punctuation ("Rock & Roll" / "Rock and Roll") does
+#: not. Bias is deliberate: a wrongly-owned verdict hides a track the user does not have
+#: (the gig-night failure this feature exists to prevent), while a wrongly-missing one
+#: only shows an extra row.
+TOKEN_OVERLAP_FLOOR = 0.65
+
+#: Upper bound on fuzzy comparisons per remote track. The blocking index normally hands
+#: back a handful; this stops a pathological library (thousands of same-named tracks)
+#: from turning one diff into a full cross-product.
+MAX_FUZZY_CANDIDATES = 400
+
+#: Version labels that describe the SAME recording for ownership purposes. Owning
+#: "Overdrive" means you are not missing "Overdrive (Original Mix)".
+_BASE_LABELS = frozenset(
+    {"original", "extended", "radio", "club", "dub", "instrumental", "acapella"}
+)
+
+#: Mix/set keywords. ⚠️ A bare ``\bmix\b`` is deliberately ABSENT — "Original Mix",
+#: "Extended Mix" and "Club Mix" are exactly the tracks the user wants. Long-form is
+#: caught by ``LONG_FORM_MS`` instead.
+_MIX_KEYWORDS = re.compile(
+    r"\b(?:"
+    r"podcast|dj[\s\-_]?set|live[\s\-_]?set|radio[\s\-_]?show|episodes?"
+    r"|ep\.?\s?\d{1,4}|b2b|boiler[\s\-_]?room|essential[\s\-_]?mix|guest[\s\-_]?mix"
+    r"|mixtape|takeover|residency"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_URN_USER_RE = re.compile(r"^soundcloud:users:(\d+)$", re.IGNORECASE)
+_DIGITS_RE = re.compile(r"^\d+$")
+_WS_RUN = re.compile(r"\s+")
+_NON_ALNUM = re.compile(r"[^\w]+")
+_FIRST_TOKEN = re.compile(r"\w+")
+
+#: ISO 3901: 2-letter country, 3-char registrant, 2-digit year, 5-digit designation.
+#: Anything else ("", "0", "unknown", a placeholder a label typed) is not an identity
+#: and must never short-circuit the diff to "owned".
+_ISRC_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{3}\d{7}$")
+_ISRC_STRIP = re.compile(r"[\s\-]+")
+
+#: How a remote track was matched to a local one. ``isrc`` is exact identity;
+#: ``title`` is the fuzzy path; ``none`` means the diff found no owned track.
+MATCH_ISRC = "isrc"
+MATCH_TITLE = "title"
+MATCH_NONE = "none"
+
+
+# ── Errors ────────────────────────────────────────────────────────────────────
+
+
+class CatalogueError(Exception):
+    """Base of the catalogue error hierarchy. Routes map these to explicit responses."""
+
+
+class ArtistNotLinked(CatalogueError):
+    """The collection has no SoundCloud account bound, so there is nothing to fetch.
+
+    Raised instead of returning an empty catalogue: an empty list would render as
+    "this artist has released nothing", which is a lie about state we do not have.
+    """
+
+
+class CatalogueUnavailable(CatalogueError):
+    """No cached catalogue and no way to fetch one (no fetcher / no credentials).
+
+    The UI must say so rather than showing an empty or stale list as if it were live.
+    """
+
+
+# ── Result types ──────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Classification:
+    """The role buckets. Every fetched track lands in exactly one of them.
+
+    There is deliberately no discard bucket: a track that was fetched but shown nowhere
+    is a silent drop, and the owner ruled those out for the mix filter for the same
+    reason. A foreign upload whose credit cannot be parsed is still listed — under
+    ``uncertain``, visible and reviewable, never auto-queued.
+    """
+
+    their_tracks: list[dict[str, Any]] = field(default_factory=list)
+    their_remixes: list[dict[str, Any]] = field(default_factory=list)
+    remixed_by_others: list[dict[str, Any]] = field(default_factory=list)
+    featured: list[dict[str, Any]] = field(default_factory=list)
+    uncertain: list[dict[str, Any]] = field(default_factory=list)
+    mixes_and_sets: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def buckets(self) -> dict[str, list[dict[str, Any]]]:
+        """``bucket key -> rows``, in render order."""
+        return {
+            BUCKET_THEIR_TRACKS: self.their_tracks,
+            BUCKET_THEIR_REMIXES: self.their_remixes,
+            BUCKET_REMIXED_BY_OTHERS: self.remixed_by_others,
+            BUCKET_FEATURED: self.featured,
+            BUCKET_UNCERTAIN: self.uncertain,
+            BUCKET_MIXES: self.mixes_and_sets,
+        }
+
+    @property
+    def diffable(self) -> list[dict[str, Any]]:
+        """Everything the ownership diff runs over — i.e. everything but the mixes."""
+        return [
+            *self.their_tracks,
+            *self.their_remixes,
+            *self.remixed_by_others,
+            *self.featured,
+            *self.uncertain,
+        ]
+
+
+@dataclass(frozen=True)
+class TrackMatch:
+    """One remote track's verdict against the library.
+
+    ``method`` says HOW it was decided: an exact ISRC hit is identity, a title score is
+    a similarity — the UI should not present the two with the same certainty.
+    """
+
+    sc_id: str
+    local_track_id: str | None
+    score: float
+    method: str = MATCH_NONE
+
+    @property
+    def matched(self) -> bool:
+        return self.local_track_id is not None
+
+
+@dataclass(frozen=True)
+class Diff:
+    """``sc_id`` -> verdict, plus the owned / missing split as id tuples."""
+
+    matches: dict[str, TrackMatch] = field(default_factory=dict)
+    in_library: tuple[str, ...] = ()
+    missing: tuple[str, ...] = ()
+
+
+# ── Small helpers ─────────────────────────────────────────────────────────────
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def normalize_user_urn(value: Any) -> str:
+    """Canonical ``soundcloud:users:<id>`` form. Empty string when unusable.
+
+    Numeric ids are spec-deprecated in favour of URNs but still flow through older call
+    sites and cached payloads, so both shapes fold onto one comparable value. Identity
+    comparison is only ever done on this — never on a display name.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if _DIGITS_RE.match(text):
+        return f"soundcloud:users:{text}"
+    m = _URN_USER_RE.match(text)
+    if m:
+        return f"soundcloud:users:{m.group(1)}"
+    return text.casefold()
+
+
+def normalize_isrc(value: Any) -> str:
+    """Canonical 12-character ISRC (upper, no dashes/spaces), or ``""`` when not one.
+
+    Rekordbox stores whatever the tag carried (``US-RC1-17-07839`` or ``USRC11707839``)
+    and SoundCloud returns whatever the uploader typed. Both fold onto one comparable
+    string; a value that does not have the ISO 3901 shape is discarded rather than
+    compared, so two tracks tagged ``"0"`` never read as the same recording.
+    """
+    text = _ISRC_STRIP.sub("", str(value or "")).upper()
+    return text if _ISRC_RE.match(text) else ""
+
+
+def _accent_fold(text: str) -> str:
+    decomposed = unicodedata.normalize("NFD", str(text or ""))
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
+def _fold(text: str) -> str:
+    """Accent-folded, punctuation-collapsed, lowercase form for name comparison."""
+    stripped = _accent_fold(text)
+    return _WS_RUN.sub(" ", _NON_ALNUM.sub(" ", stripped)).strip().casefold()
+
+
+def _tokens(stem: str) -> frozenset[str]:
+    return frozenset(_fold(stem).split())
+
+
+def token_overlap(left: str, right: str) -> float:
+    """Jaccard overlap of two stems' word sets. 0.0 when either side has no words."""
+    a, b = _tokens(left), _tokens(right)
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def _first_token(text: str) -> str:
+    m = _FIRST_TOKEN.search(text)
+    return m.group(0).casefold() if m else ""
+
+
+#: Parenthetical head words that mark a DIFFERENT recording, not a spelling of the
+#: same one. Anything here must never fold onto the original — missing it hides a
+#: genuine gap. ``original``/``extended``/``club`` are deliberately absent: those ARE
+#: the track you own.
+_BARE_DERIVATIONS = frozenset(
+    {
+        "remix",
+        "rework",
+        "refix",
+        "reprise",
+        "rerub",
+        "redux",
+        "bootleg",
+        "flip",
+        "mashup",
+        "edit",
+        "vip",
+        "live",
+        "acoustic",
+        "demo",
+        "unplugged",
+        "remaster",
+        "remastered",
+        "reimagined",
+        "interpretation",
+    }
+)
+
+_TRAILING_PAREN = re.compile(r"[([{]([^)\]}]{1,60})[)\]}]\s*$")
+
+
+def _bare_derivation(title: str) -> str:
+    """The derivation word of a trailing ``(Remix)``-style parenthetical, else ``""``.
+
+    Only fires when the parenthetical is *just* the derivation word (optionally with a
+    year or a short qualifier), because a named remixer is already handled upstream.
+    """
+    match = _TRAILING_PAREN.search(title.strip())
+    if match is None:
+        return ""
+    words = _fold(match.group(1)).split()
+    if not words:
+        return ""
+    for word in words:
+        if word in _BARE_DERIVATIONS:
+            return word
+    return ""
+
+
+def derivation_key(title: str) -> tuple[str, str]:
+    """Identity of the *version* a title describes: ``("base", "")`` or (label, who).
+
+    The gate that keeps a remix from collapsing onto the original it derives from.
+    ``(Original Mix)`` / ``(Extended Mix)`` / bare all fold to ``base`` — owning the
+    track means you are not missing its original-mix listing. ``(X Remix)``, ``(VIP)``,
+    ``(2019 Edit)``, ``(X Bootleg)`` each get their own key, so they are separate
+    recordings you may legitimately be missing.
+    """
+    raw = str(title or "")
+    tag = parse_version_tag(raw)
+    if tag is None:
+        # parse_version_tag only recognises a parenthetical that names a remixer or
+        # carries a label it knows. A BARE derivation — "(Remix)", "(Live)", "(Flip)" —
+        # falls through, and returning ("base", "") here made it collapse onto the
+        # original: the track then reads as ALREADY OWNED and a real gap is hidden.
+        # That is the dangerous direction, so a bare derivation gets its own key.
+        bare = _bare_derivation(raw)
+        return (bare, "") if bare else ("base", "")
+    if tag.remixer:
+        return (tag.label, _fold(tag.remixer))
+    if tag.label in _BASE_LABELS:
+        return ("base", "")
+    return (tag.label, _fold(" ".join(tag.modifiers)))
+
+
+def title_stems(title: str, known_names: Iterable[str] = ()) -> tuple[str, ...]:
+    """Candidate grouping stems for a title, best first.
+
+    SoundCloud titles routinely carry an ``Artist - `` prefix that Rekordbox keeps in a
+    separate field. ``extract_title_stem`` reads ``" - "`` as a trailing *version*
+    separator and would reduce ``"Boys Noize - Overdrive"`` to ``"boys noize"``, so the
+    prefix is stripped here first when it matches a known name; when it matches nothing
+    both readings are returned and the caller scores against each.
+    """
+    text = _WS_RUN.sub(" ", str(title or "")).strip()
+    if not text:
+        return ()
+    known = {_fold(n) for n in known_names if str(n or "").strip()}
+    out: list[str] = []
+
+    def _add(value: str) -> None:
+        # Accents are folded here, not left to the scorer: its exact-title short circuit
+        # runs with nfd_fold=False, so "Café Racer" would otherwise fall to the ratio path.
+        folded = _accent_fold(value).strip()
+        if folded and folded not in out:
+            out.append(folded)
+
+    head, sep, tail = text.partition(" - ")
+    if sep and tail.strip():
+        if _fold(head) in known:
+            _add(extract_title_stem(tail.strip()))
+            return tuple(out)
+        _add(extract_title_stem(text))
+        _add(extract_title_stem(tail.strip()))
+        return tuple(out)
+    _add(extract_title_stem(text))
+    return tuple(out)
+
+
+def _artist_names_for(track: Mapping[str, Any], extra: Iterable[str] = ()) -> tuple[str, ...]:
+    names = [str(track.get("uploader_name") or "").strip()]
+    names.extend(str(n or "").strip() for n in extra)
+    return tuple(n for n in names if n)
+
+
+# ── Track coercion (SC payloads are untrusted input) ───────────────────────────
+
+
+def _coerce_track(raw: Any) -> dict[str, Any] | None:
+    """Normalised SC track dict with every field forced to its contract type.
+
+    Returns ``None`` for a payload with no usable identity — a track we cannot name or
+    address is not something to show the user, and inventing a placeholder would be a
+    fabricated row.
+    """
+    if not isinstance(raw, Mapping):
+        return None
+    sc_id = str(raw.get("sc_id") or "").strip()
+    title = str(raw.get("title") or "").strip()
+    if not sc_id or not title:
+        return None
+    try:
+        duration_ms = int(raw.get("duration_ms") or 0)
+    except (TypeError, ValueError):
+        duration_ms = 0
+    return {
+        "sc_id": sc_id,
+        "title": title,
+        "permalink_url": str(raw.get("permalink_url") or ""),
+        "duration_ms": max(0, duration_ms),
+        "uploader_urn": str(raw.get("uploader_urn") or ""),
+        "uploader_name": str(raw.get("uploader_name") or ""),
+        "genre": str(raw.get("genre") or ""),
+        "tag_list": str(raw.get("tag_list") or ""),
+        "access": str(raw.get("access") or "").strip().casefold(),
+        "streamable": bool(raw.get("streamable")),
+        "sharing": str(raw.get("sharing") or "").strip().casefold(),
+        "downloadable": bool(raw.get("downloadable")),
+        "created_at": str(raw.get("created_at") or ""),
+        "artwork_url": str(raw.get("artwork_url") or ""),
+        # Normalised here so the diff, the identity table and the UI all compare the
+        # same 12 characters; "" when the upload carries no usable ISRC.
+        "isrc": normalize_isrc(raw.get("isrc")),
+        "label_name": str(raw.get("label_name") or "").strip(),
+    }
+
+
+def coerce_track(raw: Any) -> dict[str, Any] | None:
+    """Public single-row form of the coercion; ``None`` for a row with no identity."""
+    return _coerce_track(raw)
+
+
+def coerce_tracks(raw_tracks: Iterable[Any]) -> list[dict[str, Any]]:
+    """Coerce a fetched payload, dropping unusable rows and de-duplicating by ``sc_id``."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in raw_tracks or []:
+        track = _coerce_track(raw)
+        if track is None or track["sc_id"] in seen:
+            continue
+        seen.add(track["sc_id"])
+        out.append(track)
+    return out
+
+
+# ── Classification ────────────────────────────────────────────────────────────
+
+
+def is_playable(track: Mapping[str, Any]) -> bool:
+    """Legally and technically streamable in full.
+
+    ``access`` is the public API's snipped gate: ``playable`` = full, ``preview`` =
+    snippet, ``blocked`` = metadata only. A preview must never enter the missing list —
+    queueing it would download a snippet and call it the track.
+    """
+    return (
+        track.get("access") == "playable"
+        and bool(track.get("streamable"))
+        and track.get("sharing") == "public"
+    )
+
+
+def mix_exclusion_reason(track: Mapping[str, Any]) -> str | None:
+    """Why this belongs in the collapsed "Mixes & sets" bucket, or ``None``.
+
+    Owner rule, in order: not fully playable, or longer than 15 minutes, or a keyword
+    hit on title/tags/genre. ``downloadable`` is a ranking badge and is never consulted.
+    """
+    if not is_playable(track):
+        return "unavailable"
+    try:
+        duration_ms = int(track.get("duration_ms") or 0)
+    except (TypeError, ValueError):
+        duration_ms = 0
+    if duration_ms > LONG_FORM_MS:
+        return "long_form"
+    haystack = " ".join(str(track.get(key) or "") for key in ("title", "tag_list", "genre"))
+    if _MIX_KEYWORDS.search(haystack):
+        return "keyword"
+    return None
+
+
+def _identity() -> Any:
+    """The identity module, imported late.
+
+    ``identity`` imports this module for the coercion helpers, so a module-level import
+    here would be circular. Nothing else in the package needs the indirection.
+    """
+    from app.artist_store import identity
+
+    return identity
+
+
+def classify(
+    tracks: Iterable[Any],
+    artist_urn: str | None,
+    *,
+    artist_names: Sequence[str] = (),
+    overrides: Mapping[str, str] | None = None,
+) -> Classification:
+    """Split a fetched catalogue into the role buckets.
+
+    The role, the confidence and the parsed credit come from
+    :func:`app.artist_store.identity.classify_roles`: identification is by name across
+    the title's artist prefix, the uploader name and remixer credits, with
+    ``uploader_urn == artist_urn`` as the highest-confidence signal. ``artist_urn`` may
+    be ``None`` for an artist nobody has linked yet — then no track can reach ``high``
+    through the uploader, and the payload has to say the link is missing.
+
+    ``overrides`` maps ``sc_id`` to a role the user pinned by hand; it wins over the
+    classifier on every pass.
+
+    The mix/set gate runs first, so a 40-minute set from the artist's own account is a
+    set, not a missing track — whatever role its title parses to.
+    """
+    result = Classification()
+    buckets = result.buckets
+
+    for track in _identity().classify_roles(
+        tracks, artist_urn or None, tuple(artist_names), overrides=overrides
+    ):
+        reason = mix_exclusion_reason(track)
+        if reason is not None:
+            result.mixes_and_sets.append(
+                {**track, "bucket": BUCKET_MIXES, "excluded_reason": reason}
+            )
+            continue
+        bucket = BUCKET_FOR_ROLE.get(str(track.get("role")), BUCKET_UNCERTAIN)
+        buckets[bucket].append({**track, "bucket": bucket, "excluded_reason": None})
+
+    return result
+
+
+# ── Local-library index + diff ────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class _LocalEntry:
+    track_id: str
+    stem: str
+    artist: str
+    dkey: tuple[str, str]
+
+
+class _LocalIndex:
+    """Blocking index over the owned tracks.
+
+    A full cross-product is not affordable: a 200-track profile against a 5000-track
+    library is a million ``SequenceMatcher`` runs. Candidates are drawn from two cheap
+    blocking keys — folded artist and the stem's first word — then filtered to the same
+    derivation key before any fuzzy work happens.
+    """
+
+    __slots__ = ("by_artist", "by_isrc", "by_token", "entries")
+
+    def __init__(self, local_tracks: Mapping[str, Any] | Iterable[Any] | None) -> None:
+        self.entries: list[_LocalEntry] = []
+        self.by_artist: dict[str, list[int]] = {}
+        self.by_token: dict[str, list[int]] = {}
+        # ISRC -> first local track id carrying it. Exact identity, consulted before
+        # any title work. Indexed even for a track without a usable title.
+        self.by_isrc: dict[str, str] = {}
+        for track_id, track in _iter_local(local_tracks):
+            isrc = normalize_isrc(track.get("ISRC") or track.get("isrc"))
+            if isrc:
+                self.by_isrc.setdefault(isrc, track_id)
+            title = str(track.get("Title") or track.get("title") or "").strip()
+            if not title:
+                continue
+            artist = str(track.get("Artist") or track.get("artist") or "").strip()
+            dkey = derivation_key(title)
+            for stem in title_stems(title, (artist,)):
+                if not stem:
+                    continue
+                idx = len(self.entries)
+                self.entries.append(_LocalEntry(track_id, stem, artist, dkey))
+                self.by_artist.setdefault(_fold(artist), []).append(idx)
+                self.by_token.setdefault(_first_token(stem), []).append(idx)
+
+    def candidates(self, stems: Sequence[str], artists: Sequence[str]) -> list[_LocalEntry]:
+        picked: list[int] = []
+        seen: set[int] = set()
+        for bucket in [self.by_artist.get(_fold(a), []) for a in artists] + [
+            self.by_token.get(_first_token(s), []) for s in stems
+        ]:
+            for idx in bucket:
+                if idx not in seen:
+                    seen.add(idx)
+                    picked.append(idx)
+                    if len(picked) >= MAX_FUZZY_CANDIDATES:
+                        return [self.entries[i] for i in picked]
+        return [self.entries[i] for i in picked]
+
+
+def _iter_local(
+    local_tracks: Mapping[str, Any] | Iterable[Any] | None,
+) -> Iterable[tuple[str, Mapping[str, Any]]]:
+    """Accept ``db.tracks`` (id -> dict) or a plain sequence of track dicts."""
+    if not local_tracks:
+        return []
+    out: list[tuple[str, Mapping[str, Any]]] = []
+    if isinstance(local_tracks, Mapping):
+        items: Iterable[tuple[Any, Any]] = local_tracks.items()
+    else:
+        items = ((None, track) for track in local_tracks)
+    for key, track in items:
+        if not isinstance(track, Mapping):
+            continue
+        track_id = str(key if key is not None else (track.get("id") or track.get("ID") or ""))
+        if not track_id:
+            continue
+        out.append((track_id, track))
+    return out
+
+
+def _pair_score(remote_stem: str, remote_artist: str, entry: _LocalEntry) -> float:
+    """Score one pair through the shipped matcher, so its semantics stay shared.
+
+    ``fuzzy_match_with_score`` short-circuits to 1.0 on an exact normalised title. That
+    is kept deliberately: after stem reduction and the derivation gate, an identical
+    title is the strongest evidence available, and artist strings drift far more than
+    titles do — which is the reason this whole feature exists.
+    """
+    _tid, score = fuzzy_match_with_score(
+        remote_stem,
+        remote_artist,
+        {"c": {"Title": entry.stem, "Artist": entry.artist}},
+        threshold=0.0,
+    )
+    return score
+
+
+def match_score(
+    remote_track: Mapping[str, Any],
+    entry: _LocalEntry,
+    *,
+    artist_names: Sequence[str] = (),
+    token_floor: float = TOKEN_OVERLAP_FLOOR,
+) -> float:
+    """Best score between one remote track and one owned track; 0.0 when gated out.
+
+    Two gates run before any fuzzy work: the derivation key (a remix is not its
+    original) and the stem token overlap (a substituted word is a different title).
+    """
+    if derivation_key(str(remote_track.get("title") or "")) != entry.dkey:
+        return 0.0
+    names = _artist_names_for(remote_track, artist_names)
+    stems = title_stems(str(remote_track.get("title") or ""), names)
+    best = 0.0
+    for stem in stems:
+        if token_overlap(stem, entry.stem) < token_floor:
+            continue
+        for artist in names or ("",):
+            best = max(best, _pair_score(stem, artist, entry))
+            if best >= 1.0:
+                return best
+    return best
+
+
+def diff(
+    local_tracks: Mapping[str, Any] | Iterable[Any] | None,
+    remote_tracks: Iterable[Any],
+    *,
+    threshold: float = MISSING_MATCH_THRESHOLD,
+    artist_names: Sequence[str] = (),
+) -> Diff:
+    """Which remote tracks are already owned, and which are genuinely missing.
+
+    **ISRC first.** When the remote track and a local track both carry a usable ISRC
+    and they are equal, that is the same recording by definition — ``owned``, score
+    1.0, ``method="isrc"``, no title work. Only when either side lacks an ISRC does the
+    title path run.
+
+    Then two gates, in order. **Derivation** — a remix, VIP, bootleg or year-edit never
+    matches the original it derives from, while ``(Original Mix)`` / ``(Extended Mix)``
+    / bare are the same recording. **Fuzzy** — the shipped ``external_track_match``
+    scorer over title stems + artist, at :data:`MISSING_MATCH_THRESHOLD`.
+    """
+    index = _LocalIndex(local_tracks)
+    matches: dict[str, TrackMatch] = {}
+    owned: list[str] = []
+    missing: list[str] = []
+
+    for track in coerce_tracks(remote_tracks):
+        sc_id = track["sc_id"]
+        isrc = track.get("isrc") or ""
+        local_by_isrc = index.by_isrc.get(isrc) if isrc else None
+        if local_by_isrc is not None:
+            matches[sc_id] = TrackMatch(sc_id, local_by_isrc, 1.0, MATCH_ISRC)
+            owned.append(sc_id)
+            continue
+        names = _artist_names_for(track, artist_names)
+        stems = title_stems(track["title"], names)
+        best_id: str | None = None
+        best_score = 0.0
+        for entry in index.candidates(stems, names):
+            score = match_score(track, entry, artist_names=artist_names)
+            if score > best_score:
+                best_score, best_id = score, entry.track_id
+            if best_score >= 1.0:
+                break
+        if best_id is not None and best_score >= threshold:
+            matches[sc_id] = TrackMatch(sc_id, best_id, round(best_score, 3), MATCH_TITLE)
+            owned.append(sc_id)
+        else:
+            matches[sc_id] = TrackMatch(sc_id, None, round(best_score, 3), MATCH_NONE)
+            missing.append(sc_id)
+
+    return Diff(matches=matches, in_library=tuple(owned), missing=tuple(missing))
+
+
+# ── The tie-together ──────────────────────────────────────────────────────────
+
+#: ``fetch(artist_urn) -> iterable of normalised SC track dicts``. Supplied by the
+#: caller so the OAuth token never reaches this module.
+Fetcher = Callable[[str], Iterable[Any]]
+
+
+def _annotate(tracks: list[dict[str, Any]], result: Diff) -> list[dict[str, Any]]:
+    """Attach each track's ownership verdict.
+
+    A track the diff never looked at (the mixes bucket is excluded from "missing" by the
+    owner's rule) gets ``in_library=None`` — "not checked" — rather than ``False``, which
+    would assert something about the library that was never measured.
+
+    ``auto_queue_allowed`` is the identity module's single pure rule (role ∈ {primary,
+    remixer} ∧ confidence ∈ {high, medium}) AND a proven gap. It is not recomputed from
+    the bucket here: two definitions of "may the server queue this" is how a review-only
+    track ends up in a batch.
+    """
+    eligible = _identity().auto_queue_eligible
+    out: list[dict[str, Any]] = []
+    for track in tracks:
+        verdict = result.matches.get(track["sc_id"])
+        owned = verdict.matched if verdict is not None else None
+        out.append(
+            {
+                **track,
+                "in_library": owned,
+                "local_track_id": verdict.local_track_id if verdict is not None else None,
+                "match_score": verdict.score if verdict is not None else None,
+                "match_method": verdict.method if verdict is not None else None,
+                "auto_queue_allowed": owned is False
+                and eligible(
+                    str(track.get("role") or ""),
+                    str(track.get("confidence") or ""),
+                    str((track.get("credit_parse") or {}).get("matched_on") or ""),
+                ),
+            }
+        )
+    return out
+
+
+def _cached_payload(collection_id: str, artist_urn: str, max_age_s: float) -> dict[str, Any] | None:
+    payload = schema.get_catalogue_cache(collection_id, max_age_s=max_age_s)
+    if not isinstance(payload, Mapping):
+        return None
+    if normalize_user_urn(payload.get("artist_urn")) != normalize_user_urn(artist_urn):
+        return None  # rebound to a different account — the cache is about someone else
+    tracks = payload.get("tracks")
+    if not isinstance(tracks, list):
+        return None
+    return dict(payload)
+
+
+def catalogue(
+    collection_id: str,
+    *,
+    local_tracks: Mapping[str, Any] | Iterable[Any] | None = None,
+    artist_urn: str | None = None,
+    artist_names: Sequence[str] = (),
+    fetch: Fetcher | None = None,
+    max_age_s: float = CACHE_TTL_S,
+    force_refresh: bool = False,
+    max_tracks: int = MAX_CATALOGUE_TRACKS,
+    threshold: float = MISSING_MATCH_THRESHOLD,
+    remember: bool = True,
+) -> dict[str, Any]:
+    """An artist's catalogue: role buckets, each track flagged owned or missing.
+
+    Fetching happens **on selection** and only through the caller's ``fetch`` callable —
+    no speculative pre-fetch, and no credentials in this module. A fresh cache entry is
+    served without calling ``fetch`` at all; a miss with no fetcher raises
+    :class:`CatalogueUnavailable` rather than returning an empty catalogue that would
+    read as "this artist has released nothing".
+
+    The **fetched catalogue** is what gets cached, never the diff — the local side moves
+    every time the library does. The classifier's verdict per track is persisted to
+    ``track_identity`` unless ``remember=False``, so the local artist→track table fills
+    as the user browses and a pinned role survives the next pass.
+
+    An artist with **no linked account** is still catalogued: search by name needs no
+    URN. ``linked`` then comes back ``False`` and no track can reach ``high`` confidence
+    through the uploader signal.
+
+    Returns one list per :data:`BUCKET_KEYS`, ``in_library`` (the ``sc_id``s found in the
+    library), ``role_counts``, ``linked``, ``artist_urn``, ``fetched_at``, ``from_cache``,
+    ``truncated`` and ``stop_reason`` — which cap actually stopped the fetch, so a caller
+    can tell a retryable budget cut from a ceiling that a refetch cannot move.
+
+    Raises :class:`ArtistNotLinked` when there is neither a bound account nor a name to
+    search for — nothing at all to identify the artist by.
+    """
+    urn = artist_urn
+    if not urn:
+        link = schema.get_link(collection_id, PROVIDER_SOUNDCLOUD)
+        urn = str(link.get("remote_id") or "") if link else ""
+
+    names = tuple(str(n).strip() for n in artist_names if str(n or "").strip())
+    if not urn and not names:
+        raise ArtistNotLinked(
+            f"collection {collection_id!r} has no SoundCloud account bound and no name to "
+            "search for; link an account before fetching a catalogue"
+        )
+
+    payload = None if force_refresh else _cached_payload(collection_id, urn, max_age_s)
+    from_cache = payload is not None
+
+    if payload is None:
+        if fetch is None:
+            raise CatalogueUnavailable(
+                f"no cached catalogue for {collection_id!r} and no SoundCloud fetcher "
+                "available (not signed in?)"
+            )
+        raw = fetch(urn)
+        # The client's own result object reports a fetch cut short by its call budget or
+        # item cap. Losing that flag would present a partial catalogue as complete, and
+        # losing the *reason* would leave callers guessing which cap it was: a budget cut
+        # is worth retrying, every other cap is a property of the artist and is not.
+        fetch_reason = str(getattr(raw, "stop_reason", "") or "")
+        fetched = coerce_tracks(raw)
+        over_cap = len(fetched) > max_tracks
+        truncated = bool(getattr(raw, "truncated", False)) or over_cap
+        if fetch_reason:
+            logger.info(
+                "op=artist_catalogue collection=%s fetch_stopped reason=%s",
+                collection_id,
+                fetch_reason,
+            )
+        if over_cap:
+            logger.warning(
+                "op=artist_catalogue collection=%s capped fetched=%d cap=%d",
+                collection_id,
+                len(fetched),
+                max_tracks,
+            )
+            fetched = fetched[:max_tracks]
+        # The ceiling outranks whatever stopped the fetcher: more tracks came back than
+        # this cache holds, so a wider fetch has nowhere to put them.
+        stop_reason = STOP_REASON_MAX_TRACKS if over_cap else (fetch_reason if truncated else "")
+        payload = {
+            "artist_urn": normalize_user_urn(urn),
+            "fetched_at": _now_iso(),
+            "truncated": truncated,
+            "stop_reason": stop_reason,
+            "tracks": fetched,
+        }
+        schema.set_catalogue_cache(collection_id, payload)
+
+    identity = _identity()
+    tracks = coerce_tracks(payload.get("tracks") or [])
+    split = classify(
+        tracks,
+        urn,
+        artist_names=names,
+        overrides=identity.load_overrides(collection_id),
+    )
+    classified = split.diffable + split.mixes_and_sets
+    if remember and classified:
+        identity.remember_identities(collection_id, classified)
+
+    result = diff(local_tracks, split.diffable, threshold=threshold, artist_names=names)
+
+    annotated = {key: _annotate(rows, result) for key, rows in split.buckets.items()}
+    # The mixes bucket is deliberately excluded from the diff, so its rows carry
+    # in_library=None ("not checked"), never False.
+    annotated[BUCKET_MIXES] = _annotate(split.mixes_and_sets, Diff())
+
+    # Roles of the rows that were actually diffed. The excluded mixes carry a role too
+    # but are not counted here — they are never part of a missing figure.
+    counts = identity.role_counts(split.diffable)
+    logger.info(
+        "op=artist_catalogue collection=%s tracks=%d linked=%s roles=%s mixes=%d "
+        "in_library=%d cache=%s truncated=%s",
+        collection_id,
+        len(tracks),
+        bool(urn),
+        counts,
+        len(annotated[BUCKET_MIXES]),
+        len(result.in_library),
+        from_cache,
+        bool(payload.get("truncated")),
+    )
+
+    return {
+        **annotated,
+        "in_library": list(result.in_library),
+        "role_counts": counts,
+        "linked": bool(urn),
+        "artist_urn": normalize_user_urn(urn),
+        "fetched_at": str(payload.get("fetched_at") or ""),
+        "from_cache": from_cache,
+        "truncated": bool(payload.get("truncated")),
+        # Which cap stopped it, "" when nothing did. A cache entry written before this
+        # key existed reports "" too — unknown, never guessed as the retryable one.
+        "stop_reason": str(payload.get("stop_reason") or ""),
+    }
+
+
+__all__ = [
+    "BUCKET_FEATURED",
+    "BUCKET_FOR_ROLE",
+    "BUCKET_KEYS",
+    "BUCKET_MIXES",
+    "BUCKET_REMIXED_BY_OTHERS",
+    "BUCKET_THEIR_REMIXES",
+    "BUCKET_THEIR_TRACKS",
+    "BUCKET_UNCERTAIN",
+    "CACHE_TTL_S",
+    "LONG_FORM_MS",
+    "MATCH_ISRC",
+    "MATCH_NONE",
+    "MATCH_TITLE",
+    "MAX_CATALOGUE_TRACKS",
+    "MISSING_MATCH_THRESHOLD",
+    "STOP_REASON_MAX_TRACKS",
+    "TOKEN_OVERLAP_FLOOR",
+    "ArtistNotLinked",
+    "CatalogueError",
+    "CatalogueUnavailable",
+    "Classification",
+    "Diff",
+    "TrackMatch",
+    "catalogue",
+    "classify",
+    "coerce_track",
+    "coerce_tracks",
+    "derivation_key",
+    "diff",
+    "is_playable",
+    "match_score",
+    "mix_exclusion_reason",
+    "normalize_isrc",
+    "normalize_user_urn",
+    "title_stems",
+    "token_overlap",
+]

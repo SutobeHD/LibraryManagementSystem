@@ -1,6 +1,6 @@
 ---
 name: test-runner
-description: MUST BE USED PROACTIVELY after every non-trivial code change, before declaring the work done and before any commit/push. **Don't run pytest/cargo test inline and read the output yourself — this agent parses, classifies (real-bug / flaky / stale-test / setup-error), and summarises in 5 lines max.** Has explicit test-path mappings per area: app/database.py → tests/test_database.py, app/usb_pdb.py → tests/test_pdb_structure.py (byte fidelity!), app/usb_one_library.py → tests/test_onelibrary_wal_flush.py, src-tauri/src/audio/ → cargo test, frontend/src/audio/dawState/ → node --test (with the dawReducer resolver). Knows fragile areas (rbox panic isolation, FFmpeg-on-PATH, WebView2 versions). Returns: PASS/FAIL verdict + first failure detail + suggested next step.
+description: MUST BE USED PROACTIVELY after every non-trivial code change, before declaring the work done and before any commit/push. **Don't run pytest/cargo test inline and read the output yourself — this agent parses, classifies (real-bug / flaky / stale-test / setup-error), and summarises in 5 lines max.** Has explicit test-path mappings per area: app/database.py → tests/test_database.py, app/usb_pdb.py → tests/test_pdb_structure.py (byte fidelity!), app/usb_one_library.py → tests/test_onelibrary_wal_flush.py, src-tauri/src/audio/ → cargo test, frontend/src/audio/dawState/ → node --test (with the dawReducer resolver), frontend/src/components/artistHub/ + frontend/src/api/ → node --test (the catalogue hook brings its own resolver; never co-load two resolvers). Knows fragile areas (rbox panic isolation, FFmpeg-on-PATH, WebView2 versions). Returns: PASS/FAIL verdict + first failure detail + suggested next step.
 tools: Read, Bash, Grep, Glob
 ---
 
@@ -20,8 +20,9 @@ Edited file → relevant pytest target:
 | `app/services.py` | `pytest tests/test_services.py -v` |
 | `app/usb_manager.py`, `app/usb_*.py` | `pytest tests/test_usb_manager.py -v` |
 | `app/usb_pdb.py` | `pytest tests/test_pdb_structure.py -v` |
-| `app/usb_one_library.py` | `pytest tests/test_onelibrary_wal_flush.py -v` |
-| `app/soundcloud_*.py` | `pytest tests/test_soundcloud_api.py -v` |
+| `app/usb_one_library.py` | `pytest tests/test_onelibrary_wal_flush.py tests/test_usb_relocate.py -v` |
+| `app/soundcloud_*.py` | `pytest tests/test_soundcloud_api.py tests/test_soundcloud_log_redaction.py -v` |
+| `app/phrase_db_writer.py` | `pytest tests/test_phrase_db_writer.py -v` |
 | `app/analysis_*.py`, `app/anlz_*.py`, `app/phrase_generator.py` | `pytest tests/test_analysis.py -v` |
 | Anything else / wide refactor | `pytest -v` (full suite) |
 
@@ -40,12 +41,19 @@ If specific test name from the caller, pass it. Otherwise full crate.
 The frontend uses node's experimental VM modules + Mocha-style runners for state reducer tests:
 
 ```bash
-node --import ./frontend/src/audio/dawState/dawReducer.test.resolver.mjs --test frontend/src/audio/dawState/dawReducer.test.js   # frontend node:test (needs the resolver for extensionless imports)
+node --import ./frontend/src/audio/dawState/dawReducer.test.resolver.mjs --test frontend/src/audio/dawState/dawReducer.test.js   # DAW reducer — needs its resolver for extensionless imports
+node --import ./frontend/src/components/artistHub/useArtistCatalogue.test.resolver.mjs --test frontend/src/components/artistHub/useArtistCatalogue.test.js   # artist-hub catalogue hook — needs its OWN resolver
+node --test frontend/src/api/scRefreshClassification.test.js frontend/src/components/artistHub/mergeCopy.test.js frontend/src/components/artistHub/catalogueCopy.test.js frontend/src/components/artistHub/discoveryCopy.test.js   # plain suites, no resolver
 ```
 
+**Three commands, not one.** The two resolvers must never be co-loaded: `register()` installs a hook process-wide, and the artistHub one short-circuits `react` to a fake hooks runtime and `artistCatalogueApi` to a stub for **every** module in that process, not just its own suite.
+
 Known test files:
-- `frontend/src/audio/dawState/dawReducer.test.js` — DAW reducer transitions
-- Plus the `.test.resolver*.mjs` files which are module-resolution shims (don't run directly, they support the above)
+- `frontend/src/audio/dawState/dawReducer.test.js` — DAW reducer transitions (resolver: `dawReducer.test.resolver.mjs`)
+- `frontend/src/components/artistHub/useArtistCatalogue.test.js` — one batch download's lifecycle in the catalogue hook; the shipped regression was `download()` guarding its reset with `load`'s fetch counter, so a mid-run Update pinned the panel (resolver: `useArtistCatalogue.test.resolver.mjs`, plus its `…resolver-impl` / `…api-stub` / `…fake-react` shims)
+- `frontend/src/api/scRefreshClassification.test.js` — the three-way SC-refresh verdict (sc-expired / session-dead / transient)
+- `frontend/src/components/artistHub/{mergeCopy,catalogueCopy,discoveryCopy}.test.js` — pure copy builders
+- Plus the `.test.resolver*.mjs` / `.test.api-stub.mjs` / `.test.fake-react.mjs` files, which are module-resolution + runtime shims (don't run directly, they support the above)
 
 ### E2E — Tauri WebDriver
 
@@ -62,6 +70,8 @@ Run all three layers in sequence:
 pytest -v
 cargo test --manifest-path src-tauri/Cargo.toml
 node --import ./frontend/src/audio/dawState/dawReducer.test.resolver.mjs --test frontend/src/audio/dawState/dawReducer.test.js
+node --import ./frontend/src/components/artistHub/useArtistCatalogue.test.resolver.mjs --test frontend/src/components/artistHub/useArtistCatalogue.test.js
+node --test frontend/src/api/scRefreshClassification.test.js frontend/src/components/artistHub/mergeCopy.test.js frontend/src/components/artistHub/catalogueCopy.test.js frontend/src/components/artistHub/discoveryCopy.test.js
 ```
 
 E2E only on explicit request — it requires the driver running.
