@@ -106,7 +106,7 @@ Implements OAuth 2.1 + PKCE:
 | Crate | Version | Purpose |
 |-------|---------|---------|
 | `tauri` | 2.2 | Desktop framework, window management, Tauri IPC |
-| `tauri-plugin-shell` | — | `open::that()` — open URLs in system browser |
+| `tauri-plugin-shell` | — | Sidecar spawn (`app.shell().sidecar("rb-backend")` in `main.rs`) + the frontend's `plugin:shell\|open` command for external links (`utils/openExternal.js`, capability `shell:allow-open`; Cargo.lock resolves 2.3.5). `open::that()` is the separate `open` crate below |
 | `cpal` | — | Cross-platform audio output (device abstraction) |
 | `symphonia` | — | Audio decoding: MP3, FLAC, WAV, ALAC, ISOMP4 |
 | `rustfft` | — | FFT computation for waveform analysis |
@@ -130,11 +130,16 @@ Implements OAuth 2.1 + PKCE:
 
 ## Capabilities (`src-tauri/capabilities/main.json`)
 
-Minimum required permissions:
+Granted to the `main` window only (`identifier: "main-capability"`; the `sc-oauth` window gets none):
 - `core:default` — standard window/event APIs
-- `shell:allow-open` — open URLs in system browser (required for OAuth)
+- `shell:allow-spawn` — scoped to the sidecar `binaries/rb-backend` only
+- `shell:allow-execute` — bare entry, no inline `allow` scope
+- `shell:allow-open` — the shell plugin's `open` command (added 2026-09-26, `e387e36`; before it every external link in the desktop app was silently refused). Default scope: `plugins.shell.open` is unset in `tauri.conf.json`, so tauri-plugin-shell 2.3.5 validates targets against `^((mailto:\w+)|(tel:\w+)|(https?://\w+)).+`. Reached by `frontend/src/utils/openExternal.js` (`invoke('plugin:shell|open', { path })`) and by the plugin's own hook on `<a target="_blank">`. **Not** used by OAuth — `main.rs` opens the consent URL Rust-side via the `open` crate (`open::that`), which needs no capability. No custom regex, no `with` program (`docs/SECURITY.md`).
+- `dialog:default`, `dialog:allow-open`, `dialog:allow-save` — folder picker / save dialog
+- `fs:default`, `fs:allow-write-file`, `fs:allow-read-file`, `fs:allow-mkdir` — binary writes + folder creation (export)
+- `core:window:allow-minimize`, `core:window:allow-toggle-maximize`, `core:window:allow-close`, `core:window:allow-start-dragging` — custom title-bar window controls
 
-Add new permissions only when required. Document the reason in a comment in the JSON file.
+Add new permissions only when required. JSON carries no comments — record the reason in this section.
 
 ---
 
