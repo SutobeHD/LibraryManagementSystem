@@ -487,6 +487,30 @@ def test_empty_library_reports_everything_missing() -> None:
     assert result.missing == ("soundcloud:tracks:1",)
 
 
+def test_a_download_this_app_imported_is_owned_however_its_title_drifted() -> None:
+    """T-30: the registry link is identity; the recognizer may have renamed the file."""
+    owned = library(local("L7", "Starter"))
+    remote = [sc_track("1", "Promo Track 04")]
+
+    plain = cat.diff(owned, remote)
+    linked = cat.diff(owned, remote, downloaded={"soundcloud:tracks:1": "L7"})
+
+    assert plain.missing == ("soundcloud:tracks:1",)
+    assert linked.in_library == ("soundcloud:tracks:1",)
+    match = linked.matches["soundcloud:tracks:1"]
+    assert (match.local_track_id, match.method, match.score) == ("L7", cat.MATCH_DOWNLOADED, 1.0)
+
+
+def test_a_download_whose_track_left_the_library_is_not_owned() -> None:
+    result = cat.diff(
+        library(local("L1", "Overdrive")),
+        [sc_track("1", "Promo Track 04")],
+        downloaded={"soundcloud:tracks:1": "L99"},
+    )
+
+    assert result.missing == ("soundcloud:tracks:1",)
+
+
 # --------------------------------------------------------------------------- catalogue
 
 
@@ -593,6 +617,32 @@ def test_cache_holds_the_catalogue_not_the_diff() -> None:
     assert fetch.calls == 1
     assert after_download["from_cache"] is True
     assert after_download["in_library"] == ["soundcloud:tracks:1"]
+
+
+def test_the_download_lookup_sees_the_diffed_ids_and_decides_ownership() -> None:
+    cid = _linked_collection()
+    fetch = _Fetcher(
+        [sc_track("1", "Promo Track 04"), sc_track("2", "Boiler Room", duration_ms=3_600_000)]
+    )
+    asked: list[list[str]] = []
+
+    def lookup(sc_ids):
+        asked.append(list(sc_ids))
+        return {"soundcloud:tracks:1": "L7"}
+
+    payload = cat.catalogue(
+        cid,
+        local_tracks=library(local("L7", "Starter")),
+        artist_names=[ARTIST],
+        fetch=fetch,
+        downloaded_lookup=lookup,
+    )
+
+    # The mix is never diffed, so it is never asked about either.
+    assert asked == [["soundcloud:tracks:1"]]
+    assert payload["in_library"] == ["soundcloud:tracks:1"]
+    row = payload[cat.BUCKET_THEIR_TRACKS][0]
+    assert (row["local_track_id"], row["match_method"]) == ("L7", cat.MATCH_DOWNLOADED)
 
 
 def test_expired_cache_refetches() -> None:

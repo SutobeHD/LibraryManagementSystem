@@ -89,3 +89,34 @@ def test_many_calls_persist_no_corruption(registry):
         registry.register_download(sc_track_id=f"b{i}", title=f"t{i}", artist="A")
     assert len(registry.get_history(limit=100)) == 40
     assert registry.get_record("b39")["title"] == "t39"
+
+
+def test_local_track_ids_maps_only_imported_rows(registry):
+    """The artist catalogue's "downloaded" match (artist hub T-30)."""
+    for sc_id in ("11", "12", "13"):
+        registry.register_download(sc_track_id=sc_id, title="t", artist="A")
+    registry.update_analysis(sc_track_id="11", local_track_id="501")
+    # The historical tuple-string bug: never a usable id, so never a link.
+    registry.update_analysis(sc_track_id="13", local_track_id="('502', {'bpm': 128.0})")
+
+    assert registry.local_track_ids(["11", "12", "13", "99", ""]) == {"11": "501"}
+    assert registry.local_track_ids([]) == {}
+
+
+def test_local_track_ids_reads_past_the_parameter_ceiling(registry):
+    for i in range(1, 1201):
+        registry.register_download(sc_track_id=str(i), title="t", artist="A")
+        registry.update_analysis(sc_track_id=str(i), local_track_id=f"L{i}")
+
+    found = registry.local_track_ids(str(i) for i in range(1, 1201))
+
+    assert len(found) == 1200
+    assert found["1200"] == "L1200"
+
+
+def test_local_track_ids_never_creates_the_registry(tmp_path, monkeypatch):
+    path = tmp_path / "never-downloaded.db"
+    monkeypatch.setattr(dr, "_REGISTRY_DB", path)
+
+    assert dr.local_track_ids(["1", "2"]) == {}
+    assert not path.exists()

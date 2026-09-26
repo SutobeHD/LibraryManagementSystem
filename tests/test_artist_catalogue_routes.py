@@ -210,6 +210,15 @@ def _no_network(monkeypatch):
     monkeypatch.setattr(main.sc_downloader, "download_track", _no_fetch)
 
 
+@pytest.fixture(autouse=True)
+def _own_download_registry(tmp_path, monkeypatch):
+    """The catalogue reads the download registry (T-30) — never the developer's own."""
+    from app import download_registry
+
+    monkeypatch.setattr(download_registry, "_REGISTRY_DB", tmp_path / "download_registry.db")
+    return download_registry
+
+
 @pytest.fixture
 def signed_in(monkeypatch):
     monkeypatch.setattr(main.sc_auth, "get_access_token", lambda **_kw: FAKE_TOKEN)
@@ -415,6 +424,29 @@ def test_deleted_soundcloud_account_returns_artist_gone(
     _assert_no_buckets(body)
 
 
+def test_a_track_this_app_downloaded_counts_as_owned_by_identity(
+    fetched: str, auth_token, monkeypatch, _own_download_registry
+) -> None:
+    """T-30: the registry's sc_track_id -> local id link beats any title drift."""
+    reg = _own_download_registry
+    reg.init_registry()
+    reg.register_download(sc_track_id="101", title="Starter", artist=ARTIST_NAME)
+    reg.update_analysis(sc_track_id="101", local_track_id="555")
+    renamed = {"555": {"ID": "555", "Title": "Renamed On The Way In", "Artist": ARTIST_NAME}}
+    monkeypatch.setattr(main, "db", _LibraryDB(tracks=renamed))
+
+    body = _request("GET", f"/api/artists/{fetched}/catalogue", headers=auth_token).json()
+
+    row = next(t for t in body["their_tracks"] if t["sc_id"] == OWN_TRACK["sc_id"])
+    assert (row["in_library"], row["local_track_id"], row["match_method"]) == (
+        True,
+        "555",
+        "downloaded",
+    )
+    other = next(t for t in body["their_tracks"] if t["sc_id"] == OWN_TRACK_2["sc_id"])
+    assert other["in_library"] is False
+
+
 def test_catalogue_splits_into_role_buckets_and_reports_the_budget(
     fetched: str, auth_token
 ) -> None:
@@ -506,9 +538,9 @@ class TestForcedRefreshCooldown:
         """Nothing was spendable, so the first refresh that CAN fetch must still fetch."""
         url = f"/api/artists/{linked}/catalogue?refresh=true"
         assert _request("GET", url, headers=auth_token).json()["status"] == "not_connected"
-        assert (
-            linked not in main._artist_forced_refresh_at
-        ), "a read that could not fetch stamped the window"
+        assert linked not in main._artist_forced_refresh_at, (
+            "a read that could not fetch stamped the window"
+        )
 
         urns = self._live_sources(monkeypatch)
         monkeypatch.setattr(main.sc_auth, "get_access_token", lambda **_kw: FAKE_TOKEN)

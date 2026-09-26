@@ -20,7 +20,7 @@ import hashlib
 import logging
 import sqlite3
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -163,6 +163,42 @@ def get_record(sc_track_id: str) -> dict | None:
     except sqlite3.Error as exc:
         logger.error("[Registry] get_record failed: %s", exc)
         return None
+
+
+#: Ids per ``IN (...)`` query — under SQLite's historic 999-parameter ceiling.
+_LOOKUP_CHUNK = 500
+
+
+def local_track_ids(sc_track_ids: Iterable[str]) -> dict[str, str]:
+    """``sc_track_id`` -> the library id this app imported it as, for the given ids.
+
+    Bulk read behind the artist catalogue's "downloaded" match: one connection, one
+    query per chunk. Rows not imported yet, and ids an old build stored mangled (the
+    historical tuple-string bug), are left out — the caller then falls back to its
+    title match. An unreadable registry answers ``{}``.
+    """
+    wanted = sorted({str(i) for i in sc_track_ids if i})
+    out: dict[str, str] = {}
+    # A read must not create the file: nothing downloaded yet means nothing linked.
+    if not wanted or not _registry_path().exists():
+        return out
+    try:
+        with _conn() as db:
+            for start in range(0, len(wanted), _LOOKUP_CHUNK):
+                chunk = wanted[start : start + _LOOKUP_CHUNK]
+                # Only "?" placeholders are joined in; every value is bound.
+                sql = (
+                    "SELECT sc_track_id, local_track_id FROM download_history "
+                    "WHERE sc_track_id IN (" + ",".join("?" * len(chunk)) + ")"
+                )
+                for row in db.execute(sql, chunk).fetchall():
+                    local = str(row["local_track_id"] or "").strip()
+                    if local.isalnum():
+                        out[str(row["sc_track_id"])] = local
+    except sqlite3.Error as exc:
+        logger.error("[Registry] local_track_ids failed: %s", exc)
+        return {}
+    return out
 
 
 def is_already_downloaded(sc_track_id: str) -> bool:

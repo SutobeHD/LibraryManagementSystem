@@ -1844,6 +1844,7 @@ def _artist_catalogue_view(
             artist_names=names,
             fetch=fetcher,
             force_refresh=forced,
+            downloaded_lookup=_downloaded_local_ids,
         )
     except artist_catalogue.ArtistNotLinked:
         return _artist_state(
@@ -2372,6 +2373,18 @@ def _sc_numeric_track_id(sc_id: str) -> str | None:
     """`soundcloud:tracks:123` -> `123`. The downloader speaks numeric ids."""
     tail = str(sc_id or "").strip().rsplit(":", 1)[-1]
     return tail if tail.isdigit() else None
+
+
+def _downloaded_local_ids(sc_ids: Sequence[str]) -> dict[str, str]:
+    """`soundcloud:tracks:N` -> the library id this app's downloader imported it as.
+
+    The catalogue's "downloaded" match (artist hub T-30): one bulk registry read, so a
+    track fetched from "missing" counts as owned by identity, whatever the recognizer
+    renamed on the way in.
+    """
+    numeric = {sc_id: n for sc_id in sc_ids if (n := _sc_numeric_track_id(sc_id))}
+    found = download_registry.local_track_ids(numeric.values())
+    return {sc_id: found[n] for sc_id, n in numeric.items() if n in found}
 
 
 def _artist_download_selection(

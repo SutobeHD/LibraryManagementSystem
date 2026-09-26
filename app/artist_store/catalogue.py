@@ -151,6 +151,8 @@ _ISRC_STRIP = re.compile(r"[\s\-]+")
 MATCH_ISRC = "isrc"
 MATCH_TITLE = "title"
 MATCH_NONE = "none"
+#: This app downloaded that very SoundCloud track and imported it under the local id.
+MATCH_DOWNLOADED = "downloaded"
 
 
 # ── Errors ────────────────────────────────────────────────────────────────────
@@ -594,7 +596,7 @@ class _LocalIndex:
     derivation key before any fuzzy work happens.
     """
 
-    __slots__ = ("by_artist", "by_isrc", "by_token", "entries")
+    __slots__ = ("by_artist", "by_isrc", "by_token", "entries", "ids")
 
     def __init__(self, local_tracks: Mapping[str, Any] | Iterable[Any] | None) -> None:
         self.entries: list[_LocalEntry] = []
@@ -603,7 +605,11 @@ class _LocalIndex:
         # ISRC -> first local track id carrying it. Exact identity, consulted before
         # any title work. Indexed even for a track without a usable title.
         self.by_isrc: dict[str, str] = {}
+        # Every local id, so a download-registry link is only trusted while its track
+        # is still in the library.
+        self.ids: set[str] = set()
         for track_id, track in _iter_local(local_tracks):
+            self.ids.add(track_id)
             isrc = normalize_isrc(track.get("ISRC") or track.get("isrc"))
             if isrc:
                 self.by_isrc.setdefault(isrc, track_id)
@@ -706,10 +712,16 @@ def diff(
     *,
     threshold: float = MISSING_MATCH_THRESHOLD,
     artist_names: Sequence[str] = (),
+    downloaded: Mapping[str, str] | None = None,
 ) -> Diff:
     """Which remote tracks are already owned, and which are genuinely missing.
 
-    **ISRC first.** When the remote track and a local track both carry a usable ISRC
+    **Downloaded first** (artist hub T-30). ``downloaded`` maps ``sc_id`` to the local
+    id this app's downloader imported that very track as. While that id is still in
+    the library the track is owned — ``method="downloaded"``, score 1.0 — however far
+    its title drifted (the recognizer may have fixed the names on the way in).
+
+    **Then ISRC.** When the remote track and a local track both carry a usable ISRC
     and they are equal, that is the same recording by definition — ``owned``, score
     1.0, ``method="isrc"``, no title work. Only when either side lacks an ISRC does the
     title path run.
@@ -726,6 +738,11 @@ def diff(
 
     for track in coerce_tracks(remote_tracks):
         sc_id = track["sc_id"]
+        local_by_download = (downloaded or {}).get(sc_id)
+        if local_by_download and local_by_download in index.ids:
+            matches[sc_id] = TrackMatch(sc_id, local_by_download, 1.0, MATCH_DOWNLOADED)
+            owned.append(sc_id)
+            continue
         isrc = track.get("isrc") or ""
         local_by_isrc = index.by_isrc.get(isrc) if isrc else None
         if local_by_isrc is not None:
@@ -818,8 +835,13 @@ def catalogue(
     max_tracks: int = MAX_CATALOGUE_TRACKS,
     threshold: float = MISSING_MATCH_THRESHOLD,
     remember: bool = True,
+    downloaded_lookup: Callable[[Sequence[str]], Mapping[str, str]] | None = None,
 ) -> dict[str, Any]:
     """An artist's catalogue: role buckets, each track flagged owned or missing.
+
+    ``downloaded_lookup(sc_ids) -> {sc_id: local id}`` is the caller's window onto the
+    download registry — this module never opens it — so a track this app downloaded
+    counts as owned by identity, not by title similarity (see :func:`diff`).
 
     Fetching happens **on selection** and only through the caller's ``fetch`` callable —
     no speculative pre-fetch, and no credentials in this module. A fresh cache entry is
@@ -912,7 +934,16 @@ def catalogue(
     if remember and classified:
         identity.remember_identities(collection_id, classified)
 
-    result = diff(local_tracks, split.diffable, threshold=threshold, artist_names=names)
+    downloaded = (
+        downloaded_lookup([t["sc_id"] for t in split.diffable]) if downloaded_lookup else None
+    )
+    result = diff(
+        local_tracks,
+        split.diffable,
+        threshold=threshold,
+        artist_names=names,
+        downloaded=downloaded,
+    )
 
     annotated = {key: _annotate(rows, result) for key, rows in split.buckets.items()}
     # The mixes bucket is deliberately excluded from the diff, so its rows carry
@@ -961,6 +992,7 @@ __all__ = [
     "BUCKET_UNCERTAIN",
     "CACHE_TTL_S",
     "LONG_FORM_MS",
+    "MATCH_DOWNLOADED",
     "MATCH_ISRC",
     "MATCH_NONE",
     "MATCH_TITLE",
