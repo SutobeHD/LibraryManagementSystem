@@ -37,6 +37,7 @@ superseded_by: []
 - 2026-09-08 — `implement/inprogress_` — **two owner refinements** recorded: (1) identification by NAME with remix-aware roles + confidence, search by name + aliases, local `track_identity` table keyed by ISRC/URN, link stays manual — supersedes the uploader-only rule from T-13; (2) the SoundCloud login must survive restarts and days away → silent refresh (persistent-login Option A absorbed here). Cause confirmed in code: Rust parses `refresh_token`/`expires_in` and drops them, Python stores only the access token, nothing refreshes. Tasks T-19 + T-20 added; build running.
 - 2026-09-09 — `implement/inprogress_` — M2b + M3 shipped, task queue closed. `cb414fa` + `52771e9` (T-19 persistent login, T-20 name-driven remix-aware identity), `727abca` (T-11 By-Artist retirement, T-11b USB relocation, T-16 discovery, T-17 idle signal + background sync), `ac6533e` + this commit (T-18 doc sync). Four verify findings fixed pre-commit, two of them able to destroy audio: relocation matched candidates on filename + size alone (both the move and the delete branch now require a content fingerprint, unreadable = unproven), discovery reported `ok` for a walk aborted mid-run, and the sync tests drained the live probe registry. T-11's mappings half needed no code: `_normalize_artist_name` (`app/live_database.py:605`) already applies `metadata_mappings.json` before `db.artists` is built, so the store never sees an unmapped name. **Not promoted to `implemented_` — that needs owner sign-off**, and one gap is open: the background-sync call budget is per pass, not per day.
 - 2026-09-21 — `implement/inprogress_` — fix wave on `feat/artist-hub`, docs re-synced to it. The Stage-1b gap is **closed** — `sync()`'s own call path now has `tests/test_usb_relocate.py::TestOneLibrarySyncStage1b`. The relocation fingerprint from `727abca` is widened: it now hashes the whole file up to 128 KiB (only above that both 64 KiB edges) — the edge-only version hashed the head alone for 64 KiB < size <= 128 KiB, so two different short recordings sharing an oversized ID3 cover-art frame fingerprinted identically, a defect that survived `727abca`. Background sync now separates `partial:` (budget cut it short — retried first, bounded by `MAX_CONSECUTIVE_PARTIALS`) from `capped:` (a permanent ceiling — counted as synced), the catalogue payload carries `stop_reason`, and `GET /api/artists/{id}/catalogue` + `GET /api/artists/discover` are `require_session`-gated with a 60 s per-artist forced-refresh cooldown. **The per-pass/per-day gap stands: re-verified against `app/artist_store/sync.py` + `app/main.py:_artist_sync_scheduler` — every pass builds a fresh `CallBudget(limit=SYNC_CALL_BUDGET=60)`, the scheduler wakes every `ARTIST_SYNC_POLL_INTERVAL_S` (15 min) and nothing accumulates across passes; the only brake on repeat work is the per-artist 6 h TTL, which skips a fresh artist at zero calls.** Still `inprogress_` — promotion is the owner's call.
+- 2026-09-26 — `implement/inprogress_` — **owner refinement** (interactive): *"Artists speichern und ihnen Tracks zuschreiben, deren Social Media finden, Tracks von ihnen finden, welche nicht von ihnen hochgeladen wurden, und Remixe von ihnen."* Gap check vs. shipped branch: catalogue by name already finds label/promo uploads + their remixes (T-20); **missing**: (1) local attribution reads only the `Artist` string — `Remixer` field + title credits ignored, no manual assign/exclude, no backend "an artist's local tracks" call (frontend stitches it from `art_{i}` ids); (2) social links — explicit non-goal until now, nothing calls `/users/{urn}/web-profiles`; (3) no external URL opens in the desktop app at all (`shell:allow-open` missing from `capabilities/main.json`, shell plugin 2.3.5 intercepts `_blank` anchors and gets refused). Tasks T-21..T-27 added (M4). Also found: `test_usb_relocate.py::test_exact_name_wins_over_a_case_variant` red on every case-sensitive volume (= CI), fixed as T-21. Branch continues on `claude/loving-goodall-90uf7w` (fast-forward of `feat/artist-hub`), PR #58 — first CI run the branch ever got.
 
 ## Original Idea (verbatim — never edit)
 
@@ -89,12 +90,14 @@ Library has no artist-level view. Artist exists only as a per-track string — n
 - **Suggestions, 2 tiers** (owner, 2026-09-04): **Tier 1 local backlog** — artists present in the library, ranked by owned-track count desc, already-favourited excluded. **Tier 2 external SC discovery** — related/adjacent artists not in the library, seeded from the favourites. **Metric:** Tier 1 needs 0 network calls; both tiers exclude already-added.
 - **Download / local-sync convenience** (owner, 2026-09-04): per-artist **Update** button (manual, immediate) + **background sync while the app is open and idle** (no sync under load), mode configurable in Settings. **Metric:** background sync never runs during analysis/export/playback load; manual Update completes a 1-artist diff in < 5 s.
 - Reuse, don't rebuild: download goes through the existing SC downloader / unified-downloader path; matching through `app/external_track_match.py`; normalisation shares rules with `metadata-name-fixer`.
+- **Local attribution, remix-aware, manually correctable** (owner, 2026-09-26): an artist's local tracks = `Artist` field (registry grouping, unchanged) **plus** `Remixer` field **plus** title credits (`(X Remix)`, `X Remix` tail, `feat. X`, `X - Title` prefix), each with the T-20 role vocabulary (`primary` / `remixer` / `remixed_by_other` / `featured`) + a `source`. Manual **assign** (any track, any role) and **exclude** (auto-match wrong) persist in `artists.db`, keyed by library content id. One backend call serves the artist page; the Rekordbox projection uses the same set, so an artist's playlist now carries their remixes of other people's tracks. **Metric:** `Overdrive (Boys Noize Remix)` by another artist appears under Boys Noize as `remixer`; an excluded track leaves the page and the playlist on the next sync; the old Artist-field set is a subset of the new one (no regression).
+- **Social links** (owner, 2026-09-26): find + store the artist's own profiles (Instagram, SoundCloud, Spotify, Bandcamp, Beatport, RA, YouTube, X, TikTok, Facebook, website, …). Sources, strongest first: manual > SoundCloud profile (`/users/{urn}/web-profiles` + `website`, artist-curated = HIGH) > MusicBrainz url-rels (anchored via the linked SC permalink, or a user-confirmed name match = HIGH) > URLs/handles in the SC bio (known services only = LOW). User-initiated only (Find links / after linking an account). Hide survives re-fetch. Opening uses the system browser. **Metric:** a linked artist with SC web-profiles shows them after one click; a hidden link never returns; no link with a non-http(s) scheme can be stored or opened.
 
 **Non-goals** (deliberately out of scope)
 - Label / genre / setlist folder projection — side-thought from the Original Idea. Schema + projection engine designed **generic** (`collection_kind`), but only `artist` implemented here. Follow-up doc.
 - New download backend. This doc consumes the existing/planned downloader, it does not extend it.
-- Artist bio / images / social-graph browsing. Overview = tracks, not a fan page.
-- Non-SC artist sources (Spotify/Bandcamp/Beatport artist pages) in v1.
+- ~~Artist bio / images / social-graph browsing.~~ **Amended 2026-09-26:** links to the artist's own profiles are IN (Goal above). Still out: bio text, image galleries, follower/following graph browsing. Overview = tracks + where to find the artist.
+- Non-SC artist **catalogue** sources (Spotify/Bandcamp/Beatport track lists) in v1. MusicBrainz is used for profile links only — never as a track source.
 - Auto-merge without user confirmation. Detection is automatic; the merge click is not.
 - Rewriting the per-track `artist` **string** for reasons other than a merge — that is `metadata-name-fixer`'s job. (A merge itself **does** now rewrite tags — owner decision 2026-09-04.)
 
@@ -456,6 +459,11 @@ Resolves the remaining design OQs: **OQ7** finish the stubbed `app/sidecar.py:39
 | T10 | USB relocation loses audio (collision, case-only rename, cross-volume) | Same-volume `os.replace` only; two-step rename for case-only; collision falls back to copy-and-verify; never delete a source before the destination verifies | `test_usb_relocate_case_only`, `test_usb_relocate_collision_falls_back` |
 | T11 | A foreign upload is attributed to the artist and auto-queued | Identity by role + confidence: uploader-URN/ISRC = HIGH, deterministic name fold on title prefix / remixer credit = MEDIUM, tags = LOW; a name only inside `(X Remix)` is never `primary`; auto-queue needs {primary, remixer} × {HIGH, MEDIUM}; `user_override` wins | `tests/test_artist_identity.py` |
 | T12 | Refresh token or client_secret leaks (log, payload, disk) | Single keyring blob, never logged at any level, never in a response, `_log_url` strips queries; caplog canary test | `tests/test_soundcloud_auth.py` |
+| T13 | Link from SC / MusicBrainz / a bio / a manual paste carries a hostile URL (`javascript:`, `file:`, a UNC path, embedded credentials, a lookalike host) | `links.classify_url`: http(s) only, userinfo refused, dotted non-IP host, length cap, control chars refused; service = exact host-suffix table, a lookalike is at best a generic `website`; generic websites only from artist-curated or manual sources; stored canonical https; frontend opens via `plugin:shell|open` whose 2.3.5 default scope is `^((mailto:\w+)|(tel:\w+)|(https?://\w+)).+`; rendered as buttons, never HTML | `tests/test_artist_links.py` (classify table), `openExternal.test.js` |
+| T14 | MusicBrainz ban / abuse (1 req/s per IP, UA mandatory) | Shared `app/musicbrainz_client.py`: process-wide 1.1 s spacing lock, `MusicLibraryManager/<ver> ( repo URL )` UA, one 503 retry honouring `Retry-After` (capped), user-initiated only, MBID validated before it enters a path | `tests/test_musicbrainz_client.py` |
+| T15 | Wrong artist's profiles shown (name collision on MusicBrainz / SC search) | MB only auto-binds through the linked SC permalink URL relation (exact); a name search yields **candidates** the user confirms; SC account search only **suggests** — linking stays a click | `test_mb_name_match_never_autobinds`, `test_sc_candidates_never_link` |
+| T16 | Manual assignment points at a vanished / re-used content id | Assignment row snapshots title + artist; a missing id is listed as `assigned_missing`, never silently re-pointed; exclude wins over every automatic match | `tests/test_artist_attribution.py` |
+| T17 | Widening the desktop capability (`shell:allow-open`) lets page JS open arbitrary programs | Permission only reaches the plugin's `open` command; scope left at the 2.3.5 default regex (http(s)/mailto/tel) — no custom `open` config, no `with` program; nothing else added | config review; `openExternal.test.js` refuses non-http(s) before any invoke |
 
 ### Residual risk
 
@@ -519,6 +527,15 @@ First open of the Artists tab runs the import and shows a one-time "N alias grou
 - Changed: `POST /api/artist/soundcloud` (`app/main.py:2714-2717`) — the stub finally writes, now into `artists.db`.
 - Retired: the "By Artist" branch of the smart-playlist generator.
 - Changed: USB export gains a relocation pass — no new route, the existing export flow reports `relocated` alongside `copied`.
+- New 2026-09-26 (owner refinement, M4):
+  - `GET /api/artists/{id}/local-tracks` *(read)* — attributed local tracks, role + source per row, `counts`, `excluded`, `assigned_missing`. Works for a derived (never-stored) id as long as library names resolve to it.
+  - `POST /api/artists/{id}/local-tracks/{track_id}` — `{action: assign|exclude|clear, role?, name?}`; creates the collection from `name` when the row was never stored.
+  - `GET /api/artists/{id}/local-tracks/candidates?q=` *(read)* — library search for "Add tracks", attributed rows flagged.
+  - `GET /api/artists/{id}/links` *(read)* — stored links + last fetch + MB binding.
+  - `POST /api/artists/{id}/links/refresh` — SC profile + web-profiles + bio, MusicBrainz; per-source status; MB name candidates when unanchored.
+  - `POST /api/artists/{id}/links` `{url}` · `POST /api/artists/{id}/links/remove` `{url_key}` · `POST /api/artists/{id}/links/restore` — manual add, hide/delete, unhide.
+  - `POST /api/artists/{id}/links/musicbrainz` `{mbid}` / `DELETE …/links/musicbrainz` — confirm / drop a MusicBrainz match.
+  - `GET /api/artists/{id}/soundcloud/candidates` — session-gated SC user search (1 call) to **suggest** the account to link.
 
 ### Frontend (React)
 
@@ -526,9 +543,11 @@ First open of the Artists tab runs the import and shows a one-time "N alias grou
 - Changed: `main.jsx` mounts `ArtistHubView` for `lib-artists`; `MetadataView.jsx` hands off the artist branch and keeps its GitMerge button wired to the new dialog.
 - Settings: per-artist default sync mode (Auto / Review / Off), background-sync on/off.
 
+- New 2026-09-26: `artistHub/ArtistLinks.jsx` (links strip: find / add / hide / restore, MB confirm, SC account suggestions), local panel grouped by role with exclude / re-role / "Add tracks" search, TrackTable `contextActions` prop + app-wide "Artist zuordnen…" item, `utils/openExternal.js`.
+
 ### Tauri (Rust commands)
 
-None — no new IPC.
+None — no new IPC. **2026-09-26:** `capabilities/main.json` gains `shell:allow-open` (plugin already registered; default scope) so external links open in the system browser — until now every `_blank` link in the desktop app was silently refused.
 
 ### CLI / sidecar logs
 
@@ -572,6 +591,16 @@ No new stdout markers.
 | T26 | py | `tests/test_usb_relocate.py::test_collision_falls_back_to_copy_verify` | existing destination file is never clobbered | Threat T10 |
 | T27 | py | `tests/test_usb_relocate.py::test_pure_rename_copies_zero_bytes` | relocation moves, does not copy | Perf |
 | T28 | py | `tests/test_artist_sc.py::test_definitely_theirs_uploader_id_only` | a `(X Remix)` upload by another user lands in the remix list | Threat T11, Goal |
+| T29 | py | `tests/test_usb_relocate.py::test_exact_name_wins_over_a_case_variant` + `test_a_case_variant_another_track_plans_is_never_taken` | case variant of own destination merges; one planned by a second track is never taken | T-21, Threat T10 |
+| T30 | py | `tests/test_artist_attribution.py` | Artist field = old set; `Remixer` field / `(X Remix)` / `X Remix` tail → `remixer`; `feat.` → `featured`; other's remix → `remixed_by_other`; version words never a person | T-24, Goal |
+| T31 | py | `tests/test_artist_attribution.py` | assign adds any track with a role; exclude beats every auto match; vanished id → `assigned_missing` | T-24, Threat T16 |
+| T32 | py | `tests/test_artist_projection.py` | projection membership = attribution (remix credit added, excluded removed), still idempotent | T-24 |
+| T33 | py | `tests/test_artist_links.py` | classify table: services, handles, canonical https, hostile schemes / userinfo / lookalikes refused | T-22, Threat T13 |
+| T34 | py | `tests/test_artist_links.py` | precedence manual > SC profile > MB > bio; hide survives re-fetch; a source that failed keeps its rows | T-22 |
+| T35 | py | `tests/test_musicbrainz_client.py` | spacing ≥ 1 s across calls, UA sent, 503 retried once, 404 → None, bad MBID refused before any request | T-22, Threat T14 |
+| T36 | py | `tests/test_artist_links_routes.py` | refresh / add / remove / restore / MB confirm gated; MB name match never auto-binds; SC candidates never link | T-22, T-23, Threats T3 T15 |
+| T37 | js | `frontend/src/utils/openExternal.test.js` | only http(s) reaches the opener; Tauri path invokes `plugin:shell|open`, browser path `window.open` | T-25, Threats T13 T17 |
+| T38 | js | `frontend/src/components/artistHub/linksCopy.test.js` + `localCopy.test.js` | service labels / source sentences / role groups never claim what the payload lacks | T-25, T-26 |
 
 ## Task Queue
 
@@ -608,6 +637,16 @@ No new stdout markers.
 - [x] **T-16:** `get_related_artists` + local co-occurrence fallback → Tier-2 panel — Step 10, tests T16 — **DONE** shipped 2026-09-09 (`727abca`). One hop per linked favourite, never on a result; tier 2 is zero-call and always runs. Per-source state reported, and an abort now outranks a partial success — reporting `ok` for a walk stopped by a 429 made the UI claim both sources had answered about favourites that were never asked.
 - [x] **T-17:** idle signal + background sync job + per-artist sync mode in Settings — Step 11 — **DONE** shipped 2026-09-09 (`727abca`). The idle signal did not exist and is composed from the existing trackers, failing closed on every probe; `analyze-batch` is genuinely unobservable and is listed as such rather than assumed idle. Never downloads (`downloads_queued` is always `0`, observable in the run record). Off by default. **Known limit: the call budget is per pass, not per day** — at the shipped interval that is a ~5760-call/day ceiling.
 - [x] **T-18:** doc sync (`backend-index`, `frontend-index`, `FILE_MAP`, `MAP*`, `CHANGELOG`) — folds into each PR — **DONE** 2026-09-09. `MAP*` regenerated from the committed tree (`ac6533e`), not the working tree, which carries untracked files from a parallel session; `FILE_MAP` + `CHANGELOG` in this commit.
+
+**M4 — owner refinements 2026-09-26 (on `claude/loving-goodall-90uf7w`, PR #58)**
+
+- [x] **T-21:** USB relocation merges a case-variant folder on case-sensitive volumes (`planned_dests` → `Counter`, own-destination fold stays eligible unless a 2nd track plans it) — tests T29 — **DONE** 2026-09-26 (`9e88b04`)
+- [ ] **T-22:** social links backend — schema v3 `web_links` + `link_fetch`; `app/artist_store/links.py` (classify / precedence / hide); `app/musicbrainz_client.py` (shared, throttled); SC `get_user` + `get_user_web_profiles`; links routes — tests T33–T36
+- [ ] **T-23:** SC account suggestions — `search_users` + `GET …/soundcloud/candidates` (suggest only, linking stays a click) — tests T36
+- [ ] **T-24:** local attribution — `app/artist_store/attribution.py` + schema v3 `track_assignments`; `local-tracks` routes; projection membership switches to it — tests T30–T32
+- [ ] **T-25:** frontend links strip + `openExternal` + `shell:allow-open` — tests T37, T38
+- [ ] **T-26:** frontend local panel by role, exclude / re-role / Add tracks, TrackTable `contextActions` + app-wide "Artist zuordnen…" — tests T38
+- [ ] **T-27:** doc sync (`backend-index`, `frontend-index`, `rust-index`, `FILE_MAP`, `SECURITY`, `MAP*`, `CHANGELOG`)
 
 ## Review
 
