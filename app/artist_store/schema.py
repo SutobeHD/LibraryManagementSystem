@@ -39,7 +39,7 @@ logger = logging.getLogger("ARTIST_STORE")
 _APP_DIRNAME = "MusicLibraryManager"
 _DB_FILENAME = "artists.db"
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 KIND_ARTIST = "artist"
 
@@ -226,9 +226,64 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL_V2_TRACK_IDENTITY)
 
 
+# v3: owner refinement 2026-09-26. Two independent additions.
+#
+# ``web_links`` — the artist's own profiles (Instagram, Bandcamp, RA, …). ``url_key``
+# is ``links.url_key()``: one row per profile however it was spelled (``www.``, case,
+# trailing slash). ``hidden`` is the user's removal of a FETCHED link; it has to live
+# in the row, or the next Find-links click would bring the link straight back.
+# ``link_fetch`` records what the last refresh asked and what each source answered,
+# so the UI can say "MusicBrainz was not reached" instead of implying "no links".
+#
+# ``track_assignments`` — the manual half of local attribution. ``assign`` adds a
+# library track to the artist under a role; ``exclude`` removes an automatic match.
+# Keyed by the library's content id (Rekordbox ``ID`` / XML ``TrackID``) — stable
+# across loads, unlike ``art_{i}``. Title + artist are a snapshot, so a track that
+# has since left the library can still be named instead of vanishing silently.
+_DDL_V3_LINKS_AND_ASSIGNMENTS = """
+CREATE TABLE IF NOT EXISTS web_links (
+    collection_id TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    url_key       TEXT NOT NULL,                  -- links.url_key(): one row per profile
+    url           TEXT NOT NULL,                  -- canonical https URL, what the UI opens
+    service       TEXT NOT NULL,                  -- links.SERVICES key or 'website'
+    handle        TEXT,                           -- @name / slug when derivable
+    title         TEXT,                           -- the source's own label, if any
+    source        TEXT NOT NULL,                  -- manual|soundcloud_profile|musicbrainz|soundcloud_bio
+    confidence    TEXT NOT NULL,                  -- high|medium|low
+    hidden        INTEGER NOT NULL DEFAULT 0,     -- removed by the user; a re-fetch keeps it hidden
+    first_seen    TEXT NOT NULL,
+    last_seen     TEXT NOT NULL,
+    PRIMARY KEY (collection_id, url_key)
+);
+CREATE TABLE IF NOT EXISTS link_fetch (
+    collection_id TEXT PRIMARY KEY REFERENCES collections(id) ON DELETE CASCADE,
+    fetched_at    TEXT NOT NULL,
+    sources_json  TEXT NOT NULL                   -- {source: status} of the last refresh
+);
+CREATE TABLE IF NOT EXISTS track_assignments (
+    collection_id TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    track_id      TEXT NOT NULL,                  -- library content id, never art_{i}
+    action        TEXT NOT NULL,                  -- 'assign' | 'exclude'
+    role          TEXT,                           -- assign only: see IDENTITY_ROLES
+    title         TEXT,                           -- snapshot at assignment time
+    artist        TEXT,
+    created_at    TEXT NOT NULL,
+    PRIMARY KEY (collection_id, track_id)
+);
+CREATE INDEX IF NOT EXISTS ix_track_assignments_track ON track_assignments(track_id);
+"""
+
+
+def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
+    conn.executescript(_DDL_V3_LINKS_AND_ASSIGNMENTS)
+
+
 # vN -> vN+1 steps. Additive only — the base DDL above is frozen (users already hold a
 # v1 file), so every later table arrives through a step here.
-_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {1: _migrate_v1_to_v2}
+_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
+    1: _migrate_v1_to_v2,
+    2: _migrate_v2_to_v3,
+}
 
 
 def migrate(conn: sqlite3.Connection) -> int:
@@ -860,3 +915,326 @@ def delete_track_identity(collection_id: str, sc_urn: str) -> bool:
         )
         conn.commit()
     return cur.rowcount > 0
+
+
+# --------------------------------------------------------------------------- web links
+
+LINK_SOURCE_MANUAL = "manual"
+LINK_SOURCE_SC_PROFILE = "soundcloud_profile"
+LINK_SOURCE_MUSICBRAINZ = "musicbrainz"
+LINK_SOURCE_SC_BIO = "soundcloud_bio"
+
+#: Precedence when two sources return the same profile: the stronger one owns the row.
+#: The artist's own SoundCloud profile outranks MusicBrainz (the artist curates it
+#: themselves); a URL fished out of free bio text is the weakest evidence there is.
+LINK_SOURCE_RANK: dict[str, int] = {
+    LINK_SOURCE_MANUAL: 4,
+    LINK_SOURCE_SC_PROFILE: 3,
+    LINK_SOURCE_MUSICBRAINZ: 2,
+    LINK_SOURCE_SC_BIO: 1,
+}
+LINK_SOURCES = frozenset(LINK_SOURCE_RANK)
+
+
+def _web_link_values(
+    entry: Mapping[str, Any],
+) -> tuple[str, str, str, str | None, str | None, str, str]:
+    """``(url_key, url, service, handle, title, source, confidence)`` or ValueError."""
+    url_key = str(entry.get("url_key") or "").strip()
+    url = str(entry.get("url") or "").strip()
+    service = str(entry.get("service") or "").strip()
+    if not url_key or not url or not service:
+        raise ValueError("a web link needs url_key, url and service")
+    source = str(entry.get("source") or "")
+    if source not in LINK_SOURCES:
+        raise ValueError(f"unknown link source {source!r}; expected one of {sorted(LINK_SOURCES)}")
+    confidence = _check_confidence(str(entry.get("confidence") or ""))
+    handle = str(entry.get("handle") or "").strip() or None
+    title = str(entry.get("title") or "").strip() or None
+    return url_key, url, service, handle, title, source, confidence
+
+
+def list_web_links(collection_id: str, include_hidden: bool = False) -> list[dict[str, Any]]:
+    conn = _ensure_schema()
+    sql = "SELECT * FROM web_links WHERE collection_id = ?"
+    if not include_hidden:
+        sql += " AND hidden = 0"
+    rows = conn.execute(sql + " ORDER BY service, url_key", (collection_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_web_link(collection_id: str, url_key: str) -> dict[str, Any] | None:
+    conn = _ensure_schema()
+    row = conn.execute(
+        "SELECT * FROM web_links WHERE collection_id = ? AND url_key = ?",
+        (collection_id, url_key),
+    ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def count_hidden_web_links(collection_id: str) -> int:
+    conn = _ensure_schema()
+    row = conn.execute(
+        "SELECT COUNT(*) FROM web_links WHERE collection_id = ? AND hidden = 1", (collection_id,)
+    ).fetchone()
+    return int(row[0]) if row is not None else 0
+
+
+def add_manual_web_link(collection_id: str, entry: Mapping[str, Any]) -> dict[str, Any]:
+    """Store a link the user typed. It becomes ``manual`` and visible, whatever it was.
+
+    Re-adding a link the user once hid is how they undo that hide for one profile, so
+    the row is un-hidden and its source upgraded rather than duplicated.
+    """
+    values = _web_link_values({**entry, "source": LINK_SOURCE_MANUAL})
+    url_key, url, service, handle, title, source, confidence = values
+    now = _now_iso()
+    conn = _ensure_schema()
+    with _write_lock:
+        conn.execute(
+            "INSERT INTO web_links (collection_id, url_key, url, service, handle, title, source, "
+            "confidence, hidden, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?) "
+            "ON CONFLICT(collection_id, url_key) DO UPDATE SET url = excluded.url, "
+            "service = excluded.service, handle = excluded.handle, title = excluded.title, "
+            "source = excluded.source, confidence = excluded.confidence, hidden = 0, "
+            "last_seen = excluded.last_seen",
+            (collection_id, url_key, url, service, handle, title, source, confidence, now, now),
+        )
+        conn.commit()
+    return get_web_link(collection_id, url_key) or {}
+
+
+def remove_web_link(collection_id: str, url_key: str) -> str | None:
+    """Remove a link from view. ``'deleted'`` for a manual one, ``'hidden'`` otherwise.
+
+    A fetched link is hidden, not deleted: deleting it would only last until the next
+    refresh re-fetched it. None when there is no such row.
+    """
+    row = get_web_link(collection_id, url_key)
+    if row is None:
+        return None
+    conn = _ensure_schema()
+    with _write_lock:
+        if row["source"] == LINK_SOURCE_MANUAL:
+            conn.execute(
+                "DELETE FROM web_links WHERE collection_id = ? AND url_key = ?",
+                (collection_id, url_key),
+            )
+            outcome = "deleted"
+        else:
+            conn.execute(
+                "UPDATE web_links SET hidden = 1 WHERE collection_id = ? AND url_key = ?",
+                (collection_id, url_key),
+            )
+            outcome = "hidden"
+        conn.commit()
+    return outcome
+
+
+def unhide_web_links(collection_id: str) -> int:
+    conn = _ensure_schema()
+    with _write_lock:
+        cur = conn.execute(
+            "UPDATE web_links SET hidden = 0 WHERE collection_id = ? AND hidden = 1",
+            (collection_id,),
+        )
+        conn.commit()
+    return cur.rowcount
+
+
+def merge_fetched_web_links(
+    collection_id: str,
+    entries: Iterable[Mapping[str, Any]],
+    fetched_sources: Iterable[str],
+) -> dict[str, int]:
+    """Fold one refresh into the stored links, in one transaction.
+
+    ``entries`` hold at most one candidate per ``url_key`` (the caller picks the
+    strongest source). ``fetched_sources`` are the sources that ANSWERED this run —
+    only their stale rows may go. A source that failed or was not asked keeps every
+    row it contributed before, so a MusicBrainz outage cannot wipe MusicBrainz links.
+
+    Rules per existing row: a ``manual`` row is only touched on ``last_seen``; a
+    fetched row changes owner when the new source ranks at least as high, or when its
+    own source answered this run without it. ``hidden`` is never reset here — a hidden
+    link that comes back stays hidden.
+    """
+    fetched = {s for s in fetched_sources if s in LINK_SOURCES and s != LINK_SOURCE_MANUAL}
+    rows = [_web_link_values(e) for e in entries]
+    rows = [r for r in rows if r[5] != LINK_SOURCE_MANUAL]
+    now = _now_iso()
+    added = updated = removed = 0
+    conn = _ensure_schema()
+    with _write_lock:
+        existing = {
+            str(r["url_key"]): dict(r)
+            for r in conn.execute(
+                "SELECT * FROM web_links WHERE collection_id = ?", (collection_id,)
+            ).fetchall()
+        }
+        seen: set[str] = set()
+        for url_key, url, service, handle, title, source, confidence in rows:
+            seen.add(url_key)
+            old = existing.get(url_key)
+            if old is None:
+                conn.execute(
+                    "INSERT INTO web_links (collection_id, url_key, url, service, handle, title, "
+                    "source, confidence, hidden, first_seen, last_seen) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+                    (
+                        collection_id,
+                        url_key,
+                        url,
+                        service,
+                        handle,
+                        title,
+                        source,
+                        confidence,
+                        now,
+                        now,
+                    ),
+                )
+                added += 1
+                continue
+            old_source = str(old["source"])
+            takes_over = old_source != LINK_SOURCE_MANUAL and (
+                LINK_SOURCE_RANK[source] >= LINK_SOURCE_RANK.get(old_source, 0)
+                or old_source in fetched
+            )
+            if takes_over:
+                conn.execute(
+                    "UPDATE web_links SET url = ?, service = ?, handle = ?, title = ?, source = ?, "
+                    "confidence = ?, last_seen = ? WHERE collection_id = ? AND url_key = ?",
+                    (url, service, handle, title, source, confidence, now, collection_id, url_key),
+                )
+                updated += 1
+            else:
+                conn.execute(
+                    "UPDATE web_links SET last_seen = ? WHERE collection_id = ? AND url_key = ?",
+                    (now, collection_id, url_key),
+                )
+        for url_key, old in existing.items():
+            if url_key in seen or int(old["hidden"]) or old["source"] not in fetched:
+                continue
+            conn.execute(
+                "DELETE FROM web_links WHERE collection_id = ? AND url_key = ?",
+                (collection_id, url_key),
+            )
+            removed += 1
+        conn.commit()
+    return {"added": added, "updated": updated, "removed": removed}
+
+
+def record_link_fetch(collection_id: str, sources: Mapping[str, str]) -> None:
+    conn = _ensure_schema()
+    with _write_lock:
+        conn.execute(
+            "INSERT INTO link_fetch (collection_id, fetched_at, sources_json) VALUES (?, ?, ?) "
+            "ON CONFLICT(collection_id) DO UPDATE SET fetched_at = excluded.fetched_at, "
+            "sources_json = excluded.sources_json",
+            (collection_id, _now_iso(), json.dumps(dict(sources))),
+        )
+        conn.commit()
+
+
+def get_link_fetch(collection_id: str) -> dict[str, Any] | None:
+    conn = _ensure_schema()
+    row = conn.execute(
+        "SELECT fetched_at, sources_json FROM link_fetch WHERE collection_id = ?",
+        (collection_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    try:
+        sources = json.loads(row["sources_json"])
+    except (TypeError, json.JSONDecodeError) as e:
+        logger.warning("artist_store link_fetch unreadable id=%s err=%s", collection_id, e)
+        sources = {}
+    return {
+        "fetched_at": row["fetched_at"],
+        "sources": sources if isinstance(sources, dict) else {},
+    }
+
+
+# --------------------------------------------------------------------------- track assignments
+
+ASSIGN = "assign"
+EXCLUDE = "exclude"
+ASSIGNMENT_ACTIONS = frozenset({ASSIGN, EXCLUDE})
+
+#: Roles a user may give a track by hand. ``uncertain`` is the classifier's review
+#: bucket — nobody assigns a track as "not sure".
+ASSIGNABLE_ROLES = frozenset({ROLE_PRIMARY, ROLE_REMIXER, ROLE_REMIXED_BY_OTHER, ROLE_FEATURED})
+
+
+def set_track_assignment(
+    collection_id: str,
+    track_id: str,
+    action: str,
+    *,
+    role: str | None = None,
+    title: str | None = None,
+    artist: str | None = None,
+) -> None:
+    """Assign a library track to the artist, or exclude an automatic match. Upsert."""
+    tid = str(track_id or "").strip()
+    if not tid:
+        raise ValueError("track_id must be non-empty")
+    if action not in ASSIGNMENT_ACTIONS:
+        raise ValueError(f"unknown action {action!r}; expected one of {sorted(ASSIGNMENT_ACTIONS)}")
+    if action == ASSIGN:
+        if role not in ASSIGNABLE_ROLES:
+            raise ValueError(f"unknown role {role!r}; expected one of {sorted(ASSIGNABLE_ROLES)}")
+    else:
+        role = None
+    conn = _ensure_schema()
+    with _write_lock:
+        conn.execute(
+            "INSERT INTO track_assignments "
+            "(collection_id, track_id, action, role, title, artist, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(collection_id, track_id) DO UPDATE SET action = excluded.action, "
+            "role = excluded.role, title = excluded.title, artist = excluded.artist, "
+            "created_at = excluded.created_at",
+            (
+                collection_id,
+                tid,
+                action,
+                role,
+                (title or "").strip() or None,
+                (artist or "").strip() or None,
+                _now_iso(),
+            ),
+        )
+        conn.commit()
+
+
+def clear_track_assignment(collection_id: str, track_id: str) -> bool:
+    conn = _ensure_schema()
+    with _write_lock:
+        cur = conn.execute(
+            "DELETE FROM track_assignments WHERE collection_id = ? AND track_id = ?",
+            (collection_id, str(track_id)),
+        )
+        conn.commit()
+    return cur.rowcount > 0
+
+
+def list_track_assignments(collection_id: str) -> list[dict[str, Any]]:
+    conn = _ensure_schema()
+    rows = conn.execute(
+        "SELECT * FROM track_assignments WHERE collection_id = ? ORDER BY created_at, track_id",
+        (collection_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_assignments_for_track(track_id: str) -> list[dict[str, Any]]:
+    """Every collection a track is manually tied to or excluded from (index-backed)."""
+    conn = _ensure_schema()
+    rows = conn.execute(
+        "SELECT a.*, c.canonical_name FROM track_assignments a "
+        "JOIN collections c ON c.id = a.collection_id WHERE a.track_id = ? ORDER BY c.sort_key",
+        (str(track_id),),
+    ).fetchall()
+    return [dict(r) for r in rows]

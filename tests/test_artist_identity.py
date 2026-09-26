@@ -594,8 +594,10 @@ class TestMigrationV2:
         }
         assert "track_identity" not in tables_before
 
-        assert schema.migrate(conn) == 2
-        assert schema._schema_version(conn) == 2
+        # The walk goes all the way to the current version; this test pins the v1->v2
+        # step's own effect (track_identity) and that no earlier row is lost on the way.
+        assert schema.migrate(conn) == schema.SCHEMA_VERSION
+        assert schema._schema_version(conn) == schema.SCHEMA_VERSION
         tables = {
             r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
@@ -612,7 +614,7 @@ class TestMigrationV2:
         assert conn.execute("SELECT COUNT(*) FROM aliases").fetchone()[0] == 1
 
         # A second run is a no-op, not a second walk.
-        assert schema.migrate(conn) == 2
+        assert schema.migrate(conn) == schema.SCHEMA_VERSION
         conn.close()
 
     def test_fresh_db_also_gets_the_v2_table(self, store) -> None:
@@ -630,7 +632,8 @@ class TestMigrationV2:
             "last_seen",
             "user_override",
         }
-        assert store._schema_version(conn) == store.SCHEMA_VERSION == 2
+        assert store._schema_version(conn) == store.SCHEMA_VERSION
+        assert store.SCHEMA_VERSION >= 2
 
     def test_step_is_registered_for_v1(self) -> None:
         assert 1 in schema._MIGRATIONS

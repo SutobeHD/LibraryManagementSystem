@@ -88,6 +88,7 @@ from . import soundcloud_auth as sc_auth
 from .artist_store import catalogue as artist_catalogue
 from .artist_store import discovery as artist_discovery
 from .artist_store import identity as artist_identity
+from .artist_store import links as artist_links
 from .artist_store import merge as artist_merge
 from .artist_store import projection as artist_projection
 from .artist_store import registry as artist_registry
@@ -729,6 +730,30 @@ class ArtistTrackRoleReq(BaseModel):
     """Pin one catalogue track's role for one artist. `null` clears the pin."""
 
     role: str | None = None
+
+
+class ArtistLinksRefreshReq(BaseModel):
+    """One Find-links click. `musicbrainz: false` asks SoundCloud only."""
+
+    musicbrainz: bool = True
+
+
+class ArtistLinkAddReq(BaseModel):
+    """A profile URL the user pasted. Classified before it is stored, never kept raw."""
+
+    url: str = _Field(max_length=artist_links.MAX_URL_LENGTH)
+
+
+class ArtistLinkRemoveReq(BaseModel):
+    """One link to take off, by `url_key`: a manual link is deleted, a fetched one hidden."""
+
+    url_key: str = _Field(max_length=512)
+
+
+class ArtistMusicBrainzReq(BaseModel):
+    """The MusicBrainz artist the user picked out of the refresh's candidates."""
+
+    mbid: str = _Field(max_length=64)
 
 
 # NOTE: Library auto-load is handled by _on_startup() near the bottom of this file.
@@ -2056,6 +2081,192 @@ def artist_track_identities(collection_id: str):
         "collection_id": collection_id,
         "total": len(rows),
         "identities": rows,
+    }
+
+
+def _artist_links_refresh(collection_id: str, *, use_musicbrainz: bool) -> dict[str, Any]:
+    """One Find-links pass for a known collection — the refresh route and the MB confirm.
+
+    The token is looked up only when an account is linked, since nothing else could spend
+    it, and goes straight into the engine: never logged, never in the payload. An expired
+    login or an unreachable renewal is not an error here — SoundCloud reports
+    `not_connected` and MusicBrainz, which needs no login, still answers.
+    """
+    link = artist_registry.get_provider_link(collection_id)
+    sc_urn = str(link["remote_id"]) if link and link["resolved"] else ""
+    token = ""
+    if sc_urn:
+        try:
+            token = _artist_sc_token() or ""
+        except (AuthExpiredError, sc_auth.TransientRefreshError) as exc:
+            logger.warning(
+                "op=artist_links_refresh collection=%s sc_login=unavailable err=%s",
+                collection_id,
+                type(exc).__name__,
+            )
+    result = artist_links.refresh(
+        collection_id,
+        names=artist_registry.artist_names(collection_id),
+        sc_urn=sc_urn,
+        sc_permalink=link["permalink"] if link else None,
+        token=token,
+        use_musicbrainz=use_musicbrainz,
+    )
+    return {"status": "ok", **result}
+
+
+@app.get("/api/artists/{collection_id}/links")
+def artist_web_links(collection_id: str) -> dict[str, Any]:
+    """Where to find this artist: the stored profile links, in display order. No network.
+
+    Read-only, like `/identities` — what the last Find-links click stored plus the user's
+    own additions. `last_fetch.sources` says which sources answered that click; hidden
+    links are counted in `hidden_count`, never listed.
+    """
+    _artist_collection_or_404(collection_id)
+    return {"status": "ok", **artist_links.list_links(collection_id)}
+
+
+@app.post("/api/artists/{collection_id}/links/refresh", dependencies=[Depends(require_session)])
+def artist_web_links_refresh(
+    collection_id: str, r: ArtistLinksRefreshReq = ArtistLinksRefreshReq()
+) -> dict[str, Any]:
+    """Find links: ask SoundCloud and MusicBrainz once, fold the answers into the store.
+
+    User-initiated only — the Find-links click, or right after the user linked an
+    account. `sources` is the honesty contract, as in the catalogue: a source that was
+    not reached says so and the links it gave before stay, so an empty strip after a
+    failed source never reads as "this artist has no profiles". SoundCloud is asked only
+    for a linked account, within `links.LINKS_CALL_BUDGET` calls.
+
+    A MusicBrainz *name* match only fills `musicbrainz_candidates` and binds nothing —
+    shared names are the norm in electronic music. The user confirms one through
+    `POST …/links/musicbrainz`.
+    """
+    _artist_collection_or_404(collection_id)
+    return _artist_links_refresh(collection_id, use_musicbrainz=r.musicbrainz)
+
+
+@app.post("/api/artists/{collection_id}/links", dependencies=[Depends(require_session)])
+def artist_web_link_add(collection_id: str, r: ArtistLinkAddReq) -> dict[str, Any]:
+    """Add a profile link by hand. It outranks every fetched source; no refresh rewrites it.
+
+    The classifier that gates fetched URLs gates this one too — http(s) only, no
+    credentials, no IP hosts, stored in canonical form — so a pasted `javascript:` string
+    is a 400, never a row. Re-adding a link the user hid brings it back.
+    """
+    _artist_collection_or_404(collection_id)
+    try:
+        link = artist_links.add_manual_link(collection_id, r.url)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return {"status": "ok", "collection_id": collection_id, "link": link}
+
+
+@app.post("/api/artists/{collection_id}/links/remove", dependencies=[Depends(require_session)])
+def artist_web_link_remove(collection_id: str, r: ArtistLinkRemoveReq) -> dict[str, Any]:
+    """Take one link off this artist: a manual link is deleted, a fetched one hidden.
+
+    Hidden rather than deleted because the next Find-links click would fetch it straight
+    back — the hide lives in the row and outlasts every refresh until `/links/restore`.
+    """
+    _artist_collection_or_404(collection_id)
+    outcome = artist_links.remove_link(collection_id, r.url_key)
+    if outcome is None:
+        raise HTTPException(404, "This artist has no link with that url_key.")
+    return {"status": "ok", "collection_id": collection_id, "outcome": outcome}
+
+
+@app.post("/api/artists/{collection_id}/links/restore", dependencies=[Depends(require_session)])
+def artist_web_links_restore(collection_id: str) -> dict[str, Any]:
+    """Un-hide every link the user took off this artist. Idempotent — 0 when none were."""
+    _artist_collection_or_404(collection_id)
+    restored = artist_links.restore_hidden(collection_id)
+    return {"status": "ok", "collection_id": collection_id, "restored": restored}
+
+
+@app.post("/api/artists/{collection_id}/links/musicbrainz", dependencies=[Depends(require_session)])
+def artist_musicbrainz_confirm(collection_id: str, r: ArtistMusicBrainzReq) -> dict[str, Any]:
+    """Bind the MusicBrainz artist the user picked, then read its links in the same click.
+
+    The only way a name match becomes a binding: refresh offers candidates, the user
+    names one here. A confirmed pick is never second-guessed by a later refresh —
+    `DELETE` is how it goes. Answers with the refresh payload, so the strip redraws
+    without a second round-trip.
+    """
+    _artist_collection_or_404(collection_id)
+    try:
+        artist_links.confirm_musicbrainz(collection_id, r.mbid)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return _artist_links_refresh(collection_id, use_musicbrainz=True)
+
+
+@app.delete(
+    "/api/artists/{collection_id}/links/musicbrainz", dependencies=[Depends(require_session)]
+)
+def artist_musicbrainz_drop(collection_id: str) -> dict[str, Any]:
+    """Unbind MusicBrainz ("that is not this artist"). Its links leave with it, now.
+
+    Idempotent; hidden links stay hidden. While a linked SoundCloud URL is one MusicBrainz
+    itself ties to exactly one artist, the next refresh re-anchors from it — unbinding is
+    for a wrong pick, not for muting a correct anchor.
+    """
+    _artist_collection_or_404(collection_id)
+    removed = artist_links.drop_musicbrainz(collection_id)
+    return {
+        "status": "ok",
+        "collection_id": collection_id,
+        "removed": removed,
+        **artist_links.list_links(collection_id),
+    }
+
+
+#: Call cap for one "which account is theirs?" search. `search_users` spends a single
+#: call; the cap is the per-run ToU guardrail every SoundCloud fetch here carries.
+ARTIST_SC_CANDIDATES_CALL_BUDGET = 2
+
+
+@app.get(
+    "/api/artists/{collection_id}/soundcloud/candidates",
+    dependencies=[Depends(require_session)],
+)
+def artist_soundcloud_candidates(collection_id: str) -> dict[str, Any]:
+    """Which SoundCloud account is theirs? One account search on the canonical name, ranked.
+
+    Suggestions only: display names are not unique, so the bind stays the user's click on
+    `POST …/link` and nothing here writes. `match` is `exact` / `close` / `weak`, more
+    followers first within a tier.
+
+    Session-gated although it is a GET: the search runs live on the user's OAuth token.
+    """
+    _artist_collection_or_404(collection_id)
+    names = artist_registry.artist_names(collection_id)
+    if not names or not names[0].strip():
+        raise HTTPException(400, "This artist has no name to search SoundCloud for.")
+    token = _sc_access_token()
+    if not token:
+        raise HTTPException(400, _SC_NOT_CONNECTED)
+    budget = sc_api.CallBudget(limit=ARTIST_SC_CANDIDATES_CALL_BUDGET, label=collection_id)
+    try:
+        users = sc_api.search_users(names[0], token, budget=budget)
+    except AuthExpiredError:
+        raise HTTPException(401, detail="auth_expired") from None
+    except RateLimitError as exc:
+        raise HTTPException(429, safe_error_message(exc)) from None
+    candidates = artist_links.rank_soundcloud_accounts(users, names)
+    logger.info(
+        "op=artist_sc_candidates collection=%s found=%d shown=%d calls=%d",
+        collection_id,
+        len(users),
+        len(candidates),
+        budget.used,
+    )
+    return {
+        "status": "ok",
+        "collection_id": collection_id,
+        "query": names[0],
+        "candidates": candidates,
     }
 
 

@@ -1233,6 +1233,165 @@ def get_related_artists(
     return SCResultList(artists, truncated=truncated, stop_reason=reason, calls_used=calls)
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Artist profile — GET /users/{urn}, /users/{urn}/web-profiles, /users?q=
+#
+# Owner refinement 2026-09-26: find the artist's other profiles. The links an artist
+# adds to their own SoundCloud page are the best evidence there is — they curated
+# them. Everything here is untrusted remote text; URLs are validated by
+# `app/artist_store/links.py` before anything stores, renders or opens them.
+# ──────────────────────────────────────────────────────────────────────────────
+
+#: Hard cap on one users search. The picker shows five; the rest is ranking slack.
+SC_USER_SEARCH_LIMIT = 20
+
+#: Profile fields beyond `SC_ARTIST_FIELDS` that help a person tell two accounts apart
+#: (or carry links). `description` is the free-text bio — never rendered as HTML.
+SC_PROFILE_FIELDS: tuple[str, ...] = (
+    *SC_ARTIST_FIELDS,
+    "permalink",
+    "full_name",
+    "city",
+    "country",
+    "description",
+    "website",
+    "website_title",
+)
+
+
+def normalize_user_profile(raw: Any) -> dict | None:
+    """Raw SC user → `SC_PROFILE_FIELDS` dict, or None when it carries no identity."""
+    base = normalize_artist(raw)
+    if base is None:
+        return None
+    return {
+        **base,
+        "permalink": _as_str(raw.get("permalink")),
+        "full_name": _as_str(raw.get("full_name")),
+        "city": _as_str(raw.get("city")),
+        "country": _as_str(raw.get("country")),
+        "description": _as_str(raw.get("description")),
+        "website": _as_str(raw.get("website")),
+        "website_title": _as_str(raw.get("website_title")),
+    }
+
+
+def _spend(budget: CallBudget | None, op: str, urn: str) -> bool:
+    if budget is not None and not budget.try_spend():
+        logger.warning("op=%s artist=%s result=budget_exhausted", op, urn)
+        return False
+    return True
+
+
+def get_user(
+    user_urn_or_id: str | int,
+    auth_token: str,
+    *,
+    budget: CallBudget | None = None,
+) -> dict | None:
+    """One account's full profile — `GET /users/{urn}` — as `SC_PROFILE_FIELDS`.
+
+    None when the account is gone (404) or the budget is spent; the caller owns the
+    budget and can tell the two apart via `budget.exhausted`.
+    """
+    urn = user_urn(user_urn_or_id)
+    headers = _artist_headers(auth_token)
+    if not _spend(budget, "artist_sc_user", urn):
+        return None
+    try:
+        resp = _sc_get(f"{SC_API_BASE}/users/{urn}", headers=headers, timeout=10, auth_404=False)
+    except NotFoundError:
+        logger.info("op=artist_sc_user artist=%s result=not_found", urn)
+        return None
+    profile = normalize_user_profile(resp.json())
+    logger.info("op=artist_sc_user artist=%s result=%s", urn, "ok" if profile else "unusable")
+    return profile
+
+
+def get_user_web_profiles(
+    user_urn_or_id: str | int,
+    auth_token: str,
+    *,
+    budget: CallBudget | None = None,
+) -> SCResultList:
+    """Links the artist added to their own profile — `GET /users/{urn}/web-profiles`.
+
+    The endpoint returns a bare array (no cursor). Each entry is reduced to
+    `{service, title, url, username}`; entries without a URL are dropped. A 404 is an
+    empty list with `stop_reason="not_found"`, never an auth error.
+    """
+    urn = user_urn(user_urn_or_id)
+    headers = _artist_headers(auth_token)
+    if not _spend(budget, "artist_sc_web_profiles", urn):
+        return SCResultList([], truncated=True, stop_reason="budget")
+    try:
+        resp = _sc_get(
+            f"{SC_API_BASE}/users/{urn}/web-profiles",
+            headers=headers,
+            params={"limit": SC_PAGE_LIMIT},
+            timeout=10,
+            auth_404=False,
+        )
+    except NotFoundError:
+        logger.info("op=artist_sc_web_profiles artist=%s result=not_found", urn)
+        return SCResultList([], stop_reason="not_found", calls_used=1)
+    data = resp.json()
+    items = data.get("collection", []) if isinstance(data, dict) else data
+    profiles: list[dict] = []
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        url = _as_str(item.get("url")).strip()
+        if not url:
+            continue
+        profiles.append(
+            {
+                "service": _as_str(item.get("service")),
+                "title": _as_str(item.get("title")),
+                "url": url,
+                "username": _as_str(item.get("username")),
+            }
+        )
+    logger.info("op=artist_sc_web_profiles artist=%s links=%d", urn, len(profiles))
+    return SCResultList(profiles, calls_used=1)
+
+
+def search_users(
+    query: str,
+    auth_token: str,
+    *,
+    limit: int = SC_USER_SEARCH_LIMIT,
+    budget: CallBudget | None = None,
+) -> SCResultList:
+    """Account search — `GET /users?q=` — one page, `SC_PROFILE_FIELDS` dicts.
+
+    Suggestions only: display names are not unique, so nothing in this module links
+    an artist to a result. A blank query costs nothing and returns nothing.
+    """
+    text = _clean_query(query)
+    if not text:
+        return SCResultList([], stop_reason="empty_query")
+    headers = _artist_headers(auth_token)
+    if not _spend(budget, "artist_sc_user_search", text):
+        return SCResultList([], truncated=True, stop_reason="budget")
+    size = max(1, min(int(limit), SC_USER_SEARCH_LIMIT))
+    try:
+        resp = _sc_get(
+            f"{SC_API_BASE}/users",
+            headers=headers,
+            params={"q": text, "limit": size, "linked_partitioning": "true"},
+            timeout=10,
+            auth_404=False,
+        )
+    except NotFoundError:
+        return SCResultList([], stop_reason="not_found", calls_used=1)
+    data = resp.json()
+    items = data.get("collection", []) if isinstance(data, dict) else data
+    users = [u for u in (normalize_user_profile(i) for i in items or []) if u]
+    logger.info("op=artist_sc_user_search query=%r users=%d", text, len(users))
+    return SCResultList(users[:size], calls_used=1)
+
+
 def _to_soundcloud_url(url_or_permalink: str) -> str:
     """Accept a full SC URL or a bare permalink; refuse anything off-platform.
 
