@@ -586,6 +586,19 @@ def remove_link(collection_id: str, provider: str) -> bool:
     return cur.rowcount > 0
 
 
+def collection_for_remote(provider: str, remote_id: str) -> str | None:
+    """The one collection bound to a provider account, or None — also when two are."""
+    rid = str(remote_id or "").strip()
+    if not rid:
+        return None
+    conn = _ensure_schema()
+    rows = conn.execute(
+        "SELECT collection_id FROM links WHERE provider = ? AND remote_id = ? LIMIT 2",
+        (provider, rid),
+    ).fetchall()
+    return str(rows[0]["collection_id"]) if len(rows) == 1 else None
+
+
 # --------------------------------------------------------------------------- sync state
 
 

@@ -194,6 +194,45 @@ def library_artist_counts(db: Any, kind: str = KIND_ARTIST) -> dict[str, int]:
     return {cid: row["track_count"] for cid, row in _local_rows(db, kind, store).items()}
 
 
+def known_artists(db: Any = None, kind: str = KIND_ARTIST) -> list[dict[str, Any]]:
+    """Every artist the hub knows — stored or only in the library — once each.
+
+    ``{collection_id, name, stored, favourite, library_tracks, spellings}``, where
+    ``spellings`` = display name + store aliases + library spellings: every string a
+    lookup may match on. One store snapshot and one library pass; read-only. Library
+    spellings resolve exactly as the hub groups them, so a merged alias stays with the
+    artist it was merged into.
+    """
+    store = _store_index(kind)
+    local = _local_rows(db, kind, store) if db is not None else {}
+    favourites = {str(row["id"]) for row in schema.list_favourites(kind)}
+    aliases: dict[str, list[str]] = {}
+    for alias, cid in store.by_alias.items():
+        aliases.setdefault(cid, []).append(alias)
+    out: list[dict[str, Any]] = []
+    for cid in dict.fromkeys([*store.collections, *local]):
+        collection = store.collections.get(cid)
+        row = local.get(cid)
+        if collection is not None:
+            name = str(collection["canonical_name"])
+        elif row is not None:
+            name = str(row["name"])
+        else:
+            continue
+        spellings = [name, *aliases.get(cid, ()), *(row["library_names"] if row else ())]
+        out.append(
+            {
+                "collection_id": cid,
+                "name": name,
+                "stored": collection is not None,
+                "favourite": cid in favourites,
+                "library_tracks": int(row["track_count"]) if row else 0,
+                "spellings": list(dict.fromkeys(s for s in spellings if s)),
+            }
+        )
+    return out
+
+
 # --------------------------------------------------------------------------- favourites
 
 
