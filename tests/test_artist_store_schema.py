@@ -425,3 +425,33 @@ class TestWriteLocking:
 
         assert errors == []
         assert len(store.list_favourites()) == len(names)
+
+    def test_a_failed_write_rolls_back_and_frees_the_database(self, store, artist) -> None:
+        """A writer that raised must not leave its transaction open on the thread.
+
+        It used to: the FK violation below aborted before `commit()`, the implicit
+        transaction stayed open holding SQLite's write lock, and every other thread's
+        writer then failed with `database is locked`.
+        """
+        store.set_sync_mode(artist, "auto")
+        with pytest.raises(sqlite3.IntegrityError):
+            store.record_link_fetch("a_does_not_exist", {"soundcloud": "ok"})
+
+        assert not store._connect().in_transaction
+        errors: list[Exception] = []
+
+        def _other_thread_writes() -> None:
+            try:
+                store.add_favourite(store.create_collection("Helena Hauff"))
+            except Exception as e:  # re-asserted below; a swallowed error would pass the test
+                errors.append(e)
+            finally:
+                _close_thread_conn()
+
+        worker = threading.Thread(target=_other_thread_writes)
+        worker.start()
+        worker.join(timeout=30)
+
+        assert errors == []
+        assert store.get_sync_mode(artist) == "auto"
+        assert {row["canonical_name"] for row in store.list_favourites()} == {"Helena Hauff"}

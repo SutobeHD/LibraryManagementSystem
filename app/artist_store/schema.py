@@ -27,7 +27,8 @@ import multiprocessing as _mp
 import re
 import sqlite3
 import threading
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -344,6 +345,24 @@ def init_db() -> None:
     _ensure_schema()
 
 
+@contextmanager
+def _writing() -> Iterator[sqlite3.Connection]:
+    """The module lock plus one transaction: commit on success, roll back on any error.
+
+    A statement that raised used to leave its implicit transaction open on this
+    thread's connection, holding SQLite's write lock — every other writer then got
+    ``database is locked`` until this thread happened to write again.
+    """
+    conn = _ensure_schema()
+    with _write_lock:
+        try:
+            yield conn
+        except BaseException:
+            conn.rollback()
+            raise
+        conn.commit()
+
+
 # --------------------------------------------------------------------------- store meta
 
 #: Owned by the migration runner — not writable through ``set_meta``.
@@ -354,12 +373,10 @@ def set_meta(key: str, value: str) -> None:
     """Store one process-wide scalar (e.g. the projection's root-folder id)."""
     if key in _RESERVED_META_KEYS:
         raise ValueError(f"{key!r} is owned by the migration runner")
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO store_meta (key, value) VALUES (?, ?)", (key, str(value))
         )
-        conn.commit()
 
 
 def get_meta(key: str) -> str | None:
@@ -371,10 +388,8 @@ def get_meta(key: str) -> str | None:
 def delete_meta(key: str) -> bool:
     if key in _RESERVED_META_KEYS:
         raise ValueError(f"{key!r} is owned by the migration runner")
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         cur = conn.execute("DELETE FROM store_meta WHERE key = ?", (key,))
-        conn.commit()
     return cur.rowcount > 0
 
 
@@ -395,8 +410,7 @@ def create_collection(
     name = _WS_RUN.sub(" ", canonical_name).strip()
     cid = collection_id_for(name, kind)
     now = _now_iso()
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         conn.execute(
             "INSERT OR IGNORE INTO collections "
             "(id, kind, canonical_name, sort_key, created_at, updated_at) "
@@ -407,7 +421,6 @@ def create_collection(
             "INSERT OR IGNORE INTO aliases (collection_id, alias, source) VALUES (?, ?, 'canonical')",
             (cid, name),
         )
-        conn.commit()
     return cid
 
 
@@ -445,8 +458,7 @@ def set_canonical_name(collection_id: str, canonical_name: str) -> bool:
     current = get_collection(collection_id)
     if current is None:
         return False
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         conn.execute(
             "UPDATE collections SET canonical_name = ?, sort_key = ?, updated_at = ? WHERE id = ?",
             (name, sort_key_for(name), _now_iso(), collection_id),
@@ -459,16 +471,13 @@ def set_canonical_name(collection_id: str, canonical_name: str) -> bool:
             "INSERT OR IGNORE INTO aliases (collection_id, alias, source) VALUES (?, ?, 'canonical')",
             (collection_id, name),
         )
-        conn.commit()
     return True
 
 
 def delete_collection(collection_id: str) -> bool:
     """Drop a collection and everything hanging off it (FK cascade)."""
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         cur = conn.execute("DELETE FROM collections WHERE id = ?", (collection_id,))
-        conn.commit()
     return cur.rowcount > 0
 
 
@@ -480,24 +489,20 @@ def add_alias(collection_id: str, alias: str, source: str | None = None) -> bool
     text = _WS_RUN.sub(" ", alias).strip()
     if not text:
         raise ValueError("alias must contain a non-space character")
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         cur = conn.execute(
             "INSERT OR IGNORE INTO aliases (collection_id, alias, source) VALUES (?, ?, ?)",
             (collection_id, text, source),
         )
-        conn.commit()
     return cur.rowcount > 0
 
 
 def remove_alias(collection_id: str, alias: str) -> bool:
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         cur = conn.execute(
             "DELETE FROM aliases WHERE collection_id = ? AND alias = ?",
             (collection_id, _WS_RUN.sub(" ", alias).strip()),
         )
-        conn.commit()
     return cur.rowcount > 0
 
 
@@ -552,8 +557,7 @@ def set_link(
     confidence: float | None = None,
 ) -> None:
     """Bind a collection to a provider account (SoundCloud today)."""
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         conn.execute(
             "INSERT INTO links (collection_id, provider, remote_id, permalink, confidence) "
             "VALUES (?, ?, ?, ?, ?) "
@@ -562,7 +566,6 @@ def set_link(
             "confidence = excluded.confidence",
             (collection_id, provider, remote_id, permalink, confidence),
         )
-        conn.commit()
 
 
 def get_link(collection_id: str, provider: str) -> dict[str, Any] | None:
@@ -575,13 +578,11 @@ def get_link(collection_id: str, provider: str) -> dict[str, Any] | None:
 
 
 def remove_link(collection_id: str, provider: str) -> bool:
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         cur = conn.execute(
             "DELETE FROM links WHERE collection_id = ? AND provider = ?",
             (collection_id, provider),
         )
-        conn.commit()
     return cur.rowcount > 0
 
 
@@ -591,14 +592,12 @@ def remove_link(collection_id: str, provider: str) -> bool:
 def set_sync_mode(collection_id: str, mode: str) -> None:
     if mode not in SYNC_MODES:
         raise ValueError(f"unknown sync mode {mode!r}; expected one of {sorted(SYNC_MODES)}")
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         conn.execute(
             "INSERT INTO sync_state (collection_id, mode) VALUES (?, ?) "
             "ON CONFLICT(collection_id) DO UPDATE SET mode = excluded.mode",
             (collection_id, mode),
         )
-        conn.commit()
 
 
 def get_sync_mode(collection_id: str) -> str:
@@ -617,8 +616,7 @@ def get_sync_state(collection_id: str) -> dict[str, Any] | None:
 
 def record_sync(collection_id: str, error: str | None = None) -> None:
     """Stamp a finished sync attempt. ``error=None`` clears the previous failure."""
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         conn.execute(
             "INSERT INTO sync_state (collection_id, mode, last_sync_at, last_error) "
             "VALUES (?, ?, ?, ?) "
@@ -626,7 +624,6 @@ def record_sync(collection_id: str, error: str | None = None) -> None:
             "last_sync_at = excluded.last_sync_at, last_error = excluded.last_error",
             (collection_id, SYNC_REVIEW, _now_iso(), error),
         )
-        conn.commit()
 
 
 # --------------------------------------------------------------------------- projection
@@ -643,8 +640,7 @@ def set_projection(
     silently returns the first duplicate, so this id-map — verified per sync — is the
     only reliable identity the projection engine has.
     """
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         conn.execute(
             "INSERT INTO projection (collection_id, rb_playlist_id, rb_uuid, last_projected_at) "
             "VALUES (?, ?, ?, ?) "
@@ -653,7 +649,6 @@ def set_projection(
             "last_projected_at = excluded.last_projected_at",
             (collection_id, rb_playlist_id, rb_uuid, _now_iso()),
         )
-        conn.commit()
 
 
 def get_projection(collection_id: str) -> dict[str, Any] | None:
@@ -665,10 +660,8 @@ def get_projection(collection_id: str) -> dict[str, Any] | None:
 
 
 def clear_projection(collection_id: str) -> bool:
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         cur = conn.execute("DELETE FROM projection WHERE collection_id = ?", (collection_id,))
-        conn.commit()
     return cur.rowcount > 0
 
 
@@ -677,21 +670,17 @@ def clear_projection(collection_id: str) -> bool:
 
 def add_favourite(collection_id: str) -> bool:
     """Mark a collection as a favourite. False if it already was."""
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         cur = conn.execute(
             "INSERT OR IGNORE INTO favourites (collection_id, added_at) VALUES (?, ?)",
             (collection_id, _now_iso()),
         )
-        conn.commit()
     return cur.rowcount > 0
 
 
 def remove_favourite(collection_id: str) -> bool:
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         cur = conn.execute("DELETE FROM favourites WHERE collection_id = ?", (collection_id,))
-        conn.commit()
     return cur.rowcount > 0
 
 
@@ -719,8 +708,7 @@ def list_favourites(kind: str | None = KIND_ARTIST) -> list[dict[str, Any]]:
 
 def set_catalogue_cache(collection_id: str, payload: Any) -> None:
     """Store a fetched provider catalogue. TTL cache, never a permanent mirror."""
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         conn.execute(
             "INSERT INTO catalogue_cache (collection_id, payload_json, fetched_at) "
             "VALUES (?, ?, ?) "
@@ -728,7 +716,6 @@ def set_catalogue_cache(collection_id: str, payload: Any) -> None:
             "payload_json = excluded.payload_json, fetched_at = excluded.fetched_at",
             (collection_id, json.dumps(payload), _now_iso()),
         )
-        conn.commit()
 
 
 def get_catalogue_cache(collection_id: str, max_age_s: float | None = None) -> Any | None:
@@ -810,10 +797,8 @@ def upsert_track_identities(collection_id: str, entries: Iterable[Mapping[str, A
     rows = [r for r in (_identity_row(collection_id, e, now) for e in entries) if r is not None]
     if not rows:
         return 0
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         conn.executemany(_UPSERT_IDENTITY_SQL, rows)
-        conn.commit()
     return len(rows)
 
 
@@ -896,24 +881,20 @@ def set_identity_override(collection_id: str, sc_urn: str, role: str | None) -> 
     """
     if role is not None:
         _check_role(role, field_name="override")
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         cur = conn.execute(
             "UPDATE track_identity SET user_override = ? WHERE collection_id = ? AND sc_urn = ?",
             (role, collection_id, sc_urn),
         )
-        conn.commit()
     return cur.rowcount > 0
 
 
 def delete_track_identity(collection_id: str, sc_urn: str) -> bool:
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         cur = conn.execute(
             "DELETE FROM track_identity WHERE collection_id = ? AND sc_urn = ?",
             (collection_id, sc_urn),
         )
-        conn.commit()
     return cur.rowcount > 0
 
 
@@ -989,8 +970,7 @@ def add_manual_web_link(collection_id: str, entry: Mapping[str, Any]) -> dict[st
     values = _web_link_values({**entry, "source": LINK_SOURCE_MANUAL})
     url_key, url, service, handle, title, source, confidence = values
     now = _now_iso()
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         conn.execute(
             "INSERT INTO web_links (collection_id, url_key, url, service, handle, title, source, "
             "confidence, hidden, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?) "
@@ -1000,7 +980,6 @@ def add_manual_web_link(collection_id: str, entry: Mapping[str, Any]) -> dict[st
             "last_seen = excluded.last_seen",
             (collection_id, url_key, url, service, handle, title, source, confidence, now, now),
         )
-        conn.commit()
     return get_web_link(collection_id, url_key) or {}
 
 
@@ -1013,8 +992,7 @@ def remove_web_link(collection_id: str, url_key: str) -> str | None:
     row = get_web_link(collection_id, url_key)
     if row is None:
         return None
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         if row["source"] == LINK_SOURCE_MANUAL:
             conn.execute(
                 "DELETE FROM web_links WHERE collection_id = ? AND url_key = ?",
@@ -1027,18 +1005,15 @@ def remove_web_link(collection_id: str, url_key: str) -> str | None:
                 (collection_id, url_key),
             )
             outcome = "hidden"
-        conn.commit()
     return outcome
 
 
 def unhide_web_links(collection_id: str) -> int:
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         cur = conn.execute(
             "UPDATE web_links SET hidden = 0 WHERE collection_id = ? AND hidden = 1",
             (collection_id,),
         )
-        conn.commit()
     return cur.rowcount
 
 
@@ -1064,8 +1039,7 @@ def merge_fetched_web_links(
     rows = [r for r in rows if r[5] != LINK_SOURCE_MANUAL]
     now = _now_iso()
     added = updated = removed = 0
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         existing = {
             str(r["url_key"]): dict(r)
             for r in conn.execute(
@@ -1121,20 +1095,17 @@ def merge_fetched_web_links(
                 (collection_id, url_key),
             )
             removed += 1
-        conn.commit()
     return {"added": added, "updated": updated, "removed": removed}
 
 
 def record_link_fetch(collection_id: str, sources: Mapping[str, str]) -> None:
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         conn.execute(
             "INSERT INTO link_fetch (collection_id, fetched_at, sources_json) VALUES (?, ?, ?) "
             "ON CONFLICT(collection_id) DO UPDATE SET fetched_at = excluded.fetched_at, "
             "sources_json = excluded.sources_json",
             (collection_id, _now_iso(), json.dumps(dict(sources))),
         )
-        conn.commit()
 
 
 def get_link_fetch(collection_id: str) -> dict[str, Any] | None:
@@ -1187,8 +1158,7 @@ def set_track_assignment(
             raise ValueError(f"unknown role {role!r}; expected one of {sorted(ASSIGNABLE_ROLES)}")
     else:
         role = None
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         conn.execute(
             "INSERT INTO track_assignments "
             "(collection_id, track_id, action, role, title, artist, created_at) "
@@ -1206,17 +1176,14 @@ def set_track_assignment(
                 _now_iso(),
             ),
         )
-        conn.commit()
 
 
 def clear_track_assignment(collection_id: str, track_id: str) -> bool:
-    conn = _ensure_schema()
-    with _write_lock:
+    with _writing() as conn:
         cur = conn.execute(
             "DELETE FROM track_assignments WHERE collection_id = ? AND track_id = ?",
             (collection_id, str(track_id)),
         )
-        conn.commit()
     return cur.rowcount > 0
 
 
