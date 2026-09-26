@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import api from '../api/api';
+import RecognitionPanel from './downloads/RecognitionPanel';
 import {
     Download,
     CheckCircle,
@@ -230,6 +231,9 @@ const TaskCard = ({ task }) => {
                             />
                         </div>
                     )}
+
+                    {/* Artist recognition: known / new, corrected names, a suggestion */}
+                    {task._src !== 'import' && <RecognitionPanel task={task} />}
 
                     {/* BPM/Key after analysis */}
                     {(task.bpm || task.key) && (
