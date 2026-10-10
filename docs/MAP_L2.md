@@ -4031,17 +4031,26 @@ Tests for the phrase-batch backend (app/main.py):
 - `test_worker_records_failure()`
 - `test_worker_cancel_before_first()`
 - `test_worker_error_cap()`
+- `test_worker_hands_the_live_master_db_to_every_call()`
+- `test_worker_errors_out_when_the_library_left_live_mode()`
 - `test_worker_eta_positive_mid_run()`
 - `test_start_requires_auth()`
 - `test_start_library_not_loaded()`
 - `test_start_bad_phrase_length()`
 - `test_start_empty_scope()`
 - `test_start_conflict_when_locked()`
+- `test_start_outside_live_mode_is_a_409()`
 - `test_start_happy_returns_job()`
 - `test_status_unknown_404()`
 - `test_status_returns_job()`
 - `test_cancel_unknown_404()`
 - `test_cancel_sets_flag()`
+- `test_live_master_db_path_follows_the_facade()`
+- `test_commit_writes_through_the_live_master_db()`
+- `test_commit_outside_live_mode_is_a_409_not_a_422()`
+- `test_commit_still_422s_a_track_that_is_not_analysed()`
+- `test_generate_reads_beats_from_the_live_master_db()`
+- `test_generate_outside_live_mode_is_a_409()`
 
 ### `tests/test_phrase_db_writer.py`
 

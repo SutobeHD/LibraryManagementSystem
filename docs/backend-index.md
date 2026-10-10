@@ -590,9 +590,9 @@ Exception: `PhraseNotAnalysedError(RuntimeError)` — track has no ANLZ files to
 **API endpoints added to `app/main.py`** (PHRASE section):
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/phrase/generate` `[AUTH]` | Generate phrase cues from beat grid |
-| POST | `/api/phrase/commit` `[AUTH]` | Write phrase markers as MEMORY cues into the track's existing ANLZ (non-destructive) |
-| POST | `/api/phrase/batch/start` `[AUTH]` | Start a background phrase-cue batch over a scope. Body `{scope:{kind:"single"\|"playlist"\|"selection"\|"collection", track_id?, playlist_id?, track_ids?}, phrase_length?, align_downbeat?, include_bar_markers?}`. Returns `{job_id, total}`. 409 if a batch already runs, 400 on empty/invalid scope. Single-flight via `_phrase_batch_lock` (asyncio.Lock) |
+| POST | `/api/phrase/generate` `[AUTH]` | Generate phrase cues from beat grid. Reads the live library's `master.db` (`_live_master_db_path()` = `db.live_db_path`); 409 outside live mode |
+| POST | `/api/phrase/commit` `[AUTH]` | Write phrase markers as MEMORY cues into the track's existing ANLZ (non-destructive). ANLZ located via the live library's `master.db`; 409 outside live mode, 422 only for a track with no ANLZ. Was hard-wired to `%APPDATA%/Pioneer/rekordbox/master.db` (wrong for XML mode, rekordbox6 installs and the standalone db) |
+| POST | `/api/phrase/batch/start` `[AUTH]` | Start a background phrase-cue batch over a scope. Body `{scope:{kind:"single"\|"playlist"\|"selection"\|"collection", track_id?, playlist_id?, track_ids?}, phrase_length?, align_downbeat?, include_bar_markers?}`. Returns `{job_id, total}`. 409 if a batch already runs or outside live mode, 400 on empty/invalid scope. Single-flight via `_phrase_batch_lock` (asyncio.Lock) |
 | GET | `/api/phrase/batch/status?job_id=` | Poll job: `{status, total, done, percent, eta_seconds, succeeded, skipped, failed, current_track, errors[]}` |
 | POST | `/api/phrase/batch/cancel` `[AUTH]` | Cooperative cancel of a running batch by `job_id` |
 

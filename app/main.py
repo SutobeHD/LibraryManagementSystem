@@ -5777,6 +5777,29 @@ def _is_rekordbox_running() -> bool:
         return False
 
 
+def _live_master_db_path() -> Path | None:
+    """The ``master.db`` the live library runs on, or None outside live mode.
+
+    Same file the facade opens (``db.live_db_path``: ``Pioneer/rekordbox``, else
+    ``Pioneer/rekordbox6``, else the app's standalone copy). Callers used to hard-wire
+    ``%APPDATA%/Pioneer/rekordbox/master.db`` regardless of mode, so an XML library, a
+    rekordbox6 install or the standalone db hit the wrong file or none at all.
+    """
+    if getattr(db, "mode", None) != "live":
+        return None
+    return Path(db.live_db_path)
+
+
+def _require_live_master_db(feature: str) -> str:
+    """``_live_master_db_path()`` as a string, or 409 naming what needs it."""
+    path = _live_master_db_path()
+    if path is None:
+        raise HTTPException(
+            409, f"{feature} needs a live Rekordbox library. Switch to live mode first."
+        )
+    return str(path)
+
+
 # ─── SoundCloud Download API ──────────────────────────────────────────────────
 # NOTE: These endpoints use `keyring` for secure token storage (EC7/EC13).
 
@@ -6906,12 +6929,7 @@ async def phrase_generate(body: PhraseGenerateRequest):
                 detail=f"phrase_length must be 8, 16, or 32 — got {phrase_len}",
             )
 
-        import os as _os
-
-        from .config import DB_FILENAME
-
-        rb_root = str(Path(_os.environ.get("APPDATA", "")) / "Pioneer" / "rekordbox")
-        db_path = str(Path(rb_root) / DB_FILENAME)
+        db_path = _require_live_master_db("Phrase cues")
 
         # Extract beats in executor so we don't block the event loop
         beats = await asyncio.get_event_loop().run_in_executor(
@@ -6969,12 +6987,7 @@ async def phrase_commit(body: PhraseCommitRequest):
         if not db.loaded:
             raise HTTPException(status_code=400, detail="Library not loaded")
 
-        import os as _os
-
-        from .config import DB_FILENAME
-
-        rb_root = str(Path(_os.environ.get("APPDATA", "")) / "Pioneer" / "rekordbox")
-        db_path = str(Path(rb_root) / DB_FILENAME)
+        db_path = _require_live_master_db("Phrase cues")
 
         result = await asyncio.get_event_loop().run_in_executor(
             None,
@@ -7038,14 +7051,6 @@ class PhraseBatchCancelRequest(BaseModel):
     """Cancel a running phrase batch by job id."""
 
     job_id: str
-
-
-def _phrase_db_path() -> str:
-    """Resolve the Rekordbox master.db path (same rule as phrase_generate)."""
-    from .config import DB_FILENAME
-
-    rb_root = Path(os.environ.get("APPDATA", "")) / "Pioneer" / "rekordbox"
-    return str(rb_root / DB_FILENAME)
 
 
 def _phrase_track_fields(t: dict[str, Any]) -> dict[str, Any] | None:
@@ -7142,13 +7147,17 @@ async def _run_phrase_batch(
     in finally (lock acquired in the start handler — see lock comment above).
     """
     loop = asyncio.get_event_loop()
-    db_path = _phrase_db_path()
     total = len(scope_tracks)
     started = time.monotonic()
     logger.info("[PHRASE] batch %s: %d tracks (len=%d)", job_id, total, phrase_length)
 
     job = _phrase_jobs[job_id]
     try:
+        live_db_path = _live_master_db_path()
+        if live_db_path is None:
+            # The start route refused this already; the library left live mode since.
+            raise RuntimeError("Phrase cues need a live Rekordbox library")
+        db_path = str(live_db_path)
         for idx, track in enumerate(scope_tracks):
             if job.get("cancel_requested"):
                 logger.info("[PHRASE] batch %s cancelled at %d/%d", job_id, idx, total)
@@ -7252,6 +7261,8 @@ async def phrase_batch_start(body: PhraseBatchStartRequest, background_tasks: Ba
             status_code=400,
             detail=f"phrase_length must be 8, 16, or 32 — got {body.phrase_length}",
         )
+
+    _require_live_master_db("Phrase cues")
 
     if _phrase_batch_lock.locked():
         raise HTTPException(status_code=409, detail="A phrase batch is already running")
