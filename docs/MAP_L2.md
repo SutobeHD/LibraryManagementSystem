@@ -2910,6 +2910,7 @@ Social-link tests (T-22 / T-23, Threats T13 T15 — app/artist_store/links.py).
 - `cid()`
 - `test_classify_known_shapes()`
 - `test_hostile_or_useless_input_is_refused()`
+- `test_a_public_name_that_merely_contains_a_local_word_is_a_website()`
 - `test_posts_tracks_and_share_dialogs_are_not_profiles()`
 - `test_lookalike_hosts_are_never_the_service()`
 - `test_one_key_per_profile_however_it_is_spelled()`

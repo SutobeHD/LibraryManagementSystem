@@ -136,6 +136,13 @@ _MOBILE_PREFIXES = ("www.", "m.", "mobile.", "web.")
 _HOST_RE = re.compile(
     r"^(?=.{4,253}$)(?:(?!-)[a-z0-9-]{1,63}(?<!-)\.)+(?:[a-z]{2,63}|xn--[a-z0-9-]{2,59})$"
 )
+# Dotted names that resolve to this machine or the LAN, never a public site: RFC 6761
+# `.localhost` (browsers hardcode it to loopback), mDNS `.local`, RFC 8375 `.home.arpa`,
+# the usual router/LAN suffixes, and wildcard DNS that answers with the IPv4 spelled in
+# the name (`127.0.0.1.nip.io`). Mirrored in frontend/src/utils/openExternal.js.
+_LOCAL_SUFFIXES = ("localhost", "local", "lan", "home.arpa", "internal", "localdomain")
+_LOCAL_HOSTS = frozenset({"fritz.box"})
+_EMBEDDED_IPV4 = re.compile(r"(?:^|\.)(?:\d{1,3}\.){4}")
 _BAD_CHARS = re.compile(r"[\s\\\x00-\x1f\x7f]")
 _BARE_URL_RE = re.compile(r"^(?:[a-z0-9-]+\.)+[a-z]{2,63}(?:[/?#]|$)", re.IGNORECASE)
 _SLUG = re.compile(r"^[A-Za-z0-9._~%+-]{1,120}$")
@@ -349,6 +356,13 @@ def _bare(host: str) -> str:
     return host
 
 
+def _is_local_name(host: str) -> bool:
+    """A dotted name for this machine or the LAN — ``admin.localhost``, ``nas.lan``."""
+    if host in _LOCAL_HOSTS or _EMBEDDED_IPV4.search(host):
+        return True
+    return any(host == s or host.endswith("." + s) for s in _LOCAL_SUFFIXES)
+
+
 def _safe_host(hostname: str | None) -> str | None:
     """Lower-cased ASCII host, or None for anything that is not a public DNS name."""
     host = (hostname or "").rstrip(".")
@@ -363,6 +377,8 @@ def _safe_host(hostname: str | None) -> str | None:
         return None
     except ValueError:
         pass
+    if _is_local_name(host):
+        return None
     return host if _HOST_RE.match(host) else None
 
 

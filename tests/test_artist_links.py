@@ -166,6 +166,17 @@ def test_classify_known_shapes(raw, service, url, handle) -> None:
         "https://127.0.0.1/x",
         "https://[::1]/x",
         "https://localhost/x",
+        "https://a.localhost/x",
+        "http://admin.localhost/",
+        "https://LOCALHOST./x",
+        "http://router.local/",
+        "http://nas.lan/",
+        "http://printer.home.arpa/",
+        "http://db.internal/",
+        "http://box.localdomain/",
+        "http://fritz.box/",
+        "http://127.0.0.1.nip.io/",
+        "http://10.0.0.1.sslip.io/",
         "https://example.com:8443/x",
         "https://exa mple.com/x",
         "https://example.com/\x00",
@@ -178,6 +189,23 @@ def test_classify_known_shapes(raw, service, url, handle) -> None:
 )
 def test_hostile_or_useless_input_is_refused(raw) -> None:
     assert links.classify_url(raw, allow_website=True) is None
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "https://www.local.com/",
+        "https://lan.example.com/",
+        "https://localhost.example.org/",
+        "https://internal-records.com/",
+        "https://fritz.box.example.com/",
+        "https://1.2.3.example.com/",
+    ],
+)
+def test_a_public_name_that_merely_contains_a_local_word_is_a_website(raw) -> None:
+    found = links.classify_url(raw, allow_website=True)
+
+    assert found is not None and found.service == "website"
 
 
 @pytest.mark.parametrize(

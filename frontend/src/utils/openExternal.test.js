@@ -55,6 +55,40 @@ test('an IP-literal host is refused in every spelling the URL parser folds to IP
     assert.equal(safeExternalUrl('https://www.example.com./x'), 'https://www.example.com./x');
 });
 
+test('a *.localhost, LAN or wildcard-IP name is refused, as the backend refuses it', () => {
+    for (const raw of [
+        'https://a.localhost/',
+        'http://admin.localhost/',
+        'https://A.LocalHost./x',
+        'http://router.local/',
+        'http://nas.lan/',
+        'http://printer.home.arpa/',
+        'http://db.internal/',
+        'http://box.localdomain/',
+        'http://fritz.box/',
+        'http://127.0.0.1.nip.io/',
+        'http://10.0.0.1.sslip.io/',
+    ]) {
+        assert.equal(safeExternalUrl(raw), null, raw);
+    }
+    for (const raw of [
+        'https://www.local.com/',
+        'https://lan.example.com/',
+        'https://localhost.example.org/',
+        'https://fritz.box.example.com/',
+        'https://1.2.3.example.com/',
+    ]) {
+        assert.equal(safeExternalUrl(raw), raw, raw);
+    }
+});
+
+test('only the default port passes', () => {
+    assert.equal(safeExternalUrl('http://x.localhost:8000/api/x'), null);
+    assert.equal(safeExternalUrl('https://example.com:8443/x'), null);
+    assert.equal(safeExternalUrl('http://www.example.com:80/x'), 'http://www.example.com/x');
+    assert.equal(safeExternalUrl('https://www.example.com:443/x'), 'https://www.example.com/x');
+});
+
 test('in Tauri the shell plugin opens it', async () => {
     const calls = [];
     const where = await openExternal('https://soundcloud.com/boysnoize', {

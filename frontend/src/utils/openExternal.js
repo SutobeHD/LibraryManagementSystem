@@ -2,8 +2,9 @@
 //
 // Every URL that reaches here came from somewhere untrusted — a SoundCloud profile, a
 // MusicBrainz relation, an artist bio, a paste. `safeExternalUrl` is the last gate before
-// the operating system is asked to open it: http(s) only, no credentials, a dotted host,
-// no whitespace or control characters. The backend applies the same rules before it
+// the operating system is asked to open it: http(s) only, no credentials, a dotted public
+// host (no IP, no `*.localhost` / LAN name), default port, no whitespace or control
+// characters. The backend applies the same rules before it
 // stores a link (`app/artist_store/links.py:classify_url`); this is defence in depth.
 //
 // In Tauri the call goes to the shell plugin's `open` command, whose default scope
@@ -15,6 +16,18 @@
 const MAX_URL_LENGTH = 2048;
 const WHITESPACE = /\s/;
 const IPV4_HOST = /^\d{1,3}(\.\d{1,3}){3}$/;
+// Dotted names for this machine or the LAN — same list as the backend's
+// `_LOCAL_SUFFIXES` / `_LOCAL_HOSTS` / `_EMBEDDED_IPV4` in app/artist_store/links.py.
+// Browsers hardcode `*.localhost` to loopback (RFC 6761); `127.0.0.1.nip.io` is
+// wildcard DNS answering with the IP spelled in the name.
+const LOCAL_SUFFIXES = ['localhost', 'local', 'lan', 'home.arpa', 'internal', 'localdomain'];
+const LOCAL_HOSTS = new Set(['fritz.box']);
+const EMBEDDED_IPV4 = /(?:^|\.)(?:\d{1,3}\.){4}/;
+
+function isLocalName(host) {
+    if (LOCAL_HOSTS.has(host) || EMBEDDED_IPV4.test(host)) return true;
+    return LOCAL_SUFFIXES.some((s) => host === s || host.endsWith(`.${s}`));
+}
 
 /** Whitespace, a backslash or a C0/DEL control character — none belongs in a web link. */
 function hasUnsafeChars(text) {
@@ -45,10 +58,14 @@ export function safeExternalUrl(raw) {
     }
     if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
     if (url.username || url.password) return null;
+    // The parser empties `port` for :80 on http and :443 on https — classify_url's
+    // default-port rule.
+    if (url.port !== '') return null;
     // The URL parser rewrites every IPv4 spelling (hex, octal, one integer) to dotted
     // decimal, so one pattern refuses them all — as the backend's classify_url does.
     const host = url.hostname.replace(/\.$/, '');
     if (!host.includes('.') || host.startsWith('[') || IPV4_HOST.test(host)) return null;
+    if (isLocalName(host)) return null;
     return url.href;
 }
 
