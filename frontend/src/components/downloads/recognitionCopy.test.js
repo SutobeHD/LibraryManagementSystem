@@ -7,7 +7,9 @@ import assert from 'node:assert/strict';
 import {
     correctionLine,
     creditChips,
+    FILE_TAGS_STALE_TEXT,
     formatNames,
+    namesWriteOutcome,
     recognitionHeadline,
     suggestionState,
 } from './recognitionCopy.js';
@@ -112,6 +114,29 @@ test('no suggestion, no suggestion line', () => {
     assert.equal(suggestionState(LABEL_UPLOAD, '555'), null);
     assert.equal(suggestionState({ suggestion: { artist: 'X' } }, '555'), null);
     assert.equal(suggestionState(undefined, '555'), null);
+});
+
+test('a names write whose file kept its old tags is a warning, never "done"', () => {
+    const done = 'Namen übernommen';
+
+    assert.deepEqual(namesWriteOutcome({ status: 'ok', file_tags: 'written' }, done), {
+        tone: 'success',
+        message: done,
+    });
+    assert.equal(
+        namesWriteOutcome({ status: 'no_change', file_tags: 'written' }, done).tone,
+        'success'
+    );
+    assert.equal(namesWriteOutcome({ status: 'ok', file_tags: 'skipped' }, done).tone, 'success');
+    for (const data of [
+        { status: 'partial', file_tags: 'failed' },
+        { status: 'partial', file_tags: 'error' },
+        { status: 'ok', file_tags: 'failed' },
+    ]) {
+        const outcome = namesWriteOutcome(data, done);
+        assert.equal(outcome.tone, 'warning', JSON.stringify(data));
+        assert.equal(outcome.message, FILE_TAGS_STALE_TEXT);
+    }
 });
 
 test('names are joined with an en dash and survive a missing half', () => {

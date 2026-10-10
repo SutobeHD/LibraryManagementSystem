@@ -8,9 +8,11 @@ app downloaded, keyed by its SoundCloud id. The contracts under test:
   are 422, a track the registry never saw is 404, a row without a usable library id
   (import pending, or the historical tuple-string id) is 409, no library is 409, a
   library id that no longer resolves is 404.
-* only the fields that differ are written, and the ``master.db`` write happens inside
-  ``db_lock()`` (coding rule: every master.db writer holds it). ``no_change`` leaves
-  library and file alone but settles the card (registry row + ``recognition.applied``).
+* only the fields that differ reach the library, and the ``master.db`` write happens
+  inside ``db_lock()`` (coding rule: every master.db writer holds it). ``no_change``
+  leaves the library alone but settles the card (registry row + ``recognition.applied``).
+* the file gets the full Artist + Title on every call, so a tag write that failed once
+  is repaired by calling again; a file that kept its old tags is ``partial``, not ``ok``.
 * the library track must still be the downloaded file (threat T16), and a live write
   waits for Rekordbox to close.
 * after the library write: file tags on ``POST /api/track/{tid}``'s rules (behind
@@ -483,7 +485,7 @@ def test_applying_the_suggestion_moves_library_tags_registry_and_task(
     assert "Bearer" not in caplog.text
 
 
-def test_only_the_field_that_differs_is_written(
+def test_only_the_field_that_differs_reaches_the_library(
     library: FakeLibrary, tags: TagProbe, auth_token: dict[str, str]
 ) -> None:
     _downloaded()
@@ -494,7 +496,8 @@ def test_only_the_field_that_differs_is_written(
     assert res.status_code == 200
     assert res.json()["fields"] == ["Artist"]
     assert library.writes == [([LOCAL_ID], {"Artist": BOYS}, True)]
-    assert tags.calls == [(TRACK_PATH, {"Artist": BOYS}, COVER)]
+    # The file may still carry the old Title: it always gets both names.
+    assert tags.calls == [(TRACK_PATH, {"Artist": BOYS, "Title": STARTER}, COVER)]
     assert _registry_names() == (BOYS, STARTER)
 
 
@@ -511,7 +514,7 @@ def test_names_are_stripped_and_512_characters_still_fit(
     assert library.writes == [([LOCAL_ID], {"Artist": BOYS, "Title": long_title}, True)]
 
 
-def test_names_the_track_already_has_leave_library_and_file_but_settle_the_card(
+def test_names_the_track_already_has_leave_the_library_but_settle_the_card(
     library: FakeLibrary,
     tags: TagProbe,
     downloader: sdl.SoundCloudDownloader,
@@ -530,10 +533,12 @@ def test_names_the_track_already_has_leave_library_and_file_but_settle_the_card(
         "artist": RAW_ARTIST,
         "title": RAW_TITLE,
         "fields": [],
-        "file_tags": "skipped",
+        "file_tags": "written",
     }
     assert library.writes == []
-    assert tags.calls == []
+    assert library.refreshes == 0
+    # The file is not compared — it is (re)written, which is what makes a retry a repair.
+    assert tags.calls == [(TRACK_PATH, {"Artist": RAW_ARTIST, "Title": RAW_TITLE}, COVER)]
     assert _registry_names() == (RAW_ARTIST, RAW_TITLE)
     assert downloader.tasks[TASK_ID]["recognition"]["applied"] == {
         "artist": RAW_ARTIST,
@@ -625,20 +630,70 @@ def test_a_failed_tag_write_never_fails_the_request(
     auth_token: dict[str, str],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """The library already carries the names — a 500 here would read as "nothing changed"."""
+    """The library already carries the names — a 500 here would read as "nothing changed".
+
+    ``partial``, not ``ok``: the card must not report success while the file is stale.
+    """
     _downloaded()
     tags.result = outcome
 
     res = _names(headers=auth_token)
 
     assert res.status_code == 200
-    assert res.json()["status"] == "ok"
+    assert res.json()["status"] == "partial"
     assert res.json()["file_tags"] == reported
+    assert res.json()["fields"] == ["Artist", "Title"]
     assert library.tracks[LOCAL_ID]["Artist"] == BOYS
     assert _registry_names() == (BOYS, STARTER)
     assert downloader.tasks[TASK_ID]["artist"] == BOYS
     if isinstance(outcome, Exception):
         assert "tag write failed" in caplog.text
+
+
+def test_calling_again_repairs_a_failed_tag_write(
+    library: FakeLibrary, tags: TagProbe, auth_token: dict[str, str]
+) -> None:
+    """The library diff is empty on the retry; the file must still get the names."""
+    _downloaded()
+    tags.result = False
+    first = _names(headers=auth_token)
+    tags.result = True
+
+    retry = _names(headers=auth_token)
+
+    assert first.json()["status"] == "partial"
+    assert retry.status_code == 200
+    assert retry.json()["status"] == "no_change"
+    assert retry.json()["fields"] == []
+    assert retry.json()["file_tags"] == "written"
+    assert len(library.writes) == 1, "the retry must not write the library again"
+    assert tags.calls[-1] == (TRACK_PATH, {"Artist": BOYS, "Title": STARTER}, COVER)
+
+
+def test_a_retry_whose_tag_write_fails_again_is_still_partial(
+    library: FakeLibrary, tags: TagProbe, auth_token: dict[str, str]
+) -> None:
+    _downloaded()
+    library.tracks[LOCAL_ID].update({"Artist": BOYS, "Title": STARTER})
+    tags.result = RuntimeError("file held by another player")
+
+    res = _names(headers=auth_token)
+
+    assert res.status_code == 200
+    assert (res.json()["status"], res.json()["file_tags"]) == ("partial", "error")
+    assert library.writes == []
+
+
+def test_with_tag_writing_off_no_change_stays_no_change(
+    library: FakeLibrary, tags: TagProbe, settings: dict[str, Any], auth_token: dict[str, str]
+) -> None:
+    _downloaded()
+    settings["write_tags_to_files"] = False
+
+    res = _names(headers=auth_token, artist=RAW_ARTIST, title=RAW_TITLE)
+
+    assert (res.json()["status"], res.json()["file_tags"]) == ("no_change", "skipped")
+    assert tags.calls == []
 
 
 def test_a_track_without_a_cover_is_tagged_without_one(

@@ -1733,6 +1733,8 @@ Copy for the download recognizer (artist hub T-31): who a downloaded track is by
 - `formatNames()` — Copy for the download recognizer (artist hub T-31): who a downloaded track is by, whether the libra…
 - `creditChips()` — One chip per credited name: `{ key, label, title, tone }`, tone one of `favourite` / `known` / `new…
 - `correctionLine()` — export function recognitionHeadline(recognition) { const chips = creditChips(recognition); if (!chi…
+- `FILE_TAGS_STALE_TEXT()`
+- `namesWriteOutcome()` — The toast for a `POST …/names` answer: `{ tone, message }`, tone `success` or `warning`.
 - `suggestionState()` — The pending suggestion for a task, or null.
 
 ### `frontend/src/components/downloads/recognitionCopy.test.js`
@@ -3588,14 +3590,17 @@ taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py).
 - `test_no_loaded_library_is_409()`
 - `test_a_library_id_that_no_longer_resolves_is_404()`
 - `test_applying_the_suggestion_moves_library_tags_registry_and_task()`
-- `test_only_the_field_that_differs_is_written()`
+- `test_only_the_field_that_differs_reaches_the_library()`
 - `test_names_are_stripped_and_512_characters_still_fit()`
-- `test_names_the_track_already_has_leave_library_and_file_but_settle_the_card()` — The track carries these names already, so the card must stop offering them.
+- `test_names_the_track_already_has_leave_the_library_but_settle_the_card()` — The track carries these names already, so the card must stop offering them.
 - `test_an_id_now_naming_another_file_is_refused()` — Threat T16: a reload handed the imported id to another recording.
 - `test_the_downloaded_file_itself_is_renamed()`
 - `test_a_running_rekordbox_blocks_only_a_live_write()`
 - `test_with_tag_writing_off_the_file_is_left_alone()`
 - `test_a_failed_tag_write_never_fails_the_request()` — The library already carries the names — a 500 here would read as "nothing changed".
+- `test_calling_again_repairs_a_failed_tag_write()` — The library diff is empty on the retry; the file must still get the names.
+- `test_a_retry_whose_tag_write_fails_again_is_still_partial()`
+- `test_with_tag_writing_off_no_change_stays_no_change()`
 - `test_a_track_without_a_cover_is_tagged_without_one()`
 - `test_a_failed_library_write_is_500_and_nothing_else_moves()`
 - `test_undo_puts_the_raw_names_back_everywhere()`

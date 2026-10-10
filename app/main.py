@@ -6000,8 +6000,8 @@ def _same_file(registered: Any, library: Any) -> bool:
     return Path(a) == Path(b)
 
 
-def _download_names_tags(tid: str, track: Mapping[str, Any], updates: dict[str, Any]) -> str:
-    """Mirror a names change into the file's tags, on `POST /api/track/{tid}`'s rules.
+def _download_names_tags(tid: str, track: Mapping[str, Any], names: dict[str, Any]) -> str:
+    """Write Artist + Title into the file's tags, on `POST /api/track/{tid}`'s rules.
 
     Runs after the library write landed, so it cannot fail the request: any error is
     reported as `file_tags` + a warning, never a 500 that reads as "nothing changed".
@@ -6015,7 +6015,7 @@ def _download_names_tags(tid: str, track: Mapping[str, Any], updates: dict[str, 
         art_path = track.get("Artwork")
         # Rewriting the tags must not drop the cover.
         artwork = audio_tags.load_artwork(art_path) if art_path else None
-        return "written" if audio_tags.write_tags(src, updates, artwork=artwork) else "failed"
+        return "written" if audio_tags.write_tags(src, names, artwork=artwork) else "failed"
     except Exception as exc:  # best-effort boundary: the library already has the names
         logger.warning("op=download_names tag write failed local=%s err=%s", tid, exc)
         return "error"
@@ -6035,12 +6035,16 @@ def soundcloud_download_names(sc_track_id: str, r: DownloadNamesReq) -> dict[str
     registry maps it to the track the importer created. `POST /api/track/{tid}` cannot do
     this: it has no Title, and registry + tasks would keep the old names.
 
-    Only differing fields are written. Diff and write share one `db_lock()` hold, so a
-    concurrent edit cannot land between them. `no_change` leaves library and file alone
-    but still records the names on the registry row and the tasks — the track carries
-    them, so the card must stop offering them. The library track must still be the file
-    the registry downloaded: a reload can hand its id to another recording (Threat T16),
-    and renaming that one would be silent damage.
+    Only differing fields reach the library. Diff and write share one `db_lock()` hold,
+    so a concurrent edit cannot land between them. The file gets the full wanted Artist
+    + Title on every call (when tag writing is on), not just the library diff: a tag
+    write that failed once — file locked by a player, an AV scan — must be repairable by
+    calling again, and the library diff is empty by then. `status` is `partial` (still
+    200) when the file kept its old tags, so the card can say so instead of "done".
+    `no_change` leaves the library alone but still records the names on the registry row
+    and the tasks — the track carries them, so the card must stop offering them. The
+    library track must still be the file the registry downloaded: a reload can hand its
+    id to another recording (Threat T16), and renaming that one would be silent damage.
     """
     if len(sc_track_id) > 20 or not (sc_track_id.isascii() and sc_track_id.isdigit()):
         raise HTTPException(400, "sc_track_id must be a numeric SoundCloud track id.")
@@ -6079,7 +6083,7 @@ def soundcloud_download_names(sc_track_id: str, r: DownloadNamesReq) -> dict[str
         "title": r.title,
         "fields": list(updates),
     }
-    file_tags = _download_names_tags(tid, track, updates) if updates else "skipped"
+    file_tags = _download_names_tags(tid, track, wanted)
     if "Artist" in updates:
         # An applied suggestion is by definition an artist the library did not have:
         # the hub and the next download's recognizer read db.artists, a cache.
@@ -6098,7 +6102,11 @@ def soundcloud_download_names(sc_track_id: str, r: DownloadNamesReq) -> dict[str
         registry_ok,
         tasks,
     )
-    return {"status": "ok" if updates else "no_change", **answer, "file_tags": file_tags}
+    if file_tags in ("failed", "error"):
+        status = "partial"
+    else:
+        status = "ok" if updates else "no_change"
+    return {"status": status, **answer, "file_tags": file_tags}
 
 
 # ─── Download History & Deduplication API ────────────────────────────────────

@@ -90,6 +90,22 @@ export function correctionLine(recognition) {
     };
 }
 
+export const FILE_TAGS_STALE_TEXT =
+    'Library aktualisiert, Datei-Tags aber nicht geschrieben (Datei gesperrt?)';
+
+/**
+ * The toast for a `POST …/names` answer: `{ tone, message }`, tone `success` or
+ * `warning`. `partial` means the library has the names but the file kept its old
+ * tags — never reported as done.
+ */
+export function namesWriteOutcome(data, doneMessage) {
+    const stale =
+        data?.status === 'partial' || data?.file_tags === 'failed' || data?.file_tags === 'error';
+    return stale
+        ? { tone: 'warning', message: FILE_TAGS_STALE_TEXT }
+        : { tone: 'success', message: doneMessage };
+}
+
 const samePair = (a, b) => !!a && !!b && a.artist === b.artist && a.title === b.title;
 
 /**

@@ -1,14 +1,3 @@
-import React, { useMemo, useState } from 'react';
-import toast from 'react-hot-toast';
-import { Check, Lightbulb, Loader2, Star, Undo2, UserCheck, Wand2 } from 'lucide-react';
-import api from '../../api/api';
-import {
-    correctionLine,
-    creditChips,
-    recognitionHeadline,
-    suggestionState,
-} from './recognitionCopy';
-
 /**
  * RecognitionPanel — the download recognizer's answer on a Download Manager task
  * (artist hub T-31): who is credited and whether the library knows them, the names
@@ -17,8 +6,32 @@ import {
  * "Übernehmen" / "Rückgängig" write through
  * `POST /api/soundcloud/downloads/{sc_track_id}/names` — library row + file tags,
  * only ever for a track this app downloaded. The next task poll carries the result
- * (`recognition.applied`), so the panel keeps no copy of it.
+ * (`recognition.applied`), so the panel keeps no copy of it. The one exception: a
+ * `partial` answer (library written, file tags not) keeps the names until a retry —
+ * the route rewrites the file on every call, so the same call repairs it.
  */
+import React, { useMemo, useState } from 'react';
+import toast from 'react-hot-toast';
+import {
+    AlertTriangle,
+    Check,
+    Lightbulb,
+    Loader2,
+    RotateCw,
+    Star,
+    Undo2,
+    UserCheck,
+    Wand2,
+} from 'lucide-react';
+import api from '../../api/api';
+import {
+    correctionLine,
+    creditChips,
+    FILE_TAGS_STALE_TEXT,
+    namesWriteOutcome,
+    recognitionHeadline,
+    suggestionState,
+} from './recognitionCopy';
 
 const TONE_CLASS = {
     favourite: 'bg-amber2/10 text-amber2 border-amber2/40',
@@ -30,6 +43,7 @@ const RecognitionPanel = ({ task }) => {
     const recognition = task?.recognition;
     const [dismissed, setDismissed] = useState(false);
     const [busy, setBusy] = useState(false);
+    const [staleFile, setStaleFile] = useState(null);
     const chips = useMemo(() => creditChips(recognition), [recognition]);
 
     if (!recognition) return null;
@@ -40,11 +54,20 @@ const RecognitionPanel = ({ task }) => {
     const writeNames = async (names, doneMessage) => {
         setBusy(true);
         try {
-            await api.post(
+            const res = await api.post(
                 `/api/soundcloud/downloads/${encodeURIComponent(task.sc_track_id)}/names`,
                 { artist: names.artist, title: names.title }
             );
-            toast.success(doneMessage);
+            const outcome = namesWriteOutcome(res?.data, doneMessage);
+            if (outcome.tone === 'warning') {
+                setStaleFile(names);
+                toast(outcome.message, {
+                    icon: <AlertTriangle size={14} className="text-amber2" />,
+                });
+            } else {
+                setStaleFile(null);
+                toast.success(outcome.message);
+            }
         } catch (err) {
             console.error('[RecognitionPanel] writing names failed', err);
             toast.error(err?.response?.data?.detail || 'Namen konnten nicht geschrieben werden');
@@ -153,6 +176,29 @@ const RecognitionPanel = ({ task }) => {
                             </button>
                         </>
                     )}
+                </div>
+            )}
+
+            {staleFile && (
+                <div className="flex items-center gap-2 rounded-lg border border-amber2/30 bg-amber2/5 px-2 py-1.5">
+                    <AlertTriangle size={11} className="text-amber2 shrink-0" />
+                    <span className="flex-1 min-w-0 truncate" title={FILE_TAGS_STALE_TEXT}>
+                        {FILE_TAGS_STALE_TEXT}
+                    </span>
+                    <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => writeNames(staleFile, 'Datei-Tags geschrieben')}
+                        className="flex items-center gap-1 px-2 py-0.5 rounded border border-white/10 text-ink-secondary hover:text-white disabled:opacity-40"
+                        title="Artist und Titel noch einmal in die Datei schreiben"
+                    >
+                        {busy ? (
+                            <Loader2 size={10} className="animate-spin" />
+                        ) : (
+                            <RotateCw size={10} />
+                        )}
+                        Erneut schreiben
+                    </button>
                 </div>
             )}
         </div>
