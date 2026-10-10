@@ -108,6 +108,24 @@ test('source lines carry an ok flag per source', () => {
     assert.deepEqual(sourceLines(undefined), []);
 });
 
+test('"pick the right artist below" only shows while the picker is there', () => {
+    const sources = { soundcloud: 'ok', musicbrainz: 'needs_confirmation' };
+    const mbLine = (opts) => sourceLines(sources, opts).find((l) => l.key === 'musicbrainz');
+
+    assert.match(mbLine(undefined).text, /pick the right artist below/);
+    assert.match(mbLine({ hasPicker: true }).text, /pick the right artist below/);
+    const stale = mbLine({ hasPicker: false });
+    assert.doesNotMatch(stale.text, /below/);
+    assert.match(stale.text, /Find links/);
+    assert.equal(stale.ok, false);
+    // Other statuses read the same with or without a picker.
+    assert.deepEqual(
+        sourceLines({ musicbrainz: 'ok' }, { hasPicker: false }),
+        sourceLines({ musicbrainz: 'ok' })
+    );
+    assert.doesNotMatch(emptyLinksNote({ last_fetch: { sources }, hasPicker: false }), /below/);
+});
+
 test('last fetched and hidden lines stay silent without data', () => {
     assert.equal(lastFetchedLine(null), null);
     assert.equal(hiddenLine(0), null);

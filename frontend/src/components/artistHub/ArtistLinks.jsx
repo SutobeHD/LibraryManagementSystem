@@ -158,25 +158,37 @@ const ArtistLinks = ({
     const [mbCandidates, setMbCandidates] = useState([]);
     const [scCandidates, setScCandidates] = useState(null);
     const [busy, setBusy] = useState('');
-    const seqRef = useRef(0);
+    const [refreshing, setRefreshing] = useState(false);
+    // Two stamps, not one: a link edit re-reads the strip (load) while a slow "Find
+    // links" is still on the network, and must not discard its answer — the MusicBrainz
+    // candidates exist only in that response. A refresh-like answer (refresh, confirm)
+    // also outdates every load already in flight.
+    const loadSeqRef = useRef(0);
+    const refreshSeqRef = useRef(0);
+    // Link edits that landed — a refresh that overlapped one re-reads afterwards, since
+    // its own list may have been taken before the edit.
+    const editsRef = useRef(0);
 
     const view = catalogue?.view;
     const scLinked = view ? view.link_state === 'linked' : !!artist?.sc_linked;
 
     const load = useCallback(async () => {
         if (!collectionId || !enabled) return;
-        const seq = (seqRef.current += 1);
+        const seq = (loadSeqRef.current += 1);
         try {
             const payload = await fetchLinks(collectionId);
-            if (seqRef.current === seq) setData(payload);
+            if (loadSeqRef.current === seq) setData(payload);
         } catch (e) {
-            if (seqRef.current !== seq) return;
+            if (loadSeqRef.current !== seq) return;
             console.error('[ArtistLinks] loading links failed', e);
             setData(null);
         }
     }, [collectionId, enabled]);
 
     useEffect(() => {
+        // Another artist: whatever is still in flight answers for the previous one.
+        refreshSeqRef.current += 1;
+        setRefreshing(false);
         setData(null);
         setSources(null);
         setMbCandidates([]);
@@ -187,14 +199,17 @@ const ArtistLinks = ({
     const refresh = useCallback(
         async ({ quiet = false } = {}) => {
             if (!collectionId) return;
-            const seq = (seqRef.current += 1);
-            setBusy('refresh');
+            const seq = (refreshSeqRef.current += 1);
+            const editsAtStart = editsRef.current;
+            setRefreshing(true);
             try {
                 const payload = await refreshLinks(collectionId);
-                if (seqRef.current !== seq) return;
+                if (refreshSeqRef.current !== seq) return;
+                loadSeqRef.current += 1;
                 setData(payload);
                 setSources(payload?.sources ?? null);
                 setMbCandidates(payload?.musicbrainz_candidates ?? []);
+                if (editsRef.current !== editsAtStart) load();
                 if (!quiet) {
                     const n = payload?.links?.length ?? 0;
                     const added = payload?.changes?.added ?? 0;
@@ -205,13 +220,14 @@ const ArtistLinks = ({
                     );
                 }
             } catch (e) {
+                if (refreshSeqRef.current !== seq) return;
                 console.error('[ArtistLinks] refresh failed', e);
                 toast.error(linksErrorMessage(e, 'Could not look for links.'));
             } finally {
-                if (seqRef.current === seq) setBusy('');
+                if (refreshSeqRef.current === seq) setRefreshing(false);
             }
         },
-        [collectionId]
+        [collectionId, load]
     );
 
     // The parent bumps `refreshToken` after the user links, re-links or unlinks their
@@ -246,6 +262,7 @@ const ArtistLinks = ({
         setBusy('add');
         try {
             const res = await addLink(collectionId, url);
+            editsRef.current += 1;
             toast.success(`Added ${res?.link?.service_label || 'link'}`);
             await load();
         } catch (e) {
@@ -261,6 +278,7 @@ const ArtistLinks = ({
             setBusy(link.url_key);
             try {
                 const res = await removeLink(collectionId, link.url_key);
+                editsRef.current += 1;
                 toast(res?.outcome === 'hidden' ? 'Hidden — restore it any time' : 'Link removed');
                 await load();
             } catch (e) {
@@ -277,6 +295,7 @@ const ArtistLinks = ({
         setBusy('restore');
         try {
             const res = await restoreLinks(collectionId);
+            editsRef.current += 1;
             toast.success(`Restored ${res?.restored ?? 0}`);
             await load();
         } catch (e) {
@@ -289,14 +308,19 @@ const ArtistLinks = ({
 
     const confirmMb = useCallback(
         async (candidate) => {
+            const seq = (refreshSeqRef.current += 1);
+            setRefreshing(false);
             setBusy('mb');
             try {
                 const payload = await confirmMusicBrainz(collectionId, candidate.mbid);
+                if (refreshSeqRef.current !== seq) return;
+                loadSeqRef.current += 1;
                 setData(payload);
                 setSources(payload?.sources ?? null);
                 setMbCandidates([]);
                 toast.success(`MusicBrainz: linked to ${candidate.name}`);
             } catch (e) {
+                if (refreshSeqRef.current !== seq) return;
                 console.error('[ArtistLinks] confirming MusicBrainz failed', e);
                 toast.error(linksErrorMessage(e, 'Could not use that MusicBrainz entry.'));
             } finally {
@@ -354,7 +378,8 @@ const ArtistLinks = ({
     );
 
     const groups = useMemo(() => groupLinks(data?.links), [data?.links]);
-    const lines = sourceLines(sources ?? data?.last_fetch?.sources);
+    const hasPicker = mbCandidates.length > 0;
+    const lines = sourceLines(sources ?? data?.last_fetch?.sources, { hasPicker });
     const fetched = lastFetchedLine(data?.last_fetch);
     const hidden = hiddenLine(data?.hidden_count);
     const mb = data?.musicbrainz;
@@ -378,7 +403,7 @@ const ArtistLinks = ({
                 </span>
                 {groups.length === 0 ? (
                     <span className="text-[11.5px] text-ink-muted">
-                        {emptyLinksNote({ sources, last_fetch: data?.last_fetch })}
+                        {emptyLinksNote({ sources, last_fetch: data?.last_fetch, hasPicker })}
                     </span>
                 ) : (
                     groups.map((group) => (
@@ -400,7 +425,7 @@ const ArtistLinks = ({
                     <button
                         type="button"
                         onClick={restore}
-                        disabled={!!busy}
+                        disabled={!!busy || refreshing}
                         className="text-[11px] text-ink-muted hover:text-amber2 transition-colors"
                     >
                         {hidden}
@@ -422,7 +447,7 @@ const ArtistLinks = ({
                 <StripButton
                     tone="primary"
                     onClick={() => refresh()}
-                    busy={busy === 'refresh'}
+                    busy={refreshing}
                     icon={RefreshCw}
                     title="Read the links on their SoundCloud profile and ask MusicBrainz"
                 >

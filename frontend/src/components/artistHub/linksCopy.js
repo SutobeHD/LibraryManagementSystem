@@ -82,13 +82,26 @@ const MUSICBRAINZ_STATUS = {
     not_queried: { text: 'MusicBrainz not asked', ok: false },
 };
 
-/** Per-source lines for the last refresh, `[]` when nothing was ever fetched. */
-export const sourceLines = (sources) => {
+// The candidates live only in the refresh response: after a remount, "None of these" or
+// a dropped response there is no picker, so "pick … below" would point at nothing.
+const MUSICBRAINZ_NO_PICKER = {
+    text: 'MusicBrainz: several matches — "Find links" again to choose',
+    ok: false,
+};
+
+/**
+ * Per-source lines for the last refresh, `[]` when nothing was ever fetched.
+ * `hasPicker`: the MusicBrainz candidate box is on screen right now.
+ */
+export const sourceLines = (sources, { hasPicker = true } = {}) => {
     if (!sources || typeof sources !== 'object') return [];
     const out = [];
     const sc = SOUNDCLOUD_STATUS[sources.soundcloud];
     if (sc) out.push({ key: 'soundcloud', ...sc });
-    const mb = MUSICBRAINZ_STATUS[sources.musicbrainz];
+    const mb =
+        sources.musicbrainz === 'needs_confirmation' && !hasPicker
+            ? MUSICBRAINZ_NO_PICKER
+            : MUSICBRAINZ_STATUS[sources.musicbrainz];
     if (mb) out.push({ key: 'musicbrainz', ...mb });
     return out;
 };
@@ -108,7 +121,7 @@ export const emptyLinksNote = (payload) => {
     if (!sources) {
         return 'No links yet. "Find links" reads their SoundCloud profile and MusicBrainz — or add one yourself.';
     }
-    const lines = sourceLines(sources);
+    const lines = sourceLines(sources, { hasPicker: payload?.hasPicker ?? true });
     const unreached = lines.filter((line) => !line.ok);
     if (unreached.length === 0) {
         return 'Neither their SoundCloud profile nor MusicBrainz lists another profile. Add one yourself if you know it.';
