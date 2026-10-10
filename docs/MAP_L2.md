@@ -3603,7 +3603,7 @@ taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py).
 - `test_with_tag_writing_off_no_change_stays_no_change()`
 - `test_a_track_without_a_cover_is_tagged_without_one()`
 - `test_a_failed_library_write_is_500_and_nothing_else_moves()`
-- `test_undo_puts_the_raw_names_back_everywhere()`
+- `test_undo_puts_the_downloaded_names_back_everywhere()` — Undo sends ``recognition.artist`` / ``title`` — what the downloader tagged.
 - `test_a_new_artist_name_refreshes_the_artist_list()` — The hub and the next download's recognizer read db.artists — a cache.
 - `test_a_failed_artist_list_refresh_does_not_fail_the_rename()`
 

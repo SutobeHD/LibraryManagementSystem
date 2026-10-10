@@ -6030,10 +6030,13 @@ def soundcloud_download_names(sc_track_id: str, r: DownloadNamesReq) -> dict[str
 
     Artist hub T-31, Threat T18. The recognizer writes only HIGH-confidence names itself;
     an uncertain split comes back as `recognition.suggestion` and the user applies it here
-    in one click. "Rückgängig" is the same call with `recognition.raw_artist` /
-    `raw_title`. Keyed by the SoundCloud id because that is what the task knows — the
-    registry maps it to the track the importer created. `POST /api/track/{tid}` cannot do
-    this: it has no Title, and registry + tasks would keep the old names.
+    in one click. "Rückgängig" is the same call with `recognition.artist` / `title` — the
+    names the downloader tagged, so a HIGH correction (`bound_account`, `known_spelling`)
+    beside the suggestion survives the undo; SoundCloud's `raw_*` names would bring back
+    a handle the track never carried. Keyed by the SoundCloud id because that is what the
+    task knows — the registry maps it to the track the importer created.
+    `POST /api/track/{tid}` cannot do this: it has no Title, and registry + tasks would
+    keep the old names.
 
     Only differing fields reach the library. Diff and write share one `db_lock()` hold,
     so a concurrent edit cannot land between them. The file gets the full wanted Artist

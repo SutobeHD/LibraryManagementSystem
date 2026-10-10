@@ -133,7 +133,7 @@ const RecognitionPanel = ({ task }) => {
                                 writeNames(suggestion.undo, 'Ursprüngliche Namen wiederhergestellt')
                             }
                             className="flex items-center gap-1 px-2 py-0.5 rounded border border-white/10 text-ink-secondary hover:text-white disabled:opacity-40"
-                            title="Artist und Titel wieder so schreiben, wie SoundCloud sie geliefert hat"
+                            title="Artist und Titel wieder so schreiben wie vor dem Übernehmen"
                         >
                             {busy ? (
                                 <Loader2 size={10} className="animate-spin" />

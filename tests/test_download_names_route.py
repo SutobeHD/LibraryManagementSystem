@@ -18,7 +18,8 @@ app downloaded, keyed by its SoundCloud id. The contracts under test:
 * after the library write: file tags on ``POST /api/track/{tid}``'s rules (behind
   ``write_tags_to_files``, cover preserved, never a failed request), the registry row and
   every task of the track carry the new names, ``recognition.applied`` says which won.
-* undo is the same call with the raw names.
+* undo is the same call with the names the downloader tagged (``recognition.artist`` /
+  ``title``), which survive the apply on the task.
 
 No real library, no file, no network: the ``db`` facade is a recording stub, the tag
 writer is a probe, the registry a throwaway file, the downloader a fresh instance.
@@ -730,19 +731,18 @@ def test_a_failed_library_write_is_500_and_nothing_else_moves(
     assert "applied" not in downloader.tasks[TASK_ID]["recognition"]
 
 
-def test_undo_puts_the_raw_names_back_everywhere(
+def test_undo_puts_the_downloaded_names_back_everywhere(
     library: FakeLibrary,
     tags: TagProbe,
     downloader: sdl.SoundCloudDownloader,
     auth_token: dict[str, str],
 ) -> None:
+    """Undo sends ``recognition.artist`` / ``title`` — what the downloader tagged."""
     _downloaded()
     assert _names(headers=auth_token).status_code == 200
     recognition = downloader.tasks[TASK_ID]["recognition"]
 
-    res = _names(
-        headers=auth_token, artist=recognition["raw_artist"], title=recognition["raw_title"]
-    )
+    res = _names(headers=auth_token, artist=recognition["artist"], title=recognition["title"])
 
     assert res.status_code == 200
     assert res.json()["fields"] == ["Artist", "Title"]

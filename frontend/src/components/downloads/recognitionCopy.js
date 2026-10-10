@@ -112,7 +112,10 @@ const samePair = (a, b) => !!a && !!b && a.artist === b.artist && a.title === b.
  * The pending suggestion for a task, or null.
  *
  * `state`: `open` (can be applied — the track is in the library), `waiting` (not
- * imported yet), `applied` (the file now carries it). `undo` is the pair to write back.
+ * imported yet), `applied` (the file now carries it). `undo` is the pair to write back:
+ * the names the downloader tagged (`artist` / `title`), not SoundCloud's raw ones — a
+ * HIGH correction (`bound_account`, `known_spelling`) can sit beside a suggestion, and
+ * undo must not wipe it or bring back a handle the track never carried.
  */
 export function suggestionState(recognition, localTrackId) {
     const suggestion = recognition?.suggestion;
@@ -126,6 +129,9 @@ export function suggestionState(recognition, localTrackId) {
         names: formatNames(suggestion.artist, suggestion.title),
         reason: SUGGESTION_TEXT[suggestion.reason] || '',
         state,
-        undo: { artist: recognition.raw_artist ?? '', title: recognition.raw_title ?? '' },
+        undo: {
+            artist: recognition.artist || recognition.raw_artist || '',
+            title: recognition.title || recognition.raw_title || '',
+        },
     };
 }

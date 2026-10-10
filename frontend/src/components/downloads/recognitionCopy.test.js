@@ -110,6 +110,38 @@ test('a suggestion waits for the import, then opens, then reads as applied', () 
     assert.equal(undone.state, 'open');
 });
 
+test('undo restores the names the file got, keeping a HIGH correction beside a suggestion', () => {
+    const corrected = {
+        raw_artist: 'boys noize records',
+        raw_title: 'Mystery Act - Night Track',
+        artist: 'Boys Noize Records',
+        title: 'Mystery Act - Night Track',
+        changed: true,
+        corrections: ['known_spelling'],
+        suggestion: {
+            artist: 'Mystery Act',
+            title: 'Night Track',
+            reason: 'unknown_artist_prefix',
+        },
+        credits: [],
+        applied: { artist: 'Mystery Act', title: 'Night Track' },
+    };
+
+    const state = suggestionState(corrected, '555');
+
+    assert.equal(state.state, 'applied');
+    assert.deepEqual(state.undo, {
+        artist: 'Boys Noize Records',
+        title: 'Mystery Act - Night Track',
+    });
+    // A payload without the tagged names still has something to write back.
+    const { artist: _a, title: _t, ...rawOnly } = corrected;
+    assert.deepEqual(suggestionState(rawOnly, '555').undo, {
+        artist: 'boys noize records',
+        title: 'Mystery Act - Night Track',
+    });
+});
+
 test('no suggestion, no suggestion line', () => {
     assert.equal(suggestionState(LABEL_UPLOAD, '555'), null);
     assert.equal(suggestionState({ suggestion: { artist: 'X' } }, '555'), null);
