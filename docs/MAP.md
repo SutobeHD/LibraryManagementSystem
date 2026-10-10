@@ -261,6 +261,7 @@
 | `tests/test_analysis_cache.py` | Tests for app/analysis_cache.py — persistent analysis-result cache. |
 | `tests/test_analysis_db_writer.py` | Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.db. |
 | `tests/test_analysis_edge.py` | Edge-case robustness for the analysis engine entry points. |
+| `tests/test_analyze_db_routes.py` | POST /api/track/{tid}/analyze-full and POST /api/library/analyze-batch. |
 | `tests/test_anlz_cue_layout.py` | Byte-layout regression tests for the ANLZ cue + VBR tags. |
 | `tests/test_anlz_cue_patch.py` | Round-trip tests for app/anlz_cue_patch.py. |
 | `tests/test_anlz_path_resolution.py` | Pure-Python ANLZ path resolution in `app.anlz_safe`. |

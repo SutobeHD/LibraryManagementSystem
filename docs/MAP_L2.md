@@ -495,6 +495,7 @@ Setup logging
 - `  RekordboxDB.playlist_xml_path()` — Rekordbox's masterPlaylists6.xml path, or None when the backend has none.
 - `  RekordboxDB.get_playlist_by_path()` — Resolve a folder/playlist path like ["Artists", "Boys Noize"].
 - `  RekordboxDB.get_unanalyzed_track_ids()` — Track IDs with no analysis yet.
+- `  RekordboxDB.get_analysis_writer()` — ``AnalysisDBWriter`` bound to the live library, or None outside live mode.
 - `  RekordboxDB.save()`
 - `  RekordboxDB.update_tracks_metadata()`
 - `  RekordboxDB.update_track_comment()`
@@ -2494,6 +2495,20 @@ Edge-case robustness for the analysis engine entry points.
 - `test_detect_beats_none_input_no_crash()`
 - `test_detect_key_none_input_no_crash()`
 - `test_empty_returns_have_consistent_shape()` — The empty-input dicts must carry the same keys as a normal result so
+
+### `tests/test_analyze_db_routes.py`
+
+POST /api/track/{tid}/analyze-full and POST /api/library/analyze-batch.
+
+- `live()`
+- `xml_mode()`
+- `test_facade_hands_out_the_live_writer_only_in_live_mode()`
+- `test_analyze_full_runs_the_live_writer()`
+- `test_analyze_full_outside_live_mode_is_a_409()`
+- `test_analyze_full_refuses_while_rekordbox_runs()`
+- `test_analyze_full_still_needs_a_session()`
+- `test_analyze_batch_streams_ndjson_for_the_unanalysed_tracks()`
+- `test_analyze_batch_outside_live_mode_is_a_409()`
 
 ### `tests/test_anlz_cue_layout.py`
 

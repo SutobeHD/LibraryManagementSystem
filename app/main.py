@@ -5636,6 +5636,22 @@ def get_analysis_status(task_id: str):
 # replacing the need for Rekordbox's built-in analysis.
 
 
+def _live_analysis_writer() -> Any:
+    """The live library's analysis writer, or 409 when there is none to write into.
+
+    Both routes used to probe ``hasattr(db, "get_analysis_writer")`` — false on the
+    facade, so they answered 400 even in live mode.
+    """
+    writer = db.get_analysis_writer()
+    if writer is None:
+        raise HTTPException(
+            409,
+            "Analysis-to-DB needs a loaded live Rekordbox library. "
+            "Switch to live mode and load the library first.",
+        )
+    return writer
+
+
 @app.post("/api/track/{tid}/analyze-full", dependencies=[Depends(require_session)])
 async def analyze_track_full(tid: str, req: AnalyzeFullReq = AnalyzeFullReq()):
     """
@@ -5644,16 +5660,12 @@ async def analyze_track_full(tid: str, req: AnalyzeFullReq = AnalyzeFullReq()):
 
     Requires live DB mode. Rekordbox must NOT be running.
     """
-    if not hasattr(db, "get_analysis_writer"):
-        raise HTTPException(
-            400, "Analysis-to-DB requires live database mode. Switch to live mode first."
-        )
+    writer = _live_analysis_writer()
 
     if _is_rekordbox_running():
         raise HTTPException(409, "Rekordbox is running. Close it before writing analysis data.")
 
     try:
-        writer = db.get_analysis_writer()
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, writer.analyze_and_save, tid, req.force)
 
@@ -5692,13 +5704,10 @@ async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
 
     Returns a streaming response with progress updates (NDJSON).
     """
-    if not hasattr(db, "get_analysis_writer"):
-        raise HTTPException(400, "Analysis-to-DB requires live database mode.")
+    writer = _live_analysis_writer()
 
     if _is_rekordbox_running():
         raise HTTPException(409, "Rekordbox is running. Close it before writing analysis data.")
-
-    writer = db.get_analysis_writer()
 
     track_ids = req.track_ids
     if not track_ids:

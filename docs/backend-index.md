@@ -100,8 +100,8 @@ Marker convention in the route tables below:
 | POST | `/api/audio/render` `[AUTH]` | Render audio with FFmpeg (format conversion, export) |
 | POST | `/api/audio/import` `[AUTH]` | Import a local audio file into the library |
 | POST | `/api/track/{tid}/analyze` `[AUTH]` | Full analysis pipeline on single track |
-| POST | `/api/track/{tid}/analyze-full` `[AUTH]` | Analyze + write ANLZ files + update master.db in one call. Body: `{ force: bool }`. Requires live DB mode, Rekordbox must be closed |
-| POST | `/api/library/analyze-batch` `[AUTH]` | Batch analyze multiple tracks; NDJSON streaming progress. Body: `{ track_ids: [int], force: bool }` |
+| POST | `/api/track/{tid}/analyze-full` `[AUTH]` | Analyze + write ANLZ files + update master.db in one call. Body: `{ force: bool }`. 409 when not in live mode / live library not loaded (`db.get_analysis_writer()` is None) or when Rekordbox is running. Before 2026-10 it answered 400 in every mode (`hasattr` probe on the facade) |
+| POST | `/api/library/analyze-batch` `[AUTH]` | Batch analyze multiple tracks; NDJSON streaming progress. Body: `{ track_ids: [int], force: bool }`. Same 409 gates as `analyze-full` |
 | GET | `/api/library/analyze-status` | Report analysis engine capabilities + count of unanalyzed tracks |
 
 ### Project (DAW / RBEP) Endpoints
@@ -282,6 +282,7 @@ XML-based library (default mode). In-memory dict cache for fast lookups. Also co
 | `get_track_cues(tid)` | `[Cue]` | Read stored cues |
 | `get_track_beatgrid(tid)` | `[Beat]` | Read stored beatgrid |
 | `update_tracks_metadata(ids, fields)` | `bool` | Batch metadata update |
+| `get_analysis_writer()` | `AnalysisDBWriter \| None` | Facade: live backend's writer in live mode with a loaded library, else None. Not `_serialised` (writes nothing); the writer holds `db_lock` around its own `master.db` write |
 
 ### `app/live_database.py` — `LiveRekordboxDB`
 Direct SQLite access (live mode). Thread-safe via locks. Auto-backup on write.

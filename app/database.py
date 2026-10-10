@@ -1150,6 +1150,18 @@ class RekordboxDB:
             return self.live_db.get_unanalyzed_track_ids()
         return []
 
+    def get_analysis_writer(self) -> Any | None:
+        """``AnalysisDBWriter`` bound to the live library, or None outside live mode.
+
+        None also when live mode is selected but the library was never loaded
+        (``live_db`` is created lazily on first load). Not wrapped by
+        ``_serialised``: it hands out the writer and writes nothing itself; the
+        writer takes ``db_lock`` around its own ``master.db`` write.
+        """
+        if self.mode == "live" and self.live_db is not None:
+            return self.live_db.get_analysis_writer()
+        return None
+
     def save(self) -> bool:
         if hasattr(self.active_db, "save_xml"):
             return self.active_db.save_xml()
