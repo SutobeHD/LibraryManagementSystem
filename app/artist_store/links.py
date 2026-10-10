@@ -849,7 +849,8 @@ def refresh(
 # --------------------------------------------------------------------------- account suggestions
 
 
-_NON_ALNUM = re.compile(r"[^0-9a-z]+")
+# Same Unicode-aware class as identity._compact — never strip a whole non-Latin name.
+_NON_ALNUM = re.compile(r"[\W_]+")
 
 
 def rank_soundcloud_accounts(

@@ -169,7 +169,10 @@ def _same_name(a: str, b: str) -> bool:
     fa, fb = fold_key(a), fold_key(b)
     if not fa or not fb:
         return False
-    return fa == fb or identity._compact(fa) == identity._compact(fb)
+    if fa == fb:
+        return True
+    ca, cb = identity._compact(fa), identity._compact(fb)
+    return bool(ca) and ca == cb
 
 
 def _prefix_split(title: str) -> tuple[str, str] | None:

@@ -2847,6 +2847,7 @@ Artist-Hub identity tests (app/artist_store/identity.py + schema v2 track_identi
 - `  TestFeaturedAndUncertain.test_with_in_running_text_is_not_a_feature()`
 - `  TestFeaturedAndUncertain.test_name_only_in_tags_is_uncertain()`
 - `  TestFeaturedAndUncertain.test_near_spelling_is_uncertain_and_named()`
+- `  TestFeaturedAndUncertain.test_near_spelling_keeps_non_latin_letters()`
 - `  TestFeaturedAndUncertain.test_no_credit_at_all_is_uncertain_and_says_so()`
 - `  TestFeaturedAndUncertain.test_every_track_gets_exactly_one_role()`
 - `TestAliases`
@@ -3173,6 +3174,11 @@ Download recognizer tests (T-28 — app/artist_store/recognizer.py, rows T39 + T
 - `test_label_metadata_wins_over_uploader_and_prefix()`
 - `test_no_name_at_all_stays_unknown_and_is_never_a_known_artist()`
 - `test_without_a_library_the_store_still_vouches()`
+- `test_a_label_upload_never_drops_a_different_non_latin_credit()`
+- `test_an_unknown_non_latin_prefix_is_only_a_suggestion()`
+- `test_a_non_latin_remixer_is_credited()`
+- `test_a_shared_latin_part_alone_is_not_the_same_name()`
+- `test_a_non_latin_name_repeated_in_the_title_is_still_stripped()`
 - `test_a_known_spelling_is_taken()`
 - `test_a_merged_alias_resolves_to_its_artist()`
 - `test_the_bound_account_names_the_artist()`

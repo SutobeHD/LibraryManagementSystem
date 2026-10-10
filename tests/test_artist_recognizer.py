@@ -167,6 +167,52 @@ def test_without_a_library_the_store_still_vouches() -> None:
     assert rec.credits[0].favourite is True
 
 
+# Two different non-Latin names used to compact to "" and compare equal, so the
+# title's credit was cut off or promoted at HIGH confidence instead of suggested.
+
+
+def test_a_label_upload_never_drops_a_different_non_latin_credit() -> None:
+    rec = recognizer.recognize(_sc("Скриптонит - Положение", "Some Label", label_artist="Баста"))
+
+    assert (rec.artist, rec.title) == ("Баста", "Скриптонит - Положение")
+    assert rec.corrections == ()
+    assert rec.suggestion is None
+
+
+def test_an_unknown_non_latin_prefix_is_only_a_suggestion() -> None:
+    rec = recognizer.recognize(_sc("Скриптонит - Положение", "Баста"), None)
+
+    assert (rec.artist, rec.title) == ("Баста", "Скриптонит - Положение")
+    assert rec.corrections == ()
+    assert rec.suggestion == recognizer.Suggestion(
+        "Скриптонит", "Положение", recognizer.SUGGESTION_UNKNOWN_ARTIST_PREFIX
+    )
+
+
+def test_a_non_latin_remixer_is_credited() -> None:
+    rec = recognizer.recognize(_sc("Положение (Скриптонит Remix)", "Баста"), None)
+
+    assert _credits(rec) == {
+        "Баста": ("remixed_by_other", False),
+        "Скриптонит": ("remixer", False),
+    }
+
+
+def test_a_shared_latin_part_alone_is_not_the_same_name() -> None:
+    rec = recognizer.recognize(_sc("DJ Пётр - Положение", "DJ Иван"), None)
+
+    assert rec.artist == "DJ Иван"
+    assert rec.corrections == ()
+    assert rec.suggestion is not None
+
+
+def test_a_non_latin_name_repeated_in_the_title_is_still_stripped() -> None:
+    rec = recognizer.recognize(_sc("Баста - Положение", "баста"), None)
+
+    assert (rec.artist, rec.title) == ("баста", "Положение")
+    assert rec.corrections == (recognizer.CORRECTION_TITLE_REPEATS_ARTIST,)
+
+
 # --------------------------------------------------------------------------- T40 — known
 
 

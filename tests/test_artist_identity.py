@@ -255,6 +255,13 @@ class TestFeaturedAndUncertain:
         assert row["credit_parse"]["matched_on"] == idn.SIGNAL_NEAR_MATCH
         assert row["credit_parse"]["near_match"] == "boysnoize"
 
+    def test_near_spelling_keeps_non_latin_letters(self) -> None:
+        near = one(sc("1", "Положение", uploader_name="скрипто нит"), names=("Скриптонит",))
+        other = one(sc("1", "Положение", uploader_name="DJ Пётр"), names=("DJ Иван",))
+
+        assert near["credit_parse"]["matched_on"] == idn.SIGNAL_NEAR_MATCH
+        assert other["credit_parse"]["matched_on"] != idn.SIGNAL_NEAR_MATCH
+
     def test_no_credit_at_all_is_uncertain_and_says_so(self) -> None:
         row = one(sc("1", "Nothing Here"))
         assert (row["role"], row["confidence"]) == ("uncertain", LOW)

@@ -191,7 +191,9 @@ _VERSION_VOCAB = frozenset(
     }
 )
 
-_NON_ALNUM = re.compile(r"[^0-9a-z]+")
+# Unicode-aware: an ASCII-only class compacts every Cyrillic/CJK name to "" and
+# "DJ Иван" to "dj", so two different names would compare equal.
+_NON_WORD = re.compile(r"[\W_]+")
 _QUOTES = re.compile(r"[\"“”]")
 
 
@@ -221,8 +223,12 @@ def auto_queue_eligible(role: str, confidence: str, matched_on: str = "") -> boo
 
 
 def _compact(folded: str) -> str:
-    """Fold with every non-alphanumeric removed — the near-match tier (``boysnoize``)."""
-    return _NON_ALNUM.sub("", folded)
+    """Fold with every non-letter/digit removed — the near-match tier (``boysnoize``).
+
+    Empty for a name with no letter or digit; callers must never treat two empty
+    compact forms as a match.
+    """
+    return _NON_WORD.sub("", folded)
 
 
 def _split_names(text: str) -> list[str]:
