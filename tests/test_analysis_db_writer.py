@@ -81,3 +81,60 @@ def test_master_db_bpm_is_centi_bpm_int():
     """master.db stores BPM as int(round(bpm*100)) — guard the scaling contract."""
     assert round(128.0 * 100) == 12800
     assert round(127.66 * 100) == 12766
+
+
+def _lock_held_elsewhere() -> bool:
+    """True when another thread holds ``_db_write_lock`` (probed from a fresh thread)."""
+    import threading
+
+    from app.database import _db_write_lock
+
+    result: list[bool] = []
+
+    def _probe() -> None:
+        got = _db_write_lock.acquire(blocking=False)
+        if got:
+            _db_write_lock.release()
+        result.append(not got)
+
+    t = threading.Thread(target=_probe)
+    t.start()
+    t.join()
+    return result[0]
+
+
+def test_update_db_writes_master_db_inside_db_write_lock():
+    """The analysis write is a full-row ``update_content``: re-read and write must both
+    sit inside ``_db_write_lock`` or a concurrent comment / artist edit gets clobbered."""
+
+    class _Row:
+        bpm = 0
+        analysed = 0
+
+    class _FakeMasterDb:
+        def __init__(self):
+            self.seen: list[tuple[str, bool]] = []
+
+        def get_content_by_id(self, tid):
+            self.seen.append(("read", _lock_held_elsewhere()))
+            return _Row()
+
+        def update_content(self, item):
+            self.seen.append(("update_content", _lock_held_elsewhere()))
+
+        def update_content_key(self, tid, key):
+            self.seen.append(("update_content_key", _lock_held_elsewhere()))
+
+    class _FakeLiveDB:
+        def __init__(self):
+            self.tracks = {"7": {}}
+            self.db = _FakeMasterDb()
+
+    writer = AnalysisDBWriter(_FakeLiveDB())
+    assert writer._update_db("7", {"bpm": 124.0, "key_id": 22}) is True
+    assert writer.live_db.db.seen == [
+        ("read", True),
+        ("update_content", True),
+        ("update_content_key", True),
+    ]
+    assert not _lock_held_elsewhere()

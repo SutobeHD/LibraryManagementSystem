@@ -2483,6 +2483,7 @@ Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.d
 - `test_anlz_subdir_rekordbox_convention()` — ANLZ folder = <md5[:3]>/<uuid-shaped md5> — deterministic per content id.
 - `test_update_cache_bpm_key_beatgrid_shape()` — _update_cache mirrors the master.db write: BPM float, Camelot key, and a
 - `test_master_db_bpm_is_centi_bpm_int()` — master.db stores BPM as int(round(bpm*100)) — guard the scaling contract.
+- `test_update_db_writes_master_db_inside_db_write_lock()` — The analysis write is a full-row ``update_content``: re-read and write must both
 
 ### `tests/test_analysis_edge.py`
 

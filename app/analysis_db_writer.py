@@ -228,37 +228,45 @@ class AnalysisDBWriter:
         Update djmdContent fields in master.db via rbox.
 
         Updates: bpm, key_id, analysed flag, analysis_data_path
+
+        Holds ``db_lock`` from the re-read to the last write: ``update_content``
+        writes the whole row, so a row read outside the lock would clobber a
+        concurrent comment / rating / artist edit.
         """
+        from .database import db_lock
+
         try:
-            item = self.live_db.db.get_content_by_id(str(track_id))
-            if not item:
-                logger.error(f"Content {track_id} not found in DB for update")
-                return False
+            with db_lock():
+                item = self.live_db.db.get_content_by_id(str(track_id))
+                if not item:
+                    logger.error(f"Content {track_id} not found in DB for update")
+                    return False
 
-            # BPM: stored as integer (bpm × 100)
-            bpm_int = round(analysis["bpm"] * 100)
-            item.bpm = bpm_int
+                # BPM: stored as integer (bpm * 100)
+                bpm_int = round(analysis["bpm"] * 100)
+                item.bpm = bpm_int
 
-            # Analysed flag (Rekordbox uses this to know the track has been analyzed)
-            # The 'analysed' field is a bitmask; different bits mean different analysis stages.
-            # Typical fully-analyzed value observed: 4294967295 (all bits set) or simpler values.
-            # We set it to indicate BPM + key + waveform are done.
-            item.analysed = 4294967295  # 0xFFFFFFFF — fully analyzed
+                # Analysed flag (Rekordbox uses this to know the track has been analyzed)
+                # The 'analysed' field is a bitmask; different bits mean different analysis
+                # stages. Typical fully-analyzed value observed: 4294967295 (all bits set)
+                # or simpler values. We set it to indicate BPM + key + waveform are done.
+                item.analysed = 4294967295  # 0xFFFFFFFF — fully analyzed
 
-            self.live_db.db.update_content(item)
-            logger.info(f"Updated djmdContent for {track_id}: bpm={bpm_int}, analysed=0xFFFFFFFF")
+                self.live_db.db.update_content(item)
+                logger.info(
+                    f"Updated djmdContent for {track_id}: bpm={bpm_int}, analysed=0xFFFFFFFF"
+                )
 
-            # Update key via dedicated method (handles djmdKey join table)
-            key_id = analysis.get("key_id", 0)
-            if key_id > 0:
-                analysis.get("key", "")
-                full_key = self._key_id_to_name(key_id)
-                if full_key:
-                    try:
-                        self.live_db.db.update_content_key(str(track_id), full_key)
-                        logger.info(f"Updated key for {track_id}: {full_key} (key_id={key_id})")
-                    except Exception as e:
-                        logger.warning(f"update_content_key failed for {track_id}: {e}")
+                # Update key via dedicated method (handles djmdKey join table)
+                key_id = analysis.get("key_id", 0)
+                if key_id > 0:
+                    full_key = self._key_id_to_name(key_id)
+                    if full_key:
+                        try:
+                            self.live_db.db.update_content_key(str(track_id), full_key)
+                            logger.info(f"Updated key for {track_id}: {full_key} (key_id={key_id})")
+                        except Exception as e:
+                            logger.warning(f"update_content_key failed for {track_id}: {e}")
 
             return True
 
