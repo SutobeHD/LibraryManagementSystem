@@ -4482,6 +4482,8 @@ Downloader hook for the artist recognizer (artist hub T-29, plan row T41).
 - `test_a_recognizer_failure_keeps_soundclouds_names()`
 - `test_no_metadata_means_no_tagging_and_no_recognition()`
 - `test_without_overrides_the_tags_are_what_they_always_were()`
+- `test_the_registry_row_takes_the_recognized_names()` — The 'downloaded' upsert keeps names; history + duplicate notice must not show SC's.
+- `test_without_a_recognition_the_registry_keeps_soundclouds_names()`
 - `test_the_library_is_consulted_only_when_loaded()`
 - `test_note_names_moves_every_task_of_the_track_and_marks_what_was_applied()` — Apply / undo from the Download Manager (artist hub T-31).
 - `test_note_names_for_a_track_without_tasks_touches_nothing()`

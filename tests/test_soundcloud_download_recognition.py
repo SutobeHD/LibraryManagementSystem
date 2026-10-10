@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from app import download_registry
 from app import soundcloud_downloader as sdl
 from app.artist_store import recognizer, registry, schema
 
@@ -168,6 +169,79 @@ def test_without_overrides_the_tags_are_what_they_always_were(tmp_path, written)
         ("Uploader", "Song"),
         ("Label Artist", "Release"),
     ]
+
+
+def _download_end_to_end(
+    monkeypatch, tmp_path: Path, recognition: recognizer.Recognition | None
+) -> dict[str, Any] | None:
+    """``download()``'s 'downloading' row, then ``_do_download`` on the real registry SQL.
+
+    Network, save path, tagging and analysis are stubbed; the registry upsert is not.
+    """
+    monkeypatch.setattr(download_registry, "_REGISTRY_DB", tmp_path / "download_registry.db")
+    download_registry.init_registry()
+    download_registry.register_download(
+        sc_track_id="123",
+        title="Boys Noize - Starter",
+        artist="Boysnoize Records",
+        status="downloading",
+    )
+    audio = tmp_path / "stream.mp3"
+    audio.write_bytes(b"not really audio")
+    dl = sdl.SoundCloudDownloader()
+    dl.tasks["t1"] = {"id": "t1", "sc_track_id": "123"}
+    monkeypatch.setattr(
+        sdl,
+        "_resolve_stream_via_transcodings",
+        lambda *_a, **_kw: {"url": "https://cf-media.sndcdn.com/x.mp3", "protocol": "progressive"},
+    )
+    monkeypatch.setattr(sdl, "_stream_file_to_temp", lambda url, token: audio)
+    monkeypatch.setattr(sdl, "_build_save_path", lambda artist, title, ext: tmp_path / f"f{ext}")
+    monkeypatch.setattr(sdl, "_aiff_requested", lambda: False)
+    monkeypatch.setattr(dl, "_tag_download", lambda *_a, **_kw: recognition)
+    monkeypatch.setattr(dl, "_trigger_analysis_async", lambda *_a, **_kw: None)
+
+    dl._do_download(
+        task_id="t1",
+        sc_track_id="123",
+        sc_permalink_url="https://soundcloud.com/boysnoize-records/starter",
+        title="Boys Noize - Starter",
+        artist="Boysnoize Records",
+        duration_ms=1000,
+        downloadable=False,
+        auth_token=None,
+        sc_playlist_title=None,
+        on_complete=None,
+    )
+    return download_registry.get_record("123")
+
+
+def test_the_registry_row_takes_the_recognized_names(monkeypatch, tmp_path) -> None:
+    """The 'downloaded' upsert keeps names; history + duplicate notice must not show SC's."""
+    rec = recognizer.Recognition(
+        raw_artist="Boysnoize Records",
+        raw_title="Boys Noize - Starter",
+        artist=BOYS,
+        title="Starter",
+        corrections=(recognizer.CORRECTION_KNOWN_ARTIST_PREFIX,),
+        credits=(),
+    )
+
+    record = _download_end_to_end(monkeypatch, tmp_path, rec)
+
+    assert record is not None
+    assert (record["status"], record["artist"], record["title"]) == ("downloaded", BOYS, "Starter")
+
+
+def test_without_a_recognition_the_registry_keeps_soundclouds_names(monkeypatch, tmp_path) -> None:
+    record = _download_end_to_end(monkeypatch, tmp_path, None)
+
+    assert record is not None
+    assert (record["status"], record["artist"], record["title"]) == (
+        "downloaded",
+        "Boysnoize Records",
+        "Boys Noize - Starter",
+    )
 
 
 @pytest.mark.parametrize("loaded", [True, False])

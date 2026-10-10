@@ -1419,6 +1419,10 @@ class SoundCloudDownloader:
                 sha256_hash=sha256,
                 status="downloaded",
             )
+            if recognition is not None:
+                # The upsert never touches names: the row `download()` inserted still
+                # holds SoundCloud's. History search + the duplicate notice read these.
+                registry.set_names(sc_track_id, title=title, artist=artist)
 
             self._update_task(task_id, status="Downloaded", progress=85)
             logger.info("[SC-DL] Downloaded: '%s' → %s", title, final_path)

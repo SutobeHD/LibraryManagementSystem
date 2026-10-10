@@ -437,7 +437,7 @@ SQLite-based deduplication + analysis history log. DB at `{MUSIC_DIR}/download_r
 | `local_track_ids(sc_track_ids)` | `dict[str, str]` | Bulk `sc_track_id` → library id for the artist catalogue's "downloaded" match. One connection, `IN (...)` chunks of 500 (under SQLite's 999-parameter ceiling), values always bound. **Never creates the registry file** (nothing downloaded = nothing linked); rows not imported yet + the historical mangled tuple-string ids left out; `{}` on `sqlite3.Error` |
 | `register_download(**kwargs)` | bool | UPSERT download record (idempotent) |
 | `update_analysis(**kwargs)` | bool | Store BPM/key results, mark 'analyzed' |
-| `set_names(sc_track_id, *, title, artist)` | bool | Registry row follows an applied / undone recognizer suggestion (history search + duplicate notice read these). True when the row existed; False + logged on `sqlite3.Error` |
+| `set_names(sc_track_id, *, title, artist)` | bool | Registry row follows the recognized names after a download (`_do_download` step 5 — the `register_download` upsert never updates names) and an applied / undone recognizer suggestion (history search + duplicate notice read these). True when the row existed; False + logged on `sqlite3.Error` |
 | `mark_failed(sc_track_id, error)` | None | Mark as permanently failed |
 | `delete_entry(sc_track_id)` | bool | Remove entry (allows re-download) |
 | `get_history(**filters)` | `[dict]` | Paginated history, newest-first |
@@ -474,7 +474,7 @@ SC web player itself.
 3. Resolve source URL (official → transcodings fallback)
 4. Download by protocol (progressive=`_stream_file_to_temp`, hls=`_download_hls_to_temp`)
 5. Move to `SoundCloud/{Artist}/{Title}.ext`
-   - then optional AIFF conversion, then **tag** (`_tag_download`, code step 3b): v2 metadata → `_recognize_download` → `artist_store/recognizer.recognize` decides Artist/Title → `_apply_sc_metadata(..., artist=, title=)` writes tags + cover. The task gets `artist` / `title` / `recognition`; the step-7 registry row stores the recognized names. Folder + filename keep SC's raw names (built before recognition). A recognizer failure never costs the download (Threat T19) — the tags then say what SoundCloud says.
+   - then optional AIFF conversion, then **tag** (`_tag_download`, code step 3b): v2 metadata → `_recognize_download` → `artist_store/recognizer.recognize` decides Artist/Title → `_apply_sc_metadata(..., artist=, title=)` writes tags + cover. The task gets `artist` / `title` / `recognition`; the step-7 registry row stores the recognized names (`download_registry.set_names` after the upsert, which never updates names on the 'downloading' row). Folder + filename keep SC's raw names (built before recognition). A recognizer failure never costs the download (Threat T19) — the tags then say what SoundCloud says.
 6. SHA-256 hash → content dedup check
 7. Register as 'downloaded'
 8. Background thread: analyze (BPM/key) → import → auto-sort into SC playlist
