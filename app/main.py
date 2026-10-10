@@ -13,7 +13,7 @@ import traceback
 import unicodedata
 import urllib.parse
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -5716,7 +5716,10 @@ async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
     if not track_ids:
         return {"status": "ok", "data": {"message": "No tracks to analyze", "total": 0}}
 
-    async def stream_progress():
+    def stream_progress() -> Iterator[str]:
+        # Sync on purpose: StreamingResponse pulls a sync iterator through the threadpool,
+        # so each track's analysis runs off the event loop. As an async generator it ran
+        # every analysis on the loop and stalled all other requests for its duration.
         # The counter is incremented inside the generator, not around the response:
         # a stream the client aborts before it starts is never entered, so nothing can
         # leak a permanent "busy" that would disable the artist background sync forever.
@@ -5724,10 +5727,8 @@ async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
         with _analyze_batch_count_lock:
             _analyze_batch_active += 1
         try:
-            asyncio.get_running_loop()
             for progress in writer.analyze_batch(track_ids, force=req.force):
                 yield json.dumps(progress) + "\n"
-                await asyncio.sleep(0)  # Yield control to event loop
         finally:
             with _analyze_batch_count_lock:
                 _analyze_batch_active -= 1

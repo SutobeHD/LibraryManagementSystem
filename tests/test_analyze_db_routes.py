@@ -33,9 +33,18 @@ def _post(url: str, headers: dict[str, str], body: dict[str, Any] | None = None)
     return asyncio.run(_go())
 
 
+def _on_event_loop() -> bool:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return True
+
+
 class _FakeWriter:
     def __init__(self) -> None:
         self.calls: list[tuple[str, Any, bool]] = []
+        self.batch_on_loop: list[bool] = []
 
     def analyze_and_save(self, tid: str, force: bool = False) -> dict[str, Any]:
         self.calls.append(("one", tid, force))
@@ -44,6 +53,7 @@ class _FakeWriter:
     def analyze_batch(self, track_ids: list[str], force: bool = False) -> Iterator[dict[str, Any]]:
         self.calls.append(("batch", list(track_ids), force))
         for i, tid in enumerate(track_ids):
+            self.batch_on_loop.append(_on_event_loop())
             yield {"track_id": tid, "index": i + 1, "total": len(track_ids), "status": "ok"}
 
 
@@ -139,6 +149,16 @@ def test_analyze_batch_streams_ndjson_for_the_unanalysed_tracks(
     lines = [json.loads(line) for line in r.text.splitlines() if line]
     assert [x["track_id"] for x in lines] == ["11", "12"]
     assert live.writer.calls == [("batch", ["11", "12"], False)]
+
+
+def test_analyze_batch_runs_each_analysis_off_the_event_loop(
+    live: _FakeLiveDB, auth_token: dict[str, str]
+) -> None:
+    """Per-track analysis takes seconds; on the event loop it stalled every request."""
+    r = _post("/api/library/analyze-batch", auth_token, {"track_ids": ["1", "2", "3"]})
+    assert r.status_code == 200, r.text
+    assert live.writer.batch_on_loop == [False, False, False]
+    assert main._analyze_batch_active == 0
 
 
 def test_analyze_batch_outside_live_mode_is_a_409(

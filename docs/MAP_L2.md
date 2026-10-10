@@ -2508,6 +2508,7 @@ POST /api/track/{tid}/analyze-full and POST /api/library/analyze-batch.
 - `test_analyze_full_refuses_while_rekordbox_runs()`
 - `test_analyze_full_still_needs_a_session()`
 - `test_analyze_batch_streams_ndjson_for_the_unanalysed_tracks()`
+- `test_analyze_batch_runs_each_analysis_off_the_event_loop()` — Per-track analysis takes seconds; on the event loop it stalled every request.
 - `test_analyze_batch_outside_live_mode_is_a_409()`
 
 ### `tests/test_anlz_cue_layout.py`
