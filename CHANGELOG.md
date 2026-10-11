@@ -161,6 +161,10 @@
   nameless memory cues — the loader asked rbox for attribute names `DjmdCue`
   does not have. Libraries that fall back to the `djmdContentCue` mirror were
   not affected. Cues now also carry Rekordbox's colour / active-loop values.
+- USB stick export (OneLibrary) fixes:
+  - Fixed: the export missed an existing `.lms_anlz` analysis whenever the
+    track's stored path was not already in resolved form (a `..` segment, a
+    relative path, different letter case on Windows) and re-analysed the track.
 
 ## v1.0.0-beta — 2026-05-07
 

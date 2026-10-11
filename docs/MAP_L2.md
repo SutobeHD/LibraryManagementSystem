@@ -3830,6 +3830,8 @@ Tests for app/library_source.py — the Live/XML normalization layer.
 - `test_live_normalize_duration_ms_only_not_multiplied()` — Regression: a duration_ms-only track must NOT be x1000 (was 240_000_000).
 - `test_live_normalize_lowercase_and_fallback_keys()`
 - `test_live_normalize_garbage_does_not_crash()`
+- `test_sidecar_lookup_uses_the_writers_resolved_path_key()` — The writer hashes str(path.resolve()); a stored path with `..` must still hit.
+- `test_sidecar_lookup_misses_cleanly()`
 
 ### `tests/test_live_cue_loading.py`
 
