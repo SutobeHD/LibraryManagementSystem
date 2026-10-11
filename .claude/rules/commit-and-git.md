@@ -103,6 +103,7 @@ Commits push to `origin/<current-branch>` **automatically and immediately**. No 
 
 1. **Soft rule:** after every `git commit`, follow with `git push origin <branch>`.
 2. **Hard hook:** `.claude/hooks/auto-push-after-commit.py` (PostToolUse on `Bash`) parses just-landed commit, runs `git fetch --quiet`, checks drift, pushes. Fires whether agent remembers or not.
+   - **Desktop-app caveat (observed 2026-09-25):** in the Claude desktop app the hook often does NOT fire. After every commit run `git status -sb`; `ahead N` → `git push origin <branch>` manually.
 
 ### Escape clauses (skip auto-push)
 

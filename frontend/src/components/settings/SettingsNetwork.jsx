@@ -125,6 +125,23 @@ const SettingsNetwork = ({ settings, setSettings }) => {
                 </button>
             </Section>
 
+            <Section title="Artist Background Sync" icon={RefreshCw}>
+                <Toggle
+                    checked={!!settings.artist_background_sync}
+                    onChange={(v) => set('artist_background_sync', v)}
+                    label="Refresh favourite artists while the app is idle"
+                    sub="Off by default."
+                />
+                <p className="text-xs text-ink-muted leading-relaxed">
+                    Runs only while the app is open and nothing else is working, and only over
+                    favourites set to <b className="text-ink-secondary">Auto</b> or{' '}
+                    <b className="text-ink-secondary">Review</b> in the Artists tab. It refreshes
+                    their SoundCloud catalogue — at most 20 artists and 60 API calls per pass — and{' '}
+                    <b className="text-ink-secondary">never downloads anything</b>. Every download
+                    stays a button you press.
+                </p>
+            </Section>
+
             <Section title="System" icon={Power}>
                 <button
                     onClick={async () => {

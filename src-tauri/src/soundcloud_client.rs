@@ -108,10 +108,27 @@ struct TokenResponse {
     access_token: String,
     #[allow(dead_code)]
     token_type: String,
-    #[allow(dead_code)]
     expires_in: Option<u64>,
-    #[allow(dead_code)]
     refresh_token: Option<String>,
+}
+
+/// The full result of an OAuth token exchange, on its way to the Python sidecar.
+///
+/// SoundCloud access tokens live about an hour. Dropping `refresh_token` here is
+/// what used to force a browser re-login on every restart, so all three fields
+/// travel to the backend, which owns renewal from then on.
+///
+/// This type crosses the Tauri IPC boundary. It is never logged — not the access
+/// token, not the refresh token, not redacted — and `Debug` is deliberately not
+/// derived so it cannot land in a log line by accident.
+#[derive(Clone, Serialize)]
+pub struct ScTokenSet {
+    pub access_token: String,
+    /// `None` when SoundCloud issued no refresh token: the session then simply
+    /// expires instead of renewing, and the UI has to say so.
+    pub refresh_token: Option<String>,
+    /// Seconds the access token is valid for, as reported by SoundCloud.
+    pub expires_in: Option<u64>,
 }
 
 /// A single track item returned by the SoundCloud search API.
@@ -199,15 +216,23 @@ pub fn get_auth_url() -> Result<(String, String), String> {
     Ok((final_url, code_verifier))
 }
 
-/// Exchanges an authorization code for an access token using the PKCE code verifier.
+/// Exchanges an authorization code for a token set using the PKCE code verifier.
 ///
 /// # Arguments
 /// * `code` – The authorization code received in the callback.
 /// * `code_verifier` – The PKCE code verifier generated alongside the auth URL.
 ///
 /// # Returns
-/// The access token string on success.
-pub async fn exchange_code_for_token(code: &str, code_verifier: &str) -> Result<String, ScError> {
+/// The access token plus the refresh token and lifetime SoundCloud issued with it.
+///
+/// # Errors
+/// - `ScError::Other` if the client credentials are missing from the environment
+/// - `ScError::Other` if SoundCloud answers non-2xx ("Token exchange failed")
+/// - `ScError::Network` on transport failure or an unparseable token body
+pub async fn exchange_code_for_token(
+    code: &str,
+    code_verifier: &str,
+) -> Result<ScTokenSet, ScError> {
     let client = Client::new();
     let cid = get_client_id().map_err(|e| -> ScError { e.into() })?;
     let csec = get_client_secret().map_err(|e| -> ScError { e.into() })?;
@@ -231,7 +256,11 @@ pub async fn exchange_code_for_token(code: &str, code_verifier: &str) -> Result<
     }
 
     let token_resp: TokenResponse = resp.json().await?;
-    Ok(token_resp.access_token)
+    Ok(ScTokenSet {
+        access_token: token_resp.access_token,
+        refresh_token: token_resp.refresh_token,
+        expires_in: token_resp.expires_in,
+    })
 }
 
 /// Searches for a single track on SoundCloud by artist and title.

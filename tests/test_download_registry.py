@@ -89,3 +89,71 @@ def test_many_calls_persist_no_corruption(registry):
         registry.register_download(sc_track_id=f"b{i}", title=f"t{i}", artist="A")
     assert len(registry.get_history(limit=100)) == 40
     assert registry.get_record("b39")["title"] == "t39"
+
+
+def test_local_track_ids_maps_only_imported_rows(registry):
+    """The artist catalogue's "downloaded" match (artist hub T-30)."""
+    for sc_id in ("11", "12", "13"):
+        registry.register_download(sc_track_id=sc_id, title="t", artist="A")
+    registry.update_analysis(sc_track_id="11", local_track_id="501")
+    # The historical tuple-string bug: never a usable id, so never a link.
+    registry.update_analysis(sc_track_id="13", local_track_id="('502', {'bpm': 128.0})")
+
+    assert registry.local_track_ids(["11", "12", "13", "99", ""]) == {"11": "501"}
+    assert registry.local_track_ids([]) == {}
+
+
+def test_local_track_ids_reads_past_the_parameter_ceiling(registry):
+    for i in range(1, 1201):
+        registry.register_download(sc_track_id=str(i), title="t", artist="A")
+        registry.update_analysis(sc_track_id=str(i), local_track_id=f"L{i}")
+
+    found = registry.local_track_ids(str(i) for i in range(1, 1201))
+
+    assert len(found) == 1200
+    assert found["1200"] == "L1200"
+
+
+def test_local_track_ids_never_creates_the_registry(tmp_path, monkeypatch):
+    path = tmp_path / "never-downloaded.db"
+    monkeypatch.setattr(dr, "_REGISTRY_DB", path)
+
+    assert dr.local_track_ids(["1", "2"]) == {}
+    assert not path.exists()
+
+
+def test_set_names_rewrites_only_the_names(registry):
+    """Apply / undo of a recognizer suggestion (artist hub T-31)."""
+    registry.register_download(sc_track_id="11", title="Boys Noize - Starter", artist="Label")
+    registry.update_analysis(sc_track_id="11", bpm=128.0, local_track_id="501")
+    registry.register_download(sc_track_id="12", title="Other", artist="Someone")
+
+    assert registry.set_names("11", title="Starter", artist="Boys Noize") is True
+
+    rec = registry.get_record("11")
+    assert (rec["artist"], rec["title"]) == ("Boys Noize", "Starter")
+    assert (rec["status"], rec["local_track_id"], rec["bpm"]) == ("analyzed", "501", 128.0)
+    other = registry.get_record("12")
+    assert (other["artist"], other["title"]) == ("Someone", "Other")
+
+
+def test_set_names_binds_its_values(registry):
+    registry.register_download(sc_track_id="11", title="t", artist="a")
+    hostile = "x'; DROP TABLE download_history; --"
+
+    assert registry.set_names("11", title=hostile, artist="O'Brien") is True
+
+    rec = registry.get_record("11")
+    assert (rec["artist"], rec["title"]) == ("O'Brien", hostile)
+
+
+def test_set_names_on_a_row_that_is_not_there_is_false(registry):
+    assert registry.set_names("404", title="t", artist="a") is False
+    assert registry.get_record("404") is None
+
+
+def test_set_names_on_an_unreadable_registry_is_false_and_logged(tmp_path, monkeypatch, caplog):
+    monkeypatch.setattr(dr, "_REGISTRY_DB", tmp_path / "no-schema.db")
+
+    assert dr.set_names("11", title="t", artist="a") is False
+    assert "set_names failed" in caplog.text

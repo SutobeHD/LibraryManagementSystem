@@ -211,7 +211,10 @@ def resolve_anlz_dir(db, track_id: str) -> str | None:
     rel = getattr(content, "analysis_data_path", None)
     if not rel:
         return None
-    dat = Path(db.share_directory()) / str(rel).lstrip("/\\").replace("/", os.sep)
+    share = db.share_directory()  # Optional[str]: None when no share dir is configured
+    if not share:
+        return None
+    dat = Path(share) / str(rel).lstrip("/\\").replace("/", os.sep)
     return str(dat.parent)
 
 

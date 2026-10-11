@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Manual run from the Actions tab, against any branch.
+  workflow_dispatch:
 
 # Cancel in-flight runs on the same ref — saves minutes on rebase-heavy PRs.
 concurrency:
@@ -41,7 +43,7 @@ jobs:
             | pip install -r /dev/stdin
 
       - name: Lint with ruff
-        run: ruff check app/ tests/ || true   # 385 errors remain (mostly style); promoted to strict once cleanup follow-up lands
+        run: ruff check app/ tests/ || true   # advisory: style findings remain; promoted to strict once the cleanup follow-up lands
 
       - name: Check formatting with ruff
         run: ruff format --check app/ tests/ || true   # paired with ruff check — strict mode arrives together
@@ -59,7 +61,7 @@ jobs:
         run: python scripts/check_attr_defined.py
 
       - name: Run pytest
-        run: pytest tests/ -v --tb=short   # all 194 tests must pass — Phase 6 baseline
+        run: pytest tests/ -v --tb=short   # blocking: every collected test must pass
 
       - name: Check MAP.md / MAP_L2.md drift
         run: python scripts/regen_maps.py --check   # pure AST/regex, no runtime deps — regen via scripts/regen_maps.py
@@ -108,7 +110,7 @@ jobs:
         run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --no-fail-fast
 
   frontend-lint:
-    name: Frontend — eslint + prettier + build
+    name: Frontend — eslint + prettier + build + node:test
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -124,7 +126,7 @@ jobs:
       - name: Install frontend deps
         run: npm ci --prefix frontend
 
-      # `npm run lint` is --max-warnings=0 and 194 warnings remain, so the full
+      # `npm run lint` is --max-warnings=0 and warnings remain, so the full
       # run stays advisory. Errors are a different matter: a `no-undef` error is
       # a guaranteed runtime ReferenceError (it took out the whole
       # non-destructive editor). Error count is 0 — keep it there.
@@ -140,3 +142,28 @@ jobs:
 
       - name: Build (smoke)
         run: npm run build --prefix frontend
+
+      # node:test suites, blocking — these are behaviour regressions, not style.
+      # The two resolver-backed suites need their own `--import` (Vite's
+      # extensionless imports, and stubs standing in for react/axios), and one
+      # resolver must not be loaded for the other's files, so they run one per
+      # process below. Everything else is discovered instead of listed: a listed
+      # set is how the existing suites ended up never running at all.
+      # Node 20 has no glob support for `--test`, hence `find`.
+      - name: Unit tests — node:test (plain suites)
+        run: |
+          files=$(find frontend/src -name '*.test.js' \
+            ! -name 'dawReducer.test.js' ! -name 'useArtistCatalogue.test.js')
+          test -n "$files" || { echo "no plain node:test suites found"; exit 1; }
+          echo "$files"
+          node --test $files
+
+      - name: Unit tests — dawReducer (node:test)
+        run: >
+          node --import ./frontend/src/audio/dawState/dawReducer.test.resolver.mjs
+          --test frontend/src/audio/dawState/dawReducer.test.js
+
+      - name: Unit tests — artist catalogue hook (node:test)
+        run: >
+          node --import ./frontend/src/components/artistHub/useArtistCatalogue.test.resolver.mjs
+          --test frontend/src/components/artistHub/useArtistCatalogue.test.js
