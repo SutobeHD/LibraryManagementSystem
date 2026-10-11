@@ -133,13 +133,14 @@ Implements OAuth 2.1 + PKCE:
 Granted to the `main` window only (`identifier: "main-capability"`; the `sc-oauth` window gets none):
 - `core:default` — standard window/event APIs
 - `shell:allow-spawn` — scoped to the sidecar `binaries/rb-backend` only
-- `shell:allow-execute` — bare entry, no inline `allow` scope
 - `shell:allow-open` — the shell plugin's `open` command (added 2026-09-26, `e387e36`; before it every external link in the desktop app was silently refused). Default scope: `plugins.shell.open` is unset in `tauri.conf.json`, so tauri-plugin-shell 2.3.5 validates targets against `^((mailto:\w+)|(tel:\w+)|(https?://\w+)).+`. Reached by `frontend/src/utils/openExternal.js` (`invoke('plugin:shell|open', { path })`) and by the plugin's own hook on `<a target="_blank">`. **Not** used by OAuth — `main.rs` opens the consent URL Rust-side via the `open` crate (`open::that`), which needs no capability. No custom regex, no `with` program (`docs/SECURITY.md`).
 - `dialog:default`, `dialog:allow-open`, `dialog:allow-save` — folder picker / save dialog
 - `fs:default`, `fs:allow-write-file`, `fs:allow-read-file`, `fs:allow-mkdir` — binary writes + folder creation (export)
 - `core:window:allow-minimize`, `core:window:allow-toggle-maximize`, `core:window:allow-close`, `core:window:allow-start-dragging` — custom title-bar window controls
 
 Add new permissions only when required. JSON carries no comments — record the reason in this section.
+
+Removed: `shell:allow-execute` (2026-10-11) — was granted bare, without an `allow` scope, and nothing called `plugin:shell|execute`; the sidecar is spawned Rust-side (`app.shell().sidecar`), which no capability gates.
 
 ---
 
