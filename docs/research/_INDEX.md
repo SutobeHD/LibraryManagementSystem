@@ -18,6 +18,7 @@ _(none)_
 
 ### drafting
 - [drafting_performance-overhaul.md](research/drafting_performance-overhaul.md) — Speed & efficiency overhaul; Stage-1 pre-filled from 9-agent perf investigation (48 hotspots: no list virtualization, unpaginated `/api/library/tracks`, unmemoized always-mounted views, blocking USB export+scan, event-loop waveform, 30s blocking startup); 16 OQs + 8-agent research plan queued for research-explore (2026-06-09)
+- [drafting_toast-notification-ux.md](research/drafting_toast-notification-ux.md) — Toast-Notification UX — Limit, Position & Styling (dedupe/limit stacked toasts, top-right, squarer app-consistent style); Stage 1 still template. Ported from `claude/intelligent-volhard-08ac03@a74fada` (2026-10-11)
 
 ### exploring
 - [exploring_db-write-lock-retrofit.md](research/exploring_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps; Option B (auto-wrap) committed; wave-2 verify → GAPS (3rd gap: `AnalysisDBWriter` rbox-direct write uncovered by class decorator; circular drift guard); stays exploring_ (2026-05-29)
