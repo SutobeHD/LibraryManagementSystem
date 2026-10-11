@@ -3337,9 +3337,16 @@ def batch_comment(r: BatchCommentReq) -> dict[str, Any]:
 
     # Live mode is guaranteed above, so active_db is the live backend.
     live = db.active_db
+
+    def _refresh_cache(tid: str, comment: str) -> None:
+        if tid in live.tracks:
+            live.tracks[tid]["Comment"] = comment
+
     logger.info("[BATCH-COMMENT] start: source=%s action=%s", r.source_id, r.action)
     started = time.monotonic()
-    count = apply_batch_comment(live.db, r.source_id, r.action, r.find or "", r.replace or "")
+    count = apply_batch_comment(
+        live.db, r.source_id, r.action, r.find or "", r.replace or "", on_changed=_refresh_cache
+    )
     logger.info("[BATCH-COMMENT] done in %.1fs: %d updated", time.monotonic() - started, count)
     return {"status": "success", "count": count}
 

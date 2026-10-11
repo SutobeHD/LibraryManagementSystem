@@ -90,3 +90,52 @@ def test_batch_skips_rows_whose_comment_does_not_change():
 
     assert apply_batch_comment(master, "LIB", "remove", "zzz", "") == 0
     assert master.updated == []
+
+
+def _lock_held_elsewhere() -> bool:
+    """True when another thread holds ``_db_write_lock`` (probed from a fresh thread)."""
+    import threading
+
+    from app.database import _db_write_lock
+
+    result: list[bool] = []
+
+    def _probe() -> None:
+        got = _db_write_lock.acquire(blocking=False)
+        if got:
+            _db_write_lock.release()
+        result.append(not got)
+
+    t = threading.Thread(target=_probe)
+    t.start()
+    t.join()
+    return result[0]
+
+
+def test_each_row_is_reread_and_written_inside_db_write_lock():
+    """update_content writes the whole row: a read outside the lock clobbers a
+    concurrent rating / artist / analysis edit of the same track."""
+    seen: list[tuple[str, bool]] = []
+
+    class _Locked(_MasterDb):
+        def get_content_by_id(self, tid):
+            seen.append(("read", _lock_held_elsewhere()))
+            return self.rows.get(tid)
+
+        def update_content(self, item):
+            seen.append(("write", _lock_held_elsewhere()))
+            super().update_content(item)
+
+    changed: list[tuple[str, str, bool]] = []
+    apply_batch_comment(
+        _Locked(),
+        "LIB",
+        "replace",
+        "a",
+        "A",
+        on_changed=lambda tid, c: changed.append((tid, c, _lock_held_elsewhere())),
+    )
+
+    assert seen == [("read", True), ("write", True), ("read", True), ("read", True)]
+    assert changed == [("1", "A", True)]
+    assert not _lock_held_elsewhere()

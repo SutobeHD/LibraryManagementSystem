@@ -119,6 +119,15 @@ def test_edits_the_live_library_in_process(
     assert spawned == []
 
 
+def test_refreshes_the_cached_comment_of_each_changed_track(
+    live: _FakeLive, auth_token: dict[str, str]
+) -> None:
+    """The library view reads the in-memory cache, not master.db."""
+    r = _post(auth_token, {"source_id": "77", "action": "set", "replace": "new"})
+    assert r.status_code == 200, r.text
+    assert [live.tracks[t]["Comment"] for t in ("1", "2", "3")] == ["intro", "new", ""]
+
+
 def test_a_playlist_source_edits_only_its_tracks(
     live: _FakeLive, auth_token: dict[str, str]
 ) -> None:

@@ -3497,6 +3497,7 @@ POST /api/tools/batch-comment.
 - `live()`
 - `spawned()`
 - `test_edits_the_live_library_in_process()`
+- `test_refreshes_the_cached_comment_of_each_changed_track()` — The library view reads the in-memory cache, not master.db.
 - `test_a_playlist_source_edits_only_its_tracks()`
 - `test_handler_is_not_a_coroutine()`
 - `test_runs_off_the_event_loop()`
@@ -3515,6 +3516,7 @@ Tests for app/batch_worker.py — the comment transform and the batch loop.
 - `test_unknown_action_and_none_original()`
 - `test_batch_passes_string_ids_and_survives_a_failing_row()` — rbox declares MasterDb.get_content_by_id(id: str) (_rbox.pyi); the old CLI passed int.
 - `test_batch_skips_rows_whose_comment_does_not_change()`
+- `test_each_row_is_reread_and_written_inside_db_write_lock()` — update_content writes the whole row: a read outside the lock clobbers a
 
 ### `tests/test_compare_rekordbox.py`
 
