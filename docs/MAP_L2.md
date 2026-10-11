@@ -2481,6 +2481,9 @@ Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.d
 - `test_update_cache_bpm_key_beatgrid_shape()` — _update_cache mirrors the master.db write: BPM float, Camelot key, and a
 - `test_master_db_bpm_is_centi_bpm_int()` — master.db stores BPM as int(round(bpm*100)) — guard the scaling contract.
 - `test_update_db_writes_master_db_inside_db_write_lock()` — The analysis write is a full-row ``update_content``: re-read and write must both
+- `test_skip_check_never_calls_the_aborting_rbox_path_helpers()` — BPM from tags, no AnalysisDataPath: the old check killed the sidecar here.
+- `test_skip_check_still_skips_a_track_whose_dat_exists()`
+- `test_unanalyzed_listing_never_calls_the_aborting_rbox_path_helpers()`
 
 ### `tests/test_analysis_edge.py`
 
@@ -2559,6 +2562,7 @@ Pure-Python ANLZ path resolution in `app.anlz_safe`.
 - `test_resolve_dir_returns_none_for_an_unanalysed_track()` — The case that used to kill the backend process.
 - `test_resolve_dir_returns_none_for_an_unknown_track()`
 - `test_resolve_dir_survives_a_raising_db()`
+- `test_resolve_dir_returns_none_without_a_share_directory()` — `share_directory()` is Optional; `Path(None)` used to raise TypeError.
 
 ### `tests/test_anlz_reference_parse.py`
 

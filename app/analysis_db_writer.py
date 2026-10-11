@@ -93,23 +93,15 @@ class AnalysisDBWriter:
         # 2. Check if already analyzed (skip unless forced)
         if not force:
             existing_bpm = track.get("BPM", 0)
-            if existing_bpm and existing_bpm > 0:
-                # Check if ANLZ files exist
-                try:
-                    paths = self.live_db.db.get_content_anlz_paths(str(track_id))
-                    if paths and paths.get("DAT"):
-                        dat_path = str(paths["DAT"])
-                        if os.path.exists(dat_path):
-                            logger.info(
-                                f"Track {track_id} already analyzed (BPM={existing_bpm}), skipping. Use force=True to re-analyze."
-                            )
-                            return {
-                                "status": "skipped",
-                                "reason": "already_analyzed",
-                                "bpm": existing_bpm,
-                            }
-                except Exception:
-                    pass  # No ANLZ paths yet — proceed with analysis
+            if existing_bpm and existing_bpm > 0 and self._has_anlz_dat(track_id):
+                logger.info(
+                    f"Track {track_id} already analyzed (BPM={existing_bpm}), skipping. Use force=True to re-analyze."
+                )
+                return {
+                    "status": "skipped",
+                    "reason": "already_analyzed",
+                    "bpm": existing_bpm,
+                }
 
         # 3. Get audio file path
         file_path = track.get("path", "")
@@ -211,6 +203,21 @@ class AnalysisDBWriter:
             return dir_str
 
         return None
+
+    def _has_anlz_dat(self, track_id: str) -> bool:
+        """True when the track's recorded ANLZ directory already holds ``ANLZ0000.DAT``.
+
+        Not via ``get_content_anlz_paths``: it ``unwrap()``s on an empty
+        AnalysisDataPath and aborts the process (see ``app/anlz_safe.py``). A track
+        with a tag BPM that Rekordbox never analysed is exactly that row, and the
+        ``except`` that used to wrap the call could never catch the abort.
+        """
+        from .anlz_safe import resolve_anlz_dir
+
+        anlz_dir = resolve_anlz_dir(self.live_db.db, str(track_id))
+        if not anlz_dir:
+            return False
+        return (Path(anlz_dir) / "ANLZ0000.DAT").is_file()
 
     def _create_anlz_dir(self, track_id: str) -> str:
         """Create a new ANLZ directory for a track that has never been analyzed."""
@@ -401,20 +408,7 @@ class AnalysisDBWriter:
         unanalyzed = []
         for tid, track in self.live_db.tracks.items():
             bpm = track.get("BPM", 0)
-            if not bpm or bpm <= 0:
-                unanalyzed.append(tid)
-                continue
-
-            # Also check if ANLZ files exist
-            try:
-                paths = self.live_db.db.get_content_anlz_paths(tid)
-                if not paths or not paths.get("DAT"):
-                    unanalyzed.append(tid)
-                    continue
-                dat_path = str(paths["DAT"])
-                if not os.path.exists(dat_path):
-                    unanalyzed.append(tid)
-            except Exception:
+            if not bpm or bpm <= 0 or not self._has_anlz_dat(tid):
                 unanalyzed.append(tid)
 
         logger.info(f"Found {len(unanalyzed)} unanalyzed tracks out of {len(self.live_db.tracks)}")

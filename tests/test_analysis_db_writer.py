@@ -138,3 +138,96 @@ def test_update_db_writes_master_db_inside_db_write_lock():
         ("update_content_key", True),
     ]
     assert not _lock_held_elsewhere()
+
+
+# --- rbox calls that abort the process --------------------------------------
+#
+# get_content_anlz_paths / get_content_anlz_dir unwrap() on an empty AnalysisDataPath
+# and abort the whole sidecar (Rust panic, not catchable). A track with a tag BPM that
+# Rekordbox never analysed is exactly that row, so the "already analysed?" check must
+# resolve the ANLZ dir from the content row instead.
+
+_REL = "/PIONEER/USBANLZ/44d/00cc2-7321-4a2e-88d7-fbcc7074c1b3/ANLZ0000.DAT"
+
+
+class _Content:
+    def __init__(self, cid: str, analysis_data_path: str | None) -> None:
+        self.id = cid
+        self.analysis_data_path = analysis_data_path
+
+
+class _AbortingMasterDb:
+    """rbox.MasterDb stand-in: the two path helpers record the call instead of aborting."""
+
+    def __init__(self, share: str, rel_by_id: dict[str, str | None]) -> None:
+        self.share = share
+        self.rel_by_id = rel_by_id
+        self.aborting_calls: list[str] = []
+
+    def share_directory(self) -> str:
+        return self.share
+
+    def get_content_by_id(self, tid):
+        tid = str(tid)
+        return _Content(tid, self.rel_by_id[tid]) if tid in self.rel_by_id else None
+
+    def get_content_anlz_paths(self, tid):
+        self.aborting_calls.append(f"get_content_anlz_paths({tid})")
+        raise AssertionError("real rbox aborts the process here")
+
+    def get_content_anlz_dir(self, tid):
+        self.aborting_calls.append(f"get_content_anlz_dir({tid})")
+        raise AssertionError("real rbox aborts the process here")
+
+
+class _LiveDBWith:
+    def __init__(self, tracks: dict, master_db: _AbortingMasterDb) -> None:
+        self.tracks = tracks
+        self.db = master_db
+
+
+def test_skip_check_never_calls_the_aborting_rbox_path_helpers(tmp_path):
+    """BPM from tags, no AnalysisDataPath: the old check killed the sidecar here."""
+    master = _AbortingMasterDb(str(tmp_path), {"5": None})
+    writer = AnalysisDBWriter(
+        _LiveDBWith({"5": {"BPM": 124.0, "path": str(tmp_path / "gone.mp3")}}, master)
+    )
+
+    result = writer.analyze_and_save("5")
+
+    assert master.aborting_calls == []
+    assert result["status"] == "error"  # not analysed, and nothing to skip
+
+
+def test_skip_check_still_skips_a_track_whose_dat_exists(tmp_path):
+    dat = tmp_path / _REL.lstrip("/")
+    dat.parent.mkdir(parents=True)
+    dat.write_bytes(b"PMAI")
+    master = _AbortingMasterDb(str(tmp_path), {"6": _REL})
+    writer = AnalysisDBWriter(_LiveDBWith({"6": {"BPM": 128.0, "path": "x.mp3"}}, master))
+
+    result = writer.analyze_and_save("6")
+
+    assert result == {"status": "skipped", "reason": "already_analyzed", "bpm": 128.0}
+    assert master.aborting_calls == []
+
+
+def test_unanalyzed_listing_never_calls_the_aborting_rbox_path_helpers(tmp_path):
+    analysed_rel = "/PIONEER/USBANLZ/aaa/done/ANLZ0000.DAT"
+    dat = tmp_path / analysed_rel.lstrip("/")
+    dat.parent.mkdir(parents=True)
+    dat.write_bytes(b"PMAI")
+    master = _AbortingMasterDb(
+        str(tmp_path),
+        {"1": None, "2": None, "3": "/PIONEER/USBANLZ/bbb/lazy/ANLZ0000.DAT", "4": analysed_rel},
+    )
+    tracks = {
+        "1": {"BPM": 0},  # never analysed
+        "2": {"BPM": 124.0},  # tag BPM, no AnalysisDataPath: the aborting row
+        "3": {"BPM": 124.0},  # path recorded, file not written yet
+        "4": {"BPM": 124.0},  # fully analysed
+    }
+    writer = AnalysisDBWriter(_LiveDBWith(tracks, master))
+
+    assert writer.get_unanalyzed_tracks() == ["1", "2", "3"]
+    assert master.aborting_calls == []
