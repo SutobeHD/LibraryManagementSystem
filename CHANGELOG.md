@@ -162,6 +162,9 @@
     `metadata_mappings.json` once per track — the mappings are cached; a hand
     edit to the file is picked up within 2 s, and a merge whose write fails is
     not applied in memory either.
+  - Perf: drag-drop import and folder scan no longer re-resolve every library
+    path for every file (30 files over 2,000 tracks: ~75k → ~2k `resolve()`
+    calls, ~12 s → ~0.4 s); a track added meanwhile is still skipped.
 
 ## v1.0.0-beta — 2026-05-07
 

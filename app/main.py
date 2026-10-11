@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import json
 import logging
 import multiprocessing as _mp
@@ -4180,6 +4181,7 @@ async def scan_folder(r: PathRequest):
         raise HTTPException(status_code=404, detail=f"Directory not found: {path_str}")
 
     def _scan():
+        _resolve_cached.cache_clear()
         imported = 0
         skipped = 0
         for audio_file in scan_path.rglob("*"):
@@ -4368,6 +4370,7 @@ async def import_paths(r: ImportPathsReq):
             logger.warning("[Drop] Playlist bundling failed: %s", exc)
 
     def _run():
+        _resolve_cached.cache_clear()
         for f, tid in queued:
             try:
                 _process_one(f, tid)
@@ -4760,6 +4763,24 @@ def save_s(s: SetReq):
 # the UI inspect / toggle individual folders without a full settings round-trip.
 
 
+@functools.lru_cache(maxsize=200_000)
+def _resolve_cached(p: str) -> str:
+    """``str(Path(p).resolve())``, memoised; the raw string if it cannot resolve.
+
+    The dedup helpers below compare one file against every library path, and
+    an import batch calls them per file: 30 dropped files over 2,000 tracks
+    were ~75k ``resolve()`` calls. ``_scan`` / ``_run`` clear the memo at batch
+    start, so each batch sees current on-disk names (a re-plugged drive).
+    """
+    try:
+        return str(Path(p).resolve())
+    except (OSError, ValueError, RuntimeError):
+        return p
+
+
+# The helpers read the LIVE db.tracks on every call, never a per-batch
+# snapshot: a track another writer adds mid-batch (folder watcher, an
+# overlapping scan) must still count as known, or it is imported twice.
 def _track_paths_snapshot() -> set[str]:
     """Resolved-path set of every track currently in the library."""
     paths: set[str] = set()
@@ -4767,38 +4788,25 @@ def _track_paths_snapshot() -> set[str]:
         p = t.get("path") if isinstance(t, dict) else None
         if not p:
             continue
-        try:
-            paths.add(str(Path(p).resolve()))
-        except Exception:
-            paths.add(p)
+        paths.add(_resolve_cached(str(p)))
     return paths
 
 
 def _track_id_for_path(path: Path) -> str | None:
-    """Return existing track-id for a given filesystem path, or None."""
-    try:
-        target = str(path.resolve())
-    except Exception:
-        target = str(path)
+    """Return existing track-id for a given filesystem path, or None.
+
+    First match wins when two tracks share a resolved path.
+    """
+    target = _resolve_cached(str(path))
     for tid, t in getattr(db, "tracks", {}).items():
         p = t.get("path") if isinstance(t, dict) else None
-        if not p:
-            continue
-        try:
-            if str(Path(p).resolve()) == target:
-                return str(tid)
-        except Exception:
-            if str(p) == target:
-                return str(tid)
+        if p and _resolve_cached(str(p)) == target:
+            return str(tid)
     return None
 
 
 def _is_known_audio_path(path: Path) -> bool:
-    try:
-        resolved = str(path.resolve())
-    except Exception:
-        resolved = str(path)
-    return resolved in _track_paths_snapshot()
+    return _resolve_cached(str(path)) in _track_paths_snapshot()
 
 
 @app.get("/api/library/folder-watcher/status")

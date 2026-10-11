@@ -3724,6 +3724,23 @@ Tests for app/folder_watcher.py — auto-import folder watcher.
 - `test_add_after_stop_returns_false()`
 - `test_normalize_resolves_to_absolute()`
 
+### `tests/test_import_dedup.py`
+
+Import dedup — ``/api/library/import-paths``, ``/api/library/scan-folder`` and
+
+- `library()` — ``LIBRARY_SIZE`` tracks.
+- `imports()` — Fake ``process_import``: records the file and adds it to the library.
+- `resolve_calls()`
+- `test_drop_imports_new_files_once_and_skips_known()`
+- `test_drop_skips_a_file_another_writer_added_mid_batch()` — The case a per-batch snapshot gets wrong: f3 lands in the library while
+- `test_drop_batch_does_not_trust_a_resolve_memoised_before_it()`
+- `test_scan_imports_only_unknown_files()`
+- `test_scan_skips_files_another_writer_added_mid_scan()` — Whichever file the scan imports first, the other writer adds all the
+- `test_scan_does_not_trust_a_resolve_memoised_before_it()`
+- `test_is_known_sees_a_track_added_after_an_earlier_call()` — The folder watcher calls ``_is_known_audio_path(path)`` between batches,
+- `test_track_id_for_path_keeps_the_first_match()`
+- `test_unresolvable_path_falls_back_to_the_raw_string()`
+
 ### `tests/test_import_tracker.py`
 
 Tests for app/import_tracker.py — live import-progress tracker.
