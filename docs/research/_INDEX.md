@@ -29,6 +29,7 @@ _(none)_
 ### evaluated
 - [evaluated_library-format-converter.md](research/evaluated_library-format-converter.md) — Library-wide format converter; wave 2 closed all 3 blockers (proof script `fdb461c`, AAC priming empirical A/B sample-identical, path-write via direct rbox `update_content`), 6 adversarial concerns addressed/carried-forward, citation MIXED non-load-bearing, V-PASS round 2, 3 options (A/B/C) + Recommendation = Option A (full engine, sister-doc unblocks) with 4 commit-blockers for draftplan_ (2026-05-30)
 - [evaluated_soundcloud-persistent-login.md](research/evaluated_soundcloud-persistent-login.md) — Persistent SoundCloud login; Recommendation = Option A (backend-owned silent refresh). **Shipped as artist-hub T-19 on `feat/artist-hub`** (`cb414fa`, `52771e9`, `app/soundcloud_auth.py`) — archive as `implemented_` once that branch merges (2026-09-09)
+- [evaluated_metadata-genre-normalization.md](research/evaluated_metadata-genre-normalization.md) — Unify genre spelling/case variants; today genre = free string, exact+case-sensitive dedup, no normalisation. Recommendation = Option B: canonical vocab + runtime fuzzy (`rapidfuzz`, needs Schicht-A approval) + growing alias map (no pre-stored variants). Phased M0 detect-only → M1 merge+undo → M2 write-back + opt-in Discogs-CC0 seed. Ported from `claude/genre-normalization-research-v8nsgu@7b463c3` (2026-10-11)
 
 ### parked
 _(none)_
