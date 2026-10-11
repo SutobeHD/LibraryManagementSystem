@@ -406,10 +406,10 @@ auth_db — sidecar-local store for per-device paired tokens (Phase-2 auth).
 
 ### `app/batch_worker.py`
 
-Setup logging
+Batch comment edits over the live library (``POST /api/tools/batch-comment``).
 
 - `compute_new_comment()` — Pure comment transform for one track — mirrors the four batch actions.
-- `run_batch_update()`
+- `apply_batch_comment()` — Apply one comment action to every track of ``LIB`` or one playlist.
 
 ### `app/config.py`
 
@@ -3494,25 +3494,27 @@ Tests for ``app/auth.py`` -- Bearer-token session authentication.
 
 POST /api/tools/batch-comment.
 
-- `live_db()`
-- `worker()`
-- `test_worker_gets_the_live_library_master_db()`
+- `live()`
+- `spawned()`
+- `test_edits_the_live_library_in_process()`
+- `test_a_playlist_source_edits_only_its_tracks()`
 - `test_handler_is_not_a_coroutine()`
-- `test_runs_the_worker_off_the_event_loop()`
+- `test_runs_off_the_event_loop()`
 - `test_refuses_while_rekordbox_runs()`
-- `test_worker_timeout_is_a_504()`
 - `test_outside_live_mode_is_a_409()`
 - `test_still_needs_a_session()`
 
 ### `tests/test_batch_worker.py`
 
-Tests for app/batch_worker.py — pure comment-transform logic.
+Tests for app/batch_worker.py — the comment transform and the batch loop.
 
 - `test_set_overwrites()`
 - `test_append_adds_when_absent_and_skips_when_present()`
 - `test_remove_strips_substring()`
 - `test_replace_swaps_substring()`
 - `test_unknown_action_and_none_original()`
+- `test_batch_passes_string_ids_and_survives_a_failing_row()` — rbox declares MasterDb.get_content_by_id(id: str) (_rbox.pyi); the old CLI passed int.
+- `test_batch_skips_rows_whose_comment_does_not_change()`
 
 ### `tests/test_compare_rekordbox.py`
 

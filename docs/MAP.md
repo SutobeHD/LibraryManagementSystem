@@ -39,7 +39,7 @@
 | `app/audio_tags.py` | audio_tags — write metadata back to the source audio file. |
 | `app/auth.py` | Bearer-token authentication for the FastAPI sidecar. |
 | `app/auth_db.py` | auth_db — sidecar-local store for per-device paired tokens (Phase-2 auth). |
-| `app/batch_worker.py` | Setup logging |
+| `app/batch_worker.py` | Batch comment edits over the live library (``POST /api/tools/batch-comment``). |
 | `app/config.py` | *(no module docstring)* |
 | `app/database.py` | *(no module docstring)* |
 | `app/db_taste.py` | db_taste — sidecar store for per-user taste vectors (recommender-taste-llm M1, T1). |
@@ -291,7 +291,7 @@
 | `tests/test_audio_tags.py` | Tests for app/audio_tags.py — native tag write-back (mutates user files → HIGH risk). |
 | `tests/test_auth.py` | Tests for ``app/auth.py`` -- Bearer-token session authentication. |
 | `tests/test_batch_comment_route.py` | POST /api/tools/batch-comment. |
-| `tests/test_batch_worker.py` | Tests for app/batch_worker.py — pure comment-transform logic. |
+| `tests/test_batch_worker.py` | Tests for app/batch_worker.py — the comment transform and the batch loop. |
 | `tests/test_compare_rekordbox.py` | Unit tests for the pure comparison helpers in scripts/compare_rekordbox.py. |
 | `tests/test_cue_beatgrid_persistence.py` | Round-trip tests for the cue / beatgrid sidecar persistence. |
 | `tests/test_database.py` | Tests for `app/database.py`. |

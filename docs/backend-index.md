@@ -156,7 +156,7 @@ Marker convention in the route tables below:
 | POST | `/api/tools/duplicates/merge` `[AUTH]` | Merge a set of duplicate tracks |
 | POST | `/api/tools/duplicates/merge-all` `[AUTH]` | Auto-merge all detected duplicates |
 | POST | `/api/tools/rename` `[AUTH]` | Rename tracks (not supported in XML-only mode) |
-| POST | `/api/tools/batch-comment` `[AUTH]` | Batch update comments on multiple tracks. Body `{source_id: "LIB"\|playlist_id, action: remove\|replace\|append\|set, find?, replace?}` → `{status, count}`. Runs `app/batch_worker.py` against the live library's `master.db` (`_live_master_db_path()`); 409 outside live mode or while Rekordbox runs, 504 when the worker passes 600 s. Plain `def` (threadpool) so the worker never blocks the event loop. Was hard-wired to `%APPDATA%/Pioneer/rekordbox[6]/master.db` |
+| POST | `/api/tools/batch-comment` `[AUTH]` | Batch update comments on multiple tracks. Body `{source_id: "LIB"\|playlist_id, action: remove\|replace\|append\|set, find?, replace?}` → `{status, count}`. Runs `batch_worker.apply_batch_comment` in-process on the live library's rbox connection (`db.active_db.db`); 409 outside live mode or while Rekordbox runs. Plain `def` (threadpool), off the event loop. Was hard-wired to `%APPDATA%/Pioneer/rekordbox[6]/master.db`, then a `[sys.executable, batch_worker.py]` subprocess — in the frozen build that booted a second sidecar (fresh `LMS_TOKEN=` logged, token file overwritten) |
 | POST | `/api/metadata/merge` `[AUTH]` | Merge metadata from one track into another |
 
 ### SoundCloud Endpoints
@@ -523,7 +523,7 @@ SC web player itself.
 | `app/rekordbox_bridge.py` | `export_selection(track_ids, dest_path)`, `import_xml(src_path)` | High-level bridge: export selected tracks → XML; import from XML |
 | `app/xml_generator.py` | `RekordboxXML` | Generate valid `DJ_PLAYLISTS` XML: `add_track(track)`, `add_playlist(name, tracks)`, `write(path)` |
 | `app/sidecar.py` | `SidecarStorage` | Persist artist metadata (SC links, custom fields) in `app_data.json`. Methods: `get(artist_id)`, `set(artist_id, data)` |
-| `app/batch_worker.py` | CLI tool | Batch track comment/tag update via rbox `MasterDb`. Run directly: `python -m app.batch_worker --help` |
+| `app/batch_worker.py` | `apply_batch_comment(master_db, source_id, action, find, replace) -> int`, `compute_new_comment(...)` | Batch comment edit over `LIB` or one playlist on an open rbox `MasterDb`; called in-process by `POST /api/tools/batch-comment` (no CLI any more) |
 
 ---
 

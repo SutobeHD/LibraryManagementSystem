@@ -3321,54 +3321,26 @@ class BatchCommentReq(BaseModel):
 def batch_comment(r: BatchCommentReq) -> dict[str, Any]:
     """Apply one comment action to every track of the library (``LIB``) or a playlist.
 
-    Plain ``def`` on purpose: FastAPI runs it in the threadpool, so the worker
-    subprocess (up to 600 s) never blocks the event loop. As ``async def`` it stalled
-    every other request, playback streaming included, for the whole run.
-    """
-    import subprocess
+    Runs in-process on the live library's rbox connection (``db.active_db.db``, one
+    per thread). It used to spawn ``[sys.executable, batch_worker.py, ...]``: in the
+    frozen build that is the sidecar exe, which ignores argv, so the child booted a
+    second backend — printing a fresh ``LMS_TOKEN=`` line that the route then logged,
+    overwriting the session-token file, and dying on the taken port 8000.
 
-    # Reads only the facade's mode + path attributes, none of its thread-unsafe Rust
-    # objects, so it is safe from a threadpool worker.
-    db_path = _require_live_master_db("Batch comment editing")
+    Plain ``def`` on purpose: FastAPI runs it in the threadpool, off the event loop.
+    """
+    from .batch_worker import apply_batch_comment
+
+    _require_live_master_db("Batch comment editing")
     if _is_rekordbox_running():
         raise HTTPException(409, "Rekordbox is running. Close it before batch-editing comments.")
 
-    cmd = [
-        sys.executable,
-        str(Path(APP_DIR) / "batch_worker.py"),
-        "--db",
-        db_path,
-        "--source",
-        r.source_id,
-        "--action",
-        r.action,
-    ]
-    if r.find:
-        cmd.extend(["--find", r.find])
-    if r.replace:
-        cmd.extend(["--replace", r.replace])
-
-    logger.info("[BATCH-COMMENT] worker start: source=%s action=%s", r.source_id, r.action)
+    # Live mode is guaranteed above, so active_db is the live backend.
+    live = db.active_db
+    logger.info("[BATCH-COMMENT] start: source=%s action=%s", r.source_id, r.action)
     started = time.monotonic()
-    try:
-        # timeout=600s — batch workers can legitimately run minutes over large
-        # libraries, but past that point we treat the process as hung and reclaim
-        # resources rather than holding a threadpool worker forever.
-        result = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT, timeout=600)
-    except subprocess.TimeoutExpired as e:
-        logger.error("Batch worker exceeded 600s timeout — killed (%s)", e)
-        raise HTTPException(504, detail="Batch worker timed out after 600s") from e
-    except subprocess.CalledProcessError as e:
-        logger.error("Batch worker failed: %s", e.output)
-        raise HTTPException(500, "Batch processing failed. Check logs for details.") from e
-    logger.info("[BATCH-COMMENT] worker done in %.1fs", time.monotonic() - started)
-    logger.info("Batch worker output: %s", result)
-
-    count = 0
-    for line in result.split("\n"):
-        if line.startswith("COUNT:"):
-            count = int(line.split(":")[1])
-
+    count = apply_batch_comment(live.db, r.source_id, r.action, r.find or "", r.replace or "")
+    logger.info("[BATCH-COMMENT] done in %.1fs: %d updated", time.monotonic() - started, count)
     return {"status": "success", "count": count}
 
 

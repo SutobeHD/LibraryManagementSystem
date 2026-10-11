@@ -56,7 +56,7 @@ RB_Editor_Pro/
 │   ├── rekordbox_bridge.py # Import/export bridge
 │   ├── rbep_parser.py      # Parse/serialize .rbep project files
 │   ├── xml_generator.py    # Generate DJ_PLAYLISTS XML
-│   ├── batch_worker.py     # Async batch processing
+│   ├── batch_worker.py     # Batch comment edits (in-process)
 │   └── sidecar.py          # Backend process management
 │
 ├── src-tauri/              # Rust + Tauri desktop wrapper
