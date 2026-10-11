@@ -342,7 +342,7 @@ Team-shared agent setup for [Claude Code](https://claude.com/claude-code). Commi
 | `.claude/agents/route-architect.md` | Design new FastAPI route(s) including `_db_write_lock`, `X-Session-Token`, Pydantic models, error handling | Read, Edit, Grep, Glob, Bash |
 | `.claude/agents/audio-stack-reviewer.md` | Review Python DSP (`analysis_engine`, `anlz_writer`, `usb_pdb`) or Rust audio (`src-tauri/src/audio/`) for realtime correctness + byte-layout invariants | Read, Grep, Glob, Bash |
 | `.claude/agents/test-runner.md` | Run pytest / cargo test / frontend tests, parse output, surface first failure with file:line, suggest fix or escalate | Read, Bash, Grep |
-| `.claude/agents/e2e-tester.md` | Drive the actual app via `preview_*` tools (web preview) or Tauri WebDriver. Navigate, click, fill, screenshot, capture console+network logs | All preview tools, Read, Bash |
+| `.claude/agents/e2e-tester.md` | Drive the actual app via the desktop Browser pane (`mcp__Claude_Browser__*`: `preview_*` servers + page tools) or Tauri WebDriver. Navigate, click, fill, screenshot, capture console+network logs | All `mcp__Claude_Browser__*` tools, Read, Bash, Grep |
 
 ---
 
