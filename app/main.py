@@ -5618,6 +5618,34 @@ def _live_analysis_writer() -> Any:
     return writer
 
 
+#: Single-flight slot for analyze-full + analyze-batch. Two runs at once (two batches, or
+#: a batch plus analyze-full) analyse and write the same tracks' ANLZ files concurrently,
+#: and ANLZ writes sit outside ``db_lock``. A ``threading.Lock``, not asyncio: a batch
+#: frees it from its stream's ``finally`` (a threadpool thread) or the response's
+#: background task, whichever runs first.
+_analysis_db_run_lock = threading.Lock()
+
+
+def _claim_analysis_db_run() -> Callable[[], None]:
+    """Take the analysis-to-DB slot or answer 409; returns an idempotent release."""
+    if not _analysis_db_run_lock.acquire(blocking=False):
+        raise HTTPException(
+            409, "An analysis-to-DB run is already in progress. Wait for it to finish."
+        )
+    released = False
+    guard = threading.Lock()
+
+    def release() -> None:
+        nonlocal released
+        with guard:
+            if released:
+                return
+            released = True
+        _analysis_db_run_lock.release()
+
+    return release
+
+
 #: Writer error ``reason`` -> (status, detail). Fixed details on purpose: the writer's
 #: ``error`` text can carry the track's absolute file path or a raw exception message.
 #: Any other reason is a 500.
@@ -5637,13 +5665,15 @@ async def analyze_track_full(tid: str, req: AnalyzeFullReq = AnalyzeFullReq()):
     Analyze a track with our engine and write BPM, key, waveforms, beatgrid
     directly into the Rekordbox live database + ANLZ files.
 
-    Requires live DB mode. Rekordbox must NOT be running.
+    Requires live DB mode. Rekordbox must NOT be running. 409 while another
+    analysis-to-DB run (this route or analyze-batch) is in flight.
     """
     writer = _live_analysis_writer()
 
     if _is_rekordbox_running():
         raise HTTPException(409, "Rekordbox is running. Close it before writing analysis data.")
 
+    release = _claim_analysis_db_run()
     try:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, writer.analyze_and_save, tid, req.force)
@@ -5661,6 +5691,8 @@ async def analyze_track_full(tid: str, req: AnalyzeFullReq = AnalyzeFullReq()):
     except Exception as e:
         logger.error(f"analyze-full failed for {tid}: {e}", exc_info=True)
         raise HTTPException(500, safe_error_message(e))
+    finally:
+        release()
 
 
 #: In-flight `analyze-batch` streams. This route writes analysis into `master.db` and
@@ -5685,8 +5717,11 @@ async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
     Batch-analyze tracks and write results to Rekordbox DB + ANLZ.
     If track_ids is None, automatically finds all unanalyzed tracks.
 
-    Returns a streaming response with progress updates (NDJSON).
+    Returns a streaming response with progress updates (NDJSON). 409 while another
+    analysis-to-DB run (this route or analyze-full) is in flight.
     """
+    from starlette.background import BackgroundTask
+
     writer = _live_analysis_writer()
 
     if _is_rekordbox_running():
@@ -5698,6 +5733,8 @@ async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
 
     if not track_ids:
         return {"status": "ok", "data": {"message": "No tracks to analyze", "total": 0}}
+
+    release = _claim_analysis_db_run()
 
     def stream_progress() -> Iterator[str]:
         # Sync on purpose: StreamingResponse pulls a sync iterator through the threadpool,
@@ -5715,11 +5752,16 @@ async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
         finally:
             with _analyze_batch_count_lock:
                 _analyze_batch_active -= 1
+            release()
 
+    # The background release covers a stream that never started (client gone before
+    # the first chunk): its generator is never entered, so its `finally` never runs.
+    # Starlette waits out the in-flight track's thread before running it.
     return StreamingResponse(
         stream_progress(),
         media_type="application/x-ndjson",
         headers={"X-Total-Tracks": str(len(track_ids))},
+        background=BackgroundTask(release),
     )
 
 

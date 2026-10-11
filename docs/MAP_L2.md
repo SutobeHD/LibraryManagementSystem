@@ -2487,6 +2487,8 @@ Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.d
 - `test_track_without_an_analysis_data_path_is_refused_before_any_dsp()`
 - `test_failed_dat_write_leaves_master_db_untouched()`
 - `test_writes_into_the_recorded_dir_then_flags_the_row()`
+- `test_analysis_runs_in_the_worker_pool_not_the_sidecar()` — librosa/madmom in the sidecar process held the GIL for minutes per batch.
+- `test_a_crashed_worker_drops_the_pool_for_the_next_track()`
 
 ### `tests/test_analysis_edge.py`
 
@@ -2514,6 +2516,12 @@ POST /api/track/{tid}/analyze-full and POST /api/library/analyze-batch.
 - `test_analyze_batch_streams_ndjson_for_the_unanalysed_tracks()`
 - `test_analyze_batch_runs_each_analysis_off_the_event_loop()` — Per-track analysis takes seconds; on the event loop it stalled every request.
 - `test_analyze_batch_outside_live_mode_is_a_409()`
+- `slot_taken()`
+- `test_analyze_full_is_a_409_while_another_run_holds_the_slot()`
+- `test_analyze_batch_is_a_409_while_another_run_holds_the_slot()`
+- `test_analyze_full_holds_the_slot_and_frees_it_on_every_exit()`
+- `test_analyze_batch_holds_the_slot_while_streaming_then_frees_it()`
+- `test_analyze_batch_stream_that_never_starts_still_frees_the_slot()` — Client gone before the first chunk: the generator's `finally` never runs.
 
 ### `tests/test_anlz_cue_layout.py`
 

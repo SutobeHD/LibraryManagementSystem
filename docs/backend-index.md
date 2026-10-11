@@ -100,8 +100,8 @@ Marker convention in the route tables below:
 | POST | `/api/audio/render` `[AUTH]` | Render audio with FFmpeg (format conversion, export) |
 | POST | `/api/audio/import` `[AUTH]` | Import a local audio file into the library |
 | POST | `/api/track/{tid}/analyze` `[AUTH]` | Full analysis pipeline on single track |
-| POST | `/api/track/{tid}/analyze-full` `[AUTH]` | Analyze + write ANLZ files + update master.db in one call. Body: `{ force: bool }`. 409 when not in live mode / live library not loaded (`db.get_analysis_writer()` is None) or when Rekordbox is running. Writer errors map by `reason` (`_ANALYZE_FULL_ERRORS`): `track_not_found` → 404, `no_anlz_path` / `audio_missing` → 409, anything else → 500; fixed `detail` strings, never the writer's `error` text (can hold an absolute path). Before 2026-10 it answered 400 in every mode (`hasattr` probe on the facade) |
-| POST | `/api/library/analyze-batch` `[AUTH]` | Batch analyze multiple tracks; NDJSON streaming progress. Body: `{ track_ids: [int], force: bool }`. Same 409 gates as `analyze-full` |
+| POST | `/api/track/{tid}/analyze-full` `[AUTH]` | Analyze + write ANLZ files + update master.db in one call. Body: `{ force: bool }`. 409 when not in live mode / live library not loaded (`db.get_analysis_writer()` is None) or when Rekordbox is running. Writer errors map by `reason` (`_ANALYZE_FULL_ERRORS`): `track_not_found` → 404, `no_anlz_path` / `audio_missing` → 409, anything else → 500; fixed `detail` strings, never the writer's `error` text (can hold an absolute path). Single-flight with `analyze-batch` (`_analysis_db_run_lock`): 409 while either runs. Before 2026-10 it answered 400 in every mode (`hasattr` probe on the facade) |
+| POST | `/api/library/analyze-batch` `[AUTH]` | Batch analyze multiple tracks; NDJSON streaming progress. Body: `{ track_ids: [int], force: bool }`. Same 409 gates as `analyze-full`, incl. the shared single-flight slot; the stream's `finally` or the response's `BackgroundTask` frees it (whichever first), so a stream that never starts cannot leak it |
 | GET | `/api/library/analyze-status` | Report analysis engine capabilities + count of unanalyzed tracks |
 
 ### Project (DAW / RBEP) Endpoints
@@ -383,7 +383,7 @@ Non-destructive in-place patch of an **existing** ANLZ. Walks the flat PMAI tag 
 
 ## Analysis-to-DB Orchestrator (`app/analysis_db_writer.py`) — `AnalysisDBWriter`
 
-Ties analysis → ANLZ files → master.db in a single pipeline. **Requires live DB mode and Rekordbox closed.** Writes ANLZ only into the dir of the AnalysisDataPath master.db already records (`anlz_safe.resolve_anlz_dir`, never rbox's aborting `get_content_anlz_paths`); a track with none is refused (`no_anlz_path`) before any DSP — it never invents a share path or writes `analysis_data_path`. No `.DAT` written → no master.db write (`anlz_write_failed`), so `analysed` is never set without a grid on disk.
+Ties analysis → ANLZ files → master.db in a single pipeline. **Requires live DB mode and Rekordbox closed.** Writes ANLZ only into the dir of the AnalysisDataPath master.db already records (`anlz_safe.resolve_anlz_dir`, never rbox's aborting `get_content_anlz_paths`); a track with none is refused (`no_anlz_path`) before any DSP — it never invents a share path or writes `analysis_data_path`. No `.DAT` written → no master.db write (`anlz_write_failed`), so `analysed` is never set without a grid on disk. DSP (`run_full_analysis`) runs in `AnalysisEngine`'s process pool (900 s per-track ceiling), never in the sidecar; a `BrokenProcessPool` drops the pool so the next track gets a fresh one.
 
 | Method | Description |
 |--------|-------------|

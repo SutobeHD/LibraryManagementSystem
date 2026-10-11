@@ -14,6 +14,8 @@ from __future__ import annotations
 import os
 import sys
 
+import pytest
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
@@ -309,3 +311,52 @@ def test_writes_into_the_recorded_dir_then_flags_the_row(tmp_path, monkeypatch):
     assert seen["anlz_dir"] == str(recorded_dir)
     assert recorded_dir.is_dir()  # recorded but not created yet: the writer makes it
     assert master.writes == ["update_content(9, analysed=4294967295)", "update_content_key(9)"]
+
+
+# --- where the DSP runs ------------------------------------------------------
+
+
+class _FakePool:
+    def __init__(self, outcome) -> None:
+        self.outcome = outcome
+        self.submitted: list[tuple] = []
+
+    def submit(self, fn, *args):
+        from concurrent.futures import Future
+
+        self.submitted.append((fn, args))
+        fut: Future = Future()
+        if isinstance(self.outcome, BaseException):
+            fut.set_exception(self.outcome)
+        else:
+            fut.set_result(self.outcome)
+        return fut
+
+
+def test_analysis_runs_in_the_worker_pool_not_the_sidecar(monkeypatch):
+    """librosa/madmom in the sidecar process held the GIL for minutes per batch."""
+    from app import analysis_engine
+
+    pool = _FakePool({"bpm": 124.0})
+    monkeypatch.setattr(analysis_engine.AnalysisEngine, "get_executor", lambda: pool)
+
+    out = AnalysisDBWriter(object())._run_analysis("x.mp3")
+
+    assert out == {"bpm": 124.0}
+    assert pool.submitted == [(analysis_engine.run_full_analysis, ("x.mp3",))]
+
+
+def test_a_crashed_worker_drops_the_pool_for_the_next_track(monkeypatch):
+    from concurrent.futures.process import BrokenProcessPool
+
+    from app import analysis_engine
+
+    pool = _FakePool(BrokenProcessPool("worker died"))
+    dropped: list[bool] = []
+    monkeypatch.setattr(analysis_engine.AnalysisEngine, "get_executor", lambda: pool)
+    monkeypatch.setattr(analysis_engine.AnalysisEngine, "shutdown", lambda: dropped.append(True))
+
+    with pytest.raises(BrokenProcessPool):
+        AnalysisDBWriter(object())._run_analysis("x.mp3")
+
+    assert dropped == [True]

@@ -15,6 +15,7 @@ import os
 import time
 from collections.abc import Generator
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,10 @@ logger = logging.getLogger(__name__)
 
 #: File stem the writer uses inside a track's ANLZ dir (``ANLZ0000.DAT`` / ``.EXT`` / ``.2EX``).
 _ANLZ_BASE = "ANLZ0000"
+
+#: How long one track's analysis may run in the worker pool before the writer stops
+#: waiting and reports ``analysis_failed``. A long DJ mix legitimately takes minutes.
+_ANALYSIS_TIMEOUT_S = 900.0
 
 
 class AnalysisDBWriter:
@@ -188,10 +193,22 @@ class AnalysisDBWriter:
         }
 
     def _run_analysis(self, file_path: str) -> dict[str, Any]:
-        """Run the full analysis pipeline on one audio file."""
-        from .analysis_engine import run_full_analysis
+        """Run the full analysis pipeline on one file in ``AnalysisEngine``'s worker pool.
 
-        return run_full_analysis(file_path)
+        Never in the calling (sidecar) process: librosa / madmom hold the GIL and
+        hundreds of MB for seconds to minutes per track, and a native crash in that
+        stack would take playback and every open request down with it.
+        """
+        from .analysis_engine import AnalysisEngine, run_full_analysis
+
+        future = AnalysisEngine.get_executor().submit(run_full_analysis, file_path)
+        try:
+            return future.result(timeout=_ANALYSIS_TIMEOUT_S)
+        except BrokenProcessPool:
+            # A worker died mid-track. Drop the pool so the next submit (this batch's
+            # next track, or any /api/analysis call) gets a fresh one, not this error.
+            AnalysisEngine.shutdown()
+            raise
 
     def _write_anlz(
         self, track_id: str, file_path: str, analysis: dict[str, Any], anlz_dir: str

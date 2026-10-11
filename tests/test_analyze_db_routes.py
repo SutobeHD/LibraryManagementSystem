@@ -45,10 +45,12 @@ class _FakeWriter:
     def __init__(self) -> None:
         self.calls: list[tuple[str, Any, bool]] = []
         self.batch_on_loop: list[bool] = []
+        self.slot_held: list[bool] = []
         self.result: dict[str, Any] | None = None
 
     def analyze_and_save(self, tid: str, force: bool = False) -> dict[str, Any]:
         self.calls.append(("one", tid, force))
+        self.slot_held.append(main._analysis_db_run_lock.locked())
         if self.result is not None:
             return self.result
         return {"status": "ok", "track_id": tid, "bpm": 124.0}
@@ -57,6 +59,7 @@ class _FakeWriter:
         self.calls.append(("batch", list(track_ids), force))
         for i, tid in enumerate(track_ids):
             self.batch_on_loop.append(_on_event_loop())
+            self.slot_held.append(main._analysis_db_run_lock.locked())
             yield {"track_id": tid, "index": i + 1, "total": len(track_ids), "status": "ok"}
 
 
@@ -216,3 +219,68 @@ def test_analyze_batch_outside_live_mode_is_a_409(
     r = _post("/api/library/analyze-batch", auth_token, {"track_ids": ["1"]})
     assert r.status_code == 409
     assert "live Rekordbox library" in r.json()["detail"]
+
+
+# --- single flight ----------------------------------------------------------
+#
+# Two runs at once (two batches, or a batch plus analyze-full) analysed and wrote the
+# same tracks' ANLZ files concurrently; ANLZ writes sit outside db_lock.
+
+
+@pytest.fixture
+def slot_taken() -> Iterator[None]:
+    assert main._analysis_db_run_lock.acquire(blocking=False)
+    try:
+        yield
+    finally:
+        main._analysis_db_run_lock.release()
+
+
+def test_analyze_full_is_a_409_while_another_run_holds_the_slot(
+    live: _FakeLiveDB, slot_taken: None, auth_token: dict[str, str]
+) -> None:
+    r = _post("/api/track/42/analyze-full", auth_token)
+    assert r.status_code == 409
+    assert "already in progress" in r.json()["detail"]
+    assert live.writer.calls == []
+
+
+def test_analyze_batch_is_a_409_while_another_run_holds_the_slot(
+    live: _FakeLiveDB, slot_taken: None, auth_token: dict[str, str]
+) -> None:
+    r = _post("/api/library/analyze-batch", auth_token, {"track_ids": ["1"]})
+    assert r.status_code == 409
+    assert "already in progress" in r.json()["detail"]
+    assert live.writer.calls == []
+
+
+def test_analyze_full_holds_the_slot_and_frees_it_on_every_exit(
+    live: _FakeLiveDB, auth_token: dict[str, str]
+) -> None:
+    assert _post("/api/track/42/analyze-full", auth_token).status_code == 200
+    live.writer.result = {"status": "error", "reason": "audio_missing", "error": "x"}
+    assert _post("/api/track/42/analyze-full", auth_token).status_code == 409
+    assert live.writer.slot_held == [True, True]
+    assert not main._analysis_db_run_lock.locked()
+
+
+def test_analyze_batch_holds_the_slot_while_streaming_then_frees_it(
+    live: _FakeLiveDB, auth_token: dict[str, str]
+) -> None:
+    r = _post("/api/library/analyze-batch", auth_token, {"track_ids": ["1", "2"]})
+    assert r.status_code == 200, r.text
+    assert live.writer.slot_held == [True, True]
+    assert not main._analysis_db_run_lock.locked()
+
+
+def test_analyze_batch_stream_that_never_starts_still_frees_the_slot(
+    live: _FakeLiveDB,
+) -> None:
+    """Client gone before the first chunk: the generator's `finally` never runs."""
+    resp = asyncio.run(main.analyze_batch(main.AnalyzeBatchReq(track_ids=["1"])))
+    assert main._analysis_db_run_lock.locked()
+
+    asyncio.run(resp.background())
+
+    assert not main._analysis_db_run_lock.locked()
+    assert live.writer.calls == []
