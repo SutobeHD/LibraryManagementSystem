@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import unquote
 
 from .live_database import LiveRekordboxDB
+from .track_fields import normalise_track_updates, writable_fields
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,45 @@ logger = logging.getLogger(__name__)
 # RLock is used so methods that internally call other mutating methods
 # (e.g. `update_tracks_metadata` → `save_xml`) don't deadlock themselves.
 _db_write_lock = threading.RLock()
+
+_MISSING = object()
+
+# os.replace attempts in save_xml. On Windows a virus scanner or the search indexer can
+# hold a freshly written file open for a moment; a short retry rides that out.
+_REPLACE_ATTEMPTS = 3
+_REPLACE_RETRY_S = 0.05
+
+
+def _int_attr(value: Any) -> str:
+    """Integer XML attribute; anything unparsable becomes 0 instead of failing the save."""
+    try:
+        return str(int(value or 0))
+    except (TypeError, ValueError):
+        return "0"
+
+
+def _write_atomically(tree: ET.ElementTree, target: Path) -> None:
+    """Write ``tree`` beside ``target``, then swap it in: a failed write leaves the old file.
+
+    ``tree.write`` used to stream straight onto the library file, so an attribute it
+    could not serialise raised halfway and left the file truncated and unloadable. A
+    read-only library file stays refused; ``os.replace`` alone would swap it out on POSIX.
+    """
+    if target.exists() and not os.access(target, os.W_OK):
+        raise PermissionError(f"library file is read-only: {target}")
+    tmp = target.with_name(target.name + ".tmp")
+    try:
+        tree.write(str(tmp), encoding="utf-8", xml_declaration=True)
+        for attempt in range(_REPLACE_ATTEMPTS):
+            try:
+                os.replace(tmp, target)
+                break
+            except PermissionError:
+                if attempt == _REPLACE_ATTEMPTS - 1:
+                    raise
+                time.sleep(_REPLACE_RETRY_S)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 @contextmanager
@@ -669,6 +709,9 @@ class RekordboxXMLDB:
                 t_node.set("Label", track.get("Label") or "")
                 t_node.set("TotalTime", str(track.get("TotalTime") or 0))
                 t_node.set("Comments", track.get("Comment") or "")
+                t_node.set("Rating", _int_attr(track.get("Rating")))
+                if track.get("ColorID") not in (None, ""):
+                    t_node.set("ColorID", _int_attr(track.get("ColorID")))
                 for beat in track.get("beatGrid", []):
                     tempo = ET.SubElement(t_node, "TEMPO")
                     tempo.set("Inizio", str(beat.get("time", 0)))
@@ -747,8 +790,7 @@ class RekordboxXMLDB:
                             ET.SubElement(node, "TRACK", Key=str(t["id"]))
 
             build_xml_node(playlists_root_node, "ROOT")
-            tree = ET.ElementTree(root)
-            tree.write(str(self.xml_path), encoding="utf-8", xml_declaration=True)
+            _write_atomically(ET.ElementTree(root), Path(self.xml_path))
             logger.info(f"Saved XML to {self.xml_path}")
             return True
         except Exception as e:
@@ -1170,25 +1212,43 @@ class RekordboxDB:
             return self.active_db.save_xml()
         return True  # Live DB is auto-saved or handled via updates
 
+    def writable_track_fields(self) -> frozenset[str]:
+        """Field keys ``update_tracks_metadata`` accepts for the active backend."""
+        return writable_fields(self.mode)
+
     def update_tracks_metadata(self, track_ids: list[str], updates: dict[str, Any]) -> bool:
-        success = True
-        for tid in track_ids:
-            if self.mode == "live":
+        """Apply ``updates`` to every track. True only once the backend holds them.
+
+        Raises ``TrackFieldError`` (a ``ValueError``) before touching any track when a
+        key is outside ``writable_track_fields()`` or a value has the wrong type or range
+        (``app.track_fields``). XML mode: False with nothing changed when a track id is
+        unknown, and False when the library file cannot be saved; memory is then rolled
+        back to what the file still holds.
+        """
+        updates = normalise_track_updates(updates, self.mode)
+        if self.mode == "live":
+            success = True
+            for tid in track_ids:
                 if not self.active_db.update_track_metadata(tid, updates):
                     success = False
-            else:
-                # XML Mode
-                if tid in self.xml_db.tracks:
-                    t = self.xml_db.tracks[tid]
-                    for k, v in updates.items():
-                        t[k] = v
+            return success
+        tracks = self.xml_db.tracks
+        unknown = [tid for tid in track_ids if tid not in tracks]
+        if unknown:
+            logger.warning("update_tracks_metadata: unknown XML track id(s) %s", unknown[:5])
+            return False
+        before = {tid: {k: tracks[tid].get(k, _MISSING) for k in updates} for tid in track_ids}
+        for tid in track_ids:
+            tracks[tid].update(updates)
+        if self.xml_db.save_xml():
+            return True
+        for tid, old in before.items():  # the file still holds the old values
+            for key, value in old.items():
+                if value is _MISSING:
+                    tracks[tid].pop(key, None)
                 else:
-                    success = False
-
-        if self.mode == "xml" and success:
-            self.xml_db.save_xml()
-
-        return success
+                    tracks[tid][key] = value
+        return False
 
     def update_track_comment(self, tid: str, comment: str) -> bool:
         return self.update_tracks_metadata([tid], {"Comment": comment})

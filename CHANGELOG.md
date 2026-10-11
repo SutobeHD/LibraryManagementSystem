@@ -163,6 +163,18 @@
     nothing; an empty field was saved as the text "None", and a Rating or
     colour outside 0-5 / 0-8 was written as is. Such an edit is now refused
     before anything is written.
+  - Fixed: in an XML library, a value the file cannot hold (a number where
+    text belongs, a control character, a non-number BPM) could truncate the
+    library file — unloadable from then on — while the edit reported success.
+    Saves now go to a temporary file that replaces the library only once
+    complete, and such values are refused.
+  - Fixed: in an XML library, an edit whose save failed (read-only or locked
+    file) still reported success; it now fails and the in-app library is
+    rolled back to what the file holds. A batch naming an unknown track
+    changes nothing instead of editing the others.
+  - Fixed: every XML save dropped all track ratings, and colours set in the
+    app; both are now kept. Fields an XML library cannot store (Remixer, Year,
+    a misspelt key) are refused instead of vanishing on the next reload.
 
 ## v1.0.0-beta — 2026-05-07
 

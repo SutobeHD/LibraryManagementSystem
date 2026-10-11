@@ -498,7 +498,8 @@ Batch comment edits over the live library (``POST /api/tools/batch-comment``).
 - `  RekordboxDB.get_unanalyzed_track_ids()` — Track IDs with no analysis yet.
 - `  RekordboxDB.get_analysis_writer()` — ``AnalysisDBWriter`` bound to the loaded live library, else None.
 - `  RekordboxDB.save()`
-- `  RekordboxDB.update_tracks_metadata()`
+- `  RekordboxDB.writable_track_fields()` — Field keys ``update_tracks_metadata`` accepts for the active backend.
+- `  RekordboxDB.update_tracks_metadata()` — Apply ``updates`` to every track.
 - `  RekordboxDB.update_track_comment()`
 - `  RekordboxDB.update_track_path()` — Update the on-disk file path of a track after a rename operation.
 - `  RekordboxDB.get_content_by_id()` — Raw ``DjmdContent`` row, or None in XML mode / when rbox cannot serve it.
@@ -1272,7 +1273,7 @@ Track-metadata field policy: which keys a library backend stores, and their valu
 - `TrackFieldError` — A track update the backend refuses as a whole.
 - `UnsupportedTrackFields` — The update names field keys this backend cannot write.
 - `InvalidTrackFieldValue` — A known field carries a value the backend cannot store.
-- `writable_fields()` — Field keys ``backend`` persists.
+- `writable_fields()` — Field keys ``backend`` (``"live"`` / ``"xml"``) persists.
 - `normalise_track_updates()` — Allowlist the keys and type-check every value.
 
 ### `app/usb_artwork.py`
@@ -4679,6 +4680,20 @@ Track-metadata writes refuse fields and values the backend cannot store (issue K
 - `test_live_writes_every_allowed_field()`
 - `test_live_add_track_does_not_send_bpm()`
 - `test_live_add_track_skips_missing_tags()`
+- `test_writable_fields_follow_the_mode()`
+- `test_facade_live_refuses_before_the_first_track()`
+- `xml_db()`
+- `test_xml_refuses_unknown_key_and_saves_nothing()`
+- `test_xml_refuses_values_that_would_break_the_file()`
+- `test_xml_edit_keeps_every_track_rating()`
+- `test_xml_rating_color_and_bpm_survive_a_save()`
+- `test_xml_ui_rating_is_stored_on_the_ui_scale()`
+- `test_xml_unknown_track_changes_nothing()`
+- `test_xml_read_only_library_is_false_and_rolled_back()`
+- `test_xml_failed_swap_is_false_and_rolled_back()`
+- `test_xml_swap_retries_a_transient_lock()`
+- `test_xml_write_that_dies_halfway_leaves_the_library_whole()`
+- `test_xml_unserialisable_nested_value_is_false_and_the_next_save_works()`
 
 ### `tests/test_usb_copy_atomic.py`
 
