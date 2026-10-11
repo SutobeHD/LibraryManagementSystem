@@ -713,11 +713,6 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `GridReq`
 - `SetReq`
 - `SmartPlReq` — `artist_threshold` is accepted for older clients and ignored — artist
-- `PlCreateReq`
-- `PlRenameReq`
-- `PlDeleteReq`
-- `PlMoveReq`
-- `PlRemoveTrackReq`
 - `CleanTitlesReq`
 - `DeleteTrackReq`
 - `CreatePlReq`
@@ -812,7 +807,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `get_cues()`
 - `get_beatgrid()`
 - `analyze_track()` — Analyzes a track to detect BPM and beat grid if missing from XML
-- `stream_audio()` — Streams an audio file from the local filesystem
+- `stream_audio_file()` — Streams an audio file from the local filesystem
 - `MyTagCreateReq`
 - `TrackMyTagsReq`
 - `list_mytags()`
@@ -3847,6 +3842,15 @@ Unit tests for `app.logging_utils.RedactingFormatter`.
 - `test_data_dir_prefixes_scrubbed()` — EXPORT/MUSIC/TEMP dirs (resolved once at import) must also be scrubbed,
 - `test_safe_error_message_str_noop_on_clean_input()`
 - `test_non_exception_log_format_unchanged()` — A path-free `logger.info("hello")` must be byte-identical via
+
+### `tests/test_main_route_table.py`
+
+app/main.py defines each top-level name once, so no request model or handler is shadowed.
+
+- `test_main_defines_each_top_level_name_once()`
+- `test_no_method_and_path_is_registered_twice()`
+- `test_both_audio_stream_routes_keep_their_handlers()`
+- `test_playlist_move_keeps_the_model_that_was_in_effect()`
 
 ### `tests/test_main_security.py`
 

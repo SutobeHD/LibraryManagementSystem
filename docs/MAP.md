@@ -305,6 +305,7 @@
 | `tests/test_live_cue_loading.py` | Cue loading in `app.live_database`. |
 | `tests/test_live_playlist_ops.py` | Tests for the live-mode playlist primitives in `app/live_database.py`. |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
+| `tests/test_main_route_table.py` | app/main.py defines each top-level name once, so no request model or handler is shadowed. |
 | `tests/test_main_security.py` | Regression tests for ``POST /api/file/reveal`` sandbox. |
 | `tests/test_metadata_fixer_applier.py` | metadata-fixer apply/revert tests (T5 — app/metadata_fixer/applier.py). |
 | `tests/test_metadata_fixer_detector.py` | M0 detector tests — read-only malformation detection. |

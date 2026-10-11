@@ -546,33 +546,6 @@ class SmartPlReq(BaseModel):
     label_threshold: int = 3
 
 
-class PlCreateReq(BaseModel):
-    name: str
-    parent_id: str = "ROOT"
-    type: str = "1"  # 0=folder, 1=playlist
-
-
-class PlRenameReq(BaseModel):
-    pid: str
-    name: str
-
-
-class PlDeleteReq(BaseModel):
-    pid: str
-
-
-class PlMoveReq(BaseModel):
-    pid: str
-    parent_id: str = "ROOT"
-    target_id: str | None = None
-    position: str | None = "inside"
-
-
-class PlRemoveTrackReq(BaseModel):
-    pid: str
-    track_id: str
-
-
 class CleanTitlesReq(BaseModel):
     track_ids: list[str]
 
@@ -2942,7 +2915,7 @@ async def analyze_track(tid: str):
 
 
 @app.get("/api/audio/stream")
-async def stream_audio(path: str):
+async def stream_audio_file(path: str):
     """Streams an audio file from the local filesystem"""
     logger.info(f"Stream request for: {path}")
 
