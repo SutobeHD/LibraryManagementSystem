@@ -1,6 +1,6 @@
 ---
 name: route-architect
-description: MUST BE USED PROACTIVELY whenever the user asks to add or modify a FastAPI route, endpoint, or anything in `app/main.py`. **Start with this agent *before* touching `app/main.py` — don't draft the route inline.** Especially load-bearing for multi-endpoint features, new Pydantic request-model hierarchies, anything that writes `master.db` (needs `_db_write_lock` from `app/database.py`), anything behind `require_session` (Bearer auth), or anything queueing background DSP work. Returns ready-to-paste route code with all conventions applied (Pydantic v2, typed errors, `validate_audio_path`, no `requests` in async, subprocess timeouts) + a checklist of downstream updates (backend-index.md, FILE_MAP.md, tests, frontend client).
+description: 'MUST BE USED PROACTIVELY whenever the user asks to add or modify a FastAPI route, endpoint, or anything in `app/main.py`. **Start with this agent *before* touching `app/main.py` — don''t draft the route inline.** Especially load-bearing for multi-endpoint features, new Pydantic request-model hierarchies, anything that writes `master.db` (needs `_db_write_lock` from `app/database.py`), anything behind `require_session` (Bearer auth), or anything queueing background DSP work. Returns ready-to-paste route code with all conventions applied (Pydantic v2, typed errors, `validate_audio_path`, no `requests` in async, subprocess timeouts) + a checklist of downstream updates (backend-index.md, FILE_MAP.md, tests, frontend client).'
 tools: Read, Edit, Grep, Glob, Bash
 ---
 
