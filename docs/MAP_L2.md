@@ -3733,7 +3733,20 @@ Tests for app.library_format_swap.
 - `  TestFfmpegCommand.test_ffmpeg_cmd_locks_sample_rate_to_source()`
 - `  TestFfmpegCommand.test_ffmpeg_cmd_overwrite_flag()`
 - `  TestFfmpegCommand.test_ffmpeg_cmd_preserves_metadata()`
-- `  TestFfmpegCommand.test_mp3_target_includes_quality_arg()`
+- `  TestFfmpegCommand.test_mp3_target_is_320k_cbr()`
+- `  TestFfmpegCommand.test_mp3_bitrate_override_sets_the_cbr_rate()`
+- `  TestFfmpegCommand.test_mp3_bitrate_override_never_exceeds_320()`
+- `  TestFfmpegCommand.test_mp3_bitrate_override_ignored_for_other_targets()`
+- `  TestFfmpegCommand.test_export_cmd_carries_the_mp3_rate()`
+- `TestMp3BitratePolicy` — Lossless -> 320k CBR; lossy -> the source's own rate, rounded down, never inflated.
+- `  TestMp3BitratePolicy.test_cap_rounds_down_to_a_standard_rate()`
+- `  TestMp3BitratePolicy.test_lossless_source_gets_320_without_probing()`
+- `  TestMp3BitratePolicy.test_lossy_source_keeps_its_bitrate()`
+- `  TestMp3BitratePolicy.test_unprobeable_lossy_source_fails_instead_of_guessing_high()`
+- `  TestMp3BitratePolicy.test_non_mp3_target_has_no_rate()`
+- `  TestMp3BitratePolicy.test_probe_prefers_stream_over_container_bitrate()`
+- `  TestMp3BitratePolicy.test_probe_launch_failure_is_none()`
+- `  TestMp3BitratePolicy.test_convert_paths_encode_a_lossy_source_at_its_own_rate()`
 - `TestEngineConstructor`
 - `  TestEngineConstructor.test_rejects_unknown_target()`
 - `  TestEngineConstructor.test_accepts_all_four_targets()`

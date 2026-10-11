@@ -88,12 +88,22 @@ TARGET_CONFIG: dict[str, dict[str, Any]] = {
     },
     "mp3": {
         "ext": ".mp3",
-        "codec_args": ["-c:a", "libmp3lame", "-q:a", "0"],
+        # CBR at the 320k ceiling; _build_ffmpeg_cmd lowers the "-b:a" value per
+        # track for lossy sources (_mp3_kbps_for).
+        "codec_args": ["-c:a", "libmp3lame", "-b:a", "320k"],
         "file_type": FILE_TYPE_MP3,
         "expansion_ratio": 0.4,
         "required_encoder": "libmp3lame",
     },
 }
+
+# MPEG-1 Layer III CBR rates. 320 is the format's ceiling and the top of the
+# CDJ-3000 MP3 spec; libmp3lame clamps anything above it to 320 anyway.
+MP3_CBR_KBPS = (32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320)
+MP3_MAX_KBPS = MP3_CBR_KBPS[-1]
+# A nominal 256k AAC often probes a little under 256000 (VBR average, container
+# rounding); without slack it would round down a whole step to 224.
+_SOURCE_BITRATE_SLACK = 1.02
 
 # OQ3 — 600s per-track subprocess timeout (deviates from 30s default; see docstring)
 PER_TRACK_TIMEOUT_SEC = 600
@@ -311,13 +321,80 @@ def _probe_sample_rate(audio_path: Path) -> int | None:
         return None
 
 
+def _probe_bitrate_bps(audio_path: Path) -> int | None:
+    """Audio bitrate in bit/s: the first audio stream's, else the container's.
+
+    Container bitrate is the fallback only — it also counts embedded cover art.
+    """
+    try:
+        r = subprocess.run(
+            [
+                _ffprobe_bin(),
+                "-v",
+                "error",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "stream=bit_rate:format=bit_rate",
+                "-of",
+                "json",
+                str(audio_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        info = json.loads(r.stdout or "{}")
+    except (subprocess.SubprocessError, OSError, ValueError) as e:
+        logger.debug("ffprobe bitrate failed for %s: %s", audio_path.name, e)
+        return None
+    streams = info.get("streams") or [{}]
+    for raw in (streams[0].get("bit_rate"), (info.get("format") or {}).get("bit_rate")):
+        if raw is None:
+            continue
+        try:
+            bps = int(raw)
+        except (TypeError, ValueError):  # "N/A"
+            continue
+        if bps > 0:
+            return bps
+    return None
+
+
+def _mp3_kbps_cap(source_bps: int) -> int:
+    """Largest standard MP3 CBR rate not above the source's (2 % slack, floor 32k)."""
+    limit_kbps = source_bps / 1000 * _SOURCE_BITRATE_SLACK
+    fitting = [k for k in MP3_CBR_KBPS if k <= limit_kbps]
+    return fitting[-1] if fitting else MP3_CBR_KBPS[0]
+
+
+def _mp3_kbps_for(src: Path, target: str) -> int | None:
+    """CBR kbps for an MP3 encode of ``src``; None for non-MP3 targets.
+
+    Lossless sources get the 320k ceiling. A lossy source keeps its own bitrate
+    (rounded down to a standard rate): a 256k AAC becomes a 256k MP3, never a
+    320k one with nothing in the extra bits. Raises ``RuntimeError`` when a lossy
+    source's bitrate cannot be probed rather than guess high.
+    """
+    if target != "mp3":
+        return None
+    if src.suffix.lower() not in LOSSY_SOURCE_EXTS:
+        return MP3_MAX_KBPS
+    source_bps = _probe_bitrate_bps(src)
+    if source_bps is None:
+        raise RuntimeError("ffprobe bitrate failed (needed to cap a lossy-source MP3)")
+    return _mp3_kbps_cap(source_bps)
+
+
 def _build_ffmpeg_cmd(
     src: Path,
     dst: Path,
     sample_rate: int,
     target: str,
     ffmpeg_bin: str | None = None,
+    mp3_kbps: int | None = None,
 ) -> list[str]:
+    """``mp3_kbps`` overrides the MP3 target's 320k CBR (see ``_mp3_kbps_for``)."""
     cfg = TARGET_CONFIG[target]
     if ffmpeg_bin is None:
         resolved = ffmpeg_resolver.resolve_for_encoder(str(cfg["required_encoder"]))
@@ -331,7 +408,10 @@ def _build_ffmpeg_cmd(
         str(src),
         "-vn",
     ]
-    cmd.extend(list(cfg["codec_args"]))
+    codec_args = list(cfg["codec_args"])
+    if mp3_kbps is not None and target == "mp3":
+        codec_args[codec_args.index("-b:a") + 1] = f"{min(mp3_kbps, MP3_MAX_KBPS)}k"
+    cmd.extend(codec_args)
     cmd.extend(
         [
             "-ar",
@@ -354,6 +434,7 @@ def _build_export_ffmpeg_cmd(
     target: str,
     keep_cover: bool,
     ffmpeg_bin: str | None,
+    mp3_kbps: int | None = None,
 ) -> list[str]:
     """Export variant: mp3/flac can carry embedded cover art via stream copy.
 
@@ -361,7 +442,7 @@ def _build_export_ffmpeg_cmd(
     sources don't error. aiff/wav muxers can't carry attached pics; they keep
     the plain ``-vn`` command.
     """
-    cmd = _build_ffmpeg_cmd(src, dst, sample_rate, target, ffmpeg_bin)
+    cmd = _build_ffmpeg_cmd(src, dst, sample_rate, target, ffmpeg_bin, mp3_kbps)
     if keep_cover and target in ("mp3", "flac"):
         idx = cmd.index("-vn")
         cmd[idx : idx + 1] = ["-map", "0:a:0", "-map", "0:v:0?", "-c:v", "copy"]
@@ -388,8 +469,9 @@ def _run_ffmpeg_convert(
     target: str,
     ffmpeg_bin: str | None = None,
 ) -> None:
-    """Raises ``RuntimeError`` on failure."""
-    _exec_ffmpeg(_build_ffmpeg_cmd(src, dst, sample_rate, target, ffmpeg_bin), dst)
+    """Raises ``RuntimeError`` on failure (incl. an unprobeable lossy-source MP3)."""
+    mp3_kbps = _mp3_kbps_for(src, target)
+    _exec_ffmpeg(_build_ffmpeg_cmd(src, dst, sample_rate, target, ffmpeg_bin, mp3_kbps), dst)
 
 
 def _run_export_convert(
@@ -401,8 +483,11 @@ def _run_export_convert(
     ffmpeg_bin: str | None,
 ) -> None:
     """Cover-preserving convert with a single ``-vn`` retry on failure."""
-    cmd_a = _build_export_ffmpeg_cmd(src, dst, sample_rate, target, keep_cover, ffmpeg_bin)
-    cmd_plain = _build_ffmpeg_cmd(src, dst, sample_rate, target, ffmpeg_bin)
+    mp3_kbps = _mp3_kbps_for(src, target)
+    cmd_a = _build_export_ffmpeg_cmd(
+        src, dst, sample_rate, target, keep_cover, ffmpeg_bin, mp3_kbps
+    )
+    cmd_plain = _build_ffmpeg_cmd(src, dst, sample_rate, target, ffmpeg_bin, mp3_kbps)
     try:
         _exec_ffmpeg(cmd_a, dst)
         return
