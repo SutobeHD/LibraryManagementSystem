@@ -17,7 +17,7 @@ Marker convention in the route tables below:
 ### Library Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/library/tracks` | All tracks with full metadata (XML or live DB depending on mode) |
+| GET | `/api/library/tracks` | All tracks with full metadata (XML or live DB depending on mode; `hide_streaming` applied). Query `light: bool = false` — `true` drops `beatGrid`, `Cues`, `positionMarks`, `phrases` from each item (copies via `_light_track`, never mutates the cached dicts USB export / `save_xml` read). Plain array either way, no pagination |
 | GET | `/api/playlist/{pid}/tracks` | Tracks in a specific playlist |
 | GET | `/api/track/{tid}` | Single track full detail |
 | GET | `/api/track/{tid}/cues` | Hot cues + memory cues for a track |

@@ -165,6 +165,9 @@
   - Perf: drag-drop import and folder scan no longer re-resolve every library
     path for every file (30 files over 2,000 tracks: ~75k → ~2k `resolve()`
     calls, ~12 s → ~0.4 s); a track added meanwhile is still skipped.
+  - Added: `GET /api/library/tracks?light=true` returns the track list without
+    beat grids, cues, position marks and phrases (no view requests it yet; the
+    default response is unchanged).
 
 ## v1.0.0-beta — 2026-05-07
 

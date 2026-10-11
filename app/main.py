@@ -1026,11 +1026,34 @@ def get_genres():
     return db.get_all_genres()
 
 
+# Per-track data no list view reads: full beat grid, cues, XML position marks,
+# phrase analysis. The editors fetch these per track.
+_LIGHT_DROP_FIELDS = ("beatGrid", "Cues", "positionMarks", "phrases")
+
+
+def _light_track(t: dict[str, Any]) -> dict[str, Any]:
+    # dict(t) is a single C-level copy. The beatgrid loader thread inserts
+    # beatGrid into these cached dicts while the boot-time list fetches run;
+    # a comprehension over t.items() raises on that size change, and the
+    # route's except would turn it into an empty library. The cached dict is
+    # never touched: USB export and rekordbox.xml read their grids and cues.
+    d = dict(t)
+    for k in _LIGHT_DROP_FIELDS:
+        d.pop(k, None)
+    return d
+
+
 @app.get("/api/library/tracks")
-def get_library_tracks():
+def get_library_tracks(light: bool = False):
+    """Every track of the loaded library (hide_streaming applied).
+
+    ``light=true`` leaves out beatGrid, Cues, positionMarks and phrases.
+    """
     try:
         tracks = db.get_all_tracks()
         logger.info(f"Returning {len(tracks)} tracks for library view")
+        if light:
+            return [_light_track(t) for t in tracks]
         return tracks
     except Exception as e:
         logger.error(f"Failed to fetch library tracks: {e}")

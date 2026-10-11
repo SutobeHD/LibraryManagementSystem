@@ -758,7 +758,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `file_write()` — Writes text content to a file (used for .rbep project saving).
 - `clean_xml()`
 - `get_genres()`
-- `get_library_tracks()`
+- `get_library_tracks()` — Every track of the loaded library (hide_streaming applied).
 - `get_low_quality_tracks()`
 - `get_no_artwork_tracks()`
 - `get_lost_tracks()`
@@ -3847,6 +3847,19 @@ Tests for app/library_source.py — the Live/XML normalization layer.
 - `test_live_normalize_duration_ms_only_not_multiplied()` — Regression: a duration_ms-only track must NOT be x1000 (was 240_000_000).
 - `test_live_normalize_lowercase_and_fallback_keys()`
 - `test_live_normalize_garbage_does_not_crash()`
+
+### `tests/test_library_tracks_light.py`
+
+GET /api/library/tracks — the optional ``light`` projection (app/main.py).
+
+- `facade()`
+- `test_no_parameter_returns_the_full_tracks_unchanged()`
+- `test_light_false_is_the_full_response()`
+- `test_light_drops_only_the_heavy_fields()`
+- `test_light_never_mutates_the_cached_tracks()`
+- `test_hide_streaming_applies_light_or_not()`
+- `test_usb_source_and_rekordbox_xml_keep_grids_after_a_light_fetch()` — The CDJ-facing readers of the cached dicts, after a light fetch.
+- `test_light_survives_the_beatgrid_loader_writing_meanwhile()` — A writer keeps removing and re-inserting beatGrid on every cached dict
 
 ### `tests/test_live_cue_loading.py`
 
