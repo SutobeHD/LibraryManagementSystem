@@ -2,7 +2,7 @@
 
 A live master.db is SQLCipher-encrypted and can't be created from scratch in a
 test, so this exercises the pure transforms that decide WHAT gets written
-(key name, ANLZ folder path, BPM scaling, beatgrid shape). The actual rbox
+(key name, BPM scaling, beatgrid shape, which ANLZ dir). The actual rbox
 `update_content` write mechanism is covered by tests/test_onelibrary_wal_flush
 (rbox writes BPM into a Rekordbox SQLite DB and re-reads it).
 
@@ -17,7 +17,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from app.analysis_db_writer import AnalysisDBWriter, _compute_anlz_subdir  # noqa: E402
+from app.analysis_db_writer import AnalysisDBWriter  # noqa: E402
 
 
 def test_key_id_to_name_inverts_engine_map():
@@ -35,19 +35,6 @@ def test_key_id_to_name_inverts_engine_map():
 def test_key_id_to_name_unknown():
     assert AnalysisDBWriter._key_id_to_name(0) is None
     assert AnalysisDBWriter._key_id_to_name(99) is None
-
-
-def test_anlz_subdir_rekordbox_convention():
-    """ANLZ folder = <md5[:3]>/<uuid-shaped md5> — deterministic per content id."""
-    sub = _compute_anlz_subdir("123")
-    prefix, folder = sub.split("/")
-    assert len(prefix) == 3
-    # uuid-shaped: 8-4-4-4-12 hex
-    parts = folder.split("-")
-    assert [len(p) for p in parts] == [8, 4, 4, 4, 12]
-    # deterministic
-    assert _compute_anlz_subdir("123") == sub
-    assert _compute_anlz_subdir("124") != sub
 
 
 def test_update_cache_bpm_key_beatgrid_shape():
@@ -241,3 +228,84 @@ def test_unanalyzed_listing_never_calls_the_aborting_rbox_path_helpers(tmp_path)
 
     assert writer.get_unanalyzed_tracks() == ["1", "2", "3"]
     assert master.aborting_calls == []
+
+
+# --- where the ANLZ files go -------------------------------------------------
+#
+# Only the AnalysisDataPath master.db records counts. The writer used to invent a dir
+# under the hard-wired %APPDATA%/Pioneer/rekordbox share for a track without one, never
+# record it, and still set analysed = 0xFFFFFFFF: Rekordbox then showed a BPM with no
+# grid or waveform and never re-analysed the track.
+
+_ANALYSIS = {"bpm": 124.0, "key": "Am", "camelot": "8A", "key_id": 22, "duration": 200.0}
+
+
+class _RecordingMasterDb(_AbortingMasterDb):
+    def __init__(self, share: str, rel_by_id: dict[str, str | None]) -> None:
+        super().__init__(share, rel_by_id)
+        self.writes: list[str] = []
+
+    def update_content(self, item) -> None:
+        self.writes.append(f"update_content({item.id}, analysed={item.analysed})")
+
+    def update_content_key(self, tid, key) -> None:
+        self.writes.append(f"update_content_key({tid})")
+
+
+def _audio_file(tmp_path) -> str:
+    f = tmp_path / "music" / "t.mp3"
+    f.parent.mkdir()
+    f.write_bytes(b"ID3")
+    return str(f)
+
+
+def test_track_without_an_analysis_data_path_is_refused_before_any_dsp(tmp_path, monkeypatch):
+    share = tmp_path / "share"
+    master = _RecordingMasterDb(str(share), {"9": None})
+    writer = AnalysisDBWriter(_LiveDBWith({"9": {"BPM": 0, "path": _audio_file(tmp_path)}}, master))
+    ran: list[str] = []
+    monkeypatch.setattr(writer, "_run_analysis", lambda p: ran.append(p) or dict(_ANALYSIS))
+
+    result = writer.analyze_and_save("9", force=True)
+
+    assert result["status"] == "error"
+    assert result["reason"] == "no_anlz_path"
+    assert ran == []
+    assert master.writes == []
+    assert not share.exists()
+
+
+def test_failed_dat_write_leaves_master_db_untouched(tmp_path, monkeypatch):
+    master = _RecordingMasterDb(str(tmp_path / "share"), {"9": _REL})
+    writer = AnalysisDBWriter(_LiveDBWith({"9": {"BPM": 0, "path": _audio_file(tmp_path)}}, master))
+    monkeypatch.setattr(writer, "_run_analysis", lambda p: dict(_ANALYSIS))
+    # write_anlz_files swallows each file's failure; a missing "dat" key is the signal.
+    monkeypatch.setattr("app.anlz_writer.write_anlz_files", lambda **kw: {"ext": "x.EXT"})
+
+    result = writer.analyze_and_save("9")
+
+    assert result["reason"] == "anlz_write_failed"
+    assert master.writes == []
+    assert writer.live_db.tracks["9"]["BPM"] == 0
+
+
+def test_writes_into_the_recorded_dir_then_flags_the_row(tmp_path, monkeypatch):
+    share = tmp_path / "share"
+    master = _RecordingMasterDb(str(share), {"9": _REL})
+    writer = AnalysisDBWriter(_LiveDBWith({"9": {"BPM": 0, "path": _audio_file(tmp_path)}}, master))
+    monkeypatch.setattr(writer, "_run_analysis", lambda p: dict(_ANALYSIS))
+    seen: dict = {}
+
+    def _fake_write(**kw):
+        seen.update(kw)
+        return {"dat": os.path.join(kw["anlz_dir"], "ANLZ0000.DAT")}
+
+    monkeypatch.setattr("app.anlz_writer.write_anlz_files", _fake_write)
+
+    result = writer.analyze_and_save("9")
+
+    assert result["status"] == "ok", result
+    recorded_dir = share / "PIONEER" / "USBANLZ" / "44d" / "00cc2-7321-4a2e-88d7-fbcc7074c1b3"
+    assert seen["anlz_dir"] == str(recorded_dir)
+    assert recorded_dir.is_dir()  # recorded but not created yet: the writer makes it
+    assert master.writes == ["update_content(9, analysed=4294967295)", "update_content_key(9)"]

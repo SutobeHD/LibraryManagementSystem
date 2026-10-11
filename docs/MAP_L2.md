@@ -2477,7 +2477,6 @@ Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.d
 
 - `test_key_id_to_name_inverts_engine_map()` — The master.db key write must invert analysis_engine's key_id map exactly.
 - `test_key_id_to_name_unknown()`
-- `test_anlz_subdir_rekordbox_convention()` — ANLZ folder = <md5[:3]>/<uuid-shaped md5> — deterministic per content id.
 - `test_update_cache_bpm_key_beatgrid_shape()` — _update_cache mirrors the master.db write: BPM float, Camelot key, and a
 - `test_master_db_bpm_is_centi_bpm_int()` — master.db stores BPM as int(round(bpm*100)) — guard the scaling contract.
 - `test_update_db_writes_master_db_inside_db_write_lock()` — The analysis write is a full-row ``update_content``: re-read and write must both
@@ -2485,6 +2484,9 @@ Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.d
 - `test_error_results_carry_a_reason_for_the_route()`
 - `test_skip_check_still_skips_a_track_whose_dat_exists()`
 - `test_unanalyzed_listing_never_calls_the_aborting_rbox_path_helpers()`
+- `test_track_without_an_analysis_data_path_is_refused_before_any_dsp()`
+- `test_failed_dat_write_leaves_master_db_untouched()`
+- `test_writes_into_the_recorded_dir_then_flags_the_row()`
 
 ### `tests/test_analysis_edge.py`
 

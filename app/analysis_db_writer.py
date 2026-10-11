@@ -10,7 +10,6 @@ This replaces the need for Rekordbox to analyze tracks — our analysis
 is injected directly, and Rekordbox will read it as if it analyzed the track itself.
 """
 
-import hashlib
 import logging
 import os
 import time
@@ -21,21 +20,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-
-def _compute_anlz_subdir(content_id: str) -> str:
-    """
-    Compute the ANLZ subdirectory path matching Rekordbox's naming convention.
-    Rekordbox uses: USBANLZ/{hash_prefix}/{uuid-like}/ANLZ0000.DAT
-
-    The hash prefix is a 3-digit hex number (000-fff), and the subfolder
-    is derived from the content's UUID.
-    """
-    # Rekordbox uses the content's UUID for the folder name.
-    # We compute a hash prefix from the content_id for the first level.
-    h = hashlib.md5(content_id.encode()).hexdigest()
-    prefix = h[:3]
-    subfolder = h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
-    return f"{prefix}/{subfolder}"
+#: File stem the writer uses inside a track's ANLZ dir (``ANLZ0000.DAT`` / ``.EXT`` / ``.2EX``).
+_ANLZ_BASE = "ANLZ0000"
 
 
 class AnalysisDBWriter:
@@ -83,9 +69,10 @@ class AnalysisDBWriter:
 
         Returns:
             Dict with analysis results and write status. An ``error`` result
-            carries a ``reason`` (``track_not_found`` / ``audio_missing`` /
-            ``analysis_failed``) so callers can map it without parsing ``error``,
-            which may hold an absolute file path.
+            carries a ``reason`` (``track_not_found`` / ``no_anlz_path`` /
+            ``audio_missing`` / ``analysis_failed`` / ``anlz_write_failed``) so
+            callers can map it without parsing ``error``, which may hold an
+            absolute file path.
         """
 
         # 1. Validate track exists
@@ -97,10 +84,28 @@ class AnalysisDBWriter:
                 "error": f"Track {track_id} not found",
             }
 
-        # 2. Check if already analyzed (skip unless forced)
+        # 2. Where this track's ANLZ files live: only the AnalysisDataPath recorded in
+        # master.db counts. Files in a dir we picked ourselves would be linked to no
+        # row, while the row still claimed "analysed" — Rekordbox then shows a BPM
+        # with no grid or waveform and never re-analyses the track. Recording a new
+        # path means reproducing Rekordbox's share layout, which nothing here has
+        # verified, so such a track is refused before any DSP runs.
+        anlz_dir = self._recorded_anlz_dir(track_id)
+        if anlz_dir is None:
+            return {
+                "status": "error",
+                "reason": "no_anlz_path",
+                "error": (
+                    f"Track {track_id} has no AnalysisDataPath in master.db. "
+                    "Analyse it once in Rekordbox first."
+                ),
+            }
+
+        # 3. Check if already analyzed (skip unless forced)
         if not force:
             existing_bpm = track.get("BPM", 0)
-            if existing_bpm and existing_bpm > 0 and self._has_anlz_dat(track_id):
+            dat_exists = (Path(anlz_dir) / f"{_ANLZ_BASE}.DAT").is_file()
+            if existing_bpm and existing_bpm > 0 and dat_exists:
                 logger.info(
                     f"Track {track_id} already analyzed (BPM={existing_bpm}), skipping. Use force=True to re-analyze."
                 )
@@ -110,7 +115,7 @@ class AnalysisDBWriter:
                     "bpm": existing_bpm,
                 }
 
-        # 3. Get audio file path
+        # 4. Get audio file path
         file_path = track.get("path", "")
         if not file_path or not os.path.exists(file_path):
             return {
@@ -122,11 +127,9 @@ class AnalysisDBWriter:
         logger.info(f"Starting analysis for track {track_id}: {os.path.basename(file_path)}")
         start_time = time.time()
 
-        # 4. Run analysis
+        # 5. Run analysis
         try:
-            from .analysis_engine import run_full_analysis
-
-            analysis = run_full_analysis(file_path)
+            analysis = self._run_analysis(file_path)
         except Exception as e:
             logger.error(f"Analysis failed for track {track_id}: {e}")
             return {
@@ -147,13 +150,20 @@ class AnalysisDBWriter:
             f"Analysis complete for {track_id}: BPM={analysis['bpm']}, Key={analysis['key']} ({elapsed_analysis:.1f}s)"
         )
 
-        # 5. Write ANLZ binary files
-        anlz_paths = self._write_anlz(track_id, file_path, analysis)
+        # 6. Write ANLZ binary files. Without a .DAT (beat grid) master.db must not say
+        # "analysed"; write_anlz_files swallows each file's failure on its own.
+        anlz_paths = self._write_anlz(track_id, file_path, analysis, anlz_dir)
+        if "dat" not in anlz_paths:
+            return {
+                "status": "error",
+                "reason": "anlz_write_failed",
+                "error": f"Writing ANLZ files for track {track_id} failed",
+            }
 
-        # 6. Update database
+        # 7. Update database
         db_updated = self._update_db(track_id, analysis)
 
-        # 7. Update in-memory cache
+        # 8. Update in-memory cache
         self._update_cache(track_id, analysis)
 
         elapsed_total = time.time() - start_time
@@ -177,83 +187,57 @@ class AnalysisDBWriter:
             "elapsed": round(elapsed_total, 2),
         }
 
+    def _run_analysis(self, file_path: str) -> dict[str, Any]:
+        """Run the full analysis pipeline on one audio file."""
+        from .analysis_engine import run_full_analysis
+
+        return run_full_analysis(file_path)
+
     def _write_anlz(
-        self, track_id: str, file_path: str, analysis: dict[str, Any]
+        self, track_id: str, file_path: str, analysis: dict[str, Any], anlz_dir: str
     ) -> dict[str, str]:
-        """Write ANLZ binary files to the Rekordbox ANLZ directory."""
+        """Write the ANLZ files into the track's recorded ANLZ dir; ``{}`` on failure."""
         try:
             from .anlz_writer import write_anlz_files
 
-            # Determine ANLZ directory
-            anlz_dir = self._resolve_anlz_dir(track_id)
-            if not anlz_dir:
-                logger.warning(
-                    f"Could not determine ANLZ directory for track {track_id}, creating new one"
-                )
-                anlz_dir = self._create_anlz_dir(track_id)
-
+            # The path is recorded but Rekordbox creates the dir lazily.
+            Path(anlz_dir).mkdir(parents=True, exist_ok=True)
             return write_anlz_files(
                 anlz_dir=anlz_dir,
                 track_path=file_path,
                 analysis_result=analysis,
-                filename_base="ANLZ0000",
+                filename_base=_ANLZ_BASE,
             )
         except Exception as e:
             logger.error(f"Failed to write ANLZ files for track {track_id}: {e}")
             return {}
 
-    def _resolve_anlz_dir(self, track_id: str) -> str | None:
+    def _recorded_anlz_dir(self, track_id: str) -> str | None:
+        """Dir of the AnalysisDataPath master.db records for the track, or None.
+
+        Not via ``get_content_anlz_paths`` / ``get_content_anlz_dir``: both
+        ``unwrap()`` on an empty AnalysisDataPath and abort the process (see
+        ``app/anlz_safe.py``). A track with a tag BPM that Rekordbox never analysed
+        is exactly that row, and no ``except`` can catch the abort.
         """
-        Find the existing ANLZ directory for a track.
-        Returns the directory path, or None if no ANLZ dir exists yet.
-        """
-        # Never call get_content_anlz_dir / get_content_anlz_paths here: both
-        # unwrap() on the AnalysisDataPath column and ABORT the process for a
-        # track Rekordbox has not analysed — which is exactly the case this
-        # method exists to handle. The except clauses below never ran for that
-        # failure; the backend just died.
         from .anlz_safe import resolve_anlz_dir
 
-        dir_str = resolve_anlz_dir(self.live_db.db, str(track_id))
-        if dir_str:
-            if not os.path.exists(dir_str):
-                # Path known but not created yet (Rekordbox writes it lazily).
-                os.makedirs(dir_str, exist_ok=True)
-            return dir_str
-
-        return None
+        return resolve_anlz_dir(self.live_db.db, str(track_id))
 
     def _has_anlz_dat(self, track_id: str) -> bool:
-        """True when the track's recorded ANLZ directory already holds ``ANLZ0000.DAT``.
-
-        Not via ``get_content_anlz_paths``: it ``unwrap()``s on an empty
-        AnalysisDataPath and aborts the process (see ``app/anlz_safe.py``). A track
-        with a tag BPM that Rekordbox never analysed is exactly that row, and the
-        ``except`` that used to wrap the call could never catch the abort.
-        """
-        from .anlz_safe import resolve_anlz_dir
-
-        anlz_dir = resolve_anlz_dir(self.live_db.db, str(track_id))
+        """True when the track's recorded ANLZ dir already holds ``ANLZ0000.DAT``."""
+        anlz_dir = self._recorded_anlz_dir(track_id)
         if not anlz_dir:
             return False
-        return (Path(anlz_dir) / "ANLZ0000.DAT").is_file()
-
-    def _create_anlz_dir(self, track_id: str) -> str:
-        """Create a new ANLZ directory for a track that has never been analyzed."""
-        from .config import REKORDBOX_ROOT
-
-        anlz_root = Path(REKORDBOX_ROOT) / "share" / "PIONEER" / "USBANLZ"
-        subdir = _compute_anlz_subdir(str(track_id))
-        anlz_dir = anlz_root / subdir
-        os.makedirs(anlz_dir, exist_ok=True)
-        logger.info(f"Created new ANLZ directory: {anlz_dir}")
-        return str(anlz_dir)
+        return (Path(anlz_dir) / f"{_ANLZ_BASE}.DAT").is_file()
 
     def _update_db(self, track_id: str, analysis: dict[str, Any]) -> bool:
         """
         Update djmdContent fields in master.db via rbox.
 
-        Updates: bpm, key_id, analysed flag, analysis_data_path
+        Updates: bpm, key_id, analysed flag. Never ``analysis_data_path``: the
+        caller only gets here for a track whose path master.db already records
+        and whose ANLZ files were just written there.
 
         Holds ``db_lock`` from the re-read to the last write: ``update_content``
         writes the whole row, so a row read outside the lock would clobber a

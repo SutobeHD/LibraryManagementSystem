@@ -157,7 +157,9 @@ _SECRET_PATH = r"C:\Users\someone\Music\private\track.mp3"
     ("reason", "error", "status_code"),
     [
         ("track_not_found", "Track 42 not found", 404),
+        ("no_anlz_path", "Track 42 has no AnalysisDataPath in master.db.", 409),
         ("audio_missing", f"Audio file not found: {_SECRET_PATH}", 409),
+        ("anlz_write_failed", "Writing ANLZ files for track 42 failed", 500),
         ("analysis_failed", f"Analysis failed: cannot decode {_SECRET_PATH}", 500),
         (None, f"something else at {_SECRET_PATH}", 500),
     ],

@@ -5623,6 +5623,10 @@ def _live_analysis_writer() -> Any:
 #: Any other reason is a 500.
 _ANALYZE_FULL_ERRORS: dict[str, tuple[int, str]] = {
     "track_not_found": (404, "Track not found in the live library"),
+    "no_anlz_path": (
+        409,
+        "master.db records no analysis path for this track. Analyse it once in Rekordbox first.",
+    ),
     "audio_missing": (409, "The track's audio file is missing on disk"),
 }
 
