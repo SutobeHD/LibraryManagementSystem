@@ -1151,15 +1151,18 @@ class RekordboxDB:
         return []
 
     def get_analysis_writer(self) -> Any | None:
-        """``AnalysisDBWriter`` bound to the live library, or None outside live mode.
+        """``AnalysisDBWriter`` bound to the loaded live library, else None.
 
-        None also when live mode is selected but the library was never loaded
-        (``live_db`` is created lazily on first load). Not wrapped by
-        ``_serialised``: it hands out the writer and writes nothing itself; the
-        writer takes ``db_lock`` around its own ``master.db`` write.
+        None outside live mode, and in live mode until the live library has
+        loaded. ``live_db`` existing proves nothing: any ``active_db`` read creates
+        it empty, and a writer over an empty ``tracks`` dict answers "not found"
+        for every id. Not wrapped by ``_serialised``: it hands out the writer and
+        writes nothing itself; the writer takes ``db_lock`` around its own
+        ``master.db`` write.
         """
-        if self.mode == "live" and self.live_db is not None:
-            return self.live_db.get_analysis_writer()
+        live = self.live_db
+        if self.mode == "live" and live is not None and getattr(live, "loaded", False):
+            return live.get_analysis_writer()
         return None
 
     def save(self) -> bool:

@@ -495,7 +495,7 @@ Setup logging
 - `  RekordboxDB.playlist_xml_path()` — Rekordbox's masterPlaylists6.xml path, or None when the backend has none.
 - `  RekordboxDB.get_playlist_by_path()` — Resolve a folder/playlist path like ["Artists", "Boys Noize"].
 - `  RekordboxDB.get_unanalyzed_track_ids()` — Track IDs with no analysis yet.
-- `  RekordboxDB.get_analysis_writer()` — ``AnalysisDBWriter`` bound to the live library, or None outside live mode.
+- `  RekordboxDB.get_analysis_writer()` — ``AnalysisDBWriter`` bound to the loaded live library, else None.
 - `  RekordboxDB.save()`
 - `  RekordboxDB.update_tracks_metadata()`
 - `  RekordboxDB.update_track_comment()`
@@ -2502,6 +2502,7 @@ POST /api/track/{tid}/analyze-full and POST /api/library/analyze-batch.
 - `live()`
 - `xml_mode()`
 - `test_facade_hands_out_the_live_writer_only_in_live_mode()`
+- `test_analyze_full_before_the_live_library_loads_is_a_409()`
 - `test_analyze_full_runs_the_live_writer()`
 - `test_analyze_full_outside_live_mode_is_a_409()`
 - `test_analyze_full_refuses_while_rekordbox_runs()`

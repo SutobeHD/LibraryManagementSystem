@@ -60,6 +60,7 @@ class _FakeWriter:
 class _FakeLiveDB:
     def __init__(self) -> None:
         self.writer = _FakeWriter()
+        self.loaded = True
 
     def get_analysis_writer(self) -> _FakeWriter:
         return self.writer
@@ -100,6 +101,22 @@ def test_facade_hands_out_the_live_writer_only_in_live_mode() -> None:
     # Live selected but never loaded: no backend to bind a writer to.
     facade.mode, facade.live_db = "live", None
     assert facade.get_analysis_writer() is None
+
+    # Backend created by a stray `active_db` read but never loaded: still nothing.
+    fake.loaded = False
+    facade.mode, facade.live_db = "live", fake
+    assert facade.get_analysis_writer() is None
+
+
+def test_analyze_full_before_the_live_library_loads_is_a_409(
+    live: _FakeLiveDB, auth_token: dict[str, str]
+) -> None:
+    # `analyze-status` / MyTag reads create the live backend without loading it.
+    live.loaded = False
+    r = _post("/api/track/42/analyze-full", auth_token)
+    assert r.status_code == 409
+    assert "live Rekordbox library" in r.json()["detail"]
+    assert live.writer.calls == []
 
 
 # --- analyze-full -----------------------------------------------------------
