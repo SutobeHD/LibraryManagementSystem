@@ -3312,7 +3312,8 @@ def get_dupes():
 
 class BatchCommentReq(BaseModel):
     source_id: str  # "LIB" or playlist_id
-    action: str  # remove, replace, append, set
+    # Any other value used to run as a no-op and answer 200 "0 updated"; now a 422.
+    action: _Literal["remove", "replace", "append", "set"]
     find: str | None = ""
     replace: str | None = ""
 
@@ -3329,7 +3330,7 @@ def batch_comment(r: BatchCommentReq) -> dict[str, Any]:
 
     Plain ``def`` on purpose: FastAPI runs it in the threadpool, off the event loop.
     """
-    from .batch_worker import apply_batch_comment
+    from .batch_worker import UnknownPlaylistError, apply_batch_comment
 
     _require_live_master_db("Batch comment editing")
     if _is_rekordbox_running():
@@ -3344,10 +3345,17 @@ def batch_comment(r: BatchCommentReq) -> dict[str, Any]:
 
     logger.info("[BATCH-COMMENT] start: source=%s action=%s", r.source_id, r.action)
     started = time.monotonic()
-    count = apply_batch_comment(
-        live.db, r.source_id, r.action, r.find or "", r.replace or "", on_changed=_refresh_cache
-    )
-    logger.info("[BATCH-COMMENT] done in %.1fs: %d updated", time.monotonic() - started, count)
+    outcome = "failed"
+    try:
+        count = apply_batch_comment(
+            live.db, r.source_id, r.action, r.find or "", r.replace or "", on_changed=_refresh_cache
+        )
+        outcome = f"done, {count} updated"
+    except UnknownPlaylistError as e:
+        outcome = "unknown playlist"
+        raise HTTPException(404, "Playlist not found") from e
+    finally:
+        logger.info("[BATCH-COMMENT] %s in %.1fs", outcome, time.monotonic() - started)
     return {"status": "success", "count": count}
 
 

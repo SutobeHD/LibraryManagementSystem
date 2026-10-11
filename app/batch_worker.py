@@ -13,6 +13,10 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+class UnknownPlaylistError(LookupError):
+    """The batch's ``source_id`` names no playlist in master.db."""
+
+
 def compute_new_comment(action: str, original: str, find_text: str, replace_text: str) -> str:
     """Pure comment transform for one track — mirrors the four batch actions.
 
@@ -61,12 +65,18 @@ def apply_batch_comment(
 
     Returns:
         How many tracks' comments changed.
+
+    Raises:
+        UnknownPlaylistError: ``source_id`` is neither ``LIB`` nor a playlist id. Used
+            to read as an empty playlist and answer "0 updated" as a success.
     """
     from .database import db_lock
 
     if source_id == "LIB":
         target_ids = [str(c.id) for c in master_db.get_contents()]
     else:
+        if master_db.get_playlist_by_id(source_id) is None:
+            raise UnknownPlaylistError(source_id)
         target_ids = [str(c.id) for c in master_db.get_playlist_contents(source_id)]
     logger.info("batch comment: %d target tracks", len(target_ids))
 

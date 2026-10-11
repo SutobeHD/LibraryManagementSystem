@@ -66,6 +66,9 @@ class _FakeMasterDb:
         self.on_loop.append(_on_event_loop())
         return list(self.rows.values())
 
+    def get_playlist_by_id(self, pid: str) -> object | None:
+        return object() if pid in self.playlists else None
+
     def get_playlist_contents(self, pid: str) -> list[_Content]:
         self.on_loop.append(_on_event_loop())
         return [self.rows[t] for t in self.playlists.get(pid, [])]
@@ -173,3 +176,44 @@ def test_still_needs_a_session(live: _FakeLive) -> None:
     r = _post({"Authorization": "Bearer wrong"}, {"source_id": "LIB", "action": "set"})
     assert r.status_code == 401
     assert live.db.updated == []
+
+
+# --- answers that used to say "success" when nothing happened ----------------
+
+
+def test_an_unknown_action_is_a_422(live: _FakeLive, auth_token: dict[str, str]) -> None:
+    r = _post(auth_token, {"source_id": "LIB", "action": "delete-all", "replace": "x"})
+    assert r.status_code == 422
+    assert live.db.updated == []
+
+
+def test_an_unknown_playlist_is_a_404(live: _FakeLive, auth_token: dict[str, str]) -> None:
+    r = _post(auth_token, {"source_id": "999", "action": "set", "replace": "x"})
+    assert r.status_code == 404
+    assert live.db.updated == []
+
+
+def test_values_starting_with_a_dash_are_plain_text(
+    live: _FakeLive, auth_token: dict[str, str]
+) -> None:
+    """argparse read `--find -promo` as an option and exited 2 (a 500)."""
+    live.db.rows["1"].commnt = "intro -promo"
+    r = _post(auth_token, {"source_id": "LIB", "action": "remove", "find": "-promo"})
+    assert r.status_code == 200, r.text
+    assert live.db.updated == [("1", "intro")]
+
+
+def test_a_failed_run_still_logs_its_elapsed_time(
+    live: _FakeLive,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    auth_token: dict[str, str],
+) -> None:
+    def _broken() -> list[_Content]:
+        raise RuntimeError("db closed")
+
+    monkeypatch.setattr(live.db, "get_contents", _broken)
+    with caplog.at_level("INFO", logger="APP_MAIN"):
+        r = _post(auth_token, {"source_id": "LIB", "action": "set", "replace": "x"})
+    assert r.status_code == 500
+    assert any("[BATCH-COMMENT] failed in" in m for m in caplog.messages)

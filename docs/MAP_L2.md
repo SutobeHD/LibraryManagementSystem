@@ -408,6 +408,7 @@ auth_db — sidecar-local store for per-device paired tokens (Phase-2 auth).
 
 Batch comment edits over the live library (``POST /api/tools/batch-comment``).
 
+- `UnknownPlaylistError` — The batch's ``source_id`` names no playlist in master.db.
 - `compute_new_comment()` — Pure comment transform for one track — mirrors the four batch actions.
 - `apply_batch_comment()` — Apply one comment action to every track of ``LIB`` or one playlist.
 
@@ -3504,6 +3505,10 @@ POST /api/tools/batch-comment.
 - `test_refuses_while_rekordbox_runs()`
 - `test_outside_live_mode_is_a_409()`
 - `test_still_needs_a_session()`
+- `test_an_unknown_action_is_a_422()`
+- `test_an_unknown_playlist_is_a_404()`
+- `test_values_starting_with_a_dash_are_plain_text()` — argparse read `--find -promo` as an option and exited 2 (a 500).
+- `test_a_failed_run_still_logs_its_elapsed_time()`
 
 ### `tests/test_batch_worker.py`
 
