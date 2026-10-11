@@ -3319,27 +3319,20 @@ class BatchCommentReq(BaseModel):
 
 @app.post("/api/tools/batch-comment", dependencies=[Depends(require_session)])
 async def batch_comment(r: BatchCommentReq):
+    # Outside the try below, which would turn the 409 into a 500. Reads only the
+    # facade's mode + path attributes, none of its thread-unsafe Rust objects.
+    db_path = _require_live_master_db("Batch comment editing")
     try:
-        import os
         import subprocess
         import sys
         from pathlib import Path
-
-        # Manually resolve DB path to avoid touching the global 'db' object
-        # which contains thread-unsafe Rust objects.
-        live_db_path = Path(os.path.expandvars(r"%APPDATA%\Pioneer\rekordbox\master.db"))
-        if not live_db_path.exists():
-            live_db_path = Path(os.path.expandvars(r"%APPDATA%\Pioneer\rekordbox6\master.db"))
-
-        if not live_db_path.exists():
-            raise HTTPException(400, "Could not find Rekordbox master.db")
 
         # Call the worker script
         cmd = [
             sys.executable,
             str(Path(APP_DIR) / "batch_worker.py"),
             "--db",
-            str(live_db_path),
+            db_path,
             "--source",
             r.source_id,
             "--action",

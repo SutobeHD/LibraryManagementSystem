@@ -3472,6 +3472,16 @@ Tests for ``app/auth.py`` -- Bearer-token session authentication.
 - `TestCaseN_UngatedAcceptsAuthHeader`
 - `  TestCaseN_UngatedAcceptsAuthHeader.test_heartbeat_with_bearer_header_still_2xx()`
 
+### `tests/test_batch_comment_route.py`
+
+POST /api/tools/batch-comment.
+
+- `live_db()`
+- `worker()`
+- `test_worker_gets_the_live_library_master_db()`
+- `test_outside_live_mode_is_a_409()`
+- `test_still_needs_a_session()`
+
 ### `tests/test_batch_worker.py`
 
 Tests for app/batch_worker.py — pure comment-transform logic.
