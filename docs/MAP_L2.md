@@ -2482,6 +2482,7 @@ Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.d
 - `test_master_db_bpm_is_centi_bpm_int()` — master.db stores BPM as int(round(bpm*100)) — guard the scaling contract.
 - `test_update_db_writes_master_db_inside_db_write_lock()` — The analysis write is a full-row ``update_content``: re-read and write must both
 - `test_skip_check_never_calls_the_aborting_rbox_path_helpers()` — BPM from tags, no AnalysisDataPath: the old check killed the sidecar here.
+- `test_error_results_carry_a_reason_for_the_route()`
 - `test_skip_check_still_skips_a_track_whose_dat_exists()`
 - `test_unanalyzed_listing_never_calls_the_aborting_rbox_path_helpers()`
 
@@ -2506,6 +2507,7 @@ POST /api/track/{tid}/analyze-full and POST /api/library/analyze-batch.
 - `test_analyze_full_runs_the_live_writer()`
 - `test_analyze_full_outside_live_mode_is_a_409()`
 - `test_analyze_full_refuses_while_rekordbox_runs()`
+- `test_analyze_full_maps_writer_errors_by_reason_without_leaking_paths()`
 - `test_analyze_full_still_needs_a_session()`
 - `test_analyze_batch_streams_ndjson_for_the_unanalysed_tracks()`
 - `test_analyze_batch_runs_each_analysis_off_the_event_loop()` — Per-track analysis takes seconds; on the event loop it stalled every request.

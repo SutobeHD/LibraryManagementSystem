@@ -100,7 +100,7 @@ Marker convention in the route tables below:
 | POST | `/api/audio/render` `[AUTH]` | Render audio with FFmpeg (format conversion, export) |
 | POST | `/api/audio/import` `[AUTH]` | Import a local audio file into the library |
 | POST | `/api/track/{tid}/analyze` `[AUTH]` | Full analysis pipeline on single track |
-| POST | `/api/track/{tid}/analyze-full` `[AUTH]` | Analyze + write ANLZ files + update master.db in one call. Body: `{ force: bool }`. 409 when not in live mode / live library not loaded (`db.get_analysis_writer()` is None) or when Rekordbox is running. Before 2026-10 it answered 400 in every mode (`hasattr` probe on the facade) |
+| POST | `/api/track/{tid}/analyze-full` `[AUTH]` | Analyze + write ANLZ files + update master.db in one call. Body: `{ force: bool }`. 409 when not in live mode / live library not loaded (`db.get_analysis_writer()` is None) or when Rekordbox is running. Writer errors map by `reason` (`_ANALYZE_FULL_ERRORS`): `track_not_found` → 404, `audio_missing` → 409, anything else → 500; fixed `detail` strings, never the writer's `error` text (can hold an absolute path). Before 2026-10 it answered 400 in every mode (`hasattr` probe on the facade) |
 | POST | `/api/library/analyze-batch` `[AUTH]` | Batch analyze multiple tracks; NDJSON streaming progress. Body: `{ track_ids: [int], force: bool }`. Same 409 gates as `analyze-full` |
 | GET | `/api/library/analyze-status` | Report analysis engine capabilities + count of unanalyzed tracks |
 
@@ -387,7 +387,7 @@ Ties analysis → ANLZ files → master.db in a single pipeline. **Requires live
 
 | Method | Description |
 |--------|-------------|
-| `analyze_and_save(track_id, force=False)` | Full pipeline for single track: analyze → write ANLZ → update BPM/key/analysed in master.db |
+| `analyze_and_save(track_id, force=False)` | Full pipeline for single track: analyze → write ANLZ → update BPM/key/analysed in master.db. `status: error` results carry `reason`: `track_not_found` / `audio_missing` / `analysis_failed` |
 | `analyze_batch(track_ids, force=False)` | Generator — yields `{track_id, status, progress, bpm, key, error}` dicts as each track completes |
 | `get_unanalyzed_tracks()` | Returns list of track dicts with `bpm=0` or missing ANLZ files |
 

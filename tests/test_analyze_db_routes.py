@@ -45,9 +45,12 @@ class _FakeWriter:
     def __init__(self) -> None:
         self.calls: list[tuple[str, Any, bool]] = []
         self.batch_on_loop: list[bool] = []
+        self.result: dict[str, Any] | None = None
 
     def analyze_and_save(self, tid: str, force: bool = False) -> dict[str, Any]:
         self.calls.append(("one", tid, force))
+        if self.result is not None:
+            return self.result
         return {"status": "ok", "track_id": tid, "bpm": 124.0}
 
     def analyze_batch(self, track_ids: list[str], force: bool = False) -> Iterator[dict[str, Any]]:
@@ -145,6 +148,33 @@ def test_analyze_full_refuses_while_rekordbox_runs(
     assert r.status_code == 409
     assert "Rekordbox is running" in r.json()["detail"]
     assert live.writer.calls == []
+
+
+_SECRET_PATH = r"C:\Users\someone\Music\private\track.mp3"
+
+
+@pytest.mark.parametrize(
+    ("reason", "error", "status_code"),
+    [
+        ("track_not_found", "Track 42 not found", 404),
+        ("audio_missing", f"Audio file not found: {_SECRET_PATH}", 409),
+        ("analysis_failed", f"Analysis failed: cannot decode {_SECRET_PATH}", 500),
+        (None, f"something else at {_SECRET_PATH}", 500),
+    ],
+)
+def test_analyze_full_maps_writer_errors_by_reason_without_leaking_paths(
+    live: _FakeLiveDB,
+    auth_token: dict[str, str],
+    reason: str | None,
+    error: str,
+    status_code: int,
+) -> None:
+    live.writer.result = {"status": "error", "error": error}
+    if reason is not None:
+        live.writer.result["reason"] = reason
+    r = _post("/api/track/42/analyze-full", auth_token)
+    assert r.status_code == status_code, r.text
+    assert "private" not in r.json()["detail"]
 
 
 @pytest.mark.no_auth

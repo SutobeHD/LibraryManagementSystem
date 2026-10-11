@@ -5618,6 +5618,15 @@ def _live_analysis_writer() -> Any:
     return writer
 
 
+#: Writer error ``reason`` -> (status, detail). Fixed details on purpose: the writer's
+#: ``error`` text can carry the track's absolute file path or a raw exception message.
+#: Any other reason is a 500.
+_ANALYZE_FULL_ERRORS: dict[str, tuple[int, str]] = {
+    "track_not_found": (404, "Track not found in the live library"),
+    "audio_missing": (409, "The track's audio file is missing on disk"),
+}
+
+
 @app.post("/api/track/{tid}/analyze-full", dependencies=[Depends(require_session)])
 async def analyze_track_full(tid: str, req: AnalyzeFullReq = AnalyzeFullReq()):
     """
@@ -5636,7 +5645,11 @@ async def analyze_track_full(tid: str, req: AnalyzeFullReq = AnalyzeFullReq()):
         result = await loop.run_in_executor(None, writer.analyze_and_save, tid, req.force)
 
         if result.get("status") == "error":
-            raise HTTPException(500, result.get("error", "Analysis failed"))
+            logger.warning("analyze-full %s refused: %s", tid, result.get("error"))
+            status_code, detail = _ANALYZE_FULL_ERRORS.get(
+                str(result.get("reason")), (500, "Analysis failed. Check logs for details.")
+            )
+            raise HTTPException(status_code, detail)
 
         return {"status": "ok", "data": result}
     except HTTPException:

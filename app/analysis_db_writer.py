@@ -82,13 +82,20 @@ class AnalysisDBWriter:
             force: If True, re-analyze even if track is already analyzed
 
         Returns:
-            Dict with analysis results and write status
+            Dict with analysis results and write status. An ``error`` result
+            carries a ``reason`` (``track_not_found`` / ``audio_missing`` /
+            ``analysis_failed``) so callers can map it without parsing ``error``,
+            which may hold an absolute file path.
         """
 
         # 1. Validate track exists
         track = self.live_db.tracks.get(str(track_id))
         if not track:
-            return {"status": "error", "error": f"Track {track_id} not found"}
+            return {
+                "status": "error",
+                "reason": "track_not_found",
+                "error": f"Track {track_id} not found",
+            }
 
         # 2. Check if already analyzed (skip unless forced)
         if not force:
@@ -106,7 +113,11 @@ class AnalysisDBWriter:
         # 3. Get audio file path
         file_path = track.get("path", "")
         if not file_path or not os.path.exists(file_path):
-            return {"status": "error", "error": f"Audio file not found: {file_path}"}
+            return {
+                "status": "error",
+                "reason": "audio_missing",
+                "error": f"Audio file not found: {file_path}",
+            }
 
         logger.info(f"Starting analysis for track {track_id}: {os.path.basename(file_path)}")
         start_time = time.time()
@@ -118,10 +129,18 @@ class AnalysisDBWriter:
             analysis = run_full_analysis(file_path)
         except Exception as e:
             logger.error(f"Analysis failed for track {track_id}: {e}")
-            return {"status": "error", "error": f"Analysis failed: {e}"}
+            return {
+                "status": "error",
+                "reason": "analysis_failed",
+                "error": f"Analysis failed: {e}",
+            }
 
         if analysis.get("status") == "error":
-            return {"status": "error", "error": analysis.get("error", "Unknown analysis error")}
+            return {
+                "status": "error",
+                "reason": "analysis_failed",
+                "error": analysis.get("error", "Unknown analysis error"),
+            }
 
         elapsed_analysis = time.time() - start_time
         logger.info(

@@ -199,6 +199,16 @@ def test_skip_check_never_calls_the_aborting_rbox_path_helpers(tmp_path):
     assert result["status"] == "error"  # not analysed, and nothing to skip
 
 
+def test_error_results_carry_a_reason_for_the_route(tmp_path):
+    master = _AbortingMasterDb(str(tmp_path), {"8": _REL})
+    writer = AnalysisDBWriter(
+        _LiveDBWith({"8": {"BPM": 0, "path": str(tmp_path / "gone.mp3")}}, master)
+    )
+
+    assert writer.analyze_and_save("404")["reason"] == "track_not_found"
+    assert writer.analyze_and_save("8")["reason"] == "audio_missing"
+
+
 def test_skip_check_still_skips_a_track_whose_dat_exists(tmp_path):
     dat = tmp_path / _REL.lstrip("/")
     dat.parent.mkdir(parents=True)
