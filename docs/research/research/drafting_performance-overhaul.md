@@ -21,7 +21,7 @@ superseded_by: []
 ## Lifecycle
 
 - 2026-06-09 — `research/idea_` — created from template
-- 2026-06-09 — `drafting_` — promoted; Stage-1 (Prior Art→Research Plan) pre-filled from 9-agent codebase perf investigation (48 hotspots, file:line evidence). Idea Verification left for the research-draft Verifier.
+- 2026-06-09 — `research/drafting_` — promoted; Stage-1 (Prior Art→Research Plan) pre-filled from 9-agent codebase perf investigation (48 hotspots, file:line evidence). Idea Verification left for the research-draft Verifier.
 
 ## Original Idea (verbatim — never edit)
 
