@@ -156,7 +156,7 @@ Marker convention in the route tables below:
 | POST | `/api/tools/duplicates/merge` `[AUTH]` | Merge a set of duplicate tracks |
 | POST | `/api/tools/duplicates/merge-all` `[AUTH]` | Auto-merge all detected duplicates |
 | POST | `/api/tools/rename` `[AUTH]` | Rename tracks (not supported in XML-only mode) |
-| POST | `/api/tools/batch-comment` `[AUTH]` | Batch update comments on multiple tracks. Body `{source_id: "LIB"\|playlist_id, action: remove\|replace\|append\|set, find?, replace?}` → `{status, count}`. Runs `app/batch_worker.py` against the live library's `master.db` (`_live_master_db_path()`); 409 outside live mode. Was hard-wired to `%APPDATA%/Pioneer/rekordbox[6]/master.db` |
+| POST | `/api/tools/batch-comment` `[AUTH]` | Batch update comments on multiple tracks. Body `{source_id: "LIB"\|playlist_id, action: remove\|replace\|append\|set, find?, replace?}` → `{status, count}`. Runs `app/batch_worker.py` against the live library's `master.db` (`_live_master_db_path()`); 409 outside live mode or while Rekordbox runs, 504 when the worker passes 600 s. Plain `def` (threadpool) so the worker never blocks the event loop. Was hard-wired to `%APPDATA%/Pioneer/rekordbox[6]/master.db` |
 | POST | `/api/metadata/merge` `[AUTH]` | Merge metadata from one track into another |
 
 ### SoundCloud Endpoints

@@ -844,7 +844,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `create_folder_pl()` — Convenience: create a folder (Type=0).
 - `get_dupes()`
 - `BatchCommentReq`
-- `batch_comment()`
+- `batch_comment()` — Apply one comment action to every track of the library (``LIB``) or a playlist.
 - `clean_titles()`
 - `FormatSwapDryRunReq`
 - `FormatSwapExecuteReq`
@@ -3479,6 +3479,10 @@ POST /api/tools/batch-comment.
 - `live_db()`
 - `worker()`
 - `test_worker_gets_the_live_library_master_db()`
+- `test_handler_is_not_a_coroutine()`
+- `test_runs_the_worker_off_the_event_loop()`
+- `test_refuses_while_rekordbox_runs()`
+- `test_worker_timeout_is_a_504()`
 - `test_outside_live_mode_is_a_409()`
 - `test_still_needs_a_session()`
 

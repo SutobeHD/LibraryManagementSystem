@@ -3318,58 +3318,58 @@ class BatchCommentReq(BaseModel):
 
 
 @app.post("/api/tools/batch-comment", dependencies=[Depends(require_session)])
-async def batch_comment(r: BatchCommentReq):
-    # Outside the try below, which would turn the 409 into a 500. Reads only the
-    # facade's mode + path attributes, none of its thread-unsafe Rust objects.
+def batch_comment(r: BatchCommentReq) -> dict[str, Any]:
+    """Apply one comment action to every track of the library (``LIB``) or a playlist.
+
+    Plain ``def`` on purpose: FastAPI runs it in the threadpool, so the worker
+    subprocess (up to 600 s) never blocks the event loop. As ``async def`` it stalled
+    every other request, playback streaming included, for the whole run.
+    """
+    import subprocess
+
+    # Reads only the facade's mode + path attributes, none of its thread-unsafe Rust
+    # objects, so it is safe from a threadpool worker.
     db_path = _require_live_master_db("Batch comment editing")
+    if _is_rekordbox_running():
+        raise HTTPException(409, "Rekordbox is running. Close it before batch-editing comments.")
+
+    cmd = [
+        sys.executable,
+        str(Path(APP_DIR) / "batch_worker.py"),
+        "--db",
+        db_path,
+        "--source",
+        r.source_id,
+        "--action",
+        r.action,
+    ]
+    if r.find:
+        cmd.extend(["--find", r.find])
+    if r.replace:
+        cmd.extend(["--replace", r.replace])
+
+    logger.info("[BATCH-COMMENT] worker start: source=%s action=%s", r.source_id, r.action)
+    started = time.monotonic()
     try:
-        import subprocess
-        import sys
-        from pathlib import Path
-
-        # Call the worker script
-        cmd = [
-            sys.executable,
-            str(Path(APP_DIR) / "batch_worker.py"),
-            "--db",
-            db_path,
-            "--source",
-            r.source_id,
-            "--action",
-            r.action,
-        ]
-
-        if r.find:
-            cmd.extend(["--find", r.find])
-        if r.replace:
-            cmd.extend(["--replace", r.replace])
-
-        logger.info(f"Running batch worker: {cmd}")
-
-        # Run and capture output. timeout=600s — batch workers can legitimately
-        # run minutes over large libraries, but past that point we treat the
-        # process as hung and reclaim resources rather than blocking the
-        # request thread forever.
+        # timeout=600s — batch workers can legitimately run minutes over large
+        # libraries, but past that point we treat the process as hung and reclaim
+        # resources rather than holding a threadpool worker forever.
         result = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT, timeout=600)
-        logger.info(f"Batch worker output: {result}")
-
-        # Parse count
-        count = 0
-        for line in result.split("\n"):
-            if line.startswith("COUNT:"):
-                count = int(line.split(":")[1])
-
-        return {"status": "success", "count": count}
-
     except subprocess.TimeoutExpired as e:
         logger.error("Batch worker exceeded 600s timeout — killed (%s)", e)
         raise HTTPException(504, detail="Batch worker timed out after 600s") from e
     except subprocess.CalledProcessError as e:
-        logger.error(f"Batch worker failed: {e.output}")
-        raise HTTPException(500, "Batch processing failed. Check logs for details.")
-    except Exception as e:
-        logger.error(f"Batch comment error: {e}")
-        raise HTTPException(500, safe_error_message(e))
+        logger.error("Batch worker failed: %s", e.output)
+        raise HTTPException(500, "Batch processing failed. Check logs for details.") from e
+    logger.info("[BATCH-COMMENT] worker done in %.1fs", time.monotonic() - started)
+    logger.info("Batch worker output: %s", result)
+
+    count = 0
+    for line in result.split("\n"):
+        if line.startswith("COUNT:"):
+            count = int(line.split(":")[1])
+
+    return {"status": "success", "count": count}
 
 
 @app.post("/api/library/clean-titles", dependencies=[Depends(require_session)])
