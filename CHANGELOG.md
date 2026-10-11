@@ -157,6 +157,12 @@
   - Fixed: Settings could silently overwrite every stored value — a timed-out
     `GET /api/settings` left the form showing defaults, and Save posted them.
     Saving is now disabled until a load succeeds.
+- Track-metadata edits no longer report success for changes that never land:
+  - Fixed: in a live (master.db) library, editing BPM, Key, Label or any field
+    master.db cannot take through this path answered success and changed
+    nothing; an empty field was saved as the text "None", and a Rating or
+    colour outside 0-5 / 0-8 was written as is. Such an edit is now refused
+    before anything is written.
 
 ## v1.0.0-beta — 2026-05-07
 

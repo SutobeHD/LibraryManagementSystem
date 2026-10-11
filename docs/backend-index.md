@@ -290,7 +290,7 @@ Direct SQLite access (live mode). Thread-safe via locks. Auto-backup on write.
 | Method | Description |
 |--------|-------------|
 | `get_tracks()` | Query `master.db` directly |
-| `update_track_metadata(tid, updates)` | Write to SQLite (**requires Rekordbox to be closed**): `Title` / `Comment` / `Rating` / `ColorID` as direct fields via `update_content(item)`, `Artist` / `Genre` / `Album` via rbox's `update_content_artist\|genre\|album`; mirrors each into the in-memory cache. `Title` since 2026-09-26 (download names route) |
+| `update_track_metadata(tid, updates)` | Write to SQLite (**requires Rekordbox to be closed**): `Title` / `Comment` / `Rating` / `ColorID` as direct fields via `update_content(item)`, `Artist` / `Genre` / `Album` via rbox's `update_content_artist\|genre\|album`; mirrors each into the in-memory cache. `Title` since 2026-09-26 (download names route). Any other key (`BPM`, `Key`, `Label`, a typo like `ArtistName`) raises `UnsupportedTrackFields`, a wrong type / range (`None`, `Rating` outside 0-5, `ColorID` outside 0-8, a float) `InvalidTrackFieldValue` — both `app.track_fields.TrackFieldError`, raised before the row is read (was: True with nothing written) |
 | `get_analysis_writer()` | Lazy-create and return `AnalysisDBWriter` instance bound to this DB |
 | `get_unanalyzed_track_ids()` | Return list of track IDs with BPM=0 (not yet analyzed) |
 | `_load_beatgrids_from_anlz()` | Batch-loads PQTZ beatgrids via `SafeAnlzParser.load_all_beatgrids` (subprocess-isolated, bisecting). Runs on a daemon thread spawned by `_start_beatgrid_background_load` after `loaded=True` so a slow / panicking rbox call cannot block library init |

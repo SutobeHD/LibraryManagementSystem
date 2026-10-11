@@ -18,6 +18,7 @@ except ImportError:
     rbox = None
 
 from .anlz_safe import SafeAnlzParser
+from .track_fields import normalise_track_updates
 
 logger = logging.getLogger(__name__)
 
@@ -935,17 +936,13 @@ class LiveRekordboxDB:
             item = self.db.create_content(path)
             tid = str(item.id)
 
-            # 2. Update metadata (Artist, Album, etc.)
+            # 2. Update metadata. No BPM: it never reached master.db here, and
+            # update_track_metadata now refuses the whole update for a key it cannot write.
             updates = {
-                "Title": track_data.get("Title"),
-                "Artist": track_data.get("Artist"),
-                "Album": track_data.get("Album"),
-                "Genre": track_data.get("Genre"),
-                "BPM": track_data.get("BPM"),
-                "Comment": track_data.get("Comment"),
+                k: track_data[k]
+                for k in ("Title", "Artist", "Album", "Genre", "Comment")
+                if track_data.get(k) is not None
             }
-            # Remove None values
-            updates = {k: v for k, v in updates.items() if v is not None}
 
             if updates:
                 self.update_track_metadata(tid, updates)
@@ -1006,6 +1003,13 @@ class LiveRekordboxDB:
         return self.update_track_metadata(tid, {"Comment": comment})
 
     def update_track_metadata(self, tid: str, updates: dict[str, Any]) -> bool:
+        """Write ``updates`` to one master.db row. True once every field landed.
+
+        Raises ``UnsupportedTrackFields`` for a key outside ``LIVE_WRITABLE_FIELDS`` and
+        ``InvalidTrackFieldValue`` for a wrong type or range (``app.track_fields``), both
+        before the row is even read, so a refused update leaves it untouched.
+        """
+        updates = normalise_track_updates(updates, "live")
         try:
             tid = str(tid)
             logger.info(f"Updating metadata for track ID: '{tid}'")
@@ -1023,39 +1027,16 @@ class LiveRekordboxDB:
                 item.commnt = str(updates["Comment"])
                 changed = True
             if "Rating" in updates:
-                try:
-                    item.rating = int(updates["Rating"])
-                    changed = True
-                except (ValueError, TypeError) as e:
-                    logger.warning(
-                        "live_database: invalid Rating %r for track %s (%s)",
-                        updates.get("Rating"),
-                        tid,
-                        e,
-                    )
+                item.rating = updates["Rating"]
+                changed = True
             if "ColorID" in updates:
                 try:
-                    item.color_id = int(updates["ColorID"])
-                    changed = True
-                except (ValueError, TypeError) as e:
-                    # rbox occasionally returns ColorID as a string label; fall
-                    # back to str() before giving up so theme syncs don't fail
-                    # silently. master.db itself stores ColorID as INTEGER.
-                    logger.debug(
-                        "live_database: ColorID %r not int for track %s (%s) — trying str fallback",
-                        updates.get("ColorID"),
-                        tid,
-                        e,
-                    )
-                    try:
-                        item.color_id = str(updates["ColorID"])
-                        changed = True
-                    except Exception as inner:
-                        logger.warning(
-                            "live_database: ColorID for track %s rejected as int and str (%s)",
-                            tid,
-                            inner,
-                        )
+                    item.color_id = updates["ColorID"]
+                except TypeError:
+                    # rbox 0.1.7 types DjmdContent.color_id as Optional[str] (_rbox.pyi);
+                    # PyO3 raises TypeError for an int. master.db stores it as INTEGER.
+                    item.color_id = str(updates["ColorID"])
+                changed = True
 
             if changed:
                 logger.info(f"Applying direct field updates for track {tid}...")
@@ -1069,9 +1050,9 @@ class LiveRekordboxDB:
                     if "Comment" in updates:
                         self.tracks[tid]["Comment"] = updates["Comment"]
                     if "Rating" in updates:
-                        self.tracks[tid]["Rating"] = int(updates["Rating"])
+                        self.tracks[tid]["Rating"] = updates["Rating"]
                     if "ColorID" in updates:
-                        self.tracks[tid]["ColorID"] = int(updates["ColorID"])
+                        self.tracks[tid]["ColorID"] = updates["ColorID"]
                 logger.info(f"Cache updated for {tid}")
 
             # 2. Relationship fields (rbox handles joins/inserts)

@@ -76,6 +76,7 @@
 | `app/soundcloud_auth.py` | SoundCloud OAuth token store + silent refresh (persistent login, Option A). |
 | `app/soundcloud_downloader.py` | SoundCloud Downloader — Dedup-aware download pipeline with two acquisition paths. |
 | `app/templates/build_template.py` | Build a clean exportLibrary_template.db from any Rekordbox-exported USB stick. |
+| `app/track_fields.py` | Track-metadata field policy: which keys a library backend stores, and their value rules. |
 | `app/usb_artwork.py` | USB artwork extraction + bucketed write to PIONEER/Artwork/. |
 | `app/usb_manager.py` | USB Device Manager for Rekordbox Editor Pro. |
 | `app/usb_mysettings.py` | USB MYSETTING / DJMMYSETTING file read/write + schema for frontend. |
@@ -341,6 +342,7 @@
 | `tests/test_soundcloud_refresh_route.py` | Route tests for the persistent SoundCloud login (T-19). |
 | `tests/test_stream_unicode_filename.py` | Regression: GET /api/stream 500 on non-latin-1 filenames. |
 | `tests/test_system_health.py` | Contract tests for ``GET /api/system/health`` -- unauth'd liveness probe. |
+| `tests/test_track_metadata_fields.py` | Track-metadata writes refuse fields and values the backend cannot store (issue K8). |
 | `tests/test_usb_copy_atomic.py` | USB audio copies must not leave a truncated file that never self-heals. |
 | `tests/test_usb_manager.py` | Tests for `app/usb_manager.py`. |
 | `tests/test_usb_mysettings.py` | Tests for app/usb_mysettings.py — Pioneer MYSETTING file schema + I/O. |

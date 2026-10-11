@@ -666,7 +666,7 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `  LiveRekordboxDB.add_track()`
 - `  LiveRekordboxDB.delete_track()`
 - `  LiveRekordboxDB.update_track_comment()`
-- `  LiveRekordboxDB.update_track_metadata()`
+- `  LiveRekordboxDB.update_track_metadata()` — Write ``updates`` to one master.db row.
 - `  LiveRekordboxDB.list_mytags()` — Return all defined MyTag entries as [{id, name}, …].
 - `  LiveRekordboxDB.get_track_mytags()` — Return MyTag IDs assigned to the given track.
 - `  LiveRekordboxDB.create_mytag()` — Create a new MyTag definition.
@@ -1264,6 +1264,16 @@ Build a clean exportLibrary_template.db from any Rekordbox-exported USB stick.
 
 - `build_template()` — Build a clean OneLibrary template from the given Rekordbox stick.
 - `main()`
+
+### `app/track_fields.py`
+
+Track-metadata field policy: which keys a library backend stores, and their value rules.
+
+- `TrackFieldError` — A track update the backend refuses as a whole.
+- `UnsupportedTrackFields` — The update names field keys this backend cannot write.
+- `InvalidTrackFieldValue` — A known field carries a value the backend cannot store.
+- `writable_fields()` — Field keys ``backend`` persists.
+- `normalise_track_updates()` — Allowlist the keys and type-check every value.
 
 ### `app/usb_artwork.py`
 
@@ -4652,6 +4662,23 @@ Contract tests for ``GET /api/system/health`` -- unauth'd liveness probe.
 - `  TestHealthLeaksNothing.test_response_model_filters_undeclared_fields()` — ``response_model`` pins the schema so future edits can't leak.
 - `TestHealthHasNoSideEffects`
 - `  TestHealthHasNoSideEffects.test_does_not_lazily_build_live_db()` — ``db.active_db`` constructs ``LiveRekordboxDB`` on first touch.
+
+### `tests/test_track_metadata_fields.py`
+
+Track-metadata writes refuse fields and values the backend cannot store (issue K8).
+
+- `StrColorItem` — A ``DjmdContent`` stand-in whose ``color_id`` takes only str, as rbox 0.1.7 types it.
+- `conn()` — One mock rbox handle for every thread (routes run in FastAPI's threadpool).
+- `live()`
+- `test_normalise_returns_a_coerced_copy()`
+- `test_unsupported_fields_name_every_refused_key()`
+- `test_live_refuses_unknown_keys_before_any_write()`
+- `test_live_refuses_bad_values_before_any_write()`
+- `test_live_bad_artist_does_not_leave_the_title_half_written()`
+- `test_live_accepts_the_range_edges()`
+- `test_live_writes_every_allowed_field()`
+- `test_live_add_track_does_not_send_bpm()`
+- `test_live_add_track_skips_missing_tags()`
 
 ### `tests/test_usb_copy_atomic.py`
 
