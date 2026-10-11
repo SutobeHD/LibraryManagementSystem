@@ -382,6 +382,20 @@ Non-destructive in-place patch of an **existing** ANLZ. Walks the flat PMAI tag 
 
 ---
 
+## ANLZ USB Export (`app/anlz_usb_export.py`)
+
+Readies one track's ANLZ trio for the stick the way Rekordbox's own export does: PPTH := stick audio path (`/Contents/...`), plain PSSI XOR-masked (rekordcrate/rbox key), every other tag + the PMAI header (except `len_file`) byte-for-byte. Cue lists ride through unchanged. Used by `OneLibraryUsbWriter._generate_or_copy_anlz_for` (source order: `.lms_anlz` sidecar, then a fresh analysis).
+
+| Function | Signature | Notes |
+|----------|-----------|-------|
+| `export_trio` | `(src_dat, dst_dir, usb_audio_path) -> list[str]` | Reads exactly `<stem>.DAT/.EXT/.2EX` (never `.bak-*`), all-or-nothing validation. Stages `.part` files, then `os.replace`, then deletes other `ANLZ*` in `dst_dir` (case-insensitive keep list). `[]` = source missing/invalid (try next source); raises `UsbWriteError` when the stick cannot be written |
+| `is_complete_anlz` | `(data) -> bool` | `PMAI` magic, header len 28, `len_file == size`, tag chain ends exactly at EOF |
+| `to_usb_bytes` | `(data, usb_audio_path) -> bytes` | The transform; empty `usb_audio_path` keeps the source PPTH |
+| `mask_pssi` | `(tag) -> bytes` | No-op unless mood is a plain 1..3, so an exported tag is never masked twice |
+| `UsbWriteError` | `Exception` (not `OSError`) | Stick-side failure; a broad `except OSError` must not mistake it for a bad source |
+
+---
+
 ## Analysis-to-DB Orchestrator (`app/analysis_db_writer.py`) — `AnalysisDBWriter`
 
 Ties analysis → ANLZ files → master.db in a single pipeline. **Requires live DB mode and Rekordbox closed.** Writes ANLZ only into the dir of the AnalysisDataPath master.db already records (`anlz_safe.resolve_anlz_dir`, never rbox's aborting `get_content_anlz_paths`); a track with none is refused (`no_anlz_path`) before any DSP — it never invents a share path or writes `analysis_data_path`. No `.DAT` written → no master.db write (`anlz_write_failed`), so `analysed` is never set without a grid on disk. DSP (`run_full_analysis`) runs in `AnalysisEngine`'s process pool (900 s per-track ceiling), never in the sidecar; a `BrokenProcessPool` drops the pool so the next track gets a fresh one.

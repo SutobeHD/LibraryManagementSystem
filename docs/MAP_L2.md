@@ -103,6 +103,16 @@ ANLZ-Sidecar writer — shared helper used by every track-import path
 - `sidecar_dir_for()` — Stable, collision-resistant per-track sidecar directory.
 - `write_companion_anlz()` — Write DAT/EXT/2EX next to file_path.
 
+### `app/anlz_usb_export.py`
+
+Ready one track's ANLZ trio for a USB stick: the transform Rekordbox applies on export.
+
+- `UsbWriteError` — Writing to the stick failed (full, removed, read-only, I/O error).
+- `is_complete_anlz()` — PMAI root, 28-byte header, `len_file == size`, tag chain ending exactly at EOF.
+- `mask_pssi()` — XOR-mask a plain PSSI tag the way Rekordbox 6+ writes it to a stick.
+- `to_usb_bytes()` — `data` with PPTH := `usb_audio_path` (kept when that is empty) and PSSI masked.
+- `export_trio()` — Write `src_dat` and its `.EXT`/`.2EX` siblings into `dst_dir`, transformed for USB.
+
 ### `app/anlz_writer.py`
 
 LibraryManagementSystem -- ANLZ Binary File Writer
@@ -2595,6 +2605,34 @@ Beat-grid extraction in `app.anlz_safe`.
 - `test_garbage_file_returns_none_instead_of_raising()`
 - `test_missing_file_returns_none()`
 - `test_recursion_limit_is_restored()`
+
+### `tests/test_anlz_usb_export.py`
+
+ANLZ trio -> USB stick transform (`app.anlz_usb_export`) and its wiring in
+
+- `test_ppth_becomes_stick_path_and_everything_else_rides_verbatim()`
+- `test_pssi_is_masked_once_and_unmasks_to_the_original()`
+- `test_mask_key_is_the_documented_song_structure_key()` — djl-analysis / rekordcrate key bytes; each gets len_entries added mod 256.
+- `test_rbox_reads_the_stick_path_and_unmasks_the_pssi()` — Independent reader: rbox (rekordcrate) detects the mask and decodes it back.
+- `test_empty_stick_path_keeps_the_original_ppth()`
+- `test_is_complete_anlz_rejects_damaged_files()`
+- `test_one_damaged_sibling_rejects_the_whole_source()`
+- `test_missing_dat_is_no_source()`
+- `test_backups_and_stale_siblings_never_reach_the_stick()`
+- `test_fresh_file_survives_a_case_variant_of_its_name()` — FAT/exFAT keep the old entry's case on replace; the cleanup must not delete it.
+- `test_unreadable_source_is_a_source_error_not_a_stick_error()`
+- `test_stick_write_failure_raises_and_leaves_the_old_trio_and_no_parts()`
+- `test_unwritable_bucket_raises_usb_write_error()`
+- `test_sidecar_ships_with_the_stick_path()`
+- `test_invalid_sidecar_falls_back_to_a_fresh_analysis()`
+- `test_no_source_and_no_audio_returns_none()`
+
+### `tests/test_anlz_usb_export_sync.py`
+
+Full `OneLibraryUsbWriter.sync()` with copy_anlz=True against the real template.
+
+- `no_analysis()`
+- `test_sync_ships_the_sidecar_with_stick_ppth_and_masked_pssi()`
 
 ### `tests/test_anlz_writer_guards.py`
 

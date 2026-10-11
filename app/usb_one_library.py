@@ -901,7 +901,9 @@ class OneLibraryUsbWriter:
                 # field can land in the same write.
                 if copy_anlz:
                     try:
-                        anlz_rel = self._generate_or_copy_anlz_for(t, str(slot.id), source)
+                        anlz_rel = self._generate_or_copy_anlz_for(
+                            t, str(slot.id), source, usb_rel_path
+                        )
                         if anlz_rel:
                             slot.analysis_data_file_path = anlz_rel
                     except Exception as exc:
@@ -1474,13 +1476,15 @@ class OneLibraryUsbWriter:
 
     @staticmethod
     def _anlz_bucket(content_id: int) -> tuple:
-        """CDJ bucket layout: PIONEER/USBANLZ/P<bucket-hex>/<inner-hex>/.
+        """LMS bucket layout: PIONEER/USBANLZ/P<id // 256 hex>/<id hex>/.
 
-        Real Rekordbox exports use bucket = `P{(id // 256):03X}` and inner =
-        `{id:08X}`. Both are upper-case hex. Verified against an F: drive
-        export. The exact convention isn't strictly required — Rekordbox
-        and CDJs read the path from the DB — but matching it makes the
-        result indistinguishable from a real Rekordbox stick.
+        Only the `P###/########` shape copies Rekordbox. Rekordbox's own folder
+        names are NOT derived from the stick content id — the template's rows
+        point at e.g. `P018/00021E98` for content id 1. Players read the path
+        from the DB row, so any unique folder works. Because ours is keyed by
+        the stick content id, a re-sync that puts another track into the same
+        slot reuses the folder; the export therefore removes ANLZ files it did
+        not write (`anlz_usb_export.export_trio`).
         """
         cid = max(int(content_id), 0)
         bucket = f"P{(cid // 256):03X}".upper()
@@ -1492,61 +1496,57 @@ class OneLibraryUsbWriter:
         track: dict,
         content_id: str,
         source,
+        usb_audio_path: str = "",
     ) -> str | None:
-        """Drop the per-track ANLZ sidecar trio into PIONEER/USBANLZ/.
+        """Write the track's ANLZ trio into PIONEER/USBANLZ/, Rekordbox-style.
 
-        Strategy:
-          1. Look for cached sidecars in <music_dir>/.lms_anlz/<hash>/ —
-             written at import-time by `anlz_sidecar.write_companion_anlz`.
-             If present, just copy.
-          2. Otherwise run the analysis on demand (slow but bounded — same
-             code path as the importer uses) and cache the output.
-          3. Either way, copy the resulting DAT/EXT/2EX into the CDJ
-             bucket layout so they ride out to the stick.
+        Sources, first one that validates wins:
+          1. the LMS sidecar in <music_dir>/.lms_anlz/<hash>/ (written at
+             import time by `anlz_sidecar.write_companion_anlz`);
+          2. a fresh analysis, cached as that sidecar — only reached when 1 is
+             missing or invalid, and only for a track with a local audio file
+             (streaming pseudo-tracks get None).
 
-        Returns the relative `analysis_data_file_path` (matches
-        Rekordbox's own value in exportLibrary.db) or None on failure.
+        Each goes through `anlz_usb_export.export_trio`: PPTH becomes
+        `usb_audio_path`, PSSI is masked, only `.DAT`/`.EXT`/`.2EX` are written
+        (never `.bak-*` backups) and other ANLZ files in the bucket are removed.
+
+        Returns the `analysis_data_file_path` value — the `.DAT`, from which
+        players derive `.EXT`/`.2EX` — or None when no source produced one.
+        Raises `anlz_usb_export.UsbWriteError` when the stick cannot be written.
         """
-        sidecar_dir = source.get_anlz_sidecar_dir(track)
-
-        # Auto-generate if no cached sidecar — but only if we have an audio
-        # source. Streaming pseudo-tracks (SoundCloud URI etc.) get None.
-        if not (sidecar_dir and sidecar_dir.exists()):
-            audio_path_str = track.get("path")
-            if not audio_path_str:
-                return None
-            audio_path = Path(audio_path_str)
-            if not audio_path.exists():
-                return None
-            try:
-                from . import anlz_sidecar
-
-                sidecar_dir = anlz_sidecar.write_companion_anlz(audio_path)
-            except Exception as exc:
-                logger.debug("[ANLZ] generation failed for %s: %s", audio_path.name, exc)
-                return None
-            if not sidecar_dir or not sidecar_dir.exists():
-                return None
+        from . import anlz_usb_export
 
         bucket, inner = self._anlz_bucket(int(content_id))
         target_dir = self.anlz_root / bucket / inner
-        target_dir.mkdir(parents=True, exist_ok=True)
+        for src_dat in self._anlz_sources(track, source):
+            written = anlz_usb_export.export_trio(src_dat, target_dir, usb_audio_path)
+            if written:
+                return f"/PIONEER/USBANLZ/{bucket}/{inner}/{written[0]}"
+        return None
 
-        copied = []
-        for src in sidecar_dir.glob("ANLZ*"):
-            dst = target_dir / src.name
-            try:
-                _copy_file_atomic(src, dst)
-                copied.append(src.name)
-            except OSError as exc:
-                logger.debug("[ANLZ] copy %s -> %s failed: %s", src, dst, exc)
+    @staticmethod
+    def _anlz_sources(track: dict, source) -> Generator[Path, None, None]:
+        """Candidate `.DAT` files, best first. The analysis fallback runs lazily."""
+        sidecar_dir = source.get_anlz_sidecar_dir(track)
+        if sidecar_dir and sidecar_dir.exists():
+            yield sidecar_dir / "ANLZ0000.DAT"
 
-        if not copied:
-            return None
+        audio_path_str = track.get("path")
+        if not audio_path_str:
+            return
+        audio_path = Path(audio_path_str)
+        if not _exists_safe(audio_path):
+            return
+        try:
+            from . import anlz_sidecar
 
-        # Relative path stored in OneLibrary `content.analysis_data_file_path`
-        # — must point at the .DAT specifically (CDJ infers .EXT/.2EX from there)
-        return f"/PIONEER/USBANLZ/{bucket}/{inner}/ANLZ0000.DAT"
+            generated = anlz_sidecar.write_companion_anlz(audio_path)
+        except Exception as exc:  # analysis stack: librosa/madmom/numpy raise anything
+            logger.debug("[ANLZ] generation failed for %s: %s", audio_path.name, exc)
+            return
+        if generated and generated.exists():
+            yield generated / "ANLZ0000.DAT"
 
     # Back-compat shim — old `_copy_anlz_for` callers should switch to
     # `_generate_or_copy_anlz_for`. Kept while we transition the call sites.
