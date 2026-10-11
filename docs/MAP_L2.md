@@ -2410,6 +2410,7 @@ soundcloud_client.rs
 Pytest fixtures shared across the suite.
 
 - `auth_token()` — Pin ``app.auth.SESSION_TOKEN`` to ``TEST_SESSION_TOKEN`` for the test.
+- `empty_library()` — Swap ``app.main.db`` for a library that knows no tracks.
 - `pytest_configure()` — Register the ``no_auth`` marker so ``--strict-markers`` is happy.
 
 ### `tests/test_analysis.py`
