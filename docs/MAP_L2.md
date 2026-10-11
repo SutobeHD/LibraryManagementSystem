@@ -1161,9 +1161,9 @@ Constant-time equality helper for tokens, secrets, HMAC outputs.
 - `SettingsManager`
 - `  SettingsManager.load()`
 - `  SettingsManager.save()` — Write settings atomically: tmp file + os.replace.
-- `MetadataManager`
+- `MetadataManager` — Manual name mappings (artist / label / album merges).
 - `  MetadataManager.load()`
-- `  MetadataManager.save()`
+- `  MetadataManager.save()` — Write atomically (tmp + os.replace), then update the cache.
 - `  MetadataManager.add_mapping()`
 - `  MetadataManager.get_mapped_name()`
 - `BeatAnalyzer` — Track analyzer used by POST /api/track/{tid}/analyze.
@@ -4312,6 +4312,18 @@ Tests for `app/services.py`.
 - `  TestMetadataManager.test_get_mapped_name_passthrough_on_miss()` — Unmapped names return their input unchanged.
 - `  TestMetadataManager.test_add_mapping_creates_unknown_category()` — Asking for a brand-new category creates it on demand.
 - `  TestMetadataManager.test_add_mapping_persists_across_load()` — The whole point: written mappings survive process restart.
+- `TestMetadataManagerCache` — When the mappings cache is used and refreshed, and that it never lies.
+- `  TestMetadataManagerCache.store()`
+- `  TestMetadataManagerCache.test_lookups_after_the_first_touch_no_file()`
+- `  TestMetadataManagerCache.test_hand_edit_is_seen_once_the_recheck_interval_passed()`
+- `  TestMetadataManagerCache.test_unchanged_file_is_not_re_read_on_recheck()`
+- `  TestMetadataManagerCache.test_new_mappings_file_is_read()`
+- `  TestMetadataManagerCache.test_add_mapping_is_visible_immediately_and_persisted()`
+- `  TestMetadataManagerCache.test_mutating_load_result_does_not_leak_into_cache()`
+- `  TestMetadataManagerCache.test_failed_write_applies_nothing()`
+- `  TestMetadataManagerCache.test_mappings_path_that_is_a_directory_raises_and_applies_nothing()`
+- `  TestMetadataManagerCache.test_non_dict_payload_reads_as_empty()`
+- `  TestMetadataManagerCache.test_concurrent_add_mapping_loses_no_update()`
 - `TestSystemGuard` — `is_rekordbox_running` walks psutil — must tolerate weird per-process
 - `  TestSystemGuard.test_returns_true_when_rekordbox_seen()`
 - `  TestSystemGuard.test_returns_false_when_no_match()`

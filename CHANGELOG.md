@@ -157,6 +157,11 @@
   - Fixed: Settings could silently overwrite every stored value — a timed-out
     `GET /api/settings` left the form showing defaults, and Save posted them.
     Saving is now disabled until a load succeeds.
+- Performance (backend):
+  - Perf: artist/label lists and drill-downs no longer re-read
+    `metadata_mappings.json` once per track — the mappings are cached; a hand
+    edit to the file is picked up within 2 s, and a merge whose write fails is
+    not applied in memory either.
 
 ## v1.0.0-beta — 2026-05-07
 
