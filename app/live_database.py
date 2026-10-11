@@ -242,8 +242,28 @@ class LiveRekordboxDB:
     CUE_TYPE_MARKER = 0
 
     @staticmethod
-    def _cue_dict(ident, kind, in_msec, out_msec, comment) -> dict:
-        """One cue in the shape every consumer reads."""
+    def _opt_int(value: Any) -> int | None:
+        try:
+            return None if value is None else int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _cue_dict(
+        ident,
+        kind,
+        in_msec,
+        out_msec,
+        comment,
+        color=None,
+        color_table_index=None,
+        active_loop=None,
+    ) -> dict:
+        """One cue in the shape every consumer reads.
+
+        Color / ColorTableIndex / ActiveLoop are the raw djmdCue values (None
+        when the source row lacks them); nothing interprets them yet.
+        """
         kind = int(kind or 0)
         out_msec = int(out_msec or -1)
         return {
@@ -256,6 +276,9 @@ class LiveRekordboxDB:
             "InMsec": int(in_msec or 0),
             "OutMsec": out_msec,
             "Comment": comment or "",
+            "Color": LiveRekordboxDB._opt_int(color),
+            "ColorTableIndex": LiveRekordboxDB._opt_int(color_table_index),
+            "ActiveLoop": LiveRekordboxDB._opt_int(active_loop),
         }
 
     def _attach_cue(self, content_id, cue: dict) -> bool:
@@ -305,7 +328,13 @@ class LiveRekordboxDB:
         logger.info("Loaded %d cues across library (source: %s).", count, source)
 
     def _load_cues_from_djmd(self) -> int:
-        """Authoritative path: one batch read of djmdCue."""
+        """Authoritative path: one batch read of djmdCue.
+
+        Attribute names are rbox 0.1.7's `DjmdCue` fields (`kind`, `comment`;
+        pinned by test_djmd_cue_attr_names_match_rbox). A wrong name does not
+        raise — the getattr default wins silently and every hot cue loads as a
+        nameless memory cue (Kind 0).
+        """
         if not hasattr(self.db, "get_cues"):
             raise AttributeError("rbox.MasterDb has no get_cues")
 
@@ -316,10 +345,13 @@ class LiveRekordboxDB:
                 continue
             entry = self._cue_dict(
                 getattr(cue, "id", ""),
-                getattr(cue, "hot_cue", 0),
+                getattr(cue, "kind", 0),
                 getattr(cue, "in_msec", 0),
                 getattr(cue, "out_msec", -1),
-                getattr(cue, "commnt", ""),
+                getattr(cue, "comment", ""),
+                color=getattr(cue, "color", None),
+                color_table_index=getattr(cue, "color_table_index", None),
+                active_loop=getattr(cue, "active_loop", None),
             )
             count += self._attach_cue(cid, entry)
         return count
@@ -347,6 +379,9 @@ class LiveRekordboxDB:
                     e.get("InMsec"),
                     e.get("OutMsec"),
                     e.get("Comment"),
+                    color=e.get("Color"),
+                    color_table_index=e.get("ColorTableIndex"),
+                    active_loop=e.get("ActiveLoop"),
                 )
                 count += self._attach_cue(
                     e.get("ContentID") or getattr(row, "content_id", ""), entry

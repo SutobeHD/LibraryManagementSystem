@@ -157,6 +157,10 @@
   - Fixed: Settings could silently overwrite every stored value — a timed-out
     `GET /api/settings` left the form showing defaults, and Save posted them.
     Saving is now disabled until a load succeeds.
+- Fixed: in live mode, hot cues read from Rekordbox's `djmdCue` table loaded as
+  nameless memory cues — the loader asked rbox for attribute names `DjmdCue`
+  does not have. Libraries that fall back to the `djmdContentCue` mirror were
+  not affected. Cues now also carry Rekordbox's colour / active-loop values.
 
 ## v1.0.0-beta — 2026-05-07
 

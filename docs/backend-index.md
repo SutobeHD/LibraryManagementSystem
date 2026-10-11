@@ -293,6 +293,7 @@ Direct SQLite access (live mode). Thread-safe via locks. Auto-backup on write.
 | `update_track_metadata(tid, updates)` | Write to SQLite (**requires Rekordbox to be closed**): `Title` / `Comment` / `Rating` / `ColorID` as direct fields via `update_content(item)`, `Artist` / `Genre` / `Album` via rbox's `update_content_artist\|genre\|album`; mirrors each into the in-memory cache. `Title` since 2026-09-26 (download names route) |
 | `get_analysis_writer()` | Lazy-create and return `AnalysisDBWriter` instance bound to this DB |
 | `get_unanalyzed_track_ids()` | Return list of track IDs with BPM=0 (not yet analyzed) |
+| `_load_cues()` | Hot + memory cues into `track["Cues"]`: `djmdCue` via `get_cues()` (rbox `DjmdCue.kind` / `.comment` — a wrong attribute name returns the getattr default silently, pinned by `tests/test_live_cue_loading.py`), falling back to the `djmdContentCue` JSON mirror when that batch read fails. Each cue: `ID, Kind, Num, Type, InMsec, OutMsec, Comment, Color, ColorTableIndex, ActiveLoop` |
 | `_load_beatgrids_from_anlz()` | Batch-loads PQTZ beatgrids via `SafeAnlzParser.load_all_beatgrids` (subprocess-isolated, bisecting). Runs on a daemon thread spawned by `_start_beatgrid_background_load` after `loaded=True` so a slow / panicking rbox call cannot block library init |
 | `_start_beatgrid_background_load()` | Spawns the `anlz-beatgrid-loader` daemon thread that runs `_load_beatgrids_from_anlz` out of band |
 
