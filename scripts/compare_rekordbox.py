@@ -37,6 +37,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Windows consoles default to cp1252 — track titles are arbitrary unicode.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
@@ -197,14 +202,25 @@ def _rb_camelot_from_key_id(key_id: int) -> str:
     return _CAMELOT_MAP.get(full, "") if full else ""
 
 
-def _collect_tracks(db, ids: list[str] | None, n: int, seed: int | None) -> list[str]:
-    """Pick track ids: explicit --ids, else a random sample of analyzed tracks."""
+def _collect_tracks(
+    db, ids: list[str] | None, n: int, seed: int | None, min_len_s: float = 0.0
+) -> list[str]:
+    """Pick track ids: explicit --ids, else a random sample of analyzed tracks.
+
+    min_len_s filters out short clips (sampler loops, jingles) that aren't
+    representative full tracks — Rekordbox sampler kits live in the same
+    djmdContent table as the music library.
+    """
     if ids:
         return [str(i) for i in ids]
     analyzed: list[str] = []
     for item in db.get_contents():
         tid = str(getattr(item, "id", "") or getattr(item, "ID", ""))
         bpm = getattr(item, "bpm", 0) or 0
+        if min_len_s > 0:
+            length = float(getattr(item, "length", 0) or 0)
+            if length < min_len_s:
+                continue
         if tid and bpm and bpm > 0:
             analyzed.append(tid)
     if seed is not None:
@@ -307,6 +323,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--seed", type=int, default=None, help="Random seed for reproducible sampling")
     ap.add_argument("--tol", type=float, default=4.0, help="BPM tolerance %% (MIREX standard 4.0)")
     ap.add_argument("--json", help="Write full results to this JSON file (golden fixture)")
+    ap.add_argument(
+        "--min-len",
+        type=float,
+        default=0.0,
+        help="Skip tracks shorter than this many seconds (filters sampler loops/jingles)",
+    )
     args = ap.parse_args(argv)
 
     try:
@@ -320,7 +342,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     db = rbox.MasterDb(args.db) if args.db else rbox.MasterDb()
-    tids = _collect_tracks(db, args.ids, args.n, args.seed)
+    tids = _collect_tracks(db, args.ids, args.n, args.seed, min_len_s=args.min_len)
     if not tids:
         print("No analyzed tracks found.", file=sys.stderr)
         return 1
