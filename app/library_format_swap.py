@@ -51,13 +51,17 @@ from app.database import db_lock
 
 logger = logging.getLogger("LIBRARY_FORMAT_SWAP")
 
-# ── Rekordbox FileType integers (verified via pyrekordbox 0.1.7 schema) ──
+# ── Rekordbox djmdContent.FileType integers ──
+# Pioneer export codes. Verified 2026-10-20: Rekordbox's own analysis rewrites
+# AIFF rows to 12, native library rows carry WAV=11 / FLAC=5. Earlier builds
+# used AIFF=6 / WAV=5 / FLAC=11 and wrote 6 into existing library rows, so the
+# code is never auto-detected from master.db — a lookup would copy that bug.
 
 FILE_TYPE_MP3 = 1
 FILE_TYPE_M4A = 4
-FILE_TYPE_WAV = 5
-FILE_TYPE_AIFF = 6
-FILE_TYPE_FLAC = 11
+FILE_TYPE_FLAC = 5
+FILE_TYPE_WAV = 11
+FILE_TYPE_AIFF = 12
 
 LOSSY_SOURCE_EXTS = frozenset({".m4a", ".mp3", ".aac", ".ogg", ".opus"})
 LOSSLESS_SOURCE_EXTS = frozenset({".aiff", ".aif", ".wav", ".flac", ".alac"})
@@ -251,33 +255,6 @@ def _kill_rekordbox_if_present() -> bool:
             except (subprocess.SubprocessError, OSError):
                 return False
         return False
-
-
-def _detect_filetype_for_target(live_db: Any, target: str) -> int:
-    """Auto-detect the FileType integer Rekordbox uses for the target format.
-
-    Reads any existing row of that format from master.db; falls back to the
-    TARGET_CONFIG default when none present.
-    """
-    cfg = TARGET_CONFIG[target]
-    fallback = int(cfg["file_type"])
-    ext = str(cfg["ext"]).lower()
-    try:
-        rbox_db = live_db.db
-        for c in rbox_db.get_contents():
-            try:
-                fp = (getattr(c, "folder_path", "") or "").lower()
-            except (AttributeError, TypeError):
-                continue
-            if fp.endswith(ext) or (ext == ".aiff" and fp.endswith(".aif")):
-                return int(getattr(c, "file_type", fallback))
-    except (AttributeError, RuntimeError) as e:
-        logger.warning(
-            "library_format_swap: filetype auto-detect failed (%s) — fallback=%d",
-            e,
-            fallback,
-        )
-    return fallback
 
 
 def _probe_sample_rate(audio_path: Path) -> int | None:
@@ -738,7 +715,7 @@ class FormatSwapEngine:
     # — Dry-run —
 
     def dry_run(self, scope: dict[str, Any]) -> DryRunResult:
-        target_file_type = _detect_filetype_for_target(self.live_db, self.target)
+        target_file_type = int(TARGET_CONFIG[self.target]["file_type"])
         try:
             plans = self.build_plans(scope)
         except ValueError as e:
@@ -812,7 +789,7 @@ class FormatSwapEngine:
         DESTINATION volume (nearest existing ancestor of ``dest_dir``), not
         the source volume like the in-place ``dry_run``.
         """
-        target_file_type = _detect_filetype_for_target(self.live_db, self.target)
+        target_file_type = int(TARGET_CONFIG[self.target]["file_type"])
         try:
             plans = self._build_export_plans(scope, dest_dir)
         except ValueError as e:
@@ -942,7 +919,7 @@ class FormatSwapEngine:
             _store_batch(bid, result)
             return result
 
-        target_file_type = _detect_filetype_for_target(self.live_db, self.target)
+        target_file_type = int(TARGET_CONFIG[self.target]["file_type"])
         backup_dir = _backup_root() / timestamp
         backup_dir.mkdir(parents=True, exist_ok=True)
         manifest_path = backup_dir / f"manifest-{timestamp}.json"

@@ -1915,6 +1915,23 @@ Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout).
 - `test_pwv2_out_of_range_clamped()`
 - `test_pwv3_out_of_range_clamped_preserves_count()`
 
+### `tests/test_artist_splitting.py`
+
+Tests for artist-name splitting and the artist list it feeds.
+
+- `backend()`
+- `TestSplitArtists`
+- `  TestSplitArtists.test_never_yields_an_empty_name()`
+- `  TestSplitArtists.test_falls_back_to_the_raw_part()`
+- `  TestSplitArtists.test_blank_input_yields_nothing()`
+- `  TestSplitArtists.test_ordinary_splitting_is_unchanged()`
+- `  TestSplitArtists.test_separators_do_not_leak_empty_entries()`
+- `test_both_backends_split_identically()` — The implementation is duplicated — pin the two copies to each other.
+- `TestArtistListRoundTrip` — The reported symptom: header said "0 / 13 Tracks" with a blank name.
+- `  TestArtistListRoundTrip.test_every_listed_artist_resolves_to_its_tracks()`
+- `  TestArtistListRoundTrip.test_no_artist_has_a_blank_name()`
+- `  TestArtistListRoundTrip.test_count_matches_occurrences()`
+
 ### `tests/test_audio_analyzer.py`
 
 Tests for app/audio_analyzer.py — the pure _normalize_result mapping.
@@ -2162,6 +2179,7 @@ Tests for app.library_format_swap.
 - `  TestConstants.test_disk_thresholds_from_oq4()`
 - `  TestConstants.test_watchdog_interval()`
 - `  TestConstants.test_filetype_m4a_is_4()`
+- `  TestConstants.test_filetype_codes_match_pioneer_export()`
 - `TestFfmpegCommand`
 - `  TestFfmpegCommand.test_ffmpeg_cmd_codec_for_target()`
 - `  TestFfmpegCommand.test_ffmpeg_cmd_has_vn_to_drop_cover_art()`
@@ -2180,6 +2198,7 @@ Tests for app.library_format_swap.
 - `  TestScopeEnumeration.test_skips_already_target_ext()`
 - `TestDryRun`
 - `  TestDryRun.test_empty_scope_returns_zero()`
+- `  TestDryRun.test_target_file_type_ignores_legacy_library_rows()`
 - `  TestDryRun.test_invalid_scope_returns_error()`
 - `TestManifestListing`
 - `  TestManifestListing.test_empty_backup_dir_returns_empty()`
