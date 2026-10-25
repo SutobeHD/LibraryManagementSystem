@@ -219,6 +219,7 @@
 | `tests/test_anlz_reference_parse.py` | Validate the produced ANLZ files (.DAT/.EXT/.2EX). |
 | `tests/test_anlz_safe_pqtz.py` | Beat-grid extraction in `app.anlz_safe`. |
 | `tests/test_anlz_writer_guards.py` | Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout). |
+| `tests/test_artist_splitting.py` | Tests for artist-name splitting and the artist list it feeds. |
 | `tests/test_audio_analyzer.py` | Tests for app/audio_analyzer.py — the pure _normalize_result mapping. |
 | `tests/test_audio_tags.py` | Tests for app/audio_tags.py — native tag write-back (mutates user files → HIGH risk). |
 | `tests/test_auth.py` | Tests for ``app/auth.py`` -- Bearer-token session authentication. |
@@ -278,6 +279,7 @@
 | `scripts/dev/phrase_spike.py` | phrase_spike.py — manual P0 verification for the phrase memory-cue ANLZ write. |
 | `scripts/dev/rbox_artist_merge_probe.py` | Probe rbox's artist/playlist write semantics against a COPY of a master.db. |
 | `scripts/dev/safe_format_swap.py` | safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist. |
+| `scripts/feature_map.py` | Feature registry plus a live overlay of which branch or worktree touches which feature. |
 | `scripts/pipeline_dashboard.py` | Local web dashboard for the research pipeline. |
 | `scripts/pipeline_status.py` | Show the research pipeline state at a glance. |
 | `scripts/print_routine.py` | Extract the deploy-ready prompt from a routine .md file. |

@@ -1915,6 +1915,23 @@ Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout).
 - `test_pwv2_out_of_range_clamped()`
 - `test_pwv3_out_of_range_clamped_preserves_count()`
 
+### `tests/test_artist_splitting.py`
+
+Tests for artist-name splitting and the artist list it feeds.
+
+- `backend()`
+- `TestSplitArtists`
+- `  TestSplitArtists.test_never_yields_an_empty_name()`
+- `  TestSplitArtists.test_falls_back_to_the_raw_part()`
+- `  TestSplitArtists.test_blank_input_yields_nothing()`
+- `  TestSplitArtists.test_ordinary_splitting_is_unchanged()`
+- `  TestSplitArtists.test_separators_do_not_leak_empty_entries()`
+- `test_both_backends_split_identically()` — The implementation is duplicated — pin the two copies to each other.
+- `TestArtistListRoundTrip` — The reported symptom: header said "0 / 13 Tracks" with a blank name.
+- `  TestArtistListRoundTrip.test_every_listed_artist_resolves_to_its_tracks()`
+- `  TestArtistListRoundTrip.test_no_artist_has_a_blank_name()`
+- `  TestArtistListRoundTrip.test_count_matches_occurrences()`
+
 ### `tests/test_audio_analyzer.py`
 
 Tests for app/audio_analyzer.py — the pure _normalize_result mapping.
@@ -2896,6 +2913,35 @@ safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist.
 - `convert_m4a_to_aiff()` — ffmpeg src -> dst.
 - `execute()`
 - `rollback()`
+- `main()`
+
+### `scripts/feature_map.py`
+
+Feature registry plus a live overlay of which branch or worktree touches which feature.
+
+- `Feature`
+- `Area`
+- `Registry`
+- `load_registry()`
+- `path_matches()`
+- `Mapper` — Maps repo file paths onto feature ids.
+- `  Mapper.is_hub()`
+- `  Mapper.is_ignored()`
+- `  Mapper.features_for()`
+- `Site` — One construction site: an unmerged branch and/or a worktree.
+- `  Site.label()`
+- `collect_sites()`
+- `attach_activity()` — Fill Feature.activity; return feature id -> live site names when >= 2 (overlaps).
+- `compute_shares()` — Features whose paths resolve to the same tracked file share code.
+- `tracked_files()`
+- `cmd_brief()`
+- `cmd_active()`
+- `cmd_who()`
+- `cmd_list()`
+- `cmd_check()`
+- `cmd_coverage()`
+- `build_model()`
+- `cmd_html()`
 - `main()`
 
 ### `scripts/pipeline_dashboard.py`

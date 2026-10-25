@@ -185,6 +185,9 @@
 
 | File | Purpose |
 |------|---------|
+| `scripts/feature_map.py` | Feature registry tool. Loads `docs/features/*.toml`, overlays unmerged branches + worktree dirty files (stacked branches attributed to the most established ref: open PR first, then fewest commits ahead). Modes: `--brief` (SessionStart hook, never fails), `--who`, `--active`, `--list`, `--check` (CI), `--coverage`, `--html`. Stdlib only; per-tip commit cache in `<git-common-dir>/feature-map-cache.json` |
+| `scripts/feature_map_template.html` | Self-contained mindmap page (no CDN, offline). `feature_map.py --html` injects the model at `/*__FEATURE_MAP_DATA__*/null` → `tmp/feature-map.html` |
+| `docs/features/*.toml` | Feature registry, one file per top-level area (`[area]` + `[[feature]]`). `_meta.toml` = hubs, ignore globs, parked branches, stale days, coverage globs. Schema + workflow: `.claude/rules/feature-map.md` |
 | `scripts/screenshot.py` | Playwright screenshot utility for UI at localhost:5173 |
 | `scripts/test_xml_sync.py` | Validates Rekordbox XML generation with mock track data |
 | `scripts/dev/phrase_spike.py` | Manual P0 verification: patches phrase memory cues into one real track's ANLZ (timestamped `.bak-*` first; `--restore` rolls back) to confirm whether Rekordbox shows ANLZ memory cues for already-imported tracks. Never writes `master.db`. Run from repo root: `python scripts/dev/phrase_spike.py --track-id N` |
