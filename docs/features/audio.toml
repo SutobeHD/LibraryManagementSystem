@@ -1,0 +1,208 @@
+[area]
+id = "audio"
+name = "Player, Waveform & Editor"
+order = 7
+desc = "Abspielen, Waveform-Darstellung, DJ-Edit-DAW, Track-Editor; Rust-Audio-Stack (großteils ungenutzt)."
+
+# ── Playback ──────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "browser-audio-player"
+group = "Playback"
+name = "Mini-Player (HTML5)"
+status = "shipped"
+desc = "<audio>-Player: Play/Pause/Volume, Drag-Seek, amber Mirror-Scrubber."
+paths = ["frontend/src/components/Player.jsx", "frontend/src/components/shared/seededWaveform.js"]
+depends_on = ["audio-stream-route"]
+notes = "Scrubber-Waveform ist eine seeded Pseudo-Kurve, keine echte Analyse."
+
+[[feature]]
+id = "audio-stream-route"
+group = "Playback"
+name = "Audio-Streaming-Route"
+status = "shipped"
+desc = "Range-Request-Streaming, sandboxed via validate_audio_path, MIME pro Endung."
+paths = ["tests/test_stream_unicode_filename.py"]
+routes = ["/api/stream", "/api/audio/stream"]
+depends_on = ["audio-path-sandbox"]
+
+# ── Waveform ──────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "multiband-waveform-data"
+group = "Waveform"
+name = "3-Band-Waveform-Daten"
+status = "shipped"
+desc = "Backend low/mid/high-Waveform + Client-Bandsplit."
+paths = ["frontend/src/utils/AudioBandAnalyzer.js"]
+routes = ["/api/audio/waveform"]
+related = ["waveform-generation"]
+notes = "Backend-Teil: AudioEngine.generate_multiband_waveform in services.py (Hub). Decode blockiert den Event-Loop."
+
+[[feature]]
+id = "wavesurfer-waveform-editor"
+group = "Waveform"
+name = "WaveSurfer-Waveform-Editor"
+status = "partial"
+desc = "WaveSurfer + Overview, blue/rgb/3band-Layer, Cuts, Hot-Cues, Loop, Zoom."
+paths = ["frontend/src/components/WaveformEditor.jsx", "frontend/src/components/waveform/"]
+depends_on = ["multiband-waveform-data", "audio-stream-route"]
+notes = "Voller Modus nicht mehr gemountet (ersetzt durch DjEditDaw); nur simpleMode im Ranking."
+
+[[feature]]
+id = "waveform-overhaul"
+group = "Waveform"
+name = "Waveform-Overhaul"
+status = "research"
+research = "waveform-overhaul"
+branch = "claude/keen-galileo-61576d"
+desc = "Mehrere Render-Styles mit festen Paletten, >3 Bänder (nur Anzeige), einstellbare Schwellen mit Presets."
+related = ["track-editor-panels", "appearance-settings"]
+todo = ["Styles Bars/Kontur/Mirror/Dots/Stereo-Split", "Paletten je Style + Default", "hartcodierte Bandfarben an Settings binden", "Multiband ohne N WaveSurfer-Instanzen"]
+notes = "Doc nur auf Branch (Port auf 485cbfe). gallant-Backup hat WIP-Farbpresets."
+
+# ── DAW-Editor ────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "dj-edit-daw"
+group = "DAW-Editor"
+name = "DJ-Edit-DAW (Studio)"
+status = "shipped"
+desc = "Studio-Tab: Web-Audio-Playback, Regionen split/ripple-delete, Track-Browser."
+paths = ["frontend/src/components/daw/DjEditDaw.jsx", "frontend/src/components/daw/DawLayout.jsx", "frontend/src/components/daw/DawToolbar.jsx", "frontend/src/components/daw/DawBrowser.jsx", "frontend/src/components/daw/useTrackLoader.js", "frontend/src/audio/DawEngine.js", "frontend/src/audio/AudioRegion.js"]
+depends_on = ["daw-state-reducer", "daw-timeline-canvas", "multiband-waveform-data"]
+
+[[feature]]
+id = "daw-state-reducer"
+group = "DAW-Editor"
+name = "DAW-State + Undo/Redo"
+status = "shipped"
+desc = "Reducer für Regionen, Cues, Selection, Transport, History-Snapshots."
+paths = ["frontend/src/audio/DawState.js", "frontend/src/audio/dawState/"]
+
+[[feature]]
+id = "daw-timeline-canvas"
+group = "DAW-Editor"
+name = "DAW-Timeline + Mini-Map"
+status = "shipped"
+desc = "Canvas-Timeline (Path2D), Beatgrid, Playhead, Scrollbar, Overview."
+paths = ["frontend/src/components/daw/DawTimeline.jsx", "frontend/src/components/daw/timeline/", "frontend/src/components/daw/DawScrollbar.jsx", "frontend/src/components/daw/WaveformOverview.jsx", "frontend/src/components/shared/WaveformMiniCanvas.jsx"]
+depends_on = ["daw-state-reducer"]
+
+[[feature]]
+id = "daw-cue-loop-grid-edit"
+group = "DAW-Editor"
+name = "Cue/Loop/Grid-Edit in der DAW"
+status = "partial"
+desc = "Hot/Memory-Cues, Loops, Snap-to-Grid, Auto-Cue alle 16 Takte."
+paths = ["frontend/src/components/daw/DawControlStrip.jsx"]
+depends_on = ["dj-edit-daw"]
+related = ["rbep-projects", "rekordbox-cue-beatgrid-write"]
+notes = "Edits bleiben im DAW-State/.rbep - kein Rückschreiben nach Rekordbox."
+
+[[feature]]
+id = "daw-export"
+group = "DAW-Editor"
+name = "DAW-Export (WAV/MP3/FLAC)"
+status = "shipped"
+desc = "Export-Dialog: WAV via WebAudio-Render, MP3/FLAC via ffmpeg."
+paths = ["frontend/src/components/daw/ExportModal.jsx"]
+routes = ["/api/audio/render"]
+depends_on = ["dj-edit-daw"]
+notes = "Hartcodiertes localhost:8000 (HANDOVER 4.3)."
+
+[[feature]]
+id = "rbep-projects"
+group = "DAW-Editor"
+name = ".rbep Editor-Projekte"
+status = "partial"
+desc = "Rekordbox-Edit-Projekte parsen/speichern, Beat <-> Sekunde über Tempo-Map."
+paths = ["frontend/src/audio/RbepSerializer.js", "frontend/src/components/daw/useDawProject.js", "app/rbep_parser.py", "tests/test_rbep_parser.py"]
+routes = ["/api/projects", "/api/projects/save", "/api/projects/rbep/list"]
+related = ["dj-edit-daw"]
+notes = "Lade-Fallback ruft /api/file/read - die Route gibt es nicht."
+
+[[feature]]
+id = "non-destructive-editor"
+group = "DAW-Editor"
+name = "Non-Destructive Editor (alt)"
+status = "partial"
+desc = "Regionen, Envelopes/Fades, Palette-Clipboard, TimelineState."
+paths = ["frontend/src/components/editor/", "frontend/src/audio/TimelineState.js"]
+notes = "Verwaist, nirgends gemountet (nur EditorBrowser wird genutzt)."
+
+# ── Track-Editor ──────────────────────────────────────────────────────────
+
+[[feature]]
+id = "track-editor-panels"
+group = "Track-Editor"
+name = "Cue/Loop/Beatgrid/Meta-Panels"
+status = "unmerged"
+research = "waveform-editor-extensions"
+branch = "backup/gallant-lumiere-2026-09-25"
+desc = "Cue-, Loop-, Beatgrid- und Metadaten-Panels, 3-Schritt-Undo, Cue-Vorhören."
+depends_on = ["rekordbox-cue-beatgrid-write"]
+related = ["waveform-overhaul", "wavesurfer-waveform-editor"]
+todo = ["Panels gezielt portieren statt mergen (Facade 4a206e7 schon portiert)", "loop_numerator u32/u16-Fehler", "playheadStore-Ruckel-Fix aus dem WIP sichten"]
+notes = "Nur auf Backup-Branch. claude/gallant-lumiere-cff8ae hat Commits mit KIT-Mail - nie pushen."
+
+# ── Rust-Audio (ungenutzt) ────────────────────────────────────────────────
+
+[[feature]]
+id = "rust-native-playback"
+group = "Rust-Audio (ungenutzt)"
+name = "Native Audio-Engine (Rust)"
+status = "partial"
+desc = "symphonia-Decode + memmap2 + cpal/ringbuf-Output, IPC load_audio."
+paths = ["src-tauri/src/audio/engine.rs", "src-tauri/src/audio/playback.rs", "src-tauri/src/audio/commands.rs", "src-tauri/src/audio/mod.rs"]
+related = ["browser-audio-player", "audio-output-device-picker"]
+notes = "Frontend ruft load_audio nie auf; kein Pause/Seek über IPC; kein Resampling. architecture.md beschreibt es falsch als aktiv."
+
+[[feature]]
+id = "audio-output-device-picker"
+group = "Rust-Audio (ungenutzt)"
+name = "Audio-Ausgabegerät wählen"
+status = "partial"
+desc = "cpal-Geräteliste im Settings-Tab Audio."
+paths = ["frontend/src/components/settings/SettingsAudio.jsx"]
+depends_on = ["rust-native-playback"]
+notes = "audio_output_device wird gespeichert, aber nirgends gelesen."
+
+[[feature]]
+id = "rust-3band-analysis"
+group = "Rust-Audio (ungenutzt)"
+name = "Rust-FFT Waveform/BPM"
+status = "partial"
+desc = "RustFFT 3-Band-Waveform + BPM-Schätzung, IPC get_3band_waveform."
+paths = ["src-tauri/src/audio/analysis.rs"]
+related = ["multiband-waveform-data"]
+notes = "Kein Aufrufer im Frontend; detect_key liefert leer."
+
+[[feature]]
+id = "rust-offline-render"
+group = "Rust-Audio (ungenutzt)"
+name = "Rust Offline-Render"
+status = "partial"
+desc = "render_project mit Fades + lofty-Tag-Kopie, IPC start_project_export."
+paths = ["src-tauri/src/audio/export.rs", "src-tauri/src/audio/metadata.rs"]
+related = ["daw-export"]
+notes = "Kein Aufrufer; niemand hört auf export-progress."
+
+[[feature]]
+id = "rust-acoustic-fingerprint"
+group = "Rust-Audio (ungenutzt)"
+name = "Rust Akustik-Fingerprint"
+status = "partial"
+desc = "Chromaprint-artig: 11 kHz Mel -> u32-Hashes, Hamming-Ähnlichkeit."
+paths = ["src-tauri/src/audio/fingerprint.rs"]
+related = ["duplicate-finder", "external-track-match"]
+notes = "fingerprint_track/batch nie aufgerufen."
+
+[[feature]]
+id = "rust-audio-wip-stash"
+group = "Rust-Audio (ungenutzt)"
+name = "Rust-Audio-WIP (Stash 06-16)"
+status = "unmerged"
+branch = "backup/stash-pre-rewrite-wip-2026-06-16"
+desc = "Getrackter Teil eines Stashes: 8 audio/*.rs + soundcloud_client.rs (+172/-120)."
+notes = "Triage nötig: portieren oder verwerfen. stash@{0} noch lokal."

@@ -1,0 +1,137 @@
+[area]
+id = "metadata"
+name = "Metadaten & Tags"
+order = 2
+desc = "Track-Felder bearbeiten, Tags in Dateien schreiben, Namen bereinigen, Genres, Cover."
+
+# ── Tag-Editing ───────────────────────────────────────────────────────────
+
+[[feature]]
+id = "track-metadata-update"
+group = "Tag-Editing"
+name = "Track-Metadaten speichern"
+status = "shipped"
+desc = "Felder einzeln oder als Batch in master.db bzw. XML schreiben."
+paths = ["frontend/src/components/BatchEditBar.jsx"]
+routes = ["/api/track/{tid}", "/api/tracks/batch"]
+depends_on = ["live-master-db"]
+related = ["file-tag-writeback"]
+notes = "Kein eigenes Edit-Formular. BatchEditBar.jsx nicht gemountet. Unbekannte Feld-Keys werden still mit True quittiert (K8)."
+
+[[feature]]
+id = "track-write-safety"
+group = "Tag-Editing"
+parent = "track-metadata-update"
+name = "Feld-Validierung + sichere Writes"
+status = "in_progress"
+branch = "claude/fix-track-metadata-fields"
+desc = "Felder ablehnen, die Live/XML nicht speichern kann; XML-Save atomar; 400/422 statt stillem 200."
+paths = ["app/track_fields.py", "tests/test_track_metadata_fields.py"]
+related = ["db-write-lock", "artist-merge"]
+todo = ["4 uncommittete Dateien im Worktree committen (Routen-Teil)", "Backup vor Merge inkl. masterPlaylists6.xml", "Rekordbox-läuft-Guard auch für Playlist-/Metadaten-Writer", "Datei-Backup vor Tag-Writes (Revert stellt nur den Tag-String her)"]
+notes = "Worktree .claude/worktrees/wf_1fefdec9-6fc-2. Auf PR #58 gestapelt - nach #58 landen."
+
+[[feature]]
+id = "file-tag-writeback"
+group = "Tag-Editing"
+name = "Tags in Audiodatei schreiben"
+status = "shipped"
+desc = "Mutagen schreibt ID3/FLAC/MP4/Vorbis/AIFF/WAV inkl. Cover (Setting write_tags_to_files)."
+paths = ["app/audio_tags.py"]
+depends_on = ["track-metadata-update"]
+notes = "src-tauri/src/audio/metadata.rs (lofty) ist toter Code."
+
+[[feature]]
+id = "native-tag-read"
+group = "Tag-Editing"
+name = "Tags lesen beim Import"
+status = "shipped"
+desc = "Title/Artist/Album/BPM/Key/ISRC lesen, Fallback 'Artist - Title' aus Dateiname."
+notes = "Lebt in app/audio_tags.py und app/services.py."
+
+# ── Bereinigung & Normalisierung ──────────────────────────────────────────
+
+[[feature]]
+id = "metadata-fixer"
+group = "Bereinigung & Normalisierung"
+name = "Metadata-Name-Fixer"
+status = "partial"
+research = "metadata-name-fixer"
+desc = "Kaputte Artist/Title-Paare erkennen (feat., Reverse-Order, Track-Nr.), atomar anwenden/zurücknehmen, Undo-Log."
+paths = ["app/metadata_fixer/", "tests/test_metadata_fixer_*.py"]
+related = ["artist-merge", "variant-detector"]
+todo = ["T2 Scan-Route + Report-UI", "T3 empirische Gates (feat., ANLZ-SHA, NFC)", "T6 apply/revert/runs-Routen", "T7 Apply-UI", "T9 MusicBrainz: PR #58 hat schon app/musicbrainz_client.py - wiederverwenden"]
+notes = "Kein Route/UI. Detector + Schema + Applier (T1/T4/T5) fertig."
+
+[[feature]]
+id = "name-normalisation"
+group = "Bereinigung & Normalisierung"
+name = "Artist-Split & Alias-Mapping"
+status = "shipped"
+desc = "Artist-Strings beim Laden splitten/normalisieren, Alias-Merge für Label/Album/Artist."
+routes = ["/api/metadata/merge"]
+related = ["artist-merge", "metadata-merge-consolidation"]
+notes = "Alias-Mapping lebt nur in der App, wird nie in master.db/Tags geschrieben."
+
+[[feature]]
+id = "metadata-merge-consolidation"
+group = "Bereinigung & Normalisierung"
+name = "Halbe Merge-Pfade konsolidieren"
+status = "partial"
+desc = "Doppelte Merge-/Smart-Playlist-Pfade aufräumen."
+related = ["artist-merge", "name-normalisation"]
+todo = ["/api/metadata/merge + GitMerge-Button vs. Artist-Merge", "gestubbter POST /api/artist/soundcloud"]
+
+[[feature]]
+id = "clean-titles"
+group = "Bereinigung & Normalisierung"
+name = "Titel bereinigen"
+status = "shipped"
+desc = "Tags/Encoding-Müll aus Titeln der aktuellen Ansicht entfernen."
+routes = ["/api/library/clean-titles"]
+depends_on = ["track-metadata-update"]
+
+[[feature]]
+id = "batch-rename-comment"
+group = "Bereinigung & Normalisierung"
+name = "Smart-Rename & Batch-Comment"
+status = "partial"
+desc = "Dateien per Pattern %Artist%/%Title%/%BPM% umbenennen, Kommentare per Find/Replace setzen."
+paths = ["frontend/src/components/ToolsView.jsx", "app/batch_worker.py"]
+routes = ["/api/tools/rename", "/api/tools/batch-comment"]
+notes = "ToolsView wird nie gerendert (im UI unerreichbar). batch-comment blockiert den Event-Loop (K3, Fix auf PR #58)."
+
+# ── Genre ─────────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "genre-normalization"
+group = "Genre"
+name = "Genre-Normalisierung"
+status = "research"
+research = "metadata-genre-normalization"
+branch = "claude/genre-normalization-research-v8nsgu"
+desc = "Kanonisches Genre-Vokabular + Alias-Map + Runtime-Fuzzy statt hunderter gespeicherter Varianten."
+related = ["genre-definition-schema", "ranking-genre-tree", "sc-collection-sync", "unified-downloader", "genre-atlas"]
+todo = ["draftplan_ (Phased B)", "rapidfuzz Schicht-A-Audit", "Zeilen-Refs neu prüfen (Branch 124 hinter main)"]
+notes = "Doc nur auf Branch (Port auf 485cbfe). Fünf Genre-Baustellen parallel - vor neuer Genre-Arbeit hier abstimmen."
+
+[[feature]]
+id = "genre-atlas"
+group = "Genre"
+name = "Genre-Atlas (eigenes Repo)"
+status = "research"
+desc = "Alle Genres + Subgenres + Beziehungen als eigenes Daten-Repo."
+related = ["genre-normalization", "genre-definition-schema", "ranking-genre-tree"]
+notes = "Sitzung 'Genre-Atlas: eigenes Repo' vom 2026-10-25 - Stand dort prüfen, bevor hier Genre-Daten entstehen."
+
+# ── Artwork ───────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "artwork-serve-embed"
+group = "Artwork"
+name = "Cover anzeigen & einbetten"
+status = "shipped"
+desc = "Cover aus Pfad/Rekordbox-Share ausliefern, beim Tag-Write einbetten."
+routes = ["/api/artwork"]
+related = ["usb-artwork", "library-health-filters"]
+notes = "Kein Cover-Editor/Upload im UI."

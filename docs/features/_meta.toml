@@ -1,0 +1,59 @@
+# Feature-map settings. Schema + workflow: .claude/rules/feature-map.md
+# Tool: python scripts/feature_map.py --help
+
+title = "Music Library Manager"
+base = "main"
+
+# Shared files many features touch. Never owned by one feature; changes to them
+# are reported as "Hub-Dateien" so parallel work on them is visible.
+hubs = [
+  "app/main.py",
+  "app/services.py",
+  "frontend/src/main.jsx",
+  "frontend/src/api/api.js",
+  "frontend/src/config/constants.js",
+  "src-tauri/src/main.rs",
+  "src-tauri/tauri.conf.json",
+  "requirements.txt",
+  "pyproject.toml",
+  "package.json",
+  "package-lock.json",
+  "frontend/package.json",
+  "frontend/package-lock.json",
+  "frontend/vite.config.js",
+  "src-tauri/Cargo.toml",
+  "src-tauri/Cargo.lock",
+  "tests/conftest.py",
+  "CHANGELOG.md",
+  ".gitignore",
+]
+
+# Generated / bookkeeping files: changes here never count as feature work.
+ignore = [
+  "docs/MAP.md",
+  "docs/MAP_L2.md",
+  "docs/FILE_MAP.md",
+  "docs/*-index.md",
+  "docs/architecture.md",
+  "docs/research/_INDEX.md",
+  "docs/features/**",
+]
+
+# Branches never shown as construction sites.
+skip_branches = ["dependabot/*", "origin/dependabot/*"]
+
+# Backup / safety-net branches: listed as "geparkt", never counted as active work or overlaps.
+parked_branches = ["backup/*", "origin/backup/*", "wip/*"]
+
+# A branch without commits for this many days (and no uncommitted files) is "liegengeblieben".
+stale_days = 30
+
+# --coverage: every tracked file matching these globs should belong to a feature.
+coverage = [
+  "app/**/*.py",
+  "frontend/src/**/*.js",
+  "frontend/src/**/*.jsx",
+  "src-tauri/src/**/*.rs",
+  "scripts/**/*.py",
+  "scripts/**/*.mjs",
+]

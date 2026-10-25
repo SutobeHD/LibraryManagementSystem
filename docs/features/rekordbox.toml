@@ -1,0 +1,216 @@
+[area]
+id = "rekordbox"
+name = "Rekordbox-Integration"
+order = 5
+desc = "Live master.db, Standalone-XML, ANLZ lesen/schreiben, Cues, Phrasen, Backups."
+
+# ── Datenbank ─────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "live-master-db"
+group = "Datenbank"
+name = "Live master.db (rbox)"
+status = "shipped"
+desc = "Direkter Zugriff auf Rekordbox master.db, laden/entladen, Modus live/xml."
+paths = ["app/live_database.py", "app/database.py", "frontend/src/components/settings/SettingsLibrary.jsx", "tests/test_database.py"]
+routes = ["/api/library/status", "/api/library/mode", "/api/library/load", "/api/system/select_db"]
+depends_on = ["db-write-lock", "anlz-safe-reader"]
+notes = "Zentrale DB-Schicht - fast jedes Feature hängt daran. FILE_MAP verspricht Backup-Management, das es nicht gibt."
+
+[[feature]]
+id = "db-write-lock"
+group = "Datenbank"
+name = "DB-Write-Lock"
+status = "partial"
+desc = "db_lock() / _serialised serialisieren alle rbox-Schreiber (in app/database.py)."
+notes = "Lücke: AnalysisDBWriter schreibt rbox direkt ohne Lock."
+
+[[feature]]
+id = "db-write-lock-retrofit"
+group = "Datenbank"
+parent = "db-write-lock"
+name = "Lock-Lücken schließen (Retrofit)"
+status = "research"
+research = "db-write-lock-retrofit"
+branch = "claude/research-continuation-U6R4p"
+desc = "Präfix-Decorator @serialise_mutators + AST-Drift-Guard statt handgepflegter setattr-Liste."
+related = ["track-write-safety", "analysis-api-manual"]
+todo = ["4eecafb auf aktuellen main portieren", "Doc-State vereinheitlichen"]
+notes = "Drei Fassungen des Docs: main exploring_, vigilant-goldwasser rework_, U6R4p inprogress_ (5/5). 485cbfe hat einen frischen Gap-Re-Audit."
+
+[[feature]]
+id = "rekordbox-running-guard"
+group = "Datenbank"
+name = "Rekordbox-läuft-Sperre"
+status = "shipped"
+desc = "Erkennt laufendes Rekordbox, blockt Writes (Format-Swap, Merge, Projektion, analyze-full)."
+notes = "Lebt in app/services.py."
+
+[[feature]]
+id = "rekordbox-write-backups"
+group = "Datenbank"
+name = "Backups vor Writes"
+status = "shipped"
+desc = "ANLZ-.bak mit Prune, master.db-Snapshot vor Format-Swap plus Rollback, Undo-Journale."
+notes = "Kein allgemeines master.db-Backup - jedes Feature sichert nur für sich."
+
+# ── Standalone & XML ──────────────────────────────────────────────────────
+
+[[feature]]
+id = "standalone-library-mode"
+group = "Standalone & XML"
+name = "Standalone-XML-Modus"
+status = "shipped"
+desc = "Library ohne Rekordbox als rekordbox.xml: neu/laden/speichern, eigene master.db anlegen."
+paths = ["app/library_source.py"]
+routes = ["/api/library/new", "/api/library/sync", "/api/debug/load_xml"]
+related = ["live-master-db"]
+notes = "Eigene master.db nutzt rbox OneLibrary.create (in 0.1.7 kaputt)."
+
+[[feature]]
+id = "xml-standalone-leftovers"
+group = "Standalone & XML"
+parent = "standalone-library-mode"
+name = "Rest des alten XML-Branches"
+status = "unmerged"
+branch = "XMLStandaloneLibary"
+desc = "XML-Source-Picker, Spinner-Fix, Sidecar-Kill beim Schließen."
+notes = "95 Commits, 642 hinter main; 88 sind schon in main. Nur die Ideen portieren, nicht mergen."
+
+[[feature]]
+id = "rekordbox-xml-bridge"
+group = "Standalone & XML"
+name = "Rekordbox-XML Export/Import"
+status = "shipped"
+desc = "Auswahl als DJ_PLAYLISTS-XML exportieren, XML importieren (add/update)."
+paths = ["app/rekordbox_bridge.py", "app/xml_generator.py", "frontend/src/components/settings/SettingsExport.jsx"]
+routes = ["/api/rekordbox/export", "/api/rekordbox/import"]
+depends_on = ["standalone-library-mode"]
+
+[[feature]]
+id = "xml-cleaner"
+group = "Standalone & XML"
+name = "XML-Cleaner / Automator"
+status = "shipped"
+desc = "Rekordbox-XML säubern, Artist/Label-Ordner bauen."
+paths = ["frontend/src/components/XmlCleanView.jsx"]
+routes = ["/api/xml/clean"]
+
+# ── ANLZ ──────────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "anlz-safe-reader"
+group = "ANLZ"
+name = "ANLZ sicher lesen"
+status = "shipped"
+desc = "Beatgrid PQTZ im isolierten Prozess, bei rbox-Panic bisektieren, Hintergrund-Laden."
+paths = ["app/anlz_safe.py", "app/pyrekordbox_compat.py"]
+
+[[feature]]
+id = "anlz-parser-simplify"
+group = "ANLZ"
+parent = "anlz-safe-reader"
+name = "SafeAnlzParser vereinfachen"
+status = "idea"
+desc = "Bisect-Quarantäne abbauen, da pyrekordbox alle ANLZ in einem Prozess parst."
+related = ["pyrekordbox-upgrade"]
+notes = "Durch die Python-Pfadauflösung fd03b31 größtenteils überflüssig."
+
+[[feature]]
+id = "anlz-writer"
+group = "ANLZ"
+name = "ANLZ-Writer (.DAT/.EXT/.2EX)"
+status = "shipped"
+desc = "Rekordbox-kompatible ANLZ-Dateien (Beatgrid, Waveforms, Cues, PSSI) + Companion-ANLZ beim Import."
+paths = ["app/anlz_writer.py", "app/anlz_sidecar.py"]
+
+[[feature]]
+id = "anlz-memory-cue-patch"
+group = "ANLZ"
+name = "Memory-Cue-Patch ins ANLZ"
+status = "shipped"
+desc = "Ersetzt nur die Memory-Cue-Tags, Rest byte-gleich, mit Backup."
+paths = ["app/anlz_cue_patch.py"]
+depends_on = ["anlz-writer"]
+
+# ── Cues & Phrasen ────────────────────────────────────────────────────────
+
+[[feature]]
+id = "cues-beatgrid-io"
+group = "Cues & Phrasen"
+name = "Cues & Beatgrid lesen/speichern"
+status = "partial"
+desc = "Hot/Memory-Cues aus djmdCue, Beatgrid aus ANLZ, Speichern aus dem Editor."
+routes = ["/api/track/{tid}/cues", "/api/track/{tid}/beatgrid", "/api/track/cues/save", "/api/track/grid/save"]
+depends_on = ["live-master-db", "anlz-safe-reader"]
+notes = "Save schreibt nur einen JSON-Sidecar - Rekordbox sieht die Änderungen nicht."
+
+[[feature]]
+id = "rekordbox-cue-beatgrid-write"
+group = "Cues & Phrasen"
+parent = "cues-beatgrid-io"
+name = "Echter Cue-/Beatgrid-Write"
+status = "idea"
+desc = "Cues und Beatgrid nach master.db + ANLZ schreiben statt JSON-Sidecar."
+related = ["track-editor-panels", "usb-export-manual-cues"]
+todo = ["Write-Pfad master.db + ANLZ", "Kind-9-Cues (Slot I) im Frontend statt 'M'", "rbox-vs-pyrekordbox PCO2-Divergenz", "55 Tracks ohne Grid (51 nie von RB analysiert)"]
+
+[[feature]]
+id = "hot-cue-16-limits"
+group = "Cues & Phrasen"
+name = "16 Hot-Cues + Limits anheben"
+status = "unmerged"
+branch = "claude/investigate-track-data-F8dNm"
+pr = 22
+desc = "Hot-Cues 8 -> 16 (A..P), Memory-Cues 16 -> 40, BPM-Fold 60-200, phrase_bars respektieren."
+related = ["auto-cues-phrases", "phrase-cue-generator"]
+todo = ["auf aktuellem main neu portieren", "CDJ-3000-Test Banks A..P"]
+notes = "PR #22 veraltet (316 hinter main, Konflikte, CI rot) - schließen und neu bauen. main hat cue_max_hot=8."
+
+[[feature]]
+id = "phrase-cue-generator"
+group = "Cues & Phrasen"
+name = "Phrase-Cue-Generator (Batch)"
+status = "shipped"
+desc = "Phrasen-/Bar-Marker als Memory-Cues; Scope Single/Playlist/Auswahl/Collection; Progress, Cancel."
+paths = ["app/phrase_generator.py", "frontend/src/components/PhraseGeneratorView.jsx", "frontend/src/components/PhraseScopePicker.jsx", "frontend/src/components/PhraseBatchProgress.jsx", "frontend/src/components/usePhraseBatch.js", "scripts/dev/phrase_spike.py"]
+routes = ["/api/phrase"]
+depends_on = ["anlz-memory-cue-patch", "anlz-safe-reader"]
+notes = "Schreibt nur ANLZ - die Library-Ansicht von Rekordbox liest djmdCue und zeigt die Cues nicht."
+
+[[feature]]
+id = "phrase-db-writer"
+group = "Cues & Phrasen"
+parent = "phrase-cue-generator"
+name = "Phrase-Cues in djmdCue"
+status = "unmerged"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
+desc = "Memory-Cues direkt in master.db djmdCue via pyrekordbox, mit Backup/Restore."
+paths = ["app/phrase_db_writer.py", "tests/test_phrase_db_writer.py"]
+depends_on = ["pyrekordbox-upgrade"]
+todo = ["R1-Check: Phrase-Cues in Rekordbox sichtbar?", "verdrahten (verschlüsselte DB ab RB 6.6.5)", "Forward-Compat getattr(generate_unused_id/add) bei Bump"]
+notes = "Spike ohne Aufrufer; läuft nur auf entschlüsselter Kopie."
+
+# ── Format-Kopien ─────────────────────────────────────────────────────────
+
+[[feature]]
+id = "hardwerk-format-copies"
+group = "Format-Kopien"
+name = "Kopien mit Grid-/Cue-Transfer"
+status = "idea"
+desc = "Beatgrid-, Hot- und Memory-Cue-Transfer Original -> MP3/AIFF-Kopie, mit automatischer Codec-Delay-Kompensation."
+related = ["format-converter", "mp3-bitrate-variants"]
+todo = ["Transfer per pyrekordbox als Feature", "Gapless-Delay automatisch (+1105 / LAME +1152)", "48 Hardwerk-MP3-Grids noch versetzt", "AIFF-Grids prüfen"]
+
+# ── Abhängigkeiten ────────────────────────────────────────────────────────
+
+[[feature]]
+id = "pyrekordbox-upgrade"
+group = "Abhängigkeiten"
+name = "pyrekordbox 0.1.7 -> 0.4.4"
+status = "idea"
+pr = 26
+desc = "Bump könnte anlz_safe-Quarantäne und OneLibrary-Template-Hack überflüssig machen und verschlüsselte master.db öffnen."
+related = ["anlz-parser-simplify", "phrase-db-writer", "usb-onelibrary-track-limit"]
+notes = "User-Entscheidung. requirements.txt ist heute schon unerfüllbar (pyrekordbox 0.1.7 vs sqlalchemy 2.0.49)."

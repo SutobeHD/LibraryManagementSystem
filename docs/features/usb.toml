@@ -1,0 +1,163 @@
+[area]
+id = "usb"
+name = "USB / CDJ-Export"
+order = 6
+desc = "Sticks erkennen, Profile, OneLibrary + Legacy-PDB schreiben, ANLZ/Artwork, Sync, Hardware-Settings. Byte-Invarianten: app/usb_pdb.py."
+
+# ── Geräte & Profile ──────────────────────────────────────────────────────
+
+[[feature]]
+id = "usb-device-detect"
+group = "Geräte & Profile"
+name = "USB-Erkennung"
+status = "shipped"
+desc = "Nur Wechsel-Sticks, Rekordbox-Stick erkennen, Speicherbalken, Kompatibilitäts-Matrix."
+paths = ["frontend/src/components/usb/UsbDeviceList.jsx", "frontend/src/components/UsbView.jsx"]
+routes = ["/api/usb/devices"]
+related = ["linux-dj-workflow"]
+notes = "Windows-only (PowerShell Get-Disk)."
+
+[[feature]]
+id = "usb-profiles"
+group = "Geräte & Profile"
+name = "USB-Profile & Inhalt"
+status = "shipped"
+desc = "Profil pro Stick (Label, Typ, Format), Playlist-Auswahl, Stick-Inhalt durchsuchen."
+paths = ["frontend/src/components/settings/SettingsUsb.jsx", "frontend/src/components/usb/UsbProfileEditor.jsx"]
+routes = ["/api/usb/profiles", "/api/usb/rename", "/api/usb/{device_id}/contents"]
+depends_on = ["usb-device-detect"]
+
+[[feature]]
+id = "usb-drive-tools"
+group = "Geräte & Profile"
+name = "Eject / Reset / Init / Format"
+status = "shipped"
+desc = "Auswerfen, Library zurücksetzen, als Rekordbox-Stick initialisieren, FAT32/exFAT-Wizard mit Systemlaufwerk-Sperre."
+paths = ["frontend/src/components/usb/UsbFormatWizard.jsx", "frontend/src/components/usb/UsbControls.jsx"]
+routes = ["/api/usb/eject", "/api/usb/reset", "/api/usb/initialize", "/api/usb/format"]
+depends_on = ["usb-device-detect"]
+
+# ── Export-Formate ────────────────────────────────────────────────────────
+
+[[feature]]
+id = "usb-sync-engine"
+group = "Export-Formate"
+name = "USB-Sync & Diff"
+status = "shipped"
+desc = "Collection/Playlists auf den Stick, Diff-Vorschau, Lock-File, atomare Kopie, Legacy rekordbox.xml."
+paths = ["app/usb_manager.py", "frontend/src/components/usb/UsbSyncPanel.jsx", "tests/test_usb_*.py"]
+routes = ["/api/usb/sync", "/api/usb/sync/all", "/api/usb/diff", "/api/usb/history"]
+depends_on = ["usb-profiles", "usb-onelibrary-export"]
+related = ["performance-overhaul"]
+notes = "Blockierender POST mit Fake-Progress; Scan/Diff mit N+1 (Perf-Overhaul)."
+
+[[feature]]
+id = "usb-onelibrary-export"
+group = "Export-Formate"
+name = "OneLibrary exportLibrary.db"
+status = "partial"
+desc = "PIONEER/rekordbox/exportLibrary.db über Template-DB - Rekordbox 6/7 erkennt den Stick."
+paths = ["app/usb_one_library.py", "app/templates/", "tests/test_onelibrary_wal_flush.py"]
+depends_on = ["usb-anlz-export", "usb-artwork"]
+notes = "Template-Hack, weil rbox create_content in 0.1.7 kaputt ist."
+
+[[feature]]
+id = "usb-onelibrary-track-limit"
+group = "Export-Formate"
+parent = "usb-onelibrary-export"
+name = "16-Track-Grenze aufheben"
+status = "idea"
+desc = "OneLibrary-Export schreibt max. 16 Tracks (Template-Slots), Rest landet nur in rekordbox.xml."
+related = ["pyrekordbox-upgrade", "rekordbox-free-workflow-toggles"]
+todo = ["echter >16-Track-Export-Test", "Template/Writer erweitern", "mögliches ~500-Track-PDB-Limit belegen"]
+notes = "Bug K4, groß."
+
+[[feature]]
+id = "usb-legacy-pdb"
+group = "Export-Formate"
+name = "Legacy export.pdb (alte CDJs)"
+status = "partial"
+desc = "export.pdb + exportExt.pdb nach Crate-Digger-Spec, byte-verifiziert gegen echten Stick."
+paths = ["app/usb_pdb.py", "tests/test_pdb_structure.py"]
+depends_on = ["usb-onelibrary-export"]
+notes = "Default aus (usb_write_legacy_pdb), kein UI-Toggle, lineare Suche bis ~500 Tracks."
+
+[[feature]]
+id = "usb-anlz-export"
+group = "Export-Formate"
+name = "ANLZ auf den Stick"
+status = "shipped"
+desc = "USBANLZ/<bucket>/ANLZ0000.DAT/EXT/2EX pro Track, kopieren oder neu erzeugen."
+depends_on = ["anlz-writer"]
+notes = "Lebt in usb_one_library.py + anlz_sidecar.py."
+
+[[feature]]
+id = "usb-anlz-export-fixes"
+group = "Export-Formate"
+parent = "usb-anlz-export"
+name = "ANLZ-Export-Fixes (PPTH/PSSI)"
+status = "unmerged"
+branch = "claude/usb-anlz-export-fixes"
+desc = "Stick-PPTH + maskiertes PSSI, explizite Suffixe, Stale-Cleanup, djmdCue kind/comment korrekt lesen."
+paths = ["app/anlz_usb_export.py", "tests/test_anlz_usb_export*.py", "tests/test_live_cue_loading.py"]
+related = ["usb-export-manual-cues"]
+notes = "NIE GEPUSHT - nur lokal im Worktree wf_1fefdec9-6fc-3. Auf PR #58 gestapelt."
+
+[[feature]]
+id = "usb-export-manual-cues"
+group = "Export-Formate"
+name = "Manuelle Cues auf den Stick"
+status = "idea"
+desc = "Manuell gesetzte Cues/Grids/Hot-Loops übernehmen statt neu zu analysieren."
+related = ["rekordbox-cue-beatgrid-write", "usb-anlz-export-fixes"]
+notes = "Bug K5: _generate_or_copy_anlz_for liest keine position_marks. Evtl. teilweise durch usb-anlz-export-fixes (ungeprüft)."
+
+[[feature]]
+id = "usb-artwork"
+group = "Export-Formate"
+name = "Cover auf den Stick"
+status = "shipped"
+desc = "Eingebettetes Cover oder cover.jpg nach PIONEER/Artwork (klein + mittel)."
+paths = ["app/usb_artwork.py"]
+
+[[feature]]
+id = "usb-folder-relocation"
+group = "Export-Formate"
+name = "Stick-Dateien verschieben statt kopieren"
+status = "unmerged"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
+desc = "Nach Artist-Rename die Datei auf dem Stick verschieben (Case-Rename in 2 Schritten, Content-Hash als Beweis)."
+paths = ["tests/test_usb_relocate.py"]
+depends_on = ["usb-onelibrary-export"]
+related = ["artist-merge"]
+
+# ── Sync & Extras ─────────────────────────────────────────────────────────
+
+[[feature]]
+id = "usb-metadata-sync"
+group = "Sync & Extras"
+name = "USB-Metadaten-Sync"
+status = "shipped"
+desc = "Nur Metadaten auf den Stick, Smart- oder manueller Modus."
+paths = ["frontend/src/components/usb/MetadataSyncPanel.jsx"]
+depends_on = ["usb-sync-engine"]
+
+[[feature]]
+id = "usb-playcount-sync"
+group = "Sync & Extras"
+name = "Playcount-Sync PC <-> USB"
+status = "shipped"
+desc = "Drei-Wege-Diff der Playcounts, Konflikte auflösen."
+paths = ["app/playcount_sync.py", "frontend/src/components/usb/PlayCountSync.jsx"]
+routes = ["/api/usb/playcount"]
+
+[[feature]]
+id = "usb-mysettings"
+group = "Sync & Extras"
+name = "CDJ/DJM-Hardware-Settings"
+status = "shipped"
+desc = "MYSETTING/MYSETTING2/DJMMYSETTING.DAT, 42 Felder, Reset auf Defaults."
+paths = ["app/usb_mysettings.py", "frontend/src/components/UsbSettingsView.jsx"]
+routes = ["/api/usb/mysettings"]
+related = ["shared-portal-tooltip"]
