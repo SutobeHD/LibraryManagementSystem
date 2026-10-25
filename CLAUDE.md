@@ -14,6 +14,7 @@ The detailed rules live in `.claude/rules/*.md` — imported below so they're in
 @.claude/rules/self-correction.md
 @.claude/rules/coding-rules.md
 @.claude/rules/research-pipeline.md
+@.claude/rules/feature-map.md
 @.claude/rules/tooling.md
 @.claude/rules/troubleshooting.md
 
@@ -87,6 +88,7 @@ Regenerate L1/L2: `python scripts/regen_maps.py` or `/regen-maps`.
 
 ### Feature lifecycle (work-in-flight)
 
+- **`docs/features/*.toml`** — feature registry: every feature (shipped / on a branch / in progress / planned / idea / dropped) with owning files and relations. **Before building anything:** `python scripts/feature_map.py --who <id|path>` — shows whether it exists, sits on a branch, or another chat/worktree is on it right now. Mindmap: `/feature-map`. Rules: `.claude/rules/feature-map.md`.
 - **`docs/research/`** — feature lifecycle pipeline. Each feature lives in a `<state>_<slug>.md` doc moving through `research/` → `implement/` → `archived/`.
 - **`docs/research/_INDEX.md`** — live dashboard. **Check this when the user mentions a feature area** — there may be an in-flight plan you must not contradict.
 - **`docs/research/README.md`** — full pipeline rules.
@@ -131,6 +133,7 @@ Defined in `.claude/commands/`:
 | `/regen-maps` | Regenerate `docs/MAP.md` + `docs/MAP_L2.md` from AST |
 | `/route-add` | Guided FastAPI route scaffold |
 | `/research-new` | Scaffold new research topic |
+| `/feature-map` | Feature map: look up a feature/file before touching it, or show all construction sites + open the mindmap |
 | `/pipeline` | Show research pipeline state + the open approval gate |
 | `/dashboard` | Start the local research-pipeline web dashboard |
 | `/gate-list` | List the open approval gate + PRs waiting to test & merge |

@@ -179,6 +179,17 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$(git rev-parse --show-toplevel)/scripts/feature_map.py\" --brief",
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }
