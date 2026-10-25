@@ -28,28 +28,45 @@ import {
 import WaveformEditor from './WaveformEditor';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { toast } from 'react-hot-toast';
+import {
+    GENRES,
+    SUBGENRE_GROUPS,
+    COMPONENT_TAGS,
+    TYPE_TAGS,
+    hasCommentTag,
+    toggleCommentTag,
+} from '../config/tagTaxonomy';
 
-const TAG_CATEGORIES = {
-    Genre: ['House', 'Hard Techno', 'Schranz', 'Trance', 'Hardgroove', 'Groove', 'Raw'],
-    Subgenre: ['Acid', 'Industrial', 'Minimal', 'Tribal', 'Hard'],
-    Components: [
-        'Synth',
-        'Vocal',
-        'Beat',
-        'Dark',
-        'Emotional',
-        'Melodic',
-        'Acid',
-        'Groove',
-        'Bounce',
-        'Hypnotic',
-        'Minimal',
-        'Fun',
-        'euphoric',
-        'fluid',
-    ],
-    Type: ['relaxed', 'progressiv', 'Build up', 'Peak Time', 'Build down'],
-};
+const TagSection = ({ title, children }) => (
+    <div>
+        <div className="text-[9px] font-black text-ink-placeholder uppercase tracking-[0.2em] mb-2 px-1">
+            {title}
+        </div>
+        {children}
+    </div>
+);
+
+const TagRow = ({ tags, comment, onToggle }) => (
+    <div className="flex flex-wrap gap-1.5">
+        {tags.map((tag) => {
+            const isActive = hasCommentTag(comment, tag);
+            return (
+                <button
+                    key={tag}
+                    type="button"
+                    onClick={() => onToggle(tag)}
+                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all ${
+                        isActive
+                            ? 'bg-amber2/20 border-amber2 text-amber2 shadow-[0_0_10px_rgba(232,164,42,0.2)]'
+                            : 'bg-black/20 border-white/5 text-ink-muted hover:border-white/20 hover:text-ink-primary'
+                    }`}
+                >
+                    {tag}
+                </button>
+            );
+        })}
+    </div>
+);
 
 const PlaylistNode = ({ node, level = 0, onSelect }) => {
     const [isOpen, setIsOpen] = useState(false);
@@ -235,6 +252,8 @@ const RankingView = ({ libraryStatus, appMode }) => {
             .then((res) => setAllMyTags(Array.isArray(res.data) ? res.data : []))
             .catch(() => setAllMyTags([]));
     }, [myTagSupported]);
+
+    const toggleTag = (tag) => setComment((prev) => toggleCommentTag(prev, tag));
 
     const toggleMyTag = (tagId) => {
         const id = String(tagId);
@@ -646,61 +665,51 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                             </div>
                                         </label>
 
-                                        {/* MyTags Module */}
+                                        {/* Tag chips: genre tree, components, set-energy type (config/tagTaxonomy.js) */}
                                         <div className="space-y-4 mb-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                                            {Object.entries(TAG_CATEGORIES).map(
-                                                ([category, tags]) => (
-                                                    <div key={category}>
-                                                        <div className="text-[9px] font-black text-ink-placeholder uppercase tracking-[0.2em] mb-2 px-1">
-                                                            {category}
+                                            <TagSection title="Genre">
+                                                <TagRow
+                                                    tags={GENRES}
+                                                    comment={comment}
+                                                    onToggle={toggleTag}
+                                                />
+                                            </TagSection>
+                                            <TagSection title="Subgenre">
+                                                <div className="space-y-2">
+                                                    {SUBGENRE_GROUPS.map(([genre, subs]) => (
+                                                        <div
+                                                            key={genre}
+                                                            className="flex items-center gap-2"
+                                                        >
+                                                            <span
+                                                                className={`w-24 shrink-0 text-[9px] uppercase tracking-widest truncate ${hasCommentTag(comment, genre) ? 'text-amber2/80' : 'text-ink-placeholder'}`}
+                                                                title={genre}
+                                                            >
+                                                                {genre}
+                                                            </span>
+                                                            <TagRow
+                                                                tags={subs}
+                                                                comment={comment}
+                                                                onToggle={toggleTag}
+                                                            />
                                                         </div>
-                                                        <div className="flex flex-wrap gap-1.5">
-                                                            {tags.map((tag) => {
-                                                                const isActive =
-                                                                    comment.includes(tag);
-                                                                return (
-                                                                    <button
-                                                                        key={tag}
-                                                                        onClick={() => {
-                                                                            if (isActive) {
-                                                                                setComment((prev) =>
-                                                                                    prev
-                                                                                        .replace(
-                                                                                            new RegExp(
-                                                                                                `${tag},? ?`,
-                                                                                                'g'
-                                                                                            ),
-                                                                                            ''
-                                                                                        )
-                                                                                        .replace(
-                                                                                            /, $/,
-                                                                                            ''
-                                                                                        )
-                                                                                        .trim()
-                                                                                );
-                                                                            } else {
-                                                                                setComment(
-                                                                                    (prev) =>
-                                                                                        prev
-                                                                                            ? `${prev}, ${tag}`
-                                                                                            : tag
-                                                                                );
-                                                                            }
-                                                                        }}
-                                                                        className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all ${
-                                                                            isActive
-                                                                                ? 'bg-amber2/20 border-amber2 text-amber2 shadow-[0_0_10px_rgba(232,164,42,0.2)]'
-                                                                                : 'bg-black/20 border-white/5 text-ink-muted hover:border-white/20 hover:text-ink-primary'
-                                                                        }`}
-                                                                    >
-                                                                        {tag}
-                                                                    </button>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                    </div>
-                                                )
-                                            )}
+                                                    ))}
+                                                </div>
+                                            </TagSection>
+                                            <TagSection title="Components">
+                                                <TagRow
+                                                    tags={COMPONENT_TAGS}
+                                                    comment={comment}
+                                                    onToggle={toggleTag}
+                                                />
+                                            </TagSection>
+                                            <TagSection title="Type">
+                                                <TagRow
+                                                    tags={TYPE_TAGS}
+                                                    comment={comment}
+                                                    onToggle={toggleTag}
+                                                />
+                                            </TagSection>
                                         </div>
 
                                         <textarea
