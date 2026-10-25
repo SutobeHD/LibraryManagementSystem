@@ -1,16 +1,54 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api/api';
 import { log } from '../utils/log';
-import { Star, Zap, SkipForward, SkipBack, Folder, ChevronRight, ChevronDown, Tag, Disc, PlayCircle, Pause, Play, ListMusic, Save, Search, Filter, ArrowRight, ArrowLeft, Check, Hash, User, Volume2 } from 'lucide-react';
+import {
+    Star,
+    Zap,
+    SkipForward,
+    SkipBack,
+    Folder,
+    ChevronRight,
+    ChevronDown,
+    Tag,
+    Disc,
+    PlayCircle,
+    Pause,
+    Play,
+    ListMusic,
+    Save,
+    Search,
+    Filter,
+    ArrowRight,
+    ArrowLeft,
+    Check,
+    Hash,
+    User,
+    Volume2,
+} from 'lucide-react';
 import WaveformEditor from './WaveformEditor';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { toast } from 'react-hot-toast';
 
 const TAG_CATEGORIES = {
-    "Genre": ["House", "Hard Techno", "Schranz", "Trance", "Hardgroove", "Groove", "Raw"],
-    "Subgenre": ["Acid", "Industrial", "Minimal", "Tribal", "Hard"],
-    "Components": ["Synth", "Vocal", "Beat", "Dark", "Emotional", "Melodic", "Acid", "Groove", "Bounce", "Hypnotic", "Minimal", "Fun", "euphoric", "fluid"],
-    "Type": ["relaxed", "progressiv", "Build up", "Peak Time", "Build down"]
+    Genre: ['House', 'Hard Techno', 'Schranz', 'Trance', 'Hardgroove', 'Groove', 'Raw'],
+    Subgenre: ['Acid', 'Industrial', 'Minimal', 'Tribal', 'Hard'],
+    Components: [
+        'Synth',
+        'Vocal',
+        'Beat',
+        'Dark',
+        'Emotional',
+        'Melodic',
+        'Acid',
+        'Groove',
+        'Bounce',
+        'Hypnotic',
+        'Minimal',
+        'Fun',
+        'euphoric',
+        'fluid',
+    ],
+    Type: ['relaxed', 'progressiv', 'Build up', 'Peak Time', 'Build down'],
 };
 
 const PlaylistNode = ({ node, level = 0, onSelect }) => {
@@ -21,25 +59,48 @@ const PlaylistNode = ({ node, level = 0, onSelect }) => {
 
     return (
         <div>
-            <div onClick={() => hasChildren ? setIsOpen(!isOpen) : onSelect(node)} className="flex items-center gap-2 py-2 pr-2 cursor-pointer hover:bg-white/5 text-ink-secondary hover:text-white select-none transition-colors rounded-r-xl mr-2" style={{ paddingLeft: `${level * 16 + 12}px` }}>
-                {hasChildren ? (isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : <span className="w-3.5"></span>}
-                {node.Type === "0" ?
-                    <Folder size={16} className="text-amber-500 shrink-0" /> :
+            <div
+                onClick={() => (hasChildren ? setIsOpen(!isOpen) : onSelect(node))}
+                className="flex items-center gap-2 py-2 pr-2 cursor-pointer hover:bg-white/5 text-ink-secondary hover:text-white select-none transition-colors rounded-r-xl mr-2"
+                style={{ paddingLeft: `${level * 16 + 12}px` }}
+            >
+                {hasChildren ? (
+                    isOpen ? (
+                        <ChevronDown size={14} />
+                    ) : (
+                        <ChevronRight size={14} />
+                    )
+                ) : (
+                    <span className="w-3.5"></span>
+                )}
+                {node.Type === '0' ? (
+                    <Folder size={16} className="text-amber-500 shrink-0" />
+                ) : (
                     <ListMusic size={16} className="text-amber2 shrink-0" />
-                }
+                )}
                 <span className="truncate text-sm">{node.Name}</span>
             </div>
-            {isOpen && hasChildren && <div className="border-l border-white/5 ml-4">{children.map(c => <PlaylistNode key={c.ID} node={c} level={level} onSelect={onSelect} />)}</div>}
+            {isOpen && hasChildren && (
+                <div className="border-l border-white/5 ml-4">
+                    {children.map((c) => (
+                        <PlaylistNode key={c.ID} node={c} level={level} onSelect={onSelect} />
+                    ))}
+                </div>
+            )}
         </div>
     );
 };
 
 const COLORS = [
-    { id: 0, hex: 'transparent', name: 'None' }, { id: 1, hex: '#db2777', name: 'Pink' },
-    { id: 2, hex: '#dc2626', name: 'Red' }, { id: 3, hex: '#ea580c', name: 'Orange' },
-    { id: 4, hex: '#ca8a04', name: 'Yellow' }, { id: 5, hex: '#16a34a', name: 'Green' },
-    { id: 6, hex: '#06b6d4', name: 'Aqua' }, { id: 7, hex: '#2563eb', name: 'Blue' },
-    { id: 8, hex: '#7c3aed', name: 'Purple' }
+    { id: 0, hex: 'transparent', name: 'None' },
+    { id: 1, hex: '#db2777', name: 'Pink' },
+    { id: 2, hex: '#dc2626', name: 'Red' },
+    { id: 3, hex: '#ea580c', name: 'Orange' },
+    { id: 4, hex: '#ca8a04', name: 'Yellow' },
+    { id: 5, hex: '#16a34a', name: 'Green' },
+    { id: 6, hex: '#06b6d4', name: 'Aqua' },
+    { id: 7, hex: '#2563eb', name: 'Blue' },
+    { id: 8, hex: '#7c3aed', name: 'Purple' },
 ];
 
 const RankingView = ({ libraryStatus, appMode }) => {
@@ -55,16 +116,20 @@ const RankingView = ({ libraryStatus, appMode }) => {
 
     useEffect(() => {
         isMountedRef.current = true;
-        // Ensure any other global audio is paused? 
+        // Ensure any other global audio is paused?
         // For now, we assume WaveformEditor stops itself or we need a global context.
-        // Let's just create a DOM event to pause others? 
+        // Let's just create a DOM event to pause others?
         const audioElements = document.querySelectorAll('audio');
-        audioElements.forEach(a => a.pause());
+        audioElements.forEach((a) => a.pause());
         return () => {
             isMountedRef.current = false;
             // Force stop
             if (wavesurferRef.current && wavesurferRef.current.stop) {
-                try { wavesurferRef.current.stop(); } catch (e) { log.debug('RankingView wavesurfer stop on unmount failed', e); }
+                try {
+                    wavesurferRef.current.stop();
+                } catch (e) {
+                    log.debug('RankingView wavesurfer stop on unmount failed', e);
+                }
             }
         };
     }, []);
@@ -72,34 +137,44 @@ const RankingView = ({ libraryStatus, appMode }) => {
     // Track State
     const [rating, setRating] = useState(0);
     const [colorId, setColorId] = useState(0);
-    const [comment, setComment] = useState("");
-    const [genre, setGenre] = useState("");
+    const [comment, setComment] = useState('');
+    const [genre, setGenre] = useState('');
     // MyTag (live mode only — falls silently to no-op in xml mode)
-    const [allMyTags, setAllMyTags] = useState([]);    // [{id, name}]
+    const [allMyTags, setAllMyTags] = useState([]); // [{id, name}]
     const [trackMyTagIds, setTrackMyTagIds] = useState([]);
-    const [newMyTagName, setNewMyTagName] = useState("");
+    const [newMyTagName, setNewMyTagName] = useState('');
     const myTagSupported = appMode === 'live' || libraryStatus?.mode === 'live';
     const [volume, setVolumeState] = useState(() => {
         const saved = localStorage.getItem('rb_volume');
         return saved !== null ? parseFloat(saved) : 1;
     });
-    const setVolume = (v) => { setVolumeState(v); localStorage.setItem('rb_volume', String(v)); };
+    const setVolume = (v) => {
+        setVolumeState(v);
+        localStorage.setItem('rb_volume', String(v));
+    };
 
-    useHotkeys('space', (e) => {
-        if (currentTrack) {
-            e.preventDefault();
-            saveAndNext();
-        }
-    }, [currentTrack, rating, colorId, comment, genre, currentIndex, queue]);
+    useHotkeys(
+        'space',
+        (e) => {
+            if (currentTrack) {
+                e.preventDefault();
+                saveAndNext();
+            }
+        },
+        [currentTrack, rating, colorId, comment, genre, currentIndex, queue]
+    );
 
     useEffect(() => {
         if (libraryStatus?.loaded) {
-            api.get('/api/playlists/tree').then(res => {
-                setTree(res.data);
-                log.debug("[RankingView] Loaded tree:", res.data);
-                if (res.data.length === 0) console.warn("[RankingView] Warning: Tree is empty!");
-            }).catch(err => console.error("[RankingView] Failed to load tree:", err));
-            api.get('/api/genres').then(res => setGenres(res.data));
+            api.get('/api/playlists/tree')
+                .then((res) => {
+                    setTree(res.data);
+                    log.debug('[RankingView] Loaded tree:', res.data);
+                    if (res.data.length === 0)
+                        console.warn('[RankingView] Warning: Tree is empty!');
+                })
+                .catch((err) => console.error('[RankingView] Failed to load tree:', err));
+            api.get('/api/genres').then((res) => setGenres(res.data));
         }
     }, [libraryStatus?.loaded]);
 
@@ -107,23 +182,29 @@ const RankingView = ({ libraryStatus, appMode }) => {
     const [sourceMode, setSourceMode] = useState('playlist'); // 'playlist', 'artist', 'label', 'album'
     const [sourceItems, setSourceItems] = useState([]);
     const [filteredItems, setFilteredItems] = useState([]);
-    const [searchTerm, setSearchTerm] = useState("");
+    const [searchTerm, setSearchTerm] = useState('');
 
     useEffect(() => {
         if (!libraryStatus?.loaded) return;
-        setSearchTerm("");
+        setSearchTerm('');
         if (sourceMode === 'playlist') {
-            api.get('/api/playlists/tree').then(res => setTree(res.data));
+            api.get('/api/playlists/tree').then((res) => setTree(res.data));
         } else {
-            const endpoint = sourceMode === 'artist' ? '/api/artists' :
-                sourceMode === 'label' ? '/api/labels' : '/api/albums';
-            api.get(endpoint).then(res => setSourceItems(res.data));
+            const endpoint =
+                sourceMode === 'artist'
+                    ? '/api/artists'
+                    : sourceMode === 'label'
+                      ? '/api/labels'
+                      : '/api/albums';
+            api.get(endpoint).then((res) => setSourceItems(res.data));
         }
     }, [sourceMode, libraryStatus?.loaded]);
 
     useEffect(() => {
         if (sourceMode === 'playlist') return;
-        setFilteredItems(sourceItems.filter(i => i.name.toLowerCase().includes(searchTerm.toLowerCase())));
+        setFilteredItems(
+            sourceItems.filter((i) => i.name.toLowerCase().includes(searchTerm.toLowerCase()))
+        );
     }, [sourceItems, searchTerm, sourceMode]);
 
     const loadTrack = (track) => {
@@ -131,13 +212,13 @@ const RankingView = ({ libraryStatus, appMode }) => {
         setCurrentTrack(track);
         setRating(track.Rating || 0);
         setColorId(track.ColorID || 0);
-        setComment(track.Comment || "");
-        setGenre(track.Genre || "");
+        setComment(track.Comment || '');
+        setGenre(track.Genre || '');
         setIsPlaying(true);
         // Load this track's MyTag assignments (live mode only).
         if (myTagSupported && track.ID) {
             api.get(`/api/track/${encodeURIComponent(track.ID)}/mytags`)
-                .then(res => setTrackMyTagIds((res.data || []).map(t => String(t.id))))
+                .then((res) => setTrackMyTagIds((res.data || []).map((t) => String(t.id))))
                 .catch(() => setTrackMyTagIds([]));
         } else {
             setTrackMyTagIds([]);
@@ -146,15 +227,20 @@ const RankingView = ({ libraryStatus, appMode }) => {
 
     // Pull the global MyTag list once when entering live mode.
     useEffect(() => {
-        if (!myTagSupported) { setAllMyTags([]); return; }
+        if (!myTagSupported) {
+            setAllMyTags([]);
+            return;
+        }
         api.get('/api/mytags')
-            .then(res => setAllMyTags(Array.isArray(res.data) ? res.data : []))
+            .then((res) => setAllMyTags(Array.isArray(res.data) ? res.data : []))
             .catch(() => setAllMyTags([]));
     }, [myTagSupported]);
 
     const toggleMyTag = (tagId) => {
         const id = String(tagId);
-        setTrackMyTagIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+        setTrackMyTagIds((prev) =>
+            prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+        );
     };
 
     const createMyTag = async () => {
@@ -163,9 +249,9 @@ const RankingView = ({ libraryStatus, appMode }) => {
         try {
             const res = await api.post('/api/mytags', { name });
             const newTag = { id: String(res.data.id), name: res.data.name };
-            setAllMyTags(prev => [...prev, newTag]);
-            setTrackMyTagIds(prev => [...prev, newTag.id]);
-            setNewMyTagName("");
+            setAllMyTags((prev) => [...prev, newTag]);
+            setTrackMyTagIds((prev) => [...prev, newTag.id]);
+            setNewMyTagName('');
             toast.success(`MyTag "${name}" created`);
         } catch (e) {
             toast.error(e.response?.data?.detail || 'Could not create MyTag');
@@ -186,30 +272,31 @@ const RankingView = ({ libraryStatus, appMode }) => {
             Rating: rating,
             ColorID: colorId,
             Comment: comment,
-            Genre: genre
+            Genre: genre,
         };
 
         try {
-            log.debug("Saving track...", currentTrack);
-            if (!currentTrack.ID) console.warn("Track ID is missing!");
+            log.debug('Saving track...', currentTrack);
+            if (!currentTrack.ID) console.warn('Track ID is missing!');
             await api.post(`/api/track/${encodeURIComponent(currentTrack.ID)}`, payload);
             // Persist MyTags too (live mode); failure is non-fatal.
             if (myTagSupported) {
                 try {
-                    await api.post(`/api/track/${encodeURIComponent(currentTrack.ID)}/mytags`,
-                                   { tag_ids: trackMyTagIds });
+                    await api.post(`/api/track/${encodeURIComponent(currentTrack.ID)}/mytags`, {
+                        tag_ids: trackMyTagIds,
+                    });
                 } catch (tagErr) {
                     console.warn('MyTag save failed:', tagErr);
                     toast(tagErr.response?.data?.detail || 'MyTag save failed', { icon: '⚠️' });
                 }
             }
-            toast.success("Saved");
+            toast.success('Saved');
         } catch (e) {
-            console.error("Save failed:", e);
-            toast.error("Failed to save: " + (e.response?.data?.detail || e.message));
+            console.error('Save failed:', e);
+            toast.error('Failed to save: ' + (e.response?.data?.detail || e.message));
 
             // Temporary: Advance anyway to prevent getting stuck if backend is failing
-            // return; 
+            // return;
         }
         const nextIdx = currentIndex + 1;
         if (nextIdx < queue.length) {
@@ -233,28 +320,30 @@ const RankingView = ({ libraryStatus, appMode }) => {
         else if (sourceMode === 'label') endpoint = `/api/label/${item.id}/tracks`;
         else if (sourceMode === 'album') endpoint = `/api/album/${item.id}/tracks`;
 
-        api.get(endpoint).then(async res => {
-            if (!isMountedRef.current) return;
+        api.get(endpoint)
+            .then(async (res) => {
+                if (!isMountedRef.current) return;
 
-            // Get filter settings
-            const settingsRes = await api.get('/api/settings');
-            const filterMode = settingsRes.data.ranking_filter_mode || 'all';
+                // Get filter settings
+                const settingsRes = await api.get('/api/settings');
+                const filterMode = settingsRes.data.ranking_filter_mode || 'all';
 
-            let tracks = res.data;
-            if (filterMode === 'unrated') {
-                tracks = tracks.filter(t => !t.Rating || t.Rating === 0);
-            } else if (filterMode === 'untagged') {
-                tracks = tracks.filter(t => !t.Comment || t.Comment.trim() === "");
-            }
+                let tracks = res.data;
+                if (filterMode === 'unrated') {
+                    tracks = tracks.filter((t) => !t.Rating || t.Rating === 0);
+                } else if (filterMode === 'untagged') {
+                    tracks = tracks.filter((t) => !t.Comment || t.Comment.trim() === '');
+                }
 
-            setQueue(tracks);
-            setCurrentIndex(0);
-            if (tracks.length > 0) loadTrack(tracks[0]);
-            else toast.error("No tracks found matching your filter criteria.");
-        }).catch(err => {
-            console.error("Failed to load source tracks", err);
-            toast.error("Source list failed to load");
-        });
+                setQueue(tracks);
+                setCurrentIndex(0);
+                if (tracks.length > 0) loadTrack(tracks[0]);
+                else toast.error('No tracks found matching your filter criteria.');
+            })
+            .catch((err) => {
+                console.error('Failed to load source tracks', err);
+                toast.error('Source list failed to load');
+            });
     };
 
     if (!selectedPlaylist) {
@@ -284,12 +373,15 @@ const RankingView = ({ libraryStatus, appMode }) => {
                     {sourceMode !== 'playlist' && (
                         <div className="flex-1 flex items-center justify-end">
                             <div className="relative w-56 my-1">
-                                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-muted" />
+                                <Search
+                                    size={13}
+                                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-muted"
+                                />
                                 <input
                                     className="input-glass w-full pl-8 py-1 text-[11px] rounded-full bg-black/20"
                                     placeholder={`Search ${sourceMode}s...`}
                                     value={searchTerm}
-                                    onChange={e => setSearchTerm(e.target.value)}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
                                 />
                             </div>
                         </div>
@@ -300,23 +392,43 @@ const RankingView = ({ libraryStatus, appMode }) => {
                 <div className="flex-1 overflow-y-auto">
                     {sourceMode === 'playlist' ? (
                         <div className="py-2">
-                            {tree.length === 0
-                                ? <div className="text-center text-ink-muted text-sm py-16">No playlists found</div>
-                                : tree.map(n => <PlaylistNode key={n.ID} node={n} onSelect={handleSelectSource} />)}
+                            {tree.length === 0 ? (
+                                <div className="text-center text-ink-muted text-sm py-16">
+                                    No playlists found
+                                </div>
+                            ) : (
+                                tree.map((n) => (
+                                    <PlaylistNode
+                                        key={n.ID}
+                                        node={n}
+                                        onSelect={handleSelectSource}
+                                    />
+                                ))
+                            )}
                         </div>
                     ) : (
                         <div className="p-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                            {filteredItems.map(item => (
+                            {filteredItems.map((item) => (
                                 <div
                                     key={item.id}
                                     onClick={() => handleSelectSource(item)}
                                     className="bg-mx-card/40 hover:bg-amber2/10 border border-white/5 hover:border-amber2/50 p-6 rounded-xl cursor-pointer transition-all group flex flex-col items-center justify-center text-center gap-2"
                                 >
                                     <div className="w-16 h-16 rounded-full bg-mx-shell flex items-center justify-center mb-2 group-hover:scale-110 transition-transform border border-white/5 text-ink-muted group-hover:text-amber2">
-                                        {sourceMode === 'artist' ? <User size={32} /> : sourceMode === 'label' ? <Tag size={32} /> : <Disc size={32} />}
+                                        {sourceMode === 'artist' ? (
+                                            <User size={32} />
+                                        ) : sourceMode === 'label' ? (
+                                            <Tag size={32} />
+                                        ) : (
+                                            <Disc size={32} />
+                                        )}
                                     </div>
-                                    <div className="font-bold text-ink-primary group-hover:text-white truncate w-full">{item.name}</div>
-                                    <div className="text-xs text-ink-muted font-mono bg-black/20 px-2 py-1 rounded-full">{item.track_count} tracks</div>
+                                    <div className="font-bold text-ink-primary group-hover:text-white truncate w-full">
+                                        {item.name}
+                                    </div>
+                                    <div className="text-xs text-ink-muted font-mono bg-black/20 px-2 py-1 rounded-full">
+                                        {item.track_count} tracks
+                                    </div>
                                 </div>
                             ))}
                         </div>
@@ -329,14 +441,26 @@ const RankingView = ({ libraryStatus, appMode }) => {
     return (
         <div className="h-full flex flex-col bg-transparent overflow-hidden relative">
             <div className="absolute top-0 w-full h-1 bg-mx-card">
-                <div className="h-full bg-amber2 transition-all duration-300 shadow-[0_0_10px_rgba(232,164,42,0.5)]" style={{ width: `${((currentIndex + 1) / queue.length) * 100}%` }}></div>
+                <div
+                    className="h-full bg-amber2 transition-all duration-300 shadow-[0_0_10px_rgba(232,164,42,0.5)]"
+                    style={{ width: `${((currentIndex + 1) / queue.length) * 100}%` }}
+                ></div>
             </div>
 
             <div className="bg-mx-shell/80 p-4 border-b border-white/5 flex justify-between items-center shrink-0 z-10 backdrop-blur-md">
-                <h2 className="text-xl font-bold flex items-center gap-2 text-white"><Zap className="text-amber2" size={20} /> {selectedPlaylist.Name}</h2>
+                <h2 className="text-xl font-bold flex items-center gap-2 text-white">
+                    <Zap className="text-amber2" size={20} /> {selectedPlaylist.Name}
+                </h2>
                 <div className="flex items-center gap-4">
-                    <div className="text-ink-secondary text-sm font-mono bg-black/20 px-3 py-1 rounded-full border border-white/5">Track {currentIndex + 1} / {queue.length}</div>
-                    <button onClick={() => setSelectedPlaylist(null)} className="text-xs text-amber2 hover:text-white uppercase font-bold tracking-widest hover:underline border border-amber2/30 px-3 py-1 rounded-full hover:bg-amber2/10 transition-colors">Exit Full Screen</button>
+                    <div className="text-ink-secondary text-sm font-mono bg-black/20 px-3 py-1 rounded-full border border-white/5">
+                        Track {currentIndex + 1} / {queue.length}
+                    </div>
+                    <button
+                        onClick={() => setSelectedPlaylist(null)}
+                        className="text-xs text-amber2 hover:text-white uppercase font-bold tracking-widest hover:underline border border-amber2/30 px-3 py-1 rounded-full hover:bg-amber2/10 transition-colors"
+                    >
+                        Exit Full Screen
+                    </button>
                 </div>
             </div>
 
@@ -349,16 +473,23 @@ const RankingView = ({ libraryStatus, appMode }) => {
                         {/* Header */}
                         <div className="flex justify-between items-start mb-6 pb-5 border-b border-line-subtle gap-8">
                             <div className="flex-1 min-w-0">
-                                <h1 className="text-4xl md:text-5xl font-bold text-ink-primary mb-2 leading-tight tracking-tight truncate" title={currentTrack.Title}>
+                                <h1
+                                    className="text-4xl md:text-5xl font-bold text-ink-primary mb-2 leading-tight tracking-tight truncate"
+                                    title={currentTrack.Title}
+                                >
                                     {currentTrack.Title}
                                 </h1>
-                                <p className="text-2xl md:text-3xl text-amber2 font-light truncate" title={currentTrack.Artist}>
-                                    {currentTrack.Artist || "Unknown Artist"}
+                                <p
+                                    className="text-2xl md:text-3xl text-amber2 font-light truncate"
+                                    title={currentTrack.Artist}
+                                >
+                                    {currentTrack.Artist || 'Unknown Artist'}
                                 </p>
                             </div>
                             <div className="text-right shrink-0">
                                 <div className="text-6xl font-mono text-ink-muted font-bold tracking-tighter">
-                                    {Math.round(currentTrack.BPM)} <span className="text-xl text-ink-placeholder">BPM</span>
+                                    {Math.round(currentTrack.BPM)}{' '}
+                                    <span className="text-xl text-ink-placeholder">BPM</span>
                                 </div>
                             </div>
                         </div>
@@ -381,7 +512,11 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                 <button
                                     onClick={() => {
                                         const prev = currentIndex - 1;
-                                        if (prev >= 0) { setIsPlaying(true); setCurrentIndex(prev); loadTrack(queue[prev]); }
+                                        if (prev >= 0) {
+                                            setIsPlaying(true);
+                                            setCurrentIndex(prev);
+                                            loadTrack(queue[prev]);
+                                        }
                                     }}
                                     className="text-ink-muted hover:text-ink-primary p-2 transition-colors"
                                     title="Previous track"
@@ -394,13 +529,19 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                     className="bg-amber2 text-mx-deepest rounded-full p-3.5 hover:bg-amber2-hover transition-colors"
                                     title={isPlaying ? 'Pause' : 'Play'}
                                 >
-                                    {isPlaying ? <Pause size={22} fill="currentColor" /> : <Play size={22} fill="currentColor" className="ml-0.5" />}
+                                    {isPlaying ? (
+                                        <Pause size={22} fill="currentColor" />
+                                    ) : (
+                                        <Play size={22} fill="currentColor" className="ml-0.5" />
+                                    )}
                                 </button>
 
                                 <button
                                     onClick={() => {
                                         if (wavesurferRef.current) {
-                                            wavesurferRef.current.setTime(wavesurferRef.current.getCurrentTime() + 10);
+                                            wavesurferRef.current.setTime(
+                                                wavesurferRef.current.getCurrentTime() + 10
+                                            );
                                         }
                                     }}
                                     className="text-ink-muted hover:text-ink-primary p-2 transition-colors"
@@ -411,11 +552,17 @@ const RankingView = ({ libraryStatus, appMode }) => {
                             </div>
 
                             <div className="flex items-center gap-2 group/vol">
-                                <Volume2 size={16} className="text-ink-muted group-hover/vol:text-ink-secondary transition-colors" />
+                                <Volume2
+                                    size={16}
+                                    className="text-ink-muted group-hover/vol:text-ink-secondary transition-colors"
+                                />
                                 <input
-                                    type="range" min="0" max="1" step="0.01"
+                                    type="range"
+                                    min="0"
+                                    max="1"
+                                    step="0.01"
                                     value={volume}
-                                    onChange={e => setVolume(parseFloat(e.target.value))}
+                                    onChange={(e) => setVolume(parseFloat(e.target.value))}
                                     className="w-32 h-1 bg-mx-input rounded-full appearance-none cursor-pointer accent-amber2 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-amber2 transition-all"
                                 />
                             </div>
@@ -427,14 +574,24 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                 <div className="py-4 border-b border-line-subtle">
                                     <div className="flex justify-between items-center mb-4">
                                         <label className="mx-caption">Rate Track</label>
-                                        <button onClick={handleServiceMark} className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-mx-sm bg-mx-input border border-line-subtle text-ink-secondary hover:text-amber2 hover:border-amber2/40 hover:bg-amber2/5 transition-colors">
+                                        <button
+                                            onClick={handleServiceMark}
+                                            className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-mx-sm bg-mx-input border border-line-subtle text-ink-secondary hover:text-amber2 hover:border-amber2/40 hover:bg-amber2/5 transition-colors"
+                                        >
                                             Mark as Service
                                         </button>
                                     </div>
                                     <div className="flex gap-2 justify-between">
-                                        {[1, 2, 3, 4, 5].map(star => (
-                                            <button key={star} onClick={() => setRating(star)} className="transition-transform hover:scale-110 focus:outline-none">
-                                                <Star size={32} className={`transition-colors duration-200 ${rating >= star ? "text-amber2 fill-amber2" : "text-ink-placeholder hover:text-ink-muted"}`} />
+                                        {[1, 2, 3, 4, 5].map((star) => (
+                                            <button
+                                                key={star}
+                                                onClick={() => setRating(star)}
+                                                className="transition-transform hover:scale-110 focus:outline-none"
+                                            >
+                                                <Star
+                                                    size={32}
+                                                    className={`transition-colors duration-200 ${rating >= star ? 'text-amber2 fill-amber2' : 'text-ink-placeholder hover:text-ink-muted'}`}
+                                                />
                                             </button>
                                         ))}
                                     </div>
@@ -443,7 +600,7 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                 <div className="py-4">
                                     <label className="mx-caption mb-4 block">Color Code</label>
                                     <div className="flex gap-3 flex-wrap items-center">
-                                        {COLORS.slice(1).map(c => (
+                                        {COLORS.slice(1).map((c) => (
                                             <button
                                                 key={c.id}
                                                 onClick={() => setColorId(c.id)}
@@ -452,7 +609,12 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                                 title={c.name}
                                             />
                                         ))}
-                                        <button onClick={() => setColorId(0)} className="text-[10px] text-ink-muted hover:text-ink-secondary self-center ml-2 uppercase tracking-widest">Clear</button>
+                                        <button
+                                            onClick={() => setColorId(0)}
+                                            className="text-[10px] text-ink-muted hover:text-ink-secondary self-center ml-2 uppercase tracking-widest"
+                                        >
+                                            Clear
+                                        </button>
                                     </div>
                                 </div>
                             </div>
@@ -460,59 +622,90 @@ const RankingView = ({ libraryStatus, appMode }) => {
                             {/* Right Column: Metadata */}
                             <div className="space-y-6">
                                 <div>
-                                    <label className="text-[10px] font-bold text-ink-muted uppercase mb-2 flex items-center gap-2 tracking-widest"><Disc size={12} /> Genre</label>
+                                    <label className="text-[10px] font-bold text-ink-muted uppercase mb-2 flex items-center gap-2 tracking-widest">
+                                        <Disc size={12} /> Genre
+                                    </label>
                                     <input
                                         list="genres"
                                         value={genre}
-                                        onChange={e => setGenre(e.target.value)}
+                                        onChange={(e) => setGenre(e.target.value)}
                                         placeholder="Select or type new..."
                                         className="input-glass w-full text-lg"
                                     />
                                     <datalist id="genres">
-                                        {genres.map(g => <option key={g.id} value={g.name} />)}
+                                        {genres.map((g) => (
+                                            <option key={g.id} value={g.name} />
+                                        ))}
                                     </datalist>
                                 </div>
                                 <div>
                                     <div>
                                         <label className="text-[10px] font-bold text-ink-muted uppercase mb-2 flex items-center justify-between tracking-widest">
-                                            <div className="flex items-center gap-2"><Tag size={12} /> Tags & Comments</div>
+                                            <div className="flex items-center gap-2">
+                                                <Tag size={12} /> Tags & Comments
+                                            </div>
                                         </label>
 
                                         {/* MyTags Module */}
                                         <div className="space-y-4 mb-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                                            {Object.entries(TAG_CATEGORIES).map(([category, tags]) => (
-                                                <div key={category}>
-                                                    <div className="text-[9px] font-black text-ink-placeholder uppercase tracking-[0.2em] mb-2 px-1">{category}</div>
-                                                    <div className="flex flex-wrap gap-1.5">
-                                                        {tags.map(tag => {
-                                                            const isActive = comment.includes(tag);
-                                                            return (
-                                                                <button
-                                                                    key={tag}
-                                                                    onClick={() => {
-                                                                        if (isActive) {
-                                                                            setComment(prev => prev.replace(new RegExp(`${tag},? ?`, 'g'), '').replace(/, $/, '').trim());
-                                                                        } else {
-                                                                            setComment(prev => (prev ? `${prev}, ${tag}` : tag));
-                                                                        }
-                                                                    }}
-                                                                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all ${isActive
-                                                                        ? 'bg-amber2/20 border-amber2 text-amber2 shadow-[0_0_10px_rgba(232,164,42,0.2)]'
-                                                                        : 'bg-black/20 border-white/5 text-ink-muted hover:border-white/20 hover:text-ink-primary'
+                                            {Object.entries(TAG_CATEGORIES).map(
+                                                ([category, tags]) => (
+                                                    <div key={category}>
+                                                        <div className="text-[9px] font-black text-ink-placeholder uppercase tracking-[0.2em] mb-2 px-1">
+                                                            {category}
+                                                        </div>
+                                                        <div className="flex flex-wrap gap-1.5">
+                                                            {tags.map((tag) => {
+                                                                const isActive =
+                                                                    comment.includes(tag);
+                                                                return (
+                                                                    <button
+                                                                        key={tag}
+                                                                        onClick={() => {
+                                                                            if (isActive) {
+                                                                                setComment((prev) =>
+                                                                                    prev
+                                                                                        .replace(
+                                                                                            new RegExp(
+                                                                                                `${tag},? ?`,
+                                                                                                'g'
+                                                                                            ),
+                                                                                            ''
+                                                                                        )
+                                                                                        .replace(
+                                                                                            /, $/,
+                                                                                            ''
+                                                                                        )
+                                                                                        .trim()
+                                                                                );
+                                                                            } else {
+                                                                                setComment(
+                                                                                    (prev) =>
+                                                                                        prev
+                                                                                            ? `${prev}, ${tag}`
+                                                                                            : tag
+                                                                                );
+                                                                            }
+                                                                        }}
+                                                                        className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all ${
+                                                                            isActive
+                                                                                ? 'bg-amber2/20 border-amber2 text-amber2 shadow-[0_0_10px_rgba(232,164,42,0.2)]'
+                                                                                : 'bg-black/20 border-white/5 text-ink-muted hover:border-white/20 hover:text-ink-primary'
                                                                         }`}
-                                                                >
-                                                                    {tag}
-                                                                </button>
-                                                            );
-                                                        })}
+                                                                    >
+                                                                        {tag}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            ))}
+                                                )
+                                            )}
                                         </div>
 
                                         <textarea
                                             value={comment}
-                                            onChange={e => setComment(e.target.value)}
+                                            onChange={(e) => setComment(e.target.value)}
                                             placeholder="Add specific tags..."
                                             className="input-glass w-full h-24 resize-none text-sm"
                                         />
@@ -524,22 +717,28 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                     <div>
                                         <label className="text-[10px] font-bold text-ink-muted uppercase mb-2 flex items-center gap-2 tracking-widest">
                                             <Tag size={12} /> Pioneer My Tag
-                                            <span className="ml-auto text-[9px] text-ink-placeholder normal-case tracking-normal">writes to master.db</span>
+                                            <span className="ml-auto text-[9px] text-ink-placeholder normal-case tracking-normal">
+                                                writes to master.db
+                                            </span>
                                         </label>
                                         <div className="flex flex-wrap gap-1.5 mb-3 max-h-32 overflow-y-auto custom-scrollbar pr-1">
                                             {allMyTags.length === 0 && (
-                                                <span className="text-[11px] text-ink-placeholder italic">No My Tags defined yet — create one below.</span>
+                                                <span className="text-[11px] text-ink-placeholder italic">
+                                                    No My Tags defined yet — create one below.
+                                                </span>
                                             )}
-                                            {allMyTags.map(t => {
+                                            {allMyTags.map((t) => {
                                                 const active = trackMyTagIds.includes(String(t.id));
                                                 return (
                                                     <button
                                                         key={t.id}
                                                         type="button"
                                                         onClick={() => toggleMyTag(t.id)}
-                                                        className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all ${active
-                                                            ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
-                                                            : 'bg-black/20 border-white/5 text-ink-muted hover:border-white/20 hover:text-ink-primary'}`}
+                                                        className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all ${
+                                                            active
+                                                                ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
+                                                                : 'bg-black/20 border-white/5 text-ink-muted hover:border-white/20 hover:text-ink-primary'
+                                                        }`}
                                                     >
                                                         {t.name}
                                                     </button>
@@ -550,8 +749,10 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                             <input
                                                 type="text"
                                                 value={newMyTagName}
-                                                onChange={e => setNewMyTagName(e.target.value)}
-                                                onKeyDown={e => e.key === 'Enter' && createMyTag()}
+                                                onChange={(e) => setNewMyTagName(e.target.value)}
+                                                onKeyDown={(e) =>
+                                                    e.key === 'Enter' && createMyTag()
+                                                }
                                                 placeholder="New My Tag name…"
                                                 className="input-glass flex-1 text-xs"
                                             />
@@ -567,7 +768,6 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                     </div>
                                 )}
                             </div>
-
                         </div>
 
                         {/* Footer: Persistent Save & Next Actions */}
@@ -577,7 +777,10 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                 className="group relative px-16 py-6 bg-amber2 hover:bg-amber2-hover rounded-2xl font-black text-2xl uppercase tracking-widest text-black shadow-[0_0_40px_rgba(232,164,42,0.4)] hover:shadow-[0_0_60px_rgba(232,164,42,0.6)] transform transition-all hover:-translate-y-1 hover:scale-105 active:scale-95 flex items-center gap-4"
                             >
                                 <span className="relative z-10">Save & Next</span>
-                                <ArrowRight size={32} className="relative z-10 group-hover:translate-x-2 transition-transform" />
+                                <ArrowRight
+                                    size={32}
+                                    className="relative z-10 group-hover:translate-x-2 transition-transform"
+                                />
                                 <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-100%] group-hover:animate-shimmer" />
                             </button>
                         </div>
