@@ -1714,6 +1714,24 @@ Frontend-wide constants.
 - `ARTIST_DISCOVER_LIMIT()` — Suggestions requested from GET /api/artists/discover.
 - `SC_REFRESH_TIMEOUT_MS()` — Headroom over the backend's own SoundCloud call (SC_REFRESH_TIMEOUT_S = 15 s in app/soundcloud_auth…
 
+### `frontend/src/config/tagTaxonomy.js`
+
+Tag chips for the Ranking view.
+
+- `GENRE_TREE()` — Tag chips for the Ranking view.
+- `GENRES()`
+- `SUBGENRE_GROUPS()` — [genre, subgenres] pairs for the genres that have sub-genres, in genre order.
+- `COMPONENT_TAGS()`
+- `TYPE_TAGS()`
+- `ALL_TAGS()`
+- `splitCommentTags()` — A comment is a comma-separated list of tokens; free text between commas is kept as its own token so…
+- `hasCommentTag()` — Whole-token match, case-insensitive: 'Techno' is not active because the comment says 'Hard Techno',…
+- `toggleCommentTag()`
+
+### `frontend/src/config/tagTaxonomy.test.js`
+
+node --test frontend/src/config/tagTaxonomy.test.js Pure module, imports carry extensions — no resolver needed.
+
 ### `frontend/src/store/authStore.js`
 
 Tiny module-level auth state shared across the frontend.
@@ -1819,7 +1837,7 @@ Module-level subscriber registry so a single mounted <PromptModalRoot />
 
 ### `frontend/src/components/RankingView.jsx`
 
-Backend returns 'Children' (uppercase)
+*(no module docstring)*
 
 ### `frontend/src/components/RenameModal.jsx`
 
