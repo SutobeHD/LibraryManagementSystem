@@ -489,6 +489,8 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `file_write()` — Writes text content to a file (used for .rbep project saving).
 - `clean_xml()`
 - `get_genres()`
+- `genre_atlas_suggest()` — Ranked genre candidates (with reasons) for free-form track metadata.
+- `track_genre_suggestions()` — Genre candidates for a library track, each with the library's own spelling if present.
 - `get_library_tracks()`
 - `get_low_quality_tracks()`
 - `get_no_artwork_tracks()`
@@ -1350,6 +1352,12 @@ DuplicateView — Acoustic Duplicate Finder & Merge UI Left panel: list of dupli
 
 FormatConverterView — Library-wide audio format converter UI.
 
+### `frontend/src/components/GenreSuggestions.jsx`
+
+Genre suggestions from the genre atlas for one library track.
+
+- `GenreSuggestions()`
+
 ### `frontend/src/components/ImportProgressBanner.jsx`
 
 Sticky progress banner — visible on every screen while local-file or SoundCloud imports are running.
@@ -2193,6 +2201,18 @@ Tests for app.genre_atlas: matching logic on a synthetic atlas + integrity of th
 - `test_snapshot_references_resolve()`
 - `test_snapshot_suggests_hard_house_for_daddy_trance()`
 - `test_snapshot_suggests_hard_bounce_for_240kmh_upload()`
+
+### `tests/test_genre_atlas_routes.py`
+
+Route tests for the genre-atlas hints (app/main.py).
+
+- `test_suggest_hard_trance_ranks_hard_house_or_trance_techno_first()`
+- `test_suggest_without_params_returns_no_candidates()`
+- `test_suggest_rejects_out_of_range_params()`
+- `test_suggest_respects_limit()`
+- `test_track_route_404_for_unknown_track()`
+- `test_track_route_fills_library_spelling()`
+- `test_track_route_library_genre_none_without_match()`
 
 ### `tests/test_import_tracker.py`
 
