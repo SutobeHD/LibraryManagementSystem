@@ -4918,7 +4918,6 @@
   },
   {
    "aliases": [
-    "Raw",
     "lo-fi techno",
     "gritty techno"
    ],
@@ -4941,7 +4940,6 @@
   {
    "aliases": [
     "Raw Hardstyle",
-    "Raw",
     "Xtra Raw"
    ],
    "bpm": {
@@ -8147,7 +8145,7 @@
  ],
  "schema_version": 1,
  "source": {
-  "commit": "110f5a76d10127acb4a29692cb13ca7a7887d9d3",
+  "commit": "10a9c1cddb4f6fecd712c93a9d6b06b86955590d",
   "repo": "genre-atlas"
  },
  "tags": [
@@ -9082,6 +9080,37 @@
     "spotify",
     "tiktok",
     "event-listings"
+   ],
+   "status": "draft"
+  },
+  {
+   "aliases": [],
+   "id": "tag-raw",
+   "meaning": "\"Raw\" on its own is a mood word, not a genre. In techno it names the saturated, lo-fi end (raw-techno) and Beatport's underground category \"Techno (Raw / Deep / Hypnotic)\", which also holds hypnotic, dark and industrial tracks. In the hardstyle scene the same word is short for rawstyle (\"Raw Hardstyle\", \"Xtra Raw\"). As a personal crate or genre-field name it can cover distorted techno at any tempo between raw techno and hard techno, so the tempo carries most of the information.",
+   "name": "Raw",
+   "period": {
+    "from": null,
+    "to": null
+   },
+   "resolution": {
+    "dark-techno": "deep clean sub under sparse grey percussion and occasional reverb-washed stabs, 128–134 BPM.",
+    "hard-techno": "rumble tail under a distorted kick, 1/16 hat rolls, hooks and riser breakdowns, 148–165 BPM.",
+    "hypnotic-techno": "dense odd-period percussion layers and drones, clean kick, no hooks, flat loudness, 130–136 BPM.",
+    "industrial-techno": "sustained noise layers with high mid-band spectral flatness, metallic percussion with long reverb tails, distorted dry kick, 130–145 BPM, no drop dramaturgy.",
+    "raw-techno": "saturated, lo-fi, jam-timed loops with a gritty kick and short tails, 130–137 BPM.",
+    "rawstyle": "distorted kick whose tail carries a stable, melody-following pitch, screech leads and a reverse-bass intro, 150–160 BPM."
+   },
+   "resolves_to": [
+    "raw-techno",
+    "hard-techno",
+    "industrial-techno",
+    "rawstyle",
+    "hypnotic-techno",
+    "dark-techno"
+   ],
+   "seen_on": [
+    "beatport",
+    "dj-software"
    ],
    "status": "draft"
   },

@@ -266,6 +266,14 @@ def test_snapshot_suggests_hard_house_for_daddy_trance():
     assert res["candidates"][0]["id"] in {"hard-house", "trance-techno"}
 
 
+@pytest.mark.parametrize(("bpm", "expected"), [(132, "raw-techno"), (152, "hard-techno")])
+def test_snapshot_bare_raw_label_resolves_by_tempo(bpm, expected):
+    """'Raw' is a tag (raw techno, hard techno, rawstyle, ...), not an alias of one genre."""
+    res = GenreAtlas.load().suggest(genre="Raw", bpm=bpm)
+    assert res["matched"]["tags"][0]["id"] == "tag-raw"
+    assert res["candidates"][0]["id"] == expected
+
+
 def test_snapshot_suggests_hard_bounce_for_240kmh_upload():
     atlas = GenreAtlas.load()
     res = atlas.suggest(comment="https://soundcloud.com/240kmhk/track", bpm=152)
