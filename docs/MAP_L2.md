@@ -327,6 +327,22 @@ FolderWatcher — auto-import audio files from user-configured folders.
 - `init_watcher()`
 - `shutdown_watcher()`
 
+### `app/genre_atlas.py`
+
+Genre suggestions from the genre-atlas snapshot (read-only, explainable).
+
+- `normalize_key()` — Canonical comparison key: NFKC, casefold, '&'/'+' -> 'and', non-alphanumerics -> space.
+- `soundcloud_permalink()` — 'soundcloud.com/<uploader>' from the first text containing a SoundCloud URL.
+- `Reason`
+- `  Reason.as_dict()`
+- `Candidate`
+- `GenreAtlas` — In-memory index over the atlas snapshot.
+- `  GenreAtlas.load()`
+- `  GenreAtlas.info()`
+- `  GenreAtlas.suggest()` — Ranked candidate genres with reasons.
+- `get_atlas()` — Process-wide atlas instance (the snapshot is read-only at runtime).
+- `library_spelling()` — The user's own spelling of a candidate genre if the library already uses it.
+
 ### `app/import_tracker.py`
 
 Per-file import-progress tracker — gives the frontend a live transparent
@@ -2149,6 +2165,35 @@ Tests for app/folder_watcher.py — auto-import folder watcher.
 - `test_add_after_stop_returns_false()`
 - `test_normalize_resolves_to_absolute()`
 
+### `tests/test_genre_atlas.py`
+
+Tests for app.genre_atlas: matching logic on a synthetic atlas + integrity of the snapshot.
+
+- `atlas()`
+- `test_normalize_key_collapses_variants()`
+- `test_normalize_key_empty()`
+- `test_soundcloud_permalink_from_comment()`
+- `test_empty_input_gives_no_candidates()`
+- `test_tag_in_genre_field_ranks_resolution_order()`
+- `test_longer_tag_consumes_shorter_overlap()` — 'Hard Trance' must not also count as the generic 'Trance' tag.
+- `test_genre_name_inside_tag_term_not_double_counted()`
+- `test_soundcloud_uploader_scene_is_strong_prior()`
+- `test_scene_name_matches_across_spacing_variants()`
+- `test_comment_tokens_count_as_user_evidence()`
+- `test_bpm_outside_window_demotes()`
+- `test_bpm_octave_error_is_tolerated()`
+- `test_bpm_only_fallback_uses_level_one_windows()`
+- `test_confidence_sums_to_one()`
+- `test_limit_is_respected()`
+- `test_unknown_resolves_to_ids_are_skipped()`
+- `test_missing_snapshot_degrades_to_empty()`
+- `test_library_spelling_prefers_user_genre()`
+- `snapshot()`
+- `test_snapshot_is_small_enough_for_the_repo()`
+- `test_snapshot_references_resolve()`
+- `test_snapshot_suggests_hard_house_for_daddy_trance()`
+- `test_snapshot_suggests_hard_bounce_for_240kmh_upload()`
+
 ### `tests/test_import_tracker.py`
 
 Tests for app/import_tracker.py — live import-progress tracker.
@@ -3000,6 +3045,14 @@ selftest_analysis.py — autonomous accuracy self-test (no Rekordbox needed).
 - `beat_grid_metrics()` — MIREX-style beat F-measure + median phase error (ms).
 - `synth_track()` — Four-on-the-floor kick + offbeat hat + root bass + sustained triad pad.
 - `synth_track_realistic()` — Fairer benchmark than the drone synth (handover §5.2).
+- `main()`
+
+### `scripts/sync_genre_atlas.py`
+
+Vendor a slim snapshot of the genre-atlas repo into app/data/genre_atlas.json.
+
+- `slim()`
+- `render()`
 - `main()`
 
 ### `scripts/test_xml_sync.py`
