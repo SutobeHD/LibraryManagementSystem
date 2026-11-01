@@ -1415,7 +1415,7 @@ Module-level subscriber registry so a single mounted <PromptModalRoot />
 
 ### `frontend/src/components/RankingView.jsx`
 
-Backend returns 'Children' (uppercase)
+*(no module docstring)*
 
 ### `frontend/src/components/RenameModal.jsx`
 
@@ -2196,10 +2196,12 @@ Tests for app.genre_atlas: matching logic on a synthetic atlas + integrity of th
 - `test_unknown_resolves_to_ids_are_skipped()`
 - `test_missing_snapshot_degrades_to_empty()`
 - `test_library_spelling_prefers_user_genre()`
+- `test_library_spelling_prefers_exact_atlas_spelling()`
 - `snapshot()`
 - `test_snapshot_is_small_enough_for_the_repo()`
 - `test_snapshot_references_resolve()`
 - `test_snapshot_suggests_hard_house_for_daddy_trance()`
+- `test_snapshot_bare_raw_label_resolves_by_tempo()` — 'Raw' is a tag (raw techno, hard techno, rawstyle, ...), not an alias of one genre.
 - `test_snapshot_suggests_hard_bounce_for_240kmh_upload()`
 
 ### `tests/test_genre_atlas_routes.py`

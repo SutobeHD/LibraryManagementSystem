@@ -32,6 +32,8 @@ Marker convention in the route tables below:
 | GET | `/api/artists` | All artists (normalized) |
 | GET | `/api/artist/{aid}/tracks` | Tracks by artist |
 | GET | `/api/genres` | All genres |
+| GET | `/api/genre-atlas/suggest` | Read-only genre-atlas candidates for free text (title/artist/genre/comment/label/soundcloud, bpm, limit) |
+| GET | `/api/track/{tid}/genre-suggestions` | Read-only genre-atlas candidates for one library track, plus `library_genre` spelling per candidate; 404 if the track is missing |
 | GET | `/api/labels` | All labels |
 | GET | `/api/albums` | All albums |
 | GET | `/api/label/{aid}/tracks` | Tracks by label |

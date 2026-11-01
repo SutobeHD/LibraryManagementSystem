@@ -132,7 +132,7 @@
 | `frontend/src/components/Player.jsx` | Three staggered equalizer bars — shown next to the title while playing. |
 | `frontend/src/components/PlaylistBrowser.jsx` | *(no module docstring)* |
 | `frontend/src/components/PromptModal.jsx` | Module-level subscriber registry so a single mounted <PromptModalRoot /> |
-| `frontend/src/components/RankingView.jsx` | Backend returns 'Children' (uppercase) |
+| `frontend/src/components/RankingView.jsx` | *(no module docstring)* |
 | `frontend/src/components/RenameModal.jsx` | *(no module docstring)* |
 | `frontend/src/components/SettingsView.jsx` | SettingsView — Tabbed preferences panel (container). |
 | `frontend/src/components/SmartPlaylistEditor.jsx` | *(no module docstring)* |
