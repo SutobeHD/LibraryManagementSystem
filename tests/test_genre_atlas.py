@@ -236,6 +236,12 @@ def test_library_spelling_prefers_user_genre(atlas):
     assert library_spelling(cand, ["House"]) is None
 
 
+def test_library_spelling_prefers_exact_atlas_spelling(atlas):
+    cand = atlas.suggest(genre="Hardtechno")["candidates"][0]
+    assert library_spelling(cand, ["HARD TECHNO", "Hard Techno", "HardTechno"]) == "Hard Techno"
+    assert library_spelling(cand, ["HARD TECHNO", "Hardtechno"]) == "Hardtechno"
+
+
 # --- shipped snapshot ------------------------------------------------------------------------
 
 

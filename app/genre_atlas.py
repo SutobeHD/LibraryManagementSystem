@@ -348,7 +348,15 @@ def get_atlas() -> GenreAtlas:
 
 
 def library_spelling(candidate: dict[str, Any], library_genres: list[str]) -> str | None:
-    """The user's own spelling of a candidate genre if the library already uses it."""
+    """The user's own spelling of a candidate genre if the library already uses it.
+
+    An exact match on the atlas name or an alias wins, so "Hard Techno" beats "HARD TECHNO"
+    when a library holds both; otherwise the first spelling with the same canonical key.
+    """
+    present = set(library_genres)
+    for wanted in [candidate.get("name"), *(candidate.get("aliases") or [])]:
+        if wanted and wanted in present:
+            return str(wanted)
     keys = {normalize_key(candidate.get("name"))} | {
         normalize_key(a) for a in candidate.get("aliases") or []
     }
