@@ -56,7 +56,16 @@ export default function GenreSuggestions({ trackId, currentGenre, onPick }) {
             </div>
         );
     }
-    const candidates = (data?.candidates || []).slice(0, MAX_CHIPS);
+    // Two atlas genres can map to the same library spelling; show that label once.
+    const seen = new Set();
+    const candidates = (data?.candidates || [])
+        .filter((c) => {
+            const key = (c.library_genre || c.name).trim().toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        })
+        .slice(0, MAX_CHIPS);
     if (!candidates.length) return null;
 
     const current = (currentGenre || '').trim().toLowerCase();
