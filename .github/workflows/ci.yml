@@ -64,6 +64,9 @@ jobs:
       - name: Check MAP.md / MAP_L2.md drift
         run: python scripts/regen_maps.py --check   # pure AST/regex, no runtime deps — regen via scripts/regen_maps.py
 
+      - name: Validate feature registry
+        run: python scripts/feature_map.py --check   # docs/features/*.toml — ids, refs, live paths; stdlib only
+
   rust-lint-test:
     name: Rust — clippy + cargo test
     runs-on: windows-latest

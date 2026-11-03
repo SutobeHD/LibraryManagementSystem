@@ -1,0 +1,262 @@
+[area]
+id = "soundcloud"
+name = "SoundCloud & Downloads"
+order = 8
+desc = "Login, Playlist-Sync, Downloads, Download-Manager; neue Quellen (Multi-Source-Downloader). Security: CDN-Allowlist, Größenlimit, Token nur an SC-Hosts."
+
+# ── Login ─────────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "sc-oauth-pkce"
+group = "Login"
+name = "SoundCloud OAuth (PKCE)"
+status = "shipped"
+desc = "OAuth 2.1 + PKCE, Consent im In-App-Webview oder OS-Browser (sc_auth_mode)."
+paths = ["src-tauri/src/soundcloud_client.rs"]
+
+[[feature]]
+id = "sc-session-status"
+group = "Login"
+name = "SC-Session + Account-Chip"
+status = "shipped"
+desc = "Token im OS-Keyring, auth-status ohne Netz-Roundtrip, /me-Chip in der Navigation."
+paths = ["tests/test_soundcloud_auth_status.py"]
+routes = ["/api/soundcloud/auth-token", "/api/soundcloud/auth-status", "/api/soundcloud/me"]
+depends_on = ["sc-oauth-pkce"]
+
+[[feature]]
+id = "sc-persistent-login"
+group = "Login"
+name = "Persistenter SC-Login"
+status = "unmerged"
+research = "soundcloud-persistent-login"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
+desc = "Refresh-Token im Keyring, stilles Single-Flight-Refresh im Backend - Login überlebt Neustart."
+paths = ["app/soundcloud_auth.py", "tests/test_soundcloud_auth.py", "tests/test_soundcloud_refresh_route.py"]
+routes = ["/api/soundcloud/refresh"]
+depends_on = ["sc-session-status", "rate-limiter"]
+todo = ["nach #58-Merge Doc -> archived/implemented_", "Keyring-Blob chunken, falls > 1280 Zeichen", "Refresh in Tauri real testen", "Bestandsuser müssen sich einmal neu einloggen"]
+notes = "Gebaut als Artist-Hub T-19. Doc steht noch auf evaluated_."
+
+[[feature]]
+id = "sc-refresh-interceptor"
+group = "Login"
+parent = "sc-persistent-login"
+name = "401-Auto-Refresh im Client"
+status = "unmerged"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
+desc = "401 -> stilles Refresh -> Tauri-Login; unterscheidet tote Session von abgelaufenem SC-Login."
+paths = ["frontend/src/api/scRefreshClassification.js", "frontend/src/api/scRefreshClassification.test.js"]
+
+# ── Sync ──────────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "sc-api-client"
+group = "Sync"
+name = "SoundCloud-API-Client"
+status = "shipped"
+desc = "Inoffizielle v2-API: client_id-Scraping, Backoff, Pagination, Proxy."
+paths = ["app/soundcloud_api.py", "tests/test_soundcloud_api.py"]
+notes = "Artist-Katalog/Suche/CallBudget nur auf PR #58."
+
+[[feature]]
+id = "sc-playlist-sync"
+group = "Sync"
+name = "SC-Playlists/Likes <-> Library"
+status = "shipped"
+desc = "SC-Playlists + Likes laden, Fuzzy-Match gegen die Library, Merge, Sync-All, Match-Inspector."
+paths = ["frontend/src/components/SoundCloudSyncView.jsx", "frontend/src/components/MatchInspectorModal.jsx"]
+routes = ["/api/soundcloud/playlists", "/api/soundcloud/preview-matches", "/api/soundcloud/sync", "/api/soundcloud/sync-all"]
+depends_on = ["sc-api-client", "sc-session-status"]
+related = ["sc-collection-sync"]
+
+[[feature]]
+id = "sc-playlist-export"
+group = "Sync"
+name = "Lokale Playlist -> SoundCloud"
+status = "shipped"
+desc = "Tracks auf SC suchen, SC-Playlist anlegen, Fortschritts-Modal."
+paths = ["frontend/src/components/SoundCloudProgressModal.jsx"]
+depends_on = ["sc-oauth-pkce"]
+related = ["sc-playlist-write"]
+
+[[feature]]
+id = "sc-collection-sync"
+group = "Sync"
+name = "SC-Collection-Sync"
+status = "research"
+research = "soundcloud-collection-sync"
+branch = "claude/zealous-rubin-nx1wo2"
+pr = 57
+desc = "Likes + Playlists als Rekordbox-Playlists spiegeln, nur neue Tracks laden, SC-Genre -> Genres-Baum."
+depends_on = ["artist-hub"]
+related = ["library-folder-projections", "genre-normalization", "unified-downloader", "sc-playlist-write"]
+todo = ["research-explore (17 OQs, 3 empirisch)", "Likes > 500 via /me/likes/tracks", "Removal-Policy", "Subgenre-Träger klären (Comment/MyTag)"]
+notes = "Draft-PR, nur Docs."
+
+[[feature]]
+id = "sc-playlist-write"
+group = "Sync"
+name = "SC-Playlists in der App bearbeiten"
+status = "idea"
+desc = "SoundCloud-Playlist anlegen/ergänzen (POST /playlists form-encoded + PUT)."
+related = ["sc-collection-sync", "sc-playlist-export"]
+
+# ── Downloads ─────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "sc-url-download"
+group = "Downloads"
+name = "SC-Download per URL"
+status = "shipped"
+desc = "URL einfügen -> Download-Task, Task-Liste."
+paths = ["frontend/src/components/SoundCloudView.jsx"]
+routes = ["/api/soundcloud/download", "/api/soundcloud/tasks"]
+depends_on = ["sc-downloader"]
+notes = "Redundanz zu SoundCloudSyncView klären (sc-ui-polish)."
+
+[[feature]]
+id = "sc-downloader"
+group = "Downloads"
+name = "SC-Downloader (2-stufig)"
+status = "shipped"
+desc = "Offizieller Download, sonst v2-Transcodings (progressive/HLS -> ffmpeg); Previews übersprungen."
+paths = ["app/soundcloud_downloader.py", "tests/test_soundcloud_downloader*.py"]
+routes = ["/api/soundcloud/download", "/api/soundcloud/task/{task_id}"]
+depends_on = ["sc-api-client", "download-registry"]
+notes = "Host-Allowlist (SSRF), 1-GiB-Cap, ffmpeg protocol_whitelist - Schicht-A-Invarianten."
+
+[[feature]]
+id = "sc-download-pipeline"
+group = "Downloads"
+name = "Post-Download-Pipeline"
+status = "shipped"
+desc = "Optional AIFF, Tags + Cover, SHA-256, Analyse, Auto-Import, Playlist SC_<name>."
+depends_on = ["sc-downloader", "download-format-setting"]
+related = ["analysis-on-import"]
+
+[[feature]]
+id = "sc-playlist-download"
+group = "Downloads"
+name = "Ganze SC-Playlist laden"
+status = "shipped"
+desc = "Download-Button pro SC-Playlist, alles in die Queue."
+routes = ["/api/soundcloud/download-playlist"]
+depends_on = ["sc-downloader", "sc-playlist-sync"]
+
+[[feature]]
+id = "sc-aggressive-mode"
+group = "Downloads"
+name = "Aggressive Download Mode"
+status = "shipped"
+desc = "Verstecktes Opt-in (5x tippen), akzeptiert auch Preview-Transcodings."
+depends_on = ["sc-downloader"]
+notes = "Artist-Hub-Batch erbt das Setting absichtlich nicht."
+
+[[feature]]
+id = "download-registry"
+group = "Downloads"
+name = "Download-Registry / Dedup"
+status = "shipped"
+desc = "SQLite-Dedup per sc_track_id + SHA-256, Analyse-Historie, device_id."
+paths = ["app/download_registry.py", "tests/test_download_registry.py"]
+routes = ["/api/soundcloud/history", "/api/soundcloud/check/{sc_track_id}"]
+notes = "History-Routen ohne UI."
+
+[[feature]]
+id = "download-manager-view"
+group = "Downloads"
+name = "Download-Manager"
+status = "shipped"
+desc = "Stage-Pipeline-Ansicht (Resolve -> Download -> Analyse -> ANLZ -> Playlist) für Downloads + Import."
+paths = ["frontend/src/components/DownloadManagerView.jsx"]
+routes = ["/api/soundcloud/tasks", "/api/import/tasks"]
+related = ["import-progress-banner", "sc-download-recognizer"]
+
+[[feature]]
+id = "import-progress-banner"
+group = "Downloads"
+name = "Sticky Import-Banner"
+status = "shipped"
+desc = "Fortschrittsbanner auf jedem Screen, Klick öffnet den Manager."
+paths = ["frontend/src/components/ImportProgressBanner.jsx"]
+related = ["download-manager-view"]
+notes = "1,5-s-Polling (sc-ui-polish / Perf)."
+
+[[feature]]
+id = "download-format-setting"
+group = "Downloads"
+name = "Download-Format (AIFF-Default)"
+status = "partial"
+research = "download-format-setting"
+desc = "Heute sc_download_format auto|aiff. Geplant: AIFF-Default + Dropdown mit 6 Zielen, -map_metadata 0 + Art-Overlay-Fix."
+related = ["format-converter", "unified-downloader", "ffmpeg-resolver"]
+todo = ["_convert_to_target_format + Artwork-Drop-Fix", "_do_download-Switch", "Dropdown + Format-Badge", "offen: auch für lokale Imports?"]
+notes = "Doc accepted_ (0/4). Widerspruch: unified-downloader sagt 'nur AIFF'."
+
+[[feature]]
+id = "ffmpeg-resolver"
+group = "Downloads"
+name = "FFmpeg-Resolver"
+status = "shipped"
+desc = "ffmpeg-Binary pro Encoder (Setting > env > PATH > bekannte Pfade), ffprobe separat."
+paths = ["app/ffmpeg_resolver.py"]
+notes = "Nur der Format-Swap nutzt ihn; Downloader und AudioEngine nehmen das nackte FFMPEG_BIN."
+
+# ── Neue Quellen ──────────────────────────────────────────────────────────
+
+[[feature]]
+id = "unified-downloader"
+group = "Neue Quellen"
+name = "Multi-Source-Downloader"
+status = "unmerged"
+research = "downloader-unified-multi-source"
+branch = "claude/dreamy-taussig-5d11c4"
+desc = "Ein Eingabefeld (Spotify/SC/Tidal/Qobuz-URL oder Artist - Title), paralleles Probing, 100-%-Match, Best-Quality-Pick."
+depends_on = ["external-track-match", "quality-upgrade-finder"]
+related = ["download-format-setting", "download-gate-assistant", "safe-download-sources-survey", "genre-normalization"]
+todo = ["dreamy-taussig portieren oder verwerfen (299 hinter main)", "Phase 6 Frontend", "Phase 7 Tests + 50-Eintrag-Match-Set", "genre_sync mit genre-normalization abgleichen"]
+notes = "Phase 0-5 nur auf dem alten Branch (inkl. eigener external_track_match - kollidiert mit main). SpotiFLAC nur hinter Opt-in (Legal)."
+
+[[feature]]
+id = "download-gate-assistant"
+group = "Neue Quellen"
+name = "Download-Gate-Assistent"
+status = "research"
+research = "download-gate-assistant"
+branch = "claude/dreamy-taussig-5d11c4"
+desc = "Hypeddit/Toneden-Gates im eingebetteten Webview durchklicken."
+related = ["unified-downloader", "safe-download-sources-survey"]
+notes = "Credentials im Webview = security-sensitiv. State ideagate_ veraltet."
+
+[[feature]]
+id = "safe-download-sources-survey"
+group = "Neue Quellen"
+name = "Survey sichere Download-Tools"
+status = "research"
+research = "safe-download-sources-survey"
+branch = "claude/dreamy-taussig-5d11c4"
+desc = "streamrip-Klasse, Bandcamp/Beatport-Downloader, Architekturen (account/mirror/buy-to-own)."
+related = ["unified-downloader", "download-gate-assistant"]
+
+[[feature]]
+id = "sc-bulk-track-resolver"
+group = "Neue Quellen"
+name = "Bulk-Track-Resolver"
+status = "idea"
+desc = "Trackliste/Screenshot -> SC-Treffer mit Confidence-Ampel."
+related = ["external-track-match"]
+notes = "Prototyp-Skripte lagen im gelöschten Scratchpad."
+
+# ── UI ────────────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "sc-ui-polish"
+group = "UI"
+name = "SC-UI: Polling & Redundanz"
+status = "idea"
+desc = "1,5-s-Polling/401-Loop reduzieren, SoundCloudView vs. SoundCloudSyncView zusammenführen."
+related = ["sc-url-download", "sc-playlist-sync", "import-progress-banner"]
+todo = ["Polling reduzieren", "View-Redundanz auflösen", "SC-Such-Recall mit echtem Künstler messen"]
