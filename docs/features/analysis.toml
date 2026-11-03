@@ -1,0 +1,176 @@
+[area]
+id = "analysis"
+name = "Audio-Analyse"
+order = 4
+desc = "Offline-DSP (Python): BPM, Key, Beatgrid, Cues, Waveforms; Matching und Klassifikation von Tracks."
+
+# ── DSP-Engine ────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "analysis-engine"
+group = "DSP-Engine"
+name = "Analyse-Engine BPM/Key/Beatgrid"
+status = "shipped"
+desc = "madmom-RNN-Beats mit Oktav-Prior, essentia-Key, Downbeat, Tempo-Wechsel, LUFS/ReplayGain, Genre-Hint."
+paths = ["app/analysis_engine.py"]
+depends_on = ["analysis-settings", "analysis-cache"]
+related = ["genre-definition-schema"]
+
+[[feature]]
+id = "analysis-settings"
+group = "DSP-Engine"
+name = "Analyse-Einstellungen"
+status = "shipped"
+desc = "Tunables (BPM-Range, Cue-Limits, Memory-Grid, Samplerate) per RB_ANALYSIS_-Env, Settings-Tab Analysis."
+paths = ["app/analysis_settings.py", "frontend/src/components/settings/SettingsAnalysis.jsx"]
+notes = "DSP-Tunables nur per Env. UI-Preset analysis_quality liest kein Backend (toter Wert)."
+
+[[feature]]
+id = "analysis-cache"
+group = "DSP-Engine"
+name = "AnalysisCache"
+status = "shipped"
+desc = "Ergebnis-Cache auf Platte per Content-Hash."
+paths = ["app/analysis_cache.py"]
+notes = "clear()/invalidate() evtl. Dead Code."
+
+[[feature]]
+id = "auto-cues-phrases"
+group = "DSP-Engine"
+name = "Auto-Cues & Phrasen"
+status = "shipped"
+desc = "Auto-Hot-Cues, Memory-Cues oder 16-Bar-Grid, Phrasenerkennung mit PSSI-Mood-IDs."
+depends_on = ["analysis-engine", "anlz-writer"]
+related = ["phrase-cue-generator", "hot-cue-16-limits"]
+
+[[feature]]
+id = "waveform-generation"
+group = "DSP-Engine"
+name = "ANLZ-Waveforms erzeugen"
+status = "shipped"
+desc = "Rekordbox-Waveforms PWAV..PWV7 für die ANLZ-Dateien."
+depends_on = ["analysis-engine", "anlz-writer"]
+related = ["multiband-waveform-data"]
+
+# ── Pipelines ─────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "analysis-on-import"
+group = "Pipelines"
+name = "Auto-Analyse beim Import"
+status = "shipped"
+desc = "Import und SC-Download starten Vollanalyse und schreiben Companion-ANLZ."
+depends_on = ["analysis-engine", "anlz-writer"]
+related = ["import-manager", "sc-download-pipeline"]
+
+[[feature]]
+id = "analysis-api-manual"
+group = "Pipelines"
+name = "Manuelle (Re-)Analyse & Batch"
+status = "partial"
+desc = "Async-Task, Einzel-Track, analyze-full (ANLZ + master.db), NDJSON-Batch, Status."
+paths = ["app/audio_analyzer.py", "app/analysis_db_writer.py"]
+routes = ["/api/audio/analyze", "/api/track/{tid}/analyze", "/api/track/{tid}/analyze-full", "/api/library/analyze-batch"]
+depends_on = ["analysis-engine", "anlz-writer", "live-master-db"]
+related = ["db-write-lock-retrofit"]
+notes = "Kein Frontend ruft die Routen. AnalysisDBWriter schreibt ohne _db_write_lock. analyze-full/-batch liefern 400 (K1, Fix auf PR #58)."
+
+# ── Matching & Klassifikation ─────────────────────────────────────────────
+
+[[feature]]
+id = "external-track-match"
+group = "Matching & Klassifikation"
+name = "External-Track-Match (Kern-Modul)"
+status = "partial"
+research = "external-track-match-unified-module"
+desc = "Version-Tag parsen, Titel-Stem, Fuzzy-Score, Fingerprint-Hülle, Adapter-Registry - gemeinsamer Kern für 4 Features."
+paths = ["app/external_track_match.py", "tests/test_external_track_match.py"]
+related = ["variant-detector", "extended-remix-finder", "quality-upgrade-finder", "unified-downloader", "artist-catalogue-diff"]
+todo = ["T-1/T-2: >= 200 Titel labeln (Owner)", "T-10: soundcloud_api auf den Delegate umstellen (nutzt noch eigenes _fuzzy_match_with_score)", "T-11/T-12 Gates + Doc-Sync"]
+notes = "Critical Path. dreamy-taussig hat eine eigene, kollidierende Fassung."
+
+[[feature]]
+id = "variant-detector"
+group = "Matching & Klassifikation"
+name = "Remix-/Varianten-Detektor"
+status = "partial"
+research = "analysis-remix-detector"
+desc = "Radio/Extended/Remix/VIP/Bootleg klassifizieren, Varianten pro Werk clustern, Kanon wählen (variants.db)."
+paths = ["app/variant_detector.py", "app/variant_schema.py", "tests/test_variant_*.py"]
+depends_on = ["external-track-match"]
+related = ["extended-remix-finder", "metadata-fixer", "duplicate-finder"]
+todo = ["T-1 200-Track-Korpus", "T-4 Routen", "T-5 Import-Hook + CLI", "T-7 Cluster-Panel", "M3 pyacoustid"]
+
+[[feature]]
+id = "popularity-classifier"
+group = "Matching & Klassifikation"
+name = "Underground/Mainstream-Klassifikator"
+status = "partial"
+research = "analysis-underground-mainstream-classifier"
+desc = "Popularität aus Playcounts: 2D-Display + 1D-Aggregat (SC 0.80 / Spotify 0.20), ECDF-Bänder."
+paths = ["app/popularity_engine.py", "tests/test_popularity_engine.py"]
+depends_on = ["external-track-match", "sc-api-client"]
+todo = ["T4 ECDF + Spotify-Carve-out", "T5 Aggregator", "T6 playback_count im SC-Payload", "T9 Routen", "2D-Display-UI"]
+notes = "Nur Store/CRUD (T1-T3), kein Aufrufer."
+
+# ── Genre ─────────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "genre-definition-schema"
+group = "Genre"
+name = "Genre-Definitionen + Auto-Detect"
+status = "research"
+research = "analysis-genre-definition-schema"
+branch = "claude/genre-definitions-auto-detection-mqrblm"
+pr = 55
+desc = "Deklarative Genre/Style-Definitionen als Daten, Erkennung aus Audio-Features mit Confidence."
+related = ["genre-normalization", "ranking-genre-tree", "recommender-similar-tracks", "genre-atlas"]
+todo = ["Idea-Verifier", "OQ5 Regeln vs ML (essentia/sklearn)", "Ground-Truth + Metrik", "ANALYSIS_VERSION-Bump erzwingt Re-Analyse"]
+notes = "Ersetzt hint_genre() (if/elif mit 10 Labels). Draft-PR, nur Docs."
+
+# ── Validierung ───────────────────────────────────────────────────────────
+
+[[feature]]
+id = "analysis-accuracy-harness"
+group = "Validierung"
+name = "Genauigkeits-Harness (A/B + Selbsttest)"
+status = "shipped"
+desc = "A/B gegen die echte Rekordbox-Library und synthetischer Selbsttest (MIREX Acc-1/Acc-2)."
+paths = ["scripts/compare_rekordbox.py", "scripts/selftest_analysis.py", "tests/test_compare_rekordbox.py"]
+depends_on = ["analysis-engine"]
+notes = "Windows-Konsolen-Fix d96309f liegt nur auf Backup / 485cbfe."
+
+[[feature]]
+id = "analysis-real-world-validation"
+group = "Validierung"
+name = "Echt-Library- & CDJ-Test"
+status = "idea"
+desc = "A/B über 10-50 echte Tracks, Live-master.db-Write mit User-DB, echter Stick im CDJ-3000."
+related = ["analysis-accuracy-harness", "usb-onelibrary-export"]
+
+# ── Ideen ─────────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "bpm-octave-disambiguation"
+group = "Ideen"
+name = "BPM-Oktav-Restfehler"
+status = "idea"
+desc = "Restliche ~12 % Half/Double-Fehler per Genre-/Spektral-Prior oder madmom-Downbeat lösen."
+related = ["analysis-real-world-validation"]
+notes = "Auf Synthetik nicht entscheidbar - nur mit echten Tracks messen."
+
+[[feature]]
+id = "analysis-engine-ideas"
+group = "Ideen"
+name = "Weitere Engine-Verbesserungen"
+status = "idea"
+desc = "Key-, Beatgrid- und Phrasen-Verbesserungen, jede per Selbsttest messen."
+todo = ["Key 3-Profil-Ensemble", "Beatgrid mit dynamischen Tempo-Ankern", "Phrasen via madmom Downbeat/Segment", "Analyse-Länge/Offset-Settings auf Genauigkeit prüfen"]
+
+[[feature]]
+id = "analysis-dropped-experiments"
+group = "Ideen"
+name = "Verworfene Analyse-Experimente"
+status = "dropped"
+desc = "octave-snap, Even-Grid-Regularisierung, Octave-Window abschalten."
+notes = "Gemessen schlechter (Beat-F 0.921 -> 0.900, Phase-Fehler 4.5 -> 18.6 ms, Acc-1 regrediert)."

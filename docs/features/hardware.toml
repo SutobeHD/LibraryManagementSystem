@@ -1,0 +1,16 @@
+[area]
+id = "hardware"
+name = "Hardware & Recording"
+order = 10
+desc = "Controller (DDJ-GRV6/FLX4/400, class-MIDI), Set-Aufnahme. Noch kein Code - nur Plan + Mockup."
+
+[[feature]]
+id = "recording-booth"
+group = "Recording"
+name = "Recording Booth (DDJ-GRV6)"
+status = "research"
+research = "recording-booth"
+desc = "DJ-Set aufnehmen mit MIDI-Capture, Control-Timeline (JSONL), Pegel, Controller-Outline-Video; 4 Kanäle."
+paths = ["src-tauri/src/audio/recorder/", "app/recording_booth.py", "frontend/src/components/RecordingBoothView.jsx", "docs/research/mockups/recording-booth.html"]
+todo = ["/approve oder /reject (wartet seit 2026-06-02)", "3 Device-Spikes am echten GRV6 (MIDI-Co-Read, Loopback, EQ/Stem-ISO on-wire)", "maßstäblicher GRV6-SVG statt CSS-Wireframe", "Track-ID post-hoc aus der RB-History"]
+notes = "Wartet am Approval-Gate. Live-Track-ID unmöglich (PDL nur Export-Modus). Neue Deps midir/midly/resvg. Task 1 nennt noch FLX4."

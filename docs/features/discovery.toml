@@ -1,0 +1,55 @@
+[area]
+id = "discovery"
+name = "Discovery & Empfehlungen"
+order = 9
+desc = "Nächster Track, ähnliche Tracks, Geschmacksprofil, bessere Versionen finden. Fast alles geplant, kaum Code."
+
+[[feature]]
+id = "recommender-rules-baseline"
+group = "Recommender"
+name = "Recommender Regel-Baseline"
+status = "planned"
+research = "recommender-rules-baseline"
+desc = "Deterministischer 'next track'-Score aus Camelot, BPM, Genre, MyTag, Energy."
+paths = ["app/recommender.py", "tests/test_recommender_unit.py"]
+depends_on = ["analysis-engine"]
+related = ["recommender-similar-tracks", "recommender-taste"]
+todo = ["T-2 pytest-benchmark-Dep (Confirm)", "T-3 recommender.py", "T-5 GET /api/recommend/local", "T-6 SC-Related-Route"]
+notes = "Defaults bestätigt: M1 nur Backend, key_first, relative=0.7. 0/11."
+
+[[feature]]
+id = "recommender-similar-tracks"
+group = "Recommender"
+name = "Ähnliche Tracks (lokal)"
+status = "planned"
+research = "recommender-similar-tracks"
+desc = "Offline-Ähnlichkeit über 46-dim-Vektor (4 Slice-BLOBs) in track_vectors.db."
+paths = ["app/track_vector_builder.py", "app/track_vector_store.py", "app/recommender_similar.py"]
+depends_on = ["analysis-engine"]
+related = ["recommender-rules-baseline", "recommender-taste", "genre-definition-schema"]
+notes = "0/12."
+
+[[feature]]
+id = "recommender-taste"
+group = "Recommender"
+name = "Geschmacks-Recommender"
+status = "partial"
+research = "recommender-taste-llm-audio"
+desc = "Personalisierte Rangfolge: Taste-Centroid (M1), Embedding-Benchmark (M2), LLM-Erklärung (M3)."
+paths = ["app/db_taste.py", "tests/test_db_taste.py"]
+depends_on = ["recommender-similar-tracks", "recommender-rules-baseline"]
+todo = ["taste_profile_version statt Hash als Cache-Key", "M2 torch-Dep-Freigabe", "M3 API-Key-UX"]
+notes = "Nur T1 (Vektor-Store, kein Aufrufer). T2+ blockiert durch fehlende Vektoren + Plays."
+
+[[feature]]
+id = "extended-remix-finder"
+group = "Versionen finden"
+name = "Extended/Club-Version-Finder"
+status = "planned"
+research = "library-extended-remix-finder"
+desc = "Pro Radio-Edit die Extended-/Club-Version auf SC/Discogs/Beatport vorschlagen."
+paths = ["app/extended_finder.py"]
+depends_on = ["external-track-match"]
+related = ["variant-detector", "quality-upgrade-finder", "artist-catalogue-diff"]
+todo = ["T-01 search_tracks - evtl. schon durch Artist-Hub T-20 vorhanden", "T-03 Gold-Set (10 h Labeln)", "T-07 Orchestrator", "T-09/T-10 EXT-Badge + Audit-Tab"]
+notes = "0/12."

@@ -1,0 +1,150 @@
+[area]
+id = "shell"
+name = "App-Shell & UX"
+order = 11
+desc = "Navigation, Fenster, Boot, Toasts, Modals, Kontextmenüs, Settings, Design-System."
+
+# ── Navigation & Fenster ──────────────────────────────────────────────────
+
+[[feature]]
+id = "workspace-topbar-nav"
+group = "Navigation & Fenster"
+name = "TopBar + Workspaces"
+status = "shipped"
+desc = "Workspaces (Library/Import/Ranking/Editor/USB/SoundCloud/Utilities), Unter-Tabs, Lazy-Views, ErrorBoundary pro View."
+notes = "Komplett in frontend/src/main.jsx (Hub). Dauerhaft gemountete schwere Views = Perf-Hotspot."
+
+[[feature]]
+id = "frameless-window"
+group = "Navigation & Fenster"
+name = "Rahmenloses Fenster"
+status = "shipped"
+desc = "decorations:false, eigene Min/Max/Close, startDragging, Doppelklick maximiert."
+related = ["system-lifecycle-routes"]
+notes = "Close ruft vorher /api/system/shutdown. Code in main.jsx + tauri.conf.json."
+
+[[feature]]
+id = "boot-splash"
+group = "Navigation & Fenster"
+name = "Splash + Boot-Reveal"
+status = "shipped"
+desc = "Splash-Fenster, Hauptfenster startet unsichtbar, Rust-Watchdog nach 10 s."
+paths = ["frontend/public/splashscreen.html"]
+related = ["tauri-sidecar-supervisor"]
+notes = "Fester 2-s-Splash (Perf-Overhaul)."
+
+# ── Feedback ──────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "toast-notifications"
+group = "Feedback"
+name = "Toasts"
+status = "shipped"
+desc = "react-hot-toast global + eigener ToastContext/useToast."
+paths = ["frontend/src/components/ToastContext.jsx"]
+notes = "Zwei Systeme parallel (31 Dateien hot-toast, 6 useToast)."
+
+[[feature]]
+id = "toast-notification-ux"
+group = "Feedback"
+parent = "toast-notifications"
+name = "Toast-UX überarbeiten"
+status = "research"
+research = "toast-notification-ux"
+branch = "claude/intelligent-volhard-08ac03"
+desc = "Limit/Dedup, Position oben rechts, eckiges amber-Styling statt grüner Pille."
+todo = ["Stage-1-Draft", "klickbares Mockup"]
+notes = "Doc nur auf Branch (Port auf 485cbfe). Klein genug zum direkten Umsetzen."
+
+[[feature]]
+id = "confirm-prompt-modals"
+group = "Feedback"
+name = "Confirm/Prompt-Modals"
+status = "shipped"
+desc = "Promise-basierter Ersatz für window.confirm/prompt, Rename-Dialog."
+paths = ["frontend/src/components/ConfirmModal.jsx", "frontend/src/components/PromptModal.jsx", "frontend/src/components/RenameModal.jsx"]
+
+# ── Kontextmenüs ──────────────────────────────────────────────────────────
+
+[[feature]]
+id = "list-context-menus"
+group = "Kontextmenüs"
+name = "Track/Playlist-Rechtsklickmenüs"
+status = "shipped"
+desc = "Portal-Menüs: Track 9 Aktionen, Playlist 7 Aktionen; funktioniert in WebView2."
+related = ["track-table", "playlist-tree-crud", "context-menu-system"]
+notes = "Eigene Implementierung in TrackTable.jsx/PlaylistBrowser.jsx, nicht das shared ContextMenu."
+
+[[feature]]
+id = "context-menu-system"
+group = "Kontextmenüs"
+name = "App-weites Kontextmenü-System"
+status = "unmerged"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
+desc = "Unterdrückt das WebView-Menü überall, Cut/Copy/Paste in Inputs, useContextMenu-Hook."
+paths = ["frontend/src/components/shared/ContextMenu.jsx", "frontend/src/components/shared/GlobalContextMenu.jsx"]
+todo = ["restliche 9 Views anbinden", "Track/Playlist-Menüs auf das System umstellen"]
+notes = "Nutzt bisher nur der Artist Hub."
+
+# ── Settings ──────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "settings-panel"
+group = "Settings"
+name = "Settings-View"
+status = "shipped"
+desc = "8 Tabs: Library/Export/USB/Audio/Analysis/Appearance/Shortcuts/Network."
+paths = ["frontend/src/components/SettingsView.jsx", "frontend/src/components/settings/SettingsControls.jsx", "frontend/src/components/settings/SettingsNetwork.jsx"]
+routes = ["/api/settings"]
+depends_on = ["settings-backend-store"]
+notes = "Tabs gehören fachlich zu ihren Features (z. B. SettingsUsb -> usb-profiles)."
+
+[[feature]]
+id = "settings-backend-store"
+group = "Settings"
+name = "SettingsManager + Payload-Caps"
+status = "shipped"
+research = "security-pydantic-extra-allow-blob-write"
+desc = "JSON-Settings laden/speichern, SetReq-Caps (8 KB/Wert, 256 KB gesamt), Sanitizer beim Laden."
+paths = ["tests/test_settings_caps.py"]
+routes = ["/api/settings"]
+notes = "SettingsManager lebt in services.py (Hub). load() ungecacht (Perf)."
+
+[[feature]]
+id = "keyboard-shortcuts"
+group = "Settings"
+name = "Tastatur-Shortcuts"
+status = "shipped"
+desc = "Konfigurierbare DAW-Shortcuts (Key-Capture), Editor- und Waveform-Hotkeys."
+paths = ["frontend/src/components/settings/SettingsShortcuts.jsx", "frontend/src/components/daw/useDawShortcuts.js", "frontend/src/components/daw/useDawKeyhandlers.js"]
+notes = "Nur DAW konfigurierbar; kein globaler App-Hotkey-Layer."
+
+# ── Theming ───────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "appearance-settings"
+group = "Theming"
+name = "Appearance (Farben/Sprache)"
+status = "partial"
+desc = "Waveform-Visualmodus, Bandfarben, Locale de/en."
+paths = ["frontend/src/components/settings/SettingsAppearance.jsx"]
+related = ["waveform-overhaul"]
+notes = "Nur waveform_visual_mode wirkt; waveform_color_* und locale liest niemand."
+
+[[feature]]
+id = "melodex-design-system"
+group = "Theming"
+name = "Melodex Design-System"
+status = "shipped"
+desc = "Amber-Akzent, mx/ink/line-Tokens, DM Sans + JetBrains Mono, UI-Primitives."
+paths = ["frontend/tailwind.config.js", "frontend/src/index.css", "frontend/postcss.config.js"]
+notes = "Neue Views an der Library-Ansicht ausrichten (Coding-Rule)."
+
+[[feature]]
+id = "shared-portal-tooltip"
+group = "Theming"
+name = "Portal-Tooltip app-weit"
+status = "idea"
+desc = "Portal-Tooltip aus UsbSettingsView als Shared-Komponente wiederverwenden."
+related = ["usb-mysettings"]

@@ -1,0 +1,272 @@
+[area]
+id = "platform"
+name = "Plattform, Sicherheit & Performance"
+order = 12
+desc = "Tauri-Runtime + Sidecar, Auth/Security, Logging, Config, Performance, Mobile, Release/CI, Linux/macOS."
+
+# ── Desktop-Runtime ───────────────────────────────────────────────────────
+
+[[feature]]
+id = "tauri-sidecar-supervisor"
+group = "Desktop-Runtime"
+name = "Sidecar-Supervisor"
+status = "shipped"
+desc = "Startet die Python-Sidecar, fängt das Token aus stdout ab und filtert es, Kill bei Exit, Dev-Autospawn."
+related = ["bearer-session-auth", "pyinstaller-backend-bundle"]
+notes = "Code in src-tauri/src/main.rs (Hub)."
+
+[[feature]]
+id = "pyinstaller-backend-bundle"
+group = "Desktop-Runtime"
+name = "Backend-Bundle (PyInstaller)"
+status = "shipped"
+desc = "backend_entry + backend.spec -> RB_Backend-Binary als Tauri externalBin."
+paths = ["backend_entry.py", "backend.spec"]
+notes = "Sidecar-Name RB_Backend vs. rb-backend uneinheitlich (Linux-Doc)."
+
+[[feature]]
+id = "tauri-capabilities"
+group = "Desktop-Runtime"
+name = "Tauri-Capabilities"
+status = "partial"
+desc = "Rechte: shell (Sidecar-Spawn), dialog, fs read/write/mkdir."
+paths = ["src-tauri/capabilities/main.json"]
+notes = "shell:allow-execute steht auf main noch drin (main.json:19) - entfernt auf PR #58 (1af45ae)."
+
+# ── Auth & Security ───────────────────────────────────────────────────────
+
+[[feature]]
+id = "bearer-session-auth"
+group = "Auth & Security"
+name = "Bearer-Session-Auth (Phase 1)"
+status = "shipped"
+research = "security-api-auth-hardening"
+desc = "Token beim Boot, require_session auf allen Mutationen, Übergabe per stdout/Datei/dev-token."
+paths = ["app/auth.py", "frontend/src/store/authStore.js", "tests/test_auth.py"]
+depends_on = ["tauri-sidecar-supervisor"]
+notes = "Token nie loggen. Rotiert nur bei Sidecar-Neustart. Test-Isolation: plain pytest überschreibt den echten Session-Token (Fix auf PR #58)."
+
+[[feature]]
+id = "safe-compare"
+group = "Auth & Security"
+name = "Constant-Time-Vergleich"
+status = "shipped"
+research = "security-secrets-compare-digest-codebase-audit"
+desc = "safe_compare-Helper + require_session-Refactor."
+paths = ["app/security_compare.py", "tests/test_security_compare.py"]
+
+[[feature]]
+id = "rate-limiter"
+group = "Auth & Security"
+name = "Token-Bucket Rate-Limit"
+status = "shipped"
+research = "security-rate-limit-design"
+desc = "In-Process-Buckets, Loopback ausgenommen, 429 + Retry-After."
+paths = ["app/rate_limit.py", "tests/test_rate_limit.py"]
+notes = "Nur HIGH-Tier verdrahtet (shutdown/restart/sc-auth-token)."
+
+[[feature]]
+id = "cors-lockdown"
+group = "Auth & Security"
+name = "CORS-Lockdown"
+status = "shipped"
+research = "security-cors-allow-credentials-tightening"
+desc = "Nur localhost/tauri-Origins, explizite Methoden, allow_credentials=False, kein Auth-Cookie."
+notes = "Code in app/main.py. Cookie-Auth-PRs immer ablehnen."
+
+[[feature]]
+id = "audio-path-sandbox"
+group = "Auth & Security"
+name = "Pfad-Sandbox"
+status = "shipped"
+research = "security-api-file-reveal-sandbox"
+desc = "validate_audio_path gegen ALLOWED_AUDIO_ROOTS (is_relative_to) + Endungs-Whitelist."
+paths = ["tests/test_main_security.py", "tests/test_security_hotfixes.py"]
+notes = "Code in app/main.py."
+
+[[feature]]
+id = "api-route-auth-model"
+group = "Auth & Security"
+name = "Separates Route-Auth-Modell"
+status = "dropped"
+research = "api-route-auth-model"
+desc = "Eigenes Route-Auth-Konzept (Spin-off aus Downloader OQ-A)."
+notes = "Ersetzt durch das ausgelieferte require_session."
+
+[[feature]]
+id = "paired-device-tokens"
+group = "Auth & Security"
+name = "Gepaarte Geräte-Tokens (Phase 2)"
+status = "partial"
+research = "security-mobile-paired-tokens-phase2"
+desc = "Gehashter Device-Token-Store, One-Shot-QR-Pairing-Codes, require_session akzeptiert beide."
+paths = ["app/auth_db.py", "app/pairing_store.py", "tests/test_pairing*.py", "tests/test_require_session.py"]
+depends_on = ["bearer-session-auth"]
+related = ["mobile-companion"]
+todo = ["T4 /api/pairing/start + complete", "T5 Geräte-Liste + Revoke", "T6 Tauri-QR-Render", "T7 Settings-UI 'Paired Devices'"]
+
+[[feature]]
+id = "dependency-hardening-audit"
+group = "Auth & Security"
+name = "Dependency-Hardening + Audit"
+status = "shipped"
+desc = "Pins (==), lockfile-lint, Audit-Skripte, Threat-Model."
+paths = ["scripts/security-audit.sh", "scripts/security-audit.ps1", ".npmrc", ".lockfile-lintrc.json", "docs/SECURITY.md", ".claude/commands/audit.md"]
+related = ["dependency-security-bumps"]
+
+# ── Logging ───────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "log-path-redaction"
+group = "Logging"
+name = "Log/Error-Redaction"
+status = "shipped"
+research = "security-error-handler-exc-info-leak"
+desc = "RedactingFormatter entfernt absolute Pfade aus Logs/Tracebacks, safe_error_message."
+paths = ["app/logging_utils.py", "tests/test_logging_redaction.py"]
+
+[[feature]]
+id = "sc-log-credential-scrub"
+group = "Logging"
+name = "SC-Credentials aus Logs"
+status = "unmerged"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
+desc = "client_id/oauth_token aus jeder geloggten URL, jedem Param-Dict und jeder Exception entfernt."
+paths = ["tests/test_soundcloud_log_redaction.py"]
+related = ["sc-api-client", "log-path-redaction"]
+
+# ── Infra ─────────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "system-lifecycle-routes"
+group = "Infra"
+name = "Health/Heartbeat/Shutdown/Restart"
+status = "shipped"
+desc = "Health ohne Auth, Heartbeat alle 5 s, Shutdown/Restart mit Auth + Rate-Limit."
+paths = ["tests/test_system_health.py"]
+routes = ["/api/system/health", "/api/system/heartbeat", "/api/system/shutdown", "/api/system/restart"]
+notes = "Heartbeat wird gespeichert, aber kein Watchdog wertet ihn aus."
+
+[[feature]]
+id = "config-platform-paths"
+group = "Infra"
+name = "Config / Plattform-Pfade"
+status = "partial"
+desc = "REKORDBOX_ROOT, FFMPEG_BIN, export/log/temp/music-Ordner; Auth-Dateien über platformdirs."
+paths = ["app/config.py"]
+related = ["linux-dj-workflow"]
+notes = "REKORDBOX_ROOT nur über %APPDATA%; relative ./exports hängen vom cwd ab."
+
+[[feature]]
+id = "docker-deploy"
+group = "Infra"
+name = "Docker-Setup"
+status = "partial"
+desc = "Dockerfile für Backend + Frontend, docker-compose."
+paths = ["Dockerfile.backend", "Dockerfile.frontend", "docker-compose.yml"]
+notes = "Backend bindet im Container 127.0.0.1 (unerreichbar). HANDOVER 5.5 sagt: löschen."
+
+# ── Performance ───────────────────────────────────────────────────────────
+
+[[feature]]
+id = "performance-overhaul"
+group = "Performance"
+name = "Performance-Overhaul"
+status = "research"
+research = "performance-overhaul"
+desc = "Spürbare Langsamkeit beseitigen (Scroll, Tabwechsel, Playlist-Expand, USB, Start) - 48 Hotspots belegt."
+related = ["track-table", "usb-sync-engine", "workspace-topbar-nav", "multiband-waveform-data"]
+todo = ["TrackTable virtualisieren + memo-Rows", "/api/library/tracks paginieren + GZip", "schwere Views lazy mounten; SettingsManager.load cachen", "/api/usb/sync als SSE, Export parallel, Scan/Diff ohne N+1", "Waveform-Decode + load_library vom Event-Loop, 2-s-Splash weg", "Virtualisierungs-Lib als Schicht-A-Entscheidung"]
+notes = "Code-Teile auf zwei Branches (siehe Teile)."
+
+[[feature]]
+id = "perf-backend-quickwins"
+group = "Performance"
+parent = "performance-overhaul"
+name = "Backend-Perf Quick Wins"
+status = "unmerged"
+branch = "claude/perf-backend-quickwins"
+desc = "Mappings-Cache, memoisiertes resolve() im Import-Dedup, Light-Projektion für GET /api/library/tracks."
+paths = ["tests/test_import_dedup.py", "tests/test_library_tracks_light.py"]
+notes = "1 Commit ungepusht. Auf PR #58 gestapelt."
+
+[[feature]]
+id = "perf-frontend-virtualization"
+group = "Performance"
+parent = "performance-overhaul"
+name = "TrackTable-Virtualisierung (Mai-Pass)"
+status = "unmerged"
+branch = "claude/pensive-wiles-74ad65"
+desc = "Virtualisierte TrackTable, TrackRow-Memo, modulweiter Track-Cache, useDeferredValue-Suche."
+paths = ["frontend/src/hooks/useVirtualRows.js", "frontend/src/hooks/useLibraryTracks.js"]
+related = ["track-table"]
+notes = "372 hinter main. Backend-Teil ist in perf-backend-quickwins neu gebaut - nur das Frontend fehlt noch."
+
+# ── Mobile ────────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "mobile-companion"
+group = "Mobile"
+name = "Mobile Companion (PWA)"
+status = "research"
+research = "mobile-companion-ranking-app"
+desc = "Dünner PWA-Client für den Ranking-Modus; braucht die laufende Haupt-App im LAN/Tunnel."
+depends_on = ["paired-device-tokens"]
+related = ["ranking-mode"]
+todo = ["OQ14 QR-TTL 60 s Sign-off", "OQ7 nur Text vs. Cover-Thumb", "Tailscale-Funnel-Rezept"]
+
+# ── Release & CI ──────────────────────────────────────────────────────────
+
+[[feature]]
+id = "ci-pipeline"
+group = "Release & CI"
+name = "CI-Pipeline"
+status = "shipped"
+desc = "Python ruff/mypy/pytest + MAP-Drift, Rust clippy/fmt/test, Frontend eslint/prettier/build."
+paths = [".github/workflows/ci.yml", "scripts/check_attr_defined.py", "tests/test_route_uniqueness.py"]
+notes = "Letzter main-Lauf rot (MAP-Drift). ruff/mypy nicht blockierend."
+
+[[feature]]
+id = "ci-node-test-suites"
+group = "Release & CI"
+parent = "ci-pipeline"
+name = "node:test-Suites in der CI"
+status = "unmerged"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
+desc = "Frontend-Unit-Tests blockierend in der CI (Plain-Suites, dawReducer, Artist-Hook)."
+notes = "Auf main laufen Frontend-Tests in der CI gar nicht."
+
+[[feature]]
+id = "cross-platform-release"
+group = "Release & CI"
+name = "Release-Pipeline"
+status = "shipped"
+desc = "Bei Tag-Push: PyInstaller-Backend + Tauri-Bundle für Win/Mac/Linux; lokales Release-Skript."
+paths = [".github/workflows/release.yml", "scripts/local-release.ps1"]
+depends_on = ["pyinstaller-backend-bundle"]
+notes = "Kein Code-Signing (SmartScreen-Warnung)."
+
+# ── Linux/macOS ───────────────────────────────────────────────────────────
+
+[[feature]]
+id = "linux-macos-support"
+group = "Linux/macOS"
+name = "Linux/macOS-Support"
+status = "partial"
+desc = "CI baut deb/rpm + dmg, platformdirs-Pfade, xdg-open/open-Zweige."
+related = ["config-platform-paths", "usb-device-detect"]
+notes = "AppImage übersprungen, macOS ungetestet, Rekordbox-Root + USB-Detektor Windows-zentriert."
+
+[[feature]]
+id = "linux-dj-workflow"
+group = "Linux/macOS"
+parent = "linux-macos-support"
+name = "Linux-Workflow SC -> CDJ"
+status = "research"
+research = "linux-dj-workflow"
+branch = "claude/quirky-jepsen-9bb229"
+desc = "SoundCloud -> Analyse -> CDJ-3000-Stick ohne Rekordbox auf Linux."
+todo = ["USB-Erkennung als Plattform-Strategy", "plattformbewusste Pfade", "Sidecar-Namen vereinheitlichen", "Rekordbox-Autodetect auf Linux degradieren", "Linux-CI Tauri-Build-Smoke"]
+notes = "Doc nur auf Branch (Port auf 485cbfe). macOS/Realtime-Audio/AppImage bewusst Non-goal für M1."

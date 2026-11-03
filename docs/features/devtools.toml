@@ -1,0 +1,262 @@
+[area]
+id = "devtools"
+name = "Entwicklung & Tooling"
+order = 13
+desc = "Arbeitsweise, Research-Pipeline, Doku-Maps, Claude-Setup, Qualität/CI, Abhängigkeiten, Dev-Skripte."
+
+# ── Arbeitsweise ──────────────────────────────────────────────────────────
+
+[[feature]]
+id = "feature-map"
+group = "Arbeitsweise"
+name = "Feature-Map (diese Mindmap)"
+status = "shipped"
+desc = "Registry aller Features + Live-Abgleich mit Branches/Worktrees: wer baut gerade woran, was überschneidet sich."
+paths = ["scripts/feature_map.py", "scripts/feature_map_template.html", "docs/features/", ".claude/rules/feature-map.md", ".claude/commands/feature-map.md"]
+related = ["research-pipeline", "code-map-regen"]
+
+# ── Research-Pipeline ─────────────────────────────────────────────────────
+
+[[feature]]
+id = "research-pipeline"
+group = "Research-Pipeline"
+name = "Research -> Implement-Pipeline"
+status = "shipped"
+desc = "Zustand über Ordner + Dateipräfix, ein Approval-Gate, Index, Template, Gate-Commands."
+paths = ["docs/research/README.md", "docs/research/_TEMPLATE.md", ".claude/rules/research-pipeline.md", ".claude/commands/approve.md", ".claude/commands/reject.md", ".claude/commands/pipeline.md", ".claude/commands/gate-*.md", ".claude/commands/research-new.md"]
+related = ["feature-map"]
+
+[[feature]]
+id = "pipeline-cli-tools"
+group = "Research-Pipeline"
+name = "Pipeline-Status/Dashboard/Validator"
+status = "shipped"
+desc = "CLI-Status, lokales Web-Dashboard, Validator für Research-Docs."
+paths = ["scripts/pipeline_status.py", "scripts/pipeline_dashboard.py", "scripts/validate_research_docs.py", ".claude/commands/dashboard.md"]
+depends_on = ["research-pipeline"]
+
+[[feature]]
+id = "cloud-routines"
+group = "Research-Pipeline"
+name = "claude.ai-Cron-Routinen"
+status = "partial"
+desc = "12 Routine-Prompts (draft/explore/plan/implement/watchdog ...), print_routine, Deploy-Checkliste."
+paths = ["docs/research/routines/", "scripts/print_routine.py", "DEPLOY-ROUTINES.md", ".claude/commands/print-routine.md"]
+depends_on = ["research-pipeline"]
+todo = ["Entscheiden: neu deployen oder Pipeline manuell (/print-routine) fahren"]
+notes = "Seit 2026-06-10 läuft keine Routine. 6 accepted_- und 7 inprogress_-Docs stehen still."
+
+[[feature]]
+id = "research-doc-ports"
+group = "Research-Pipeline"
+name = "Port verwaister Research-Docs"
+status = "unmerged"
+branch = "detached@485cbfe"
+desc = "Toast-, Waveform-, Linux-, pnpm-, Genre-Docs portiert + A/B-Harness-Fix; Doc-States nachgezogen."
+notes = "AUF KEINEM BRANCH - nur über Worktree .claude/worktrees/wf_12dfd943-65c-2 erreichbar. Branch setzen, sonst beim Aufräumen weg."
+
+# ── Doku-Maps ─────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "code-map-regen"
+group = "Doku-Maps"
+name = "MAP-Regenerator"
+status = "shipped"
+desc = "MAP.md/MAP_L2.md deterministisch aus AST; CI prüft Drift."
+paths = ["scripts/regen_maps.py", ".claude/commands/regen-maps.md"]
+
+[[feature]]
+id = "doc-sync-agent"
+group = "Doku-Maps"
+name = "Doc-Sync (FILE_MAP/Indizes)"
+status = "shipped"
+desc = "Subagent + Command gleicht FILE_MAP und Backend/Frontend/Rust-Indizes mit dem Code ab."
+paths = [".claude/agents/doc-syncer.md", ".claude/commands/sync-docs.md"]
+notes = "architecture.md Flows 2/3 veraltet (Native-Playback/Rust-Waveform ungenutzt)."
+
+# ── Claude-Setup ──────────────────────────────────────────────────────────
+
+[[feature]]
+id = "claude-hooks"
+group = "Claude-Setup"
+name = "Claude-Hooks"
+status = "shipped"
+desc = "Auto-Format nach Edit, Auto-Push nach Commit, Feature-Map-Digest beim Sitzungsstart."
+paths = [".claude/hooks/", ".claude/settings.json"]
+notes = "Auto-Push feuert in der Desktop-App oft nicht."
+
+[[feature]]
+id = "claude-slash-commands"
+group = "Claude-Setup"
+name = "Slash-Commands"
+status = "shipped"
+desc = "commit, pr-new, sync-check, changelog-bump, full-check, test-py, dev-full, tauri-*, route-add, help."
+paths = [".claude/commands/commit.md", ".claude/commands/pr-new.md", ".claude/commands/sync-check.md", ".claude/commands/changelog-bump.md", ".claude/commands/full-check.md", ".claude/commands/test-py.md", ".claude/commands/dev-full.md", ".claude/commands/tauri-*.md", ".claude/commands/route-add.md", ".claude/commands/help.md"]
+
+[[feature]]
+id = "claude-agents-rules"
+group = "Claude-Setup"
+name = "Subagents + Regeln"
+status = "shipped"
+desc = "audio-stack-reviewer, route-architect, test-runner, e2e-tester; CLAUDE.md + .claude/rules."
+paths = ["CLAUDE.md", ".claude/rules/", ".claude/agents/audio-stack-reviewer.md", ".claude/agents/route-architect.md", ".claude/agents/test-runner.md", ".claude/agents/e2e-tester.md"]
+
+[[feature]]
+id = "claude-setup-cleanup"
+group = "Claude-Setup"
+name = "Claude-Setup aufräumen"
+status = "idea"
+desc = "Doppelte Regeln und tote Patterns entfernen, Hook-Claims korrigieren."
+related = ["claude-agents-rules", "claude-hooks"]
+todo = ["Duplikate CLAUDE.md vs. rules (wartet auf User)", "tote Exclude-Patterns in pyproject + format-on-edit", "Auto-Push-Claim auf die CLI einschränken", "klarstellen, dass dev:full kein Fenster öffnet"]
+
+# ── Qualität & CI ─────────────────────────────────────────────────────────
+
+[[feature]]
+id = "quality-gate-sweep"
+group = "Qualität & CI"
+name = "Lint/Typecheck-Sweep auf 0"
+status = "unmerged"
+branch = "claude/continuous-improvement-docs-i65s3x"
+desc = "ruff/mypy/eslint auf 0, alle Gates blockierend, Frontend-Tests in CI, 8 tote Endpoints repariert."
+related = ["ci-pipeline", "ci-node-test-suites"]
+todo = ["rebasen, neu machen oder verwerfen (177 Dateien, starke Konflikte mit #58)", "prüfen, was #58 schon abdeckt"]
+notes = "main hat ~195 ESLint-Warnungen, check_untyped_defs=false."
+
+[[feature]]
+id = "slopcode-cleanup-handover"
+group = "Qualität & CI"
+name = "Slopcode-Cleanup (Reste)"
+status = "partial"
+desc = "HANDOVER-Phasen 1-6 weitgehend erledigt, kleine Reste offen."
+paths = ["docs/HANDOVER.md"]
+todo = ["5.5 docker-compose.yml + Dockerfile.* löschen", "4.3 hartcodiertes localhost:8000 in DawEngine.js/ExportModal.jsx"]
+
+[[feature]]
+id = "code-health-followups"
+group = "Qualität & CI"
+name = "Code-Health-Restpunkte"
+status = "idea"
+desc = "Kleinere Audit-Befunde."
+todo = ["AnalysisCache.clear()/invalidate() auf Dead Code prüfen", "lintet clippy mit --no-default-features den Audio-Stack?", "_content_disposition_inline für Header aus DB-Strings wiederverwenden", "Test-Isolation in conftest (Fix 9fdbf79 nur auf PR #58)"]
+
+[[feature]]
+id = "orphaned-code"
+group = "Qualität & CI"
+name = "Verwaiste Dateien"
+status = "idea"
+desc = "Toter Code, der gemountet aussieht: aufräumen oder wiederbeleben."
+paths = ["frontend/src/components/LibraryView.jsx", "app/rekordbox_export.py", "app/analysis_inspector.py", "app/sidecar.py"]
+related = ["non-destructive-editor", "batch-rename-comment", "rust-native-playback"]
+notes = "Weitere: BatchEditBar.jsx, ToolsView.jsx (nie gerendert), editor/, Rust audio/metadata.rs. Fehlende Routen: /api/library/quality-stats, /api/insights/dj_stats, /api/file/read."
+
+[[feature]]
+id = "pre-commit-hooks"
+group = "Qualität & CI"
+name = "Pre-Commit-Hooks"
+status = "shipped"
+desc = "Hygiene, ruff, mypy, Syntax-Checks; Interpreter-Resolver gegen uv-PYTHONHOME-Mismatch."
+paths = [".pre-commit-config.yaml", "scripts/hook-python.sh"]
+notes = "pre-commit-ruff != .venv-ruff: erster Commit pro .py-Datei scheitert am Reformat."
+
+# ── Abhängigkeiten ────────────────────────────────────────────────────────
+
+[[feature]]
+id = "dependency-security-bumps"
+group = "Abhängigkeiten"
+name = "Dependabot/CVE-Abbau"
+status = "planned"
+pr = 46
+desc = "Echte CVEs per Bump schließen, Dependabot-Stau (11 PRs, alle > 60 Tage) abbauen."
+related = ["dependency-hardening-audit", "pyrekordbox-upgrade"]
+todo = ["python-multipart 0.0.9 + starlette 0.35.1 HIGH (PR #46 + starlette-Pin)", "npm: axios/vite/postcss; concurrently -> shell-quote critical", "Rust openssl/rustls/rustls-webpki", "#40/#53/#54 neu erzeugen, #56 schließen (braucht ESLint 9)", "Dependabot-Alerts in den Repo-Settings aktivieren"]
+notes = "Erst nach dem #58-Merge."
+
+[[feature]]
+id = "dev-env-pins"
+group = "Abhängigkeiten"
+name = "Dev-Env + Pins angleichen"
+status = "idea"
+desc = "madmom/essentia in der Build-Umgebung, 10 abweichende Pins, ruff-Version im pre-commit = .venv."
+notes = "requirements.txt ist heute nicht installierbar. User-Entscheidung."
+
+[[feature]]
+id = "tooling-pnpm-migration"
+group = "Abhängigkeiten"
+name = "npm -> pnpm"
+status = "research"
+research = "tooling-pnpm-migration"
+branch = "claude/clever-moser-b881be"
+desc = "Workspace-Modell statt 3x npm --prefix, inkl. CI, Tauri-Hooks, Security-Controls."
+notes = "Doc nur auf Branch (Port auf 485cbfe)."
+
+# ── Dev-Skripte & Tests ───────────────────────────────────────────────────
+
+[[feature]]
+id = "dev-launcher"
+group = "Dev-Skripte & Tests"
+name = "Dev-Launcher"
+status = "shipped"
+desc = "Backend mit venv-Python, Self-Healing-node_modules, dev:full, Preview-launch.json."
+paths = ["scripts/run-backend.mjs", "scripts/ensure-deps.mjs", ".claude/launch.json"]
+
+[[feature]]
+id = "e2e-webdriver"
+group = "Dev-Skripte & Tests"
+name = "E2E (Tauri WebDriver)"
+status = "shipped"
+desc = "tauri-driver + msedgedriver, Mocha-Smoke, Web-Preview-Workflow."
+paths = ["tests/e2e/", "docs/e2e-testing.md"]
+notes = "Nur ein Smoke-Test."
+
+[[feature]]
+id = "screenshot-tools"
+group = "Dev-Skripte & Tests"
+name = "Screenshot-Tools"
+status = "shipped"
+desc = "Headless-Chrome/CDP-Shots aller Views, alternativ Playwright."
+paths = ["scripts/dev/shoot.mjs", "scripts/screenshot.py"]
+
+[[feature]]
+id = "dev-spike-scripts"
+group = "Dev-Skripte & Tests"
+name = "Dev-Spikes/Probes"
+status = "shipped"
+desc = "rbox-Artist-Merge-Probe (nach jedem rbox-Upgrade laufen lassen), XML-Sync-Test."
+paths = ["scripts/dev/rbox_artist_merge_probe.py", "scripts/test_xml_sync.py"]
+
+# ── Repo & Doku ───────────────────────────────────────────────────────────
+
+[[feature]]
+id = "repo-portfolio-polish"
+group = "Repo & Doku"
+name = "Repo-Präsentation"
+status = "idea"
+desc = "Repo für die Uni-Bewerbung aufbereiten."
+todo = ["README v2 mit Musikinformatik-Fokus", "GitHub-Description + Topics + Profil-Pin", "Screenshot/GIF in docs/assets", "docs/research -> docs/internal/research (Skripte mitziehen)", "Mailmap", "History-Rewrite Co-Authored-By (bräuchte Force-Push-Ausnahme)"]
+
+[[feature]]
+id = "dev-handbook"
+group = "Repo & Doku"
+name = "HTML-Handbuch"
+status = "unmerged"
+branch = "claude/comprehensive-documentation-DutfF"
+desc = "HTML-Entwicklerhandbuch, 28 Kapitel (Parts I-VII)."
+notes = "Stand 2026-05-21 - Inhalt vermutlich veraltet."
+
+[[feature]]
+id = "obsidian-dj-vault"
+group = "Repo & Doku"
+name = "Obsidian DJ-Theorie-Vault"
+status = "unmerged"
+branch = "claude/obsidian-dj-music-theory-e9mbmo"
+desc = "42 Notizen: Musiktheorie, Harmonic Mixing, BPM/Pitch, DJ-Technik, Hardware."
+notes = "Kein Code - gehört evtl. nicht ins Repo."
+
+[[feature]]
+id = "devtools-dropped-cleanups"
+group = "Repo & Doku"
+name = "Verworfene Aufräum-Ideen"
+status = "dropped"
+desc = "USB-Invarianten in den Rules deduplizieren; Dev-Skript-Aggregation extrahieren; Import-Trick gegen pyrekordbox-Warnung."
+notes = "Churn > Nutzen; im Audit widerlegt; ersetzt durch den Logger-Schutz in pyrekordbox_compat."

@@ -1,0 +1,206 @@
+[area]
+id = "artists"
+name = "Artist Hub"
+order = 3
+desc = "Lieblingskünstler, Schreibvarianten mergen, SoundCloud-Kataloge, Discovery. Alles auf PR #58 (claude/loving-goodall-90uf7w) - nichts davon auf main."
+
+# ── Hub & Store ───────────────────────────────────────────────────────────
+
+[[feature]]
+id = "artist-hub"
+group = "Hub & Store"
+name = "Artist Hub (Gesamt, M1-M5)"
+status = "unmerged"
+research = "library-artist-hub"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
+desc = "Artist-Übersicht mit Favoriten, Merge, Rekordbox-Artists-Ordner, SC-Katalog, Discovery, Background-Sync, USB-Relocation."
+paths = ["frontend/src/components/ArtistHubView.jsx", "app/artist_store/__init__.py", "frontend/src/components/artistHub/artistHubApi.js", "frontend/src/components/artistHub/LocalTracksPanel.jsx", "frontend/src/components/artistHub/AssignArtistModal.jsx"]
+depends_on = ["external-track-match", "sc-api-client", "live-master-db"]
+todo = ["PR #58 mergen (CI grün; ersetzt feat/artist-hub)", "2 Commits von feat/artist-hub (Ranking-Genre-Baum) auf #58 cherry-picken", "Entscheiden: Tageslimit statt Per-Pass-Budget für Background-Sync", "Owner-Sign-off -> implemented_"]
+notes = "Vier Branches sind auf #58 gestapelt (track-write-safety, usb-anlz-export-fixes, perf-backend-quickwins, research-doc-ports) - #58 zuerst landen."
+
+[[feature]]
+id = "artist-store-sidecar"
+group = "Hub & Store"
+name = "Artist-Store (artists.db)"
+status = "unmerged"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
+desc = "Sidecar-DB mit Migrationen: Collections, Aliases, SC-Binding, Sync-State, Katalog-Cache."
+paths = ["app/artist_store/schema.py", "tests/test_artist_store_schema.py"]
+
+[[feature]]
+id = "artist-favourites"
+group = "Hub & Store"
+name = "Favoriten & Backlog"
+status = "unmerged"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
+desc = "Favoriten, Tier-1-Backlog ohne Netz, Sync-Modus pro Artist (auto/review/off), All-Artists-Tab."
+paths = ["app/artist_store/registry.py", "tests/test_artist_store_registry.py", "tests/test_artist_routes.py"]
+routes = ["/api/artists/hub", "/api/artists/favourites", "/api/artists/browse"]
+depends_on = ["artist-store-sidecar", "name-normalisation"]
+
+# ── Merge & Rekordbox ─────────────────────────────────────────────────────
+
+[[feature]]
+id = "artist-merge"
+group = "Merge & Rekordbox"
+name = "Artist-Merge (Schreibweisen)"
+status = "unmerged"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
+desc = "Doppelte Schreibweisen per deterministischem Fold finden, Preview, Apply in master.db + Datei-Tags, Revert per Journal."
+paths = ["app/artist_store/merge.py", "frontend/src/components/artistHub/MergeDialog.jsx", "frontend/src/components/artistHub/mergeCopy.js", "frontend/src/components/artistHub/mergeCopy.test.js", "tests/test_artist_merge_*.py"]
+routes = ["/api/artists/merge", "/api/artists/jobs"]
+depends_on = ["artist-store-sidecar", "live-master-db", "file-tag-writeback", "metadata-fixer", "rekordbox-running-guard"]
+related = ["usb-folder-relocation", "name-normalisation"]
+notes = "Nie fuzzy. Waisen löschen nur Opt-in (nullt Remixer/Composer, Revert stellt das nicht her)."
+
+[[feature]]
+id = "artist-projection-rekordbox"
+group = "Merge & Rekordbox"
+name = "Rekordbox-Ordner 'Artists'"
+status = "unmerged"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
+desc = "Eine Playlist pro Favorit inkl. aller Alias-Varianten, Diff in place, idempotent."
+paths = ["app/artist_store/projection.py", "frontend/src/components/artistHub/ProjectionPanel.jsx", "tests/test_artist_projection.py"]
+routes = ["/api/artists/projection"]
+depends_on = ["artist-favourites", "playlist-tree-crud"]
+related = ["auto-label-playlists", "library-folder-projections"]
+
+# ── SoundCloud-Katalog ────────────────────────────────────────────────────
+
+[[feature]]
+id = "artist-sc-link"
+group = "SoundCloud-Katalog"
+name = "Artist mit SoundCloud verknüpfen"
+status = "unmerged"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
+desc = "SC-Profil manuell binden/lösen, Import aus Legacy app_data.json."
+paths = ["frontend/src/components/artistHub/ArtistDetail.jsx", "frontend/src/components/artistHub/artistCatalogueApi.js"]
+routes = ["/api/artists/{collection_id}/link"]
+depends_on = ["artist-store-sidecar"]
+notes = "Auf main ist /api/artist/soundcloud ein Fake (Speichern auskommentiert)."
+
+[[feature]]
+id = "artist-identity-roles"
+group = "SoundCloud-Katalog"
+name = "Track-Rollen (remix-aware)"
+status = "unmerged"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
+desc = "Rollen primary/remixer/featured/uncertain aus Namen, Identity-Tabelle (ISRC), Rolle manuell pinnen."
+paths = ["app/artist_store/identity.py", "tests/test_artist_identity.py"]
+depends_on = ["artist-sc-link", "external-track-match"]
+
+[[feature]]
+id = "artist-catalogue-diff"
+group = "SoundCloud-Katalog"
+name = "Katalog & Fehlt-Liste"
+status = "unmerged"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
+desc = "SC-Katalog in 6 Rollen-Buckets, Diff gegen Library, 6-h-Cache (max. 2000 Tracks)."
+paths = ["app/artist_store/catalogue.py", "frontend/src/components/artistHub/useArtistCatalogue*", "frontend/src/components/artistHub/catalogueCopy*", "tests/test_artist_catalogue*.py", "tests/test_soundcloud_artist_api.py"]
+routes = ["/api/artists/{collection_id}/catalogue"]
+depends_on = ["artist-identity-roles", "external-track-match"]
+
+[[feature]]
+id = "artist-download-missing"
+group = "SoundCloud-Katalog"
+name = "Fehlende Tracks laden"
+status = "unmerged"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
+desc = "Fehlende Tracks über den SC-Downloader einreihen, Auto-Queue nur primary/remixer mit hoher Confidence."
+paths = ["frontend/src/components/artistHub/useArtistDetailActions.js"]
+routes = ["/api/artists/{collection_id}/download-missing", "/api/artists/download/status"]
+depends_on = ["artist-catalogue-diff", "sc-downloader"]
+
+# ── Discovery & Sync ──────────────────────────────────────────────────────
+
+[[feature]]
+id = "artist-discovery"
+group = "Discovery & Sync"
+name = "Artist-Discovery"
+status = "unmerged"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
+desc = "Neue Artists über einen /related-Hop pro Favorit plus Co-Occurrence aus dem Cache."
+paths = ["app/artist_store/discovery.py", "frontend/src/components/artistHub/discoveryCopy*", "frontend/src/components/artistHub/artistDiscoveryApi.js", "tests/test_artist_discovery*.py"]
+routes = ["/api/artists/discover"]
+depends_on = ["artist-sc-link", "artist-catalogue-diff"]
+
+[[feature]]
+id = "artist-background-sync"
+group = "Discovery & Sync"
+name = "Idle-Background-Sync"
+status = "unmerged"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
+desc = "Aktualisiert Kataloge der Favoriten, wenn die App idle ist; lädt nie herunter; Default aus."
+paths = ["app/artist_store/sync.py", "tests/test_artist_sync.py"]
+routes = ["/api/artists/sync"]
+depends_on = ["artist-catalogue-diff"]
+notes = "Budget gilt pro Pass (60 Calls / 15 min), nicht pro Tag: bis ~5760 Calls/Tag. Entscheidung offen."
+
+# ── Links & Attribution (M4/M5) ───────────────────────────────────────────
+
+[[feature]]
+id = "artist-links-musicbrainz"
+group = "Links & Attribution"
+name = "Artist-Links + MusicBrainz"
+status = "unmerged"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
+desc = "Links-Leiste pro Artist (Web/Socials), MusicBrainz-Lookup, externe Links im System-Browser mit Host-Gates."
+paths = ["app/artist_store/links.py", "app/musicbrainz_client.py", "frontend/src/components/artistHub/ArtistLinks.jsx", "frontend/src/components/artistHub/artistLinksApi.js", "frontend/src/components/artistHub/linksCopy*", "frontend/src/utils/openExternal*", "tests/test_artist_links*.py", "tests/test_musicbrainz_client.py"]
+related = ["metadata-fixer"]
+
+[[feature]]
+id = "track-attribution"
+group = "Links & Attribution"
+name = "Credit-basierte Track-Zuordnung"
+status = "unmerged"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
+desc = "Lokale Tracks nach Rollen gruppiert, überall einem Artist zuweisbar."
+paths = ["app/artist_store/attribution.py", "tests/test_artist_attribution.py", "tests/test_artist_local_tracks_routes.py"]
+depends_on = ["artist-identity-roles"]
+
+[[feature]]
+id = "sc-download-recognizer"
+group = "Links & Attribution"
+name = "Download-Recognizer"
+status = "unmerged"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
+desc = "Erkennt, von wem ein SC-Download ist, und taggt jeden Download mit den erkannten Namen."
+paths = ["app/artist_store/recognizer.py", "frontend/src/components/downloads/", "tests/test_artist_recognizer.py", "tests/test_soundcloud_download_recognition.py", "tests/test_download_names_route.py"]
+routes = ["/api/soundcloud/downloads/{id}/names"]
+depends_on = ["artist-identity-roles", "sc-downloader"]
+related = ["download-manager-view"]
+
+# ── Folgeideen ────────────────────────────────────────────────────────────
+
+[[feature]]
+id = "artist-hub-followups"
+group = "Folgeideen"
+name = "Artist-Hub Folgeideen"
+status = "idea"
+desc = "Kleinere offene Wünsche rund um den Artist Hub."
+related = ["artist-hub"]
+todo = ["Artist-Liste virtualisieren (3364 Artists bei Threshold 0)", "Liste nach Threshold-Save live neu berechnen", "DJ-Prefix-Normalisierung nur am Stringanfang (DJ Koze/Hell/Shadow)", "downloadable nur als Ranking-/Badge-Signal", "Namensvetter-Auto-Download-Sperre lockern (nur auf Wunsch)", "SKIPPED_TRACK_CAP_NOTE aus discoveryCopy importieren (Text-Drift)"]
+
+[[feature]]
+id = "artist-hub-dropped-designs"
+group = "Folgeideen"
+name = "Verworfene Artist-Hub-Varianten"
+status = "dropped"
+desc = "metadata_mappings.json erweitern; RB-Ordner als Favoritenliste; mappings.json importieren; Discord als Input."
+related = ["artist-hub"]
+notes = "Nebenläufigkeit; kein Platz für Binding/Sync-State; Mappings greifen schon in _normalize_artist_name; Discord vom User verworfen."

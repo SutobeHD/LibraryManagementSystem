@@ -4904,6 +4904,35 @@ Scan an audio library with ffprobe, aggregate codec/bitrate/sample-rate.
 - `classify()` — Bucket per club-readiness tier.
 - `main()`
 
+### `scripts/feature_map.py`
+
+Feature registry plus a live overlay of which branch or worktree touches which feature.
+
+- `Feature`
+- `Area`
+- `Registry`
+- `load_registry()`
+- `path_matches()`
+- `Mapper` — Maps repo file paths onto feature ids.
+- `  Mapper.is_hub()`
+- `  Mapper.is_ignored()`
+- `  Mapper.features_for()`
+- `Site` — One construction site: an unmerged branch and/or a worktree.
+- `  Site.label()`
+- `collect_sites()`
+- `attach_activity()` — Fill Feature.activity; return feature id -> live site names when >= 2 (overlaps).
+- `compute_shares()` — Features whose paths resolve to the same tracked file share code.
+- `tracked_files()`
+- `cmd_brief()`
+- `cmd_active()`
+- `cmd_who()`
+- `cmd_list()`
+- `cmd_check()`
+- `cmd_coverage()`
+- `build_model()`
+- `cmd_html()`
+- `main()`
+
 ### `scripts/pipeline_dashboard.py`
 
 Local web dashboard for the research pipeline.

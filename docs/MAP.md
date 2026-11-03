@@ -360,6 +360,7 @@
 | `scripts/dev/rescan_unreadable.py` | Re-scan only the rows marked unreadable in an audio_report.json. |
 | `scripts/dev/safe_format_swap.py` | safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist. |
 | `scripts/dev/scan_audio_quality.py` | Scan an audio library with ffprobe, aggregate codec/bitrate/sample-rate. |
+| `scripts/feature_map.py` | Feature registry plus a live overlay of which branch or worktree touches which feature. |
 | `scripts/pipeline_dashboard.py` | Local web dashboard for the research pipeline. |
 | `scripts/pipeline_status.py` | Show the research pipeline state at a glance. |
 | `scripts/print_routine.py` | Extract the deploy-ready prompt from a routine .md file. |
