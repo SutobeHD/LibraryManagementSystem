@@ -59,7 +59,8 @@ All DAW state is managed in this directory. Do NOT duplicate in component-local 
 | File | Purpose | Key API calls |
 |------|---------|--------------|
 | `components/MetadataView.jsx` | Library browser — mode (`playlists`/`artists`/`labels`/`albums`) driven by the `mode` prop from the Library workspace nav (no own title/tab bar). Playlists → `PlaylistBrowser`; artists/labels/albums → item grid → `TrackTable`. Routes to: `lib-*`. | `GET /api/artists\|labels\|albums`, `GET /api/{type}/{id}/tracks`, `POST /api/metadata/merge` |
-| `components/RankingView.jsx` | Ranking-mode view: per-track hot-cue / tag / quality controls with embedded `WaveformEditor` in `simpleMode`. Routes to: `ranking`. | `GET /api/library/tracks` |
+| `components/RankingView.jsx` | Ranking-mode view: per-track hot-cue / tag / quality controls with embedded `WaveformEditor` in `simpleMode`. Routes to: `ranking`. Renders `GenreSuggestions` under the Genre input. | `GET /api/library/tracks` |
+| `components/GenreSuggestions.jsx` | Read-only genre-atlas chips for one track (top 5, confidence, tooltip with reasons + audio check). Click calls `onPick` with the library's own spelling; never saves. Props: `trackId`, `currentGenre`, `onPick`. | `GET /api/track/{tid}/genre-suggestions` |
 | `components/InsightsView.jsx` | DJ-style analytics dashboard — BPM histogram, Camelot key wheel, genre breakdown, most-played tracks, library composition (energy/format/era). Routes to: `insights`. | `GET /api/insights/bpm_distribution` (+ others) |
 | `components/ImportView.jsx` | Audio import wizard — drag-drop or filesystem picker, scan + analyse, watcher integration. Routes to: `import`. | `POST /api/audio/import` |
 | `components/XmlCleanView.jsx` | Rekordbox XML cleaning: drag-drop a file, scan, fix encoding/dead refs. Routes to: `xml`. | `POST /api/xml/clean` |

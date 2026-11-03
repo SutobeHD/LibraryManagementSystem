@@ -23,6 +23,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     Request,
     Response,
     UploadFile,
@@ -83,6 +84,7 @@ from . import audio_tags, download_registry, folder_watcher
 from .audio_analyzer import LIBROSA_AVAILABLE, AudioAnalyzer
 from .config import EXPORT_DIR, LOG_DIR, MUSIC_DIR, TEMP_DIR
 from .database import db
+from .genre_atlas import get_atlas, library_spelling
 from .phrase_generator import (
     PhraseNotAnalysedError,
     commit_phrase_cues,
@@ -914,6 +916,103 @@ async def clean_xml(
 @app.get("/api/genres")
 def get_genres():
     return db.get_all_genres()
+
+
+# Genre-atlas hints: read-only suggestions from app/genre_atlas.py. Nothing here writes; the UI
+# saves a picked genre through the normal track update route.
+GENRE_HINT_MAX_LEN = 500
+GENRE_HINT_MAX_BPM = 400.0
+_GenreHintStr = _Annotated[str | None, Query(max_length=GENRE_HINT_MAX_LEN)]
+_GenreHintLimit = _Annotated[int, Query(ge=1, le=20)]
+
+
+def _track_text(track: dict[str, Any], *keys: str) -> str | None:
+    """First non-empty value among ``keys`` as a string, else None."""
+    for key in keys:
+        value = track.get(key)
+        if value is not None and str(value).strip():
+            return str(value)
+    return None
+
+
+def _track_bpm(track: dict[str, Any]) -> float | None:
+    """Track BPM as a float inside (0, GENRE_HINT_MAX_BPM), else None (missing / unparsable)."""
+    try:
+        bpm = float(track.get("BPM") or 0)
+    except (TypeError, ValueError) as e:
+        logger.debug("op=track_genre_suggestions bpm_unparsable err=%s", e)
+        return None
+    return bpm if 0 < bpm < GENRE_HINT_MAX_BPM else None
+
+
+def _library_genre_names() -> list[str]:
+    """Genre names in the active library; accepts ``{id, name}`` rows and plain strings."""
+    names: list[str] = []
+    for row in db.get_all_genres() or []:
+        name = row.get("name") if isinstance(row, dict) else row
+        if isinstance(name, str) and name.strip():
+            names.append(name)
+    return names
+
+
+@app.get("/api/genre-atlas/suggest")
+def genre_atlas_suggest(
+    title: _GenreHintStr = None,
+    artist: _GenreHintStr = None,
+    genre: _GenreHintStr = None,
+    comment: _GenreHintStr = None,
+    label: _GenreHintStr = None,
+    soundcloud: _GenreHintStr = None,
+    bpm: _Annotated[float | None, Query(gt=0, lt=GENRE_HINT_MAX_BPM)] = None,
+    limit: _GenreHintLimit = 8,
+) -> dict[str, Any]:
+    """Ranked genre candidates (with reasons) for free-form track metadata."""
+    result = get_atlas().suggest(
+        title=title,
+        artist=artist,
+        genre=genre,
+        comment=comment,
+        label=label,
+        soundcloud=soundcloud,
+        bpm=bpm,
+        limit=limit,
+    )
+    logger.debug(
+        "op=genre_atlas_suggest limit=%d candidates=%d bpm_only=%s",
+        limit,
+        len(result["candidates"]),
+        result["bpm_only"],
+    )
+    return result
+
+
+@app.get("/api/track/{tid}/genre-suggestions")
+def track_genre_suggestions(tid: str, limit: _GenreHintLimit = 8) -> dict[str, Any]:
+    """Genre candidates for a library track, each with the library's own spelling if present."""
+    track = db.get_track_details(tid)
+    if not track:
+        raise HTTPException(404, "Track not found")
+    current_genre = _track_text(track, "Genre")
+    result = get_atlas().suggest(
+        title=_track_text(track, "Title"),
+        artist=_track_text(track, "Artist", "ArtistName"),
+        genre=current_genre,
+        comment=_track_text(track, "Comment"),
+        label=_track_text(track, "Label"),
+        bpm=_track_bpm(track),
+        limit=limit,
+    )
+    library_genres = _library_genre_names()
+    for cand in result["candidates"]:
+        cand["library_genre"] = library_spelling(cand, library_genres)
+    result["track"] = {"id": tid, "genre": current_genre}
+    logger.debug(
+        "op=track_genre_suggestions tid=%s candidates=%d library_genres=%d",
+        tid,
+        len(result["candidates"]),
+        len(library_genres),
+    )
+    return result
 
 
 @app.get("/api/library/tracks")
