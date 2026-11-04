@@ -5,6 +5,8 @@ Tests for the phrase-batch backend (app/main.py):
   * _phrase_track_fields — live/xml/raw key shapes
   * _run_phrase_batch — progress, skipped/failed reasons, cancel, ETA, error cap
   * /api/phrase/batch/{start,status,cancel} — auth, validation, 409 single-flight
+  * _live_master_db_path + /api/phrase/{generate,commit} — the live library's
+    master.db, 409 outside live mode (was hard-wired to %APPDATA%/Pioneer/rekordbox)
 
 The blocking phrase_generator calls are monkeypatched in the app.main namespace
 so no rbox / real ANLZ is touched. The autouse `auth_token` fixture (conftest)
@@ -15,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from pathlib import Path
 
 import httpx
 import pytest
@@ -61,11 +64,18 @@ def _clean_phrase_state():
             main._phrase_batch_lock.release()
 
 
+LIVE_DB_PATH = "X:/Rekordbox/master.db"
+
+
 class _DB:
     """Minimal stand-in for the `db` facade used by resolve_track_scope."""
 
-    def __init__(self, *, loaded=True, all_tracks=None, playlist_tracks=None, details=None):
+    def __init__(
+        self, *, loaded=True, all_tracks=None, playlist_tracks=None, details=None, mode="live"
+    ):
         self.loaded = loaded
+        self.mode = mode
+        self.live_db_path = Path(LIVE_DB_PATH)
         self._all = all_tracks or []
         self._pl = playlist_tracks or []
         self._details = details
@@ -117,7 +127,7 @@ def _drive(
     if commit is None:
         commit = lambda tid, c, dbp, include_bar_markers=False: {"written": len(c)}  # noqa: E731
     monkeypatch.setattr(main, "commit_phrase_cues", commit)
-    monkeypatch.setattr(main, "_phrase_db_path", lambda: "X:/master.db")
+    monkeypatch.setattr(main, "_live_master_db_path", lambda: Path(LIVE_DB_PATH))
 
     job_id = "job-test"
     main._phrase_jobs[job_id] = _new_job(len(tracks))
@@ -263,6 +273,30 @@ def test_worker_error_cap(monkeypatch):
     assert job["errors_truncated"] is True
 
 
+def test_worker_hands_the_live_master_db_to_every_call(monkeypatch):
+    seen = []
+
+    def _commit(tid, c, dbp, include_bar_markers=False):
+        seen.append(dbp)
+        return {"written": len(c)}
+
+    job = _drive(_tracks(2), monkeypatch, commit=_commit)
+    assert job["status"] == "done"
+    assert seen == [str(Path(LIVE_DB_PATH))] * 2
+
+
+def test_worker_errors_out_when_the_library_left_live_mode(monkeypatch):
+    calls = []
+    monkeypatch.setattr(main, "commit_phrase_cues", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(main, "_live_master_db_path", lambda: None)
+    main._phrase_jobs["job-x"] = _new_job(1)
+    asyncio.run(_run_phrase_batch("job-x", _tracks(1), 16, False, False))
+    job = main._phrase_jobs["job-x"]
+    assert job["status"] == "error"
+    assert "live Rekordbox library" in job["error"]
+    assert calls == []
+
+
 def test_worker_eta_positive_mid_run(monkeypatch):
     # 2 tracks: assert eta math stays a non-negative number through completion.
     job = _drive(_tracks(2), monkeypatch)
@@ -322,6 +356,20 @@ def test_start_conflict_when_locked(monkeypatch, auth_token):
     assert r.status_code == 409
 
 
+def test_start_outside_live_mode_is_a_409(monkeypatch, auth_token):
+    monkeypatch.setattr(
+        main, "db", _DB(all_tracks=[{"ID": 1, "Title": "a", "path": "p"}], mode="xml")
+    )
+    r = _post(
+        "/api/phrase/batch/start",
+        json={"scope": {"kind": "collection"}},
+        headers=auth_token,
+    )
+    assert r.status_code == 409
+    assert "live Rekordbox library" in r.json()["detail"]
+    assert not main._phrase_batch_lock.locked()
+
+
 def test_start_happy_returns_job(monkeypatch, auth_token):
     monkeypatch.setattr(main, "db", _DB(all_tracks=[{"ID": 1, "Title": "a", "path": "p"}]))
 
@@ -363,3 +411,77 @@ def test_cancel_sets_flag(auth_token):
     r = _post("/api/phrase/batch/cancel", json={"job_id": "abc"}, headers=auth_token)
     assert r.status_code == 200
     assert main._phrase_jobs["abc"]["cancel_requested"] is True
+
+
+# ── Live master.db resolution + generate / commit ───────────────────────────
+
+
+def test_live_master_db_path_follows_the_facade(monkeypatch):
+    monkeypatch.setattr(main, "db", _DB(mode="live"))
+    assert main._live_master_db_path() == Path(LIVE_DB_PATH)
+    monkeypatch.setattr(main, "db", _DB(mode="xml"))
+    assert main._live_master_db_path() is None
+
+
+def test_commit_writes_through_the_live_master_db(monkeypatch, auth_token):
+    seen = []
+
+    def _commit(tid, cues, dbp, include_bar_markers=False):
+        seen.append((tid, dbp))
+        return {"written": len(cues)}
+
+    monkeypatch.setattr(main, "db", _DB())
+    monkeypatch.setattr(main, "commit_phrase_cues", _commit)
+    r = _post(
+        "/api/phrase/commit",
+        json={"track_id": 7, "cues": [{"type": "phrase_start", "position_ms": 0}]},
+        headers=auth_token,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["data"] == {"written": 1}
+    assert seen == [(7, str(Path(LIVE_DB_PATH)))]
+
+
+def test_commit_outside_live_mode_is_a_409_not_a_422(monkeypatch, auth_token):
+    calls = []
+    monkeypatch.setattr(main, "db", _DB(mode="xml"))
+    monkeypatch.setattr(main, "commit_phrase_cues", lambda *a, **k: calls.append(a))
+    r = _post(
+        "/api/phrase/commit",
+        json={"track_id": 7, "cues": []},
+        headers=auth_token,
+    )
+    assert r.status_code == 409
+    assert "live Rekordbox library" in r.json()["detail"]
+    assert calls == []
+
+
+def test_commit_still_422s_a_track_that_is_not_analysed(monkeypatch, auth_token):
+    def _raise(tid, cues, dbp, include_bar_markers=False):
+        raise PhraseNotAnalysedError("no anlz")
+
+    monkeypatch.setattr(main, "db", _DB())
+    monkeypatch.setattr(main, "commit_phrase_cues", _raise)
+    r = _post("/api/phrase/commit", json={"track_id": 7, "cues": []}, headers=auth_token)
+    assert r.status_code == 422
+
+
+def test_generate_reads_beats_from_the_live_master_db(monkeypatch, auth_token):
+    seen = []
+
+    def _beats(tid, dbp):
+        seen.append((tid, dbp))
+        return []
+
+    monkeypatch.setattr(main, "db", _DB())
+    monkeypatch.setattr(main, "extract_beats_from_db", _beats)
+    r = _post("/api/phrase/generate", json={"track_id": 7}, headers=auth_token)
+    assert r.status_code == 200, r.text
+    assert seen == [(7, str(Path(LIVE_DB_PATH)))]
+
+
+def test_generate_outside_live_mode_is_a_409(monkeypatch, auth_token):
+    monkeypatch.setattr(main, "db", _DB(mode="xml"))
+    r = _post("/api/phrase/generate", json={"track_id": 7}, headers=auth_token)
+    assert r.status_code == 409
+    assert "live Rekordbox library" in r.json()["detail"]

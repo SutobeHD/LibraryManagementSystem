@@ -672,17 +672,53 @@ class LibraryTools:
         return results
 
     @staticmethod
-    def generate_smart_playlists(artist_threshold=5, label_threshold=5):
-        """Generates intelligent playlists for Artists and Labels meeting the threshold."""
-        # Note: XMLProcessor already does something similar, but this is for dynamic calling
-        artist_map = defaultdict(list)
-        label_map = defaultdict(list)
+    def _legacy_by_artist_folder(auto_folder_id: str) -> dict[str, Any] | None:
+        """The folder the retired "By Artist" generator left behind, if any."""
+        node = next(
+            (
+                p
+                for p in db.playlists
+                if p.get("Name") == "By Artist" and p.get("ParentID") == auto_folder_id
+            ),
+            None,
+        )
+        if not node:
+            return None
+        return {
+            "id": node.get("ID"),
+            "name": node.get("Name"),
+            "playlists": sum(1 for p in db.playlists if p.get("ParentID") == node.get("ID")),
+        }
 
+    @staticmethod
+    def generate_smart_playlists(
+        artist_threshold: int = 5, label_threshold: int = 5
+    ) -> dict[str, Any]:
+        """Build the "By Label" auto-playlists. Artists are no longer generated here.
+
+        The retired "By Artist" branch grouped on the raw ``track["Artist"]``
+        string, so `boys noize` and `Boys Noize` became two folders, and its
+        per-artist loop created unconditionally — every re-run duplicated every
+        playlist. The `Artists` folder in Rekordbox now belongs to
+        ``app/artist_store/projection.py``, which is alias-aware, id-mapped and
+        idempotent. ``artist_threshold`` is accepted for call compatibility and
+        ignored.
+
+        Returns a report. ``legacy_by_artist`` is non-None while a folder from
+        the old generator is still in the library — nothing deletes it here; the
+        user's playlists are theirs to keep or remove.
+        """
+        artists_note = {
+            "source": "artist_hub",
+            "endpoint": "/api/artists/projection/sync",
+            "note": (
+                "Artist playlists come from the Artist Hub projection "
+                "(folder 'Artists'); this generator no longer writes them."
+            ),
+        }
+        label_map = defaultdict(list)
         for tid, track in db.tracks.items():
-            artist = track.get("Artist")
             label = track.get("Label")
-            if artist:
-                artist_map[artist].append(tid)
             if label:
                 label_map[label].append(tid)
 
@@ -696,30 +732,17 @@ class LibraryTools:
             )
 
         if not auto_folder_node:
-            return False
+            return {
+                "ok": False,
+                "labels_created": 0,
+                "artists": artists_note,
+                "legacy_by_artist": None,
+            }
         auto_folder_id = auto_folder_node["ID"]
 
-        # 2. Artists Folder
-        art_folder_node = next(
-            (
-                p
-                for p in db.playlists
-                if p["Name"] == "By Artist" and p["ParentID"] == auto_folder_id
-            ),
-            None,
-        )
-        if not art_folder_node:
-            art_folder_node = db.create_playlist(
-                "By Artist", parent_id=auto_folder_id, is_folder=True
-            )
+        legacy_by_artist = LibraryTools._legacy_by_artist_folder(auto_folder_id)
 
-        if art_folder_node:
-            art_folder_id = art_folder_node["ID"]
-            for art, tids in artist_map.items():
-                if len(tids) >= artist_threshold:
-                    db.create_playlist(art, parent_id=art_folder_id, tracks=tids)
-
-        # 3. Labels Folder
+        # 2. Labels Folder
         lbl_folder_node = next(
             (
                 p
@@ -733,14 +756,21 @@ class LibraryTools:
                 "By Label", parent_id=auto_folder_id, is_folder=True
             )
 
+        labels_created = 0
         if lbl_folder_node:
             lbl_folder_id = lbl_folder_node["ID"]
             for lbl, tids in label_map.items():
                 if len(tids) >= label_threshold:
                     db.create_playlist(lbl, parent_id=lbl_folder_id, tracks=tids)
+                    labels_created += 1
 
         db.save()
-        return True
+        return {
+            "ok": True,
+            "labels_created": labels_created,
+            "artists": artists_note,
+            "legacy_by_artist": legacy_by_artist,
+        }
 
     @staticmethod
     def smart_rename(track_ids, pattern):
@@ -791,6 +821,8 @@ class SettingsManager:
         "sc_download_format": "auto",  # "auto" (keep source codec) | "aiff" (convert to PCM AIFF lossless)
         "legacy_pdb_stub": False,  # opt-in: write header-only export.pdb for CDJ-2000nxs2 (experimental — see app/usb_pdb.py)
         "scan_folders": [],  # absolute paths watched for new audio files (FolderWatcher)
+        # opt-in: refresh favourite catalogues while the app is idle (artist_store.sync)
+        "artist_background_sync": False,
     }
     # Caps mirror app/main.py SetReq validator. Load-path is intentionally
     # tolerant: legacy settings.json files predating the validator must keep
