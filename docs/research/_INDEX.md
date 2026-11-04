@@ -17,6 +17,7 @@ If this index drifts from the file system, the file system wins — re-derive wi
 _(none)_
 
 ### drafting
+- [drafting_analysis-genre-definition-schema.md](research/drafting_analysis-genre-definition-schema.md) — Declarative genre/style/mood definitions (data, not code) + explainable detector over per-track audio features; Stage-1 pre-filled (prior art = hardcoded `hint_genre()` if/elif at `analysis_engine.py:2035`, 11 OQs, 6-agent research plan); Idea-Verifier pending → queued for research-draft (2026-08-16)
 - [drafting_performance-overhaul.md](research/drafting_performance-overhaul.md) — Speed & efficiency overhaul; Stage-1 pre-filled from 9-agent perf investigation (48 hotspots: no list virtualization, unpaginated `/api/library/tracks`, unmemoized always-mounted views, blocking USB export+scan, event-loop waveform, 30s blocking startup); 16 OQs + 8-agent research plan queued for research-explore (2026-06-09)
 
 ### exploring
