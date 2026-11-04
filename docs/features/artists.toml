@@ -17,7 +17,7 @@ pr = 58
 desc = "Artist-Übersicht mit Favoriten, Merge, Rekordbox-Artists-Ordner, SC-Katalog, Discovery, Background-Sync, USB-Relocation."
 paths = ["frontend/src/components/ArtistHubView.jsx", "app/artist_store/__init__.py", "frontend/src/components/artistHub/artistHubApi.js", "frontend/src/components/artistHub/LocalTracksPanel.jsx", "frontend/src/components/artistHub/AssignArtistModal.jsx"]
 depends_on = ["external-track-match", "sc-api-client", "live-master-db"]
-todo = ["PR #58 mergen (CI grün; ersetzt feat/artist-hub)", "2 Commits von feat/artist-hub (Ranking-Genre-Baum) auf #58 cherry-picken", "Entscheiden: Tageslimit statt Per-Pass-Budget für Background-Sync", "Owner-Sign-off -> implemented_"]
+todo = ["PR #58 mergen (CI grün; ersetzt feat/artist-hub)", "Entscheiden: Tageslimit statt Per-Pass-Budget für Background-Sync", "Owner-Sign-off -> implemented_"]
 notes = "Vier Branches sind auf #58 gestapelt (track-write-safety, usb-anlz-export-fixes, perf-backend-quickwins, research-doc-ports) - #58 zuerst landen."
 
 [[feature]]
