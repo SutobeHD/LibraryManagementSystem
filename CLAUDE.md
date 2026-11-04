@@ -105,6 +105,7 @@ Regenerate L1/L2: `python scripts/regen_maps.py` or `/regen-maps`.
 - **`docs/PROJECT_OVERVIEW.md`** — high-level overview.
 - **`docs/NAMING_MAP.md`** — v0.0.2 rename refactor audit trail.
 - **`docs/reference/rbxport/`** — facts learned from rbxport (GPL, no code copied): USB export correctness + incremental sync, ANLZ waveform encoding/rendering, Rekordbox UI tokens/layout. Read before touching `usb_*`, ANLZ waveform tags, waveform renderers, or theming.
+- **`docs/reference/syndicate/`** — facts learned from the Syndicate (Untitled Audio) user guide: library maintenance/import/tag UX, design tokens + deck/edit-mode UX, mixer/clock/mapping/OSC. Its USB format is not Pioneer — use rbxport for CDJ export.
 - **`CHANGELOG.md`** — what shipped when.
 
 ### Tooling config
