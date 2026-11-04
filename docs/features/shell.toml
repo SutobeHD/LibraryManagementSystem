@@ -142,6 +142,17 @@ paths = ["frontend/tailwind.config.js", "frontend/src/index.css", "frontend/post
 notes = "Neue Views an der Library-Ansicht ausrichten (Coding-Rule)."
 
 [[feature]]
+id = "rekordbox-skin"
+group = "Theming"
+name = "Rekordbox-Skin"
+status = "idea"
+desc = "Umschaltbares Theme im Rekordbox-7-Look: Farben, Arial-Dichte, Zebra-Zeilen, Spalten."
+depends_on = ["melodex-design-system"]
+related = ["appearance-settings"]
+todo = ["Tailwind-Keys auf CSS-Vars umstellen", "[data-theme=rekordbox]-Override-Sheet", "Theme-Picker in SettingsAppearance"]
+notes = "Tokens/Metriken/Layout: docs/reference/rbxport/ui-skin.md (rbxport-Studie, nur Fakten - GPL)."
+
+[[feature]]
 id = "shared-portal-tooltip"
 group = "Theming"
 name = "Portal-Tooltip app-weit"
