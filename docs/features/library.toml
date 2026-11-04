@@ -305,3 +305,30 @@ name = "MP3 >320 / pauschal 320"
 status = "dropped"
 desc = "MP3 freeformat >320 kbps bzw. alles pauschal auf 320 CBR."
 notes = "freeformat ist außerhalb der CDJ-Spec; pauschal 320 erfindet Bitrate bei AAC-Quellen."
+
+[[feature]]
+id = "missing-file-relink"
+group = "Qualität & Duplikate"
+name = "Fehlende Dateien neu verknüpfen"
+status = "idea"
+desc = "Problem-Scan (fehlende Dateien, Playlist-Waisen, verwaiste Sidecars) + Ordner durchsuchen + alle Funde auf einmal relinken."
+related = ["library-health-filters"]
+notes = "Vorbild Syndicate Library Manager: docs/reference/syndicate/library-export.md §5."
+
+[[feature]]
+id = "tag-shelf-filter"
+group = "Bewertung & Tags"
+name = "Tag-Shelf-Filter"
+status = "idea"
+desc = "Tag-Chips mit Live-Counts: Klick = einschließen, Shift-Klick = ausschließen, ALL/ANY-Umschalter."
+related = ["mytag-management"]
+notes = "Vorbild Syndicate Tag Shelf: docs/reference/syndicate/library-export.md §4."
+
+[[feature]]
+id = "m3u-import-export"
+group = "Import"
+name = "M3U/M3U8 Import + Export"
+status = "idea"
+desc = "Playlists als M3U/M3U8 rein und raus; nicht gefundene Pfade bleiben als MISSING-Platzhalter zum späteren Relinken."
+related = ["import-manager", "missing-file-relink"]
+notes = "Vorbild Syndicate: docs/reference/syndicate/library-export.md §3-4, performance-control.md Roadmap."
