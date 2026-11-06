@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app import ffmpeg_resolver as resolver_mod
+from app import library_format_swap as lfs
 from app.ffmpeg_resolver import ResolvedFfmpeg
 from app.library_format_swap import (
     DISK_HARD_ABORT_FACTOR,
@@ -131,11 +132,113 @@ class TestFfmpegCommand:
         cmd = _build_ffmpeg_cmd(Path("/tmp/s.m4a"), Path("/tmp/d.aiff"), 48000, "aiff")
         assert "-map_metadata" in cmd
 
-    def test_mp3_target_includes_quality_arg(self):
-        cmd = _build_ffmpeg_cmd(Path("/tmp/s.m4a"), Path("/tmp/d.mp3"), 48000, "mp3")
-        assert "-q:a" in cmd
-        idx = cmd.index("-q:a")
-        assert cmd[idx + 1] == "0"  # highest VBR quality
+    def test_mp3_target_is_320k_cbr(self):
+        # Project MP3 policy: 320 CBR ceiling (CDJ-3000 MP3 spec max), not VBR V0.
+        cmd = _build_ffmpeg_cmd(Path("/tmp/s.flac"), Path("/tmp/d.mp3"), 48000, "mp3")
+        assert "-q:a" not in cmd
+        assert cmd[cmd.index("-b:a") + 1] == "320k"
+
+    def test_mp3_bitrate_override_sets_the_cbr_rate(self):
+        cmd = _build_ffmpeg_cmd(Path("/tmp/s.m4a"), Path("/tmp/d.mp3"), 44100, "mp3", "ff", 256)
+        assert cmd[cmd.index("-b:a") + 1] == "256k"
+
+    def test_mp3_bitrate_override_never_exceeds_320(self):
+        cmd = _build_ffmpeg_cmd(Path("/tmp/s.wav"), Path("/tmp/d.mp3"), 44100, "mp3", "ff", 640)
+        assert cmd[cmd.index("-b:a") + 1] == "320k"
+
+    def test_mp3_bitrate_override_ignored_for_other_targets(self):
+        cmd = _build_ffmpeg_cmd(Path("/tmp/s.m4a"), Path("/tmp/d.flac"), 44100, "flac", "ff", 256)
+        assert "-b:a" not in cmd
+
+    def test_export_cmd_carries_the_mp3_rate(self):
+        cmd = _build_export_ffmpeg_cmd(
+            Path("/tmp/s.m4a"), Path("/tmp/d.mp3"), 44100, "mp3", True, "ff", 192
+        )
+        assert cmd[cmd.index("-b:a") + 1] == "192k"
+        assert "0:v:0?" in cmd
+
+
+class TestMp3BitratePolicy:
+    """Lossless -> 320k CBR; lossy -> the source's own rate, rounded down, never inflated."""
+
+    @pytest.mark.parametrize(
+        "source_bps,expected",
+        [
+            (256_000, 256),
+            (251_500, 256),  # nominal 256k probed a hair low (VBR average) -> 2 % slack
+            (249_000, 224),
+            (192_000, 192),
+            (128_000, 128),
+            (320_000, 320),
+            (500_000, 320),
+            (20_000, 32),
+        ],
+    )
+    def test_cap_rounds_down_to_a_standard_rate(self, source_bps, expected):
+        assert lfs._mp3_kbps_cap(source_bps) == expected
+
+    def test_lossless_source_gets_320_without_probing(self, monkeypatch):
+        def _no_probe(_p):
+            raise AssertionError("lossless sources must not be probed")
+
+        monkeypatch.setattr(lfs, "_probe_bitrate_bps", _no_probe)
+        assert lfs._mp3_kbps_for(Path("/m/a.flac"), "mp3") == 320
+        assert lfs._mp3_kbps_for(Path("/m/a.AIFF"), "mp3") == 320
+
+    def test_lossy_source_keeps_its_bitrate(self, monkeypatch):
+        # 256k AAC stays 256k — re-encoding it at 320 only invents bits.
+        monkeypatch.setattr(lfs, "_probe_bitrate_bps", lambda _p: 256_000)
+        assert lfs._mp3_kbps_for(Path("/m/a.m4a"), "mp3") == 256
+
+    def test_unprobeable_lossy_source_fails_instead_of_guessing_high(self, monkeypatch):
+        monkeypatch.setattr(lfs, "_probe_bitrate_bps", lambda _p: None)
+        with pytest.raises(RuntimeError, match="bitrate"):
+            lfs._mp3_kbps_for(Path("/m/a.opus"), "mp3")
+
+    def test_non_mp3_target_has_no_rate(self, monkeypatch):
+        monkeypatch.setattr(lfs, "_probe_bitrate_bps", lambda _p: 128_000)
+        assert lfs._mp3_kbps_for(Path("/m/a.m4a"), "aiff") is None
+
+    @pytest.mark.parametrize(
+        "stdout,expected",
+        [
+            ('{"streams":[{"bit_rate":"256000"}],"format":{"bit_rate":"262144"}}', 256_000),
+            ('{"streams":[{}],"format":{"bit_rate":"160000"}}', 160_000),
+            ('{"streams":[],"format":{"bit_rate":"N/A"}}', None),
+            ("not json", None),
+        ],
+    )
+    def test_probe_prefers_stream_over_container_bitrate(self, monkeypatch, stdout, expected):
+        seen = {}
+
+        def _run(cmd, **kwargs):
+            seen["cmd"], seen["timeout"] = cmd, kwargs.get("timeout")
+            return SimpleNamespace(stdout=stdout, returncode=0)
+
+        monkeypatch.setattr(lfs, "_ffprobe_bin", lambda: "ffprobe")
+        monkeypatch.setattr(lfs.subprocess, "run", _run)
+        assert lfs._probe_bitrate_bps(Path("/m/a.m4a")) == expected
+        assert seen["timeout"] == 30
+
+    def test_probe_launch_failure_is_none(self, monkeypatch):
+        def _run(cmd, **kwargs):
+            raise OSError("no ffprobe")
+
+        monkeypatch.setattr(lfs, "_ffprobe_bin", lambda: "ffprobe")
+        monkeypatch.setattr(lfs.subprocess, "run", _run)
+        assert lfs._probe_bitrate_bps(Path("/m/a.m4a")) is None
+
+    @pytest.mark.parametrize("convert", ["in_place", "export"])
+    def test_convert_paths_encode_a_lossy_source_at_its_own_rate(self, monkeypatch, convert):
+        cmds: list[list[str]] = []
+        monkeypatch.setattr(lfs, "_probe_bitrate_bps", lambda _p: 256_000)
+        monkeypatch.setattr(lfs, "_exec_ffmpeg", lambda cmd, dst: cmds.append(cmd))
+        src, dst = Path("/m/a.m4a"), Path("/m/a.mp3")
+        if convert == "in_place":
+            lfs._run_ffmpeg_convert(src, dst, 44100, "mp3", "ff")
+        else:
+            lfs._run_export_convert(src, dst, 44100, "mp3", True, "ff")
+        assert cmds and all(c[c.index("-b:a") + 1] == "256k" for c in cmds)
 
 
 class TestEngineConstructor:
@@ -550,9 +653,7 @@ class TestMasterDbWriteLock:
             n
             for n in ast.walk(tree)
             if isinstance(n, ast.Call)
-            and (
-                getattr(n.func, "attr", None) == callee or getattr(n.func, "id", None) == callee
-            )
+            and (getattr(n.func, "attr", None) == callee or getattr(n.func, "id", None) == callee)
         ]
         assert sites, f"no call site found for {callee} — did it get renamed?"
         unguarded = [n.lineno for n in sites if not self._guarded_by_db_lock(tree, n.lineno)]
@@ -567,9 +668,7 @@ class TestMasterDbWriteLock:
 
         tree = self._module_tree()
         rollback = next(
-            n
-            for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef) and n.name == "rollback"
+            n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "rollback"
         )
         copies = [
             n.lineno

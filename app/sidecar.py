@@ -1,3 +1,17 @@
+"""Legacy ``app_data.json`` store — READ-ONLY, kept only for a one-shot import.
+
+Superseded by the artist-store sidecar (``app/artist_store/schema.py``, table ``links``).
+This file keyed a SoundCloud URL on the artist **name**, which a merge rewrites, so the
+binding was orphaned the moment two spellings were collapsed. Its only writer route
+(``POST /api/artist/soundcloud``) had the storage call commented out and returned a fake
+success, so no production data depends on the write path.
+
+``app/artist_store/registry.py:migrate_legacy_artist_links`` reads ``data["artists"]``
+once, writes the rows into ``links`` keyed on the store's stable ``collection_id``, and
+stamps a ``store_meta`` marker. The setter is deliberately gone: nothing may write here
+again, or the two stores diverge.
+"""
+
 import json
 import logging
 from pathlib import Path
@@ -25,20 +39,9 @@ class SidecarStorage:
             )
             return {"artists": {}}
 
-    def _save(self):
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(self.data, f, indent=2)
-
     def get_artist_link(self, artist_name: str):
+        """Legacy read. Only the migration should call this."""
         return self.data.get("artists", {}).get(artist_name, {}).get("soundcloud", "")
-
-    def set_artist_link(self, artist_name: str, link: str):
-        if "artists" not in self.data:
-            self.data["artists"] = {}
-        if artist_name not in self.data["artists"]:
-            self.data["artists"][artist_name] = {}
-        self.data["artists"][artist_name]["soundcloud"] = link
-        self._save()
 
 
 storage = SidecarStorage()

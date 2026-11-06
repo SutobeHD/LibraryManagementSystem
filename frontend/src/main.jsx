@@ -56,6 +56,8 @@ import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
 import { ConfirmModalRoot, confirmModal } from './components/ConfirmModal';
 import { PromptModalRoot, promptModal } from './components/PromptModal';
+import { AssignArtistModalRoot } from './components/artistHub/AssignArtistModal';
+import GlobalContextMenu from './components/shared/GlobalContextMenu';
 import { log } from './utils/log';
 import { HEARTBEAT_INTERVAL_MS, LIBRARY_STATUS_INTERVAL_MS } from './config/constants';
 
@@ -67,6 +69,7 @@ const SettingsView = lazy(() => import('./components/SettingsView'));
 const RankingView = lazy(() => import('./components/RankingView'));
 const XmlCleanView = lazy(() => import('./components/XmlCleanView'));
 const MetadataView = lazy(() => import('./components/MetadataView'));
+const ArtistHubView = lazy(() => import('./components/ArtistHubView'));
 const ImportView = lazy(() => import('./components/ImportView'));
 const UsbView = lazy(() => import('./components/UsbView'));
 const UsbSettingsView = lazy(() => import('./components/UsbSettingsView'));
@@ -713,6 +716,16 @@ const App = () => {
     });
     const [isInitialLoading, setIsInitialLoading] = useState(false);
 
+    // The Artists tab renders ArtistHubView, not MetadataView. MetadataView stays
+    // mounted (hidden) for the other library tabs, so it holds the last non-artist
+    // mode instead of reloading into 'artists' behind the hub.
+    const [metadataMode, setMetadataMode] = useState('playlists');
+    useEffect(() => {
+        if (activeTab.startsWith('lib-') && activeTab !== 'lib-artists') {
+            setMetadataMode(activeTab.replace('lib-', ''));
+        }
+    }, [activeTab]);
+
     const checkLibraryStatus = useCallback(async () => {
         try {
             const res = await api.get('/api/library/status');
@@ -1075,10 +1088,28 @@ const App = () => {
                 <div className={`flex-1 min-h-0 w-full relative ${playerTrack ? 'pb-20' : ''}`}>
                     <Suspense fallback={<ViewLoader />}>
                         {/* STABILITY: Each view wrapped in its own ErrorBoundary */}
-                        <div className={activeTab.startsWith('lib-') ? 'h-full' : 'hidden'}>
+                        <div
+                            className={
+                                activeTab.startsWith('lib-') && activeTab !== 'lib-artists'
+                                    ? 'h-full'
+                                    : 'hidden'
+                            }
+                        >
                             <ErrorBoundary key="eb-library">
                                 <MetadataView
-                                    mode={activeTab.replace('lib-', '')}
+                                    mode={metadataMode}
+                                    onSelectTrack={handleTrackSelect}
+                                    onEditTrack={handleTrackEdit}
+                                    onPlayTrack={handlePlayTrack}
+                                    libraryStatus={libraryStatus}
+                                />
+                            </ErrorBoundary>
+                        </div>
+
+                        <div className={activeTab === 'lib-artists' ? 'h-full' : 'hidden'}>
+                            <ErrorBoundary key="eb-artist-hub">
+                                <ArtistHubView
+                                    active={activeTab === 'lib-artists'}
                                     onSelectTrack={handleTrackSelect}
                                     onEditTrack={handleTrackEdit}
                                     onPlayTrack={handlePlayTrack}
@@ -1215,6 +1246,8 @@ root.render(
         />
         <ConfirmModalRoot />
         <PromptModalRoot />
+        <AssignArtistModalRoot />
+        <GlobalContextMenu />
         <App />
     </ToastProvider>
 );

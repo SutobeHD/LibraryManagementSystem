@@ -21,6 +21,7 @@ Driving the app: same pattern as ``tests/test_security_hotfixes.py``
 ``TestClient`` because the installed fastapi 0.109 + httpx 0.28 pair
 mishandles the deprecated ``app=`` kwarg).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -52,13 +53,14 @@ def _post(
     middleware stack so the global handler can convert them to a 500 —
     matching the live uvicorn behaviour.
     """
+
     async def _go() -> httpx.Response:
         transport = httpx.ASGITransport(
-            app=app, client=("127.0.0.1", 12345), raise_app_exceptions=False,
+            app=app,
+            client=("127.0.0.1", 12345),
+            raise_app_exceptions=False,
         )
-        async with httpx.AsyncClient(
-            transport=transport, base_url="http://testserver"
-        ) as ac:
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as ac:
             return await ac.post(url, json=json, headers=headers)
 
     return asyncio.run(_go())
@@ -113,6 +115,7 @@ def no_run(monkeypatch: pytest.MonkeyPatch) -> _RunRecorder:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("empty_library")
 class TestFileRevealSandboxRejects:
     def test_outside_roots_path_is_forbidden(
         self,
@@ -233,10 +236,9 @@ class TestFileRevealSandboxAccepts:
         assert r.status_code == 200, r.text
         assert r.json() == {"status": "success"}
 
-        assert len(no_run.calls) == 1, (
-            f"expected exactly one subprocess.run call, got "
-            f"{len(no_run.calls)}: {no_run.calls!r}"
-        )
+        assert (
+            len(no_run.calls) == 1
+        ), f"expected exactly one subprocess.run call, got {len(no_run.calls)}: {no_run.calls!r}"
         (args, kwargs) = no_run.calls[0]
         # argv is the first positional arg.
         assert args[0] == expected_argv_builder(resolved)
@@ -250,6 +252,7 @@ class TestFileRevealSandboxAccepts:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("empty_library")
 class TestRenderCutSrcSandbox:
     """The route validated `source_path` and nothing else, but AudioEngine
     reads `c.get("src", source_path)` per cut (app/services.py:251 and :281)

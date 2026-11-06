@@ -121,12 +121,13 @@ id = "ranking-genre-tree"
 group = "Bewertung & Tags"
 parent = "ranking-mode"
 name = "Ranking-Tags als Genre-Baum"
-status = "in_progress"
-branch = "feat/artist-hub"
+status = "unmerged"
+branch = "claude/loving-goodall-90uf7w"
+pr = 58
 desc = "Tag-Chips als Genre > Sub-Genre sortiert, Tokens landen im Comment."
 paths = ["frontend/src/config/tagTaxonomy.js", "frontend/src/config/tagTaxonomy.test.js"]
 related = ["genre-normalization", "genre-definition-schema", "genre-atlas"]
-notes = "f4cf807 (2026-10-25) nur auf feat/artist-hub, nicht in PR #58 - auf #58 cherry-picken (konfliktfrei)."
+notes = "f4cf807 von feat/artist-hub auf PR #58 cherry-picked (0c33733). feat/genre-atlas-hints ändert RankingView.jsx parallel (45892de, Atlas-Vorschläge) - beim zweiten Merge Konflikt in RankingView.jsx möglich; Prettier-Commits beider Branches identisch."
 
 [[feature]]
 id = "mytag-management"

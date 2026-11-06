@@ -101,6 +101,9 @@ const DEFAULTS = {
     http_proxy: '',
     sc_sync_folder_id: '',
     sc_auth_mode: 'gui', // 'gui' = in-app login window | 'browser' = external browser
+    // Opt-in idle refresh of favourite artists' SoundCloud catalogues (Artists tab).
+    // Never downloads; see app/artist_store/sync.py.
+    artist_background_sync: false,
 };
 
 const TABS = [
