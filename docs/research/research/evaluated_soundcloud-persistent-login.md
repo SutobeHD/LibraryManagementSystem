@@ -26,6 +26,7 @@ superseded_by: []
 - 2026-05-31 — `research/exploring_` — explore phase 1 done (tiered codebase+web+synthesis × 4 aspects / 8 OQs)
 - 2026-05-31 — `research/evaluated_` — explore phase 2 verified (adversarial + citation + research-verifier PASS), recommendation = Option A
 - 2026-09-08 — `research/evaluated_` — **implementation absorbed into [inprogress_library-artist-hub](../implement/inprogress_library-artist-hub.md) as task T-19** (owner decision 2026-09-08: the login must survive restarts and days away). Option A as recommended: `app/soundcloud_auth.py`, single atomic keyring blob, backend single-flight refresh, `/api/soundcloud/refresh`, interceptor refreshes before re-login — resolving both plan-blockers. Stays `evaluated_` until `feat/artist-hub` merges, then archive as `implemented_`.
+- 2026-10-11 — `research/evaluated_` — code shipped in `cb414fa`, `52771e9`; awaiting owner sign-off -> archived/implemented_. Both commits ride on `claude/loving-goodall-90uf7w` (draft PR #58, fast-forward of `feat/artist-hub`), not yet on `main`. Owner must log in to SoundCloud once for a refresh token to exist (store reports `refreshable: false, source: legacy` until then).
 
 ## Original Idea (verbatim — never edit)
 
