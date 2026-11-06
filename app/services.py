@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import datetime
 import json
 import logging
@@ -925,39 +926,125 @@ class SettingsManager:
 
 
 class MetadataManager:
+    """Manual name mappings (artist / label / album merges).
+
+    ``get_mapped_name`` runs once per track while the artist and label lists
+    are built, so the parsed file is cached instead of re-read per lookup.
+    The cached dict is never mutated in place: ``load()`` hands out a deep
+    copy and ``save()`` swaps in a new one only after the write succeeded.
+    That is what lets the lookup read it without taking the lock.
+    """
+
     MAPPINGS_FILE = Path("metadata_mappings.json")
+    # Hand edits to the file are picked up at most this late. A stat per
+    # lookup (~29 us on Windows) would cost more than the cache saves.
+    _RECHECK_INTERVAL_S = 2.0
+
+    _cache: dict[str, dict[str, str]] | None = None
+    _cache_key: Path | None = None
+    _cache_sig: tuple[int, int] | None = None
+    _cache_checked_at = 0.0
+    _cache_lock = threading.RLock()
+
+    @staticmethod
+    def _empty() -> dict[str, dict[str, str]]:
+        return {"artists": {}, "labels": {}, "albums": {}}
+
+    @staticmethod
+    def _file_sig(path: Path) -> tuple[int, int] | None:
+        try:
+            st = path.stat()
+        except OSError:
+            return None
+        return (st.st_mtime_ns, st.st_size)
 
     @classmethod
-    def load(cls) -> dict[str, dict[str, str]]:
-        if not cls.MAPPINGS_FILE.exists():
-            return {"artists": {}, "labels": {}, "albums": {}}
+    def _read_from_disk(cls, path: Path) -> dict[str, dict[str, str]]:
+        if not path.exists():
+            return cls._empty()
         try:
-            with open(cls.MAPPINGS_FILE, encoding="utf-8") as f:
-                return json.load(f)
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
         except (OSError, json.JSONDecodeError) as e:
             logger.warning(
                 "services.MetadataManager.load: returning empty mappings — %s",
                 e,
             )
-            return {"artists": {}, "labels": {}, "albums": {}}
+            return cls._empty()
+        if not isinstance(data, dict):
+            logger.warning(
+                "services.MetadataManager.load: non-dict payload, returning empty mappings",
+            )
+            return cls._empty()
+        return data
+
+    @classmethod
+    def _mappings(cls) -> dict[str, dict[str, str]]:
+        """The cached mappings. Shared and read-only — never mutate the result."""
+        cache = cls._cache
+        if (
+            cache is not None
+            and cls._cache_key is cls.MAPPINGS_FILE
+            and time.monotonic() - cls._cache_checked_at < cls._RECHECK_INTERVAL_S
+        ):
+            return cache
+        with cls._cache_lock:
+            path = cls.MAPPINGS_FILE
+            # Signature before content: a write racing the read leaves a stale
+            # signature, which only forces one more re-read later.
+            sig = cls._file_sig(path)
+            if cls._cache is not None and cls._cache_key is path and cls._cache_sig == sig:
+                cls._cache_checked_at = time.monotonic()
+                return cls._cache
+            data = cls._read_from_disk(path)
+            cls._cache = data
+            cls._cache_key = path
+            cls._cache_sig = sig
+            cls._cache_checked_at = time.monotonic()
+            return data
+
+    @classmethod
+    def load(cls) -> dict[str, dict[str, str]]:
+        return copy.deepcopy(cls._mappings())
 
     @classmethod
     def save(cls, data: dict[str, dict[str, str]]) -> None:
-        with open(cls.MAPPINGS_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+        """Write atomically (tmp + os.replace), then update the cache.
+
+        On a failed write the cache keeps the previous mappings, so a merge
+        the file does not hold is never applied in memory either.
+        """
+        payload = json.dumps(data, indent=2)
+        with cls._cache_lock:
+            path = cls.MAPPINGS_FILE
+            tmp_path = path.with_suffix(path.suffix + ".tmp")
+            try:
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    f.write(payload)
+                os.replace(tmp_path, path)
+            except OSError as e:
+                logger.error("services.MetadataManager.save: write failed err=%s", e)
+                with contextlib.suppress(OSError):
+                    tmp_path.unlink()
+                raise
+            cls._cache = copy.deepcopy(data)
+            cls._cache_key = path
+            cls._cache_sig = cls._file_sig(path)
+            cls._cache_checked_at = time.monotonic()
 
     @classmethod
     def add_mapping(cls, category: str, source_name: str, target_name: str) -> None:
-        data = cls.load()
-        if category not in data:
-            data[category] = {}
-        data[category][source_name] = target_name
-        cls.save(data)
+        # Held across load + save so two concurrent merges cannot drop one.
+        with cls._cache_lock:
+            data = cls.load()
+            if category not in data:
+                data[category] = {}
+            data[category][source_name] = target_name
+            cls.save(data)
 
     @classmethod
     def get_mapped_name(cls, category: str, name: str) -> str:
-        data = cls.load()
-        return data.get(category, {}).get(name, name)
+        return cls._mappings().get(category, {}).get(name, name)
 
 
 class BeatAnalyzer:

@@ -191,6 +191,17 @@
   - Fixed: every XML save dropped all track ratings, and colours set in the
     app; both are now kept. Fields an XML library cannot store (Remixer, Year,
     a misspelt key) are refused instead of vanishing on the next reload.
+- Performance (backend):
+  - Perf: artist/label lists and drill-downs no longer re-read
+    `metadata_mappings.json` once per track — the mappings are cached; a hand
+    edit to the file is picked up within 2 s, and a merge whose write fails is
+    not applied in memory either.
+  - Perf: drag-drop import and folder scan no longer re-resolve every library
+    path for every file (30 files over 2,000 tracks: ~75k → ~2k `resolve()`
+    calls, ~12 s → ~0.4 s); a track added meanwhile is still skipped.
+  - Added: `GET /api/library/tracks?light=true` returns the track list without
+    beat grids, cues, position marks and phrases (no view requests it yet; the
+    default response is unchanged).
 
 ## v1.0.0-beta — 2026-05-07
 

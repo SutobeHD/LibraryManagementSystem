@@ -307,9 +307,11 @@
 | `tests/test_download_registry.py` | Tests for app/download_registry.py — SoundCloud download dedup/history DB. |
 | `tests/test_external_track_match.py` | external_track_match unit tests (external-track-match-unified-module T-3..T-9). |
 | `tests/test_folder_watcher.py` | Tests for app/folder_watcher.py — auto-import folder watcher. |
+| `tests/test_import_dedup.py` | Import dedup — ``/api/library/import-paths``, ``/api/library/scan-folder`` and |
 | `tests/test_import_tracker.py` | Tests for app/import_tracker.py — live import-progress tracker. |
 | `tests/test_library_format_swap.py` | Tests for app.library_format_swap. |
 | `tests/test_library_source.py` | Tests for app/library_source.py — the Live/XML normalization layer. |
+| `tests/test_library_tracks_light.py` | GET /api/library/tracks — the optional ``light`` projection (app/main.py). |
 | `tests/test_live_cue_loading.py` | Cue loading in `app.live_database`. |
 | `tests/test_live_playlist_ops.py` | Tests for the live-mode playlist primitives in `app/live_database.py`. |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |

@@ -10,6 +10,9 @@ filesystem call would still happen, we use `tmp_path`.
 
 from __future__ import annotations
 
+import builtins
+import json
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -122,6 +125,162 @@ class TestMetadataManager:
         # Drop and reload via load():
         loaded = MetadataManager.load()
         assert loaded["labels"]["ABC"] == "ABC Records"
+
+
+class TestMetadataManagerCache:
+    """When the mappings cache is used and refreshed, and that it never lies.
+
+    `get_mapped_name` runs once per track while artist/label lists are
+    built, so the mappings are cached. The cache must still never disagree
+    with what the file holds after a write."""
+
+    @pytest.fixture
+    def store(self, tmp_path: Path, monkeypatch) -> Path:
+        path = tmp_path / "metadata_mappings.json"
+        path.write_text(json.dumps({"artists": {"DJ_x": "DJ X"}}), encoding="utf-8")
+        monkeypatch.setattr(MetadataManager, "MAPPINGS_FILE", path)
+        return path
+
+    def test_lookups_after_the_first_touch_no_file(self, store: Path, monkeypatch) -> None:
+        # An hour-long recheck interval: the test must not depend on wall time.
+        monkeypatch.setattr(MetadataManager, "_RECHECK_INTERVAL_S", 3600.0)
+        assert MetadataManager.get_mapped_name("artists", "DJ_x") == "DJ X"
+
+        opens: list[object] = []
+        stats: list[object] = []
+        real_open = builtins.open
+        real_sig = MetadataManager._file_sig
+
+        def counting_open(*args, **kwargs):
+            opens.append(args[0] if args else None)
+            return real_open(*args, **kwargs)
+
+        def counting_sig(path):
+            stats.append(path)
+            return real_sig(path)
+
+        monkeypatch.setattr(builtins, "open", counting_open)
+        monkeypatch.setattr(MetadataManager, "_file_sig", staticmethod(counting_sig))
+        for _ in range(1000):
+            assert MetadataManager.get_mapped_name("artists", "DJ_x") == "DJ X"
+            assert MetadataManager.get_mapped_name("artists", "Other") == "Other"
+        assert opens == []
+        assert stats == []
+
+    def test_hand_edit_is_seen_once_the_recheck_interval_passed(
+        self, store: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(MetadataManager, "_RECHECK_INTERVAL_S", 3600.0)
+        assert MetadataManager.get_mapped_name("artists", "DJ_x") == "DJ X"
+
+        store.write_text(json.dumps({"artists": {"DJ_x": "Edited By Hand"}}), encoding="utf-8")
+        # Inside the interval the cached value is served.
+        assert MetadataManager.get_mapped_name("artists", "DJ_x") == "DJ X"
+
+        monkeypatch.setattr(MetadataManager, "_RECHECK_INTERVAL_S", 0.0)
+        assert MetadataManager.get_mapped_name("artists", "DJ_x") == "Edited By Hand"
+
+    def test_unchanged_file_is_not_re_read_on_recheck(self, store: Path, monkeypatch) -> None:
+        monkeypatch.setattr(MetadataManager, "_RECHECK_INTERVAL_S", 0.0)
+        assert MetadataManager.get_mapped_name("artists", "DJ_x") == "DJ X"
+
+        reads: list[Path] = []
+        real_read = MetadataManager._read_from_disk.__func__
+
+        def counting_read(cls, path):
+            reads.append(path)
+            return real_read(cls, path)
+
+        monkeypatch.setattr(MetadataManager, "_read_from_disk", classmethod(counting_read))
+        for _ in range(20):
+            assert MetadataManager.get_mapped_name("artists", "DJ_x") == "DJ X"
+        assert reads == []
+
+    def test_new_mappings_file_is_read(self, store: Path, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setattr(MetadataManager, "_RECHECK_INTERVAL_S", 3600.0)
+        assert MetadataManager.get_mapped_name("artists", "DJ_x") == "DJ X"
+
+        other = tmp_path / "other_mappings.json"
+        other.write_text(json.dumps({"artists": {"DJ_x": "From Other"}}), encoding="utf-8")
+        monkeypatch.setattr(MetadataManager, "MAPPINGS_FILE", other)
+        assert MetadataManager.get_mapped_name("artists", "DJ_x") == "From Other"
+
+    def test_add_mapping_is_visible_immediately_and_persisted(
+        self, store: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(MetadataManager, "_RECHECK_INTERVAL_S", 3600.0)
+        assert MetadataManager.get_mapped_name("artists", "Boysnoize") == "Boysnoize"
+
+        MetadataManager.add_mapping("artists", "Boysnoize", "Boys Noize")
+
+        assert MetadataManager.get_mapped_name("artists", "Boysnoize") == "Boys Noize"
+        assert MetadataManager.get_mapped_name("artists", "DJ_x") == "DJ X"
+        on_disk = json.loads(store.read_text(encoding="utf-8"))
+        assert on_disk["artists"] == {"DJ_x": "DJ X", "Boysnoize": "Boys Noize"}
+        assert not store.with_suffix(".json.tmp").exists()
+
+    def test_mutating_load_result_does_not_leak_into_cache(self, store: Path) -> None:
+        loaded = MetadataManager.load()
+        loaded["artists"]["DJ_x"] = "Mutated"
+        loaded["artists"]["Ghost"] = "Should Not Exist"
+
+        assert MetadataManager.get_mapped_name("artists", "DJ_x") == "DJ X"
+        assert MetadataManager.get_mapped_name("artists", "Ghost") == "Ghost"
+        assert MetadataManager.load()["artists"] == {"DJ_x": "DJ X"}
+
+    def test_failed_write_applies_nothing(self, store: Path, monkeypatch) -> None:
+        import app.services as services
+
+        assert MetadataManager.get_mapped_name("artists", "DJ_x") == "DJ X"
+        before = store.read_text(encoding="utf-8")
+
+        def failing_replace(src, dst):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(services.os, "replace", failing_replace)
+        with pytest.raises(OSError, match="disk full"):
+            MetadataManager.add_mapping("artists", "Boysnoize", "Boys Noize")
+
+        assert MetadataManager.get_mapped_name("artists", "Boysnoize") == "Boysnoize"
+        assert MetadataManager.get_mapped_name("artists", "DJ_x") == "DJ X"
+        assert store.read_text(encoding="utf-8") == before
+        assert not store.with_suffix(".json.tmp").exists()
+
+    def test_mappings_path_that_is_a_directory_raises_and_applies_nothing(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        as_dir = tmp_path / "metadata_mappings.json"
+        as_dir.mkdir()
+        monkeypatch.setattr(MetadataManager, "MAPPINGS_FILE", as_dir)
+
+        with pytest.raises(OSError):
+            MetadataManager.add_mapping("artists", "Boysnoize", "Boys Noize")
+
+        assert MetadataManager.get_mapped_name("artists", "Boysnoize") == "Boysnoize"
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["metadata_mappings.json"]
+
+    def test_non_dict_payload_reads_as_empty(self, tmp_path: Path, monkeypatch) -> None:
+        path = tmp_path / "metadata_mappings.json"
+        path.write_text("[1, 2, 3]", encoding="utf-8")
+        monkeypatch.setattr(MetadataManager, "MAPPINGS_FILE", path)
+
+        assert MetadataManager.load() == {"artists": {}, "labels": {}, "albums": {}}
+        assert MetadataManager.get_mapped_name("artists", "Any") == "Any"
+
+    def test_concurrent_add_mapping_loses_no_update(self, store: Path) -> None:
+        def worker(n: int) -> None:
+            for i in range(5):
+                MetadataManager.add_mapping("labels", f"src-{n}-{i}", f"dst-{n}-{i}")
+
+        threads = [threading.Thread(target=worker, args=(n,)) for n in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+
+        labels = json.loads(store.read_text(encoding="utf-8"))["labels"]
+        assert len(labels) == 20
+        assert MetadataManager.get_mapped_name("labels", "src-3-4") == "dst-3-4"
 
 
 # ---------------------------------------------------------------------------

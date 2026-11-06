@@ -769,7 +769,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `file_write()` — Writes text content to a file (used for .rbep project saving).
 - `clean_xml()`
 - `get_genres()`
-- `get_library_tracks()`
+- `get_library_tracks()` — Every track of the loaded library (hide_streaming applied).
 - `get_low_quality_tracks()`
 - `get_no_artwork_tracks()`
 - `get_lost_tracks()`
@@ -1172,9 +1172,9 @@ Constant-time equality helper for tokens, secrets, HMAC outputs.
 - `SettingsManager`
 - `  SettingsManager.load()`
 - `  SettingsManager.save()` — Write settings atomically: tmp file + os.replace.
-- `MetadataManager`
+- `MetadataManager` — Manual name mappings (artist / label / album merges).
 - `  MetadataManager.load()`
-- `  MetadataManager.save()`
+- `  MetadataManager.save()` — Write atomically (tmp + os.replace), then update the cache.
 - `  MetadataManager.add_mapping()`
 - `  MetadataManager.get_mapped_name()`
 - `BeatAnalyzer` — Track analyzer used by POST /api/track/{tid}/analyze.
@@ -3803,6 +3803,23 @@ Tests for app/folder_watcher.py — auto-import folder watcher.
 - `test_add_after_stop_returns_false()`
 - `test_normalize_resolves_to_absolute()`
 
+### `tests/test_import_dedup.py`
+
+Import dedup — ``/api/library/import-paths``, ``/api/library/scan-folder`` and
+
+- `library()` — ``LIBRARY_SIZE`` tracks.
+- `imports()` — Fake ``process_import``: records the file and adds it to the library.
+- `resolve_calls()`
+- `test_drop_imports_new_files_once_and_skips_known()`
+- `test_drop_skips_a_file_another_writer_added_mid_batch()` — The case a per-batch snapshot gets wrong: f3 lands in the library while
+- `test_drop_batch_does_not_trust_a_resolve_memoised_before_it()`
+- `test_scan_imports_only_unknown_files()`
+- `test_scan_skips_files_another_writer_added_mid_scan()` — Whichever file the scan imports first, the other writer adds all the
+- `test_scan_does_not_trust_a_resolve_memoised_before_it()`
+- `test_is_known_sees_a_track_added_after_an_earlier_call()` — The folder watcher calls ``_is_known_audio_path(path)`` between batches,
+- `test_track_id_for_path_keeps_the_first_match()`
+- `test_unresolvable_path_falls_back_to_the_raw_string()`
+
 ### `tests/test_import_tracker.py`
 
 Tests for app/import_tracker.py — live import-progress tracker.
@@ -3911,6 +3928,19 @@ Tests for app/library_source.py — the Live/XML normalization layer.
 - `test_live_normalize_garbage_does_not_crash()`
 - `test_sidecar_lookup_uses_the_writers_resolved_path_key()` — The writer hashes str(path.resolve()); a stored path with `..` must still hit.
 - `test_sidecar_lookup_misses_cleanly()`
+
+### `tests/test_library_tracks_light.py`
+
+GET /api/library/tracks — the optional ``light`` projection (app/main.py).
+
+- `facade()`
+- `test_no_parameter_returns_the_full_tracks_unchanged()`
+- `test_light_false_is_the_full_response()`
+- `test_light_drops_only_the_heavy_fields()`
+- `test_light_never_mutates_the_cached_tracks()`
+- `test_hide_streaming_applies_light_or_not()`
+- `test_usb_source_and_rekordbox_xml_keep_grids_after_a_light_fetch()` — The CDJ-facing readers of the cached dicts, after a light fetch.
+- `test_light_survives_the_beatgrid_loader_writing_meanwhile()` — A writer keeps removing and re-inserting beatGrid on every cached dict
 
 ### `tests/test_live_cue_loading.py`
 
@@ -4396,6 +4426,18 @@ Tests for `app/services.py`.
 - `  TestMetadataManager.test_get_mapped_name_passthrough_on_miss()` — Unmapped names return their input unchanged.
 - `  TestMetadataManager.test_add_mapping_creates_unknown_category()` — Asking for a brand-new category creates it on demand.
 - `  TestMetadataManager.test_add_mapping_persists_across_load()` — The whole point: written mappings survive process restart.
+- `TestMetadataManagerCache` — When the mappings cache is used and refreshed, and that it never lies.
+- `  TestMetadataManagerCache.store()`
+- `  TestMetadataManagerCache.test_lookups_after_the_first_touch_no_file()`
+- `  TestMetadataManagerCache.test_hand_edit_is_seen_once_the_recheck_interval_passed()`
+- `  TestMetadataManagerCache.test_unchanged_file_is_not_re_read_on_recheck()`
+- `  TestMetadataManagerCache.test_new_mappings_file_is_read()`
+- `  TestMetadataManagerCache.test_add_mapping_is_visible_immediately_and_persisted()`
+- `  TestMetadataManagerCache.test_mutating_load_result_does_not_leak_into_cache()`
+- `  TestMetadataManagerCache.test_failed_write_applies_nothing()`
+- `  TestMetadataManagerCache.test_mappings_path_that_is_a_directory_raises_and_applies_nothing()`
+- `  TestMetadataManagerCache.test_non_dict_payload_reads_as_empty()`
+- `  TestMetadataManagerCache.test_concurrent_add_mapping_loses_no_update()`
 - `TestSystemGuard` — `is_rekordbox_running` walks psutil — must tolerate weird per-process
 - `  TestSystemGuard.test_returns_true_when_rekordbox_seen()`
 - `  TestSystemGuard.test_returns_false_when_no_match()`
