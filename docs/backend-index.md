@@ -276,12 +276,13 @@ XML-based library (default mode). In-memory dict cache for fast lookups. Also co
 | `get_tracks_by_artist/label/album(id)` | `[Track]` | Filter tracks by grouping |
 | `add_track(track_data)` | `str` (new ID) | Add track to XML library |
 | `delete_track(tid)` | `bool` | Remove track from XML |
-| `save_xml()` | None | Write current state back to XML file |
+| `save_xml()` | `bool` | Write current state back to the XML file — every track's `Rating` (was dropped on every save) and the app's own `ColorID` included. Atomic: written to `<file>.tmp`, then `os.replace` onto the library file (3 tries, 50 ms apart, for a scanner holding it open); a read-only library file is refused, not swapped out. False on any failure, with the old file intact (was: written in place, so a value ElementTree could not serialise left it truncated) |
 | `save_track_cues(tid, cues)` | `bool` | Persist cue points |
 | `save_track_beatgrid(tid, grid)` | `bool` | Persist beatgrid |
 | `get_track_cues(tid)` | `[Cue]` | Read stored cues |
 | `get_track_beatgrid(tid)` | `[Beat]` | Read stored beatgrid |
-| `update_tracks_metadata(ids, fields)` | `bool` | Batch metadata update |
+| `writable_track_fields()` | `frozenset[str]` | Field keys `update_tracks_metadata` accepts in the active mode: `app.track_fields.LIVE_WRITABLE_FIELDS` / `XML_WRITABLE_FIELDS` |
+| `update_tracks_metadata(ids, fields)` | `bool` | Batch metadata update. Raises `TrackFieldError` (a `ValueError`) before touching any track for a key outside `writable_track_fields()` or a bad value (`app.track_fields.normalise_track_updates`). XML mode: False with nothing changed when any id is unknown; otherwise applies, then returns `save_xml()`'s result — on False the touched keys are restored in memory, so memory matches the file (was: True even when the save failed) |
 | `get_analysis_writer()` | `AnalysisDBWriter \| None` | Facade: live backend's writer in live mode with a loaded library, else None. Not `_serialised` (writes nothing); the writer holds `db_lock` around its own `master.db` write |
 
 ### `app/live_database.py` — `LiveRekordboxDB`
@@ -290,7 +291,7 @@ Direct SQLite access (live mode). Thread-safe via locks. Auto-backup on write.
 | Method | Description |
 |--------|-------------|
 | `get_tracks()` | Query `master.db` directly |
-| `update_track_metadata(tid, updates)` | Write to SQLite (**requires Rekordbox to be closed**): `Title` / `Comment` / `Rating` / `ColorID` as direct fields via `update_content(item)`, `Artist` / `Genre` / `Album` via rbox's `update_content_artist\|genre\|album`; mirrors each into the in-memory cache. `Title` since 2026-09-26 (download names route) |
+| `update_track_metadata(tid, updates)` | Write to SQLite (**requires Rekordbox to be closed**): `Title` / `Comment` / `Rating` / `ColorID` as direct fields via `update_content(item)`, `Artist` / `Genre` / `Album` via rbox's `update_content_artist\|genre\|album`; mirrors each into the in-memory cache. `Title` since 2026-09-26 (download names route). Any other key (`BPM`, `Key`, `Label`, a typo like `ArtistName`) raises `UnsupportedTrackFields`, a wrong type / range (`None`, `Rating` outside 0-5, `ColorID` outside 0-8, a float) `InvalidTrackFieldValue` — both `app.track_fields.TrackFieldError`, raised before the row is read (was: True with nothing written) |
 | `get_analysis_writer()` | Lazy-create and return `AnalysisDBWriter` instance bound to this DB |
 | `get_unanalyzed_track_ids()` | Return list of track IDs with BPM=0 (not yet analyzed) |
 | `_load_cues()` | Hot + memory cues into `track["Cues"]`: `djmdCue` via `get_cues()` (rbox `DjmdCue.kind` / `.comment` — a wrong attribute name returns the getattr default silently, pinned by `tests/test_live_cue_loading.py`), falling back to the `djmdContentCue` JSON mirror when that batch read fails. Each cue: `ID, Kind, Num, Type, InMsec, OutMsec, Comment, Color, ColorTableIndex, ActiveLoop` |
