@@ -705,6 +705,9 @@ const ViewLoader = () => (
 const App = () => {
     const [appMode, setAppMode] = useState('choice');
     const [activeTab, setActiveTab] = useState('lib-playlists');
+    // DOM node at the right of the Library WorkspaceNav row; MetadataView portals
+    // its refresh + search into it so the content area needs no own toolbar row.
+    const [libraryNavSlot, setLibraryNavSlot] = useState(null);
     const [activeWorkspace, setActiveWorkspace] = useState('library');
     const [activeTrack, setActiveTrack] = useState(null);
     const [playerTrack, setPlayerTrack] = useState(null);
@@ -1082,7 +1085,13 @@ const App = () => {
                         items={currentWorkspace.items}
                         activeTab={activeTab}
                         setActiveTab={setActiveTab}
-                        rightSlot={currentWorkspace.id === 'soundcloud' ? <ScAccountChip /> : null}
+                        rightSlot={
+                            currentWorkspace.id === 'soundcloud' ? (
+                                <ScAccountChip />
+                            ) : currentWorkspace.id === 'library' ? (
+                                <div ref={setLibraryNavSlot} className="flex items-center" />
+                            ) : null
+                        }
                     />
                 )}
                 <div className={`flex-1 min-h-0 w-full relative ${playerTrack ? 'pb-20' : ''}`}>
@@ -1098,6 +1107,11 @@ const App = () => {
                             <ErrorBoundary key="eb-library">
                                 <MetadataView
                                     mode={metadataMode}
+                                    navSlot={
+                                        activeTab.startsWith('lib-') && activeTab !== 'lib-artists'
+                                            ? libraryNavSlot
+                                            : null
+                                    }
                                     onSelectTrack={handleTrackSelect}
                                     onEditTrack={handleTrackEdit}
                                     onPlayTrack={handlePlayTrack}

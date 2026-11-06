@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { toast } from 'react-hot-toast';
 import api from '../api/api';
 import TrackTable from './TrackTable';
@@ -18,6 +19,7 @@ const MetadataView = ({
     onEditTrack,
     onPlayTrack,
     libraryStatus,
+    navSlot = null,
 }) => {
     const activeTab = mode; // controlled by the Library workspace nav
     const [items, setItems] = useState([]);
@@ -111,6 +113,37 @@ const MetadataView = ({
         }
     };
 
+    const controls = (
+        <div className="flex items-center gap-1.5">
+            {!selectedItem && (
+                <button
+                    onClick={loadItems}
+                    disabled={isLoading}
+                    className={`p-1 rounded-sm transition-colors text-ink-secondary hover:text-ink-primary hover:bg-mx-hover ${isLoading ? 'animate-spin opacity-50' : ''}`}
+                    title="Refresh View"
+                >
+                    <RotateCw size={12} />
+                </button>
+            )}
+            <div className="relative group w-56">
+                <Search
+                    size={12}
+                    className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-muted group-focus-within:text-amber2 transition-colors"
+                />
+                <input
+                    className="w-full h-5 pl-6 pr-2 text-[11px] bg-mx-input border border-line-subtle rounded-sm text-ink-primary placeholder:text-ink-placeholder focus:outline-none focus:border-amber2"
+                    placeholder={selectedItem ? 'Search tracks...' : `Search ${activeTab}...`}
+                    value={selectedItem ? trackFilter : searchTerm}
+                    onChange={(e) =>
+                        selectedItem
+                            ? setTrackFilter(e.target.value)
+                            : setSearchTerm(e.target.value)
+                    }
+                />
+            </div>
+        </div>
+    );
+
     // Playlists mode → PlaylistBrowser owns the whole area (its own search + tree).
     if (activeTab === 'playlists' && !selectedItem) {
         return (
@@ -126,69 +159,44 @@ const MetadataView = ({
     }
 
     return (
-        <div className="h-full flex flex-col p-4">
-            {/* Header — back + item name when an item is open, else just search */}
-            <div className="flex justify-between items-center mb-4 gap-4">
-                {selectedItem ? (
-                    <div className="flex items-center gap-4 min-w-0">
-                        <button
-                            onClick={() => setSelectedItem(null)}
-                            className="p-2 hover:bg-white/10 rounded-full transition-colors text-ink-secondary hover:text-white shrink-0"
-                        >
-                            <ArrowLeft size={22} />
-                        </button>
-                        <div className="min-w-0">
-                            <h1 className="text-2xl font-bold text-white flex items-center gap-2.5 truncate">
-                                {activeTab === 'artists' ? (
-                                    <User size={26} className="text-amber2 shrink-0" />
-                                ) : activeTab === 'labels' ? (
-                                    <Tag size={26} className="text-purple-400 shrink-0" />
-                                ) : (
-                                    <Disc size={26} className="text-amber-400 shrink-0" />
-                                )}
-                                <span className="truncate">{selectedItem.name}</span>
-                            </h1>
-                            <p className="text-ink-secondary text-sm mt-0.5">
-                                {filteredTracks.length} /{' '}
-                                {selectedItem.track_count || tracks.length} Tracks
-                            </p>
+        <div className="h-full flex flex-col px-4 pb-4 pt-2">
+            {/* Header — back + item name when an item is open. Search + refresh live in the
+                Library nav row (portal) when main.jsx provides the slot. */}
+            {(selectedItem || !navSlot) && (
+                <div className="flex justify-between items-center mb-3 gap-4">
+                    {selectedItem ? (
+                        <div className="flex items-center gap-4 min-w-0">
+                            <button
+                                onClick={() => setSelectedItem(null)}
+                                className="p-2 hover:bg-white/10 rounded-full transition-colors text-ink-secondary hover:text-white shrink-0"
+                            >
+                                <ArrowLeft size={22} />
+                            </button>
+                            <div className="min-w-0">
+                                <h1 className="text-2xl font-bold text-white flex items-center gap-2.5 truncate">
+                                    {activeTab === 'artists' ? (
+                                        <User size={26} className="text-amber2 shrink-0" />
+                                    ) : activeTab === 'labels' ? (
+                                        <Tag size={26} className="text-purple-400 shrink-0" />
+                                    ) : (
+                                        <Disc size={26} className="text-amber-400 shrink-0" />
+                                    )}
+                                    <span className="truncate">{selectedItem.name}</span>
+                                </h1>
+                                <p className="text-ink-secondary text-sm mt-0.5">
+                                    {filteredTracks.length} /{' '}
+                                    {selectedItem.track_count || tracks.length} Tracks
+                                </p>
+                            </div>
                         </div>
-                    </div>
-                ) : (
-                    <div />
-                )}
-
-                <div className="flex items-center gap-3 shrink-0">
-                    {!selectedItem && (
-                        <button
-                            onClick={loadItems}
-                            disabled={isLoading}
-                            className={`p-2 rounded-full transition-all border border-white/5 hover:bg-white/10 text-ink-secondary hover:text-amber2 ${isLoading ? 'animate-spin opacity-50' : ''}`}
-                            title="Refresh View"
-                        >
-                            <RotateCw size={16} />
-                        </button>
+                    ) : (
+                        <div />
                     )}
-                    <div className="relative group w-64">
-                        <Search
-                            size={16}
-                            className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted group-focus-within:text-amber2 transition-colors"
-                        />
-                        <input
-                            className="input-glass w-full pl-10 bg-black/20 text-sm rounded-full py-2"
-                            placeholder={
-                                selectedItem ? 'Search tracks...' : `Search ${activeTab}...`
-                            }
-                            value={selectedItem ? trackFilter : searchTerm}
-                            onChange={(e) =>
-                                selectedItem
-                                    ? setTrackFilter(e.target.value)
-                                    : setSearchTerm(e.target.value)
-                            }
-                        />
-                    </div>
+
+                    {!navSlot && controls}
                 </div>
-            </div>
+            )}
+            {navSlot && createPortal(controls, navSlot)}
 
             {/* Content Area */}
             <div className="flex-1 overflow-hidden relative">
