@@ -17,6 +17,9 @@ export default {
         "./index.html",
         "./src/**/*.{js,ts,jsx,tsx}",
     ],
+    // Built at runtime from variables (UsbSyncPanel tone/ringColor, InsightsView
+    // KpiCard color) — invisible to the content scan.
+    safelist: ['text-ok', 'text-amber2', 'text-bad', 'text-teal-400', 'text-rose-400'],
     theme: {
         extend: {
             colors: {
