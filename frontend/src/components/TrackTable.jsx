@@ -129,6 +129,7 @@ const TrackTable = ({
     onSortedTracksChange,
 }) => {
     const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
+    const [selectedKey, setSelectedKey] = useState(null);
     const [visibleColumns, setVisibleColumns] = useState(() => {
         const saved = localStorage.getItem('track_table_columns');
         return saved ? JSON.parse(saved) : DEFAULT_COLUMNS.map((c) => c.id);
@@ -208,11 +209,11 @@ const TrackTable = ({
 
     return (
         <div
-            className={`h-full overflow-auto relative ${variant === 'default' ? 'bg-mx-shell border border-line-subtle rounded-mx-md mx-2 mb-2 pb-20' : ''}`}
+            className={`track-table h-full overflow-auto relative ${variant === 'default' ? 'bg-mx-shell border border-line-subtle rounded-mx-md mx-2 mb-2 pb-20' : ''}`}
         >
             <table className="w-full text-left border-collapse min-w-[800px] table-fixed">
                 <thead
-                    className="sticky top-0 z-10 select-none"
+                    className="tt-head sticky top-0 z-10 select-none"
                     style={{
                         background: 'var(--mx-shell)',
                         borderBottom: '1px solid var(--line-subtle)',
@@ -232,7 +233,7 @@ const TrackTable = ({
                                     key={col.id}
                                     style={{ width: col.width, textAlign: col.align || 'left' }}
                                     onClick={() => col.sortable && handleSort(col.id)}
-                                    className={`p-2 text-[10px] font-semibold text-ink-muted uppercase tracking-wider ${col.sortable ? 'cursor-pointer hover:text-amber2 transition-colors' : ''}`}
+                                    className={`tt-th p-2 text-[10px] font-semibold text-ink-muted uppercase tracking-wider ${col.sortable ? 'cursor-pointer hover:text-amber2 transition-colors' : ''} ${sortConfig.key === col.id ? 'tt-sorted' : ''}`}
                                 >
                                     <div className="flex items-center gap-1 justify-between">
                                         <span
@@ -261,7 +262,7 @@ const TrackTable = ({
                                 <th
                                     key={col.id}
                                     style={{ width: col.width }}
-                                    className="p-2 text-[10px] font-semibold text-ink-muted uppercase tracking-wider text-center"
+                                    className="tt-th p-2 text-[10px] font-semibold text-ink-muted uppercase tracking-wider text-center"
                                 >
                                     {col.label}
                                 </th>
@@ -272,7 +273,10 @@ const TrackTable = ({
                     {sortedTracks.map((t, index) => (
                         <tr
                             key={t.id || index}
-                            onClick={() => onSelectTrack && onSelectTrack(t)}
+                            onClick={() => {
+                                setSelectedKey(t.id || index);
+                                onSelectTrack && onSelectTrack(t);
+                            }}
                             onDoubleClick={() =>
                                 onPlay ? onPlay(t) : onEditTrack && onEditTrack(t)
                             }
@@ -281,7 +285,7 @@ const TrackTable = ({
                                 setContextMenu({ x: e.clientX, y: e.clientY, track: t });
                                 setHeaderMenu(null);
                             }}
-                            className="group transition-colors cursor-pointer text-[12px] hover:bg-mx-hover"
+                            className={`tt-row group transition-colors cursor-pointer text-[12px] hover:bg-mx-hover ${selectedKey === (t.id || index) ? 'tt-selected' : ''}`}
                             style={{ borderBottom: '1px solid var(--line-subtle)' }}
                             draggable={!!onReorder}
                             onDragStart={(e) => {
@@ -323,7 +327,7 @@ const TrackTable = ({
                             }}
                         >
                             {visibleColumns.includes('index') && (
-                                <td className="p-1 font-mono text-ink-muted text-right pr-2 text-[11px]">
+                                <td className="tt-num p-1 font-mono text-ink-muted text-right pr-2 text-[11px]">
                                     {index + 1}
                                 </td>
                             )}
@@ -341,7 +345,7 @@ const TrackTable = ({
                             {visibleColumns.includes('artwork') && (
                                 <td className="p-1 px-2 text-center w-[48px]">
                                     {t.Artwork ? (
-                                        <div className="w-9 h-9 rounded-mx-sm overflow-hidden mx-auto bg-mx-card border border-line-subtle relative group-hover:scale-105 transition-transform">
+                                        <div className="tt-art w-9 h-9 rounded-mx-sm overflow-hidden mx-auto bg-mx-card border border-line-subtle relative group-hover:scale-105 transition-transform">
                                             <img
                                                 src={`${api.defaults.baseURL || ''}/api/artwork?path=${encodeURIComponent(t.Artwork)}`}
                                                 alt={t.Title}
@@ -364,7 +368,7 @@ const TrackTable = ({
                                             />
                                         </div>
                                     ) : (
-                                        <div className="w-9 h-9 bg-mx-card rounded-mx-sm border border-line-subtle flex items-center justify-center mx-auto text-ink-placeholder">
+                                        <div className="tt-art w-9 h-9 bg-mx-card rounded-mx-sm border border-line-subtle flex items-center justify-center mx-auto text-ink-placeholder">
                                             <ImageIcon size={14} />
                                         </div>
                                     )}
@@ -372,7 +376,7 @@ const TrackTable = ({
                             )}
                             {visibleColumns.includes('Title') && (
                                 <td
-                                    className="p-1 px-2 font-medium text-ink-primary group-hover:text-amber2 transition-colors truncate"
+                                    className="tt-title p-1 px-2 font-medium text-ink-primary group-hover:text-amber2 transition-colors truncate"
                                     title={t.Title}
                                 >
                                     {t.Title}
@@ -389,14 +393,14 @@ const TrackTable = ({
                                 </td>
                             )}
                             {visibleColumns.includes('BPM') && (
-                                <td className="p-1 text-amber2 text-center font-mono">
+                                <td className="tt-bpm p-1 text-amber2 text-center font-mono">
                                     {t.BPM ? parseFloat(t.BPM).toFixed(2) : '-'}
                                 </td>
                             )}
                             {visibleColumns.includes('Key') && (
                                 <td className="p-1 text-center font-mono font-bold">
                                     <span
-                                        className="px-2 py-0.5 rounded-full text-[9px] shadow-lg"
+                                        className="tt-key-badge px-2 py-0.5 rounded-full text-[9px] shadow-lg"
                                         style={{
                                             backgroundColor: `${getKeyColor(t.Key)}22`, // 22 is ~13% opacity
                                             color: getKeyColor(t.Key),
@@ -428,7 +432,7 @@ const TrackTable = ({
                             )}
                             {visibleColumns.includes('Rating') && (
                                 <td className="p-1 text-center">
-                                    <div className="flex justify-center gap-0.5 opacity-40 group-hover:opacity-100">
+                                    <div className="tt-rating flex justify-center gap-0.5 opacity-40 group-hover:opacity-100">
                                         {[1, 2, 3, 4, 5].map((star) => (
                                             <Star
                                                 key={star}
@@ -485,7 +489,7 @@ const TrackTable = ({
                                     )
                             )}
                             {visibleColumns.includes('TotalTime') && (
-                                <td className="p-1 text-ink-secondary text-center font-mono">
+                                <td className="tt-time p-1 text-ink-secondary text-center font-mono">
                                     {formatTime(t.TotalTime)}
                                 </td>
                             )}

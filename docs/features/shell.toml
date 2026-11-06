@@ -145,12 +145,15 @@ notes = "Neue Views an der Library-Ansicht ausrichten (Coding-Rule)."
 id = "rekordbox-skin"
 group = "Theming"
 name = "Rekordbox-Skin"
-status = "idea"
+status = "unmerged"
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
 desc = "Umschaltbares Theme im Rekordbox-7-Look: Farben, Arial-Dichte, Zebra-Zeilen, Spalten."
+paths = ["frontend/src/themes/", "frontend/src/utils/theme.js"]
 depends_on = ["melodex-design-system"]
 related = ["appearance-settings"]
-todo = ["Tailwind-Keys auf CSS-Vars umstellen", "[data-theme=rekordbox]-Override-Sheet", "Theme-Picker in SettingsAppearance"]
-notes = "Tokens/Metriken/Layout: docs/reference/rbxport/ui-skin.md (rbxport-Studie, nur Fakten - GPL)."
+todo = ["Hardcodierte Farben (blue-/cyan-/white/, Hex) in Komponenten auf Tokens", "Kontextmenüs 25px + #979797-Rahmen", "Shell: Tree 305px + Statusleiste 27px (Research-Doc zuerst)", "Player/Deck-Look (PLAY-Ring grün, CUE gelb)", "Spalten-Preset + Datum M/D/YY im Skin"]
+notes = "Phase 1: Tokens als RGB-Kanal-Vars (tailwind.config.js tok()), :root[data-theme=rekordbox] in themes/rekordbox.css, Picker in SettingsAppearance (localStorage lms.ui_theme), TrackTable-Hooks tt-*. Schrift 13px statt rbxport-16.5px (macOS-Messung). Quelle: docs/reference/rbxport/ui-skin.md."
 
 [[feature]]
 id = "shared-portal-tooltip"

@@ -48,6 +48,8 @@ All DAW state is managed in this directory. Do NOT duplicate in component-local 
 | File | Purpose |
 |------|---------|
 | `utils/log.js` | Dev-only logger (see Entry Point above). |
+| `utils/theme.js` | UI skin selection: `THEMES`, `getStoredTheme` / `applyTheme` / `setTheme` (localStorage `lms.ui_theme` → `<html data-theme>`), `REKORDBOX_WAVEFORM_COLORS`. Applied in `main.jsx` before first render. |
+| `themes/rekordbox.css` | Rekordbox-style skin: overrides the RGB-channel colour vars (`--<name>-rgb`, see `index.css` `:root` + `tailwind.config.js` `tok()`), fonts, radii, row metrics, scrollbars under `:root[data-theme='rekordbox']`; styles `TrackTable` via `.track-table` / `.tt-*` hooks. Values: `docs/reference/rbxport/ui-skin.md`. |
 | `utils/AudioBandAnalyzer.js` | Splits an `AudioBuffer` into 3 frequency bands (lowpass 400 Hz, bandpass 400–2000 Hz, highpass 2000 Hz) via `OfflineAudioContext`. Also generates multi-resolution (r1/r2/r4 LOD) peak arrays for zoom-adaptive rendering, plus `bufferToWav` PCM-WAV exporter. |
 
 ---
@@ -98,7 +100,7 @@ Non-lazy components used by feature views.
 | `components/PlaylistBrowser.jsx` | Rekordbox playlist tree — expand/collapse, drag-reorder, smart-playlist editing, context menu, rename, "Move to" picker. Used inside `MetadataView`. |
 | `components/SmartPlaylistEditor.jsx` | Rule-based smart playlist editor — field/operator/value rows, AND/OR combinator, live preview. Modal dialog. |
 | `components/SoundCloudProgressModal.jsx` | OAuth + download progress overlay used by SC views — stage label, current track, percentage, cancel button. |
-| `components/TrackTable.jsx` | **Reusable sortable track table** — Camelot wheel colours, BPM/key display, multi-select, configurable columns, drag-reorder. Used inside `LibraryView`, `MetadataView`, `RankingView`, `UtilitiesView`. |
+| `components/TrackTable.jsx` | **Reusable sortable track table** — Camelot wheel colours, BPM/key display, multi-select, configurable columns, drag-reorder, row-selection marker (`tt-selected`). Skin hooks: `.track-table`, `.tt-head/th/row/title/bpm/time/num/art/rating/key-badge`. Used inside `LibraryView`, `MetadataView`, `RankingView`, `UtilitiesView`. |
 | `components/LibraryView.jsx` | Minimal track-browser wrapper around `TrackTable` (legacy; superseded as the default `library` route by `MetadataView`). |
 | `components/ToolsView.jsx` | Legacy batch-tools hub (duplicates, rename, batch comments). Functionality moved to `UtilitiesView`; kept for direct imports. |
 | `components/shared/WaveformMiniCanvas.jsx` | **Reusable canvas waveform renderer** — CDJ-style 3-band colours (Low=Red, Mid=Green, High=Blue, screen blend), mono fallback, optional playhead line + viewport-window highlight. DPR + ResizeObserver-aware. Used by `WaveformOverview`. |
@@ -116,7 +118,7 @@ Non-lazy components used by feature views.
 | `components/settings/SettingsUsb.jsx` | Per-stick USB profile CRUD (label, type, audio format). Loads profiles lazily. |
 | `components/settings/SettingsAudio.jsx` | CPAL output device picker — enumerates `list_audio_devices` Tauri command (desktop only). |
 | `components/settings/SettingsAnalysis.jsx` | Analysis quality preset (Fast librosa / Standard madmom / Thorough ensemble), ranking filter, insight thresholds. |
-| `components/settings/SettingsAppearance.jsx` | Waveform band-colour customisation (blue / RGB / 3band / custom), locale picker. |
+| `components/settings/SettingsAppearance.jsx` | UI theme picker (Melodex / Rekordbox-Stil, instant, per device via `utils/theme.js`; offers Rekordbox waveform colours), waveform band-colour customisation (blue / RGB / 3band / custom), locale picker. |
 | `components/settings/SettingsShortcuts.jsx` | Configurable DAW keyboard shortcut bindings (14 actions) via `KeyCapture`. |
 | `components/settings/SettingsNetwork.jsx` | HTTP proxy, SoundCloud sync target, backend restart. Hidden "expert" toggle (5× click on muted dot reveals aggressive-download switch). |
 

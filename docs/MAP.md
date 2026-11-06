@@ -113,6 +113,7 @@
 | `frontend/src/store/authStore.js` | Tiny module-level auth state shared across the frontend. |
 | `frontend/src/utils/AudioBandAnalyzer.js` | AudioBandAnalyzer Splits an AudioBuffer into 3 frequency bands (Rekordbox-style): - Low: < 400 Hz (Bass / Kic… |
 | `frontend/src/utils/log.js` | Dev-only logging utility. |
+| `frontend/src/utils/theme.js` | theme — UI skin selection (per device, localStorage). |
 | `frontend/src/components/BatchEditBar.jsx` | *(no module docstring)* |
 | `frontend/src/components/ConfirmModal.jsx` | Module-level subscriber registry so a single mounted <ConfirmModalRoot /> |
 | `frontend/src/components/DownloadManagerView.jsx` | Stage pipeline (in execution order) — covers BOTH SC-DL and local-import |
@@ -139,7 +140,7 @@
 | `frontend/src/components/SoundCloudView.jsx` | PRIVACY: do not hold the actual OAuth token in React state — the real |
 | `frontend/src/components/ToastContext.jsx` | *(no module docstring)* |
 | `frontend/src/components/ToolsView.jsx` | Mirror of LibraryTools.smart_rename's token substitution + sanitisation, |
-| `frontend/src/components/TrackTable.jsx` | Camelot |
+| `frontend/src/components/TrackTable.jsx` | *(no module docstring)* |
 | `frontend/src/components/UsbSettingsView.jsx` | UsbSettingsView — edit MYSETTING.DAT / MYSETTING2.DAT / DJMMYSETTING.DAT Per-stick CDJ + DJM hardware setting… |
 | `frontend/src/components/UsbView.jsx` | UsbView — Melodex-styled USB device manager (container). |
 | `frontend/src/components/UtilitiesView.jsx` | UtilitiesView — router for the Utilities workspace. |
@@ -163,7 +164,7 @@
 | `frontend/src/components/editor/TimelineCanvas.jsx` | TimelineCanvas - Main editing canvas for the non-destructive audio editor Features: - Zoomable timeline with … |
 | `frontend/src/components/format-swap/ScopeBucketPicker.jsx` | ScopeBucketPicker — 4-bucket scope chooser for the Format Converter. |
 | `frontend/src/components/settings/SettingsAnalysis.jsx` | SettingsAnalysis — Quality preset, ranking filter, library insight thresholds. |
-| `frontend/src/components/settings/SettingsAppearance.jsx` | SettingsAppearance — Waveform band colours, locale picker. |
+| `frontend/src/components/settings/SettingsAppearance.jsx` | SettingsAppearance — UI theme (skin), waveform band colours, locale picker. |
 | `frontend/src/components/settings/SettingsAudio.jsx` | SettingsAudio — CPAL output device picker (Tauri-only enumeration). |
 | `frontend/src/components/settings/SettingsControls.jsx` | SettingsControls — Shared building blocks for the tabbed Settings panel. |
 | `frontend/src/components/settings/SettingsExport.jsx` | SettingsExport — Default export folder, format defaults, Rekordbox bridge. |

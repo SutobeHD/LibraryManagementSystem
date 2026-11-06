@@ -1,10 +1,14 @@
 /**
- * SettingsAppearance — Waveform band colours, locale picker.
+ * SettingsAppearance — UI theme (skin), waveform band colours, locale picker.
+ *
+ * Theme applies instantly and is stored per device (utils/theme.js), not in
+ * the backend settings — the Save button is not needed for it.
  */
 
-import React, { useCallback } from 'react';
-import { Palette, Globe } from 'lucide-react';
+import React, { useCallback, useState } from 'react';
+import { Palette, Globe, Brush } from 'lucide-react';
 import { Section, Field } from './SettingsControls';
+import { THEMES, getStoredTheme, setTheme, REKORDBOX_WAVEFORM_COLORS } from '../../utils/theme';
 
 const SettingsAppearance = ({ settings, setSettings }) => {
     const set = useCallback(
@@ -14,8 +18,52 @@ const SettingsAppearance = ({ settings, setSettings }) => {
         [setSettings]
     );
 
+    const [theme, setThemeState] = useState(getStoredTheme);
+    const chooseTheme = useCallback((id) => {
+        setThemeState(setTheme(id));
+    }, []);
+    const applyRekordboxWaveform = useCallback(() => {
+        setSettings((prev) => ({
+            ...prev,
+            waveform_visual_mode: 'custom',
+            ...REKORDBOX_WAVEFORM_COLORS,
+        }));
+    }, [setSettings]);
+
     return (
         <div className="space-y-6">
+            <Section title="Theme" icon={Brush}>
+                <div className="grid grid-cols-2 gap-3">
+                    {THEMES.map((t) => (
+                        <button
+                            key={t.id}
+                            onClick={() => chooseTheme(t.id)}
+                            aria-pressed={theme === t.id}
+                            className={`flex flex-col items-start gap-1 p-4 rounded-mx-lg border text-left transition-all ${
+                                theme === t.id
+                                    ? 'bg-amber2/20 border-amber2'
+                                    : 'bg-mx-deepest/50 border-white/5 hover:border-white/20'
+                            }`}
+                        >
+                            <span
+                                className={`font-bold text-sm ${theme === t.id ? 'text-ink-primary' : 'text-ink-secondary'}`}
+                            >
+                                {t.label}
+                            </span>
+                            <span className="text-xs text-ink-muted">{t.desc}</span>
+                        </button>
+                    ))}
+                </div>
+                <p className="text-xs text-ink-muted">
+                    Wirkt sofort und wird pro Gerät gespeichert.
+                </p>
+                {theme === 'rekordbox' && (
+                    <button onClick={applyRekordboxWaveform} className="btn-secondary text-xs">
+                        Rekordbox-Waveform-Farben übernehmen (Blau / Orange / Weiß)
+                    </button>
+                )}
+            </Section>
+
             <Section title="Waveform Colors" icon={Palette}>
                 <p className="text-xs text-ink-muted">
                     Custom colors for the 3-band waveform display (Low / Mid / High frequency

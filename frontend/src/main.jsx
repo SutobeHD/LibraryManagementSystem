@@ -49,6 +49,8 @@ import {
     Library,
 } from 'lucide-react';
 import './index.css';
+import './themes/rekordbox.css';
+import { applyTheme, getStoredTheme } from './utils/theme';
 import { ToastProvider } from './components/ToastContext';
 import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
@@ -1188,6 +1190,8 @@ window.addEventListener('unhandledrejection', (event) => {
     event.preventDefault();
 });
 
+applyTheme(getStoredTheme());
+
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
     <ToastProvider>
@@ -1197,10 +1201,10 @@ root.render(
             toastOptions={{
                 duration: 3000,
                 style: {
-                    background: '#1A1E27',
-                    color: '#F0F2F7',
-                    border: '1px solid #2A2F3E',
-                    fontFamily: '"DM Sans", system-ui, sans-serif',
+                    background: 'var(--mx-panel)',
+                    color: 'var(--ink-primary)',
+                    border: '1px solid var(--line-subtle)',
+                    fontFamily: 'var(--font-ui)',
                     fontSize: 13,
                     maxWidth: '500px',
                     borderRadius: 6,

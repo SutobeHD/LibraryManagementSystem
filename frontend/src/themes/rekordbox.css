@@ -1,0 +1,185 @@
+/* ============================================================
+   Rekordbox-style skin — opt-in via :root[data-theme="rekordbox"]
+   Values: docs/reference/rbxport/ui-skin.md (measured facts, own CSS).
+   Look: black ground, #0F0F0F / #1E1E1E zebra, steel-blue selection,
+   single blue accent, Arial, 25px rows, near-flat 2px radii.
+   ============================================================ */
+
+:root[data-theme='rekordbox'] {
+    --mx-deepest-rgb: 0 0 0; /* #000000 ground, gaps        */
+    --mx-shell-rgb: 15 15 15; /* #0F0F0F top bar, odd rows   */
+    --mx-panel-rgb: 30 30 30; /* #1E1E1E tree, header, even  */
+    --mx-surface-rgb: 30 30 30; /* #1E1E1E                     */
+    --mx-card-rgb: 50 50 50; /* #323232 raised              */
+    --mx-hover-rgb: 43 43 43; /* #2B2B2B row hover           */
+    --mx-selected-rgb: 49 75 103; /* #314B67 selected row        */
+    --mx-input-rgb: 0 0 0; /* #000000 field interior      */
+
+    --line-subtle-rgb: 50 50 50; /* #323232 dividers            */
+    --line-default-rgb: 50 50 50; /* #323232                     */
+    --line-interactive-rgb: 100 100 100; /* #646464 toggle outlines     */
+
+    --ink-primary-rgb: 230 230 230; /* #E6E6E6 body text           */
+    --ink-secondary-rgb: 154 154 154; /* #9A9A9A dim text            */
+    --ink-muted-rgb: 150 150 150; /* #969696 status text         */
+    --ink-placeholder-rgb: 75 75 75; /* #4B4B4B placeholder         */
+    --ink-inverse-rgb: 0 0 0;
+
+    --amber-rgb: 19 115 235; /* #1373EB accent              */
+    --amber-hover-rgb: 71 117 255; /* #4775FF focus/hover         */
+    --amber-press-rgb: 14 92 192; /* #0E5CC0 derived             */
+    --amber-dim-rgb: 49 75 103; /* #314B67                     */
+
+    --ok-rgb: 47 191 78; /* #2FBF4E meter green         */
+    --bad-rgb: 226 59 46; /* #E23B2E error               */
+    --info-rgb: 91 200 255; /* #5BC8FF sync pending        */
+
+    --font-ui: Arial, 'Helvetica Neue', Helvetica, sans-serif;
+    --font-mono: Arial, 'Helvetica Neue', Helvetica, sans-serif;
+
+    --radius-mx-xs: 2px;
+    --radius-mx-sm: 2px;
+    --radius-mx-md: 2px;
+    --radius-mx-lg: 3px;
+    --radius-mx-xl: 3px;
+
+    /* rbxport measured 16.5px on macOS; 13px matches Windows 100 % scale. */
+    --row-h: 25px;
+    --head-h: 24px;
+    --fs-ui: 13px;
+    --scrollbar-w: 12px;
+}
+
+/* ── Base ──────────────────────────────────────────────────── */
+:root[data-theme='rekordbox'] body {
+    background-image: none;
+    -webkit-font-smoothing: auto;
+}
+:root[data-theme='rekordbox'] .font-mono {
+    font-variant-numeric: tabular-nums;
+}
+:root[data-theme='rekordbox'] ::selection {
+    background: rgb(var(--mx-selected-rgb));
+}
+:root[data-theme='rekordbox'] :focus-visible {
+    outline: 1px solid rgb(var(--amber-rgb));
+    outline-offset: -1px;
+}
+
+/* Scrollbars: always visible, black track, inset grey thumb. */
+:root[data-theme='rekordbox'] ::-webkit-scrollbar {
+    width: var(--scrollbar-w);
+    height: var(--scrollbar-w);
+}
+:root[data-theme='rekordbox'] ::-webkit-scrollbar-track,
+:root[data-theme='rekordbox'] ::-webkit-scrollbar-corner {
+    background: #000;
+}
+:root[data-theme='rekordbox'] ::-webkit-scrollbar-thumb {
+    background: rgb(var(--mx-card-rgb));
+    border: 2px solid #000;
+    border-radius: 4px;
+}
+:root[data-theme='rekordbox'] ::-webkit-scrollbar-thumb:hover {
+    background: #6b6b6b;
+}
+:root[data-theme='rekordbox'] * {
+    scrollbar-color: rgb(var(--mx-card-rgb)) #000;
+}
+
+/* ── Track table ───────────────────────────────────────────── */
+:root[data-theme='rekordbox'] .track-table {
+    background: #000;
+    border-color: #000;
+    border-radius: 0;
+}
+:root[data-theme='rekordbox'] .tt-head {
+    background: rgb(var(--mx-panel-rgb)) !important;
+    border-bottom: 1px solid #000 !important;
+}
+:root[data-theme='rekordbox'] .tt-th {
+    height: var(--head-h);
+    padding: 0 8px;
+    font-size: var(--fs-ui);
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
+    color: rgb(var(--ink-primary-rgb));
+    border-right: 1px solid rgb(var(--line-default-rgb));
+}
+:root[data-theme='rekordbox'] .tt-th.tt-sorted {
+    color: rgb(var(--amber-rgb));
+}
+:root[data-theme='rekordbox'] .tt-row {
+    height: var(--row-h);
+    font-size: var(--fs-ui);
+    border-bottom: 0 !important;
+    background: rgb(var(--mx-shell-rgb));
+    transition: none;
+}
+:root[data-theme='rekordbox'] .tt-row:nth-child(even) {
+    background: rgb(var(--mx-panel-rgb));
+}
+:root[data-theme='rekordbox'] .tt-row:hover {
+    background: rgb(var(--mx-hover-rgb));
+}
+:root[data-theme='rekordbox'] .tt-row.tt-selected {
+    background: rgb(var(--mx-selected-rgb));
+}
+:root[data-theme='rekordbox'] .tt-row > td {
+    padding-top: 0;
+    padding-bottom: 0;
+    padding-left: 6px;
+    padding-right: 6px;
+    border-right: 1px solid rgb(var(--line-default-rgb));
+    color: rgb(var(--ink-primary-rgb));
+    font-size: var(--fs-ui);
+    font-weight: 400;
+}
+:root[data-theme='rekordbox'] .tt-row.tt-selected > td {
+    border-right-color: #000;
+}
+:root[data-theme='rekordbox'] .tt-row .tt-title,
+:root[data-theme='rekordbox'] .tt-row:hover .tt-title {
+    color: rgb(var(--ink-primary-rgb));
+}
+:root[data-theme='rekordbox'] .tt-num,
+:root[data-theme='rekordbox'] .tt-bpm,
+:root[data-theme='rekordbox'] .tt-time {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+:root[data-theme='rekordbox'] .tt-num {
+    font-size: var(--fs-ui);
+}
+
+/* Key column: plain text, no Camelot colour badge. */
+:root[data-theme='rekordbox'] .tt-key-badge {
+    background: none !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    color: rgb(var(--ink-primary-rgb)) !important;
+    padding: 0;
+    font-size: var(--fs-ui);
+    font-weight: 400;
+}
+
+/* Artwork thumb shrinks to the row. */
+:root[data-theme='rekordbox'] .tt-art {
+    width: calc(var(--row-h) - 4px);
+    height: calc(var(--row-h) - 4px);
+    border: 0;
+    border-radius: 0;
+}
+
+/* Rating stars: text colour, no fade-out. */
+:root[data-theme='rekordbox'] .tt-rating {
+    opacity: 1 !important;
+}
+:root[data-theme='rekordbox'] .tt-rating svg {
+    width: 13px;
+    height: 13px;
+}
+:root[data-theme='rekordbox'] .tt-rating .text-amber2 {
+    color: rgb(var(--ink-primary-rgb));
+}

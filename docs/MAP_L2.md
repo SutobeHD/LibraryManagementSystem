@@ -1311,6 +1311,18 @@ Dev-only logging utility.
 
 - `log()`
 
+### `frontend/src/utils/theme.js`
+
+theme — UI skin selection (per device, localStorage).
+
+- `THEME_STORAGE_KEY()` — theme — UI skin selection (per device, localStorage).
+- `DEFAULT_THEME()`
+- `THEMES()`
+- `REKORDBOX_WAVEFORM_COLORS()` — Rekordbox 3-band waveform colours (low / mid / high), see docs/reference/rbxport/ui-skin.md §2.5.
+- `getStoredTheme()`
+- `applyTheme()`
+- `setTheme()`
+
 ### `frontend/src/components/BatchEditBar.jsx`
 
 *(no module docstring)*
@@ -1432,7 +1444,7 @@ Mirror of LibraryTools.smart_rename's token substitution + sanitisation,
 
 ### `frontend/src/components/TrackTable.jsx`
 
-Camelot
+*(no module docstring)*
 
 ### `frontend/src/components/UsbSettingsView.jsx`
 
@@ -1534,7 +1546,7 @@ SettingsAnalysis — Quality preset, ranking filter, library insight thresholds.
 
 ### `frontend/src/components/settings/SettingsAppearance.jsx`
 
-SettingsAppearance — Waveform band colours, locale picker.
+SettingsAppearance — UI theme (skin), waveform band colours, locale picker.
 
 ### `frontend/src/components/settings/SettingsAudio.jsx`
 
