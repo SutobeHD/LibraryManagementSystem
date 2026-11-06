@@ -22,6 +22,7 @@
 | `app/anlz_cue_patch.py` | anlz_cue_patch.py — non-destructive memory-cue injection into existing ANLZ files. |
 | `app/anlz_safe.py` | Safe wrapper around `rbox.MasterDb` + `rbox.Anlz` for PQTZ beatgrid loading. |
 | `app/anlz_sidecar.py` | ANLZ-Sidecar writer — shared helper used by every track-import path |
+| `app/anlz_usb_export.py` | Ready one track's ANLZ trio for a USB stick: the transform Rekordbox applies on export. |
 | `app/anlz_writer.py` | LibraryManagementSystem -- ANLZ Binary File Writer |
 | `app/artist_store/__init__.py` | artist_store — Artist-Hub sidecar package (``artists.db``). |
 | `app/artist_store/attribution.py` | artist_store.attribution — which library tracks belong to an artist, and as what. |
@@ -270,6 +271,8 @@
 | `tests/test_anlz_path_resolution.py` | Pure-Python ANLZ path resolution in `app.anlz_safe`. |
 | `tests/test_anlz_reference_parse.py` | Validate the produced ANLZ files (.DAT/.EXT/.2EX). |
 | `tests/test_anlz_safe_pqtz.py` | Beat-grid extraction in `app.anlz_safe`. |
+| `tests/test_anlz_usb_export.py` | ANLZ trio -> USB stick transform (`app.anlz_usb_export`) and its wiring in |
+| `tests/test_anlz_usb_export_sync.py` | Full `OneLibraryUsbWriter.sync()` with copy_anlz=True against the real template. |
 | `tests/test_anlz_writer_guards.py` | Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout). |
 | `tests/test_artist_attribution.py` | Local attribution tests (T-24 — app/artist_store/attribution.py). |
 | `tests/test_artist_catalogue.py` | Artist-Hub catalogue tests (T-14 — app/artist_store/catalogue.py). |

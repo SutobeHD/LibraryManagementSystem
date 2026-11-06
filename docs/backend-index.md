@@ -293,6 +293,7 @@ Direct SQLite access (live mode). Thread-safe via locks. Auto-backup on write.
 | `update_track_metadata(tid, updates)` | Write to SQLite (**requires Rekordbox to be closed**): `Title` / `Comment` / `Rating` / `ColorID` as direct fields via `update_content(item)`, `Artist` / `Genre` / `Album` via rbox's `update_content_artist\|genre\|album`; mirrors each into the in-memory cache. `Title` since 2026-09-26 (download names route) |
 | `get_analysis_writer()` | Lazy-create and return `AnalysisDBWriter` instance bound to this DB |
 | `get_unanalyzed_track_ids()` | Return list of track IDs with BPM=0 (not yet analyzed) |
+| `_load_cues()` | Hot + memory cues into `track["Cues"]`: `djmdCue` via `get_cues()` (rbox `DjmdCue.kind` / `.comment` — a wrong attribute name returns the getattr default silently, pinned by `tests/test_live_cue_loading.py`), falling back to the `djmdContentCue` JSON mirror when that batch read fails. Each cue: `ID, Kind, Num, Type, InMsec, OutMsec, Comment, Color, ColorTableIndex, ActiveLoop` |
 | `_load_beatgrids_from_anlz()` | Batch-loads PQTZ beatgrids via `SafeAnlzParser.load_all_beatgrids` (subprocess-isolated, bisecting). Runs on a daemon thread spawned by `_start_beatgrid_background_load` after `loaded=True` so a slow / panicking rbox call cannot block library init |
 | `_start_beatgrid_background_load()` | Spawns the `anlz-beatgrid-loader` daemon thread that runs `_load_beatgrids_from_anlz` out of band |
 
@@ -378,6 +379,20 @@ Non-destructive in-place patch of an **existing** ANLZ. Walks the flat PMAI tag 
 | `read_beats_from_anlz` | `(anlz_dir) -> list[float]` | Read beat timestamps (s) from the `.DAT` PQTZ tag — rbox MasterDb has no beat-grid getter. `[]` if no `.DAT`/PQTZ |
 | `_walk_tags` | `(data) -> (tags, end)` | Walk the tag chain past the PMAI header; stops (not raises) on a malformed length so the remainder is carried verbatim |
 | `_patch_one_file` | `(path, memory_cues, include_pco2) -> bool` | Rewrite one `.DAT`/`.EXT`; `include_pco2=True` for `.EXT` only. Appends a memory PCOB/PCO2 if the file lacks one |
+
+---
+
+## ANLZ USB Export (`app/anlz_usb_export.py`)
+
+Readies one track's ANLZ trio for the stick the way Rekordbox's own export does: PPTH := stick audio path (`/Contents/...`), plain PSSI XOR-masked (rekordcrate/rbox key), every other tag + the PMAI header (except `len_file`) byte-for-byte. Cue lists ride through unchanged. Used by `OneLibraryUsbWriter._generate_or_copy_anlz_for` (source order: `.lms_anlz` sidecar, then a fresh analysis).
+
+| Function | Signature | Notes |
+|----------|-----------|-------|
+| `export_trio` | `(src_dat, dst_dir, usb_audio_path) -> list[str]` | Reads exactly `<stem>.DAT/.EXT/.2EX` (never `.bak-*`), all-or-nothing validation. Stages `.part` files, then `os.replace`, then deletes other `ANLZ*` in `dst_dir` (case-insensitive keep list). `[]` = source missing/invalid (try next source); raises `UsbWriteError` when the stick cannot be written |
+| `is_complete_anlz` | `(data) -> bool` | `PMAI` magic, header len 28, `len_file == size`, tag chain ends exactly at EOF |
+| `to_usb_bytes` | `(data, usb_audio_path) -> bytes` | The transform; empty `usb_audio_path` keeps the source PPTH |
+| `mask_pssi` | `(tag) -> bytes` | No-op unless mood is a plain 1..3, so an exported tag is never masked twice |
+| `UsbWriteError` | `Exception` (not `OSError`) | Stick-side failure; a broad `except OSError` must not mistake it for a bad source |
 
 ---
 

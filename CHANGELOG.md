@@ -157,6 +157,22 @@
   - Fixed: Settings could silently overwrite every stored value — a timed-out
     `GET /api/settings` left the form showing defaults, and Save posted them.
     Saving is now disabled until a load succeeds.
+- Fixed: in live mode, hot cues read from Rekordbox's `djmdCue` table loaded as
+  nameless memory cues — the loader asked rbox for attribute names `DjmdCue`
+  does not have. Libraries that fall back to the `djmdContentCue` mirror were
+  not affected. Cues now also carry Rekordbox's colour / active-loop values.
+- USB stick export (OneLibrary) fixes:
+  - Fixed: the export missed an existing `.lms_anlz` analysis whenever the
+    track's stored path was not already in resolved form (a `..` segment, a
+    relative path, different letter case on Windows) and re-analysed the track.
+  - Changed: ANLZ files go onto the stick the way Rekordbox exports them — the
+    embedded path (PPTH) is the stick's audio path instead of your local one,
+    and the phrase data (PSSI) is masked. Grid, waveforms and cues are unchanged.
+  - Fixed: analysis backups (`ANLZ0000.DAT.bak-*`) were copied onto the stick,
+    and a slot reused by another track kept that track's old `.EXT`/`.2EX` next
+    to the new `.DAT`. Only `.DAT`/`.EXT`/`.2EX` are written now, other ANLZ
+    files in the track's folder are removed, and a half-written analysis is
+    rejected instead of copied.
 
 ## v1.0.0-beta — 2026-05-07
 
