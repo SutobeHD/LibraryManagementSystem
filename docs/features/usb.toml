@@ -97,11 +97,12 @@ group = "Export-Formate"
 parent = "usb-anlz-export"
 name = "ANLZ-Export-Fixes (PPTH/PSSI)"
 status = "unmerged"
-branch = "claude/usb-anlz-export-fixes"
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
 desc = "Stick-PPTH + maskiertes PSSI, explizite Suffixe, Stale-Cleanup, djmdCue kind/comment korrekt lesen."
 paths = ["app/anlz_usb_export.py", "tests/test_anlz_usb_export*.py", "tests/test_live_cue_loading.py"]
 related = ["usb-export-manual-cues"]
-notes = "NIE GEPUSHT - nur lokal im Worktree wf_1fefdec9-6fc-3. Auf PR #58 gestapelt."
+notes = "Auf origin gepusht, in den Integrations-Branch gemergt."
 
 [[feature]]
 id = "usb-export-manual-cues"
@@ -127,8 +128,8 @@ id = "usb-folder-relocation"
 group = "Export-Formate"
 name = "Stick-Dateien verschieben statt kopieren"
 status = "unmerged"
-branch = "claude/loving-goodall-90uf7w"
-pr = 58
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
 desc = "Nach Artist-Rename die Datei auf dem Stick verschieben (Case-Rename in 2 Schritten, Content-Hash als Beweis)."
 paths = ["tests/test_usb_relocate.py"]
 depends_on = ["usb-onelibrary-export"]
