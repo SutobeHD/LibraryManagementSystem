@@ -24,6 +24,7 @@ related: []
 - 2026-05-29 — `research/exploring_` — GATE B handled by agent (gate authority delegated). PASS-to-wave-2 with 3 BLOCKING items (proof artifact, AAC-priming beatgrid A/B, extension-changing path write). Research verifier may NOT graduate to `evaluated_` until all 3 close. Advanced for wave 2.
 - 2026-05-30 — `research/evaluated_` — wave 2 complete: 3 blockers closed (proof script committed `fdb461c`, AAC priming empirical A/B sample-identical, path-write via direct rbox `update_content`), 6 adversarial concerns addressed or carried-forward, citation MIXED (2 non-load-bearing FAILs ack'd), research-verifier PASS round 2, 3 options + recommendation written.
 - 2026-05-30 — `last_updated` bumped.
+- 2026-10-11 — `research/evaluated_` — code shipped in `2fc2720`, `4dbe461`, `408452b`; awaiting owner sign-off -> archived/implemented_. `2fc2720` (2026-06-10) = `app/library_format_swap.py` engine + routes, `4dbe461` (2026-06-10) = `FormatConverterView.jsx` (Utilities → Converter tab), `408452b` (2026-08-22) = library-wide mode + export-copies + `app/ffmpeg_resolver.py` + `tests/test_library_format_swap.py` — all on `main`. Follow-up `2572f8a` (PR #58): MP3 target 320k CBR, lossy source at its own rate. Doc skipped draftplan_ → approvalgate_; state prefix left for the owner.
 
 ## Original Idea (verbatim — never edit)
 

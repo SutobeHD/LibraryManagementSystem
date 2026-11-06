@@ -11,39 +11,81 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── Design tokens (CSS variables, in case raw CSS needs them) ── */
+/* ── Design tokens ───────────────────────────────────────────
+   Colours are stored once as RGB channels (--<name>-rgb: R G B) so
+   Tailwind opacity modifiers work and a theme (src/themes/*.css,
+   :root[data-theme=...]) can override them at runtime. The plain
+   --<name> vars are derived for raw CSS / inline styles.
+   ──────────────────────────────────────────────────────────── */
 :root {
-  --mx-deepest:  #0D0F14;
-  --mx-shell:    #13161D;
-  --mx-panel:    #1A1E27;
-  --mx-surface:  #1E2230;
-  --mx-card:     #222736;
-  --mx-hover:    #272C3A;
-  --mx-selected: #2A3045;
-  --mx-input:    #181B24;
+  --mx-deepest-rgb: 13 15 20;     /* #0D0F14 */
+  --mx-shell-rgb: 19 22 29;       /* #13161D */
+  --mx-panel-rgb: 26 30 39;       /* #1A1E27 */
+  --mx-surface-rgb: 30 34 48;     /* #1E2230 */
+  --mx-card-rgb: 34 39 54;        /* #222736 */
+  --mx-hover-rgb: 39 44 58;       /* #272C3A */
+  --mx-selected-rgb: 42 48 69;    /* #2A3045 */
+  --mx-input-rgb: 24 27 36;       /* #181B24 */
 
-  --line-subtle:      #2A2F3E;
-  --line-default:     #353C50;
-  --line-interactive: #404760;
+  --line-subtle-rgb: 42 47 62;    /* #2A2F3E */
+  --line-default-rgb: 53 60 80;   /* #353C50 */
+  --line-interactive-rgb: 64 71 96; /* #404760 */
 
-  --ink-primary:     #F0F2F7;
-  --ink-secondary:   #9BA3B8;
-  --ink-muted:       #5C6478;
-  --ink-placeholder: #3E4558;
+  --ink-primary-rgb: 240 242 247; /* #F0F2F7 */
+  --ink-secondary-rgb: 155 163 184; /* #9BA3B8 */
+  --ink-muted-rgb: 92 100 120;    /* #5C6478 */
+  --ink-placeholder-rgb: 62 69 88; /* #3E4558 */
+  --ink-inverse-rgb: 13 15 20;    /* #0D0F14 */
 
-  --amber:        #E8A42A;
-  --amber-hover:  #F5C860;
-  --amber-press:  #C8841A;
-  --amber-dim:    #7A5215;
-  --amber-glow:   rgba(232, 164, 42, 0.20);
-  --amber-bg:     rgba(232, 164, 42, 0.08);
+  --amber-rgb: 232 164 42;        /* #E8A42A */
+  --amber-hover-rgb: 245 200 96;  /* #F5C860 */
+  --amber-press-rgb: 200 132 26;  /* #C8841A */
+  --amber-dim-rgb: 122 82 21;     /* #7A5215 */
 
-  --ok:   #3DD68C;
-  --bad:  #E85C4A;
-  --info: #4A9EE8;
+  --ok-rgb: 61 214 140;           /* #3DD68C */
+  --bad-rgb: 232 92 74;           /* #E85C4A */
+  --info-rgb: 74 158 232;         /* #4A9EE8 */
 
-  --font-ui:   'DM Sans', system-ui, sans-serif;
+  --mx-deepest: rgb(var(--mx-deepest-rgb));
+  --mx-shell: rgb(var(--mx-shell-rgb));
+  --mx-panel: rgb(var(--mx-panel-rgb));
+  --mx-surface: rgb(var(--mx-surface-rgb));
+  --mx-card: rgb(var(--mx-card-rgb));
+  --mx-hover: rgb(var(--mx-hover-rgb));
+  --mx-selected: rgb(var(--mx-selected-rgb));
+  --mx-input: rgb(var(--mx-input-rgb));
+
+  --line-subtle: rgb(var(--line-subtle-rgb));
+  --line-default: rgb(var(--line-default-rgb));
+  --line-interactive: rgb(var(--line-interactive-rgb));
+
+  --ink-primary: rgb(var(--ink-primary-rgb));
+  --ink-secondary: rgb(var(--ink-secondary-rgb));
+  --ink-muted: rgb(var(--ink-muted-rgb));
+  --ink-placeholder: rgb(var(--ink-placeholder-rgb));
+  --ink-inverse: rgb(var(--ink-inverse-rgb));
+
+  --amber: rgb(var(--amber-rgb));
+  --amber-hover: rgb(var(--amber-hover-rgb));
+  --amber-press: rgb(var(--amber-press-rgb));
+  --amber-dim: rgb(var(--amber-dim-rgb));
+
+  --ok: rgb(var(--ok-rgb));
+  --bad: rgb(var(--bad-rgb));
+  --info: rgb(var(--info-rgb));
+  --amber-glow: rgb(var(--amber-rgb) / 0.20);
+  --amber-bg:   rgb(var(--amber-rgb) / 0.08);
+
+  --font-ui:   'DM Sans', Inter, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Mono', monospace;
+
+  --radius-mx-xs: 2px;
+  --radius-mx-sm: 4px;
+  --radius-mx-md: 6px;
+  --radius-mx-lg: 8px;
+  --radius-mx-xl: 12px;
+
+  --row-h: 36px;
 }
 
 @layer base {
@@ -53,8 +95,8 @@
     @apply bg-mx-deepest text-ink-primary font-sans antialiased overflow-hidden;
     /* Subtle amber glow — replaces old cyan radial glows */
     background-image:
-      radial-gradient(circle at 15% 50%, rgba(232, 164, 42, 0.04), transparent 30%),
-      radial-gradient(circle at 85% 30%, rgba(232, 164, 42, 0.03), transparent 30%);
+      radial-gradient(circle at 15% 50%, rgb(var(--amber-rgb) / 0.04), transparent 30%),
+      radial-gradient(circle at 85% 30%, rgb(var(--amber-rgb) / 0.03), transparent 30%);
   }
 
   /* Mono utility for any element with `data-mono` or .mono */
@@ -62,7 +104,7 @@
 
   /* Selection */
   ::selection {
-    background: rgba(232, 164, 42, 0.30);
+    background: rgb(var(--amber-rgb) / 0.30);
     color: var(--ink-primary);
   }
 }
@@ -260,12 +302,12 @@
   .daw-scrollbar::-webkit-scrollbar { height: 10px; }
   .daw-scrollbar::-webkit-scrollbar-track { background: transparent; }
   .daw-scrollbar::-webkit-scrollbar-thumb {
-    background: rgba(232, 164, 42, 0.45);
+    background: rgb(var(--amber-rgb) / 0.45);
     border-radius: 4px;
     transition: background 0.15s;
   }
-  .daw-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(232, 164, 42, 0.7); }
-  .daw-scrollbar::-webkit-scrollbar-thumb:active { background: rgba(232, 164, 42, 0.85); }
+  .daw-scrollbar::-webkit-scrollbar-thumb:hover { background: rgb(var(--amber-rgb) / 0.7); }
+  .daw-scrollbar::-webkit-scrollbar-thumb:active { background: rgb(var(--amber-rgb) / 0.85); }
 }
 
 /* Animations */
@@ -381,7 +423,7 @@
 .region-block:hover { border-color: rgba(255, 255, 255, 0.30); }
 .region-block.selected {
   border-color: var(--amber);
-  box-shadow: 0 8px 32px rgba(232, 164, 42, 0.30);
+  box-shadow: 0 8px 32px rgb(var(--amber-rgb) / 0.30);
   z-index: 20;
 }
 .region-block.muted { opacity: 0.4; }
@@ -419,9 +461,9 @@
 
 .selection-highlight {
   position: absolute; top: 0; bottom: 0;
-  background: rgba(232, 164, 42, 0.15);
-  border-left: 2px solid rgba(232, 164, 42, 0.50);
-  border-right: 2px solid rgba(232, 164, 42, 0.50);
+  background: rgb(var(--amber-rgb) / 0.15);
+  border-left: 2px solid rgb(var(--amber-rgb) / 0.50);
+  border-right: 2px solid rgb(var(--amber-rgb) / 0.50);
   pointer-events: none;
 }
 
@@ -455,7 +497,7 @@
 .beat-line { position: absolute; top: 0; bottom: 0; pointer-events: none; }
 .beat-line.normal { width: 1px; background: rgba(255, 255, 255, 0.10); }
 .beat-line.downbeat { width: 1.5px; background: rgba(239, 68, 68, 0.30); }
-.beat-line.phrase { width: 2px; background: rgba(232, 164, 42, 0.40); }
+.beat-line.phrase { width: 2px; background: rgb(var(--amber-rgb) / 0.40); }
 
 .toolbar-btn {
   padding: 8px; border-radius: 4px;

@@ -87,3 +87,37 @@ def test_live_normalize_garbage_does_not_crash():
     out = LiveLibrarySource._normalize("1", {"BPM": "n/a", "TotalTime": "oops"})
     assert out["bpm"] == 0.0
     assert out["duration_ms"] == 0
+
+
+# --- ANLZ sidecar lookup ----------------------------------------------------
+
+
+def _sidecar_for(audio):
+    from app.anlz_sidecar import sidecar_dir_for
+
+    folder = sidecar_dir_for(audio)
+    folder.mkdir(parents=True)
+    (folder / "ANLZ0000.DAT").write_bytes(b"PMAI")
+    return folder
+
+
+def test_sidecar_lookup_uses_the_writers_resolved_path_key(tmp_path):
+    """The writer hashes str(path.resolve()); a stored path with `..` must still hit."""
+    audio = tmp_path / "music" / "Track.mp3"
+    (tmp_path / "music" / "sub").mkdir(parents=True)
+    audio.write_bytes(b"\xff\xfb")
+    folder = _sidecar_for(audio)
+
+    stored = str(tmp_path / "music" / "sub" / ".." / "Track.mp3")
+    assert stored != str(audio.resolve())
+    found = XmlLibrarySource(None).get_anlz_sidecar_dir({"path": stored})
+    assert found is not None and found.resolve() == folder.resolve()
+
+
+def test_sidecar_lookup_misses_cleanly(tmp_path):
+    audio = tmp_path / "Track.mp3"
+    audio.write_bytes(b"\xff\xfb")
+    src = XmlLibrarySource(None)
+    assert src.get_anlz_sidecar_dir({"path": str(audio)}) is None
+    assert src.get_anlz_sidecar_dir({"path": ""}) is None
+    assert src.get_anlz_sidecar_dir({}) is None

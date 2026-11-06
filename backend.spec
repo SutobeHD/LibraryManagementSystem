@@ -140,6 +140,9 @@ hiddenimports += collect_submodules('keyring.backends')
 # --- App-internal modules ---
 hiddenimports += collect_submodules('app')
 
+# --- App data files (read at runtime via Path(__file__).parent / 'data') ---
+datas += [('app/data/genre_atlas.json', 'app/data')]
+
 
 a = Analysis(
     ['backend_entry.py'],

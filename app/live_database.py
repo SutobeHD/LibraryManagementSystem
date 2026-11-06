@@ -7,7 +7,7 @@ import time
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 # rbox (pyrekordbox) is not pip-installable on the Linux CI runner. Soft-import
 # so app.main collection survives its absence; every rbox call sits inside a
@@ -18,6 +18,7 @@ except ImportError:
     rbox = None
 
 from .anlz_safe import SafeAnlzParser
+from .track_fields import normalise_track_updates
 
 logger = logging.getLogger(__name__)
 
@@ -242,8 +243,28 @@ class LiveRekordboxDB:
     CUE_TYPE_MARKER = 0
 
     @staticmethod
-    def _cue_dict(ident, kind, in_msec, out_msec, comment) -> dict:
-        """One cue in the shape every consumer reads."""
+    def _opt_int(value: Any) -> int | None:
+        try:
+            return None if value is None else int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _cue_dict(
+        ident,
+        kind,
+        in_msec,
+        out_msec,
+        comment,
+        color=None,
+        color_table_index=None,
+        active_loop=None,
+    ) -> dict:
+        """One cue in the shape every consumer reads.
+
+        Color / ColorTableIndex / ActiveLoop are the raw djmdCue values (None
+        when the source row lacks them); nothing interprets them yet.
+        """
         kind = int(kind or 0)
         out_msec = int(out_msec or -1)
         return {
@@ -256,6 +277,9 @@ class LiveRekordboxDB:
             "InMsec": int(in_msec or 0),
             "OutMsec": out_msec,
             "Comment": comment or "",
+            "Color": LiveRekordboxDB._opt_int(color),
+            "ColorTableIndex": LiveRekordboxDB._opt_int(color_table_index),
+            "ActiveLoop": LiveRekordboxDB._opt_int(active_loop),
         }
 
     def _attach_cue(self, content_id, cue: dict) -> bool:
@@ -305,7 +329,13 @@ class LiveRekordboxDB:
         logger.info("Loaded %d cues across library (source: %s).", count, source)
 
     def _load_cues_from_djmd(self) -> int:
-        """Authoritative path: one batch read of djmdCue."""
+        """Authoritative path: one batch read of djmdCue.
+
+        Attribute names are rbox 0.1.7's `DjmdCue` fields (`kind`, `comment`;
+        pinned by test_djmd_cue_attr_names_match_rbox). A wrong name does not
+        raise — the getattr default wins silently and every hot cue loads as a
+        nameless memory cue (Kind 0).
+        """
         if not hasattr(self.db, "get_cues"):
             raise AttributeError("rbox.MasterDb has no get_cues")
 
@@ -316,10 +346,13 @@ class LiveRekordboxDB:
                 continue
             entry = self._cue_dict(
                 getattr(cue, "id", ""),
-                getattr(cue, "hot_cue", 0),
+                getattr(cue, "kind", 0),
                 getattr(cue, "in_msec", 0),
                 getattr(cue, "out_msec", -1),
-                getattr(cue, "commnt", ""),
+                getattr(cue, "comment", ""),
+                color=getattr(cue, "color", None),
+                color_table_index=getattr(cue, "color_table_index", None),
+                active_loop=getattr(cue, "active_loop", None),
             )
             count += self._attach_cue(cid, entry)
         return count
@@ -347,6 +380,9 @@ class LiveRekordboxDB:
                     e.get("InMsec"),
                     e.get("OutMsec"),
                     e.get("Comment"),
+                    color=e.get("Color"),
+                    color_table_index=e.get("ColorTableIndex"),
+                    active_loop=e.get("ActiveLoop"),
                 )
                 count += self._attach_cue(
                     e.get("ContentID") or getattr(row, "content_id", ""), entry
@@ -403,59 +439,64 @@ class LiveRekordboxDB:
             parser.stats["panics"],
         )
 
+    # Rbox Attribute values:  0 = normal playlist, 1 = folder, 4 = intelligent playlist
+    # Frontend Type values:   "0" = folder, "1" = normal playlist, "4" = intelligent playlist
+    # We must remap 0↔1 to match what PlaylistNode expects.
+    ATTR_TO_TYPE: ClassVar[dict[int, str]] = {0: "1", 1: "0", 4: "4"}
+
+    def _playlist_node(self, pl) -> dict:
+        """Normalise one rbox DjmdPlaylist row into the dict shape the frontend expects."""
+        # rbox 0.1.7+ exposes `attribute` as a `builtins.PlaylistType` enum
+        # object that is NOT hashable, so `ATTR_TO_TYPE.get(attr, "1")`
+        # raised TypeError on every load. Coerce to int via explicit
+        # value/int casting.
+        raw_attr = getattr(pl, "attribute", 0)
+        try:
+            attr = int(getattr(raw_attr, "value", raw_attr))
+        except (TypeError, ValueError):
+            attr = 0
+        pl_type = self.ATTR_TO_TYPE.get(attr, "1")  # default to playlist
+
+        parent_id = str(pl.parent_id) if pl.parent_id else "ROOT"
+        if parent_id.lower() == "root":
+            parent_id = "ROOT"
+
+        # pyrekordbox may expose smart playlist XML as 'SmartList', 'smart_list', or
+        # via a raw attribute — try all known names so intelligent playlists aren't empty.
+        smart_list_xml = None
+        if pl_type == "4":
+            for attr_name in ("SmartList", "smart_list", "smartList", "criteria"):
+                val = getattr(pl, attr_name, None)
+                if val:
+                    smart_list_xml = val
+                    break
+            if smart_list_xml is None:
+                logger.debug(
+                    f"Intelligent playlist '{pl.name}' has no smart_list XML. "
+                    f"Available attrs: {[a for a in dir(pl) if not a.startswith('_')]}"
+                )
+
+        return {
+            "ID": str(pl.id),
+            "Name": pl.name,
+            "ParentID": parent_id,
+            "Type": pl_type,
+            "Seq": pl.seq,
+            # rbox mints a fresh uuid on every create, so this is NOT a re-run
+            # key. It is a second identity: a stored playlist ID whose UUID has
+            # changed points at a different playlist than the one we projected.
+            "UUID": getattr(pl, "uuid", None),
+            "smart_list": smart_list_xml,
+        }
+
     def _load_playlists(self):
         self.playlists = []
         raw_playlists = self.db.get_playlists()
 
-        # Rbox Attribute values:  0 = normal playlist, 1 = folder, 4 = intelligent playlist
-        # Frontend Type values:   "0" = folder, "1" = normal playlist, "4" = intelligent playlist
-        # We must remap 0↔1 to match what PlaylistNode expects.
-        ATTR_TO_TYPE = {0: "1", 1: "0", 4: "4"}
-
         for pl in raw_playlists:
-            # rbox 0.1.7+ exposes `attribute` as a `builtins.PlaylistType` enum
-            # object that is NOT hashable, so `ATTR_TO_TYPE.get(attr, "1")`
-            # raised TypeError on every load. Coerce to int via explicit
-            # value/int casting.
-            raw_attr = getattr(pl, "attribute", 0)
-            try:
-                attr = int(getattr(raw_attr, "value", raw_attr))
-            except (TypeError, ValueError):
-                attr = 0
-            pl_type = ATTR_TO_TYPE.get(attr, "1")  # default to playlist
-            my_id = str(pl.id)
-
             # Update status for frontend feedback
             self.loading_status = f"Loading: {pl.name}"
-
-            parent_id = str(pl.parent_id) if pl.parent_id else "ROOT"
-            if parent_id.lower() == "root":
-                parent_id = "ROOT"
-
-            # pyrekordbox may expose smart playlist XML as 'SmartList', 'smart_list', or
-            # via a raw attribute — try all known names so intelligent playlists aren't empty.
-            smart_list_xml = None
-            if pl_type == "4":
-                for attr_name in ("SmartList", "smart_list", "smartList", "criteria"):
-                    val = getattr(pl, attr_name, None)
-                    if val:
-                        smart_list_xml = val
-                        break
-                if smart_list_xml is None:
-                    logger.debug(
-                        f"Intelligent playlist '{pl.name}' has no smart_list XML. "
-                        f"Available attrs: {[a for a in dir(pl) if not a.startswith('_')]}"
-                    )
-
-            node_data = {
-                "ID": my_id,
-                "Name": pl.name,
-                "ParentID": parent_id,
-                "Type": pl_type,
-                "Seq": pl.seq,
-                "smart_list": smart_list_xml,
-            }
-            self.playlists.append(node_data)
+            self.playlists.append(self._playlist_node(pl))
 
         # Ensure playlists are sorted by Seq for baseline
         self.playlists.sort(key=lambda x: x.get("Seq", 0))
@@ -930,17 +971,13 @@ class LiveRekordboxDB:
             item = self.db.create_content(path)
             tid = str(item.id)
 
-            # 2. Update metadata (Artist, Album, etc.)
+            # 2. Update metadata. No BPM: it never reached master.db here, and
+            # update_track_metadata now refuses the whole update for a key it cannot write.
             updates = {
-                "Title": track_data.get("Title"),
-                "Artist": track_data.get("Artist"),
-                "Album": track_data.get("Album"),
-                "Genre": track_data.get("Genre"),
-                "BPM": track_data.get("BPM"),
-                "Comment": track_data.get("Comment"),
+                k: track_data[k]
+                for k in ("Title", "Artist", "Album", "Genre", "Comment")
+                if track_data.get(k) is not None
             }
-            # Remove None values
-            updates = {k: v for k, v in updates.items() if v is not None}
 
             if updates:
                 self.update_track_metadata(tid, updates)
@@ -1001,6 +1038,13 @@ class LiveRekordboxDB:
         return self.update_track_metadata(tid, {"Comment": comment})
 
     def update_track_metadata(self, tid: str, updates: dict[str, Any]) -> bool:
+        """Write ``updates`` to one master.db row. True once every field landed.
+
+        Raises ``UnsupportedTrackFields`` for a key outside ``LIVE_WRITABLE_FIELDS`` and
+        ``InvalidTrackFieldValue`` for a wrong type or range (``app.track_fields``), both
+        before the row is even read, so a refused update leaves it untouched.
+        """
+        updates = normalise_track_updates(updates, "live")
         try:
             tid = str(tid)
             logger.info(f"Updating metadata for track ID: '{tid}'")
@@ -1011,43 +1055,23 @@ class LiveRekordboxDB:
 
             changed = False
             # 1. Direct fields
+            if "Title" in updates:
+                item.title = str(updates["Title"])
+                changed = True
             if "Comment" in updates:
                 item.commnt = str(updates["Comment"])
                 changed = True
             if "Rating" in updates:
-                try:
-                    item.rating = int(updates["Rating"])
-                    changed = True
-                except (ValueError, TypeError) as e:
-                    logger.warning(
-                        "live_database: invalid Rating %r for track %s (%s)",
-                        updates.get("Rating"),
-                        tid,
-                        e,
-                    )
+                item.rating = updates["Rating"]
+                changed = True
             if "ColorID" in updates:
                 try:
-                    item.color_id = int(updates["ColorID"])
-                    changed = True
-                except (ValueError, TypeError) as e:
-                    # rbox occasionally returns ColorID as a string label; fall
-                    # back to str() before giving up so theme syncs don't fail
-                    # silently. master.db itself stores ColorID as INTEGER.
-                    logger.debug(
-                        "live_database: ColorID %r not int for track %s (%s) — trying str fallback",
-                        updates.get("ColorID"),
-                        tid,
-                        e,
-                    )
-                    try:
-                        item.color_id = str(updates["ColorID"])
-                        changed = True
-                    except Exception as inner:
-                        logger.warning(
-                            "live_database: ColorID for track %s rejected as int and str (%s)",
-                            tid,
-                            inner,
-                        )
+                    item.color_id = updates["ColorID"]
+                except TypeError:
+                    # rbox 0.1.7 types DjmdContent.color_id as Optional[str] (_rbox.pyi);
+                    # PyO3 raises TypeError for an int. master.db stores it as INTEGER.
+                    item.color_id = str(updates["ColorID"])
+                changed = True
 
             if changed:
                 logger.info(f"Applying direct field updates for track {tid}...")
@@ -1056,12 +1080,14 @@ class LiveRekordboxDB:
 
                 # Update in-memory cache
                 if tid in self.tracks:
+                    if "Title" in updates:
+                        self.tracks[tid]["Title"] = str(updates["Title"])
                     if "Comment" in updates:
                         self.tracks[tid]["Comment"] = updates["Comment"]
                     if "Rating" in updates:
-                        self.tracks[tid]["Rating"] = int(updates["Rating"])
+                        self.tracks[tid]["Rating"] = updates["Rating"]
                     if "ColorID" in updates:
-                        self.tracks[tid]["ColorID"] = int(updates["ColorID"])
+                        self.tracks[tid]["ColorID"] = updates["ColorID"]
                 logger.info(f"Cache updated for {tid}")
 
             # 2. Relationship fields (rbox handles joins/inserts)
@@ -1322,14 +1348,12 @@ class LiveRekordboxDB:
             else:
                 new_pl = self.db.create_playlist(name, target_parent)
 
-            # Add to cache (simplistic, real schema has more attributes)
-            node_data = {
-                "ID": str(new_pl.id),
-                "Name": new_pl.name,
-                "ParentID": parent_id,
-                "Type": "0" if is_folder else "1",
-                "Seq": getattr(new_pl, "seq", 0),
-            }
+            node_data = self._playlist_node(new_pl)
+            if getattr(new_pl, "attribute", None) is None:
+                # rbox normally echoes the attribute back on the created row; if a
+                # future version stops, trust what the caller asked for rather than
+                # silently filing a new folder as a playlist.
+                node_data["Type"] = "0" if is_folder else "1"
             self.playlists.append(node_data)
             return node_data
         except Exception as e:
@@ -1346,15 +1370,91 @@ class LiveRekordboxDB:
             return False
 
     def remove_track_from_playlist(self, pid, tid):
+        # rbox's delete_playlist_song takes the DjmdSongPlaylist row id — NOT
+        # (playlist_id, track_id). Passing two args raises TypeError on every
+        # call, which is how this silently never worked. Verified against
+        # rbox 0.1.7 `_rbox.pyi:2422` and empirically in
+        # scripts/dev/rbox_artist_merge_probe.py.
         try:
-            # delete_playlist_song expects (playlist_id, track_id) ?
-            # Actually dir showed: delete_playlist_song and delete_playlist_songs
-            # Usually it takes the playlist ID and the track ID.
-            self.db.delete_playlist_song(str(pid), str(tid))
+            row = next(
+                (r for r in self.db.get_playlist_songs(str(pid)) if str(r.content_id) == str(tid)),
+                None,
+            )
+            if row is None:
+                logger.warning("track %s is not in playlist %s — nothing to remove", tid, pid)
+                return False
+            self.db.delete_playlist_song(str(row.id))
             return True
         except Exception as e:
             logger.error(f"Failed to remove track {tid} from playlist {pid}: {e}")
             return False
+
+    def get_playlist_children(self, parent_id="ROOT"):
+        """Direct children of a playlist folder, straight from the DB."""
+        try:
+            target = "root" if str(parent_id).upper() == "ROOT" else str(parent_id)
+            return [self._playlist_node(pl) for pl in self.db.get_playlist_children(target)]
+        except Exception as e:
+            logger.error(f"Failed to list children of playlist {parent_id}: {e}")
+            return []
+
+    def get_playlist_by_id(self, pid):
+        """One playlist/folder node by id, straight from the DB — None when it is gone.
+
+        The projection's id-map verification: a stored id that no longer resolves
+        means the user deleted the node inside Rekordbox.
+        """
+        try:
+            pl = self.db.get_playlist_by_id(str(pid))
+            return self._playlist_node(pl) if pl is not None else None
+        except Exception as e:
+            logger.error(f"Failed to look up playlist {pid}: {e}")
+            return None
+
+    def get_playlist_track_ids(self, pid):
+        """Content ids currently linked to a playlist, read fresh (not from the cache).
+
+        `playlists_tracks` is only filled at library load and no mutator maintains it,
+        so a caller that diffs playlist membership must not read it — it would re-add
+        every track it just added.
+        """
+        try:
+            return [
+                str(s.content_id)
+                for s in self.db.get_playlist_songs(str(pid))
+                if hasattr(s, "content_id")
+            ]
+        except Exception as e:
+            logger.error(f"Failed to list songs of playlist {pid}: {e}")
+            return []
+
+    def playlist_xml_path(self):
+        """Path to Rekordbox's masterPlaylists6.xml, or None when rbox found none.
+
+        None means rbox opened master.db without the XML beside it and will silently
+        skip the XML update on every playlist create — playlists written in that state
+        disappear from Rekordbox on its next restart.
+        """
+        try:
+            path = self.db.playlist_xml_path()
+            return str(path) if path else None
+        except Exception as e:
+            logger.error(f"Failed to read playlist XML path: {e}")
+            return None
+
+    def get_playlist_by_path(self, path):
+        """Resolve a folder/playlist path like ["Artists", "Boys Noize"].
+
+        Returns the FIRST match — `djmdPlaylist` has no uniqueness constraint on
+        (Name, ParentID), so same-named siblings are legal and indistinguishable
+        here. Callers that need a stable handle must keep the returned ID.
+        """
+        try:
+            pl = self.db.get_playlist_by_path([str(p) for p in path])
+            return self._playlist_node(pl) if pl is not None else None
+        except Exception as e:
+            logger.error(f"Failed to resolve playlist path {path}: {e}")
+            return None
 
     def reorder_playlist_track(self, pid: str, track_id: str, new_index: int) -> bool:
         """

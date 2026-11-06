@@ -3,7 +3,7 @@ slug: performance-overhaul
 title: Speed & efficiency overhaul — eliminate perceptible app slowness
 owner: tb
 created: 2026-06-09
-last_updated: 2026-06-09
+last_updated: 2026-10-11
 tags: []
 related: []
 supersedes: []
@@ -21,7 +21,12 @@ superseded_by: []
 ## Lifecycle
 
 - 2026-06-09 — `research/idea_` — created from template
-- 2026-06-09 — `drafting_` — promoted; Stage-1 (Prior Art→Research Plan) pre-filled from 9-agent codebase perf investigation (48 hotspots, file:line evidence). Idea Verification left for the research-draft Verifier.
+- 2026-06-09 — `research/drafting_` — promoted; Stage-1 (Prior Art→Research Plan) pre-filled from 9-agent codebase perf investigation (48 hotspots, file:line evidence). Idea Verification left for the research-draft Verifier.
+- 2026-10-11 — note only, state unchanged (no transition). 3 backend quick wins shipped outside pipeline as single-file fixes, branch `claude/perf-backend-quickwins` (stacked on PR #58; reworked from unmerged `claude/pensive-wiles-74ad65`):
+  - `7b8f52c` — `MetadataManager` mappings cached (`app/services.py`): `metadata_mappings.json` was re-read per `get_mapped_name` = per track in artist/label lists + drill-downs. Same class as OQ13 (per-access JSON re-read). Hand edits seen ≤2 s (mtime+size), atomic save, cache swapped only after write.
+  - `4a1592c` — import dedup (`app/main.py` scan-folder / import-paths / folder watcher): `resolve()` memoised, cleared per batch. 30 files × 2,000 tracks: ~75k → ~2k resolves, ~12 s → ~0.4 s. Live `db.tracks` kept per file — pensive-wiles `0c3630a` per-batch snapshot rejected (re-imports track a concurrent writer adds).
+  - `6115d74` — OQ6 projection half (Agent 3): `GET /api/library/tracks?light=true` drops beatGrid/Cues/positionMarks/phrases. `dict(t)`+`pop`, cached dicts untouched (USB export + `save_xml` read them). No pagination. No caller yet — default response unchanged.
+  - Still open, untouched: OQ3/OQ4 (virtualisation), OQ5 (client cache) — frontend ports need owner decision; OQ13 (`hide_streaming` re-read per `db.tracks` access); OQ12 (non-blocking startup).
 
 ## Original Idea (verbatim — never edit)
 

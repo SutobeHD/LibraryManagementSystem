@@ -10,8 +10,11 @@ things we do not want in this process:
    the redaction layer exists to prevent;
 3. logs "Incompatible rekordbox 6 database: Could not retrieve db-key."
    on the ROOT logger, because it cannot find the master.db key inside
-   Rekordbox's app.asar. Irrelevant to us: we read ANLZ files and
-   MySetting files, never `pyrekordbox.db6`.
+   Rekordbox's app.asar. Almost always irrelevant to us: we read ANLZ
+   files and MySetting files. The one `pyrekordbox.db6` user is
+   `app/phrase_db_writer.py` (an unwired spike), and that key would
+   not help it either — 0.1.7 refuses Rekordbox >= 6.6.5 and needs a
+   SQLCipher DBAPI, so it opens a decrypted copy with `unlock=False`.
 
 Measured 2026-09-03: importing `app.usb_mysettings` moved the root
 logger from INFO to NOTSET. Wrap such imports in `quiet_import()`.

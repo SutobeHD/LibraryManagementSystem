@@ -49,11 +49,15 @@ import {
     Library,
 } from 'lucide-react';
 import './index.css';
+import './themes/rekordbox.css';
+import { applyTheme, getStoredTheme } from './utils/theme';
 import { ToastProvider } from './components/ToastContext';
 import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
 import { ConfirmModalRoot, confirmModal } from './components/ConfirmModal';
 import { PromptModalRoot, promptModal } from './components/PromptModal';
+import { AssignArtistModalRoot } from './components/artistHub/AssignArtistModal';
+import GlobalContextMenu from './components/shared/GlobalContextMenu';
 import { log } from './utils/log';
 import { HEARTBEAT_INTERVAL_MS, LIBRARY_STATUS_INTERVAL_MS } from './config/constants';
 
@@ -65,6 +69,7 @@ const SettingsView = lazy(() => import('./components/SettingsView'));
 const RankingView = lazy(() => import('./components/RankingView'));
 const XmlCleanView = lazy(() => import('./components/XmlCleanView'));
 const MetadataView = lazy(() => import('./components/MetadataView'));
+const ArtistHubView = lazy(() => import('./components/ArtistHubView'));
 const ImportView = lazy(() => import('./components/ImportView'));
 const UsbView = lazy(() => import('./components/UsbView'));
 const UsbSettingsView = lazy(() => import('./components/UsbSettingsView'));
@@ -700,6 +705,9 @@ const ViewLoader = () => (
 const App = () => {
     const [appMode, setAppMode] = useState('choice');
     const [activeTab, setActiveTab] = useState('lib-playlists');
+    // DOM node at the right of the Library WorkspaceNav row; MetadataView portals
+    // its refresh + search into it so the content area needs no own toolbar row.
+    const [libraryNavSlot, setLibraryNavSlot] = useState(null);
     const [activeWorkspace, setActiveWorkspace] = useState('library');
     const [activeTrack, setActiveTrack] = useState(null);
     const [playerTrack, setPlayerTrack] = useState(null);
@@ -710,6 +718,16 @@ const App = () => {
         playlists: 0,
     });
     const [isInitialLoading, setIsInitialLoading] = useState(false);
+
+    // The Artists tab renders ArtistHubView, not MetadataView. MetadataView stays
+    // mounted (hidden) for the other library tabs, so it holds the last non-artist
+    // mode instead of reloading into 'artists' behind the hub.
+    const [metadataMode, setMetadataMode] = useState('playlists');
+    useEffect(() => {
+        if (activeTab.startsWith('lib-') && activeTab !== 'lib-artists') {
+            setMetadataMode(activeTab.replace('lib-', ''));
+        }
+    }, [activeTab]);
 
     const checkLibraryStatus = useCallback(async () => {
         try {
@@ -1067,16 +1085,45 @@ const App = () => {
                         items={currentWorkspace.items}
                         activeTab={activeTab}
                         setActiveTab={setActiveTab}
-                        rightSlot={currentWorkspace.id === 'soundcloud' ? <ScAccountChip /> : null}
+                        rightSlot={
+                            currentWorkspace.id === 'soundcloud' ? (
+                                <ScAccountChip />
+                            ) : currentWorkspace.id === 'library' ? (
+                                <div ref={setLibraryNavSlot} className="flex items-center" />
+                            ) : null
+                        }
                     />
                 )}
                 <div className={`flex-1 min-h-0 w-full relative ${playerTrack ? 'pb-20' : ''}`}>
                     <Suspense fallback={<ViewLoader />}>
                         {/* STABILITY: Each view wrapped in its own ErrorBoundary */}
-                        <div className={activeTab.startsWith('lib-') ? 'h-full' : 'hidden'}>
+                        <div
+                            className={
+                                activeTab.startsWith('lib-') && activeTab !== 'lib-artists'
+                                    ? 'h-full'
+                                    : 'hidden'
+                            }
+                        >
                             <ErrorBoundary key="eb-library">
                                 <MetadataView
-                                    mode={activeTab.replace('lib-', '')}
+                                    mode={metadataMode}
+                                    navSlot={
+                                        activeTab.startsWith('lib-') && activeTab !== 'lib-artists'
+                                            ? libraryNavSlot
+                                            : null
+                                    }
+                                    onSelectTrack={handleTrackSelect}
+                                    onEditTrack={handleTrackEdit}
+                                    onPlayTrack={handlePlayTrack}
+                                    libraryStatus={libraryStatus}
+                                />
+                            </ErrorBoundary>
+                        </div>
+
+                        <div className={activeTab === 'lib-artists' ? 'h-full' : 'hidden'}>
+                            <ErrorBoundary key="eb-artist-hub">
+                                <ArtistHubView
+                                    active={activeTab === 'lib-artists'}
                                     onSelectTrack={handleTrackSelect}
                                     onEditTrack={handleTrackEdit}
                                     onPlayTrack={handlePlayTrack}
@@ -1188,6 +1235,8 @@ window.addEventListener('unhandledrejection', (event) => {
     event.preventDefault();
 });
 
+applyTheme(getStoredTheme());
+
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
     <ToastProvider>
@@ -1197,10 +1246,10 @@ root.render(
             toastOptions={{
                 duration: 3000,
                 style: {
-                    background: '#1A1E27',
-                    color: '#F0F2F7',
-                    border: '1px solid #2A2F3E',
-                    fontFamily: '"DM Sans", system-ui, sans-serif',
+                    background: 'var(--mx-panel)',
+                    color: 'var(--ink-primary)',
+                    border: '1px solid var(--line-subtle)',
+                    fontFamily: 'var(--font-ui)',
                     fontSize: 13,
                     maxWidth: '500px',
                     borderRadius: 6,
@@ -1211,6 +1260,8 @@ root.render(
         />
         <ConfirmModalRoot />
         <PromptModalRoot />
+        <AssignArtistModalRoot />
+        <GlobalContextMenu />
         <App />
     </ToastProvider>
 );

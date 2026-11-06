@@ -47,10 +47,12 @@ related = ["phrase-cue-generator", "hot-cue-16-limits"]
 id = "waveform-generation"
 group = "DSP-Engine"
 name = "ANLZ-Waveforms erzeugen"
-status = "shipped"
+status = "partial"
 desc = "Rekordbox-Waveforms PWAV..PWV7 für die ANLZ-Dateien."
 depends_on = ["analysis-engine", "anlz-writer"]
 related = ["multiband-waveform-data"]
+todo = ["PWV5 R/B tauschen (R=low)", "PWV4 Byte-Order + 7-bit", "PWV2 ohne Whiteness, Höhe 1..15", "PWV6/7 0..127", "Crossover 2 kHz vereinheitlichen (Python/services/Rust)"]
+notes = "Abweichungen laut rbxport-Studie: docs/reference/rbxport/waveform.md §8."
 
 # ── Pipelines ─────────────────────────────────────────────────────────────
 

@@ -80,8 +80,8 @@ id = "context-menu-system"
 group = "Kontextmenüs"
 name = "App-weites Kontextmenü-System"
 status = "unmerged"
-branch = "claude/loving-goodall-90uf7w"
-pr = 58
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
 desc = "Unterdrückt das WebView-Menü überall, Cut/Copy/Paste in Inputs, useContextMenu-Hook."
 paths = ["frontend/src/components/shared/ContextMenu.jsx", "frontend/src/components/shared/GlobalContextMenu.jsx"]
 todo = ["restliche 9 Views anbinden", "Track/Playlist-Menüs auf das System umstellen"]
@@ -140,6 +140,20 @@ status = "shipped"
 desc = "Amber-Akzent, mx/ink/line-Tokens, DM Sans + JetBrains Mono, UI-Primitives."
 paths = ["frontend/tailwind.config.js", "frontend/src/index.css", "frontend/postcss.config.js"]
 notes = "Neue Views an der Library-Ansicht ausrichten (Coding-Rule)."
+
+[[feature]]
+id = "rekordbox-skin"
+group = "Theming"
+name = "Rekordbox-Skin"
+status = "unmerged"
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
+desc = "Umschaltbares Theme im Rekordbox-7-Look: Farben, Arial-Dichte, Zebra-Zeilen, Spalten."
+paths = ["frontend/src/themes/", "frontend/src/utils/theme.js"]
+depends_on = ["melodex-design-system"]
+related = ["appearance-settings"]
+todo = ["Hardcodierte Farben (blue-/cyan-/white/, Hex) in Komponenten auf Tokens", "Kontextmenüs 25px + #979797-Rahmen", "Shell: Tree 305px + Statusleiste 27px (Research-Doc zuerst)", "Player/Deck-Look (PLAY-Ring grün, CUE gelb)", "Spalten-Preset + Datum M/D/YY im Skin"]
+notes = "Phase 1: Tokens als RGB-Kanal-Vars (tailwind.config.js tok()), :root[data-theme=rekordbox] in themes/rekordbox.css, Picker in SettingsAppearance (localStorage lms.ui_theme), TrackTable-Hooks tt-*. Schrift 13px statt rbxport-16.5px (macOS-Messung). Quelle: docs/reference/rbxport/ui-skin.md."
 
 [[feature]]
 id = "shared-portal-tooltip"
