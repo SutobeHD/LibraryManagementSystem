@@ -26,6 +26,7 @@ import {
     Volume2,
 } from 'lucide-react';
 import WaveformEditor from './WaveformEditor';
+import GenreSuggestions from './GenreSuggestions';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { toast } from 'react-hot-toast';
 import {
@@ -656,6 +657,11 @@ const RankingView = ({ libraryStatus, appMode }) => {
                                             <option key={g.id} value={g.name} />
                                         ))}
                                     </datalist>
+                                    <GenreSuggestions
+                                        trackId={currentTrack?.ID}
+                                        currentGenre={genre}
+                                        onPick={setGenre}
+                                    />
                                 </div>
                                 <div>
                                     <div>

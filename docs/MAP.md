@@ -48,6 +48,7 @@
 | `app/external_track_match.py` | external_track_match — shared title/version parsing + fuzzy-match + fingerprint. |
 | `app/ffmpeg_resolver.py` | Per-encoder FFmpeg binary resolution with cached ``-encoders`` probing. |
 | `app/folder_watcher.py` | FolderWatcher — auto-import audio files from user-configured folders. |
+| `app/genre_atlas.py` | Genre suggestions from the genre-atlas snapshot (read-only, explainable). |
 | `app/import_tracker.py` | Per-file import-progress tracker — gives the frontend a live transparent |
 | `app/library_format_swap.py` | Library-wide audio format conversion engine. |
 | `app/library_source.py` | LibrarySource — uniform abstraction over Live (master.db) and XML modes. |
@@ -160,6 +161,7 @@
 | `frontend/src/components/DownloadManagerView.jsx` | Stage pipeline (in execution order) — covers BOTH SC-DL and local-import |
 | `frontend/src/components/DuplicateView.jsx` | DuplicateView — Acoustic Duplicate Finder & Merge UI Left panel: list of duplicate groups with similarity bad… |
 | `frontend/src/components/FormatConverterView.jsx` | FormatConverterView — Library-wide audio format converter UI. |
+| `frontend/src/components/GenreSuggestions.jsx` | Genre suggestions from the genre atlas for one library track. |
 | `frontend/src/components/ImportProgressBanner.jsx` | Sticky progress banner — visible on every screen while local-file or SoundCloud imports are running. |
 | `frontend/src/components/ImportView.jsx` | Recursively walk a DataTransferItemList, returning every File inside any dropped folder. |
 | `frontend/src/components/InsightsView.jsx` | InsightsView — DJ-Style Analytics Dashboard Datenbasierte Einblicke in den eigenen DJ-Stil und die Library: •… |
@@ -307,6 +309,8 @@
 | `tests/test_download_registry.py` | Tests for app/download_registry.py — SoundCloud download dedup/history DB. |
 | `tests/test_external_track_match.py` | external_track_match unit tests (external-track-match-unified-module T-3..T-9). |
 | `tests/test_folder_watcher.py` | Tests for app/folder_watcher.py — auto-import folder watcher. |
+| `tests/test_genre_atlas.py` | Tests for app.genre_atlas: matching logic on a synthetic atlas + integrity of the snapshot. |
+| `tests/test_genre_atlas_routes.py` | Route tests for the genre-atlas hints (app/main.py). |
 | `tests/test_import_dedup.py` | Import dedup — ``/api/library/import-paths``, ``/api/library/scan-folder`` and |
 | `tests/test_import_tracker.py` | Tests for app/import_tracker.py — live import-progress tracker. |
 | `tests/test_library_format_swap.py` | Tests for app.library_format_swap. |
@@ -377,5 +381,6 @@
 | `scripts/regen_maps.py` | Auto-generate tiered code maps from the actual source tree. |
 | `scripts/screenshot.py` | *(no module docstring)* |
 | `scripts/selftest_analysis.py` | selftest_analysis.py — autonomous accuracy self-test (no Rekordbox needed). |
+| `scripts/sync_genre_atlas.py` | Vendor a slim snapshot of the genre-atlas repo into app/data/genre_atlas.json. |
 | `scripts/test_xml_sync.py` | Add app to path |
 | `scripts/validate_research_docs.py` | Validate every doc under docs/research/{research,implement,archived}/. |
