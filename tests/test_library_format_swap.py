@@ -98,6 +98,15 @@ class TestConstants:
         # safe_format_swap.py-proven Pioneer convention
         assert FILE_TYPE_M4A == 4
 
+    def test_filetype_codes_match_pioneer_export(self):
+        # What Rekordbox's own analysis writes into djmdContent.FileType.
+        # Old wrong values were AIFF=6 / WAV=5 / FLAC=11.
+        assert FILE_TYPE_MP3 == 1
+        assert FILE_TYPE_M4A == 4
+        assert FILE_TYPE_FLAC == 5
+        assert FILE_TYPE_WAV == 11
+        assert FILE_TYPE_AIFF == 12
+
 
 class TestFfmpegCommand:
     @pytest.mark.parametrize(
@@ -282,7 +291,7 @@ class TestScopeEnumeration:
         live_db = MagicMock()
         c1 = MagicMock(folder_path="/a/song.m4a", file_type=4, file_size=100, id="1")
         c1.rb_local_deleted = False
-        c2 = MagicMock(folder_path="/a/song.aiff", file_type=6, file_size=500, id="2")
+        c2 = MagicMock(folder_path="/a/song.aiff", file_type=12, file_size=500, id="2")
         c2.rb_local_deleted = False
         live_db.db.get_contents.return_value = [c1, c2]
         engine = FormatSwapEngine(live_db, "aiff")
@@ -302,6 +311,18 @@ class TestDryRun:
         assert result.total_source_mb == 0.0
         assert result.estimated_target_mb == 0.0
         assert result.drive_check_pass is True  # nothing requested = pass
+
+    def test_target_file_type_ignores_legacy_library_rows(self):
+        # Older builds wrote AIFF rows with FileType 6. The engine must use
+        # the verified code, not copy whatever an existing row carries.
+        legacy = MagicMock(folder_path="/a/old.aiff", file_type=6, file_size=500, id="9")
+        legacy.rb_local_deleted = False
+        live_db = MagicMock()
+        live_db.db.get_contents.return_value = [legacy]
+        live_db.db.get_content_by_id.return_value = None
+        engine = FormatSwapEngine(live_db, "aiff")
+        result = engine.dry_run({"kind": "track_ids", "ids": []})
+        assert result.target_file_type == FILE_TYPE_AIFF == 12
 
     def test_invalid_scope_returns_error(self):
         live_db = MagicMock()
@@ -401,7 +422,7 @@ class TestRollback:
                     "new": {
                         "folder_path": str(new_path),
                         "file_name_l": "song.aiff",
-                        "file_type": 6,
+                        "file_type": 12,
                         "file_size": 21,
                     },
                 }
@@ -471,9 +492,9 @@ class TestEnumerateLibrarySubset:
         return [
             _make_content("1", folder_path="/m/a.m4a", file_type=4, rating=0, color_id=0),
             _make_content("2", folder_path="/m/b.mp3", file_type=1, rating=4, color_id=1),
-            _make_content("3", folder_path="/m/c.flac", file_type=11, rating=0, color_id=2),
-            _make_content("4", folder_path="/m/d.aiff", file_type=6, rating=5, color_id=0),
-            _make_content("5", folder_path="/m/e.wav", file_type=5, rating=3, color_id=3),
+            _make_content("3", folder_path="/m/c.flac", file_type=5, rating=0, color_id=2),
+            _make_content("4", folder_path="/m/d.aiff", file_type=12, rating=5, color_id=0),
+            _make_content("5", folder_path="/m/e.wav", file_type=11, rating=3, color_id=3),
             _make_content("6", folder_path="/m/del.m4a", file_type=4, deleted=True),
         ]
 

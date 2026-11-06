@@ -3850,6 +3850,7 @@ Tests for app.library_format_swap.
 - `  TestConstants.test_disk_thresholds_from_oq4()`
 - `  TestConstants.test_watchdog_interval()`
 - `  TestConstants.test_filetype_m4a_is_4()`
+- `  TestConstants.test_filetype_codes_match_pioneer_export()`
 - `TestFfmpegCommand`
 - `  TestFfmpegCommand.test_ffmpeg_cmd_codec_for_target()`
 - `  TestFfmpegCommand.test_ffmpeg_cmd_has_vn_to_drop_cover_art()`
@@ -3881,6 +3882,7 @@ Tests for app.library_format_swap.
 - `  TestScopeEnumeration.test_skips_already_target_ext()`
 - `TestDryRun`
 - `  TestDryRun.test_empty_scope_returns_zero()`
+- `  TestDryRun.test_target_file_type_ignores_legacy_library_rows()`
 - `  TestDryRun.test_invalid_scope_returns_error()`
 - `TestManifestListing`
 - `  TestManifestListing.test_empty_backup_dir_returns_empty()`
