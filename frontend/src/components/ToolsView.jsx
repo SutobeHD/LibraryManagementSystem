@@ -3,7 +3,21 @@ import api from '../api/api';
 import toast from 'react-hot-toast';
 import { confirmModal } from './ConfirmModal';
 import { log } from '../utils/log';
-import { Download, RefreshCw, Scissors, Copy, Wand2, Search, Check, X, Merge, Sparkles, Loader2, Eye, AlertTriangle } from 'lucide-react';
+import {
+    Download,
+    RefreshCw,
+    Scissors,
+    Copy,
+    Wand2,
+    Search,
+    Check,
+    X,
+    Merge,
+    Sparkles,
+    Loader2,
+    Eye,
+    AlertTriangle,
+} from 'lucide-react';
 
 const RENAME_PATTERN_LS_KEY = 'rb-editor:smart-rename:last-pattern';
 const DEFAULT_RENAME_PATTERN = '%Artist% - %Title% [%BPM%]';
@@ -58,16 +72,18 @@ const ToolsView = () => {
     // Comment Editor State
     const [playlists, setPlaylists] = useState([]);
     const [commentData, setCommentData] = useState({
-        scope: "LIB", // "LIB" or PlaylistID
-        action: "remove", // remove, replace, append, set
-        find: "",
-        replace: ""
+        scope: 'LIB', // "LIB" or PlaylistID
+        action: 'remove', // remove, replace, append, set
+        find: '',
+        replace: '',
     });
     const [commentProcessing, setCommentProcessing] = useState(false);
 
     // Fetch Playlists on Mount (for scope selector)
     useEffect(() => {
-        api.get('/api/playlists/tree').then(res => setPlaylists(res.data)).catch(console.error);
+        api.get('/api/playlists/tree')
+            .then((res) => setPlaylists(res.data))
+            .catch(console.error);
     }, []);
 
     const handleSelectDuplicate = async (group) => {
@@ -75,29 +91,39 @@ const ToolsView = () => {
         setSelectedDuplicate(group);
         setCompareTracks([]);
         try {
-            const promises = group.ids.map(id => api.get(`/api/track/${id}`));
+            const promises = group.ids.map((id) => api.get(`/api/track/${id}`));
             const responses = await Promise.all(promises);
-            setCompareTracks(responses.map(r => r.data));
-        } catch (e) { console.error("Failed to load tracks", e); }
+            setCompareTracks(responses.map((r) => r.data));
+        } catch (e) {
+            console.error('Failed to load tracks', e);
+        }
     };
 
     const handleKeep = async (keepTrack) => {
         if (!selectedDuplicate) return;
         const keepId = String(keepTrack.ID || keepTrack.id);
-        const removeIds = selectedDuplicate.ids.filter(id => String(id) !== keepId).map(String);
+        const removeIds = selectedDuplicate.ids.filter((id) => String(id) !== keepId).map(String);
 
         if (removeIds.length === 0) return;
-        if (!(await confirmModal({
-            title: 'Merge duplicates',
-            message: `Keep "${keepTrack.Title}" and merge ${removeIds.length} duplicate(s)? Playlist memberships will be transferred.`,
-            confirmLabel: 'Merge',
-        }))) return;
+        if (
+            !(await confirmModal({
+                title: 'Merge duplicates',
+                message: `Keep "${keepTrack.Title}" and merge ${removeIds.length} duplicate(s)? Playlist memberships will be transferred.`,
+                confirmLabel: 'Merge',
+            }))
+        )
+            return;
 
         setMerging(true);
         try {
-            await api.post('/api/tools/duplicates/merge', { keep_id: keepId, remove_ids: removeIds });
-            toast.success(`Merged: kept "${keepTrack.Title}", removed ${removeIds.length} duplicates`);
-            setDuplicates(prev => prev.filter(d => d !== selectedDuplicate));
+            await api.post('/api/tools/duplicates/merge', {
+                keep_id: keepId,
+                remove_ids: removeIds,
+            });
+            toast.success(
+                `Merged: kept "${keepTrack.Title}", removed ${removeIds.length} duplicates`
+            );
+            setDuplicates((prev) => prev.filter((d) => d !== selectedDuplicate));
             setSelectedDuplicate(null);
             setCompareTracks([]);
         } catch (e) {
@@ -113,18 +139,24 @@ const ToolsView = () => {
         let bestTrack = compareTracks[0];
         let bestScore = -1;
         for (const t of compareTracks) {
-            const score = ((t.Rating || 0) * 100) + (t.BitRate || t.Bitrate || 0);
-            if (score > bestScore) { bestScore = score; bestTrack = t; }
+            const score = (t.Rating || 0) * 100 + (t.BitRate || t.Bitrate || 0);
+            if (score > bestScore) {
+                bestScore = score;
+                bestTrack = t;
+            }
         }
         if (bestTrack) await handleKeep(bestTrack);
     };
 
     const handleMergeAll = async () => {
-        if (!(await confirmModal({
-            title: 'Auto-merge all duplicates',
-            message: `Auto-merge all ${duplicates.length} duplicate groups? This keeps the highest-quality version and transfers playlist memberships.`,
-            confirmLabel: 'Auto-merge',
-        }))) return;
+        if (
+            !(await confirmModal({
+                title: 'Auto-merge all duplicates',
+                message: `Auto-merge all ${duplicates.length} duplicate groups? This keeps the highest-quality version and transfers playlist memberships.`,
+                confirmLabel: 'Auto-merge',
+            }))
+        )
+            return;
         setMerging(true);
         try {
             const res = await api.post('/api/tools/duplicates/merge-all');
@@ -143,14 +175,21 @@ const ToolsView = () => {
         try {
             const res = await api.get('/api/tools/duplicates');
             setDuplicates(res.data);
-        } catch (e) { console.error(e); }
-        finally { setScanning(false); }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setScanning(false);
+        }
     };
 
     // Persist pattern as the user edits it so a refresh / tab switch
     // doesn't blow away their work.
     useEffect(() => {
-        try { localStorage.setItem(RENAME_PATTERN_LS_KEY, pattern); } catch (e) { log.warn('rename pattern persist failed', e); }
+        try {
+            localStorage.setItem(RENAME_PATTERN_LS_KEY, pattern);
+        } catch (e) {
+            log.warn('rename pattern persist failed', e);
+        }
     }, [pattern]);
 
     // Lazy-load the track list the first time the user opens the Rename tab.
@@ -159,12 +198,15 @@ const ToolsView = () => {
         if (allTracks.length > 0 || tracksLoading) return;
         setTracksLoading(true);
         api.get('/api/library/tracks')
-            .then(res => setAllTracks(Array.isArray(res.data) ? res.data : []))
-            .catch(e => { log.error('failed to fetch library tracks for rename preview', e); toast.error('Could not load track list'); })
+            .then((res) => setAllTracks(Array.isArray(res.data) ? res.data : []))
+            .catch((e) => {
+                log.error('failed to fetch library tracks for rename preview', e);
+                toast.error('Could not load track list');
+            })
             .finally(() => setTracksLoading(false));
     }, [activeTab, allTracks.length, tracksLoading]);
 
-    const insertToken = (token) => setPattern(prev => `${prev}${token}`);
+    const insertToken = (token) => setPattern((prev) => `${prev}${token}`);
 
     const handleRenamePreview = () => {
         if (!pattern.trim()) {
@@ -175,12 +217,12 @@ const ToolsView = () => {
             toast.error('No tracks loaded yet');
             return;
         }
-        const rows = allTracks.map(t => {
+        const rows = allTracks.map((t) => {
             const tid = String(t.id || t.ID || '');
             const from = (t.path || t.FolderPath || '').split(/[\\/]/).pop() || `(track ${tid})`;
             const baseName = buildRenameName(t, pattern);
             // Preserve extension from current path so the preview is honest
-            const ext = (from.includes('.') ? from.slice(from.lastIndexOf('.')) : '');
+            const ext = from.includes('.') ? from.slice(from.lastIndexOf('.')) : '';
             const to = baseName ? `${baseName}${ext}` : '(empty)';
             return { id: tid, from, to, sameName: from === to };
         });
@@ -190,18 +232,28 @@ const ToolsView = () => {
     };
 
     const handleRenameApply = async () => {
-        if (!pattern.trim()) { toast.error('Pattern is empty'); return; }
-        if (allTracks.length === 0) { toast.error('No tracks loaded'); return; }
-        const trackIds = allTracks
-            .map(t => String(t.id || t.ID || ''))
-            .filter(Boolean);
-        if (trackIds.length === 0) { toast.error('No valid track IDs'); return; }
-        if (!(await confirmModal({
-            title: `Rename ${trackIds.length} tracks?`,
-            message: `Every audio file in the library will be renamed on disk using:\n\n${pattern}\n\nThis modifies files outside this app and cannot be undone automatically. Make sure you have a backup.`,
-            confirmLabel: 'Rename All',
-            danger: true,
-        }))) return;
+        if (!pattern.trim()) {
+            toast.error('Pattern is empty');
+            return;
+        }
+        if (allTracks.length === 0) {
+            toast.error('No tracks loaded');
+            return;
+        }
+        const trackIds = allTracks.map((t) => String(t.id || t.ID || '')).filter(Boolean);
+        if (trackIds.length === 0) {
+            toast.error('No valid track IDs');
+            return;
+        }
+        if (
+            !(await confirmModal({
+                title: `Rename ${trackIds.length} tracks?`,
+                message: `Every audio file in the library will be renamed on disk using:\n\n${pattern}\n\nThis modifies files outside this app and cannot be undone automatically. Make sure you have a backup.`,
+                confirmLabel: 'Rename All',
+                danger: true,
+            }))
+        )
+            return;
 
         setRenameRunning(true);
         setRenameResult(null);
@@ -218,7 +270,9 @@ const ToolsView = () => {
             } else if (success.length === 0) {
                 toast.error(`Rename failed (${errors.length} errors)`);
             } else {
-                toast.success(`Renamed ${success.length} of ${trackIds.length} (${errors.length} errors)`);
+                toast.success(
+                    `Renamed ${success.length} of ${trackIds.length} (${errors.length} errors)`
+                );
             }
             log.info('smart_rename result', { success: success.length, errors });
         } catch (e) {
@@ -231,23 +285,26 @@ const ToolsView = () => {
     };
 
     const handleCommentRun = async () => {
-        if (!(await confirmModal({
-            title: 'Modify comments',
-            message: 'This will modify comments for all selected tracks. Continue?',
-            confirmLabel: 'Continue',
-        }))) return;
+        if (
+            !(await confirmModal({
+                title: 'Modify comments',
+                message: 'This will modify comments for all selected tracks. Continue?',
+                confirmLabel: 'Continue',
+            }))
+        )
+            return;
         setCommentProcessing(true);
         try {
             const res = await api.post('/api/tools/batch-comment', {
                 source_id: commentData.scope,
                 action: commentData.action,
                 find: commentData.find,
-                replace: commentData.replace
+                replace: commentData.replace,
             });
             toast.success(`Updated comments for ${res.data.count} tracks!`);
         } catch (e) {
             console.error(e);
-            toast.error("Update failed.");
+            toast.error('Update failed.');
         } finally {
             setCommentProcessing(false);
         }
@@ -257,8 +314,8 @@ const ToolsView = () => {
     const flattenPlaylists = (nodes, depth = 0) => {
         if (!Array.isArray(nodes)) return [];
         let options = [];
-        nodes.forEach(n => {
-            if (n.Type === "1") options.push({ id: n.ID, name: n.Name, depth });
+        nodes.forEach((n) => {
+            if (n.Type === '1') options.push({ id: n.ID, name: n.Name, depth });
             if (n.children && n.children.length > 0) {
                 options = [...options, ...flattenPlaylists(n.children, depth + 1)];
             }
@@ -276,7 +333,9 @@ const ToolsView = () => {
                     </div>
                     <div>
                         <h1 className="text-3xl font-bold">Library Tools</h1>
-                        <p className="text-ink-secondary">Advanced utilities to keep your library clean</p>
+                        <p className="text-ink-secondary">
+                            Advanced utilities to keep your library clean
+                        </p>
                     </div>
                 </div>
 
@@ -317,7 +376,11 @@ const ToolsView = () => {
                                         disabled={merging}
                                         className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-xl text-xs font-bold border border-emerald-500/30 transition-all disabled:opacity-50"
                                     >
-                                        {merging ? <RefreshCw size={14} className="animate-spin" /> : <Merge size={14} />}
+                                        {merging ? (
+                                            <RefreshCw size={14} className="animate-spin" />
+                                        ) : (
+                                            <Merge size={14} />
+                                        )}
                                         Merge All ({duplicates.length} groups)
                                     </button>
                                 )}
@@ -341,12 +404,16 @@ const ToolsView = () => {
                                                         className={`p-3 rounded-lg border cursor-pointer transition-colors ${selectedDuplicate === d ? 'bg-amber2/20 border-amber2/50' : 'bg-white/5 border-white/5 hover:bg-white/10'}`}
                                                     >
                                                         <div className="flex justify-between items-start mb-1">
-                                                            <div className="font-bold text-ink-primary truncate pr-2">{d.Title}</div>
+                                                            <div className="font-bold text-ink-primary truncate pr-2">
+                                                                {d.Title}
+                                                            </div>
                                                             <span className="text-[10px] bg-red-500/20 text-red-300 px-1.5 py-0.5 rounded flex-shrink-0">
                                                                 {d.count || d.Count || '?'}x
                                                             </span>
                                                         </div>
-                                                        <div className="text-xs text-ink-muted">{d.Artist}</div>
+                                                        <div className="text-xs text-ink-muted">
+                                                            {d.Artist}
+                                                        </div>
                                                     </div>
                                                 ))}
                                             </div>
@@ -357,8 +424,12 @@ const ToolsView = () => {
                                         disabled={scanning}
                                         className="btn-primary w-full flex justify-center items-center gap-2 py-3"
                                     >
-                                        {scanning ? <RefreshCw className="animate-spin" /> : <Search />}
-                                        {scanning ? "Scanning..." : "Scan for Duplicates"}
+                                        {scanning ? (
+                                            <RefreshCw className="animate-spin" />
+                                        ) : (
+                                            <Search />
+                                        )}
+                                        {scanning ? 'Scanning...' : 'Scan for Duplicates'}
                                     </button>
                                 </div>
 
@@ -367,32 +438,88 @@ const ToolsView = () => {
                                     {selectedDuplicate && compareTracks.length > 0 ? (
                                         <div className="flex-1 flex flex-col p-4 animate-fade-in">
                                             <div className="flex justify-between items-center mb-4">
-                                                <h3 className="text-lg font-bold text-ink-primary flex items-center gap-2"><Merge size={18} /> Compare & Merge</h3>
+                                                <h3 className="text-lg font-bold text-ink-primary flex items-center gap-2">
+                                                    <Merge size={18} /> Compare & Merge
+                                                </h3>
                                                 <div className="flex items-center gap-2">
                                                     <button
-                                                        onClick={() => handleSmartMerge(selectedDuplicate)}
+                                                        onClick={() =>
+                                                            handleSmartMerge(selectedDuplicate)
+                                                        }
                                                         disabled={merging}
                                                         className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-lg text-xs font-bold border border-emerald-500/30 transition-all disabled:opacity-50"
                                                     >
                                                         <Sparkles size={12} /> Smart Merge
                                                     </button>
-                                                    <span className="text-xs text-ink-muted">or select one to keep →</span>
+                                                    <span className="text-xs text-ink-muted">
+                                                        or select one to keep →
+                                                    </span>
                                                 </div>
                                             </div>
                                             <div className="flex-1 flex gap-4 overflow-x-auto pb-2">
-                                                {compareTracks.map(t => (
-                                                    <div key={t.id || t.ID} className="min-w-[240px] flex-1 bg-black/60 p-4 rounded-xl border border-white/10 flex flex-col relative group hover:border-white/20 transition-colors">
-                                                        <div className="text-xs text-amber2 font-mono mb-2 truncate">{t.id || t.ID}</div>
-                                                        <div className="font-bold text-lg leading-tight mb-1">{t.Title}</div>
-                                                        <div className="text-sm text-ink-secondary mb-4">{t.Artist}</div>
+                                                {compareTracks.map((t) => (
+                                                    <div
+                                                        key={t.id || t.ID}
+                                                        className="min-w-[240px] flex-1 bg-black/60 p-4 rounded-xl border border-white/10 flex flex-col relative group hover:border-white/20 transition-colors"
+                                                    >
+                                                        <div className="text-xs text-amber2 font-mono mb-2 truncate">
+                                                            {t.id || t.ID}
+                                                        </div>
+                                                        <div className="font-bold text-lg leading-tight mb-1">
+                                                            {t.Title}
+                                                        </div>
+                                                        <div className="text-sm text-ink-secondary mb-4">
+                                                            {t.Artist}
+                                                        </div>
 
                                                         <div className="space-y-2 text-xs text-ink-muted mb-6">
-                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>BPM</span> <span className="text-ink-primary">{t.BPM?.toFixed?.(2) || t.BPM || '—'}</span></div>
-                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>Key</span> <span className="text-ink-primary">{t.Key || '—'}</span></div>
-                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>Rating</span> <span className="text-ink-primary">{'★'.repeat(t.Rating || 0)}{'☆'.repeat(5 - (t.Rating || 0))}</span></div>
-                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>Size</span> <span className="text-ink-primary">{t.Size ? (t.Size / 1024 / 1024).toFixed(1) + ' MB' : '—'}</span></div>
-                                                            <div className="flex justify-between border-b border-white/5 pb-1"><span>Bitrate</span> <span className="text-ink-primary">{t.BitRate || t.Bitrate || '—'}</span></div>
-                                                            <div className="truncate mt-2 opacity-50" title={t.path || t.FolderPath}>{t.path || t.FolderPath || '—'}</div>
+                                                            <div className="flex justify-between border-b border-white/5 pb-1">
+                                                                <span>BPM</span>{' '}
+                                                                <span className="text-ink-primary">
+                                                                    {t.BPM?.toFixed?.(2) ||
+                                                                        t.BPM ||
+                                                                        '—'}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex justify-between border-b border-white/5 pb-1">
+                                                                <span>Key</span>{' '}
+                                                                <span className="text-ink-primary">
+                                                                    {t.Key || '—'}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex justify-between border-b border-white/5 pb-1">
+                                                                <span>Rating</span>{' '}
+                                                                <span className="text-ink-primary">
+                                                                    {'★'.repeat(t.Rating || 0)}
+                                                                    {'☆'.repeat(
+                                                                        5 - (t.Rating || 0)
+                                                                    )}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex justify-between border-b border-white/5 pb-1">
+                                                                <span>Size</span>{' '}
+                                                                <span className="text-ink-primary">
+                                                                    {t.Size
+                                                                        ? (
+                                                                              t.Size /
+                                                                              1024 /
+                                                                              1024
+                                                                          ).toFixed(1) + ' MB'
+                                                                        : '—'}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex justify-between border-b border-white/5 pb-1">
+                                                                <span>Bitrate</span>{' '}
+                                                                <span className="text-ink-primary">
+                                                                    {t.BitRate || t.Bitrate || '—'}
+                                                                </span>
+                                                            </div>
+                                                            <div
+                                                                className="truncate mt-2 opacity-50"
+                                                                title={t.path || t.FolderPath}
+                                                            >
+                                                                {t.path || t.FolderPath || '—'}
+                                                            </div>
                                                         </div>
 
                                                         <div className="mt-auto">
@@ -410,8 +537,13 @@ const ToolsView = () => {
                                     ) : (
                                         <div className="absolute inset-0 flex flex-col items-center justify-center text-ink-muted">
                                             <Merge size={64} className="mb-6 opacity-20" />
-                                            <h3 className="text-xl font-bold text-ink-primary mb-2">Select a Duplicate Group</h3>
-                                            <p className="max-w-md text-center text-sm px-8">Select a group from the list to compare tracks side-by-side and merge metadata.</p>
+                                            <h3 className="text-xl font-bold text-ink-primary mb-2">
+                                                Select a Duplicate Group
+                                            </h3>
+                                            <p className="max-w-md text-center text-sm px-8">
+                                                Select a group from the list to compare tracks
+                                                side-by-side and merge metadata.
+                                            </p>
                                         </div>
                                     )}
                                 </div>
@@ -427,23 +559,32 @@ const ToolsView = () => {
                             </h2>
 
                             <div className="mb-4 flex items-start gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-                                <AlertTriangle size={14} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                                <AlertTriangle
+                                    size={14}
+                                    className="text-amber-400 flex-shrink-0 mt-0.5"
+                                />
                                 <p className="text-xs text-amber-200 leading-relaxed">
-                                    Smart Rename currently operates on every track in the library. Files are renamed on disk and library links are rewritten — this cannot be undone automatically.
+                                    Smart Rename currently operates on every track in the library.
+                                    Files are renamed on disk and library links are rewritten — this
+                                    cannot be undone automatically.
                                 </p>
                             </div>
 
                             <div className="mb-4">
-                                <label className="text-[10px] text-ink-muted uppercase font-bold mb-2 block tracking-widest leading-none">Pattern</label>
+                                <label className="text-[10px] text-ink-muted uppercase font-bold mb-2 block tracking-widest leading-none">
+                                    Pattern
+                                </label>
                                 <input
                                     value={pattern}
-                                    onChange={e => setPattern(e.target.value)}
+                                    onChange={(e) => setPattern(e.target.value)}
                                     placeholder={DEFAULT_RENAME_PATTERN}
                                     className="input-glass w-full font-mono text-fuchsia-400"
                                 />
                                 <div className="flex flex-wrap items-center gap-2 mt-3">
-                                    <span className="text-[10px] text-ink-muted uppercase font-bold tracking-widest">Tokens</span>
-                                    {RENAME_TOKENS.map(tok => (
+                                    <span className="text-[10px] text-ink-muted uppercase font-bold tracking-widest">
+                                        Tokens
+                                    </span>
+                                    {RENAME_TOKENS.map((tok) => (
                                         <button
                                             key={tok}
                                             type="button"
@@ -458,13 +599,19 @@ const ToolsView = () => {
 
                             <div className="mb-4 flex items-center justify-between text-xs">
                                 <div className="text-ink-muted">
-                                    Affected: <span className="text-ink-primary font-bold">{tracksLoading ? '…' : allTracks.length}</span> tracks
+                                    Affected:{' '}
+                                    <span className="text-ink-primary font-bold">
+                                        {tracksLoading ? '…' : allTracks.length}
+                                    </span>{' '}
+                                    tracks
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <button
                                         type="button"
                                         onClick={handleRenamePreview}
-                                        disabled={tracksLoading || allTracks.length === 0 || renameRunning}
+                                        disabled={
+                                            tracksLoading || allTracks.length === 0 || renameRunning
+                                        }
                                         className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 text-ink-primary rounded-lg border border-white/10 transition-colors text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         <Eye size={12} /> Preview
@@ -472,10 +619,16 @@ const ToolsView = () => {
                                     <button
                                         type="button"
                                         onClick={handleRenameApply}
-                                        disabled={tracksLoading || allTracks.length === 0 || renameRunning}
+                                        disabled={
+                                            tracksLoading || allTracks.length === 0 || renameRunning
+                                        }
                                         className="flex items-center gap-1.5 px-3 py-1.5 bg-fuchsia-500/20 hover:bg-fuchsia-500/30 text-fuchsia-300 rounded-lg border border-fuchsia-500/40 transition-colors text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
-                                        {renameRunning ? <RefreshCw size={12} className="animate-spin" /> : <Wand2 size={12} />}
+                                        {renameRunning ? (
+                                            <RefreshCw size={12} className="animate-spin" />
+                                        ) : (
+                                            <Wand2 size={12} />
+                                        )}
                                         {renameRunning ? 'Renaming…' : 'Rename All'}
                                     </button>
                                 </div>
@@ -489,7 +642,13 @@ const ToolsView = () => {
                                 ) : !renamePreviewBuilt ? (
                                     <div className="flex-1 flex flex-col items-center justify-center text-ink-muted px-8 text-center">
                                         <Eye size={48} className="mb-4 opacity-20" />
-                                        <p className="text-sm">Click <span className="text-fuchsia-300 font-bold">Preview</span> to see the first 5 renames before applying.</p>
+                                        <p className="text-sm">
+                                            Click{' '}
+                                            <span className="text-fuchsia-300 font-bold">
+                                                Preview
+                                            </span>{' '}
+                                            to see the first 5 renames before applying.
+                                        </p>
                                     </div>
                                 ) : (
                                     <div className="flex-1 overflow-y-auto p-3 space-y-2 scrollbar-hide">
@@ -501,9 +660,18 @@ const ToolsView = () => {
                                                 key={row.id || i}
                                                 className={`flex items-center gap-3 px-3 py-2 rounded-lg border text-xs font-mono ${row.sameName ? 'bg-white/[0.02] border-white/5 text-ink-muted' : 'bg-fuchsia-500/5 border-fuchsia-500/20 text-ink-primary'}`}
                                             >
-                                                <div className="flex-1 truncate" title={row.from}>{row.from}</div>
-                                                <div className="text-fuchsia-400 flex-shrink-0">→</div>
-                                                <div className="flex-1 truncate text-right" title={row.to}>{row.to}</div>
+                                                <div className="flex-1 truncate" title={row.from}>
+                                                    {row.from}
+                                                </div>
+                                                <div className="text-fuchsia-400 flex-shrink-0">
+                                                    →
+                                                </div>
+                                                <div
+                                                    className="flex-1 truncate text-right"
+                                                    title={row.to}
+                                                >
+                                                    {row.to}
+                                                </div>
                                             </div>
                                         ))}
                                         {renamePreview.length > 5 && (
@@ -513,15 +681,34 @@ const ToolsView = () => {
                                         )}
                                         {renameResult && (
                                             <div className="mt-4 pt-4 border-t border-white/5 space-y-1">
-                                                <div className="text-[10px] text-ink-muted uppercase font-bold tracking-widest">Last Result</div>
-                                                <div className="text-xs text-emerald-400">{renameResult.success.length} succeeded</div>
+                                                <div className="text-[10px] text-ink-muted uppercase font-bold tracking-widest">
+                                                    Last Result
+                                                </div>
+                                                <div className="text-xs text-emerald-400">
+                                                    {renameResult.success.length} succeeded
+                                                </div>
                                                 {renameResult.errors.length > 0 && (
-                                                    <div className="text-xs text-red-400">{renameResult.errors.length} error(s):
+                                                    <div className="text-xs text-red-400">
+                                                        {renameResult.errors.length} error(s):
                                                         <ul className="list-disc list-inside mt-1 space-y-0.5 text-ink-muted font-mono">
-                                                            {renameResult.errors.slice(0, 5).map((err, idx) => (
-                                                                <li key={idx} className="truncate" title={err}>{err}</li>
-                                                            ))}
-                                                            {renameResult.errors.length > 5 && <li>… and {renameResult.errors.length - 5} more</li>}
+                                                            {renameResult.errors
+                                                                .slice(0, 5)
+                                                                .map((err, idx) => (
+                                                                    <li
+                                                                        key={idx}
+                                                                        className="truncate"
+                                                                        title={err}
+                                                                    >
+                                                                        {err}
+                                                                    </li>
+                                                                ))}
+                                                            {renameResult.errors.length > 5 && (
+                                                                <li>
+                                                                    … and{' '}
+                                                                    {renameResult.errors.length - 5}{' '}
+                                                                    more
+                                                                </li>
+                                                            )}
                                                         </ul>
                                                     </div>
                                                 )}
@@ -543,14 +730,21 @@ const ToolsView = () => {
                             <div className="space-y-6 max-w-2xl">
                                 {/* Scope */}
                                 <div>
-                                    <label className="text-[10px] text-ink-muted uppercase font-bold mb-2 block tracking-widest">Target Scope</label>
+                                    <label className="text-[10px] text-ink-muted uppercase font-bold mb-2 block tracking-widest">
+                                        Target Scope
+                                    </label>
                                     <select
                                         value={commentData.scope}
-                                        onChange={e => setCommentData({ ...commentData, scope: e.target.value })}
+                                        onChange={(e) =>
+                                            setCommentData({
+                                                ...commentData,
+                                                scope: e.target.value,
+                                            })
+                                        }
                                         className="input-glass w-full text-ink-primary"
                                     >
                                         <option value="LIB">Full Library (All Tracks)</option>
-                                        {flatPlaylists.map(pl => (
+                                        {flatPlaylists.map((pl) => (
                                             <option key={pl.id} value={pl.id}>
                                                 {'\u00A0'.repeat(pl.depth * 2)} {pl.name}
                                             </option>
@@ -560,12 +754,16 @@ const ToolsView = () => {
 
                                 {/* Action */}
                                 <div>
-                                    <label className="text-[10px] text-ink-muted uppercase font-bold mb-2 block tracking-widest">Action</label>
+                                    <label className="text-[10px] text-ink-muted uppercase font-bold mb-2 block tracking-widest">
+                                        Action
+                                    </label>
                                     <div className="flex gap-4">
-                                        {['remove', 'replace', 'append', 'set'].map(act => (
+                                        {['remove', 'replace', 'append', 'set'].map((act) => (
                                             <button
                                                 key={act}
-                                                onClick={() => setCommentData({ ...commentData, action: act })}
+                                                onClick={() =>
+                                                    setCommentData({ ...commentData, action: act })
+                                                }
                                                 className={`flex-1 py-2 rounded-lg border text-sm capitalize ${commentData.action === act ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-black/20 border-white/5 text-ink-muted hover:bg-white/5'}`}
                                             >
                                                 {act}
@@ -576,25 +774,44 @@ const ToolsView = () => {
 
                                 {/* Inputs */}
                                 <div className="grid grid-cols-2 gap-4">
-                                    {(commentData.action === 'remove' || commentData.action === 'replace') && (
-                                        <div className={`${commentData.action === 'remove' ? 'col-span-2' : ''}`}>
-                                            <label className="text-[10px] text-ink-muted uppercase font-bold mb-2 block tracking-widest">Find Text</label>
+                                    {(commentData.action === 'remove' ||
+                                        commentData.action === 'replace') && (
+                                        <div
+                                            className={`${commentData.action === 'remove' ? 'col-span-2' : ''}`}
+                                        >
+                                            <label className="text-[10px] text-ink-muted uppercase font-bold mb-2 block tracking-widest">
+                                                Find Text
+                                            </label>
                                             <input
                                                 value={commentData.find}
-                                                onChange={e => setCommentData({ ...commentData, find: e.target.value })}
+                                                onChange={(e) =>
+                                                    setCommentData({
+                                                        ...commentData,
+                                                        find: e.target.value,
+                                                    })
+                                                }
                                                 className="input-glass w-full"
                                                 placeholder="Text to find..."
                                             />
                                         </div>
                                     )}
                                     {commentData.action !== 'remove' && (
-                                        <div className={`${commentData.action === 'set' || commentData.action === 'append' ? 'col-span-2' : ''}`}>
+                                        <div
+                                            className={`${commentData.action === 'set' || commentData.action === 'append' ? 'col-span-2' : ''}`}
+                                        >
                                             <label className="text-[10px] text-ink-muted uppercase font-bold mb-2 block tracking-widest">
-                                                {commentData.action === 'replace' ? 'Replace With' : 'Content'}
+                                                {commentData.action === 'replace'
+                                                    ? 'Replace With'
+                                                    : 'Content'}
                                             </label>
                                             <input
                                                 value={commentData.replace}
-                                                onChange={e => setCommentData({ ...commentData, replace: e.target.value })}
+                                                onChange={(e) =>
+                                                    setCommentData({
+                                                        ...commentData,
+                                                        replace: e.target.value,
+                                                    })
+                                                }
                                                 className="input-glass w-full"
                                                 placeholder="New content..."
                                             />
@@ -613,7 +830,6 @@ const ToolsView = () => {
                             </div>
                         </div>
                     )}
-
                 </div>
             </div>
         </div>

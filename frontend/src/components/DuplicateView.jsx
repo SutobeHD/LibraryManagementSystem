@@ -18,14 +18,22 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-    Copy, Check, AlertTriangle, Loader2, Music, ChevronRight,
-    Trash2, Zap, RefreshCw, HardDrive, Activity,
+    Copy,
+    Check,
+    AlertTriangle,
+    Loader2,
+    Music,
+    ChevronRight,
+    Trash2,
+    Zap,
+    RefreshCw,
+    HardDrive,
+    Activity,
 } from 'lucide-react';
 import api from '../api/api';
 import toast from 'react-hot-toast';
 
-const log = (level, msg, data) =>
-    console[level]?.(`[DuplicateView] ${msg}`, data ?? '');
+const log = (level, msg, data) => console[level]?.(`[DuplicateView] ${msg}`, data ?? '');
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Helpers
@@ -38,7 +46,7 @@ const formatMb = (mb) => {
 
 const similarityColor = (sim) => {
     if (sim >= 0.95) return 'text-bad';
-    if (sim >= 0.90) return 'text-amber2';
+    if (sim >= 0.9) return 'text-amber2';
     return 'text-info';
 };
 
@@ -67,12 +75,16 @@ const TrackCard = ({ track, isMaster, onSelect }) => (
     >
         {/* Radio + Master badge */}
         <div className="flex items-center gap-2 mb-2.5">
-            <div className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
-                isMaster ? 'border-amber2 bg-amber2' : 'border-line-default'
-            }`}>
+            <div
+                className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
+                    isMaster ? 'border-amber2 bg-amber2' : 'border-line-default'
+                }`}
+            >
                 {isMaster && <div className="w-1.5 h-1.5 rounded-full bg-mx-deepest" />}
             </div>
-            <span className={`text-[10px] font-semibold uppercase tracking-wider ${isMaster ? 'text-amber2' : 'text-ink-muted'}`}>
+            <span
+                className={`text-[10px] font-semibold uppercase tracking-wider ${isMaster ? 'text-amber2' : 'text-ink-muted'}`}
+            >
                 {isMaster ? 'Keep' : 'Remove'}
             </span>
         </div>
@@ -81,9 +93,7 @@ const TrackCard = ({ track, isMaster, onSelect }) => (
         <p className="text-[12px] font-semibold text-ink-primary truncate mb-0.5">
             {track.title || track.path?.split(/[\\/]/).pop() || '(untitled)'}
         </p>
-        <p className="text-[10px] text-ink-muted truncate mb-2">
-            {track.artist || '—'}
-        </p>
+        <p className="text-[10px] text-ink-muted truncate mb-2">{track.artist || '—'}</p>
 
         {/* Meta grid */}
         <div className="space-y-1 text-[10px] font-mono text-ink-secondary">
@@ -148,8 +158,8 @@ const GroupDetail = ({ group, onMergeSuccess }) => {
 
     const handleMerge = async () => {
         const removePaths = (group.duplicates || [])
-            .map(t => t.path)
-            .filter(p => p !== masterPath);
+            .map((t) => t.path)
+            .filter((p) => p !== masterPath);
 
         if (removePaths.length === 0) {
             toast.error('Nothing to remove — select a different master');
@@ -227,7 +237,7 @@ const GroupDetail = ({ group, onMergeSuccess }) => {
                 <input
                     type="checkbox"
                     checked={mergePlayCounts}
-                    onChange={e => setMergePlayCounts(e.target.checked)}
+                    onChange={(e) => setMergePlayCounts(e.target.checked)}
                     className="accent-amber2 w-4 h-4"
                 />
                 Merge play counts into master track
@@ -236,19 +246,27 @@ const GroupDetail = ({ group, onMergeSuccess }) => {
             {/* Merge button */}
             <div className="mt-auto">
                 <div className="text-[10px] text-ink-muted mb-2">
-                    Master: <span className="font-mono text-ink-secondary">
+                    Master:{' '}
+                    <span className="font-mono text-ink-secondary">
                         {masterPath?.split(/[\\/]/).pop() || '—'}
-                    </span>
-                    {' '}— {(group.duplicates || []).length - 1} duplicate(s) will be removed from library.
+                    </span>{' '}
+                    — {(group.duplicates || []).length - 1} duplicate(s) will be removed from
+                    library.
                 </div>
                 <button
                     onClick={handleMerge}
                     disabled={merging}
                     className="w-full btn-primary flex items-center justify-center gap-2 py-2.5 disabled:opacity-40"
                 >
-                    {merging
-                        ? <><Loader2 size={14} className="animate-spin" /> Merging…</>
-                        : <><Trash2 size={14} /> Merge — Remove Duplicates</>}
+                    {merging ? (
+                        <>
+                            <Loader2 size={14} className="animate-spin" /> Merging…
+                        </>
+                    ) : (
+                        <>
+                            <Trash2 size={14} /> Merge — Remove Duplicates
+                        </>
+                    )}
                 </button>
             </div>
         </div>
@@ -261,8 +279,8 @@ const GroupDetail = ({ group, onMergeSuccess }) => {
 
 const DuplicateView = () => {
     const [scanning, setScanning] = useState(false);
-    const [scanProgress, setScanProgress] = useState(null);  // {done, total}
-    const [groups, setGroups] = useState(null);               // null = not scanned
+    const [scanProgress, setScanProgress] = useState(null); // {done, total}
+    const [groups, setGroups] = useState(null); // null = not scanned
     const [scanError, setScanError] = useState(null);
     const [selectedGroupIdx, setSelectedGroupIdx] = useState(0);
     const pollRef = useRef(null);
@@ -280,7 +298,7 @@ const DuplicateView = () => {
             const res = await api.get('/api/library/tracks');
             const list = res.data?.tracks ?? res.data?.data ?? res.data ?? [];
             trackPaths = (Array.isArray(list) ? list : [])
-                .map(t => t.Location || t.path || '')
+                .map((t) => t.Location || t.path || '')
                 .filter(Boolean);
             log('info', `${trackPaths.length} track paths collected`);
         } catch (e) {
@@ -299,7 +317,8 @@ const DuplicateView = () => {
         let jobId = null;
         try {
             const res = await api.post('/api/duplicates/scan', { track_paths: trackPaths });
-            if (res.data?.status !== 'ok') throw new Error(res.data?.message || 'Scan failed to start');
+            if (res.data?.status !== 'ok')
+                throw new Error(res.data?.message || 'Scan failed to start');
             jobId = res.data.data?.job_id;
             log('info', 'scan started', { jobId, total: res.data.data?.total });
         } catch (e) {
@@ -338,7 +357,6 @@ const DuplicateView = () => {
                 log('info', `scan done: ${g.length} groups`);
                 if (g.length === 0) toast.success('No duplicates found');
                 else toast.success(`Found ${g.length} duplicate group(s)`);
-
             } catch (e) {
                 log('error', 'poll failed', e);
             }
@@ -347,12 +365,14 @@ const DuplicateView = () => {
 
     // Cleanup poll on unmount
     useEffect(() => {
-        return () => { if (pollRef.current) clearInterval(pollRef.current); };
+        return () => {
+            if (pollRef.current) clearInterval(pollRef.current);
+        };
     }, []);
 
     const handleMergeSuccess = useCallback(() => {
         // Refresh after merge — re-run scan or just update local state
-        setGroups(prev => {
+        setGroups((prev) => {
             if (!prev) return prev;
             // Keep the group in the list but it will show "merged" state
             return [...prev];
@@ -364,12 +384,17 @@ const DuplicateView = () => {
         <div className="h-full flex flex-col bg-mx-deepest">
             {/* Toolbar */}
             <div className="flex items-center gap-3 px-6 py-4 border-b border-line-subtle shrink-0">
-                <div className="w-8 h-8 rounded-mx-md flex items-center justify-center" style={{ background: 'var(--amber-bg)', color: 'var(--amber)' }}>
+                <div
+                    className="w-8 h-8 rounded-mx-md flex items-center justify-center"
+                    style={{ background: 'var(--amber-bg)', color: 'var(--amber)' }}
+                >
                     <Copy size={16} />
                 </div>
                 <div>
                     <h1 className="text-[14px] font-semibold text-ink-primary">Duplicate Finder</h1>
-                    <p className="text-ink-muted text-tiny">Acoustic & hash-based duplicate detection</p>
+                    <p className="text-ink-muted text-tiny">
+                        Acoustic & hash-based duplicate detection
+                    </p>
                 </div>
 
                 <button
@@ -377,9 +402,15 @@ const DuplicateView = () => {
                     disabled={scanning}
                     className="ml-auto btn-primary flex items-center gap-2 py-2 px-4 disabled:opacity-40"
                 >
-                    {scanning
-                        ? <><Loader2 size={14} className="animate-spin" /> Scanning…</>
-                        : <><RefreshCw size={14} /> Scan Library</>}
+                    {scanning ? (
+                        <>
+                            <Loader2 size={14} className="animate-spin" /> Scanning…
+                        </>
+                    ) : (
+                        <>
+                            <RefreshCw size={14} /> Scan Library
+                        </>
+                    )}
                 </button>
             </div>
 
@@ -398,7 +429,7 @@ const DuplicateView = () => {
                             style={{
                                 width: scanProgress.total
                                     ? `${(scanProgress.done / scanProgress.total) * 100}%`
-                                    : '0%'
+                                    : '0%',
                             }}
                         />
                     </div>
@@ -420,10 +451,12 @@ const DuplicateView = () => {
                         <Copy size={28} className="text-ink-muted" strokeWidth={1.2} />
                     </div>
                     <div>
-                        <p className="text-[14px] font-semibold text-ink-primary mb-1">Find Duplicates</p>
+                        <p className="text-[14px] font-semibold text-ink-primary mb-1">
+                            Find Duplicates
+                        </p>
                         <p className="text-tiny text-ink-muted max-w-xs">
-                            Scans your entire library using acoustic fingerprinting
-                            (or fast hash comparison if librosa is unavailable).
+                            Scans your entire library using acoustic fingerprinting (or fast hash
+                            comparison if librosa is unavailable).
                         </p>
                     </div>
                     <button onClick={startScan} className="btn-primary flex items-center gap-2">
@@ -436,7 +469,9 @@ const DuplicateView = () => {
             {!scanning && groups !== null && groups.length === 0 && (
                 <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-8">
                     <Check size={36} className="text-ok" />
-                    <p className="text-[14px] font-semibold text-ink-primary">No duplicates found</p>
+                    <p className="text-[14px] font-semibold text-ink-primary">
+                        No duplicates found
+                    </p>
                     <p className="text-tiny text-ink-muted">Your library looks clean.</p>
                 </div>
             )}
@@ -460,11 +495,15 @@ const DuplicateView = () => {
                                         key={i}
                                         onClick={() => setSelectedGroupIdx(i)}
                                         className={`w-full text-left px-4 py-3 transition-colors ${
-                                            isActive ? 'bg-amber2/5 border-l-2 border-amber2' : 'hover:bg-mx-hover'
+                                            isActive
+                                                ? 'bg-amber2/5 border-l-2 border-amber2'
+                                                : 'hover:bg-mx-hover'
                                         }`}
                                     >
                                         <div className="flex items-center justify-between mb-1">
-                                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-mx-xs ${similarityColor(g.similarity)} bg-current/10`}>
+                                            <span
+                                                className={`text-[10px] font-bold px-1.5 py-0.5 rounded-mx-xs ${similarityColor(g.similarity)} bg-current/10`}
+                                            >
                                                 {similarityLabel(g.similarity)}
                                             </span>
                                             <span className="text-[10px] text-ink-muted font-mono">
@@ -472,7 +511,9 @@ const DuplicateView = () => {
                                             </span>
                                         </div>
                                         <p className="text-[12px] text-ink-primary truncate">
-                                            {repTrack?.title || repTrack?.path?.split(/[\\/]/).pop() || '(unknown)'}
+                                            {repTrack?.title ||
+                                                repTrack?.path?.split(/[\\/]/).pop() ||
+                                                '(unknown)'}
                                         </p>
                                         <p className="text-[10px] text-ink-muted truncate">
                                             {repTrack?.artist || ''}

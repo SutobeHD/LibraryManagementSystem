@@ -11,12 +11,12 @@ const LibraryView = ({ onSelectTrack }) => {
     const loadTracks = () => {
         setLoading(true);
         api.get('/api/library/tracks')
-            .then(res => {
+            .then((res) => {
                 if (Array.isArray(res.data)) {
                     setTracks(res.data);
                 }
             })
-            .catch(err => console.error("Failed to load tracks", err))
+            .catch((err) => console.error('Failed to load tracks', err))
             .finally(() => setLoading(false));
     };
 
@@ -27,10 +27,11 @@ const LibraryView = ({ onSelectTrack }) => {
     const filteredTracks = useMemo(() => {
         if (!searchQuery) return tracks;
         const q = searchQuery.toLowerCase();
-        return tracks.filter(t =>
-            (t.Title && t.Title.toLowerCase().includes(q)) ||
-            (t.Artist && t.Artist.toLowerCase().includes(q)) ||
-            (t.Album && t.Album.toLowerCase().includes(q))
+        return tracks.filter(
+            (t) =>
+                (t.Title && t.Title.toLowerCase().includes(q)) ||
+                (t.Artist && t.Artist.toLowerCase().includes(q)) ||
+                (t.Album && t.Album.toLowerCase().includes(q))
         );
     }, [tracks, searchQuery]);
 
@@ -42,14 +43,21 @@ const LibraryView = ({ onSelectTrack }) => {
                         <Database size={20} className="text-amber2" />
                     </div>
                     <div>
-                        <h1 className="text-xl font-bold text-white tracking-tight">Library Tracks</h1>
-                        <p className="text-xs text-ink-muted font-mono uppercase tracking-widest">{filteredTracks.length} / {tracks.length} TRACKS</p>
+                        <h1 className="text-xl font-bold text-white tracking-tight">
+                            Library Tracks
+                        </h1>
+                        <p className="text-xs text-ink-muted font-mono uppercase tracking-widest">
+                            {filteredTracks.length} / {tracks.length} TRACKS
+                        </p>
                     </div>
                 </div>
 
                 <div className="flex items-center gap-3">
                     <div className="relative group">
-                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted group-focus-within:text-amber2 transition-colors" />
+                        <Search
+                            size={14}
+                            className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted group-focus-within:text-amber2 transition-colors"
+                        />
                         <input
                             type="text"
                             placeholder="Search library..."
