@@ -243,6 +243,7 @@ Every user-visible sentence lives in a `*Copy.js` module with its own `node --te
 | `scripts/feature_map.py` | Feature registry tool. Loads `docs/features/*.toml`, overlays unmerged branches + worktree dirty files (stacked branches attributed to the most established ref: open PR first, then fewest commits ahead). Modes: `--brief` (SessionStart hook, never fails), `--who`, `--active`, `--list`, `--check` (CI), `--coverage`, `--html`. Stdlib only; per-tip commit cache in `<git-common-dir>/feature-map-cache.json` |
 | `scripts/feature_map_template.html` | Self-contained mindmap page (no CDN, offline). `feature_map.py --html` injects the model at `/*__FEATURE_MAP_DATA__*/null` → `tmp/feature-map.html` |
 | `scripts/sync_genre_atlas.py` | Vendors a slim snapshot of the sibling `genre-atlas` repo (`dist/genres.json`) into `app/data/genre_atlas.json`. Source `../genre-atlas`, `$GENRE_ATLAS_DIR` or `--source`; `--check` exits 1 on drift |
+| `scripts/library_analysis.py` | Read-only whole-library report: field fill rates, derived source/format/MyTags, Genre-field vocabulary + spelling variants, genre-atlas coverage (metadata / tempo-only / none), leave-genre-out agreement with the user's labels, gaps (unmatched uploaders/labels), LMS analysis-cache coverage. Input: `GET /api/library/tracks` or `--input` dump. Output: `tmp/library-analysis/{report.md,report.json,tracks.csv}` |
 | `docs/features/*.toml` | Feature registry, one file per top-level area (`[area]` + `[[feature]]`). `_meta.toml` = hubs, ignore globs, parked branches, stale days, coverage globs. Schema + workflow: `.claude/rules/feature-map.md` |
 | `scripts/screenshot.py` | Playwright screenshot utility for UI at localhost:5173 |
 | `scripts/test_xml_sync.py` | Validates Rekordbox XML generation with mock track data |
@@ -299,6 +300,7 @@ Only rows added / changed in Phase-1 auth hardening are listed here. Full suite 
 | `tests/test_rate_limit.py` | **NEW** 7 cases covering `app/rate_limit.py` token-bucket. Asserts: bucket refills at the configured steady rate; burst capacity respected on initial cold start; loopback IPs short-circuit via `_WHITELIST_SENTINEL`; `BucketStore` lazy-purges fully-refilled idle entries; concurrent `take()` under RLock cannot over-spend; `Retry-After` header populated on 429; **auth fires before the rate-limit decorator body runs** (so a missing Bearer header returns 401 without consuming a token). |
 | `tests/test_genre_atlas.py` | Matching logic on a synthetic atlas (normalisation, overlapping tags, scenes, BPM window/octave, BPM-only fallback, library spelling) + shipped-snapshot integrity, size < 500 KB and real-data cases (Daddy Trance, 240KM/H, bare "Raw" by tempo) |
 | `tests/test_genre_atlas_routes.py` | Both genre-atlas GET routes via httpx ASGITransport + fake db: query validation, 404, library spelling, no auth needed |
+| `tests/test_library_analysis.py` | `scripts/library_analysis.py` on a synthetic atlas: zero-as-empty fill rates, MyTag dedupe, source/format, spelling variants, coverage split, leave-genre-out agreement, gaps, analysis-cache coverage, report + CSV output |
 
 ---
 
