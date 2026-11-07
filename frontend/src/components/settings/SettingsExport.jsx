@@ -3,7 +3,7 @@
  */
 
 import React, { useCallback } from 'react';
-import api from '../../api/api';
+import api, { fetchLibraryTracks } from '../../api/api';
 import toast from 'react-hot-toast';
 import { promptModal } from '../PromptModal';
 import { FileOutput, FolderOpen, RefreshCw } from 'lucide-react';
@@ -112,7 +112,7 @@ const SettingsExport = ({ settings, setSettings }) => {
                     <button
                         onClick={async () => {
                             try {
-                                const tracks = await api.get('/api/library/tracks');
+                                const tracks = await fetchLibraryTracks();
                                 const ids = tracks.data.map((t) => t.id || t.TrackID);
                                 const res = await api.post('/api/rekordbox/export', {
                                     track_ids: ids,

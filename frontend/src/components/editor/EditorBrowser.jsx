@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Music, Disc, User, Play, Plus, X, ListMusic } from 'lucide-react';
-import api from '../../api/api';
+import { fetchLibraryTracks } from '../../api/api';
 
 const EditorBrowser = ({ onLoadTrack, onClose }) => {
     const [searchTerm, setSearchTerm] = useState('');
@@ -15,7 +15,7 @@ const EditorBrowser = ({ onLoadTrack, onClose }) => {
     const loadLibrary = async () => {
         setLoading(true);
         try {
-            const res = await api.get('/api/library/tracks');
+            const res = await fetchLibraryTracks();
             // Ensure we have an array
             const data = Array.isArray(res.data) ? res.data : [];
             setTracks(data);

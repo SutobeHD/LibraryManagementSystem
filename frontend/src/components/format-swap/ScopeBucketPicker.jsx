@@ -37,7 +37,7 @@ import {
     ChevronRight,
     Sparkles,
 } from 'lucide-react';
-import api from '../../api/api';
+import api, { fetchLibraryTracks } from '../../api/api';
 import { useToast } from '../ToastContext';
 
 const RENDER_CAP = 300;
@@ -109,7 +109,7 @@ function SingleTrackPicker({ track, onPick }) {
 
     useEffect(() => {
         setLoading(true);
-        api.get('/api/library/tracks')
+        fetchLibraryTracks()
             .then((res) => {
                 const list = Array.isArray(res.data) ? res.data : (res.data?.tracks ?? []);
                 setTracks(Array.isArray(list) ? list : []);

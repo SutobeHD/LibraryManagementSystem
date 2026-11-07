@@ -20,7 +20,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import api from '../api/api';
+import api, { fetchLibraryTracks } from '../api/api';
 import {
     BarChart3,
     Music,
@@ -56,7 +56,7 @@ const InsightsView = ({ libraryStatus }) => {
                     err
                 );
                 // Fallback: aus Library-Daten ableiten
-                api.get('/api/library/tracks')
+                fetchLibraryTracks()
                     .then((r) => {
                         setStats(deriveStatsFromTracks(r.data || []));
                         setLoading(false);

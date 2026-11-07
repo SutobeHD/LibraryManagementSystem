@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import api from '../api/api';
+import api, { fetchLibraryTracks } from '../api/api';
 import toast from 'react-hot-toast';
 import { confirmModal } from './ConfirmModal';
 import { log } from '../utils/log';
@@ -197,7 +197,7 @@ const ToolsView = () => {
         if (activeTab !== 'rename') return;
         if (allTracks.length > 0 || tracksLoading) return;
         setTracksLoading(true);
-        api.get('/api/library/tracks')
+        fetchLibraryTracks()
             .then((res) => setAllTracks(Array.isArray(res.data) ? res.data : []))
             .catch((e) => {
                 log.error('failed to fetch library tracks for rename preview', e);

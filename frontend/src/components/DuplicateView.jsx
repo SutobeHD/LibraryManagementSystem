@@ -30,7 +30,7 @@ import {
     HardDrive,
     Activity,
 } from 'lucide-react';
-import api from '../api/api';
+import api, { fetchLibraryTracks } from '../api/api';
 import toast from 'react-hot-toast';
 
 const log = (level, msg, data) => console[level]?.(`[DuplicateView] ${msg}`, data ?? '');
@@ -295,7 +295,7 @@ const DuplicateView = () => {
         log('info', 'loading library tracks for scan');
         let trackPaths = [];
         try {
-            const res = await api.get('/api/library/tracks');
+            const res = await fetchLibraryTracks();
             const list = res.data?.tracks ?? res.data?.data ?? res.data ?? [];
             trackPaths = (Array.isArray(list) ? list : [])
                 .map((t) => t.Location || t.path || '')

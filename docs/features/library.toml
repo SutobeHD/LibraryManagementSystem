@@ -25,7 +25,8 @@ status = "shipped"
 desc = "Ganze Library als Collection-Knoten, Suche mit bpm:/key:/genre:/year:/rating:, Track löschen."
 routes = ["/api/library/tracks", "/api/track/{tid}", "/api/track/delete", "/api/tracks/move"]
 depends_on = ["track-table", "live-master-db"]
-notes = "/api/tracks/move ist ein Stub. /api/library/tracks ohne Pagination (siehe perf-backend-quickwins)."
+notes = "/api/tracks/move ist ein Stub. /api/library/tracks ohne Pagination (siehe perf-backend-quickwins). Auf main lädt die Collection die volle Liste (140 MB, ~18 s) und reißt den 10-s-Axios-Timeout -> nach Refresh oft 0 Tracks. Fix auf feat/light-library-tracks: alle Listen-Views über fetchLibraryTracks() mit ?light=true (3,2 MB, ~0,2 s)."
+todo = ["feat/light-library-tracks (auf PR #60 gestapelt) mergen"]
 
 [[feature]]
 id = "category-browser"

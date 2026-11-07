@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import api, { getScAuthMode } from '../api/api';
+import api, { getScAuthMode, fetchLibraryTracks } from '../api/api';
 import { log } from '../utils/log';
 import { useToast } from './ToastContext';
 import {
@@ -257,7 +257,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
     };
 
     const loadAllTracks = () => {
-        api.get('/api/library/tracks')
+        fetchLibraryTracks()
             .then((res) => {
                 if (Array.isArray(res.data)) setAllTracks(res.data);
             })

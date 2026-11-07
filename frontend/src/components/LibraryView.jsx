@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import api from '../api/api';
+import { fetchLibraryTracks } from '../api/api';
 import TrackTable from './TrackTable';
 import { Database, RotateCw, Search } from 'lucide-react';
 
@@ -10,7 +10,7 @@ const LibraryView = ({ onSelectTrack }) => {
 
     const loadTracks = () => {
         setLoading(true);
-        api.get('/api/library/tracks')
+        fetchLibraryTracks()
             .then((res) => {
                 if (Array.isArray(res.data)) {
                     setTracks(res.data);

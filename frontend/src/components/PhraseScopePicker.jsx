@@ -24,7 +24,7 @@ import {
     Loader2,
     ChevronRight,
 } from 'lucide-react';
-import api from '../api/api';
+import api, { fetchLibraryTracks } from '../api/api';
 
 const MODES = [
     { id: 'single', label: 'Single', icon: Music, desc: 'One track' },
@@ -99,7 +99,7 @@ export default function PhraseScopePicker({ onScopeChange }) {
     // ── Load collection + playlist tree once ────────────────────────────────
     useEffect(() => {
         setTracksLoading(true);
-        api.get('/api/library/tracks')
+        fetchLibraryTracks()
             .then((res) => {
                 const list = Array.isArray(res.data)
                     ? res.data

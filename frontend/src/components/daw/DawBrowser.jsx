@@ -8,7 +8,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Search, Music, FolderOpen, Grid, ChevronDown, ChevronUp, FileAudio } from 'lucide-react';
-import api from '../../api/api';
+import api, { fetchLibraryTracks } from '../../api/api';
 
 const DawBrowser = React.memo(({ onLoadTrack, onOpenProject, isCollapsed, onToggleCollapse }) => {
     const [searchQuery, setSearchQuery] = useState('');
@@ -23,7 +23,7 @@ const DawBrowser = React.memo(({ onLoadTrack, onOpenProject, isCollapsed, onTogg
         const fetchTracks = async (isRetry = false) => {
             if (!isRetry) setIsLoading(true);
             try {
-                const res = await api.get('/api/library/tracks', { params: { limit: 200 } });
+                const res = await fetchLibraryTracks();
                 // Endpoint may return plain array or { tracks: [...] } — handle both
                 const tracks = Array.isArray(res.data) ? res.data : res.data?.tracks || [];
                 setTracks(tracks);
