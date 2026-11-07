@@ -25,6 +25,7 @@ import { confirmModal } from './ConfirmModal';
 import { promptModal } from './PromptModal';
 import { assignArtistModal } from './artistHub/AssignArtistModal';
 import { log } from '../utils/log';
+import { TRACK_TABLE_TEXT_COL_MIN_PX } from '../config/constants';
 import { openExternal } from '../utils/openExternal';
 
 const DEFAULT_COLUMNS = [
@@ -168,6 +169,18 @@ const TrackTable = ({
         });
     };
 
+    // table-fixed gives %-width columns only what the px columns leave over; with many
+    // columns visible Title/Artist/Album shrank to nothing. A min width from the visible
+    // columns makes the container scroll horizontally instead.
+    const minTableWidth = useMemo(() => {
+        const px = (w) =>
+            typeof w === 'string' && w.endsWith('px')
+                ? parseInt(w, 10)
+                : TRACK_TABLE_TEXT_COL_MIN_PX;
+        const own = DEFAULT_COLUMNS.filter((c) => visibleColumns.includes(c.id));
+        return [...own, ...(customColumns || [])].reduce((sum, c) => sum + px(c.width), 0);
+    }, [visibleColumns, customColumns]);
+
     const sortedTracks = useMemo(() => {
         if (!sortConfig.key) return tracks;
 
@@ -235,7 +248,10 @@ const TrackTable = ({
         <div
             className={`track-table h-full overflow-auto relative ${variant === 'default' ? 'bg-mx-shell border border-line-subtle rounded-mx-md mx-2 mb-2 pb-20' : ''}`}
         >
-            <table className="w-full text-left border-collapse min-w-[800px] table-fixed">
+            <table
+                className="w-full text-left border-collapse table-fixed"
+                style={{ minWidth: Math.max(800, minTableWidth) }}
+            >
                 <thead
                     className="tt-head sticky top-0 z-10 select-none"
                     style={{
