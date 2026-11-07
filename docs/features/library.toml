@@ -18,6 +18,16 @@ related = ["inline-rating-color", "collection-view", "list-context-menus", "perf
 notes = "Virtualisiert seit PR #63 (in #60, perf-frontend-virtualization). LibraryView.jsx ist ein toter Vorgänger."
 
 [[feature]]
+id = "library-feature-sorting"
+group = "Browsen & Suchen"
+name = "Nach Merkmalen sortieren"
+status = "idea"
+desc = "Track-Liste nach mehr Merkmalen sortieren: Genre, Label, Jahr, Hinzugefügt, Farbe, MyTags, Atlas-Genre und LMS-Merkmale (Lautheit, Stimmung, Energie)."
+related = ["track-table", "library-analysis-report", "smart-playlists", "genre-atlas-hints"]
+notes = "Wunsch 2026-11-07. Heute sortierbar: Titel, Artist, Album, BPM, Key (Textsortierung, nicht Camelot), Rating, Bitrate, PlayCount, Composer, Remixer, Länge. Spalte Date Added liest t.DateAdded, das Feld heißt StockDate -> immer '-'. LMS-Merkmale liegen nur im Analyse-Cache (Pfad-Schlüssel), keine Route liest sie."
+todo = ["Date-Added-Spalte auf StockDate umstellen", "Spalten Genre/Label/Jahr/Farbe/MyTags sortierbar machen", "Key nach Camelot sortieren", "LMS-Merkmale an die Track-Liste hängen (Route aus dem Cache)"]
+
+[[feature]]
 id = "collection-view"
 group = "Browsen & Suchen"
 name = "Collection & Token-Suche"
