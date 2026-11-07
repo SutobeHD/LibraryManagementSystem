@@ -81,13 +81,14 @@ id = "context-menu-system"
 group = "Kontextmenüs"
 name = "App-weites Kontextmenü-System"
 status = "unmerged"
-test = "testen"
+test = "getestet"
+tested = "2026-11-07"
 branch = "claude/dreamy-planck-w7771v"
 pr = 60
 desc = "Unterdrückt das WebView-Menü überall, Cut/Copy/Paste in Inputs, useContextMenu-Hook."
 paths = ["frontend/src/components/shared/ContextMenu.jsx", "frontend/src/components/shared/GlobalContextMenu.jsx"]
 todo = ["restliche 9 Views anbinden", "Track/Playlist-Menüs auf das System umstellen"]
-notes = "Nutzt bisher nur der Artist Hub."
+notes = "Nutzt bisher nur der Artist Hub. 2026-11-07 geprüft: natives Menü unterdrückt, Input-Menü (Ausschneiden/Kopieren/Einfügen/Alles/Leeren), Artist-Menü, Esc schließt."
 
 # ── Settings ──────────────────────────────────────────────────────────────
 
@@ -148,7 +149,8 @@ id = "rekordbox-skin"
 group = "Theming"
 name = "Rekordbox-Skin"
 status = "unmerged"
-test = "testen"
+test = "getestet"
+tested = "2026-11-07"
 branch = "claude/dreamy-planck-w7771v"
 pr = 60
 desc = "Umschaltbares Theme im Rekordbox-7-Look: Farben, Arial-Dichte, Zebra-Zeilen, Spalten."

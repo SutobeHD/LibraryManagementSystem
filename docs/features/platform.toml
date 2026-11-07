@@ -138,6 +138,7 @@ pr = 60
 desc = "client_id/oauth_token aus jeder geloggten URL, jedem Param-Dict und jeder Exception entfernt."
 paths = ["tests/test_soundcloud_log_redaction.py"]
 related = ["sc-api-client", "log-path-redaction"]
+notes = "2026-11-07: Backend-Log nach 401-Pfad frei von Credentials; Erfolgspfad mit client_id-URLs nicht ausgelöst (SC-Login abgelaufen)."
 
 # ── Infra ─────────────────────────────────────────────────────────────────
 
@@ -194,7 +195,8 @@ branch = "claude/dreamy-planck-w7771v"
 pr = 60
 desc = "Mappings-Cache, memoisiertes resolve() im Import-Dedup, Light-Projektion für GET /api/library/tracks."
 paths = ["tests/test_import_dedup.py", "tests/test_library_tracks_light.py"]
-notes = "1 Commit ungepusht. Auf PR #58 gestapelt."
+todo = ["Frontend fragt light=true nirgends ab (9 Aufrufer von /api/library/tracks) - Gewinn kommt nicht an"]
+notes = "1 Commit ungepusht. Auf PR #58 gestapelt. 2026-11-07 Live-DB: light=true liefert 4760 Tracks ohne Heavy-Felder, aber nur 3,19 statt 3,31 MB (~3,5 %), ~0,25 s."
 
 [[feature]]
 id = "perf-frontend-virtualization"
@@ -207,7 +209,7 @@ branch = "claude/pensive-wiles-74ad65"
 desc = "Virtualisierte TrackTable, TrackRow-Memo, modulweiter Track-Cache, useDeferredValue-Suche."
 paths = ["frontend/src/hooks/useVirtualRows.js", "frontend/src/hooks/useLibraryTracks.js"]
 related = ["track-table"]
-notes = "372 hinter main. Backend-Teil ist in perf-backend-quickwins neu gebaut - nur das Frontend fehlt noch."
+notes = "372 hinter main. Backend-Teil ist in perf-backend-quickwins neu gebaut - nur das Frontend fehlt noch. Stand 2026-11-07 (PR #60): Collection rendert alle 4760 Zeilen ins DOM."
 
 # ── Mobile ────────────────────────────────────────────────────────────────
 
@@ -239,11 +241,12 @@ group = "Release & CI"
 parent = "ci-pipeline"
 name = "node:test-Suites in der CI"
 status = "unmerged"
-test = "testen"
+test = "getestet"
+tested = "2026-11-07"
 branch = "claude/dreamy-planck-w7771v"
 pr = 60
 desc = "Frontend-Unit-Tests blockierend in der CI (Plain-Suites, dawReducer, Artist-Hook)."
-notes = "Auf main laufen Frontend-Tests in der CI gar nicht."
+notes = "Auf main laufen Frontend-Tests in der CI gar nicht. 2026-11-07 CI-Lauf 42383467162 (Stand PR #60/#61): 3 Suites, 124 Tests grün, ohne continue-on-error."
 
 [[feature]]
 id = "cross-platform-release"

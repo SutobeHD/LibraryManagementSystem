@@ -115,6 +115,7 @@ paths = ["frontend/src/components/RankingView.jsx"]
 routes = ["/api/track/{tid}", "/api/track/{tid}/mytags", "/api/genres"]
 depends_on = ["track-metadata-update", "mytag-management"]
 related = ["mobile-companion"]
+todo = ["Leere/fertige Playlist zeigt 'Track 1 / 0'"]
 notes = "Springt auch bei fehlgeschlagenem Save weiter. 'Service Mark' ist ein Platzhalter."
 
 [[feature]]
@@ -123,7 +124,8 @@ group = "Bewertung & Tags"
 parent = "ranking-mode"
 name = "Ranking-Tags als Genre-Baum"
 status = "unmerged"
-test = "testen"
+test = "getestet"
+tested = "2026-11-07"
 branch = "claude/dreamy-planck-w7771v"
 pr = 60
 desc = "Tag-Chips als Genre > Sub-Genre sortiert, Tokens landen im Comment."

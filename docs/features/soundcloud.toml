@@ -52,6 +52,7 @@ branch = "claude/dreamy-planck-w7771v"
 pr = 60
 desc = "401 -> stilles Refresh -> Tauri-Login; unterscheidet tote Session von abgelaufenem SC-Login."
 paths = ["frontend/src/api/scRefreshClassification.js", "frontend/src/api/scRefreshClassification.test.js"]
+notes = "2026-11-07 Browser-Dev mit echter abgelaufener Session: 401 -> /api/soundcloud/refresh 401 -> UI 'session expired, sign in again'. Tauri-Login-Schritt ungetestet."
 
 # ── Sync ──────────────────────────────────────────────────────────────────
 
@@ -178,6 +179,7 @@ desc = "Stage-Pipeline-Ansicht (Resolve -> Download -> Analyse -> ANLZ -> Playli
 paths = ["frontend/src/components/DownloadManagerView.jsx"]
 routes = ["/api/soundcloud/tasks", "/api/import/tasks"]
 related = ["import-progress-banner", "sc-download-recognizer"]
+todo = ["Mit echtem Download oder Import prüfen - 2026-11-07 Ansicht lädt, aber keine Tasks, Download-Registry leer"]
 
 [[feature]]
 id = "import-progress-banner"

@@ -18,7 +18,7 @@ pr = 60
 desc = "Artist-Übersicht mit Favoriten, Merge, Rekordbox-Artists-Ordner, SC-Katalog, Discovery, Background-Sync, USB-Relocation."
 paths = ["frontend/src/components/ArtistHubView.jsx", "app/artist_store/__init__.py", "frontend/src/components/artistHub/artistHubApi.js", "frontend/src/components/artistHub/LocalTracksPanel.jsx", "frontend/src/components/artistHub/AssignArtistModal.jsx"]
 depends_on = ["external-track-match", "sc-api-client", "live-master-db"]
-todo = ["PR #58 mergen (CI grün; ersetzt feat/artist-hub)", "Entscheiden: Tageslimit statt Per-Pass-Budget für Background-Sync", "Owner-Sign-off -> implemented_"]
+todo = ["PR #58 mergen (CI grün; ersetzt feat/artist-hub)", "Entscheiden: Tageslimit statt Per-Pass-Budget für Background-Sync", "Owner-Sign-off -> implemented_", "SC-Kette (Link, Katalog, Discovery, Sync, Download-missing) nach SC-Login testen - Session war 2026-11-07 abgelaufen, Refresh 401", "Zurück-Button im Artist-Detail hat weder Label noch Title", "Sprachmix: Hub-UI englisch, Kontextmenü deutsch"]
 notes = "Vier Branches sind auf #58 gestapelt (track-write-safety, usb-anlz-export-fixes, perf-backend-quickwins, research-doc-ports) - #58 zuerst landen."
 
 [[feature]]
@@ -26,7 +26,8 @@ id = "artist-store-sidecar"
 group = "Hub & Store"
 name = "Artist-Store (artists.db)"
 status = "unmerged"
-test = "testen"
+test = "getestet"
+tested = "2026-11-07"
 branch = "claude/dreamy-planck-w7771v"
 pr = 60
 desc = "Sidecar-DB mit Migrationen: Collections, Aliases, SC-Binding, Sync-State, Katalog-Cache."
@@ -37,13 +38,16 @@ id = "artist-favourites"
 group = "Hub & Store"
 name = "Favoriten & Backlog"
 status = "unmerged"
-test = "testen"
+test = "getestet"
+tested = "2026-11-07"
 branch = "claude/dreamy-planck-w7771v"
 pr = 60
 desc = "Favoriten, Tier-1-Backlog ohne Netz, Sync-Modus pro Artist (auto/review/off), All-Artists-Tab."
 paths = ["app/artist_store/registry.py", "tests/test_artist_store_registry.py", "tests/test_artist_routes.py"]
 routes = ["/api/artists/hub", "/api/artists/favourites", "/api/artists/browse"]
 depends_on = ["artist-store-sidecar", "name-normalisation"]
+todo = ["Track-Zahl der Favoritenliste weicht von Detail/Playlist ab (mischluft 36 vs 37, Arman John 11 vs 12, Noise Not War 8 vs 9, TRIPTYKH 8 vs 9)", "Backlog/All artists zeigen Nicht-Artists (FREE DL, Trance, MR020, Extended Mix, New Import, KI, TLVA008) und Steuerzeichen ('ANN' + U+0012)", "Sync-Modus-Wechsel ungetestet"]
+notes = "Getestet 2026-11-07 im Browser-Dev gegen Live-master.db: Add aus Backlog, Entfernen per Kontextmenü + Confirm, Backlog (0 Calls), All artists (203)."
 
 # ── Merge & Rekordbox ─────────────────────────────────────────────────────
 
@@ -60,14 +64,16 @@ paths = ["app/artist_store/merge.py", "frontend/src/components/artistHub/MergeDi
 routes = ["/api/artists/merge", "/api/artists/jobs"]
 depends_on = ["artist-store-sidecar", "live-master-db", "file-tag-writeback", "metadata-fixer", "rekordbox-running-guard"]
 related = ["usb-folder-relocation", "name-normalisation"]
-notes = "Nie fuzzy. Waisen löschen nur Opt-in (nullt Remixer/Composer, Revert stellt das nicht her)."
+todo = ["Mehrfach-Credits nicht plattmachen: Gruppe FREE DL = 26 von 26 umzuschreibenden Tracks Compound ('Bad Bunny, Pietro GAIN, Free DL' wird 'FREE DL') - Compound-Tracks ausschließen oder Credit in place ersetzen", "Apply + Revert real testen (auf Kopie der master.db)"]
+notes = "Nie fuzzy. Waisen löschen nur Opt-in (nullt Remixer/Composer, Revert stellt das nicht her). Preview 2026-11-07 gegen Live-DB geprüft: 6 Gruppen, Dry-Run-Zahlen plausibel, nichts angewendet."
 
 [[feature]]
 id = "artist-projection-rekordbox"
 group = "Merge & Rekordbox"
 name = "Rekordbox-Ordner 'Artists'"
 status = "unmerged"
-test = "testen"
+test = "getestet"
+tested = "2026-11-07"
 branch = "claude/dreamy-planck-w7771v"
 pr = 60
 desc = "Eine Playlist pro Favorit inkl. aller Alias-Varianten, Diff in place, idempotent."
@@ -75,6 +81,8 @@ paths = ["app/artist_store/projection.py", "frontend/src/components/artistHub/Pr
 routes = ["/api/artists/projection"]
 depends_on = ["artist-favourites", "playlist-tree-crud"]
 related = ["auto-label-playlists", "library-folder-projections"]
+todo = ["Re-Run-Idempotenz und Anzeige in Rekordbox selbst ungetestet"]
+notes = "2026-11-07 Ergebnis des Syncs vom 6.11. in Live-master.db geprüft: /Artists = 9 Playlists, eine pro Favorit, keine Dubletten, Alias- und Titel-Credits enthalten."
 
 # ── SoundCloud-Katalog ────────────────────────────────────────────────────
 
@@ -97,12 +105,15 @@ id = "artist-identity-roles"
 group = "SoundCloud-Katalog"
 name = "Track-Rollen (remix-aware)"
 status = "unmerged"
-test = "testen"
+test = "getestet"
+tested = "2026-11-07"
 branch = "claude/dreamy-planck-w7771v"
 pr = 60
 desc = "Rollen primary/remixer/featured/uncertain aus Namen, Identity-Tabelle (ISRC), Rolle manuell pinnen."
 paths = ["app/artist_store/identity.py", "tests/test_artist_identity.py"]
 depends_on = ["artist-sc-link", "external-track-match"]
+todo = ["ISRC-Identity-Tabelle + manuelles Pinnen ungetestet (braucht SC-Katalog)"]
+notes = "2026-11-07: Rollen aus Namen an echter Library geprüft (mischluft: 33 eigene, 4 Remixe; Edits und Titel-Credits richtig)."
 
 [[feature]]
 id = "artist-catalogue-diff"
@@ -166,24 +177,29 @@ id = "artist-links-musicbrainz"
 group = "Links & Attribution"
 name = "Artist-Links + MusicBrainz"
 status = "unmerged"
-test = "testen"
+test = "getestet"
+tested = "2026-11-07"
 branch = "claude/dreamy-planck-w7771v"
 pr = 60
 desc = "Links-Leiste pro Artist (Web/Socials), MusicBrainz-Lookup, externe Links im System-Browser mit Host-Gates."
 paths = ["app/artist_store/links.py", "app/musicbrainz_client.py", "frontend/src/components/artistHub/ArtistLinks.jsx", "frontend/src/components/artistHub/artistLinksApi.js", "frontend/src/components/artistHub/linksCopy*", "frontend/src/utils/openExternal*", "tests/test_artist_links*.py", "tests/test_musicbrainz_client.py"]
 related = ["metadata-fixer"]
+todo = ["Link-Öffnen im System-Browser (Tauri, Host-Gates) ungetestet"]
+notes = "2026-11-07: Find links -> MusicBrainz-Treffer mischluft (German Trance, Score 100) -> 'That's them' -> 5 Links (Instagram, YouTube, SoundCloud, Spotify, Apple Music)."
 
 [[feature]]
 id = "track-attribution"
 group = "Links & Attribution"
 name = "Credit-basierte Track-Zuordnung"
 status = "unmerged"
-test = "testen"
+test = "getestet"
+tested = "2026-11-07"
 branch = "claude/dreamy-planck-w7771v"
 pr = 60
 desc = "Lokale Tracks nach Rollen gruppiert, überall einem Artist zuweisbar."
 paths = ["app/artist_store/attribution.py", "tests/test_artist_attribution.py", "tests/test_artist_local_tracks_routes.py"]
 depends_on = ["artist-identity-roles"]
+todo = ["Zuweisen ('Add tracks' / AssignArtistModal) ungetestet"]
 
 [[feature]]
 id = "sc-download-recognizer"
