@@ -304,7 +304,7 @@
 | `tests/test_compare_rekordbox.py` | Unit tests for the pure comparison helpers in scripts/compare_rekordbox.py. |
 | `tests/test_cue_beatgrid_persistence.py` | Round-trip tests for the cue / beatgrid sidecar persistence. |
 | `tests/test_database.py` | Tests for `app/database.py`. |
-| `tests/test_database_save_cache.py` | Perf contracts of `app/database.py`: cached settings read + memoised track view. |
+| `tests/test_database_save_cache.py` | Perf contracts of `app/database.py`: cached settings read + coalesced XML saves. |
 | `tests/test_db_taste.py` | taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py). |
 | `tests/test_download_names_route.py` | ``POST /api/soundcloud/downloads/{sc_track_id}/names`` (artist hub T-31, Threat T18). |
 | `tests/test_download_registry.py` | Tests for app/download_registry.py — SoundCloud download dedup/history DB. |

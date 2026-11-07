@@ -1,9 +1,11 @@
+import atexit
 import json
 import logging
 import os
 import re
 import threading
 import time
+import weakref
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from contextlib import contextmanager
@@ -29,6 +31,15 @@ _MISSING = object()
 # hold a freshly written file open for a moment; a short retry rides that out.
 _REPLACE_ATTEMPTS = 3
 _REPLACE_RETRY_S = 0.05
+
+# XML-mode mutations mark the library dirty instead of rewriting rekordbox.xml (every
+# track, one <TEMPO> per beat) each time. The file is written once mutations pause for
+# _SAVE_DEBOUNCE_S, and at the latest _SAVE_MAX_DELAY_S after the first unsaved one, so
+# a steady stream of edits cannot postpone the write forever.
+_SAVE_DEBOUNCE_S = 2.0
+_SAVE_MAX_DELAY_S = 10.0
+# How long the exit flush waits for a writer still holding _db_write_lock.
+_EXIT_FLUSH_LOCK_TIMEOUT_S = 10.0
 
 _STREAMING_PREFIXES = ("soundcloud:", "spotify:", "tidal:", "beatport:")
 
@@ -115,21 +126,136 @@ def _invalidates_tracks(method):
     return wrapper
 
 
+# Every RekordboxXMLDB, so the exit flush reaches libraries with a pending save.
+_xml_dbs: "weakref.WeakSet[RekordboxXMLDB]" = weakref.WeakSet()
+
+
+def flush_pending_saves(lock_timeout: float = _EXIT_FLUSH_LOCK_TIMEOUT_S) -> bool:
+    """Write every XML library with unsaved changes. True when none is left dirty.
+
+    Registered with ``atexit``. A shutdown that ends in ``os._exit`` skips atexit
+    and must call this itself first. Waits at most ``lock_timeout`` seconds for a
+    writer holding ``_db_write_lock`` so a wedged request cannot hang the exit.
+    """
+    ok = True
+    for xml_db in list(_xml_dbs):
+        if not xml_db.pending_save:
+            continue
+        if not _db_write_lock.acquire(timeout=lock_timeout):
+            logger.error("flush_pending_saves: db lock busy, %s not saved", xml_db._xml_path)
+            ok = False
+            continue
+        try:
+            ok = xml_db.flush() and ok
+        finally:
+            _db_write_lock.release()
+    return ok
+
+
+atexit.register(flush_pending_saves)
+
+
 class RekordboxXMLDB:
     def __init__(self):
-        self.xml_path = Path("rekordbox.xml")
+        self._xml_path = Path("rekordbox.xml")
         self.tracks = {}  # ID -> Track Dict
         self.playlists = []  # List of playlist nodes
         self.playlists_tracks = defaultdict(list)
         self.artists = []
         self.genres = []
         self.loaded = False
+        # Coalesced save state. _flush_cv guards the fields below; lock order is
+        # _db_write_lock -> _flush_cv, never the reverse.
+        self.flush_delay_s = _SAVE_DEBOUNCE_S
+        self.flush_max_delay_s = _SAVE_MAX_DELAY_S
+        self._flush_cv = threading.Condition(threading.Lock())
+        self._dirty = False
+        self._mutation_gen = 0
+        self._first_dirty_at = 0.0
+        self._last_mutation_at = 0.0
+        self._flusher: threading.Thread | None = None
+        _xml_dbs.add(self)
+
+    @property
+    def xml_path(self) -> Path:
+        """Library file path. Flushes pending changes first, so whoever opens it sees them."""
+        if self._dirty:
+            self.flush()
+        return self._xml_path
+
+    @xml_path.setter
+    def xml_path(self, value: str | Path) -> None:
+        # Pending changes belong to the file they were made against.
+        if self._dirty:
+            self.flush()
+        self._xml_path = Path(value)
+
+    @property
+    def pending_save(self) -> bool:
+        """True while a mutation is in memory but not yet in the library file."""
+        return self._dirty
+
+    def _mark_dirty(self) -> None:
+        """Record a mutation and make sure the debounce flusher is running."""
+        now = time.monotonic()
+        with self._flush_cv:
+            self._mutation_gen += 1
+            if not self._dirty:
+                self._dirty = True
+                self._first_dirty_at = now
+            self._last_mutation_at = now
+            if self._flusher is None:
+                self._flusher = threading.Thread(
+                    target=self._flush_loop, name="xml-save-debounce", daemon=True
+                )
+                self._flusher.start()
+
+    def _flush_loop(self) -> None:
+        """Write once mutations pause; exit when clean, or after a failed write.
+
+        A failed write leaves the library dirty and stops the thread instead of
+        retrying in a loop: the next mutation, an explicit flush or the exit flush
+        tries again.
+        """
+        while True:
+            with self._flush_cv:
+                while True:
+                    if not self._dirty:
+                        self._flusher = None
+                        return
+                    now = time.monotonic()
+                    due = min(
+                        self._last_mutation_at + self.flush_delay_s,
+                        self._first_dirty_at + self.flush_max_delay_s,
+                    )
+                    if now >= due:
+                        break
+                    self._flush_cv.wait(due - now)
+            if not self.flush():
+                with self._flush_cv:
+                    self._flusher = None
+                return
+
+    def flush(self) -> bool:
+        """Write pending changes now. True when the file holds everything in memory."""
+        with _db_write_lock:
+            if not self._dirty:
+                return True
+            return self.save_xml()
+
+    def _discard_pending(self) -> None:
+        """Forget unsaved changes: memory was replaced by (or reset away from) the file."""
+        with self._flush_cv:
+            self._dirty = False
+            self._flush_cv.notify_all()
 
     def load_xml(self, path: str):
+        if self._dirty and not self.flush():
+            logger.warning("load_xml: unsaved changes to %s are lost", self._xml_path)
         try:
             tree = ET.parse(path)
             root = tree.getroot()
-            self.xml_path = Path(path)
+            self._xml_path = Path(path)
 
             # PARSE COLLECTION
             collection = root.find("COLLECTION")
@@ -153,6 +279,7 @@ class RekordboxXMLDB:
             # Extract Metadata
             self._extract_metadata()
             self.loaded = True
+            self._discard_pending()
             logger.info(
                 f"Loaded XML: {len(self.tracks)} tracks, {len(self.playlists)} playlist nodes"
             )
@@ -428,7 +555,7 @@ class RekordboxXMLDB:
         tid = track_data.get("TrackID") or str(int(time.time() * 1000))
         track_data["id"] = tid
         self.tracks[tid] = track_data
-        self.save_xml()
+        self._mark_dirty()
         self.get_all_labels.cache_clear()
         self.get_all_albums.cache_clear()
         logger.info(f"Added track {tid} to XML library.")
@@ -448,7 +575,7 @@ class RekordboxXMLDB:
         }
         self.playlists.append(node)
         self.playlists_tracks[pid] = []
-        self.save_xml()
+        self._mark_dirty()
         logger.info(f"Created XML playlist '{name}' (pid={pid})")
         return node
 
@@ -466,7 +593,7 @@ class RekordboxXMLDB:
         if tid in existing_ids:
             return True  # already there
         self.playlists_tracks[pid].append(track)
-        self.save_xml()
+        self._mark_dirty()
         return True
 
     def find_playlist_by_name(self, name):
@@ -520,7 +647,7 @@ class RekordboxXMLDB:
             t for t in self.playlists_tracks[pid] if str(t.get("id") or t.get("TrackID")) != tid
         ]
         if len(self.playlists_tracks[pid]) < before:
-            self.save_xml()
+            self._mark_dirty()
             return True
         return False
 
@@ -539,7 +666,7 @@ class RekordboxXMLDB:
         track = tracks.pop(idx)
         new_index = max(0, min(new_index, len(tracks)))
         tracks.insert(new_index, track)
-        self.save_xml()
+        self._mark_dirty()
         return True
 
     def rename_playlist(self, pid, new_name):
@@ -548,7 +675,7 @@ class RekordboxXMLDB:
         if not node:
             return False
         node["Name"] = new_name
-        self.save_xml()
+        self._mark_dirty()
         return True
 
     def move_playlist(self, pid, new_parent_id, target_id=None, position=None):
@@ -587,7 +714,7 @@ class RekordboxXMLDB:
             else:
                 insert_at = len(self.playlists)
             self.playlists.insert(insert_at, node)
-        self.save_xml()
+        self._mark_dirty()
         return True
 
     def delete_playlist(self, pid):
@@ -608,7 +735,7 @@ class RekordboxXMLDB:
         self.playlists = [p for p in self.playlists if str(p.get("ID")) not in to_delete]
         for did in to_delete:
             self.playlists_tracks.pop(did, None)
-        self.save_xml()
+        self._mark_dirty()
         logger.info(f"Deleted XML playlist tree rooted at {pid} ({len(to_delete)} nodes)")
         return True
 
@@ -632,7 +759,7 @@ class RekordboxXMLDB:
         }
         self.playlists.append(node)
         self.playlists_tracks[pid] = []
-        self.save_xml()
+        self._mark_dirty()
         return node
 
     def update_smart_playlist(self, pid, criteria):
@@ -640,7 +767,7 @@ class RekordboxXMLDB:
         if not node:
             return False
         node["SmartList"] = criteria
-        self.save_xml()
+        self._mark_dirty()
         return True
 
     def evaluate_smart_playlist(self, pid):
@@ -666,7 +793,7 @@ class RekordboxXMLDB:
         self._ensure_mytags()
         tid = f"mt_{int(time.time() * 1000)}"
         self._mytags[tid] = name
-        self.save_xml()
+        self._mark_dirty()
         return tid
 
     def delete_mytag(self, tag_id):
@@ -674,7 +801,7 @@ class RekordboxXMLDB:
         self._mytags.pop(str(tag_id), None)
         for tids in self._track_mytags.values():
             tids.discard(str(tag_id))
-        self.save_xml()
+        self._mark_dirty()
         return True
 
     def get_track_mytags(self, tid):
@@ -685,7 +812,7 @@ class RekordboxXMLDB:
     def set_track_mytags(self, tid, tag_ids):
         self._ensure_mytags()
         self._track_mytags[str(tid)] = set(str(x) for x in tag_ids)
-        self.save_xml()
+        self._mark_dirty()
         return {"track_id": str(tid), "tag_ids": list(self._track_mytags[str(tid)])}
 
     def delete_track(self, tid):
@@ -699,14 +826,31 @@ class RekordboxXMLDB:
                     for t in self.playlists_tracks[pid]
                     if str(t.get("id") or t.get("TrackID")) != tid
                 ]
-            self.save_xml()
+            self._mark_dirty()
             self.get_all_labels.cache_clear()
             self.get_all_albums.cache_clear()
             logger.info(f"Deleted track {tid} from XML library.")
             return True
         return False
 
-    def save_xml(self):
+    def save_xml(self) -> bool:
+        """Write the library file now, pending debounce or not. True on success.
+
+        Clears the dirty flag only when no mutation slipped in while the file was
+        being built, so a change made mid-write still gets its own save.
+        """
+        with _db_write_lock:
+            with self._flush_cv:
+                gen = self._mutation_gen
+            ok = self._write_xml()
+            if ok:
+                with self._flush_cv:
+                    if self._mutation_gen == gen:
+                        self._dirty = False
+                        self._flush_cv.notify_all()
+            return ok
+
+    def _write_xml(self) -> bool:
         try:
             root = ET.Element("DJ_PLAYLISTS", Version="1.0.0")
             collection = ET.SubElement(root, "COLLECTION", Entries=str(len(self.tracks)))
@@ -809,8 +953,8 @@ class RekordboxXMLDB:
                             ET.SubElement(node, "TRACK", Key=str(t["id"]))
 
             build_xml_node(playlists_root_node, "ROOT")
-            _write_atomically(ET.ElementTree(root), Path(self.xml_path))
-            logger.info(f"Saved XML to {self.xml_path}")
+            _write_atomically(ET.ElementTree(root), self._xml_path)
+            logger.info(f"Saved XML to {self._xml_path}")
             return True
         except Exception as e:
             logger.error(f"Failed to save XML: {e}", exc_info=True)
@@ -1000,9 +1144,14 @@ class RekordboxDB:
             return success
 
     def unload_library(self) -> bool:
+        # Save what is pending, then forget it: a debounced write after the reset
+        # would overwrite the library file with an empty collection.
+        if not self.xml_db.flush():
+            logger.warning("unload_library: unsaved XML changes are lost")
         self.xml_db.tracks = {}
         self.xml_db.playlists = []
         self.xml_db.loaded = False
+        self.xml_db._discard_pending()
         if self.live_db:
             self.live_db.tracks = {}
             self.live_db.loaded = False
