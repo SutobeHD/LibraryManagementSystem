@@ -162,3 +162,22 @@ name = "Portal-Tooltip app-weit"
 status = "idea"
 desc = "Portal-Tooltip aus UsbSettingsView als Shared-Komponente wiederverwenden."
 related = ["usb-mysettings"]
+
+[[feature]]
+id = "modular-shell"
+group = "Navigation & Fenster"
+name = "Modulares Fenster-Layout"
+status = "idea"
+desc = "Ein Fenster mit festen Zonen (Decks, Baum, Browser, Info, Statusleiste) statt Vollbild-Seiten; Werkzeuge als einblendbare Panels, Layout-Presets, Splitter, Pop-out-Fenster."
+related = ["workspace-topbar-nav", "rekordbox-skin", "rekordbox-only-theme"]
+notes = "User 2026-11-07: mag die Modularität alter DJ-Software, fehlt komplett. Vorbild Rekordbox-Fenster (docs/reference/rbxport/ui-skin.md §5) + Syndicate-Modi/Browser abdockbar (docs/reference/syndicate/ui-decks-waveform.md §4-5). Mehrere Module -> Research-Doc vor Code."
+
+[[feature]]
+id = "rekordbox-only-theme"
+group = "Theming"
+name = "Rekordbox als einzige Ansicht"
+status = "idea"
+desc = "Rekordbox-Look wird Standard und am Ende einziges Theme; Melodex-Tokens + Theme-Umschalter entfallen."
+depends_on = ["rekordbox-skin"]
+related = ["melodex-design-system", "modular-shell"]
+notes = "User 2026-11-07: findet Rekordbox-Look deutlich besser, will am Ende nur eine Ansicht."
