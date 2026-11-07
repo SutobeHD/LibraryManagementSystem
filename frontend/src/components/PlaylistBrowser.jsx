@@ -1018,10 +1018,10 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                 {selectedPlaylist || showCollection ? (
                     <div className="flex-1 overflow-y-auto flex flex-col">
                         {/* Header */}
-                        <div className="p-5 border-b border-white/5 bg-mx-shell/40 backdrop-blur-xl flex justify-between items-end shrink-0">
+                        <div className="pb-head p-5 border-b border-white/5 bg-mx-shell/40 backdrop-blur-xl flex justify-between items-end shrink-0">
                             <div className="flex items-center gap-4">
                                 <div
-                                    className={`p-2.5 rounded-xl ${showCollection ? 'bg-amber2/15' : isIntelligentSelected ? 'bg-purple-500/15' : 'bg-mx-card'}`}
+                                    className={`pb-head-icon p-2.5 rounded-xl ${showCollection ? 'bg-amber2/15' : isIntelligentSelected ? 'bg-purple-500/15' : 'bg-mx-card'}`}
                                 >
                                     {showCollection ? (
                                         <Database size={24} className="text-amber2" />
@@ -1032,7 +1032,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                                     )}
                                 </div>
                                 <div>
-                                    <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+                                    <h1 className="pb-head-title text-2xl font-bold text-white tracking-tight flex items-center gap-2">
                                         {currentViewTitle}
                                         {isIntelligentSelected && (
                                             <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">

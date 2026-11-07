@@ -152,8 +152,8 @@ desc = "Umschaltbares Theme im Rekordbox-7-Look: Farben, Arial-Dichte, Zebra-Zei
 paths = ["frontend/src/themes/", "frontend/src/utils/theme.js"]
 depends_on = ["melodex-design-system"]
 related = ["appearance-settings"]
-todo = ["Hardcodierte Farben (blue-/cyan-/white/, Hex) in Komponenten auf Tokens", "Kontextmenüs 25px + #979797-Rahmen", "Shell: Tree 305px + Statusleiste 27px (Research-Doc zuerst)", "Player/Deck-Look (PLAY-Ring grün, CUE gelb)", "Spalten-Preset + Datum M/D/YY im Skin"]
-notes = "Phase 1: Tokens als RGB-Kanal-Vars (tailwind.config.js tok()), :root[data-theme=rekordbox] in themes/rekordbox.css, Picker in SettingsAppearance (localStorage lms.ui_theme), TrackTable-Hooks tt-*. Schrift 13px statt rbxport-16.5px (macOS-Messung). Quelle: docs/reference/rbxport/ui-skin.md."
+todo = ["Inline-Hex-Farben in Komponenten (~138, style={{...}}) auf Tokens", "Kontextmenüs 25px + #979797-Rahmen", "Shell: Tree 305px + Statusleiste 27px (Research-Doc zuerst)", "Player/Deck-Look (PLAY-Ring grün, CUE gelb)", "Spalten-Preset + Datum M/D/YY im Skin"]
+notes = "Phase 2: Tailwind-Palettenfamilien + Radius-Skala über Vars (tailwind.config.js SKINNABLE_FAMILIES, --skin-<family>), globale Rekordbox-Schicht (Rundungen, Blur, Glow, Großschreibung, Akzent-Textfarbe), PlaylistBrowser-Kopf als Leiste (pb-head*). Phase 1: Tokens als RGB-Kanal-Vars (tailwind.config.js tok()), :root[data-theme=rekordbox] in themes/rekordbox.css, Picker in SettingsAppearance (localStorage lms.ui_theme), TrackTable-Hooks tt-*. Schrift 13px statt rbxport-16.5px (macOS-Messung). Quelle: docs/reference/rbxport/ui-skin.md."
 
 [[feature]]
 id = "shared-portal-tooltip"

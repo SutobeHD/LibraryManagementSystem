@@ -1897,6 +1897,7 @@ Frontend-wide constants.
 - `ARTIST_ASSIGN_PICKER_LIMIT()` — Artists the app-wide "Artist zuordnen…" picker lists per search.
 - `ARTIST_DISCOVER_LIMIT()` — Suggestions requested from GET /api/artists/discover.
 - `SC_REFRESH_TIMEOUT_MS()` — Headroom over the backend's own SoundCloud call (SC_REFRESH_TIMEOUT_S = 15 s in app/soundcloud_auth…
+- `TRACK_TABLE_TEXT_COL_MIN_PX()` — TrackTable: width reserved for each %-width text column (Title/Artist/Album) when computing the tab…
 
 ### `frontend/src/config/tagTaxonomy.js`
 
