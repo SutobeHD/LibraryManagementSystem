@@ -271,13 +271,6 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
         }
     }, [libraryStatus?.loaded]);
 
-    useEffect(() => {
-        if (libraryStatus?.loaded) {
-            loadTree();
-            loadAllTracks();
-        }
-    }, []);
-
     const handleSelectCollection = () => {
         setSelectedPlaylist(null);
         setShowCollection(true);
