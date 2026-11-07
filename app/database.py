@@ -30,6 +30,8 @@ _MISSING = object()
 _REPLACE_ATTEMPTS = 3
 _REPLACE_RETRY_S = 0.05
 
+_STREAMING_PREFIXES = ("soundcloud:", "spotify:", "tidal:", "beatport:")
+
 
 def _int_attr(value: Any) -> str:
     """Integer XML attribute; anything unparsable becomes 0 instead of failing the save."""
@@ -92,6 +94,23 @@ def _serialised(method):
     def wrapper(self, *args, **kwargs):
         with _db_write_lock:
             return method(self, *args, **kwargs)
+
+    return wrapper
+
+
+def _invalidates_tracks(method):
+    """Decorator: drop the facade's memoised `tracks` view once ``method`` returns.
+
+    The bump runs after the mutation, never before: a reader racing a bump that
+    preceded the change would memoise the old state under the new version.
+    """
+
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            self._bump_tracks_version()
 
     return wrapper
 
@@ -799,6 +818,15 @@ class RekordboxXMLDB:
 
 
 class RekordboxDB:
+    # Class-level defaults: tests build the facade with __new__, skipping __init__.
+    # Bumped after every facade method that can change the track dict (see the
+    # _invalidates_tracks loop below); keys the memoised filtered `tracks` view.
+    _tracks_version: int = 0
+    # (source dict, len at build, _tracks_version at build, filtered dict)
+    _tracks_memo: tuple[dict[Any, Any], int, int, dict[Any, Any]] | None = None
+    # (settings-file stat key, hide_streaming)
+    _hide_streaming_cache: tuple[tuple[Any, ...], bool] | None = None
+
     def __init__(self):
         # Discover Live DB path
         # 1. Try existing Rekordbox installation
@@ -838,11 +866,34 @@ class RekordboxDB:
             logger.error(f"Failed to create standalone master.db: {e}")
             return False
 
-    def _get_hide_streaming_setting(self):
+    @staticmethod
+    def _settings_stat_key(config: Path) -> tuple[Any, ...] | None:
+        """Identity of the settings file on disk; None when it cannot be stat'ed.
+
+        SettingsManager.save swaps in a fresh file via os.replace, so the inode
+        changes on every save even inside one mtime tick.
+        """
+        try:
+            st = config.stat()
+        except FileNotFoundError:
+            return (str(config), None)
+        except OSError:
+            return None
+        return (str(config), st.st_mtime_ns, st.st_size, st.st_ino)
+
+    def _get_hide_streaming_setting(self) -> bool:
+        """``hide_streaming`` from settings.json, re-read only when the file changed."""
         try:
             from .services import SettingsManager
 
-            return SettingsManager.load().get("hide_streaming", False)
+            key = self._settings_stat_key(Path(SettingsManager.CONFIG))
+            cached = self._hide_streaming_cache
+            if key is not None and cached is not None and cached[0] == key:
+                return cached[1]
+            hide = bool(SettingsManager.load().get("hide_streaming", False))
+            if key is not None:
+                self._hide_streaming_cache = (key, hide)
+            return hide
         except (OSError, ValueError, KeyError, AttributeError) as e:
             logger.warning(
                 "database: failed to read hide_streaming setting — defaulting to False (%s)",
@@ -850,22 +901,16 @@ class RekordboxDB:
             )
             return False
 
-    def _filter_tracks(self, tracks_source):
-        hide = self._get_hide_streaming_setting()
-        if not hide:
-            return tracks_source
+    @staticmethod
+    def _strip_streaming(tracks_source: Any) -> Any:
+        """Drop streaming-service tracks from a dict or list; anything else passes through."""
 
         def is_streaming(t):
             # Check both 'path' (standardized) and 'Location' (raw XML)
             p = t.get("path", t.get("Location", ""))
             if not p:
                 return False
-            return (
-                p.startswith("soundcloud:")
-                or p.startswith("spotify:")
-                or p.startswith("tidal:")
-                or p.startswith("beatport:")
-            )
+            return p.startswith(_STREAMING_PREFIXES)
 
         if isinstance(tracks_source, dict):
             return {tid: t for tid, t in tracks_source.items() if not is_streaming(t)}
@@ -873,9 +918,36 @@ class RekordboxDB:
             return [t for t in tracks_source if not is_streaming(t)]
         return tracks_source
 
+    def _filter_tracks(self, tracks_source):
+        if not self._get_hide_streaming_setting():
+            return tracks_source
+        return self._strip_streaming(tracks_source)
+
+    def _bump_tracks_version(self) -> None:
+        self._tracks_version += 1
+        self._tracks_memo = None
+
     @property
     def tracks(self):
-        return self._filter_tracks(self.active_db.tracks)
+        """Track dict of the active backend, minus streaming tracks when hidden.
+
+        The filtered copy is memoised until the source dict is swapped, changes
+        size, or a facade mutator bumps ``_tracks_version``. It is shared between
+        callers: read it, never write into it.
+        """
+        source = self.active_db.tracks
+        if not self._get_hide_streaming_setting():
+            return source
+        if not isinstance(source, dict):
+            return self._strip_streaming(source)
+        memo = self._tracks_memo
+        version = self._tracks_version
+        size = len(source)
+        if memo is not None and memo[0] is source and memo[1] == size and memo[2] == version:
+            return memo[3]
+        filtered = self._strip_streaming(source)
+        self._tracks_memo = (source, size, version, filtered)
+        return filtered
 
     @property
     def playlists(self):
@@ -1454,6 +1526,20 @@ class RekordboxDB:
             return track["BeatGrid"]
         return []
 
+
+# Facade methods that can add, drop, swap or re-path tracks. Wrapped inside the lock
+# below, so the memo bump lands before the lock is released.
+for _name in (
+    "set_mode",
+    "load_library",
+    "unload_library",
+    "create_new_library",
+    "add_track",
+    "delete_track",
+    "update_tracks_metadata",
+    "update_track_path",
+):
+    setattr(RekordboxDB, _name, _invalidates_tracks(getattr(RekordboxDB, _name)))
 
 # Wrap every mutating method on the facade with the module-level write
 # lock so concurrent route handlers can't race against each other.

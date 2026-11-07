@@ -464,7 +464,7 @@ Batch comment edits over the live library (``POST /api/tools/batch-comment``).
 - `  RekordboxXMLDB.save_xml()`
 - `RekordboxDB`
 - `  RekordboxDB.ensure_standalone_master_db()` — Create an empty master.db at our private location if Rekordbox isn't installed.
-- `  RekordboxDB.tracks()`
+- `  RekordboxDB.tracks()` — Track dict of the active backend, minus streaming tracks when hidden.
 - `  RekordboxDB.playlists()`
 - `  RekordboxDB.artists()`
 - `  RekordboxDB.genres()`
@@ -3704,6 +3704,25 @@ Tests for `app/database.py`.
 - `  TestFilterTracks.test_falls_back_to_location_key()` — Raw XML stores the URL under `Location` rather than `path`.
 - `  TestFilterTracks.test_unknown_scheme_preserved()` — Only the four explicit prefixes are filtered.
 - `  TestFilterTracks.test_unknown_input_type_passed_through()` — If the caller hands a non-dict / non-list we just return it.
+
+### `tests/test_database_save_cache.py`
+
+Perf contracts of `app/database.py`: cached settings read + memoised track view.
+
+- `settings_file()`
+- `load_calls()`
+- `TestHideStreamingCache`
+- `  TestHideStreamingCache.test_unchanged_file_is_read_at_most_once()`
+- `  TestHideStreamingCache.test_missing_file_is_read_at_most_once()`
+- `  TestHideStreamingCache.test_flag_flips_on_first_access_after_mtime_change()`
+- `  TestHideStreamingCache.test_settings_manager_save_takes_effect_on_next_access()`
+- `TestFilteredTracksMemo`
+- `  TestFilteredTracksMemo.strip_calls()`
+- `  TestFilteredTracksMemo.hidden()`
+- `  TestFilteredTracksMemo.test_filtered_view_is_built_once()`
+- `  TestFilteredTracksMemo.test_facade_add_and_delete_invalidate()`
+- `  TestFilteredTracksMemo.test_path_change_invalidates()`
+- `  TestFilteredTracksMemo.test_swapped_or_resized_source_invalidates()`
 
 ### `tests/test_db_taste.py`
 
