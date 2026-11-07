@@ -155,6 +155,8 @@
 | `frontend/src/utils/openExternal.js` | Open a web link outside the app: the system browser in Tauri, a new tab in the browser. |
 | `frontend/src/utils/openExternal.test.js` | node:test — `node --test frontend/src/utils/openExternal.test.js` |
 | `frontend/src/utils/theme.js` | theme — UI skin selection (per device, localStorage). |
+| `frontend/src/utils/trackSort.js` | Sort helpers for TrackTable. |
+| `frontend/src/utils/trackSort.test.js` | *(no module docstring)* |
 | `frontend/src/components/ArtistHubView.jsx` | *(no module docstring)* |
 | `frontend/src/components/BatchEditBar.jsx` | *(no module docstring)* |
 | `frontend/src/components/ConfirmModal.jsx` | Module-level subscriber registry so a single mounted <ConfirmModalRoot /> |

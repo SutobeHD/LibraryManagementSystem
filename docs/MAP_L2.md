@@ -1960,6 +1960,20 @@ theme — UI skin selection (per device, localStorage).
 - `applyTheme()`
 - `setTheme()`
 
+### `frontend/src/utils/trackSort.js`
+
+Sort helpers for TrackTable.
+
+- `keySortValue()` — export function camelotOf(key) { const raw = text(key); if (!raw) return null; const s = raw .repla…
+- `formatOf()` — export function mytagList(raw) { const seen = new Set(); for (const part of String(raw || '').split…
+- `dateAdded()` — "YYYY-MM-DD" a track was added, else null.
+- `SORT_VALUES()`
+- `sortTracks()` — New array sorted by one column; ties keep their incoming order.
+
+### `frontend/src/utils/trackSort.test.js`
+
+*(no module docstring)*
+
 ### `frontend/src/components/ArtistHubView.jsx`
 
 *(no module docstring)*

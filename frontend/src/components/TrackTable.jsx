@@ -26,7 +26,10 @@ import { promptModal } from './PromptModal';
 import { assignArtistModal } from './artistHub/AssignArtistModal';
 import { log } from '../utils/log';
 import { openExternal } from '../utils/openExternal';
+import { dateAdded, formatOf, mytagList, sortTracks } from '../utils/trackSort';
 
+// `defaultHidden` columns stay off until switched on in the header's right-click menu,
+// so a fresh install keeps the table narrow enough for the percentage columns.
 const DEFAULT_COLUMNS = [
     { id: 'index', label: '#', width: '32px', align: 'right', fixed: true },
     { id: 'preview', label: 'Prev', width: '40px', align: 'center', fixed: true },
@@ -36,16 +39,44 @@ const DEFAULT_COLUMNS = [
     { id: 'Album', label: 'Album', width: '20%', sortable: true },
     { id: 'BPM', label: 'BPM', width: '48px', align: 'center', sortable: true },
     { id: 'Key', label: 'Key', width: '64px', align: 'center', sortable: true },
-    { id: 'Color', label: 'C', width: '32px', align: 'center' },
+    { id: 'Color', label: 'C', width: '32px', align: 'center', sortable: true },
     { id: 'Rating', label: 'Rating', width: '64px', align: 'center', sortable: true },
     { id: 'Bitrate', label: 'kbps', width: '64px', align: 'center', sortable: true },
     { id: 'PlayCount', label: 'Plays', width: '48px', align: 'center', sortable: true },
     { id: 'Composer', label: 'Composer', width: '150px', sortable: true },
     { id: 'Remixer', label: 'Remixer', width: '150px', sortable: true },
+    { id: 'Genre', label: 'Genre', width: '120px', sortable: true, defaultHidden: true },
+    { id: 'Label', label: 'Label', width: '120px', sortable: true, defaultHidden: true },
+    {
+        id: 'ReleaseYear',
+        label: 'Year',
+        width: '48px',
+        align: 'center',
+        sortable: true,
+        defaultHidden: true,
+    },
+    { id: 'MyTag', label: 'My Tags', width: '150px', sortable: true, defaultHidden: true },
+    {
+        id: 'Format',
+        label: 'Format',
+        width: '56px',
+        align: 'center',
+        sortable: true,
+        defaultHidden: true,
+    },
     { id: 'TotalTime', label: 'Time', width: '64px', align: 'center', sortable: true },
-    { id: 'DateAdded', label: 'Date Added', width: '96px', align: 'right' },
+    { id: 'DateAdded', label: 'Date Added', width: '96px', align: 'right', sortable: true },
     { id: 'actions', label: '', width: '40px', align: 'right', fixed: true },
 ];
+
+// The table is `table-fixed`: pixel columns win and percentage columns (Title, Artist,
+// Album) only get what is left. A floor per percentage column turns a wide column set
+// into horizontal scrolling instead of squeezing Title to nothing.
+const TABLE_MIN_WIDTH_PX = 800;
+const PERCENT_COLUMN_MIN_PX = 160;
+
+const columnMinPx = (width) =>
+    typeof width === 'string' && width.endsWith('px') ? parseInt(width, 10) : PERCENT_COLUMN_MIN_PX;
 
 const CAMELOT_COLORS = {
     // Camelot
@@ -140,7 +171,8 @@ const TrackTable = ({
     const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
     const [selectedKey, setSelectedKey] = useState(null);
     const [visibleColumns, setVisibleColumns] = useState(() => {
-        const fallback = defaultColumnIds ?? DEFAULT_COLUMNS.map((c) => c.id);
+        const fallback =
+            defaultColumnIds ?? DEFAULT_COLUMNS.filter((c) => !c.defaultHidden).map((c) => c.id);
         try {
             const saved = localStorage.getItem(columnsStorageKey);
             return saved ? JSON.parse(saved) : fallback;
@@ -168,27 +200,16 @@ const TrackTable = ({
         });
     };
 
-    const sortedTracks = useMemo(() => {
-        if (!sortConfig.key) return tracks;
+    const sortedTracks = useMemo(() => sortTracks(tracks, sortConfig), [tracks, sortConfig]);
 
-        return [...tracks].sort((a, b) => {
-            let aVal = a[sortConfig.key];
-            let bVal = b[sortConfig.key];
-
-            // Handle numeric values (BPM, Rating, etc)
-            if (typeof aVal === 'number' && typeof bVal === 'number') {
-                return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
-            }
-
-            // Fallback to string comparison
-            aVal = String(aVal || '').toLowerCase();
-            bVal = String(bVal || '').toLowerCase();
-
-            if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
-            if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
-            return 0;
-        });
-    }, [tracks, sortConfig]);
+    const tableMinWidth = useMemo(() => {
+        const shown = DEFAULT_COLUMNS.filter((c) => visibleColumns.includes(c.id));
+        const total = [...shown, ...(customColumns || [])].reduce(
+            (sum, c) => sum + columnMinPx(c.width),
+            0
+        );
+        return Math.max(TABLE_MIN_WIDTH_PX, total);
+    }, [visibleColumns, customColumns]);
 
     useEffect(() => {
         if (onSortedTracksChange) {
@@ -235,7 +256,10 @@ const TrackTable = ({
         <div
             className={`track-table h-full overflow-auto relative ${variant === 'default' ? 'bg-mx-shell border border-line-subtle rounded-mx-md mx-2 mb-2 pb-20' : ''}`}
         >
-            <table className="w-full text-left border-collapse min-w-[800px] table-fixed">
+            <table
+                className="w-full text-left border-collapse table-fixed"
+                style={{ minWidth: tableMinWidth }}
+            >
                 <thead
                     className="tt-head sticky top-0 z-10 select-none"
                     style={{
@@ -496,17 +520,22 @@ const TrackTable = ({
                                 </td>
                             )}
                             {[
-                                { id: 'Bitrate', value: t.Bitrate || '-' },
-                                { id: 'PlayCount', value: t.PlayCount || '-' },
+                                { id: 'Bitrate', value: t.Bitrate || '-', mono: true },
+                                { id: 'PlayCount', value: t.PlayCount || '-', mono: true },
                                 { id: 'Composer', value: t.Composer },
                                 { id: 'Remixer', value: t.Remixer },
+                                { id: 'Genre', value: t.Genre },
+                                { id: 'Label', value: t.Label },
+                                { id: 'ReleaseYear', value: t.ReleaseYear || '-', mono: true },
+                                { id: 'MyTag', value: mytagList(t.MyTag).join(', ') },
+                                { id: 'Format', value: formatOf(t), mono: true },
                             ].map(
                                 (field) =>
                                     visibleColumns.includes(field.id) && (
                                         <td
                                             key={field.id}
-                                            className={`p-1 truncate ${field.id === 'Bitrate' || field.id === 'PlayCount' ? 'text-center font-mono text-ink-secondary' : 'text-ink-muted'}`}
-                                            title={field.value}
+                                            className={`p-1 truncate ${field.mono ? 'text-center font-mono text-ink-secondary' : 'text-ink-muted'}`}
+                                            title={field.value || undefined}
                                         >
                                             {field.value || '-'}
                                         </td>
@@ -519,7 +548,7 @@ const TrackTable = ({
                             )}
                             {visibleColumns.includes('DateAdded') && (
                                 <td className="p-1 text-ink-muted text-right pr-2 text-[10px] font-mono">
-                                    {t.DateAdded || '-'}
+                                    {dateAdded(t) || '-'}
                                 </td>
                             )}
                             {customColumns &&

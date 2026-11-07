@@ -18,6 +18,19 @@ related = ["inline-rating-color", "collection-view", "list-context-menus", "perf
 notes = "Nicht virtualisiert (Perf-Hotspot). LibraryView.jsx ist ein toter Vorgänger."
 
 [[feature]]
+id = "library-feature-sorting"
+group = "Browsen & Suchen"
+name = "Nach Merkmalen sortieren"
+status = "unmerged"
+branch = "feat/sortable-columns"
+parent = "track-table"
+desc = "Track-Liste nach mehr Merkmalen sortieren: Genre, Label, Jahr, My Tags, Format, Hinzugefügt, Farbe; Key nach Camelot-Rad; fehlende Werte immer unten."
+paths = ["frontend/src/utils/trackSort.js", "frontend/src/utils/trackSort.test.js"]
+related = ["collection-view", "smart-playlists", "genre-atlas-hints"]
+notes = "Wunsch 2026-11-07. Neue Spalten sind ab Werk aus (Rechtsklick auf den Tabellenkopf). Date Added liest StockDate; 23 Live-Tracks liefern dort den Text 'None' (live_database.py: str(None)) und zählen als leer. Tabelle bekommt eine Mindestbreite aus den sichtbaren Spalten, damit Title/Artist nicht auf 0 px schrumpfen."
+todo = ["Spalte Atlas-Genre (Vorschlag aus genre_atlas)", "LMS-Merkmale an die Track-Liste hängen (Route aus dem Analyse-Cache)", "Backend: StockDate leer statt 'None' senden"]
+
+[[feature]]
 id = "collection-view"
 group = "Browsen & Suchen"
 name = "Collection & Token-Suche"
