@@ -36,6 +36,7 @@ import {
     Crosshair,
 } from 'lucide-react';
 import { getPositionInfo, HOT_CUE_COLORS, snapToGrid } from '../../audio/DawState';
+import { gridAnchorSec } from '../../audio/beatGrid';
 
 const DawControlStrip = React.memo(
     ({ state, dispatch, onPlay, onStop, onSplit, onRippleDelete, onJumpTo, onExport }) => {
@@ -59,7 +60,7 @@ const DawControlStrip = React.memo(
             clipboard,
             gridOffsetSec,
         } = state;
-        const firstBeatSec = (state.tempoMap?.[0]?.positionMs || 0) / 1000 + (gridOffsetSec || 0);
+        const firstBeatSec = gridAnchorSec(state.tempoMap) + (gridOffsetSec || 0);
 
         const hasSelection = selectedRegionIds && selectedRegionIds.size > 0;
         const canUndo = undoStack.length > 0;

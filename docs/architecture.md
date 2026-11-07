@@ -110,6 +110,8 @@ User opens app
     → Parse Pioneer Rekordbox XML (or SQLite in Live Mode)
   → Returns: [{id, title, artist, bpm, key, path, ...}]
   → Frontend: TrackTable.jsx renders sortable list
+  → Editors (DAW useTrackLoader, WaveformEditor): GET /api/track/{id}/beatgrid for the one loaded track
+    → db.get_track_beatgrid: sidecar override, else the track's loaded beatGrid (ANLZ / XML TEMPO)
 ```
 
 ### 2. Audio Playback (Native)

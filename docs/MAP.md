@@ -100,6 +100,8 @@
 | `frontend/src/audio/DawState.js` | DawState — Central state management for the DJ Edit DAW. |
 | `frontend/src/audio/RbepSerializer.js` | RbepSerializer — .rbep XML Parser/Serializer Handles the critical Beat ↔ Seconds conversion for Rekordbox Edi… |
 | `frontend/src/audio/TimelineState.js` | TimelineState - State management for the non-destructive audio editor Manages all timeline state including re… |
+| `frontend/src/audio/beatGrid.js` | Rekordbox beat-grid helpers shared by the DAW and the waveform editor. |
+| `frontend/src/audio/beatGrid.test.js` | Beat-grid helpers. |
 | `frontend/src/audio/dawState/cues.js` | cuesReducer — hot cues, memory cues, and loops. |
 | `frontend/src/audio/dawState/dawReducer.test.js` | Tests for the composed dawReducer (DawState.js barrel) — Phase 4B split. |
 | `frontend/src/audio/dawState/helpers.js` | DawState helpers — pure utilities and the initial-state factory. |

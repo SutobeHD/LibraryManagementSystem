@@ -14,8 +14,9 @@ import toast from 'react-hot-toast';
 
 import * as DawEngine from '../../audio/DawEngine';
 import { buildTempoMap } from '../../audio/RbepSerializer';
+import { beatGridToTempoMap } from '../../audio/beatGrid';
 import AudioBandAnalyzer from '../../utils/AudioBandAnalyzer';
-import api from '../../api/api';
+import api, { fetchTrackBeatGrid } from '../../api/api';
 import { log } from '../../utils/log';
 
 /**
@@ -68,6 +69,8 @@ export default function useTrackLoader({
                     return;
                 }
 
+                const trackId = track.TrackID || track.ID || track.id || '';
+
                 // Set track metadata
                 dispatch({
                     type: 'SET_TRACK_META',
@@ -76,9 +79,21 @@ export default function useTrackLoader({
                         artist: track.Artist || track.artist || '',
                         album: track.Album || track.album || '',
                         filepath,
-                        id: track.TrackID || track.ID || track.id || '',
+                        id: trackId,
                     },
                 });
+
+                // The Rekordbox grid loads while the audio decodes. The light
+                // library list carries no beatGrid, so it is fetched per track.
+                const gridPromise = trackId
+                    ? fetchTrackBeatGrid(trackId, { timeout: 15000 }).catch((err) => {
+                          console.warn(
+                              '[DjEditDaw] Beat grid unavailable, using even BPM spacing:',
+                              err.message
+                          );
+                          return [];
+                      })
+                    : Promise.resolve([]);
 
                 dispatch({
                     type: 'SET_PROJECT',
@@ -95,12 +110,15 @@ export default function useTrackLoader({
 
                 dispatch({ type: 'SET_SOURCE_BUFFER', payload: { buffer: audioBuffer } });
 
-                // Set BPM and build tempo map
-                const bpm = track.BPM || track.bpm || 128;
+                // Tempo map from the Rekordbox grid; without one, even BPM spacing from 0.
+                const gridTempoMap = beatGridToTempoMap(await gridPromise, audioBuffer.duration);
+                const bpm = track.BPM || track.bpm || gridTempoMap[0]?.bpm || 128;
                 dispatch({ type: 'SET_BPM', payload: bpm });
 
-                const firstBeatMs = track.firstBeatMs || 0;
-                const tempoMap = buildTempoMap(bpm, firstBeatMs, audioBuffer.duration * 1000);
+                const tempoMap =
+                    gridTempoMap.length > 0
+                        ? gridTempoMap
+                        : buildTempoMap(bpm, 0, audioBuffer.duration * 1000);
                 dispatch({ type: 'SET_TEMPO_MAP', payload: tempoMap });
 
                 // Create initial region (entire track)

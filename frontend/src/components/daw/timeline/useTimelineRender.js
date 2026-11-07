@@ -16,6 +16,7 @@
 
 import { useEffect, useRef } from 'react';
 import * as DawEngine from '../../../audio/DawEngine';
+import { gridAnchorSec } from '../../../audio/beatGrid';
 
 // ─── CONSTANTS ──────────────────────────────────────────────────────────────────
 
@@ -97,7 +98,7 @@ export function useTimelineRender({ state, dispatch, canvasRef, ds, goodFramesRe
         d.selectedIds = state.selectedRegionIds;
         d.bpm = state.bpm;
         d.snapDivision = state.snapDivision || '1/4';
-        d.firstBeatSec = (state.tempoMap?.[0]?.positionMs || 0) / 1000 + (state.gridOffsetSec || 0);
+        d.firstBeatSec = gridAnchorSec(state.tempoMap) + (state.gridOffsetSec || 0);
         d.totalDuration = state.totalDuration;
         // Source duration drives peak indexing. AudioBuffer wins (most
         // authoritative). trackMeta.duration is set in handleFileSelect for

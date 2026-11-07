@@ -18,6 +18,7 @@ import toast from 'react-hot-toast';
 
 // Engine imports
 import { createInitialState, dawReducer, snapToGrid } from '../../audio/DawState';
+import { gridAnchorSec } from '../../audio/beatGrid';
 import * as DawEngine from '../../audio/DawEngine';
 
 // UI imports
@@ -246,7 +247,7 @@ const DjEditDaw = ({ track: initialTrack }) => {
         // Snap playhead for split if enabled
         let splitTime = state.playhead;
         if (state.snapEnabled && !state.slipMode && state.bpm > 0) {
-            const firstBeatSec = (state.tempoMap?.[0]?.positionMs || 0) / 1000;
+            const firstBeatSec = gridAnchorSec(state.tempoMap) + (state.gridOffsetSec || 0);
             splitTime = snapToGrid(splitTime, state.bpm, state.snapDivision, firstBeatSec);
         }
 
@@ -273,6 +274,7 @@ const DjEditDaw = ({ track: initialTrack }) => {
         state.bpm,
         state.snapDivision,
         state.tempoMap,
+        state.gridOffsetSec,
     ]);
 
     const handleRippleDelete = useCallback(() => {

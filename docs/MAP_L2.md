@@ -1435,6 +1435,7 @@ variant_schema — DDL + idempotent migration runner for the variants sidecar.
 - `scAuthTokenBody()` — The `POST /api/soundcloud/auth-token` body for one `scLogin()` result.
 - `cancellableGet()` — ─── AbortController helpers ────────────────────────────────────────────────── export function crea…
 - `fetchLibraryTracks()` — export function cancellablePost(url, data, config = {}) { const controller = new AbortController();…
+- `fetchTrackBeatGrid()` — Rekordbox beat grid of one track, `[{ time (s), bpm, beat }]` — a saved editor grid wins over the l…
 
 ### `frontend/src/api/scRefreshClassification.js`
 
@@ -1523,6 +1524,17 @@ TimelineState - State management for the non-destructive audio editor Manages al
 - `redo()` — Redo undone action @param {TimelineState} state @returns {TimelineState}
 - `getTimelineDuration()` — Get timeline duration (end of last region) @param {TimelineState} state @returns {number}
 - `getSortedRegions()` — Get sorted regions @param {TimelineState} state @returns {AudioRegion[]}
+
+### `frontend/src/audio/beatGrid.js`
+
+Rekordbox beat-grid helpers shared by the DAW and the waveform editor.
+
+- `expandBeatGrid()` — export function normalizeBeatGrid(raw) { if (!Array.isArray(raw)) return []; const out = []; for (c…
+- `gridAnchorSec()` — export function beatGridToTempoMap(grid, durationSec) { return expandBeatGrid(grid, durationSec).ma…
+
+### `frontend/src/audio/beatGrid.test.js`
+
+Beat-grid helpers.
 
 ### `frontend/src/audio/dawState/cues.js`
 
@@ -3670,6 +3682,8 @@ Round-trip tests for the cue / beatgrid sidecar persistence.
 - `TestFallbackToActiveDb`
 - `  TestFallbackToActiveDb.test_cues_fall_back_to_track_details()` — With no sidecar override, whatever the active DB loaded wins.
 - `  TestFallbackToActiveDb.test_sidecar_override_beats_the_active_db()`
+- `  TestFallbackToActiveDb.test_beatgrid_falls_back_to_the_loaded_grid()` — Both loaders store the grid as ``beatGrid``.
+- `  TestFallbackToActiveDb.test_beatgrid_sidecar_override_beats_the_loaded_grid()`
 - `TestWriteLockCoverage`
 - `  TestWriteLockCoverage.test_savers_are_serialised()` — Both savers must be in database.py's `_serialised` wrap list —
 - `TestEndpointsNoLongerFiveHundred` — The regression that mattered: both save routes returned HTTP 500

@@ -99,6 +99,7 @@
 | `frontend/src/audio/AudioRegion.js` | Non-destructive region data model: source file reference, gain, fades, start/end offset |
 | `frontend/src/audio/TimelineState.js` | Timeline: regions, markers, beat grid, playback position, selection state |
 | `frontend/src/audio/RbepSerializer.js` | `.rbep` XML parser/serializer: beat↔seconds conversion using tempo maps, `POSITION_MARK` cue handling |
+| `frontend/src/audio/beatGrid.js` | Rekordbox beat-grid helpers (pure): expand ANLZ/XML grids per beat with bar position, DAW tempo map, first-downbeat anchor. DAW grid lines + snap anchor on `gridAnchorSec(tempoMap)` (first `beat === 1`), not `tempoMap[0]` — 20 % of tracks start mid-bar. `SET_TEMPO_MAP` resets `gridOffsetSec` |
 
 ### Utilities
 
