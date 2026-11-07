@@ -4425,6 +4425,26 @@ Routing-table invariant: no duplicate (method, path) registrations.
 - `test_no_duplicate_method_path()`
 - `test_deduplicated_path_has_single_handler()`
 
+### `tests/test_sc_fuzzy_index.py`
+
+SoundCloud sync matcher: the indexed matcher answers exactly like the old brute force.
+
+- `engine()`
+- `TestMatchesBruteForce`
+- `  TestMatchesBruteForce.test_synthetic_library_with_edge_cases()`
+- `  TestMatchesBruteForce.test_near_duplicate_library_ties_and_close_scores()` — One artist, numbered titles, shared suffix: many candidates with equal
+- `  TestMatchesBruteForce.test_exact_title_hit_takes_first_in_dict_order()`
+- `  TestMatchesBruteForce.test_equal_ratio_tie_takes_first_in_dict_order()`
+- `  TestMatchesBruteForce.test_empty_library()`
+- `test_lcs_bound_exact_up_to_64_chars_and_upper_bound_beyond()`
+- `counting_index()`
+- `TestIndexReuse`
+- `  TestIndexReuse.test_same_mapping_builds_once()`
+- `  TestIndexReuse.test_resized_mapping_rebuilds_and_sees_new_track()`
+- `  TestIndexReuse.test_other_mapping_rebuilds()`
+- `  TestIndexReuse.test_preview_and_sync_index_once_per_engine()`
+- `test_benchmark_20k_library_500_track_playlist()`
+
 ### `tests/test_security_compare.py`
 
 Tests for ``app/security_compare.py::safe_compare``.
