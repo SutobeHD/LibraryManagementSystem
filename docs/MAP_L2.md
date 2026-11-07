@@ -4898,6 +4898,42 @@ USB audio copies must not leave a truncated file that never self-heals.
 - `TestEndToEndHealing`
 - `  TestEndToEndHealing.test_a_truncated_track_is_repaired_on_the_next_sync()`
 
+### `tests/test_usb_lookup_batching.py`
+
+Batched master.db lookups in the USB scan / diff / legacy-export paths.
+
+- `FakeMasterDb` — Counts every getter call; mirrors the rbox 0.1.7 MasterDb read surface.
+- `  FakeMasterDb.get_contents()`
+- `  FakeMasterDb.get_artists()`
+- `  FakeMasterDb.get_albums()`
+- `  FakeMasterDb.get_artist_by_id()`
+- `  FakeMasterDb.get_album_by_id()`
+- `  FakeMasterDb.get_playlists()`
+- `  FakeMasterDb.get_playlist_by_id()`
+- `  FakeMasterDb.get_playlist_contents()`
+- `fake_rbox()` — Install a fake `rbox` module whose `MasterDb(...)` returns `state["db"]`.
+- `TestNameLookup`
+- `  TestNameLookup.test_one_bulk_call_for_many_lookups()`
+- `  TestNameLookup.test_unknown_and_falsy_ids_are_empty()`
+- `  TestNameLookup.test_int_and_str_ids_hit_the_same_entry()`
+- `  TestNameLookup.test_bulk_failure_falls_back_to_memoised_by_id()`
+- `  TestNameLookup.test_by_id_failure_in_fallback_is_empty_and_memoised()`
+- `TestCalculateDiffBatching`
+- `  TestCalculateDiffBatching.test_one_open_and_constant_getter_calls()`
+- `  TestCalculateDiffBatching.test_open_failure_returns_empty_without_second_open()`
+- `TestMatchUpdatesEquivalence`
+- `  TestMatchUpdatesEquivalence.test_randomised_fixture_matches_old_loop()`
+- `  TestMatchUpdatesEquivalence.test_first_usb_match_in_stick_order_wins()`
+- `  TestMatchUpdatesEquivalence.test_none_artist_on_stick_no_longer_crashes()`
+- `  TestMatchUpdatesEquivalence.test_key_computed_once_per_track()` — O(local + usb) — not O(to_add x usb).
+- `legacy_engine()`
+- `TestLegacyExportBatching`
+- `  TestLegacyExportBatching.test_constant_lookups_for_5k_tracks()`
+- `  TestLegacyExportBatching.test_copied_files_land_under_the_artist_folder()`
+- `  TestLegacyExportBatching.test_playlist_filter_still_resolves()`
+- `TestLegacyExportGolden`
+- `  TestLegacyExportGolden.test_output_matches_pre_batching_export()`
+
 ### `tests/test_usb_manager.py`
 
 Tests for `app/usb_manager.py`.

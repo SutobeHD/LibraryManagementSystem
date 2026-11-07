@@ -356,6 +356,7 @@
 | `tests/test_system_health.py` | Contract tests for ``GET /api/system/health`` -- unauth'd liveness probe. |
 | `tests/test_track_metadata_fields.py` | Track-metadata writes refuse fields and values the backend cannot store (issue K8). |
 | `tests/test_usb_copy_atomic.py` | USB audio copies must not leave a truncated file that never self-heals. |
+| `tests/test_usb_lookup_batching.py` | Batched master.db lookups in the USB scan / diff / legacy-export paths. |
 | `tests/test_usb_manager.py` | Tests for `app/usb_manager.py`. |
 | `tests/test_usb_mysettings.py` | Tests for app/usb_mysettings.py — Pioneer MYSETTING file schema + I/O. |
 | `tests/test_usb_relocate.py` | Tests for the USB relocation pass (`app/usb_one_library.py`). |
