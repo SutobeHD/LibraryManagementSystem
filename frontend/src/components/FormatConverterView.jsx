@@ -17,8 +17,15 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-    RefreshCw, Loader2, AlertTriangle, CheckCircle2, FileAudio, HardDrive,
-    PlayCircle, Undo2, FileText,
+    RefreshCw,
+    Loader2,
+    AlertTriangle,
+    CheckCircle2,
+    FileAudio,
+    HardDrive,
+    PlayCircle,
+    Undo2,
+    FileText,
 } from 'lucide-react';
 import api from '../api/api';
 import { useToast } from './ToastContext';
@@ -137,7 +144,12 @@ const FormatConverterView = () => {
                 trigger: 'user_format_pick',
             });
             setBatchId(res.data.batch_id);
-            setBatchStatus({ tracks_planned: dryResult.tracks.length, tracks_converted: 0, tracks_failed: 0, finished: false });
+            setBatchStatus({
+                tracks_planned: dryResult.tracks.length,
+                tracks_converted: 0,
+                tracks_failed: 0,
+                finished: false,
+            });
             toast.success(`Batch started: ${res.data.batch_id}`);
         } catch (err) {
             console.error('[FormatConverter] execute failed', err);
@@ -158,9 +170,15 @@ const FormatConverterView = () => {
                     if (res.data.error) {
                         toast.error(`Batch ${batchId}: ${res.data.error}`);
                     } else if (res.data.aborted) {
-                        toast.warning ? toast.warning(`Batch ${batchId} aborted (${res.data.tracks_converted}/${res.data.tracks_planned})`) : toast.info(`Batch aborted.`);
+                        toast.warning
+                            ? toast.warning(
+                                  `Batch ${batchId} aborted (${res.data.tracks_converted}/${res.data.tracks_planned})`
+                              )
+                            : toast.info(`Batch aborted.`);
                     } else {
-                        toast.success(`Batch done: ${res.data.tracks_converted}/${res.data.tracks_planned} converted, ${res.data.tracks_failed} failed.`);
+                        toast.success(
+                            `Batch done: ${res.data.tracks_converted}/${res.data.tracks_planned} converted, ${res.data.tracks_failed} failed.`
+                        );
                     }
                     // Refresh manifest list after a batch finishes
                     fetchManifests();
@@ -171,7 +189,10 @@ const FormatConverterView = () => {
         };
         tick();
         const id = setInterval(tick, 1500);
-        return () => { cancelled = true; clearInterval(id); };
+        return () => {
+            cancelled = true;
+            clearInterval(id);
+        };
     }, [batchId]);
 
     // ── Manifest list + rollback ──────────────────────────────────────────────
@@ -184,14 +205,16 @@ const FormatConverterView = () => {
         }
     }, []);
 
-    useEffect(() => { fetchManifests(); }, [fetchManifests]);
+    useEffect(() => {
+        fetchManifests();
+    }, [fetchManifests]);
 
     const runRollback = async () => {
         if (!rollbackTarget) {
             toast.error('Pick a manifest to roll back.');
             return;
         }
-        const m = manifests.find(x => x.filename === rollbackTarget);
+        const m = manifests.find((x) => x.filename === rollbackTarget);
         const ok = await confirmModal({
             title: 'Roll back this batch?',
             message: [
@@ -213,7 +236,9 @@ const FormatConverterView = () => {
             const res = await api.post('/api/library/format-swap/rollback', {
                 manifest_filename: rollbackTarget,
             });
-            toast.success(`Rolled back: ${res.data.audio_restored} files, ${res.data.target_deleted} targets removed.`);
+            toast.success(
+                `Rolled back: ${res.data.audio_restored} files, ${res.data.target_deleted} targets removed.`
+            );
             await fetchManifests();
             setRollbackTarget('');
         } catch (err) {
@@ -224,9 +249,14 @@ const FormatConverterView = () => {
         }
     };
 
-    const progressPct = batchStatus && batchStatus.tracks_planned > 0
-        ? Math.round(((batchStatus.tracks_converted + batchStatus.tracks_failed) / batchStatus.tracks_planned) * 100)
-        : 0;
+    const progressPct =
+        batchStatus && batchStatus.tracks_planned > 0
+            ? Math.round(
+                  ((batchStatus.tracks_converted + batchStatus.tracks_failed) /
+                      batchStatus.tracks_planned) *
+                      100
+              )
+            : 0;
 
     return (
         <div className="h-full overflow-y-auto bg-mx-deepest p-6 animate-fade-in">
@@ -237,9 +267,12 @@ const FormatConverterView = () => {
                         <RefreshCw size={18} className="text-amber2" />
                     </div>
                     <div>
-                        <h1 className="text-[18px] font-semibold tracking-tight">Mass Format Converter</h1>
+                        <h1 className="text-[18px] font-semibold tracking-tight">
+                            Mass Format Converter
+                        </h1>
                         <span className="font-mono text-tiny text-amber2">
-                            content_id row-mutate · cues/beatgrid preserved · master.db snapshot + rollback
+                            content_id row-mutate · cues/beatgrid preserved · master.db snapshot +
+                            rollback
                         </span>
                     </div>
                 </div>
@@ -248,9 +281,10 @@ const FormatConverterView = () => {
                 <div className="mx-card p-4 flex items-start gap-3 border-l-4 border-amber2">
                     <AlertTriangle size={18} className="text-amber2 shrink-0 mt-0.5" />
                     <div className="text-tiny text-ink-secondary leading-relaxed">
-                        <strong className="text-ink-primary">Rekordbox must be closed</strong> while a batch
-                        runs (writes to <code className="font-mono">master.db</code> are gated).
-                        Originals are renamed to <code className="font-mono">.backup-&lt;ts&gt;</code>
+                        <strong className="text-ink-primary">Rekordbox must be closed</strong> while
+                        a batch runs (writes to <code className="font-mono">master.db</code> are
+                        gated). Originals are renamed to{' '}
+                        <code className="font-mono">.backup-&lt;ts&gt;</code>
                         for rollback — they stay on disk until you delete them manually.
                     </div>
                 </div>
@@ -260,13 +294,22 @@ const FormatConverterView = () => {
                     <h2 className="text-[14px] font-semibold">Scope &amp; target</h2>
 
                     <div>
-                        <label className="block text-tiny text-ink-muted mb-1.5">Target format</label>
+                        <label className="block text-tiny text-ink-muted mb-1.5">
+                            Target format
+                        </label>
                         <select
                             className="input-glass w-full text-[13px]"
                             value={target}
-                            onChange={e => { setTarget(e.target.value); setDryResult(null); }}
+                            onChange={(e) => {
+                                setTarget(e.target.value);
+                                setDryResult(null);
+                            }}
                         >
-                            {TARGETS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                            {TARGETS.map((t) => (
+                                <option key={t.value} value={t.value}>
+                                    {t.label}
+                                </option>
+                            ))}
                         </select>
                     </div>
 
@@ -279,16 +322,31 @@ const FormatConverterView = () => {
                         <button
                             className="px-3 py-2 text-tiny font-medium bg-amber2/10 hover:bg-amber2/20 disabled:opacity-40 border border-amber2/30 rounded-mx-sm transition-colors"
                             onClick={runDryRun}
-                            disabled={!scopeIsValid || dryLoading || batchStatus?.finished === false}
+                            disabled={
+                                !scopeIsValid || dryLoading || batchStatus?.finished === false
+                            }
                         >
-                            {dryLoading ? (<><Loader2 size={12} className="inline mr-1.5 animate-spin" />Probing…</>) : 'Dry-run preview'}
+                            {dryLoading ? (
+                                <>
+                                    <Loader2 size={12} className="inline mr-1.5 animate-spin" />
+                                    Probing…
+                                </>
+                            ) : (
+                                'Dry-run preview'
+                            )}
                         </button>
                         <button
                             className="px-3 py-2 text-tiny font-medium bg-rose-500/10 hover:bg-rose-500/20 disabled:opacity-30 border border-rose-500/30 text-rose-300 rounded-mx-sm transition-colors"
                             onClick={runExecute}
-                            disabled={!dryResult || dryResult.tracks.length === 0 || !dryResult.drive_check_pass || batchStatus?.finished === false}
+                            disabled={
+                                !dryResult ||
+                                dryResult.tracks.length === 0 ||
+                                !dryResult.drive_check_pass ||
+                                batchStatus?.finished === false
+                            }
                         >
-                            <PlayCircle size={12} className="inline mr-1.5" />Execute
+                            <PlayCircle size={12} className="inline mr-1.5" />
+                            Execute
                         </button>
                     </div>
                 </div>
@@ -302,41 +360,60 @@ const FormatConverterView = () => {
                         <div className="grid grid-cols-4 gap-3 text-tiny">
                             <div>
                                 <div className="text-ink-muted">Tracks</div>
-                                <div className="font-mono text-[16px] text-ink-primary">{dryResult.tracks.length}</div>
+                                <div className="font-mono text-[16px] text-ink-primary">
+                                    {dryResult.tracks.length}
+                                </div>
                             </div>
                             <div>
                                 <div className="text-ink-muted">Source</div>
-                                <div className="font-mono text-[16px] text-ink-primary">{dryResult.total_source_mb} MB</div>
+                                <div className="font-mono text-[16px] text-ink-primary">
+                                    {dryResult.total_source_mb} MB
+                                </div>
                             </div>
                             <div>
                                 <div className="text-ink-muted">~ Target</div>
-                                <div className="font-mono text-[16px] text-ink-primary">{dryResult.estimated_target_mb} MB</div>
+                                <div className="font-mono text-[16px] text-ink-primary">
+                                    {dryResult.estimated_target_mb} MB
+                                </div>
                             </div>
                             <div>
-                                <div className="text-ink-muted flex items-center gap-1"><HardDrive size={10} /> Free</div>
-                                <div className={`font-mono text-[16px] ${dryResult.drive_check_pass ? 'text-emerald-300' : 'text-rose-300'}`}>
+                                <div className="text-ink-muted flex items-center gap-1">
+                                    <HardDrive size={10} /> Free
+                                </div>
+                                <div
+                                    className={`font-mono text-[16px] ${dryResult.drive_check_pass ? 'text-emerald-300' : 'text-rose-300'}`}
+                                >
                                     {dryResult.drive_free_mb} MB
                                 </div>
                             </div>
                         </div>
                         {(dryResult.warning || dryResult.error) && (
-                            <div className={`text-tiny p-2 rounded-mx-sm ${dryResult.error ? 'bg-rose-500/10 text-rose-200 border border-rose-500/30' : 'bg-amber2/10 text-amber2 border border-amber2/30'}`}>
+                            <div
+                                className={`text-tiny p-2 rounded-mx-sm ${dryResult.error ? 'bg-rose-500/10 text-rose-200 border border-rose-500/30' : 'bg-amber2/10 text-amber2 border border-amber2/30'}`}
+                            >
                                 {dryResult.error || dryResult.warning}
                             </div>
                         )}
                         {dryResult.tracks.length > 0 && (
                             <details className="text-tiny">
                                 <summary className="cursor-pointer text-ink-muted hover:text-ink-primary">
-                                    Show {Math.min(dryResult.tracks.length, 10)} of {dryResult.tracks.length} affected files
+                                    Show {Math.min(dryResult.tracks.length, 10)} of{' '}
+                                    {dryResult.tracks.length} affected files
                                 </summary>
                                 <ul className="font-mono text-[11px] mt-2 space-y-0.5 max-h-48 overflow-y-auto">
-                                    {dryResult.tracks.slice(0, 50).map(t => (
-                                        <li key={t.content_id} className="truncate text-ink-secondary">
-                                            <span className="text-ink-muted">[{t.content_id}]</span> {t.source}
+                                    {dryResult.tracks.slice(0, 50).map((t) => (
+                                        <li
+                                            key={t.content_id}
+                                            className="truncate text-ink-secondary"
+                                        >
+                                            <span className="text-ink-muted">[{t.content_id}]</span>{' '}
+                                            {t.source}
                                         </li>
                                     ))}
                                     {dryResult.tracks.length > 50 && (
-                                        <li className="text-ink-muted">... +{dryResult.tracks.length - 50} more</li>
+                                        <li className="text-ink-muted">
+                                            ... +{dryResult.tracks.length - 50} more
+                                        </li>
                                     )}
                                 </ul>
                             </details>
@@ -349,14 +426,27 @@ const FormatConverterView = () => {
                     <div className="mx-card p-5 space-y-3">
                         <h2 className="text-[14px] font-semibold flex items-center gap-2">
                             {batchStatus.finished ? (
-                                <CheckCircle2 size={14} className={batchStatus.error || batchStatus.aborted ? 'text-rose-400' : 'text-emerald-400'} />
+                                <CheckCircle2
+                                    size={14}
+                                    className={
+                                        batchStatus.error || batchStatus.aborted
+                                            ? 'text-rose-400'
+                                            : 'text-emerald-400'
+                                    }
+                                />
                             ) : (
                                 <Loader2 size={14} className="text-amber2 animate-spin" />
                             )}
                             Batch <code className="font-mono text-[11px]">{batchId}</code>
                             {batchStatus.finished && (
                                 <span className="text-tiny text-ink-muted ml-1">
-                                    ({batchStatus.error ? 'error' : batchStatus.aborted ? 'aborted' : 'done'})
+                                    (
+                                    {batchStatus.error
+                                        ? 'error'
+                                        : batchStatus.aborted
+                                          ? 'aborted'
+                                          : 'done'}
+                                    )
                                 </span>
                             )}
                         </h2>
@@ -368,10 +458,27 @@ const FormatConverterView = () => {
                                 />
                             </div>
                             <div className="grid grid-cols-4 gap-3 text-tiny font-mono">
-                                <div><span className="text-ink-muted">Planned: </span><span className="text-ink-primary">{batchStatus.tracks_planned}</span></div>
-                                <div><span className="text-ink-muted">Done: </span><span className="text-emerald-300">{batchStatus.tracks_converted}</span></div>
-                                <div><span className="text-ink-muted">Failed: </span><span className="text-rose-300">{batchStatus.tracks_failed}</span></div>
-                                <div><span className="text-ink-muted">{progressPct}%</span></div>
+                                <div>
+                                    <span className="text-ink-muted">Planned: </span>
+                                    <span className="text-ink-primary">
+                                        {batchStatus.tracks_planned}
+                                    </span>
+                                </div>
+                                <div>
+                                    <span className="text-ink-muted">Done: </span>
+                                    <span className="text-emerald-300">
+                                        {batchStatus.tracks_converted}
+                                    </span>
+                                </div>
+                                <div>
+                                    <span className="text-ink-muted">Failed: </span>
+                                    <span className="text-rose-300">
+                                        {batchStatus.tracks_failed}
+                                    </span>
+                                </div>
+                                <div>
+                                    <span className="text-ink-muted">{progressPct}%</span>
+                                </div>
                             </div>
                             {batchStatus.error && (
                                 <div className="text-tiny p-2 rounded-mx-sm bg-rose-500/10 text-rose-200 border border-rose-500/30">
@@ -399,12 +506,13 @@ const FormatConverterView = () => {
                             <select
                                 className="input-glass w-full text-[13px] font-mono"
                                 value={rollbackTarget}
-                                onChange={e => setRollbackTarget(e.target.value)}
+                                onChange={(e) => setRollbackTarget(e.target.value)}
                             >
                                 <option value="">Pick a manifest…</option>
-                                {manifests.map(m => (
+                                {manifests.map((m) => (
                                     <option key={m.filename} value={m.filename}>
-                                        {m.timestamp} · {m.target} · {m.tracks} tracks · {m.scope_kind}
+                                        {m.timestamp} · {m.target} · {m.tracks} tracks ·{' '}
+                                        {m.scope_kind}
                                     </option>
                                 ))}
                             </select>
@@ -413,11 +521,25 @@ const FormatConverterView = () => {
                                 onClick={runRollback}
                                 disabled={!rollbackTarget || rollbackLoading}
                             >
-                                {rollbackLoading ? (<><Loader2 size={12} className="inline mr-1.5 animate-spin" />Rolling back…</>) : (<><Undo2 size={12} className="inline mr-1.5" />Rollback this batch</>)}
+                                {rollbackLoading ? (
+                                    <>
+                                        <Loader2 size={12} className="inline mr-1.5 animate-spin" />
+                                        Rolling back…
+                                    </>
+                                ) : (
+                                    <>
+                                        <Undo2 size={12} className="inline mr-1.5" />
+                                        Rollback this batch
+                                    </>
+                                )}
                             </button>
                             <p className="text-tiny text-ink-placeholder">
                                 <FileText size={10} className="inline mr-1" />
-                                Manifests live under <code className="font-mono">%APPDATA%/MusicLibraryManager/format-swap-backups/</code>.
+                                Manifests live under{' '}
+                                <code className="font-mono">
+                                    %APPDATA%/MusicLibraryManager/format-swap-backups/
+                                </code>
+                                .
                             </p>
                         </>
                     )}

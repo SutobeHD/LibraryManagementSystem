@@ -12,8 +12,15 @@ import { Loader2, CheckCircle, AlertTriangle, X, ChevronRight } from 'lucide-rea
 import api from '../api/api';
 
 const ACTIVE_STATES = new Set([
-    'Queued', 'Starting', 'Resolving', 'Downloading', 'Downloaded',
-    'Analyzing', 'Importing', 'ANLZ', 'Sorting',
+    'Queued',
+    'Starting',
+    'Resolving',
+    'Downloading',
+    'Downloaded',
+    'Analyzing',
+    'Importing',
+    'ANLZ',
+    'Sorting',
 ]);
 const FAIL_STATES = new Set(['Failed', 'Error', 'Analysis Failed']);
 
@@ -31,7 +38,9 @@ const ImportProgressBanner = ({ onOpenManager }) => {
                 ]);
                 setImportTasks(imp.data || {});
                 setScTasks(sc.data || {});
-            } catch (e) { /* ignore */ }
+            } catch (e) {
+                /* ignore */
+            }
         };
         tick();
         const t = setInterval(tick, 1500);
@@ -40,15 +49,23 @@ const ImportProgressBanner = ({ onOpenManager }) => {
 
     const stats = useMemo(() => {
         const all = [
-            ...Object.values(importTasks).map(t => ({ ...t, _src: 'import' })),
-            ...Object.values(scTasks).map(t => ({ ...t, _src: 'sc' })),
+            ...Object.values(importTasks).map((t) => ({ ...t, _src: 'import' })),
+            ...Object.values(scTasks).map((t) => ({ ...t, _src: 'sc' })),
         ];
         const total = all.length;
-        const active = all.filter(t => ACTIVE_STATES.has(t.status));
-        const done = all.filter(t => t.status === 'Completed' || t.status === 'Linked' || t.status === 'Skipped');
-        const failed = all.filter(t => FAIL_STATES.has(t.status));
+        const active = all.filter((t) => ACTIVE_STATES.has(t.status));
+        const done = all.filter(
+            (t) => t.status === 'Completed' || t.status === 'Linked' || t.status === 'Skipped'
+        );
+        const failed = all.filter((t) => FAIL_STATES.has(t.status));
         const inflight = active[0] || null;
-        return { total, activeCount: active.length, doneCount: done.length, failedCount: failed.length, inflight };
+        return {
+            total,
+            activeCount: active.length,
+            doneCount: done.length,
+            failedCount: failed.length,
+            inflight,
+        };
     }, [importTasks, scTasks]);
 
     // Reset dismiss when a new import starts
@@ -62,9 +79,7 @@ const ImportProgressBanner = ({ onOpenManager }) => {
         return null;
     }
 
-    const overallPct = stats.total > 0
-        ? Math.round((stats.doneCount / stats.total) * 100)
-        : 0;
+    const overallPct = stats.total > 0 ? Math.round((stats.doneCount / stats.total) * 100) : 0;
 
     return (
         <div
@@ -84,13 +99,17 @@ const ImportProgressBanner = ({ onOpenManager }) => {
                                 {stats.doneCount}/{stats.total}
                             </span>{' '}
                             <span className="text-ink-muted text-[11px] font-normal">
-                                ({stats.activeCount} aktiv{stats.failedCount ? `, ${stats.failedCount} Fehler` : ''})
+                                ({stats.activeCount} aktiv
+                                {stats.failedCount ? `, ${stats.failedCount} Fehler` : ''})
                             </span>
                         </span>
                         <div className="flex items-center gap-2 shrink-0">
                             <span className="font-mono text-xs text-amber2">{overallPct}%</span>
                             <button
-                                onClick={(e) => { e.stopPropagation(); setDismissed(true); }}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDismissed(true);
+                                }}
                                 className="p-1 rounded hover:bg-white/10 text-ink-muted hover:text-white"
                                 title="Schließen"
                             >
@@ -111,21 +130,29 @@ const ImportProgressBanner = ({ onOpenManager }) => {
                     {/* Currently active track */}
                     {stats.inflight && (
                         <div className="flex items-center gap-2 mt-2 text-[11px] text-ink-muted truncate">
-                            <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider shrink-0 ${
-                                stats.inflight._src === 'import'
-                                    ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                                    : 'bg-orange-500/20 text-orange-300 border border-orange-500/30'
-                            }`}>
+                            <span
+                                className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider shrink-0 ${
+                                    stats.inflight._src === 'import'
+                                        ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                                        : 'bg-orange-500/20 text-orange-300 border border-orange-500/30'
+                                }`}
+                            >
                                 {stats.inflight._src === 'import' ? 'Lokal' : 'SC'}
                             </span>
-                            <span className="text-amber2 font-mono shrink-0">{stats.inflight.status}</span>
+                            <span className="text-amber2 font-mono shrink-0">
+                                {stats.inflight.status}
+                            </span>
                             <span className="text-ink-placeholder">·</span>
-                            <span className="truncate">{stats.inflight.title || stats.inflight.file_path}</span>
+                            <span className="truncate">
+                                {stats.inflight.title || stats.inflight.file_path}
+                            </span>
                             {(stats.inflight.bpm || stats.inflight.key) && (
                                 <>
                                     <span className="text-ink-placeholder shrink-0">·</span>
                                     <span className="font-mono text-purple-300 shrink-0">
-                                        {stats.inflight.bpm ? `${Math.round(stats.inflight.bpm)} BPM` : ''}
+                                        {stats.inflight.bpm
+                                            ? `${Math.round(stats.inflight.bpm)} BPM`
+                                            : ''}
                                         {stats.inflight.bpm && stats.inflight.key ? ' · ' : ''}
                                         {stats.inflight.key || ''}
                                     </span>
