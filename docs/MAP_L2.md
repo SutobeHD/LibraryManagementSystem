@@ -2231,6 +2231,23 @@ Tests for app/import_tracker.py — live import-progress tracker.
 - `test_prune_drops_oldest_finished_first()`
 - `test_prune_keeps_inflight_over_cap()` — Soft cap by design: active (non-terminal) tasks are never dropped, even
 
+### `tests/test_library_analysis.py`
+
+Tests for scripts/library_analysis.py on a synthetic atlas and a handful of tracks.
+
+- `atlas()`
+- `tracks()`
+- `test_is_filled_treats_rekordbox_zero_as_empty()`
+- `test_mytags_are_deduplicated_in_order()`
+- `test_source_and_format_from_path()`
+- `test_field_report_counts_fill_rate()`
+- `test_genre_vocabulary_groups_spellings_and_flags_unresolved()`
+- `test_coverage_splits_metadata_tempo_and_none()`
+- `test_agreement_leave_genre_out()`
+- `test_gaps_lists_unmatched_uploaders()`
+- `test_report_renders_and_csv_has_one_row_per_track()`
+- `test_analysis_cache_report_counts_valid_entries()`
+
 ### `tests/test_library_format_swap.py`
 
 Tests for app.library_format_swap.
@@ -3009,6 +3026,34 @@ Feature registry plus a live overlay of which branch or worktree touches which f
 - `cmd_coverage()`
 - `build_model()`
 - `cmd_html()`
+- `main()`
+
+### `scripts/library_analysis.py`
+
+Whole-library analysis: which track fields are filled, how the Genre field is used, and how
+
+- `fetch_tracks()`
+- `mytags()` — MyTag names of a track, de-duplicated, order kept ("Melodic, Raw, Raw" -> 2 tags).
+- `source_of()`
+- `format_of()`
+- `derived()`
+- `is_filled()`
+- `field_report()`
+- `derived_report()`
+- `suggest_for()`
+- `resolve_label()` — Atlas genre ids a Genre-field value stands for (via tag or genre name), best first.
+- `ancestors()`
+- `level1()` — The level-1 genre above gid (e.g.
+- `same_branch()`
+- `evidence_sources()`
+- `genre_vocabulary()`
+- `coverage()`
+- `agreement()` — Leave-the-genre-field-out: can the other evidence reproduce the user's Genre label?
+- `gaps()`
+- `write_csv()`
+- `render_md()`
+- `analysis_cache_report()` — Read-only look at the LMS analysis cache: which library files already have features.
+- `analyse()`
 - `main()`
 
 ### `scripts/pipeline_dashboard.py`
